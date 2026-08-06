@@ -213,33 +213,60 @@ query's proven proper-type positions. Ambient query rigids may remain in the
 provider body; they are never solved by this branch. Both sources are bounded
 and the independent checker replays the choice.
 
-A richer frontend may supply a third, provider-local source through
-`ProviderInstantiationCandidate`. The checked Djinn and Exference runners
-first bound the complete association list at 32, then resolve every `Name`
-against the exact sealed session and elaborate its candidate as a closed,
-context-free proper type in that session's synonym and kind scope. Candidates
-are alpha-deduplicated only within one provider. The resulting relation is
-keyed by provider identity, not by scheme shape: two globals with alpha-equivalent
-schemes cannot donate evidence to one another. Calling either historical
-runner is definitionally the same as calling its
-`WithInstantiationCandidates` variant with `[]`.
+A richer frontend may supply provider-local facts through either of two shared
+relations. `ProviderInstantiationCandidate` contributes independent scalar
+types to one exact provider's bounded candidate pool. It remains the stable
+compatibility path for frontends which genuinely authorize the resulting
+Cartesian combinations. `ProviderInstantiationAssignment` instead contributes
+one complete ordered leading-binder vector. It preserves the correlation
+established by one external proof, so neither backend reconstructs cross-vector
+tuples.
 
-Djinn compiles each retained association into a direct specialized premise for
-that exact loaded polymorphic provider. The evidence-enriched structural and
-nominal plans also contain the historical query-local and loaded instantiation
-premises, so one checked proof may compose old and supplied evidence. For a
-nonempty evidence call this strict superset runs before the evidence-free
-loaded tails, preventing a productive loaded proof stream from starving the
-supplied route at the global candidate cutoff. The independent proof checker
-sees the specialization before lowering rewrites its synthetic proof identity
-into the corresponding visible application of the real provider. Exference
-instead keeps the checked map in its query state and
-consults it only from exact retained-global lookup. Ordinary implicit use is
-first; the existing instance-head and query-derived visible choices follow;
-the separately bounded supplied choices are last. Scoped values never consult
-the map. These are finite evidence-directed typing rules, not permission for
-ordinary unification to decompose a polytype or a claim of general
-impredicative inference.
+The checked Djinn and Exference runners first bound either outer relation at 32
+before entering an element. Assignment runners also bound each argument spine
+at four before entering an argument. They resolve every `Name` against the
+exact sealed session, require an eligible context-free retained polymorphic
+scheme whose complete leading arity matches the vector, and elaborate each
+argument as a closed, context-free proper type in that session's synonym and
+kind scope. Djinn additionally substitutes the complete vector and checks the
+whole specialized body at kind `Type`. Scalar types and complete vectors are
+alpha-deduplicated only within one provider. Both relations remain keyed by
+provider identity, not by scheme shape: two globals with alpha-equivalent
+schemes cannot donate evidence to one another.
+
+Calling either historical runner is definitionally the same as calling its
+`WithInstantiationCandidates` variant with `[]`; calling the corresponding
+`WithInstantiationAssignments` variant with `[]` has the same observable
+result, ordering, diagnostics, and finite-budget behavior. The two nonempty
+public entrances remain distinct: an assignment is never flattened into the
+legacy scalar pool.
+
+Djinn compiles each retained scalar specialization or exact vector into a
+direct specialized premise for that loaded polymorphic provider. The
+evidence-enriched structural and nominal plans also contain the historical
+query-local and loaded instantiation premises, so one checked proof may compose
+old and supplied evidence. For a nonempty evidence call this strict superset
+runs before the evidence-free loaded tails, preventing a productive loaded
+proof stream from starving the supplied route at the global candidate cutoff.
+Scalar pools retain their four-binder, 512-attempt, and sixteen-per-scheme
+Cartesian windows; exact vectors bypass those reconstruction windows while
+remaining within the 32-premise family bound. The independent proof checker
+sees each specialization before lowering rewrites its synthetic proof identity
+into the corresponding visible application of the real provider. A
+target-named specialization is available only to the self-reference diagnostic
+search.
+
+Exference instead keeps the checked relation in its query state and consults it
+only from exact retained-global lookup. Ordinary implicit use remains first.
+Within the visible branch, monomorphic Haskell instance-head choices come
+first. Exact assignment vectors, when supplied, follow and precede checked
+query-derived choices; the legacy scalar runner retains its historical order
+of query-derived choices followed by separately capped supplied choices. The
+exact route consumes a vector once and may instantiate non-vacuous leading
+binders, whereas the scalar pool route requires a completely vacuous prefix.
+Scoped values never consult either map. These are finite evidence-directed
+typing rules, not permission for ordinary unification to decompose a polytype
+or a claim of general impredicative inference.
 
 Djinn's historical query-local and appended loaded instantiation-axiom families
 now share visible-evidence retention: inferable choices erase, but a vacuous

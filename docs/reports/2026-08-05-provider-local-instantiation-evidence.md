@@ -1,5 +1,13 @@
 # Provider-local instantiation evidence — 2026-08-05
 
+> **Follow-up.** This report documents the original scalar candidate-pool API,
+> which remains supported unchanged. Frontends that have established one
+> complete correlated leading-binder vector should instead use the exact
+> assignment API described in the
+> [exact provider-instantiation assignment report](2026-08-05-exact-provider-instantiation-assignments.md).
+> The later API does not reinterpret or replace
+> `ProviderInstantiationCandidate` lists.
+
 ## Outcome
 
 The stable Djinn and Exference adapters now accept a bounded association

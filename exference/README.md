@@ -912,38 +912,57 @@ source APIs do not infer or discover a manifest; they continue to give
 classifies the opaque base-library signature stubs as abstract and retains only
 `Data.Void.Void` and `GHC.Generics.V1` as genuine empty datatypes.
 
-## Checked provider-local instantiation evidence
+## Checked provider-local candidates and assignments
 
-`runExferenceQueryWithInstantiationCandidates` lets a richer frontend attach
-one already established type choice to an exact retained global provider. The
-shared `ProviderInstantiationCandidate` association list is globally bounded
-at 32 before any element is entered. The stable runner then resolves every
-provider against the sealed session, elaborates synonyms in that session's
-scope, checks kind `Type`, and requires either a closed ground monotype or a
-complete closed, context-free forall-rooted type. It retains first occurrences
-and alpha-deduplicates types per provider. Association is nominal: a different
-global with an alpha-equivalent scheme receives no choice, and neither a
-scoped value nor a sibling global consults the supplied map. The caller remains
-responsible for the source-language fact which justifies the choice.
+`runExferenceQueryWithInstantiationCandidates` retains the original scalar
+pool contract. Each `ProviderInstantiationCandidate` associates one already
+established type with an exact retained global; the visible provider rule may
+reconstruct bounded binder combinations from that provider-local pool.
+`runExferenceQueryWithInstantiationAssignments` instead accepts
+`ProviderInstantiationAssignment`, whose argument list is one complete ordered
+leading-binder vector. Exact vectors are consumed once and are never flattened
+or Cartesian-recombined.
 
-Supplied choices participate only in the visible branch of exact global
-lookup. Ordinary implicit instantiation stays first, followed by the existing
-ground-instance-head and checked query-derived candidates, then the supplied
-candidate route. Query-derived and supplied products keep separate
-32-combination caps before that concatenation, preventing a wide query pool
-from spending the supplied route's generation allowance. The supplied route
-opens no more than four leading binders and requires a context-free provider
-whose complete leading prefix is vacuous. Search and the independent expression
-checker consume the resulting visible application through their existing
-checked representation.
+Both outer lists are globally bounded at 32 before any element is entered. The
+assignment runner additionally bounds every argument spine at four before
+entering an argument, requires a nonempty vector whose length exactly matches
+the retained provider's complete leading forall chain, and rejects a contextual
+provider scheme. Every candidate or argument is synonym-elaborated in the
+sealed session and checked at kind `Type`. Assignment arguments must be closed,
+context-free, and representable as specified visible type arguments; the
+private core independently rechecks provider closure, context, arity, and the
+lowered visible-argument shape. Scalar types and complete ordered vectors are
+alpha-deduplicated per provider while retaining their first occurrences.
+Association is nominal: a different global with an alpha-equivalent scheme
+receives no choice, and neither a scoped value nor a sibling global consults
+the supplied map. The caller remains responsible for the source-language fact
+which justifies either assertion.
 
-`runExferenceQuery` delegates exactly to the new runner with `[]`; no candidate
-order, budget observation, or diagnostic changes in that case. Nonempty
-evidence remains a bounded global-only tail. It does not enable scoped-provider
-donation, invent a polytype, decompose a quantified body in ordinary
-unification, or provide general impredicative inference. The shared contract
-and Djinn's proof-producing counterpart are recorded in the
-[provider-local instantiation evidence report](../docs/reports/2026-08-05-provider-local-instantiation-evidence.md).
+Both forms participate only in visible exact-global lookup; the ordinary
+implicit use remains first. The scalar runner preserves its established visible
+order: ground monomorphic instance-head choices, checked query-derived choices,
+then supplied candidates. Query-derived and supplied products keep separate
+32-combination caps, so a wide query pool cannot spend the scalar supplied
+route's allowance. With the assignment runner, the visible order is ground
+monomorphic instance-head choices, exact supplied vectors, then checked
+query-derived choices. The exact route performs no Cartesian product and does
+not require selected binders to be vacuous: because the caller supplied the
+complete vector, those binders may occur in the provider body. Both routes open
+at most four leading binders, and search plus the independent expression
+checker consume their applications through the same checked representation.
+
+`runExferenceQuery` follows the exact empty-evidence path. Calling either
+explicit runner with `[]` returns the same batches, candidate order, budget
+observations, and diagnostics. Current regressions cover empty compatibility,
+lazy outer and inner bounds, exact arity and locality, non-vacuous and
+structural impredicative arguments, higher-kinded-binder rejection, and an
+ordered four-binder application. Nonempty evidence remains a bounded
+global-only capability. It does not enable scoped-provider donation, invent a
+polytype, decompose a quantified body in ordinary unification, or provide
+general impredicative inference. See the original
+[provider-local candidate report](../docs/reports/2026-08-05-provider-local-instantiation-evidence.md)
+and the
+[exact provider-assignment report](../docs/reports/2026-08-05-exact-provider-instantiation-assignments.md).
 
 ## Experimental features
 

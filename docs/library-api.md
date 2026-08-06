@@ -46,7 +46,7 @@ build-depends: djex
 | Proof-backed non-inhabitation result | Yes when formula translation is complete | No |
 | Ranked heuristic candidates | No | Yes |
 | Explicit prenex polymorphism | Yes at the checked request edge | Yes |
-| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through singleton, pairwise, and triple occurrence frontiers; context-free bounded hypothesis instantiation at sequent-supplied candidates with retained visible choices for vacuous local or loaded binders; per-use loaded-scheme instantiation at those variable/guarded-quantified candidates plus closed query/value monotypes; and positive-only nominal transport through reachable parameterized datatype applications | Contextual quantified-goal introduction with lexical givens and escape-checked skolems; scoped-provider instantiation; closed visible instantiation selected by monomorphic instance heads or, for fully vacuous scoped and retained global providers, checked query monotypes and polytypes; and guarded context-free shallow quantified-provider subsumption |
+| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through singleton, pairwise, and triple occurrence frontiers; context-free bounded hypothesis instantiation at sequent-supplied candidates with retained visible choices for vacuous local or loaded binders; per-use loaded-scheme instantiation at those variable/guarded-quantified candidates plus closed query/value monotypes; exact externally established provider-assignment vectors; and positive-only nominal transport through reachable parameterized datatype applications | Contextual quantified-goal introduction with lexical givens and escape-checked skolems; scoped-provider instantiation; closed visible instantiation selected by monomorphic instance heads or, for fully vacuous scoped and retained global providers, checked query monotypes and polytypes; exact externally established provider-assignment vectors; and guarded context-free shallow quantified-provider subsumption |
 | Type-class participation | Validates contexts; synthesizes only dictionary-independent terms | Resolves givens, superclasses, and instances |
 | Main controls | Candidate and choice-point limits | Step, queue, depth, constraint, and pattern controls |
 
@@ -170,51 +170,104 @@ required.
 
 ## Supply provider-local instantiation evidence
 
-A frontend whose source environment proves an otherwise erased type choice can
-associate that choice with one exact loaded provider:
+A frontend whose source environment proves otherwise erased type choices can
+make either of two different assertions:
+
+- `ProviderInstantiationCandidate` associates one type with an exact provider's
+  independent candidate pool. A multiply quantified provider reconstructs
+  bounded tuples from that pool, so this is appropriate only when every
+  resulting combination is justified.
+- `ProviderInstantiationAssignment` associates one complete ordered vector
+  with an exact provider. It preserves the argument order and correlation
+  established by one source-language proof and is consumed once, without
+  Cartesian reconstruction.
+
+The original candidate API remains available unchanged:
 
 ```haskell
-djinnEvidence =
+candidateEvidence =
   [ ProviderInstantiationCandidate
-      { providerInstantiationCandidateProvider = djinnProviderName
-      , providerInstantiationCandidateType = djinnCandidateType
-      }
-  ]
-exferenceEvidence =
-  [ ProviderInstantiationCandidate
-      { providerInstantiationCandidateProvider = exferenceProviderName
-      , providerInstantiationCandidateType = exferenceCandidateType
+      { providerInstantiationCandidateProvider = providerName
+      , providerInstantiationCandidateType = candidateType
       }
   ]
 
-djinnResult =
+djinnCandidateResult =
   runDjinnQueryWithInstantiationCandidates
-    djinnSession djinnEvidence djinnRequest
-exferenceResults =
+    djinnSession candidateEvidence djinnRequest
+exferenceCandidateResults =
   runExferenceQueryWithInstantiationCandidates
-    exferenceSession exferenceEvidence exferenceRequest
+    exferenceSession candidateEvidence exferenceRequest
 ```
 
-The evidence element's type variable must match the selected backend's neutral
-type-variable namespace. `ProviderInstantiationCandidate` and
-`maximumProviderInstantiationCandidates` are shared vocabulary exported by
-`Language.Haskell.Djex`; the latter is 32 and bounds associations across the
-whole call, not separately per provider. Each checked runner observes the list
-spine through at most the first extra cell before entering an element, so an
-over-wide or cyclic caller-built list fails finitely.
+Use an assignment when the frontend has established the complete binder
+vector, for example one active instance head fixing both `a` and `b`:
+
+```haskell
+assignments =
+  [ ProviderInstantiationAssignment
+      { providerInstantiationAssignmentProvider = providerName
+      , providerInstantiationAssignmentArguments =
+          [firstArgumentType, secondArgumentType]
+      }
+  ]
+
+djinnAssignmentResult =
+  runDjinnQueryWithInstantiationAssignments
+    djinnSession assignments djinnRequest
+exferenceAssignmentResults =
+  runExferenceQueryWithInstantiationAssignments
+    exferenceSession assignments exferenceRequest
+```
+
+The payload's type variable must match the selected backend's neutral
+type-variable namespace. Both payload types and all three bounds are exported
+by `Language.Haskell.Djex`:
+
+- `maximumProviderInstantiationCandidates` is 32 scalar associations per call;
+- `maximumProviderInstantiationAssignments` is 32 complete vectors per call;
+  and
+- `maximumProviderInstantiationArguments` is four ordered arguments per
+  vector.
+
+Each checked runner observes an outer list through at most its first extra cell
+before entering an element. Assignment runners likewise bound each argument
+spine before entering an argument. Over-wide or cyclic caller-built lists
+therefore fail finitely.
 
 Construction is not certification. The caller remains responsible for the
-source-language reason that a provider may be selected at that type. The
-runner is the representation and session trust boundary: it requires the
-provider's exact `Name` to denote a loaded global in that sealed session,
-expands synonyms there, checks kind `Type`, and accepts only a closed,
-context-free type representable as a visible argument. Exference narrows that
-shape to a ground monotype or a complete forall-rooted closed context-free
-type. First occurrences are retained and alpha-equivalent candidate types are
-deduplicated per provider. The provider remains part of the key, so an
-alpha-identical scheme under another name receives no evidence.
+source-language reason that a provider may be selected at the supplied types.
+The runners are the representation and session trust boundary. Candidate
+runners require the exact `Name` to denote an eligible loaded global, elaborate
+each type in that sealed session's synonym and kind scope, and accept only a
+closed, context-free proper type representable as a visible argument.
+Exference's scalar route narrows that shape to a ground monotype or a complete
+forall-rooted type and uses it only for a context-free provider whose complete
+leading prefix is vacuous.
 
-The original runners are exact empty-evidence delegates:
+Assignment runners additionally require an exact retained polymorphic scheme,
+a context-free leading chain of arity one through four, and a vector whose
+length equals that complete chain. Every argument is synonym-elaborated in the
+same sealed session, checked at kind `Type`, and required to be closed,
+context-free, and representable as a specified visible type argument. Djinn
+then substitutes the complete vector into the retained scheme and proves that
+the whole specialized body still has kind `Type`; this catches a proper-type
+argument assigned to a higher-kinded binder even when the argument is valid in
+isolation. Exference rechecks the retained scheme's closure, context, arity, and
+visible-argument shape at its private search boundary. Unlike its scalar
+route, the exact Exference route may instantiate binders which occur in the
+provider body because the complete correlated vector is already known.
+
+First occurrences are retained. Scalar types are alpha-deduplicated per
+provider; assignments are alpha-deduplicated as whole ordered vectors per
+provider. In both cases the provider remains part of the key, so an
+alpha-identical scheme under another name receives no evidence. Target-named
+Djinn specializations remain diagnostic-only, and Exference's normal exact
+target exclusion keeps the requested definition out of provider search.
+
+The original runners retain their exact historical behavior. They delegate
+through the empty candidate path, and an explicit empty assignment call returns
+the same result, ordering, diagnostics, and finite-budget observations:
 
 ```haskell
 runDjinnQuery session =
@@ -223,23 +276,26 @@ runExferenceQuery session =
   runExferenceQueryWithInstantiationCandidates session []
 ```
 
-That equality includes candidate ordering, finite-budget observations, and
-diagnostics. Nonempty evidence is additive, with engine-specific scheduling:
+Nonempty evidence is additive, with engine- and payload-specific scheduling:
 
-| Engine | Supplied-evidence boundary and order |
-| --- | --- |
-| Djinn | Historical plain structural, nominal, and query-local-instantiation plans remain first. A positive-only evidence-enriched family then adds direct specialized premises for exact loaded polymorphic providers while also carrying the query-local and loaded instantiation axioms needed for mixed proofs. It runs before the evidence-free loaded tails so an unbounded productive loaded stream cannot spend the global candidate cutoff first. The proof checker validates the specialization before lowering restores the exact provider and visible type arguments. The family admits at most four provider binders, sixteen specializations per scheme, 32 direct provider premises, and 512 attempted tuples, and spends the query's remaining cutoff and choice-point budget. |
-| Exference | Only the exact retained-global lookup receives supplied candidates; scoped values and other globals do not. Ordinary implicit instantiation remains first, followed by monomorphic instance-head choices, checked query-derived choices, and then supplied choices. Query-derived and supplied products are capped separately, so a wide historical pool cannot consume the supplied route's 32-combination generation allowance. The supplied route opens at most four leading binders and requires a context-free provider whose complete leading prefix is vacuous. |
+| Engine | Independent candidate pool | Exact ordered assignments |
+| --- | --- | --- |
+| Djinn | The historical plain structural, nominal, and query-local-instantiation plans remain first. The positive-only provider family reconstructs bounded tuples: at most four binders, 512 attempts, sixteen specializations per scheme, and 32 direct provider premises. | The same positive-only provider-plan position receives one direct premise per retained vector and never uses the tuple-attempt or per-scheme Cartesian window. It still carries query-local and loaded instantiation axioms for mixed proofs and runs before evidence-free loaded tails. Each proof is checked before lowering restores the exact provider and visible arguments. |
+| Exference | Exact retained-global lookup alone receives the pool. After ordinary implicit use, its visible order is ground monomorphic instance heads, checked query-derived choices, then supplied scalar choices. Query-derived and supplied products retain separate 32-combination caps. Scoped values and sibling globals never consult the map. | Exact retained-global lookup consumes each vector once. After ordinary implicit use, its visible order is ground monomorphic instance heads, exact supplied assignments, then checked query-derived choices. No Cartesian product or vacuous-body restriction is used. Scoped values and sibling globals never consult the map. |
 
-This API can make a visible choice such as
+Both APIs can make a visible choice such as
 `provider @(forall a. a -> a)` available when a richer frontend has already
-established that association. It does not inspect that frontend's proof, infer
-an instance head, invent a polytype, perform general higher-rank subsumption,
-or enable the first-order unifiers to enter quantified bodies. A miss after
-the finite engine-specific tails remains subject to each engine's existing
-incompleteness and search-budget rules. See the
+established the necessary fact. Only the assignment API preserves a
+multi-binder choice such as `[T1, T2]` without also authorizing `[T1, T1]` or
+`[T2, T1]`. Neither API inspects the frontend's proof, infers an instance head,
+invents a polytype, performs general higher-rank subsumption, or enables the
+first-order unifiers to enter quantified bodies. A miss after the finite
+engine-specific tails remains subject to each engine's existing incompleteness
+and search-budget rules. See the original
 [provider-local instantiation evidence report](reports/2026-08-05-provider-local-instantiation-evidence.md)
-for the trust split and regression boundary.
+and the
+[exact provider-instantiation assignment report](reports/2026-08-05-exact-provider-instantiation-assignments.md)
+for the two trust boundaries and their regression coverage.
 
 ## Djinn example
 

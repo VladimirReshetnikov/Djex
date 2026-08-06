@@ -813,44 +813,62 @@ knowing before editing the source:
   trusting term producers; the shared output scope checker and allocator then
   enforce the same invariant at the renderer boundary.
 
-## Checked provider-local instantiation evidence
+## Checked provider-local candidates and assignments
 
-`runDjinnQueryWithInstantiationCandidates` is the stable entrance for a
-frontend which has established a type choice for one exact loaded polymorphic
-provider. Its shared `ProviderInstantiationCandidate` values are checked only
-after ordinary request preparation: the complete association list is bounded
-at 32 before its elements are entered, then every provider is resolved in the
-sealed session and every type is synonym-expanded, kind-checked at `Type`, and
-required to be closed and context-free. Alpha-equivalent types are
-deduplicated per provider in caller order. Provider identity remains in the
-key, so another name with an alpha-identical scheme cannot inherit the choice.
-The caller still owns the source-language justification for the association;
-Djinn checks that the assertion is representable and cannot escape its named
-provider.
+Djinn exposes two stable provider-evidence entrances with deliberately
+different meanings. `runDjinnQueryWithInstantiationCandidates` retains the
+original `ProviderInstantiationCandidate` contract: each provider/type
+association contributes one independent scalar type to that exact provider's
+pool, and a multiply quantified scheme reconstructs bounded tuples from the
+pool. `runDjinnQueryWithInstantiationAssignments` instead accepts
+`ProviderInstantiationAssignment`, whose ordered argument list is one complete
+correlated leading-binder vector. Each exact vector is consumed once; it is
+never flattened or Cartesian-recombined with another vector.
 
-Each retained association can produce a direct specialized premise for that
-provider. The new structural and, when relevant, nominal plans carry the
-existing query-local and loaded-scheme instantiation premises as well. This
-lets one proof compose historical inference with an externally selected type.
-For a nonempty evidence call, the enriched plans run after the historical
-plain, nominal, and query-local plans but before the evidence-free loaded
-tails: a productive loaded proof stream therefore cannot consume the global
-candidate cutoff before the supplied choice is considered. The independent
-proof checker validates the specialized premise; only afterward does
-conversion replace its private proof identity with the corresponding real
-provider plus specified visible type arguments. Target-named specializations
-remain diagnostic-only.
+Both checked entrances run only after ordinary request preparation. Their
+outer lists are bounded at 32 before an element is entered. The assignment
+entrance additionally observes at most five cells of an argument spine to
+enforce the four-argument maximum before entering an argument. Each provider
+must resolve by exact `Name` to a retained loaded polymorphic scheme in the
+sealed session. Candidate types and assignment arguments are synonym-expanded
+there, checked at kind `Type`, and required to be closed, context-free, and
+representable as specified visible arguments. An assignment must have the
+scheme's exact complete leading arity, between one and four. Djinn substitutes
+the whole vector into the retained body and proves that the specialized body
+still has kind `Type`; this prevents a separately proper argument from being
+assigned to a higher-kinded binder. Scalar types and whole ordered vectors are
+alpha-deduplicated per provider in caller order. Provider identity stays in the
+key, so an alpha-identically typed sibling cannot inherit either form of
+evidence.
 
-The evidence family uses the existing four-binder and 512-attempt limits,
-retains at most sixteen specializations from one scheme and 32 direct provider
-premises, and spends only the query cutoff and proof-search fuel left by
-earlier plans. An
-empty evidence list omits the plans completely, so `runDjinnQuery` is exactly
-`runDjinnQueryWithInstantiationCandidates session []`, including ordering and
-finite-budget behavior. This is a guarded proof-producing extension, not
-general impredicative inference or higher-rank subsumption. The shared contract
-and the complementary Exference behavior are recorded in the
-[provider-local instantiation evidence report](../docs/reports/2026-08-05-provider-local-instantiation-evidence.md).
+Each retained scalar specialization or exact vector produces a direct premise
+for that provider. The structural and, when relevant, nominal provider plans
+also carry the existing query-local and loaded-scheme instantiation premises,
+so one proof can compose historical inference with external evidence. For a
+nonempty call, those enriched plans run after the historical plain, nominal,
+and query-local plans but before the evidence-free loaded tails: a productive
+loaded stream therefore cannot spend the global candidate cutoff before the
+supplied route. The independent proof checker validates the specialized
+premise before conversion replaces its private identity with the real provider
+and ordered visible type applications. A target-named specialization remains
+diagnostic-only and cannot become a synthesized self-reference.
+
+The scalar route retains its historical four-binder, 512-attempt, and
+sixteen-specializations-per-scheme Cartesian windows. Exact vectors bypass
+those reconstruction windows while sharing the 32-direct-premise family cap
+and the query cutoff and proof-search fuel left by earlier plans. Empty evidence
+omits the provider plans completely: `runDjinnQuery` is exactly the empty
+candidate call, and the empty assignment call returns the same candidates,
+ordering, diagnostics, and finite-budget observations. Current regressions
+cover empty compatibility, lazy outer and inner bounds, wrong arity and
+ineligible types/providers, whole-vector alpha deduplication, exact locality,
+mixed historical and supplied evidence, target exclusion, and a four-binder
+vector beyond the scalar Cartesian prefix. This remains a bounded
+proof-producing extension, not general impredicative inference or higher-rank
+subsumption. See the original
+[provider-local candidate report](../docs/reports/2026-08-05-provider-local-instantiation-evidence.md)
+and the
+[exact provider-assignment report](../docs/reports/2026-08-05-exact-provider-instantiation-assignments.md).
 
 ## Important limitations
 

@@ -83,6 +83,9 @@ monotypes is recorded in the
 The checked provider-local instantiation evidence shared by the stable Djinn
 and Exference adapters is recorded in the
 [2026-08-05 provider-local instantiation evidence report](docs/reports/2026-08-05-provider-local-instantiation-evidence.md).
+Its exact ordered-vector extension, which preserves correlations between the
+leading binders selected by one external proof, is recorded in the
+[2026-08-05 exact provider-instantiation assignment report](docs/reports/2026-08-05-exact-provider-instantiation-assignments.md).
 Djinn's complementary nominal view of reachable parameterized datatypes is
 recorded in the
 [2026-08-01 nominal parametric-data transport report](docs/reports/2026-08-01-nominal-parametric-data-transport.md).

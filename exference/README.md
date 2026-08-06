@@ -912,6 +912,39 @@ source APIs do not infer or discover a manifest; they continue to give
 classifies the opaque base-library signature stubs as abstract and retains only
 `Data.Void.Void` and `GHC.Generics.V1` as genuine empty datatypes.
 
+## Checked provider-local instantiation evidence
+
+`runExferenceQueryWithInstantiationCandidates` lets a richer frontend attach
+one already established type choice to an exact retained global provider. The
+shared `ProviderInstantiationCandidate` association list is globally bounded
+at 32 before any element is entered. The stable runner then resolves every
+provider against the sealed session, elaborates synonyms in that session's
+scope, checks kind `Type`, and requires either a closed ground monotype or a
+complete closed, context-free forall-rooted type. It retains first occurrences
+and alpha-deduplicates types per provider. Association is nominal: a different
+global with an alpha-equivalent scheme receives no choice, and neither a
+scoped value nor a sibling global consults the supplied map. The caller remains
+responsible for the source-language fact which justifies the choice.
+
+Supplied choices participate only in the visible branch of exact global
+lookup. Ordinary implicit instantiation stays first, followed by the existing
+ground-instance-head and checked query-derived candidates, then the supplied
+candidate route. Query-derived and supplied products keep separate
+32-combination caps before that concatenation, preventing a wide query pool
+from spending the supplied route's generation allowance. The supplied route
+opens no more than four leading binders and requires a context-free provider
+whose complete leading prefix is vacuous. Search and the independent expression
+checker consume the resulting visible application through their existing
+checked representation.
+
+`runExferenceQuery` delegates exactly to the new runner with `[]`; no candidate
+order, budget observation, or diagnostic changes in that case. Nonempty
+evidence remains a bounded global-only tail. It does not enable scoped-provider
+donation, invent a polytype, decompose a quantified body in ordinary
+unification, or provide general impredicative inference. The shared contract
+and Djinn's proof-producing counterpart are recorded in the
+[provider-local instantiation evidence report](../docs/reports/2026-08-05-provider-local-instantiation-evidence.md).
+
 ## Experimental features
 
 - Pattern-matching on multi-constructor data types can be enabled via

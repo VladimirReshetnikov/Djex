@@ -168,6 +168,79 @@ batch is nonempty. Keep the returned Exference result list lazy when streaming,
 but apply an explicit selection or fold when a global best candidate is
 required.
 
+## Supply provider-local instantiation evidence
+
+A frontend whose source environment proves an otherwise erased type choice can
+associate that choice with one exact loaded provider:
+
+```haskell
+djinnEvidence =
+  [ ProviderInstantiationCandidate
+      { providerInstantiationCandidateProvider = djinnProviderName
+      , providerInstantiationCandidateType = djinnCandidateType
+      }
+  ]
+exferenceEvidence =
+  [ ProviderInstantiationCandidate
+      { providerInstantiationCandidateProvider = exferenceProviderName
+      , providerInstantiationCandidateType = exferenceCandidateType
+      }
+  ]
+
+djinnResult =
+  runDjinnQueryWithInstantiationCandidates
+    djinnSession djinnEvidence djinnRequest
+exferenceResults =
+  runExferenceQueryWithInstantiationCandidates
+    exferenceSession exferenceEvidence exferenceRequest
+```
+
+The evidence element's type variable must match the selected backend's neutral
+type-variable namespace. `ProviderInstantiationCandidate` and
+`maximumProviderInstantiationCandidates` are shared vocabulary exported by
+`Language.Haskell.Djex`; the latter is 32 and bounds associations across the
+whole call, not separately per provider. Each checked runner observes the list
+spine through at most the first extra cell before entering an element, so an
+over-wide or cyclic caller-built list fails finitely.
+
+Construction is not certification. The caller remains responsible for the
+source-language reason that a provider may be selected at that type. The
+runner is the representation and session trust boundary: it requires the
+provider's exact `Name` to denote a loaded global in that sealed session,
+expands synonyms there, checks kind `Type`, and accepts only a closed,
+context-free type representable as a visible argument. Exference narrows that
+shape to a ground monotype or a complete forall-rooted closed context-free
+type. First occurrences are retained and alpha-equivalent candidate types are
+deduplicated per provider. The provider remains part of the key, so an
+alpha-identical scheme under another name receives no evidence.
+
+The original runners are exact empty-evidence delegates:
+
+```haskell
+runDjinnQuery session =
+  runDjinnQueryWithInstantiationCandidates session []
+runExferenceQuery session =
+  runExferenceQueryWithInstantiationCandidates session []
+```
+
+That equality includes candidate ordering, finite-budget observations, and
+diagnostics. Nonempty evidence is additive, with engine-specific scheduling:
+
+| Engine | Supplied-evidence boundary and order |
+| --- | --- |
+| Djinn | Historical plain structural, nominal, and query-local-instantiation plans remain first. A positive-only evidence-enriched family then adds direct specialized premises for exact loaded polymorphic providers while also carrying the query-local and loaded instantiation axioms needed for mixed proofs. It runs before the evidence-free loaded tails so an unbounded productive loaded stream cannot spend the global candidate cutoff first. The proof checker validates the specialization before lowering restores the exact provider and visible type arguments. The family admits at most four provider binders, sixteen specializations per scheme, 32 direct provider premises, and 512 attempted tuples, and spends the query's remaining cutoff and choice-point budget. |
+| Exference | Only the exact retained-global lookup receives supplied candidates; scoped values and other globals do not. Ordinary implicit instantiation remains first, followed by monomorphic instance-head choices, checked query-derived choices, and then supplied choices. Query-derived and supplied products are capped separately, so a wide historical pool cannot consume the supplied route's 32-combination generation allowance. The supplied route opens at most four leading binders and requires a context-free provider whose complete leading prefix is vacuous. |
+
+This API can make a visible choice such as
+`provider @(forall a. a -> a)` available when a richer frontend has already
+established that association. It does not inspect that frontend's proof, infer
+an instance head, invent a polytype, perform general higher-rank subsumption,
+or enable the first-order unifiers to enter quantified bodies. A miss after
+the finite engine-specific tails remains subject to each engine's existing
+incompleteness and search-budget rules. See the
+[provider-local instantiation evidence report](reports/2026-08-05-provider-local-instantiation-evidence.md)
+for the trust split and regression boundary.
+
 ## Djinn example
 
 This function uses the standard Djinn environment, parses the contextual Djinn

@@ -80,6 +80,9 @@ Djinn's widened bounded hypothesis-instantiation rule is recorded in the
 Its per-occurrence instantiation of loaded polymorphic values and closed source
 monotypes is recorded in the
 [2026-08-01 loaded polymorphic values report](docs/reports/2026-08-01-loaded-polymorphic-djinn-values.md).
+The checked provider-local instantiation evidence shared by the stable Djinn
+and Exference adapters is recorded in the
+[2026-08-05 provider-local instantiation evidence report](docs/reports/2026-08-05-provider-local-instantiation-evidence.md).
 Djinn's complementary nominal view of reachable parameterized datatypes is
 recorded in the
 [2026-08-01 nominal parametric-data transport report](docs/reports/2026-08-01-nominal-parametric-data-transport.md).

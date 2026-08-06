@@ -213,6 +213,34 @@ query's proven proper-type positions. Ambient query rigids may remain in the
 provider body; they are never solved by this branch. Both sources are bounded
 and the independent checker replays the choice.
 
+A richer frontend may supply a third, provider-local source through
+`ProviderInstantiationCandidate`. The checked Djinn and Exference runners
+first bound the complete association list at 32, then resolve every `Name`
+against the exact sealed session and elaborate its candidate as a closed,
+context-free proper type in that session's synonym and kind scope. Candidates
+are alpha-deduplicated only within one provider. The resulting relation is
+keyed by provider identity, not by scheme shape: two globals with alpha-equivalent
+schemes cannot donate evidence to one another. Calling either historical
+runner is definitionally the same as calling its
+`WithInstantiationCandidates` variant with `[]`.
+
+Djinn compiles each retained association into a direct specialized premise for
+that exact loaded polymorphic provider. The evidence-enriched structural and
+nominal plans also contain the historical query-local and loaded instantiation
+premises, so one checked proof may compose old and supplied evidence. For a
+nonempty evidence call this strict superset runs before the evidence-free
+loaded tails, preventing a productive loaded proof stream from starving the
+supplied route at the global candidate cutoff. The independent proof checker
+sees the specialization before lowering rewrites its synthetic proof identity
+into the corresponding visible application of the real provider. Exference
+instead keeps the checked map in its query state and
+consults it only from exact retained-global lookup. Ordinary implicit use is
+first; the existing instance-head and query-derived visible choices follow;
+the separately bounded supplied choices are last. Scoped values never consult
+the map. These are finite evidence-directed typing rules, not permission for
+ordinary unification to decompose a polytype or a claim of general
+impredicative inference.
+
 Djinn's historical query-local and appended loaded instantiation-axiom families
 now share visible-evidence retention: inferable choices erase, but a vacuous
 binder retains the shortest visible prefix. Environment sealing additionally

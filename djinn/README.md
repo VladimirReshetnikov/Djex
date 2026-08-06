@@ -813,6 +813,45 @@ knowing before editing the source:
   trusting term producers; the shared output scope checker and allocator then
   enforce the same invariant at the renderer boundary.
 
+## Checked provider-local instantiation evidence
+
+`runDjinnQueryWithInstantiationCandidates` is the stable entrance for a
+frontend which has established a type choice for one exact loaded polymorphic
+provider. Its shared `ProviderInstantiationCandidate` values are checked only
+after ordinary request preparation: the complete association list is bounded
+at 32 before its elements are entered, then every provider is resolved in the
+sealed session and every type is synonym-expanded, kind-checked at `Type`, and
+required to be closed and context-free. Alpha-equivalent types are
+deduplicated per provider in caller order. Provider identity remains in the
+key, so another name with an alpha-identical scheme cannot inherit the choice.
+The caller still owns the source-language justification for the association;
+Djinn checks that the assertion is representable and cannot escape its named
+provider.
+
+Each retained association can produce a direct specialized premise for that
+provider. The new structural and, when relevant, nominal plans carry the
+existing query-local and loaded-scheme instantiation premises as well. This
+lets one proof compose historical inference with an externally selected type.
+For a nonempty evidence call, the enriched plans run after the historical
+plain, nominal, and query-local plans but before the evidence-free loaded
+tails: a productive loaded proof stream therefore cannot consume the global
+candidate cutoff before the supplied choice is considered. The independent
+proof checker validates the specialized premise; only afterward does
+conversion replace its private proof identity with the corresponding real
+provider plus specified visible type arguments. Target-named specializations
+remain diagnostic-only.
+
+The evidence family uses the existing four-binder and 512-attempt limits,
+retains at most sixteen specializations from one scheme and 32 direct provider
+premises, and spends only the query cutoff and proof-search fuel left by
+earlier plans. An
+empty evidence list omits the plans completely, so `runDjinnQuery` is exactly
+`runDjinnQueryWithInstantiationCandidates session []`, including ordering and
+finite-budget behavior. This is a guarded proof-producing extension, not
+general impredicative inference or higher-rank subsumption. The shared contract
+and the complementary Exference behavior are recorded in the
+[provider-local instantiation evidence report](../docs/reports/2026-08-05-provider-local-instantiation-evidence.md).
+
 ## Important limitations
 
 - Djinn implements propositional intuitionistic reasoning, not the full Haskell

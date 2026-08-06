@@ -1,5 +1,10 @@
 # Triple rank-N frontiers
 
+> Historical boundary: the
+> [quartic frontier successor](2026-08-06-quartic-rank-n-frontiers.md) extends
+> current coverage through nine independent sites. The eight-site gap below
+> records the state delivered by this earlier milestone.
+
 Date: 2026-08-01
 
 ## Outcome

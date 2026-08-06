@@ -46,7 +46,7 @@ build-depends: djex
 | Proof-backed non-inhabitation result | Yes when formula translation is complete | No |
 | Ranked heuristic candidates | No | Yes |
 | Explicit prenex polymorphism | Yes at the checked request edge | Yes |
-| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through singleton, pairwise, and triple occurrence frontiers; context-free bounded hypothesis instantiation at sequent-supplied candidates with retained visible choices for vacuous local or loaded binders; per-use loaded-scheme instantiation at those variable/guarded-quantified candidates plus closed query/value monotypes; exact externally established provider-assignment vectors; and positive-only nominal transport through reachable parameterized datatype applications | Contextual quantified-goal introduction with lexical givens and escape-checked skolems; scoped-provider instantiation; closed visible instantiation selected by monomorphic instance heads or, for fully vacuous scoped and retained global providers, checked query monotypes and polytypes; exact externally established provider-assignment vectors; and guarded context-free shallow quantified-provider subsumption |
+| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through singleton, pairwise, triple, and quadruple occurrence frontiers; context-free bounded hypothesis instantiation at sequent-supplied candidates with retained visible choices for vacuous local or loaded binders; per-use loaded-scheme instantiation at those variable/guarded-quantified candidates plus closed query/value monotypes; exact externally established provider-assignment vectors; and positive-only nominal transport through reachable parameterized datatype applications | Contextual quantified-goal introduction with lexical givens and escape-checked skolems; scoped-provider instantiation; closed visible instantiation selected by monomorphic instance heads or, for fully vacuous scoped and retained global providers, checked query monotypes and polytypes; exact externally established provider-assignment vectors; and guarded context-free shallow quantified-provider subsumption |
 | Type-class participation | Validates contexts; synthesizes only dictionary-independent terms | Resolves givens, superclasses, and instances |
 | Main controls | Candidate and choice-point limits | Step, queue, depth, constraint, and pattern controls |
 
@@ -400,17 +400,19 @@ projection treats it as one proposition and compares it by lexical
 alpha-equivalence. The checked query worker also tries a polarized projection
 that opens atoms in positive positions, including atoms with validated class
 contexts, the historical exact opaque projection, two singleton occurrence
-frontiers, two pairwise frontiers, and two triple frontiers. Up to three
-positive occurrences may stay opaque while their siblings open, or up to three
-may open while unrelated siblings stay opaque. Selecting nested occurrences
+frontiers, two pairwise frontiers, two triple frontiers, and two quadruple
+frontiers. Up to four positive occurrences may stay opaque while their siblings
+open, or up to four may open while unrelated siblings stay opaque. Selecting
+nested occurrences
 also opens the union of their required enclosing chains. Prepared functions
 cache the same views under distinct internal proof identities, allowing a
 reusable source function to be used at different sound views in one term. The
 historical fully-open, exact-opaque, and singleton prefix retains its order;
-the deterministic pairwise and triple tail raises growth from linear to cubic.
+the deterministic pairwise, triple, and quadruple tail raises growth from
+linear to quartic.
 The family is
-exhaustive for seven independent occurrences but does not enumerate the power
-set: an eight-site proof requiring exactly four open and four opaque
+exhaustive for nine independent occurrences but does not enumerate the power
+set: a ten-site proof requiring exactly five open and five opaque
 occurrences can remain inconclusive. When a hypothesis-side
 context-free chain of at most four binders exists, bounded instantiation axioms
 can eliminate it completely at a candidate tuple drawn from

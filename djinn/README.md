@@ -540,14 +540,15 @@ preserve it. The context contributes no LJT premises. Outer applications
 containing an atom, such as
 `[(forall result. result -> result -> result)]`, retain their structure and
 compare alpha-equivalently without exposing the quantified body.
-The checked worker bounds composition with singleton, pairwise, and triple
-occurrence-local frontiers: up to three sites may stay opaque while their
-siblings open, or up to three sites may open while unrelated siblings stay
-opaque. Nested selected sites bring along the union of their required enclosing
-forall chains. Together with the fully opened and exact opaque plans, this
-covers every combination of seven independent sites in cubic rather than
+The checked worker bounds composition with singleton, pairwise, triple, and
+quadruple occurrence-local frontiers: up to four sites may stay opaque while
+their siblings open, or up to four sites may open while unrelated siblings
+stay opaque. Nested selected sites bring along the union of their required
+enclosing forall chains. Together with the fully opened and exact opaque plans,
+this covers every combination of nine independent sites in quartic rather than
 exponential space. The historical fully-open, exact-opaque, and singleton
-prefix retains its order before the deterministic pairwise and triple tail.
+prefix retains its order before the deterministic pairwise, triple, and
+quadruple tail.
 
 Datatype declarations still compile structurally for that historical family.
 At query time, a backward slice rooted in the elaborated goal decides whether
@@ -932,10 +933,11 @@ and the
   opened polarized view,
   the historical exact-opaque view, one plan retaining each positive forall
   opaquely while its siblings open, the dual plans opening one occurrence
-  while unrelated siblings stay opaque, and the corresponding unordered-pair
-  and unordered-triple frontiers. The structural no-axiom family is exhaustive
-  for seven independent sites and grows cubically; it does not enumerate
-  central subsets such as four open and four opaque sites among eight.
+  while unrelated siblings stay opaque, and the corresponding unordered-pair,
+  unordered-triple, and unordered-quadruple frontiers. The structural no-axiom
+  family is exhaustive for nine independent sites and grows quartically; it
+  does not enumerate central subsets such as five open and five opaque sites
+  among ten.
   Reusable loaded functions expose all of those sound views in one proof
   environment.
 

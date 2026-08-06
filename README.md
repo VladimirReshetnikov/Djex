@@ -91,9 +91,11 @@ are recorded in the
 Djinn's complementary nominal view of reachable parameterized datatypes is
 recorded in the
 [2026-08-01 nominal parametric-data transport report](docs/reports/2026-08-01-nominal-parametric-data-transport.md).
-Djinn's cubic extension of its bounded rank-N plan family is recorded in the
-[2026-08-01 triple rank-N frontiers report](docs/reports/2026-08-01-triple-rank-n-frontiers.md),
+Djinn's quartic extension of its bounded rank-N plan family is recorded in the
+[2026-08-06 quartic rank-N frontiers report](docs/reports/2026-08-06-quartic-rank-n-frontiers.md),
 following the
+[2026-08-01 triple rank-N frontiers report](docs/reports/2026-08-01-triple-rank-n-frontiers.md)
+and the
 [2026-07-31 pairwise rank-N frontiers report](docs/reports/2026-07-31-pairwise-rank-n-frontiers.md).
 Its later proof-enumeration work is recorded in the
 [oldest-first evidence report](docs/reports/2026-08-05-oldest-first-evidence.md)
@@ -408,16 +410,17 @@ refutation. Exference still does not perform non-exact subsumption between
 contextual schemes; quantified types outside an exposed goal/provider boundary
 remain opaque. Finite identifier or search-budget exhaustion is truncation, not
 negative evidence.
-Djinn searches a cubically bounded family. Its historical prefix remains
+Djinn searches a quartically bounded family. Its historical prefix remains
 the fully opened polarized plan, the exact-opaque plan, and the two singleton
 frontiers: one positive `forall` stays opaque while its siblings open, or one
 occurrence opens while unrelated siblings remain opaque. A deterministic tail
-then makes the same choices for each unordered pair and triple of sites.
+then makes the same choices for each unordered pair, triple, and quadruple of
+sites.
 Opening nested occurrences also opens the union of their enclosing chains.
 Loaded functions expose those sound views together, so a reusable premise can
 be consumed at different views in one proof. The family is exhaustive for
-seven independent sites without enumerating the power set; for eight
-independent sites, a proof requiring exactly four open and four opaque
+nine independent sites without enumerating the power set; for ten independent
+sites, a proof requiring exactly five open and five opaque
 occurrences may remain inconclusive. After that complete structural no-axiom
 prefix, bounded instantiation plans cover many omitted middle subsets, but
 chains beyond four binders, constrained chains, and candidates outside the

@@ -340,8 +340,9 @@ providerInstantiationPremises symbolPrefix translator schemes candidates =
 --
 -- Each vector has already been checked against the exact provider scheme at
 -- the public boundary.  In particular, its length is the leading-binder
--- arity, its arguments are closed proper types, and duplicate alpha-equivalent
--- vectors for one provider have been removed.  Consume the vector as one
+-- arity, its arguments are closed types checked at their positional binder
+-- kinds, and duplicate alpha-equivalent vectors for one provider have been
+-- removed.  Consume the vector as one
 -- correlated choice: unlike 'providerInstantiationPremises', this path never
 -- reconstructs tuples through a Cartesian product and therefore does not use
 -- the historical per-scheme attempt window.

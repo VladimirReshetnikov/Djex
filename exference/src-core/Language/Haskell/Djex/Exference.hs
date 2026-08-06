@@ -722,7 +722,8 @@ prepareProviderInstantiationAssignments session rawAssignments
         "Exference provider instantiation assignment names no retained polymorphic binding"
         (renderCanonical provider)
       Just retained -> Right retained
-    let (binders, constraints, _) = SharedType.splitLeadingForalls scheme
+    let (binders, constraints, schemeBody) =
+          SharedType.splitLeadingForalls scheme
     if length binders == argumentCount
       then pure ()
       else Left $ shownErrorDiagnostic
@@ -735,14 +736,23 @@ prepareProviderInstantiationAssignments session rawAssignments
         "DJEX_EXF_ASSIGNMENT_CONTEXT"
         "Exference provider instantiation assignment targets a contextual scheme"
         (label, constraints)
+    inferredBinderKinds <- first
+      (\failure -> shownErrorDiagnostic
+        "DJEX_EXF_ASSIGNMENT_KIND"
+        "Exference could not infer provider binder kinds"
+        (label, failure))
+      $ SharedKindInference.inferSharedVariableKinds
+          kindAssumptions binders [schemeBody]
+    let binderKinds = map snd inferredBinderKinds
     arguments <- traverse
-      (prepareArgument label) $ zip [0 :: Int ..] rawArguments
+      (prepareArgument label) $
+        zip3 [0 :: Int ..] binderKinds rawArguments
     validateSpecializationKind label scheme arguments
     pure (provider, arguments)
 
-  prepareArgument label (argumentIndex, source) = do
+  prepareArgument label (argumentIndex, binderKind, source) = do
     elaborated <- first (assignmentElaborationFailure label argumentIndex)
-      $ Session.elaborateSessionGoal session source
+      $ Session.elaborateSessionTypeAtKind session binderKind source
     if Set.null (SharedType.freeVariables elaborated)
         && null (SharedType.typeConstraints elaborated)
       then pure ()
@@ -769,13 +779,12 @@ prepareProviderInstantiationAssignments session rawAssignments
         "invalid lowered Exference provider instantiation argument"
         (label, argumentIndex, lowered)
 
-  -- Every assignment argument is deliberately a proper type, matching the
-  -- cross-engine evidence contract.  That fact alone does not prove it can
-  -- replace the corresponding provider binder: a binder used as a type
-  -- constructor has a higher kind. Reuse the core's exact ordered
+  -- Every assignment argument has already been elaborated at the inferred
+  -- kind of its exact provider-binder position. Reuse the core's exact ordered
   -- instantiation worker, then kind-check the complete substituted body against
-  -- the session inventory. This checks positional compatibility without
-  -- reconstructing a Cartesian product or trusting the first-order lowering.
+  -- the session inventory as an independent specialization guard. This checks
+  -- the whole scheme without reconstructing a Cartesian product or trusting
+  -- the first-order lowering.
   validateSpecializationKind label scheme arguments = case
       CorePolytype.assignmentProviderInstantiations [arguments] scheme of
     [instantiation] -> first

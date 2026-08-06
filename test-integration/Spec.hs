@@ -1610,27 +1610,177 @@ tests = testGroup "Djex facade"
       expectFailure "wrong assignment arity"
         "DJEX_EXF_ASSIGNMENT_ARITY" [tokenType, tokenType]
 
-  , testCase "reject an Exference assignment at a higher-kinded binder" $ do
-      tokenName <- expectRight $ mkIdentifier "AssignmentKindToken"
-      providerName <- expectRight $ mkIdentifier "assignmentKindProvider"
-      targetName <- expectRight $ mkIdentifier "assignmentKindTarget"
+  , testCase "accept an Exference higher-kinded assignment" $ do
+      tokenName <- expectRight $ mkIdentifier "HigherAssignmentToken"
+      wrapperName <- expectRight $ mkIdentifier "HigherAssignmentWrapper"
+      providerName <- expectRight $ mkIdentifier "higherAssignmentProvider"
+      targetName <- expectRight $ mkIdentifier "higherAssignmentTarget"
       target <- expectRight $ mkDefinitionName targetName
       let constructorVariable = FlexibleVariable 0
           tokenType = TypeConstructor tokenName
-          -- The occurrence as an application fixes this binder at
-          -- Type -> Type even though assignment arguments are proper types.
+          wrapperConstructor :: ExferenceType
+          wrapperConstructor = TypeConstructor wrapperName
+          wrappedToken = TypeApplication wrapperConstructor tokenType
           providerType = ForallType [constructorVariable] [] $
             FunctionType
               (TypeApplication
                 (TypeVariable constructorVariable) tokenType)
               tokenType
+          goalType = FunctionType wrappedToken tokenType
           declarations =
             [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , AbstractTypeDeclaration () wrapperName $
+                FunctionKind ProperTypeKind ProperTypeKind
             , ValueDeclaration $ ValueSignature () providerName providerType
             ]
           assignment = ProviderInstantiationAssignment
             { providerInstantiationAssignmentProvider = providerName
-            , providerInstantiationAssignmentArguments = [tokenType]
+            , providerInstantiationAssignmentArguments = [wrapperConstructor]
+            }
+          scalarCandidate = ProviderInstantiationCandidate
+            { providerInstantiationCandidateProvider = providerName
+            , providerInstantiationCandidateType = wrapperConstructor
+            }
+          visibleSpine expression = case expression of
+            Global name -> Just (name, [])
+            VisibleTypeApplication function argument -> do
+              (name, earlier) <- visibleSpine function
+              pure (name, earlier ++ [argument])
+            _ -> Nothing
+      visibleWrapper <- expectRight $
+        specifiedVisibleTypeArgument wrapperConstructor
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = goalType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 512}
+        }
+      results <- expectRight $ runExferenceQueryWithInstantiationAssignments
+        session [assignment] request
+      let visibleVectors =
+            [ actual
+            | candidate <- concatMap
+                (batchCandidates . resultSearch) results
+            , FunctionClause _ [] body <- [candidateOutput candidate]
+            , Just (occurrence, actual) <- [visibleSpine body]
+            , occurrence == providerName
+            ]
+      assertBool
+        ("the higher-kinded assignment was absent: " ++ show visibleVectors)
+        $ [visibleWrapper] `elem` visibleVectors
+      case runExferenceQueryWithInstantiationCandidates
+          session [scalarCandidate] request of
+        Left failure -> diagnosticCode failure @?=
+          Just "DJEX_EXF_CANDIDATE_KIND"
+        Right _ -> fail
+          "the legacy scalar Candidate API accepted a higher-kinded type"
+
+  , testCase "retain a mixed higher-kinded and impredicative Exference assignment" $ do
+      tokenName <- expectRight $ mkIdentifier "MixedKindAssignmentToken"
+      wrapperName <- expectRight $ mkIdentifier "MixedKindAssignmentWrapper"
+      providerName <- expectRight $ mkIdentifier "mixedKindAssignmentProvider"
+      targetName <- expectRight $ mkIdentifier "mixedKindAssignmentTarget"
+      target <- expectRight $ mkDefinitionName targetName
+      let constructorVariable = FlexibleVariable 0
+          hiddenVariable = FlexibleVariable 1
+          identityVariable = FlexibleVariable 2
+          identityType = TypeVariable identityVariable
+          quantifiedIdentity = ForallType [identityVariable] [] $
+            FunctionType identityType identityType
+          tokenType = TypeConstructor tokenName
+          wrapperConstructor :: ExferenceType
+          wrapperConstructor = TypeConstructor wrapperName
+          wrappedToken = TypeApplication wrapperConstructor tokenType
+          providerType = ForallType
+            [constructorVariable, hiddenVariable] [] $
+              FunctionType
+                (TypeApplication
+                  (TypeVariable constructorVariable) tokenType)
+                tokenType
+          goalType = FunctionType wrappedToken tokenType
+          arguments = [wrapperConstructor, quantifiedIdentity]
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , AbstractTypeDeclaration () wrapperName $
+                FunctionKind ProperTypeKind ProperTypeKind
+            , ValueDeclaration $ ValueSignature () providerName providerType
+            ]
+          assignment = ProviderInstantiationAssignment
+            { providerInstantiationAssignmentProvider = providerName
+            , providerInstantiationAssignmentArguments = arguments
+            }
+          visibleSpine expression = case expression of
+            Global name -> Just (name, [])
+            VisibleTypeApplication function argument -> do
+              (name, earlier) <- visibleSpine function
+              pure (name, earlier ++ [argument])
+            _ -> Nothing
+      visibleArguments <- expectRight $
+        traverse specifiedVisibleTypeArgument arguments
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = goalType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 512}
+        }
+      results <- expectRight $ runExferenceQueryWithInstantiationAssignments
+        session [assignment] request
+      let visibleVectors =
+            [ actual
+            | candidate <- concatMap
+                (batchCandidates . resultSearch) results
+            , FunctionClause _ [] body <- [candidateOutput candidate]
+            , Just (occurrence, actual) <- [visibleSpine body]
+            , occurrence == providerName
+            ]
+      assertBool
+        ("the mixed higher-kinded/impredicative assignment was absent: " ++
+          show visibleVectors)
+        $ visibleArguments `elem` visibleVectors
+
+  , testCase "reject both directions of Exference assignment kind mismatch" $ do
+      tokenName <- expectRight $ mkIdentifier "AssignmentKindToken"
+      wrapperName <- expectRight $ mkIdentifier "AssignmentKindWrapper"
+      higherProviderName <- expectRight $
+        mkIdentifier "higherKindAssignmentProvider"
+      properProviderName <- expectRight $
+        mkIdentifier "properKindAssignmentProvider"
+      targetName <- expectRight $ mkIdentifier "assignmentKindTarget"
+      target <- expectRight $ mkDefinitionName targetName
+      let constructorVariable = FlexibleVariable 0
+          properVariable = FlexibleVariable 1
+          tokenType = TypeConstructor tokenName
+          wrapperConstructor = TypeConstructor wrapperName
+          -- The occurrence as an application fixes this binder at
+          -- Type -> Type; the other provider's vacuous binder defaults to Type.
+          higherProviderType = ForallType [constructorVariable] [] $
+            FunctionType
+              (TypeApplication
+                (TypeVariable constructorVariable) tokenType)
+              tokenType
+          properProviderType = ForallType [properVariable] [] tokenType
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , AbstractTypeDeclaration () wrapperName $
+                FunctionKind ProperTypeKind ProperTypeKind
+            , ValueDeclaration $ ValueSignature ()
+                higherProviderName higherProviderType
+            , ValueDeclaration $ ValueSignature ()
+                properProviderName properProviderType
+            ]
+          assignment provider arguments = ProviderInstantiationAssignment
+            { providerInstantiationAssignmentProvider = provider
+            , providerInstantiationAssignmentArguments = arguments
             }
       environment <- expectRight
         (mkEnvironment declarations :: Either
@@ -1643,12 +1793,18 @@ tests = testGroup "Djex facade"
         , requestOptions = defaultExferenceOptions
             {exferenceMaximumSteps = 64}
         }
-      case runExferenceQueryWithInstantiationAssignments
-          session [assignment] request of
-        Left failure -> diagnosticCode failure @?=
-          Just "DJEX_EXF_ASSIGNMENT_KIND"
-        Right _ -> fail
-          "Exference accepted a proper type for a Type -> Type provider binder"
+      let expectKindFailure label supplied = case
+            runExferenceQueryWithInstantiationAssignments
+              session [supplied] request of
+            Left failure -> diagnosticCode failure @?=
+              Just "DJEX_EXF_ASSIGNMENT_KIND"
+            Right _ -> fail $ label ++ " was accepted"
+      expectKindFailure
+        "a proper type for a Type -> Type provider binder"
+        $ assignment higherProviderName [tokenType]
+      expectKindFailure
+        "a Type -> Type constructor for a Type provider binder"
+        $ assignment properProviderName [wrapperConstructor]
 
   , testCase "accept an ordered proper-type Exference assignment" $ do
       tokenName <- expectRight $ mkIdentifier "ProperAssignmentToken"

@@ -22,6 +22,7 @@ module Language.Haskell.Djex.Exference.Internal.Session
   , sessionSearchEnvironment
   , sessionClassArity
   , elaborateSessionGoal
+  , elaborateSessionTypeAtKind
   , checkSessionTypeSynonymInspectionSaturation
   , normalizeSessionTypeSynonyms
   , exferenceSessionInventory
@@ -87,6 +88,7 @@ import Language.Haskell.Synthesis.Inventory
   )
 import Language.Haskell.Synthesis.KindInference
   ( ClassKindPolicy (GeneralizeClassKinds)
+  , GroundKind
   , KindInventoryPolicy (OpenKindInventory)
   )
 import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
@@ -388,6 +390,18 @@ elaborateSessionGoal
   -> Either (TypeElaborationError SynthesisVariable) (Type SynthesisVariable)
 elaborateSessionGoal session = elaboratePreparedType
   freshSynthesisVariable (preparedView session) ProperTypeKind
+
+-- | Elaborate a type against one exact ground kind from this session's sealed
+-- inventory. Provider assignments use this narrower internal operation after
+-- inferring the positional kinds of a retained scheme; ordinary queries and
+-- scalar provider candidates continue through 'elaborateSessionGoal'.
+elaborateSessionTypeAtKind
+  :: ExferenceSession
+  -> GroundKind
+  -> Type SynthesisVariable
+  -> Either (TypeElaborationError SynthesisVariable) (Type SynthesisVariable)
+elaborateSessionTypeAtKind session expected = elaboratePreparedType
+  freshSynthesisVariable (preparedView session) expected
 
 -- | Validate the @:kind@ saturation rule without constructing an expanded
 -- normal form. The complete operational head beneath context-free prenex

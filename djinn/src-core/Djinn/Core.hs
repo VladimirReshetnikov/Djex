@@ -69,6 +69,7 @@ import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
+import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Query as SharedQuery
@@ -1047,10 +1048,10 @@ prepareProviderInstantiationCandidates prepared rawCandidates = do
                 )
 
 -- Bound both list spines before entering caller-owned argument values.  Once
--- an assignment is known to have the exact provider arity, elaborate each
--- argument independently as a closed, context-free proper type and retain its
--- visible syntax.  The complete substituted provider body is kind-checked as
--- a final guard against assigning a proper type to a higher-kinded binder.
+-- an assignment is known to have the exact provider arity, infer its binder
+-- kinds from the retained provider body, elaborate each argument at its exact
+-- positional kind, and retain its visible syntax.  The complete substituted
+-- provider body is kind-checked as a final independent specialization guard.
 -- Alpha-equivalent vectors are de-duplicated per provider without losing the
 -- order or correlation within a vector.
 prepareProviderInstantiationAssignments
@@ -1122,8 +1123,18 @@ prepareProviderInstantiationAssignments prepared rawAssignments = do
                 providerLabel ++ "expected " ++ show arity ++
                     " ordered argument(s), but received " ++
                     show observedArguments
+        inferredBinderKinds <- first
+            (DjinnInstantiationAssignmentFailure .
+                (providerLabel ++) .
+                ("cannot infer provider binder kinds: " ++) . show) $
+            SharedKindInference.inferSharedVariableKinds
+                (SharedInventory.inventoryKindAssumptions $
+                    preparedEnvironmentInventory prepared)
+                binders [schemeBody]
+        let binderKinds = map (fromGroundHKind . snd) inferredBinderKinds
         checkedArguments <- mapM
-            (validateArgument providerLabel) $ zip [0 :: Int ..] arguments
+            (validateArgument providerLabel) $
+                zip3 [0 :: Int ..] binderKinds arguments
         instantiatedBody <- first
             (DjinnInstantiationAssignmentFailure .
                 (providerLabel ++) .
@@ -1144,12 +1155,12 @@ prepareProviderInstantiationAssignments prepared rawAssignments = do
                 , (provider, checkedArguments) : retained
                 )
 
-    validateArgument providerLabel (argumentIndex, source) = do
+    validateArgument providerLabel (argumentIndex, binderKind, source) = do
         let label = providerLabel ++ "argument #" ++
                 show argumentIndex ++ ": "
         elaborated <- first
             (DjinnInstantiationAssignmentFailure . (label ++)) $
-            elaboratePreparedSynthesisTypes prepared [(KStar, source)]
+            elaboratePreparedSynthesisTypes prepared [(binderKind, source)]
         checked <- case elaborated of
             [one] -> Right one
             _ -> Left $ DjinnInternalQueryFailure $

@@ -1511,6 +1511,55 @@ testRankNTypeAtoms = do
         ambiguousTokenSession evidenceRequest
         [providerAssignment "ambiguousMonoToken"
             [SharedType.TypeConstructor SharedName.listName]]
+    let higherKindGoal = SharedType.FunctionType
+            (SharedType.TypeApplication
+                higherKindType higherKindArgumentType)
+            tokenType
+    higherKindTarget <- expectShownRight $
+        SharedName.mkIdentifier "instantiateAtHigherKindAssignment"
+    higherKindRequest <- expectShownRight $ Djex.parseDjinnRequest
+        mixedKindSession
+        defaultQueryOptions
+            { optionAlternatives = True
+            , optionCutoff = 128
+            }
+        higherKindTarget
+        "higher-kind-provider-assignment.djinn"
+        (SharedTypeRender.renderType id higherKindGoal)
+    let higherKindAssignment = providerAssignment
+            "mixedKindAmbiguousMonoToken"
+            [higherKindType, higherKindArgumentType, closedType]
+        mixedKindAssignment = providerAssignment
+            "mixedKindAmbiguousMonoToken"
+            [higherKindType, higherKindArgumentType, quantifiedIdentity]
+    higherKindAssigned <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationAssignments
+            mixedKindSession [higherKindAssignment] higherKindRequest
+    higherKindAssignedRendered <- renderStableCandidates higherKindAssigned
+    assertBool
+        ("a sound higher-kinded assignment was not retained: " ++
+            show higherKindAssignedRendered)
+        $ any
+            (("mixedKindAmbiguousMonoToken @HigherKindConstructor " ++
+                "@HigherKindArgument @MonoClosed") `isInfixOf`)
+            higherKindAssignedRendered
+    mixedKindAssigned <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationAssignments
+            mixedKindSession [mixedKindAssignment] higherKindRequest
+    mixedKindAssignedRendered <- renderStableCandidates mixedKindAssigned
+    assertBool
+        ("a mixed higher-kinded/impredicative assignment was not retained " ++
+            "in order: " ++ show mixedKindAssignedRendered)
+        $ any
+            (("mixedKindAmbiguousMonoToken @HigherKindConstructor " ++
+                "@HigherKindArgument @(forall a0_0. a0_0 -> a0_0)")
+                    `isInfixOf`)
+            mixedKindAssignedRendered
+    expectAssignmentFailure
+        "a proper type at a higher-kinded provider binder"
+        mixedKindSession higherKindRequest
+        [providerAssignment "mixedKindAmbiguousMonoToken"
+            [closedType, higherKindArgumentType, quantifiedIdentity]]
     expectAssignmentFailure "an unknown assignment provider"
         ambiguousTokenSession evidenceRequest
         [providerAssignment "missingProvider" [quantifiedIdentity]]

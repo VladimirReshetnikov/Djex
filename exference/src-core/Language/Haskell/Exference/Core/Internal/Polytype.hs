@@ -321,9 +321,9 @@ candidateProviderInstantiations rawCandidates source =
 -- exact provider by a checked adapter. Each vector is tried once; unlike the
 -- historical candidate pool, this route neither constructs a Cartesian
 -- product nor requires the selected binders to be absent from the provider
--- body. The stable boundary has already proved every argument's proper kind,
--- while this worker independently retains closure, context, arity, and visible
--- application shape.
+-- body. The stable boundary has already proved every argument's exact
+-- positional binder kind, while this worker independently retains closure,
+-- context, arity, and visible application shape.
 assignmentProviderInstantiations
   :: [[HsType]]
   -> HsType
@@ -355,8 +355,9 @@ assignmentProviderInstantiations rawAssignments source =
       }
 
 -- | Structural boundary expected of one adapter-checked assignment argument.
--- The adapter separately proves kind @Type@ in its sealed synonym and kind
--- environment. Here we retain lexical closure, context freedom, and the exact
+-- The adapter separately proves the provider binder's positional kind in its
+-- sealed synonym and kind environment. Here we retain lexical closure,
+-- context freedom, and the exact
 -- generated visible-argument representation, including applications which
 -- contain a nested quantified proper type.
 isProviderAssignmentArgument :: HsType -> Bool

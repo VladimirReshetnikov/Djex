@@ -1322,6 +1322,181 @@ tests = testGroup "Djex facade"
       assertBool "caller evidence lost the exact provider application"
         $ "evidenceProvider @(forall" `isInfixOf` rendered
 
+  , testCase "specialize a non-vacuous Exference provider from caller evidence" $ do
+      wrapperName <- expectRight $ mkIdentifier "EvidenceWrapper"
+      providerName <- expectRight $ mkIdentifier "evidenceWrapperProvider"
+      targetName <- expectRight $ mkIdentifier "useEvidenceWrapperProvider"
+      target <- expectRight $ mkDefinitionName targetName
+      let providerVariable = FlexibleVariable 0
+          identityVariable = FlexibleVariable 1
+          identityType = TypeVariable identityVariable
+          quantifiedIdentity = ForallType [identityVariable] [] $
+            FunctionType identityType identityType
+          wrapperConstructor = TypeConstructor wrapperName
+          wrapperType argument =
+            TypeApplication wrapperConstructor argument
+          providerType = ForallType [providerVariable] [] $
+            wrapperType $ TypeVariable providerVariable
+          goalType = wrapperType quantifiedIdentity
+          declarations =
+            [ AbstractTypeDeclaration () wrapperName $
+                FunctionKind ProperTypeKind ProperTypeKind
+            , ValueDeclaration $ ValueSignature () providerName providerType
+            ]
+          assignment = ProviderInstantiationAssignment
+            { providerInstantiationAssignmentProvider = providerName
+            , providerInstantiationAssignmentArguments = [quantifiedIdentity]
+            }
+      quantifiedArgument <- expectRight
+        $ specifiedVisibleTypeArgument quantifiedIdentity
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = goalType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 512}
+        }
+      results <- expectRight $ runExferenceQueryWithInstantiationAssignments
+        session [assignment] request
+      let candidates = concatMap
+            (batchCandidates . resultSearch) results
+          isSuppliedApplication candidate = case candidateOutput candidate of
+            FunctionClause _ []
+                (VisibleTypeApplication (Global occurrence) argument) ->
+              occurrence == providerName && argument == quantifiedArgument
+            _ -> False
+      candidate <- maybe
+        (fail $ "caller evidence produced no impredicative wrapper result: "
+          ++ show (map candidateOutput candidates))
+        pure
+        $ find isSuppliedApplication candidates
+      rendered <- expectRight
+        $ renderExferenceCandidateDefinition Unqualified candidate
+      assertBool "non-vacuous evidence lost the exact provider application"
+        $ "evidenceWrapperProvider @(forall" `isInfixOf` rendered
+
+  , testCase "retain a structural impredicative Exference assignment" $ do
+      tokenName <- expectRight $ mkIdentifier "StructuralEvidenceToken"
+      wrapperName <- expectRight $ mkIdentifier "StructuralEvidenceWrapper"
+      providerName <- expectRight $ mkIdentifier "structuralEvidenceProvider"
+      targetName <- expectRight $ mkIdentifier "useStructuralEvidenceProvider"
+      target <- expectRight $ mkDefinitionName targetName
+      let providerVariable = FlexibleVariable 0
+          identityVariable = FlexibleVariable 1
+          identityType = TypeVariable identityVariable
+          quantifiedIdentity = ForallType [identityVariable] [] $
+            FunctionType identityType identityType
+          wrapperConstructor = TypeConstructor wrapperName
+          structuralChoice =
+            TypeApplication wrapperConstructor quantifiedIdentity
+          tokenType = TypeConstructor tokenName
+          providerType = ForallType [providerVariable] [] tokenType
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , AbstractTypeDeclaration () wrapperName $
+                FunctionKind ProperTypeKind ProperTypeKind
+            , ValueDeclaration $ ValueSignature () providerName providerType
+            ]
+          assignment = ProviderInstantiationAssignment
+            { providerInstantiationAssignmentProvider = providerName
+            , providerInstantiationAssignmentArguments = [structuralChoice]
+            }
+      structuralArgument <- expectRight
+        $ specifiedVisibleTypeArgument structuralChoice
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = tokenType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 512}
+        }
+      results <- expectRight $ runExferenceQueryWithInstantiationAssignments
+        session [assignment] request
+      let candidates = concatMap
+            (batchCandidates . resultSearch) results
+          isStructuralApplication candidate = case candidateOutput candidate of
+            FunctionClause _ []
+                (VisibleTypeApplication (Global occurrence) argument) ->
+              occurrence == providerName && argument == structuralArgument
+            _ -> False
+      candidate <- maybe
+        (fail $ "structural assignment produced no visible application: "
+          ++ show (map candidateOutput candidates))
+        pure
+        $ find isStructuralApplication candidates
+      rendered <- expectRight
+        $ renderExferenceCandidateDefinition Unqualified candidate
+      assertBool "structural assignment lost its nested quantified argument"
+        $ all (`isInfixOf` rendered)
+            ["structuralEvidenceProvider @(", "forall"]
+
+  , testCase "retain an exact four-binder Exference assignment" $ do
+      tokenName <- expectRight $ mkIdentifier "FourEvidenceToken"
+      providerName <- expectRight $ mkIdentifier "fourEvidenceProvider"
+      targetName <- expectRight $ mkIdentifier "useFourEvidenceProvider"
+      target <- expectRight $ mkDefinitionName targetName
+      let providerVariables = map FlexibleVariable [0 .. 3]
+          quantified binder body = ForallType [FlexibleVariable binder] [] body
+          variable binder = TypeVariable $ FlexibleVariable binder
+          tokenType = TypeConstructor tokenName
+          arguments =
+            [ quantified 10 $ FunctionType (variable 10) (variable 10)
+            , quantified 11 $ FunctionType (variable 11) tokenType
+            , quantified 12 $ FunctionType tokenType (variable 12)
+            , quantified 13 $ FunctionType (variable 13) $
+                FunctionType (variable 13) (variable 13)
+            ]
+          providerType = ForallType providerVariables [] tokenType
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , ValueDeclaration $ ValueSignature () providerName providerType
+            ]
+          assignment = ProviderInstantiationAssignment
+            { providerInstantiationAssignmentProvider = providerName
+            , providerInstantiationAssignmentArguments = arguments
+            }
+          visibleSpine expression = case expression of
+            Global name -> Just (name, [])
+            VisibleTypeApplication function argument -> do
+              (name, earlier) <- visibleSpine function
+              pure (name, earlier ++ [argument])
+            _ -> Nothing
+      visibleArguments <- expectRight $
+        traverse specifiedVisibleTypeArgument arguments
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = tokenType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 1024}
+        }
+      results <- expectRight $ runExferenceQueryWithInstantiationAssignments
+        session [assignment] request
+      let candidates = concatMap
+            (batchCandidates . resultSearch) results
+          visibleVectors =
+            [ actual
+            | candidate <- candidates
+            , FunctionClause _ [] body <- [candidateOutput candidate]
+            , Just (occurrence, actual@(_ : _)) <- [visibleSpine body]
+            , occurrence == providerName
+            ]
+      assertBool
+        ("the exact four-binder assignment was absent: " ++ show visibleVectors)
+        $ visibleArguments `elem` visibleVectors
+
   , testCase "empty Exference provider evidence is exactly inert" $ do
       tokenName <- expectRight $ mkIdentifier "EmptyEvidenceToken"
       providerName <- expectRight $ mkIdentifier "emptyEvidenceProvider"
@@ -1348,7 +1523,10 @@ tests = testGroup "Djex facade"
       historical <- expectRight $ runExferenceQuery session request
       explicitEmpty <- expectRight
         $ runExferenceQueryWithInstantiationCandidates session [] request
+      exactEmpty <- expectRight
+        $ runExferenceQueryWithInstantiationAssignments session [] request
       explicitEmpty @?= historical
+      exactEmpty @?= historical
 
   , testCase "bound Exference provider evidence before entering elements" $ do
       tokenName <- expectRight $ mkIdentifier "BoundedEvidenceToken"
@@ -1360,6 +1538,9 @@ tests = testGroup "Djex facade"
           poisonedCandidates =
             (error "Exference entered an over-limit evidence element")
               : poisonedCandidates
+          poisonedAssignments =
+            (error "Exference entered an over-limit assignment element")
+              : poisonedAssignments
       environment <- expectRight
         (mkEnvironment declarations :: Either
           (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
@@ -1378,6 +1559,166 @@ tests = testGroup "Djex facade"
         Left failure -> diagnosticCode failure @?=
           Just "DJEX_EXF_CANDIDATE_LIMIT"
         Right _ -> fail "Exference accepted an over-limit cyclic evidence list"
+      assignmentResult <- expectWithin "Exference provider assignment bound" $
+        evaluate $ runExferenceQueryWithInstantiationAssignments
+          session poisonedAssignments request
+      case assignmentResult of
+        Left failure -> diagnosticCode failure @?=
+          Just "DJEX_EXF_ASSIGNMENT_LIMIT"
+        Right _ -> fail "Exference accepted an over-limit cyclic assignment list"
+
+  , testCase "validate Exference assignment vectors before search" $ do
+      tokenName <- expectRight $ mkIdentifier "AssignmentBoundaryToken"
+      providerName <- expectRight $ mkIdentifier "assignmentBoundaryProvider"
+      targetName <- expectRight $ mkIdentifier "assignmentBoundaryTarget"
+      target <- expectRight $ mkDefinitionName targetName
+      let tokenType = TypeConstructor tokenName
+          providerType = ForallType [FlexibleVariable 0] [] tokenType
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , ValueDeclaration $ ValueSignature () providerName providerType
+            ]
+          poisonedArguments =
+            (error "Exference entered an over-limit assignment argument")
+              : poisonedArguments
+          assignment arguments = ProviderInstantiationAssignment
+            { providerInstantiationAssignmentProvider = providerName
+            , providerInstantiationAssignmentArguments = arguments
+            }
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = tokenType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 32}
+        }
+      let expectFailure label code supplied = do
+            outcome <- expectWithin label $ evaluate $
+              runExferenceQueryWithInstantiationAssignments
+                session [assignment supplied] request
+            case outcome of
+              Left failure -> diagnosticCode failure @?= Just code
+              Right _ -> fail $ label ++ " was accepted"
+      expectFailure "cyclic assignment argument spine"
+        "DJEX_EXF_ASSIGNMENT_ARGUMENT_LIMIT" poisonedArguments
+      expectFailure "empty assignment vector"
+        "DJEX_EXF_ASSIGNMENT_ARITY" []
+      expectFailure "wrong assignment arity"
+        "DJEX_EXF_ASSIGNMENT_ARITY" [tokenType, tokenType]
+
+  , testCase "reject an Exference assignment at a higher-kinded binder" $ do
+      tokenName <- expectRight $ mkIdentifier "AssignmentKindToken"
+      providerName <- expectRight $ mkIdentifier "assignmentKindProvider"
+      targetName <- expectRight $ mkIdentifier "assignmentKindTarget"
+      target <- expectRight $ mkDefinitionName targetName
+      let constructorVariable = FlexibleVariable 0
+          tokenType = TypeConstructor tokenName
+          -- The occurrence as an application fixes this binder at
+          -- Type -> Type even though assignment arguments are proper types.
+          providerType = ForallType [constructorVariable] [] $
+            FunctionType
+              (TypeApplication
+                (TypeVariable constructorVariable) tokenType)
+              tokenType
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , ValueDeclaration $ ValueSignature () providerName providerType
+            ]
+          assignment = ProviderInstantiationAssignment
+            { providerInstantiationAssignmentProvider = providerName
+            , providerInstantiationAssignmentArguments = [tokenType]
+            }
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = tokenType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 64}
+        }
+      case runExferenceQueryWithInstantiationAssignments
+          session [assignment] request of
+        Left failure -> diagnosticCode failure @?=
+          Just "DJEX_EXF_ASSIGNMENT_KIND"
+        Right _ -> fail
+          "Exference accepted a proper type for a Type -> Type provider binder"
+
+  , testCase "accept an ordered proper-type Exference assignment" $ do
+      tokenName <- expectRight $ mkIdentifier "ProperAssignmentToken"
+      wrapperName <- expectRight $ mkIdentifier "ProperAssignmentWrapper"
+      pairName <- expectRight $ mkIdentifier "ProperAssignmentPair"
+      providerName <- expectRight $ mkIdentifier "properAssignmentProvider"
+      targetName <- expectRight $ mkIdentifier "properAssignmentTarget"
+      target <- expectRight $ mkDefinitionName targetName
+      let firstVariable = FlexibleVariable 0
+          secondVariable = FlexibleVariable 1
+          tokenType = TypeConstructor tokenName
+          wrapperConstructor = TypeConstructor wrapperName
+          pairConstructor = TypeConstructor pairName
+          wrapperType argument =
+            TypeApplication wrapperConstructor argument
+          pairType first second = TypeApplication
+            (TypeApplication pairConstructor first) second
+          arguments :: [ExferenceType]
+          arguments = [tokenType, wrapperType tokenType]
+          providerType = ForallType [firstVariable, secondVariable] [] $
+            pairType
+              (TypeVariable firstVariable)
+              (TypeVariable secondVariable)
+          goalType = pairType tokenType $ wrapperType tokenType
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , AbstractTypeDeclaration () wrapperName $
+                FunctionKind ProperTypeKind ProperTypeKind
+            , AbstractTypeDeclaration () pairName $
+                FunctionKind ProperTypeKind $
+                  FunctionKind ProperTypeKind ProperTypeKind
+            , ValueDeclaration $ ValueSignature () providerName providerType
+            ]
+          assignment = ProviderInstantiationAssignment
+            { providerInstantiationAssignmentProvider = providerName
+            , providerInstantiationAssignmentArguments = arguments
+            }
+          visibleSpine expression = case expression of
+            Global name -> Just (name, [])
+            VisibleTypeApplication function argument -> do
+              (name, earlier) <- visibleSpine function
+              pure (name, earlier ++ [argument])
+            _ -> Nothing
+      visibleArguments <- expectRight $
+        traverse specifiedVisibleTypeArgument arguments
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = goalType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 512}
+        }
+      results <- expectRight $ runExferenceQueryWithInstantiationAssignments
+        session [assignment] request
+      let visibleVectors =
+            [ actual
+            | candidate <- concatMap
+                (batchCandidates . resultSearch) results
+            , FunctionClause _ [] body <- [candidateOutput candidate]
+            , Just (occurrence, actual) <- [visibleSpine body]
+            , occurrence == providerName
+            ]
+      assertBool
+        ("the ordered proper-type assignment was absent: "
+          ++ show visibleVectors)
+        $ visibleArguments `elem` visibleVectors
 
   , testCase "keep Exference provider evidence local to an exact name" $ do
       tokenName <- expectRight $ mkIdentifier "LocalEvidenceToken"
@@ -1402,6 +1743,10 @@ tests = testGroup "Djex facade"
           evidence = ProviderInstantiationCandidate
             { providerInstantiationCandidateProvider = selectedName
             , providerInstantiationCandidateType = quantifiedIdentity
+            }
+          assignment = ProviderInstantiationAssignment
+            { providerInstantiationAssignmentProvider = selectedName
+            , providerInstantiationAssignmentArguments = [quantifiedIdentity]
             }
       quantifiedArgument <- expectRight
         $ specifiedVisibleTypeArgument quantifiedIdentity
@@ -1430,6 +1775,16 @@ tests = testGroup "Djex facade"
       assertBool
         "alpha-identical unrelated provider received another provider's evidence"
         $ not $ any (suppliedTo unrelatedName) candidates
+      assignmentResults <- expectRight $
+        runExferenceQueryWithInstantiationAssignments
+          session [assignment] request
+      let assignmentCandidates = concatMap
+            (batchCandidates . resultSearch) assignmentResults
+      assertBool "selected provider did not receive its exact assignment"
+        $ any (suppliedTo selectedName) assignmentCandidates
+      assertBool
+        "alpha-identical unrelated provider received another provider's assignment"
+        $ not $ any (suppliedTo unrelatedName) assignmentCandidates
 
   , testCase "specialize an Exference provider at a closed quantified type" $ do
       tokenName <- expectRight $ mkIdentifier "Token"

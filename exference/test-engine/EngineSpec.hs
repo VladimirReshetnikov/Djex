@@ -31,6 +31,7 @@ import Language.Haskell.Exference.Core.Internal.Options
 import Language.Haskell.Exference.Core.Internal.Polytype
   ( GroundProviderInstantiation (..)
   , candidateProviderInstantiations
+  , assignmentProviderInstantiations
   , groundProviderInstantiations
   , instantiateLeadingForallsWith
   , quantifiedProviderSubsumes
@@ -460,6 +461,45 @@ tests = testGroup "Exference private engine boundaries"
         ]
       candidateProviderInstantiations [selected]
           (provider ambientFlexible) @?= []
+  , testCase "exact assignments retain structure, order, and non-vacuous bodies" $ do
+      let selected = TypeForall [1] []
+            $ TypeArrow (TypeVar 1) (TypeVar 1)
+          wrapper argument = TypeApp (TypeCons $ name "Wrapper") argument
+          provider = TypeForall [0] [] $ wrapper $ TypeVar 0
+          token = TypeCons $ name "Token"
+          structural = wrapper selected
+          quantified binder body = TypeForall [binder] [] body
+          arguments =
+            [ quantified 11 $ TypeArrow (TypeVar 11) (TypeVar 11)
+            , quantified 12 $ TypeArrow (TypeVar 12) token
+            , quantified 13 $ TypeArrow token (TypeVar 13)
+            , quantified 14 $ TypeArrow
+                (TypeVar 14) (TypeArrow (TypeVar 14) (TypeVar 14))
+            ]
+          fourBinderProvider = TypeForall [2, 3, 4, 5] [] token
+      candidateProviderInstantiations [selected] provider @?= []
+      assignmentProviderInstantiations [[selected]] provider @?=
+        [ GroundProviderInstantiation
+            { groundProviderArguments = [selected]
+            , groundProviderType = wrapper selected
+            , groundProviderConstraints = []
+            }
+        ]
+      assignmentProviderInstantiations [[structural]]
+          (TypeForall [6] [] token) @?=
+        [ GroundProviderInstantiation
+            { groundProviderArguments = [structural]
+            , groundProviderType = token
+            , groundProviderConstraints = []
+            }
+        ]
+      assignmentProviderInstantiations [arguments] fourBinderProvider @?=
+        [ GroundProviderInstantiation
+            { groundProviderArguments = arguments
+            , groundProviderType = token
+            , groundProviderConstraints = []
+            }
+        ]
   , testCase "generic deconstructors need no persistent flexible IDs" $ do
       let integer = TypeCons $ name "Int"
           box argument = TypeApp (TypeCons $ name "Box") argument

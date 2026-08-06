@@ -42,6 +42,7 @@ module Language.Haskell.Djex.Djinn
   , DjinnResult
   , runDjinnQuery
   , runDjinnQueryWithInstantiationCandidates
+  , runDjinnQueryWithInstantiationAssignments
   , renderDjinnCandidateExpression
   , renderDjinnCandidateDefinition
   ) where
@@ -97,7 +98,8 @@ import Language.Haskell.Synthesis.Generated
   )
 import Language.Haskell.Synthesis.Name (Name)
 import Language.Haskell.Synthesis.Query
-  ( ProviderInstantiationCandidate
+  ( ProviderInstantiationAssignment
+  , ProviderInstantiationCandidate
   , QueryEvidence (..)
   , QueryRequest (..)
   , RequestProvenance (..)
@@ -180,17 +182,54 @@ runDjinnQueryWithInstantiationCandidates
   -> [ProviderInstantiationCandidate DjinnTypeVariable]
   -> DjinnRequest
   -> Either Diagnostic DjinnResult
-runDjinnQueryWithInstantiationCandidates session candidates request = do
+runDjinnQueryWithInstantiationCandidates session candidates =
+  runDjinnQueryWithProviderEvidence session $ CandidateEvidence candidates
+
+-- | Run one checked Djinn search with complete ordered leading-forall
+-- assignments established for exact named providers.  Each assignment vector
+-- is bounded, elaborated, and checked against its provider's exact arity, then
+-- supplied directly to proof search without Cartesian reconstruction.
+runDjinnQueryWithInstantiationAssignments
+  :: DjinnSession
+  -> [ProviderInstantiationAssignment DjinnTypeVariable]
+  -> DjinnRequest
+  -> Either Diagnostic DjinnResult
+runDjinnQueryWithInstantiationAssignments session assignments =
+  runDjinnQueryWithProviderEvidence session $ AssignmentEvidence assignments
+
+data DjinnProviderEvidence
+  = CandidateEvidence
+      [ProviderInstantiationCandidate DjinnTypeVariable]
+  | AssignmentEvidence
+      [ProviderInstantiationAssignment DjinnTypeVariable]
+
+runDjinnQueryWithProviderEvidence
+  :: DjinnSession
+  -> DjinnProviderEvidence
+  -> DjinnRequest
+  -> Either Diagnostic DjinnResult
+runDjinnQueryWithProviderEvidence session evidence request = do
   let query = djinnRequestQuery request
   (contexts, goal) <- Request.prepareDjinnRequest
     (Session.sessionClassArity session) request
-  case Core.inhabitSynthesisResultPreparedWithInstantiationCandidates
-      (requestOptions query)
-      (Session.sessionPreparedEnvironment session)
-      contexts
-      candidates
-      (requestTarget query)
-      goal of
+  let execute = case evidence of
+        CandidateEvidence candidates ->
+          Core.inhabitSynthesisResultPreparedWithInstantiationCandidates
+            (requestOptions query)
+            (Session.sessionPreparedEnvironment session)
+            contexts
+            candidates
+            (requestTarget query)
+            goal
+        AssignmentEvidence assignments ->
+          Core.inhabitSynthesisResultPreparedWithInstantiationAssignments
+            (requestOptions query)
+            (Session.sessionPreparedEnvironment session)
+            contexts
+            assignments
+            (requestTarget query)
+            goal
+  case execute of
     Left failure -> Left $
       djinnQueryFailure request failure
     Right result
@@ -263,6 +302,10 @@ djinnQueryFailure request failure = case failure of
   DjinnInstantiationCandidateFailure message -> contextualDiagnostic Error
     "DJEX_DJINN_CANDIDATE"
     "Djinn rejected provider instantiation evidence"
+    message
+  DjinnInstantiationAssignmentFailure message -> contextualDiagnostic Error
+    "DJEX_DJINN_ASSIGNMENT"
+    "Djinn rejected a provider instantiation assignment"
     message
   DjinnInternalQueryFailure message -> contextualDiagnostic Error
     "DJEX_DJINN_INTERNAL"

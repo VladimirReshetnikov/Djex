@@ -1242,8 +1242,17 @@ testRankNTypeAtoms = do
                     sharedName providerName
                 , SharedQuery.providerInstantiationCandidateType = candidateType
                 }
+        providerAssignment providerName arguments =
+            SharedQuery.ProviderInstantiationAssignment
+                { SharedQuery.providerInstantiationAssignmentProvider =
+                    sharedName providerName
+                , SharedQuery.providerInstantiationAssignmentArguments =
+                    arguments
+                }
         identityEvidence = providerChoice
             "ambiguousMonoToken" quantifiedIdentity
+        identityAssignment = providerAssignment
+            "ambiguousMonoToken" [quantifiedIdentity]
     evidenceTargetName <- expectShownRight $
         SharedName.mkIdentifier "instantiateFromProviderEvidence"
     evidenceRequest <- expectShownRight $ Djex.parseDjinnRequest
@@ -1256,6 +1265,11 @@ testRankNTypeAtoms = do
             ambiguousTokenSession [] evidenceRequest
     assertEqual "the empty provider-evidence runner changed Djinn results"
         evidenceBaseline explicitEmptyEvidence
+    explicitEmptyAssignments <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationAssignments
+            ambiguousTokenSession [] evidenceRequest
+    assertEqual "the empty provider-assignment runner changed Djinn results"
+        evidenceBaseline explicitEmptyAssignments
     evidenceBaselineRendered <- renderStableCandidates evidenceBaseline
     assertBool
         ("a quantified provider choice was invented without evidence: " ++
@@ -1273,6 +1287,30 @@ testRankNTypeAtoms = do
         $ any
             ("ambiguousMonoToken @(forall a0_0. a0_0 -> a0_0)" `isInfixOf`)
             evidencedTokenRendered
+    assignedToken <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationAssignments
+            ambiguousTokenSession [identityAssignment] evidenceRequest
+    assignedTokenRendered <- renderStableCandidates assignedToken
+    assertBool
+        ("an exact provider assignment lost its quantified choice: " ++
+            show assignedTokenRendered)
+        $ any
+            ("ambiguousMonoToken @(forall a0_0. a0_0 -> a0_0)" `isInfixOf`)
+            assignedTokenRendered
+    let renamedQuantifiedIdentity =
+            SharedType.ForallType ["renamedIdentity"] [] $
+                SharedType.FunctionType
+                    (SharedType.TypeVariable "renamedIdentity")
+                    (SharedType.TypeVariable "renamedIdentity")
+        renamedIdentityAssignment = providerAssignment
+            "ambiguousMonoToken" [renamedQuantifiedIdentity]
+    duplicateAssignedToken <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationAssignments
+            ambiguousTokenSession
+            [identityAssignment, renamedIdentityAssignment]
+            evidenceRequest
+    assertEqual "alpha-equivalent assignment vectors were not de-duplicated"
+        assignedToken duplicateAssignedToken
 
     -- Two providers may erase to alpha-identical schemes. Evidence for the
     -- first still cannot specialize the second merely because their logical
@@ -1292,6 +1330,17 @@ testRankNTypeAtoms = do
             ("sameSchemeWithoutEvidence @(forall a0_0. a0_0 -> a0_0)"
                 `isInfixOf`)
             localityRendered
+    assignedLocalityToken <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationAssignments
+            localitySession [identityAssignment] evidenceRequest
+    assignedLocalityRendered <- renderStableCandidates assignedLocalityToken
+    assertBool
+        ("a complete assignment was donated to an alpha-identical provider: " ++
+            show assignedLocalityRendered)
+        $ not $ any
+            ("sameSchemeWithoutEvidence @(forall a0_0. a0_0 -> a0_0)"
+                `isInfixOf`)
+            assignedLocalityRendered
 
     -- The evidence tail must extend the richest historical instantiation plan,
     -- not replace it.  The novel quantified choice specializes both the box and
@@ -1360,6 +1409,26 @@ testRankNTypeAtoms = do
                 "a0_0 -> a0_1 -> a0_0)"
             , "historicalChoiceCarrier"
             ]) mixedEvidenceRendered
+    mixedAssignments <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationAssignments
+            mixedEvidenceSession
+            [ providerAssignment "externalChoiceBox" [novelQuantifiedChoice]
+            , providerAssignment "finishMixedEvidence" [novelQuantifiedChoice]
+            ]
+            mixedEvidenceRequest
+    mixedAssignmentsRendered <- renderStableCandidates mixedAssignments
+    assertBool
+        ("ordered assignments did not compose with historical evidence: " ++
+            show mixedAssignmentsRendered ++ "; progress: " ++ show
+                (SharedSearch.batchProgress $
+                    SharedQuery.resultSearch mixedAssignments))
+        $ any (\term -> all (`isInfixOf` term)
+            [ "finishMixedEvidence @(forall a0_0 a0_1. " ++
+                "a0_0 -> a0_1 -> a0_0)"
+            , "externalChoiceBox @(forall a0_0 a0_1. " ++
+                "a0_0 -> a0_1 -> a0_0)"
+            , "historicalChoiceCarrier"
+            ]) mixedAssignmentsRendered
 
     -- Candidate failures are independent of a parsed request's source: the
     -- evidence came from an external environment, not that source buffer.
@@ -1392,6 +1461,152 @@ testRankNTypeAtoms = do
         replicate
             (SharedQuery.maximumProviderInstantiationCandidates + 1)
             (error "provider candidate element forced before width rejection")
+
+    -- Complete assignments have their own source-free failure boundary.  Both
+    -- the outer list and every inner vector are observed only one cell beyond
+    -- their bounds before any caller-owned element is entered.
+    let expectAssignmentFailure description session request supplied = case
+            Djex.runDjinnQueryWithInstantiationAssignments
+                session supplied request of
+          Left failure -> do
+            assertEqual (description ++ " diagnostic code")
+                (Just "DJEX_DJINN_ASSIGNMENT")
+                (SharedDiagnostic.diagnosticCode failure)
+            assertEqual (description ++ " source provenance")
+                Nothing (SharedDiagnostic.diagnosticSource failure)
+          Right result -> fail $ description ++ " was accepted: " ++ show result
+        cyclicAssignments =
+            error "assignment element forced before outer bound rejection" :
+                cyclicAssignments
+        cyclicArguments =
+            error "assignment argument forced before inner bound rejection" :
+                cyclicArguments
+    expectAssignmentFailure "a cyclic provider assignment list"
+        ambiguousTokenSession evidenceRequest cyclicAssignments
+    expectAssignmentFailure "a cyclic provider argument vector"
+        ambiguousTokenSession evidenceRequest
+        [providerAssignment "ambiguousMonoToken" cyclicArguments]
+    expectAssignmentFailure "an empty provider argument vector"
+        ambiguousTokenSession evidenceRequest
+        [providerAssignment "ambiguousMonoToken" []]
+    expectAssignmentFailure "a wrong-arity provider argument vector"
+        ambiguousTokenSession evidenceRequest
+        [providerAssignment "ambiguousMonoToken" $
+            replicate 2
+                (error "argument forced before exact arity rejection")]
+    expectAssignmentFailure "an open provider assignment argument"
+        ambiguousTokenSession evidenceRequest
+        [providerAssignment "ambiguousMonoToken"
+            [SharedType.TypeVariable "openAssignment"]]
+    expectAssignmentFailure "a contextual provider assignment argument"
+        ambiguousTokenSession evidenceRequest
+        [providerAssignment "ambiguousMonoToken"
+            [SharedType.ForallType ["constrainedAssignment"]
+                [Constraint (sharedName "Eq")
+                    [SharedType.TypeVariable "constrainedAssignment"]]
+                (SharedType.FunctionType
+                    (SharedType.TypeVariable "constrainedAssignment")
+                    (SharedType.TypeVariable "constrainedAssignment"))]]
+    expectAssignmentFailure "a higher-kinded provider assignment argument"
+        ambiguousTokenSession evidenceRequest
+        [providerAssignment "ambiguousMonoToken"
+            [SharedType.TypeConstructor SharedName.listName]]
+    expectAssignmentFailure "an unknown assignment provider"
+        ambiguousTokenSession evidenceRequest
+        [providerAssignment "missingProvider" [quantifiedIdentity]]
+    expectAssignmentFailure "a monomorphic assignment provider"
+        loadedSession evidenceRequest
+        [providerAssignment "monoValue" [quantifiedIdentity]]
+
+    -- A complete four-binder vector can retain correlations beyond the old
+    -- per-provider Cartesian prefix.  With four supplied candidate types the
+    -- requested [q1,q2,q3,q4] tuple is Cartesian index 27 and therefore absent
+    -- from the historical first-16 window; the assignment path consumes it
+    -- directly and retains all four visible applications in source order.
+    let quantifiedFirst = SharedType.ForallType ["first"] [] $
+            SharedType.FunctionType
+                (SharedType.TypeVariable "first")
+                (SharedType.TypeVariable "first")
+        quantifiedKeepFirst =
+            SharedType.ForallType ["keepFirst", "discardSecond"] [] $
+                SharedType.FunctionType
+                    (SharedType.TypeVariable "keepFirst") $
+                    SharedType.FunctionType
+                        (SharedType.TypeVariable "discardSecond")
+                        (SharedType.TypeVariable "keepFirst")
+        quantifiedKeepSecond =
+            SharedType.ForallType ["discardFirst", "keepSecond"] [] $
+                SharedType.FunctionType
+                    (SharedType.TypeVariable "discardFirst") $
+                    SharedType.FunctionType
+                        (SharedType.TypeVariable "keepSecond")
+                        (SharedType.TypeVariable "keepSecond")
+        quantifiedKeepOfThree = SharedType.ForallType
+            ["keepOfThree", "middleOfThree", "lastOfThree"] [] $
+                SharedType.FunctionType
+                    (SharedType.TypeVariable "keepOfThree") $
+                    SharedType.FunctionType
+                        (SharedType.TypeVariable "middleOfThree") $
+                        SharedType.FunctionType
+                            (SharedType.TypeVariable "lastOfThree")
+                            (SharedType.TypeVariable "keepOfThree")
+        orderedArguments =
+            [ quantifiedFirst
+            , quantifiedKeepFirst
+            , quantifiedKeepSecond
+            , quantifiedKeepOfThree
+            ]
+        orderedScheme = SharedType.ForallType
+            ["orderedFirst", "orderedSecond", "orderedThird", "orderedFourth"]
+            [] tokenType
+        orderedApplication =
+            "orderedFourProvider @(forall a0_0. a0_0 -> a0_0)" ++
+            " @(forall a0_0 a0_1. a0_0 -> a0_1 -> a0_0)" ++
+            " @(forall a0_0 a0_1. a0_0 -> a0_1 -> a0_1)" ++
+            " @(forall a0_0 a0_1 a0_2. " ++
+                "a0_0 -> a0_1 -> a0_2 -> a0_0)"
+        orderedSiblingApplication =
+            "orderedFourSibling" ++
+                drop (length "orderedFourProvider") orderedApplication
+    orderedEnvironment <- mkNeutralDjinnEnvironment $
+        closedDeclarations ++
+        [ valueDeclaration "orderedFourProvider" orderedScheme
+        , valueDeclaration "orderedFourSibling" orderedScheme
+        ]
+    orderedSession <- expectShownRight $ Djex.mkDjinnSession orderedEnvironment
+    orderedTarget <- expectShownRight $
+        SharedName.mkIdentifier "retainOrderedFourAssignment"
+    orderedRequest <- expectShownRight $ Djex.parseDjinnRequest
+        orderedSession
+        defaultQueryOptions
+            { optionAlternatives = True
+            , optionCutoff = 128
+            }
+        orderedTarget "ordered-provider-assignment.djinn" "MonoToken"
+    cartesianPrefix <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationCandidates
+            orderedSession
+            (map (providerChoice "orderedFourProvider") orderedArguments)
+            orderedRequest
+    cartesianPrefixRendered <- renderStableCandidates cartesianPrefix
+    assertBool
+        ("the regression tuple unexpectedly entered the old Cartesian prefix: " ++
+            show cartesianPrefixRendered)
+        $ not $ any (orderedApplication `isInfixOf`) cartesianPrefixRendered
+    orderedResult <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationAssignments
+            orderedSession
+            [providerAssignment "orderedFourProvider" orderedArguments]
+            orderedRequest
+    orderedRendered <- renderStableCandidates orderedResult
+    assertBool
+        ("the exact four-argument assignment was not retained in order: " ++
+            show orderedRendered)
+        $ any (orderedApplication `isInfixOf`) orderedRendered
+    assertBool
+        ("the exact assignment leaked to a sibling provider: " ++
+            show orderedRendered)
+        $ not $ any (orderedSiblingApplication `isInfixOf`) orderedRendered
 
     defaultBox <- runStableQuery defaultBoxSession
         "instantiateLoadedResultProvider"
@@ -1612,6 +1827,16 @@ testRankNTypeAtoms = do
         [] $ SharedSearch.batchCandidates $ SharedQuery.resultSearch fiveLoaded
     assertEqual "a bounded loaded-scheme miss was falsely refuted"
         SharedQuery.NoEvidence $ SharedQuery.resultEvidence fiveLoaded
+    fiveAssignmentTarget <- expectShownRight $
+        SharedName.mkIdentifier "rejectFiveBinderAssignment"
+    fiveAssignmentRequest <- expectShownRight $ Djex.parseDjinnRequest
+        fiveSession defaultQueryOptions fiveAssignmentTarget
+        "five-provider-assignment.djinn" "MonoFiveResult"
+    expectAssignmentFailure "a five-binder assignment provider"
+        fiveSession fiveAssignmentRequest
+        [providerAssignment "monoFiveProvider" $
+            take SharedQuery.maximumProviderInstantiationArguments $
+                map SharedType.TypeConstructor fiveNames]
 
     -- Four-binder chains remain practical under the existing per-scheme and
     -- per-query attempt caps. The generated evidence is still the original

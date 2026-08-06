@@ -9,6 +9,7 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , findQueryResultsInEnvironmentEither
   , findQueryResultsInEnvironmentWithCheckedOptions
   , findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
+  , findQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
   , findQueryResultsWithAllocators
   , queryProjectionStrictnessForTesting
   , prepareExferenceInput
@@ -34,6 +35,7 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , mkExferenceEnvironment
   , mkExferenceEnvironmentWithSchemes
   , exferenceEnvironmentContainsBinding
+  , exferenceEnvironmentBindingScheme
   , checkExferenceOptions
   , validateExferenceOptions
   , validateExferenceQuery
@@ -180,6 +182,7 @@ data CheckedExferenceQuery = CheckedExferenceQuery
   !ExferenceEnvironment
   !ExferenceQuery
   !(M.Map QualifiedName [HsType])
+  !(M.Map QualifiedName [[HsType]])
   !RigidInstantiationPlan
 
 data ExferenceInputError
@@ -426,6 +429,7 @@ findEngineBatchesWith allocators
           }
       }
       providerCandidates
+      providerAssignments
       rigidPlan) =
   unfoldr helper rootFindExpressionState
  where
@@ -497,6 +501,7 @@ findEngineBatchesWith allocators
     , nodeFunctionSchemes = functionSchemes
     , nodeVisibleTypeCandidates = properTypeCandidates
     , nodeProviderInstantiationCandidates = providerCandidates
+    , nodeProviderInstantiationAssignments = providerAssignments
     , nodeDeconstructors  = deconss'
     , nodeQueryClassEnv   = rootClassEnvironment
     , nodeExpression      = ExpHole 0
@@ -748,7 +753,7 @@ findQueryResultsInEnvironmentWithCheckedOptions
   -> CheckedExferenceOptions
   -> Either ExferenceInputError [ExferenceResult]
 findQueryResultsInEnvironmentWithCheckedOptions =
-  findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates M.empty
+  findQueryResultsInEnvironmentWithCheckedOptionsAndEvidence M.empty M.empty
 
 -- | Run a query with an adapter-checked, provider-local proper-type candidate
 -- map.  This entrance is Cabal-private: stable adapters establish kind and
@@ -762,8 +767,34 @@ findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
   -> CheckedExferenceOptions
   -> Either ExferenceInputError [ExferenceResult]
 findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates candidates =
+  findQueryResultsInEnvironmentWithCheckedOptionsAndEvidence candidates M.empty
+
+-- | Run a query with adapter-checked exact provider assignments. This private
+-- entrance preserves each ordered vector and keeps the historical flat
+-- candidate API on its unchanged search path.
+findQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
+  :: M.Map QualifiedName [[HsType]]
+  -> SharedGenerated.DefinitionName
+  -> ExferenceSourceTypeVariableHints
+  -> ExferenceEnvironment
+  -> ExferenceQuery
+  -> CheckedExferenceOptions
+  -> Either ExferenceInputError [ExferenceResult]
+findQueryResultsInEnvironmentWithCheckedOptionsAndAssignments assignments =
+  findQueryResultsInEnvironmentWithCheckedOptionsAndEvidence M.empty assignments
+
+findQueryResultsInEnvironmentWithCheckedOptionsAndEvidence
+  :: M.Map QualifiedName [HsType]
+  -> M.Map QualifiedName [[HsType]]
+  -> SharedGenerated.DefinitionName
+  -> ExferenceSourceTypeVariableHints
+  -> ExferenceEnvironment
+  -> ExferenceQuery
+  -> CheckedExferenceOptions
+  -> Either ExferenceInputError [ExferenceResult]
+findQueryResultsInEnvironmentWithCheckedOptionsAndEvidence candidates assignments =
   findQueryResultsWithCheckedOptionsAndAllocators
-    defaultSearchAllocators candidates
+    defaultSearchAllocators candidates assignments
 
 -- The allocator-parametric form is an internal test seam for exercising
 -- finite identifier exhaustion.  Keeping preparation here guarantees that
@@ -778,11 +809,12 @@ findQueryResultsWithAllocators
 findQueryResultsWithAllocators allocators' target sourceHints environment query = do
   checkedOptions <- checkExferenceOptions $ querySearchOptions query
   findQueryResultsWithCheckedOptionsAndAllocators
-    allocators' M.empty target sourceHints environment query checkedOptions
+    allocators' M.empty M.empty target sourceHints environment query checkedOptions
 
 findQueryResultsWithCheckedOptionsAndAllocators
   :: SearchAllocators
   -> M.Map QualifiedName [HsType]
+  -> M.Map QualifiedName [[HsType]]
   -> SharedGenerated.DefinitionName
   -> ExferenceSourceTypeVariableHints
   -> ExferenceEnvironment
@@ -790,10 +822,11 @@ findQueryResultsWithCheckedOptionsAndAllocators
   -> CheckedExferenceOptions
   -> Either ExferenceInputError [ExferenceResult]
 findQueryResultsWithCheckedOptionsAndAllocators
-    allocators' candidates target sourceHints environment query checkedOptions = do
-  checked@(CheckedExferenceQuery _ checkedQuery _ rigidPlan) <-
-    prepareExferenceQueryWithCheckedOptionsAndCandidates
-      environment checkedOptions candidates queryWithTargetExcluded
+    allocators' candidates assignments target sourceHints environment query
+      checkedOptions = do
+  checked@(CheckedExferenceQuery _ checkedQuery _ _ rigidPlan) <-
+    prepareExferenceQueryWithCheckedOptionsAndEvidence
+      environment checkedOptions candidates assignments queryWithTargetExcluded
   -- The opaque value is paired with the exact canonical goal for which its
   -- spelling scope was checked. Stable adapters retarget it only while
   -- performing origin-safe synonym elaboration; direct core callers cannot
@@ -901,6 +934,7 @@ prepareExferenceInput input = do
     (ExferenceEnvironment canonicalEnvironment rigidContext M.empty)
     canonicalQuery
     M.empty
+    M.empty
     rigidPlan
  where
   environment = inputEnvironment input
@@ -958,6 +992,17 @@ exferenceEnvironmentContainsBinding name
       ((== name) . functionName)
       $ environmentFunctions environment
 
+-- | Recover the exact retained leading-forall scheme for one checked global.
+-- Stable assignment adapters use this private projection to validate vector
+-- arity before search. A present ordinary binding without a retained scheme is
+-- deliberately ineligible for visible assignment evidence.
+exferenceEnvironmentBindingScheme
+  :: QualifiedName
+  -> ExferenceEnvironment
+  -> Maybe HsType
+exferenceEnvironmentBindingScheme name
+    (ExferenceEnvironment _ _ schemes) = M.lookup name schemes
+
 -- | Validate the varying part of a search against an already sealed
 -- environment and retain its exact rigid-instantiation plan. Excluding
 -- bindings only removes capabilities and therefore cannot invalidate the
@@ -980,18 +1025,19 @@ prepareExferenceQueryWithCheckedOptions
   -> Either ExferenceInputError CheckedExferenceQuery
 prepareExferenceQueryWithCheckedOptions
     sealed checkedOptions =
-  prepareExferenceQueryWithCheckedOptionsAndCandidates
-    sealed checkedOptions M.empty
+  prepareExferenceQueryWithCheckedOptionsAndEvidence
+    sealed checkedOptions M.empty M.empty
 
-prepareExferenceQueryWithCheckedOptionsAndCandidates
+prepareExferenceQueryWithCheckedOptionsAndEvidence
   :: ExferenceEnvironment
   -> CheckedExferenceOptions
   -> M.Map QualifiedName [HsType]
+  -> M.Map QualifiedName [[HsType]]
   -> ExferenceQuery
   -> Either ExferenceInputError CheckedExferenceQuery
-prepareExferenceQueryWithCheckedOptionsAndCandidates
+prepareExferenceQueryWithCheckedOptionsAndEvidence
     sealed@(ExferenceEnvironment environment rigidContext _)
-    (CheckedExferenceOptions options) candidates uncheckedQuery = do
+    (CheckedExferenceOptions options) candidates assignments uncheckedQuery = do
   validateQueryInputWidths environment query
   validateQueryClassConstraints environment query
   validateInputTypes
@@ -999,7 +1045,8 @@ prepareExferenceQueryWithCheckedOptionsAndCandidates
     : concatMap (constraint_params . snd) constraints
   let canonicalQuery = canonicalizeQuery query
   rigidPlan <- prepareRigidInstantiation rigidContext canonicalQuery
-  pure $ CheckedExferenceQuery sealed canonicalQuery candidates rigidPlan
+  pure $ CheckedExferenceQuery
+    sealed canonicalQuery candidates assignments rigidPlan
  where
   query = uncheckedQuery {querySearchOptions = options}
   constraints = queryConstraints query
@@ -1720,8 +1767,13 @@ stateStep allocators multiPM allowConstrs h
           suppliedCandidates <- gets
             (M.findWithDefault [] (functionName binding)
               . nodeProviderInstantiationCandidates)
+          suppliedAssignments <- gets
+            (M.findWithDefault [] (functionName binding)
+              . nodeProviderInstantiationAssignments)
           let instantiations = L.nub $
                 groundProviderInstantiations contxt source ++
+                assignmentProviderInstantiations
+                  suppliedAssignments source ++
                 candidateProviderInstantiations candidates source ++
                 candidateProviderInstantiations suppliedCandidates source
           instantiation <- lift $ chooseBranches instantiations

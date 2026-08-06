@@ -166,6 +166,11 @@ data SearchNode = SearchNode
     -- ^ Checked closed proper-type choices supplied for exact retained global
     -- providers.  The provider key prevents evidence from leaking to a local
     -- value or another global with an alpha-equivalent scheme.
+  , nodeProviderInstantiationAssignments ::
+      Map.Map QualifiedName [[HsType]]
+    -- ^ Complete ordered leading-binder assignments supplied for exact
+    -- retained globals. Vectors remain correlated through search instead of
+    -- being expanded from the historical candidate pools.
   , nodeDeconstructors  :: [DeconstructorBinding]
   , nodeQueryClassEnv   :: QueryClassEnv
   , nodeExpression      :: Expression

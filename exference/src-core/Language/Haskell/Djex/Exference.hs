@@ -67,6 +67,7 @@ module Language.Haskell.Djex.Exference
   , ExferenceResidualRenderError (..)
   , runExferenceQuery
   , runExferenceQueryWithInstantiationCandidates
+  , runExferenceQueryWithInstantiationAssignments
   , exferenceCandidateMetrics
   , exferenceResultBindingUsages
   , renderExferenceCandidateExpression
@@ -154,16 +155,25 @@ import Language.Haskell.Synthesis.Generated
   , RenderError (..)
   , RenderOptions
   , renderOptionsWithLocalNameHints
+  , specifiedVisibleTypeArgument
   )
 import qualified Language.Haskell.Synthesis.Fresh as Fresh
-import Language.Haskell.Synthesis.Inventory (inventoryEnvironment)
+import Language.Haskell.Synthesis.Inventory
+  ( inventoryEnvironment
+  , inventoryKindAssumptions
+  )
+import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
+import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import Language.Haskell.Synthesis.Name
   ( Name
   , renderCanonical
   )
 import Language.Haskell.Synthesis.Query
   ( ProviderInstantiationCandidate (..)
+  , ProviderInstantiationAssignment (..)
   , QueryRequest (..)
+  , maximumProviderInstantiationArguments
+  , maximumProviderInstantiationAssignments
   , maximumProviderInstantiationCandidates
   , resultSearch
   )
@@ -537,7 +547,7 @@ runExferenceQuery
   -> ExferenceRequest
   -> Either Diagnostic [ExferenceResult]
 runExferenceQuery session =
-  runExferenceQueryWithInstantiationCandidates session []
+  runExferenceQueryWithProviderEvidence session [] []
 
 -- | Run a checked request with a bounded collection of closed proper-type
 -- choices established for exact retained global providers.  Candidate
@@ -548,7 +558,29 @@ runExferenceQueryWithInstantiationCandidates
   -> [ProviderInstantiationCandidate ExferenceTypeVariable]
   -> ExferenceRequest
   -> Either Diagnostic [ExferenceResult]
-runExferenceQueryWithInstantiationCandidates session rawCandidates request = do
+runExferenceQueryWithInstantiationCandidates session rawCandidates =
+  runExferenceQueryWithProviderEvidence session rawCandidates []
+
+-- | Run a checked request with complete ordered leading-binder assignments
+-- established for exact retained globals. Assignment vectors are checked in
+-- this session and consumed directly; they are never reconstructed as a
+-- Cartesian product or donated to another provider.
+runExferenceQueryWithInstantiationAssignments
+  :: ExferenceSession
+  -> [ProviderInstantiationAssignment ExferenceTypeVariable]
+  -> ExferenceRequest
+  -> Either Diagnostic [ExferenceResult]
+runExferenceQueryWithInstantiationAssignments session rawAssignments =
+  runExferenceQueryWithProviderEvidence session [] rawAssignments
+
+runExferenceQueryWithProviderEvidence
+  :: ExferenceSession
+  -> [ProviderInstantiationCandidate ExferenceTypeVariable]
+  -> [ProviderInstantiationAssignment ExferenceTypeVariable]
+  -> ExferenceRequest
+  -> Either Diagnostic [ExferenceResult]
+runExferenceQueryWithProviderEvidence
+    session rawCandidates rawAssignments request = do
   let query = exferenceRequestQuery request
       target = requestTarget query
       requestDiagnostic = withExferenceRequestProvenance request
@@ -572,6 +604,8 @@ runExferenceQueryWithInstantiationCandidates session rawCandidates request = do
     $ fromSynthesisType elaboratedGoal
   providerCandidates <- prepareProviderInstantiationCandidates
     session rawCandidates
+  providerAssignments <- prepareProviderInstantiationAssignments
+    session rawAssignments
   let sourceHints = retargetExferenceSourceTypeVariableHints
         elaboratedGoal checkedSourceHints
   -- The direct result boundary owns exact target exclusion and result naming,
@@ -584,14 +618,13 @@ runExferenceQueryWithInstantiationCandidates session rawCandidates request = do
         | Core.isExferenceOptionError failure = optionFailure failure
         | otherwise = requestDiagnostic $ shownErrorDiagnostic
             "DJEX_EXF_QUERY" "Exference rejected the query" failure
-  first searchFailure
-    $ CoreInternal.findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
-        providerCandidates
-        target
-        sourceHints
-        (Session.sessionSearchEnvironment session)
-        input
-        checkedOptions
+  first searchFailure $ if Map.null providerAssignments
+    then CoreInternal.findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
+      providerCandidates target sourceHints
+      (Session.sessionSearchEnvironment session) input checkedOptions
+    else CoreInternal.findQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
+      providerAssignments target sourceHints
+      (Session.sessionSearchEnvironment session) input checkedOptions
 
 prepareProviderInstantiationCandidates
   :: ExferenceSession
@@ -642,6 +675,146 @@ prepareProviderInstantiationCandidates session rawCandidates
   retainCandidate candidates (provider, candidate) = Map.insertWith
     (\new old -> old ++ new)
     provider [candidate] candidates
+
+prepareProviderInstantiationAssignments
+  :: ExferenceSession
+  -> [ProviderInstantiationAssignment ExferenceTypeVariable]
+  -> Either Diagnostic (Map.Map Name [[HsType]])
+prepareProviderInstantiationAssignments session rawAssignments
+  | observed > maximumProviderInstantiationAssignments =
+      Left $ shownErrorDiagnostic
+        "DJEX_EXF_ASSIGNMENT_LIMIT"
+        "too many Exference provider instantiation assignments"
+        (maximumProviderInstantiationAssignments, observed)
+  | otherwise = do
+      checked <- traverse prepareAssignment $
+        zip [0 :: Int ..] rawAssignments
+      pure $ Map.map
+        (SharedCollection.distinctOn $ map SharedTypeAtom.alphaTypeKey)
+        $ List.foldl' retainAssignment Map.empty checked
+ where
+  observed = SharedCollection.observedListLength
+    maximumProviderInstantiationAssignments rawAssignments
+  searchEnvironment = Session.sessionSearchEnvironment session
+
+  prepareAssignment (assignmentIndex, assignment) = do
+    let provider = providerInstantiationAssignmentProvider assignment
+        rawArguments = providerInstantiationAssignmentArguments assignment
+        argumentCount = SharedCollection.observedListLength
+          maximumProviderInstantiationArguments rawArguments
+        label = "provider instantiation assignment #" ++
+          show assignmentIndex ++ " for " ++ renderCanonical provider
+    if argumentCount == 0
+      then Left $ shownErrorDiagnostic
+        "DJEX_EXF_ASSIGNMENT_ARITY"
+        "Exference provider instantiation assignment is empty"
+        label
+      else if argumentCount > maximumProviderInstantiationArguments
+        then Left $ shownErrorDiagnostic
+          "DJEX_EXF_ASSIGNMENT_ARGUMENT_LIMIT"
+          "too many Exference provider instantiation arguments"
+          (label, maximumProviderInstantiationArguments, argumentCount)
+        else pure ()
+    scheme <- case CoreInternal.exferenceEnvironmentBindingScheme
+        provider searchEnvironment of
+      Nothing -> Left $ contextualDiagnostic Error
+        "DJEX_EXF_ASSIGNMENT_PROVIDER"
+        "Exference provider instantiation assignment names no retained polymorphic binding"
+        (renderCanonical provider)
+      Just retained -> Right retained
+    let (binders, constraints, _) = SharedType.splitLeadingForalls scheme
+    if length binders == argumentCount
+      then pure ()
+      else Left $ shownErrorDiagnostic
+        "DJEX_EXF_ASSIGNMENT_ARITY"
+        "Exference provider instantiation assignment has the wrong arity"
+        (label, length binders, argumentCount)
+    if null constraints
+      then pure ()
+      else Left $ shownErrorDiagnostic
+        "DJEX_EXF_ASSIGNMENT_CONTEXT"
+        "Exference provider instantiation assignment targets a contextual scheme"
+        (label, constraints)
+    arguments <- traverse
+      (prepareArgument label) $ zip [0 :: Int ..] rawArguments
+    validateSpecializationKind label scheme arguments
+    pure (provider, arguments)
+
+  prepareArgument label (argumentIndex, source) = do
+    elaborated <- first (assignmentElaborationFailure label argumentIndex)
+      $ Session.elaborateSessionGoal session source
+    if Set.null (SharedType.freeVariables elaborated)
+        && null (SharedType.typeConstraints elaborated)
+      then pure ()
+      else Left $ shownErrorDiagnostic
+        "DJEX_EXF_ASSIGNMENT_TYPE"
+        "Exference provider instantiation argument is not closed and context-free"
+        (label, argumentIndex, elaborated)
+    _ <- first
+      (\failure -> shownErrorDiagnostic
+        "DJEX_EXF_ASSIGNMENT_TYPE"
+        "invalid Exference provider instantiation argument"
+        (label, argumentIndex, failure))
+      $ specifiedVisibleTypeArgument elaborated
+    lowered <- first
+      (\failure -> shownErrorDiagnostic
+        "DJEX_EXF_ASSIGNMENT_LOWER"
+        "Exference could not lower a provider instantiation argument"
+        (label, argumentIndex, failure))
+      $ fromSynthesisType elaborated
+    if CorePolytype.isProviderAssignmentArgument lowered
+      then Right lowered
+      else Left $ shownErrorDiagnostic
+        "DJEX_EXF_ASSIGNMENT_TYPE"
+        "invalid lowered Exference provider instantiation argument"
+        (label, argumentIndex, lowered)
+
+  -- Every assignment argument is deliberately a proper type, matching the
+  -- cross-engine evidence contract.  That fact alone does not prove it can
+  -- replace the corresponding provider binder: a binder used as a type
+  -- constructor has a higher kind. Reuse the core's exact ordered
+  -- instantiation worker, then kind-check the complete substituted body against
+  -- the session inventory. This checks positional compatibility without
+  -- reconstructing a Cartesian product or trusting the first-order lowering.
+  validateSpecializationKind label scheme arguments = case
+      CorePolytype.assignmentProviderInstantiations [arguments] scheme of
+    [instantiation] -> first
+      (\failure -> shownErrorDiagnostic
+        "DJEX_EXF_ASSIGNMENT_KIND"
+        "Exference rejected a provider instantiation assignment kind"
+        (label, failure))
+      $ SharedKindInference.checkTypesKinds kindAssumptions
+          [(ProperTypeKind, CorePolytype.groundProviderType instantiation)]
+    _ -> Left $ shownErrorDiagnostic
+      "DJEX_EXF_ASSIGNMENT_TYPE"
+      "Exference could not validate a provider instantiation assignment"
+      (label, scheme, arguments)
+
+  kindAssumptions = inventoryKindAssumptions
+    $ Session.exferenceSessionInventory session
+
+  retainAssignment assignments (provider, arguments) = Map.insertWith
+    (\new old -> old ++ new)
+    provider [arguments] assignments
+
+assignmentElaborationFailure
+  :: String
+  -> Int
+  -> TypeElaborationError ExferenceTypeVariable
+  -> Diagnostic
+assignmentElaborationFailure label argumentIndex failure = case failure of
+  IllKindedType _ _ -> shownErrorDiagnostic
+    "DJEX_EXF_ASSIGNMENT_KIND"
+    "Exference rejected a provider instantiation argument kind"
+    (label, argumentIndex, failure)
+  SynonymExpansionFailed _ -> shownErrorDiagnostic
+    "DJEX_EXF_ASSIGNMENT_SYNONYM"
+    "Exference could not expand a provider instantiation argument"
+    (label, argumentIndex, failure)
+  InvalidElaborationType _ _ -> shownErrorDiagnostic
+    "DJEX_EXF_ASSIGNMENT_TYPE"
+    "Exference rejected a provider instantiation argument type"
+    (label, argumentIndex, failure)
 
 candidateElaborationFailure
   :: Name

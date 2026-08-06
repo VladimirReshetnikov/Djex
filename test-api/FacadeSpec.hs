@@ -293,12 +293,25 @@ facadeTests = testGroup "public Djex facade"
             ( providerInstantiationCandidateProvider evidence
             , providerInstantiationCandidateType evidence
             )
+          providerAssignmentProjection
+            :: ProviderInstantiationAssignment String
+            -> (Name, [Type String])
+          providerAssignmentProjection assignment =
+            ( providerInstantiationAssignmentProvider assignment
+            , providerInstantiationAssignmentArguments assignment
+            )
           djinnEvidenceRunner
             :: DjinnSession
             -> [ProviderInstantiationCandidate DjinnTypeVariable]
             -> DjinnRequest
             -> Either Diagnostic DjinnResult
           djinnEvidenceRunner = runDjinnQueryWithInstantiationCandidates
+          djinnAssignmentRunner
+            :: DjinnSession
+            -> [ProviderInstantiationAssignment DjinnTypeVariable]
+            -> DjinnRequest
+            -> Either Diagnostic DjinnResult
+          djinnAssignmentRunner = runDjinnQueryWithInstantiationAssignments
           exferenceEvidenceRunner
             :: ExferenceSession
             -> [ProviderInstantiationCandidate ExferenceTypeVariable]
@@ -306,6 +319,13 @@ facadeTests = testGroup "public Djex facade"
             -> Either Diagnostic [ExferenceResult]
           exferenceEvidenceRunner =
             runExferenceQueryWithInstantiationCandidates
+          exferenceAssignmentRunner
+            :: ExferenceSession
+            -> [ProviderInstantiationAssignment ExferenceTypeVariable]
+            -> ExferenceRequest
+            -> Either Diagnostic [ExferenceResult]
+          exferenceAssignmentRunner =
+            runExferenceQueryWithInstantiationAssignments
       djinnTypeProjection `seq` djinnRequestProjection `seq`
         djinnCandidateProjection `seq` djinnEnvironmentProjection `seq`
         inventoryProjection `seq`
@@ -315,10 +335,14 @@ facadeTests = testGroup "public Djex facade"
         residualRendererProjection `seq`
         qualifiedResidualRendererProjection `seq`
         metadataProjection `seq` providerEvidenceProjection `seq`
-        djinnEvidenceRunner `seq` exferenceEvidenceRunner `seq` pure ()
+        providerAssignmentProjection `seq`
+        djinnEvidenceRunner `seq` djinnAssignmentRunner `seq`
+        exferenceEvidenceRunner `seq` exferenceAssignmentRunner `seq` pure ()
       mkDjinnRequest `seq` mkExferenceSession `seq`
         mkExferenceSessionWithPolicy `seq` pure ()
       maximumProviderInstantiationCandidates @?= 32
+      maximumProviderInstantiationAssignments @?= 32
+      maximumProviderInstantiationArguments @?= 4
   , testCase "seals Djinn from the neutral environment vocabulary" $ do
       let checkedEnvironment
             :: Either (EnvironmentError DjinnTypeVariable) DjinnEnvironment

@@ -14,6 +14,9 @@ module Language.Haskell.Synthesis.Query
   ( QueryRequest (..)
   , ProviderInstantiationCandidate (..)
   , maximumProviderInstantiationCandidates
+  , ProviderInstantiationAssignment (..)
+  , maximumProviderInstantiationAssignments
+  , maximumProviderInstantiationArguments
   , validateRequestTarget
   , RequestTypeSite (..)
   , requestTypeSiteLabel
@@ -117,6 +120,42 @@ instance NFData variable =>
 -- cannot reach search code whose fairness schedules require finite inputs.
 maximumProviderInstantiationCandidates :: Int
 maximumProviderInstantiationCandidates = 32
+
+-- | One externally established complete leading-binder assignment for an
+-- exact named provider.
+--
+-- Unlike 'ProviderInstantiationCandidate', whose type contributes to a
+-- provider-local pool, this value retains the caller's argument order and
+-- correlation. A richer frontend can therefore preserve the complete choice
+-- established by one source-language instance head without asking a backend
+-- to reconstruct it through a Cartesian product. Constructing the value is
+-- still only an assertion; checked backend runners remain responsible for
+-- session identity, arity, type, and finite-width validation.
+data ProviderInstantiationAssignment variable =
+  ProviderInstantiationAssignment
+    { providerInstantiationAssignmentProvider :: Name
+    , providerInstantiationAssignmentArguments :: [Type variable]
+    }
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
+
+instance NFData variable =>
+    NFData (ProviderInstantiationAssignment variable)
+
+-- | Maximum number of complete provider assignments accepted by one checked
+-- query execution.
+--
+-- As with the historical candidate bound, adapters must observe at most one
+-- outer-list cell beyond this limit before entering an assignment value.
+maximumProviderInstantiationAssignments :: Int
+maximumProviderInstantiationAssignments = 32
+
+-- | Maximum number of ordered leading-forall arguments in one complete
+-- provider assignment.
+--
+-- Checked adapters must bound an argument-list spine before entering any
+-- argument, so an over-wide or cyclic caller-built list fails finitely.
+maximumProviderInstantiationArguments :: Int
+maximumProviderInstantiationArguments = 4
 
 -- | Validate the shared generated-definition namespace and attach one
 -- adapter-specific code and summary to the common failure detail. Keeping the

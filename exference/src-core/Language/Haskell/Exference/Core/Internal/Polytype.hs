@@ -11,6 +11,8 @@ module Language.Haskell.Exference.Core.Internal.Polytype
   , instantiateLeadingForallsWith
   , groundProviderInstantiations
   , candidateProviderInstantiations
+  , assignmentProviderInstantiations
+  , isProviderAssignmentArgument
   , isVisibleTypeCandidate
   )
 where
@@ -41,6 +43,7 @@ import Language.Haskell.Exference.Core.Unify
   , unifyRightEqs
   )
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
+import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 
@@ -295,9 +298,9 @@ candidateProviderInstantiations rawCandidates source =
     guard $ null constraints
     -- Query-selected arguments exist only for the foreign-erasure case: the
     -- source binder has no surviving term-level type occurrence from which
-    -- ordinary unification could infer it.  Besides avoiding redundant
-    -- siblings for ordinary polymorphic functions, this fails closed for a
-    -- higher-kinded binder whose kind is not represented in HsType itself.
+    -- ordinary unification could infer it. Besides avoiding redundant siblings
+    -- for ordinary polymorphic functions, this fails closed for a higher-kinded
+    -- binder whose kind is not represented in HsType itself.
     guard $ all (`Set.notMember` freeVars body) orderedBinders
     let candidates = SharedCollection.distinctOn
           SharedTypeAtom.alphaTypeKey
@@ -313,6 +316,56 @@ candidateProviderInstantiations rawCandidates source =
       , groundProviderType = instantiated
       , groundProviderConstraints = instantiatedConstraints
       }
+
+-- | Consume complete, ordered leading-binder assignments established for one
+-- exact provider by a checked adapter. Each vector is tried once; unlike the
+-- historical candidate pool, this route neither constructs a Cartesian
+-- product nor requires the selected binders to be absent from the provider
+-- body. The stable boundary has already proved every argument's proper kind,
+-- while this worker independently retains closure, context, arity, and visible
+-- application shape.
+assignmentProviderInstantiations
+  :: [[HsType]]
+  -> HsType
+  -> [GroundProviderInstantiation]
+assignmentProviderInstantiations rawAssignments source =
+  take 32 $ SharedCollection.distinctOn groundProviderArguments $ do
+    guard $ Set.null $ freeVars source
+    normalized <- either (const []) (pure . fst)
+      $ alphaNormalizeForalls IntSet.empty source
+    let (binders, constraints, _) =
+          SharedType.splitLeadingForalls normalized
+        binderIdentifiers =
+          traverse SharedType.flexibleVariableIdentity binders
+    orderedBinders <- maybe [] pure binderIdentifiers
+    guard $ not $ null orderedBinders
+    guard $ length orderedBinders <= 4
+    guard $ null constraints
+    arguments <- SharedCollection.distinctOn
+      (map SharedTypeAtom.alphaTypeKey) rawAssignments
+    guard $ length arguments == length orderedBinders
+    guard $ all isProviderAssignmentArgument arguments
+    (instantiated, instantiatedConstraints) <- maybe [] pure
+      $ instantiateLeadingForallsAt
+          isProviderAssignmentArgument arguments normalized
+    pure GroundProviderInstantiation
+      { groundProviderArguments = arguments
+      , groundProviderType = instantiated
+      , groundProviderConstraints = instantiatedConstraints
+      }
+
+-- | Structural boundary expected of one adapter-checked assignment argument.
+-- The adapter separately proves kind @Type@ in its sealed synonym and kind
+-- environment. Here we retain lexical closure, context freedom, and the exact
+-- generated visible-argument representation, including applications which
+-- contain a nested quantified proper type.
+isProviderAssignmentArgument :: HsType -> Bool
+isProviderAssignmentArgument source =
+  Set.null (SharedType.freeVariables source)
+    && null (SharedType.typeConstraints source)
+    && case SharedGenerated.specifiedVisibleTypeArgument source of
+      Right _ -> True
+      Left _ -> False
 
 -- Replace a complete leading prefix with an ordered collection of admissible
 -- closed types. Closed replacements cannot be captured, so deleting shadowed

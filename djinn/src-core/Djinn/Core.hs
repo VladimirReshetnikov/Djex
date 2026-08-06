@@ -47,6 +47,7 @@ module Djinn.Core (
     DjinnQueryOptionsError(..), DjinnQueryError(..),
     inhabitResult, inhabitResultPrepared, inhabitSynthesisResultPrepared,
     inhabitSynthesisResultPreparedWithInstantiationCandidates,
+    inhabitSynthesisResultPreparedWithInstantiationAssignments,
     GeneratedQueryReport(..), inhabitGenerated, inhabitGeneratedPrepared,
     QueryOutcome(..), QueryReport(..), inhabit
     ) where
@@ -88,6 +89,7 @@ import Djinn.Internal.Instantiation
     , instantiationAxioms
     , loadedInstantiationAxioms
     , providerInstantiationApplications
+    , providerInstantiationAssignmentPremises
     , providerInstantiationPremiseBindings
     , providerInstantiationPremises
     , rewriteProviderInstantiationEvidence
@@ -668,6 +670,7 @@ data DjinnQueryError
     = DjinnQueryOptionsFailure DjinnQueryOptionsError
     | DjinnQueryFailure String
     | DjinnInstantiationCandidateFailure String
+    | DjinnInstantiationAssignmentFailure String
     | DjinnInternalQueryFailure String
     | DjinnResultInvariantFailure SharedQuery.QueryResultInvariantError
     deriving (Eq, Show)
@@ -824,7 +827,26 @@ inhabitSynthesisResultPreparedWithInstantiationCandidates options prepared
     -- structural validation and kind inference. Elaboration returns the
     -- canonical alias-free types consumed at the formula boundary.
     inhabitSynthesisResultPreparedChecked
-        options prepared contexts candidates target goal
+        options prepared contexts candidates [] target goal
+
+-- | Search a sealed Djinn environment with externally established complete
+-- leading-binder assignments for exact providers.  Each ordered vector is
+-- validated and consumed directly, without reconstructing candidate tuples.
+-- The historical and candidate entrances remain the exact empty-assignment
+-- cases of the common checked worker.
+inhabitSynthesisResultPreparedWithInstantiationAssignments
+    :: QueryOptions
+    -> PreparedEnvironment
+    -> [Constraint (SharedType.Type HSymbol)]
+    -> [SharedQuery.ProviderInstantiationAssignment HSymbol]
+    -> SharedGenerated.DefinitionName
+    -> SharedType.Type HSymbol
+    -> Either DjinnQueryError DjinnResult
+inhabitSynthesisResultPreparedWithInstantiationAssignments options prepared
+        contexts assignments target goal = do
+    first DjinnQueryOptionsFailure $ validateQueryOptions options
+    inhabitSynthesisResultPreparedChecked
+        options prepared contexts [] assignments target goal
 
 -- | Compatibility projection of 'inhabitResult'.
 inhabitGenerated :: QueryOptions -> Environment -> [Context] -> HSymbol -> HType
@@ -866,11 +888,12 @@ inhabitSynthesisResultPreparedChecked
     -> PreparedEnvironment
     -> [Constraint (SharedType.Type HSymbol)]
     -> [SharedQuery.ProviderInstantiationCandidate HSymbol]
+    -> [SharedQuery.ProviderInstantiationAssignment HSymbol]
     -> SharedGenerated.DefinitionName
     -> SharedType.Type HSymbol
     -> Either DjinnQueryError DjinnResult
 inhabitSynthesisResultPreparedChecked options prepared contexts candidates
-        target goal = do
+        assignments target goal = do
     elaboratedGoal <- resolveSynthesisQueryContexts prepared
         ( "goal type " ++ renderSynthesisType goal
         , KStar
@@ -900,7 +923,9 @@ inhabitSynthesisResultPreparedChecked options prepared contexts candidates
         else Right plans
     checkedCandidates <- prepareProviderInstantiationCandidates
         prepared candidates
-    searchPreparedFormula options prepared checkedCandidates target
+    checkedAssignments <- prepareProviderInstantiationAssignments
+        prepared assignments
+    searchPreparedFormula options prepared checkedCandidates checkedAssignments target
         elaboratedGoal
         parametricDataRelevant
         plans nominalPlans
@@ -928,7 +953,7 @@ inhabitResultPreparedChecked options prepared contexts target goal = do
     sharedGoal <- projectGoal goal
     sharedContexts <- projectContexts contexts
     inhabitSynthesisResultPreparedChecked
-        options prepared sharedContexts [] target sharedGoal
+        options prepared sharedContexts [] [] target sharedGoal
   where
     projectGoal source = case toSynthesisType source of
         Right projected -> Right projected
@@ -944,6 +969,13 @@ type PreparedProviderInstantiationCandidate =
     ( Symbol
     , SharedType.Type HSymbol
     , SharedGenerated.VisibleTypeArgument
+    )
+
+type PreparedProviderInstantiationAssignment =
+    ( Symbol
+    , [( SharedType.Type HSymbol
+       , SharedGenerated.VisibleTypeArgument
+       )]
     )
 
 -- Validate external provider evidence only after the ordinary goal and
@@ -1014,6 +1046,128 @@ prepareProviderInstantiationCandidates prepared rawCandidates = do
                 , (provider, checked, visible) : retained
                 )
 
+-- Bound both list spines before entering caller-owned argument values.  Once
+-- an assignment is known to have the exact provider arity, elaborate each
+-- argument independently as a closed, context-free proper type and retain its
+-- visible syntax.  The complete substituted provider body is kind-checked as
+-- a final guard against assigning a proper type to a higher-kinded binder.
+-- Alpha-equivalent vectors are de-duplicated per provider without losing the
+-- order or correlation within a vector.
+prepareProviderInstantiationAssignments
+    :: PreparedEnvironment
+    -> [SharedQuery.ProviderInstantiationAssignment HSymbol]
+    -> Either DjinnQueryError [PreparedProviderInstantiationAssignment]
+prepareProviderInstantiationAssignments prepared rawAssignments = do
+    let maximumAssignments =
+            SharedQuery.maximumProviderInstantiationAssignments
+        observed = SharedCollection.observedListLength
+            maximumAssignments rawAssignments
+    if observed > maximumAssignments
+        then Left $ DjinnInstantiationAssignmentFailure $
+            "provider instantiation assignment count exceeds " ++
+                show maximumAssignments
+        else return ()
+    (_, retained) <- foldM validateAssignment (Map.empty, []) $
+        zip [0 :: Int ..] rawAssignments
+    return $ reverse retained
+  where
+    maximumArguments = SharedQuery.maximumProviderInstantiationArguments
+    (loadedSchemes, _, _) =
+        preparedEnvironmentLoadedFunctionInstantiation prepared
+    loadedSchemeSources = Map.fromList
+        [ (provider, source)
+        | (provider, formula) <- loadedSchemes
+        , PVar opaque <- [formula]
+        , Just source <- [opaqueSymbolSource opaque]
+        ]
+
+    validateAssignment (seen, retained) (index, assignment) = do
+        let arguments =
+                SharedQuery.providerInstantiationAssignmentArguments assignment
+            observedArguments = SharedCollection.observedListLength
+                maximumArguments arguments
+            assignmentLabel =
+                "provider instantiation assignment #" ++ show index ++ ": "
+        if observedArguments > maximumArguments
+            then Left $ DjinnInstantiationAssignmentFailure $
+                assignmentLabel ++ "argument count exceeds " ++
+                    show maximumArguments
+            else return ()
+        let providerName =
+                SharedQuery.providerInstantiationAssignmentProvider assignment
+            providerLabel = assignmentLabel ++ "provider " ++
+                SharedName.renderCanonical providerName ++ ": "
+        providerSpelling <- first
+            (DjinnInstantiationAssignmentFailure . (providerLabel ++)) $
+            synthesisFunctionSymbol providerName
+        let provider = Symbol providerSpelling
+        schemeSource <- case Map.lookup provider loadedSchemeSources of
+            Just source -> Right source
+            Nothing -> Left $ DjinnInstantiationAssignmentFailure $
+                providerLabel ++
+                    "provider is not an exact loaded polymorphic value"
+        let (binders, schemeConstraints, schemeBody) =
+                SharedType.splitLeadingForalls schemeSource
+            arity = length binders
+        unless (null schemeConstraints) $
+            Left $ DjinnInstantiationAssignmentFailure $
+                providerLabel ++ "provider scheme is not context-free"
+        unless (arity >= 1 && arity <= maximumArguments) $
+            Left $ DjinnInstantiationAssignmentFailure $
+                providerLabel ++ "leading forall arity " ++ show arity ++
+                    " is outside the supported range 1.." ++
+                    show maximumArguments
+        unless (observedArguments == arity) $
+            Left $ DjinnInstantiationAssignmentFailure $
+                providerLabel ++ "expected " ++ show arity ++
+                    " ordered argument(s), but received " ++
+                    show observedArguments
+        checkedArguments <- mapM
+            (validateArgument providerLabel) $ zip [0 :: Int ..] arguments
+        instantiatedBody <- first
+            (DjinnInstantiationAssignmentFailure .
+                (providerLabel ++) .
+                ("cannot instantiate provider body: " ++) . show) $
+            SharedType.substituteTypeVariables freshTypeVariable Set.empty
+                (Map.fromList $ zip binders $ map fst checkedArguments)
+                schemeBody
+        first (DjinnInstantiationAssignmentFailure .
+                (providerLabel ++) .
+                ("instantiated provider body is ill-kinded: " ++)) $
+            checkPreparedSynthesisTypesKinds prepared [(KStar, instantiatedBody)]
+        let key = map (SharedTypeAtom.alphaTypeKey . fst) checkedArguments
+            providerKeys = Map.findWithDefault Set.empty provider seen
+        if key `Set.member` providerKeys
+            then Right (seen, retained)
+            else Right
+                ( Map.insert provider (Set.insert key providerKeys) seen
+                , (provider, checkedArguments) : retained
+                )
+
+    validateArgument providerLabel (argumentIndex, source) = do
+        let label = providerLabel ++ "argument #" ++
+                show argumentIndex ++ ": "
+        elaborated <- first
+            (DjinnInstantiationAssignmentFailure . (label ++)) $
+            elaboratePreparedSynthesisTypes prepared [(KStar, source)]
+        checked <- case elaborated of
+            [one] -> Right one
+            _ -> Left $ DjinnInternalQueryFailure $
+                "provider assignment elaboration changed batch shape"
+        unless (Set.null $ SharedType.freeVariables checked) $
+            Left $ DjinnInstantiationAssignmentFailure $
+                label ++ "type is not closed"
+        unless (null $ SharedType.typeConstraints checked) $
+            Left $ DjinnInstantiationAssignmentFailure $
+                label ++ "type is not context-free"
+        visible <- first
+            (DjinnInstantiationAssignmentFailure . (label ++) . show) $
+            SharedGenerated.specifiedVisibleTypeArgument checked
+        return (checked, visible)
+
+    freshTypeVariable unavailable variable =
+        Just $ fst $ freshPrimedVariable unavailable variable
+
 -- Proof search is representation-independent once the checked source query
 -- has become a formula. Both the native and raw entrances meet at this single
 -- worker; validated class contexts add no premises here, while bounded
@@ -1023,14 +1177,16 @@ searchPreparedFormula
     :: QueryOptions
     -> PreparedEnvironment
     -> [PreparedProviderInstantiationCandidate]
+    -> [PreparedProviderInstantiationAssignment]
     -> SharedGenerated.DefinitionName
     -> SharedType.Type HSymbol
     -> Bool
     -> PolarizedFormulaPlans
     -> PolarizedFormulaPlans
     -> Either DjinnQueryError DjinnResult
-searchPreparedFormula options prepared providerCandidates target elaboratedGoal
-        parametricDataRelevant formulaPlans nominalFormulaPlans = do
+searchPreparedFormula options prepared providerCandidates providerAssignments
+        target elaboratedGoal parametricDataRelevant formulaPlans
+        nominalFormulaPlans = do
     let (premises, premiseTranslationIncomplete, premiseSpellings) =
             preparedEnvironmentPolarizedFunctionPremises prepared
         (nominalPremises, _, nominalPremiseSpellings) =
@@ -1226,9 +1382,26 @@ searchPreparedFormula options prepared providerCandidates target elaboratedGoal
             activeProviderInstantiations
         activeProviderApplications = providerInstantiationApplications
             activeProviderInstantiations
-        activeProviderSymbols = Map.keysSet activeProviderApplications
-        activeProviderVisibleApplications =
-            Map.map snd activeProviderApplications
+        activeProviderAssignmentInstantiations =
+            providerInstantiationAssignmentPremises
+                "$djinn$provider-assignment$active$"
+                structuralTranslator
+                activeLoadedSchemePremises
+                providerAssignments
+        activeProviderAssignmentPremises =
+            providerInstantiationPremiseBindings
+                activeProviderAssignmentInstantiations
+        activeProviderAssignmentApplications =
+            providerInstantiationApplications
+                activeProviderAssignmentInstantiations
+        activeAllProviderPremises =
+            activeProviderPremises ++ activeProviderAssignmentPremises
+        activeAllProviderApplications =
+            activeProviderApplications `Map.union`
+                activeProviderAssignmentApplications
+        activeAllProviderSymbols = Map.keysSet activeAllProviderApplications
+        activeAllProviderVisibleApplications =
+            Map.map snd activeAllProviderApplications
         targetProviderInstantiations = providerInstantiationPremises
             "$djinn$provider-instantiation$target$"
             structuralTranslator
@@ -1236,6 +1409,17 @@ searchPreparedFormula options prepared providerCandidates target elaboratedGoal
             providerCandidates
         targetProviderPremises = providerInstantiationPremiseBindings
             targetProviderInstantiations
+        targetProviderAssignmentInstantiations =
+            providerInstantiationAssignmentPremises
+                "$djinn$provider-assignment$target$"
+                structuralTranslator
+                targetLoadedSchemePremises
+                providerAssignments
+        targetProviderAssignmentPremises =
+            providerInstantiationPremiseBindings
+                targetProviderAssignmentInstantiations
+        targetAllProviderPremises =
+            targetProviderPremises ++ targetProviderAssignmentPremises
         activeNominalProviderInstantiations = providerInstantiationPremises
             "$djinn$nominal-provider-instantiation$active$"
             nominalTranslator
@@ -1245,10 +1429,28 @@ searchPreparedFormula options prepared providerCandidates target elaboratedGoal
             activeNominalProviderInstantiations
         activeNominalProviderApplications = providerInstantiationApplications
             activeNominalProviderInstantiations
-        activeNominalProviderSymbols =
-            Map.keysSet activeNominalProviderApplications
-        activeNominalProviderVisibleApplications =
-            Map.map snd activeNominalProviderApplications
+        activeNominalProviderAssignmentInstantiations =
+            providerInstantiationAssignmentPremises
+                "$djinn$nominal-provider-assignment$active$"
+                nominalTranslator
+                activeNominalLoadedSchemePremises
+                providerAssignments
+        activeNominalProviderAssignmentPremises =
+            providerInstantiationPremiseBindings
+                activeNominalProviderAssignmentInstantiations
+        activeNominalProviderAssignmentApplications =
+            providerInstantiationApplications
+                activeNominalProviderAssignmentInstantiations
+        activeAllNominalProviderPremises =
+            activeNominalProviderPremises ++
+                activeNominalProviderAssignmentPremises
+        activeAllNominalProviderApplications =
+            activeNominalProviderApplications `Map.union`
+                activeNominalProviderAssignmentApplications
+        activeAllNominalProviderSymbols =
+            Map.keysSet activeAllNominalProviderApplications
+        activeAllNominalProviderVisibleApplications =
+            Map.map snd activeAllNominalProviderApplications
         targetNominalProviderInstantiations = providerInstantiationPremises
             "$djinn$nominal-provider-instantiation$target$"
             nominalTranslator
@@ -1256,6 +1458,18 @@ searchPreparedFormula options prepared providerCandidates target elaboratedGoal
             providerCandidates
         targetNominalProviderPremises = providerInstantiationPremiseBindings
             targetNominalProviderInstantiations
+        targetNominalProviderAssignmentInstantiations =
+            providerInstantiationAssignmentPremises
+                "$djinn$nominal-provider-assignment$target$"
+                nominalTranslator
+                targetNominalLoadedSchemePremises
+                providerAssignments
+        targetNominalProviderAssignmentPremises =
+            providerInstantiationPremiseBindings
+                targetNominalProviderAssignmentInstantiations
+        targetAllNominalProviderPremises =
+            targetNominalProviderPremises ++
+                targetNominalProviderAssignmentPremises
         useNominalLoadedProjection =
             parametricDataRelevant &&
                 ( useNominalProjection ||
@@ -1267,8 +1481,10 @@ searchPreparedFormula options prepared providerCandidates target elaboratedGoal
         useNominalProviderProjection =
             parametricDataRelevant &&
                 ( nominalProjectionDistinct ||
-                    activeNominalProviderPremises /= activeProviderPremises ||
-                    targetNominalProviderPremises /= targetProviderPremises
+                    activeAllNominalProviderPremises /=
+                        activeAllProviderPremises ||
+                    targetAllNominalProviderPremises /=
+                        targetAllProviderPremises
                 )
         -- Preserve the complete historical structural/no-axiom prefix. This
         -- keeps first-result behavior, frontier ordering, and finite-budget
@@ -1361,20 +1577,20 @@ searchPreparedFormula options prepared providerCandidates target elaboratedGoal
         providerStructuralSearchPlans =
             [ ( premises ++ loadedSchemePremises ++
                     activeAxiomPremises ++ activeLoadedAxiomPremises ++
-                    activeProviderPremises
+                    activeAllProviderPremises
               , targetAxiomPremises ++ targetLoadedAxiomPremises ++
-                    targetProviderPremises
+                    targetAllProviderPremises
               , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
-                    `Set.union` activeProviderSymbols
+                    `Set.union` activeAllProviderSymbols
               , activeVisibleApplications `Map.union`
                     activeLoadedVisibleApplications `Map.union`
-                    activeProviderVisibleApplications
-              , activeProviderApplications
+                    activeAllProviderVisibleApplications
+              , activeAllProviderApplications
               , form
               , False
               )
-            | not (null activeProviderPremises) ||
-                not (null targetProviderPremises)
+            | not (null activeAllProviderPremises) ||
+                not (null targetAllProviderPremises)
             , (form, _) <- plans
             ]
         providerNominalSearchPlans
@@ -1383,22 +1599,22 @@ searchPreparedFormula options prepared providerCandidates target elaboratedGoal
                 [ ( nominalPremises ++ nominalLoadedSchemePremises ++
                         activeNominalAxiomPremises ++
                         activeNominalLoadedAxiomPremises ++
-                        activeNominalProviderPremises
+                        activeAllNominalProviderPremises
                   , targetNominalAxiomPremises ++
                         targetNominalLoadedAxiomPremises ++
-                        targetNominalProviderPremises
+                        targetAllNominalProviderPremises
                   , activeNominalAxiomSymbols `Set.union`
                         activeNominalLoadedAxiomSymbols `Set.union`
-                        activeNominalProviderSymbols
+                        activeAllNominalProviderSymbols
                   , activeNominalVisibleApplications `Map.union`
                         activeNominalLoadedVisibleApplications `Map.union`
-                        activeNominalProviderVisibleApplications
-                  , activeNominalProviderApplications
+                        activeAllNominalProviderVisibleApplications
+                  , activeAllNominalProviderApplications
                   , form
                   , False
                   )
-                | not (null activeNominalProviderPremises) ||
-                    not (null targetNominalProviderPremises)
+                | not (null activeAllNominalProviderPremises) ||
+                    not (null targetAllNominalProviderPremises)
                 , (form, _) <- nominalPlans
                 ]
         searchPlans =
@@ -1735,6 +1951,7 @@ renderDjinnQueryError failure = case failure of
         renderDjinnQueryOptionsError optionsFailure
     DjinnQueryFailure message -> message
     DjinnInstantiationCandidateFailure message -> message
+    DjinnInstantiationAssignmentFailure message -> message
     DjinnInternalQueryFailure message -> message
     DjinnResultInvariantFailure invariant ->
         "internal Djinn result invariant: " ++ show invariant

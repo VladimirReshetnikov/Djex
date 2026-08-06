@@ -277,6 +277,35 @@ queryTests = testGroup "queries"
       maximumProviderInstantiationCandidates @?= 32
       _ <- evaluate $ force candidate
       pure ()
+  , testCase "retain complete provider instantiation assignments" $ do
+      let provider = right $ mkQualifiedIdentifier
+            (right $ mkModuleName "Fixture") "provider"
+          assignment = ProviderInstantiationAssignment
+            provider
+            [ SharedType.TypeVariable "left"
+            , SharedType.FunctionType
+                (SharedType.TypeVariable "right")
+                (SharedType.TypeVariable "right")
+            ]
+      providerInstantiationAssignmentProvider assignment @?= provider
+      providerInstantiationAssignmentArguments assignment @?=
+        [ SharedType.TypeVariable "left"
+        , SharedType.FunctionType
+            (SharedType.TypeVariable "right")
+            (SharedType.TypeVariable "right")
+        ]
+      fmap length assignment @?= ProviderInstantiationAssignment
+        provider
+        [ SharedType.TypeVariable 4
+        , SharedType.FunctionType
+            (SharedType.TypeVariable 5)
+            (SharedType.TypeVariable 5)
+        ]
+      toList assignment @?= ["left", "right", "right"]
+      maximumProviderInstantiationAssignments @?= 32
+      maximumProviderInstantiationArguments @?= 4
+      _ <- evaluate $ force assignment
+      pure ()
   , testCase "label every request type site uniformly" $
       map requestTypeSiteLabel [minBound .. maxBound] @?=
         ["goal", "context"]

@@ -28,6 +28,7 @@ module Djinn.Internal.Instantiation
     , instantiationAxioms
     , loadedInstantiationAxioms
     , providerInstantiationPremises
+    , providerInstantiationAssignmentPremises
     , closedMonotypeSubtrees
     , instantiationAxiomPremises
     , instantiationAxiomSymbols
@@ -334,6 +335,62 @@ providerInstantiationPremises symbolPrefix translator schemes candidates =
 
     second (value, _) = value
     third (_, value) = value
+
+-- | Build direct provider-local premises from complete ordered assignments.
+--
+-- Each vector has already been checked against the exact provider scheme at
+-- the public boundary.  In particular, its length is the leading-binder
+-- arity, its arguments are closed proper types, and duplicate alpha-equivalent
+-- vectors for one provider have been removed.  Consume the vector as one
+-- correlated choice: unlike 'providerInstantiationPremises', this path never
+-- reconstructs tuples through a Cartesian product and therefore does not use
+-- the historical per-scheme attempt window.
+providerInstantiationAssignmentPremises
+    :: String
+    -> (SharedType.Type String -> Either String Formula)
+    -> [(Symbol, Formula)]
+    -> [( Symbol
+        , [( SharedType.Type String
+           , SharedGenerated.VisibleTypeArgument
+           )]
+        )]
+    -> ProviderInstantiationPremises
+providerInstantiationAssignmentPremises
+        symbolPrefix translator schemes assignments =
+    ProviderInstantiationPremises premises applications
+  where
+    retained = take maxProviderInstantiationPremises $
+        concatMap specialize schemes
+    entries =
+        [ (Symbol $ symbolPrefix ++ show index, provider, formula, arguments)
+        | (index, (provider, formula, arguments)) <-
+            zip [0 :: Int ..] retained
+        ]
+    premises =
+        [ (synthetic, formula)
+        | (synthetic, _, formula, _) <- entries
+        ]
+    applications = Map.fromList
+        [ (synthetic, (provider, arguments))
+        | (synthetic, provider, _, arguments) <- entries
+        ]
+
+    specialize (provider, schemeFormula) = case schemeSourceFromFormula
+            schemeFormula >>= instantiationScheme of
+        Nothing -> []
+        Just scheme ->
+            [ (provider, formula, map snd assignment)
+            | (assignmentProvider, assignment) <- assignments
+            , assignmentProvider == provider
+            , length assignment == length (schemeBinders scheme)
+            , Right instantiated <-
+                [instantiateSchemeBody scheme $ map fst assignment]
+            , Right formula <- [translator instantiated]
+            ]
+
+    schemeSourceFromFormula formula = case formula of
+        PVar symbol -> opaqueSymbolSource symbol
+        _ -> Nothing
 
 -- | Expand every free use of a provider-specialization premise into an
 -- application to its exact provider. The synthetic head remains in place so

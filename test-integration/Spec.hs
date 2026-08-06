@@ -1779,6 +1779,79 @@ tests = testGroup "Djex facade"
           ++ "or positional order: " ++ show visibleVectors)
         $ visibleArguments `elem` visibleVectors
 
+  , testCase "retain distinct higher-order Exference assignments" $ do
+      tokenName <- expectRight $ mkIdentifier "HigherOrderKindedToken"
+      higherOrderConstructorName <- expectRight $
+        mkIdentifier "HigherOrderKindedConstructor"
+      builderName <- expectRight $ mkIdentifier "HigherOrderKindedBuilder"
+      providerName <- expectRight $ mkIdentifier "higherOrderKindedProvider"
+      targetName <- expectRight $ mkIdentifier "useHigherOrderKindedProvider"
+      target <- expectRight $ mkDefinitionName targetName
+      let providerVariable = FlexibleVariable 0
+          tokenType = TypeConstructor tokenName
+          higherOrderConstructor :: ExferenceType
+          higherOrderConstructor =
+            TypeConstructor higherOrderConstructorName
+          builderConstructor :: ExferenceType
+          builderConstructor = TypeConstructor builderName
+          partialBuilder = TypeApplication builderConstructor tokenType
+          unaryKind = FunctionKind ProperTypeKind ProperTypeKind
+          higherOrderKind = FunctionKind unaryKind ProperTypeKind
+          builderKind = FunctionKind ProperTypeKind higherOrderKind
+          providerType = ForallType [providerVariable] [] tokenType
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , AbstractTypeDeclaration () higherOrderConstructorName
+                higherOrderKind
+            , AbstractTypeDeclaration () builderName builderKind
+            , ValueDeclaration $ ValueSignature () providerName providerType
+            ]
+          assignment argument = KindedProviderInstantiationAssignment
+            { kindedProviderInstantiationAssignmentProvider = providerName
+            , kindedProviderInstantiationAssignmentArguments =
+                [(higherOrderKind, argument)]
+            }
+          firstAssignment = assignment higherOrderConstructor
+          secondAssignment = assignment partialBuilder
+          visibleSpine expression = case expression of
+            Global name -> Just (name, [])
+            VisibleTypeApplication function argument -> do
+              (name, earlier) <- visibleSpine function
+              pure (name, earlier ++ [argument])
+            _ -> Nothing
+      visibleArguments <- expectRight $
+        traverse specifiedVisibleTypeArgument
+          [higherOrderConstructor, partialBuilder]
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = tokenType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 512}
+        }
+      results <- expectRight $
+        runExferenceQueryWithKindedInstantiationAssignments
+          session [firstAssignment, secondAssignment, firstAssignment] request
+      let visibleVectors =
+            [ actual
+            | candidate <- concatMap
+                (batchCandidates . resultSearch) results
+            , FunctionClause _ [] body <- [candidateOutput candidate]
+            , Just (occurrence, actual) <- [visibleSpine body]
+            , occurrence == providerName
+            ]
+      mapM_ (\expected ->
+        assertEqual
+          ("a distinct same-kind higher-order assignment was lost or "
+            ++ "duplicated: " ++ show visibleVectors)
+          1
+          (length $ filter (== [expected]) visibleVectors))
+        visibleArguments
+
   , testCase "accept an Exference higher-kinded assignment" $ do
       tokenName <- expectRight $ mkIdentifier "HigherAssignmentToken"
       wrapperName <- expectRight $ mkIdentifier "HigherAssignmentWrapper"

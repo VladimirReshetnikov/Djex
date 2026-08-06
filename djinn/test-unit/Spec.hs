@@ -1211,12 +1211,22 @@ testRankNTypeAtoms = do
         ]
     let higherKindName = sharedName "HigherKindConstructor"
         higherKindTripleName = sharedName "HigherKindTriple"
+        higherOrderName = sharedName "HigherOrderConstructor"
+        higherOrderBuilderName = sharedName "HigherOrderBuilder"
         higherKindArgumentName = sharedName "HigherKindArgument"
         higherKindType = SharedType.TypeConstructor higherKindName
         higherKindTripleType =
             SharedType.TypeConstructor higherKindTripleName
         partialHigherKindTriple = SharedType.TypeApplication
             higherKindTripleType closedType
+        unaryKind = SharedKind.FunctionKind closedKind closedKind
+        higherOrderKind =
+            SharedKind.FunctionKind unaryKind closedKind
+        higherOrderType = SharedType.TypeConstructor higherOrderName
+        higherOrderBuilderType =
+            SharedType.TypeConstructor higherOrderBuilderName
+        partialHigherOrderBuilder = SharedType.TypeApplication
+            higherOrderBuilderType closedType
         higherKindArgumentType =
             SharedType.TypeConstructor higherKindArgumentName
         mixedKindProvider = SharedType.ForallType ["f", "a", "hidden"] [] $
@@ -1228,7 +1238,7 @@ testRankNTypeAtoms = do
     mixedKindSession <- sealDjinnSessionFrom stableSession $
         closedDeclarations ++
         [ SharedDeclaration.AbstractTypeDeclaration () higherKindName $
-            SharedKind.FunctionKind closedKind closedKind
+            unaryKind
         , abstractClosed higherKindArgumentName
         , valueDeclaration "mixedKindAmbiguousMonoToken" mixedKindProvider
         ]
@@ -1240,10 +1250,16 @@ testRankNTypeAtoms = do
             SharedKind.FunctionKind closedKind $
                 SharedKind.FunctionKind closedKind $
                     SharedKind.FunctionKind closedKind closedKind
+        , SharedDeclaration.AbstractTypeDeclaration () higherOrderName
+            higherOrderKind
+        , SharedDeclaration.AbstractTypeDeclaration () higherOrderBuilderName $
+            SharedKind.FunctionKind closedKind higherOrderKind
         , valueDeclaration "vacuousHigherKindMonoToken" $
             SharedType.ForallType ["constructor"] [] tokenType
         , valueDeclaration "vacuousHigherKindsMonoToken" $
             SharedType.ForallType ["unary", "binary"] [] tokenType
+        , valueDeclaration "vacuousHigherOrderMonoToken" $
+            SharedType.ForallType ["higherOrder"] [] tokenType
         ]
     sealedBoxSession <- sealDjinnSessionFrom stableSession $
         closedDeclarations ++ [boxDeclaration,
@@ -1709,6 +1725,35 @@ testRankNTypeAtoms = do
             (("vacuousHigherKindsMonoToken @HigherKindConstructor " ++
                 "@(HigherKindTriple MonoClosed)") `isInfixOf`)
             vacuousHigherKindsRendered
+
+    -- One exact provider may retain multiple independent source proofs at the
+    -- same genuinely higher-order kind.  A duplicate of the first vector must
+    -- not suppress the distinct partially applied alternative.
+    let higherOrderAssignment argument = kindedProviderAssignment
+            "vacuousHigherOrderMonoToken"
+            [(higherOrderKind, argument)]
+        firstHigherOrderAssignment = higherOrderAssignment higherOrderType
+        secondHigherOrderAssignment =
+            higherOrderAssignment partialHigherOrderBuilder
+    higherOrderAlternatives <- expectShownRight $
+        Djex.runDjinnQueryWithKindedInstantiationAssignments
+            vacuousHigherKindSession
+            [ firstHigherOrderAssignment
+            , secondHigherOrderAssignment
+            , firstHigherOrderAssignment
+            ]
+            vacuousHigherKindRequest
+    higherOrderRendered <- renderStableCandidates higherOrderAlternatives
+    mapM_
+      (\expected ->
+        assertEqual
+          ("a distinct same-kind higher-order assignment was lost or " ++
+              "duplicated: " ++ show higherOrderRendered)
+          1
+          (length $ filter (expected `isInfixOf`) higherOrderRendered))
+        [ "vacuousHigherOrderMonoToken @HigherOrderConstructor"
+        , "vacuousHigherOrderMonoToken @(HigherOrderBuilder MonoClosed)"
+        ]
 
     let higherKindGoal = SharedType.FunctionType
             (SharedType.TypeApplication

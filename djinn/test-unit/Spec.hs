@@ -1210,8 +1210,13 @@ testRankNTypeAtoms = do
                     (SharedType.TypeVariable "payload") tokenType
         ]
     let higherKindName = sharedName "HigherKindConstructor"
+        higherKindPairName = sharedName "HigherKindPair"
         higherKindArgumentName = sharedName "HigherKindArgument"
         higherKindType = SharedType.TypeConstructor higherKindName
+        higherKindPairType =
+            SharedType.TypeConstructor higherKindPairName
+        partialHigherKindPair = SharedType.TypeApplication
+            higherKindPairType closedType
         higherKindArgumentType =
             SharedType.TypeConstructor higherKindArgumentName
         mixedKindProvider = SharedType.ForallType ["f", "a", "hidden"] [] $
@@ -1231,8 +1236,13 @@ testRankNTypeAtoms = do
         closedDeclarations ++
         [ SharedDeclaration.AbstractTypeDeclaration () higherKindName $
             SharedKind.FunctionKind closedKind closedKind
+        , SharedDeclaration.AbstractTypeDeclaration () higherKindPairName $
+            SharedKind.FunctionKind closedKind $
+                SharedKind.FunctionKind closedKind closedKind
         , valueDeclaration "vacuousHigherKindMonoToken" $
             SharedType.ForallType ["constructor"] [] tokenType
+        , valueDeclaration "vacuousHigherKindPairMonoToken" $
+            SharedType.ForallType ["constructor", "partial"] [] tokenType
         ]
     sealedBoxSession <- sealDjinnSessionFrom stableSession $
         closedDeclarations ++ [boxDeclaration,
@@ -1672,6 +1682,29 @@ testRankNTypeAtoms = do
         [ vacuousHigherKindAssignment
         , vacuousProperKindAssignment
         ]
+
+    -- Preserve a whole source-proved vector when multiple binders are vacuous.
+    -- The second argument is a partially applied binary constructor, so this
+    -- also pins kind checking and visible argument order beyond the unary case.
+    let vacuousHigherKindPairAssignment = kindedProviderAssignment
+            "vacuousHigherKindPairMonoToken"
+            [ (constructorKind, higherKindType)
+            , (constructorKind, partialHigherKindPair)
+            ]
+    vacuousHigherKindPairResult <- expectShownRight $
+        Djex.runDjinnQueryWithKindedInstantiationAssignments
+            vacuousHigherKindSession
+            [vacuousHigherKindPairAssignment]
+            vacuousHigherKindRequest
+    vacuousHigherKindPairRendered <-
+        renderStableCandidates vacuousHigherKindPairResult
+    assertBool
+        ("a multi-vacuous higher-kinded vector lost its partial constructor " ++
+            "or positional order: " ++ show vacuousHigherKindPairRendered)
+        $ any
+            (("vacuousHigherKindPairMonoToken @HigherKindConstructor " ++
+                "@(HigherKindPair MonoClosed)") `isInfixOf`)
+            vacuousHigherKindPairRendered
 
     let higherKindGoal = SharedType.FunctionType
             (SharedType.TypeApplication

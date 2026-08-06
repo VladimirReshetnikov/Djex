@@ -1708,6 +1708,75 @@ tests = testGroup "Djex facade"
         ("the vacuous kinded assignment was absent: " ++ show visibleVectors)
         $ [visibleWrapper] `elem` visibleVectors
 
+  , testCase "retain an ordered multi-vacuous Exference assignment" $ do
+      tokenName <- expectRight $ mkIdentifier "MultiVacuousKindedToken"
+      wrapperName <- expectRight $ mkIdentifier "MultiVacuousKindedWrapper"
+      pairName <- expectRight $ mkIdentifier "MultiVacuousKindedPair"
+      providerName <- expectRight $ mkIdentifier "multiVacuousKindedProvider"
+      targetName <- expectRight $ mkIdentifier "useMultiVacuousKindedProvider"
+      target <- expectRight $ mkDefinitionName targetName
+      let firstVariable = FlexibleVariable 0
+          secondVariable = FlexibleVariable 1
+          tokenType = TypeConstructor tokenName
+          wrapperConstructor :: ExferenceType
+          wrapperConstructor = TypeConstructor wrapperName
+          pairConstructor :: ExferenceType
+          pairConstructor = TypeConstructor pairName
+          partialPair = TypeApplication pairConstructor tokenType
+          constructorKind =
+            FunctionKind ProperTypeKind ProperTypeKind
+          pairKind = FunctionKind ProperTypeKind constructorKind
+          providerType = ForallType
+            [firstVariable, secondVariable] [] tokenType
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , AbstractTypeDeclaration () wrapperName constructorKind
+            , AbstractTypeDeclaration () pairName pairKind
+            , ValueDeclaration $ ValueSignature () providerName providerType
+            ]
+          kindedAssignment = KindedProviderInstantiationAssignment
+            { kindedProviderInstantiationAssignmentProvider = providerName
+            , kindedProviderInstantiationAssignmentArguments =
+                [ (constructorKind, wrapperConstructor)
+                , (constructorKind, partialPair)
+                ]
+            }
+          visibleSpine expression = case expression of
+            Global name -> Just (name, [])
+            VisibleTypeApplication function argument -> do
+              (name, earlier) <- visibleSpine function
+              pure (name, earlier ++ [argument])
+            _ -> Nothing
+      visibleArguments <- expectRight $
+        traverse specifiedVisibleTypeArgument
+          [wrapperConstructor, partialPair]
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = tokenType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 512}
+        }
+      results <- expectRight $
+        runExferenceQueryWithKindedInstantiationAssignments
+          session [kindedAssignment] request
+      let visibleVectors =
+            [ actual
+            | candidate <- concatMap
+                (batchCandidates . resultSearch) results
+            , FunctionClause _ [] body <- [candidateOutput candidate]
+            , Just (occurrence, actual) <- [visibleSpine body]
+            , occurrence == providerName
+            ]
+      assertBool
+        ("the multi-vacuous kinded assignment lost its partial constructor "
+          ++ "or positional order: " ++ show visibleVectors)
+        $ visibleArguments `elem` visibleVectors
+
   , testCase "accept an Exference higher-kinded assignment" $ do
       tokenName <- expectRight $ mkIdentifier "HigherAssignmentToken"
       wrapperName <- expectRight $ mkIdentifier "HigherAssignmentWrapper"

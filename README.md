@@ -2,7 +2,7 @@
 
 Djex is a Haskell expression synthesizer formed by merging
 [Djinn](https://github.com/augustss/djinn) and
-[Exference](https://github.com/lspitzner/exference). Given a type, it
+[Exference](https://github.com/lspitzner/exference) and adding support for rank-N types. Given a type, it
 generates a Haskell expression of that type. Djinn contributes a complete
 intuitionistic prover built on Dyckhoff's LJT calculus, so it terminates and
 can prove a type uninhabited; Exference contributes a ranked heuristic search

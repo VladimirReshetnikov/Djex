@@ -347,9 +347,15 @@ findAtoms = Map.findWithDefault []
 addAtom :: Term -> Symbol -> AtomicProofs -> AtomicProofs
 addAtom proof atom = Map.alter (Just . insertUnique . fromMaybe []) atom
   where
+    -- Oldest first: an atom's proofs are consulted in arrival order, so
+    -- the least-derived evidence (a goal argument, a named premise) is
+    -- tried before compositions freshly derived from it.  Preferring
+    -- recency here made every atom choice point reach for the newest
+    -- derived junk first and buried argument-using proofs beyond any
+    -- practical candidate window.
     insertUnique proofs
         | proof `elem` proofs = proofs
-        | otherwise = proof : proofs
+        | otherwise = proofs ++ [proof]
 
 ------------------------------
 ----- Implications of one atom, indexed by that atom.
@@ -361,8 +367,10 @@ extract atomImps a =
     case Map.updateLookupWithKey (\ _ _ -> Nothing) a atomImps of
         (found, rest) -> (fromMaybe [] found, rest)
 
+-- Oldest first, as for atomic proofs: consequences fire in the order
+-- their implications arrived.
 insert :: AtomImps -> Symbol -> Antecedents -> AtomImps
-insert atomImps a bs = Map.insertWith (++) a bs atomImps
+insert atomImps a bs = Map.insertWith (flip (++)) a bs atomImps
 
 ------------------------------
 ----- Nested implications, (a -> b) -> c
@@ -373,10 +381,12 @@ data NestImp = NestImp Term Formula Formula Formula
 
 type NestImps = [NestImp]
 
+-- Oldest first, as for atomic proofs: the branching over nested
+-- implications tries them in arrival order.
 addNestImp :: NestImp -> NestImps -> NestImps
 addNestImp nested nestedImps
     | nested `elem` nestedImps = nestedImps
-    | otherwise = nested : nestedImps
+    | otherwise = nestedImps ++ [nested]
 
 ------------------------------
 ----- Generate a new unique variable

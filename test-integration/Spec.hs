@@ -1608,6 +1608,15 @@ tests = testGroup "Djex facade"
             { kindedProviderInstantiationAssignmentProvider = providerName
             , kindedProviderInstantiationAssignmentArguments = arguments
             }
+          cyclicGroundKind =
+            FunctionKind cyclicGroundKind ProperTypeKind
+          cyclicKindedAssignment = kindedAssignment
+            [ ( cyclicGroundKind
+              , error "Exference forced a type paired with a cyclic kind"
+              )
+            ]
+          validKindedAssignment =
+            kindedAssignment [(ProperTypeKind, tokenType)]
       environment <- expectRight
         (mkEnvironment declarations :: Either
           (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
@@ -1640,6 +1649,21 @@ tests = testGroup "Djex facade"
           Just "DJEX_EXF_ASSIGNMENT_ARGUMENT_LIMIT"
         Right _ -> fail
           "cyclic kinded assignment argument spine was accepted"
+      let expectKindLimit label supplied = do
+            outcome <- expectWithin label $ evaluate $
+              runExferenceQueryWithKindedInstantiationAssignments
+                session supplied request
+            case outcome of
+              Left failure -> do
+                diagnosticCode failure @?=
+                  Just "DJEX_EXF_ASSIGNMENT_KIND_LIMIT"
+                diagnosticSource failure @?= Nothing
+              Right _ -> fail $ label ++ " was accepted"
+      expectKindLimit "cyclic Exference assignment kind"
+        [cyclicKindedAssignment]
+      expectKindLimit
+        "cyclic Exference kind before same-provider comparison"
+        [validKindedAssignment, cyclicKindedAssignment]
 
   , testCase "kind a vacuous Exference provider from caller evidence" $ do
       tokenName <- expectRight $ mkIdentifier "VacuousKindedToken"

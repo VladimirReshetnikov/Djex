@@ -367,6 +367,7 @@ facadeTests = testGroup "public Djex facade"
       maximumProviderInstantiationCandidates @?= 32
       maximumProviderInstantiationAssignments @?= 32
       maximumProviderInstantiationArguments @?= 4
+      maximumProviderInstantiationKindNodes @?= 129
   , testCase "seals Djinn from the neutral environment vocabulary" $ do
       let checkedEnvironment
             :: Either (EnvironmentError DjinnTypeVariable) DjinnEnvironment

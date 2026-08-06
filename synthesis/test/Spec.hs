@@ -304,6 +304,7 @@ queryTests = testGroup "queries"
       toList assignment @?= ["left", "right", "right"]
       maximumProviderInstantiationAssignments @?= 32
       maximumProviderInstantiationArguments @?= 4
+      maximumProviderInstantiationKindNodes @?= 129
       _ <- evaluate $ force assignment
       pure ()
   , testCase "retain caller-supplied provider assignment kinds" $ do
@@ -329,6 +330,33 @@ queryTests = testGroup "queries"
       toList assignment @?= ["constructor", "element"]
       _ <- evaluate $ force assignment
       pure ()
+  , testCase "observe caller-supplied kind trees through a finite bound" $ do
+      let proper = Kind.ProperTypeKind
+          arrowChain arity = foldr Kind.FunctionKind proper
+            (replicate arity proper)
+          leftCyclic = Kind.FunctionKind leftCyclic proper
+          rightCyclic = Kind.FunctionKind proper rightCyclic
+          poisoned = Kind.FunctionKind
+            (error "entered a kind branch beyond the node bound")
+            (error "entered a kind branch beyond the node bound")
+      Kind.observedKindNodeCount
+          maximumProviderInstantiationKindNodes (arrowChain 64)
+        @?= maximumProviderInstantiationKindNodes
+      Kind.observedKindNodeCount
+          maximumProviderInstantiationKindNodes (arrowChain 65)
+        @?= maximumProviderInstantiationKindNodes + 1
+      Kind.observedKindNodeCount
+          maximumProviderInstantiationKindNodes leftCyclic
+        @?= maximumProviderInstantiationKindNodes + 1
+      Kind.observedKindNodeCount
+          maximumProviderInstantiationKindNodes rightCyclic
+        @?= maximumProviderInstantiationKindNodes + 1
+      Kind.observedKindNodeCount 1 poisoned @?= 2
+      Kind.observedKindNodeCount 1
+          (Kind.KindVariable
+            (error "forced a bounded kind-variable payload") ::
+              Kind.Kind String)
+        @?= 1
   , testCase "label every request type site uniformly" $
       map requestTypeSiteLabel [minBound .. maxBound] @?=
         ["goal", "context"]

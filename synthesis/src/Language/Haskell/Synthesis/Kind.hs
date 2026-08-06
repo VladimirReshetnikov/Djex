@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
@@ -12,6 +13,7 @@ module Language.Haskell.Synthesis.Kind
   ( Kind (..)
   , freeKindVariables
   , groundKind
+  , observedKindNodeCount
   ) where
 
 import Control.DeepSeq (NFData)
@@ -45,3 +47,26 @@ groundKind kind = case kind of
   KindVariable variable -> Left variable
   FunctionKind parameter result -> FunctionKind
     <$> groundKind parameter <*> groundKind result
+
+-- | Observe a kind tree's exact constructor count through a finite bound.
+--
+-- A result at or below the nonnegative bound is exact. A result one greater
+-- means only that the tree is larger; no remaining subtree or kind-variable
+-- payload is inspected. The explicit worklist makes even a cyclic caller-built
+-- tree terminate, while counting nodes rather than depth also bounds balanced
+-- trees whose size grows exponentially with their depth. The observation
+-- saturates at 'maxBound' when no larger sentinel can be represented.
+observedKindNodeCount :: Int -> Kind variable -> Int
+observedKindNodeCount maximumExpected root = go 0 [root]
+ where
+  bound = max 0 maximumExpected
+
+  go !observed [] = observed
+  go !observed (kind : rest)
+    | observed >= bound =
+        if observed == maxBound then maxBound else observed + 1
+    | otherwise = case kind of
+        ProperTypeKind -> go (observed + 1) rest
+        KindVariable _ -> go (observed + 1) rest
+        FunctionKind parameter result ->
+          go (observed + 1) (parameter : result : rest)

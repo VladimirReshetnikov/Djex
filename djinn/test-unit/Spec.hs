@@ -1,10 +1,12 @@
 module Main (main) where
 
+import Control.Exception (evaluate)
 import Data.List (isInfixOf, isPrefixOf, isSuffixOf, nub, sort)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (listToMaybe)
 import Data.Void (Void, absurd)
 import Numeric.Natural (Natural)
+import System.Timeout (timeout)
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertEqual, testCase)
 import Text.ParserCombinators.ReadP (ReadP, eof, readP_to_S, skipSpaces)
@@ -1583,16 +1585,19 @@ testRankNTypeAtoms = do
             assertEqual (description ++ " source provenance")
                 Nothing (SharedDiagnostic.diagnosticSource failure)
           Right result -> fail $ description ++ " was accepted: " ++ show result
-        expectKindedAssignmentFailure description session request supplied =
-            case Djex.runDjinnQueryWithKindedInstantiationAssignments
-                session supplied request of
-              Left failure -> do
+        expectKindedAssignmentFailure description session request supplied = do
+            outcome <- timeout 2000000 $ evaluate $
+                Djex.runDjinnQueryWithKindedInstantiationAssignments
+                    session supplied request
+            case outcome of
+              Nothing -> fail $ description ++ " did not terminate"
+              Just (Left failure) -> do
                 assertEqual (description ++ " diagnostic code")
                     (Just "DJEX_DJINN_ASSIGNMENT")
                     (SharedDiagnostic.diagnosticCode failure)
                 assertEqual (description ++ " source provenance")
                     Nothing (SharedDiagnostic.diagnosticSource failure)
-              Right result ->
+              Just (Right result) ->
                 fail $ description ++ " was accepted: " ++ show result
         cyclicAssignments =
             error "assignment element forced before outer bound rejection" :
@@ -1606,6 +1611,16 @@ testRankNTypeAtoms = do
         cyclicKindedArguments =
             error "kinded argument forced before inner bound rejection" :
                 cyclicKindedArguments
+        cyclicGroundKind = SharedKind.FunctionKind
+            cyclicGroundKind SharedKind.ProperTypeKind
+        cyclicKindedAssignment = kindedProviderAssignment
+            "ambiguousMonoToken"
+            [ ( cyclicGroundKind
+              , error "paired type forced before cyclic kind rejection"
+              )
+            ]
+        validKindedAssignment = kindedProviderAssignment
+            "ambiguousMonoToken" [(closedKind, closedType)]
     expectAssignmentFailure "a cyclic provider assignment list"
         ambiguousTokenSession evidenceRequest cyclicAssignments
     expectAssignmentFailure "a cyclic provider argument vector"
@@ -1617,6 +1632,12 @@ testRankNTypeAtoms = do
         ambiguousTokenSession evidenceRequest
         [kindedProviderAssignment "ambiguousMonoToken"
             cyclicKindedArguments]
+    expectKindedAssignmentFailure "a cyclic provider assignment kind"
+        ambiguousTokenSession evidenceRequest [cyclicKindedAssignment]
+    expectKindedAssignmentFailure
+        "a cyclic kind before same-provider kind-vector comparison"
+        ambiguousTokenSession evidenceRequest
+        [validKindedAssignment, cyclicKindedAssignment]
     expectAssignmentFailure "an empty provider argument vector"
         ambiguousTokenSession evidenceRequest
         [providerAssignment "ambiguousMonoToken" []]

@@ -164,7 +164,10 @@ import Language.Haskell.Synthesis.Inventory
   ( inventoryEnvironment
   , inventoryKindAssumptions
   )
-import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
+import Language.Haskell.Synthesis.Kind
+  ( Kind (ProperTypeKind)
+  , observedKindNodeCount
+  )
 import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import Language.Haskell.Synthesis.Name
   ( Name
@@ -178,6 +181,7 @@ import Language.Haskell.Synthesis.Query
   , maximumProviderInstantiationArguments
   , maximumProviderInstantiationAssignments
   , maximumProviderInstantiationCandidates
+  , maximumProviderInstantiationKindNodes
   , resultSearch
   )
 import Language.Haskell.Synthesis.Search
@@ -801,6 +805,8 @@ prepareProviderInstantiationAssignments session evidence
               kindAssumptions binders [schemeBody]
         pure $ map snd inferredBinderKinds
       Just supplied -> do
+        mapM_ (validateSuppliedKind label) $
+          zip [0 :: Int ..] supplied
         first
           (\failure -> shownErrorDiagnostic
             "DJEX_EXF_ASSIGNMENT_KIND"
@@ -831,6 +837,20 @@ prepareProviderInstantiationAssignments session evidence
         , Map.insert provider (Set.insert key providerKeys) seenArguments
         , Map.insertWith (\new old -> old ++ new)
             provider [arguments] retained
+        )
+
+  validateSuppliedKind label (argumentIndex, kind) =
+    let observedNodes = observedKindNodeCount
+          maximumProviderInstantiationKindNodes kind
+    in if observedNodes <= maximumProviderInstantiationKindNodes
+      then Right ()
+      else Left $ shownErrorDiagnostic
+        "DJEX_EXF_ASSIGNMENT_KIND_LIMIT"
+        "Exference provider instantiation kind exceeds the structural bound"
+        ( label
+        , argumentIndex
+        , maximumProviderInstantiationKindNodes
+        , observedNodes
         )
 
   prepareArgument label (argumentIndex, binderKind, source) = do

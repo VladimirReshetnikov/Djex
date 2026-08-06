@@ -1198,6 +1198,8 @@ prepareProviderInstantiationAssignments prepared evidence = do
                 (SharedKindInference.inferSharedVariableKinds
                     kindAssumptions binders [schemeBody])
             Just suppliedGroundKinds -> do
+                mapM_ (validateSuppliedKind providerLabel) $
+                    zip [0 :: Int ..] suppliedGroundKinds
                 first
                     (DjinnInstantiationAssignmentFailure .
                         (providerLabel ++) .
@@ -1244,6 +1246,19 @@ prepareProviderInstantiationAssignments prepared evidence = do
                     seenArguments
                 , (provider, checkedArguments) : retained
                 )
+
+    validateSuppliedKind providerLabel (argumentIndex, kind) =
+        let maximumNodes =
+                SharedQuery.maximumProviderInstantiationKindNodes
+            observedNodes =
+                SharedKind.observedKindNodeCount maximumNodes kind
+            label = providerLabel ++ "argument #" ++
+                show argumentIndex ++ ": "
+        in unless (observedNodes <= maximumNodes) $
+            Left $ DjinnInstantiationAssignmentFailure $
+                label ++ "supplied ground kind node count exceeds " ++
+                    show maximumNodes ++ " (observed " ++
+                    show observedNodes ++ ")"
 
     validateArgument providerLabel (argumentIndex, binderKind, source) = do
         let label = providerLabel ++ "argument #" ++

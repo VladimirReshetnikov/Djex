@@ -300,6 +300,13 @@ facadeTests = testGroup "public Djex facade"
             ( providerInstantiationAssignmentProvider assignment
             , providerInstantiationAssignmentArguments assignment
             )
+          kindedProviderAssignmentProjection
+            :: KindedProviderInstantiationAssignment String
+            -> (Name, [(GroundKind, Type String)])
+          kindedProviderAssignmentProjection assignment =
+            ( kindedProviderInstantiationAssignmentProvider assignment
+            , kindedProviderInstantiationAssignmentArguments assignment
+            )
           djinnEvidenceRunner
             :: DjinnSession
             -> [ProviderInstantiationCandidate DjinnTypeVariable]
@@ -312,6 +319,13 @@ facadeTests = testGroup "public Djex facade"
             -> DjinnRequest
             -> Either Diagnostic DjinnResult
           djinnAssignmentRunner = runDjinnQueryWithInstantiationAssignments
+          djinnKindedAssignmentRunner
+            :: DjinnSession
+            -> [KindedProviderInstantiationAssignment DjinnTypeVariable]
+            -> DjinnRequest
+            -> Either Diagnostic DjinnResult
+          djinnKindedAssignmentRunner =
+            runDjinnQueryWithKindedInstantiationAssignments
           exferenceEvidenceRunner
             :: ExferenceSession
             -> [ProviderInstantiationCandidate ExferenceTypeVariable]
@@ -326,6 +340,13 @@ facadeTests = testGroup "public Djex facade"
             -> Either Diagnostic [ExferenceResult]
           exferenceAssignmentRunner =
             runExferenceQueryWithInstantiationAssignments
+          exferenceKindedAssignmentRunner
+            :: ExferenceSession
+            -> [KindedProviderInstantiationAssignment ExferenceTypeVariable]
+            -> ExferenceRequest
+            -> Either Diagnostic [ExferenceResult]
+          exferenceKindedAssignmentRunner =
+            runExferenceQueryWithKindedInstantiationAssignments
       djinnTypeProjection `seq` djinnRequestProjection `seq`
         djinnCandidateProjection `seq` djinnEnvironmentProjection `seq`
         inventoryProjection `seq`
@@ -336,8 +357,11 @@ facadeTests = testGroup "public Djex facade"
         qualifiedResidualRendererProjection `seq`
         metadataProjection `seq` providerEvidenceProjection `seq`
         providerAssignmentProjection `seq`
+        kindedProviderAssignmentProjection `seq`
         djinnEvidenceRunner `seq` djinnAssignmentRunner `seq`
-        exferenceEvidenceRunner `seq` exferenceAssignmentRunner `seq` pure ()
+        djinnKindedAssignmentRunner `seq`
+        exferenceEvidenceRunner `seq` exferenceAssignmentRunner `seq`
+        exferenceKindedAssignmentRunner `seq` pure ()
       mkDjinnRequest `seq` mkExferenceSession `seq`
         mkExferenceSessionWithPolicy `seq` pure ()
       maximumProviderInstantiationCandidates @?= 32

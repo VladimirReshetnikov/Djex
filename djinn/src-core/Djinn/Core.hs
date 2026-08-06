@@ -48,6 +48,7 @@ module Djinn.Core (
     inhabitResult, inhabitResultPrepared, inhabitSynthesisResultPrepared,
     inhabitSynthesisResultPreparedWithInstantiationCandidates,
     inhabitSynthesisResultPreparedWithInstantiationAssignments,
+    inhabitSynthesisResultPreparedWithKindedInstantiationAssignments,
     GeneratedQueryReport(..), inhabitGenerated, inhabitGeneratedPrepared,
     QueryOutcome(..), QueryReport(..), inhabit
     ) where
@@ -69,6 +70,7 @@ import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
+import qualified Language.Haskell.Synthesis.Kind as SharedKind
 import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
@@ -828,7 +830,8 @@ inhabitSynthesisResultPreparedWithInstantiationCandidates options prepared
     -- structural validation and kind inference. Elaboration returns the
     -- canonical alias-free types consumed at the formula boundary.
     inhabitSynthesisResultPreparedChecked
-        options prepared contexts candidates [] target goal
+        options prepared contexts candidates
+        (InferredProviderInstantiationAssignments []) target goal
 
 -- | Search a sealed Djinn environment with externally established complete
 -- leading-binder assignments for exact providers.  Each ordered vector is
@@ -847,7 +850,28 @@ inhabitSynthesisResultPreparedWithInstantiationAssignments options prepared
         contexts assignments target goal = do
     first DjinnQueryOptionsFailure $ validateQueryOptions options
     inhabitSynthesisResultPreparedChecked
-        options prepared contexts [] assignments target goal
+        options prepared contexts []
+        (InferredProviderInstantiationAssignments assignments) target goal
+
+-- | Search a sealed Djinn environment with complete assignments whose exact
+-- leading-binder ground kinds were retained by the caller. Supplied kinds are
+-- checked against every occurrence in the provider body; unlike the
+-- compatibility entrance above, an otherwise vacuous binder need not default
+-- to @Type@.
+inhabitSynthesisResultPreparedWithKindedInstantiationAssignments
+    :: QueryOptions
+    -> PreparedEnvironment
+    -> [Constraint (SharedType.Type HSymbol)]
+    -> [SharedQuery.KindedProviderInstantiationAssignment HSymbol]
+    -> SharedGenerated.DefinitionName
+    -> SharedType.Type HSymbol
+    -> Either DjinnQueryError DjinnResult
+inhabitSynthesisResultPreparedWithKindedInstantiationAssignments options
+        prepared contexts assignments target goal = do
+    first DjinnQueryOptionsFailure $ validateQueryOptions options
+    inhabitSynthesisResultPreparedChecked
+        options prepared contexts []
+        (KindedProviderInstantiationAssignments assignments) target goal
 
 -- | Compatibility projection of 'inhabitResult'.
 inhabitGenerated :: QueryOptions -> Environment -> [Context] -> HSymbol -> HType
@@ -889,12 +913,12 @@ inhabitSynthesisResultPreparedChecked
     -> PreparedEnvironment
     -> [Constraint (SharedType.Type HSymbol)]
     -> [SharedQuery.ProviderInstantiationCandidate HSymbol]
-    -> [SharedQuery.ProviderInstantiationAssignment HSymbol]
+    -> ProviderInstantiationAssignmentEvidence
     -> SharedGenerated.DefinitionName
     -> SharedType.Type HSymbol
     -> Either DjinnQueryError DjinnResult
 inhabitSynthesisResultPreparedChecked options prepared contexts candidates
-        assignments target goal = do
+        assignmentEvidence target goal = do
     elaboratedGoal <- resolveSynthesisQueryContexts prepared
         ( "goal type " ++ renderSynthesisType goal
         , KStar
@@ -925,7 +949,7 @@ inhabitSynthesisResultPreparedChecked options prepared contexts candidates
     checkedCandidates <- prepareProviderInstantiationCandidates
         prepared candidates
     checkedAssignments <- prepareProviderInstantiationAssignments
-        prepared assignments
+        prepared assignmentEvidence
     searchPreparedFormula options prepared checkedCandidates checkedAssignments target
         elaboratedGoal
         parametricDataRelevant
@@ -954,7 +978,8 @@ inhabitResultPreparedChecked options prepared contexts target goal = do
     sharedGoal <- projectGoal goal
     sharedContexts <- projectContexts contexts
     inhabitSynthesisResultPreparedChecked
-        options prepared sharedContexts [] [] target sharedGoal
+        options prepared sharedContexts []
+        (InferredProviderInstantiationAssignments []) target sharedGoal
   where
     projectGoal source = case toSynthesisType source of
         Right projected -> Right projected
@@ -978,6 +1003,18 @@ type PreparedProviderInstantiationAssignment =
        , SharedGenerated.VisibleTypeArgument
        )]
     )
+
+data ProviderInstantiationAssignmentEvidence
+    = InferredProviderInstantiationAssignments
+        [SharedQuery.ProviderInstantiationAssignment HSymbol]
+    | KindedProviderInstantiationAssignments
+        [SharedQuery.KindedProviderInstantiationAssignment HSymbol]
+
+data ProviderInstantiationAssignmentInput
+    = InferredProviderInstantiationAssignment
+        (SharedQuery.ProviderInstantiationAssignment HSymbol)
+    | KindedProviderInstantiationAssignment
+        (SharedQuery.KindedProviderInstantiationAssignment HSymbol)
 
 -- Validate external provider evidence only after the ordinary goal and
 -- contexts have crossed their established request boundary. The list spine is
@@ -1048,19 +1085,25 @@ prepareProviderInstantiationCandidates prepared rawCandidates = do
                 )
 
 -- Bound both list spines before entering caller-owned argument values.  Once
--- an assignment is known to have the exact provider arity, infer its binder
--- kinds from the retained provider body, elaborate each argument at its exact
--- positional kind, and retain its visible syntax.  The complete substituted
--- provider body is kind-checked as a final independent specialization guard.
+-- an assignment is known to have the exact provider arity, either infer its
+-- binder kinds from the retained provider body or validate the caller's exact
+-- positional kinds against that body, then elaborate each paired argument and
+-- retain its visible syntax. The complete substituted provider body is
+-- kind-checked as a final independent specialization guard.
 -- Alpha-equivalent vectors are de-duplicated per provider without losing the
 -- order or correlation within a vector.
 prepareProviderInstantiationAssignments
     :: PreparedEnvironment
-    -> [SharedQuery.ProviderInstantiationAssignment HSymbol]
+    -> ProviderInstantiationAssignmentEvidence
     -> Either DjinnQueryError [PreparedProviderInstantiationAssignment]
-prepareProviderInstantiationAssignments prepared rawAssignments = do
+prepareProviderInstantiationAssignments prepared evidence = do
     let maximumAssignments =
             SharedQuery.maximumProviderInstantiationAssignments
+        rawAssignments = case evidence of
+            InferredProviderInstantiationAssignments assignments ->
+                map InferredProviderInstantiationAssignment assignments
+            KindedProviderInstantiationAssignments assignments ->
+                map KindedProviderInstantiationAssignment assignments
         observed = SharedCollection.observedListLength
             maximumAssignments rawAssignments
     if observed > maximumAssignments
@@ -1068,7 +1111,8 @@ prepareProviderInstantiationAssignments prepared rawAssignments = do
             "provider instantiation assignment count exceeds " ++
                 show maximumAssignments
         else return ()
-    (_, retained) <- foldM validateAssignment (Map.empty, []) $
+    (_, _, retained) <- foldM validateAssignment
+        (Map.empty, Map.empty, []) $
         zip [0 :: Int ..] rawAssignments
     return $ reverse retained
   where
@@ -1082,11 +1126,34 @@ prepareProviderInstantiationAssignments prepared rawAssignments = do
         , Just source <- [opaqueSymbolSource opaque]
         ]
 
-    validateAssignment (seen, retained) (index, assignment) = do
-        let arguments =
-                SharedQuery.providerInstantiationAssignmentArguments assignment
-            observedArguments = SharedCollection.observedListLength
-                maximumArguments arguments
+    validateAssignment
+            (seenKinds, seenArguments, retained) (index, assignment) = do
+        let (providerName, observedArguments, suppliedKinds, arguments) =
+                case assignment of
+                    InferredProviderInstantiationAssignment unkinded ->
+                        let rawArguments =
+                                SharedQuery.providerInstantiationAssignmentArguments
+                                    unkinded
+                        in
+                        ( SharedQuery.providerInstantiationAssignmentProvider
+                            unkinded
+                        , SharedCollection.observedListLength
+                            maximumArguments rawArguments
+                        , Nothing
+                        , rawArguments
+                        )
+                    KindedProviderInstantiationAssignment kinded ->
+                        let rawArguments =
+                                SharedQuery.kindedProviderInstantiationAssignmentArguments
+                                    kinded
+                        in
+                        ( SharedQuery.kindedProviderInstantiationAssignmentProvider
+                            kinded
+                        , SharedCollection.observedListLength
+                            maximumArguments rawArguments
+                        , Just $ map fst rawArguments
+                        , map snd rawArguments
+                        )
             assignmentLabel =
                 "provider instantiation assignment #" ++ show index ++ ": "
         if observedArguments > maximumArguments
@@ -1094,9 +1161,7 @@ prepareProviderInstantiationAssignments prepared rawAssignments = do
                 assignmentLabel ++ "argument count exceeds " ++
                     show maximumArguments
             else return ()
-        let providerName =
-                SharedQuery.providerInstantiationAssignmentProvider assignment
-            providerLabel = assignmentLabel ++ "provider " ++
+        let providerLabel = assignmentLabel ++ "provider " ++
                 SharedName.renderCanonical providerName ++ ": "
         providerSpelling <- first
             (DjinnInstantiationAssignmentFailure . (providerLabel ++)) $
@@ -1123,15 +1188,36 @@ prepareProviderInstantiationAssignments prepared rawAssignments = do
                 providerLabel ++ "expected " ++ show arity ++
                     " ordered argument(s), but received " ++
                     show observedArguments
-        inferredBinderKinds <- first
-            (DjinnInstantiationAssignmentFailure .
-                (providerLabel ++) .
-                ("cannot infer provider binder kinds: " ++) . show) $
-            SharedKindInference.inferSharedVariableKinds
-                (SharedInventory.inventoryKindAssumptions $
-                    preparedEnvironmentInventory prepared)
-                binders [schemeBody]
-        let binderKinds = map (fromGroundHKind . snd) inferredBinderKinds
+        let kindAssumptions = SharedInventory.inventoryKindAssumptions $
+                preparedEnvironmentInventory prepared
+        groundBinderKinds <- case suppliedKinds of
+            Nothing -> map snd <$> first
+                (DjinnInstantiationAssignmentFailure .
+                    (providerLabel ++) .
+                    ("cannot infer provider binder kinds: " ++) . show)
+                (SharedKindInference.inferSharedVariableKinds
+                    kindAssumptions binders [schemeBody])
+            Just suppliedGroundKinds -> do
+                first
+                    (DjinnInstantiationAssignmentFailure .
+                        (providerLabel ++) .
+                        (("supplied provider binder kinds conflict with the " ++
+                            "retained body: ") ++) . show) $
+                    SharedKindInference.checkTypesKinds kindAssumptions $
+                        (SharedKind.ProperTypeKind, schemeBody) :
+                        zip suppliedGroundKinds
+                            (map SharedType.TypeVariable binders)
+                return suppliedGroundKinds
+        case Map.lookup provider seenKinds of
+            Just previousKinds | previousKinds /= groundBinderKinds ->
+                Left $ DjinnInstantiationAssignmentFailure $
+                    providerLabel ++
+                        "binder kind vector conflicts with another " ++
+                        "assignment for this provider; expected " ++
+                        show previousKinds ++ ", but received " ++
+                        show groundBinderKinds
+            _ -> return ()
+        let binderKinds = map fromGroundHKind groundBinderKinds
         checkedArguments <- mapM
             (validateArgument providerLabel) $
                 zip3 [0 :: Int ..] binderKinds arguments
@@ -1147,11 +1233,15 @@ prepareProviderInstantiationAssignments prepared rawAssignments = do
                 ("instantiated provider body is ill-kinded: " ++)) $
             checkPreparedSynthesisTypesKinds prepared [(KStar, instantiatedBody)]
         let key = map (SharedTypeAtom.alphaTypeKey . fst) checkedArguments
-            providerKeys = Map.findWithDefault Set.empty provider seen
+            providerKeys = Map.findWithDefault
+                Set.empty provider seenArguments
+            retainedKinds = Map.insert provider groundBinderKinds seenKinds
         if key `Set.member` providerKeys
-            then Right (seen, retained)
+            then Right (retainedKinds, seenArguments, retained)
             else Right
-                ( Map.insert provider (Set.insert key providerKeys) seen
+                ( retainedKinds
+                , Map.insert provider (Set.insert key providerKeys)
+                    seenArguments
                 , (provider, checkedArguments) : retained
                 )
 

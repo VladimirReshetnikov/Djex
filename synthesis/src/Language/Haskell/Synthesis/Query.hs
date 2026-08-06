@@ -15,6 +15,7 @@ module Language.Haskell.Synthesis.Query
   , ProviderInstantiationCandidate (..)
   , maximumProviderInstantiationCandidates
   , ProviderInstantiationAssignment (..)
+  , KindedProviderInstantiationAssignment (..)
   , maximumProviderInstantiationAssignments
   , maximumProviderInstantiationArguments
   , validateRequestTarget
@@ -63,6 +64,7 @@ import Language.Haskell.Synthesis.Generated
   , mkDefinitionName
   )
 import Language.Haskell.Synthesis.Name (Name, renderCanonical)
+import Language.Haskell.Synthesis.KindInference (GroundKind)
 import Language.Haskell.Synthesis.Search
   ( SearchBatch
   , batchCandidates
@@ -140,6 +142,26 @@ data ProviderInstantiationAssignment variable =
 
 instance NFData variable =>
     NFData (ProviderInstantiationAssignment variable)
+
+-- | One externally established complete assignment whose exact leading-binder
+-- ground kinds are also known to the caller.
+--
+-- The unkinded 'ProviderInstantiationAssignment' remains the compatibility
+-- boundary: adapters infer every constrained position from the retained body
+-- and default a vacuous position to @Type@. This richer form lets a frontend
+-- preserve source kind facts for those otherwise unconstrained positions.
+-- Checked runners still validate every supplied kind against all uses in the
+-- exact provider body before elaborating the paired argument at that kind.
+data KindedProviderInstantiationAssignment variable =
+  KindedProviderInstantiationAssignment
+    { kindedProviderInstantiationAssignmentProvider :: Name
+    , kindedProviderInstantiationAssignmentArguments ::
+        [(GroundKind, Type variable)]
+    }
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
+
+instance NFData variable =>
+    NFData (KindedProviderInstantiationAssignment variable)
 
 -- | Maximum number of complete provider assignments accepted by one checked
 -- query execution.

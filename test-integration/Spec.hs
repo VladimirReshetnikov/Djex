@@ -1525,8 +1525,12 @@ tests = testGroup "Djex facade"
         $ runExferenceQueryWithInstantiationCandidates session [] request
       exactEmpty <- expectRight
         $ runExferenceQueryWithInstantiationAssignments session [] request
+      kindedEmpty <- expectRight
+        $ runExferenceQueryWithKindedInstantiationAssignments
+            session [] request
       explicitEmpty @?= historical
       exactEmpty @?= historical
+      kindedEmpty @?= historical
 
   , testCase "bound Exference provider evidence before entering elements" $ do
       tokenName <- expectRight $ mkIdentifier "BoundedEvidenceToken"
@@ -1541,6 +1545,9 @@ tests = testGroup "Djex facade"
           poisonedAssignments =
             (error "Exference entered an over-limit assignment element")
               : poisonedAssignments
+          poisonedKindedAssignments =
+            (error "Exference entered an over-limit kinded assignment element")
+              : poisonedKindedAssignments
       environment <- expectRight
         (mkEnvironment declarations :: Either
           (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
@@ -1566,6 +1573,15 @@ tests = testGroup "Djex facade"
         Left failure -> diagnosticCode failure @?=
           Just "DJEX_EXF_ASSIGNMENT_LIMIT"
         Right _ -> fail "Exference accepted an over-limit cyclic assignment list"
+      kindedAssignmentResult <- expectWithin
+        "Exference kinded provider assignment bound" $ evaluate $
+          runExferenceQueryWithKindedInstantiationAssignments
+            session poisonedKindedAssignments request
+      case kindedAssignmentResult of
+        Left failure -> diagnosticCode failure @?=
+          Just "DJEX_EXF_ASSIGNMENT_LIMIT"
+        Right _ -> fail
+          "Exference accepted an over-limit cyclic kinded assignment list"
 
   , testCase "validate Exference assignment vectors before search" $ do
       tokenName <- expectRight $ mkIdentifier "AssignmentBoundaryToken"
@@ -1581,9 +1597,16 @@ tests = testGroup "Djex facade"
           poisonedArguments =
             (error "Exference entered an over-limit assignment argument")
               : poisonedArguments
+          poisonedKindedArguments =
+            (error "Exference entered an over-limit kinded assignment argument")
+              : poisonedKindedArguments
           assignment arguments = ProviderInstantiationAssignment
             { providerInstantiationAssignmentProvider = providerName
             , providerInstantiationAssignmentArguments = arguments
+            }
+          kindedAssignment arguments = KindedProviderInstantiationAssignment
+            { kindedProviderInstantiationAssignmentProvider = providerName
+            , kindedProviderInstantiationAssignmentArguments = arguments
             }
       environment <- expectRight
         (mkEnvironment declarations :: Either
@@ -1609,6 +1632,81 @@ tests = testGroup "Djex facade"
         "DJEX_EXF_ASSIGNMENT_ARITY" []
       expectFailure "wrong assignment arity"
         "DJEX_EXF_ASSIGNMENT_ARITY" [tokenType, tokenType]
+      kindedOutcome <- expectWithin "cyclic kinded assignment argument spine" $
+        evaluate $ runExferenceQueryWithKindedInstantiationAssignments
+          session [kindedAssignment poisonedKindedArguments] request
+      case kindedOutcome of
+        Left failure -> diagnosticCode failure @?=
+          Just "DJEX_EXF_ASSIGNMENT_ARGUMENT_LIMIT"
+        Right _ -> fail
+          "cyclic kinded assignment argument spine was accepted"
+
+  , testCase "kind a vacuous Exference provider from caller evidence" $ do
+      tokenName <- expectRight $ mkIdentifier "VacuousKindedToken"
+      wrapperName <- expectRight $ mkIdentifier "VacuousKindedWrapper"
+      providerName <- expectRight $ mkIdentifier "vacuousKindedProvider"
+      targetName <- expectRight $ mkIdentifier "useVacuousKindedProvider"
+      target <- expectRight $ mkDefinitionName targetName
+      let providerVariable = FlexibleVariable 0
+          tokenType = TypeConstructor tokenName
+          wrapperConstructor :: ExferenceType
+          wrapperConstructor = TypeConstructor wrapperName
+          constructorKind =
+            FunctionKind ProperTypeKind ProperTypeKind
+          providerType = ForallType [providerVariable] [] tokenType
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , AbstractTypeDeclaration () wrapperName constructorKind
+            , ValueDeclaration $ ValueSignature () providerName providerType
+            ]
+          legacyAssignment = ProviderInstantiationAssignment
+            { providerInstantiationAssignmentProvider = providerName
+            , providerInstantiationAssignmentArguments = [wrapperConstructor]
+            }
+          kindedAssignment = KindedProviderInstantiationAssignment
+            { kindedProviderInstantiationAssignmentProvider = providerName
+            , kindedProviderInstantiationAssignmentArguments =
+                [(constructorKind, wrapperConstructor)]
+            }
+          visibleSpine expression = case expression of
+            Global name -> Just (name, [])
+            VisibleTypeApplication function argument -> do
+              (name, earlier) <- visibleSpine function
+              pure (name, earlier ++ [argument])
+            _ -> Nothing
+      visibleWrapper <- expectRight $
+        specifiedVisibleTypeArgument wrapperConstructor
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = tokenType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 512}
+        }
+      case runExferenceQueryWithInstantiationAssignments
+          session [legacyAssignment] request of
+        Left failure -> diagnosticCode failure @?=
+          Just "DJEX_EXF_ASSIGNMENT_KIND"
+        Right _ -> fail
+          "the legacy assignment API accepted a vacuous higher-kinded choice"
+      results <- expectRight $
+        runExferenceQueryWithKindedInstantiationAssignments
+          session [kindedAssignment] request
+      let visibleVectors =
+            [ actual
+            | candidate <- concatMap
+                (batchCandidates . resultSearch) results
+            , FunctionClause _ [] body <- [candidateOutput candidate]
+            , Just (occurrence, actual) <- [visibleSpine body]
+            , occurrence == providerName
+            ]
+      assertBool
+        ("the vacuous kinded assignment was absent: " ++ show visibleVectors)
+        $ [visibleWrapper] `elem` visibleVectors
 
   , testCase "accept an Exference higher-kinded assignment" $ do
       tokenName <- expectRight $ mkIdentifier "HigherAssignmentToken"
@@ -1761,6 +1859,8 @@ tests = testGroup "Djex facade"
           properVariable = FlexibleVariable 1
           tokenType = TypeConstructor tokenName
           wrapperConstructor = TypeConstructor wrapperName
+          constructorKind =
+            FunctionKind ProperTypeKind ProperTypeKind
           -- The occurrence as an application fixes this binder at
           -- Type -> Type; the other provider's vacuous binder defaults to Type.
           higherProviderType = ForallType [constructorVariable] [] $
@@ -1771,8 +1871,7 @@ tests = testGroup "Djex facade"
           properProviderType = ForallType [properVariable] [] tokenType
           declarations =
             [ AbstractTypeDeclaration () tokenName ProperTypeKind
-            , AbstractTypeDeclaration () wrapperName $
-                FunctionKind ProperTypeKind ProperTypeKind
+            , AbstractTypeDeclaration () wrapperName constructorKind
             , ValueDeclaration $ ValueSignature ()
                 higherProviderName higherProviderType
             , ValueDeclaration $ ValueSignature ()
@@ -1782,6 +1881,19 @@ tests = testGroup "Djex facade"
             { providerInstantiationAssignmentProvider = provider
             , providerInstantiationAssignmentArguments = arguments
             }
+          kindedAssignment provider arguments =
+            KindedProviderInstantiationAssignment
+              { kindedProviderInstantiationAssignmentProvider = provider
+              , kindedProviderInstantiationAssignmentArguments = arguments
+              }
+          bodyKindMismatch = kindedAssignment higherProviderName
+            [(ProperTypeKind, tokenType)]
+          argumentKindMismatch = kindedAssignment properProviderName
+            [(constructorKind, tokenType)]
+          properVacuous = kindedAssignment properProviderName
+            [(ProperTypeKind, tokenType)]
+          higherVacuous = kindedAssignment properProviderName
+            [(constructorKind, wrapperConstructor)]
       environment <- expectRight
         (mkEnvironment declarations :: Either
           (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
@@ -1805,6 +1917,25 @@ tests = testGroup "Djex facade"
       expectKindFailure
         "a Type -> Type constructor for a Type provider binder"
         $ assignment properProviderName [wrapperConstructor]
+      let expectExplicitKindFailure label supplied = case
+            runExferenceQueryWithKindedInstantiationAssignments
+              session supplied request of
+            Left failure -> diagnosticCode failure @?=
+              Just "DJEX_EXF_ASSIGNMENT_KIND"
+            Right _ -> fail $ label ++ " was accepted"
+      expectExplicitKindFailure
+        "a supplied kind conflicting with the provider body"
+        [bodyKindMismatch]
+      expectExplicitKindFailure
+        "an argument conflicting with its supplied kind"
+        [argumentKindMismatch]
+      _ <- expectRight $ runExferenceQueryWithKindedInstantiationAssignments
+        session [properVacuous] request
+      _ <- expectRight $ runExferenceQueryWithKindedInstantiationAssignments
+        session [higherVacuous] request
+      expectExplicitKindFailure
+        "conflicting kind vectors for one provider"
+        [properVacuous, higherVacuous]
 
   , testCase "accept an ordered proper-type Exference assignment" $ do
       tokenName <- expectRight $ mkIdentifier "ProperAssignmentToken"

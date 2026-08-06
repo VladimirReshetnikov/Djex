@@ -68,6 +68,7 @@ module Language.Haskell.Djex.Exference
   , runExferenceQuery
   , runExferenceQueryWithInstantiationCandidates
   , runExferenceQueryWithInstantiationAssignments
+  , runExferenceQueryWithKindedInstantiationAssignments
   , exferenceCandidateMetrics
   , exferenceResultBindingUsages
   , renderExferenceCandidateExpression
@@ -84,6 +85,7 @@ import Control.Exception
   , fromException
   , tryJust
   )
+import Control.Monad (foldM)
 import Data.Bifunctor (first)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
@@ -169,7 +171,8 @@ import Language.Haskell.Synthesis.Name
   , renderCanonical
   )
 import Language.Haskell.Synthesis.Query
-  ( ProviderInstantiationCandidate (..)
+  ( KindedProviderInstantiationAssignment (..)
+  , ProviderInstantiationCandidate (..)
   , ProviderInstantiationAssignment (..)
   , QueryRequest (..)
   , maximumProviderInstantiationArguments
@@ -547,7 +550,8 @@ runExferenceQuery
   -> ExferenceRequest
   -> Either Diagnostic [ExferenceResult]
 runExferenceQuery session =
-  runExferenceQueryWithProviderEvidence session [] []
+  runExferenceQueryWithProviderEvidence session []
+    $ InferredProviderInstantiationAssignments []
 
 -- | Run a checked request with a bounded collection of closed proper-type
 -- choices established for exact retained global providers.  Candidate
@@ -559,7 +563,8 @@ runExferenceQueryWithInstantiationCandidates
   -> ExferenceRequest
   -> Either Diagnostic [ExferenceResult]
 runExferenceQueryWithInstantiationCandidates session rawCandidates =
-  runExferenceQueryWithProviderEvidence session rawCandidates []
+  runExferenceQueryWithProviderEvidence session rawCandidates
+    $ InferredProviderInstantiationAssignments []
 
 -- | Run a checked request with complete ordered leading-binder assignments
 -- established for exact retained globals. Assignment vectors are checked in
@@ -571,16 +576,43 @@ runExferenceQueryWithInstantiationAssignments
   -> ExferenceRequest
   -> Either Diagnostic [ExferenceResult]
 runExferenceQueryWithInstantiationAssignments session rawAssignments =
-  runExferenceQueryWithProviderEvidence session [] rawAssignments
+  runExferenceQueryWithProviderEvidence session []
+    $ InferredProviderInstantiationAssignments rawAssignments
+
+-- | Run a checked request with complete assignments whose exact leading-binder
+-- ground kinds were retained by the caller. Supplied kinds are checked against
+-- every occurrence in the retained provider body, while a vacuous binder keeps
+-- the caller-established kind instead of taking the compatibility default of
+-- @Type@.
+runExferenceQueryWithKindedInstantiationAssignments
+  :: ExferenceSession
+  -> [KindedProviderInstantiationAssignment ExferenceTypeVariable]
+  -> ExferenceRequest
+  -> Either Diagnostic [ExferenceResult]
+runExferenceQueryWithKindedInstantiationAssignments session rawAssignments =
+  runExferenceQueryWithProviderEvidence session []
+    $ KindedProviderInstantiationAssignments rawAssignments
+
+data ProviderInstantiationAssignmentEvidence
+  = InferredProviderInstantiationAssignments
+      [ProviderInstantiationAssignment ExferenceTypeVariable]
+  | KindedProviderInstantiationAssignments
+      [KindedProviderInstantiationAssignment ExferenceTypeVariable]
+
+data ProviderInstantiationAssignmentInput
+  = InferredProviderInstantiationAssignmentInput
+      (ProviderInstantiationAssignment ExferenceTypeVariable)
+  | KindedProviderInstantiationAssignmentInput
+      (KindedProviderInstantiationAssignment ExferenceTypeVariable)
 
 runExferenceQueryWithProviderEvidence
   :: ExferenceSession
   -> [ProviderInstantiationCandidate ExferenceTypeVariable]
-  -> [ProviderInstantiationAssignment ExferenceTypeVariable]
+  -> ProviderInstantiationAssignmentEvidence
   -> ExferenceRequest
   -> Either Diagnostic [ExferenceResult]
 runExferenceQueryWithProviderEvidence
-    session rawCandidates rawAssignments request = do
+    session rawCandidates assignmentEvidence request = do
   let query = exferenceRequestQuery request
       target = requestTarget query
       requestDiagnostic = withExferenceRequestProvenance request
@@ -605,7 +637,7 @@ runExferenceQueryWithProviderEvidence
   providerCandidates <- prepareProviderInstantiationCandidates
     session rawCandidates
   providerAssignments <- prepareProviderInstantiationAssignments
-    session rawAssignments
+    session assignmentEvidence
   let sourceHints = retargetExferenceSourceTypeVariableHints
         elaboratedGoal checkedSourceHints
   -- The direct result boundary owns exact target exclusion and result naming,
@@ -678,30 +710,52 @@ prepareProviderInstantiationCandidates session rawCandidates
 
 prepareProviderInstantiationAssignments
   :: ExferenceSession
-  -> [ProviderInstantiationAssignment ExferenceTypeVariable]
+  -> ProviderInstantiationAssignmentEvidence
   -> Either Diagnostic (Map.Map Name [[HsType]])
-prepareProviderInstantiationAssignments session rawAssignments
+prepareProviderInstantiationAssignments session evidence
   | observed > maximumProviderInstantiationAssignments =
       Left $ shownErrorDiagnostic
         "DJEX_EXF_ASSIGNMENT_LIMIT"
         "too many Exference provider instantiation assignments"
         (maximumProviderInstantiationAssignments, observed)
   | otherwise = do
-      checked <- traverse prepareAssignment $
+      (_, _, retained) <- foldM prepareAssignment
+        (Map.empty, Map.empty, Map.empty) $
         zip [0 :: Int ..] rawAssignments
-      pure $ Map.map
-        (SharedCollection.distinctOn $ map SharedTypeAtom.alphaTypeKey)
-        $ List.foldl' retainAssignment Map.empty checked
+      pure retained
  where
+  rawAssignments = case evidence of
+    InferredProviderInstantiationAssignments assignments ->
+      map InferredProviderInstantiationAssignmentInput assignments
+    KindedProviderInstantiationAssignments assignments ->
+      map KindedProviderInstantiationAssignmentInput assignments
   observed = SharedCollection.observedListLength
     maximumProviderInstantiationAssignments rawAssignments
   searchEnvironment = Session.sessionSearchEnvironment session
 
-  prepareAssignment (assignmentIndex, assignment) = do
-    let provider = providerInstantiationAssignmentProvider assignment
-        rawArguments = providerInstantiationAssignmentArguments assignment
-        argumentCount = SharedCollection.observedListLength
-          maximumProviderInstantiationArguments rawArguments
+  prepareAssignment
+      (seenKinds, seenArguments, retained) (assignmentIndex, assignment) = do
+    let (provider, argumentCount, suppliedKinds, rawArguments) =
+          case assignment of
+          InferredProviderInstantiationAssignmentInput inferred ->
+            let arguments = providerInstantiationAssignmentArguments inferred
+            in
+            ( providerInstantiationAssignmentProvider inferred
+            , SharedCollection.observedListLength
+                maximumProviderInstantiationArguments arguments
+            , Nothing
+            , arguments
+            )
+          KindedProviderInstantiationAssignmentInput kinded ->
+            let arguments =
+                  kindedProviderInstantiationAssignmentArguments kinded
+            in
+            ( kindedProviderInstantiationAssignmentProvider kinded
+            , SharedCollection.observedListLength
+                maximumProviderInstantiationArguments arguments
+            , Just $ map fst arguments
+            , map snd arguments
+            )
         label = "provider instantiation assignment #" ++
           show assignmentIndex ++ " for " ++ renderCanonical provider
     if argumentCount == 0
@@ -721,7 +775,7 @@ prepareProviderInstantiationAssignments session rawAssignments
         "DJEX_EXF_ASSIGNMENT_PROVIDER"
         "Exference provider instantiation assignment names no retained polymorphic binding"
         (renderCanonical provider)
-      Just retained -> Right retained
+      Just retainedScheme -> Right retainedScheme
     let (binders, constraints, schemeBody) =
           SharedType.splitLeadingForalls scheme
     if length binders == argumentCount
@@ -736,19 +790,48 @@ prepareProviderInstantiationAssignments session rawAssignments
         "DJEX_EXF_ASSIGNMENT_CONTEXT"
         "Exference provider instantiation assignment targets a contextual scheme"
         (label, constraints)
-    inferredBinderKinds <- first
-      (\failure -> shownErrorDiagnostic
-        "DJEX_EXF_ASSIGNMENT_KIND"
-        "Exference could not infer provider binder kinds"
-        (label, failure))
-      $ SharedKindInference.inferSharedVariableKinds
-          kindAssumptions binders [schemeBody]
-    let binderKinds = map snd inferredBinderKinds
+    binderKinds <- case suppliedKinds of
+      Nothing -> do
+        inferredBinderKinds <- first
+          (\failure -> shownErrorDiagnostic
+            "DJEX_EXF_ASSIGNMENT_KIND"
+            "Exference could not infer provider binder kinds"
+            (label, failure))
+          $ SharedKindInference.inferSharedVariableKinds
+              kindAssumptions binders [schemeBody]
+        pure $ map snd inferredBinderKinds
+      Just supplied -> do
+        first
+          (\failure -> shownErrorDiagnostic
+            "DJEX_EXF_ASSIGNMENT_KIND"
+            "Exference rejected supplied provider binder kinds"
+            (label, failure))
+          $ SharedKindInference.checkTypesKinds kindAssumptions
+              $ (ProperTypeKind, schemeBody) : zip supplied
+                  (map SharedType.TypeVariable binders)
+        pure supplied
+    case Map.lookup provider seenKinds of
+      Just established
+        | established /= binderKinds -> Left $ shownErrorDiagnostic
+            "DJEX_EXF_ASSIGNMENT_KIND"
+            "Exference provider instantiation assignments disagree on binder kinds"
+            (label, established, binderKinds)
+      _ -> pure ()
     arguments <- traverse
       (prepareArgument label) $
         zip3 [0 :: Int ..] binderKinds rawArguments
     validateSpecializationKind label scheme arguments
-    pure (provider, arguments)
+    let key = map SharedTypeAtom.alphaTypeKey arguments
+        providerKeys = Map.findWithDefault Set.empty provider seenArguments
+        retainedKinds = Map.insert provider binderKinds seenKinds
+    if key `Set.member` providerKeys
+      then pure (retainedKinds, seenArguments, retained)
+      else pure
+        ( retainedKinds
+        , Map.insert provider (Set.insert key providerKeys) seenArguments
+        , Map.insertWith (\new old -> old ++ new)
+            provider [arguments] retained
+        )
 
   prepareArgument label (argumentIndex, binderKind, source) = do
     elaborated <- first (assignmentElaborationFailure label argumentIndex)
@@ -779,12 +862,12 @@ prepareProviderInstantiationAssignments session rawAssignments
         "invalid lowered Exference provider instantiation argument"
         (label, argumentIndex, lowered)
 
-  -- Every assignment argument has already been elaborated at the inferred
-  -- kind of its exact provider-binder position. Reuse the core's exact ordered
-  -- instantiation worker, then kind-check the complete substituted body against
-  -- the session inventory as an independent specialization guard. This checks
-  -- the whole scheme without reconstructing a Cartesian product or trusting
-  -- the first-order lowering.
+  -- Every assignment argument has already been elaborated at the inferred or
+  -- supplied kind of its exact provider-binder position. Reuse the core's
+  -- exact ordered instantiation worker, then kind-check the complete
+  -- substituted body against the session inventory as an independent
+  -- specialization guard. This checks the whole scheme without reconstructing
+  -- a Cartesian product or trusting the first-order lowering.
   validateSpecializationKind label scheme arguments = case
       CorePolytype.assignmentProviderInstantiations [arguments] scheme of
     [instantiation] -> first
@@ -801,10 +884,6 @@ prepareProviderInstantiationAssignments session rawAssignments
 
   kindAssumptions = inventoryKindAssumptions
     $ Session.exferenceSessionInventory session
-
-  retainAssignment assignments (provider, arguments) = Map.insertWith
-    (\new old -> old ++ new)
-    provider [arguments] assignments
 
 assignmentElaborationFailure
   :: String

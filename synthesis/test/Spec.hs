@@ -306,6 +306,29 @@ queryTests = testGroup "queries"
       maximumProviderInstantiationArguments @?= 4
       _ <- evaluate $ force assignment
       pure ()
+  , testCase "retain caller-supplied provider assignment kinds" $ do
+      let provider = right $ mkQualifiedIdentifier
+            (right $ mkModuleName "Fixture") "kindedProvider"
+          constructorKind = Kind.FunctionKind
+            Kind.ProperTypeKind Kind.ProperTypeKind
+          assignment = KindedProviderInstantiationAssignment
+            provider
+            [ (constructorKind, SharedType.TypeVariable "constructor")
+            , (Kind.ProperTypeKind, SharedType.TypeVariable "element")
+            ]
+      kindedProviderInstantiationAssignmentProvider assignment @?= provider
+      kindedProviderInstantiationAssignmentArguments assignment @?=
+        [ (constructorKind, SharedType.TypeVariable "constructor")
+        , (Kind.ProperTypeKind, SharedType.TypeVariable "element")
+        ]
+      fmap length assignment @?= KindedProviderInstantiationAssignment
+        provider
+        [ (constructorKind, SharedType.TypeVariable 11)
+        , (Kind.ProperTypeKind, SharedType.TypeVariable 7)
+        ]
+      toList assignment @?= ["constructor", "element"]
+      _ <- evaluate $ force assignment
+      pure ()
   , testCase "label every request type site uniformly" $
       map requestTypeSiteLabel [minBound .. maxBound] @?=
         ["goal", "context"]

@@ -1227,6 +1227,13 @@ testRankNTypeAtoms = do
         , abstractClosed higherKindArgumentName
         , valueDeclaration "mixedKindAmbiguousMonoToken" mixedKindProvider
         ]
+    vacuousHigherKindSession <- sealDjinnSessionFrom stableSession $
+        closedDeclarations ++
+        [ SharedDeclaration.AbstractTypeDeclaration () higherKindName $
+            SharedKind.FunctionKind closedKind closedKind
+        , valueDeclaration "vacuousHigherKindMonoToken" $
+            SharedType.ForallType ["constructor"] [] tokenType
+        ]
     sealedBoxSession <- sealDjinnSessionFrom stableSession $
         closedDeclarations ++ [boxDeclaration,
             valueDeclaration "sealedMonoBox" sealedBoxScheme]
@@ -1256,6 +1263,13 @@ testRankNTypeAtoms = do
                 , SharedQuery.providerInstantiationAssignmentArguments =
                     arguments
                 }
+        kindedProviderAssignment providerName arguments =
+            SharedQuery.KindedProviderInstantiationAssignment
+                { SharedQuery.kindedProviderInstantiationAssignmentProvider =
+                    sharedName providerName
+                , SharedQuery.kindedProviderInstantiationAssignmentArguments =
+                    arguments
+                }
         identityEvidence = providerChoice
             "ambiguousMonoToken" quantifiedIdentity
         identityAssignment = providerAssignment
@@ -1277,6 +1291,12 @@ testRankNTypeAtoms = do
             ambiguousTokenSession [] evidenceRequest
     assertEqual "the empty provider-assignment runner changed Djinn results"
         evidenceBaseline explicitEmptyAssignments
+    explicitEmptyKindedAssignments <- expectShownRight $
+        Djex.runDjinnQueryWithKindedInstantiationAssignments
+            ambiguousTokenSession [] evidenceRequest
+    assertEqual
+        "the empty kinded provider-assignment runner changed Djinn results"
+        evidenceBaseline explicitEmptyKindedAssignments
     evidenceBaselineRendered <- renderStableCandidates evidenceBaseline
     assertBool
         ("a quantified provider choice was invented without evidence: " ++
@@ -1536,17 +1556,40 @@ testRankNTypeAtoms = do
             assertEqual (description ++ " source provenance")
                 Nothing (SharedDiagnostic.diagnosticSource failure)
           Right result -> fail $ description ++ " was accepted: " ++ show result
+        expectKindedAssignmentFailure description session request supplied =
+            case Djex.runDjinnQueryWithKindedInstantiationAssignments
+                session supplied request of
+              Left failure -> do
+                assertEqual (description ++ " diagnostic code")
+                    (Just "DJEX_DJINN_ASSIGNMENT")
+                    (SharedDiagnostic.diagnosticCode failure)
+                assertEqual (description ++ " source provenance")
+                    Nothing (SharedDiagnostic.diagnosticSource failure)
+              Right result ->
+                fail $ description ++ " was accepted: " ++ show result
         cyclicAssignments =
             error "assignment element forced before outer bound rejection" :
                 cyclicAssignments
         cyclicArguments =
             error "assignment argument forced before inner bound rejection" :
                 cyclicArguments
+        cyclicKindedAssignments =
+            error "kinded assignment forced before outer bound rejection" :
+                cyclicKindedAssignments
+        cyclicKindedArguments =
+            error "kinded argument forced before inner bound rejection" :
+                cyclicKindedArguments
     expectAssignmentFailure "a cyclic provider assignment list"
         ambiguousTokenSession evidenceRequest cyclicAssignments
     expectAssignmentFailure "a cyclic provider argument vector"
         ambiguousTokenSession evidenceRequest
         [providerAssignment "ambiguousMonoToken" cyclicArguments]
+    expectKindedAssignmentFailure "a cyclic kinded provider assignment list"
+        ambiguousTokenSession evidenceRequest cyclicKindedAssignments
+    expectKindedAssignmentFailure "a cyclic kinded provider argument vector"
+        ambiguousTokenSession evidenceRequest
+        [kindedProviderAssignment "ambiguousMonoToken"
+            cyclicKindedArguments]
     expectAssignmentFailure "an empty provider argument vector"
         ambiguousTokenSession evidenceRequest
         [providerAssignment "ambiguousMonoToken" []]
@@ -1572,6 +1615,64 @@ testRankNTypeAtoms = do
         ambiguousTokenSession evidenceRequest
         [providerAssignment "ambiguousMonoToken"
             [SharedType.TypeConstructor SharedName.listName]]
+
+    -- A caller-retained ground kind can specialize a genuinely vacuous binder
+    -- without changing the compatibility runner's Type default.  Keep a
+    -- visible application in the result so acceptance cannot be confused with
+    -- an ignored assignment.
+    vacuousHigherKindTarget <- expectShownRight $
+        SharedName.mkIdentifier "instantiateVacuousHigherKindAssignment"
+    vacuousHigherKindRequest <- expectShownRight $ Djex.parseDjinnRequest
+        vacuousHigherKindSession
+        defaultQueryOptions
+            { optionAlternatives = True
+            , optionCutoff = 128
+            }
+        vacuousHigherKindTarget
+        "vacuous-higher-kind-provider-assignment.djinn"
+        "MonoToken"
+    let constructorKind =
+            SharedKind.FunctionKind closedKind closedKind
+        vacuousHigherKindAssignment = kindedProviderAssignment
+            "vacuousHigherKindMonoToken"
+            [(constructorKind, higherKindType)]
+        vacuousProperKindAssignment = kindedProviderAssignment
+            "vacuousHigherKindMonoToken"
+            [(closedKind, closedType)]
+    vacuousHigherKindResult <- expectShownRight $
+        Djex.runDjinnQueryWithKindedInstantiationAssignments
+            vacuousHigherKindSession
+            [vacuousHigherKindAssignment]
+            vacuousHigherKindRequest
+    vacuousHigherKindRendered <-
+        renderStableCandidates vacuousHigherKindResult
+    assertBool
+        ("a vacuous higher-kinded assignment lost its visible application: " ++
+            show vacuousHigherKindRendered)
+        $ any
+            ("vacuousHigherKindMonoToken @HigherKindConstructor" `isInfixOf`)
+            vacuousHigherKindRendered
+    expectAssignmentFailure
+        "the compatibility runner's vacuous Type default"
+        vacuousHigherKindSession vacuousHigherKindRequest
+        [providerAssignment "vacuousHigherKindMonoToken" [higherKindType]]
+    expectKindedAssignmentFailure
+        "a proper argument at a caller-supplied higher kind"
+        vacuousHigherKindSession vacuousHigherKindRequest
+        [kindedProviderAssignment "vacuousHigherKindMonoToken"
+            [(constructorKind, closedType)]]
+    _ <- expectShownRight $
+        Djex.runDjinnQueryWithKindedInstantiationAssignments
+            vacuousHigherKindSession
+            [vacuousProperKindAssignment]
+            vacuousHigherKindRequest
+    expectKindedAssignmentFailure
+        "conflicting kind vectors for one provider"
+        vacuousHigherKindSession vacuousHigherKindRequest
+        [ vacuousHigherKindAssignment
+        , vacuousProperKindAssignment
+        ]
+
     let higherKindGoal = SharedType.FunctionType
             (SharedType.TypeApplication
                 higherKindType higherKindArgumentType)
@@ -1587,6 +1688,17 @@ testRankNTypeAtoms = do
         higherKindTarget
         "higher-kind-provider-assignment.djinn"
         (SharedTypeRender.renderType id higherKindGoal)
+    expectKindedAssignmentFailure
+        "a supplied proper kind conflicting with the retained provider body"
+        mixedKindSession higherKindRequest
+        [kindedProviderAssignment "mixedKindAmbiguousMonoToken"
+            [ (closedKind,
+                error "argument forced before supplied-kind/body rejection")
+            , (closedKind,
+                error "argument forced before supplied-kind/body rejection")
+            , (closedKind,
+                error "argument forced before supplied-kind/body rejection")
+            ]]
     let higherKindAssignment = providerAssignment
             "mixedKindAmbiguousMonoToken"
             [higherKindType, higherKindArgumentType, closedType]

@@ -43,6 +43,7 @@ module Language.Haskell.Djex.Djinn
   , runDjinnQuery
   , runDjinnQueryWithInstantiationCandidates
   , runDjinnQueryWithInstantiationAssignments
+  , runDjinnQueryWithKindedInstantiationAssignments
   , renderDjinnCandidateExpression
   , renderDjinnCandidateDefinition
   ) where
@@ -98,7 +99,8 @@ import Language.Haskell.Synthesis.Generated
   )
 import Language.Haskell.Synthesis.Name (Name)
 import Language.Haskell.Synthesis.Query
-  ( ProviderInstantiationAssignment
+  ( KindedProviderInstantiationAssignment
+  , ProviderInstantiationAssignment
   , ProviderInstantiationCandidate
   , QueryEvidence (..)
   , QueryRequest (..)
@@ -197,11 +199,26 @@ runDjinnQueryWithInstantiationAssignments
 runDjinnQueryWithInstantiationAssignments session assignments =
   runDjinnQueryWithProviderEvidence session $ AssignmentEvidence assignments
 
+-- | Run one checked Djinn search with complete ordered assignments and the
+-- exact ground kind of every leading provider binder. The supplied kind vector
+-- is validated against the retained provider body, so it can refine a vacuous
+-- binder without weakening any inferred non-vacuous constraint.
+runDjinnQueryWithKindedInstantiationAssignments
+  :: DjinnSession
+  -> [KindedProviderInstantiationAssignment DjinnTypeVariable]
+  -> DjinnRequest
+  -> Either Diagnostic DjinnResult
+runDjinnQueryWithKindedInstantiationAssignments session assignments =
+  runDjinnQueryWithProviderEvidence session $
+    KindedAssignmentEvidence assignments
+
 data DjinnProviderEvidence
   = CandidateEvidence
       [ProviderInstantiationCandidate DjinnTypeVariable]
   | AssignmentEvidence
       [ProviderInstantiationAssignment DjinnTypeVariable]
+  | KindedAssignmentEvidence
+      [KindedProviderInstantiationAssignment DjinnTypeVariable]
 
 runDjinnQueryWithProviderEvidence
   :: DjinnSession
@@ -223,6 +240,14 @@ runDjinnQueryWithProviderEvidence session evidence request = do
             goal
         AssignmentEvidence assignments ->
           Core.inhabitSynthesisResultPreparedWithInstantiationAssignments
+            (requestOptions query)
+            (Session.sessionPreparedEnvironment session)
+            contexts
+            assignments
+            (requestTarget query)
+            goal
+        KindedAssignmentEvidence assignments ->
+          Core.inhabitSynthesisResultPreparedWithKindedInstantiationAssignments
             (requestOptions query)
             (Session.sessionPreparedEnvironment session)
             contexts

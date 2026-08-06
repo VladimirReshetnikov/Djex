@@ -1662,6 +1662,42 @@ stateStep allocators multiPM allowConstrs h
         , nodeLastStepBinding = Nothing
         }
 
+    -- A nested concrete product tree is just as syntax-directed as one pair.
+    -- Materialize every known nonempty boxed-tuple layer in a sibling branch,
+    -- leaving holes only at non-tuple leaves. The shallow branch above remains
+    -- available because it can still reuse an in-scope value or environment
+    -- binding for an inner product instead of constructing that subtree.
+    tupleTreeStep
+      :: [HsType]
+      -> StateT SearchNode SearchBranches ()
+    tupleTreeStep elements
+      | any isConcreteTuple elements = do
+          fields <- mapM buildField elements
+          modify $ \node -> node
+            { nodeExpression = fillExprHole var
+                (ExpTuple $ map fst fields)
+                (nodeExpression node)
+            , nodeGoals = nodeGoals node <> Seq.fromList
+                (mkGoals scopeId givenConstraints $ concatMap snd fields)
+            , nodeDepth = addScore (nodeDepth node)
+                $ heuristics_functionGoalTransform h
+            , nodeLastStepBinding = Nothing
+            }
+      | otherwise = mzero
+     where
+      isConcreteTuple (TypeTuple Boxed nested) = not $ null nested
+      isConcreteTuple _ = False
+
+      buildField
+        :: HsType
+        -> StateT SearchNode SearchBranches (Expression, [VarBinding])
+      buildField (TypeTuple Boxed nested) | not $ null nested = do
+        children <- mapM buildField nested
+        pure (ExpTuple $ map fst children, concatMap snd children)
+      buildField fieldType = do
+        hole <- builderAllocHole allocators
+        pure (ExpHole hole, [VarBinding hole fieldType])
+
     -- try to resolve the goal by looking at the parameters in scope, i.e.
     -- the parameters accumulated by building the expression so far.
     -- e.g. for (\x -> (_ :: Int)), the goal can be filled by `x` if
@@ -1754,6 +1790,36 @@ stateStep allocators multiPM allowConstrs h
               (unifyShared goalType instantiatedResult)
         OrdinaryProviderUse ->
           useProvider scheme provType [] dependencies exactUnification
+
+    -- Reuse an in-scope function as a whole before eta-expanding an arrow
+    -- goal. Scoped bindings are stored as a final result plus their parameter
+    -- spine, so the ordinary provider lane deliberately matches the result
+    -- and schedules those parameters as application goals. For an arrow goal,
+    -- however, that representation used to hide an exact function-valued
+    -- forwarding step and force a factorial search over equivalent eta-long
+    -- applications. Keep this lane exact: the shared same-namespace unifier
+    -- may refine flexible variables, while the independent checker still
+    -- validates the retained declaration annotation on every result.
+    byProvidedWhole :: StateT SearchNode SearchBranches ()
+    byProvidedWhole = do
+      provided <- lift . chooseBranches =<< gets
+        (scopeGetAllBindings scopeId . nodeProvidedScopes)
+      let
+        provId = varPVariable provided
+        dependencies = varPParameters provided
+        scheme = SharedType.functionType dependencies $ varPResult provided
+      case dependencies of
+        -- A scalar local with a flexible result was never split from an arrow;
+        -- leave its established instantiation behavior to 'byProvided'.
+        [] -> mzero
+        _ -> byGenericUnify
+          (Right (provId, scheme, []))
+          scheme
+          []
+          []
+          (heuristics_stepProvidedGood h)
+          (heuristics_stepProvidedBad h)
+          ((\substs -> (substs, substs)) <$> unifyShared goalType scheme)
 
     -- try to resolve the goal by looking at functions from the environment.
     byFunctionSimple :: StateT SearchNode SearchBranches ()
@@ -1938,7 +2004,7 @@ stateStep allocators multiPM allowConstrs h
         traverse_ (builderRecordVarUse . fst) applierVariable
 
   case goalType of
-    TypeArrow _ _ -> arrowStep goalType []
+    TypeArrow _ _ -> byProvidedWhole <|> arrowStep goalType []
     TypeForall is cs t | forallMode == OpenLeadingForalls ->
       forallStep is cs t
     TypeForall is cs t | forallMode == ContinueForallIntroduction ->
@@ -1946,7 +2012,8 @@ stateStep allocators multiPM allowConstrs h
     TypeForall is cs t | forallMode == TryForallIntroduction ->
       byProvided <|> byFunctionSimple <|> introducedForallStep is cs t
     TypeTuple Boxed elements | not $ null elements ->
-      byProvided <|> tupleStep elements <|> byFunctionSimple
+      byProvided <|> tupleTreeStep elements <|> tupleStep elements
+        <|> byFunctionSimple
     _ -> byProvided <|> byFunctionSimple
 
 

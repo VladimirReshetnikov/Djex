@@ -3918,27 +3918,78 @@ tests = testGroup "Exference"
           validateExferenceInput input { input_goalType = constrainedGoal }
             @?= Right ()
       , testCase
-          "bounded search checks four forwarded and four introduced schemes" $
+          "forwards a scoped arrow value before eta expansion" $ do
+          let reusable = TypeArrow (TypeConstant 0) (TypeConstant 0)
+              goal = TypeArrow reusable
+                $ TypeTuple Boxed [reusable, reusable]
+              input = identityInput
+                { input_goalType = goal
+                , input_envFuncs = []
+                , input_maxSteps = 5
+                }
+          (expression, residual, statistics) <- maybe
+            (fail "exact arrow forwarding missed the five-step bound") pure
+            $ findOneExpression input
+          residual @?= []
+          exference_steps statistics @?= 5
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+            goal [] expression @?= Right ()
+      , testCase
+          "materializes a nested concrete tuple tree in one step" $ do
+          let firstType = TypeConstant 0
+              secondType = TypeConstant 1
+              thirdType = TypeConstant 2
+              output = TypeTuple Boxed
+                [firstType, TypeTuple Boxed [secondType, thirdType]]
+              goal = foldr TypeArrow output
+                [firstType, secondType, thirdType]
+              input = identityInput
+                { input_goalType = goal
+                , input_envFuncs = []
+                , input_maxSteps = 6
+                }
+              stripLambdas remaining expression
+                | remaining <= 0 = expression
+                | ExpLambda _ _ body <- expression =
+                    stripLambdas (remaining - 1) body
+                | otherwise = expression
+          (expression, residual, statistics) <- maybe
+            (fail "nested structural tuple missed the six-step bound") pure
+            $ findOneExpression input
+          residual @?= []
+          exference_steps statistics @?= 6
+          case stripLambdas (3 :: Int) expression of
+            ExpTuple [_, ExpTuple [_, _]] -> pure ()
+            body -> fail $ "nested tuple search returned "
+              ++ showExpression body
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+            goal [] expression @?= Right ()
+      , testCase
+          "bounded search checks the live quartic Lean serialization" $
           do
-            let forallChain binders body =
-                  foldr (\binder -> TypeForall [binder] []) body binders
+            let -- Lean's universe atom is deliberately caller-owned in the
+                -- parser-neutral projection, so Exference closes it with the
+                -- other free variables at the query boundary.
+                typeUniverse = TypeVar 4
+                erasedForallChain body =
+                  foldr TypeArrow body $ replicate 5 typeUniverse
                 identity binder = TypeForall [binder] []
                   $ TypeArrow (TypeVar binder) (TypeVar binder)
                 nestedProducts = foldr1
                   (\left right -> TypeTuple Boxed [left, right])
                 inputs =
-                  [ forallChain [10 .. 14] $ TypeVar 0
-                  , forallChain [15 .. 19] $ TypeVar 1
-                  , forallChain [20 .. 24] $ TypeVar 2
-                  , forallChain [25 .. 29] $ TypeVar 3
+                  [ erasedForallChain $ TypeVar 0
+                  , erasedForallChain $ TypeVar 1
+                  , erasedForallChain $ TypeVar 2
+                  , erasedForallChain $ TypeVar 3
                   ]
                 output = nestedProducts
-                  ( [ forallChain [30 .. 34] $ TypeVar 0
-                    , forallChain [35 .. 39] $ TypeVar 1
-                    , forallChain [40 .. 44] $ TypeVar 2
-                    , forallChain [45 .. 49] $ TypeVar 3
+                  ( [ erasedForallChain $ TypeVar 0
+                    , erasedForallChain $ TypeVar 1
+                    , erasedForallChain $ TypeVar 2
+                    , erasedForallChain $ TypeVar 3
                     ]
-                    ++ map identity [50 .. 53]
+                    ++ map identity [10 .. 13]
                   )
                 goal = TypeForall [0, 1, 2, 3] []
                   $ foldr TypeArrow output inputs
@@ -3959,7 +4010,7 @@ tests = testGroup "Exference"
             assertBool
               ("direct quartic candidate took "
                 ++ show (exference_steps statistics) ++ " steps")
-              (exference_steps statistics <= 512)
+              (exference_steps statistics <= 32)
             checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
               goal [] expression @?= Right ()
       , testCase

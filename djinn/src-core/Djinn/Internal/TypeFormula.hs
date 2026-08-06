@@ -30,6 +30,8 @@ module Djinn.Internal.TypeFormula
     , tripleOpenFormulaPlans
     , quadrupleOpaqueFormulaPlans
     , quadrupleOpenFormulaPlans
+    , quintupleOpaqueFormulaPlans
+    , quintupleOpenFormulaPlans
     , polarizedFormulaPlanSkolems
     , prepareFormulaCompiler
     , prepareFormulaCompilerWithRecursiveData
@@ -191,9 +193,10 @@ data FormulaTranslation = FormulaTranslation
 -- | One nonempty, deliberately bounded family of coherent translations.  The
 -- primary plan opens every supported positive forall.  The historical exact
 -- plan opens none; the first two local frontiers differ from either extreme at
--- one independently reachable occurrence.  Quadratic, cubic, and quartic tail
--- frontiers make the corresponding choice at unordered pairs, triples, and
--- quadruples of sites.
+-- one independently reachable occurrence.  Quadratic through quintic tail
+-- frontiers make the corresponding choice at unordered pairs through
+-- quintuples of sites. The quintic categories have a fixed per-orientation
+-- cap which still retains every selection needed through eleven sites.
 -- Keeping the categories explicit lets goal search and prepared-premise
 -- caching preserve their established order without reconstructing it from an
 -- unlabelled list.
@@ -208,6 +211,8 @@ data PolarizedFormulaPlans = PolarizedFormulaPlans
     , tripleOpenFormulaPlans :: [FormulaTranslation]
     , quadrupleOpaqueFormulaPlans :: [FormulaTranslation]
     , quadrupleOpenFormulaPlans :: [FormulaTranslation]
+    , quintupleOpaqueFormulaPlans :: [FormulaTranslation]
+    , quintupleOpenFormulaPlans :: [FormulaTranslation]
     }
     deriving (Eq, Show)
 
@@ -223,7 +228,9 @@ polarizedFormulaPlanSkolems plans = SharedCollection.distinctOn id $
             pairOpaqueFormulaPlans plans ++ pairOpenFormulaPlans plans ++
             tripleOpaqueFormulaPlans plans ++ tripleOpenFormulaPlans plans ++
             quadrupleOpaqueFormulaPlans plans ++
-            quadrupleOpenFormulaPlans plans)
+            quadrupleOpenFormulaPlans plans ++
+            quintupleOpaqueFormulaPlans plans ++
+            quintupleOpenFormulaPlans plans)
 
 -- A definition origin plus the reverse source path is stable across alias
 -- expansion, duplicated arguments, datatype fields, and reopened forall
@@ -358,10 +365,12 @@ compileFormula view prepared source = do
 -- Besides the two historical extremes, retain both singleton frontiers: one
 -- opaque occurrence among opened siblings, and one opened occurrence (plus
 -- any enclosing forall chain needed to reach it) among opaque siblings.
--- Pairwise, triple, and quadruple tail frontiers make the same choices at
--- unordered pairs, triples, and quadruples. This is exhaustive for nine
--- independent sites without constructing a power set; its additional plan
--- count is quartic rather than exponential.
+-- Pairwise through quintic tail frontiers make the same choices at unordered
+-- selections of two through five sites. The fifth-order layer is capped at
+-- 512 plans per orientation, enough to retain all 462 selections at eleven
+-- sites. This is exhaustive for eleven independent sites without constructing
+-- a power set, while larger inputs cannot make the new tail grow without
+-- bound.
 -- The numeric namespace must be distinct for independently compiled goals and
 -- premises so their locally introduced skolems cannot accidentally meet.
 compilePolarizedFormulaPlans
@@ -419,6 +428,16 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
                 quadrupleMembers)
             siteQuadruples
         else Right []
+    let siteQuintuples = boundedQuintuples sites
+    quintupleOpaque <- if atLeast 10 sites then mapM
+            (compileSelection expanded . Set.fromList . quintupleMembers)
+            siteQuintuples
+        else Right []
+    quintupleOpen <- if atLeast 11 sites then mapM
+            (compileSelection expanded . opaqueExceptTargets allSites .
+                quintupleMembers)
+            siteQuintuples
+        else Right []
     return PolarizedFormulaPlans
         { primaryFormulaPlan = primary
         , exactOpaqueFormulaPlan = exact
@@ -430,6 +449,8 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
         , tripleOpenFormulaPlans = tripleOpen
         , quadrupleOpaqueFormulaPlans = quadrupleOpaque
         , quadrupleOpenFormulaPlans = quadrupleOpen
+        , quintupleOpaqueFormulaPlans = quintupleOpaque
+        , quintupleOpenFormulaPlans = quintupleOpen
         }
   where
     compileSelection expanded opaqueSites = lowerExpansionType
@@ -450,6 +471,10 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
     quadrupleMembers (firstSite, secondSite, thirdSite, fourthSite) =
         [firstSite, secondSite, thirdSite, fourthSite]
 
+    quintupleMembers
+            (firstSite, secondSite, thirdSite, fourthSite, fifthSite) =
+        [firstSite, secondSite, thirdSite, fourthSite, fifthSite]
+
     unorderedPairs [] = []
     unorderedPairs (firstSite : remaining) =
         map ((,) firstSite) remaining ++ unorderedPairs remaining
@@ -466,12 +491,43 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
         | (secondSite, thirdSite, fourthSite) <- unorderedTriples remaining
         ] ++ unorderedQuadruples remaining
 
+    unorderedQuintuples [] = []
+    unorderedQuintuples (firstSite : remaining) =
+        [ (firstSite, secondSite, thirdSite, fourthSite, fifthSite)
+        | (secondSite, thirdSite, fourthSite, fifthSite) <-
+            unorderedQuadruples remaining
+        ] ++ unorderedQuintuples remaining
+
+    -- The complete eleven-site layer has 462 selections. Alternate the two
+    -- source edges so a bounded suffix does not systematically exclude late
+    -- sites, then stop before compiling more than a fixed number of views.
+    boundedQuintuples values = take maxQuintuplePlansPerFrontier $
+        SharedCollection.distinctOn
+            (Set.fromList . quintupleMembers)
+            (roundRobin
+                [ unorderedQuintuples values
+                , unorderedQuintuples $ reverse values
+                ])
+
+    roundRobin streams = case
+            [ (value, remaining)
+            | value : remaining <- streams
+            ] of
+        [] -> []
+        active -> map fst active ++ roundRobin (map snd active)
+
     atLeast :: Int -> [element] -> Bool
     atLeast count = go count
       where
         go remaining _ | remaining <= 0 = True
         go _ [] = False
         go remaining (_ : rest) = go (remaining - 1) rest
+
+-- C(11, 5) = 462, so this cap preserves both complete quintic orientations
+-- through eleven independent sites while bounding their incremental cost on
+-- every larger input.
+maxQuintuplePlansPerFrontier :: Int
+maxQuintuplePlansPerFrontier = 512
 
 data ForallLowering
     = OpaqueForalls

@@ -955,7 +955,9 @@ sealPreparedEnvironment expansion = do
             map translatedFormula (tripleOpaqueFormulaPlans plans) ++
             map translatedFormula (tripleOpenFormulaPlans plans) ++
             map translatedFormula (quadrupleOpaqueFormulaPlans plans) ++
-            map translatedFormula (quadrupleOpenFormulaPlans plans)
+            map translatedFormula (quadrupleOpenFormulaPlans plans) ++
+            map translatedFormula (quintupleOpaqueFormulaPlans plans) ++
+            map translatedFormula (quintupleOpenFormulaPlans plans)
         ]
     primaryPremise variants = case variants of
         primary : _ -> [primary]
@@ -1217,7 +1219,7 @@ preparedEnvironmentNominalSynthesisFormulaTranslator
 
 -- | Translate a checked positive goal into one nonempty, categorized plan
 -- family.  Consumers retain the historical primary/exact/singleton prefix and
--- append the pairwise and triple polynomial tails without guessing category
+-- append the pairwise through bounded-quintic tails without guessing category
 -- boundaries in a flat list.
 preparedEnvironmentPolarizedSynthesisFormulaPlans
     :: PreparedEnvironment

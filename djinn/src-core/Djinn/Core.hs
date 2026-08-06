@@ -117,6 +117,8 @@ import Djinn.Internal.TypeFormula
     , tripleOpenFormulaPlans
     , quadrupleOpaqueFormulaPlans
     , quadrupleOpenFormulaPlans
+    , quintupleOpaqueFormulaPlans
+    , quintupleOpenFormulaPlans
     , singleOpaqueFormulaPlans
     , singleOpenFormulaPlans
     , translatedFormula
@@ -1374,7 +1376,11 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
                 map translatedFormula
                     (quadrupleOpaqueFormulaPlans formulaPlans) ++
                 map translatedFormula
-                    (quadrupleOpenFormulaPlans formulaPlans)
+                    (quadrupleOpenFormulaPlans formulaPlans) ++
+                map translatedFormula
+                    (quintupleOpaqueFormulaPlans formulaPlans) ++
+                map translatedFormula
+                    (quintupleOpenFormulaPlans formulaPlans)
         rawPlans =
             (translatedFormula primary, primarySound) :
             [ (formula, False)
@@ -1876,12 +1882,14 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         map translatedFormula (tripleOpaqueFormulaPlans plans) ++
         map translatedFormula (tripleOpenFormulaPlans plans) ++
         map translatedFormula (quadrupleOpaqueFormulaPlans plans) ++
-        map translatedFormula (quadrupleOpenFormulaPlans plans)
+        map translatedFormula (quadrupleOpenFormulaPlans plans) ++
+        map translatedFormula (quintupleOpaqueFormulaPlans plans) ++
+        map translatedFormula (quintupleOpenFormulaPlans plans)
 
 -- Goal plans retain their historical linear prefix: the fully opened
 -- translation, the exact opaque fallback, one independently opaque positive
 -- forall at a time, and one independently opened branch among opaque siblings.
--- Pairwise, triple, and quadruple choices form deterministic polynomial tails.
+-- Pairwise through quintic choices form deterministic bounded tails.
 -- Global premises expose the same sound views simultaneously under
 -- distinct internal proof identities, so one term may use different views at
 -- different occurrences of a reusable source function. Every proof remains

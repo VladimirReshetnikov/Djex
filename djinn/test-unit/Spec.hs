@@ -2418,12 +2418,11 @@ testRankNTypeAtoms = do
         ++ "(forall f. f -> f), (forall g. g -> g), "
         ++ "(forall h. h -> h))))"
 
-    -- Ten independent sites expose the next omitted central layer. Five exact
-    -- transports plus five structural identities need a flat 5/5 selection,
-    -- so bounded search must remain inconclusive rather than claim a
-    -- refutation.
-    quinticOpacityGap <- runStableQuery stableSession
-        "tenSiteCentralOpacityRankNGap"
+    -- The bounded quintic tail closes the ten-site central layer. Five exact
+    -- transports beside five structural identities specifically require a
+    -- flat 5/5 selection. The final transport is separated from its first
+    -- four siblings so this is not merely the first source-order quintuple.
+    runFirstStableIdentity stableSession "tenSiteCentralOpacityRankNQuintic"
         $ "(forall a b c d e. (a, b, c, d, e)) -> "
         ++ "(forall a b c d e. (a, b, c, d, e) -> q) -> "
         ++ "(forall a b c d e. (a, b, c, d, e) -> r) -> "
@@ -2433,15 +2432,58 @@ testRankNTypeAtoms = do
         ++ "(forall v w x y u. (v, w, x, y, u) -> q), "
         ++ "(forall v w x y u. (v, w, x, y, u) -> r), "
         ++ "(forall v w x y u. (v, w, x, y, u) -> z), "
-        ++ "(forall v w x y u. (v, w, x, y, u) -> m), "
         ++ "(forall e. e -> e), (forall f. f -> f), "
         ++ "(forall g. g -> g), (forall h. h -> h), "
+        ++ "(forall i. i -> i), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> m))"
+
+    -- At eleven independent sites the dual quintic layer is separately
+    -- necessary: six schemes remain exact while five separated identity sites
+    -- open. Together with the earlier layers this covers every subset through
+    -- eleven sites.
+    runFirstStableIdentity stableSession "elevenSiteQuintupleOpenRankN"
+        $ "(forall a b c d e. (a, b, c, d, e)) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> q) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> r) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> z) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> m) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> n) -> "
+        ++ "((forall e. e -> e), (forall f. f -> f), "
+        ++ "(forall g. g -> g), (forall h. h -> h), "
+        ++ "(forall v w x y u. (v, w, x, y, u)), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> q), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> r), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> z), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> m), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> n), "
         ++ "(forall i. i -> i))"
-    assertEqual "the quartic frontier unexpectedly covered a flat 5/5 subset"
+
+    -- Twelve independent sites expose the next omitted balanced layer. Six
+    -- exact transports plus six structural identities need a 6/6 selection,
+    -- so exhausting the bounded family stays inconclusive rather than
+    -- manufacturing a refutation.
+    sexticOpacityGap <- runStableQueryWith firstCandidateOptions stableSession
+        "twelveSiteCentralOpacityRankNGap"
+        $ "(forall a b c d e. (a, b, c, d, e)) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> q) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> r) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> z) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> m) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> n) -> "
+        ++ "((forall v w x y u. (v, w, x, y, u)), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> q), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> r), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> z), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> m), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> n), "
+        ++ "(forall e. e -> e), (forall f. f -> f), "
+        ++ "(forall g. g -> g), (forall h. h -> h), "
+        ++ "(forall i. i -> i), (forall j. j -> j))"
+    assertEqual "the quintic frontier unexpectedly covered a flat 6/6 subset"
         [] $ SharedSearch.batchCandidates
-            $ SharedQuery.resultSearch quinticOpacityGap
-    assertEqual "a bounded quintic-subset gap was falsely refuted"
-        SharedQuery.NoEvidence $ SharedQuery.resultEvidence quinticOpacityGap
+            $ SharedQuery.resultSearch sexticOpacityGap
+    assertEqual "a bounded sextic-subset gap was falsely refuted"
+        SharedQuery.NoEvidence $ SharedQuery.resultEvidence sexticOpacityGap
 
     -- Prepared global premises cache the same pairwise views as a goal.  The
     -- only route to the abstract result is to call this loaded consumer with
@@ -2528,6 +2570,40 @@ testRankNTypeAtoms = do
     assertBool "the quartic prepared premise was not used"
         $ any ("consumeQuartic" `isInfixOf`) quarticClauses
 
+    -- The fifth-order cached views remain available to reusable functions.
+    -- Five exact schemes and five introduced identities make this consumer
+    -- unreachable through any earlier premise variant.
+    let wideConsumerM =
+            "(forall s t u v w. (s, t, u, v, w) -> QuinticPremiseM)"
+        quinticArgument = "(" ++ wideValue ++ ", " ++ wideConsumer ++ ", "
+            ++ wideConsumerR ++ ", " ++ wideConsumerZ ++ ", "
+            ++ "(forall e. e -> e), "
+            ++ "(forall f. f -> f), (forall g. g -> g), "
+            ++ "(forall h. h -> h), (forall i. i -> i), "
+            ++ wideConsumerM ++ ")"
+    quinticConsumer <- expectRight $ parseHType
+        $ quinticArgument ++ " -> QuinticPremiseResult"
+    quinticGoal <- expectRight $ parseHType
+        $ wideValue ++ " -> " ++ wideConsumer ++ " -> " ++ wideConsumerR
+        ++ " -> " ++ wideConsumerZ ++ " -> " ++ wideConsumerM
+        ++ " -> QuinticPremiseResult"
+    quinticEnvironment <- expectRight $ do
+        withQ <- declare (AbstractType "PairwisePremiseQ" KStar)
+            standardEnvironment
+        withR <- declare (AbstractType "TriplePremiseR" KStar) withQ
+        withZ <- declare (AbstractType "QuarticPremiseZ" KStar) withR
+        withM <- declare (AbstractType "QuinticPremiseM" KStar) withZ
+        withResult <- declare
+            (AbstractType "QuinticPremiseResult" KStar) withM
+        declare (Function "consumeQuintic" quinticConsumer) withResult
+    quinticReport <- expectRight $ inhabit firstCandidateOptions
+        quinticEnvironment [] "useQuinticPreparedPremise" quinticGoal
+    quinticClauses <- case reportOutcome quinticReport of
+        Realized clauses -> pure clauses
+        outcome -> fail $ "quintic prepared premise failed: " ++ show outcome
+    assertBool "the quintic prepared premise was not used"
+        $ any ("consumeQuintic" `isInfixOf`) quinticClauses
+
     -- Goal and premise translation are separate skolem scopes. Reusing the
     -- same internal proposition for both would admit the ill-typed proof
     -- @\_ x -> consumePoly x@.
@@ -2601,16 +2677,28 @@ testRankNTypeAtoms = do
             $ not $ null clauses
         outcome -> fail $ description ++ " was not realized: " ++ show outcome
 
-    runStableIdentity session targetSpelling source = do
-        result <- runStableQuery session targetSpelling source
+    firstCandidateOptions = defaultQueryOptions
+        { optionAlternatives = False
+        , optionSorted = False
+        , optionCutoff = 1
+        }
+
+    runStableIdentity = runStableIdentityWith defaultQueryOptions
+
+    runFirstStableIdentity = runStableIdentityWith firstCandidateOptions
+
+    runStableIdentityWith options session targetSpelling source = do
+        result <- runStableQueryWith options session targetSpelling source
         assertBool (targetSpelling ++ " produced no candidate")
             $ not $ null $ SharedSearch.batchCandidates
             $ SharedQuery.resultSearch result
 
-    runStableQuery session targetSpelling source = do
+    runStableQuery = runStableQueryWith defaultQueryOptions
+
+    runStableQueryWith options session targetSpelling source = do
         target <- expectShownRight $ SharedName.mkIdentifier targetSpelling
         request <- expectShownRight $ Djex.parseDjinnRequest session
-            defaultQueryOptions target (targetSpelling ++ ".djinn") source
+            options target (targetSpelling ++ ".djinn") source
         expectShownRight $ Djex.runDjinnQuery session request
 
     renderStableCandidates result = mapM

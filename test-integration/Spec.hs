@@ -2500,6 +2500,81 @@ tests = testGroup "Djex facade"
             ++ output ++ "\nstderr:\n" ++ errors
             ++ "\nDjinn generated:\n" ++ djinnGenerated)
           ExitSuccess exitCode
+  , testCase "compile the quintic rank-N frontier through the Djinn facade" $ do
+      let source =
+            "(forall a b c d e. q) -> "
+            ++ "(forall a b c d e. r) -> "
+            ++ "(forall a b c d e. z) -> "
+            ++ "(forall a b c d e. m) -> "
+            ++ "(forall a b c d e. n) -> "
+            ++ "((forall v w x y u. q), "
+            ++ "(forall v w x y u. r), "
+            ++ "(forall v w x y u. z), "
+            ++ "(forall v w x y u. m), "
+            ++ "(forall e. e -> e), (forall f. f -> f), "
+            ++ "(forall g. g -> g), (forall h. h -> h), "
+            ++ "(forall i. i -> i), (forall v w x y u. n))"
+          signature target = unlines
+            [ target ++ " :: forall q r z m n."
+            , "  (forall a b c d e. q) ->"
+            , "  (forall a b c d e. r) ->"
+            , "  (forall a b c d e. z) ->"
+            , "  (forall a b c d e. m) ->"
+            , "  (forall a b c d e. n) ->"
+            , "  ( (forall v w x y u. q)"
+            , "  , (forall v w x y u. r)"
+            , "  , (forall v w x y u. z)"
+            , "  , (forall v w x y u. m)"
+            , "  , (forall e. e -> e)"
+            , "  , (forall f. f -> f)"
+            , "  , (forall g. g -> g)"
+            , "  , (forall h. h -> h)"
+            , "  , (forall i. i -> i)"
+            , "  , (forall v w x y u. n)"
+            , "  )"
+            ]
+
+      djinnSession <- sealDjinnEnvironment standardEnvironment
+      djinnTarget <- expectRight $ mkIdentifier "quinticDjinn"
+      djinnGoal <- expectRight $ parseHType source
+      djinnRequest <- sharedDjinnRequest
+        djinnTarget [] defaultQueryOptions
+          { optionAlternatives = False
+          , optionSorted = False
+          , optionCutoff = 1
+          } djinnGoal
+      djinnResult <- expectRight $ runDjinnQuery djinnSession djinnRequest
+      resultEvidence djinnResult @?= ValidatedCandidates
+      djinnCandidate <- case batchCandidates $ resultSearch djinnResult of
+        candidate : _ -> pure candidate
+        [] -> fail "Djinn returned quintic candidate evidence without a term"
+      candidateResidualConstraints djinnCandidate @?= []
+      djinnGenerated <- expectRight $
+        renderDjinnCandidateDefinition Unqualified djinnCandidate
+
+      let fixture = unlines
+            [ "module QuinticRankNFixture where"
+            , ""
+            , signature "quinticDjinn"
+            , djinnGenerated
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XHaskell2010"
+          , "-XAllowAmbiguousTypes"
+          , "-XImpredicativeTypes"
+          , "-XRankNTypes"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected the public quintic rank-N candidate\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors
+            ++ "\nDjinn generated:\n" ++ djinnGenerated)
+          ExitSuccess exitCode
   , testCase
       "compile nested quartic rank-N values through both Exference adapters" $
       do

@@ -311,26 +311,28 @@ while unexposed quantified atoms remain opaque; finite identifier or
 search-budget exhaustion is an inconclusive truncation. In particular,
 Djinn keeps constrained hypothesis occurrences and chains beyond four binders
 opaque; if the bounded approximation finds no term, the result is inconclusive
-rather than a proof of uninhabitability. Its plan family is deliberately
-quartic
-rather than exponential. The historical prefix is fully opened,
+rather than a proof of uninhabitability. Its plan family retains a quartic
+historical prefix and adds a capped quintic tail rather than an unbounded
+exponential search. The historical prefix is fully opened,
 exactly opaque, one plan per positive occurrence retained opaquely while the
 others open, and the dual plans opening one occurrence while unrelated
 siblings stay opaque. A deterministic tail makes the same opaque/open choices
-for each unordered pair, triple, and quadruple. Opening nested occurrences
-includes the union of their enclosing forall chains. A single proof can
-therefore mix exact transport with structural introduction at sibling
-occurrences; the family
-covers every combination of nine independent sites without enumerating a
-power set.
+for each unordered pair, triple, quadruple, and bounded quintuple. The
+quintuple-opaque layer begins at ten sites and its dual open layer at eleven;
+each alternates stable selections from both source-order edges and retains at
+most 512. Opening nested occurrences includes the union of their enclosing
+forall chains. A single proof can therefore mix exact transport with structural
+introduction at sibling occurrences. All ten- and eleven-site selections fit
+under the cap, so the family covers every combination through eleven
+independent sites without a general power-set search.
 The full historical structural no-axiom prefix runs before the focused nominal
 family. Every nominal formula is tried plainly and, when an instantiation is
 available, again with its separately compiled nominal axioms. Those attempts
 are positive-only and share the one query-wide cutoff and fuel with structural
 search: they may add independently checked candidates, but their failure never
 supports a proof of uninhabitability. The structural base family still omits
-central subsets from ten sites onward,
-such as exactly five open and five opaque sites among ten, though
+central subsets from twelve sites onward, such as exactly six open and six
+opaque sites among twelve, though
 instantiable hypotheses often cover such middle subsets through bounded axiom
 plans. Historical structural instantiation completes before the new
 loaded-scheme structural and optional nominal tails. Those tails retain exact

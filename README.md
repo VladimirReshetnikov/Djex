@@ -91,9 +91,12 @@ are recorded in the
 Djinn's complementary nominal view of reachable parameterized datatypes is
 recorded in the
 [2026-08-01 nominal parametric-data transport report](docs/reports/2026-08-01-nominal-parametric-data-transport.md).
-Djinn's quartic extension of its bounded rank-N plan family is recorded in the
-[2026-08-06 quartic rank-N frontiers report](docs/reports/2026-08-06-quartic-rank-n-frontiers.md),
+Djinn's capped quintic extension of its bounded rank-N plan family is recorded
+in the
+[2026-08-06 quintic rank-N frontiers report](docs/reports/2026-08-06-quintic-rank-n-frontiers.md),
 following the
+[2026-08-06 quartic rank-N frontiers report](docs/reports/2026-08-06-quartic-rank-n-frontiers.md),
+the
 [2026-08-01 triple rank-N frontiers report](docs/reports/2026-08-01-triple-rank-n-frontiers.md)
 and the
 [2026-07-31 pairwise rank-N frontiers report](docs/reports/2026-07-31-pairwise-rank-n-frontiers.md).
@@ -410,20 +413,24 @@ refutation. Exference still does not perform non-exact subsumption between
 contextual schemes; quantified types outside an exposed goal/provider boundary
 remain opaque. Finite identifier or search-budget exhaustion is truncation, not
 negative evidence.
-Djinn searches a quartically bounded family. Its historical prefix remains
-the fully opened polarized plan, the exact-opaque plan, and the two singleton
-frontiers: one positive `forall` stays opaque while its siblings open, or one
-occurrence opens while unrelated siblings remain opaque. A deterministic tail
-then makes the same choices for each unordered pair, triple, and quadruple of
-sites.
+Djinn searches a quartic historical family followed by a capped quintic tail.
+Its prefix remains the fully opened polarized plan, the exact-opaque plan, and
+the two singleton frontiers: one positive `forall` stays opaque while its
+siblings open, or one occurrence opens while unrelated siblings remain opaque.
+A deterministic tail then makes the same choices for each unordered pair,
+triple, quadruple, and bounded quintuple of sites. Quintuple-opaque plans begin
+at ten sites and quintuple-open plans begin at eleven. Each orientation retains
+at most 512 selections, alternated stably from both source-order edges, so the
+new layer contributes at most 1,024 formula views on larger inputs.
 Opening nested occurrences also opens the union of their enclosing chains.
 Loaded functions expose those sound views together, so a reusable premise can
-be consumed at different views in one proof. The family is exhaustive for
-nine independent sites without enumerating the power set; for ten independent
-sites, a proof requiring exactly five open and five opaque
-occurrences may remain inconclusive. After that complete structural no-axiom
-prefix, bounded instantiation plans cover many omitted middle subsets, but
-chains beyond four binders, constrained chains, and candidates outside the
+be consumed at different views in one proof. All 252 five-site selections at
+ten sites and all 462 at eleven fit below the cap, making the family exhaustive
+for eleven independent sites without a general power-set search. Twelve sites
+expose the next central boundary: a proof requiring exactly six open and six
+opaque occurrences may remain inconclusive. After that complete structural
+no-axiom prefix, bounded instantiation plans cover many omitted middle subsets,
+but chains beyond four binders, constrained chains, and candidates outside the
 finite query/value-signature vocabulary stay out of reach. Each structural or
 nominal instantiation family is capped per scheme and per family. Four-binder
 query-local tuple selection fairly mixes source-order,

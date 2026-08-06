@@ -1,5 +1,11 @@
 # Quartic rank-N frontiers
 
+> Historical Djinn boundary: the
+> [bounded quintic successor](2026-08-06-quintic-rank-n-frontiers.md) closes the
+> ten-site five-open/five-opaque gap and extends complete structural coverage
+> through eleven independent sites. The Exference and live Leant findings in
+> this report remain current.
+
 Date: 2026-08-06
 
 ## Outcome

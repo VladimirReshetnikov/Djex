@@ -540,15 +540,18 @@ preserve it. The context contributes no LJT premises. Outer applications
 containing an atom, such as
 `[(forall result. result -> result -> result)]`, retain their structure and
 compare alpha-equivalently without exposing the quantified body.
-The checked worker bounds composition with singleton, pairwise, triple, and
-quadruple occurrence-local frontiers: up to four sites may stay opaque while
-their siblings open, or up to four sites may open while unrelated siblings
-stay opaque. Nested selected sites bring along the union of their required
-enclosing forall chains. Together with the fully opened and exact opaque plans,
-this covers every combination of nine independent sites in quartic rather than
-exponential space. The historical fully-open, exact-opaque, and singleton
-prefix retains its order before the deterministic pairwise, triple, and
-quadruple tail.
+The checked worker bounds composition with singleton, pairwise, triple,
+quadruple, and capped quintuple occurrence-local frontiers. Quintuple-opaque
+plans begin at ten sites; their dual quintuple-open plans begin at eleven, where
+they no longer duplicate the opaque layer. Nested selected sites bring along
+the union of their required enclosing forall chains. The quintic enumerator
+alternates stable selections from both source-order edges and retains at most
+512 per orientation. All 252 selections at ten sites and all 462 at eleven fit
+under that cap, so together with the fully opened and exact opaque plans the
+family covers every combination through eleven independent sites without a
+general exponential search. The historical fully-open, exact-opaque, and
+singleton prefix retains its order before the deterministic pairwise through
+bounded-quintic tail.
 
 Datatype declarations still compile structurally for that historical family.
 At query time, a backward slice rooted in the elaborated goal decides whether
@@ -934,10 +937,13 @@ and the
   the historical exact-opaque view, one plan retaining each positive forall
   opaquely while its siblings open, the dual plans opening one occurrence
   while unrelated siblings stay opaque, and the corresponding unordered-pair,
-  unordered-triple, and unordered-quadruple frontiers. The structural no-axiom
-  family is exhaustive for nine independent sites and grows quartically; it
-  does not enumerate central subsets such as five open and five opaque sites
-  among ten.
+  unordered-triple, unordered-quadruple, and bounded unordered-quintuple
+  frontiers. Quintuple-opaque plans start at ten sites and quintuple-open plans
+  at eleven. Each orientation alternates source-edge selections and retains at
+  most 512 views, covering every combination through eleven independent sites
+  while bounding the fifth-order increment to 1,024 views on larger inputs.
+  The next central omission is a twelve-site selection with exactly six open
+  and six opaque sites.
   Reusable loaded functions expose all of those sound views in one proof
   environment.
 

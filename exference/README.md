@@ -175,9 +175,22 @@ Generated terms likewise use the shared expression tree. The historical
 `ExpLetMatch`, `ExpLet`, and `ExpCaseMatch` views remain available, and
 `ExpTuple` exposes the shared structural boxed-tuple form. A saturated boxed
 tuple goal is introduced directly, like a lambda, so it does not require or
-record an ordinary tuple-constructor binding. Excluding or rerating `(,)`
-therefore affects its binding and partial-application paths, not structural
-introduction of an already fixed pair goal.
+record an ordinary tuple-constructor binding. When an independently scheduled
+goal contains another nonempty boxed tuple, an eager structural branch can
+materialize the complete known tuple tree at once and schedule only its
+non-tuple leaves. The original one-layer branch also remains available and can
+continue recursively, because it may reuse a scoped or environment value for
+an inner product at any depth instead of constructing that product.
+
+Each search goal carries internal `TupleGoalMode` provenance to keep those two
+lanes bounded. Fields created by the shallow lane remain on that lane through
+arrows, nested forall introduction, partial applications, and pattern-match
+continuations; independent provider-dependency goals may still start an eager
+whole-tree branch. For a purely structural balanced tree this collapses the
+former duplicate recurrence `F(h) = 1 + F(h - 1)^2` to at most two histories:
+one eager and one recursively shallow. Excluding or rerating `(,)` therefore
+affects its binding and partial-application paths, not structural introduction
+of an already fixed pair or nested product tree.
 
 Class constraints use `Language.Haskell.Synthesis.Constraint` directly as
 `Constraint HsType`; the historical `HsConstraint` constructor spelling is a
@@ -1053,6 +1066,15 @@ and the
     (forall x. (forall y. y -> y) -> (forall z. z -> x))
   ```
 
+  An arrow goal also gets a guarded exact whole-value forwarding attempt before
+  structural eta expansion. Scoped function bindings are stored internally as
+  a result plus a nonempty parameter spine; this branch reconstructs that
+  complete arrow scheme and compares it in the binding's existing variable
+  namespace. It uses the ordinary scoped-provider score, substitution, and
+  usage accounting, and every result still passes the independent expression
+  checker. Scalar providers retain their established route, while eta expansion
+  remains a sibling fallback when forwarding does not apply.
+
   At a monomorphic (non-quantified) goal, provider binders are instead
   instantiated with fresh flexible variables for that occurrence, their direct
   contexts become proof obligations, and the arrow body participates in
@@ -1113,6 +1135,11 @@ and the
   [2026-07-29 contextual rank-N report](../docs/reports/2026-07-29-contextual-rank-n-introduction.md).
   The original context-free rule is recorded in the
   [forall-introduction report](../docs/reports/2026-07-29-exference-forall-introduction.md).
+  Commit `f3dd2495` introduced the complementary whole-arrow and nested-product
+  scheduling used by the live quartic regression; commit `c0c1a461` hardened
+  the tuple shortcut with bounded structural provenance. Both are recorded in
+  the
+  [2026-08-06 quartic rank-N report](../docs/reports/2026-08-06-quartic-rank-n-frontiers.md).
 
 ## Other known (technical) issues
 

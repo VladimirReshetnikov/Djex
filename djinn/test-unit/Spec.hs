@@ -145,8 +145,10 @@ tests =
     , ("prove empty goals from contradictions", testEmptyGoalContradiction)
     , ("reject non-theorems", testNonTheorems)
     , ("honor search budgets and strategies", testSearchModes)
-    , ("prefer distinct evidence across repeated curried domains",
+    , ("prefer distinct evidence across adjacent curried domains",
           testDistinctCurriedArguments)
+    , ("rotate fairly across three repeated-domain proofs",
+          testThreeWayCurriedArguments)
     , ("use an assumption as its named proof", testNamedAssumption)
     , ("reject ambiguous raw proof environments",
           testCheckedProofSearchEnvironment)
@@ -4480,6 +4482,43 @@ testDistinctCurriedArguments = do
             "the early distinct-argument proof must check independently"
             (checkProof [] goal proof)
         [] -> fail "the first twenty proofs omitted the mixed application"
+
+testThreeWayCurriedArguments :: IO ()
+testThreeWayCurriedArguments = do
+    let combine = atomA :-> atomA :-> atomA
+        distractor = atomA :-> atomA
+        goal = foldr (:->) atomA
+            [atomA, atomA, atomA, combine, distractor, distractor]
+        proofs = prove True [] goal
+        directPairs :: Proof -> [(Int, Int)]
+        directPairs proof = case proof of
+            Lam first (Lam second (Lam third (Lam function
+                    (Lam _ (Lam _ body))))) ->
+                [(leftIndex, rightIndex) |
+                    (leftIndex, left) <- zip [0 ..] [first, second, third],
+                    (rightIndex, right) <- zip [0 ..] [first, second, third],
+                    body == Apply (Apply (Var function) (Var left)) (Var right)]
+            _ -> []
+        expectedPairs = [(left, right) | left <- [0 .. 2], right <- [0 .. 2]]
+        prefix = take 60 proofs
+        observedPairs = concatMap directPairs prefix
+        bounded = proveWithMode
+            (defaultSearchMode True) { searchBudget = Just 120 } [] goal
+        boundedPairs = concatMap directPairs (searchProofs bounded)
+    assertBool "the sixty-candidate window omitted a direct sibling pair" $
+        all (`elem` observedPairs) expectedPairs
+    assertBool "the bounded search omitted a direct sibling pair" $
+        all (`elem` boundedPairs) expectedPairs
+    assertBool "the bounded repeated-domain search should remain truncated" $
+        searchExhausted bounded
+    assertEqual "the bounded repeated-domain search should spend its fuel"
+        (Just 0) (remainingSearchBudget bounded)
+    let usesFirstAndThird proof = (0, 2) `elem` directPairs proof
+    case filter usesFirstAndThird prefix of
+        proof : _ -> assertRight
+            "the early third-sibling proof must check independently"
+            (checkProof [] goal proof)
+        [] -> fail "the first sixty proofs omitted the third atom sibling"
 
 testNamedAssumption :: IO ()
 testNamedAssumption = do

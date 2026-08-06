@@ -318,13 +318,21 @@ choose values = P $ \ _ s sk fk ->
 interleaveChoices :: [P a] -> P a
 interleaveChoices [] = mzero
 interleaveChoices [choice] = choice
-interleaveChoices (choice : choices) =
-    interleaveChoice choice (interleaveChoices choices)
+interleaveChoices (choice : choices) = P $ \ strat s sk fk ->
+    replay sk fk $ roundRobin
+        (reify strat s choice : map (Step . reify strat s) choices)
   where
-    interleaveChoice first second = P $ \ strat s sk fk ->
-        replay sk fk $
-            interleaveS (reify strat s first)
-                (Step (reify strat s second))
+    -- Advance every live stream by one node per round.  The reversed rear
+    -- list makes queue rotation amortized constant-time without favoring a
+    -- right-nested suffix when three or more proofs are available.
+    roundRobin streams = advance streams []
+    advance [] [] = Done
+    advance [] rear = advance (reverse rear) []
+    advance (Done : streams) rear = advance streams rear
+    advance (Yield result rest : streams) rear =
+        Yield result (advance streams (rest : rear))
+    advance (Step rest : streams) rear =
+        Step (advance streams (rest : rear))
 
 -- Cut a subsearch to its first result, preserving the choice points that
 -- were explored to reach it so budgets stay honest.

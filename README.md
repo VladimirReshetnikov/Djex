@@ -87,6 +87,10 @@ Djinn's cubic extension of its bounded rank-N plan family is recorded in the
 [2026-08-01 triple rank-N frontiers report](docs/reports/2026-08-01-triple-rank-n-frontiers.md),
 following the
 [2026-07-31 pairwise rank-N frontiers report](docs/reports/2026-07-31-pairwise-rank-n-frontiers.md).
+Its later proof-enumeration work is recorded in the
+[oldest-first evidence report](docs/reports/2026-08-05-oldest-first-evidence.md)
+and the
+[repeated-domain fairness report](docs/reports/2026-08-05-repeated-domain-evidence-fairness.md).
 Contextual goal introduction and its
 lexical evidence boundary are recorded in the
 [2026-07-29 contextual rank-N report](docs/reports/2026-07-29-contextual-rank-n-introduction.md).

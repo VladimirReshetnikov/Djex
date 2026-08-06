@@ -40,9 +40,12 @@ import Djinn.Internal.ProofCheck (checkProofEnvironment)
 type MoreSolutions = Bool
 
 -- How alternative branches are explored at each choice point.  DepthFirst
--- is the classical order (fully explore the first branch before the
--- second); Interleave alternates between branches at every choice point,
--- so an expensive dead end cannot starve a cheap alternative.
+-- is the classical order (fully explore the first branch before the second),
+-- except for the bounded local rotation of the three oldest proofs while
+-- enumerating retained alternatives for an exact atomic @A -> A -> A@ suffix.
+-- Interleave alternates between branches at every choice point, so an
+-- expensive dead end cannot starve a cheap alternative (including the tail
+-- outside that local three-proof cohort).
 data Strategy = DepthFirst | Interleave
     deriving (Eq, Show)
 
@@ -58,7 +61,8 @@ data SearchMode = SearchMode {
     }
     deriving (Show)
 
--- The classical search: depth-first, unbudgeted, complete.
+-- The classical search: depth-first apart from the documented exact binary-
+-- endomorphism exception, unbudgeted, and complete.
 defaultSearchMode :: MoreSolutions -> SearchMode
 defaultSearchMode more = SearchMode {
     searchAlternatives = more,

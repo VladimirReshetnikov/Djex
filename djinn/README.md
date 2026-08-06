@@ -764,14 +764,21 @@ the total, propositional model), not a timeout.
 Operationally, `redant` classifies antecedents into four groups — unprocessed
 formulas, implications indexed by their atomic premise (`AtomImps`), nested
 implications (`NestImps`), and bare atoms — and `redsucc` then reduces the
-goal. Nested implications are the branching point of the search; everything
-else is deterministic reduction. The search runs in a small backtracking
-monad `P` producing a lazy stream with explicit choice-point markers, which
-is what the `budget` setting counts; with `+multi` the local cuts are
-disabled so alternative proofs stream out lazily. The `LJT` module also
+goal. Nested implications provide the calculus's structural branches. With
+alternative proofs retained, selecting among several atom proofs or indexed
+implications also branches the result stream; the remaining reductions are
+deterministic. The search runs in a small backtracking monad `P` producing a
+lazy stream with explicit choice-point markers, which is what the `budget`
+setting counts; with `+multi` the local cuts are disabled so alternative
+proofs stream out lazily. The `LJT` module also
 exposes `proveWithMode` with a named `SearchMode` (alternatives, depth-first
-or interleaved strategy, optional budget) for programmatic use; the CLI uses
-the classical depth-first order.
+or interleaved strategy, optional budget) for programmatic use. The CLI uses
+the classical depth-first order except for one deliberately local fairness
+rule: while `+multi` enumerates an exact atomic binary endomorphism suffix
+`A -> A -> A`, the oldest three same-domain proofs rotate round-robin so one
+cohort member's descendants cannot starve the other cohort members. Evidence
+after that bounded cohort remains on the ordinary depth-first tail; the
+`Interleave` strategy can also alternate into that tail.
 
 Each selected proof term is normalized (`nf`), checked against the requested
 formula by an independent unification-based type checker (`ProofCheck`),

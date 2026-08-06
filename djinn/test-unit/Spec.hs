@@ -151,6 +151,10 @@ tests =
           testThreeWayCurriedArguments)
     , ("bound repeated-domain fairness to the oldest three proofs",
           testWideCurriedArguments)
+    , ("preserve row-major DFS outside binary endomorphisms",
+          testNonEndomorphicCurriedArguments)
+    , ("reach the repeated-domain fairness tail when interleaving",
+          testInterleavedWideCurriedArguments)
     , ("use an assumption as its named proof", testNamedAssumption)
     , ("reject ambiguous raw proof environments",
           testCheckedProofSearchEnvironment)
@@ -4550,6 +4554,71 @@ testWideCurriedArguments = do
             [(left, right) | left <- [0 .. 2], right <- [0 .. 2]]
     assertEqual "the fair cohort should contain exactly the oldest three proofs"
         (sort expectedPairs) (sort applications)
+
+-- The local rotation is not a general repeated-domain scheduler.  In
+-- particular, changing the result atom makes this @A -> A -> B@ rather than
+-- the exact binary endomorphism shape, so DepthFirst must retain its historical
+-- left-argument-major traversal across all four available A proofs.
+testNonEndomorphicCurriedArguments :: IO ()
+testNonEndomorphicCurriedArguments = do
+    let combine = atomA :-> atomA :-> atomB
+        goal = foldr (:->) atomB
+            [atomA, atomA, atomA, atomA, combine]
+        directPairs :: Proof -> [(Int, Int)]
+        directPairs proof = case proof of
+            Lam first (Lam second (Lam third (Lam fourth
+                    (Lam function body)))) ->
+                [(leftIndex, rightIndex) |
+                    (leftIndex, left) <-
+                        zip [0 ..] [first, second, third, fourth],
+                    (rightIndex, right) <-
+                        zip [0 ..] [first, second, third, fourth],
+                    body == Apply (Apply (Var function) (Var left)) (Var right)]
+            _ -> []
+        applications =
+            [pair | proof <- prove True [] goal, pair <- directPairs proof]
+        expectedPairs =
+            [(left, right) | left <- [0 .. 3], right <- [0 .. 3]]
+        -- Each direct application is reached through both the immediate and
+        -- indexed implication paths; the historical DFS order keeps those
+        -- twins adjacent before advancing the right-hand atom.
+        expectedApplications = concatMap (replicate 2) expectedPairs
+    assertEqual "non-endomorphic repeated domains must remain row-major"
+        expectedApplications applications
+
+-- DepthFirst deliberately leaves evidence after the oldest three proofs on a
+-- classical tail.  Global Interleave must still alternate into that tail; this
+-- finite prefix check ensures the fourth proof is reachable rather than merely
+-- present somewhere in an unforced, potentially starved search space.
+testInterleavedWideCurriedArguments :: IO ()
+testInterleavedWideCurriedArguments = do
+    let combine = atomA :-> atomA :-> atomA
+        goal = foldr (:->) atomA
+            [atomA, atomA, atomA, atomA, combine]
+        mode = (defaultSearchMode True) { searchStrategy = Interleave }
+        directPairs :: Proof -> [(Int, Int)]
+        directPairs proof = case proof of
+            Lam first (Lam second (Lam third (Lam fourth
+                    (Lam function body)))) ->
+                [(leftIndex, rightIndex) |
+                    (leftIndex, left) <-
+                        zip [0 ..] [first, second, third, fourth],
+                    (rightIndex, right) <-
+                        zip [0 ..] [first, second, third, fourth],
+                    body == Apply (Apply (Var function) (Var left)) (Var right)]
+            _ -> []
+        prefix = take 60 $ searchProofs $ proveWithMode mode [] goal
+        fourthApplications =
+            [(proof, pair) |
+                proof <- prefix,
+                pair@(left, right) <- directPairs proof,
+                left == 3 || right == 3]
+    case fourthApplications of
+        (proof, _) : _ -> assertRight
+            "the interleaved fourth-proof application must check independently"
+            (checkProof [] goal proof)
+        [] -> fail $ "the first sixty interleaved proofs omitted the " ++
+            "fourth-proof tail"
 
 testNamedAssumption :: IO ()
 testNamedAssumption = do

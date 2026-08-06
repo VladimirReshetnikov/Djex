@@ -149,7 +149,7 @@ tests =
           testDistinctCurriedArguments)
     , ("rotate fairly across three repeated-domain proofs",
           testThreeWayCurriedArguments)
-    , ("retain depth-first order beyond the local fairness cap",
+    , ("bound repeated-domain fairness to the oldest three proofs",
           testWideCurriedArguments)
     , ("use an assumption as its named proof", testNamedAssumption)
     , ("reject ambiguous raw proof environments",
@@ -4544,13 +4544,12 @@ testWideCurriedArguments = do
                         zip [0 ..] [first, second, third, fourth],
                     body == Apply (Apply (Var function) (Var left)) (Var right)]
             _ -> []
-        applications =
+        applications = take 9
             [pair | proof <- prove True [] goal, pair <- directPairs proof]
-    case applications of
-        (0, 0) : _ -> pure ()
-        pair : _ -> fail $
-            "wide repeated-domain search changed its first pair to " ++ show pair
-        [] -> fail "wide repeated-domain search produced no direct application"
+        expectedPairs =
+            [(left, right) | left <- [0 .. 2], right <- [0 .. 2]]
+    assertEqual "the fair cohort should contain exactly the oldest three proofs"
+        (sort expectedPairs) (sort applications)
 
 testNamedAssumption :: IO ()
 testNamedAssumption = do

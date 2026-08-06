@@ -573,36 +573,36 @@ redant more antes atomImps nestImps atoms goal =
             nestImps atoms g
       where
         available = findAtoms s atoms
-        -- Once adjacent arguments establish a repeated-domain chain, prefer
-        -- atom proofs not yet used by that chain.  Fairly interleaving every
-        -- branch below keeps repeated applications available as well.
-        -- Keep the local fanout deliberately small: fair branching across a
-        -- wide atom inventory turns independent rank-N plans into a large
-        -- Cartesian frontier, while the first three oldest proofs cover the
-        -- ordinary distinct-argument cases this preference is for.
+        -- A binary endomorphism is the common combining shape where reusing
+        -- the first argument can starve a direct mixed application.  Prefer
+        -- unused proofs within a small oldest-first cohort, fairly
+        -- interleaving that cohort so repeated applications remain available.
+        -- The untouched tail and exact shape guard keep unrelated wide rank-N
+        -- plans on their historical depth-first traversal.
         fairSiblingLimit = 3
-        siblingSetIsSmall = case drop fairSiblingLimit available of
-            [] -> True
-            _ -> False
+        (fairAvailable, remainingAvailable) =
+            splitAt fairSiblingLimit available
         priorArguments = case fairChain of
-            Just (domain, arguments)
-                | domain == s && siblingSetIsSmall -> arguments
+            Just (domain, arguments) | domain == s -> arguments
             _ -> []
-        orderedAvailable
-            | null priorArguments = available
+        orderedFair
+            | null priorArguments = fairAvailable
             | otherwise =
-                filter (`notElem` priorArguments) available
-                ++ filter (`elem` priorArguments) available
-        applyAvailable = case orderedAvailable of
+                filter (`notElem` priorArguments) fairAvailable
+                ++ filter (`elem` priorArguments) fairAvailable
+        applyAvailable = case available of
             [] -> mzero
             atom : _ | not more -> applyAtom atom
-            _ | continueFair ->
-                interleaveChoices (map applyAtom orderedAvailable)
-            _ -> choose orderedAvailable >>= applyAtom
-        continueFair = siblingSetIsSmall
-            && (not (null priorArguments) || repeatsDomain s b)
-        repeatsDomain domain (PVar next :-> _) = domain == next
-        repeatsDomain _ _ = False
+            _ | continueFair -> applyFair
+            _ -> choose available >>= applyAtom
+        applyFair = case remainingAvailable of
+            [] -> interleaveChoices (map applyAtom orderedFair)
+            _ -> interleaveChoices (map applyAtom orderedFair)
+                `mplus` (choose remainingAvailable >>= applyAtom)
+        continueFair = not (null priorArguments) || repeatedEndomorphism s b
+        repeatedEndomorphism domain (PVar next :-> PVar result) =
+            domain == next && domain == result
+        repeatedEndomorphism _ _ = False
         applyAtom atom = do
             x <- newSym "x"
             let nextChain

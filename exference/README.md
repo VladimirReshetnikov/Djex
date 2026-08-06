@@ -921,53 +921,64 @@ reconstruct bounded binder combinations from that provider-local pool.
 `runExferenceQueryWithInstantiationAssignments` instead accepts
 `ProviderInstantiationAssignment`, whose argument list is one complete ordered
 leading-binder vector. Exact vectors are consumed once and are never flattened
-or Cartesian-recombined.
+or Cartesian-recombined. The parallel
+`runExferenceQueryWithKindedInstantiationAssignments` accepts
+`KindedProviderInstantiationAssignment`, pairing every argument with the
+frontend-attested `GroundKind` of that provider-binder position.
 
-Both outer lists are globally bounded at 32 before any element is entered. The
-assignment runner additionally bounds every argument spine at four before
-entering an argument, requires a nonempty vector whose length exactly matches
-the retained provider's complete leading forall chain, and rejects a contextual
+All outer lists are globally bounded at 32 before any element is entered. The
+assignment runners additionally bound every argument spine at four before
+entering an argument, require a nonempty vector whose length exactly matches
+the retained provider's complete leading forall chain, and reject a contextual
 provider scheme. Every candidate or argument is synonym-elaborated in the
 sealed session. The legacy scalar Candidate route continues to require a
 closed, context-free proper type and check it at kind `Type`; it remains
-proper-type-only. For an exact assignment, Exference infers every leading
-binder's ground kind from the retained provider body, defaulting a vacuous
-binder to `Type`, and checks the argument in that position at exactly that
-kind. Assignment arguments must be closed, context-free, and representable as
-specified visible type arguments.
+proper-type-only. For a legacy exact assignment, Exference infers every leading
+binder's ground kind from the retained provider body, defaults a vacuous binder
+to `Type`, and checks the argument at that inferred kind. For a kinded
+assignment, it checks all observable binder uses against the supplied complete
+kind vector and elaborates each paired argument at its supplied kind. A
+vacuous binder has no body occurrence capable of proving its source kind; that
+`GroundKind` is therefore caller-attested rather than inferred by Exference.
+Repeated assignments naming one provider must agree on their complete kind
+vector before their type vectors are alpha-deduplicated. Assignment arguments
+in both forms must be closed, context-free, and representable as specified
+visible type arguments.
 The complete substituted provider body is independently checked at kind
 `Type`, after which the private core rechecks provider closure, context, arity,
-and the lowered visible-argument shape. Higher-kinded vectors and vectors
-mixing higher-kinded constructors with closed impredicative `Type` arguments
-are therefore supported when the provider body determines the higher-kinded
-positions and vacuous positions take their default `Type` kind; either
-direction of a kind mismatch is rejected. Scalar types and complete ordered
+and the lowered visible-argument shape. The legacy route supports
+higher-kinded positions determined by the provider body and retains the
+vacuous-`Type` default. The kinded route additionally supports a bare or
+partially applied higher-kinded constructor in a vacuous position, including a
+vector mixing it with a closed impredicative `Type` argument. Either direction
+of an observable kind mismatch is rejected. Scalar types and complete ordered
 vectors are alpha-deduplicated per provider while retaining their first
 occurrences.
 Association is nominal: a different global with an alpha-equivalent scheme
 receives no choice, and neither a scoped value nor a sibling global consults
 the supplied map. The caller remains responsible for the source-language fact
-which justifies either assertion.
+which justifies any assertion.
 
-Both forms participate only in visible exact-global lookup; the ordinary
-implicit use remains first. The scalar runner preserves its established visible
+All provider-evidence forms participate only in visible exact-global lookup;
+the ordinary implicit use remains first. The scalar runner preserves its established visible
 order: ground monomorphic instance-head choices, checked query-derived choices,
 then supplied candidates. Query-derived and supplied products keep separate
 32-combination caps, so a wide query pool cannot spend the scalar supplied
-route's allowance. With the assignment runner, the visible order is ground
-monomorphic instance-head choices, exact supplied vectors, then checked
+route's allowance. With either exact assignment runner, the visible order is
+ground monomorphic instance-head choices, exact supplied vectors, then checked
 query-derived choices. The exact route performs no Cartesian product and does
 not require selected binders to be vacuous: because the caller supplied the
 complete vector, those binders may occur in the provider body. Both routes open
 at most four leading binders, and search plus the independent expression
 checker consume their applications through the same checked representation.
 
-`runExferenceQuery` follows the exact empty-evidence path. Calling either
-explicit runner with `[]` returns the same batches, candidate order, budget
+`runExferenceQuery` follows the exact empty-evidence path. Calling any explicit
+evidence runner with `[]` returns the same batches, candidate order, budget
 observations, and diagnostics. Current regressions cover empty compatibility,
 lazy outer and inner bounds, exact arity and locality, non-vacuous and
 structural impredicative arguments, higher-kinded and mixed
-higher-kinded/impredicative assignments, both directions of kind mismatch,
+higher-kinded/impredicative assignments, vacuous higher-kinded evidence,
+same-provider kind-vector consistency, both directions of kind mismatch,
 legacy scalar rejection of a higher-kinded argument, and an ordered
 four-binder application. Nonempty evidence remains a bounded
 global-only capability. It does not enable scoped-provider donation, invent a

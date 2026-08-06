@@ -21,7 +21,7 @@ That model is correct when the frontend has independently justified every
 combination, but it loses which types were selected together by one external
 proof.
 
-The new payload retains that fact directly:
+The original correlated payload retains that fact directly:
 
 ```haskell
 ProviderInstantiationAssignment
@@ -34,9 +34,27 @@ The argument list is the complete vector in the provider's leading-forall
 order. Each vector is consumed once. Neither backend flattens it into a scalar
 pool or reconstructs a Cartesian product, so evidence for `[T1, T2]` does not
 also authorize `[T1, T1]`, `[T2, T1]`, or a tuple assembled from a different
-external proof. Each position is checked at the corresponding provider
-binder's inferred ground kind rather than forcing every vector member to have
-kind `Type`.
+external proof. For this legacy payload, each position is checked at the
+corresponding provider binder's inferred ground kind rather than forcing every
+vector member to have kind `Type`.
+
+Commit `22206d9c` adds a parallel kind-aware payload without changing that
+compatibility contract:
+
+```haskell
+KindedProviderInstantiationAssignment
+  { kindedProviderInstantiationAssignmentProvider :: Name
+  , kindedProviderInstantiationAssignmentArguments ::
+      [(GroundKind, Type variable)]
+  }
+```
+
+Each pair preserves the source frontend's exact positional ground kind beside
+the already correlated type argument. This is necessary when the retained
+provider body has erased the only source kind annotation: in particular, a
+vacuous binder has no occurrence from which either backend could infer a
+higher kind. The kind is caller-attested evidence, not a reconstructed backend
+fact.
 
 ## Stable contract
 
@@ -46,6 +64,8 @@ export:
 ```haskell
 runDjinnQueryWithInstantiationAssignments
 runExferenceQueryWithInstantiationAssignments
+runDjinnQueryWithKindedInstantiationAssignments
+runExferenceQueryWithKindedInstantiationAssignments
 ```
 
 The shared limits are public as well:
@@ -65,8 +85,10 @@ list therefore fails finitely at the checked boundary.
 `ProviderInstantiationCandidate`,
 `maximumProviderInstantiationCandidates`, and both
 `WithInstantiationCandidates` runners retain their original proper-type-only
-behavior. The two payloads deliberately have separate entrances: an exact
-vector is never silently downgraded to the scalar compatibility model.
+behavior. The legacy assignment type and runners also retain their inferred
+kind behavior. The three payloads deliberately have separate entrances: an
+exact vector is never silently downgraded to the scalar compatibility model,
+and a kinded vector is never stripped of its caller-attested kinds.
 
 ## Checked assignment boundary
 
@@ -86,28 +108,36 @@ For every assignment, the stable runner checks:
    unsupported.
 3. The argument-vector length must equal that exact arity. Empty and partial
    vectors are rejected rather than completed from another source.
-4. The runner infers each leading binder's ground kind from the exact provider
-   body and synonym-elaborates the argument in that position at that kind. A
-   binder whose kind the body does not otherwise constrain is vacuous and
-   defaults to `Type`. Every argument is required to be closed and
-   context-free.
-5. Every argument must have the shared specified-visible-argument
+4. The legacy runner infers each leading binder's ground kind from the exact
+   provider body. A binder whose kind the body does not constrain is vacuous
+   and defaults to `Type`; the argument is synonym-elaborated at that inferred
+   kind. This historical behavior remains unchanged.
+5. The kinded runner instead checks the provider body at `Type` in one scope
+   shared with every caller-supplied binder-kind obligation. Every observable
+   use must agree with its supplied `GroundKind`. A vacuous position supplies
+   no such constraint, so its kind remains a caller assertion; the backend
+   still synonym-elaborates the paired argument at exactly that kind.
+6. Every argument must be closed, context-free, and have the shared
+   specified-visible-argument
    representation, including a higher-kinded constructor, a closed quantified
    `Type`, or a structural proper type containing one where its positional kind
    permits that form.
-6. Alpha-equivalent vectors are deduplicated as complete ordered lists within
-   one provider, retaining the first occurrence. Provider identity remains
-   part of the key.
+7. Repeated kinded assignments for the same provider must agree on the
+   complete binder-kind vector. This consistency check happens before
+   alpha-equivalent type vectors are deduplicated as complete ordered lists,
+   retaining the first occurrence. Provider identity remains part of the key.
 
 Both adapters perform an additional whole-assignment proof. They
 capture-avoidably substitute the complete checked vector into the retained
 provider body and kind-check that specialized body at `Type` in the sealed
 environment. This independent guard rejects both a proper type supplied at a
 `Type -> Type` position and a higher-kinded constructor supplied at a `Type`
-position. Positional inference also permits a higher-kinded vector, or a vector
-mixing a higher-kinded constructor with a closed impredicative `Type`, when the
-provider body determines the higher-kinded position and the vacuous position
-takes its default `Type` kind.
+position. The legacy runner permits a higher-kinded vector, or a vector mixing
+a higher-kinded constructor with a closed impredicative `Type`, when the
+provider body determines the higher-kinded position and every vacuous position
+takes its default `Type` kind. The kinded runner additionally admits a bare or
+partially applied higher-kinded constructor at a vacuous position whose exact
+ground kind was retained by the frontend.
 
 Exference lowers each checked argument only after those stable shared-type
 checks. Its private engine boundary independently rechecks provider closure,
@@ -152,7 +182,7 @@ their schemes compare equal. Normal target exclusion removes the requested
 definition from provider lookup.
 
 Ordinary implicit instantiation remains the first provider-use branch. Within
-the visible branch, the assignment runner tries:
+the visible branch, either exact assignment runner tries:
 
 1. complete choices proved by ground monomorphic Haskell instance heads;
 2. caller-supplied exact assignment vectors; and
@@ -182,36 +212,43 @@ runExferenceQuery session =
   runExferenceQueryWithInstantiationCandidates session []
 ```
 
-Calling either assignment runner with `[]` yields the same result, candidate
-ordering, diagnostic precedence, completion status, and finite-budget
-observations. No assignment plan or visible branch is added in that case.
+Calling either legacy or kinded assignment runner with `[]` yields the same
+result, candidate ordering, diagnostic precedence, completion status, and
+finite-budget observations. No assignment plan or visible branch is added in
+that case.
 
 Exact assignments are assertions, not a proof interchange or a general
 impredicative solver. They do not inspect the frontend proof, search local
 scopes, infer a missing vector member, donate evidence between provider names,
 decompose quantified bodies in ordinary unification, remove the four-argument
-or search bounds, or turn a bounded miss into a proof of uninhabitability.
+or search bounds, or turn a bounded miss into a proof of uninhabitability. In
+particular, the kinded boundary validates a supplied kind against every
+observable use but does not claim to infer or prove the source kind of a
+vacuous binder.
 
 ## Regression coverage
 
 Current validation exercises the full project matrix without changing the
-historical scalar fixtures. Focused shared-API coverage pins the new record,
-accessors, traversal/deep-evaluation behavior, public runner names, and both
-numeric limits.
+historical scalar or inferred-assignment fixtures. Focused shared-API coverage
+pins both assignment records, accessors, traversal/deep-evaluation behavior,
+public runner names, and both numeric limits.
 
 Djinn regressions cover empty-runner equality; finite outer and inner cyclic
 list rejection; empty, wrong-width, five-binder, open, contextual,
 higher-kinded mismatch, monomorphic-provider, and unknown-provider failures;
 unary quantified, higher-kinded, and mixed higher-kinded/impredicative success;
+kinded vacuous higher-kinded success; same-provider kind-vector consistency;
 whole-vector alpha deduplication; cross-provider non-donation; composition with
 loaded instantiation evidence; and a correlated four-binder vector deliberately
 outside the legacy first-sixteen Cartesian prefix.
 
-Exference core and integration regressions cover direct vector consumption,
+Exference integration regressions, together with the existing core assignment
+coverage, exercise direct vector consumption,
 non-vacuous provider bodies, structural arguments containing nested
 quantification, ordered four-binder visible applications, higher-kinded and
-mixed higher-kinded/impredicative vectors, both directions of assignment kind
-mismatch, legacy scalar rejection of a higher-kinded argument, finite outer and
-inner bounds, exact arity, empty compatibility, and cross-provider
+mixed higher-kinded/impredicative vectors, kinded vacuous higher-kinded
+success, same-provider kind-vector consistency, both directions of assignment
+kind mismatch, legacy scalar rejection of a higher-kinded argument, finite
+outer and inner bounds, exact arity, empty compatibility, and cross-provider
 non-donation. Every positive integration candidate still passes the shared
 generated-syntax boundary and the engine's independent expression checker.

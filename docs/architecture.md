@@ -220,7 +220,10 @@ compatibility path for frontends which genuinely authorize the resulting
 Cartesian combinations. `ProviderInstantiationAssignment` instead contributes
 one complete ordered leading-binder vector. It preserves the correlation
 established by one external proof, so neither backend reconstructs cross-vector
-tuples.
+tuples. `KindedProviderInstantiationAssignment` carries the same relation but
+pairs each argument with a frontend-attested positional `GroundKind`; it exists
+for source kind facts which the retained, kind-erased value scheme cannot
+recover.
 
 The checked Djinn and Exference runners first bound either outer relation at 32
 before entering an element. Assignment runners also bound each argument spine
@@ -229,25 +232,35 @@ exact sealed session, require an eligible context-free retained polymorphic
 scheme whose complete leading arity matches the vector, and elaborate each
 scalar candidate as a closed, context-free proper type in that session's
 synonym and kind scope. That compatibility relation remains proper-type-only.
-For an assignment, both adapters infer the ground kind of every leading binder
-from the exact provider body, default an otherwise unconstrained vacuous binder
-to `Type`, and elaborate each closed, context-free visible argument at its
-positional kind. They then substitute the complete vector and independently
-check the whole specialized body at kind `Type`. Thus higher-kinded vectors and
-mixed higher-kinded/impredicative vectors are accepted when the context-free
-body determines the higher-kinded positions and vacuous positions take their
-default `Type` kind; contextual providers and kind-mismatched vectors are
-rejected. Scalar types and complete vectors are alpha-deduplicated only
-within one provider. Both relations remain keyed by provider identity, not by
-scheme shape: two globals with alpha-equivalent schemes cannot donate evidence
-to one another.
+For a legacy assignment, both adapters infer the ground kind of every leading
+binder from the exact provider body, default an otherwise unconstrained
+vacuous binder to `Type`, and elaborate each argument at that inferred kind.
+
+For a kinded assignment, the adapters check the retained body at `Type` in one
+kind-inference scope shared with every supplied binder-kind obligation. A
+non-vacuous occurrence must therefore agree with the caller's `GroundKind`.
+A vacuous binder imposes no observable constraint, so its source kind remains
+caller-attested rather than backend-inferred; the paired argument is still
+elaborated at exactly that supplied kind. This admits bare and partially
+applied higher-kinded constructors in vacuous positions. Repeated assignments
+for one provider must present the same complete binder-kind vector before
+their type vectors are alpha-deduplicated.
+
+Both assignment forms require closed, context-free visible arguments, then
+substitute the complete vector and independently check the whole specialized
+body at kind `Type`. Contextual providers and kind-mismatched vectors are
+rejected. Scalar types and complete vectors are alpha-deduplicated only within
+one provider. All relations remain keyed by provider identity, not by scheme
+shape: two globals with alpha-equivalent schemes cannot donate evidence to one
+another.
 
 Calling either historical runner is definitionally the same as calling its
-`WithInstantiationCandidates` variant with `[]`; calling the corresponding
-`WithInstantiationAssignments` variant with `[]` has the same observable
-result, ordering, diagnostics, and finite-budget behavior. The two nonempty
-public entrances remain distinct: an assignment is never flattened into the
-legacy scalar pool.
+`WithInstantiationCandidates` variant with `[]`; calling either the legacy
+`WithInstantiationAssignments` or parallel
+`WithKindedInstantiationAssignments` variant with `[]` has the same observable
+result, ordering, diagnostics, and finite-budget behavior. The nonempty public
+entrances remain distinct: an assignment is never flattened into the legacy
+scalar pool, and kinded evidence is never silently stripped of its kinds.
 
 Djinn compiles each retained scalar specialization or exact vector into a
 direct specialized premise for that loaded polymorphic provider. The

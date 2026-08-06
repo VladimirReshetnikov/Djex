@@ -171,7 +171,7 @@ required.
 ## Supply provider-local instantiation evidence
 
 A frontend whose source environment proves otherwise erased type choices can
-make either of two different assertions:
+use three payloads spanning two evidence models:
 
 - `ProviderInstantiationCandidate` associates one type with an exact provider's
   independent candidate pool. A multiply quantified provider reconstructs
@@ -180,7 +180,12 @@ make either of two different assertions:
 - `ProviderInstantiationAssignment` associates one complete ordered vector
   with an exact provider. It preserves the argument order and correlation
   established by one source-language proof and is consumed once, without
-  Cartesian reconstruction.
+  Cartesian reconstruction. Its compatibility runner infers positional kinds
+  from the retained provider body and defaults a vacuous binder to `Type`.
+- `KindedProviderInstantiationAssignment` preserves the same complete vector
+  while pairing every argument with the `GroundKind` attested by the frontend.
+  This is the route for source kind facts which the kind-erased provider body,
+  especially a vacuous binder, cannot reconstruct.
 
 The original candidate API remains available unchanged:
 
@@ -220,8 +225,32 @@ exferenceAssignmentResults =
     exferenceSession assignments exferenceRequest
 ```
 
+Use the parallel kinded payload when the source proof also retains each
+leading binder's exact ground kind:
+
+```haskell
+kindedAssignments =
+  [ KindedProviderInstantiationAssignment
+      { kindedProviderInstantiationAssignmentProvider = providerName
+      , kindedProviderInstantiationAssignmentArguments =
+          [ ( FunctionKind ProperTypeKind ProperTypeKind
+            , higherKindedConstructor
+            )
+          , (ProperTypeKind, closedImpredicativeType)
+          ]
+      }
+  ]
+
+djinnKindedAssignmentResult =
+  runDjinnQueryWithKindedInstantiationAssignments
+    djinnSession kindedAssignments djinnRequest
+exferenceKindedAssignmentResults =
+  runExferenceQueryWithKindedInstantiationAssignments
+    exferenceSession kindedAssignments exferenceRequest
+```
+
 The payload's type variable must match the selected backend's neutral
-type-variable namespace. Both payload types and all three bounds are exported
+type-variable namespace. All payload types and all three bounds are exported
 by `Language.Haskell.Djex`:
 
 - `maximumProviderInstantiationCandidates` is 32 scalar associations per call;
@@ -249,31 +278,44 @@ leading prefix is vacuous.
 Assignment runners additionally require an exact retained polymorphic scheme,
 a context-free leading chain of arity one through four, and a vector whose
 length equals that complete chain; contextual schemes are unsupported. The
-runner infers each binder's ground kind from the exact provider body, defaulting
-a vacuous binder to `Type`, then synonym-elaborates the argument in that
-position at exactly that kind. Every argument must still be closed,
-context-free, and representable as a specified visible type argument. Both
-backends substitute the complete vector and independently check that the whole
-specialized body has kind `Type` in the sealed inventory. Exference then
-rechecks the retained scheme's closure, context, arity, and visible-argument
-shape at its private search boundary. Higher-kinded vectors, including vectors
-which mix a higher-kinded constructor with a closed impredicative `Type`
-argument, are supported when the provider body determines the higher-kinded
-positions and vacuous positions take their default `Type` kind. Unlike its
-scalar route, the exact Exference route may also instantiate
+legacy assignment runners infer each binder's ground kind from the exact
+provider body, default a vacuous binder to `Type`, and synonym-elaborate the
+argument in that position at the inferred kind. Their behavior is unchanged.
+
+The kinded runners instead consume the caller's complete positional
+`GroundKind` vector. They check the provider body at `Type` while sharing each
+binder with its supplied kind obligation, so every non-vacuous occurrence must
+agree with the assertion. A vacuous binder has no occurrence capable of proving
+its source kind: the supplied ground kind is frontend-attested, though the
+backend still elaborates the paired argument at exactly that kind. Complete
+kind vectors for repeated assignments to one provider must agree before type
+vectors are alpha-deduplicated. `GroundKind` is `Kind Void`, so an unresolved
+kind variable cannot cross this boundary.
+
+Every argument in either form must be closed, context-free, and representable
+as a specified visible type argument. Both backends substitute the complete
+vector and independently check that the whole specialized body has kind `Type`
+in the sealed inventory. Exference then rechecks the retained scheme's closure,
+context, arity, and visible-argument shape at its private search boundary. The
+kinded form supports a bare or partially applied higher-kinded constructor at a
+vacuous position and can mix it with a closed impredicative `Type` argument.
+Unlike its scalar route, either exact Exference route may also instantiate
 binders which occur in the provider body because the complete correlated vector
 is already known.
 
 First occurrences are retained. Scalar types are alpha-deduplicated per
 provider; assignments are alpha-deduplicated as whole ordered vectors per
-provider. In both cases the provider remains part of the key, so an
+provider. Kinded assignments first require one consistent complete kind vector
+per provider; kinds are not discarded to make conflicting assertions compare
+equal. In every case the provider remains part of the key, so an
 alpha-identical scheme under another name receives no evidence. Target-named
 Djinn specializations remain diagnostic-only, and Exference's normal exact
 target exclusion keeps the requested definition out of provider search.
 
 The original runners retain their exact historical behavior. They delegate
-through the empty candidate path, and an explicit empty assignment call returns
-the same result, ordering, diagnostics, and finite-budget observations:
+through the empty candidate path, and an explicit empty call to either the
+legacy or kinded assignment runner returns the same result, ordering,
+diagnostics, and finite-budget observations:
 
 ```haskell
 runDjinnQuery session =
@@ -289,11 +331,11 @@ Nonempty evidence is additive, with engine- and payload-specific scheduling:
 | Djinn | The historical plain structural, nominal, and query-local-instantiation plans remain first. The positive-only provider family reconstructs bounded tuples: at most four binders, 512 attempts, sixteen specializations per scheme, and 32 direct provider premises. | The same positive-only provider-plan position receives one direct premise per retained vector and never uses the tuple-attempt or per-scheme Cartesian window. It still carries query-local and loaded instantiation axioms for mixed proofs and runs before evidence-free loaded tails. Each proof is checked before lowering restores the exact provider and visible arguments. |
 | Exference | Exact retained-global lookup alone receives the pool. After ordinary implicit use, its visible order is ground monomorphic instance heads, checked query-derived choices, then supplied scalar choices. Query-derived and supplied products retain separate 32-combination caps. Scoped values and sibling globals never consult the map. | Exact retained-global lookup consumes each vector once. After ordinary implicit use, its visible order is ground monomorphic instance heads, exact supplied assignments, then checked query-derived choices. No Cartesian product or vacuous-body restriction is used. Scoped values and sibling globals never consult the map. |
 
-Both APIs can make a visible choice such as
+Both evidence models can make a visible choice such as
 `provider @(forall a. a -> a)` available when a richer frontend has already
-established the necessary fact. Only the assignment API preserves a
+established the necessary fact. Only the exact-assignment model preserves a
 multi-binder choice such as `[T1, T2]` without also authorizing `[T1, T1]` or
-`[T2, T1]`. Neither API inspects the frontend's proof, infers an instance head,
+`[T2, T1]`. Neither model inspects the frontend's proof, infers an instance head,
 invents a polytype, performs general higher-rank subsumption, or enables the
 first-order unifiers to enter quantified bodies. A miss after the finite
 engine-specific tails remains subject to each engine's existing incompleteness

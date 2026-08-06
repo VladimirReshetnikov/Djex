@@ -84,8 +84,9 @@ The checked provider-local instantiation evidence shared by the stable Djinn
 and Exference adapters is recorded in the
 [2026-08-05 provider-local instantiation evidence report](docs/reports/2026-08-05-provider-local-instantiation-evidence.md).
 Its exact ordered-vector extension, which preserves correlations between the
-leading binders selected by one external proof and checks each argument at its
-provider binder's inferred ground kind, is recorded in the
+leading binders selected by one external proof, and its later kind-aware form,
+which retains caller-attested positional ground kinds even for vacuous binders,
+are recorded in the
 [2026-08-05 exact provider-instantiation assignment report](docs/reports/2026-08-05-exact-provider-instantiation-assignments.md).
 Djinn's complementary nominal view of reachable parameterized datatypes is
 recorded in the
@@ -259,14 +260,23 @@ candidates include complete closed context-free foralls, so search can emit
 binders and 32 combinations. Ordinary implicit instantiation remains first,
 and the instance-head route remains monotype-only.
 A richer frontend may instead pass either backend one complete, correlated
-provider-assignment vector. Each argument is checked at the ground kind of its
-position in the exact provider scheme, with a vacuous binder defaulting to
-`Type`; the fully specialized body must still have kind `Type`. This supports
-higher-kinded vectors and vectors mixing higher-kinded constructors with
-closed impredicative arguments when the context-free provider body determines
-the higher-kinded positions; vacuous positions take their default `Type` kind.
-Contextual provider schemes remain unsupported. The legacy scalar
-`ProviderInstantiationCandidate` entrances are unchanged and remain
+provider-assignment vector. The legacy `ProviderInstantiationAssignment`
+runners infer each positional ground kind from the exact provider body and
+default an unconstrained vacuous binder to `Type`. The parallel
+`KindedProviderInstantiationAssignment` runners,
+`runDjinnQueryWithKindedInstantiationAssignments` and
+`runExferenceQueryWithKindedInstantiationAssignments`, pair every argument
+with a caller-attested `GroundKind`. Each adapter checks those supplied kinds
+against all observable uses in the retained body, elaborates every argument at
+its paired kind, requires repeated assignments for the same provider to agree
+on the complete kind vector, and still checks the fully specialized body at
+`Type`. A vacuous binder supplies no body constraint from which its source kind
+could be inferred; its higher kind is therefore frontend evidence, not a
+backend inference. This admits a bare or partially applied higher-kinded
+constructor at such a position, including vectors that also contain a closed
+impredicative `Type` argument. Both assignment forms retain the 32-vector and
+four-argument bounds, and contextual provider schemes remain unsupported. The
+legacy scalar `ProviderInstantiationCandidate` entrances are unchanged and remain
 proper-type-only.
 Exference can also forward a context-free quantified provider with no free
 flexible variables to a less-general such goal; provider binders are solved

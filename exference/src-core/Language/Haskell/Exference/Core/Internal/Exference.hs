@@ -1639,6 +1639,29 @@ stateStep allocators multiPM allowConstrs h
             , nodeLastStepBinding = Nothing
             }
 
+    -- A concrete boxed product is syntax-directed in the same way as an
+    -- arrow: its constructor and arity are already fixed by the goal.  Build
+    -- the structural tuple directly and schedule one field goal per element.
+    -- Tuple constructor bindings remain useful for partial applications and
+    -- flexible result goals, but a neutral session no longer needs to invent
+    -- an ordinary @(,)@ declaration merely to introduce a known pair.
+    tupleStep
+      :: [HsType]
+      -> StateT SearchNode SearchBranches ()
+    tupleStep elements = do
+      holes <- forM elements $ const $ builderAllocHole allocators
+      let newGoals = mkGoals scopeId givenConstraints
+            $ zipWith VarBinding holes elements
+      modify $ \node -> node
+        { nodeExpression = fillExprHole var
+            (ExpTuple $ map ExpHole holes)
+            (nodeExpression node)
+        , nodeGoals = nodeGoals node <> Seq.fromList newGoals
+        , nodeDepth = addScore (nodeDepth node)
+            $ heuristics_functionGoalTransform h
+        , nodeLastStepBinding = Nothing
+        }
+
     -- try to resolve the goal by looking at the parameters in scope, i.e.
     -- the parameters accumulated by building the expression so far.
     -- e.g. for (\x -> (_ :: Int)), the goal can be filled by `x` if
@@ -1922,6 +1945,8 @@ stateStep allocators multiPM allowConstrs h
       introducedForallStep is cs t
     TypeForall is cs t | forallMode == TryForallIntroduction ->
       byProvided <|> byFunctionSimple <|> introducedForallStep is cs t
+    TypeTuple Boxed elements | not $ null elements ->
+      byProvided <|> tupleStep elements <|> byFunctionSimple
     _ -> byProvided <|> byFunctionSimple
 
 

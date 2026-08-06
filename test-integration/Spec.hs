@@ -2501,7 +2501,8 @@ tests = testGroup "Djex facade"
             ++ "\nDjinn generated:\n" ++ djinnGenerated)
           ExitSuccess exitCode
   , testCase
-      "compile nested quartic rank-N values through the Exference facade" $ do
+      "compile nested quartic rank-N values through both Exference adapters" $
+      do
       let inputs =
             [ "(forall a b c d e. q)"
             , "(forall a b c d e. r)"
@@ -2525,44 +2526,53 @@ tests = testGroup "Djex facade"
             nestedProducts inputs
       LoadReport checkedResult _ <- environmentFromFiles [] []
       checked <- expectRight checkedResult
-      session <- expectRight $
+      hseSession <- expectRight $
         ExferenceCompatibility.mkExferenceSession checked
+      neutralEnvironment <- expectRight
+        (mkEnvironment [] :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      neutralSession <- expectRight $ mkExferenceSession neutralEnvironment
       target <- expectRight $ mkIdentifier "quarticExference"
-      request <- expectRight $ parseExferenceRequest session
-        defaultExferenceOptions
-          { exferenceMaximumSteps = 4096
-          , exferenceMaximumQueueSize = Just 1024
-          }
-        target "quartic-rank-n-exference" source
-      candidate <- firstExferenceCandidate =<< expectRight
-        (runExferenceQuery session request)
-      candidateResidualConstraints candidate @?= []
-      generated <- expectRight $
-        renderExferenceCandidateDefinition Unqualified candidate
-
-      let fixture = unlines
-            [ "module NestedQuarticRankNFixture where"
-            , ""
-            , "quarticExference :: forall q r z m. " ++ source
-            , generated
-            ]
-      withTemporaryHaskellModule fixture $ \sourcePath -> do
-        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
-          [ "-v0"
-          , "-fforce-recomp"
-          , "-fno-code"
-          , "-fno-write-interface"
-          , "-XHaskell2010"
-          , "-XAllowAmbiguousTypes"
-          , "-XImpredicativeTypes"
-          , "-XRankNTypes"
-          , sourcePath
-          ] ""
-        assertEqual
-          ("GHC rejected the public nested quartic Exference candidate\nstdout:\n"
-            ++ output ++ "\nstderr:\n" ++ errors
-            ++ "\nExference generated:\n" ++ generated)
-          ExitSuccess exitCode
+      let checkSession (label, session) = do
+            request <- expectRight $ parseExferenceRequest session
+              defaultExferenceOptions
+                { exferenceMaximumSteps = 4096
+                , exferenceMaximumQueueSize = Just 1024
+                }
+              target "quartic-rank-n-exference" source
+            candidate <- firstExferenceCandidate =<< expectRight
+              (runExferenceQuery session request)
+            candidateResidualConstraints candidate @?= []
+            generated <- expectRight $
+              renderExferenceCandidateDefinition Unqualified candidate
+            let fixture = unlines
+                  [ "module NestedQuarticRankNFixture where"
+                  , ""
+                  , "quarticExference :: forall q r z m. " ++ source
+                  , generated
+                  ]
+            withTemporaryHaskellModule fixture $ \sourcePath -> do
+              (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+                [ "-v0"
+                , "-fforce-recomp"
+                , "-fno-code"
+                , "-fno-write-interface"
+                , "-XHaskell2010"
+                , "-XAllowAmbiguousTypes"
+                , "-XImpredicativeTypes"
+                , "-XRankNTypes"
+                , sourcePath
+                ] ""
+              assertEqual
+                ("GHC rejected the " ++ label
+                  ++ " nested quartic Exference candidate\nstdout:\n"
+                  ++ output ++ "\nstderr:\n" ++ errors
+                  ++ "\nExference generated:\n" ++ generated)
+                ExitSuccess exitCode
+      mapM_ checkSession
+        [ ("checked HSE", hseSession)
+        , ("neutral", neutralSession)
+        ]
   , testCase "do not guess visible arguments for non-vacuous providers" $ do
       seedName <- expectRight $ mkIdentifier "Seed"
       tokenName <- expectRight $ mkIdentifier "Token"

@@ -16,6 +16,7 @@ module Language.Haskell.Exference.Core.Expression
       , ExpLambda
       , ExpApply
       , ExpTypeApply
+      , ExpTuple
       , ExpHole
       , ExpLetMatch
       , ExpLet
@@ -95,6 +96,15 @@ pattern ExpTypeApply function argument <-
   ExpTypeApply (Expression function) argument = Expression
     $ Generated.VisibleTypeApplication function argument
 
+-- | A structural boxed tuple.  Keeping saturated tuple introduction in the
+-- shared generated tree avoids pretending that syntax-level constructors
+-- must have been declared as ordinary environment bindings.
+pattern ExpTuple :: [Expression] -> Expression
+pattern ExpTuple elements <- (matchTuple -> Just elements)
+ where
+  ExpTuple elements = Expression
+    $ Generated.Tuple [element | Expression element <- elements]
+
 pattern ExpHole :: TVarId -> Expression
 pattern ExpHole variable =
   Expression (Generated.Hole (AnnotatedLocal variable Nothing))
@@ -139,8 +149,8 @@ pattern ExpCaseMatch scrutinee alternatives <-
   ExpCaseMatch (Expression scrutinee) alternatives = Expression
     $ Generated.Case scrutinee $ map generatedAlternative alternatives
 
-{-# COMPLETE ExpVar, ExpName, ExpLambda, ExpApply, ExpTypeApply, ExpHole, ExpLetMatch,
-             ExpLet, ExpCaseMatch #-}
+{-# COMPLETE ExpVar, ExpName, ExpLambda, ExpApply, ExpTypeApply, ExpTuple,
+             ExpHole, ExpLetMatch, ExpLet, ExpCaseMatch #-}
 
 annotated :: TVarId -> HsType -> AnnotatedLocal
 annotated variable annotation = AnnotatedLocal variable $ Just annotation
@@ -176,6 +186,11 @@ matchTypeApply
 matchTypeApply (Expression expression) = case expression of
   Generated.VisibleTypeApplication function argument ->
     Just (Expression function, argument)
+  _ -> Nothing
+
+matchTuple :: Expression -> Maybe [Expression]
+matchTuple (Expression expression) = case expression of
+  Generated.Tuple elements -> Just $ map Expression elements
   _ -> Nothing
 
 matchLetMatch

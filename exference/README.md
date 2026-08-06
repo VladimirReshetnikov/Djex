@@ -170,6 +170,15 @@ function and tuple constructor applications to structural `FunctionType` and
 `TupleType` values. They reject a rigid variable in any forall binder because
 Exference treats rigid IDs as search constants rather than source binders.
 
+Generated terms likewise use the shared expression tree. The historical
+`ExpVar`, `ExpName`, `ExpLambda`, `ExpApply`, `ExpTypeApply`, `ExpHole`,
+`ExpLetMatch`, `ExpLet`, and `ExpCaseMatch` views remain available, and
+`ExpTuple` exposes the shared structural boxed-tuple form. A saturated boxed
+tuple goal is introduced directly, like a lambda, so it does not require or
+record an ordinary tuple-constructor binding. Excluding or rerating `(,)`
+therefore affects its binding and partial-application paths, not structural
+introduction of an already fixed pair goal.
+
 Class constraints use `Language.Haskell.Synthesis.Constraint` directly as
 `Constraint HsType`; the historical `HsConstraint` constructor spelling is a
 bidirectional compatibility pattern. Class declarations and instances live in
@@ -435,6 +444,9 @@ tuples through arity 64, while the eager Exference search inventory deliberately
 materializes only arities 2 through 7: higher eager constructors would add a
 partial-application branch to every non-arrow goal. This operational cap is
 exported as `maximumBuiltInTupleArity` rather than repeated as a magic number.
+It limits materialized constructor bindings, not saturated structural tuple
+introduction, which accepts every boxed arity validated by the shared type
+model. Unit remains on its existing constructor-binding path.
 Recursive flags come from the shared alias-expanded inventory witness across
 all loaded modules and appear in both the backend-derived projection and
 checked Inventory; caller-supplied or module-local preliminary bits are never

@@ -414,6 +414,13 @@ checkValidatedExpression provenCandidateRigids
             (TypeArrow parameter expectedType)
           parameter' <- zonk parameter
           checkAgainst variables argument parameter'
+        -- A structural tuple carries its arity but not independently
+        -- inferable polytypes for its fields.  Check each field against the
+        -- corresponding expected component so rank-N lambdas and forwarded
+        -- schemes retain the same bidirectional boundary as applications.
+        (ExpTuple elements, TypeTuple Boxed expectedElements)
+          | length elements == length expectedElements ->
+              zipWithM_ (checkAgainst variables) elements expectedElements
         _ -> infer variables checkedExpression
           >>= (`unifyTypes` expectedType)
 
@@ -499,6 +506,8 @@ checkValidatedExpression provenCandidateRigids
         ExpName name -> visibleBindingScheme name >>= zonk
         _ -> infer variables function >>= zonk
       instantiateVisibleTypeArgument argument functionType
+    infer variables (ExpTuple elements) =
+      TypeTuple Boxed <$> mapM (infer variables) elements
     infer _ (ExpHole variable) = throwCheck $ ExpressionHole variable
     infer variables (ExpLetMatch constructor patternVariables binding body) = do
       bindingType <- infer variables binding

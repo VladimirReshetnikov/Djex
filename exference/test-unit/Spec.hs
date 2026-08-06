@@ -3942,13 +3942,12 @@ tests = testGroup "Exference"
                   )
                 goal = TypeForall [0, 1, 2, 3] []
                   $ foldr TypeArrow output inputs
-                pairName = validTupleName 2
-                pairResult = TypeTuple Boxed [TypeVar 100, TypeVar 101]
-                pairBinding = FunctionBinding pairResult pairName 0 []
-                  [TypeVar 100, TypeVar 101]
                 input = identityInput
                   { input_goalType = goal
-                  , input_envFuncs = [pairBinding]
+                  -- Parser-neutral clients express products structurally and
+                  -- need not materialize the syntax-level pair constructor as
+                  -- an ordinary environment binding.
+                  , input_envFuncs = []
                   , input_maxSteps = 4096
                   , input_maxQueueSize = Just 1024
                   }
@@ -3961,7 +3960,40 @@ tests = testGroup "Exference"
               ("direct quartic candidate took "
                 ++ show (exference_steps statistics) ++ " steps")
               (exference_steps statistics <= 512)
-            checkExpression (mkQueryClassEnv emptyClassEnv []) [pairBinding] []
+            checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+              goal [] expression @?= Right ()
+      , testCase
+          "structurally introduces flat tuples above the eager binding cap" $
+          do
+            let elements = map TypeVar [0 .. 7]
+                goal = foldr TypeArrow (TypeTuple Boxed elements) elements
+                input = identityInput
+                  { input_goalType = goal
+                  , input_envFuncs = []
+                  , input_maxSteps = 256
+                  }
+                stripLambdas :: Int -> Expression -> Expression
+                stripLambdas remaining expression
+                  | remaining <= 0 = expression
+                  | ExpLambda _ _ body <- expression =
+                      stripLambdas (remaining - 1) body
+                  | otherwise = expression
+            (expression, residual, _) <- maybe
+              (fail "an empty neutral inventory could not build an 8-tuple")
+              pure
+              $ findOneExpression input
+            residual @?= []
+            case stripLambdas 8 expression of
+              ExpTuple tupleElements -> length tupleElements @?= 8
+              body -> fail $ "flat tuple search returned "
+                ++ showExpression body
+            case renderExpression Generated.Unqualified expression of
+              Left failure -> fail $ "flat tuple did not render: "
+                ++ show failure
+              Right rendered -> assertBool
+                ("flat tuple rendering lost tuple syntax: " ++ rendered)
+                ("," `isInfixOf` rendered)
+            checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
               goal [] expression @?= Right ()
       , testCase "nested contextual forall givens discharge body obligations" $ do
           let className = name "C"
@@ -4233,6 +4265,8 @@ tests = testGroup "Exference"
                         providerBinder == returned
                           && actualArgument == argument
                       _ -> containsExplicit providerBinder function
+                  ExpTuple elements ->
+                    any (containsExplicit providerBinder) elements
                   ExpHole _ -> False
                   ExpLetMatch _ _ binding body ->
                     containsExplicit providerBinder binding
@@ -8463,9 +8497,12 @@ tests = testGroup "Exference"
                       , [(2, boolean)]
                       , ExpLet 3 functionType
                           (ExpLambda 4 boolean $ ExpVar 1 integer)
-                          (ExpApply
-                            (ExpVar 3 functionType)
-                            (ExpVar 2 boolean))
+                          (ExpTuple
+                            [ ExpApply
+                                (ExpVar 3 functionType)
+                                (ExpVar 2 boolean)
+                            , ExpVar 1 integer
+                            ])
                       )
                     ]
               generated = Generated.Let
@@ -8478,9 +8515,12 @@ tests = testGroup "Exference"
                     , Generated.Let (Generated.Bind 3)
                         (Generated.Lambda [Generated.Bind 4]
                           $ Generated.Local 1)
-                        (Generated.Apply
-                          (Generated.Local 3)
-                          (Generated.Local 2))
+                        (Generated.Tuple
+                          [ Generated.Apply
+                              (Generated.Local 3)
+                              (Generated.Local 2)
+                          , Generated.Local 1
+                          ])
                     )
                   ])
           toGeneratedExpression expression @?= generated
@@ -8493,6 +8533,7 @@ tests = testGroup "Exference"
             , (1, integer)
             , (3, functionType)
             , (2, boolean)
+            , (1, integer)
             ]
           expressionNameHints expression @?= Map.fromList
             [(1, "i1"), (2, "b2"), (3, "f3"), (4, "b4")]
@@ -9656,6 +9697,30 @@ tests = testGroup "Exference"
             actual -> fail
               $ "result-directed checking trusted a foreign annotation: "
               ++ show actual
+      , testCase
+          "checks structural quantified tuple fields bidirectionally" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let identity binder = TypeForall [binder] []
+                $ TypeArrow (TypeVar binder) (TypeVar binder)
+              expected = TypeTuple Boxed [identity 2, identity 3]
+              wider = TypeTuple Boxed
+                [identity 2, identity 3, identity 4]
+              rigidIdentity rigid local =
+                ExpLambda local (TypeConstant rigid)
+                  $ ExpVar local $ TypeConstant rigid
+              direct = ExpTuple
+                [rigidIdentity 0 20, rigidIdentity 1 21]
+              forged = ExpTuple
+                [rigidIdentity 0 20, rigidIdentity 7 21]
+              classes = mkQueryClassEnv staticClasses []
+              expectMismatch label result = case result of
+                Left TypeMismatch{} -> pure ()
+                actual -> fail $ label ++ ": " ++ show actual
+          checkExpression classes [] [] expected [] direct @?= Right ()
+          expectMismatch "structural tuple trusted a foreign rigid"
+            $ checkExpression classes [] [] expected [] forged
+          expectMismatch "structural tuple accepted the wrong arity"
+            $ checkExpression classes [] [] wider [] direct
       , testCase "contextual forall introduction uses substituted local givens" $ do
           let className = name "C"
               evidence ty = HsConstraint className [ty]

@@ -1210,13 +1210,13 @@ testRankNTypeAtoms = do
                     (SharedType.TypeVariable "payload") tokenType
         ]
     let higherKindName = sharedName "HigherKindConstructor"
-        higherKindPairName = sharedName "HigherKindPair"
+        higherKindTripleName = sharedName "HigherKindTriple"
         higherKindArgumentName = sharedName "HigherKindArgument"
         higherKindType = SharedType.TypeConstructor higherKindName
-        higherKindPairType =
-            SharedType.TypeConstructor higherKindPairName
-        partialHigherKindPair = SharedType.TypeApplication
-            higherKindPairType closedType
+        higherKindTripleType =
+            SharedType.TypeConstructor higherKindTripleName
+        partialHigherKindTriple = SharedType.TypeApplication
+            higherKindTripleType closedType
         higherKindArgumentType =
             SharedType.TypeConstructor higherKindArgumentName
         mixedKindProvider = SharedType.ForallType ["f", "a", "hidden"] [] $
@@ -1236,13 +1236,14 @@ testRankNTypeAtoms = do
         closedDeclarations ++
         [ SharedDeclaration.AbstractTypeDeclaration () higherKindName $
             SharedKind.FunctionKind closedKind closedKind
-        , SharedDeclaration.AbstractTypeDeclaration () higherKindPairName $
+        , SharedDeclaration.AbstractTypeDeclaration () higherKindTripleName $
             SharedKind.FunctionKind closedKind $
-                SharedKind.FunctionKind closedKind closedKind
+                SharedKind.FunctionKind closedKind $
+                    SharedKind.FunctionKind closedKind closedKind
         , valueDeclaration "vacuousHigherKindMonoToken" $
             SharedType.ForallType ["constructor"] [] tokenType
-        , valueDeclaration "vacuousHigherKindPairMonoToken" $
-            SharedType.ForallType ["constructor", "partial"] [] tokenType
+        , valueDeclaration "vacuousHigherKindsMonoToken" $
+            SharedType.ForallType ["unary", "binary"] [] tokenType
         ]
     sealedBoxSession <- sealDjinnSessionFrom stableSession $
         closedDeclarations ++ [boxDeclaration,
@@ -1684,27 +1685,30 @@ testRankNTypeAtoms = do
         ]
 
     -- Preserve a whole source-proved vector when multiple binders are vacuous.
-    -- The second argument is a partially applied binary constructor, so this
-    -- also pins kind checking and visible argument order beyond the unary case.
-    let vacuousHigherKindPairAssignment = kindedProviderAssignment
-            "vacuousHigherKindPairMonoToken"
+    -- The second argument is a partially applied ternary constructor with two
+    -- arrows remaining, so this also pins recursive kind checking and visible
+    -- argument order beyond the unary case.
+    let binaryConstructorKind =
+            SharedKind.FunctionKind closedKind constructorKind
+        vacuousHigherKindsAssignment = kindedProviderAssignment
+            "vacuousHigherKindsMonoToken"
             [ (constructorKind, higherKindType)
-            , (constructorKind, partialHigherKindPair)
+            , (binaryConstructorKind, partialHigherKindTriple)
             ]
-    vacuousHigherKindPairResult <- expectShownRight $
+    vacuousHigherKindsResult <- expectShownRight $
         Djex.runDjinnQueryWithKindedInstantiationAssignments
             vacuousHigherKindSession
-            [vacuousHigherKindPairAssignment]
+            [vacuousHigherKindsAssignment]
             vacuousHigherKindRequest
-    vacuousHigherKindPairRendered <-
-        renderStableCandidates vacuousHigherKindPairResult
+    vacuousHigherKindsRendered <-
+        renderStableCandidates vacuousHigherKindsResult
     assertBool
         ("a multi-vacuous higher-kinded vector lost its partial constructor " ++
-            "or positional order: " ++ show vacuousHigherKindPairRendered)
+            "or positional order: " ++ show vacuousHigherKindsRendered)
         $ any
-            (("vacuousHigherKindPairMonoToken @HigherKindConstructor " ++
-                "@(HigherKindPair MonoClosed)") `isInfixOf`)
-            vacuousHigherKindPairRendered
+            (("vacuousHigherKindsMonoToken @HigherKindConstructor " ++
+                "@(HigherKindTriple MonoClosed)") `isInfixOf`)
+            vacuousHigherKindsRendered
 
     let higherKindGoal = SharedType.FunctionType
             (SharedType.TypeApplication

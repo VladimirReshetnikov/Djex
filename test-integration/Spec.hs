@@ -1711,7 +1711,7 @@ tests = testGroup "Djex facade"
   , testCase "retain an ordered multi-vacuous Exference assignment" $ do
       tokenName <- expectRight $ mkIdentifier "MultiVacuousKindedToken"
       wrapperName <- expectRight $ mkIdentifier "MultiVacuousKindedWrapper"
-      pairName <- expectRight $ mkIdentifier "MultiVacuousKindedPair"
+      tripleName <- expectRight $ mkIdentifier "MultiVacuousKindedTriple"
       providerName <- expectRight $ mkIdentifier "multiVacuousKindedProvider"
       targetName <- expectRight $ mkIdentifier "useMultiVacuousKindedProvider"
       target <- expectRight $ mkDefinitionName targetName
@@ -1720,25 +1720,27 @@ tests = testGroup "Djex facade"
           tokenType = TypeConstructor tokenName
           wrapperConstructor :: ExferenceType
           wrapperConstructor = TypeConstructor wrapperName
-          pairConstructor :: ExferenceType
-          pairConstructor = TypeConstructor pairName
-          partialPair = TypeApplication pairConstructor tokenType
+          tripleConstructor :: ExferenceType
+          tripleConstructor = TypeConstructor tripleName
+          partialTriple = TypeApplication tripleConstructor tokenType
           constructorKind =
             FunctionKind ProperTypeKind ProperTypeKind
-          pairKind = FunctionKind ProperTypeKind constructorKind
+          binaryConstructorKind =
+            FunctionKind ProperTypeKind constructorKind
+          tripleKind = FunctionKind ProperTypeKind binaryConstructorKind
           providerType = ForallType
             [firstVariable, secondVariable] [] tokenType
           declarations =
             [ AbstractTypeDeclaration () tokenName ProperTypeKind
             , AbstractTypeDeclaration () wrapperName constructorKind
-            , AbstractTypeDeclaration () pairName pairKind
+            , AbstractTypeDeclaration () tripleName tripleKind
             , ValueDeclaration $ ValueSignature () providerName providerType
             ]
           kindedAssignment = KindedProviderInstantiationAssignment
             { kindedProviderInstantiationAssignmentProvider = providerName
             , kindedProviderInstantiationAssignmentArguments =
                 [ (constructorKind, wrapperConstructor)
-                , (constructorKind, partialPair)
+                , (binaryConstructorKind, partialTriple)
                 ]
             }
           visibleSpine expression = case expression of
@@ -1749,7 +1751,7 @@ tests = testGroup "Djex facade"
             _ -> Nothing
       visibleArguments <- expectRight $
         traverse specifiedVisibleTypeArgument
-          [wrapperConstructor, partialPair]
+          [wrapperConstructor, partialTriple]
       environment <- expectRight
         (mkEnvironment declarations :: Either
           (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)

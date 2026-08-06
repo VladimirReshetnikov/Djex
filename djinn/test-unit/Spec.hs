@@ -1112,9 +1112,11 @@ testRankNTypeAtoms = do
         closedName = sharedName "MonoClosed"
         tokenName = sharedName "MonoToken"
         resultName = sharedName "MonoResult"
+        nominalEmptyName = sharedName "ProviderVoid"
         closedType = SharedType.TypeConstructor closedName
         tokenType = SharedType.TypeConstructor tokenName
         resultType = SharedType.TypeConstructor resultName
+        nominalEmptyType = SharedType.TypeConstructor nominalEmptyName
         abstractClosed name = SharedDeclaration.AbstractTypeDeclaration ()
             name closedKind
         closedScheme = SharedType.ForallType ["instanceType"] [] $
@@ -1194,6 +1196,11 @@ testRankNTypeAtoms = do
         closedDeclarations ++
         [ valueDeclaration "ambiguousMonoToken" $
             SharedType.ForallType ["chosen"] [] tokenType
+        ]
+    nominalEmptySession <- sealDjinnSessionFrom stableSession $
+        [ SharedDeclaration.DataTypeDeclaration () nominalEmptyName [] []
+        , valueDeclaration "vacuousEmptyProvider" $
+            SharedType.ForallType ["chosen"] [] nominalEmptyType
         ]
     prefixAmbiguousSession <- sealDjinnSessionFrom stableSession $
         closedDeclarations ++
@@ -1297,6 +1304,60 @@ testRankNTypeAtoms = do
         $ any
             ("ambiguousMonoToken @(forall a0_0. a0_0 -> a0_0)" `isInfixOf`)
             assignedTokenRendered
+
+    -- The priority plan exposes an exact vacuous choice before a bare provider
+    -- can shadow it, but it must not replace the historical provider superset.
+    -- This tuple pins a single proof which uses the same provider once through
+    -- the external rank-N assignment and once through ordinary instantiation.
+    mixedUseTarget <- expectShownRight $
+        SharedName.mkIdentifier "composeExactAndOrdinaryProviderUses"
+    mixedUseRequest <- expectShownRight $ Djex.parseDjinnRequest
+        ambiguousTokenSession
+        defaultQueryOptions
+            { optionAlternatives = True
+            , optionCutoff = 128
+            }
+        mixedUseTarget
+        "mixed-provider-assignment.djinn" "(MonoToken, MonoToken)"
+    mixedUse <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationAssignments ambiguousTokenSession
+            [identityAssignment] mixedUseRequest
+    mixedUseRendered <- renderStableCandidates mixedUse
+    let exactUse =
+            "ambiguousMonoToken @(forall a0_0. a0_0 -> a0_0)"
+        compact = filter (`notElem` " \n\r\t")
+        mixedProviderUse term =
+            let rendered = compact term
+                exact = compact exactUse
+            in (("(" ++ exact ++ ",ambiguousMonoToken)")
+                    `isInfixOf` rendered) ||
+                (("(ambiguousMonoToken," ++ exact ++ ")")
+                    `isInfixOf` rendered)
+    assertBool
+        ("exact and ordinary uses of one provider did not compose: " ++
+            show mixedUseRendered)
+        $ any mixedProviderUse mixedUseRendered
+
+    -- Nominal-empty identity commits to the first premise of the exact empty
+    -- type. The assignment specialization must therefore precede the ordinary
+    -- vacuous provider scheme, or the only direct candidate is an
+    -- uninstantiated provider name that its caller cannot elaborate.
+    nominalEmptyTarget <- expectShownRight $
+        SharedName.mkIdentifier "instantiateVacuousEmptyProvider"
+    nominalEmptyRequest <- expectShownRight $ Djex.parseDjinnRequest
+        nominalEmptySession defaultQueryOptions nominalEmptyTarget
+        "provider-empty-assignment.djinn" "ProviderVoid"
+    assignedNominalEmpty <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationAssignments nominalEmptySession
+            [providerAssignment "vacuousEmptyProvider" [quantifiedIdentity]]
+            nominalEmptyRequest
+    assignedNominalEmptyRendered <-
+        renderStableCandidates assignedNominalEmpty
+    assertBool
+        ("a vacuous nominal-empty provider shadowed its exact assignment: " ++
+            show assignedNominalEmptyRendered)
+        $ "vacuousEmptyProvider @(forall a0_0. a0_0 -> a0_0)"
+            `elem` assignedNominalEmptyRendered
     let renamedQuantifiedIdentity =
             SharedType.ForallType ["renamedIdentity"] [] $
                 SharedType.FunctionType

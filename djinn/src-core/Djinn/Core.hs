@@ -1413,6 +1413,12 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         activeAllProviderSymbols = Map.keysSet activeAllProviderApplications
         activeAllProviderVisibleApplications =
             Map.map snd activeAllProviderApplications
+        activeProviderAssignmentSymbols =
+            Map.keysSet activeProviderAssignmentApplications
+        activeProviderAssignmentVisibleApplications =
+            Map.map snd activeProviderAssignmentApplications
+        activeProviderAssignmentNames = Set.fromList $
+            map fst $ Map.elems activeProviderAssignmentApplications
         targetProviderInstantiations = providerInstantiationPremises
             "$djinn$provider-instantiation$target$"
             structuralTranslator
@@ -1462,6 +1468,12 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             Map.keysSet activeAllNominalProviderApplications
         activeAllNominalProviderVisibleApplications =
             Map.map snd activeAllNominalProviderApplications
+        activeNominalProviderAssignmentSymbols =
+            Map.keysSet activeNominalProviderAssignmentApplications
+        activeNominalProviderAssignmentVisibleApplications =
+            Map.map snd activeNominalProviderAssignmentApplications
+        activeNominalProviderAssignmentNames = Set.fromList $
+            map fst $ Map.elems activeNominalProviderAssignmentApplications
         targetNominalProviderInstantiations = providerInstantiationPremises
             "$djinn$nominal-provider-instantiation$target$"
             nominalTranslator
@@ -1580,11 +1592,62 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
                 | not (null nominalLoadedSchemePremises)
                 , (form, _) <- nominalPlans
                 ]
-        -- Caller-supplied evidence is an additive tail. Direct specialized
-        -- premises retain the exact provider association which justified each
-        -- type choice, and target-named specializations remain diagnostic-only.
-        -- Omitting these plan families for an empty evidence set makes the
-        -- complete historical plan list and its finite-budget behavior exact.
+        -- Exact ordered assignments receive one positive-only priority plan.
+        -- Replace the ordinary views of each assigned provider in this plan,
+        -- then put its exact premise at the tail. LJT introduces folded
+        -- environment arrows from left to right: a nominal empty premise
+        -- encountered before later arrows is eliminated, while the tail
+        -- premise reaches the final matching goal by direct identity and
+        -- therefore preserves its visible type application. The unfiltered
+        -- provider superset below remains available for proofs which compose
+        -- an exact assignment with an ordinary use of that same provider.
+        providerAssignmentPriorityStructuralSearchPlans =
+            [ ( withoutProviders activeProviderAssignmentNames premises ++
+                    withoutProviders activeProviderAssignmentNames
+                        loadedSchemePremises ++
+                    activeAxiomPremises ++ activeLoadedAxiomPremises ++
+                    activeProviderAssignmentPremises
+              , []
+              , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
+                    `Set.union` activeProviderAssignmentSymbols
+              , activeVisibleApplications `Map.union`
+                    activeLoadedVisibleApplications `Map.union`
+                    activeProviderAssignmentVisibleApplications
+              , activeProviderAssignmentApplications
+              , form
+              , False
+              )
+            | not (null activeProviderAssignmentPremises)
+            , (form, _) <- plans
+            ]
+        providerAssignmentPriorityNominalSearchPlans
+            | not useNominalProviderProjection = []
+            | otherwise =
+                [ ( withoutProviders activeNominalProviderAssignmentNames
+                        nominalPremises ++
+                        withoutProviders activeNominalProviderAssignmentNames
+                            nominalLoadedSchemePremises ++
+                        activeNominalAxiomPremises ++
+                        activeNominalLoadedAxiomPremises ++
+                        activeNominalProviderAssignmentPremises
+                  , []
+                  , activeNominalAxiomSymbols `Set.union`
+                        activeNominalLoadedAxiomSymbols `Set.union`
+                        activeNominalProviderAssignmentSymbols
+                  , activeNominalVisibleApplications `Map.union`
+                        activeNominalLoadedVisibleApplications `Map.union`
+                        activeNominalProviderAssignmentVisibleApplications
+                  , activeNominalProviderAssignmentApplications
+                  , form
+                  , False
+                  )
+                | not (null activeNominalProviderAssignmentPremises)
+                , (form, _) <- nominalPlans
+                ]
+        -- The historical combined scalar-candidate and exact-assignment plan
+        -- remains an unfiltered additive superset at its established position.
+        -- This preserves legacy candidate ordering and allows one proof to use
+        -- the same provider through both exact and ordinary instantiation.
         providerStructuralSearchPlans =
             [ ( premises ++ loadedSchemePremises ++
                     activeAxiomPremises ++ activeLoadedAxiomPremises ++
@@ -1629,6 +1692,11 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
                 , (form, _) <- nominalPlans
                 ]
         searchPlans =
+            -- Exact assignment priority is absent for both the scalar-only
+            -- and empty-evidence entrances, so their historical plan order is
+            -- unchanged byte for byte.
+            providerAssignmentPriorityStructuralSearchPlans ++
+            providerAssignmentPriorityNominalSearchPlans ++
             structuralSearchPlans ++
             nominalSearchPlans ++
             structuralAxiomSearchPlans ++
@@ -1640,6 +1708,8 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             providerNominalSearchPlans ++
             loadedStructuralSearchPlans ++
             loadedNominalSearchPlans
+        withoutProviders providerNames =
+            filter ((`Set.notMember` providerNames) . fst)
     results <- runPlans collectAcrossPlans
         options (optionCutoff options) [] searchPlans
     mergeFormulaPlanResults options results

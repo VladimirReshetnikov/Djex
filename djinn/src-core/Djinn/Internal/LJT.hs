@@ -462,11 +462,12 @@ redant :: MoreSolutions -> Antecedents -> AtomImps -> NestImps
 redant more antes atomImps nestImps atoms goal =
     case antes of
         [] -> redsucc goal
-        a : rest -> redant1 False a rest goal
+        a : rest -> redant1 Nothing a rest goal
   where
     redant0 pending g = redant more pending atomImps nestImps atoms g
 
-    redant1 :: Bool -> Antecedent -> Antecedents -> Goal -> P Proof
+    redant1 ::
+        Maybe (Symbol, [Term]) -> Antecedent -> Antecedents -> Goal -> P Proof
     redant1 fairChain antecedent@(A p f) pending g
         -- Prefer the direct identity between the same nominal empty type.
         -- Exploring elimination as an alternative would cause result scoring
@@ -481,7 +482,8 @@ redant more antes atomImps nestImps atoms goal =
         isNominalEmpty _ = False
 
     -- Reduce and classify the first pending antecedent.
-    reduceAntecedent :: Bool -> Antecedent -> Antecedents -> Goal -> P Proof
+    reduceAntecedent ::
+        Maybe (Symbol, [Term]) -> Antecedent -> Antecedents -> Goal -> P Proof
     reduceAntecedent _ (A p (PVar s)) pending g =
         let (consequences, remainingAtomImps) = extract atomImps s
             newAntecedents =
@@ -505,7 +507,7 @@ redant more antes atomImps nestImps atoms goal =
             (p : zipWith Lam variables proofs)
       where
         proveAlternative (v, (_, f)) =
-            redant1 False (A (Var v) f) pending g
+            redant1 Nothing (A (Var v) f) pending g
     -- Empty datatypes have no constructors.  Preserve their nominal identity
     -- for equality, but eliminate any one of them explicitly with an empty case.
     reduceAntecedent _ (A p (Empty _)) _ _ =
@@ -515,7 +517,8 @@ redant more antes atomImps nestImps atoms goal =
 
     -- Reduce an implication antecedent.
     reduceImp ::
-        Bool -> Term -> Formula -> Formula -> Antecedents -> Goal -> P Proof
+        Maybe (Symbol, [Term]) -> Term -> Formula -> Formula
+        -> Antecedents -> Goal -> P Proof
     -- p : PVar s -> b
     reduceImp fairChain p (PVar s) b pending g =
         reduceAtomicImp fairChain p s b pending g
@@ -523,7 +526,7 @@ redant more antes atomImps nestImps atoms goal =
     reduceImp _ p (Conj conjuncts) b pending g = do
         x <- newSym "x"
         let implication = foldr (:->) b conjuncts
-        proof <- redant1 False (A (Var x) implication) pending g
+        proof <- redant1 Nothing (A (Var x) implication) pending g
         subst (curryTuple (length conjuncts) p) x proof
     -- p : (c | d) -> b
     reduceImp _ p (Disj alternatives) b pending g = do
@@ -561,7 +564,8 @@ redant more antes atomImps nestImps atoms goal =
     -- Reduce an implication whose antecedent is atomic.  One branch applies
     -- it to an atom already in scope; the other indexes it for later use.
     reduceAtomicImp ::
-        Bool -> Term -> Symbol -> Formula -> Antecedents -> Goal -> P Proof
+        Maybe (Symbol, [Term]) -> Term -> Symbol -> Formula
+        -> Antecedents -> Goal -> P Proof
     reduceAtomicImp fairChain p s b pending g =
         applyAvailable
         `mplus`
@@ -569,17 +573,32 @@ redant more antes atomImps nestImps atoms goal =
             nestImps atoms g
       where
         available = findAtoms s atoms
-        applyAvailable = case available of
+        -- Once adjacent arguments establish a repeated-domain chain, prefer
+        -- atom proofs not yet used by that chain.  Fairly interleaving every
+        -- branch below keeps repeated applications available as well.
+        priorArguments = case fairChain of
+            Just (domain, arguments) | domain == s -> arguments
+            _ -> []
+        orderedAvailable
+            | null priorArguments = available
+            | otherwise =
+                filter (`notElem` priorArguments) available
+                ++ filter (`elem` priorArguments) available
+        applyAvailable = case orderedAvailable of
             [] -> mzero
             atom : _ | not more -> applyAtom atom
-            _ | continueFair -> interleaveChoices (map applyAtom available)
-            _ -> choose available >>= applyAtom
-        continueFair = fairChain || repeatsDomain s b
+            _ | continueFair ->
+                interleaveChoices (map applyAtom orderedAvailable)
+            _ -> choose orderedAvailable >>= applyAtom
+        continueFair = not (null priorArguments) || repeatsDomain s b
         repeatsDomain domain (PVar next :-> _) = domain == next
         repeatsDomain _ _ = False
         applyAtom atom = do
             x <- newSym "x"
-            proof <- redant1 continueFair (A (Var x) b) pending g
+            let nextChain
+                    | continueFair = Just (s, atom : priorArguments)
+                    | otherwise = Nothing
+            proof <- redant1 nextChain (A (Var x) b) pending g
             subst (Apply p atom) x proof
 
     -- Reduce the goal once every antecedent has been classified.
@@ -619,7 +638,7 @@ redant more antes atomImps nestImps atoms goal =
         `mplus`
         do
             s <- newSym "x"
-            proof <- redant1 False (A (Var s) a) [] b
+            proof <- redant1 Nothing (A (Var s) a) [] b
             return $ Lam s proof
 
     -- Implications are indexed after antecedent processing.  Consult those

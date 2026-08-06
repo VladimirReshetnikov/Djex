@@ -4475,13 +4475,19 @@ testDistinctCurriedArguments = do
                 body == Apply (Apply (Var function) (Var first)) (Var second)
             _ -> False
         prefix = take 20 proofs
-    assertBool "fair atomic branching lost the repeated application" $
-        any isRepeated prefix
-    case filter isMixed prefix of
-        proof : _ -> assertRight
-            "the early distinct-argument proof must check independently"
-            (checkProof [] goal proof)
-        [] -> fail "the first twenty proofs omitted the mixed application"
+        mixed = [(index, proof) |
+            (index, proof) <- zip [(1 :: Int) ..] prefix, isMixed proof]
+        repeated = [index |
+            (index, proof) <- zip [(1 :: Int) ..] prefix, isRepeated proof]
+    case (mixed, repeated) of
+        ((mixedIndex, proof) : _, repeatedIndex : _) -> do
+            assertBool "distinct evidence should precede repeated evidence" $
+                mixedIndex < repeatedIndex
+            assertRight
+                "the early distinct-argument proof must check independently"
+                (checkProof [] goal proof)
+        ([], _) -> fail "the first twenty proofs omitted the mixed application"
+        (_, []) -> fail "the first twenty proofs omitted the repeated application"
 
 testThreeWayCurriedArguments :: IO ()
 testThreeWayCurriedArguments = do

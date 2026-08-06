@@ -4,6 +4,7 @@
 module Language.Haskell.Exference.Core.Internal.ExferenceNode
   ( SearchNode (..)
   , ForallGoalMode (..)
+  , TupleGoalMode (..)
   , TGoal (..)
   , Scopes
   , ScopeId
@@ -119,6 +120,15 @@ data ForallGoalMode
   | ContinueForallIntroduction
   deriving (Eq, Generic)
 
+-- | Whether a product goal may use the eager whole-tree shortcut. A nested
+-- goal emitted by the shortcut's shallow sibling stays on the shallow lane;
+-- otherwise each recursive child can rediscover the same saturated tuple
+-- through every possible partition of the tree.
+data TupleGoalMode
+  = AllowTupleTree
+  | ContinueShallowTuple
+  deriving (Eq, Generic)
+
 -- | An expression hole, its innermost lexical term scope, and the class
 -- assumptions visible only while constructing that hole. Root-prenex givens
 -- remain in 'nodeQueryClassEnv'; this local list is for contextual rank-N
@@ -127,6 +137,7 @@ data TGoal = TGoal
   { goalBinding :: VarBinding
   , goalScope :: !ScopeId
   , goalForallMode :: !ForallGoalMode
+  , goalTupleMode :: !TupleGoalMode
   , goalGivenConstraints :: [HsConstraint]
   }
   deriving Generic
@@ -146,7 +157,7 @@ mkGoals :: ScopeId
         -> [VarBinding]
         -> [TGoal]
 mkGoals sid givens = map
-  (\binding -> TGoal binding sid TryForallIntroduction givens)
+  (\binding -> TGoal binding sid TryForallIntroduction AllowTupleTree givens)
 
 data SearchNode = SearchNode
   { nodeGoals           :: Seq TGoal
@@ -193,6 +204,7 @@ data SearchNode = SearchNode
 instance NFData VarBinding
 instance NFData VarPBinding
 instance NFData ForallGoalMode
+instance NFData TupleGoalMode
 instance NFData TGoal
 instance NFData SearchNode
 

@@ -3965,6 +3965,65 @@ tests = testGroup "Exference"
           checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
             goal [] expression @?= Right ()
       , testCase
+          "does not rediscover a balanced tuple through every subtree" $ do
+          let leaves = map TypeConstant [0 .. 31]
+              balanced [] = error "balanced tuple test requires leaves"
+              balanced [leaf] = leaf
+              balanced elements = TypeTuple Boxed
+                [ balanced left
+                , balanced right
+                ]
+               where
+                (left, right) = splitAt (length elements `div` 2) elements
+              goal = foldr TypeArrow (balanced leaves) leaves
+              input = identityInput
+                { input_goalType = goal
+                , input_envFuncs = []
+                , input_maxSteps = 256
+                , input_maxQueueSize = Just 256
+                }
+          chunks <- expectRight $ findExpressionsWithStatsEither input
+          finalChunk <- case chunks of
+            [] -> fail "balanced tuple search emitted no status chunk"
+            firstChunk : remaining ->
+              pure $ lastElement firstChunk remaining
+          chunkStatus finalChunk @?= SearchStatus SearchExhausted 0 0
+          let candidates = concatMap chunkElements chunks
+          let expressions =
+                [ toGeneratedExpression expression
+                | (expression, residual, _) <- candidates
+                , null residual
+                ]
+          assertBool
+            ("balanced tuple produced " ++ show (length expressions)
+              ++ " structural derivations")
+            (length expressions <= 2)
+          Set.size (Set.fromList expressions) @?= 1
+      , testCase
+          "shallow tuple paths still reuse a deeply nested product" $ do
+          let firstType = TypeConstant 0
+              secondType = TypeConstant 1
+              thirdType = TypeConstant 2
+              fourthType = TypeConstant 3
+              reusable = TypeTuple Boxed [thirdType, fourthType]
+              output = TypeTuple Boxed
+                [ firstType
+                , TypeTuple Boxed [secondType, reusable]
+                ]
+              goal = foldr TypeArrow output
+                [firstType, secondType, reusable]
+              input = identityInput
+                { input_goalType = goal
+                , input_envFuncs = []
+                , input_maxSteps = 32
+                }
+          (expression, residual, _) <- maybe
+            (fail "deeply nested tuple reuse disappeared") pure
+            $ findOneExpression input
+          residual @?= []
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+            goal [] expression @?= Right ()
+      , testCase
           "bounded search checks the live quartic Lean serialization" $
           do
             let -- Lean's universe atom is deliberately caller-owned in the

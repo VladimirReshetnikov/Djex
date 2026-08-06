@@ -491,7 +491,8 @@ findEngineBatchesWith allocators
     , findQueue = Q.singleton 0 $ ScheduledNode rootGoal rootSearchNode
     }
   t = forallify rawType
-  rootGoal = TGoal (VarBinding 0 t) initialScopeId OpenLeadingForalls []
+  rootGoal = TGoal
+    (VarBinding 0 t) initialScopeId OpenLeadingForalls AllowTupleTree []
   rootSearchNode = SearchNode
     { nodeGoals           = Seq.empty
     , nodeConstraintGoals = []
@@ -1472,7 +1473,7 @@ rateNode h s = priorityFromPenalty
 rateGoals :: ExferenceHeuristicsConfig -> Seq.Seq TGoal -> Penalty
 rateGoals h = sumScores . fmap rateGoal
   where
-    rateGoal (TGoal (VarBinding _ t) _ _ _) = typeComplexity h t
+    rateGoal (TGoal (VarBinding _ t) _ _ _ _) = typeComplexity h t
 
 -- TODO: actually measure performance with different values and derive these
 -- weights instead of relying on historically chosen defaults.
@@ -1528,7 +1529,8 @@ stateStep :: SearchAllocators
           -> TGoal
           -> StateT SearchNode SearchBranches ()
 stateStep allocators multiPM allowConstrs h
-    (TGoal (VarBinding var goalType) scopeId forallMode givenConstraints) = do
+    (TGoal (VarBinding var goalType) scopeId forallMode tupleMode
+      givenConstraints) = do
   -- This paragraph is evil, and hopefully temporary. (Scoping issues make it necessary.)
   contxt <- gets nodeQueryClassEnv
   constraintGoals' <- gets nodeConstraintGoals
@@ -1562,7 +1564,7 @@ stateStep allocators multiPM allowConstrs h
           -- may cause duplication of the goals (e.g. for the different cases
           -- in the pattern match).
           additionalGoals <- addScopePatternMatch
-            allocators multiPM g nextId newScopeId givenConstraints
+            allocators multiPM g nextId newScopeId tupleMode givenConstraints
             $ map splitBinding
             $ reverse ts
           modify $ \node -> node
@@ -1594,7 +1596,7 @@ stateStep allocators multiPM allowConstrs h
       modify $ \node -> node
         { nodeGoals = TGoal
             (VarBinding var $ snd $ applySubsts substs t)
-            scopeId OpenLeadingForalls givenConstraints
+            scopeId OpenLeadingForalls tupleMode givenConstraints
             Seq.<| nodeGoals node
         , nodeQueryClassEnv = addQueryClassEnv
             (snd . constraintApplySubsts substs <$> cs)
@@ -1628,7 +1630,7 @@ stateStep allocators multiPM allowConstrs h
           modify $ \node -> node
             { nodeGoals = TGoal
                 (VarBinding var $ snd $ applySubsts substitutions t)
-                scopeId ContinueForallIntroduction
+                scopeId ContinueForallIntroduction tupleMode
                 (givenConstraints ++ openedContexts)
                 Seq.<| nodeGoals node
             , nodeRigidPlan = nextPlan
@@ -1650,8 +1652,13 @@ stateStep allocators multiPM allowConstrs h
       -> StateT SearchNode SearchBranches ()
     tupleStep elements = do
       holes <- forM elements $ const $ builderAllocHole allocators
-      let newGoals = mkGoals scopeId givenConstraints
-            $ zipWith VarBinding holes elements
+      let newGoals = zipWith shallowGoal holes elements
+          shallowGoal hole element = TGoal
+            (VarBinding hole element)
+            scopeId
+            TryForallIntroduction
+            ContinueShallowTuple
+            givenConstraints
       modify $ \node -> node
         { nodeExpression = fillExprHole var
             (ExpTuple $ map ExpHole holes)
@@ -1933,7 +1940,7 @@ stateStep allocators multiPM allowConstrs h
                 (ExpHole var))
                 (nodeExpression node)
             , nodeGoals = TGoal (VarBinding vParam d)
-                scopeId TryForallIntroduction givenConstraints
+                scopeId TryForallIntroduction AllowTupleTree givenConstraints
                 Seq.<| nodeGoals node
             }
           newScopeId <- builderAddScope allocators scopeId
@@ -1950,6 +1957,7 @@ stateStep allocators multiPM allowConstrs h
             goalType
             var
             newScopeId
+            tupleMode
             givenConstraints
             [splitBindingWithParameters ds $ VarBinding vResult provided]
           modify $ \node -> node
@@ -2012,7 +2020,10 @@ stateStep allocators multiPM allowConstrs h
     TypeForall is cs t | forallMode == TryForallIntroduction ->
       byProvided <|> byFunctionSimple <|> introducedForallStep is cs t
     TypeTuple Boxed elements | not $ null elements ->
-      byProvided <|> tupleTreeStep elements <|> tupleStep elements
+      byProvided
+        <|> (case tupleMode of
+          AllowTupleTree -> tupleTreeStep elements <|> tupleStep elements
+          ContinueShallowTuple -> tupleStep elements)
         <|> byFunctionSimple
     _ -> byProvided <|> byFunctionSimple
 
@@ -2031,13 +2042,16 @@ addScopePatternMatch :: SearchAllocators
                                --  form or another)
                      -> Int    -- goal id (hole id)
                      -> ScopeId -- scope for this goal
+                     -> TupleGoalMode -- structural product provenance
                      -> [HsConstraint] -- lexical class givens for this goal
                      -> [VarPBinding]
                      -> StateT SearchNode SearchBranches [TGoal]
-addScopePatternMatch allocators multiPM goalType vid sid givens bindings =
+addScopePatternMatch allocators multiPM goalType vid sid tupleMode givens
+    bindings =
   case bindings of
   [] -> return
-    [TGoal (VarBinding vid goalType) sid TryForallIntroduction givens]
+    [TGoal (VarBinding vid goalType) sid TryForallIntroduction
+      tupleMode givens]
   (b : bindingRest) -> do
     let v = varPVariable b
         vtResult = varPResult b
@@ -2047,7 +2061,7 @@ addScopePatternMatch allocators multiPM goalType vid sid givens bindings =
       { nodeProvidedScopes = scopesAddPBinding sid b
           $ nodeProvidedScopes node }
     let defaultHandleRest = addScopePatternMatch
-          allocators multiPM goalType vid sid givens bindingRest
+          allocators multiPM goalType vid sid tupleMode givens bindingRest
     case vtResult of
       TypeVar {}    -> defaultHandleRest -- dont pattern-match on variables, even if it unifies
       TypeArrow {}  ->
@@ -2134,6 +2148,7 @@ addScopePatternMatch allocators multiPM goalType vid sid givens bindings =
                   goalType
                   vid
                   sid
+                  tupleMode
                   givens
                   (reverse newBinds ++ bindingRest)
           mapFunc (DeconstructorBinding matchParam
@@ -2180,6 +2195,7 @@ addScopePatternMatch allocators multiPM goalType vid sid givens bindings =
                       goalType
                       newVid
                       newSid
+                      tupleMode
                       givens
                       bindingRest
                   else addScopePatternMatch
@@ -2188,6 +2204,7 @@ addScopePatternMatch allocators multiPM goalType vid sid givens bindings =
                     goalType
                     newVid
                     newSid
+                    tupleMode
                     givens
                     (newBinds ++ bindingRest)
           mapFunc _ = Nothing

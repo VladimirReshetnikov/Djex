@@ -145,6 +145,8 @@ tests =
     , ("prove empty goals from contradictions", testEmptyGoalContradiction)
     , ("reject non-theorems", testNonTheorems)
     , ("honor search budgets and strategies", testSearchModes)
+    , ("prefer distinct evidence across repeated curried domains",
+          testDistinctCurriedArguments)
     , ("use an assumption as its named proof", testNamedAssumption)
     , ("reject ambiguous raw proof environments",
           testCheckedProofSearchEnvironment)
@@ -4446,6 +4448,38 @@ testSearchModes = do
         null $ searchProofs $ run fair peirce
     assertEqual "interleaved search finds the same pick-3 proof set"
         (sort full) (sort $ searchProofs $ run fair pick3)
+
+-- A curried premise with repeated domains used to exhaust the complete
+-- subtree for its first atom proof before trying a second proof at the next
+-- argument.  Two ordinary unary premises are enough to push @combine x y@
+-- beyond a sixty-candidate client window even though @combine x x@ appears
+-- first.  The repeated-domain branch should instead expose both the direct
+-- repeated and distinct applications before exhausting derived compositions.
+testDistinctCurriedArguments :: IO ()
+testDistinctCurriedArguments = do
+    let combine = atomA :-> atomA :-> atomA
+        distractor = atomA :-> atomA
+        goal = foldr (:->) atomA
+            [atomA, atomA, combine, distractor, distractor]
+        proofs = prove True [] goal
+        isRepeated proof = case proof of
+            Lam first (Lam _ (Lam function
+                    (Lam _ (Lam _ body)))) ->
+                body == Apply (Apply (Var function) (Var first)) (Var first)
+            _ -> False
+        isMixed proof = case proof of
+            Lam first (Lam second (Lam function
+                    (Lam _ (Lam _ body)))) ->
+                body == Apply (Apply (Var function) (Var first)) (Var second)
+            _ -> False
+        prefix = take 20 proofs
+    assertBool "fair atomic branching lost the repeated application" $
+        any isRepeated prefix
+    case filter isMixed prefix of
+        proof : _ -> assertRight
+            "the early distinct-argument proof must check independently"
+            (checkProof [] goal proof)
+        [] -> fail "the first twenty proofs omitted the mixed application"
 
 testNamedAssumption :: IO ()
 testNamedAssumption = do

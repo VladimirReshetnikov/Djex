@@ -309,6 +309,23 @@ choose values = P $ \ _ s sk fk ->
         stream (x : xs) = sk s x (Step (stream xs))
     in stream values
 
+-- Explore the supplied computations round-robin even under the historical
+-- depth-first strategy.  This is deliberately narrower than 'Interleave': it
+-- is used only along a curried premise with adjacent repeated domains, so one
+-- argument choice's descendant compositions cannot starve every sibling
+-- choice.  The 'Step' before the remaining computations preserves the same
+-- finite choice-point accounting as 'choose'.
+interleaveChoices :: [P a] -> P a
+interleaveChoices [] = mzero
+interleaveChoices [choice] = choice
+interleaveChoices (choice : choices) =
+    interleaveChoice choice (interleaveChoices choices)
+  where
+    interleaveChoice first second = P $ \ strat s sk fk ->
+        replay sk fk $
+            interleaveS (reify strat s first)
+                (Step (reify strat s second))
+
 -- Cut a subsearch to its first result, preserving the choice points that
 -- were explored to reach it so budgets stay honest.
 atMostOne :: P a -> P a
@@ -437,38 +454,39 @@ redant :: MoreSolutions -> Antecedents -> AtomImps -> NestImps
 redant more antes atomImps nestImps atoms goal =
     case antes of
         [] -> redsucc goal
-        a : rest -> redant1 a rest goal
+        a : rest -> redant1 False a rest goal
   where
     redant0 pending g = redant more pending atomImps nestImps atoms g
 
-    redant1 :: Antecedent -> Antecedents -> Goal -> P Proof
-    redant1 antecedent@(A p f) pending g
+    redant1 :: Bool -> Antecedent -> Antecedents -> Goal -> P Proof
+    redant1 fairChain antecedent@(A p f) pending g
         -- Prefer the direct identity between the same nominal empty type.
         -- Exploring elimination as an alternative would cause result scoring
         -- to print the less useful explicit empty case instead.
         | f == g && isNominalEmpty f = return p
-        | f /= g = reduceAntecedent antecedent pending g
-        | more = return p `mplus` reduceAntecedent antecedent pending g
+        | f /= g = reduceAntecedent fairChain antecedent pending g
+        | more = return p `mplus`
+            reduceAntecedent fairChain antecedent pending g
         | otherwise = return p
       where
         isNominalEmpty (Empty _) = True
         isNominalEmpty _ = False
 
     -- Reduce and classify the first pending antecedent.
-    reduceAntecedent :: Antecedent -> Antecedents -> Goal -> P Proof
-    reduceAntecedent (A p (PVar s)) pending g =
+    reduceAntecedent :: Bool -> Antecedent -> Antecedents -> Goal -> P Proof
+    reduceAntecedent _ (A p (PVar s)) pending g =
         let (consequences, remainingAtomImps) = extract atomImps s
             newAntecedents =
                 [A (Apply f p) b | A f b <- consequences] ++ pending
         in redant more newAntecedents remainingAtomImps nestImps
              (addAtom p s atoms) g
-    reduceAntecedent (A p (Conj conjuncts)) pending g = do
+    reduceAntecedent _ (A p (Conj conjuncts)) pending g = do
         variables <- mapM (const (newSym "v")) conjuncts
         proof <- redant0
             (zipWith (\ v f -> A (Var v) f) variables conjuncts ++ pending) g
         return $ applys (Csplit (length conjuncts))
             [foldr Lam proof variables, p]
-    reduceAntecedent (A p (Disj alternatives)) pending g = do
+    reduceAntecedent _ (A p (Disj alternatives)) pending g = do
         variables <- mapM (const (newSym "d")) alternatives
         proofs <- mapM proveAlternative (zip variables alternatives)
         -- Even when both propositions print as @false@, a raw empty
@@ -478,26 +496,29 @@ redant more antes atomImps nestImps atoms goal =
         return $ applys (Ccases (map fst alternatives))
             (p : zipWith Lam variables proofs)
       where
-        proveAlternative (v, (_, f)) = redant1 (A (Var v) f) pending g
+        proveAlternative (v, (_, f)) =
+            redant1 False (A (Var v) f) pending g
     -- Empty datatypes have no constructors.  Preserve their nominal identity
     -- for equality, but eliminate any one of them explicitly with an empty case.
-    reduceAntecedent (A p (Empty _)) _ _ =
+    reduceAntecedent _ (A p (Empty _)) _ _ =
         return $ Apply (Ccases []) p
-    reduceAntecedent (A p (a :-> b)) pending g =
-        reduceImp p a b pending g
+    reduceAntecedent fairChain (A p (a :-> b)) pending g =
+        reduceImp fairChain p a b pending g
 
     -- Reduce an implication antecedent.
-    reduceImp :: Term -> Formula -> Formula -> Antecedents -> Goal -> P Proof
+    reduceImp ::
+        Bool -> Term -> Formula -> Formula -> Antecedents -> Goal -> P Proof
     -- p : PVar s -> b
-    reduceImp p (PVar s) b pending g = reduceAtomicImp p s b pending g
+    reduceImp fairChain p (PVar s) b pending g =
+        reduceAtomicImp fairChain p s b pending g
     -- p : (c & d) -> b
-    reduceImp p (Conj conjuncts) b pending g = do
+    reduceImp _ p (Conj conjuncts) b pending g = do
         x <- newSym "x"
         let implication = foldr (:->) b conjuncts
-        proof <- redant1 (A (Var x) implication) pending g
+        proof <- redant1 False (A (Var x) implication) pending g
         subst (curryTuple (length conjuncts) p) x proof
     -- p : (c | d) -> b
-    reduceImp p (Disj alternatives) b pending g = do
+    reduceImp _ p (Disj alternatives) b pending g = do
         variables <- mapM (const (newSym "d")) alternatives
         proof <- redant0
             (zipWith (\ v (_, d) -> A (Var v) (d :-> b)) variables alternatives
@@ -508,9 +529,10 @@ redant more antes atomImps nestImps atoms goal =
             subst (inj constructor i p) v result
     -- An implication from an empty type is always available and contributes
     -- no usable premise.
-    reduceImp _ (Empty _) _ pending g = redant0 pending g
+    reduceImp _ _ (Empty _) _ pending g = redant0 pending g
     -- p : (c -> d) -> b
-    reduceImp p (c :-> d) b pending g = reduceNestedImp p c d b pending g
+    reduceImp _ p (c :-> d) b pending g =
+        reduceNestedImp p c d b pending g
 
     -- Reduce a nested implication antecedent.
     reduceNestedImp ::
@@ -530,16 +552,27 @@ redant more antes atomImps nestImps atoms goal =
 
     -- Reduce an implication whose antecedent is atomic.  One branch applies
     -- it to an atom already in scope; the other indexes it for later use.
-    reduceAtomicImp :: Term -> Symbol -> Formula -> Antecedents -> Goal -> P Proof
-    reduceAtomicImp p s b pending g =
-        (do
-            atom <- cutSearch more $ choose (findAtoms s atoms)
-            x <- newSym "x"
-            proof <- redant1 (A (Var x) b) pending g
-            subst (Apply p atom) x proof)
+    reduceAtomicImp ::
+        Bool -> Term -> Symbol -> Formula -> Antecedents -> Goal -> P Proof
+    reduceAtomicImp fairChain p s b pending g =
+        applyAvailable
         `mplus`
         redant more pending (insert atomImps s [A p b])
             nestImps atoms g
+      where
+        available = findAtoms s atoms
+        applyAvailable = case available of
+            [] -> mzero
+            atom : _ | not more -> applyAtom atom
+            _ | continueFair -> interleaveChoices (map applyAtom available)
+            _ -> choose available >>= applyAtom
+        continueFair = fairChain || repeatsDomain s b
+        repeatsDomain domain (PVar next :-> _) = domain == next
+        repeatsDomain _ _ = False
+        applyAtom atom = do
+            x <- newSym "x"
+            proof <- redant1 continueFair (A (Var x) b) pending g
+            subst (Apply p atom) x proof
 
     -- Reduce the goal once every antecedent has been classified.
     redsucc :: Goal -> P Proof
@@ -578,7 +611,7 @@ redant more antes atomImps nestImps atoms goal =
         `mplus`
         do
             s <- newSym "x"
-            proof <- redant1 (A (Var s) a) [] b
+            proof <- redant1 False (A (Var s) a) [] b
             return $ Lam s proof
 
     -- Implications are indexed after antecedent processing.  Consult those

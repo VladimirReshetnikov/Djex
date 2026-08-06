@@ -46,6 +46,7 @@ module Djinn.Core (
     DjinnQueryMetadata(..), DjinnResult,
     DjinnQueryOptionsError(..), DjinnQueryError(..),
     inhabitResult, inhabitResultPrepared, inhabitSynthesisResultPrepared,
+    inhabitSynthesisResultPreparedWithInstantiationCandidates,
     GeneratedQueryReport(..), inhabitGenerated, inhabitGeneratedPrepared,
     QueryOutcome(..), QueryReport(..), inhabit
     ) where
@@ -86,6 +87,10 @@ import Djinn.Internal.Instantiation
     , instantiationVisibleApplications
     , instantiationAxioms
     , loadedInstantiationAxioms
+    , providerInstantiationApplications
+    , providerInstantiationPremiseBindings
+    , providerInstantiationPremises
+    , rewriteProviderInstantiationEvidence
     , usesInstantiationEvidence
     )
 import Djinn.Internal.LJT
@@ -662,6 +667,7 @@ type DjinnResult =
 data DjinnQueryError
     = DjinnQueryOptionsFailure DjinnQueryOptionsError
     | DjinnQueryFailure String
+    | DjinnInstantiationCandidateFailure String
     | DjinnInternalQueryFailure String
     | DjinnResultInvariantFailure SharedQuery.QueryResultInvariantError
     deriving (Eq, Show)
@@ -793,13 +799,32 @@ inhabitSynthesisResultPrepared
     -> SharedGenerated.DefinitionName
     -> SharedType.Type HSymbol
     -> Either DjinnQueryError DjinnResult
-inhabitSynthesisResultPrepared options prepared contexts target goal = do
+inhabitSynthesisResultPrepared options prepared contexts target goal =
+    inhabitSynthesisResultPreparedWithInstantiationCandidates
+        options prepared contexts [] target goal
+
+-- | Search a sealed Djinn environment with externally established,
+-- provider-local type choices. Each association is checked against the exact
+-- prepared provider and type/kind/synonym scope before it can add a separate
+-- proof-producing search tail. The ordinary entrance above is the exact empty
+-- evidence case.
+inhabitSynthesisResultPreparedWithInstantiationCandidates
+    :: QueryOptions
+    -> PreparedEnvironment
+    -> [Constraint (SharedType.Type HSymbol)]
+    -> [SharedQuery.ProviderInstantiationCandidate HSymbol]
+    -> SharedGenerated.DefinitionName
+    -> SharedType.Type HSymbol
+    -> Either DjinnQueryError DjinnResult
+inhabitSynthesisResultPreparedWithInstantiationCandidates options prepared
+        contexts candidates target goal = do
     first DjinnQueryOptionsFailure $ validateQueryOptions options
     -- Resolution owns the observable query-failure order: class lookup and
     -- arity precede type inspection, while synonym saturation precedes full
     -- structural validation and kind inference. Elaboration returns the
     -- canonical alias-free types consumed at the formula boundary.
-    inhabitSynthesisResultPreparedChecked options prepared contexts target goal
+    inhabitSynthesisResultPreparedChecked
+        options prepared contexts candidates target goal
 
 -- | Compatibility projection of 'inhabitResult'.
 inhabitGenerated :: QueryOptions -> Environment -> [Context] -> HSymbol -> HType
@@ -840,10 +865,12 @@ inhabitSynthesisResultPreparedChecked
     :: QueryOptions
     -> PreparedEnvironment
     -> [Constraint (SharedType.Type HSymbol)]
+    -> [SharedQuery.ProviderInstantiationCandidate HSymbol]
     -> SharedGenerated.DefinitionName
     -> SharedType.Type HSymbol
     -> Either DjinnQueryError DjinnResult
-inhabitSynthesisResultPreparedChecked options prepared contexts target goal = do
+inhabitSynthesisResultPreparedChecked options prepared contexts candidates
+        target goal = do
     elaboratedGoal <- resolveSynthesisQueryContexts prepared
         ( "goal type " ++ renderSynthesisType goal
         , KStar
@@ -871,7 +898,9 @@ inhabitSynthesisResultPreparedChecked options prepared contexts target goal = do
             translateType translateNominalPlans
                 "nominal goal type: " elaboratedGoal
         else Right plans
-    searchPreparedFormula options prepared target
+    checkedCandidates <- prepareProviderInstantiationCandidates
+        prepared candidates
+    searchPreparedFormula options prepared checkedCandidates target
         elaboratedGoal
         parametricDataRelevant
         plans nominalPlans
@@ -899,7 +928,7 @@ inhabitResultPreparedChecked options prepared contexts target goal = do
     sharedGoal <- projectGoal goal
     sharedContexts <- projectContexts contexts
     inhabitSynthesisResultPreparedChecked
-        options prepared sharedContexts target sharedGoal
+        options prepared sharedContexts [] target sharedGoal
   where
     projectGoal source = case toSynthesisType source of
         Right projected -> Right projected
@@ -911,6 +940,80 @@ inhabitResultPreparedChecked options prepared contexts target goal = do
         Left failure -> internalQueryFailure $
             "checked raw context projection failed: " ++ show failure
 
+type PreparedProviderInstantiationCandidate =
+    ( Symbol
+    , SharedType.Type HSymbol
+    , SharedGenerated.VisibleTypeArgument
+    )
+
+-- Validate external provider evidence only after the ordinary goal and
+-- contexts have crossed their established request boundary. The list spine is
+-- bounded before any element is entered, making cyclic caller-built evidence
+-- a finite query failure. Types are then elaborated independently in source
+-- order so one provider's binders cannot share kind variables with another;
+-- closedness makes that independence semantic rather than merely diagnostic.
+prepareProviderInstantiationCandidates
+    :: PreparedEnvironment
+    -> [SharedQuery.ProviderInstantiationCandidate HSymbol]
+    -> Either DjinnQueryError [PreparedProviderInstantiationCandidate]
+prepareProviderInstantiationCandidates prepared rawCandidates = do
+    let maximumCandidates =
+            SharedQuery.maximumProviderInstantiationCandidates
+        observed = SharedCollection.observedListLength
+            maximumCandidates rawCandidates
+    if observed > maximumCandidates
+        then Left $ DjinnInstantiationCandidateFailure $
+            "provider instantiation candidate count exceeds " ++
+                show maximumCandidates
+        else return ()
+    (_, retained) <- foldM validateCandidate (Map.empty, []) $
+        zip [0 :: Int ..] rawCandidates
+    return $ reverse retained
+  where
+    (loadedSchemes, nominalLoadedSchemes, _) =
+        preparedEnvironmentLoadedFunctionInstantiation prepared
+    loadedProviders = Set.fromList $
+        map fst loadedSchemes ++ map fst nominalLoadedSchemes
+
+    validateCandidate (seen, retained) (index, candidate) = do
+        let providerName =
+                SharedQuery.providerInstantiationCandidateProvider candidate
+            source = SharedQuery.providerInstantiationCandidateType candidate
+            label = "provider instantiation candidate #" ++ show index ++
+                " for " ++ SharedName.renderCanonical providerName ++ ": "
+        providerSpelling <- first
+            (DjinnInstantiationCandidateFailure . (label ++)) $
+            synthesisFunctionSymbol providerName
+        let provider = Symbol providerSpelling
+        if provider `Set.member` loadedProviders
+            then return ()
+            else Left $ DjinnInstantiationCandidateFailure $ label ++
+                "provider is not an exact loaded polymorphic value"
+        elaborated <- first
+            (DjinnInstantiationCandidateFailure . (label ++)) $
+            elaboratePreparedSynthesisTypes prepared [(KStar, source)]
+        checked <- case elaborated of
+            [one] -> Right one
+            _ -> Left $ DjinnInternalQueryFailure $
+                "provider candidate elaboration changed batch shape"
+        unless (Set.null $ SharedType.freeVariables checked) $
+            Left $ DjinnInstantiationCandidateFailure $
+                label ++ "type is not closed"
+        unless (null $ SharedType.typeConstraints checked) $
+            Left $ DjinnInstantiationCandidateFailure $
+                label ++ "type is not context-free"
+        visible <- first
+            (DjinnInstantiationCandidateFailure . (label ++) . show) $
+            SharedGenerated.specifiedVisibleTypeArgument checked
+        let key = SharedTypeAtom.alphaTypeKey checked
+            providerKeys = Map.findWithDefault Set.empty provider seen
+        if key `Set.member` providerKeys
+            then Right (seen, retained)
+            else Right
+                ( Map.insert provider (Set.insert key providerKeys) seen
+                , (provider, checked, visible) : retained
+                )
+
 -- Proof search is representation-independent once the checked source query
 -- has become a formula. Both the native and raw entrances meet at this single
 -- worker; validated class contexts add no premises here, while bounded
@@ -919,13 +1022,14 @@ inhabitResultPreparedChecked options prepared contexts target goal = do
 searchPreparedFormula
     :: QueryOptions
     -> PreparedEnvironment
+    -> [PreparedProviderInstantiationCandidate]
     -> SharedGenerated.DefinitionName
     -> SharedType.Type HSymbol
     -> Bool
     -> PolarizedFormulaPlans
     -> PolarizedFormulaPlans
     -> Either DjinnQueryError DjinnResult
-searchPreparedFormula options prepared target elaboratedGoal
+searchPreparedFormula options prepared providerCandidates target elaboratedGoal
         parametricDataRelevant formulaPlans nominalFormulaPlans = do
     let (premises, premiseTranslationIncomplete, premiseSpellings) =
             preparedEnvironmentPolarizedFunctionPremises prepared
@@ -1113,6 +1217,45 @@ searchPreparedFormula options prepared target elaboratedGoal
             (map snd targetNominalLoadedSchemePremises)
         targetNominalLoadedAxiomPremises =
             instantiationAxiomPremises targetNominalLoadedAxioms
+        activeProviderInstantiations = providerInstantiationPremises
+            "$djinn$provider-instantiation$active$"
+            structuralTranslator
+            activeLoadedSchemePremises
+            providerCandidates
+        activeProviderPremises = providerInstantiationPremiseBindings
+            activeProviderInstantiations
+        activeProviderApplications = providerInstantiationApplications
+            activeProviderInstantiations
+        activeProviderSymbols = Map.keysSet activeProviderApplications
+        activeProviderVisibleApplications =
+            Map.map snd activeProviderApplications
+        targetProviderInstantiations = providerInstantiationPremises
+            "$djinn$provider-instantiation$target$"
+            structuralTranslator
+            targetLoadedSchemePremises
+            providerCandidates
+        targetProviderPremises = providerInstantiationPremiseBindings
+            targetProviderInstantiations
+        activeNominalProviderInstantiations = providerInstantiationPremises
+            "$djinn$nominal-provider-instantiation$active$"
+            nominalTranslator
+            activeNominalLoadedSchemePremises
+            providerCandidates
+        activeNominalProviderPremises = providerInstantiationPremiseBindings
+            activeNominalProviderInstantiations
+        activeNominalProviderApplications = providerInstantiationApplications
+            activeNominalProviderInstantiations
+        activeNominalProviderSymbols =
+            Map.keysSet activeNominalProviderApplications
+        activeNominalProviderVisibleApplications =
+            Map.map snd activeNominalProviderApplications
+        targetNominalProviderInstantiations = providerInstantiationPremises
+            "$djinn$nominal-provider-instantiation$target$"
+            nominalTranslator
+            targetNominalLoadedSchemePremises
+            providerCandidates
+        targetNominalProviderPremises = providerInstantiationPremiseBindings
+            targetNominalProviderInstantiations
         useNominalLoadedProjection =
             parametricDataRelevant &&
                 ( useNominalProjection ||
@@ -1121,13 +1264,21 @@ searchPreparedFormula options prepared target elaboratedGoal
                     activeNominalLoadedAxiomPremises /=
                         activeLoadedAxiomPremises
                 )
+        useNominalProviderProjection =
+            parametricDataRelevant &&
+                ( nominalProjectionDistinct ||
+                    activeNominalProviderPremises /= activeProviderPremises ||
+                    targetNominalProviderPremises /= targetProviderPremises
+                )
         -- Preserve the complete historical structural/no-axiom prefix. This
         -- keeps first-result behavior, frontier ordering, and finite-budget
         -- observations stable; the nominal family shares only the cutoff and
         -- fuel left by that prefix and still precedes the structural axiom
         -- phase which previously formed the appended transport tail.
         structuralSearchPlans =
-            [ (premises, [], Set.empty, Map.empty, form, sound)
+            [ ( premises, [], Set.empty, Map.empty, Map.empty
+              , form, sound
+              )
             | (form, sound) <- plans
             ]
         structuralAxiomSearchPlans =
@@ -1135,6 +1286,7 @@ searchPreparedFormula options prepared target elaboratedGoal
               , targetAxiomPremises
               , activeAxiomSymbols
               , activeVisibleApplications
+              , Map.empty
               , form
               , sound && null activeAxiomPremises
               )
@@ -1149,6 +1301,7 @@ searchPreparedFormula options prepared target elaboratedGoal
               , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
               , activeVisibleApplications `Map.union`
                     activeLoadedVisibleApplications
+              , Map.empty
               , form
               , sound && null activeAxiomPremises &&
                     null activeLoadedSchemePremises
@@ -1167,11 +1320,14 @@ searchPreparedFormula options prepared target elaboratedGoal
             | not useNominalProjection = []
             | otherwise = concatMap nominalFormSearchPlans nominalPlans
         nominalFormSearchPlans (form, _) =
-            (nominalPremises, [], Set.empty, Map.empty, form, False) :
+            ( nominalPremises, [], Set.empty, Map.empty, Map.empty
+            , form, False
+            ) :
             [ ( nominalPremises ++ activeNominalAxiomPremises
               , targetNominalAxiomPremises
               , activeNominalAxiomSymbols
               , activeNominalVisibleApplications
+              , Map.empty
               , form
               , False
               )
@@ -1190,16 +1346,71 @@ searchPreparedFormula options prepared target elaboratedGoal
                         activeNominalLoadedAxiomSymbols
                   , activeNominalVisibleApplications `Map.union`
                         activeNominalLoadedVisibleApplications
+                  , Map.empty
                   , form
                   , False
                   )
                 | not (null nominalLoadedSchemePremises)
                 , (form, _) <- nominalPlans
                 ]
+        -- Caller-supplied evidence is an additive tail. Direct specialized
+        -- premises retain the exact provider association which justified each
+        -- type choice, and target-named specializations remain diagnostic-only.
+        -- Omitting these plan families for an empty evidence set makes the
+        -- complete historical plan list and its finite-budget behavior exact.
+        providerStructuralSearchPlans =
+            [ ( premises ++ loadedSchemePremises ++
+                    activeAxiomPremises ++ activeLoadedAxiomPremises ++
+                    activeProviderPremises
+              , targetAxiomPremises ++ targetLoadedAxiomPremises ++
+                    targetProviderPremises
+              , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
+                    `Set.union` activeProviderSymbols
+              , activeVisibleApplications `Map.union`
+                    activeLoadedVisibleApplications `Map.union`
+                    activeProviderVisibleApplications
+              , activeProviderApplications
+              , form
+              , False
+              )
+            | not (null activeProviderPremises) ||
+                not (null targetProviderPremises)
+            , (form, _) <- plans
+            ]
+        providerNominalSearchPlans
+            | not useNominalProviderProjection = []
+            | otherwise =
+                [ ( nominalPremises ++ nominalLoadedSchemePremises ++
+                        activeNominalAxiomPremises ++
+                        activeNominalLoadedAxiomPremises ++
+                        activeNominalProviderPremises
+                  , targetNominalAxiomPremises ++
+                        targetNominalLoadedAxiomPremises ++
+                        targetNominalProviderPremises
+                  , activeNominalAxiomSymbols `Set.union`
+                        activeNominalLoadedAxiomSymbols `Set.union`
+                        activeNominalProviderSymbols
+                  , activeNominalVisibleApplications `Map.union`
+                        activeNominalLoadedVisibleApplications `Map.union`
+                        activeNominalProviderVisibleApplications
+                  , activeNominalProviderApplications
+                  , form
+                  , False
+                  )
+                | not (null activeNominalProviderPremises) ||
+                    not (null targetNominalProviderPremises)
+                , (form, _) <- nominalPlans
+                ]
         searchPlans =
             structuralSearchPlans ++
             nominalSearchPlans ++
             structuralAxiomSearchPlans ++
+            -- A productive historical loaded proof stream can consume the
+            -- global candidate cutoff without finishing.  Run its strict
+            -- provider-evidence superset first when that optional family
+            -- exists; the empty-evidence plan list remains exactly historical.
+            providerStructuralSearchPlans ++
+            providerNominalSearchPlans ++
             loadedStructuralSearchPlans ++
             loadedNominalSearchPlans
     results <- runPlans collectAcrossPlans
@@ -1212,13 +1423,14 @@ searchPreparedFormula options prepared target elaboratedGoal
               , diagnosticOnlyPremises
               , axiomSymbols
               , visibleApplications
+              , providerApplications
               , form
               , negativeEvidenceSound
               )
                 : remaining) = do
         result <- searchPreparedFormulaPlan
             currentOptions candidateLimit target planPremises axiomSymbols
-            visibleApplications diagnosticOnlyPremises form
+            visibleApplications providerApplications diagnosticOnlyPremises form
             negativeEvidenceSound
         let completed' = result : completed
             nextLimit = candidateLimit - formulaPlanProofCount result
@@ -1284,10 +1496,13 @@ data FormulaPlanResult = FormulaPlanResult
 -- proofs remain useful under an incomplete plan, but absence of one does not
 -- establish that the original Haskell type is uninhabited. The extra premise
 -- list is diagnostic-only: it contains target-derived instantiation axioms
--- which must never enter safe proof search. Other instantiation axioms
--- participate in search and proof checking under their reserved symbols;
--- their evidence is erased only after checking, immediately before the proof
--- becomes generated code.
+-- or provider specializations which must never enter safe proof search. Other
+-- instantiation axioms participate in search and proof checking under their
+-- reserved symbols; their evidence is erased only after checking. The second
+-- application map retains direct provider-local specializations: proof
+-- checking sees their synthetic premise, then generated conversion rewrites a
+-- synthetic occurrence through its exact provider before the existing visible
+-- type-application lowering runs.
 searchPreparedFormulaPlan
     :: QueryOptions
     -> Int
@@ -1295,12 +1510,15 @@ searchPreparedFormulaPlan
     -> [(Symbol, Formula)]
     -> Set.Set Symbol
     -> Map.Map Symbol [SharedGenerated.VisibleTypeArgument]
+    -> Map.Map Symbol
+        (Symbol, [SharedGenerated.VisibleTypeArgument])
     -> [(Symbol, Formula)]
     -> Formula
     -> Bool
     -> Either DjinnQueryError FormulaPlanResult
 searchPreparedFormulaPlan options candidateLimit target externalEnv
-        axiomSymbols visibleApplications diagnosticOnlyEnv form
+        axiomSymbols visibleApplications providerApplications
+        diagnosticOnlyEnv form
         negativeEvidenceSound = do
     let name = SharedGenerated.definitionSpelling target
         proofEnv = prepareProofEnvironment (Symbol name) externalEnv
@@ -1365,11 +1583,14 @@ searchPreparedFormulaPlan options candidateLimit target externalEnv
                 candidateLimitReached = not $ null overflow
                 convertProof internalProof =
                     let restored = restoreProofTerm proofEnv internalProof
+                        providerApplied =
+                            rewriteProviderInstantiationEvidence
+                                providerApplications restored
                         implicitAxiomSymbols = axiomSymbols
                             `Set.difference`
                             Map.keysSet visibleApplications
                         erased = eliminateInstantiationEvidence
-                            implicitAxiomSymbols restored
+                            implicitAxiomSymbols providerApplied
                         convert
                             | usesInstantiationEvidence
                                 axiomSymbols restored =
@@ -1513,6 +1734,7 @@ renderDjinnQueryError failure = case failure of
     DjinnQueryOptionsFailure optionsFailure ->
         renderDjinnQueryOptionsError optionsFailure
     DjinnQueryFailure message -> message
+    DjinnInstantiationCandidateFailure message -> message
     DjinnInternalQueryFailure message -> message
     DjinnResultInvariantFailure invariant ->
         "internal Djinn result invariant: " ++ show invariant

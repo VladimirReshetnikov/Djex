@@ -18,7 +18,8 @@ module Djinn.Internal.Environment (
     preparedEnvironmentNominalPolarizedFunctionPremises,
     preparedEnvironmentLoadedFunctionInstantiation,
     preparedEnvironmentQueryUsesParametricData,
-    lookupPreparedSynthesisClass, synthesisMethodSymbol,
+    lookupPreparedSynthesisClass, synthesisFunctionSymbol,
+    synthesisMethodSymbol,
     elaboratePreparedSynthesisTypes,
     SynthesisEnvironment, SynthesisInventory,
     SynthesisEnvironmentError(..),
@@ -156,6 +157,13 @@ type SynthesisClassDefinition =
 -- boundary, but keep that invariant checked at this private projection edge.
 synthesisMethodSymbol :: SharedName.Name -> Either String HSymbol
 synthesisMethodSymbol = synthesisValueSymbol MethodOwner "class method"
+
+-- | Project a checked shared value name into the exact proof symbol used by
+-- the prepared function indexes. Query-time provider evidence uses this same
+-- authority so an operator or qualified identifier cannot accidentally be
+-- associated with a similarly rendered declaration.
+synthesisFunctionSymbol :: SharedName.Name -> Either String HSymbol
+synthesisFunctionSymbol = synthesisValueSymbol FunctionOwner "function"
 
 -- Identifiers retain their canonical qualification; operators use the bare
 -- spelling stored in Djinn's proof namespace. Qualified operators and every
@@ -886,7 +894,7 @@ sealPreparedEnvironment expansion = do
         ]
 
     translateFunction compiler (namespace, signature) = do
-        name <- synthesisValueSymbol FunctionOwner "function" $
+        name <- synthesisFunctionSymbol $
             SharedDeclaration.valueName signature
         let sourceType = SharedDeclaration.valueType signature
             quantifiedSource =

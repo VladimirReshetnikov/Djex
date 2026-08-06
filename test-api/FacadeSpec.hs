@@ -286,6 +286,26 @@ facadeTests = testGroup "public Djex facade"
           metadataProjection
             :: ExferenceResult -> ExferenceBatchMetadata
           metadataProjection = batchMetadata . resultSearch
+          providerEvidenceProjection
+            :: ProviderInstantiationCandidate String
+            -> (Name, Type String)
+          providerEvidenceProjection evidence =
+            ( providerInstantiationCandidateProvider evidence
+            , providerInstantiationCandidateType evidence
+            )
+          djinnEvidenceRunner
+            :: DjinnSession
+            -> [ProviderInstantiationCandidate DjinnTypeVariable]
+            -> DjinnRequest
+            -> Either Diagnostic DjinnResult
+          djinnEvidenceRunner = runDjinnQueryWithInstantiationCandidates
+          exferenceEvidenceRunner
+            :: ExferenceSession
+            -> [ProviderInstantiationCandidate ExferenceTypeVariable]
+            -> ExferenceRequest
+            -> Either Diagnostic [ExferenceResult]
+          exferenceEvidenceRunner =
+            runExferenceQueryWithInstantiationCandidates
       djinnTypeProjection `seq` djinnRequestProjection `seq`
         djinnCandidateProjection `seq` djinnEnvironmentProjection `seq`
         inventoryProjection `seq`
@@ -294,9 +314,11 @@ facadeTests = testGroup "public Djex facade"
         requestProjection `seq` candidateProjection `seq`
         residualRendererProjection `seq`
         qualifiedResidualRendererProjection `seq`
-        metadataProjection `seq` pure ()
+        metadataProjection `seq` providerEvidenceProjection `seq`
+        djinnEvidenceRunner `seq` exferenceEvidenceRunner `seq` pure ()
       mkDjinnRequest `seq` mkExferenceSession `seq`
         mkExferenceSessionWithPolicy `seq` pure ()
+      maximumProviderInstantiationCandidates @?= 32
   , testCase "seals Djinn from the neutral environment vocabulary" $ do
       let checkedEnvironment
             :: Either (EnvironmentError DjinnTypeVariable) DjinnEnvironment

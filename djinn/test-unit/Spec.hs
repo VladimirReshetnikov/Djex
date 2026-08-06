@@ -1226,6 +1226,173 @@ testRankNTypeAtoms = do
     implicitBoxSession <- sealDjinnSessionFrom stableSession $
         closedDeclarations ++ [boxDeclaration,
             valueDeclaration "implicitMonoBox" implicitBoxScheme]
+
+    -- A caller may supply a closed proper type justified by one exact loaded
+    -- provider's originating environment. The quantified identity below does
+    -- not occur in this goal or either provider scheme: only the evidence tail
+    -- may produce that visible choice. The ordinary runner remains precisely
+    -- the empty-evidence entrance.
+    let quantifiedIdentity = SharedType.ForallType ["identityType"] [] $
+            SharedType.FunctionType
+                (SharedType.TypeVariable "identityType")
+                (SharedType.TypeVariable "identityType")
+        providerChoice providerName candidateType =
+            SharedQuery.ProviderInstantiationCandidate
+                { SharedQuery.providerInstantiationCandidateProvider =
+                    sharedName providerName
+                , SharedQuery.providerInstantiationCandidateType = candidateType
+                }
+        identityEvidence = providerChoice
+            "ambiguousMonoToken" quantifiedIdentity
+    evidenceTargetName <- expectShownRight $
+        SharedName.mkIdentifier "instantiateFromProviderEvidence"
+    evidenceRequest <- expectShownRight $ Djex.parseDjinnRequest
+        ambiguousTokenSession defaultQueryOptions evidenceTargetName
+        "provider-evidence.djinn" "MonoToken"
+    evidenceBaseline <- expectShownRight $
+        Djex.runDjinnQuery ambiguousTokenSession evidenceRequest
+    explicitEmptyEvidence <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationCandidates
+            ambiguousTokenSession [] evidenceRequest
+    assertEqual "the empty provider-evidence runner changed Djinn results"
+        evidenceBaseline explicitEmptyEvidence
+    evidenceBaselineRendered <- renderStableCandidates evidenceBaseline
+    assertBool
+        ("a quantified provider choice was invented without evidence: " ++
+            show evidenceBaselineRendered)
+        $ not $ any
+            ("ambiguousMonoToken @(forall a0_0. a0_0 -> a0_0)" `isInfixOf`)
+            evidenceBaselineRendered
+    evidencedToken <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationCandidates
+            ambiguousTokenSession [identityEvidence] evidenceRequest
+    evidencedTokenRendered <- renderStableCandidates evidencedToken
+    assertBool
+        ("provider-local evidence did not retain its quantified choice: " ++
+            show evidencedTokenRendered)
+        $ any
+            ("ambiguousMonoToken @(forall a0_0. a0_0 -> a0_0)" `isInfixOf`)
+            evidencedTokenRendered
+
+    -- Two providers may erase to alpha-identical schemes. Evidence for the
+    -- first still cannot specialize the second merely because their logical
+    -- scheme atoms compare equal.
+    localitySession <- sealDjinnSessionFrom ambiguousTokenSession
+        [ valueDeclaration "sameSchemeWithoutEvidence" $
+            SharedType.ForallType ["otherChoice"] [] tokenType
+        ]
+    localityToken <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationCandidates
+            localitySession [identityEvidence] evidenceRequest
+    localityRendered <- renderStableCandidates localityToken
+    assertBool
+        ("provider evidence was donated across an alpha-identical scheme: " ++
+            show localityRendered)
+        $ not $ any
+            ("sameSchemeWithoutEvidence @(forall a0_0. a0_0 -> a0_0)"
+                `isInfixOf`)
+            localityRendered
+
+    -- The evidence tail must extend the richest historical instantiation plan,
+    -- not replace it.  The novel quantified choice specializes both the box and
+    -- finisher providers, while the finisher's second argument independently
+    -- requires the loaded carrier at MonoClosed.  A candidate containing all
+    -- three globals therefore consumes both evidence channels in one checked
+    -- proof.
+    let novelQuantifiedChoice =
+            SharedType.ForallType ["choiceLeft", "choiceRight"] [] $
+                SharedType.FunctionType
+                    (SharedType.TypeVariable "choiceLeft") $
+                    SharedType.FunctionType
+                        (SharedType.TypeVariable "choiceRight")
+                        (SharedType.TypeVariable "choiceLeft")
+        carrierName = sharedName "MonoCarrier"
+        carrierConstructor = SharedType.TypeConstructor carrierName
+        carrierType element =
+            SharedType.TypeApplication carrierConstructor element
+        carrierDeclaration = SharedDeclaration.AbstractTypeDeclaration ()
+            carrierName boxKind
+        historicalCarrierScheme =
+            SharedType.ForallType ["historicalChoice"] [] $
+                carrierType $ SharedType.TypeVariable "historicalChoice"
+        mixedFinishScheme = SharedType.ForallType ["externalChoice"] [] $
+            SharedType.FunctionType
+                (boxType $ SharedType.TypeVariable "externalChoice") $
+                SharedType.FunctionType
+                    (carrierType closedType)
+                    resultType
+    mixedEvidenceEnvironment <- mkNeutralDjinnEnvironment $
+        closedDeclarations ++
+        [ boxDeclaration, carrierDeclaration
+        , valueDeclaration "externalChoiceBox" defaultBoxScheme
+        , valueDeclaration "historicalChoiceCarrier" historicalCarrierScheme
+        , valueDeclaration "finishMixedEvidence" mixedFinishScheme
+        ]
+    mixedEvidenceSession <- expectShownRight $
+        Djex.mkDjinnSession mixedEvidenceEnvironment
+    mixedEvidenceTarget <- expectShownRight $
+        SharedName.mkIdentifier "composeProviderAndLoadedEvidence"
+    mixedEvidenceRequest <- expectShownRight $ Djex.parseDjinnRequest
+        mixedEvidenceSession
+        defaultQueryOptions
+            { optionAlternatives = True
+            , optionCutoff = 128
+            }
+        mixedEvidenceTarget
+        "mixed-provider-evidence.djinn" "MonoResult"
+    mixedEvidence <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationCandidates
+            mixedEvidenceSession
+            [ providerChoice "externalChoiceBox" novelQuantifiedChoice
+            , providerChoice "finishMixedEvidence" novelQuantifiedChoice
+            ]
+            mixedEvidenceRequest
+    mixedEvidenceRendered <- renderStableCandidates mixedEvidence
+    assertBool
+        ("provider-local and loaded instantiation evidence did not compose: " ++
+            show mixedEvidenceRendered ++ "; progress: " ++ show
+                (SharedSearch.batchProgress $
+                    SharedQuery.resultSearch mixedEvidence))
+        $ any (\term -> all (`isInfixOf` term)
+            [ "finishMixedEvidence @(forall a0_0 a0_1. " ++
+                "a0_0 -> a0_1 -> a0_0)"
+            , "externalChoiceBox @(forall a0_0 a0_1. " ++
+                "a0_0 -> a0_1 -> a0_0)"
+            , "historicalChoiceCarrier"
+            ]) mixedEvidenceRendered
+
+    -- Candidate failures are independent of a parsed request's source: the
+    -- evidence came from an external environment, not that source buffer.
+    let expectCandidateFailure description supplied = case
+            Djex.runDjinnQueryWithInstantiationCandidates
+                ambiguousTokenSession supplied evidenceRequest of
+          Left failure -> do
+            assertEqual (description ++ " diagnostic code")
+                (Just "DJEX_DJINN_CANDIDATE")
+                (SharedDiagnostic.diagnosticCode failure)
+            assertEqual (description ++ " source provenance")
+                Nothing (SharedDiagnostic.diagnosticSource failure)
+          Right result -> fail $ description ++ " was accepted: " ++ show result
+    expectCandidateFailure "an open provider candidate"
+        [providerChoice "ambiguousMonoToken" $ SharedType.TypeVariable "open"]
+    expectCandidateFailure "a contextual provider candidate"
+        [providerChoice "ambiguousMonoToken" $
+            SharedType.ForallType ["constrained"]
+                [Constraint (sharedName "Eq")
+                    [SharedType.TypeVariable "constrained"]]
+                (SharedType.FunctionType
+                    (SharedType.TypeVariable "constrained")
+                    (SharedType.TypeVariable "constrained"))]
+    expectCandidateFailure "a higher-kinded provider candidate"
+        [providerChoice "ambiguousMonoToken" $
+            SharedType.TypeConstructor SharedName.listName]
+    expectCandidateFailure "an unknown provider association"
+        [providerChoice "missingProvider" quantifiedIdentity]
+    expectCandidateFailure "an over-wide provider candidate list" $
+        replicate
+            (SharedQuery.maximumProviderInstantiationCandidates + 1)
+            (error "provider candidate element forced before width rejection")
+
     defaultBox <- runStableQuery defaultBoxSession
         "instantiateLoadedResultProvider"
         "MonoBox MonoClosed"

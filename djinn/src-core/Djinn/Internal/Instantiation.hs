@@ -24,12 +24,17 @@
 -- refutation.
 module Djinn.Internal.Instantiation
     ( InstantiationAxioms
+    , ProviderInstantiationPremises
     , instantiationAxioms
     , loadedInstantiationAxioms
+    , providerInstantiationPremises
     , closedMonotypeSubtrees
     , instantiationAxiomPremises
     , instantiationAxiomSymbols
     , instantiationVisibleApplications
+    , providerInstantiationPremiseBindings
+    , providerInstantiationApplications
+    , rewriteProviderInstantiationEvidence
     , usesInstantiationEvidence
     , eliminateInstantiationEvidence
     ) where
@@ -74,6 +79,12 @@ maxInstantiationAttempts = 512
 maxInstantiationAxiomsPerScheme :: Int
 maxInstantiationAxiomsPerScheme = 16
 
+-- Keep direct provider evidence within the same global bound as the public
+-- candidate association list, even when several candidates form tuples for a
+-- multiply quantified provider.
+maxProviderInstantiationPremises :: Int
+maxProviderInstantiationPremises = 32
+
 -- | The generated axiom premises together with their reserved proof symbols.
 -- The symbols use Djinn's private @$@ namespace, so they cannot collide with
 -- declared functions. Ordinary inferable evidence is erased before code
@@ -85,6 +96,20 @@ data InstantiationAxioms = InstantiationAxioms
     , instantiationAxiomSymbols :: Set.Set Symbol
     , instantiationVisibleApplications ::
         Map.Map Symbol [SharedGenerated.VisibleTypeArgument]
+    }
+
+-- | Provider-local specializations justified by caller-supplied evidence.
+--
+-- Unlike an ordinary instantiation axiom, each premise is the already
+-- specialized provider result rather than an implication from a scheme atom.
+-- Its synthetic proof symbol remains paired with the one exact provider whose
+-- external environment established the choice. Proof checking sees only the
+-- specialized premise; generated lowering later expands a use into an
+-- application of the synthetic evidence to that provider.
+data ProviderInstantiationPremises = ProviderInstantiationPremises
+    { providerInstantiationPremiseBindings :: [(Symbol, Formula)]
+    , providerInstantiationApplications ::
+        Map.Map Symbol (Symbol, [SharedGenerated.VisibleTypeArgument])
     }
 
 -- One retained logical axiom plus the explicit type arguments required when
@@ -247,6 +272,92 @@ loadedInstantiationAxioms translator visibleArgument variableSpellings
         , Just source <- [opaqueSymbolSource symbol]
         , Just scheme <- [instantiationScheme source]
         ]
+
+-- | Build a bounded family of direct provider-local specialization premises.
+--
+-- Candidate associations have already crossed the checked public boundary:
+-- their provider symbols name exact loaded schemes and each type is a closed,
+-- context-free proper type with the retained visible argument supplied beside
+-- it. Scheme order is the prepared environment's declaration order; candidate
+-- order is the caller's first-occurrence order for that provider. A provider
+-- receives no candidate associated with another provider, even when their
+-- quantified schemes are alpha-equivalent.
+providerInstantiationPremises
+    :: String
+    -> (SharedType.Type String -> Either String Formula)
+    -> [(Symbol, Formula)]
+    -> [( Symbol
+        , SharedType.Type String
+        , SharedGenerated.VisibleTypeArgument
+        )]
+    -> ProviderInstantiationPremises
+providerInstantiationPremises symbolPrefix translator schemes candidates =
+    ProviderInstantiationPremises premises applications
+  where
+    retained = take maxProviderInstantiationPremises $ concatMap specialize schemes
+    entries =
+        [ (Symbol $ symbolPrefix ++ show index, provider, formula, arguments)
+        | (index, (provider, formula, arguments)) <-
+            zip [0 :: Int ..] retained
+        ]
+    premises =
+        [ (synthetic, formula)
+        | (synthetic, _, formula, _) <- entries
+        ]
+    applications = Map.fromList
+        [ (synthetic, (provider, arguments))
+        | (synthetic, provider, _, arguments) <- entries
+        ]
+
+    specialize (provider, schemeFormula) = case schemeSourceFromFormula
+            schemeFormula >>= instantiationScheme of
+        Nothing -> []
+        Just scheme -> take maxInstantiationAxiomsPerScheme
+            [ (provider, formula, map third tuple)
+            | tuple <- take maxInstantiationAttempts $
+                sequence $ replicate (length $ schemeBinders scheme)
+                    providerCandidates
+            , Right instantiated <-
+                [instantiateSchemeBody scheme $ map second tuple]
+            , Right formula <- [translator instantiated]
+            ]
+      where
+        providerCandidates =
+            [ (candidateType, visibleArgument)
+            | (candidateProvider, candidateType, visibleArgument) <- candidates
+            , candidateProvider == provider
+            ]
+
+    schemeSourceFromFormula formula = case formula of
+        PVar symbol -> opaqueSymbolSource symbol
+        _ -> Nothing
+
+    second (value, _) = value
+    third (_, value) = value
+
+-- | Expand every free use of a provider-specialization premise into an
+-- application to its exact provider. The synthetic head remains in place so
+-- the existing visible-evidence converter can turn
+-- @synthetic provider@ into @provider @T ...@. LJT reserves environment
+-- symbols from binder allocation, but deleting a shadowed key keeps this
+-- helper correct for independently constructed terms as well.
+rewriteProviderInstantiationEvidence
+    :: Map.Map Symbol
+        (Symbol, [SharedGenerated.VisibleTypeArgument])
+    -> Term
+    -> Term
+rewriteProviderInstantiationEvidence evidence = go evidence
+  where
+    go visible term = case term of
+        Var synthetic
+            | Just (provider, _) <- Map.lookup synthetic visible ->
+                Apply (Var synthetic) (Var provider)
+        Lam binder body -> Lam binder $ go (Map.delete binder visible) body
+        Apply function argument -> Apply
+            (go visible function) (go visible argument)
+        Xsel index arity expression ->
+            Xsel index arity $ go visible expression
+        _ -> term
 
 buildInstantiationAxioms
     :: String

@@ -41,6 +41,7 @@ module Language.Haskell.Djex.Djinn
   , DjinnQueryMetadata (..)
   , DjinnResult
   , runDjinnQuery
+  , runDjinnQueryWithInstantiationCandidates
   , renderDjinnCandidateExpression
   , renderDjinnCandidateDefinition
   ) where
@@ -96,7 +97,8 @@ import Language.Haskell.Synthesis.Generated
   )
 import Language.Haskell.Synthesis.Name (Name)
 import Language.Haskell.Synthesis.Query
-  ( QueryEvidence (..)
+  ( ProviderInstantiationCandidate
+  , QueryEvidence (..)
   , QueryRequest (..)
   , RequestProvenance (..)
   , mkQueryResult
@@ -165,14 +167,28 @@ runDjinnQuery
   :: DjinnSession
   -> DjinnRequest
   -> Either Diagnostic DjinnResult
-runDjinnQuery session request = do
+runDjinnQuery session =
+  runDjinnQueryWithInstantiationCandidates session []
+
+-- | Run one checked Djinn search with externally established type choices for
+-- exact named providers. Ordinary request validation retains precedence; the
+-- evidence list is then bounded, elaborated, kind-checked, and kept
+-- provider-local against this exact session before it can add a separate
+-- proof-producing search tail.
+runDjinnQueryWithInstantiationCandidates
+  :: DjinnSession
+  -> [ProviderInstantiationCandidate DjinnTypeVariable]
+  -> DjinnRequest
+  -> Either Diagnostic DjinnResult
+runDjinnQueryWithInstantiationCandidates session candidates request = do
   let query = djinnRequestQuery request
   (contexts, goal) <- Request.prepareDjinnRequest
     (Session.sessionClassArity session) request
-  case Core.inhabitSynthesisResultPrepared
+  case Core.inhabitSynthesisResultPreparedWithInstantiationCandidates
       (requestOptions query)
       (Session.sessionPreparedEnvironment session)
       contexts
+      candidates
       (requestTarget query)
       goal of
     Left failure -> Left $
@@ -244,6 +260,10 @@ djinnQueryFailure request failure = case failure of
   DjinnQueryFailure message -> Request.withDjinnRequestProvenance request
     $ contextualDiagnostic Error
         "DJEX_DJINN_QUERY" "Djinn rejected the query" message
+  DjinnInstantiationCandidateFailure message -> contextualDiagnostic Error
+    "DJEX_DJINN_CANDIDATE"
+    "Djinn rejected provider instantiation evidence"
+    message
   DjinnInternalQueryFailure message -> contextualDiagnostic Error
     "DJEX_DJINN_INTERNAL"
     "Djinn violated an internal query invariant"

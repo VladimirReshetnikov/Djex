@@ -8,6 +8,7 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , findExpressionsWithAllocators
   , findQueryResultsInEnvironmentEither
   , findQueryResultsInEnvironmentWithCheckedOptions
+  , findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
   , findQueryResultsWithAllocators
   , queryProjectionStrictnessForTesting
   , prepareExferenceInput
@@ -32,6 +33,7 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , isExferenceOptionError
   , mkExferenceEnvironment
   , mkExferenceEnvironmentWithSchemes
+  , exferenceEnvironmentContainsBinding
   , checkExferenceOptions
   , validateExferenceOptions
   , validateExferenceQuery
@@ -177,6 +179,7 @@ data CheckedExferenceOptions = CheckedExferenceOptions !ExferenceOptions
 data CheckedExferenceQuery = CheckedExferenceQuery
   !ExferenceEnvironment
   !ExferenceQuery
+  !(M.Map QualifiedName [HsType])
   !RigidInstantiationPlan
 
 data ExferenceInputError
@@ -422,6 +425,7 @@ findEngineBatchesWith allocators
           , exferenceHeuristics = heuristics
           }
       }
+      providerCandidates
       rigidPlan) =
   unfoldr helper rootFindExpressionState
  where
@@ -492,6 +496,7 @@ findEngineBatchesWith allocators
     , nodeFunctions       = funcs
     , nodeFunctionSchemes = functionSchemes
     , nodeVisibleTypeCandidates = properTypeCandidates
+    , nodeProviderInstantiationCandidates = providerCandidates
     , nodeDeconstructors  = deconss'
     , nodeQueryClassEnv   = rootClassEnvironment
     , nodeExpression      = ExpHole 0
@@ -743,7 +748,22 @@ findQueryResultsInEnvironmentWithCheckedOptions
   -> CheckedExferenceOptions
   -> Either ExferenceInputError [ExferenceResult]
 findQueryResultsInEnvironmentWithCheckedOptions =
-  findQueryResultsWithCheckedOptionsAndAllocators defaultSearchAllocators
+  findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates M.empty
+
+-- | Run a query with an adapter-checked, provider-local proper-type candidate
+-- map.  This entrance is Cabal-private: stable adapters establish kind and
+-- closure before any value can reach the raw search engine.
+findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
+  :: M.Map QualifiedName [HsType]
+  -> SharedGenerated.DefinitionName
+  -> ExferenceSourceTypeVariableHints
+  -> ExferenceEnvironment
+  -> ExferenceQuery
+  -> CheckedExferenceOptions
+  -> Either ExferenceInputError [ExferenceResult]
+findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates candidates =
+  findQueryResultsWithCheckedOptionsAndAllocators
+    defaultSearchAllocators candidates
 
 -- The allocator-parametric form is an internal test seam for exercising
 -- finite identifier exhaustion.  Keeping preparation here guarantees that
@@ -758,10 +778,11 @@ findQueryResultsWithAllocators
 findQueryResultsWithAllocators allocators' target sourceHints environment query = do
   checkedOptions <- checkExferenceOptions $ querySearchOptions query
   findQueryResultsWithCheckedOptionsAndAllocators
-    allocators' target sourceHints environment query checkedOptions
+    allocators' M.empty target sourceHints environment query checkedOptions
 
 findQueryResultsWithCheckedOptionsAndAllocators
   :: SearchAllocators
+  -> M.Map QualifiedName [HsType]
   -> SharedGenerated.DefinitionName
   -> ExferenceSourceTypeVariableHints
   -> ExferenceEnvironment
@@ -769,10 +790,10 @@ findQueryResultsWithCheckedOptionsAndAllocators
   -> CheckedExferenceOptions
   -> Either ExferenceInputError [ExferenceResult]
 findQueryResultsWithCheckedOptionsAndAllocators
-    allocators' target sourceHints environment query checkedOptions = do
-  checked@(CheckedExferenceQuery _ checkedQuery rigidPlan) <-
-    prepareExferenceQueryWithCheckedOptions
-      environment checkedOptions queryWithTargetExcluded
+    allocators' candidates target sourceHints environment query checkedOptions = do
+  checked@(CheckedExferenceQuery _ checkedQuery _ rigidPlan) <-
+    prepareExferenceQueryWithCheckedOptionsAndCandidates
+      environment checkedOptions candidates queryWithTargetExcluded
   -- The opaque value is paired with the exact canonical goal for which its
   -- spelling scope was checked. Stable adapters retarget it only while
   -- performing origin-safe synonym elaboration; direct core callers cannot
@@ -879,6 +900,7 @@ prepareExferenceInput input = do
   pure $ CheckedExferenceQuery
     (ExferenceEnvironment canonicalEnvironment rigidContext M.empty)
     canonicalQuery
+    M.empty
     rigidPlan
  where
   environment = inputEnvironment input
@@ -924,6 +946,18 @@ mkExferenceEnvironmentWithSchemes environment schemes = do
   pure $ ExferenceEnvironment canonicalEnvironment
     (mkRigidInstantiationContext canonicalEnvironment) canonicalSchemes
 
+-- | Whether an exact value binding is available in this sealed search
+-- projection.  Stable adapters use this before accepting provider-local
+-- evidence, so an excluded or out-of-scope source name cannot donate a type.
+exferenceEnvironmentContainsBinding
+  :: QualifiedName
+  -> ExferenceEnvironment
+  -> Bool
+exferenceEnvironmentContainsBinding name
+    (ExferenceEnvironment environment _ _) = any
+      ((== name) . functionName)
+      $ environmentFunctions environment
+
 -- | Validate the varying part of a search against an already sealed
 -- environment and retain its exact rigid-instantiation plan. Excluding
 -- bindings only removes capabilities and therefore cannot invalidate the
@@ -945,8 +979,19 @@ prepareExferenceQueryWithCheckedOptions
   -> ExferenceQuery
   -> Either ExferenceInputError CheckedExferenceQuery
 prepareExferenceQueryWithCheckedOptions
+    sealed checkedOptions =
+  prepareExferenceQueryWithCheckedOptionsAndCandidates
+    sealed checkedOptions M.empty
+
+prepareExferenceQueryWithCheckedOptionsAndCandidates
+  :: ExferenceEnvironment
+  -> CheckedExferenceOptions
+  -> M.Map QualifiedName [HsType]
+  -> ExferenceQuery
+  -> Either ExferenceInputError CheckedExferenceQuery
+prepareExferenceQueryWithCheckedOptionsAndCandidates
     sealed@(ExferenceEnvironment environment rigidContext _)
-    (CheckedExferenceOptions options) uncheckedQuery = do
+    (CheckedExferenceOptions options) candidates uncheckedQuery = do
   validateQueryInputWidths environment query
   validateQueryClassConstraints environment query
   validateInputTypes
@@ -954,7 +999,7 @@ prepareExferenceQueryWithCheckedOptions
     : concatMap (constraint_params . snd) constraints
   let canonicalQuery = canonicalizeQuery query
   rigidPlan <- prepareRigidInstantiation rigidContext canonicalQuery
-  pure $ CheckedExferenceQuery sealed canonicalQuery rigidPlan
+  pure $ CheckedExferenceQuery sealed canonicalQuery candidates rigidPlan
  where
   query = uncheckedQuery {querySearchOptions = options}
   constraints = queryConstraints query
@@ -1672,9 +1717,13 @@ stateStep allocators multiPM allowConstrs h
           source <- maybe mzero pure =<< gets
             (M.lookup (functionName binding) . nodeFunctionSchemes)
           candidates <- gets nodeVisibleTypeCandidates
+          suppliedCandidates <- gets
+            (M.findWithDefault [] (functionName binding)
+              . nodeProviderInstantiationCandidates)
           let instantiations = L.nub $
                 groundProviderInstantiations contxt source ++
-                candidateProviderInstantiations candidates source
+                candidateProviderInstantiations candidates source ++
+                candidateProviderInstantiations suppliedCandidates source
           instantiation <- lift $ chooseBranches instantiations
           typeArguments <- maybe mzero pure
             $ traverse

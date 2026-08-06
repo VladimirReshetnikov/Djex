@@ -66,6 +66,7 @@ module Language.Haskell.Djex.Exference
   , RenderError (..)
   , ExferenceResidualRenderError (..)
   , runExferenceQuery
+  , runExferenceQueryWithInstantiationCandidates
   , exferenceCandidateMetrics
   , exferenceResultBindingUsages
   , renderExferenceCandidateExpression
@@ -99,6 +100,7 @@ import qualified Language.Haskell.Exference.Core as Core
 import qualified Language.Haskell.Exference.Core.Candidate as CoreCandidate
 import qualified Language.Haskell.Exference.Core.ExferenceStats as CoreStats
 import qualified Language.Haskell.Exference.Core.Internal.Exference as CoreInternal
+import qualified Language.Haskell.Exference.Core.Internal.Polytype as CorePolytype
 import Language.Haskell.Exference.Core.Types
   ( HsType
   , defaultVariableName
@@ -140,9 +142,10 @@ import Language.Haskell.Synthesis.Candidate
   , renderCandidateExpression
   )
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
-  , Severity (Info, Warning)
+  , Severity (Error, Info, Warning)
   , contextualDiagnostic
   , shownErrorDiagnostic
   )
@@ -159,13 +162,16 @@ import Language.Haskell.Synthesis.Name
   , renderCanonical
   )
 import Language.Haskell.Synthesis.Query
-  ( QueryRequest (..)
+  ( ProviderInstantiationCandidate (..)
+  , QueryRequest (..)
+  , maximumProviderInstantiationCandidates
   , resultSearch
   )
 import Language.Haskell.Synthesis.Search
   ( batchMetadata
   )
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 import qualified Language.Haskell.Synthesis.TypeRender as SharedRender
 import Language.Haskell.Synthesis.TypeSynonym
   ( TypeElaborationError (..)
@@ -530,7 +536,19 @@ runExferenceQuery
   :: ExferenceSession
   -> ExferenceRequest
   -> Either Diagnostic [ExferenceResult]
-runExferenceQuery session request = do
+runExferenceQuery session =
+  runExferenceQueryWithInstantiationCandidates session []
+
+-- | Run a checked request with a bounded collection of closed proper-type
+-- choices established for exact retained global providers.  Candidate
+-- associations are checked against this session after the request goal, and
+-- never become evidence for local values or another global provider.
+runExferenceQueryWithInstantiationCandidates
+  :: ExferenceSession
+  -> [ProviderInstantiationCandidate ExferenceTypeVariable]
+  -> ExferenceRequest
+  -> Either Diagnostic [ExferenceResult]
+runExferenceQueryWithInstantiationCandidates session rawCandidates request = do
   let query = exferenceRequestQuery request
       target = requestTarget query
       requestDiagnostic = withExferenceRequestProvenance request
@@ -552,6 +570,8 @@ runExferenceQuery session request = do
       "Exference rejected the shared query type"
     )
     $ fromSynthesisType elaboratedGoal
+  providerCandidates <- prepareProviderInstantiationCandidates
+    session rawCandidates
   let sourceHints = retargetExferenceSourceTypeVariableHints
         elaboratedGoal checkedSourceHints
   -- The direct result boundary owns exact target exclusion and result naming,
@@ -565,12 +585,81 @@ runExferenceQuery session request = do
         | otherwise = requestDiagnostic $ shownErrorDiagnostic
             "DJEX_EXF_QUERY" "Exference rejected the query" failure
   first searchFailure
-    $ CoreInternal.findQueryResultsInEnvironmentWithCheckedOptions
+    $ CoreInternal.findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
+        providerCandidates
         target
         sourceHints
         (Session.sessionSearchEnvironment session)
         input
         checkedOptions
+
+prepareProviderInstantiationCandidates
+  :: ExferenceSession
+  -> [ProviderInstantiationCandidate ExferenceTypeVariable]
+  -> Either Diagnostic (Map.Map Name [HsType])
+prepareProviderInstantiationCandidates session rawCandidates
+  | observed > maximumProviderInstantiationCandidates =
+      Left $ shownErrorDiagnostic
+        "DJEX_EXF_CANDIDATE_LIMIT"
+        "too many Exference provider instantiation candidates"
+        (maximumProviderInstantiationCandidates, observed)
+  | otherwise = do
+      checked <- traverse prepareCandidate rawCandidates
+      pure $ Map.map
+        (SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey)
+        $ List.foldl' retainCandidate Map.empty checked
+ where
+  observed = SharedCollection.observedListLength
+    maximumProviderInstantiationCandidates rawCandidates
+  searchEnvironment = Session.sessionSearchEnvironment session
+
+  prepareCandidate candidate = do
+    let provider = providerInstantiationCandidateProvider candidate
+        candidateType = providerInstantiationCandidateType candidate
+    if CoreInternal.exferenceEnvironmentContainsBinding
+        provider searchEnvironment
+      then pure ()
+      else Left $ contextualDiagnostic Error
+        "DJEX_EXF_CANDIDATE_PROVIDER"
+        "Exference provider instantiation candidate names an unavailable binding"
+        (renderCanonical provider)
+    elaborated <- first (candidateElaborationFailure provider)
+      $ Session.elaborateSessionGoal session candidateType
+    if CorePolytype.isVisibleTypeCandidate elaborated
+      then pure ()
+      else Left $ shownErrorDiagnostic
+        "DJEX_EXF_CANDIDATE_TYPE"
+        "invalid Exference provider instantiation candidate type"
+        (provider, elaborated)
+    lowered <- first
+      (\failure -> shownErrorDiagnostic
+        "DJEX_EXF_CANDIDATE_LOWER"
+        "Exference could not lower a provider instantiation candidate"
+        (provider, failure))
+      $ fromSynthesisType elaborated
+    pure (provider, lowered)
+
+  retainCandidate candidates (provider, candidate) = Map.insertWith
+    (\new old -> old ++ new)
+    provider [candidate] candidates
+
+candidateElaborationFailure
+  :: Name
+  -> TypeElaborationError ExferenceTypeVariable
+  -> Diagnostic
+candidateElaborationFailure provider failure = case failure of
+  IllKindedType _ _ -> shownErrorDiagnostic
+    "DJEX_EXF_CANDIDATE_KIND"
+    "Exference rejected a provider instantiation candidate kind"
+    (provider, failure)
+  SynonymExpansionFailed _ -> shownErrorDiagnostic
+    "DJEX_EXF_CANDIDATE_SYNONYM"
+    "Exference could not expand a provider instantiation candidate"
+    (provider, failure)
+  InvalidElaborationType _ _ -> shownErrorDiagnostic
+    "DJEX_EXF_CANDIDATE_TYPE"
+    "Exference rejected a provider instantiation candidate type"
+    (provider, failure)
 
 elaborationFailure
   :: TypeElaborationError ExferenceTypeVariable

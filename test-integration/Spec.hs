@@ -1270,6 +1270,167 @@ tests = testGroup "Djex facade"
             ++ output ++ "\nstderr:\n" ++ errors
             ++ "\ngenerated:\n" ++ rendered)
           ExitSuccess exitCode
+  , testCase "specialize an Exference provider from caller evidence" $ do
+      tokenName <- expectRight $ mkIdentifier "EvidenceToken"
+      providerName <- expectRight $ mkIdentifier "evidenceProvider"
+      targetName <- expectRight $ mkIdentifier "useEvidenceProvider"
+      target <- expectRight $ mkDefinitionName targetName
+      let providerVariable = FlexibleVariable 0
+          identityVariable = FlexibleVariable 1
+          identityType = TypeVariable identityVariable
+          quantifiedIdentity = ForallType [identityVariable] [] $
+            FunctionType identityType identityType
+          tokenType = TypeConstructor tokenName
+          providerType = ForallType [providerVariable] [] tokenType
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , ValueDeclaration $ ValueSignature () providerName providerType
+            ]
+          evidence = ProviderInstantiationCandidate
+            { providerInstantiationCandidateProvider = providerName
+            , providerInstantiationCandidateType = quantifiedIdentity
+            }
+      quantifiedArgument <- expectRight
+        $ specifiedVisibleTypeArgument quantifiedIdentity
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = tokenType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 512}
+        }
+      results <- expectRight $ runExferenceQueryWithInstantiationCandidates
+        session [evidence] request
+      let candidates = concatMap
+            (batchCandidates . resultSearch) results
+          isSuppliedApplication candidate = case candidateOutput candidate of
+            FunctionClause _ []
+                (VisibleTypeApplication (Global occurrence) argument) ->
+              occurrence == providerName && argument == quantifiedArgument
+            _ -> False
+      candidate <- maybe
+        (fail $ "caller evidence produced no quantified provider application: "
+          ++ show (map candidateOutput candidates))
+        pure
+        $ find isSuppliedApplication candidates
+      rendered <- expectRight
+        $ renderExferenceCandidateDefinition Unqualified candidate
+      assertBool "caller evidence lost the exact provider application"
+        $ "evidenceProvider @(forall" `isInfixOf` rendered
+
+  , testCase "empty Exference provider evidence is exactly inert" $ do
+      tokenName <- expectRight $ mkIdentifier "EmptyEvidenceToken"
+      providerName <- expectRight $ mkIdentifier "emptyEvidenceProvider"
+      targetName <- expectRight $ mkIdentifier "useEmptyEvidenceProvider"
+      target <- expectRight $ mkDefinitionName targetName
+      let providerVariable = FlexibleVariable 0
+          tokenType = TypeConstructor tokenName
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , ValueDeclaration $ ValueSignature () providerName
+                $ ForallType [providerVariable] [] tokenType
+            ]
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = tokenType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 256}
+        }
+      historical <- expectRight $ runExferenceQuery session request
+      explicitEmpty <- expectRight
+        $ runExferenceQueryWithInstantiationCandidates session [] request
+      explicitEmpty @?= historical
+
+  , testCase "bound Exference provider evidence before entering elements" $ do
+      tokenName <- expectRight $ mkIdentifier "BoundedEvidenceToken"
+      targetName <- expectRight $ mkIdentifier "boundedEvidence"
+      target <- expectRight $ mkDefinitionName targetName
+      let tokenType = TypeConstructor tokenName
+          declarations =
+            [AbstractTypeDeclaration () tokenName ProperTypeKind]
+          poisonedCandidates =
+            (error "Exference entered an over-limit evidence element")
+              : poisonedCandidates
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = tokenType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 32}
+        }
+      result <- expectWithin "Exference provider evidence bound" $ evaluate
+        $ runExferenceQueryWithInstantiationCandidates
+            session poisonedCandidates request
+      case result of
+        Left failure -> diagnosticCode failure @?=
+          Just "DJEX_EXF_CANDIDATE_LIMIT"
+        Right _ -> fail "Exference accepted an over-limit cyclic evidence list"
+
+  , testCase "keep Exference provider evidence local to an exact name" $ do
+      tokenName <- expectRight $ mkIdentifier "LocalEvidenceToken"
+      selectedName <- expectRight $ mkIdentifier "selectedProvider"
+      unrelatedName <- expectRight $ mkIdentifier "unrelatedProvider"
+      targetName <- expectRight $ mkIdentifier "useSelectedProvider"
+      target <- expectRight $ mkDefinitionName targetName
+      let selectedVariable = FlexibleVariable 0
+          unrelatedVariable = FlexibleVariable 1
+          identityVariable = FlexibleVariable 2
+          identityType = TypeVariable identityVariable
+          quantifiedIdentity = ForallType [identityVariable] [] $
+            FunctionType identityType identityType
+          tokenType = TypeConstructor tokenName
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , ValueDeclaration $ ValueSignature () selectedName
+                $ ForallType [selectedVariable] [] tokenType
+            , ValueDeclaration $ ValueSignature () unrelatedName
+                $ ForallType [unrelatedVariable] [] tokenType
+            ]
+          evidence = ProviderInstantiationCandidate
+            { providerInstantiationCandidateProvider = selectedName
+            , providerInstantiationCandidateType = quantifiedIdentity
+            }
+      quantifiedArgument <- expectRight
+        $ specifiedVisibleTypeArgument quantifiedIdentity
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = tokenType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 1024}
+        }
+      results <- expectRight $ runExferenceQueryWithInstantiationCandidates
+        session [evidence] request
+      let candidates = concatMap
+            (batchCandidates . resultSearch) results
+          suppliedTo provider candidate = case candidateOutput candidate of
+            FunctionClause _ []
+                (VisibleTypeApplication (Global occurrence) argument) ->
+              occurrence == provider && argument == quantifiedArgument
+            _ -> False
+      assertBool "selected provider did not receive its supplied candidate"
+        $ any (suppliedTo selectedName) candidates
+      assertBool
+        "alpha-identical unrelated provider received another provider's evidence"
+        $ not $ any (suppliedTo unrelatedName) candidates
+
   , testCase "specialize an Exference provider at a closed quantified type" $ do
       tokenName <- expectRight $ mkIdentifier "Token"
       globalName <- expectRight $ mkIdentifier "globalPoly"

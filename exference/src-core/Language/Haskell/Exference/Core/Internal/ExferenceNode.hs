@@ -162,6 +162,10 @@ data SearchNode = SearchNode
     -- ^ Closed query subtrees proven to occupy proper-type positions.  These
     -- may explicitly instantiate a context-free foreign scheme whose binder
     -- is otherwise absent from its result.
+  , nodeProviderInstantiationCandidates :: Map.Map QualifiedName [HsType]
+    -- ^ Checked closed proper-type choices supplied for exact retained global
+    -- providers.  The provider key prevents evidence from leaking to a local
+    -- value or another global with an alpha-equivalent scheme.
   , nodeDeconstructors  :: [DeconstructorBinding]
   , nodeQueryClassEnv   :: QueryClassEnv
   , nodeExpression      :: Expression

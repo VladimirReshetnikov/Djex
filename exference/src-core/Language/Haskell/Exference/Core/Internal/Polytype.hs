@@ -11,6 +11,7 @@ module Language.Haskell.Exference.Core.Internal.Polytype
   , instantiateLeadingForallsWith
   , groundProviderInstantiations
   , candidateProviderInstantiations
+  , isVisibleTypeCandidate
   )
 where
 

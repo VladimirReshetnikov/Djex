@@ -576,8 +576,17 @@ redant more antes atomImps nestImps atoms goal =
         -- Once adjacent arguments establish a repeated-domain chain, prefer
         -- atom proofs not yet used by that chain.  Fairly interleaving every
         -- branch below keeps repeated applications available as well.
+        -- Keep the local fanout deliberately small: fair branching across a
+        -- wide atom inventory turns independent rank-N plans into a large
+        -- Cartesian frontier, while the first three oldest proofs cover the
+        -- ordinary distinct-argument cases this preference is for.
+        fairSiblingLimit = 3
+        siblingSetIsSmall = case drop fairSiblingLimit available of
+            [] -> True
+            _ -> False
         priorArguments = case fairChain of
-            Just (domain, arguments) | domain == s -> arguments
+            Just (domain, arguments)
+                | domain == s && siblingSetIsSmall -> arguments
             _ -> []
         orderedAvailable
             | null priorArguments = available
@@ -590,7 +599,8 @@ redant more antes atomImps nestImps atoms goal =
             _ | continueFair ->
                 interleaveChoices (map applyAtom orderedAvailable)
             _ -> choose orderedAvailable >>= applyAtom
-        continueFair = not (null priorArguments) || repeatsDomain s b
+        continueFair = siblingSetIsSmall
+            && (not (null priorArguments) || repeatsDomain s b)
         repeatsDomain domain (PVar next :-> _) = domain == next
         repeatsDomain _ _ = False
         applyAtom atom = do

@@ -149,6 +149,8 @@ tests =
           testDistinctCurriedArguments)
     , ("rotate fairly across three repeated-domain proofs",
           testThreeWayCurriedArguments)
+    , ("retain depth-first order beyond the local fairness cap",
+          testWideCurriedArguments)
     , ("use an assumption as its named proof", testNamedAssumption)
     , ("reject ambiguous raw proof environments",
           testCheckedProofSearchEnvironment)
@@ -4525,6 +4527,30 @@ testThreeWayCurriedArguments = do
             "the early third-sibling proof must check independently"
             (checkProof [] goal proof)
         [] -> fail "the first sixty proofs omitted the third atom sibling"
+
+testWideCurriedArguments :: IO ()
+testWideCurriedArguments = do
+    let combine = atomA :-> atomA :-> atomA
+        goal = foldr (:->) atomA
+            [atomA, atomA, atomA, atomA, combine]
+        directPairs :: Proof -> [(Int, Int)]
+        directPairs proof = case proof of
+            Lam first (Lam second (Lam third (Lam fourth
+                    (Lam function body)))) ->
+                [(leftIndex, rightIndex) |
+                    (leftIndex, left) <-
+                        zip [0 ..] [first, second, third, fourth],
+                    (rightIndex, right) <-
+                        zip [0 ..] [first, second, third, fourth],
+                    body == Apply (Apply (Var function) (Var left)) (Var right)]
+            _ -> []
+        applications =
+            [pair | proof <- prove True [] goal, pair <- directPairs proof]
+    case applications of
+        (0, 0) : _ -> pure ()
+        pair : _ -> fail $
+            "wide repeated-domain search changed its first pair to " ++ show pair
+        [] -> fail "wide repeated-domain search produced no direct application"
 
 testNamedAssumption :: IO ()
 testNamedAssumption = do

@@ -240,7 +240,7 @@ vector equality, backend kind conversion, and forcing the paired type. It
 rejects a cyclic kind or any finite tree above the bound without entering an
 unbounded remainder, while preserving the shared 64-tuple constructor's
 129-node right-associated all-`Type` kind. The latter is a capacity within one
-argument's kind, independent of the four-argument vector limit.
+argument's kind, independent of the five-argument vector limit.
 
 Each scalar candidate is elaborated as a closed, context-free proper type in
 the sealed session's synonym and kind scope. That compatibility relation
@@ -286,8 +286,8 @@ query-local and loaded instantiation premises, so one checked proof may compose
 old and supplied evidence. For a nonempty evidence call this strict superset
 runs before the evidence-free loaded tails, preventing a productive loaded
 proof stream from starving the supplied route at the global candidate cutoff.
-Scalar pools retain their four-binder, 512-attempt, and sixteen-per-scheme
-Cartesian windows; exact vectors bypass those reconstruction windows while
+Scalar pools retain their five-binder, 512-attempt, and sixteen-per-scheme
+tuple windows; exact vectors bypass those reconstruction windows while
 remaining within the 32-premise family bound. The independent proof checker
 sees each specialization before lowering rewrites its synthetic proof identity
 into the corresponding visible application of the real provider. A

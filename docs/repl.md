@@ -157,6 +157,12 @@ deliberately bounded rank-N rule families:
   impredicative instantiation. Inferable evidence stays implicit; if a selected
   binder is vacuous, Djinn retains the shortest visible prefix and can preserve
   a query-supplied closed quantified choice.
+- A separate final positive-only Djinn family revisits only hypothesis schemes
+  embedded in the requested goal. It adds closed, forall-free monotype subtrees
+  already present in that elaborated goal and retains only tuples containing at
+  least one such candidate. A tuple may mix those closed candidates with the
+  historical variables, skolems, premise-scope names, and guarded quantified
+  subtrees without changing the historical family's order.
 - Djinn retains context-free schemes for loaded values, including implicitly
   quantified free signature variables, in a separate appended family. That
   family adds closed, forall-free subtrees of the checked query and loaded
@@ -300,12 +306,14 @@ and impredicative wrappers cannot accidentally capture or conflate variables.
 Rendering chooses fresh binder spellings when a source hint would capture a
 free name. These bounded rules do not add general higher-rank subsumption,
 polymorphic-let generalization, or general visible type application. Explicit
-open arguments such as `@a` remain unsupported. A closed quantified visible
-argument is admitted only when the finite checked query vocabulary already
-supplies it and a bounded vacuous-provider rule selects it; neither backend
-invents a polytype. Djinn can retain that evidence for a query-local or loaded
-scheme, although its historical expression projection still rejects visible
-type application explicitly.
+open arguments such as `@a` remain unsupported. A visible argument is admitted
+only when the finite checked vocabulary already supplies it and a bounded rule
+selects it; neither backend invents a visible type argument. Djinn's historical
+family can retain a closed quantified query choice for a vacuous binder, and
+its final query-local family can retain a closed, forall-free subtree of the
+requested type. The loaded family can retain either form from its own bounded vocabulary,
+although Djinn's historical expression projection still rejects visible type
+application explicitly.
 Exference does not perform non-exact subsumption between contextual schemes,
 while unexposed quantified atoms remain opaque; finite identifier or
 search-budget exhaustion is an inconclusive truncation. In particular,
@@ -334,11 +342,15 @@ supports a proof of uninhabitability. The structural base family still omits
 central subsets from twelve sites onward, such as exactly six open and six
 opaque sites among twelve, though
 instantiable hypotheses often cover such middle subsets through bounded axiom
-plans. Historical structural instantiation completes before the new
-loaded-scheme structural and optional nominal tails. Those tails retain exact
-global schemes only for their bounded axioms and share the remaining cutoff and
-fuel. A retained non-target scheme conservatively disables negative evidence,
-even when that premise would turn out to be irrelevant.
+plans. Historical structural instantiation completes before the loaded-scheme
+structural and optional nominal tails. The final query-local closed-monotype
+structural and nominal tail follows them, considers a combined historical and
+closed-query candidate pool, and keeps only tuples containing a closed query
+candidate. Its plans carry the already established loaded-scheme premises,
+loaded axioms, and provider specializations so mixed proofs compose. All tails
+share the remaining cutoff and fuel. A retained non-target loaded scheme
+conservatively disables negative evidence, even when that premise would turn
+out to be irrelevant.
 
 Every proof that consumes instantiation evidence uses conservative no-eta
 conversion. This retains a lambda when erasure would otherwise expose an eta
@@ -352,6 +364,8 @@ The projection and evidence boundary is detailed in the
 [nominal parametric-data transport report](reports/2026-08-01-nominal-parametric-data-transport.md).
 Loaded-scheme retention and closed monotype discovery are detailed in the
 [loaded polymorphic values report](reports/2026-08-01-loaded-polymorphic-djinn-values.md).
+Query-local closed-monotype discovery and its final plan family are detailed in
+the [query-local closed-monotype report](reports/2026-08-09-query-local-closed-monotype-instantiation.md).
 A generated visible application requires `TypeApplications`; its surrounding
 rank-N provider signature commonly also requires `RankNTypes`, and an ambiguous
 contextual signature may require `AllowAmbiguousTypes`.

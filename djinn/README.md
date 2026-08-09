@@ -834,11 +834,11 @@ carry the `GroundKind` established by the frontend.
 
 All checked entrances run only after ordinary request preparation. Their
 outer lists are bounded at 32 before an element is entered. The assignment
-entrances additionally observe at most five cells of an argument spine to
-enforce the four-argument maximum before entering an argument. Each provider
+entrances additionally observe at most six cells of an argument spine to
+enforce the five-argument maximum before entering an argument. Each provider
 must then resolve by exact `Name` to a retained loaded polymorphic scheme in the
 sealed session. An assignment must have that scheme's exact complete leading
-arity, between one and four, and cannot target a contextual scheme.
+arity, between one and five, and cannot target a contextual scheme.
 
 After those structural and provider checks, each supplied kind in the kinded
 entrance receives an independent productive node preflight under the public
@@ -848,7 +848,7 @@ into its internal kind representation, or forcing the paired type. A cyclic
 kind or a finite kind tree above 129 nodes is therefore rejected after only the
 bounded prefix is observed. The limit still accepts the shared 64-tuple
 constructor's right-associated all-`Type` kind, which has `2 * 64 + 1` nodes;
-this capacity is independent of the four arguments allowed in one
+this capacity is independent of the five arguments allowed in one
 provider-assignment vector.
 
 Candidate types and assignment arguments are synonym-expanded in the sealed
@@ -924,16 +924,20 @@ and the
   selected binder is vacuous, conversion retains the shortest visible prefix,
   including a specified closed quantified choice already supplied by the query.
   Constrained hypothesis occurrences, longer eliminable chains, and candidates
-  outside that vocabulary remain opaque, alpha-equated atoms. A separate
-  appended family
-  retains exact context-free schemes for loaded values, including implicitly
-  quantified free signature variables, and extends their candidate vocabulary
-  with closed, forall-free subtrees of the checked query and loaded value
-  signatures. Loaded vacuous binders share the same visible-evidence rule. The
-  complete substituted body is kind-checked, so a closed
-  higher-kinded constructor is usable only at a compatible binder. An empty
-  incomplete search is
-  inconclusive rather than proof of uninhabitability. Search tries the fully
+  outside that vocabulary remain opaque, alpha-equated atoms. A separate final
+  positive-only family revisits only hypothesis schemes embedded in the
+  requested goal. It extends their candidates with closed, forall-free
+  monotype subtrees already present in that elaborated goal and retains only
+  tuples containing at least one such closed candidate. Mixed tuples can also
+  use the historical candidates without changing the historical family's
+  order. A different appended family retains exact context-free schemes for
+  loaded values, including implicitly quantified free signature variables, and
+  extends their candidate vocabulary with closed, forall-free subtrees of the
+  checked query and synonym-expanded loaded value signatures. Loaded vacuous
+  binders share the same visible-evidence rule. Every complete substituted body
+  is kind-checked, so a closed higher-kinded constructor is usable only at a
+  compatible binder. Both extensions are positive-only. An empty incomplete
+  search is inconclusive rather than proof of uninhabitability. Search tries the fully
   opened polarized view,
   the historical exact-opaque view, one plan retaining each positive forall
   opaquely while its siblings open, the dual plans opening one occurrence
@@ -1027,6 +1031,9 @@ recorded in the
 Loaded-scheme retention, closed monotype discovery, kind checking, and honest
 negative evidence are recorded in the
 [loaded polymorphic values report](../docs/reports/2026-08-01-loaded-polymorphic-djinn-values.md).
+Query-local closed-monotype discovery, mixed tuple scheduling, and the final
+positive-only plan family are recorded in the
+[query-local closed-monotype report](../docs/reports/2026-08-09-query-local-closed-monotype-instantiation.md).
 The recursive constructor rule, opacity boundary, and REPL projection are
 recorded in the
 [bounded Djinn recursive-introduction report](../docs/reports/2026-08-01-bounded-djinn-recursive-introduction.md).

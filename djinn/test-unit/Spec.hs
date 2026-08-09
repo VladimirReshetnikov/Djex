@@ -1110,6 +1110,30 @@ testRankNTypeAtoms = do
         $ "(forall a b. f a b) -> "
         ++ "f (forall x. x -> x) (forall y. y -> y -> y)"
 
+    let vacuousCorrelatedOptions = defaultQueryOptions
+            { optionAlternatives = True
+            , optionSorted = False
+            , optionCutoff = 40
+            }
+    vacuousCorrelated <- runStableQueryWith vacuousCorrelatedOptions
+        stableSession "ignoreVacuousCorrelatedChoice"
+        $ "(forall a b. f a) -> u -> v -> w -> x -> y -> z -> "
+        ++ "f (forall q. q -> q)"
+    assertEqual
+        "the correlated tail duplicated a historically retained specialization"
+        1 $ length $ SharedSearch.batchCandidates
+            $ SharedQuery.resultSearch vacuousCorrelated
+
+    vacuousOnlyCorrelated <- runStableQueryWith vacuousCorrelatedOptions
+        stableSession "ignoreVacuousOnlyCorrelatedChoices"
+        $ "(forall p hidden. f p) -> "
+        ++ "g (forall x. x -> x) -> h (forall y. y -> y -> y) -> "
+        ++ "a -> c -> d -> e -> u -> v -> r -> (f v -> r) -> r"
+    assertEqual
+        "quantified choices on only a vacuous binder activated the correlated tail"
+        1 $ length $ SharedSearch.batchCandidates
+            $ SharedQuery.resultSearch vacuousOnlyCorrelated
+
     -- A checked query-local hypothesis can instantiate at a closed monotype
     -- already present in the requested type. Keep that type in the indexed
     -- result: an unindexed result can instead be reached by impredicatively
@@ -1149,6 +1173,24 @@ testRankNTypeAtoms = do
                 SharedKind.FunctionKind closedKind closedKind
             ]
     closedSession <- sealDjinnSessionFrom stableSession closedDeclarations
+
+    queryTailPrefix <- runStableQueryWith firstCandidateOptions closedSession
+        "preserveQueryClosedPrefixBeforeCorrelation" $
+        "MonoClosed -> (forall a. f a) -> (forall a b. g a b) -> "
+        ++ "Either (f MonoClosed) "
+        ++ "(g (forall x. x -> x) (forall y. y -> y -> y))"
+    queryTailPrefixRendered <- renderStableCandidates queryTailPrefix
+    assertBool
+        ("the correlated tail moved ahead of the established query-closed "
+            ++ "prefix: " ++ show queryTailPrefixRendered)
+        (not (null queryTailPrefixRendered) &&
+            all ("Left" `isInfixOf`) queryTailPrefixRendered)
+
+    runStableIdentity closedSession "composeCorrelatedAndClosedInstances" $
+        "MonoClosed -> (forall a. f a) -> (forall a b. g a b) -> "
+        ++ "(f MonoClosed, "
+        ++ "g (forall x. x -> x) (forall y. y -> y -> y))"
+
     runStableIdentity closedSession "instantiateAtMentionedClosedMonotype" $
         "(forall a. (a -> MonoToken) -> a -> MonoIndexed a) -> "
         ++ "(MonoClosed -> MonoToken) -> MonoClosed -> "

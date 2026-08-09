@@ -240,23 +240,26 @@ instantiationAxioms translator visibleArgument variableSpellings goalFormulas
 -- lexical Cartesian prefix, which means its sixteen-axiom scheme allowance can
 -- miss a later tuple of two different guarded quantified candidates.  This
 -- tail preserves that prefix and instead fairly considers the same finite
--- variable/quantified vocabulary.  It retains only tuples which use at least
--- one quantified candidate, lie beyond the historical raw prefix, and
--- instantiate the scheme body to an alpha-equal subtree of the exact query.
+-- variable/quantified vocabulary.  It retains only tuples which put a
+-- quantified candidate in a result-relevant binder, produce a logical axiom
+-- not already retained by the complete bounded historical run, and instantiate
+-- the scheme body to an alpha-equal subtree of the exact query.
 -- No type is invented and every surviving body still crosses the prepared
 -- kind check, formula translator, proof checker, and evidence-erasure boundary.
 queryCorrelatedInstantiationAxioms
     :: (SharedType.Type String -> Either String Formula)
     -> (SharedType.Type String ->
         Maybe SharedGenerated.VisibleTypeArgument)
+    -> InstantiationAxioms
     -> [String]
     -> SharedType.Type String
     -> [Formula]
     -> [Formula]
     -> InstantiationAxioms
 queryCorrelatedInstantiationAxioms translator visibleArgument
-        variableSpellings elaboratedGoal goalFormulas premiseFormulas =
-    buildInstantiationAxioms
+        historicalAxioms variableSpellings elaboratedGoal
+        goalFormulas premiseFormulas =
+    buildInstantiationAxiomsExcluding historicalAxiomSet
         "$djinn$query-correlated-instantiation$" translator True
         visibleArgument correlatedTuples initialSchemes
   where
@@ -271,40 +274,41 @@ queryCorrelatedInstantiationAxioms translator visibleArgument
         ]
     sourceVariableCandidates = map SharedType.TypeVariable $
         distinctOn id variableSpellings
-    historicalVariableCandidates = map SharedType.TypeVariable $
-        distinctOn id $ sort variableSpellings
     quantifiedCandidates =
         distinctOn SharedTypeAtom.alphaTypeKey $
         sortOn (SharedTypeRender.renderType id) $
         concatMap closedQuantifiedSubtrees opaqueSources
     quantifiedCandidateKeys = Set.fromList $
         map SharedTypeAtom.alphaTypeKey quantifiedCandidates
-    historicalCandidates =
-        historicalVariableCandidates ++ quantifiedCandidates
     candidates = distinctOn SharedTypeAtom.alphaTypeKey $
         sourceVariableCandidates ++ quantifiedCandidates
     queryTargetKeys = Set.fromList $
         map SharedTypeAtom.alphaTypeKey $
         typeSubtrees $ SharedType.canonicalizeType elaboratedGoal
-    tupleKey = map SharedTypeAtom.alphaTypeKey
+    historicalAxiomSet = Set.fromList
+        [ InstantiationAxiom formula $
+            Map.lookup symbol $
+                instantiationVisibleApplications historicalAxioms
+        | (symbol, formula) <- instantiationAxiomPremises historicalAxioms
+        ]
     correlatedTuples _ | null quantifiedCandidates = []
     correlatedTuples scheme =
         [ arguments
         | arguments <- take maxInstantiationAttempts $
             fairCandidateTuples candidates arity
-        , any ((`Set.member` quantifiedCandidateKeys) .
-            SharedTypeAtom.alphaTypeKey) arguments
-        , tupleKey arguments `Set.notMember` historicalPrefixKeys
+        , or
+            [ binder `Set.member` bodyVariables &&
+                SharedTypeAtom.alphaTypeKey argument
+                    `Set.member` quantifiedCandidateKeys
+            | (binder, argument) <- zip (schemeBinders scheme) arguments
+            ]
         , Right instantiated <- [instantiateSchemeBody scheme arguments]
         , SharedTypeAtom.alphaTypeKey instantiated
             `Set.member` queryTargetKeys
         ]
       where
         arity = length $ schemeBinders scheme
-        historicalPrefixKeys = Set.fromList $
-            map tupleKey $
-            take maxInstantiationAxiomsPerScheme $
-            historicalCandidateTuples historicalCandidates candidates arity
+        bodyVariables = SharedType.freeVariables $ schemeBody scheme
     initialSchemes = distinctOn schemeKey
         [ scheme
         | (HypothesisSide, symbol) <- schemeAtoms
@@ -579,15 +583,44 @@ buildInstantiationAxioms
     -> (InstantiationScheme -> [[SharedType.Type String]])
     -> [InstantiationScheme]
     -> InstantiationAxioms
-buildInstantiationAxioms symbolPrefix translator interleaveSchemes
+buildInstantiationAxioms =
+    buildInstantiationAxiomsWithExclusions False Set.empty
+
+buildInstantiationAxiomsExcluding
+    :: Set.Set InstantiationAxiom
+    -> String
+    -> (SharedType.Type String -> Either String Formula)
+    -> Bool
+    -> (SharedType.Type String ->
+        Maybe SharedGenerated.VisibleTypeArgument)
+    -> (InstantiationScheme -> [[SharedType.Type String]])
+    -> [InstantiationScheme]
+    -> InstantiationAxioms
+buildInstantiationAxiomsExcluding =
+    buildInstantiationAxiomsWithExclusions True
+
+buildInstantiationAxiomsWithExclusions
+    :: Bool
+    -> Set.Set InstantiationAxiom
+    -> String
+    -> (SharedType.Type String -> Either String Formula)
+    -> Bool
+    -> (SharedType.Type String ->
+        Maybe SharedGenerated.VisibleTypeArgument)
+    -> (InstantiationScheme -> [[SharedType.Type String]])
+    -> [InstantiationScheme]
+    -> InstantiationAxioms
+buildInstantiationAxiomsWithExclusions deduplicateFormula excludedAxioms
+        symbolPrefix translator interleaveSchemes
         visibleArgument candidateTuples schemes =
     InstantiationAxioms premises symbols visibleApplications
   where
     entries =
         [ (Symbol $ symbolPrefix ++ show index, axiom)
         | (index, axiom) <- zip [0 :: Int ..] $
-            buildAxiomFormulas interleaveSchemes translator
-                visibleArgument candidateTuples schemes
+            buildAxiomFormulas deduplicateFormula excludedAxioms
+                interleaveSchemes translator visibleArgument
+                candidateTuples schemes
         ]
     premises =
         [ (symbol, instantiationAxiomFormula axiom)
@@ -677,16 +710,18 @@ data InstantiationJob
 
 buildAxiomFormulas
     :: Bool
+    -> Set.Set InstantiationAxiom
+    -> Bool
     -> (SharedType.Type String -> Either String Formula)
     -> (SharedType.Type String ->
         Maybe SharedGenerated.VisibleTypeArgument)
     -> (InstantiationScheme -> [[SharedType.Type String]])
     -> [InstantiationScheme]
     -> [InstantiationAxiom]
-buildAxiomFormulas interleaveSchemes translator visibleArgument
-        candidateTuples initialSchemes = loop
+buildAxiomFormulas deduplicateFormula excludedAxioms interleaveSchemes
+        translator visibleArgument candidateTuples initialSchemes = loop
     (Set.fromList $ map schemeKey initialSchemes)
-    Set.empty
+    excludedAxioms
     maxInstantiationAttempts
     maxInstantiationAxioms
     (map SchemeJob initialSchemes)
@@ -705,25 +740,35 @@ buildAxiomFormulas interleaveSchemes translator visibleArgument
             | schemeAllowance <= 0 ->
                 loop seenSchemes seenAxioms attempts allowance jobs
             | otherwise -> case schemeAxiom scheme arguments of
-                Just axiom
-                    | axiom `Set.notMember` seenAxioms ->
-                        let discovered = distinctOn schemeKey
-                                [ found
-                                | found <- discoveredSchemes
-                                    $ instantiationAxiomFormula axiom
-                                , schemeKey found
-                                    `Set.notMember` seenSchemes
-                                ]
-                        in axiom : loop
-                            (foldr (Set.insert . schemeKey)
-                                seenSchemes discovered)
+                Just axiom ->
+                    let discovered = distinctOn schemeKey
+                            [ found
+                            | found <- discoveredSchemes
+                                $ instantiationAxiomFormula axiom
+                            , schemeKey found `Set.notMember` seenSchemes
+                            ]
+                        seenSchemes' = foldr (Set.insert . schemeKey)
+                            seenSchemes discovered
+                        next retainedAllowance =
+                            reschedule
+                                (AxiomJob scheme retainedAllowance tuples)
+                                jobs ++ map SchemeJob discovered
+                        alreadySeen =
+                            axiom `Set.member` seenAxioms ||
+                            ( deduplicateFormula && any
+                                ((instantiationAxiomFormula axiom ==) .
+                                    instantiationAxiomFormula)
+                                (Set.toList seenAxioms)
+                            )
+                    in if alreadySeen
+                        then loop seenSchemes' seenAxioms
+                            (attempts - 1) allowance
+                            (next schemeAllowance)
+                        else axiom : loop seenSchemes'
                             (Set.insert axiom seenAxioms)
                             (attempts - 1)
                             (allowance - 1)
-                            (reschedule
-                                (AxiomJob scheme
-                                    (schemeAllowance - 1) tuples)
-                                jobs ++ map SchemeJob discovered)
+                            (next $ schemeAllowance - 1)
                 _ -> loop seenSchemes seenAxioms (attempts - 1) allowance
                     (reschedule
                         (AxiomJob scheme schemeAllowance tuples) jobs)

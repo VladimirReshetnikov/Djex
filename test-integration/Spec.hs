@@ -553,6 +553,77 @@ tests = testGroup "Djex facade"
           ("GHC rejected generated visible type application\nstdout:\n"
             ++ output ++ "\nstderr:\n" ++ errors)
           ExitSuccess exitCode
+  , testCase "compile query-local Djinn instantiation at a closed monotype" $ do
+      closedName <- expectRight $ parseName "MonoClosed"
+      tokenName <- expectRight $ parseName "MonoToken"
+      indexedName <- expectRight $ parseName "MonoIndexed"
+      targetName <- expectRight $ mkIdentifier "useQueryLocalMono"
+      let proper = ProperTypeKind
+          declarations =
+            [ AbstractTypeDeclaration () closedName proper
+            , AbstractTypeDeclaration () tokenName proper
+            , AbstractTypeDeclaration () indexedName $
+                FunctionKind proper proper
+            ]
+          query =
+            "(forall a. (a -> MonoToken) -> a -> MonoIndexed a) -> "
+              ++ "(MonoClosed -> MonoToken) -> MonoClosed -> "
+              ++ "MonoIndexed MonoClosed"
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+      session <- expectRight $ mkDjinnSession environment
+      request <- expectRight $ parseDjinnRequest session
+        defaultQueryOptions targetName "query-local-closed.djinn" query
+      result <- expectRight $ runDjinnQuery session request
+      resultEvidence result @?= ValidatedCandidates
+      -- Returning the rank-N local is its implicit use at MonoClosed: the
+      -- remaining result arrows and indexed result fix that monotype.
+      let usesLocalProvider candidate = case candidateOutput candidate of
+            FunctionClause actualTarget [Bind provider]
+                (Local usedProvider) ->
+              actualTarget == requestTarget (djinnRequestQuery request)
+                && usedProvider == provider
+            _ -> False
+      candidate <- case filter usesLocalProvider
+          (batchCandidates $ resultSearch result) of
+        selected : _ -> pure selected
+        [] -> fail $ "Djinn did not use the query-local provider at "
+          ++ "MonoClosed: " ++ show (batchCandidates $ resultSearch result)
+      generated <- expectRight $
+        renderDjinnCandidateDefinition Unqualified candidate
+      generated @?= "useQueryLocalMono a = a"
+
+      let fixture = unlines
+            [ "module QueryLocalClosedDjinnFixture where"
+            , ""
+            , "data MonoClosed"
+            , "data MonoToken"
+            , "data MonoIndexed a"
+            , ""
+            , "useQueryLocalMono ::"
+            , "  (forall a. (a -> MonoToken) -> a -> MonoIndexed a) ->"
+            , "  (MonoClosed -> MonoToken) -> MonoClosed ->"
+            , "  MonoIndexed MonoClosed"
+            , generated
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XHaskell2010"
+          , "-XEmptyDataDecls"
+          , "-XImpredicativeTypes"
+          , "-XRankNTypes"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected query-local closed-monotype Djinn evidence\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors
+            ++ "\ngenerated:\n" ++ generated)
+          ExitSuccess exitCode
   , testCase "render nominal Djinn transport accepted by GHC 9.12" $ do
       dataName <- expectRight $ parseName "MaybeLike"
       nothingName <- expectRight $ parseName "NothingLike"

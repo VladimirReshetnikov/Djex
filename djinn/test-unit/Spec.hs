@@ -1163,6 +1163,19 @@ testRankNTypeAtoms = do
             ("@(forall a0_0. a0_0 -> a0_0)" `isInfixOf`)
             localVacuousRendered
 
+    -- A vacuous local binder must retain the newly selected closed monotype
+    -- explicitly: the result cannot tell GHC which query-supplied type made
+    -- the bounded axiom available.  The older quantified choice above remains
+    -- first, while multi-result collection reaches the additive closed tail.
+    localClosedVacuous <- runStableQuery closedSession
+        "instantiateVacuousHypothesisAtClosedMonotype" $
+        "MonoClosed -> (forall hidden. MonoToken) -> MonoToken"
+    localClosedVacuousRendered <- renderStableCandidates localClosedVacuous
+    assertBool
+        ("a query-local vacuous scheme lost its closed monotype choice: "
+            ++ show localClosedVacuousRendered)
+        $ any ("@MonoClosed" `isInfixOf`) localClosedVacuousRendered
+
     -- Loaded polymorphic values cross the same checked boundary.  The only
     -- possible inhabitant composes the three named globals, so this pins both
     -- closed-monotype discovery and post-check instantiation-evidence erasure.

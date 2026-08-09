@@ -46,7 +46,7 @@ build-depends: djex
 | Proof-backed non-inhabitation result | Yes when formula translation is complete | No |
 | Ranked heuristic candidates | No | Yes |
 | Explicit prenex polymorphism | Yes at the checked request edge | Yes |
-| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through singleton, pairwise, triple, quadruple, and capped quintuple occurrence frontiers; historical context-free hypothesis instantiation at variable and guarded-quantified candidates; a final positive-only query-local family adding closed, forall-free query subtrees while requiring at least one per tuple; separate per-use loaded-scheme instantiation at query/value-signature candidates; exact externally established provider-assignment vectors; and positive-only nominal transport through reachable parameterized datatype applications | Contextual quantified-goal introduction with lexical givens and escape-checked skolems; scoped-provider instantiation; closed visible instantiation selected by monomorphic instance heads or, for fully vacuous scoped and retained global providers, checked query monotypes and polytypes; exact externally established provider-assignment vectors; and guarded context-free shallow quantified-provider subsumption |
+| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through singleton, pairwise, triple, quadruple, and capped quintuple occurrence frontiers; historical context-free hypothesis instantiation at variable and guarded-quantified candidates; a positive-only query-correlated tail requiring a result-relevant quantified choice and an exact query-subtree result while excluding historical logical formulas; an established positive-only query-closed family adding closed, forall-free query subtrees while requiring at least one per tuple; separate per-use loaded-scheme instantiation at query/value-signature candidates; exact externally established provider-assignment vectors; and positive-only nominal transport through reachable parameterized datatype applications | Contextual quantified-goal introduction with lexical givens and escape-checked skolems; scoped-provider instantiation; closed visible instantiation selected by monomorphic instance heads or, for fully vacuous scoped and retained global providers, checked query monotypes and polytypes; exact externally established provider-assignment vectors; and guarded context-free shallow quantified-provider subsumption |
 | Type-class participation | Validates contexts; synthesizes only dictionary-independent terms | Resolves givens, superclasses, and instances |
 | Main controls | Candidate and choice-point limits | Step, queue, depth, constraint, and pattern controls |
 
@@ -428,14 +428,34 @@ windows, repeated arguments,
 sparse monotone selections, and the Cartesian tail without raising any search
 cap.
 
-A separate final positive-only family revisits only hypothesis-side schemes embedded in the
-elaborated goal. Its candidate pool adds closed, forall-free monotype subtrees
-already present in that goal to the historical candidates. Fair tuple
-scheduling retains only tuples containing at least one closed query candidate,
-so the historical prefix is not duplicated; mixed tuples may still use
-variables, skolems, premise-scope spellings, or guarded quantified subtrees.
-Each substituted body must kind-check, and a vacuous binder may retain the
-shortest visible application required by the checked choice.
+A separate positive-only query-correlated family revisits only hypothesis-side
+schemes embedded in the elaborated goal. It fairly schedules the same finite
+variable and guarded-quantified vocabulary, using source occurrence order for
+the variable candidates. A retained tuple must pair a quantified candidate with
+a binder occurring free in the scheme body and specialize the complete body to
+an alpha-equivalent subtree of the canonical elaborated query.
+
+The builder starts with the exact active historical axioms for the structural
+or nominal formula plan. A correlated axiom is excluded when its logical
+formula is already present there or was retained earlier in this family, even
+if its visible evidence differs. Before tuple enumeration, the builder seeds its
+worklist with nested schemes exposed by those historical formulas; that initial
+closure spends no eligible attempt. A later correlated candidate with an
+already-seen formula is scanned the same way and spends one eligible attempt,
+but neither case spends a per-scheme or family axiom allowance. The fair
+producer prefilters at most 512 raw tuples for each scheme, while the builder
+independently charges at most 512 eligible attempts across the family. At most
+five binders, sixteen retained axioms per scheme, and 64 retained axioms per
+structural or nominal family remain allowed.
+
+The established query-closed positive-only family revisits only hypothesis-side
+schemes embedded in the elaborated goal. Its candidate pool adds closed,
+forall-free monotype subtrees already present in that goal to the historical
+candidates. Fair tuple scheduling retains only tuples containing at least one
+closed query candidate, so the historical prefix is not duplicated; mixed
+tuples may still use variables, skolems, premise-scope spellings, or guarded
+quantified subtrees. Each substituted body must kind-check, and a vacuous binder
+may retain the shortest visible application required by the checked choice.
 
 Prepared environments additionally retain each context-free loaded scheme
 before leading binders are implicitized. An appended positive-only family can
@@ -483,14 +503,17 @@ The complete historical structural no-axiom prefix runs before this focused
 nominal family. Each nominal formula is paired with a plain proof plan and,
 when present, an axiom-enabled proof plan. Historical structural instantiation
 then completes before the appended loaded-scheme structural and, when needed,
-nominal families. The final query-local closed-monotype structural and nominal
-family follows. It carries the loaded premises and axioms plus any provider
-specializations already established for the query, allowing mixed proofs to
-compose without resetting search. Every plan consumes the same query-wide
-candidate cutoff and choice-point budget. The nominal, loaded-scheme, and
-query-local closed-monotype families are positive-only: returned terms are
-checked against the exact formula, but an empty result never contributes
-logical negative evidence. Thus ordinary
+nominal families. The established query-closed structural and optional nominal
+plans retain their position after that prefix and contain no correlated axioms.
+Pure query-correlated structural and optional nominal plans follow, carrying
+historical, loaded, and provider premises but no query-closed axioms. Only when
+both families contribute does a final combined structural and optional nominal
+superset carry both sets, allowing mixed proofs to compose without moving or
+duplicating either independent plan. Every plan consumes the same query-wide
+candidate cutoff and choice-point budget. The nominal, loaded-scheme,
+query-correlated, query-closed, and combined families are positive-only:
+returned terms are checked against the exact formula, but an empty result never
+contributes logical negative evidence. Thus ordinary
 applications remain structural in the primary projection, while reachable
 parameterized datatype applications have a complementary nominal transport
 view for impredicative arguments.
@@ -508,6 +531,12 @@ The same rule protects a selector application introduced by field-projection
 normalization. Consumers compiling these signatures or candidates may need
 `RankNTypes` and `ImpredicativeTypes`.
 
+The checked request
+`(forall a b. f a b) -> f (forall x. x -> x) (forall y. y -> y -> y)` can
+return `\x -> x`. The two different guarded quantified arguments occur in the
+request, and their complete specialization is exactly the requested result;
+the rule does not construct either polytype or accept a merely related body.
+
 Reachability also supports closed global composition. With
 `token :: Token`, `poly :: Token -> (forall a. D a)`, and the `finish` signature
 above in the prepared environment, a request for `R` can return
@@ -520,11 +549,11 @@ These examples describe candidates from the later nominal family. Set
 would otherwise end first-result search before that family is reached.
 
 See the
-[nominal parametric-data transport report](reports/2026-08-01-nominal-parametric-data-transport.md)
-the
+[nominal parametric-data transport report](reports/2026-08-01-nominal-parametric-data-transport.md),
 [loaded polymorphic values report](reports/2026-08-01-loaded-polymorphic-djinn-values.md),
-and the
-[query-local closed-monotype report](reports/2026-08-09-query-local-closed-monotype-instantiation.md)
+[query-local closed-monotype report](reports/2026-08-09-query-local-closed-monotype-instantiation.md),
+and
+[query-correlated guarded-impredicative report](reports/2026-08-09-query-correlated-guarded-impredicative-instantiation.md)
 for the proof-policy and regression boundaries.
 
 Both stable adapters use the same `Language.Haskell.Synthesis.TypeAtom`
@@ -534,8 +563,9 @@ variables are keyed by lexical scope and binder position; free identities are
 not renamed away. The representation itself remains an inert transport/equality
 feature. Each backend must opt into explicit typing rules: positive
 introduction (with validated contexts ignored for proof power), bounded
-context-free hypothesis instantiation, final query-local closed-monotype
-instantiation, and bounded loaded-value instantiation in Djinn; or fresh
+context-free hypothesis instantiation, query-correlated guarded-impredicative
+instantiation, query-closed monotype instantiation, and bounded
+loaded-value instantiation in Djinn; or fresh
 per-use provider instantiation, contextual quantified-goal introduction, and shallow subsumption
 between context-free quantified schemes with no free flexible variables in
 Exference. Neither backend implements general rank-N subsumption.

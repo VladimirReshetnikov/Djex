@@ -2566,6 +2566,70 @@ tests = testGroup "Djex facade"
             ++ "\nDjinn generated:\n" ++ djinnGenerated
             ++ "\nExference generated:\n" ++ exferenceGenerated)
           ExitSuccess exitCode
+  , testCase
+      "compile correlated impredicative instances through both engines" $ do
+      let source =
+            "(forall a b. f a b) -> "
+            ++ "f (forall x. x -> x) (forall y. y -> y -> y)"
+          signature target = unlines
+            [ target ++ " :: forall f."
+            , "  (forall a b. f a b) ->"
+            , "  f (forall x. x -> x) (forall y. y -> y -> y)"
+            ]
+
+      djinnSession <- sealDjinnEnvironment standardEnvironment
+      djinnTarget <- expectRight $ mkIdentifier "correlatedDjinn"
+      djinnGoal <- expectRight $ parseHType source
+      djinnRequest <- sharedDjinnRequest
+        djinnTarget [] defaultQueryOptions djinnGoal
+      djinnResult <- expectRight $ runDjinnQuery djinnSession djinnRequest
+      resultEvidence djinnResult @?= ValidatedCandidates
+      djinnCandidate <- case batchCandidates $ resultSearch djinnResult of
+        candidate : _ -> pure candidate
+        [] -> fail "Djinn returned correlated evidence without a candidate"
+      candidateResidualConstraints djinnCandidate @?= []
+      djinnGenerated <- expectRight $
+        renderDjinnCandidateDefinition Unqualified djinnCandidate
+
+      checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
+      exferenceSession <- expectRight $
+        ExferenceCompatibility.mkExferenceSession checked
+      exferenceTarget <- expectRight $ mkIdentifier "correlatedExference"
+      exferenceRequest <- expectRight $ parseExferenceRequest exferenceSession
+        defaultExferenceOptions {exferenceMaximumSteps = 512}
+        exferenceTarget "correlated-impredicative" source
+      exferenceCandidate <- firstExferenceCandidate =<< expectRight
+        (runExferenceQuery exferenceSession exferenceRequest)
+      candidateResidualConstraints exferenceCandidate @?= []
+      exferenceGenerated <- expectRight $
+        renderExferenceCandidateDefinition Unqualified exferenceCandidate
+
+      let fixture = unlines
+            [ "module CorrelatedImpredicativeFixture where"
+            , ""
+            , signature "correlatedDjinn"
+            , djinnGenerated
+            , ""
+            , signature "correlatedExference"
+            , exferenceGenerated
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XHaskell2010"
+          , "-XImpredicativeTypes"
+          , "-XRankNTypes"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected correlated impredicative instances\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors
+            ++ "\nDjinn generated:\n" ++ djinnGenerated
+            ++ "\nExference generated:\n" ++ exferenceGenerated)
+          ExitSuccess exitCode
   , testCase "compile the quartic rank-N frontier through the Djinn facade" $ do
       let source =
             "(forall a b c d e f. q) -> "

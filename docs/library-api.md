@@ -46,7 +46,7 @@ build-depends: djex
 | Proof-backed non-inhabitation result | Yes when formula translation is complete | No |
 | Ranked heuristic candidates | No | Yes |
 | Explicit prenex polymorphism | Yes at the checked request edge | Yes |
-| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through singleton, pairwise, triple, quadruple, and capped quintuple occurrence frontiers; context-free bounded hypothesis instantiation at sequent-supplied candidates with retained visible choices for vacuous local or loaded binders; per-use loaded-scheme instantiation at those variable/guarded-quantified candidates plus closed query/value monotypes; exact externally established provider-assignment vectors; and positive-only nominal transport through reachable parameterized datatype applications | Contextual quantified-goal introduction with lexical givens and escape-checked skolems; scoped-provider instantiation; closed visible instantiation selected by monomorphic instance heads or, for fully vacuous scoped and retained global providers, checked query monotypes and polytypes; exact externally established provider-assignment vectors; and guarded context-free shallow quantified-provider subsumption |
+| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through singleton, pairwise, triple, quadruple, and capped quintuple occurrence frontiers; historical context-free hypothesis instantiation at variable and guarded-quantified candidates; a final positive-only query-local family adding closed, forall-free query subtrees while requiring at least one per tuple; separate per-use loaded-scheme instantiation at query/value-signature candidates; exact externally established provider-assignment vectors; and positive-only nominal transport through reachable parameterized datatype applications | Contextual quantified-goal introduction with lexical givens and escape-checked skolems; scoped-provider instantiation; closed visible instantiation selected by monomorphic instance heads or, for fully vacuous scoped and retained global providers, checked query monotypes and polytypes; exact externally established provider-assignment vectors; and guarded context-free shallow quantified-provider subsumption |
 | Type-class participation | Validates contexts; synthesizes only dictionary-independent terms | Resolves givens, superclasses, and instances |
 | Main controls | Candidate and choice-point limits | Step, queue, depth, constraint, and pattern controls |
 
@@ -273,7 +273,7 @@ at most 129 constructors; if work remains, it returns the sentinel 130 without
 entering the pending constructor. Cyclic kinds and finite trees above the bound
 therefore fail finitely. The shared 64-tuple constructor's right-associated
 all-`Type` kind contains exactly `2 * 64 + 1 = 129` nodes and remains accepted.
-This kind capacity does not change the four-argument limit on one
+This kind capacity does not change the five-argument limit on one
 provider-assignment vector.
 
 Construction is not certification. The caller remains responsible for the
@@ -288,7 +288,7 @@ forall-rooted type and uses it only for a context-free provider whose complete
 leading prefix is vacuous.
 
 Assignment runners additionally require an exact retained polymorphic scheme,
-a context-free leading chain of arity one through four, and a vector whose
+a context-free leading chain of arity one through five, and a vector whose
 length equals that complete chain; contextual schemes are unsupported. The
 legacy assignment runners infer each binder's ground kind from the exact
 provider body, default a vacuous binder to `Type`, and synonym-elaborate the
@@ -428,6 +428,15 @@ windows, repeated arguments,
 sparse monotone selections, and the Cartesian tail without raising any search
 cap.
 
+A separate final positive-only family revisits only hypothesis-side schemes embedded in the
+elaborated goal. Its candidate pool adds closed, forall-free monotype subtrees
+already present in that goal to the historical candidates. Fair tuple
+scheduling retains only tuples containing at least one closed query candidate,
+so the historical prefix is not duplicated; mixed tuples may still use
+variables, skolems, premise-scope spellings, or guarded quantified subtrees.
+Each substituted body must kind-check, and a vacuous binder may retain the
+shortest visible application required by the checked choice.
+
 Prepared environments additionally retain each context-free loaded scheme
 before leading binders are implicitized. An appended positive-only family can
 instantiate those schemes at the historical variable and quantified
@@ -474,10 +483,14 @@ The complete historical structural no-axiom prefix runs before this focused
 nominal family. Each nominal formula is paired with a plain proof plan and,
 when present, an axiom-enabled proof plan. Historical structural instantiation
 then completes before the appended loaded-scheme structural and, when needed,
-nominal families. Every plan consumes the same query-wide candidate cutoff and
-choice-point budget. The nominal and loaded-scheme families are
-positive-only: returned terms are checked against the exact nominal formula,
-but an empty result never contributes logical negative evidence. Thus ordinary
+nominal families. The final query-local closed-monotype structural and nominal
+family follows. It carries the loaded premises and axioms plus any provider
+specializations already established for the query, allowing mixed proofs to
+compose without resetting search. Every plan consumes the same query-wide
+candidate cutoff and choice-point budget. The nominal, loaded-scheme, and
+query-local closed-monotype families are positive-only: returned terms are
+checked against the exact formula, but an empty result never contributes
+logical negative evidence. Thus ordinary
 applications remain structural in the primary projection, while reachable
 parameterized datatype applications have a complementary nominal transport
 view for impredicative arguments.
@@ -508,8 +521,10 @@ would otherwise end first-result search before that family is reached.
 
 See the
 [nominal parametric-data transport report](reports/2026-08-01-nominal-parametric-data-transport.md)
+the
+[loaded polymorphic values report](reports/2026-08-01-loaded-polymorphic-djinn-values.md),
 and the
-[loaded polymorphic values report](reports/2026-08-01-loaded-polymorphic-djinn-values.md)
+[query-local closed-monotype report](reports/2026-08-09-query-local-closed-monotype-instantiation.md)
 for the proof-policy and regression boundaries.
 
 Both stable adapters use the same `Language.Haskell.Synthesis.TypeAtom`
@@ -519,9 +534,9 @@ variables are keyed by lexical scope and binder position; free identities are
 not renamed away. The representation itself remains an inert transport/equality
 feature. Each backend must opt into explicit typing rules: positive
 introduction (with validated contexts ignored for proof power), bounded
-context-free hypothesis instantiation, and bounded loaded-value instantiation
-in Djinn; or fresh per-use provider
-instantiation, contextual quantified-goal introduction, and shallow subsumption
+context-free hypothesis instantiation, final query-local closed-monotype
+instantiation, and bounded loaded-value instantiation in Djinn; or fresh
+per-use provider instantiation, contextual quantified-goal introduction, and shallow subsumption
 between context-free quantified schemes with no free flexible variables in
 Exference. Neither backend implements general rank-N subsumption.
 

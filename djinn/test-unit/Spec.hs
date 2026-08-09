@@ -1107,17 +1107,24 @@ testRankNTypeAtoms = do
     runStableIdentity stableSession "instantiateAtImpredicativeWrapper"
         "(forall a. f a) -> f (Maybe (forall b. b -> b))"
 
-    -- Preserve the established query-local closed-monotype behavior beside
-    -- the loaded-scheme tail. Keep the fixture abstract so neither datatype
-    -- construction nor empty elimination can hide the compatibility result.
+    -- A checked query-local hypothesis can instantiate at a closed monotype
+    -- already present in the requested type. Keep that type in the indexed
+    -- result: an unindexed result can instead be reached by impredicatively
+    -- instantiating the provider at its own scheme and feeding it itself,
+    -- which would not demonstrate closed-monotype discovery. The fixture is
+    -- abstract so datatype construction cannot hide the required instance.
     let closedKind = SharedKind.ProperTypeKind
         closedName = sharedName "MonoClosed"
         tokenName = sharedName "MonoToken"
         resultName = sharedName "MonoResult"
+        indexedName = sharedName "MonoIndexed"
         nominalEmptyName = sharedName "ProviderVoid"
         closedType = SharedType.TypeConstructor closedName
         tokenType = SharedType.TypeConstructor tokenName
         resultType = SharedType.TypeConstructor resultName
+        indexedConstructor = SharedType.TypeConstructor indexedName
+        indexedType element =
+            SharedType.TypeApplication indexedConstructor element
         nominalEmptyType = SharedType.TypeConstructor nominalEmptyName
         abstractClosed name = SharedDeclaration.AbstractTypeDeclaration ()
             name closedKind
@@ -1135,11 +1142,14 @@ testRankNTypeAtoms = do
             [ abstractClosed closedName
             , abstractClosed tokenName
             , abstractClosed resultName
+            , SharedDeclaration.AbstractTypeDeclaration () indexedName $
+                SharedKind.FunctionKind closedKind closedKind
             ]
     closedSession <- sealDjinnSessionFrom stableSession closedDeclarations
     runStableIdentity closedSession "instantiateAtMentionedClosedMonotype" $
-        "(forall a. (a -> MonoToken) -> a -> MonoResult) -> "
-        ++ "(MonoClosed -> MonoToken) -> MonoClosed -> MonoResult"
+        "(forall a. (a -> MonoToken) -> a -> MonoIndexed a) -> "
+        ++ "(MonoClosed -> MonoToken) -> MonoClosed -> "
+        ++ "MonoIndexed MonoClosed"
 
     localVacuous <- runStableQuery closedSession
         "instantiateVacuousHypothesisAtClosedRankN" $
@@ -1152,6 +1162,19 @@ testRankNTypeAtoms = do
         $ any
             ("@(forall a0_0. a0_0 -> a0_0)" `isInfixOf`)
             localVacuousRendered
+
+    -- A vacuous local binder must retain the newly selected closed monotype
+    -- explicitly: the result cannot tell GHC which query-supplied type made
+    -- the bounded axiom available.  The older quantified choice above remains
+    -- first, while multi-result collection reaches the additive closed tail.
+    localClosedVacuous <- runStableQuery closedSession
+        "instantiateVacuousHypothesisAtClosedMonotype" $
+        "MonoClosed -> (forall hidden. MonoToken) -> MonoToken"
+    localClosedVacuousRendered <- renderStableCandidates localClosedVacuous
+    assertBool
+        ("a query-local vacuous scheme lost its closed monotype choice: "
+            ++ show localClosedVacuousRendered)
+        $ any ("@MonoClosed" `isInfixOf`) localClosedVacuousRendered
 
     -- Loaded polymorphic values cross the same checked boundary.  The only
     -- possible inhabitant composes the three named globals, so this pins both
@@ -1191,6 +1214,10 @@ testRankNTypeAtoms = do
         implicitBoxScheme = SharedType.FunctionType
             (SharedType.TypeVariable "implicitBoxed")
             (boxType $ SharedType.TypeVariable "implicitBoxed")
+        queryClosedConsumerScheme = SharedType.ForallType ["consumed"] [] $
+            SharedType.FunctionType
+                (boxType $ SharedType.TypeVariable "consumed")
+                (indexedType $ SharedType.TypeVariable "consumed")
     defaultBoxSession <- sealDjinnSessionFrom stableSession $
         closedDeclarations ++ [boxDeclaration,
             valueDeclaration "defaultMonoBox" defaultBoxScheme]
@@ -1269,6 +1296,28 @@ testRankNTypeAtoms = do
     implicitBoxSession <- sealDjinnSessionFrom stableSession $
         closedDeclarations ++ [boxDeclaration,
             valueDeclaration "implicitMonoBox" implicitBoxScheme]
+    queryClosedCompositionSession <- sealDjinnSessionFrom stableSession $
+        closedDeclarations ++
+        [ boxDeclaration
+        , valueDeclaration "consumeQueryClosedBox" queryClosedConsumerScheme
+        ]
+
+    -- The final additive plan carries the established loaded-scheme axioms as
+    -- well as the new local family. Both providers must choose MonoClosed: the
+    -- indexed result rules out self-instantiating either scheme at a quantified
+    -- candidate, while the otherwise unused first argument puts the checked
+    -- closed type in the query vocabulary.
+    queryClosedComposition <- runStableQuery queryClosedCompositionSession
+        "composeQueryClosedAndLoadedInstantiation" $
+        "MonoClosed -> (forall a. MonoBox a) -> "
+        ++ "MonoIndexed MonoClosed"
+    queryClosedCompositionRendered <-
+        renderStableCandidates queryClosedComposition
+    assertBool
+        ("query-local closed instantiation did not compose with a loaded " ++
+            "scheme: " ++ show queryClosedCompositionRendered)
+        $ any ("consumeQueryClosedBox" `isInfixOf`)
+            queryClosedCompositionRendered
 
     -- A caller may supply a closed proper type justified by one exact loaded
     -- provider's originating environment. The quantified identity below does

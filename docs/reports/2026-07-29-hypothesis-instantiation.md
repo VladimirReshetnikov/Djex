@@ -15,6 +15,12 @@
 > A later
 > [scoped closed-polytype extension](2026-08-01-scoped-closed-polytype-applications.md)
 > retains selected visible evidence when a query-local binder is vacuous.
+>
+> **2026-08-09 follow-up.** The
+> [query-local closed-monotype extension](2026-08-09-query-local-closed-monotype-instantiation.md)
+> preserves the historical variable/guarded-quantified family below and adds a
+> separate final positive-only tail for closed, forall-free subtrees already
+> present in the elaborated goal.
 
 ## Scope
 

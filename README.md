@@ -83,6 +83,9 @@ evidence is recorded in the
 Its per-occurrence instantiation of loaded polymorphic values and closed source
 monotypes is recorded in the
 [2026-08-01 loaded polymorphic values report](docs/reports/2026-08-01-loaded-polymorphic-djinn-values.md).
+The separate positive-only extension which instantiates query-local hypotheses
+at closed monotypes already present in the requested type is recorded in the
+[2026-08-09 query-local closed-monotype report](docs/reports/2026-08-09-query-local-closed-monotype-instantiation.md).
 The checked provider-local instantiation evidence shared by the stable Djinn
 and Exference adapters is recorded in the
 [2026-08-05 provider-local instantiation evidence report](docs/reports/2026-08-05-provider-local-instantiation-evidence.md).
@@ -226,21 +229,25 @@ context, in a positive position: arrow results, products, and datatype fields
 preserve that position, while each arrow parameter reverses it. As at the query
 root, the context contributes no proof premises, so the result must remain
 dictionary-independent. Djinn can also eliminate a hypothesis-side
-context-free `forall` of up to four leading binders by instantiating its
-complete chain at sequent-supplied candidates: the goal's type variables, the
-skolems of opened positive occurrences, premise-scope variables, and — as a
-guarded form of impredicativity — any query-supplied subtree that is
-independent of enclosing binders and contains quantification, including a
-structural wrapper around a quantified atom. A separate appended Djinn family
-retains context-free schemes from loaded values and additionally instantiates
-them at closed, forall-free subtrees of the elaborated query and loaded value
-signatures. In the shared REPL, ordinary workspace values enter this family
-only after `:set djinn-axioms on`; value axioms are off by default. Each
-substituted body is kind-checked, so a closed higher-kinded
-constructor is admitted only when its complete use has kind `Type`. The search
-remains bounded and positive-only; a missed non-target retained scheme makes
-the result inconclusive rather than proving non-inhabitation. Exference can
-introduce a nested
+context-free `forall` of up to five leading binders. Its historical family
+instantiates the complete chain at sequent-supplied candidates: the goal's type
+variables, skolems of opened positive occurrences, premise-scope variables,
+and — as guarded impredicativity — query subtrees that are independent of
+enclosing binders and contain quantification.
+
+A separate final positive-only family revisits only schemes embedded on the
+hypothesis side of the requested goal. It adds closed, forall-free monotype
+subtrees already present in that elaborated goal, retains only tuples using at
+least one such closed candidate, and permits mixed tuples with the historical
+candidates without changing the historical prefix. A different appended
+family retains exact context-free schemes from loaded values and may also use
+closed, forall-free subtrees of the query and synonym-expanded loaded value
+signatures. Ordinary workspace values enter that loaded family only after
+`:set djinn-axioms on`; value axioms are off by default. Every substituted body
+is kind-checked, so a closed higher-kinded constructor is admitted only when
+its complete use has kind `Type`. Both extensions are bounded and
+positive-only; a missed non-target retained loaded scheme makes the result
+inconclusive rather than proving non-inhabitation. Exference can introduce a nested
 `forall`, with or without class contexts, once ordinary search exposes it as a
 goal, for example as a callback argument or an arrow result. It opens the
 complete leading chain with branch-local fresh rigid constants and treats each
@@ -294,7 +301,7 @@ such a position, including vectors that also contain a closed impredicative
 `Type` argument. Multiple distinct vectors may be retained for the same
 provider when their complete kind vectors agree; regressions exercise two such
 choices at the genuinely higher-order kind `(Type -> Type) -> Type`. Both
-assignment forms retain the 32-vector and four-argument bounds, the kinded form
+assignment forms retain the 32-vector and five-argument bounds, the kinded form
 adds the 129-node per-kind bound, and contextual provider schemes remain
 unsupported. The legacy scalar `ProviderInstantiationCandidate` entrances are
 unchanged and remain proper-type-only.
@@ -436,11 +443,14 @@ no-axiom prefix, bounded instantiation plans cover many omitted middle subsets,
 but chains beyond five binders, constrained chains, and candidates outside the
 finite query/value-signature vocabulary stay out of reach. Each structural or
 nominal instantiation family is capped per scheme and per family. Four- and
-five-binder query-local tuple selection fairly mix source-order,
+five-binder historical query-local tuple selection fairly mixes source-order,
 repeated, sparse, and Cartesian shapes while one- through three-binder schemes
-retain their historical order; the appended loaded-value family uses the same
+retain their historical order. The appended loaded-value family uses the same
 tuple shapes while alternating both ends of its source-ordered candidate list.
-Those caps lose completeness only, never
+The final query-local closed-monotype family schedules the same structural and
+nominal plans over the combined historical and closed-query pool, retains only
+tuples containing a closed query candidate, and carries loaded/provider
+evidence so mixed proofs compose. Those caps lose completeness only, never
 soundness. The nominal parametric-datatype plans obey the same caps and add no
 negative evidence. An incomplete primary premise also makes negative evidence
 conservative for the whole query. The examples use the same

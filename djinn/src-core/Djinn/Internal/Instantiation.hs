@@ -11,8 +11,8 @@
 -- @Opaque(forall as. t) -> compile(t[as := ss])@ over a finite candidate set:
 -- the sequent's type variables (including skolems introduced by opened
 -- positive foralls), every quantified atom the sequent already mentions,
--- and—for the separate loaded-value tail—closed forall-free subtrees of
--- checked queries and value signatures. Quantified candidates give guarded
+-- and—for separate additive tails—closed forall-free subtrees of checked
+-- queries and value signatures. Quantified candidates give guarded
 -- impredicative instantiation; closed candidates may have any kind, but the
 -- complete substituted body is kind-checked before compilation.
 --
@@ -26,6 +26,7 @@ module Djinn.Internal.Instantiation
     ( InstantiationAxioms
     , ProviderInstantiationPremises
     , instantiationAxioms
+    , queryClosedInstantiationAxioms
     , loadedInstantiationAxioms
     , providerInstantiationPremises
     , providerInstantiationAssignmentPremises
@@ -225,6 +226,71 @@ instantiationAxioms translator visibleArgument variableSpellings goalFormulas
     initialSchemes = distinctOn schemeKey
         [ scheme
         | (HypothesisSide, symbol) <- atoms
+        , Just source <- [opaqueSymbolSource symbol]
+        , Just scheme <- [instantiationScheme source]
+        ]
+
+-- | Build an additive hypothesis-instantiation tail whose tuples use at
+-- least one closed, forall-free subtree already present in the checked query.
+--
+-- The historical family above deliberately retains its exact candidate order
+-- and proof-plan position.  Re-enumerating its expanded pool in place would
+-- perturb established result prefixes, while enumerating all tuples again in
+-- a second family would duplicate every historical axiom.  This family
+-- therefore fairly schedules the combined pool but keeps only tuples which
+-- contain a supplied closed candidate.  Mixed variable/quantified/closed
+-- tuples remain available, and the existing per-scheme, family, and attempt
+-- caps apply independently to this positive-only completeness extension.
+queryClosedInstantiationAxioms
+    :: (SharedType.Type String -> Either String Formula)
+    -> (SharedType.Type String ->
+        Maybe SharedGenerated.VisibleTypeArgument)
+    -> [String]
+    -> [SharedType.Type String]
+    -> [Formula]
+    -> [Formula]
+    -> InstantiationAxioms
+queryClosedInstantiationAxioms translator visibleArgument variableSpellings
+        closedCandidates goalFormulas premiseFormulas =
+    buildInstantiationAxioms "$djinn$query-closed-instantiation$" translator
+        True
+        visibleArgument
+        candidateTuples
+        initialSchemes
+  where
+    candidateAtoms =
+        concatMap (sidedAtomSymbols ObligationSide) goalFormulas ++
+        concatMap (sidedAtomSymbols HypothesisSide) premiseFormulas
+    -- Only hypothesis-side schemes embedded in the requested goal belong to
+    -- this local family. Exact loaded schemes have their own retained-source
+    -- path; rediscovering global premise variants here would duplicate that
+    -- path and could misclassify an ordinary safe local axiom as target-only
+    -- diagnostic evidence.
+    schemeAtoms = concatMap (sidedAtomSymbols ObligationSide) goalFormulas
+    opaqueSources =
+        [ source
+        | (_, symbol) <- candidateAtoms
+        , Just source <- [opaqueSymbolSource symbol]
+        ]
+    variableCandidates = map SharedType.TypeVariable $
+        distinctOn id variableSpellings
+    quantifiedCandidates =
+        distinctOn SharedTypeAtom.alphaTypeKey $
+        sortOn (SharedTypeRender.renderType id) $
+        concatMap closedQuantifiedSubtrees opaqueSources
+    retainedClosedCandidates =
+        distinctOn SharedTypeAtom.alphaTypeKey closedCandidates
+    closedCandidateKeys = Set.fromList $
+        map SharedTypeAtom.alphaTypeKey retainedClosedCandidates
+    candidates = distinctOn SharedTypeAtom.alphaTypeKey $
+        variableCandidates ++ quantifiedCandidates ++ retainedClosedCandidates
+    candidateTuples arity = filter containsClosedCandidate $
+        fairCandidateTuples candidates arity
+    containsClosedCandidate = any $ \candidate ->
+        SharedTypeAtom.alphaTypeKey candidate `Set.member` closedCandidateKeys
+    initialSchemes = distinctOn schemeKey
+        [ scheme
+        | (HypothesisSide, symbol) <- schemeAtoms
         , Just source <- [opaqueSymbolSource symbol]
         , Just scheme <- [instantiationScheme source]
         ]

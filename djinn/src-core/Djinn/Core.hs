@@ -91,6 +91,7 @@ import Djinn.Internal.Instantiation
     , instantiationVisibleApplications
     , instantiationAxioms
     , loadedInstantiationAxioms
+    , queryClosedInstantiationAxioms
     , providerInstantiationApplications
     , providerInstantiationAssignmentPremises
     , providerInstantiationPremiseBindings
@@ -1332,9 +1333,12 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             ((== targetSymbol) . fst) nominalLoadedSchemePremises
         goalVariables =
             SharedType.freeVariablesInFirstOccurrenceOrder elaboratedGoal
+        queryClosedCandidates =
+            SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey $
+                closedMonotypeSubtrees elaboratedGoal
         closedCandidates =
             SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey $
-                closedMonotypeSubtrees elaboratedGoal ++
+                queryClosedCandidates ++
                     environmentClosedCandidates
         checkedTranslator translator source = do
             checkPreparedSynthesisTypesKinds prepared [(KStar, source)]
@@ -1445,6 +1449,36 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             (map snd targetNominalPremises)
         targetNominalAxiomPremises =
             instantiationAxiomPremises targetNominalAxioms
+        queryClosedAxioms = queryClosedInstantiationAxioms
+            structuralTranslator
+            visibleArgument
+            (goalVariables ++
+                polarizedFormulaPlanSkolems formulaPlans ++
+                premiseSpellings)
+            queryClosedCandidates
+            (map fst plans)
+            (map snd premises)
+        queryClosedAxiomSymbols =
+            instantiationAxiomSymbols queryClosedAxioms
+        queryClosedAxiomPremises =
+            instantiationAxiomPremises queryClosedAxioms
+        queryClosedVisibleApplications =
+            instantiationVisibleApplications queryClosedAxioms
+        nominalQueryClosedAxioms = queryClosedInstantiationAxioms
+            nominalTranslator
+            visibleArgument
+            (goalVariables ++
+                polarizedFormulaPlanSkolems nominalFormulaPlans ++
+                nominalPremiseSpellings)
+            queryClosedCandidates
+            (map fst nominalPlans)
+            (map snd nominalPremises)
+        nominalQueryClosedAxiomSymbols =
+            instantiationAxiomSymbols nominalQueryClosedAxioms
+        nominalQueryClosedAxiomPremises =
+            instantiationAxiomPremises nominalQueryClosedAxioms
+        nominalQueryClosedVisibleApplications =
+            instantiationVisibleApplications nominalQueryClosedAxioms
         activeLoadedAxioms = loadedInstantiationAxioms
             structuralTranslator
             visibleArgument
@@ -1626,6 +1660,12 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
                     targetAllNominalProviderPremises /=
                         targetAllProviderPremises
                 )
+        useNominalQueryClosedProjection =
+            parametricDataRelevant &&
+                ( nominalProjectionDistinct ||
+                    nominalQueryClosedAxiomPremises /=
+                        queryClosedAxiomPremises
+                )
         -- Preserve the complete historical structural/no-axiom prefix. This
         -- keeps first-result behavior, frontier ordering, and finite-budget
         -- observations stable; the nominal family shares only the cutoff and
@@ -1707,6 +1747,61 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
                   , False
                   )
                 | not (null nominalLoadedSchemePremises)
+                , (form, _) <- nominalPlans
+                ]
+        -- Closed monotypes which occur in the checked query extend local
+        -- hypothesis instantiation in a separate final family.  Keeping this
+        -- positive-only superset after every established family preserves all
+        -- historical plan and candidate prefixes while still allowing one
+        -- proof to mix an old variable/quantified axiom with a newly admitted
+        -- closed instance. The final plan is also a superset of established
+        -- loaded and caller-supplied provider evidence, so the new local
+        -- specialization can compose with either capability without moving
+        -- or modifying their earlier priority plans.
+        queryClosedStructuralSearchPlans =
+            [ ( premises ++ loadedSchemePremises ++ activeAxiomPremises ++
+                    activeLoadedAxiomPremises ++ activeAllProviderPremises ++
+                    queryClosedAxiomPremises
+              , targetAxiomPremises ++ targetLoadedAxiomPremises ++
+                    targetAllProviderPremises
+              , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
+                    `Set.union` activeAllProviderSymbols
+                    `Set.union` queryClosedAxiomSymbols
+              , activeVisibleApplications `Map.union`
+                    activeLoadedVisibleApplications `Map.union`
+                    activeAllProviderVisibleApplications `Map.union`
+                    queryClosedVisibleApplications
+              , activeAllProviderApplications
+              , form
+              , False
+              )
+            | not (null queryClosedAxiomPremises)
+            , (form, _) <- plans
+            ]
+        queryClosedNominalSearchPlans
+            | not useNominalQueryClosedProjection = []
+            | otherwise =
+                [ ( nominalPremises ++ nominalLoadedSchemePremises ++
+                        activeNominalAxiomPremises ++
+                        activeNominalLoadedAxiomPremises ++
+                        activeAllNominalProviderPremises ++
+                        nominalQueryClosedAxiomPremises
+                  , targetNominalAxiomPremises ++
+                        targetNominalLoadedAxiomPremises ++
+                        targetAllNominalProviderPremises
+                  , activeNominalAxiomSymbols `Set.union`
+                        activeNominalLoadedAxiomSymbols `Set.union`
+                        activeAllNominalProviderSymbols `Set.union`
+                        nominalQueryClosedAxiomSymbols
+                  , activeNominalVisibleApplications `Map.union`
+                        activeNominalLoadedVisibleApplications `Map.union`
+                        activeAllNominalProviderVisibleApplications `Map.union`
+                        nominalQueryClosedVisibleApplications
+                  , activeAllNominalProviderApplications
+                  , form
+                  , False
+                  )
+                | not (null nominalQueryClosedAxiomPremises)
                 , (form, _) <- nominalPlans
                 ]
         -- Exact ordered assignments receive one positive-only priority plan.
@@ -1824,7 +1919,9 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             providerStructuralSearchPlans ++
             providerNominalSearchPlans ++
             loadedStructuralSearchPlans ++
-            loadedNominalSearchPlans
+            loadedNominalSearchPlans ++
+            queryClosedStructuralSearchPlans ++
+            queryClosedNominalSearchPlans
         withoutProviders providerNames =
             filter ((`Set.notMember` providerNames) . fst)
     results <- runPlans collectAcrossPlans

@@ -306,17 +306,24 @@ Scoped values never consult either map. These are finite evidence-directed
 typing rules, not permission for ordinary unification to decompose a polytype
 or a claim of general impredicative inference.
 
-Djinn's historical query-local and appended loaded instantiation-axiom families
-now share visible-evidence retention: inferable choices erase, but a vacuous
-binder retains the shortest visible prefix. Environment sealing additionally
-keeps exact context-free loaded schemes in a private structural/nominal index;
-that family instantiates up to four leading binders from the historical
-variable and guarded quantified candidates plus closed, forall-free subtrees of
-the checked query and synonym-expanded loaded signatures. The complete
-substituted body and any specified visible argument are kind-checked against
-the prepared environment. These bounded axioms are proof-producing only; a
-missed non-target scheme cannot support negative evidence. Quantifiers outside
-these explicit boundaries remain opaque.
+Djinn has three bounded instantiation-axiom families. The historical
+query-local family instantiates up to five leading binders at variables,
+opened-forall skolems, premise-scope spellings, and guarded quantified query
+subtrees. A separate final positive-only family revisits only hypothesis
+schemes embedded in the elaborated goal. It adds closed, forall-free monotype
+subtrees from that goal and retains only tuples containing at least one such
+candidate, so it does not duplicate the historical prefix.
+
+Environment sealing separately keeps exact context-free loaded schemes in a
+private structural/nominal index. That appended family may use the historical
+candidates plus closed, forall-free subtrees of the checked query and
+synonym-expanded loaded signatures. All three families share visible-evidence
+retention: inferable choices erase, but a vacuous binder retains the shortest
+visible prefix. Every complete substituted body and specified visible argument
+is kind-checked against the prepared environment. These bounded extensions are
+proof-producing only; the final query-local and loaded families are
+positive-only, and a missed non-target loaded scheme cannot support negative
+evidence. Quantifiers outside these explicit boundaries remain opaque.
 Structure surrounding those opaque quantifiers retains its ordinary form,
 which permits impredicative values such as
 `[(forall a. a -> a)]` without claiming general higher-rank subsumption.

@@ -720,12 +720,23 @@ buildAxiomFormulas
     -> [InstantiationAxiom]
 buildAxiomFormulas deduplicateFormula excludedAxioms interleaveSchemes
         translator visibleArgument candidateTuples initialSchemes = loop
-    (Set.fromList $ map schemeKey initialSchemes)
+    (Set.fromList $ map schemeKey startingSchemes)
     excludedAxioms
     maxInstantiationAttempts
     maxInstantiationAxioms
-    (map SchemeJob initialSchemes)
+    (map SchemeJob startingSchemes)
   where
+    -- A retained historical axiom can expose a shallower hypothesis scheme
+    -- without the correlated tuple producer ever recreating that bridge (for
+    -- example when the bridge itself uses no quantified argument). Seed those
+    -- descendants directly; later duplicate attempts retain the same closure
+    -- behavior for schemes exposed recursively by correlated formulas.
+    startingSchemes = distinctOn schemeKey $
+        initialSchemes ++
+        concatMap
+            (discoveredSchemes . instantiationAxiomFormula)
+            (Set.toList excludedAxioms)
+
     loop seenSchemes seenAxioms attempts allowance queue = case queue of
         _ | attempts <= 0 || allowance <= 0 -> []
         [] -> []

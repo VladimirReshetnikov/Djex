@@ -1850,9 +1850,10 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
                 , (form, _) <- nominalPlans
                 ]
         -- Closed monotypes which occur in the checked query extend local
-        -- hypothesis instantiation in a separate final family.  Keeping this
-        -- positive-only superset after every established family preserves all
-        -- historical plan and candidate prefixes while still allowing one
+        -- hypothesis instantiation in the historically final family. Keeping
+        -- this established positive-only superset unchanged after the loaded
+        -- and provider families preserves every earlier plan and candidate
+        -- prefix while still allowing one
         -- proof to mix an old variable/quantified axiom with a newly admitted
         -- closed instance. The final plan is also a superset of established
         -- loaded and caller-supplied provider evidence, so the new local

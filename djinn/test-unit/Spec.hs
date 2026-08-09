@@ -1109,6 +1109,9 @@ testRankNTypeAtoms = do
     runStableIdentity stableSession "correlateGuardedImpredicativeInstances"
         $ "(forall a b. f a b) -> "
         ++ "f (forall x. x -> x) (forall y. y -> y -> y)"
+    runStableIdentity stableSession "correlateThroughHistoricalNestedBridge"
+        $ "(forall outer. outer -> (forall a b. g a b)) -> x -> "
+        ++ "g (forall p. p -> p) (forall q. q -> q -> q)"
 
     let vacuousCorrelatedOptions = defaultQueryOptions
             { optionAlternatives = True

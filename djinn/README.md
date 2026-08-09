@@ -886,8 +886,8 @@ premise before conversion replaces its private identity with the real provider
 and ordered visible type applications. A target-named specialization remains
 diagnostic-only and cannot become a synthesized self-reference.
 
-The scalar route retains its historical four-binder, 512-attempt, and
-sixteen-specializations-per-scheme Cartesian windows. Exact vectors bypass
+The scalar route retains its bounded five-binder, 512-attempt, and
+sixteen-specializations-per-scheme tuple windows. Exact vectors bypass
 those reconstruction windows while sharing the 32-direct-premise family cap
 and the query cutoff and proof-search fuel left by earlier plans. Empty evidence
 omits the provider plans completely: `runDjinnQuery` is exactly the empty
@@ -901,7 +901,8 @@ target exclusion,
 higher-kinded and mixed higher-kinded/impredicative assignments, vacuous
 higher-kinded evidence, same-provider kind-vector consistency, two distinct
 same-provider vectors at the genuine kind `(Type -> Type) -> Type`, kind
-mismatch, and a four-binder vector beyond the scalar Cartesian prefix. This
+mismatch, a four-binder vector beyond the scalar Cartesian prefix, ordered
+five-binder evidence, and a conservative six-binder boundary. This
 remains a bounded proof-producing extension, not general impredicative
 inference or higher-rank subsumption. See the original
 [provider-local candidate report](../docs/reports/2026-08-05-provider-local-instantiation-evidence.md)
@@ -914,7 +915,7 @@ and the
   type system. A query's prenex `forall`/constraint prefix is elaborated, and a
   nested forall, including one with a validated context, can be introduced in a
   positive formula position when its body is dictionary-independent.
-  A hypothesis-side context-free forall of at most four leading binders can
+  A hypothesis-side context-free forall of at most five leading binders can
   additionally be eliminated through bounded instantiation axioms: the chain is
   instantiated completely at candidates the sequent itself supplies (goal
   variables, opened-forall skolems, premise-scope variables, and quantified

@@ -77,6 +77,9 @@ Djinn's complementary bounded recursive-constructor rule is recorded in the
 [2026-08-01 bounded recursive introduction report](docs/reports/2026-08-01-bounded-djinn-recursive-introduction.md).
 Djinn's widened bounded hypothesis-instantiation rule is recorded in the
 [2026-08-01 four-binder instantiation report](docs/reports/2026-08-01-four-binder-instantiation.md).
+The shared five-binder successor across Djinn, Exference, and exact provider
+evidence is recorded in the
+[2026-08-09 five-binder instantiation report](docs/reports/2026-08-09-five-binder-instantiation.md).
 Its per-occurrence instantiation of loaded polymorphic values and closed source
 monotypes is recorded in the
 [2026-08-01 loaded polymorphic values report](docs/reports/2026-08-01-loaded-polymorphic-djinn-values.md).
@@ -261,7 +264,7 @@ flexible variables whose leading binders are all vacuous may instead select
 checked proper types already supplied below arrows or tuples in the query. Its
 residual body may mention ambient rigids opened from that same query. The
 candidates include complete closed context-free foralls, so search can emit
-`provider @(forall a0_0. a0_0 -> a0_0)`. The query route retains at most four
+`provider @(forall a0_0. a0_0 -> a0_0)`. The query route retains at most five
 binders and 32 combinations. Ordinary implicit instantiation remains first,
 and the instance-head route remains monotype-only.
 A richer frontend may instead pass either backend one complete, correlated
@@ -430,10 +433,10 @@ for eleven independent sites without a general power-set search. Twelve sites
 expose the next central boundary: a proof requiring exactly six open and six
 opaque occurrences may remain inconclusive. After that complete structural
 no-axiom prefix, bounded instantiation plans cover many omitted middle subsets,
-but chains beyond four binders, constrained chains, and candidates outside the
+but chains beyond five binders, constrained chains, and candidates outside the
 finite query/value-signature vocabulary stay out of reach. Each structural or
-nominal instantiation family is capped per scheme and per family. Four-binder
-query-local tuple selection fairly mixes source-order,
+nominal instantiation family is capped per scheme and per family. Four- and
+five-binder query-local tuple selection fairly mix source-order,
 repeated, sparse, and Cartesian shapes while one- through three-binder schemes
 retain their historical order; the appended loaded-value family uses the same
 tuple shapes while alternating both ends of its source-ordered candidate list.

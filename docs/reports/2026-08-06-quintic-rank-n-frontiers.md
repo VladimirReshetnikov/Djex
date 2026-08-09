@@ -1,5 +1,11 @@
 # Bounded quintic rank-N frontiers
 
+> **Follow-up.** The
+> [five-binder instantiation successor](2026-08-09-five-binder-instantiation.md)
+> raises the separate hypothesis and provider limit from four to five. The
+> occurrence-frontier fixtures now use six-binder sentinels so the structural
+> results below remain isolated from instantiation.
+
 Date: 2026-08-06
 
 ## Outcome

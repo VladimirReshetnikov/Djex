@@ -51,12 +51,15 @@ import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 import qualified Language.Haskell.Synthesis.TypeRender as SharedTypeRender
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
+import qualified Language.Haskell.Synthesis.Query as SharedQuery
 
 -- Instantiating a leading chain replaces every binder at once, mirroring
--- Exference's provider rule. Longer chains multiply the candidate tuple space
--- without matching realistic queries, so they stay opaque.
+-- Exference's provider rule. Keep this eligibility boundary aligned with the
+-- shared exact-assignment contract; longer chains multiply the candidate tuple
+-- space and stay opaque.
 maxInstantiationBinders :: Int
-maxInstantiationBinders = 4
+maxInstantiationBinders =
+    SharedQuery.maximumProviderInstantiationArguments
 
 -- The original one- through three-binder rule enumerated a lexically sorted
 -- Cartesian product. Keep that exact prefix so widening the rule cannot
@@ -216,7 +219,7 @@ instantiationAxioms translator visibleArgument variableSpellings goalFormulas
         historicalVariableCandidates ++ quantifiedCandidates
     -- The callers supply source first-occurrence order: goal variables first,
     -- then opened skolems and sealed premise scopes. Retain that order for the
-    -- new four-binder heuristics so alpha-renaming cannot reshuffle useful
+    -- wide-binder heuristics so alpha-renaming cannot reshuffle useful
     -- source-ordered runs merely because their spellings sort differently.
     wideCandidates = sourceVariableCandidates ++ quantifiedCandidates
     initialSchemes = distinctOn schemeKey
@@ -628,7 +631,7 @@ buildAxiomFormulas interleaveSchemes translator visibleArgument
     rightToMaybe = either (const Nothing) Just
 
 -- One- through three-binder query-local schemes retain their exact historical
--- lexical Cartesian order. Four-binder schemes use the source-order widening
+-- lexical Cartesian order. Wider schemes use the source-order widening
 -- introduced with the original bounded rule.
 historicalCandidateTuples
     :: [SharedType.Type String]

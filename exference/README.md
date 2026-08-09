@@ -952,7 +952,7 @@ or Cartesian-recombined. The parallel
 frontend-attested `GroundKind` of that provider-binder position.
 
 All outer lists are globally bounded at 32 before any element is entered. The
-assignment runners additionally bound every argument spine at four before
+assignment runners additionally bound every argument spine at five before
 entering an argument. They then resolve the exact retained polymorphic provider,
 require a nonempty vector whose length matches its complete leading forall
 chain, and reject a contextual scheme. After those checks, the kinded runner
@@ -1004,7 +1004,7 @@ ground monomorphic instance-head choices, exact supplied vectors, then checked
 query-derived choices. The exact route performs no Cartesian product and does
 not require selected binders to be vacuous: because the caller supplied the
 complete vector, those binders may occur in the provider body. Both routes open
-at most four leading binders, and search plus the independent expression
+at most five leading binders, and search plus the independent expression
 checker consume their applications through the same checked representation.
 
 `runExferenceQuery` follows the exact empty-evidence path. Calling any explicit
@@ -1017,7 +1017,8 @@ higher-kinded/impredicative
 assignments, vacuous higher-kinded evidence, same-provider kind-vector
 consistency, two distinct same-provider vectors at the genuine kind
 `(Type -> Type) -> Type`, both directions of kind mismatch, legacy scalar
-rejection of a higher-kinded argument, and an ordered four-binder application.
+rejection of a higher-kinded argument, and ordered four- and five-binder
+applications with a six-binder rejection boundary.
 Nonempty evidence remains a bounded global-only capability. It does not enable
 scoped-provider donation, invent a polytype, decompose a quantified body in
 ordinary unification, or provide general impredicative inference. See the
@@ -1088,7 +1089,7 @@ and the
   foralls already present below arrows or tuples. The residual provider body
   may mention ambient rigids opened from that query. This works for scoped
   values and retained globals, retains
-  at most four binders and 32 query combinations, and can emit
+  at most five binders and 32 query combinations, and can emit
   `provider @(forall a0_0. a0_0 -> a0_0)`. Ordinary fresh instantiation keeps
   priority, and explicit instance-head selection remains monotype-only.
   A nested quantified type exposed as a goal can now be constructed as well,

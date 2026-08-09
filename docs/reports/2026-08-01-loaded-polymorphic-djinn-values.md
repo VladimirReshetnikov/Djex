@@ -6,6 +6,10 @@ Date: 2026-08-01
 > [scoped closed-polytype extension](2026-08-01-scoped-closed-polytype-applications.md)
 > applies loaded schemes' visible-evidence retention to query-local Djinn
 > schemes and admits complete closed query polytypes in both engines.
+> The later
+> [five-binder successor](2026-08-09-five-binder-instantiation.md) raises the
+> loaded-scheme eligibility boundary from four to five while preserving the
+> fixed attempt and axiom caps described below.
 
 ## Outcome
 

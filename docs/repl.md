@@ -149,7 +149,7 @@ deliberately bounded rank-N rule families:
   preserve polarity; crossing an arrow parameter reverses it. Context methods
   are not LJT premises, so the body must be dictionary-independent. Djinn also
   eliminates a hypothesis-side
-  context-free chain of at most four leading binders by instantiating it at
+  context-free chain of at most five leading binders by instantiating it at
   candidates the sequent itself supplies — goal variables, opened-forall
   skolems, premise-scope variables, and query-supplied subtrees that are
   independent of enclosing binders and contain quantification, including
@@ -189,7 +189,7 @@ deliberately bounded rank-N rule families:
   provider with no free flexible variables whose leading binders are fully
   vacuous may instead select checked query proper types, including complete
   closed context-free foralls below arrows or tuples, and emit
-  `provider @(forall a0_0. a0_0 -> a0_0)`. The query route retains at most four
+  `provider @(forall a0_0. a0_0 -> a0_0)`. The query route retains at most five
   binders and 32 combinations. Ambient query rigids may remain in the provider
   body; the instance-head route remains monotype-only.
   Ordinary implicit instantiation stays first. Shared generated syntax can
@@ -309,7 +309,7 @@ type application explicitly.
 Exference does not perform non-exact subsumption between contextual schemes,
 while unexposed quantified atoms remain opaque; finite identifier or
 search-budget exhaustion is an inconclusive truncation. In particular,
-Djinn keeps constrained hypothesis occurrences and chains beyond four binders
+Djinn keeps constrained hypothesis occurrences and chains beyond five binders
 opaque; if the bounded approximation finds no term, the result is inconclusive
 rather than a proof of uninhabitability. Its plan family retains a quartic
 historical prefix and adds a capped quintic tail rather than an unbounded

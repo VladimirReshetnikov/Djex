@@ -1,5 +1,11 @@
 # Exact provider-instantiation assignments — 2026-08-05
 
+> **Follow-up.** The
+> [five-binder successor](2026-08-09-five-binder-instantiation.md) raises
+> `maximumProviderInstantiationArguments` from four to five and moves the
+> conservative rejection boundary to six. Numeric limits and regression
+> expectations below describe this report's historical tree.
+
 ## Outcome
 
 The stable Djinn and Exference adapters now accept complete ordered

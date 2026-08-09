@@ -10,6 +10,11 @@ Date: 2026-08-01
 > [scoped closed-polytype extension](2026-08-01-scoped-closed-polytype-applications.md)
 > retains a bounded visible application when a selected query-local binder is
 > vacuous.
+> The
+> [five-binder successor](2026-08-09-five-binder-instantiation.md) widens this
+> same fair scheduler and the shared exact-assignment contract to five leading
+> binders. The four-binder results below remain the historical boundary for
+> this report.
 
 ## Outcome
 

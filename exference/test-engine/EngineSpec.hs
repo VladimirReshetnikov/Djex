@@ -500,6 +500,42 @@ tests = testGroup "Exference private engine boundaries"
             , groundProviderConstraints = []
             }
         ]
+  , testCase "provider instantiation admits five binders and rejects six" $ do
+      let token = TypeCons $ name "WideToken"
+          quantified binder body = TypeForall [binder] [] body
+          selected = quantified 10
+            $ TypeArrow (TypeVar 10) (TypeVar 10)
+          exactArguments =
+            [ quantified 11 $ TypeArrow (TypeVar 11) (TypeVar 11)
+            , quantified 12 $ TypeArrow (TypeVar 12) token
+            , quantified 13 $ TypeArrow token (TypeVar 13)
+            , quantified 14 $ TypeArrow
+                (TypeVar 14) (TypeArrow (TypeVar 14) (TypeVar 14))
+            , quantified 15 $ TypeArrow
+                (TypeArrow (TypeVar 15) token) (TypeVar 15)
+            ]
+          sixthArgument = quantified 16 $ TypeArrow
+            (TypeVar 16) (TypeArrow token (TypeVar 16))
+          fiveBinderProvider = TypeForall [0 .. 4] [] token
+          sixBinderProvider = TypeForall [0 .. 5] [] token
+      candidateProviderInstantiations [selected] fiveBinderProvider @?=
+        [ GroundProviderInstantiation
+            { groundProviderArguments = replicate 5 selected
+            , groundProviderType = token
+            , groundProviderConstraints = []
+            }
+        ]
+      assignmentProviderInstantiations [exactArguments]
+          fiveBinderProvider @?=
+        [ GroundProviderInstantiation
+            { groundProviderArguments = exactArguments
+            , groundProviderType = token
+            , groundProviderConstraints = []
+            }
+        ]
+      candidateProviderInstantiations [selected] sixBinderProvider @?= []
+      assignmentProviderInstantiations
+          [exactArguments ++ [sixthArgument]] sixBinderProvider @?= []
   , testCase "generic deconstructors need no persistent flexible IDs" $ do
       let integer = TypeCons $ name "Int"
           box argument = TypeApp (TypeCons $ name "Box") argument

@@ -303,7 +303,7 @@ queryTests = testGroup "queries"
         ]
       toList assignment @?= ["left", "right", "right"]
       maximumProviderInstantiationAssignments @?= 32
-      maximumProviderInstantiationArguments @?= 4
+      maximumProviderInstantiationArguments @?= 5
       maximumProviderInstantiationKindNodes @?= 129
       _ <- evaluate $ force assignment
       pure ()

@@ -1499,6 +1499,67 @@ tests = testGroup "Djex facade"
         ("the exact four-binder assignment was absent: " ++ show visibleVectors)
         $ visibleArguments `elem` visibleVectors
 
+  , testCase "retain an exact five-binder Exference assignment" $ do
+      tokenName <- expectRight $ mkIdentifier "FiveEvidenceToken"
+      providerName <- expectRight $ mkIdentifier "fiveEvidenceProvider"
+      targetName <- expectRight $ mkIdentifier "useFiveEvidenceProvider"
+      target <- expectRight $ mkDefinitionName targetName
+      let providerVariables = map FlexibleVariable [0 .. 4]
+          quantified binder body = ForallType [FlexibleVariable binder] [] body
+          variable binder = TypeVariable $ FlexibleVariable binder
+          tokenType = TypeConstructor tokenName
+          arguments =
+            [ quantified 10 $ FunctionType (variable 10) (variable 10)
+            , quantified 11 $ FunctionType (variable 11) tokenType
+            , quantified 12 $ FunctionType tokenType (variable 12)
+            , quantified 13 $ FunctionType (variable 13) $
+                FunctionType (variable 13) (variable 13)
+            , quantified 14 $ FunctionType
+                (FunctionType (variable 14) tokenType) (variable 14)
+            ]
+          providerType = ForallType providerVariables [] tokenType
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , ValueDeclaration $ ValueSignature () providerName providerType
+            ]
+          assignment = ProviderInstantiationAssignment
+            { providerInstantiationAssignmentProvider = providerName
+            , providerInstantiationAssignmentArguments = arguments
+            }
+          visibleSpine expression = case expression of
+            Global name -> Just (name, [])
+            VisibleTypeApplication function argument -> do
+              (name, earlier) <- visibleSpine function
+              pure (name, earlier ++ [argument])
+            _ -> Nothing
+      visibleArguments <- expectRight $
+        traverse specifiedVisibleTypeArgument arguments
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = tokenType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 1024}
+        }
+      results <- expectRight $ runExferenceQueryWithInstantiationAssignments
+        session [assignment] request
+      let candidates = concatMap
+            (batchCandidates . resultSearch) results
+          visibleVectors =
+            [ actual
+            | candidate <- candidates
+            , FunctionClause _ [] body <- [candidateOutput candidate]
+            , Just (occurrence, actual@(_ : _)) <- [visibleSpine body]
+            , occurrence == providerName
+            ]
+      assertBool
+        ("the exact five-binder assignment was absent: " ++ show visibleVectors)
+        $ visibleArguments `elem` visibleVectors
+
   , testCase "empty Exference provider evidence is exactly inert" $ do
       tokenName <- expectRight $ mkIdentifier "EmptyEvidenceToken"
       providerName <- expectRight $ mkIdentifier "emptyEvidenceProvider"
@@ -2436,26 +2497,26 @@ tests = testGroup "Djex facade"
           ExitSuccess exitCode
   , testCase "compile the quartic rank-N frontier through the Djinn facade" $ do
       let source =
-            "(forall a b c d e. q) -> "
-            ++ "(forall a b c d e. r) -> "
-            ++ "(forall a b c d e. z) -> "
-            ++ "(forall a b c d e. m) -> "
-            ++ "((forall v w x y u. q), "
-            ++ "(forall v w x y u. r), "
-            ++ "(forall v w x y u. z), "
-            ++ "(forall v w x y u. m), "
+            "(forall a b c d e f. q) -> "
+            ++ "(forall a b c d e f. r) -> "
+            ++ "(forall a b c d e f. z) -> "
+            ++ "(forall a b c d e f. m) -> "
+            ++ "((forall v w x y u t. q), "
+            ++ "(forall v w x y u t. r), "
+            ++ "(forall v w x y u t. z), "
+            ++ "(forall v w x y u t. m), "
             ++ "(forall e. e -> e), (forall f. f -> f), "
             ++ "(forall g. g -> g), (forall h. h -> h))"
           signature target = unlines
             [ target ++ " :: forall q r z m."
-            , "  (forall a b c d e. q) ->"
-            , "  (forall a b c d e. r) ->"
-            , "  (forall a b c d e. z) ->"
-            , "  (forall a b c d e. m) ->"
-            , "  ( (forall v w x y u. q)"
-            , "  , (forall v w x y u. r)"
-            , "  , (forall v w x y u. z)"
-            , "  , (forall v w x y u. m)"
+            , "  (forall a b c d e f. q) ->"
+            , "  (forall a b c d e f. r) ->"
+            , "  (forall a b c d e f. z) ->"
+            , "  (forall a b c d e f. m) ->"
+            , "  ( (forall v w x y u t. q)"
+            , "  , (forall v w x y u t. r)"
+            , "  , (forall v w x y u t. z)"
+            , "  , (forall v w x y u t. m)"
             , "  , (forall e. e -> e)"
             , "  , (forall f. f -> f)"
             , "  , (forall g. g -> g)"
@@ -2502,35 +2563,35 @@ tests = testGroup "Djex facade"
           ExitSuccess exitCode
   , testCase "compile the quintic rank-N frontier through the Djinn facade" $ do
       let source =
-            "(forall a b c d e. q) -> "
-            ++ "(forall a b c d e. r) -> "
-            ++ "(forall a b c d e. z) -> "
-            ++ "(forall a b c d e. m) -> "
-            ++ "(forall a b c d e. n) -> "
-            ++ "((forall v w x y u. q), "
-            ++ "(forall v w x y u. r), "
-            ++ "(forall v w x y u. z), "
-            ++ "(forall v w x y u. m), "
+            "(forall a b c d e f. q) -> "
+            ++ "(forall a b c d e f. r) -> "
+            ++ "(forall a b c d e f. z) -> "
+            ++ "(forall a b c d e f. m) -> "
+            ++ "(forall a b c d e f. n) -> "
+            ++ "((forall v w x y u t. q), "
+            ++ "(forall v w x y u t. r), "
+            ++ "(forall v w x y u t. z), "
+            ++ "(forall v w x y u t. m), "
             ++ "(forall e. e -> e), (forall f. f -> f), "
             ++ "(forall g. g -> g), (forall h. h -> h), "
-            ++ "(forall i. i -> i), (forall v w x y u. n))"
+            ++ "(forall i. i -> i), (forall v w x y u t. n))"
           signature target = unlines
             [ target ++ " :: forall q r z m n."
-            , "  (forall a b c d e. q) ->"
-            , "  (forall a b c d e. r) ->"
-            , "  (forall a b c d e. z) ->"
-            , "  (forall a b c d e. m) ->"
-            , "  (forall a b c d e. n) ->"
-            , "  ( (forall v w x y u. q)"
-            , "  , (forall v w x y u. r)"
-            , "  , (forall v w x y u. z)"
-            , "  , (forall v w x y u. m)"
+            , "  (forall a b c d e f. q) ->"
+            , "  (forall a b c d e f. r) ->"
+            , "  (forall a b c d e f. z) ->"
+            , "  (forall a b c d e f. m) ->"
+            , "  (forall a b c d e f. n) ->"
+            , "  ( (forall v w x y u t. q)"
+            , "  , (forall v w x y u t. r)"
+            , "  , (forall v w x y u t. z)"
+            , "  , (forall v w x y u t. m)"
             , "  , (forall e. e -> e)"
             , "  , (forall f. f -> f)"
             , "  , (forall g. g -> g)"
             , "  , (forall h. h -> h)"
             , "  , (forall i. i -> i)"
-            , "  , (forall v w x y u. n)"
+            , "  , (forall v w x y u t. n)"
             , "  )"
             ]
 
@@ -2579,16 +2640,16 @@ tests = testGroup "Djex facade"
       "compile nested quartic rank-N values through both Exference adapters" $
       do
       let inputs =
-            [ "(forall a b c d e. q)"
-            , "(forall a b c d e. r)"
-            , "(forall a b c d e. z)"
-            , "(forall a b c d e. m)"
+            [ "(forall a b c d e f. q)"
+            , "(forall a b c d e f. r)"
+            , "(forall a b c d e f. z)"
+            , "(forall a b c d e f. m)"
             ]
           components =
-            [ "(forall v w x y u. q)"
-            , "(forall v w x y u. r)"
-            , "(forall v w x y u. z)"
-            , "(forall v w x y u. m)"
+            [ "(forall v w x y u t. q)"
+            , "(forall v w x y u t. r)"
+            , "(forall v w x y u t. z)"
+            , "(forall v w x y u t. m)"
             , "(forall e. e -> e)"
             , "(forall f. f -> f)"
             , "(forall g. g -> g)"

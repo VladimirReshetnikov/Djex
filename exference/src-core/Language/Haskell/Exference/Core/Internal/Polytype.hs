@@ -44,6 +44,7 @@ import Language.Haskell.Exference.Core.Unify
   )
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
+import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 
@@ -269,10 +270,10 @@ groundProviderInstantiations environment source =
 -- this worker admits ground monotypes and complete closed, context-free
 -- quantified types while retaining a finite prefix.
 --
--- The complete leading binder chain is instantiated in source order.  Four is
--- the same practical rank-N bound used by the neighboring Djinn rule, and the
--- tuple cap prevents a wide query vocabulary from turning one global lookup
--- into an unbounded product search.
+-- The complete leading binder chain is instantiated in source order. Keep the
+-- practical rank-N bound aligned with the neighboring Djinn rule and shared
+-- exact-assignment boundary; the tuple cap prevents a wide query vocabulary
+-- from turning one global lookup into an unbounded product search.
 candidateProviderInstantiations
   :: [HsType]
   -> HsType
@@ -294,7 +295,8 @@ candidateProviderInstantiations rawCandidates source =
           traverse SharedType.flexibleVariableIdentity binders
     orderedBinders <- maybe [] pure binderIdentifiers
     guard $ not $ null orderedBinders
-    guard $ length orderedBinders <= 4
+    guard $ length orderedBinders <=
+      SharedQuery.maximumProviderInstantiationArguments
     guard $ null constraints
     -- Query-selected arguments exist only for the foreign-erasure case: the
     -- source binder has no surviving term-level type occurrence from which
@@ -339,7 +341,8 @@ assignmentProviderInstantiations rawAssignments source =
           traverse SharedType.flexibleVariableIdentity binders
     orderedBinders <- maybe [] pure binderIdentifiers
     guard $ not $ null orderedBinders
-    guard $ length orderedBinders <= 4
+    guard $ length orderedBinders <=
+      SharedQuery.maximumProviderInstantiationArguments
     guard $ null constraints
     arguments <- SharedCollection.distinctOn
       (map SharedTypeAtom.alphaTypeKey) rawAssignments

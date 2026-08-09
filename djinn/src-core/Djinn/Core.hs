@@ -91,6 +91,7 @@ import Djinn.Internal.Instantiation
     , instantiationVisibleApplications
     , instantiationAxioms
     , loadedInstantiationAxioms
+    , queryCorrelatedInstantiationAxioms
     , queryClosedInstantiationAxioms
     , providerInstantiationApplications
     , providerInstantiationAssignmentPremises
@@ -1449,6 +1450,37 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             (map snd targetNominalPremises)
         targetNominalAxiomPremises =
             instantiationAxiomPremises targetNominalAxioms
+        queryCorrelatedAxioms = queryCorrelatedInstantiationAxioms
+            structuralTranslator
+            visibleArgument
+            (goalVariables ++
+                polarizedFormulaPlanSkolems formulaPlans ++
+                premiseSpellings)
+            elaboratedGoal
+            (map fst plans)
+            (map snd premises)
+        queryCorrelatedAxiomSymbols =
+            instantiationAxiomSymbols queryCorrelatedAxioms
+        queryCorrelatedAxiomPremises =
+            instantiationAxiomPremises queryCorrelatedAxioms
+        queryCorrelatedVisibleApplications =
+            instantiationVisibleApplications queryCorrelatedAxioms
+        nominalQueryCorrelatedAxioms =
+            queryCorrelatedInstantiationAxioms
+                nominalTranslator
+                visibleArgument
+                (goalVariables ++
+                    polarizedFormulaPlanSkolems nominalFormulaPlans ++
+                    nominalPremiseSpellings)
+                elaboratedGoal
+                (map fst nominalPlans)
+                (map snd nominalPremises)
+        nominalQueryCorrelatedAxiomSymbols =
+            instantiationAxiomSymbols nominalQueryCorrelatedAxioms
+        nominalQueryCorrelatedAxiomPremises =
+            instantiationAxiomPremises nominalQueryCorrelatedAxioms
+        nominalQueryCorrelatedVisibleApplications =
+            instantiationVisibleApplications nominalQueryCorrelatedAxioms
         queryClosedAxioms = queryClosedInstantiationAxioms
             structuralTranslator
             visibleArgument
@@ -1660,9 +1692,17 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
                     targetAllNominalProviderPremises /=
                         targetAllProviderPremises
                 )
+        useNominalQueryCorrelatedProjection =
+            parametricDataRelevant &&
+                ( nominalProjectionDistinct ||
+                    nominalQueryCorrelatedAxiomPremises /=
+                        queryCorrelatedAxiomPremises
+                )
         useNominalQueryClosedProjection =
             parametricDataRelevant &&
                 ( nominalProjectionDistinct ||
+                    nominalQueryCorrelatedAxiomPremises /=
+                        queryCorrelatedAxiomPremises ||
                     nominalQueryClosedAxiomPremises /=
                         queryClosedAxiomPremises
                 )
@@ -1749,6 +1789,58 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
                 | not (null nominalLoadedSchemePremises)
                 , (form, _) <- nominalPlans
                 ]
+        -- Fairly correlated guarded-impredicative tuples form a separate
+        -- positive-only tail.  Its axioms are exact instances whose complete
+        -- result already occurs in the checked query; keeping the tail after
+        -- every established structural, nominal, provider, and loaded plan
+        -- preserves their candidate prefixes while allowing the new local
+        -- instance to compose with those premise families.
+        queryCorrelatedStructuralSearchPlans =
+            [ ( premises ++ loadedSchemePremises ++ activeAxiomPremises ++
+                    activeLoadedAxiomPremises ++ activeAllProviderPremises ++
+                    queryCorrelatedAxiomPremises
+              , targetAxiomPremises ++ targetLoadedAxiomPremises ++
+                    targetAllProviderPremises
+              , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
+                    `Set.union` activeAllProviderSymbols
+                    `Set.union` queryCorrelatedAxiomSymbols
+              , activeVisibleApplications `Map.union`
+                    activeLoadedVisibleApplications `Map.union`
+                    activeAllProviderVisibleApplications `Map.union`
+                    queryCorrelatedVisibleApplications
+              , activeAllProviderApplications
+              , form
+              , False
+              )
+            | not (null queryCorrelatedAxiomPremises)
+            , (form, _) <- plans
+            ]
+        queryCorrelatedNominalSearchPlans
+            | not useNominalQueryCorrelatedProjection = []
+            | otherwise =
+                [ ( nominalPremises ++ nominalLoadedSchemePremises ++
+                        activeNominalAxiomPremises ++
+                        activeNominalLoadedAxiomPremises ++
+                        activeAllNominalProviderPremises ++
+                        nominalQueryCorrelatedAxiomPremises
+                  , targetNominalAxiomPremises ++
+                        targetNominalLoadedAxiomPremises ++
+                        targetAllNominalProviderPremises
+                  , activeNominalAxiomSymbols `Set.union`
+                        activeNominalLoadedAxiomSymbols `Set.union`
+                        activeAllNominalProviderSymbols `Set.union`
+                        nominalQueryCorrelatedAxiomSymbols
+                  , activeNominalVisibleApplications `Map.union`
+                        activeNominalLoadedVisibleApplications `Map.union`
+                        activeAllNominalProviderVisibleApplications `Map.union`
+                        nominalQueryCorrelatedVisibleApplications
+                  , activeAllNominalProviderApplications
+                  , form
+                  , False
+                  )
+                | not (null nominalQueryCorrelatedAxiomPremises)
+                , (form, _) <- nominalPlans
+                ]
         -- Closed monotypes which occur in the checked query extend local
         -- hypothesis instantiation in a separate final family.  Keeping this
         -- positive-only superset after every established family preserves all
@@ -1761,15 +1853,18 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         queryClosedStructuralSearchPlans =
             [ ( premises ++ loadedSchemePremises ++ activeAxiomPremises ++
                     activeLoadedAxiomPremises ++ activeAllProviderPremises ++
+                    queryCorrelatedAxiomPremises ++
                     queryClosedAxiomPremises
               , targetAxiomPremises ++ targetLoadedAxiomPremises ++
                     targetAllProviderPremises
               , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
                     `Set.union` activeAllProviderSymbols
+                    `Set.union` queryCorrelatedAxiomSymbols
                     `Set.union` queryClosedAxiomSymbols
               , activeVisibleApplications `Map.union`
                     activeLoadedVisibleApplications `Map.union`
                     activeAllProviderVisibleApplications `Map.union`
+                    queryCorrelatedVisibleApplications `Map.union`
                     queryClosedVisibleApplications
               , activeAllProviderApplications
               , form
@@ -1785,6 +1880,7 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
                         activeNominalAxiomPremises ++
                         activeNominalLoadedAxiomPremises ++
                         activeAllNominalProviderPremises ++
+                        nominalQueryCorrelatedAxiomPremises ++
                         nominalQueryClosedAxiomPremises
                   , targetNominalAxiomPremises ++
                         targetNominalLoadedAxiomPremises ++
@@ -1792,10 +1888,12 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
                   , activeNominalAxiomSymbols `Set.union`
                         activeNominalLoadedAxiomSymbols `Set.union`
                         activeAllNominalProviderSymbols `Set.union`
+                        nominalQueryCorrelatedAxiomSymbols `Set.union`
                         nominalQueryClosedAxiomSymbols
                   , activeNominalVisibleApplications `Map.union`
                         activeNominalLoadedVisibleApplications `Map.union`
                         activeAllNominalProviderVisibleApplications `Map.union`
+                        nominalQueryCorrelatedVisibleApplications `Map.union`
                         nominalQueryClosedVisibleApplications
                   , activeAllNominalProviderApplications
                   , form
@@ -1920,6 +2018,8 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             providerNominalSearchPlans ++
             loadedStructuralSearchPlans ++
             loadedNominalSearchPlans ++
+            queryCorrelatedStructuralSearchPlans ++
+            queryCorrelatedNominalSearchPlans ++
             queryClosedStructuralSearchPlans ++
             queryClosedNominalSearchPlans
         withoutProviders providerNames =

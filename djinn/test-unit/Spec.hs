@@ -1106,6 +1106,9 @@ testRankNTypeAtoms = do
         "forall b. (forall a. a -> a) -> b -> b"
     runStableIdentity stableSession "instantiateAtImpredicativeWrapper"
         "(forall a. f a) -> f (Maybe (forall b. b -> b))"
+    runStableIdentity stableSession "correlateGuardedImpredicativeInstances"
+        $ "(forall a b. f a b) -> "
+        ++ "f (forall x. x -> x) (forall y. y -> y -> y)"
 
     -- A checked query-local hypothesis can instantiate at a closed monotype
     -- already present in the requested type. Keep that type in the indexed

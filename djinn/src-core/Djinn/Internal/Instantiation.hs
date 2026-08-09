@@ -26,6 +26,7 @@ module Djinn.Internal.Instantiation
     ( InstantiationAxioms
     , ProviderInstantiationPremises
     , instantiationAxioms
+    , queryCorrelatedInstantiationAxioms
     , queryClosedInstantiationAxioms
     , loadedInstantiationAxioms
     , providerInstantiationPremises
@@ -197,7 +198,9 @@ instantiationAxioms translator visibleArgument variableSpellings goalFormulas
     buildInstantiationAxioms "$djinn$instantiation$" translator
         False
         visibleArgument
-        (historicalCandidateTuples historicalCandidates wideCandidates)
+        (\scheme -> historicalCandidateTuples
+            historicalCandidates wideCandidates
+            (length $ schemeBinders scheme))
         initialSchemes
   where
     atoms =
@@ -226,6 +229,85 @@ instantiationAxioms translator visibleArgument variableSpellings goalFormulas
     initialSchemes = distinctOn schemeKey
         [ scheme
         | (HypothesisSide, symbol) <- atoms
+        , Just source <- [opaqueSymbolSource symbol]
+        , Just scheme <- [instantiationScheme source]
+        ]
+
+-- | Build an additive positive-only family for a query-local scheme instance
+-- whose complete result already occurs in the checked query.
+--
+-- The historical one- through three-binder family deliberately keeps its
+-- lexical Cartesian prefix, which means its sixteen-axiom scheme allowance can
+-- miss a later tuple of two different guarded quantified candidates.  This
+-- tail preserves that prefix and instead fairly considers the same finite
+-- variable/quantified vocabulary.  It retains only tuples which use at least
+-- one quantified candidate, lie beyond the historical raw prefix, and
+-- instantiate the scheme body to an alpha-equal subtree of the exact query.
+-- No type is invented and every surviving body still crosses the prepared
+-- kind check, formula translator, proof checker, and evidence-erasure boundary.
+queryCorrelatedInstantiationAxioms
+    :: (SharedType.Type String -> Either String Formula)
+    -> (SharedType.Type String ->
+        Maybe SharedGenerated.VisibleTypeArgument)
+    -> [String]
+    -> SharedType.Type String
+    -> [Formula]
+    -> [Formula]
+    -> InstantiationAxioms
+queryCorrelatedInstantiationAxioms translator visibleArgument
+        variableSpellings elaboratedGoal goalFormulas premiseFormulas =
+    buildInstantiationAxioms
+        "$djinn$query-correlated-instantiation$" translator True
+        visibleArgument correlatedTuples initialSchemes
+  where
+    candidateAtoms =
+        concatMap (sidedAtomSymbols ObligationSide) goalFormulas ++
+        concatMap (sidedAtomSymbols HypothesisSide) premiseFormulas
+    schemeAtoms = concatMap (sidedAtomSymbols ObligationSide) goalFormulas
+    opaqueSources =
+        [ source
+        | (_, symbol) <- candidateAtoms
+        , Just source <- [opaqueSymbolSource symbol]
+        ]
+    sourceVariableCandidates = map SharedType.TypeVariable $
+        distinctOn id variableSpellings
+    historicalVariableCandidates = map SharedType.TypeVariable $
+        distinctOn id $ sort variableSpellings
+    quantifiedCandidates =
+        distinctOn SharedTypeAtom.alphaTypeKey $
+        sortOn (SharedTypeRender.renderType id) $
+        concatMap closedQuantifiedSubtrees opaqueSources
+    quantifiedCandidateKeys = Set.fromList $
+        map SharedTypeAtom.alphaTypeKey quantifiedCandidates
+    historicalCandidates =
+        historicalVariableCandidates ++ quantifiedCandidates
+    candidates = distinctOn SharedTypeAtom.alphaTypeKey $
+        sourceVariableCandidates ++ quantifiedCandidates
+    queryTargetKeys = Set.fromList $
+        map SharedTypeAtom.alphaTypeKey $
+        typeSubtrees $ SharedType.canonicalizeType elaboratedGoal
+    tupleKey = map SharedTypeAtom.alphaTypeKey
+    correlatedTuples _ | null quantifiedCandidates = []
+    correlatedTuples scheme =
+        [ arguments
+        | arguments <- take maxInstantiationAttempts $
+            fairCandidateTuples candidates arity
+        , any ((`Set.member` quantifiedCandidateKeys) .
+            SharedTypeAtom.alphaTypeKey) arguments
+        , tupleKey arguments `Set.notMember` historicalPrefixKeys
+        , Right instantiated <- [instantiateSchemeBody scheme arguments]
+        , SharedTypeAtom.alphaTypeKey instantiated
+            `Set.member` queryTargetKeys
+        ]
+      where
+        arity = length $ schemeBinders scheme
+        historicalPrefixKeys = Set.fromList $
+            map tupleKey $
+            take maxInstantiationAxiomsPerScheme $
+            historicalCandidateTuples historicalCandidates candidates arity
+    initialSchemes = distinctOn schemeKey
+        [ scheme
+        | (HypothesisSide, symbol) <- schemeAtoms
         , Just source <- [opaqueSymbolSource symbol]
         , Just scheme <- [instantiationScheme source]
         ]
@@ -284,8 +366,8 @@ queryClosedInstantiationAxioms translator visibleArgument variableSpellings
         map SharedTypeAtom.alphaTypeKey retainedClosedCandidates
     candidates = distinctOn SharedTypeAtom.alphaTypeKey $
         variableCandidates ++ quantifiedCandidates ++ retainedClosedCandidates
-    candidateTuples arity = filter containsClosedCandidate $
-        fairCandidateTuples candidates arity
+    candidateTuples scheme = filter containsClosedCandidate $
+        fairCandidateTuples candidates $ length $ schemeBinders scheme
     containsClosedCandidate = any $ \candidate ->
         SharedTypeAtom.alphaTypeKey candidate `Set.member` closedCandidateKeys
     initialSchemes = distinctOn schemeKey
@@ -316,7 +398,9 @@ loadedInstantiationAxioms translator visibleArgument variableSpellings
     buildInstantiationAxioms "$djinn$loaded-instantiation$" translator
         True
         visibleArgument
-        (fairCandidateTuples candidates) initialSchemes
+        (\scheme -> fairCandidateTuples candidates $
+            length $ schemeBinders scheme)
+        initialSchemes
   where
     candidateAtoms =
         concatMap (sidedAtomSymbols ObligationSide) goalFormulas ++
@@ -492,7 +576,7 @@ buildInstantiationAxioms
     -> Bool
     -> (SharedType.Type String ->
         Maybe SharedGenerated.VisibleTypeArgument)
-    -> (Int -> [[SharedType.Type String]])
+    -> (InstantiationScheme -> [[SharedType.Type String]])
     -> [InstantiationScheme]
     -> InstantiationAxioms
 buildInstantiationAxioms symbolPrefix translator interleaveSchemes
@@ -596,7 +680,7 @@ buildAxiomFormulas
     -> (SharedType.Type String -> Either String Formula)
     -> (SharedType.Type String ->
         Maybe SharedGenerated.VisibleTypeArgument)
-    -> (Int -> [[SharedType.Type String]])
+    -> (InstantiationScheme -> [[SharedType.Type String]])
     -> [InstantiationScheme]
     -> [InstantiationAxiom]
 buildAxiomFormulas interleaveSchemes translator visibleArgument
@@ -613,7 +697,7 @@ buildAxiomFormulas interleaveSchemes translator visibleArgument
         SchemeJob scheme : jobs -> loop seenSchemes seenAxioms attempts
             allowance $
                 AxiomJob scheme maxInstantiationAxiomsPerScheme
-                    (candidateTuples $ length $ schemeBinders scheme)
+                    (candidateTuples scheme)
                 : jobs
         AxiomJob _ _ [] : jobs ->
             loop seenSchemes seenAxioms attempts allowance jobs

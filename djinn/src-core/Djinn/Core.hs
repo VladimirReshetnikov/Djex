@@ -1855,10 +1855,10 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         -- and provider families preserves every earlier plan and candidate
         -- prefix while still allowing one
         -- proof to mix an old variable/quantified axiom with a newly admitted
-        -- closed instance. The final plan is also a superset of established
-        -- loaded and caller-supplied provider evidence, so the new local
-        -- specialization can compose with either capability without moving
-        -- or modifying their earlier priority plans.
+        -- closed instance. This established plan is also a superset of loaded
+        -- and caller-supplied provider evidence, so the new local
+        -- specialization can compose with either capability without moving or
+        -- modifying their earlier priority plans.
         queryClosedStructuralSearchPlans =
             [ ( premises ++ loadedSchemePremises ++ activeAxiomPremises ++
                     activeLoadedAxiomPremises ++ activeAllProviderPremises ++

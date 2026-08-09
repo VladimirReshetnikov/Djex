@@ -86,6 +86,10 @@ monotypes is recorded in the
 The separate positive-only extension which instantiates query-local hypotheses
 at closed monotypes already present in the requested type is recorded in the
 [2026-08-09 query-local closed-monotype report](docs/reports/2026-08-09-query-local-closed-monotype-instantiation.md).
+The complementary query-correlated guarded-impredicative tail, which fairly
+selects a multi-binder tuple only when its complete specialized body already
+occurs in the checked request, is recorded in the
+[2026-08-09 query-correlated guarded-impredicative report](docs/reports/2026-08-09-query-correlated-guarded-impredicative-instantiation.md).
 The checked provider-local instantiation evidence shared by the stable Djinn
 and Exference adapters is recorded in the
 [2026-08-05 provider-local instantiation evidence report](docs/reports/2026-08-05-provider-local-instantiation-evidence.md).
@@ -235,19 +239,30 @@ variables, skolems of opened positive occurrences, premise-scope variables,
 and — as guarded impredicativity — query subtrees that are independent of
 enclosing binders and contain quantification.
 
-A separate final positive-only family revisits only schemes embedded on the
-hypothesis side of the requested goal. It adds closed, forall-free monotype
-subtrees already present in that elaborated goal, retains only tuples using at
-least one such closed candidate, and permits mixed tuples with the historical
-candidates without changing the historical prefix. A different appended
-family retains exact context-free schemes from loaded values and may also use
-closed, forall-free subtrees of the query and synonym-expanded loaded value
-signatures. Ordinary workspace values enter that loaded family only after
-`:set djinn-axioms on`; value axioms are off by default. Every substituted body
-is kind-checked, so a closed higher-kinded constructor is admitted only when
-its complete use has kind `Type`. Both extensions are bounded and
-positive-only; a missed non-target retained loaded scheme makes the result
-inconclusive rather than proving non-inhabitation. Exference can introduce a nested
+A separate positive-only query-correlated tail fairly revisits that same finite
+variable and guarded-quantified vocabulary. It keeps only tuples which pair a
+quantified candidate with a binder occurring free in the scheme body and
+specialize that complete body to an alpha-equivalent subtree of the elaborated
+query. Seeding its builder with the active historical axioms suppresses
+duplicate logical formulas without blocking nested schemes discovered through
+an excluded bridge. The fair producer observes at most 512 raw tuples per
+scheme; the family builder separately charges at most 512 eligible attempts,
+sixteen retained axioms per scheme, and 64 retained axioms in total.
+
+The established query-closed positive-only family revisits only schemes
+embedded on the hypothesis side of the requested goal. It adds closed,
+forall-free monotype subtrees already present in that elaborated goal, retains
+only tuples using at least one such closed candidate, and permits mixed tuples
+with the historical candidates without changing the historical prefix. A
+different appended family retains exact context-free schemes from loaded values
+and may also use closed, forall-free subtrees of the query and synonym-expanded
+loaded value signatures. Ordinary workspace values enter that loaded family
+only after `:set djinn-axioms on`; value axioms are off by default. Every
+substituted body is kind-checked, so a closed higher-kinded constructor is
+admitted only when its complete use has kind `Type`. The query-correlated,
+query-closed, and loaded extensions are bounded and positive-only; a missed
+non-target retained loaded scheme makes the result inconclusive rather than
+proving non-inhabitation. Exference can introduce a nested
 `forall`, with or without class contexts, once ordinary search exposes it as a
 goal, for example as a callback argument or an arrow result. It opens the
 complete leading chain with branch-local fresh rigid constants and treats each
@@ -317,6 +332,7 @@ the requested scheme itself supplies. This covers, for example:
 :djinn (forall a. a -> a) -> b -> b
 :djinn (forall a. a -> Maybe a) -> (forall b. b -> b) -> Maybe (forall b. b -> b)
 :djinn (forall a. f a) -> f (Maybe (forall b. b -> b))
+:compare (forall a b. f a b) -> f (forall x. x -> x) (forall y. y -> y -> y)
 :exference ((forall a. a -> a) -> result) -> result
 :exference (forall a. a -> a) -> Int -> Int
 :exference (forall a b. a -> b -> a) -> (forall x. x -> x -> x)
@@ -447,12 +463,18 @@ five-binder historical query-local tuple selection fairly mixes source-order,
 repeated, sparse, and Cartesian shapes while one- through three-binder schemes
 retain their historical order. The appended loaded-value family uses the same
 tuple shapes while alternating both ends of its source-ordered candidate list.
-The final query-local closed-monotype family schedules the same structural and
-nominal plans over the combined historical and closed-query pool, retains only
-tuples containing a closed query candidate, and carries loaded/provider
-evidence so mixed proofs compose. Those caps lose completeness only, never
-soundness. The nominal parametric-datatype plans obey the same caps and add no
-negative evidence. An incomplete primary premise also makes negative evidence
+The established query-closed structural and optional nominal plans keep their
+position after those loaded and provider plans. They schedule the combined
+historical and closed-query pool and retain only tuples containing a closed
+query candidate. Pure query-correlated structural and optional nominal plans
+follow, carrying historical, loaded, and provider premises but leaving the
+query-closed family unchanged. A final combined superset is present only when
+both families contribute axioms, allowing one proof to compose their instances
+without duplicating either single-family plan. Every added plan contributes
+candidates but no negative evidence. Those caps lose completeness only, never
+soundness.
+The nominal parametric-datatype plans obey the same caps and add no negative
+evidence. An incomplete primary premise also makes negative evidence
 conservative for the whole query. The examples use the same
 Church Boolean and Church List shapes as the
 [church-encoding reference](https://github.com/VladimirReshetnikov/Haskell/blob/main/church-encoding/src/Church.hs).

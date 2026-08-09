@@ -306,10 +306,25 @@ Scoped values never consult either map. These are finite evidence-directed
 typing rules, not permission for ordinary unification to decompose a polytype
 or a claim of general impredicative inference.
 
-Djinn has three bounded instantiation-axiom families. The historical
+Djinn has four bounded instantiation-axiom families. The historical
 query-local family instantiates up to five leading binders at variables,
 opened-forall skolems, premise-scope spellings, and guarded quantified query
-subtrees. A separate final positive-only family revisits only hypothesis
+subtrees. A separate positive-only query-correlated family fairly schedules
+that same finite vocabulary. It retains only tuples which pair a quantified
+candidate with a binder occurring free in the scheme body and whose complete
+specialized body is alpha-equivalent to a subtree of the canonical elaborated
+query. The fair producer prefilters at most 512 raw tuples per scheme.
+
+Each structural or nominal builder starts with the exact axioms retained by its
+active bounded historical run and treats any identical logical formula as a
+duplicate, even when visible evidence differs. Before enumeration it seeds its
+worklist with nested schemes exposed by those historical formulas, without
+spending an attempt. A later duplicate correlated candidate also exposes nested
+schemes and spends one eligible attempt but no axiom allowance. The builder
+separately charges at most 512 eligible attempts across the family and retains
+at most sixteen axioms per scheme and 64 in total.
+
+The established query-closed positive-only family revisits only hypothesis
 schemes embedded in the elaborated goal. It adds closed, forall-free monotype
 subtrees from that goal and retains only tuples containing at least one such
 candidate, so it does not duplicate the historical prefix.
@@ -317,13 +332,20 @@ candidate, so it does not duplicate the historical prefix.
 Environment sealing separately keeps exact context-free loaded schemes in a
 private structural/nominal index. That appended family may use the historical
 candidates plus closed, forall-free subtrees of the checked query and
-synonym-expanded loaded signatures. All three families share visible-evidence
+synonym-expanded loaded signatures. All four families share visible-evidence
 retention: inferable choices erase, but a vacuous binder retains the shortest
 visible prefix. Every complete substituted body and specified visible argument
 is kind-checked against the prepared environment. These bounded extensions are
-proof-producing only; the final query-local and loaded families are
-positive-only, and a missed non-target loaded scheme cannot support negative
-evidence. Quantifiers outside these explicit boundaries remain opaque.
+proof-producing only; the query-correlated, query-closed, and loaded
+families are positive-only, and a missed non-target loaded scheme cannot
+support negative evidence. The plan schedule retains the historical prefix,
+then the provider and loaded plans, and then the formerly final query-closed
+structural and optional nominal plans unchanged. Pure query-correlated plans
+follow and carry historical, loaded, and provider premises without importing
+query-closed axioms. A final combined superset appears only when both families
+contribute and permits their instances to compose. None of these tails resets
+the query-wide cutoff or fuel. Quantifiers outside these explicit boundaries
+remain opaque.
 Structure surrounding those opaque quantifiers retains its ordinary form,
 which permits impredicative values such as
 `[(forall a. a -> a)]` without claiming general higher-rank subsumption.

@@ -924,20 +924,51 @@ and the
   selected binder is vacuous, conversion retains the shortest visible prefix,
   including a specified closed quantified choice already supplied by the query.
   Constrained hypothesis occurrences, longer eliminable chains, and candidates
-  outside that vocabulary remain opaque, alpha-equated atoms. A separate final
-  positive-only family revisits only hypothesis schemes embedded in the
-  requested goal. It extends their candidates with closed, forall-free
-  monotype subtrees already present in that elaborated goal and retains only
-  tuples containing at least one such closed candidate. Mixed tuples can also
-  use the historical candidates without changing the historical family's
-  order. A different appended family retains exact context-free schemes for
-  loaded values, including implicitly quantified free signature variables, and
-  extends their candidate vocabulary with closed, forall-free subtrees of the
-  checked query and synonym-expanded loaded value signatures. Loaded vacuous
-  binders share the same visible-evidence rule. Every complete substituted body
-  is kind-checked, so a closed higher-kinded constructor is usable only at a
-  compatible binder. Both extensions are positive-only. An empty incomplete
-  search is inconclusive rather than proof of uninhabitability. Search tries the fully
+  outside that vocabulary remain opaque, alpha-equated atoms.
+
+  A separate positive-only query-correlated family fairly revisits the same
+  variable and guarded-quantified vocabulary. It keeps only tuples which pair a
+  quantified candidate with a binder occurring free in the scheme body and
+  specialize the complete body to an alpha-equivalent subtree of the canonical
+  elaborated request. The fair producer prefilters at most 512 raw tuples per
+  scheme. The builder separately charges at most 512 eligible attempts across
+  the family and retains at most sixteen axioms per scheme and 64 in total.
+
+  Exact active historical axioms seed that builder. A candidate with the same
+  logical formula as an active historical or earlier correlated axiom is
+  excluded even when its visible evidence differs. Nested schemes exposed by
+  the historical seed enter the worklist before enumeration and spend no
+  attempt; a later duplicate correlated candidate performs the same discovery
+  while spending one attempt but no axiom allowance. The pure correlated
+  structural and optional nominal plans run after the unchanged query-closed
+  plans, carry historical, loaded, and provider premises, and never contribute
+  negative evidence.
+
+  The established query-closed positive-only family revisits only hypothesis
+  schemes embedded in the requested goal. It extends their candidates with
+  closed, forall-free monotype subtrees already present in that elaborated goal
+  and retains only tuples containing at least one such closed candidate. Mixed
+  tuples can also use the historical candidates without changing the
+  historical family's order. A different appended family retains exact
+  context-free schemes for loaded values, including implicitly quantified free
+  signature variables, and extends their candidate vocabulary with closed,
+  forall-free subtrees of the checked query and synonym-expanded loaded value
+  signatures. Loaded vacuous binders share the same visible-evidence rule.
+  Every complete substituted body is kind-checked, so a closed higher-kinded
+  constructor is usable only at a compatible binder. The query-correlated,
+  query-closed, and loaded
+  extensions are positive-only. The query-closed plans remain unchanged and do
+  not carry correlated axioms. A final combined structural and optional nominal
+  superset is added only when both query-local families contribute, so their
+  specializations can compose without duplicating either independent plan. An
+  empty incomplete search is inconclusive rather than proof of uninhabitability.
+
+  In particular,
+  `(forall a b. f a b) -> f (forall x. x -> x) (forall y. y -> y -> y)`
+  can return `\x -> x`: both quantified arguments already occur in the request
+  and their correlated specialization is exactly its result.
+
+  Search tries the fully
   opened polarized view,
   the historical exact-opaque view, one plan retaining each positive forall
   opaquely while its siblings open, the dual plans opening one occurrence
@@ -1031,9 +1062,12 @@ recorded in the
 Loaded-scheme retention, closed monotype discovery, kind checking, and honest
 negative evidence are recorded in the
 [loaded polymorphic values report](../docs/reports/2026-08-01-loaded-polymorphic-djinn-values.md).
-Query-local closed-monotype discovery, mixed tuple scheduling, and the final
-positive-only plan family are recorded in the
+Query-local closed-monotype discovery, mixed tuple scheduling, and the
+established positive-only plan family are recorded in the
 [query-local closed-monotype report](../docs/reports/2026-08-09-query-local-closed-monotype-instantiation.md).
+Query-correlated guarded-impredicative scheduling, exact-result filtering, and
+positive-only evidence are recorded in the
+[query-correlated guarded-impredicative report](../docs/reports/2026-08-09-query-correlated-guarded-impredicative-instantiation.md).
 The recursive constructor rule, opacity boundary, and REPL projection are
 recorded in the
 [bounded Djinn recursive-introduction report](../docs/reports/2026-08-01-bounded-djinn-recursive-introduction.md).

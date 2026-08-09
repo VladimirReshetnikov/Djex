@@ -157,12 +157,22 @@ deliberately bounded rank-N rule families:
   impredicative instantiation. Inferable evidence stays implicit; if a selected
   binder is vacuous, Djinn retains the shortest visible prefix and can preserve
   a query-supplied closed quantified choice.
-- A separate final positive-only Djinn family revisits only hypothesis schemes
-  embedded in the requested goal. It adds closed, forall-free monotype subtrees
-  already present in that elaborated goal and retains only tuples containing at
-  least one such candidate. A tuple may mix those closed candidates with the
-  historical variables, skolems, premise-scope names, and guarded quantified
-  subtrees without changing the historical family's order.
+- A separate positive-only query-correlated Djinn family fairly revisits the
+  same finite variable and guarded-quantified vocabulary. A retained tuple must
+  pair a quantified candidate with a binder occurring free in the scheme body
+  and specialize that complete body to an alpha-equivalent subtree of the
+  elaborated query. Active historical axioms seed duplicate filtering, while
+  excluded logical bridges can still expose nested schemes. The producer sees
+  at most 512 raw tuples per scheme; the builder separately charges at most 512
+  eligible attempts per family, sixteen retained axioms per scheme, and 64 per
+  family.
+- The established query-closed positive-only Djinn family revisits only
+  hypothesis schemes embedded in the requested goal. It adds closed,
+  forall-free monotype subtrees already present in that elaborated goal and
+  retains only tuples containing at least one such candidate. A tuple may mix
+  those closed candidates with the historical variables, skolems,
+  premise-scope names, and guarded quantified subtrees without changing the
+  historical family's order.
 - Djinn retains context-free schemes for loaded values, including implicitly
   quantified free signature variables, in a separate appended family. That
   family adds closed, forall-free subtrees of the checked query and loaded
@@ -210,6 +220,7 @@ c -> (forall a. Eq a => a -> a)
 (forall a. a -> a) -> b -> b
 (forall a. a -> Maybe a) -> (forall b. b -> b) -> Maybe (forall b. b -> b)
 (forall a. f a) -> f (Maybe (forall b. b -> b))
+(forall a b. f a b) -> f (forall x. x -> x) (forall y. y -> y -> y)
 ((forall a. a -> a) -> result) -> result
 (forall a. a -> a) -> Int -> Int
 (forall a b. a -> b -> a) -> (forall x. x -> x -> x)
@@ -310,10 +321,13 @@ open arguments such as `@a` remain unsupported. A visible argument is admitted
 only when the finite checked vocabulary already supplies it and a bounded rule
 selects it; neither backend invents a visible type argument. Djinn's historical
 family can retain a closed quantified query choice for a vacuous binder, and
-its final query-local family can retain a closed, forall-free subtree of the
-requested type. The loaded family can retain either form from its own bounded vocabulary,
-although Djinn's historical expression projection still rejects visible type
-application explicitly.
+its query-correlated family can combine existing guarded quantified choices
+only when a quantified choice affects the body and their complete
+specialization already occurs in the request. Its query-closed family can
+retain a closed, forall-free subtree of the
+requested type. The loaded family can retain either form from its own bounded
+vocabulary, although Djinn's historical expression projection still rejects
+visible type application explicitly.
 Exference does not perform non-exact subsumption between contextual schemes,
 while unexposed quantified atoms remain opaque; finite identifier or
 search-budget exhaustion is an inconclusive truncation. In particular,
@@ -343,12 +357,15 @@ central subsets from twelve sites onward, such as exactly six open and six
 opaque sites among twelve, though
 instantiable hypotheses often cover such middle subsets through bounded axiom
 plans. Historical structural instantiation completes before the loaded-scheme
-structural and optional nominal tails. The final query-local closed-monotype
-structural and nominal tail follows them, considers a combined historical and
-closed-query candidate pool, and keeps only tuples containing a closed query
-candidate. Its plans carry the already established loaded-scheme premises,
-loaded axioms, and provider specializations so mixed proofs compose. All tails
-share the remaining cutoff and fuel. A retained non-target loaded scheme
+structural and optional nominal tails. The established query-closed structural
+and optional nominal plans remain next, using a combined historical and
+closed-query candidate pool and keeping only tuples containing a closed query
+candidate. Pure query-correlated structural and optional nominal plans follow;
+they carry historical, loaded, and provider premises but not query-closed
+axioms. When both families contribute, one final combined structural and
+optional nominal superset carries both axiom sets so mixed proofs compose
+without moving or duplicating either independent plan. All tails share the
+remaining cutoff and fuel. A retained non-target loaded scheme
 conservatively disables negative evidence, even when that premise would turn
 out to be irrelevant.
 
@@ -364,8 +381,12 @@ The projection and evidence boundary is detailed in the
 [nominal parametric-data transport report](reports/2026-08-01-nominal-parametric-data-transport.md).
 Loaded-scheme retention and closed monotype discovery are detailed in the
 [loaded polymorphic values report](reports/2026-08-01-loaded-polymorphic-djinn-values.md).
-Query-local closed-monotype discovery and its final plan family are detailed in
-the [query-local closed-monotype report](reports/2026-08-09-query-local-closed-monotype-instantiation.md).
+Query-local closed-monotype discovery and its established plan family are
+detailed in the
+[query-local closed-monotype report](reports/2026-08-09-query-local-closed-monotype-instantiation.md).
+Query-correlated guarded-impredicative scheduling and its exact-result filter
+are detailed in the
+[query-correlated guarded-impredicative report](reports/2026-08-09-query-correlated-guarded-impredicative-instantiation.md).
 A generated visible application requires `TypeApplications`; its surrounding
 rank-N provider signature commonly also requires `RankNTypes`, and an ambiguous
 contextual signature may require `AllowAmbiguousTypes`.

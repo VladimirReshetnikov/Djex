@@ -638,7 +638,12 @@ synonym-elaboration, and type-rendering vocabulary. `DjinnEnvironment`,
 `DjinnInventory`, `DjinnTypeVariable`, `DjinnLocal`, and `DjinnType` make
 every Djinn adapter signature nameable without depending on a hidden backend
 alias, and both stable environment aliases use `Void` for explicit kind
-variables, making their common ground-kind contract visible in types.
+variables, making their common ground-kind contract visible in types. A Djinn
+session preserves explicit `GroundKind` annotations on shared class parameters,
+including methodless higher-kinded classes, while using an unannotated copy
+only for the historical `ClassDecl` lexical preflight. The standalone
+shared-to-legacy declaration conversion remains strict because that legacy
+syntax cannot represent the annotation.
 
 Checked boundaries preflight widths before any structural traversal that
 assumes a finite list spine. Known class applications observe at most the

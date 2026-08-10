@@ -3195,6 +3195,154 @@ tests = testGroup "Djex facade"
               ++ "\nExference generated:\n" ++ exferenceGenerated)
             ExitSuccess exitCode
   , testCase
+      "compile higher-kinded contextual assignments through both engines" $ do
+      className <- expectRight $ parseName "HigherContextClass"
+      familyName <- expectRight $ parseName "HigherContextFamily"
+      naturalName <- expectRight $ parseName "HigherContextNatural"
+      tokenName <- expectRight $ parseName "HigherContextToken"
+      tokenConstructorName <- expectRight $ parseName "MkHigherContextToken"
+      providerName <- expectRight $ parseName "higherContextProvider"
+      let higherKind = FunctionKind ProperTypeKind ProperTypeKind
+          djinnElement = "element"
+          djinnElementType = TypeVariable djinnElement
+          djinnContextualArgument :: Type DjinnTypeVariable
+          djinnContextualArgument = ForallType [djinnElement]
+            [Constraint className [TypeConstructor familyName]] $
+              FunctionType djinnElementType djinnElementType
+          djinnProviderType = ForallType ["selected"] [] $
+            TypeConstructor tokenName
+          djinnDeclarations =
+            [ AbstractTypeDeclaration () familyName higherKind
+            , AbstractTypeDeclaration () naturalName ProperTypeKind
+            , DataTypeDeclaration () tokenName []
+                [DataConstructor () tokenConstructorName []]
+            , ClassDeclaration () className
+                [TypeParameter "f" $ Just higherKind] [] []
+            , ValueDeclaration $ ValueSignature () providerName
+                djinnProviderType
+            ]
+          djinnAssignment = ProviderInstantiationAssignment
+            { providerInstantiationAssignmentProvider = providerName
+            , providerInstantiationAssignmentArguments =
+                [djinnContextualArgument]
+            }
+          usesVisibleProvider candidate = case candidateOutput candidate of
+            FunctionClause _ [] body ->
+              referencesVisibleGlobal providerName body
+            _ -> False
+      djinnEnvironment <- expectRight
+        (mkEnvironment djinnDeclarations :: Either
+          (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+      djinnSession <- expectRight $ mkDjinnSession djinnEnvironment
+      djinnTargetName <- expectRight $
+        mkIdentifier "useDjinnHigherContextAssignment"
+      djinnTarget <- expectRight $ mkDefinitionName djinnTargetName
+      djinnRequest <- expectRight $ mkDjinnRequest QueryRequest
+        { requestTarget = djinnTarget
+        , requestGoal = TypeConstructor tokenName
+        , requestContexts = []
+        , requestOptions = defaultQueryOptions
+            { optionAlternatives = True
+            , optionCutoff = 64
+            }
+        }
+      djinnResult <- expectRight $
+        runDjinnQueryWithInstantiationAssignments
+          djinnSession [djinnAssignment] djinnRequest
+      djinnCandidate <- maybe
+        (fail "Djinn lost the higher-kinded contextual assignment")
+        pure $ find usesVisibleProvider $
+          batchCandidates $ resultSearch djinnResult
+      djinnGenerated <- expectRight $
+        renderDjinnCandidateDefinition Unqualified djinnCandidate
+
+      let classParameter = FlexibleVariable 0
+          selectedVariable = FlexibleVariable 1
+          elementVariable = FlexibleVariable 2
+          elementType = TypeVariable elementVariable
+          contextualArgument :: Type ExferenceTypeVariable
+          contextualArgument = ForallType [elementVariable]
+            [Constraint className [TypeConstructor familyName]] $
+              FunctionType elementType elementType
+          providerType = ForallType [selectedVariable] [] $
+            TypeConstructor tokenName
+          exferenceDeclarations =
+            [ AbstractTypeDeclaration () familyName higherKind
+            , AbstractTypeDeclaration () naturalName ProperTypeKind
+            , DataTypeDeclaration () tokenName []
+                [DataConstructor () tokenConstructorName []]
+            , ClassDeclaration () className
+                [TypeParameter classParameter $ Just higherKind] [] []
+            , ValueDeclaration $ ValueSignature () providerName providerType
+            ]
+          exferenceAssignment = ProviderInstantiationAssignment
+            { providerInstantiationAssignmentProvider = providerName
+            , providerInstantiationAssignmentArguments = [contextualArgument]
+            }
+      exferenceEnvironment <- expectRight
+        (mkEnvironment exferenceDeclarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      exferenceSession <- expectRight $
+        mkExferenceSession exferenceEnvironment
+      exferenceTargetName <- expectRight $
+        mkIdentifier "useExferenceHigherContextAssignment"
+      exferenceTarget <- expectRight $ mkDefinitionName exferenceTargetName
+      exferenceRequest <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = exferenceTarget
+        , requestGoal = TypeConstructor tokenName
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            { exferenceMaximumSteps = 1024
+            , exferenceMaximumQueueSize = Just 512
+            }
+        }
+      exferenceResults <- expectRight $
+        runExferenceQueryWithInstantiationAssignments
+          exferenceSession [exferenceAssignment] exferenceRequest
+      exferenceCandidate <- maybe
+        (fail "Exference lost the higher-kinded contextual assignment")
+        pure $ find usesVisibleProvider $
+          concatMap (batchCandidates . resultSearch) exferenceResults
+      exferenceGenerated <- expectRight $
+        renderExferenceCandidateDefinition Unqualified exferenceCandidate
+
+      let fixture = unlines
+            [ "module HigherKindedContextualAssignmentFixture where"
+            , ""
+            , "class HigherContextClass (f :: * -> *)"
+            , "data HigherContextFamily a"
+            , "data HigherContextNatural"
+            , "data HigherContextToken = MkHigherContextToken"
+            , ""
+            , "higherContextProvider :: forall selected. HigherContextToken"
+            , "higherContextProvider = MkHigherContextToken"
+            , ""
+            , "useDjinnHigherContextAssignment :: HigherContextToken"
+            , djinnGenerated
+            , ""
+            , "useExferenceHigherContextAssignment :: HigherContextToken"
+            , exferenceGenerated
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XFlexibleContexts"
+          , "-XImpredicativeTypes"
+          , "-XKindSignatures"
+          , "-XRankNTypes"
+          , "-XTypeApplications"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected higher-kinded contextual assignments\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors
+            ++ "\nDjinn generated:\n" ++ djinnGenerated
+            ++ "\nExference generated:\n" ++ exferenceGenerated)
+          ExitSuccess exitCode
+  , testCase
       "compile correlated impredicative instances through both engines" $ do
       let source =
             "(forall a b. f a b) -> "

@@ -4331,7 +4331,7 @@ generatedTests = testGroup "generated syntax"
             (VisibleTypeApplication function specifiedInteger)
       _ <- evaluate $ force source
       pure ()
-  , testCase "decompose mixed term and visible type applications" $ do
+  , testCase "construct and decompose mixed term and visible type applications" $ do
       let function, first, second :: Expression Int
           function = Global $ right $ mkIdentifier "function"
           first = Local 1
@@ -4345,20 +4345,41 @@ generatedTests = testGroup "generated syntax"
           throughInferred = VisibleTypeApplication
             throughFirst inferredVisibleTypeArgument
           application = Apply throughInferred second
+          arguments =
+            [ VisibleTypeArgumentArgument specified
+            , TermArgument first
+            , VisibleTypeArgumentArgument inferredVisibleTypeArgument
+            , TermArgument second
+            ]
+      applyExpressionArguments function arguments @?= application
       expressionFullApplicationSpine application @?=
-        ( function
-        , [ VisibleTypeArgumentArgument specified
-          , TermArgument first
-          , VisibleTypeArgumentArgument inferredVisibleTypeArgument
-          , TermArgument second
-          ]
-        )
+        (function, arguments)
+      uncurry applyExpressionArguments
+          (expressionFullApplicationSpine application) @?=
+        application
       expressionFullApplicationSpine function @?= (function, [])
       -- The historical observation remains deliberately term-only.
       expressionApplicationSpine application @?=
         (throughInferred, [second])
       _ <- evaluate $ force $ expressionFullApplicationSpine application
       pure ()
+  , testCase "treat an empty mixed application spine as identity" $ do
+      let function = Local (0 :: Int)
+      applyExpressionArguments function [] @?= function
+  , testCase "construct a wide mixed application spine without deferred folds" $ do
+      let width = 200000
+          function = Local (-1 :: Int)
+          argument index
+            | even index = TermArgument $ Local index
+            | otherwise =
+                VisibleTypeArgumentArgument inferredVisibleTypeArgument
+          arguments = map argument [0 .. width - 1]
+          (actualHead, actualArguments) = expressionFullApplicationSpine
+            $ applyExpressionArguments function arguments
+      actualHead @?= function
+      length actualArguments @?= width
+      take 2 actualArguments @?= take 2 arguments
+      drop (width - 2) actualArguments @?= drop (width - 2) arguments
   , testCase "rewrite every expression constructor bottom-up" $ do
       let build = right $ mkIdentifier "build"
           source :: Expression Int

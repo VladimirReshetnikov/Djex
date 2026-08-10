@@ -199,6 +199,12 @@ facadeTests = testGroup "public Djex facade"
           , TermArgument $ Local "value"
           ]
         )
+      applyExpressionArguments function
+          [ VisibleTypeArgumentArgument inferredVisibleTypeArgument
+          , TermArgument $ Local "value"
+          ] @?= source
+      uncurry applyExpressionArguments
+          (expressionFullApplicationSpine source) @?= source
       rewriteExpressionBottomUp
           (\expression -> case expression of
             Local local -> Hole local

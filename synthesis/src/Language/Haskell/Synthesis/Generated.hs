@@ -42,6 +42,7 @@ module Language.Haskell.Synthesis.Generated
   , expressionLambdaSpine
   , functionClauseFromExpression
   , functionClauseExpression
+  , applyExpressionArguments
   , expressionApplicationSpine
   , expressionFullApplicationSpine
   , rewriteExpressionBottomUp
@@ -383,6 +384,23 @@ functionClauseFromExpression name expression =
 functionClauseExpression :: FunctionClause local -> Expression local
 functionClauseExpression (FunctionClause _ patterns body) =
   lambdaExpression patterns body
+
+-- | Apply term and visible type arguments to a head in source order.
+--
+-- This is the mixed generated-expression constructor paired with
+-- 'expressionFullApplicationSpine'. The spine is built strictly so a wide
+-- generated application does not retain a chain of pending folds; argument
+-- payloads remain lazy.
+applyExpressionArguments
+  :: Expression local
+  -> [ApplicationArgument local]
+  -> Expression local
+applyExpressionArguments = List.foldl' applyArgument
+ where
+  applyArgument function argument = case argument of
+    TermArgument value -> Apply function value
+    VisibleTypeArgumentArgument typeArgument ->
+      VisibleTypeApplication function typeArgument
 
 -- | Decompose a left-associated expression application into its head and
 -- arguments in source order. A non-application has no arguments.

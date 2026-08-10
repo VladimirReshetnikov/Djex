@@ -4582,6 +4582,22 @@ tests = testGroup "Exference"
                 $ ExpTypeApply (ExpVar 10 provider) argument
           checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
             goal [] expression @?= Right ()
+      , testCase "checker validates contextual visible arguments" $ do
+          let missingClass = name "MissingVisibleArgumentClass"
+              token = TypeCons $ name "VisibleArgumentToken"
+              contextual = TypeForall [0]
+                [HsConstraint missingClass [TypeVar 0]]
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              provider = TypeForall [0] [] token
+              goal = TypeArrow provider token
+          argument <- expectRight
+            $ Generated.specifiedVisibleTypeArgument contextual
+          let expression = ExpLambda 10 provider
+                $ ExpTypeApply (ExpVar 10 provider) argument
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+              goal [] expression @?=
+            Left (InvalidCheckClassConstraint
+              $ UnknownConstraintClass QueryConstraint missingClass)
       , testCase "visible applications preserve every leading context layer" $ do
           let outerClass = name "Outer"
               firstClass = name "First"

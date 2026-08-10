@@ -1279,9 +1279,6 @@ prepareProviderInstantiationAssignments prepared evidence = do
         unless (Set.null $ SharedType.freeVariables checked) $
             Left $ DjinnInstantiationAssignmentFailure $
                 label ++ "type is not closed"
-        unless (null $ SharedType.typeConstraints checked) $
-            Left $ DjinnInstantiationAssignmentFailure $
-                label ++ "type is not context-free"
         visible <- first
             (DjinnInstantiationAssignmentFailure . (label ++) . show) $
             SharedGenerated.specifiedVisibleTypeArgument checked
@@ -1582,6 +1579,8 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             providerInstantiationAssignmentPremises
                 "$djinn$provider-assignment$active$"
                 structuralTranslator
+                (Just $
+                    preparedEnvironmentStructuralAssignmentFidelity prepared)
                 activeLoadedSchemePremises
                 providerAssignments
         activeProviderAssignmentPremises =
@@ -1615,6 +1614,8 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             providerInstantiationAssignmentPremises
                 "$djinn$provider-assignment$target$"
                 structuralTranslator
+                (Just $
+                    preparedEnvironmentStructuralAssignmentFidelity prepared)
                 targetLoadedSchemePremises
                 providerAssignments
         targetProviderAssignmentPremises =
@@ -1635,6 +1636,7 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             providerInstantiationAssignmentPremises
                 "$djinn$nominal-provider-assignment$active$"
                 nominalTranslator
+                Nothing
                 activeNominalLoadedSchemePremises
                 providerAssignments
         activeNominalProviderAssignmentPremises =
@@ -1670,6 +1672,7 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             providerInstantiationAssignmentPremises
                 "$djinn$nominal-provider-assignment$target$"
                 nominalTranslator
+                Nothing
                 targetNominalLoadedSchemePremises
                 providerAssignments
         targetNominalProviderAssignmentPremises =

@@ -790,7 +790,7 @@ validateCheckInputs classEnvironment functions deconstructors goal expected
     $ qClassEnv_constraints classEnvironment
   mapM_ (validateCheckFunction classEnvironment) functions
   mapM_ (validateCheckDeconstructorTypes classEnvironment) deconstructors
-  validateExpressionPatternArities
+  validateExpressionPatternArities classEnvironment
     (constructorArityIndex deconstructors) expression
   mapM_ (validateCheckType classEnvironment QueryConstraint . snd)
     $ expressionTypedLocals expression
@@ -833,7 +833,8 @@ validateCheckCandidateInputs
     (ExpressionCheckContext _ classEnvironment _ _ _ constructorArities _)
     expected expression = do
   mapM_ (validateCheckConstraint classEnvironment QueryConstraint) expected
-  validateExpressionPatternArities constructorArities expression
+  validateExpressionPatternArities
+    classEnvironment constructorArities expression
   mapM_ (validateCheckType classEnvironment QueryConstraint . snd)
     $ expressionTypedLocals expression
   validateGeneratedExpression expression
@@ -984,11 +985,12 @@ constructorArityIndex deconstructors = Map.fromList
 -- ExpCaseMatch pattern views must traverse every binder before matching and
 -- therefore cannot safely diagnose a cyclic malformed binder list.
 validateExpressionPatternArities
-  :: Map.Map QualifiedName Int
+  :: QueryClassEnv
+  -> Map.Map QualifiedName Int
   -> Expression
   -> Either ExpressionCheckError ()
-validateExpressionPatternArities constructorArities = inspectExpression
-  . toGeneratedExpression
+validateExpressionPatternArities classEnvironment constructorArities =
+  inspectExpression . toGeneratedExpression
  where
   inspectExpression generated = case generated of
     SharedGenerated.Local{} -> Right ()
@@ -997,8 +999,8 @@ validateExpressionPatternArities constructorArities = inspectExpression
       mapM_ inspectPattern patterns >> inspectExpression body
     SharedGenerated.Apply function argument ->
       inspectExpression function >> inspectExpression argument
-    SharedGenerated.VisibleTypeApplication function _ ->
-      inspectExpression function
+    SharedGenerated.VisibleTypeApplication function argument ->
+      inspectExpression function >> inspectVisibleTypeArgument argument
     SharedGenerated.Tuple elements -> mapM_ inspectExpression elements
     SharedGenerated.Hole{} -> Right ()
     SharedGenerated.Let pattern binding body ->
@@ -1010,6 +1012,33 @@ validateExpressionPatternArities constructorArities = inspectExpression
 
   inspectAlternative (pattern, body) =
     inspectPattern pattern >> inspectExpression body
+
+  -- Explicit type applications are raw candidate input just like local
+  -- annotations. Reconstruct the closed argument in a checker-local binder
+  -- namespace, then validate both its type structure and every contextual
+  -- class occurrence before expression checking can consume it.
+  inspectVisibleTypeArgument argument = case
+      SharedGenerated.visibleTypeArgumentClosedType argument of
+    Nothing -> Right ()
+    Just closed -> do
+      let binders = SharedType.typeBinderVariables closed
+          renaming = Map.fromList $ zip binders
+            $ map SharedType.FlexibleVariable [0 ..]
+      translated <- maybe
+        (Left FlexibleIdentifierSupplyExhausted)
+        Right
+        $ traverse (`Map.lookup` renaming) closed
+      validateCheckType classEnvironment QueryConstraint translated
+      mapM_ validateDeclaredClass $ typeConstraints translated
+
+  -- Query signatures deliberately permit nominal constraints from a partial
+  -- external class inventory. A specified visible argument is executable
+  -- evidence, however, so its embedded classes must be present in the sealed
+  -- checker environment rather than passing that compatibility policy.
+  validateDeclaredClass constraint = case validateConstraintInEnv
+      (qClassEnv_env classEnvironment) QueryConstraint constraint of
+    Left failure -> Left $ InvalidCheckClassConstraint failure
+    Right () -> Right ()
 
   inspectPattern pattern = case pattern of
     SharedGenerated.Bind{} -> Right ()

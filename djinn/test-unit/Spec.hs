@@ -1451,6 +1451,63 @@ testRankNTypeAtoms = do
             ("ambiguousMonoToken @(forall a0_0. a0_0 -> a0_0)" `isInfixOf`)
             assignedTokenRendered
 
+    -- Constructor-field flow is strictly more precise than comparing the
+    -- structural and nominal formulae wholesale.  Both correlated parameters
+    -- below survive in fields, so the structural assignment may eliminate the
+    -- box and recover MonoToken even though its nominal formula is opaque.
+    let correlatedBoxName = sharedName "AssignedCorrelatedBox"
+        correlatedConstructorName = sharedName "AssignedCorrelatedBoxValue"
+        correlatedProviderName = "assignedCorrelatedProvider"
+        selectedParameter =
+            SharedDeclaration.TypeParameter "selectedParameter" Nothing
+        hiddenParameter =
+            SharedDeclaration.TypeParameter "hiddenParameter" Nothing
+        correlatedBox left right = SharedType.TypeApplication
+            (SharedType.TypeApplication
+                (SharedType.TypeConstructor correlatedBoxName) left)
+            right
+        correlatedDeclaration = SharedDeclaration.DataTypeDeclaration ()
+            correlatedBoxName [selectedParameter, hiddenParameter]
+            [ SharedDeclaration.DataConstructor () correlatedConstructorName
+                [ SharedType.TypeVariable "selectedParameter"
+                , SharedType.TypeVariable "hiddenParameter"
+                ]
+            ]
+        correlatedProviderScheme =
+            SharedType.ForallType ["selected", "hidden"] [] $
+                correlatedBox
+                    (SharedType.TypeVariable "selected")
+                    (SharedType.TypeVariable "hidden")
+    correlatedSession <- sealDjinnSessionFrom stableSession $
+        closedDeclarations ++
+        [ correlatedDeclaration
+        , valueDeclaration correlatedProviderName correlatedProviderScheme
+        ]
+    correlatedTarget <- expectShownRight $
+        SharedName.mkIdentifier "useFaithfulCorrelatedAssignment"
+    correlatedRequest <- expectShownRight $ Djex.parseDjinnRequest
+        correlatedSession
+        defaultQueryOptions
+            { optionAlternatives = True
+            , optionCutoff = 64
+            }
+        correlatedTarget
+        "faithful-correlated-provider-assignment.djinn"
+        "MonoToken"
+    correlatedResult <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationAssignments correlatedSession
+            [providerAssignment correlatedProviderName
+                [tokenType, quantifiedIdentity]]
+            correlatedRequest
+    correlatedRendered <- renderStableCandidates correlatedResult
+    assertBool
+        ("a faithful correlated assignment was lost to nominal/structural " ++
+            "formula inequality: " ++ show correlatedRendered)
+        $ any (\term -> all (`isInfixOf` term)
+            [ correlatedProviderName ++ " @MonoToken"
+            , "@(forall a0_0. a0_0 -> a0_0)"
+            ]) correlatedRendered
+
     -- The priority plan exposes an exact vacuous choice before a bare provider
     -- can shadow it, but it must not replace the historical provider superset.
     -- This tuple pins a single proof which uses the same provider once through
@@ -1747,15 +1804,33 @@ testRankNTypeAtoms = do
         ambiguousTokenSession evidenceRequest
         [providerAssignment "ambiguousMonoToken"
             [SharedType.TypeVariable "openAssignment"]]
-    expectAssignmentFailure "a contextual provider assignment argument"
-        ambiguousTokenSession evidenceRequest
-        [providerAssignment "ambiguousMonoToken"
-            [SharedType.ForallType ["constrainedAssignment"]
+    let contextualAssignmentArgument =
+            SharedType.ForallType ["constrainedAssignment"]
                 [Constraint (sharedName "Eq")
                     [SharedType.TypeVariable "constrainedAssignment"]]
                 (SharedType.FunctionType
                     (SharedType.TypeVariable "constrainedAssignment")
-                    (SharedType.TypeVariable "constrainedAssignment"))]]
+                    (SharedType.TypeVariable "constrainedAssignment"))
+        contextualAssignment = providerAssignment
+            "ambiguousMonoToken" [contextualAssignmentArgument]
+    contextualAssignedToken <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationAssignments
+            ambiguousTokenSession [contextualAssignment] evidenceRequest
+    contextualAssignedRendered <- renderStableCandidates contextualAssignedToken
+    assertBool
+        ("an exact contextual assignment lost its specified polytype: " ++
+            show contextualAssignedRendered)
+        $ any
+            (("ambiguousMonoToken @(forall a0_0. " ++
+                "(Eq a0_0) => a0_0 -> a0_0)") `isInfixOf`)
+            contextualAssignedRendered
+    expectAssignmentFailure "an unknown-class contextual assignment argument"
+        ambiguousTokenSession evidenceRequest
+        [providerAssignment "ambiguousMonoToken"
+            [SharedType.ForallType ["unknownClassArgument"]
+                [Constraint (sharedName "MissingAssignmentClass")
+                    [SharedType.TypeVariable "unknownClassArgument"]]
+                (SharedType.TypeVariable "unknownClassArgument")]]
     expectAssignmentFailure "a higher-kinded provider assignment argument"
         ambiguousTokenSession evidenceRequest
         [providerAssignment "ambiguousMonoToken"
@@ -3359,6 +3434,120 @@ testNominalDataProjectionBoundaries = do
         nominalData nominalAlias
     assertBool "the parametric datatype lost its complementary projection"
         $ structuralData /= nominalData
+
+    -- Exact provider assignments may use the structural projection only when
+    -- every assigned datatype-argument flow survives constructor expansion.
+    -- Check the correlated case explicitly: the first source argument must
+    -- not hide an equal second source argument erased below a phantom
+    -- parameter, including when that application is nested in a faithful
+    -- wrapper.
+    let phantomName = sharedName "FlowPhantom"
+        phantomConstructorName = sharedName "FlowPhantomValue"
+        mixedOneName = sharedName "MixedOneFlow"
+        mixedOneConstructorName = sharedName "MixedOneFlowValue"
+        mixedName = sharedName "MixedFlow"
+        mixedConstructorName = sharedName "MixedFlowValue"
+        wrapperName = sharedName "FlowWrapper"
+        wrapperConstructorName = sharedName "FlowWrapperValue"
+        correlatedName = sharedName "CorrelatedFlow"
+        correlatedConstructorName = sharedName "CorrelatedFlowValue"
+        emptyName = sharedName "FlowEmpty"
+        hiddenParameter =
+            SharedDeclaration.TypeParameter "hiddenParameter" Nothing
+        hiddenParameterType = SharedType.TypeVariable "hiddenParameter"
+        phantomType element = SharedType.TypeApplication
+            (SharedType.TypeConstructor phantomName) element
+        mixedOneType element = SharedType.TypeApplication
+            (SharedType.TypeConstructor mixedOneName) element
+        mixedType left right = SharedType.TypeApplication
+            (SharedType.TypeApplication
+                (SharedType.TypeConstructor mixedName) left)
+            right
+        wrapperType element = SharedType.TypeApplication
+            (SharedType.TypeConstructor wrapperName) element
+        correlatedType left right = SharedType.TypeApplication
+            (SharedType.TypeApplication
+                (SharedType.TypeConstructor correlatedName) left)
+            right
+        emptyType element = SharedType.TypeApplication
+            (SharedType.TypeConstructor emptyName) element
+        phantomDeclaration = SharedDeclaration.DataTypeDeclaration ()
+            phantomName [parameter]
+            [SharedDeclaration.DataConstructor () phantomConstructorName []]
+        mixedOneDeclaration = SharedDeclaration.DataTypeDeclaration ()
+            mixedOneName [parameter]
+            [SharedDeclaration.DataConstructor () mixedOneConstructorName
+                [parameterType, phantomType parameterType]]
+        mixedDeclaration = SharedDeclaration.DataTypeDeclaration () mixedName
+            [parameter, hiddenParameter]
+            [SharedDeclaration.DataConstructor () mixedConstructorName
+                [parameterType, phantomType hiddenParameterType]]
+        wrapperDeclaration = SharedDeclaration.DataTypeDeclaration ()
+            wrapperName [parameter]
+            [SharedDeclaration.DataConstructor () wrapperConstructorName
+                [parameterType]]
+        correlatedDeclaration = SharedDeclaration.DataTypeDeclaration ()
+            correlatedName [parameter, hiddenParameter]
+            [SharedDeclaration.DataConstructor () correlatedConstructorName
+                [parameterType, hiddenParameterType]]
+        emptyDeclaration = SharedDeclaration.DataTypeDeclaration ()
+            emptyName [parameter] []
+        assignedVariable = SharedType.TypeVariable "assigned"
+        hiddenVariable = SharedType.TypeVariable "hidden"
+        higherVariable = SharedType.TypeVariable "higher"
+    flowEnvironment <- mkNeutralDjinnEnvironment
+        [ dataDeclaration
+        , phantomDeclaration
+        , mixedOneDeclaration
+        , mixedDeclaration
+        , wrapperDeclaration
+        , correlatedDeclaration
+        , emptyDeclaration
+        ]
+    flowPrepared <- expectShownRight $
+        RawEnvironment.prepareGroundSynthesisEnvironment flowEnvironment
+    let retains binders arguments source = expectShownRight $
+            RawEnvironment.preparedEnvironmentStructuralAssignmentFidelity
+                flowPrepared binders arguments source
+    faithfulFlow <- retains ["assigned"] [flagType] $
+        dataType assignedVariable
+    phantomFlow <- retains ["assigned"] [flagType] $
+        phantomType assignedVariable
+    mixedOneFlow <- retains ["assigned"] [flagType] $
+        mixedOneType assignedVariable
+    mixedFlow <- retains ["assigned"] [flagType] $
+        mixedType assignedVariable assignedVariable
+    nestedMixedFlow <- retains ["assigned"] [flagType] $
+        wrapperType $ mixedType assignedVariable assignedVariable
+    correlatedFlow <- retains ["assigned", "hidden"] [flagType, polytype] $
+        correlatedType assignedVariable hiddenVariable
+    nestedAssignmentFlow <- retains ["assigned"]
+        [phantomType flagType] assignedVariable
+    higherKindedFlow <- retains ["higher"]
+        [SharedType.TypeConstructor phantomName] $
+        SharedType.TypeApplication higherVariable flagType
+    emptyFlow <- retains ["assigned"] [emptyType flagType] assignedVariable
+    assertBool "a faithful constructor-field assignment was rejected"
+        faithfulFlow
+    assertBool "a wholly phantom assignment was retained" $ not phantomFlow
+    assertBool
+        "a distinguished formal was rejected for a phantom sibling field"
+        mixedOneFlow
+    assertBool
+        "a correlated first argument masked a phantom second argument"
+        $ not mixedFlow
+    assertBool
+        "a faithful source wrapper masked a nested correlated phantom argument"
+        $ not nestedMixedFlow
+    assertBool "a correlated faithful assignment vector was rejected"
+        correlatedFlow
+    assertBool "erasure inside an exact assignment was retained"
+        $ not nestedAssignmentFlow
+    assertBool "an exact higher-kinded phantom head was retained"
+        $ not higherKindedFlow
+    assertBool
+        "a parameterized empty datatype lost its complete Empty identity"
+        emptyFlow
 
     -- Result matching must specialize a provider before adding its domains.
     -- @bridge@ fixes @a := IntLike@, so the next frontier is @XLike IntLike@;

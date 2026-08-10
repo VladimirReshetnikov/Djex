@@ -1507,6 +1507,21 @@ testRankNTypeAtoms = do
             [ correlatedProviderName ++ " @MonoToken"
             , "@(forall a0_0. a0_0 -> a0_0)"
             ]) correlatedRendered
+    correlatedScalarResult <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationCandidates correlatedSession
+            [ providerChoice correlatedProviderName tokenType
+            , providerChoice correlatedProviderName quantifiedIdentity
+            ]
+            correlatedRequest
+    correlatedScalarRendered <-
+        renderStableCandidates correlatedScalarResult
+    assertBool
+        ("a faithful scalar provider tuple was lost to structural fidelity " ++
+            "checking: " ++ show correlatedScalarRendered)
+        $ any (\term -> all (`isInfixOf` term)
+            [ correlatedProviderName ++ " @MonoToken"
+            , "@(forall a0_0. a0_0 -> a0_0)"
+            ]) correlatedScalarRendered
 
     -- The priority plan exposes an exact vacuous choice before a bare provider
     -- can shadow it, but it must not replace the historical provider superset.
@@ -3449,6 +3464,9 @@ testNominalDataProjectionBoundaries = do
         mixedConstructorName = sharedName "MixedFlowValue"
         wrapperName = sharedName "FlowWrapper"
         wrapperConstructorName = sharedName "FlowWrapperValue"
+        faithfulSiblingsName = sharedName "FaithfulSiblingFlow"
+        faithfulSiblingsConstructorName =
+            sharedName "FaithfulSiblingFlowValue"
         correlatedName = sharedName "CorrelatedFlow"
         correlatedConstructorName = sharedName "CorrelatedFlowValue"
         emptyName = sharedName "FlowEmpty"
@@ -3465,6 +3483,8 @@ testNominalDataProjectionBoundaries = do
             right
         wrapperType element = SharedType.TypeApplication
             (SharedType.TypeConstructor wrapperName) element
+        faithfulSiblingsType element = SharedType.TypeApplication
+            (SharedType.TypeConstructor faithfulSiblingsName) element
         correlatedType left right = SharedType.TypeApplication
             (SharedType.TypeApplication
                 (SharedType.TypeConstructor correlatedName) left)
@@ -3486,6 +3506,13 @@ testNominalDataProjectionBoundaries = do
             wrapperName [parameter]
             [SharedDeclaration.DataConstructor () wrapperConstructorName
                 [parameterType]]
+        faithfulSiblingsDeclaration =
+            SharedDeclaration.DataTypeDeclaration ()
+                faithfulSiblingsName [parameter]
+                [ SharedDeclaration.DataConstructor ()
+                    faithfulSiblingsConstructorName
+                    [parameterType, wrapperType parameterType]
+                ]
         correlatedDeclaration = SharedDeclaration.DataTypeDeclaration ()
             correlatedName [parameter, hiddenParameter]
             [SharedDeclaration.DataConstructor () correlatedConstructorName
@@ -3501,6 +3528,7 @@ testNominalDataProjectionBoundaries = do
         , mixedOneDeclaration
         , mixedDeclaration
         , wrapperDeclaration
+        , faithfulSiblingsDeclaration
         , correlatedDeclaration
         , emptyDeclaration
         ]
@@ -3519,6 +3547,8 @@ testNominalDataProjectionBoundaries = do
         mixedType assignedVariable assignedVariable
     nestedMixedFlow <- retains ["assigned"] [flagType] $
         wrapperType $ mixedType assignedVariable assignedVariable
+    faithfulSiblingsFlow <- retains ["assigned"] [flagType] $
+        faithfulSiblingsType assignedVariable
     correlatedFlow <- retains ["assigned", "hidden"] [flagType, polytype] $
         correlatedType assignedVariable hiddenVariable
     nestedAssignmentFlow <- retains ["assigned"]
@@ -3526,25 +3556,32 @@ testNominalDataProjectionBoundaries = do
     higherKindedFlow <- retains ["higher"]
         [SharedType.TypeConstructor phantomName] $
         SharedType.TypeApplication higherVariable flagType
+    vacuousPhantomFlow <- retains ["assigned"] [flagType] $
+        phantomType flagType
     emptyFlow <- retains ["assigned"] [emptyType flagType] assignedVariable
     assertBool "a faithful constructor-field assignment was rejected"
         faithfulFlow
     assertBool "a wholly phantom assignment was retained" $ not phantomFlow
     assertBool
-        "a distinguished formal was rejected for a phantom sibling field"
-        mixedOneFlow
+        "a faithful field masked an erased sibling field"
+        $ not mixedOneFlow
     assertBool
         "a correlated first argument masked a phantom second argument"
         $ not mixedFlow
     assertBool
         "a faithful source wrapper masked a nested correlated phantom argument"
         $ not nestedMixedFlow
+    assertBool
+        "fully faithful sibling fields were rejected"
+        faithfulSiblingsFlow
     assertBool "a correlated faithful assignment vector was rejected"
         correlatedFlow
     assertBool "erasure inside an exact assignment was retained"
         $ not nestedAssignmentFlow
     assertBool "an exact higher-kinded phantom head was retained"
         $ not higherKindedFlow
+    assertBool "a wholly vacuous structural vector was rejected"
+        vacuousPhantomFlow
     assertBool
         "a parameterized empty datatype lost its complete Empty identity"
         emptyFlow

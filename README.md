@@ -321,20 +321,24 @@ kind vectors agree; regressions exercise two such
 choices at the genuinely higher-order kind `(Type -> Type) -> Type`. Both
 assignment forms retain the 32-vector and five-argument bounds, the kinded form
 adds the 129-node per-kind bound, and contextual provider schemes remain
-unsupported. The legacy scalar `ProviderInstantiationCandidate` entrances are
-unchanged and remain proper-type-only.
+unsupported. The legacy scalar `ProviderInstantiationCandidate` entrances
+remain proper-type-only.
 
-Djinn marks the complete exact vector before substituting it into a provider and
-admits the resulting non-vacuous premise to its constructor-expanding search
-projection only when every reached datatype argument remains observable through
-its own formal. This checks structure inside an assigned type as well as later
-arguments applied to an assigned higher-kinded head. It preserves useful
-elimination through faithful and correlated constructor fields while routing
-wholly phantom parameters and independently erased repeated positions through
-the nominal projection alone. Recursive, unknown, and parameterized empty
-types retain the opaque complete-application identity used by compilation.
-Consequently structural equality cannot turn an exact visible application into
-a nominally different one after phantom information is erased.
+Djinn marks each complete legacy scalar tuple or exact vector before
+substituting it into a provider and admits the resulting non-vacuous premise to
+its constructor-expanding search projection only when every reached datatype
+argument remains observable through its own formal. That existential
+observation is a boundary gate; Djinn then traverses the instantiated
+constructor body and requires every marker-bearing field to preserve the
+argument at each nested datatype boundary. This checks structure inside an
+assigned type as well as later arguments applied to an assigned higher-kinded
+head. It preserves useful elimination through fully faithful and correlated
+constructor fields while routing wholly phantom parameters and any
+independently erased occurrence through the nominal projection alone.
+Recursive, unknown, and parameterized empty types retain the opaque
+complete-application identity used by compilation.
+Consequently structural equality cannot turn a selected visible application
+into a nominally different one after phantom information is erased.
 Exference can also forward a context-free quantified provider with no free
 flexible variables to a less-general such goal; provider binders are solved
 with monotypes or, in the guarded Quick-Look sense, with quantified subtrees

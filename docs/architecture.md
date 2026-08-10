@@ -285,17 +285,21 @@ Djinn compiles each retained scalar specialization or exact vector into a
 direct specialized premise for that loaded polymorphic provider. The
 evidence-enriched structural and nominal plans also contain the historical
 query-local and loaded instantiation premises, so one checked proof may compose
-old and supplied evidence. Wholly vacuous exact vectors remain in the
-structural projection. A non-vacuous vector enters that projection only when
-the prepared structural compiler can observe every relevant argument through
-its corresponding datatype formal. The complete vector is marked before
+old and supplied evidence. Wholly vacuous scalar tuples and exact vectors
+remain in the structural projection. A non-vacuous specialization enters that
+projection only when the prepared structural compiler can observe every
+relevant argument through its corresponding datatype formal. That existential
+observation is only a boundary gate: the instantiated constructor body is then
+traversed, and every marker-bearing field must preserve the argument at each
+nested datatype boundary. The complete vector is marked before
 substitution, so the walk checks both structure nested inside an assigned type
 and scheme-owned arguments applied to an assigned higher-kinded head. The check
 is per nominal argument boundary: it keeps faithful constructor fields and
 correlated faithful parameters, but rejects a wholly phantom formal or one
 independently erased occurrence of a repeated assignment. Recursive, unknown,
 and fully applied empty datatypes remain opaque exactly as they do during
-formula compilation. Rejected structural vectors remain in the nominal family,
+formula compilation. Rejected structural specializations remain in the nominal
+family,
 so erased phantom parameters cannot justify a nominally mismatched visible
 application. For a nonempty evidence call this
 strict superset runs before the evidence-free loaded tails, preventing a

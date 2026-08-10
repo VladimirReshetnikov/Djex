@@ -366,7 +366,7 @@ compileFormula view prepared source = do
         OpaqueForalls prepared emptyExpansionPath [] expanded
 
 -- | Check that structural compilation preserves the complete nominal content
--- of every exact provider argument which actually reaches the provider body.
+-- of every selected provider argument which actually reaches the provider body.
 -- Each argument is marked before substitution, so the walk sees erasure both
 -- at a binder occurrence and inside the assigned type itself.  This also
 -- follows a higher-kinded assignment into applications supplied by the scheme:
@@ -374,11 +374,13 @@ compileFormula view prepared source = do
 -- @Phantom Bool@.
 --
 -- A datatype formal is observable when at least one constructor-field path
--- retains it.  The check is nevertheless performed independently at every
--- application argument, so an observed correlated sibling cannot hide an
--- erased one.  Aliases are definitionally transparent. Recursive datatypes,
--- unknown or unsaturated applications, and foralls stay opaque under
--- 'compileFormula' and therefore preserve their complete nominal identity.
+-- retains it. That existential observation is only the top-level gate: after
+-- it passes, the instantiated constructor body is traversed so every field
+-- which carries an exact marker must preserve it at each nested datatype
+-- boundary. Thus one faithful sibling cannot hide an erased one. Aliases are
+-- definitionally transparent. Recursive datatypes, unknown or unsaturated
+-- applications, and foralls stay opaque under 'compileFormula' and therefore
+-- preserve their complete nominal identity.
 -- Fully applied empty datatypes do too: 'compileFormula' deliberately lowers
 -- them to an 'Empty' proposition keyed by the complete application.
 structuralFormulaRetainsAssignments
@@ -1297,13 +1299,19 @@ structuralAssignmentFaithful definitions insideExact path source = case source o
                                             | (index, isRelevant) <-
                                                 zip [0 :: Int ..] relevant
                                             ]
-                                    nested <- and <$> sequence
-                                        [ structuralAssignmentFaithful
-                                            definitions exactBoundary path
-                                            argument
-                                        | argument <- arguments
-                                        ]
-                                    pure $ retained && nested
+                                    if not retained
+                                        then pure False
+                                        else do
+                                            expanded <- lift $
+                                                expandDefinitionStep
+                                                    definitions path name
+                                                    origin parameters body
+                                                    arguments
+                                            structuralAssignmentFaithful
+                                                definitions exactBoundary
+                                                (pushExpansion
+                                                    name origin path)
+                                                expanded
                 -- Unknown, unsaturated, and oversaturated applications are
                 -- opaque atoms containing their complete normalized source.
                 _ -> pure True
@@ -1382,9 +1390,10 @@ definitionParameterObservations definitions name parameters body = do
             modify $ Map.insert name observed
             pure observed
 
--- Existential variable observation in a declaration formula.  One faithful
--- constructor-field path is enough for a formal, but callers test the returned
--- index independently for every actual argument at every source boundary.
+-- Existential variable observation in a declaration formula. One faithful
+-- constructor-field path is enough for a formal to pass the top-level gate;
+-- 'structuralAssignmentFaithful' then expands the instantiated body and checks
+-- every marker-bearing field rather than treating this set as final evidence.
 structuralVariableObservations
     :: PreparedFormulaCompiler
     -> Set.Set String

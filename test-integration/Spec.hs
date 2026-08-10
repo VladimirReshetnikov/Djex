@@ -2769,23 +2769,29 @@ tests = testGroup "Djex facade"
             ++ "\nExference generated:\n" ++ exferenceGenerated)
           ExitSuccess exitCode
   , testCase
-      ("reject phantom assignment mismatch and compile concrete exact "
-        ++ "matches through both engines") $
+      ("reject phantom provider mismatches and compile concrete exact "
+        ++ "assignments through both engines") $
       do
         className <- expectRight $ parseName "Assignable"
         boxName <- expectRight $ parseName "ContextualBox"
         boxConstructorName <- expectRight $ parseName "MkContextualBox"
+        mixedName <- expectRight $ parseName "MixedContextual"
+        mixedConstructorName <- expectRight $ parseName "MkMixedContextual"
         providerName <- expectRight $ parseName "contextualBoxProvider"
         intLikeName <- expectRight $ parseName "AssignmentIntLike"
         boolLikeName <- expectRight $ parseName "AssignmentBoolLike"
         nestedProviderName <- expectRight $
           parseName "nestedPhantomProvider"
+        mixedProviderName <- expectRight $
+          parseName "mixedContextualProvider"
         higherProviderName <- expectRight $
           parseName "higherPhantomProvider"
         djinnTargetName <- expectRight $
           mkIdentifier "useDjinnContextualAssignment"
         djinnTarget <- expectRight $ mkDefinitionName djinnTargetName
         let box argument = TypeApplication (TypeConstructor boxName) argument
+            mixed argument =
+              TypeApplication (TypeConstructor mixedName) argument
             visibleProviderSpine expression = case expression of
               Global occurrence -> Just (occurrence, [])
               VisibleTypeApplication function argument -> do
@@ -2835,6 +2841,8 @@ tests = testGroup "Djex facade"
               box $ TypeVariable "selected"
             nestedProviderType = ForallType ["assigned"] [] $
               TypeVariable "assigned"
+            mixedProviderType = ForallType ["assigned"] [] $
+              mixed $ TypeVariable "assigned"
             higherProviderType = ForallType ["shape"] [] $
               TypeApplication
                 (TypeVariable "shape")
@@ -2851,10 +2859,18 @@ tests = testGroup "Djex facade"
               , DataTypeDeclaration () boxName
                   [TypeParameter "boxParameter" Nothing]
                   [DataConstructor () boxConstructorName []]
+              , DataTypeDeclaration () mixedName
+                  [TypeParameter "mixedParameter" Nothing]
+                  [DataConstructor () mixedConstructorName
+                    [ TypeVariable "mixedParameter"
+                    , box $ TypeVariable "mixedParameter"
+                    ]]
               , ValueDeclaration $ ValueSignature () providerName
                   djinnProviderType
               , ValueDeclaration $ ValueSignature () nestedProviderName
                   nestedProviderType
+              , ValueDeclaration $ ValueSignature () mixedProviderName
+                  mixedProviderType
               , ValueDeclaration $ ValueSignature () higherProviderName
                   higherProviderType
               ]
@@ -2867,6 +2883,20 @@ tests = testGroup "Djex facade"
               { providerInstantiationAssignmentProvider = nestedProviderName
               , providerInstantiationAssignmentArguments =
                   [nestedAssignmentType]
+              }
+            nestedScalarCandidate = ProviderInstantiationCandidate
+              { providerInstantiationCandidateProvider = nestedProviderName
+              , providerInstantiationCandidateType = nestedAssignmentType
+              }
+            mixedAssignment = ProviderInstantiationAssignment
+              { providerInstantiationAssignmentProvider = mixedProviderName
+              , providerInstantiationAssignmentArguments =
+                  [TypeConstructor intLikeName]
+              }
+            mixedScalarCandidate = ProviderInstantiationCandidate
+              { providerInstantiationCandidateProvider = mixedProviderName
+              , providerInstantiationCandidateType =
+                  TypeConstructor intLikeName
               }
             higherAssignment = ProviderInstantiationAssignment
               { providerInstantiationAssignmentProvider = higherProviderName
@@ -2941,6 +2971,50 @@ tests = testGroup "Djex facade"
         assertBool
           "Djinn retained p @(Phantom Int) for a Phantom Bool goal"
           $ not $ any usesNestedExact nestedCandidates
+        nestedScalarResult <- expectRight $
+          runDjinnQueryWithInstantiationCandidates
+            djinnSession [nestedScalarCandidate] nestedRequest
+        let nestedScalarCandidates =
+              batchCandidates $ resultSearch nestedScalarResult
+        assertBool
+          "the nested scalar phantom fixture produced no safe candidate"
+          $ not $ null nestedScalarCandidates
+        assertBool
+          "Djinn retained scalar p @(Phantom Int) for a Phantom Bool goal"
+          $ not $ any usesNestedExact nestedScalarCandidates
+
+        -- A faithful sibling field must not mask a second path which erases
+        -- the same visible choice. Structural projection can reach the
+        -- ContextualBox field of MixedContextual Int, but it cannot inhabit
+        -- ContextualBox Bool with that value.
+        mixedVisible <- expectRight $ specifiedVisibleTypeArgument
+          (TypeConstructor intLikeName :: Type DjinnTypeVariable)
+        let usesMixedVisible candidate = case candidateOutput candidate of
+              FunctionClause _ [] body -> containsVisibleProviderSpine
+                mixedProviderName [mixedVisible] body
+              _ -> False
+        mixedScalarResult <- expectRight $
+          runDjinnQueryWithInstantiationCandidates
+            djinnSession [mixedScalarCandidate] nestedRequest
+        let mixedScalarCandidates =
+              batchCandidates $ resultSearch mixedScalarResult
+        assertBool
+          "the mixed scalar-candidate fixture produced no safe candidate"
+          $ not $ null mixedScalarCandidates
+        assertBool
+          "Djinn retained scalar Mixed Int evidence for a Phantom Bool goal"
+          $ not $ any usesMixedVisible mixedScalarCandidates
+        mixedExactResult <- expectRight $
+          runDjinnQueryWithInstantiationAssignments
+            djinnSession [mixedAssignment] nestedRequest
+        let mixedExactCandidates =
+              batchCandidates $ resultSearch mixedExactResult
+        assertBool
+          "the mixed exact-assignment fixture produced no safe candidate"
+          $ not $ null mixedExactCandidates
+        assertBool
+          "Djinn retained exact Mixed Int evidence for a Phantom Bool goal"
+          $ not $ any usesMixedVisible mixedExactCandidates
         nestedSafeCandidate <- maybe
           (fail $ "Djinn returned no provider-free alternative: "
             ++ show nestedCandidates)

@@ -1569,6 +1569,8 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         activeProviderInstantiations = providerInstantiationPremises
             "$djinn$provider-instantiation$active$"
             structuralTranslator
+            (Just $
+                preparedEnvironmentStructuralAssignmentFidelity prepared)
             activeLoadedSchemePremises
             providerCandidates
         activeProviderPremises = providerInstantiationPremiseBindings
@@ -1606,6 +1608,8 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         targetProviderInstantiations = providerInstantiationPremises
             "$djinn$provider-instantiation$target$"
             structuralTranslator
+            (Just $
+                preparedEnvironmentStructuralAssignmentFidelity prepared)
             targetLoadedSchemePremises
             providerCandidates
         targetProviderPremises = providerInstantiationPremiseBindings
@@ -1626,6 +1630,7 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         activeNominalProviderInstantiations = providerInstantiationPremises
             "$djinn$nominal-provider-instantiation$active$"
             nominalTranslator
+            Nothing
             activeNominalLoadedSchemePremises
             providerCandidates
         activeNominalProviderPremises = providerInstantiationPremiseBindings
@@ -1664,6 +1669,7 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         targetNominalProviderInstantiations = providerInstantiationPremises
             "$djinn$nominal-provider-instantiation$target$"
             nominalTranslator
+            Nothing
             targetNominalLoadedSchemePremises
             providerCandidates
         targetNominalProviderPremises = providerInstantiationPremiseBindings

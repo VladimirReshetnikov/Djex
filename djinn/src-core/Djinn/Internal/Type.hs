@@ -256,6 +256,11 @@ fromSynthesisType source = do
 -- | Project one validated shared type-constructor name into Djinn's spelling.
 -- Unit is included because declaration owners use the nominal name directly;
 -- canonical ordinary types represent it structurally as a zero boxed tuple.
+-- The boxed pair constructor is also a source type in its unsaturated
+-- higher-kinded form.  Saturated pairs still canonicalize to 'TupleType', but
+-- exact provider assignments can retain @(,)@ beneath an opaque application or
+-- inside a quantified context, so the formula boundary must preserve that
+-- structural head rather than rejecting the otherwise valid shared type.
 djinnTypeConstructorSymbol
   :: SharedName.Name
   -> Either SynthesisTypeError HSymbol
@@ -263,6 +268,8 @@ djinnTypeConstructorSymbol name = case SharedName.nameSpecial name of
   Just SharedName.ListConstructor -> Right "[]"
   Just SharedName.FunctionConstructor -> Right "->"
   Just (SharedName.TupleConstructor SharedName.Boxed 0) -> Right "()"
+  Just (SharedName.TupleConstructor SharedName.Boxed 2) ->
+    Right $ SharedName.renderCanonical name
   Just (SharedName.TupleConstructor boxity arity) ->
     Left $ PartialTupleConstructorUnsupported boxity arity
   Just SharedName.ConsConstructor ->

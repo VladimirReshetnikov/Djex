@@ -94,6 +94,8 @@ tests =
     , ("kind-check intrinsic list syntax", testIntrinsicListKind)
     , ("render canonical units and kinds", testCanonicalRendering)
     , ("round-trip shared source types", testSharedTypeAdapter)
+    , ("retain structural higher-kinded exact assignments",
+          testStructuralHigherKindedAssignments)
     , ("infer simple positive rank-N types with an opaque fallback",
           testRankNTypeAtoms)
     , ("retain nominal parametric-data transport beside structural search",
@@ -918,6 +920,33 @@ testSharedTypeAdapter = do
             [ SharedType.TupleType SharedName.Boxed []
             , SharedType.TupleType SharedName.Boxed []
             ])
+    pairName <- expectShownRight $ SharedName.tupleName SharedName.Boxed 2
+    let pairConstructor = SharedType.TypeConstructor pairName
+            :: SharedType.Type String
+        partialPair = SharedType.TypeApplication pairConstructor
+            $ SharedType.TypeConstructor $ sharedName "Natural"
+    projectedPair <- expectShownRight $ fromSynthesisType pairConstructor
+    projectedPartialPair <- expectShownRight $ fromSynthesisType partialPair
+    assertEqual "the native boxed pair constructor retains its shared identity"
+        (Just pairConstructor) (hTypeSynthesisStructure projectedPair)
+    assertEqual "the native boxed pair constructor renders without double parentheses"
+        "(,)" (show projectedPair)
+    assertEqual "a partially applied boxed pair renders as a higher-kinded type"
+        "(,) Natural" (show projectedPartialPair)
+    assertEqual "the native boxed pair constructor round-trips through Djinn"
+        (Right pairConstructor) (toSynthesisType projectedPair)
+    boxedTripleName <- expectShownRight $
+        SharedName.tupleName SharedName.Boxed 3
+    assertEqual "wider partial boxed tuple constructors remain unsupported"
+        (Left $ PartialTupleConstructorUnsupported SharedName.Boxed 3)
+        (fromSynthesisType $ SharedType.TypeConstructor boxedTripleName
+            :: Either SynthesisTypeError HType)
+    unboxedPairName <- expectShownRight $
+        SharedName.tupleName SharedName.Unboxed 2
+    assertEqual "partial unboxed tuple constructors remain unsupported"
+        (Left $ PartialTupleConstructorUnsupported SharedName.Unboxed 2)
+        (fromSynthesisType $ SharedType.TypeConstructor unboxedPairName
+            :: Either SynthesisTypeError HType)
     let malformedConstructor = HTCon "not a type"
     assertEqual "malformed compatibility names stay outside the shared tree"
         Nothing (hTypeSynthesisStructure malformedConstructor)
@@ -980,6 +1009,132 @@ testSharedTypeAdapter = do
         projected <- expectShownRight $ toSynthesisType raw
         assertEqual ("shared rendering changed " ++ show raw)
             (show raw) (SharedTypeRender.renderType id projected)
+
+-- A boxed pair is structural when saturated, but an exact higher-kinded
+-- assignment can also retain its bare constructor beneath an opaque nominal
+-- application or in a nested class context. Exercise both non-vacuous paths
+-- through the checked public adapter; a vacuous provider would prove only that
+-- visible rendering can carry the argument without Djinn ever lowering it.
+testStructuralHigherKindedAssignments :: IO ()
+testStructuralHigherKindedAssignments = do
+    targetName <- expectShownRight $
+        SharedName.mkIdentifier "structuralHigherKindedResult"
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName targetName
+    environment <- expectShownRight $
+        SharedEnvironment.mkEnvironment declarations
+    session <- expectShownRight $ Djex.mkDjinnSession environment
+    directRequest <- request target directGoal
+    directResult <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationAssignments session
+            [assignment directProviderName
+                [pairConstructor, partialEither]]
+            directRequest
+    directRendered <- render directResult
+    assertBool
+        ("Djinn lost the residual boxed-pair assignment: " ++
+            show directRendered)
+        $ any (allFragments
+            [ "structuralProvider"
+            , "@(,)"
+            , "@(Either StructuralNatural)"
+            ]) directRendered
+
+    contextualRequest <- request target $ box contextualArgument
+    contextualResult <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationAssignments session
+            [assignment contextualProviderName [contextualArgument]]
+            contextualRequest
+    contextualRendered <- render contextualResult
+    assertBool
+        ("Djinn lost the non-vacuous structural contextual assignment: " ++
+            show contextualRendered)
+        $ any (allFragments
+            [ "structuralContextProvider"
+            , "StructuralContext (,) (Either StructuralNatural)"
+            ]) contextualRendered
+  where
+    proper = SharedKind.ProperTypeKind
+    unary = SharedKind.FunctionKind proper proper
+    binary = SharedKind.FunctionKind proper unary
+    pairName = expectName $ SharedName.tupleName SharedName.Boxed 2
+    pairConstructor = SharedType.TypeConstructor pairName
+    naturalName = sharedName "StructuralNatural"
+    eitherName = sharedName "Either"
+    envelopeName = sharedName "StructuralEnvelope"
+    boxName = sharedName "StructuralContextBox"
+    boxConstructorName = sharedName "MkStructuralContextBox"
+    className = sharedName "StructuralContext"
+    directProviderName = sharedName "structuralProvider"
+    contextualProviderName = sharedName "structuralContextProvider"
+    naturalType = SharedType.TypeConstructor naturalName
+    eitherConstructor = SharedType.TypeConstructor eitherName
+    partialEither = SharedType.TypeApplication eitherConstructor naturalType
+    application2 function first second = SharedType.TypeApplication
+        (SharedType.TypeApplication function first) second
+    envelope first second = application2
+        (SharedType.TypeConstructor envelopeName) first second
+    box argument = SharedType.TypeApplication
+        (SharedType.TypeConstructor boxName) argument
+    directProviderType = SharedType.ForallType ["binary", "unary"] [] $
+        envelope
+            (SharedType.TypeVariable "binary")
+            (SharedType.TypeVariable "unary")
+    directGoal = envelope pairConstructor partialEither
+    element = SharedType.TypeVariable "element"
+    contextualArgument = SharedType.ForallType ["element"]
+        [Constraint className [pairConstructor, partialEither]] $
+            SharedType.FunctionType element element
+    contextualProviderType = SharedType.ForallType ["selected"] [] $
+        box $ SharedType.TypeVariable "selected"
+    declarations :: [SharedDeclaration.Declaration String Void ()]
+    declarations =
+        [ SharedDeclaration.AbstractTypeDeclaration () naturalName proper
+        , SharedDeclaration.AbstractTypeDeclaration () eitherName binary
+        , SharedDeclaration.AbstractTypeDeclaration () envelopeName $
+            SharedKind.FunctionKind binary $
+                SharedKind.FunctionKind unary proper
+        , SharedDeclaration.ClassDeclaration () className
+            [ SharedDeclaration.TypeParameter "binary" $ Just binary
+            , SharedDeclaration.TypeParameter "unary" $ Just unary
+            ] [] []
+        , SharedDeclaration.DataTypeDeclaration () boxName
+            [SharedDeclaration.TypeParameter "boxed" Nothing]
+            [SharedDeclaration.DataConstructor () boxConstructorName
+                [SharedType.TypeVariable "boxed"]]
+        , valueDeclaration directProviderName directProviderType
+        , valueDeclaration contextualProviderName contextualProviderType
+        ]
+
+    valueDeclaration name valueType = SharedDeclaration.ValueDeclaration $
+        SharedDeclaration.ValueSignature () name valueType
+
+    assignment provider arguments =
+        SharedQuery.ProviderInstantiationAssignment
+            { SharedQuery.providerInstantiationAssignmentProvider = provider
+            , SharedQuery.providerInstantiationAssignmentArguments = arguments
+            }
+
+    request target goal = expectShownRight $ Djex.mkDjinnRequest $
+        SharedQuery.QueryRequest
+            { SharedQuery.requestTarget = target
+            , SharedQuery.requestGoal = goal
+            , SharedQuery.requestContexts = []
+            , SharedQuery.requestOptions = defaultQueryOptions
+                { optionAlternatives = True
+                , optionCutoff = 128
+                }
+            }
+
+    render result = mapM
+        (expectShownRight . Djex.renderDjinnCandidateDefinition
+            SharedGenerated.Unqualified)
+        $ SharedSearch.batchCandidates $ SharedQuery.resultSearch result
+
+    allFragments fragments source = all (`isInfixOf` source) fragments
+
+    expectName source = case source of
+        Left failure -> error $ show failure
+        Right name -> name
 
 -- The raw compatibility formula keeps rank-N types as alpha-stable atoms.
 -- Checked queries additionally try a polarized translation: positive foralls

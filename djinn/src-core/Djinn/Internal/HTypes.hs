@@ -301,6 +301,14 @@ instance Show HType where
     showsPrec p (HTApp f a) = showParen (p > 2) $ showsPrec 2 f . showString " " . showsPrec 3 a
     showsPrec _ (HTVar s) = showString s
     showsPrec _ (HTCon "()") = showString "()"
+    -- Native shared exact assignments can retain the boxed pair constructor at
+    -- higher kind. Its canonical spelling is already parenthesized, unlike the
+    -- historical raw operator spelling accepted by this compatibility view.
+    showsPrec _ (HTCon s)
+        | Right name <- SharedName.parseName s
+        , SharedName.nameSpecial name == Just
+            (SharedName.TupleConstructor SharedName.Boxed 2) =
+                showString $ SharedName.renderCanonical name
     showsPrec _ (HTCon s) | not (isQualifiedConId s) =
         showParen True $ showString s
     showsPrec _ (HTCon s) = showString s

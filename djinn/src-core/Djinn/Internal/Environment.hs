@@ -276,7 +276,7 @@ prepareSynthesisEnvironment
     :: SynthesisEnvironment
     -> Either SynthesisEnvironmentError PreparedEnvironment
 prepareSynthesisEnvironment sourceEnvironment = do
-    mapM_ preflightDeclaration $
+    mapM_ preflightSynthesisEnvironmentDeclaration $
         SharedEnvironment.environmentDeclarations sourceEnvironment
     groundedEnvironment <- first
         (InvalidSynthesisInventory .
@@ -1265,8 +1265,7 @@ projectPreparedInventory
     :: PreparedEnvironment
     -> Either SynthesisEnvironmentError Environment
 projectPreparedInventory prepared = do
-    sourceDeclarations <- mapM preflightDeclaration $
-        map (SharedDeclaration.mapDeclarationKindVariables absurd) $
+    sourceDeclarations <- mapM preflightGroundDeclaration $
         SharedEnvironment.environmentDeclarations environment
     projectSynthesisEnvironment assumptions sourceDeclarations
   where
@@ -1371,10 +1370,35 @@ preflightDeclaration sharedDeclaration = do
         fromSynthesisDeclaration sharedDeclaration
     return (sharedDeclaration, rawDeclaration)
 
+-- The stable neutral environment can state a class parameter's already-ground
+-- kind even though the historical standalone 'ClassDecl' syntax cannot store
+-- that annotation.  Use an unannotated copy only for the compatibility
+-- lexical/feature preflight, while retaining the original shared declaration
+-- as the authoritative input to Inventory kind checking and later projection.
+-- Datatype and synonym parameter annotations remain unsupported at this
+-- Djinn boundary, as do class superclasses and instance declarations.
+preflightSynthesisEnvironmentDeclaration
+    :: SynthesisDeclaration
+    -> Either SynthesisEnvironmentError (SynthesisDeclaration, Declaration)
+preflightSynthesisEnvironmentDeclaration sharedDeclaration = do
+    (_, rawDeclaration) <- preflightDeclaration $
+        eraseClassParameterKinds sharedDeclaration
+    return (sharedDeclaration, rawDeclaration)
+  where
+    eraseClassParameterKinds declaration = case declaration of
+        SharedDeclaration.ClassDeclaration
+                annotation name parameters superclasses methods ->
+            SharedDeclaration.ClassDeclaration annotation name
+                (map eraseParameterKind parameters) superclasses methods
+        _ -> declaration
+
+    eraseParameterKind parameter = SharedDeclaration.TypeParameter
+        (SharedDeclaration.parameterVariable parameter) Nothing
+
 preflightGroundDeclaration
     :: SharedDeclaration.Declaration HSymbol Void ()
     -> Either SynthesisEnvironmentError (SynthesisDeclaration, Declaration)
-preflightGroundDeclaration = preflightDeclaration .
+preflightGroundDeclaration = preflightSynthesisEnvironmentDeclaration .
     SharedDeclaration.mapDeclarationKindVariables absurd
 
 data ProjectedDeclaration

@@ -4204,6 +4204,15 @@ testSharedDeclarationAdapter = do
     assertEqual "Djinn lowering rejects unsupported superclass semantics"
         (Left ClassSuperclassesUnsupported)
         (fromSynthesisDeclaration sharedClass)
+    let explicitClassParameter = SharedDeclaration.TypeParameter "f" $
+            Just $ SharedKind.FunctionKind
+                SharedKind.ProperTypeKind SharedKind.ProperTypeKind
+        explicitlyKindedClass = SharedDeclaration.ClassDeclaration ()
+            (sharedName "HigherComparable") [explicitClassParameter] [] []
+    assertEqual
+        "standalone Djinn declarations cannot erase explicit class kinds"
+        (Left $ ExplicitParameterKindUnsupported "f")
+        (fromSynthesisDeclaration explicitlyKindedClass)
     assertEqual "shared validation catches a function in the type namespace"
         (Left $ UnsupportedDjinnDeclarationName FunctionOwner
             $ sharedName "T")
@@ -4481,6 +4490,50 @@ testNeutralDjinnPreparation = do
             $ SharedInference.classParameterKinds
             $ SharedInventory.inventoryKindAssumptions
             $ Djex.djinnSessionInventory orderedSession)
+
+    -- A stable neutral environment owns ground class-parameter kinds which
+    -- the historical standalone ClassDecl syntax cannot spell.  Sealing must
+    -- retain that authoritative annotation while its on-demand compatibility
+    -- snapshot reconstructs the same HKind from Inventory assumptions.
+    let higherClassKind = SharedKind.FunctionKind proper proper
+        higherClass = SharedDeclaration.ClassDeclaration ()
+            (sharedName "HigherMarker")
+            [SharedDeclaration.TypeParameter "f" $ Just higherClassKind]
+            [] []
+        higherDeclarations =
+            [ abstract "F" higherClassKind
+            , abstract "Ground" proper
+            , higherClass
+            ]
+    higherEnvironment <- mkNeutralDjinnEnvironment higherDeclarations
+    higherSession <- expectShownRight $ Djex.mkDjinnSession higherEnvironment
+    assertEqual "the session erased an explicit ground class kind"
+        (Just [Just higherClassKind])
+        (Map.lookup (sharedName "HigherMarker")
+            $ SharedInference.classParameterKinds
+            $ SharedInventory.inventoryKindAssumptions
+            $ Djex.djinnSessionInventory higherSession)
+    higherPrepared <- expectShownRight $
+        RawEnvironment.prepareGroundSynthesisEnvironment higherEnvironment
+    assertEqual "the raw snapshot lost an explicit ground class kind"
+        [("HigherMarker", ([("f", KArrow KStar KStar)], []))]
+        (classDeclarations $
+            RawEnvironment.preparedEnvironmentSource higherPrepared)
+    weakenedHigherPrepared <- expectShownRight $
+        RawEnvironment.prepareSynthesisEnvironment $
+            SharedEnvironment.mapEnvironmentKindVariables absurd
+                higherEnvironment
+    assertEqual "kind-weakened preparation changed the explicit class kind"
+        [("HigherMarker", ([("f", KArrow KStar KStar)], []))]
+        (classDeclarations $
+            RawEnvironment.preparedEnvironmentSource weakenedHigherPrepared)
+    higherF <- either fail pure $ mkContext "HigherMarker" [HTCon "F"]
+    higherGround <- either fail pure $
+        mkContext "HigherMarker" [HTCon "Ground"]
+    assertEqual "the explicit higher class kind rejected a matching constructor"
+        (Right []) (resolvePreparedContext higherPrepared higherF)
+    assertLeft "the explicit higher class kind accepted a proper type"
+        (resolvePreparedContext higherPrepared higherGround)
 
     -- Synonym expansion must precede the recursive-datatype policy.  The
     -- parameter of Phantom is semantically absent, so this datatype is not

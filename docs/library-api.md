@@ -255,7 +255,7 @@ by `Language.Haskell.Djex`:
 
 - `maximumProviderInstantiationCandidates` is 32 scalar associations per call;
 - `maximumProviderInstantiationAssignments` is 32 complete vectors per call;
-- `maximumProviderInstantiationArguments` is five ordered arguments per
+- `maximumProviderInstantiationArguments` is six ordered arguments per
   vector; and
 - `maximumProviderInstantiationKindNodes` is 129 constructors in each
   caller-supplied `GroundKind`.
@@ -273,7 +273,7 @@ at most 129 constructors; if work remains, it returns the sentinel 130 without
 entering the pending constructor. Cyclic kinds and finite trees above the bound
 therefore fail finitely. The shared 64-tuple constructor's right-associated
 all-`Type` kind contains exactly `2 * 64 + 1 = 129` nodes and remains accepted.
-This kind capacity does not change the five-argument limit on one
+This kind capacity does not change the six-argument limit on one
 provider-assignment vector.
 
 Construction is not certification. The caller remains responsible for the
@@ -288,7 +288,7 @@ forall-rooted type and uses it only for a context-free provider whose complete
 leading prefix is vacuous.
 
 Assignment runners additionally require an exact retained polymorphic scheme,
-a context-free leading chain of arity one through five, and a vector whose
+a context-free leading chain of arity one through six, and a vector whose
 length equals that complete chain; contextual schemes are unsupported. The
 legacy assignment runners infer each binder's ground kind from the exact
 provider body, default a vacuous binder to `Type`, and synonym-elaborate the
@@ -356,7 +356,7 @@ Nonempty evidence is additive, with engine- and payload-specific scheduling:
 
 | Engine | Independent candidate pool | Exact ordered assignments |
 | --- | --- | --- |
-| Djinn | The historical plain structural, nominal, and query-local-instantiation plans remain first. The positive-only provider family reconstructs bounded tuples: at most five binders, 512 attempts, sixteen specializations per scheme, and 32 direct provider premises. | The same positive-only provider-plan position receives one direct premise per retained vector and never uses the tuple-attempt or per-scheme Cartesian window. It still carries query-local and loaded instantiation axioms for mixed proofs and runs before evidence-free loaded tails. Each proof is checked before lowering restores the exact provider and visible arguments. |
+| Djinn | The historical plain structural, nominal, and query-local-instantiation plans remain first. The positive-only provider family reconstructs bounded tuples: at most six binders, 512 attempts, sixteen specializations per scheme, and 32 direct provider premises. | The same positive-only provider-plan position receives one direct premise per retained vector and never uses the tuple-attempt or per-scheme Cartesian window. It still carries query-local and loaded instantiation axioms for mixed proofs and runs before evidence-free loaded tails. Each proof is checked before lowering restores the exact provider and visible arguments. |
 | Exference | Exact retained-global lookup alone receives the pool. After ordinary implicit use, its visible order is ground monomorphic instance heads, checked query-derived choices, then supplied scalar choices. Query-derived and supplied products retain separate 32-combination caps. Scoped values and sibling globals never consult the map. | Exact retained-global lookup consumes each vector once. After ordinary implicit use, its visible order is ground monomorphic instance heads, exact supplied assignments, then checked query-derived choices. No Cartesian product or vacuous-body restriction is used. Scoped values and sibling globals never consult the map. |
 
 Both evidence models can make a visible choice such as
@@ -426,7 +426,7 @@ eleven-site selections, making the family exhaustive through eleven
 independent occurrences while limiting the new layer to 1,024 views on larger
 inputs. A twelve-site proof requiring exactly six open and six opaque
 occurrences remains outside the family. When a hypothesis-side
-context-free chain of at most five binders exists, bounded instantiation axioms
+context-free chain of at most six binders exists, bounded instantiation axioms
 can eliminate it completely at a candidate tuple drawn from
 the sequent's variables, opened-forall skolems, premise scopes, and already
 mentioned subtrees that are independent of enclosing binders and contain
@@ -435,7 +435,7 @@ Inferable axiom evidence lowers to the hypothesis expression itself. If a
 selected binder is vacuous, proof conversion retains the shortest visible
 prefix, including a specified closed quantified argument when the query
 supplied one. One- through three-binder schemes retain their historical lexical
-Cartesian order. Four- and five-binder schemes fairly interleave source-order
+Cartesian order. Four-, five-, and six-binder schemes fairly interleave source-order
 windows, repeated arguments,
 sparse monotone selections, and the Cartesian tail without raising any search
 cap.
@@ -457,7 +457,7 @@ already-seen formula is scanned the same way and spends one eligible attempt,
 but neither case spends a per-scheme or family axiom allowance. The fair
 producer prefilters at most 512 raw tuples for each scheme, while the builder
 independently charges at most 512 eligible attempts across the family. At most
-five binders, sixteen retained axioms per scheme, and 64 retained axioms per
+six binders, sixteen retained axioms per scheme, and 64 retained axioms per
 structural or nominal family remain allowed.
 
 The established query-closed positive-only family revisits only hypothesis-side
@@ -628,7 +628,7 @@ prefix is vacuous can select proper types already supplied by the checked
 query. Its residual body may retain ambient rigids opened by that query. The
 candidate pool contains ground monotypes and complete closed context-free
 foralls observed below arrows or tuples. Search can therefore emit `provider @Int` or
-`provider @(forall a0_0. a0_0 -> a0_0)`. The query route retains at most five
+`provider @(forall a0_0. a0_0 -> a0_0)`. The query route retains at most six
 binders and 32 combinations; the instance-head route stays monotype-only. The
 ordinary implicit per-use branch remains available and retains priority.
 

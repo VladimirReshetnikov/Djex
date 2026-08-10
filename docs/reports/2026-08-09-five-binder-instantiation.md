@@ -2,6 +2,12 @@
 
 Date: 2026-08-09
 
+> **Successor.** The
+> [six-binder widening](2026-08-10-six-binder-instantiation.md) raises the
+> shared limit from five to six and moves the conservative rejection and
+> inconclusive-search boundary to seven. The results and limits below describe
+> this report's historical revision.
+
 ## Outcome
 
 Djex now admits complete context-free leading `forall` chains of one through

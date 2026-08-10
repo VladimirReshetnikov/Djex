@@ -15,6 +15,9 @@ Date: 2026-08-01
 > same fair scheduler and the shared exact-assignment contract to five leading
 > binders. The four-binder results below remain the historical boundary for
 > this report.
+> The subsequent
+> [six-binder successor](2026-08-10-six-binder-instantiation.md) reuses that
+> scheduler for six binders and moves the incomplete boundary to seven.
 
 ## Outcome
 

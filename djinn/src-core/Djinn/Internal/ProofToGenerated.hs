@@ -351,28 +351,22 @@ termToGeneratedExpressionWithEvidence contractEta visibleEvidence term = do
     Generated.Case scrutinee alternatives ->
       Generated.Case scrutinee
         [ (pattern', pushVisibleArguments
-            (rebuildApplication branch existing) arguments)
+            (Generated.applyExpressionArguments branch existing) arguments)
         | (pattern', branch) <- alternatives
         ]
     Generated.Let pattern' binding body ->
       Generated.Let pattern' binding $
-        pushVisibleArguments (rebuildApplication body existing) arguments
+        pushVisibleArguments
+          (Generated.applyExpressionArguments body existing) arguments
     Generated.Global{} -> appendVisible
       applicationHead existing arguments
     Generated.Local{} -> appendVisible
       applicationHead existing arguments
-    _ -> rebuildApplication applicationHead existing
+    _ -> Generated.applyExpressionArguments applicationHead existing
 
   appendVisible applicationHead existing arguments =
-    rebuildApplication applicationHead $
+    Generated.applyExpressionArguments applicationHead $
       existing ++ map Generated.VisibleTypeArgumentArgument arguments
-
-  rebuildApplication = foldl' applyArgument
-
-  applyArgument function argument = case argument of
-    Generated.TermArgument value -> Generated.Apply function value
-    Generated.VisibleTypeArgumentArgument typeArgument ->
-      Generated.VisibleTypeApplication function typeArgument
 
   evidenceBinder = selected
    where

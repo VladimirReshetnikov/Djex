@@ -4663,6 +4663,128 @@ tests = testGroup "Exference"
           residual @?= []
           checkExpression (mkQueryClassEnv emptyClassEnv []) []
             [deconstructor] goal [] expression @?= Right ()
+      , testCase "scalar global products expose rank-N fields" $ do
+          let inputType = TypeCons $ name "Input"
+              resultType = TypeCons $ name "Result"
+              fieldType = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) resultType
+              sourceType = TypeTuple Boxed
+                [fieldType, TypeTuple Boxed []]
+              sourceName = name "structuredSource"
+              source = FunctionBinding sourceType sourceName 0 [] []
+              goal = TypeArrow inputType resultType
+              input = identityInput
+                { input_goalType = goal
+                , input_envFuncs = [source]
+                , input_maxSteps = 8
+                , input_maxQueueSize = Just 32
+                }
+              appliesField field argument expression = case expression of
+                ExpApply
+                    (ExpVar usedField _)
+                    (ExpVar usedArgument _) ->
+                  field == usedField
+                    && argument == usedArgument
+                ExpLetMatch _ _ _ body -> appliesField field argument body
+                ExpLet _ _ _ body -> appliesField field argument body
+                _ -> False
+              matchedProduct argument expression = case expression of
+                ExpLetMatch (TupleCon 2) ((field, _) : _)
+                    (ExpName occurrence) body ->
+                  occurrence == sourceName && appliesField field argument body
+                ExpLet aggregate _ (ExpName occurrence)
+                    (ExpLetMatch (TupleCon 2) ((field, _) : _)
+                      (ExpVar matchedAggregate _) body) ->
+                  occurrence == sourceName
+                    && aggregate == matchedAggregate
+                    && appliesField field argument body
+                _ -> False
+          (expression, residual, _) <- maybe
+            (fail "a scalar global product did not expose its rank-N field")
+            pure
+            $ findOneExpression input
+          residual @?= []
+          case expression of
+            ExpLambda argument argumentType body -> do
+              argumentType @?= inputType
+              assertBool
+                ("unexpected scalar-global elimination: "
+                  ++ showExpression expression)
+                $ matchedProduct argument body
+            _ -> fail $ "scalar-global elimination lost its lambda: "
+              ++ showExpression expression
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [source] []
+            goal [] expression @?= Right ()
+      , testCase "polymorphic aggregate donation repeats at fresh holes" $ do
+          let familyType = TypeCons $ name "Family"
+              resultType = TypeCons $ name "Result"
+              sourceName = name "repeatableAggregate"
+              sourceType = TypeTuple Boxed
+                [ TypeArrow
+                    (TypeApp familyType $ TypeVar 0)
+                    resultType
+                , TypeVar 0
+                ]
+              source = FunctionBinding sourceType sourceName 0 [] []
+              input = identityInput
+                { input_goalType = resultType
+                , input_envFuncs = [source]
+                , input_allowUnused = True
+                , input_maxSteps = 64
+                , input_maxQueueSize = Just 128
+                }
+              globalUses :: Expression -> Int
+              globalUses expression = case expression of
+                ExpVar{} -> 0
+                ExpName occurrence
+                  | occurrence == sourceName -> 1
+                  | otherwise -> 0
+                ExpLambda _ _ body -> globalUses body
+                ExpApply function argument ->
+                  globalUses function + globalUses argument
+                ExpTypeApply function _ -> globalUses function
+                ExpTuple elements -> sum $ map globalUses elements
+                ExpHole{} -> 0
+                ExpLetMatch _ _ binding body ->
+                  globalUses binding + globalUses body
+                ExpLet _ _ binding body ->
+                  globalUses binding + globalUses body
+                ExpCaseMatch scrutinee alternatives ->
+                  globalUses scrutinee
+                    + sum [globalUses body | (_, _, body) <- alternatives]
+              candidates = concatMap chunkElements
+                $ findExpressionsWithStats input
+          (expression, residual, _) <- maybe
+            (fail "a polymorphic aggregate could not be reused at a fresh hole")
+            pure
+            $ find
+                (\(candidate, _, _) -> globalUses candidate >= 2)
+                candidates
+          residual @?= []
+          assertBool
+            ("expected two fresh aggregate instantiations, got: "
+              ++ showExpression expression)
+            $ globalUses expression >= 2
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [source] []
+            resultType [] expression @?= Right ()
+      , testCase "polymorphic aggregate donation terminates once per goal" $ do
+          let familyType = TypeCons $ name "Family"
+              sourceType = TypeTuple Boxed
+                [TypeApp familyType $ TypeVar 0, TypeTuple Boxed []]
+              sourceName = name "polymorphicAggregate"
+              source = FunctionBinding sourceType sourceName 0 [] []
+              input = identityInput
+                { input_goalType = TypeCons $ name "Impossible"
+                , input_envFuncs = [source]
+                , input_allowUnused = True
+                , input_maxSteps = 32
+                , input_maxQueueSize = Just 32
+                }
+          terminal <- lastChunk input
+          assertBool "an impossible aggregate goal produced a candidate"
+            $ null $ chunkElements terminal
+          chunkStatus terminal @?= SearchStatus SearchExhausted 0 0
+          Map.lookup sourceName (chunkBindingUsages terminal) @?= Just 1
       , testCase "generic constructors instantiate impredicatively" $ do
           let polymorphic = TypeForall [0] []
                 $ TypeArrow (TypeVar 0) (TypeVar 0)

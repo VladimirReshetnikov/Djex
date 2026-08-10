@@ -442,6 +442,62 @@ findEngineBatchesWith allocators
   functionSchemes = M.filterWithKey
     (\name _ -> name `S.notMember` excludedBindings)
     allFunctionSchemes
+  -- Boxed tuples are syntax, not declarations.  Introduction has therefore
+  -- always been available from the type alone; retain the same invariant for
+  -- elimination by deriving only the tuple shapes which this checked query
+  -- and environment can actually expose. Explicit source deconstructors keep
+  -- their established order, and an existing matching tuple head suppresses
+  -- its derived duplicate.
+  deconss = deconss' ++
+    [ tupleDeconstructor arity
+    | arity <- observedTupleArities
+    , tupleNameForArity arity `S.notMember` declaredDeconstructorNames
+    ]
+  declaredDeconstructorNames = S.fromList
+    [ deconstructorName
+    | deconstructor <- deconss'
+    , deconstructorName <- maybeToList
+        $ typeConstructorHead $ deconstructorInput deconstructor
+    ]
+  observedTupleArities = SharedCollection.distinctOn id $ concatMap
+    boxedTupleArities
+    ( t
+      : M.elems functionSchemes
+      ++ concatMap functionBindingTypes funcs
+      ++ concatMap deconstructorBindingTypes deconss'
+      ++ concat (M.elems providerCandidates)
+      ++ concatMap concat (M.elems providerAssignments)
+      ++ concatMap (constraint_params . snd)
+          (environmentConstraints $ EnvDictionary funcs deconss' sClassEnv)
+    )
+  tupleDeconstructor arity =
+    let variables = map TypeVar [0 .. arity - 1]
+        tupleName = tupleNameForArity arity
+    in DeconstructorBinding
+        (TypeTuple Boxed variables)
+        [ConstructorBinding tupleName variables]
+        False
+  tupleNameForArity arity = case
+      SynthesisName.tupleName SynthesisName.Boxed arity of
+    Right tupleName -> tupleName
+    Left failure -> error $
+      "validated boxed tuple arity lost its generated name: " ++ show failure
+
+  boxedTupleArities source = case source of
+    SharedType.TypeVariable{} -> []
+    SharedType.TypeConstructor{} -> []
+    SharedType.TypeApplication function argument ->
+      boxedTupleArities function ++ boxedTupleArities argument
+    SharedType.FunctionType parameter result ->
+      boxedTupleArities parameter ++ boxedTupleArities result
+    SharedType.TupleType boxity elements ->
+      [length elements | boxity == SynthesisName.Boxed] ++
+        concatMap boxedTupleArities elements
+    SharedType.ForallType _ contexts body ->
+      concatMap
+          (concatMap boxedTupleArities . constraint_params)
+          contexts
+        ++ boxedTupleArities body
 
   -- Only roots which the checked query uses in a proper-type position become
   -- candidates for an otherwise unconstrained visible binder.  In an
@@ -503,7 +559,8 @@ findEngineBatchesWith allocators
     , nodeVisibleTypeCandidates = properTypeCandidates
     , nodeProviderInstantiationCandidates = providerCandidates
     , nodeProviderInstantiationAssignments = providerAssignments
-    , nodeDeconstructors  = deconss'
+    , nodeAggregateDonations = M.empty
+    , nodeDeconstructors  = deconss
     , nodeQueryClassEnv   = rootClassEnvironment
     , nodeExpression      = ExpHole 0
       -- The root goal and expression already own hole 0.
@@ -1855,6 +1912,88 @@ stateStep allocators multiPM allowConstrs h
             good
             bad
             (unifyDisjoint goalType providedType)
+          <|> donateGlobalAggregate
+            typeArguments
+            providedType
+            providedConstraints
+            providedParameters
+        -- An ordinary scalar global used to be considered only as a complete
+        -- result.  If that result is an aggregate, failing to unify it with
+        -- the current goal discarded fields which a local aggregate would
+        -- expose immediately during lambda introduction.  Bind the exact
+        -- checked global once in this lexical branch and feed the local value
+        -- through the same pattern-elimination path.
+        --
+        -- Direct use and partial application retain priority.  The guard also
+        -- runs before allocating the let: a scalar without an applicable
+        -- deconstructor must leave no unused local or dead search branch.
+        donateGlobalAggregate typeArguments providedType providedConstraints
+            providedParameters = case providedParameters of
+          _ : _ -> mzero
+          [] -> do
+            case unifyDisjoint goalType providedType of
+              Just _ -> mzero
+              Nothing -> pure ()
+            deconstructors <- gets nodeDeconstructors
+            let applicable deconstructor =
+                  case unifyRight providedType
+                      $ deconstructorInput deconstructor of
+                    Nothing -> False
+                    Just _ -> case deconstructorConstructors deconstructor of
+                      [] -> True
+                      [_] -> True
+                      _ -> False
+            if any applicable deconstructors
+              then pure ()
+              else mzero
+            priorDonations <- gets nodeAggregateDonations
+            let globalName = functionName binding
+                alreadyDonated = maybe False (S.member globalName)
+                  $ M.lookup var priorDonations
+            if alreadyDonated
+              then mzero
+              else pure ()
+            scopedBindings <- gets
+              (scopeGetAllBindings scopeId . nodeProvidedScopes)
+            -- Avoid adding a byte-for-byte equivalent scalar which is already
+            -- exposed in this scope. Fresh polymorphic instantiations have
+            -- distinct flexible IDs and are governed by the goal/global marker
+            -- above, so they remain available at a genuinely new hole.
+            let aggregateKey = SharedTypeAtom.alphaTypeKey providedType
+                sameAggregate scoped =
+                  null (varPParameters scoped) &&
+                    SharedTypeAtom.alphaTypeKey
+                      (varPResult scoped) == aggregateKey
+            if any sameAggregate scopedBindings
+              then mzero
+              else pure ()
+            modify $ \node -> node
+              { nodeAggregateDonations = M.insertWith S.union var
+                  (S.singleton globalName) $ nodeAggregateDonations node }
+            aggregate <- builderAllocVar allocators
+            aggregateScope <- builderAddScope allocators scopeId
+            let global = foldl' ExpTypeApply
+                  (ExpName globalName) typeArguments
+            modify $ \node -> node
+              { nodeExpression = fillExprHole var
+                  (ExpLet aggregate providedType global $ ExpHole var)
+                  $ nodeExpression node
+              , nodeConstraintGoals = nodeConstraintGoals node <>
+                  scopedConstraints givenConstraints providedConstraints
+              , nodeDepth = addScore (nodeDepth node) bad
+              , nodeLastStepBinding = Just globalName
+              }
+            additionalGoals <- addScopePatternMatch
+              allocators
+              multiPM
+              goalType
+              var
+              aggregateScope
+              tupleMode
+              givenConstraints
+              [splitBinding $ VarBinding aggregate providedType]
+            modify $ \node -> node
+              { nodeGoals = nodeGoals node <> Seq.fromList additionalGoals }
         ordinary = useGlobal [] provType constraints parameters
         visible = do
           source <- maybe mzero pure =<< gets

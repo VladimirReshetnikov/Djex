@@ -1092,6 +1092,208 @@ tests = testGroup "Djex facade"
           ("GHC rejected selector-presented nominal transport\nstdout:\n"
             ++ output ++ "\nstderr:\n" ++ errors)
           ExitSuccess exitCode
+  , testCase "compile rank-N fields eliminated from a loaded product" $ do
+      inputName <- expectRight $ parseName "StructuredInput"
+      resultName <- expectRight $ parseName "StructuredResult"
+      sourceName <- expectRight $ parseName "structuredSource"
+      djinnTargetName <- expectRight $ mkIdentifier "structuredDjinn"
+      exferenceTargetName <- expectRight $
+        mkIdentifier "structuredExference"
+      djinnTarget <- expectRight $ mkDefinitionName djinnTargetName
+      exferenceTarget <- expectRight $
+        mkDefinitionName exferenceTargetName
+      let inputType = TypeConstructor inputName
+          resultType = TypeConstructor resultName
+          djinnVariable = TypeVariable "element"
+          djinnProvider = ForallType ["element"] [] $
+            FunctionType djinnVariable resultType
+          djinnSource = TupleType Boxed
+            [djinnProvider, TupleType Boxed []]
+          djinnDeclarations =
+            [ AbstractTypeDeclaration () inputName ProperTypeKind
+            , AbstractTypeDeclaration () resultName ProperTypeKind
+            , ValueDeclaration $ ValueSignature () sourceName djinnSource
+            ]
+      djinnEnvironment <- expectRight
+        (mkEnvironment djinnDeclarations :: Either
+          (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+      djinnSession <- expectRight $ mkDjinnSession djinnEnvironment
+      djinnRequest <- expectRight $ mkDjinnRequest QueryRequest
+        { requestTarget = djinnTarget
+        , requestGoal = FunctionType inputType resultType
+        , requestContexts = []
+        , requestOptions = defaultQueryOptions
+            { optionAlternatives = True
+            , optionSorted = False
+            , optionCutoff = 20
+            }
+        }
+      djinnResult <- expectRight $ runDjinnQuery djinnSession djinnRequest
+      djinnCandidate <- maybe
+        (fail "Djinn did not eliminate the loaded product")
+        pure
+        $ find (candidateEliminatesProduct sourceName)
+        $ batchCandidates $ resultSearch djinnResult
+      djinnGenerated <- expectRight $
+        renderDjinnCandidateDefinition Unqualified djinnCandidate
+
+      let exferenceVariable = FlexibleVariable 0
+          exferenceVariableType = TypeVariable exferenceVariable
+          exferenceProvider = ForallType [exferenceVariable] [] $
+            FunctionType exferenceVariableType resultType
+          exferenceSource = TupleType Boxed
+            [exferenceProvider, TupleType Boxed []]
+          exferenceDeclarations =
+            [ AbstractTypeDeclaration () inputName ProperTypeKind
+            , AbstractTypeDeclaration () resultName ProperTypeKind
+            , ValueDeclaration $ ValueSignature () sourceName exferenceSource
+            ]
+      exferenceEnvironment <- expectRight
+        (mkEnvironment exferenceDeclarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      exferenceSession <- expectRight $
+        mkExferenceSession exferenceEnvironment
+      exferenceRequest <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = exferenceTarget
+        , requestGoal = FunctionType inputType resultType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            { exferenceAllowUnused = True
+            , exferenceMaximumSteps = 512
+            , exferenceMaximumQueueSize = Just 256
+            }
+        }
+      exferenceResults <- expectRight $
+        runExferenceQuery exferenceSession exferenceRequest
+      exferenceCandidate <- maybe
+        (fail "Exference did not eliminate the loaded product")
+        pure
+        $ find (candidateEliminatesProduct sourceName)
+        $ concatMap (batchCandidates . resultSearch) exferenceResults
+      exferenceGenerated <- expectRight $
+        renderExferenceCandidateDefinition Unqualified exferenceCandidate
+
+      let fixture = unlines
+            [ "module LoadedProductEliminationFixture where"
+            , ""
+            , "data StructuredInput = StructuredInput"
+            , "data StructuredResult = StructuredResult"
+            , ""
+            , "structuredSource ::"
+            , "  (forall a. a -> StructuredResult, ())"
+            , "structuredSource = (const StructuredResult, ())"
+            , ""
+            , "structuredDjinn :: StructuredInput -> StructuredResult"
+            , djinnGenerated
+            , ""
+            , "structuredExference :: StructuredInput -> StructuredResult"
+            , exferenceGenerated
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XHaskell2010"
+          , "-XRankNTypes"
+          , "-XImpredicativeTypes"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected loaded-product rank-N elimination\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors
+            ++ "\nDjinn generated:\n" ++ djinnGenerated
+            ++ "\nExference generated:\n" ++ exferenceGenerated)
+          ExitSuccess exitCode
+  , testCase "eliminate a product exposed only by provider assignment" $ do
+      inputName <- expectRight $ parseName "AssignedInput"
+      resultName <- expectRight $ parseName "AssignedResult"
+      sourceName <- expectRight $ parseName "assignedProductSource"
+      targetName <- expectRight $ mkIdentifier "assignedProductElimination"
+      target <- expectRight $ mkDefinitionName targetName
+      let providerVariable = FlexibleVariable 0
+          fieldVariable = FlexibleVariable 1
+          inputType = TypeConstructor inputName
+          resultType = TypeConstructor resultName
+          fieldType = ForallType [fieldVariable] [] $
+            FunctionType (TypeVariable fieldVariable) resultType
+          assignedProduct = TupleType Boxed
+            [fieldType, TupleType Boxed []]
+          providerType = ForallType [providerVariable] [] $
+            TypeVariable providerVariable
+          declarations =
+            [ AbstractTypeDeclaration () inputName ProperTypeKind
+            , AbstractTypeDeclaration () resultName ProperTypeKind
+            , ValueDeclaration $ ValueSignature () sourceName providerType
+            ]
+          assignment = ProviderInstantiationAssignment
+            { providerInstantiationAssignmentProvider = sourceName
+            , providerInstantiationAssignmentArguments = [assignedProduct]
+            }
+      assignedArgument <- expectRight $
+        specifiedVisibleTypeArgument assignedProduct
+      let referencesAssignedSource expression = case expression of
+            Local _ -> False
+            Global _ -> False
+            Lambda _ body -> referencesAssignedSource body
+            Apply function argument ->
+              referencesAssignedSource function ||
+                referencesAssignedSource argument
+            VisibleTypeApplication (Global occurrence) argument ->
+              occurrence == sourceName && argument == assignedArgument
+            VisibleTypeApplication function _ ->
+              referencesAssignedSource function
+            Tuple elements -> any referencesAssignedSource elements
+            Hole _ -> False
+            Let _ value body ->
+              referencesAssignedSource value || referencesAssignedSource body
+            Case scrutinee alternatives ->
+              referencesAssignedSource scrutinee ||
+                any (referencesAssignedSource . snd) alternatives
+          appliesLocalField expression = case expression of
+            Apply (Local _) (Local _) -> True
+            Local _ -> False
+            Global _ -> False
+            Lambda _ body -> appliesLocalField body
+            Apply function argument ->
+              appliesLocalField function || appliesLocalField argument
+            VisibleTypeApplication function _ -> appliesLocalField function
+            Tuple elements -> any appliesLocalField elements
+            Hole _ -> False
+            Let _ value body ->
+              appliesLocalField value || appliesLocalField body
+            Case scrutinee alternatives ->
+              appliesLocalField scrutinee ||
+                any (appliesLocalField . snd) alternatives
+          isAssignedElimination candidate =
+            candidateEliminatesProduct sourceName candidate &&
+              case candidateOutput candidate of
+                FunctionClause _ _ body ->
+                  referencesAssignedSource body && appliesLocalField body
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = FunctionType inputType resultType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            { exferenceAllowUnused = True
+            , exferenceMaximumSteps = 128
+            , exferenceMaximumQueueSize = Just 128
+            }
+        }
+      results <- expectRight $ runExferenceQueryWithInstantiationAssignments
+        session [assignment] request
+      let candidates = concatMap
+            (batchCandidates . resultSearch) results
+      _ <- maybe
+        (fail "the assigned rank-N product was not visibly eliminated")
+        pure
+        $ find isAssignedElimination candidates
+      pure ()
   , testCase "run a checked Exference session through the shared envelope" $ do
       checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
       session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
@@ -3898,6 +4100,37 @@ referencesVisibleGlobal target expression = case expression of
   Case scrutinee alternatives ->
     referencesVisibleGlobal target scrutinee ||
       any (referencesVisibleGlobal target . snd) alternatives
+
+candidateEliminatesProduct
+  :: Name
+  -> Candidate ty details (FunctionClause local)
+  -> Bool
+candidateEliminatesProduct target candidate = case candidateOutput candidate of
+  FunctionClause _ _ body -> eliminates body
+ where
+  eliminates expression = case expression of
+    Local _ -> False
+    Global _ -> False
+    Lambda _ body -> eliminates body
+    Apply function argument -> eliminates function || eliminates argument
+    VisibleTypeApplication function _ -> eliminates function
+    Tuple elements -> any eliminates elements
+    Hole _ -> False
+    Let sourcePattern value body ->
+      (productPattern sourcePattern && referencesGlobal target value) ||
+        eliminates value || eliminates body
+    Case scrutinee alternatives ->
+      ( referencesGlobal target scrutinee
+          && any (productPattern . fst) alternatives
+      ) || eliminates scrutinee || any (eliminates . snd) alternatives
+
+  productPattern sourcePattern = case sourcePattern of
+    Bind _ -> False
+    Wildcard -> False
+    Constructor name _ ->
+      nameSpecial name == Just (TupleConstructor Boxed 2)
+    TuplePattern elements -> length elements == 2
+    As _ nested -> productPattern nested
 
 firstExferenceCandidate :: [ExferenceResult] -> IO ExferenceCandidate
 firstExferenceCandidate results = case

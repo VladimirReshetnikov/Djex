@@ -42,6 +42,7 @@ import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import Data.Sequence
 import Numeric.Natural (Natural)
 
@@ -182,6 +183,12 @@ data SearchNode = SearchNode
     -- ^ Complete ordered leading-binder assignments supplied for exact
     -- retained globals. Vectors remain correlated through search instead of
     -- being expanded from the historical candidate pools.
+  , nodeAggregateDonations :: Map.Map TVarId (Set.Set QualifiedName)
+    -- ^ Scalar globals already exposed structurally at a particular goal
+    -- hole. Singleton elimination preserves that hole, so this branch-local
+    -- marker prevents rediscovering the same donation forever while allowing
+    -- the same polymorphic global at a genuinely new application or result
+    -- hole.
   , nodeDeconstructors  :: [DeconstructorBinding]
   , nodeQueryClassEnv   :: QueryClassEnv
   , nodeExpression      :: Expression

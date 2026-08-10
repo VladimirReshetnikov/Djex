@@ -17,7 +17,7 @@ module Language.Haskell.Exference.Core.ExpressionCheck
   )
 where
 
-import Control.Monad (foldM, unless, when, zipWithM_)
+import Control.Monad (foldM, replicateM, unless, when, zipWithM_)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict (StateT (..), gets, modify', runStateT)
 import qualified Data.IntMap.Strict as IntMap
@@ -57,6 +57,7 @@ import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.Unify (unifyShared)
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
+import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 data ExpressionCheckError
@@ -722,16 +723,22 @@ checkValidatedExpression provenCandidateRigids
               (substituteScopedVariable binder replacement nestedBody)
 
     instantiateConstructor name scrutineeType = case
-        [ (deconstructorInput deconstructor, constructorFields alternative)
-        | deconstructor <- deconstructors
-        , alternative <- deconstructorConstructors deconstructor
-        , constructorName alternative == name
-        ] of
-      [] -> throwCheck $ UnknownConstructor name
-      (input, fields) : _ -> do
-        (freshInput :| freshFields, _) <- freshenTypes (input :| fields) []
-        unifyTypes scrutineeType freshInput
+        SharedName.nameSpecial name of
+      Just (SharedName.TupleConstructor boxity arity) -> do
+        freshFields <- replicateM arity freshTypeVariable
+        unifyTypes scrutineeType $ TypeTuple boxity freshFields
         mapM zonk freshFields
+      _ -> case
+          [ (deconstructorInput deconstructor, constructorFields alternative)
+          | deconstructor <- deconstructors
+          , alternative <- deconstructorConstructors deconstructor
+          , constructorName alternative == name
+          ] of
+        [] -> throwCheck $ UnknownConstructor name
+        (input, fields) : _ -> do
+          (freshInput :| freshFields, _) <- freshenTypes (input :| fields) []
+          unifyTypes scrutineeType freshInput
+          mapM zonk freshFields
 
     -- Trying declarations from one unchanged state gives empty datatypes the
     -- same independent unification semantics as ordinary constructors while
@@ -1009,7 +1016,9 @@ validateExpressionPatternArities constructorArities = inspectExpression
     SharedGenerated.Wildcard -> Right ()
     SharedGenerated.Constructor name arguments -> do
       expected <- maybe (Left $ UnknownConstructor name) Right
-        $ Map.lookup name constructorArities
+        $ case SharedName.nameSpecial name of
+          Just (SharedName.TupleConstructor _ arity) -> Just arity
+          _ -> Map.lookup name constructorArities
       let actual = SharedCollection.observedListLength expected arguments
       unless (actual == expected) $ Left $ PatternArity name expected actual
       mapM_ inspectPattern arguments

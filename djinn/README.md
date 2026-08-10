@@ -881,20 +881,23 @@ Each retained scalar specialization or exact vector produces a direct premise
 for that provider. The structural and, when relevant, nominal provider plans
 also carry the existing query-local and loaded-scheme instantiation premises,
 so one proof can compose historical inference with external evidence. For a
-wholly vacuous vector the structural premise remains safe because no selected
-argument can affect the provider body. A non-vacuous exact vector enters the
-structural family only when the prepared datatype expansion preserves every
-reached argument at its own nominal boundary. The complete vector is marked
-before substitution, so this includes datatype structure inside an assigned
-type and scheme-owned arguments later applied to an assigned higher-kinded
-head. Each relevant argument must retain its own nested correlations and feed a
-datatype formal that is observable in at least one constructor field. Faithful
-fields and faithful correlated parameters therefore remain available for
-elimination, while a wholly phantom parameter or an independently erased
-duplicate position falls back to the nominal family. Recursive, unknown, and
+wholly vacuous scalar tuple or exact vector the structural premise remains safe
+because no selected argument can affect the provider body. A non-vacuous
+specialization enters the structural family only when the prepared datatype
+expansion preserves every reached argument at its own nominal boundary. The
+complete vector is marked before substitution, so this includes datatype
+structure inside an assigned type and scheme-owned arguments later applied to
+an assigned higher-kinded head. Each relevant argument must feed a datatype
+formal observable in at least one constructor field. That is only the boundary
+gate: every marker-bearing field is then checked recursively, so all nested
+correlations must survive and one faithful sibling cannot mask an erased one.
+Fully faithful fields and correlated parameters therefore remain available for
+elimination, while a wholly phantom parameter or any independently erased
+occurrence falls back to the nominal family. Recursive, unknown, and
 fully applied empty datatypes retain their complete opaque identity, matching
 formula compilation. This prevents a phantom datatype projection from
-presenting an exact assignment at a different nominal result type. For a nonempty call,
+presenting a selected provider argument at a different nominal result type. For
+a nonempty call,
 those enriched plans run
 after the historical plain, nominal, and query-local plans but before the
 evidence-free loaded tails: a productive loaded stream therefore cannot spend

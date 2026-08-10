@@ -855,9 +855,12 @@ Candidate types are synonym-expanded in the sealed session and remain closed,
 context-free proper types. Assignment arguments are also synonym-expanded and
 must be lexically closed and representable as specified visible arguments, but
 an exact argument may itself be a contextual polytype. Its nested constraints
-remain part of the selected type rather than becoming provider obligations. The
-legacy scalar Candidate route remains proper-type-only and continues to check
-every candidate at kind `Type`.
+remain part of the selected type rather than becoming provider obligations.
+Those constraints are checked against the authoritative class-parameter kinds
+in the sealed shared environment, so a contextual argument may apply a
+methodless class parameter of kind `Type -> Type` to a closed nominal family.
+The legacy scalar Candidate route remains proper-type-only and continues to
+check every candidate at kind `Type`.
 
 The legacy assignment runner infers each leading binder's ground kind from the
 retained provider body, defaults a vacuous binder to `Type`, and checks the

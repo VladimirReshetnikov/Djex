@@ -245,9 +245,13 @@ validator runs during live search sealing, so neither path can resolve an
 ambiguous name by list order. It also validates unused function and constructor
 names through the shared generated-syntax boundary, and rejects unbound or
 duplicate local identities before its inference map can hide a malformed
-pattern. Rank-N occurrences are validated across unused bindings, datatype
-fields, the complete class/instance environment, expected constraints, and
-generated annotations rather than only when inference happens to reach them.
+pattern. Every specified visible type argument is reconstructed in an
+independent binder namespace; its complete type is validated and every nested
+constraint class must occur in the sealed class environment before inference
+can consume the application. Rank-N occurrences are validated across unused
+bindings, datatype fields, the complete class/instance environment, expected
+constraints, and generated annotations rather than only when inference happens
+to reach them.
 The checker and search use both the same opaque, alpha-aware unifier and the
 same scoped provider-use rules. An exact quantified occurrence remains opaque;
 a bounded rule can shallowly subsume one context-free prenex scheme to another;
@@ -962,7 +966,7 @@ inference, same-provider kind-vector equality, recursive conversion of that
 supplied kind, or forcing the paired type. Cyclic kinds and finite trees above
 129 nodes thus fail after a bounded observation, while the shared 64-tuple
 constructor's right-associated all-`Type` kind remains accepted at exactly
-`2 * 64 + 1` nodes. That kind capacity is separate from the four-argument
+`2 * 64 + 1` nodes. That kind capacity is separate from the five-argument
 provider-vector limit.
 
 Every candidate or argument is synonym-elaborated in the sealed session. The
@@ -977,8 +981,10 @@ body occurrence capable of proving its source kind; that `GroundKind` is
 therefore caller-attested rather than inferred by Exference.
 Repeated assignments naming one provider must agree on their complete kind
 vector before their type vectors are alpha-deduplicated. Assignment arguments
-in both forms must be closed, context-free, and representable as specified
-visible type arguments.
+in both forms must be lexically closed and representable as specified visible
+type arguments. An exact argument may itself be a contextual polytype; its
+nested constraints remain part of the selected type rather than becoming
+provider obligations.
 The complete substituted provider body is independently checked at kind
 `Type`, after which the private core rechecks provider closure, context, arity,
 and the lowered visible-argument shape. The legacy route supports

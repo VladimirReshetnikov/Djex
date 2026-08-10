@@ -304,11 +304,13 @@ kind vectors for repeated assignments to one provider must agree before type
 vectors are alpha-deduplicated. `GroundKind` is `Kind Void`, so an unresolved
 kind variable cannot cross this boundary.
 
-Every argument in either form must be closed, context-free, and representable
-as a specified visible type argument. Both backends substitute the complete
-vector and independently check that the whole specialized body has kind `Type`
-in the sealed inventory. Exference then rechecks the retained scheme's closure,
-context, arity, and visible-argument shape at its private search boundary. The
+Every argument in either form must be lexically closed and representable as a
+specified visible type argument. A contextual polytype is accepted: its nested
+constraints remain inside the selected argument rather than becoming provider
+obligations. Both backends substitute the complete vector and independently
+check that the whole specialized body has kind `Type` in the sealed inventory.
+Exference then rechecks the retained scheme's closure, provider context, arity,
+and visible-argument shape at its private search boundary. The
 kinded form supports a bare or partially applied higher-kinded constructor at a
 vacuous position and can mix it with a closed impredicative `Type` argument.
 Unlike its scalar route, either exact Exference route may also instantiate
@@ -327,6 +329,16 @@ provider remains part of the key, so an alpha-identical scheme under another
 name receives no evidence. Target-named Djinn specializations remain
 diagnostic-only, and Exference's normal exact target exclusion keeps the
 requested definition out of provider search.
+
+For Djinn, a non-vacuous vector participates in the structural datatype
+projection only when each relevant argument has faithful nested flow and its
+corresponding declaration parameter is observable in constructor fields. The
+vector is marked before substitution, covering phantom structure inside an
+assigned type and later arguments to an assigned higher-kinded head. Recursive,
+unknown, and fully applied empty datatypes retain compilation's complete opaque
+identity. This occurrence-sensitive boundary keeps valid constructor
+elimination that a whole-formula nominal comparison would discard, while
+independently erased phantom positions remain nominal-only.
 
 The original runners retain their exact historical behavior. They delegate
 through the empty candidate path, and an explicit empty call to either the
@@ -627,11 +639,14 @@ The shared generated-term API represents this with
 type and alpha-normalizes quantified binders. The complete value is available
 through `visibleTypeArgumentClosedType`; `visibleTypeArgumentType` remains the
 monotype-only compatibility projection. The independent Exference checker
-consumes one flexible leading binder for each node and accepts either bounded
-form. Open arguments such as `@a` and arbitrary caller-directed instantiation
-remain outside the API invariant. Djinn's bounded axiom routes can also retain
-the node for vacuous local or loaded binders; its historical `HExpr` projection
-rejects the shared node instead of erasing it.
+first reconstructs each complete specified payload in a checker-local binder
+namespace, validates its full type, and requires every nested constraint class
+to exist in the sealed class environment. It then consumes one flexible
+leading binder for each node and accepts either bounded form. Open arguments
+such as `@a` and arbitrary caller-directed instantiation remain outside the API
+invariant. Djinn's bounded axiom routes can also retain the node for vacuous
+local or loaded binders; its historical `HExpr` projection rejects the shared
+node instead of erasing it.
 
 Candidate source containing such a node must be compiled with
 `TypeApplications`. Its enclosing signature will commonly also need

@@ -313,13 +313,28 @@ A vacuous binder supplies no body constraint from which its source kind could
 be inferred; its higher kind is therefore frontend evidence, not a backend
 inference. This admits a bare or partially applied higher-kinded constructor at
 such a position, including vectors that also contain a closed impredicative
-`Type` argument. Multiple distinct vectors may be retained for the same
-provider when their complete kind vectors agree; regressions exercise two such
+`Type` argument. An exact argument must be lexically closed but may itself be a
+contextual polytype such as `forall a. Eq a => a -> a`; that nested context is
+part of the selected type, not an obligation of the provider scheme. Multiple
+distinct vectors may be retained for the same provider when their complete
+kind vectors agree; regressions exercise two such
 choices at the genuinely higher-order kind `(Type -> Type) -> Type`. Both
 assignment forms retain the 32-vector and five-argument bounds, the kinded form
 adds the 129-node per-kind bound, and contextual provider schemes remain
 unsupported. The legacy scalar `ProviderInstantiationCandidate` entrances are
 unchanged and remain proper-type-only.
+
+Djinn marks the complete exact vector before substituting it into a provider and
+admits the resulting non-vacuous premise to its constructor-expanding search
+projection only when every reached datatype argument remains observable through
+its own formal. This checks structure inside an assigned type as well as later
+arguments applied to an assigned higher-kinded head. It preserves useful
+elimination through faithful and correlated constructor fields while routing
+wholly phantom parameters and independently erased repeated positions through
+the nominal projection alone. Recursive, unknown, and parameterized empty
+types retain the opaque complete-application identity used by compilation.
+Consequently structural equality cannot turn an exact visible application into
+a nominally different one after phantom information is erased.
 Exference can also forward a context-free quantified provider with no free
 flexible variables to a less-general such goal; provider binders are solved
 with monotypes or, in the guarded Quick-Look sense, with quantified subtrees

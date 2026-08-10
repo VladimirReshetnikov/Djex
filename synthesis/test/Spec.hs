@@ -4366,6 +4366,22 @@ generatedTests = testGroup "generated syntax"
   , testCase "treat an empty mixed application spine as identity" $ do
       let function = Local (0 :: Int)
       applyExpressionArguments function [] @?= function
+  , testCase "leave mixed application argument payloads lazy" $ do
+      let function = Local (0 :: Int)
+          poisonedTerm :: Expression Int
+          poisonedTerm = error "term application payload was forced"
+          poisonedTypeArgument :: VisibleTypeArgument
+          poisonedTypeArgument =
+            error "visible type argument payload was forced"
+      _ <- evaluate $ applyExpressionArguments function
+        [ VisibleTypeArgumentArgument inferredVisibleTypeArgument
+        , TermArgument poisonedTerm
+        ]
+      _ <- evaluate $ applyExpressionArguments function
+        [ TermArgument $ Local 1
+        , VisibleTypeArgumentArgument poisonedTypeArgument
+        ]
+      pure ()
   , testCase "construct a wide mixed application spine without deferred folds" $ do
       let width = 200000
           function = Local (-1 :: Int)

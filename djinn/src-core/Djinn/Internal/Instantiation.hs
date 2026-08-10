@@ -118,6 +118,34 @@ data ProviderInstantiationPremises = ProviderInstantiationPremises
         Map.Map Symbol (Symbol, [SharedGenerated.VisibleTypeArgument])
     }
 
+-- Structural lowering may erase a caller-supplied type argument before proof
+-- search sees it. The prepared environment marks the complete simultaneous
+-- substitution, then checks every reached datatype-argument boundary. This
+-- catches phantom loss inside an argument and through a higher-kinded head
+-- without rejecting constructor fields which do preserve the choice. Nominal
+-- lowering preserves the full application and therefore passes no checker. A
+-- wholly vacuous vector remains accepted because no marker reaches the body.
+type ProviderInstantiationFidelity =
+    [String]
+    -> [SharedType.Type String]
+    -> SharedType.Type String
+    -> Either String Bool
+
+retainsProviderInstantiationFidelity
+    :: Maybe ProviderInstantiationFidelity
+    -> InstantiationScheme
+    -> [SharedType.Type String]
+    -> Bool
+retainsProviderInstantiationFidelity fidelityTranslator scheme arguments =
+    case fidelityTranslator of
+        Nothing -> True
+        Just checkFidelity -> case checkFidelity
+                (schemeBinders scheme)
+                arguments
+                (schemeBody scheme) of
+            Right retainedFidelity -> retainedFidelity
+            Left _ -> False
+
 -- One retained logical axiom plus the explicit type arguments required when
 -- its proof evidence cannot safely collapse to an implicitly instantiated
 -- occurrence. The latter is populated only when a leading binder is absent
@@ -439,17 +467,21 @@ loadedInstantiationAxioms translator visibleArgument variableSpellings
 -- it. Scheme order is the prepared environment's declaration order; candidate
 -- order is the caller's first-occurrence order for that provider. A provider
 -- receives no candidate associated with another provider, even when their
--- quantified schemes are alpha-equivalent.
+-- quantified schemes are alpha-equivalent. When a structural checker is
+-- supplied, a completed Cartesian tuple is retained only if lowering preserves
+-- that exact vector; nominal specialization supplies no checker.
 providerInstantiationPremises
     :: String
     -> (SharedType.Type String -> Either String Formula)
+    -> Maybe ProviderInstantiationFidelity
     -> [(Symbol, Formula)]
     -> [( Symbol
         , SharedType.Type String
         , SharedGenerated.VisibleTypeArgument
         )]
     -> ProviderInstantiationPremises
-providerInstantiationPremises symbolPrefix translator schemes candidates =
+providerInstantiationPremises
+        symbolPrefix translator fidelityTranslator schemes candidates =
     ProviderInstantiationPremises premises applications
   where
     retained = take maxProviderInstantiationPremises $ concatMap specialize schemes
@@ -478,6 +510,8 @@ providerInstantiationPremises symbolPrefix translator schemes candidates =
             , Right instantiated <-
                 [instantiateSchemeBody scheme $ map second tuple]
             , Right formula <- [translator instantiated]
+            , retainsProviderInstantiationFidelity
+                fidelityTranslator scheme (map second tuple)
             ]
       where
         providerCandidates =
@@ -506,12 +540,7 @@ providerInstantiationPremises symbolPrefix translator schemes candidates =
 providerInstantiationAssignmentPremises
     :: String
     -> (SharedType.Type String -> Either String Formula)
-    -> Maybe
-        ( [String]
-        -> [SharedType.Type String]
-        -> SharedType.Type String
-        -> Either String Bool
-        )
+    -> Maybe ProviderInstantiationFidelity
     -> [(Symbol, Formula)]
     -> [( Symbol
         , [( SharedType.Type String
@@ -550,26 +579,9 @@ providerInstantiationAssignmentPremises
             , Right instantiated <-
                 [instantiateSchemeBody scheme $ map fst assignment]
             , Right formula <- [translator instantiated]
-            , retainsTranslationFidelity scheme assignment
+            , retainsProviderInstantiationFidelity
+                fidelityTranslator scheme (map fst assignment)
             ]
-
-    -- A structural provider premise may erase a nominal assignment through a
-    -- phantom datatype parameter.  The prepared compiler marks the complete
-    -- exact vector before substituting it into the scheme, then checks each
-    -- reached datatype-argument boundary.  This catches erasure inside an
-    -- assigned type and through an assigned higher-kinded head without the
-    -- whole-formula comparison which rejects faithful constructor fields.
-    -- Nominal premises retain complete applications and need no companion
-    -- check. A wholly vacuous binder remains accepted because its marker never
-    -- reaches the provider body.
-    retainsTranslationFidelity scheme assignment = case fidelityTranslator of
-            Nothing -> True
-            Just checkFidelity -> case checkFidelity
-                    (schemeBinders scheme)
-                    (map fst assignment)
-                    (schemeBody scheme) of
-                Right retainedFidelity -> retainedFidelity
-                Left _ -> False
 
     schemeSourceFromFormula formula = case formula of
         PVar symbol -> opaqueSymbolSource symbol

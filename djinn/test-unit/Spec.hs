@@ -1507,6 +1507,21 @@ testRankNTypeAtoms = do
             [ correlatedProviderName ++ " @MonoToken"
             , "@(forall a0_0. a0_0 -> a0_0)"
             ]) correlatedRendered
+    correlatedScalarResult <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationCandidates correlatedSession
+            [ providerChoice correlatedProviderName tokenType
+            , providerChoice correlatedProviderName quantifiedIdentity
+            ]
+            correlatedRequest
+    correlatedScalarRendered <-
+        renderStableCandidates correlatedScalarResult
+    assertBool
+        ("a faithful scalar provider tuple was lost to structural fidelity " ++
+            "checking: " ++ show correlatedScalarRendered)
+        $ any (\term -> all (`isInfixOf` term)
+            [ correlatedProviderName ++ " @MonoToken"
+            , "@(forall a0_0. a0_0 -> a0_0)"
+            ]) correlatedScalarRendered
 
     -- The priority plan exposes an exact vacuous choice before a bare provider
     -- can shadow it, but it must not replace the historical provider superset.

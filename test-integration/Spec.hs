@@ -2769,8 +2769,8 @@ tests = testGroup "Djex facade"
             ++ "\nExference generated:\n" ++ exferenceGenerated)
           ExitSuccess exitCode
   , testCase
-      ("reject phantom assignment mismatch and compile concrete exact "
-        ++ "matches through both engines") $
+      ("reject phantom provider mismatches and compile concrete exact "
+        ++ "assignments through both engines") $
       do
         className <- expectRight $ parseName "Assignable"
         boxName <- expectRight $ parseName "ContextualBox"
@@ -2868,6 +2868,10 @@ tests = testGroup "Djex facade"
               , providerInstantiationAssignmentArguments =
                   [nestedAssignmentType]
               }
+            nestedScalarCandidate = ProviderInstantiationCandidate
+              { providerInstantiationCandidateProvider = nestedProviderName
+              , providerInstantiationCandidateType = nestedAssignmentType
+              }
             higherAssignment = ProviderInstantiationAssignment
               { providerInstantiationAssignmentProvider = higherProviderName
               , providerInstantiationAssignmentArguments =
@@ -2941,6 +2945,17 @@ tests = testGroup "Djex facade"
         assertBool
           "Djinn retained p @(Phantom Int) for a Phantom Bool goal"
           $ not $ any usesNestedExact nestedCandidates
+        nestedScalarResult <- expectRight $
+          runDjinnQueryWithInstantiationCandidates
+            djinnSession [nestedScalarCandidate] nestedRequest
+        let nestedScalarCandidates =
+              batchCandidates $ resultSearch nestedScalarResult
+        assertBool
+          "the nested scalar phantom fixture produced no safe candidate"
+          $ not $ null nestedScalarCandidates
+        assertBool
+          "Djinn retained scalar p @(Phantom Int) for a Phantom Bool goal"
+          $ not $ any usesNestedExact nestedScalarCandidates
         nestedSafeCandidate <- maybe
           (fail $ "Djinn returned no provider-free alternative: "
             ++ show nestedCandidates)

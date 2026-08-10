@@ -2,6 +2,12 @@
 
 Date: 2026-08-09
 
+> **Successor.** The
+> [six-binder widening](2026-08-10-six-binder-instantiation.md) raises this
+> family's shared leading-chain limit from five to six while retaining the
+> fixed tuple-attempt and axiom allowances. The limits below describe the
+> historical five-binder revision.
+
 ## Outcome
 
 Djinn can now specialize a polymorphic hypothesis at a closed monotype already

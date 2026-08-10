@@ -2,6 +2,12 @@
 
 Date: 2026-08-09
 
+> **Successor.** The
+> [six-binder widening](2026-08-10-six-binder-instantiation.md) applies this
+> same query-correlated family to six leading binders without changing its
+> attempt or retained-axiom caps. The five-binder statements below are
+> historical facts for this revision.
+
 ## Outcome
 
 Djinn can now recover a multi-binder guarded-impredicative instance when the

@@ -227,7 +227,7 @@ recover.
 
 The checked Djinn and Exference runners first bound either outer relation at 32
 before entering an element. Assignment runners also bound each argument spine
-at four before entering an argument. The runners then resolve every `Name`
+at six before entering an argument. The runners then resolve every `Name`
 against the exact sealed session and require an eligible context-free retained
 polymorphic scheme whose complete leading arity matches the vector.
 
@@ -240,7 +240,7 @@ vector equality, backend kind conversion, and forcing the paired type. It
 rejects a cyclic kind or any finite tree above the bound without entering an
 unbounded remainder, while preserving the shared 64-tuple constructor's
 129-node right-associated all-`Type` kind. The latter is a capacity within one
-argument's kind, independent of the five-argument vector limit.
+argument's kind, independent of the six-argument vector limit.
 
 Each scalar candidate is elaborated as a closed, context-free proper type in
 the sealed session's synonym and kind scope. That compatibility relation
@@ -305,7 +305,7 @@ application. For a nonempty evidence call this
 strict superset runs before the evidence-free loaded tails, preventing a
 productive loaded proof stream from starving the supplied route at the global
 candidate cutoff.
-Scalar pools retain their five-binder, 512-attempt, and sixteen-per-scheme
+Scalar pools retain their six-binder, 512-attempt, and sixteen-per-scheme
 tuple windows; exact vectors bypass those reconstruction windows while
 remaining within the 32-premise family bound. The independent proof checker
 sees each specialization before lowering rewrites its synthetic proof identity
@@ -326,7 +326,7 @@ typing rules, not permission for ordinary unification to decompose a polytype
 or a claim of general impredicative inference.
 
 Djinn has four bounded instantiation-axiom families. The historical
-query-local family instantiates up to five leading binders at variables,
+query-local family instantiates up to six leading binders at variables,
 opened-forall skolems, premise-scope spellings, and guarded quantified query
 subtrees. A separate positive-only query-correlated family fairly schedules
 that same finite vocabulary. It retains only tuples which pair a quantified

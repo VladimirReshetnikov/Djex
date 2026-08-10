@@ -10,6 +10,9 @@ Date: 2026-08-01
 > [five-binder successor](2026-08-09-five-binder-instantiation.md) raises the
 > loaded-scheme eligibility boundary from four to five while preserving the
 > fixed attempt and axiom caps described below.
+> The later
+> [six-binder successor](2026-08-10-six-binder-instantiation.md) raises that
+> same boundary to six and moves the conservative miss to seven.
 > The separate
 > [query-local closed-monotype extension](2026-08-09-query-local-closed-monotype-instantiation.md)
 > now admits closed query subtrees for hypotheses embedded in the requested

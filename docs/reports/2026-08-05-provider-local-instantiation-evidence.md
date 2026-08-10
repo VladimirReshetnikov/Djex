@@ -7,6 +7,10 @@
 > [exact provider-instantiation assignment report](2026-08-05-exact-provider-instantiation-assignments.md).
 > The later API does not reinterpret or replace
 > `ProviderInstantiationCandidate` lists.
+> The shared
+> [six-binder widening](2026-08-10-six-binder-instantiation.md) raises only the
+> finite leading-chain limit used by scalar tuple reconstruction; the scalar
+> association semantics documented below remain unchanged.
 
 ## Outcome
 

@@ -834,11 +834,11 @@ carry the `GroundKind` established by the frontend.
 
 All checked entrances run only after ordinary request preparation. Their
 outer lists are bounded at 32 before an element is entered. The assignment
-entrances additionally observe at most six cells of an argument spine to
-enforce the five-argument maximum before entering an argument. Each provider
+entrances additionally observe at most seven cells of an argument spine to
+enforce the six-argument maximum before entering an argument. Each provider
 must then resolve by exact `Name` to a retained loaded polymorphic scheme in the
 sealed session. An assignment must have that scheme's exact complete leading
-arity, between one and five, and cannot target a contextual scheme.
+arity, between one and six, and cannot target a contextual scheme.
 
 After those structural and provider checks, each supplied kind in the kinded
 entrance receives an independent productive node preflight under the public
@@ -848,7 +848,7 @@ into its internal kind representation, or forcing the paired type. A cyclic
 kind or a finite kind tree above 129 nodes is therefore rejected after only the
 bounded prefix is observed. The limit still accepts the shared 64-tuple
 constructor's right-associated all-`Type` kind, which has `2 * 64 + 1` nodes;
-this capacity is independent of the five arguments allowed in one
+this capacity is independent of the six arguments allowed in one
 provider-assignment vector.
 
 Candidate types are synonym-expanded in the sealed session and remain closed,
@@ -910,7 +910,7 @@ premise before conversion replaces its private identity with the real provider
 and ordered visible type applications. A target-named specialization remains
 diagnostic-only and cannot become a synthesized self-reference.
 
-The scalar route retains its bounded five-binder, 512-attempt, and
+The scalar route retains its bounded six-binder, 512-attempt, and
 sixteen-specializations-per-scheme tuple windows. Exact vectors bypass
 those reconstruction windows while sharing the 32-direct-premise family cap
 and the query cutoff and proof-search fuel left by earlier plans. Empty evidence
@@ -926,7 +926,7 @@ higher-kinded and mixed higher-kinded/impredicative assignments, vacuous
 higher-kinded evidence, same-provider kind-vector consistency, two distinct
 same-provider vectors at the genuine kind `(Type -> Type) -> Type`, kind
 mismatch, a four-binder vector beyond the scalar Cartesian prefix, ordered
-five-binder evidence, and a conservative six-binder boundary. This
+five- and six-binder evidence, and a conservative seven-binder boundary. This
 remains a bounded proof-producing extension, not general impredicative
 inference or higher-rank subsumption. See the original
 [provider-local candidate report](../docs/reports/2026-08-05-provider-local-instantiation-evidence.md)
@@ -939,7 +939,7 @@ and the
   type system. A query's prenex `forall`/constraint prefix is elaborated, and a
   nested forall, including one with a validated context, can be introduced in a
   positive formula position when its body is dictionary-independent.
-  A hypothesis-side context-free forall of at most five leading binders can
+  A hypothesis-side context-free forall of at most six leading binders can
   additionally be eliminated through bounded instantiation axioms: the chain is
   instantiated completely at candidates the sequent itself supplies (goal
   variables, opened-forall skolems, premise-scope variables, and quantified

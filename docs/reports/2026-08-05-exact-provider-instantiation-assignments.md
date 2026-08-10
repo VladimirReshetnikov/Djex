@@ -5,6 +5,9 @@
 > `maximumProviderInstantiationArguments` from four to five and moves the
 > conservative rejection boundary to six. Numeric limits and regression
 > expectations below describe this report's historical tree.
+> The subsequent
+> [six-binder successor](2026-08-10-six-binder-instantiation.md) raises the
+> shared limit again to six and moves rejection to seven.
 
 ## Outcome
 

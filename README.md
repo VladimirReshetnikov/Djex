@@ -80,6 +80,9 @@ Djinn's widened bounded hypothesis-instantiation rule is recorded in the
 The shared five-binder successor across Djinn, Exference, and exact provider
 evidence is recorded in the
 [2026-08-09 five-binder instantiation report](docs/reports/2026-08-09-five-binder-instantiation.md).
+The shared six-binder successor preserves the same finite schedules and moves
+the conservative boundary to seven in the
+[2026-08-10 six-binder instantiation report](docs/reports/2026-08-10-six-binder-instantiation.md).
 Its per-occurrence instantiation of loaded polymorphic values and closed source
 monotypes is recorded in the
 [2026-08-01 loaded polymorphic values report](docs/reports/2026-08-01-loaded-polymorphic-djinn-values.md).
@@ -233,7 +236,7 @@ context, in a positive position: arrow results, products, and datatype fields
 preserve that position, while each arrow parameter reverses it. As at the query
 root, the context contributes no proof premises, so the result must remain
 dictionary-independent. Djinn can also eliminate a hypothesis-side
-context-free `forall` of up to five leading binders. Its historical family
+context-free `forall` of up to six leading binders. Its historical family
 instantiates the complete chain at sequent-supplied candidates: the goal's type
 variables, skolems of opened positive occurrences, premise-scope variables,
 and — as guarded impredicativity — query subtrees that are independent of
@@ -286,7 +289,7 @@ flexible variables whose leading binders are all vacuous may instead select
 checked proper types already supplied below arrows or tuples in the query. Its
 residual body may mention ambient rigids opened from that same query. The
 candidates include complete closed context-free foralls, so search can emit
-`provider @(forall a0_0. a0_0 -> a0_0)`. The query route retains at most five
+`provider @(forall a0_0. a0_0 -> a0_0)`. The query route retains at most six
 binders and 32 combinations. Ordinary implicit instantiation remains first,
 and the instance-head route remains monotype-only.
 A richer frontend may instead pass either backend one complete, correlated
@@ -319,7 +322,7 @@ part of the selected type, not an obligation of the provider scheme. Multiple
 distinct vectors may be retained for the same provider when their complete
 kind vectors agree; regressions exercise two such
 choices at the genuinely higher-order kind `(Type -> Type) -> Type`. Both
-assignment forms retain the 32-vector and five-argument bounds, the kinded form
+assignment forms retain the 32-vector and six-argument bounds, the kinded form
 adds the 129-node per-kind bound, and contextual provider schemes remain
 unsupported. The legacy scalar `ProviderInstantiationCandidate` entrances
 remain proper-type-only.
@@ -475,10 +478,10 @@ for eleven independent sites without a general power-set search. Twelve sites
 expose the next central boundary: a proof requiring exactly six open and six
 opaque occurrences may remain inconclusive. After that complete structural
 no-axiom prefix, bounded instantiation plans cover many omitted middle subsets,
-but chains beyond five binders, constrained chains, and candidates outside the
+but chains beyond six binders, constrained chains, and candidates outside the
 finite query/value-signature vocabulary stay out of reach. Each structural or
-nominal instantiation family is capped per scheme and per family. Four- and
-five-binder historical query-local tuple selection fairly mixes source-order,
+nominal instantiation family is capped per scheme and per family. Four-,
+five-, and six-binder historical query-local tuple selection fairly mixes source-order,
 repeated, sparse, and Cartesian shapes while one- through three-binder schemes
 retain their historical order. The appended loaded-value family uses the same
 tuple shapes while alternating both ends of its source-ordered candidate list.

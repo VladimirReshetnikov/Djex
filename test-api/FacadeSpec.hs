@@ -372,7 +372,7 @@ facadeTests = testGroup "public Djex facade"
         mkExferenceSessionWithPolicy `seq` pure ()
       maximumProviderInstantiationCandidates @?= 32
       maximumProviderInstantiationAssignments @?= 32
-      maximumProviderInstantiationArguments @?= 5
+      maximumProviderInstantiationArguments @?= 6
       maximumProviderInstantiationKindNodes @?= 129
   , testCase "seals Djinn from the neutral environment vocabulary" $ do
       let checkedEnvironment

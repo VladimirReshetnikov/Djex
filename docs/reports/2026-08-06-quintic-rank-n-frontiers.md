@@ -5,6 +5,10 @@
 > raises the separate hypothesis and provider limit from four to five. The
 > occurrence-frontier fixtures now use six-binder sentinels so the structural
 > results below remain isolated from instantiation.
+> The later
+> [six-binder instantiation successor](2026-08-10-six-binder-instantiation.md)
+> moves those sentinels to seven binders without changing the quintic plan
+> family or its caps.
 
 Date: 2026-08-06
 

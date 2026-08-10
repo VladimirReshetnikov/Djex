@@ -515,7 +515,7 @@ tests = testGroup "Exference private engine boundaries"
             , groundProviderConstraints = []
             }
         ]
-  , testCase "provider instantiation admits five binders and rejects six" $ do
+  , testCase "provider instantiation admits six binders and rejects seven" $ do
       let token = TypeCons $ name "WideToken"
           quantified binder body = TypeForall [binder] [] body
           selected = quantified 10
@@ -528,29 +528,32 @@ tests = testGroup "Exference private engine boundaries"
                 (TypeVar 14) (TypeArrow (TypeVar 14) (TypeVar 14))
             , quantified 15 $ TypeArrow
                 (TypeArrow (TypeVar 15) token) (TypeVar 15)
+            , quantified 16 $ TypeArrow
+                (TypeVar 16) (TypeArrow token (TypeVar 16))
             ]
-          sixthArgument = quantified 16 $ TypeArrow
-            (TypeVar 16) (TypeArrow token (TypeVar 16))
-          fiveBinderProvider = TypeForall [0 .. 4] [] token
+          seventhArgument = quantified 17 $ TypeArrow
+            (TypeArrow (TypeVar 17) token)
+            (TypeArrow token (TypeVar 17))
           sixBinderProvider = TypeForall [0 .. 5] [] token
-      candidateProviderInstantiations [selected] fiveBinderProvider @?=
+          sevenBinderProvider = TypeForall [0 .. 6] [] token
+      candidateProviderInstantiations [selected] sixBinderProvider @?=
         [ GroundProviderInstantiation
-            { groundProviderArguments = replicate 5 selected
+            { groundProviderArguments = replicate 6 selected
             , groundProviderType = token
             , groundProviderConstraints = []
             }
         ]
       assignmentProviderInstantiations [exactArguments]
-          fiveBinderProvider @?=
+          sixBinderProvider @?=
         [ GroundProviderInstantiation
             { groundProviderArguments = exactArguments
             , groundProviderType = token
             , groundProviderConstraints = []
             }
         ]
-      candidateProviderInstantiations [selected] sixBinderProvider @?= []
+      candidateProviderInstantiations [selected] sevenBinderProvider @?= []
       assignmentProviderInstantiations
-          [exactArguments ++ [sixthArgument]] sixBinderProvider @?= []
+          [exactArguments ++ [seventhArgument]] sevenBinderProvider @?= []
   , testCase "generic deconstructors need no persistent flexible IDs" $ do
       let integer = TypeCons $ name "Int"
           box argument = TypeApp (TypeCons $ name "Box") argument

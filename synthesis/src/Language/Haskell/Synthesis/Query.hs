@@ -182,7 +182,7 @@ maximumProviderInstantiationAssignments = 32
 -- Checked adapters must bound an argument-list spine before entering any
 -- argument, so an over-wide or cyclic caller-built list fails finitely.
 maximumProviderInstantiationArguments :: Int
-maximumProviderInstantiationArguments = 5
+maximumProviderInstantiationArguments = 6
 
 -- | Maximum number of constructors in one caller-supplied provider kind.
 --

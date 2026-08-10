@@ -2364,9 +2364,9 @@ testRankNTypeAtoms = do
                 "@MonoFive4 @MonoFive5") `isInfixOf`)
             fiveAssignedRendered
 
-    -- Retaining a scheme remains an honesty witness. A leading chain beyond
-    -- the shared five-binder bound stays inconclusive even though every
-    -- required closed monotype and value is loaded in the environment.
+    -- Six leading binders use the same bounded route. This is the first
+    -- successor case, so cover both loaded reconstruction and one exact
+    -- assignment before moving the conservative boundary outward.
     let sixNames = map (sharedName . ("MonoSix" ++) . show)
             ([1 .. 6] :: [Int])
         sixResultName = sharedName "MonoSixResult"
@@ -2384,20 +2384,70 @@ testRankNTypeAtoms = do
             [valueDeclaration "monoSixProvider" sixProviderType]
     sixSession <- sealDjinnSessionFrom stableSession sixDeclarations
     sixLoaded <- runStableQuery sixSession
-        "doNotRefuteSixBinderLoadedScheme" "MonoSixResult"
-    assertEqual "a six-binder loaded scheme escaped its bound"
-        [] $ SharedSearch.batchCandidates $ SharedQuery.resultSearch sixLoaded
-    assertEqual "a bounded six-binder loaded-scheme miss was falsely refuted"
-        SharedQuery.NoEvidence $ SharedQuery.resultEvidence sixLoaded
+        "instantiateSixBinderLoadedScheme" "MonoSixResult"
+    sixLoadedRendered <- renderStableCandidates sixLoaded
+    assertBool
+        ("a six-binder loaded scheme was not instantiated: " ++
+            show sixLoadedRendered)
+        $ any (\term -> all (`isInfixOf` term) $
+            "monoSixProvider" :
+                map (("monoSixValue" ++) . show) ([1 .. 6] :: [Int]))
+            sixLoadedRendered
     sixAssignmentTarget <- expectShownRight $
-        SharedName.mkIdentifier "rejectSixBinderAssignment"
+        SharedName.mkIdentifier "retainSixBinderAssignment"
     sixAssignmentRequest <- expectShownRight $ Djex.parseDjinnRequest
         sixSession defaultQueryOptions sixAssignmentTarget
         "six-provider-assignment.djinn" "MonoSixResult"
-    expectAssignmentFailure "a six-binder assignment provider"
-        sixSession sixAssignmentRequest
-        [providerAssignment "monoSixProvider" $
-            map SharedType.TypeConstructor sixNames]
+    sixAssigned <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationAssignments
+            sixSession
+            [providerAssignment "monoSixProvider" $
+                map SharedType.TypeConstructor sixNames]
+            sixAssignmentRequest
+    sixAssignedRendered <- renderStableCandidates sixAssigned
+    assertBool
+        ("an exact six-binder assignment was not retained: " ++
+            show sixAssignedRendered)
+        $ any
+            (("monoSixProvider @MonoSix1 @MonoSix2 @MonoSix3 " ++
+                "@MonoSix4 @MonoSix5 @MonoSix6") `isInfixOf`)
+            sixAssignedRendered
+
+    -- Retaining a scheme remains an honesty witness. A leading chain beyond
+    -- the shared six-binder bound stays inconclusive even though every
+    -- required closed monotype and value is loaded in the environment.
+    let sevenNames = map (sharedName . ("MonoSeven" ++) . show)
+            ([1 .. 7] :: [Int])
+        sevenResultName = sharedName "MonoSevenResult"
+        sevenVariables = map (("seven" ++) . show) ([1 .. 7] :: [Int])
+        sevenProviderType = SharedType.ForallType sevenVariables [] $
+            foldr SharedType.FunctionType
+                (SharedType.TypeConstructor sevenResultName)
+                (map SharedType.TypeVariable sevenVariables)
+        sevenDeclarations =
+            map abstractClosed (sevenNames ++ [sevenResultName]) ++
+            zipWith
+                (\index name ->
+                    valueDeclaration ("monoSevenValue" ++ show index) $
+                        SharedType.TypeConstructor name)
+                ([1 ..] :: [Int]) sevenNames ++
+            [valueDeclaration "monoSevenProvider" sevenProviderType]
+    sevenSession <- sealDjinnSessionFrom stableSession sevenDeclarations
+    sevenLoaded <- runStableQuery sevenSession
+        "doNotRefuteSevenBinderLoadedScheme" "MonoSevenResult"
+    assertEqual "a seven-binder loaded scheme escaped its bound"
+        [] $ SharedSearch.batchCandidates $ SharedQuery.resultSearch sevenLoaded
+    assertEqual "a bounded seven-binder loaded-scheme miss was falsely refuted"
+        SharedQuery.NoEvidence $ SharedQuery.resultEvidence sevenLoaded
+    sevenAssignmentTarget <- expectShownRight $
+        SharedName.mkIdentifier "rejectSevenBinderAssignment"
+    sevenAssignmentRequest <- expectShownRight $ Djex.parseDjinnRequest
+        sevenSession defaultQueryOptions sevenAssignmentTarget
+        "seven-provider-assignment.djinn" "MonoSevenResult"
+    expectAssignmentFailure "a seven-binder assignment provider"
+        sevenSession sevenAssignmentRequest
+        [providerAssignment "monoSevenProvider" $
+            map SharedType.TypeConstructor sevenNames]
 
     -- Four-binder chains remain practical under the existing per-scheme and
     -- per-query attempt caps. The generated evidence is still the original
@@ -2449,12 +2499,29 @@ testRankNTypeAtoms = do
         $ "(forall a b c d e. RankNFive a b c d e) -> "
         ++ "RankNFive z y x w v"
 
+    -- The fair wide scheduler is arity-generic, so six-binder query-local
+    -- hypotheses retain both ordinary and non-lexical source-order uses.
+    runStableIdentity stableSession "instantiateSixBinderRankN"
+        $ "(forall a b c d e f. a -> b -> c -> d -> e -> f -> result) -> "
+        ++ "u -> v -> w -> x -> y -> z -> result"
+    let sixArgumentKind = foldr SharedKind.FunctionKind properKind $
+            replicate 6 properKind
+        sixArgumentConstructor =
+            SharedDeclaration.AbstractTypeDeclaration ()
+                (sharedName "RankNSix") sixArgumentKind
+    sixBinderSession <- sealDjinnSessionFrom stableSession
+        [sixArgumentConstructor]
+    runStableIdentity sixBinderSession "instantiateSixBinderInSourceOrder"
+        $ "(forall a b c d e f. RankNSix a b c d e f) -> "
+        ++ "RankNSix z y x w v u"
+
     -- A leading chain beyond the widened binder bound stays opaque. The honest
     -- inconclusive answer is retained: no candidate is invented and no
     -- refutation is manufactured.
-    unsupported <- runStableQuery stableSession "sixBinderOpaqueRankN"
-        $ "(forall a b c d e f. a -> b -> c -> d -> e -> f -> result) -> "
-        ++ "u -> v -> w -> x -> y -> z -> result"
+    unsupported <- runStableQuery stableSession "sevenBinderOpaqueRankN"
+        $ "(forall a b c d e f g. "
+        ++ "a -> b -> c -> d -> e -> f -> g -> result) -> "
+        ++ "t -> u -> v -> w -> x -> y -> z -> result"
     assertEqual "an uninstantiable rank-N chain unexpectedly found a candidate"
         [] $ SharedSearch.batchCandidates $ SharedQuery.resultSearch unsupported
     assertEqual "an uninstantiable opaque rank-N search was falsely refuted"
@@ -2534,15 +2601,15 @@ testRankNTypeAtoms = do
         ++ "((forall c. c), (forall d. d -> q), "
         ++ "(forall e. e -> e), (forall f. f -> f))"
 
-    -- Six-binder hypotheses stay beyond the instantiation-axiom bound, so
+    -- Seven-binder hypotheses stay beyond the instantiation-axiom bound, so
     -- this inhabitant specifically needs the pairwise frontier: two components
     -- use exact opaque transport while two sibling identities open
     -- structurally.
     runStableIdentity stableSession "wideMiddleOpacityRankNPair"
-        $ "(forall a b c d e f. (a, b, c, d, e, f)) -> "
-        ++ "(forall s t u v w x. (s, t, u, v, w, x) -> q) -> "
-        ++ "((forall v w x y z u. (v, w, x, y, z, u)), "
-        ++ "(forall s t u v w x. (s, t, u, v, w, x) -> q), "
+        $ "(forall a b c d e f g. (a, b, c, d, e, f, g)) -> "
+        ++ "(forall s t u v w x y. (s, t, u, v, w, x, y) -> q) -> "
+        ++ "((forall v w x y z u t. (v, w, x, y, z, u, t)), "
+        ++ "(forall s t u v w x y. (s, t, u, v, w, x, y) -> q), "
         ++ "(forall e. e -> e), (forall f. f -> f))"
 
     -- The dual pairwise frontier is independently necessary at five sites:
@@ -2550,40 +2617,40 @@ testRankNTypeAtoms = do
     -- with the historical extremes and singleton frontiers, this completes
     -- every independent choice subset through five sites.
     runStableIdentity stableSession "dualWideMiddleOpacityRankNPair"
-        $ "(forall a b c d e f. (a, b, c, d, e, f)) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> q) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> r) -> "
-        ++ "((forall v w x y z u. (v, w, x, y, z, u)), "
-        ++ "(forall v w x y z u. (v, w, x, y, z, u) -> q), "
-        ++ "(forall v w x y z u. (v, w, x, y, z, u) -> r), "
+        $ "(forall a b c d e f g. (a, b, c, d, e, f, g)) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> q) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> r) -> "
+        ++ "((forall v w x y z u t. (v, w, x, y, z, u, t)), "
+        ++ "(forall v w x y z u t. (v, w, x, y, z, u, t) -> q), "
+        ++ "(forall v w x y z u t. (v, w, x, y, z, u, t) -> r), "
         ++ "(forall e. e -> e), (forall f. f -> f))"
 
     -- Selecting two nested targets opens both of their required ancestor
     -- chains. The three wide siblings must remain exact, so neither a singleton
     -- plan nor a pair selection which forgets ancestry can inhabit this type.
     runStableIdentity stableSession "nestedWideMiddleOpacityRankNPair"
-        $ "(forall a b c d e f. (a, b, c, d, e, f)) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> q) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> r) -> "
-        ++ "((forall v w x y z u. (v, w, x, y, z, u)), "
-        ++ "(forall v w x y z u. (v, w, x, y, z, u) -> q), "
-        ++ "(forall v w x y z u. (v, w, x, y, z, u) -> r), "
+        $ "(forall a b c d e f g. (a, b, c, d, e, f, g)) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> q) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> r) -> "
+        ++ "((forall v w x y z u t. (v, w, x, y, z, u, t)), "
+        ++ "(forall v w x y z u t. (v, w, x, y, z, u, t) -> q), "
+        ++ "(forall v w x y z u t. (v, w, x, y, z, u, t) -> r), "
         ++ "(forall outer. (outer -> outer, "
         ++ "forall inner. inner -> inner)), "
         ++ "(forall other. (other -> other, "
         ++ "forall deep. deep -> deep)))"
 
-    -- The cubic frontier closes the first former pairwise gap. Six-binder
+    -- The cubic frontier closes the first former pairwise gap. Seven-binder
     -- hypotheses stay beyond the instantiation-axiom bound, so three exact
     -- transports plus three structural identities specifically require a 3/3
     -- selection.
     runStableIdentity stableSession "sixSiteCentralOpacityRankNTriple"
-        $ "(forall a b c d e f. (a, b, c, d, e, f)) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> q) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> r) -> "
-        ++ "((forall v w x y z u. (v, w, x, y, z, u)), "
-        ++ "(forall v w x y z u. (v, w, x, y, z, u) -> q), "
-        ++ "(forall v w x y z u. (v, w, x, y, z, u) -> r), "
+        $ "(forall a b c d e f g. (a, b, c, d, e, f, g)) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> q) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> r) -> "
+        ++ "((forall v w x y z u t. (v, w, x, y, z, u, t)), "
+        ++ "(forall v w x y z u t. (v, w, x, y, z, u, t) -> q), "
+        ++ "(forall v w x y z u t. (v, w, x, y, z, u, t) -> r), "
         ++ "(forall e. e -> e), (forall f. f -> f), "
         ++ "(forall g. g -> g))"
 
@@ -2592,14 +2659,14 @@ testRankNTypeAtoms = do
     -- with the historical, singleton, and pair frontiers this completes every
     -- independent choice subset through seven sites.
     runStableIdentity stableSession "sevenSiteTripleOpenRankN"
-        $ "(forall a b c d e f. (a, b, c, d, e, f)) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> q) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> r) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> z) -> "
-        ++ "((forall v w x y u t. (v, w, x, y, u, t)), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> q), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> r), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> z), "
+        $ "(forall a b c d e f g. (a, b, c, d, e, f, g)) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> q) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> r) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> z) -> "
+        ++ "((forall v w x y u t s. (v, w, x, y, u, t, s)), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> q), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> r), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> z), "
         ++ "(forall e. e -> e), (forall f. f -> f), "
         ++ "(forall g. g -> g))"
 
@@ -2607,30 +2674,30 @@ testRankNTypeAtoms = do
     -- well. This reaches a four-open/four-opaque formula at eight recorded
     -- sites without adding an unrestricted fourth-order frontier.
     runStableIdentity stableSession "nestedTripleRankNFrontier"
-        $ "(forall a b c d e f. (a, b, c, d, e, f)) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> q) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> r) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> z) -> "
-        ++ "((forall v w x y u t. (v, w, x, y, u, t)), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> q), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> r), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> z), "
+        $ "(forall a b c d e f g. (a, b, c, d, e, f, g)) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> q) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> r) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> z) -> "
+        ++ "((forall v w x y u t s. (v, w, x, y, u, t, s)), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> q), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> r), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> z), "
         ++ "(forall outer. ((forall e. e -> e), "
         ++ "(forall f. f -> f), (forall g. g -> g))))"
 
-    -- The quartic frontier closes the next balanced gap. Six-binder
+    -- The quartic frontier closes the next balanced gap. Seven-binder
     -- hypotheses remain beyond the instantiation-axiom bound, so four exact
     -- transports beside four structural identities specifically require a
     -- flat 4/4 selection.
     runStableIdentity stableSession "eightSiteCentralOpacityRankNQuartic"
-        $ "(forall a b c d e f. (a, b, c, d, e, f)) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> q) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> r) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> z) -> "
-        ++ "((forall v w x y u t. (v, w, x, y, u, t)), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> q), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> r), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> z), "
+        $ "(forall a b c d e f g. (a, b, c, d, e, f, g)) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> q) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> r) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> z) -> "
+        ++ "((forall v w x y u t s. (v, w, x, y, u, t, s)), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> q), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> r), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> z), "
         ++ "(forall e. e -> e), (forall f. f -> f), "
         ++ "(forall g. g -> g), (forall h. h -> h))"
 
@@ -2639,16 +2706,16 @@ testRankNTypeAtoms = do
     -- with the earlier frontiers this completes every independent choice
     -- subset through nine sites.
     runStableIdentity stableSession "nineSiteQuarticOpenRankN"
-        $ "(forall a b c d e f. (a, b, c, d, e, f)) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> q) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> r) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> z) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> m) -> "
-        ++ "((forall v w x y u t. (v, w, x, y, u, t)), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> q), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> r), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> z), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> m), "
+        $ "(forall a b c d e f g. (a, b, c, d, e, f, g)) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> q) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> r) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> z) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> m) -> "
+        ++ "((forall v w x y u t s. (v, w, x, y, u, t, s)), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> q), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> r), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> z), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> m), "
         ++ "(forall e. e -> e), (forall f. f -> f), "
         ++ "(forall g. g -> g), (forall h. h -> h))"
 
@@ -2657,16 +2724,16 @@ testRankNTypeAtoms = do
     -- sites while leaving an independent 5/5 selection outside the quartic
     -- bound.
     runStableIdentity stableSession "nestedQuarticRankNFrontier"
-        $ "(forall a b c d e f. (a, b, c, d, e, f)) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> q) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> r) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> z) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> m) -> "
-        ++ "((forall v w x y u t. (v, w, x, y, u, t)), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> q), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> r), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> z), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> m), "
+        $ "(forall a b c d e f g. (a, b, c, d, e, f, g)) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> q) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> r) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> z) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> m) -> "
+        ++ "((forall v w x y u t s. (v, w, x, y, u, t, s)), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> q), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> r), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> z), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> m), "
         ++ "(forall outer. ((forall e. e -> e), "
         ++ "(forall f. f -> f), (forall g. g -> g), "
         ++ "(forall h. h -> h))))"
@@ -2676,39 +2743,39 @@ testRankNTypeAtoms = do
     -- flat 5/5 selection. The final transport is separated from its first
     -- four siblings so this is not merely the first source-order quintuple.
     runFirstStableIdentity stableSession "tenSiteCentralOpacityRankNQuintic"
-        $ "(forall a b c d e f. (a, b, c, d, e, f)) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> q) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> r) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> z) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> m) -> "
-        ++ "((forall v w x y u t. (v, w, x, y, u, t)), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> q), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> r), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> z), "
+        $ "(forall a b c d e f g. (a, b, c, d, e, f, g)) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> q) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> r) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> z) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> m) -> "
+        ++ "((forall v w x y u t s. (v, w, x, y, u, t, s)), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> q), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> r), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> z), "
         ++ "(forall e. e -> e), (forall f. f -> f), "
         ++ "(forall g. g -> g), (forall h. h -> h), "
         ++ "(forall i. i -> i), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> m))"
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> m))"
 
     -- At eleven independent sites the dual quintic layer is separately
     -- necessary: six schemes remain exact while five separated identity sites
     -- open. Together with the earlier layers this covers every subset through
     -- eleven sites.
     runFirstStableIdentity stableSession "elevenSiteQuintupleOpenRankN"
-        $ "(forall a b c d e f. (a, b, c, d, e, f)) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> q) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> r) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> z) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> m) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> n) -> "
+        $ "(forall a b c d e f g. (a, b, c, d, e, f, g)) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> q) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> r) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> z) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> m) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> n) -> "
         ++ "((forall e. e -> e), (forall f. f -> f), "
         ++ "(forall g. g -> g), (forall h. h -> h), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t)), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> q), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> r), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> z), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> m), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> n), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s)), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> q), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> r), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> z), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> m), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> n), "
         ++ "(forall i. i -> i))"
 
     -- Twelve independent sites expose the next omitted balanced layer. Six
@@ -2717,18 +2784,18 @@ testRankNTypeAtoms = do
     -- manufacturing a refutation.
     sexticOpacityGap <- runStableQueryWith firstCandidateOptions stableSession
         "twelveSiteCentralOpacityRankNGap"
-        $ "(forall a b c d e f. (a, b, c, d, e, f)) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> q) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> r) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> z) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> m) -> "
-        ++ "(forall a b c d e f. (a, b, c, d, e, f) -> n) -> "
-        ++ "((forall v w x y u t. (v, w, x, y, u, t)), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> q), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> r), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> z), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> m), "
-        ++ "(forall v w x y u t. (v, w, x, y, u, t) -> n), "
+        $ "(forall a b c d e f g. (a, b, c, d, e, f, g)) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> q) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> r) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> z) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> m) -> "
+        ++ "(forall a b c d e f g. (a, b, c, d, e, f, g) -> n) -> "
+        ++ "((forall v w x y u t s. (v, w, x, y, u, t, s)), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> q), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> r), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> z), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> m), "
+        ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> n), "
         ++ "(forall e. e -> e), (forall f. f -> f), "
         ++ "(forall g. g -> g), (forall h. h -> h), "
         ++ "(forall i. i -> i), (forall j. j -> j))"
@@ -2741,9 +2808,9 @@ testRankNTypeAtoms = do
     -- Prepared global premises cache the same pairwise views as a goal.  The
     -- only route to the abstract result is to call this loaded consumer with
     -- two exact wide schemes and two structurally introduced identities.
-    let wideValue = "(forall a b c d e f. (a, b, c, d, e, f))"
+    let wideValue = "(forall a b c d e f g. (a, b, c, d, e, f, g))"
         wideConsumer =
-            "(forall s t u v w x. (s, t, u, v, w, x) -> PairwisePremiseQ)"
+            "(forall s t u v w x y. (s, t, u, v, w, x, y) -> PairwisePremiseQ)"
         pairArgument = "(" ++ wideValue ++ ", " ++ wideConsumer
             ++ ", (forall e. e -> e), (forall f. f -> f))"
     pairConsumer <- expectRight $ parseHType
@@ -2766,10 +2833,10 @@ testRankNTypeAtoms = do
         $ any ("consumePairwise" `isInfixOf`) pairClauses
 
     -- Prepared global premises retain the cubic views too. The consumer needs
-    -- three exact six-binder values and three structurally introduced
+    -- three exact seven-binder values and three structurally introduced
     -- identities, so no historical or pairwise premise variant can call it.
     let wideConsumerR =
-            "(forall s t u v w x. (s, t, u, v, w, x) -> TriplePremiseR)"
+            "(forall s t u v w x y. (s, t, u, v, w, x, y) -> TriplePremiseR)"
         tripleArgument = "(" ++ wideValue ++ ", " ++ wideConsumer ++ ", "
             ++ wideConsumerR ++ ", (forall e. e -> e), "
             ++ "(forall f. f -> f), (forall g. g -> g))"
@@ -2794,10 +2861,10 @@ testRankNTypeAtoms = do
         $ any ("consumeTriple" `isInfixOf`) tripleClauses
 
     -- Prepared global premises retain quartic views too. Four exact
-    -- six-binder values and four structurally introduced identities make the
+    -- seven-binder values and four structurally introduced identities make the
     -- loaded consumer unavailable through every earlier premise variant.
     let wideConsumerZ =
-            "(forall s t u v w x. (s, t, u, v, w, x) -> QuarticPremiseZ)"
+            "(forall s t u v w x y. (s, t, u, v, w, x, y) -> QuarticPremiseZ)"
         quarticArgument = "(" ++ wideValue ++ ", " ++ wideConsumer ++ ", "
             ++ wideConsumerR ++ ", " ++ wideConsumerZ
             ++ ", (forall e. e -> e), (forall f. f -> f), "
@@ -2827,7 +2894,7 @@ testRankNTypeAtoms = do
     -- Five exact schemes and five introduced identities make this consumer
     -- unreachable through any earlier premise variant.
     let wideConsumerM =
-            "(forall s t u v w x. (s, t, u, v, w, x) -> QuinticPremiseM)"
+            "(forall s t u v w x y. (s, t, u, v, w, x, y) -> QuinticPremiseM)"
         quinticArgument = "(" ++ wideValue ++ ", " ++ wideConsumer ++ ", "
             ++ wideConsumerR ++ ", " ++ wideConsumerZ ++ ", "
             ++ "(forall e. e -> e), "

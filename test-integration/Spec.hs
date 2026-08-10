@@ -3364,6 +3364,301 @@ tests = testGroup "Djex facade"
             ++ "\nExference generated:\n" ++ exferenceGenerated)
           ExitSuccess exitCode
   , testCase
+      "compile structural higher-kinded assignments through both engines" $
+      do
+      pairName <- expectRight $ tupleName Boxed 2
+      eitherName <- expectRight $ mkIdentifier "Either"
+      leftName <- expectRight $ mkIdentifier "Left"
+      rightName <- expectRight $ mkIdentifier "Right"
+      naturalName <- expectRight $ mkIdentifier "StructuralNatural"
+      booleanName <- expectRight $ mkIdentifier "StructuralBoolean"
+      tokenName <- expectRight $ mkIdentifier "StructuralToken"
+      tokenConstructorName <- expectRight $ mkIdentifier "MkStructuralToken"
+      providerName <- expectRight $ mkIdentifier "structuralProvider"
+      className <- expectRight $ mkIdentifier "StructuralContext"
+      contextProviderName <- expectRight $
+        mkIdentifier "structuralContextProvider"
+      let proper = ProperTypeKind
+          unary = FunctionKind proper proper
+          binary = FunctionKind proper unary
+          apply2 constructor first second = TypeApplication
+            (TypeApplication constructor first) second
+          pairConstructor = TypeConstructor pairName
+          eitherConstructor = TypeConstructor eitherName
+          naturalType = TypeConstructor naturalName
+          booleanType = TypeConstructor booleanName
+          tokenType = TypeConstructor tokenName
+          pairType = TupleType Boxed [naturalType, booleanType]
+          partialEither = TypeApplication eitherConstructor naturalType
+          eitherType = TypeApplication partialEither booleanType
+          usesProvider provider candidate = case candidateOutput candidate of
+            FunctionClause _ _ body -> referencesVisibleGlobal provider body
+
+      let djinnFirstParameter = "eitherLeft"
+          djinnSecondParameter = "eitherRight"
+          djinnFirstType = TypeVariable djinnFirstParameter
+          djinnSecondType = TypeVariable djinnSecondParameter
+          djinnFamily = "family"
+          djinnPartial = "partial"
+          djinnElement = "element"
+          djinnElementType = TypeVariable djinnElement
+          djinnProviderType = ForallType [djinnFamily, djinnPartial] [] $
+            FunctionType
+              (apply2 (TypeVariable djinnFamily) naturalType booleanType) $
+                FunctionType
+                  (TypeApplication (TypeVariable djinnPartial) booleanType)
+                  tokenType
+          djinnContextualArgument = ForallType [djinnElement]
+            [Constraint className [pairConstructor, partialEither]] $
+              FunctionType djinnElementType djinnElementType
+          djinnContextProviderType = ForallType ["selected"] [] tokenType
+          djinnBaseDeclarations =
+            [ AbstractTypeDeclaration () naturalName proper
+            , AbstractTypeDeclaration () booleanName proper
+            , DataTypeDeclaration () eitherName
+                [ TypeParameter djinnFirstParameter Nothing
+                , TypeParameter djinnSecondParameter Nothing
+                ]
+                [ DataConstructor () leftName [djinnFirstType]
+                , DataConstructor () rightName [djinnSecondType]
+                ]
+            , DataTypeDeclaration () tokenName []
+                [DataConstructor () tokenConstructorName []]
+            , ClassDeclaration () className
+                [ TypeParameter "f" $ Just binary
+                , TypeParameter "g" $ Just unary
+                ] [] []
+            ]
+          djinnStructuralDeclarations = djinnBaseDeclarations ++
+            [ValueDeclaration $ ValueSignature () providerName
+              djinnProviderType]
+          djinnContextDeclarations = djinnBaseDeclarations ++
+            [ValueDeclaration $ ValueSignature () contextProviderName
+              djinnContextProviderType]
+          djinnStructuralAssignment = KindedProviderInstantiationAssignment
+            { kindedProviderInstantiationAssignmentProvider = providerName
+            , kindedProviderInstantiationAssignmentArguments =
+                [ (binary, pairConstructor)
+                , (unary, partialEither)
+                ]
+            }
+          djinnContextAssignment = KindedProviderInstantiationAssignment
+            { kindedProviderInstantiationAssignmentProvider =
+                contextProviderName
+            , kindedProviderInstantiationAssignmentArguments =
+                [(proper, djinnContextualArgument)]
+            }
+      djinnStructuralEnvironment <- expectRight
+        (mkEnvironment djinnStructuralDeclarations :: Either
+          (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+      djinnContextEnvironment <- expectRight
+        (mkEnvironment djinnContextDeclarations :: Either
+          (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+      djinnStructuralSession <- expectRight $
+        mkDjinnSession djinnStructuralEnvironment
+      djinnContextSession <- expectRight $
+        mkDjinnSession djinnContextEnvironment
+      let runDjinn session targetSpelling goal provider assignment = do
+            targetName <- expectRight $ mkIdentifier targetSpelling
+            target <- expectRight $ mkDefinitionName targetName
+            request <- expectRight $ mkDjinnRequest QueryRequest
+              { requestTarget = target
+              , requestGoal = goal
+              , requestContexts = []
+              , requestOptions = defaultQueryOptions
+                  { optionAlternatives = True
+                  , optionCutoff = 64
+                  }
+              }
+            result <- expectRight $
+              runDjinnQueryWithKindedInstantiationAssignments
+                session [assignment] request
+            candidate <- maybe
+              (fail $ "Djinn lost structural assignment for " ++ targetSpelling)
+              pure $ find (usesProvider provider) $
+                batchCandidates $ resultSearch result
+            expectRight $
+              renderDjinnCandidateDefinition Unqualified candidate
+      djinnStructuralGenerated <- runDjinn djinnStructuralSession
+        "useDjinnStructuralAssignment"
+        (FunctionType pairType $ FunctionType eitherType tokenType)
+        providerName djinnStructuralAssignment
+      djinnContextGenerated <- runDjinn djinnContextSession
+        "useDjinnStructuralContext" tokenType
+        contextProviderName djinnContextAssignment
+
+      let exferenceFirstParameter = FlexibleVariable 0
+          exferenceSecondParameter = FlexibleVariable 1
+          exferenceFamily = FlexibleVariable 2
+          exferencePartial = FlexibleVariable 3
+          exferenceSelected = FlexibleVariable 4
+          exferenceElement = FlexibleVariable 5
+          exferenceElementType = TypeVariable exferenceElement
+          exferenceProviderType = ForallType
+            [exferenceFamily, exferencePartial] [] $
+              FunctionType
+                (apply2 (TypeVariable exferenceFamily)
+                  naturalType booleanType) $
+                  FunctionType
+                    (TypeApplication
+                      (TypeVariable exferencePartial) booleanType)
+                    tokenType
+          exferenceContextualArgument = ForallType [exferenceElement]
+            [Constraint className [pairConstructor, partialEither]] $
+              FunctionType exferenceElementType exferenceElementType
+          exferenceContextProviderType = ForallType
+            [exferenceSelected] [] tokenType
+          exferenceBaseDeclarations =
+            [ AbstractTypeDeclaration () naturalName proper
+            , AbstractTypeDeclaration () booleanName proper
+            , DataTypeDeclaration () eitherName
+                [ TypeParameter exferenceFirstParameter Nothing
+                , TypeParameter exferenceSecondParameter Nothing
+                ]
+                [ DataConstructor () leftName
+                    [TypeVariable exferenceFirstParameter]
+                , DataConstructor () rightName
+                    [TypeVariable exferenceSecondParameter]
+                ]
+            , DataTypeDeclaration () tokenName []
+                [DataConstructor () tokenConstructorName []]
+            , ClassDeclaration () className
+                [ TypeParameter (FlexibleVariable 6) $ Just binary
+                , TypeParameter (FlexibleVariable 7) $ Just unary
+                ] [] []
+            ]
+          exferenceStructuralDeclarations = exferenceBaseDeclarations ++
+            [ValueDeclaration $ ValueSignature () providerName
+              exferenceProviderType]
+          exferenceContextDeclarations = exferenceBaseDeclarations ++
+            [ValueDeclaration $ ValueSignature () contextProviderName
+              exferenceContextProviderType]
+          exferenceStructuralAssignment =
+            KindedProviderInstantiationAssignment
+              { kindedProviderInstantiationAssignmentProvider = providerName
+              , kindedProviderInstantiationAssignmentArguments =
+                  [ (binary, pairConstructor)
+                  , (unary, partialEither)
+                  ]
+              }
+          exferenceContextAssignment =
+            KindedProviderInstantiationAssignment
+              { kindedProviderInstantiationAssignmentProvider =
+                  contextProviderName
+              , kindedProviderInstantiationAssignmentArguments =
+                  [(proper, exferenceContextualArgument)]
+              }
+      exferenceStructuralEnvironment <- expectRight
+        (mkEnvironment exferenceStructuralDeclarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      exferenceContextEnvironment <- expectRight
+        (mkEnvironment exferenceContextDeclarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      exferenceStructuralSession <- expectRight $
+        mkExferenceSession exferenceStructuralEnvironment
+      exferenceContextSession <- expectRight $
+        mkExferenceSession exferenceContextEnvironment
+      let runExference session targetSpelling goal provider assignment = do
+            targetName <- expectRight $ mkIdentifier targetSpelling
+            target <- expectRight $ mkDefinitionName targetName
+            request <- expectRight $ mkExferenceRequest QueryRequest
+              { requestTarget = target
+              , requestGoal = goal
+              , requestContexts = []
+              , requestOptions = defaultExferenceOptions
+                  { exferenceMaximumSteps = 2048
+                  , exferenceMaximumQueueSize = Just 1024
+                  }
+              }
+            results <- expectRight $
+              runExferenceQueryWithKindedInstantiationAssignments
+                session [assignment] request
+            candidate <- maybe
+              (fail $ "Exference lost structural assignment for "
+                ++ targetSpelling)
+              pure $ find (usesProvider provider) $
+                concatMap (batchCandidates . resultSearch) results
+            expectRight $
+              renderExferenceCandidateDefinition Unqualified candidate
+      exferenceStructuralGenerated <- runExference exferenceStructuralSession
+        "useExferenceStructuralAssignment"
+        (FunctionType pairType $ FunctionType eitherType tokenType)
+        providerName exferenceStructuralAssignment
+      exferenceContextGenerated <- runExference exferenceContextSession
+        "useExferenceStructuralContext" tokenType
+        contextProviderName exferenceContextAssignment
+
+      let structuralGenerated =
+            [djinnStructuralGenerated, exferenceStructuralGenerated]
+          contextGenerated =
+            [djinnContextGenerated, exferenceContextGenerated]
+          generated = structuralGenerated ++ contextGenerated
+      mapM_ (\source -> do
+          assertBool ("boxed-pair assignment was not rendered: " ++ source) $
+            "@(,)" `isInfixOf` source
+          assertBool ("partial Either assignment was not rendered: " ++ source) $
+            "Either StructuralNatural" `isInfixOf` source)
+        structuralGenerated
+      mapM_ (\source -> assertBool
+          ("structural contextual heads were not rendered: " ++ source) $
+          "StructuralContext (,) (Either StructuralNatural)"
+            `isInfixOf` source)
+        contextGenerated
+
+      let fixture = unlines
+            [ "module StructuralHigherKindedAssignmentFixture where"
+            , ""
+            , "data StructuralNatural"
+            , "data StructuralBoolean"
+            , "data StructuralToken = MkStructuralToken"
+            , ""
+            , "class StructuralContext (f :: * -> * -> *) (g :: * -> *)"
+            , ""
+            , "structuralProvider :: forall f g."
+            , "  f StructuralNatural StructuralBoolean ->"
+            , "  g StructuralBoolean -> StructuralToken"
+            , "structuralProvider _ _ = MkStructuralToken"
+            , ""
+            , "structuralContextProvider :: forall selected. StructuralToken"
+            , "structuralContextProvider = MkStructuralToken"
+            , ""
+            , "useDjinnStructuralAssignment ::"
+            , "  (StructuralNatural, StructuralBoolean) ->"
+            , "  Either StructuralNatural StructuralBoolean -> StructuralToken"
+            , djinnStructuralGenerated
+            , ""
+            , "useExferenceStructuralAssignment ::"
+            , "  (StructuralNatural, StructuralBoolean) ->"
+            , "  Either StructuralNatural StructuralBoolean -> StructuralToken"
+            , exferenceStructuralGenerated
+            , ""
+            , "useDjinnStructuralContext :: StructuralToken"
+            , djinnContextGenerated
+            , ""
+            , "useExferenceStructuralContext :: StructuralToken"
+            , exferenceContextGenerated
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XAllowAmbiguousTypes"
+          , "-XEmptyDataDecls"
+          , "-XFlexibleContexts"
+          , "-XImpredicativeTypes"
+          , "-XKindSignatures"
+          , "-XRankNTypes"
+          , "-XTypeApplications"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected structural higher-kinded assignments\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors
+            ++ "\nGenerated:\n" ++ unlines generated)
+          ExitSuccess exitCode
+  , testCase
       "compile correlated impredicative instances through both engines" $ do
       let source =
             "(forall a b. f a b) -> "

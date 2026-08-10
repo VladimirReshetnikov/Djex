@@ -880,6 +880,15 @@ ordered vectors are alpha-deduplicated per provider in caller order. Provider
 identity stays in the key, so an
 alpha-identically typed sibling cannot inherit any form of evidence.
 
+At Djinn's shared-type boundary, residual tuple heads have a narrower contract.
+The bare boxed arity-two constructor crosses the boundary canonically as `(,)`,
+including when it is partially applied or retained inside a contextual
+rank-N assignment. Saturating the constructor still produces the ordinary
+structural pair representation and follows the existing tuple proof rules.
+Wider boxed and all unboxed bare or partial tuple constructors remain rejected
+with `PartialTupleConstructorUnsupported`; accepting `(,)` is not a general
+partial-tuple escape hatch.
+
 Each retained scalar specialization or exact vector produces a direct premise
 for that provider. The structural and, when relevant, nominal provider plans
 also carry the existing query-local and loaded-scheme instantiation premises,
@@ -926,9 +935,13 @@ higher-kinded and mixed higher-kinded/impredicative assignments, vacuous
 higher-kinded evidence, same-provider kind-vector consistency, two distinct
 same-provider vectors at the genuine kind `(Type -> Type) -> Type`, kind
 mismatch, a four-binder vector beyond the scalar Cartesian prefix, ordered
-five- and six-binder evidence, and a conservative seven-binder boundary. This
-remains a bounded proof-producing extension, not general impredicative
-inference or higher-rank subsumption. See the original
+five- and six-binder evidence, a conservative seven-binder boundary, canonical
+bare/partial boxed-pair projection with wider-boxed and unboxed rejection, and
+non-vacuous direct and contextual rank-N pair assignments through the checked
+public runner. The facade integration suite additionally renders corresponding
+Djinn and Exference definitions and type-checks them together with GHC. This
+remains a bounded proof-producing extension, not general impredicative inference
+or higher-rank subsumption. See the original
 [provider-local candidate report](../docs/reports/2026-08-05-provider-local-instantiation-evidence.md)
 and the
 [exact provider-assignment report](../docs/reports/2026-08-05-exact-provider-instantiation-assignments.md).

@@ -506,6 +506,12 @@ providerInstantiationPremises symbolPrefix translator schemes candidates =
 providerInstantiationAssignmentPremises
     :: String
     -> (SharedType.Type String -> Either String Formula)
+    -> Maybe
+        ( [String]
+        -> [SharedType.Type String]
+        -> SharedType.Type String
+        -> Either String Bool
+        )
     -> [(Symbol, Formula)]
     -> [( Symbol
         , [( SharedType.Type String
@@ -514,7 +520,7 @@ providerInstantiationAssignmentPremises
         )]
     -> ProviderInstantiationPremises
 providerInstantiationAssignmentPremises
-        symbolPrefix translator schemes assignments =
+        symbolPrefix translator fidelityTranslator schemes assignments =
     ProviderInstantiationPremises premises applications
   where
     retained = take maxProviderInstantiationPremises $
@@ -544,7 +550,26 @@ providerInstantiationAssignmentPremises
             , Right instantiated <-
                 [instantiateSchemeBody scheme $ map fst assignment]
             , Right formula <- [translator instantiated]
+            , retainsTranslationFidelity scheme assignment
             ]
+
+    -- A structural provider premise may erase a nominal assignment through a
+    -- phantom datatype parameter.  The prepared compiler marks the complete
+    -- exact vector before substituting it into the scheme, then checks each
+    -- reached datatype-argument boundary.  This catches erasure inside an
+    -- assigned type and through an assigned higher-kinded head without the
+    -- whole-formula comparison which rejects faithful constructor fields.
+    -- Nominal premises retain complete applications and need no companion
+    -- check. A wholly vacuous binder remains accepted because its marker never
+    -- reaches the provider body.
+    retainsTranslationFidelity scheme assignment = case fidelityTranslator of
+            Nothing -> True
+            Just checkFidelity -> case checkFidelity
+                    (schemeBinders scheme)
+                    (map fst assignment)
+                    (schemeBody scheme) of
+                Right retainedFidelity -> retainedFidelity
+                Left _ -> False
 
     schemeSourceFromFormula formula = case formula of
         PVar symbol -> opaqueSymbolSource symbol

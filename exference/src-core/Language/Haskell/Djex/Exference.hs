@@ -857,11 +857,10 @@ prepareProviderInstantiationAssignments session evidence
     elaborated <- first (assignmentElaborationFailure label argumentIndex)
       $ Session.elaborateSessionTypeAtKind session binderKind source
     if Set.null (SharedType.freeVariables elaborated)
-        && null (SharedType.typeConstraints elaborated)
       then pure ()
       else Left $ shownErrorDiagnostic
         "DJEX_EXF_ASSIGNMENT_TYPE"
-        "Exference provider instantiation argument is not closed and context-free"
+        "Exference provider instantiation argument is not closed"
         (label, argumentIndex, elaborated)
     _ <- first
       (\failure -> shownErrorDiagnostic

@@ -2769,6 +2769,358 @@ tests = testGroup "Djex facade"
             ++ "\nExference generated:\n" ++ exferenceGenerated)
           ExitSuccess exitCode
   , testCase
+      ("reject phantom assignment mismatch and compile concrete exact "
+        ++ "matches through both engines") $
+      do
+        className <- expectRight $ parseName "Assignable"
+        boxName <- expectRight $ parseName "ContextualBox"
+        boxConstructorName <- expectRight $ parseName "MkContextualBox"
+        providerName <- expectRight $ parseName "contextualBoxProvider"
+        intLikeName <- expectRight $ parseName "AssignmentIntLike"
+        boolLikeName <- expectRight $ parseName "AssignmentBoolLike"
+        nestedProviderName <- expectRight $
+          parseName "nestedPhantomProvider"
+        higherProviderName <- expectRight $
+          parseName "higherPhantomProvider"
+        djinnTargetName <- expectRight $
+          mkIdentifier "useDjinnContextualAssignment"
+        djinnTarget <- expectRight $ mkDefinitionName djinnTargetName
+        let box argument = TypeApplication (TypeConstructor boxName) argument
+            visibleProviderSpine expression = case expression of
+              Global occurrence -> Just (occurrence, [])
+              VisibleTypeApplication function argument -> do
+                (occurrence, earlier) <- visibleProviderSpine function
+                pure (occurrence, earlier ++ [argument])
+              _ -> Nothing
+            containsVisibleProviderSpine occurrence arguments expression =
+              visibleProviderSpine expression == Just (occurrence, arguments)
+                || case expression of
+                  Local _ -> False
+                  Global _ -> False
+                  Lambda _ body ->
+                    containsVisibleProviderSpine occurrence arguments body
+                  Apply function argument ->
+                    containsVisibleProviderSpine occurrence arguments function
+                      || containsVisibleProviderSpine
+                        occurrence arguments argument
+                  VisibleTypeApplication function _ ->
+                    containsVisibleProviderSpine occurrence arguments function
+                  Tuple elements -> any
+                    (containsVisibleProviderSpine occurrence arguments)
+                    elements
+                  Hole _ -> False
+                  Let _ binding body ->
+                    containsVisibleProviderSpine occurrence arguments binding
+                      || containsVisibleProviderSpine
+                        occurrence arguments body
+                  Case scrutinee alternatives ->
+                    containsVisibleProviderSpine
+                        occurrence arguments scrutinee
+                      || any
+                        (containsVisibleProviderSpine occurrence arguments
+                          . snd)
+                        alternatives
+            djinnContextualVariable = "contextual"
+            djinnContextualType = TypeVariable djinnContextualVariable
+            djinnContextualArgument :: Type DjinnTypeVariable
+            djinnContextualArgument = ForallType [djinnContextualVariable]
+              [Constraint className [djinnContextualType]]
+              $ FunctionType djinnContextualType djinnContextualType
+            djinnIdentityVariable = "identity"
+            djinnIdentityType = TypeVariable djinnIdentityVariable
+            djinnIdentityArgument :: Type DjinnTypeVariable
+            djinnIdentityArgument = ForallType [djinnIdentityVariable] [] $
+              FunctionType djinnIdentityType djinnIdentityType
+            djinnProviderType = ForallType ["selected", "hidden"] [] $
+              box $ TypeVariable "selected"
+            nestedProviderType = ForallType ["assigned"] [] $
+              TypeVariable "assigned"
+            higherProviderType = ForallType ["shape"] [] $
+              TypeApplication
+                (TypeVariable "shape")
+                (TypeConstructor intLikeName)
+            nestedAssignmentType :: Type DjinnTypeVariable
+            nestedAssignmentType = box $ TypeConstructor intLikeName
+            nestedMismatchType :: Type DjinnTypeVariable
+            nestedMismatchType = box $ TypeConstructor boolLikeName
+            djinnDeclarations =
+              [ ClassDeclaration () className
+                  [TypeParameter "classParameter" Nothing] [] []
+              , AbstractTypeDeclaration () intLikeName ProperTypeKind
+              , AbstractTypeDeclaration () boolLikeName ProperTypeKind
+              , DataTypeDeclaration () boxName
+                  [TypeParameter "boxParameter" Nothing]
+                  [DataConstructor () boxConstructorName []]
+              , ValueDeclaration $ ValueSignature () providerName
+                  djinnProviderType
+              , ValueDeclaration $ ValueSignature () nestedProviderName
+                  nestedProviderType
+              , ValueDeclaration $ ValueSignature () higherProviderName
+                  higherProviderType
+              ]
+            djinnAssignment = ProviderInstantiationAssignment
+              { providerInstantiationAssignmentProvider = providerName
+              , providerInstantiationAssignmentArguments =
+                  [djinnContextualArgument, djinnIdentityArgument]
+              }
+            nestedAssignment = ProviderInstantiationAssignment
+              { providerInstantiationAssignmentProvider = nestedProviderName
+              , providerInstantiationAssignmentArguments =
+                  [nestedAssignmentType]
+              }
+            higherAssignment = ProviderInstantiationAssignment
+              { providerInstantiationAssignmentProvider = higherProviderName
+              , providerInstantiationAssignmentArguments =
+                  [TypeConstructor boxName]
+              }
+        djinnVisibleArguments <- expectRight $ traverse
+          specifiedVisibleTypeArgument
+          [djinnContextualArgument, djinnIdentityArgument]
+        djinnEnvironment <- expectRight
+          (mkEnvironment djinnDeclarations :: Either
+            (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+        djinnSession <- expectRight $ mkDjinnSession djinnEnvironment
+        djinnMismatchTargetName <- expectRight $
+          mkIdentifier "rejectDjinnContextualAssignmentMismatch"
+        djinnMismatchTarget <- expectRight $
+          mkDefinitionName djinnMismatchTargetName
+        djinnMismatchRequest <- expectRight $ mkDjinnRequest QueryRequest
+          { requestTarget = djinnMismatchTarget
+          , requestGoal = box djinnIdentityArgument
+          , requestContexts = []
+          , requestOptions = defaultQueryOptions
+              { optionAlternatives = True
+              , optionCutoff = 64
+              }
+          }
+        djinnMismatchResult <- expectRight $
+          runDjinnQueryWithInstantiationAssignments
+            djinnSession [djinnAssignment] djinnMismatchRequest
+        let djinnMismatchCandidates =
+              batchCandidates $ resultSearch djinnMismatchResult
+        assertBool "the phantom mismatch fixture produced no candidates" $
+          not $ null djinnMismatchCandidates
+        assertBool
+          ("Djinn reused a structurally erased exact assignment at a "
+            ++ "nominal mismatch")
+          $ not $ any
+              (\candidate -> case candidateOutput candidate of
+                FunctionClause _ [] body -> containsVisibleProviderSpine
+                  providerName djinnVisibleArguments body
+                _ -> False)
+              djinnMismatchCandidates
+
+        -- The assignment itself can contain an erased datatype application.
+        -- Marking only the uninstantiated scheme binder accepts this exploit:
+        -- both instantiated bodies lower to the nullary constructor formula,
+        -- but GHC cannot use @p @(ContextualBox Int)@ at ContextualBox Bool.
+        nestedTargetName <- expectRight $
+          mkIdentifier "rejectNestedPhantomAssignmentMismatch"
+        nestedTarget <- expectRight $ mkDefinitionName nestedTargetName
+        nestedRequest <- expectRight $ mkDjinnRequest QueryRequest
+          { requestTarget = nestedTarget
+          , requestGoal = nestedMismatchType
+          , requestContexts = []
+          , requestOptions = defaultQueryOptions
+              { optionAlternatives = True
+              , optionCutoff = 64
+              }
+          }
+        nestedResult <- expectRight $
+          runDjinnQueryWithInstantiationAssignments
+            djinnSession [nestedAssignment] nestedRequest
+        nestedVisible <- expectRight $
+          specifiedVisibleTypeArgument nestedAssignmentType
+        let nestedCandidates = batchCandidates $ resultSearch nestedResult
+            usesNestedExact candidate = case candidateOutput candidate of
+              FunctionClause _ [] body -> containsVisibleProviderSpine
+                nestedProviderName [nestedVisible] body
+              _ -> False
+        assertBool "the nested phantom fixture produced no safe candidate" $
+          not $ null nestedCandidates
+        assertBool
+          "Djinn retained p @(Phantom Int) for a Phantom Bool goal"
+          $ not $ any usesNestedExact nestedCandidates
+        nestedSafeCandidate <- maybe
+          (fail $ "Djinn returned no provider-free alternative: "
+            ++ show nestedCandidates)
+          pure
+          $ find
+              (\candidate -> case candidateOutput candidate of
+                FunctionClause _ [] body -> not $
+                  containsVisibleProviderSpine nestedProviderName [] body
+                _ -> False)
+              nestedCandidates
+        nestedSafeGenerated <- expectRight $
+          renderDjinnCandidateDefinition Unqualified nestedSafeCandidate
+
+        -- Higher-kinded substitution has to retain the marker after the
+        -- assigned constructor becomes saturated by the scheme body.
+        higherTargetName <- expectRight $
+          mkIdentifier "rejectHigherPhantomAssignmentMismatch"
+        higherTarget <- expectRight $ mkDefinitionName higherTargetName
+        higherRequest <- expectRight $ mkDjinnRequest QueryRequest
+          { requestTarget = higherTarget
+          , requestGoal = nestedMismatchType
+          , requestContexts = []
+          , requestOptions = defaultQueryOptions
+              { optionAlternatives = True
+              , optionCutoff = 64
+              }
+          }
+        higherResult <- expectRight $
+          runDjinnQueryWithInstantiationAssignments
+            djinnSession [higherAssignment] higherRequest
+        higherVisible <- expectRight $
+          specifiedVisibleTypeArgument
+            (TypeConstructor boxName :: Type DjinnTypeVariable)
+        let higherCandidates = batchCandidates $ resultSearch higherResult
+        assertBool "the higher-kinded phantom fixture produced no candidates" $
+          not $ null higherCandidates
+        assertBool
+          "Djinn retained f := Phantom for f Int at a Phantom Bool goal"
+          $ not $ any
+              (\candidate -> case candidateOutput candidate of
+                FunctionClause _ [] body -> containsVisibleProviderSpine
+                  higherProviderName [higherVisible] body
+                _ -> False)
+              higherCandidates
+
+        djinnRequest <- expectRight $ mkDjinnRequest QueryRequest
+          { requestTarget = djinnTarget
+          , requestGoal = box djinnContextualArgument
+          , requestContexts = []
+          , requestOptions = defaultQueryOptions
+              { optionAlternatives = True
+              , optionCutoff = 64
+              }
+          }
+        djinnResult <- expectRight $
+          runDjinnQueryWithInstantiationAssignments
+            djinnSession [djinnAssignment] djinnRequest
+        djinnCandidate <- maybe
+          (fail "Djinn lost the exact contextual assignment vector")
+          pure
+          $ find
+              (\candidate -> case candidateOutput candidate of
+                FunctionClause _ [] body ->
+                  visibleProviderSpine body ==
+                    Just (providerName, djinnVisibleArguments)
+                _ -> False)
+          $ batchCandidates $ resultSearch djinnResult
+        djinnGenerated <- expectRight $
+          renderDjinnCandidateDefinition Unqualified djinnCandidate
+
+        exferenceTargetName <- expectRight $
+          mkIdentifier "useExferenceContextualAssignment"
+        exferenceTarget <- expectRight $ mkDefinitionName exferenceTargetName
+        let selectedVariable = FlexibleVariable 0
+            hiddenVariable = FlexibleVariable 1
+            classParameter = FlexibleVariable 2
+            contextualVariable = FlexibleVariable 3
+            contextualType = TypeVariable contextualVariable
+            contextualArgument = ForallType [contextualVariable]
+              [Constraint className [contextualType]]
+              $ FunctionType contextualType contextualType
+            identityVariable = FlexibleVariable 4
+            identityType = TypeVariable identityVariable
+            identityArgument = ForallType [identityVariable] [] $
+              FunctionType identityType identityType
+            boxParameter = FlexibleVariable 5
+            providerType = ForallType [selectedVariable, hiddenVariable] [] $
+              box $ TypeVariable selectedVariable
+            exferenceDeclarations =
+              [ ClassDeclaration () className
+                  [TypeParameter classParameter Nothing] [] []
+              , DataTypeDeclaration () boxName
+                  [TypeParameter boxParameter Nothing]
+                  [DataConstructor () boxConstructorName []]
+              , ValueDeclaration $ ValueSignature () providerName providerType
+              ]
+            exferenceAssignment = ProviderInstantiationAssignment
+              { providerInstantiationAssignmentProvider = providerName
+              , providerInstantiationAssignmentArguments =
+                  [contextualArgument, identityArgument]
+              }
+        exferenceVisibleArguments <- expectRight $ traverse
+          specifiedVisibleTypeArgument [contextualArgument, identityArgument]
+        exferenceEnvironment <- expectRight
+          (mkEnvironment exferenceDeclarations :: Either
+            (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+        exferenceSession <- expectRight $
+          mkExferenceSession exferenceEnvironment
+        exferenceRequest <- expectRight $ mkExferenceRequest QueryRequest
+          { requestTarget = exferenceTarget
+          , requestGoal = box contextualArgument
+          , requestContexts = []
+          , requestOptions = defaultExferenceOptions
+              { exferenceMaximumSteps = 1024
+              , exferenceMaximumQueueSize = Just 512
+              }
+          }
+        exferenceResults <- expectRight $
+          runExferenceQueryWithInstantiationAssignments
+            exferenceSession [exferenceAssignment] exferenceRequest
+        exferenceCandidate <- maybe
+          (fail "Exference lost the exact contextual assignment vector")
+          pure
+          $ find
+              (\candidate -> case candidateOutput candidate of
+                FunctionClause _ [] body ->
+                  visibleProviderSpine body ==
+                    Just (providerName, exferenceVisibleArguments)
+                _ -> False)
+          $ concatMap (batchCandidates . resultSearch) exferenceResults
+        exferenceGenerated <- expectRight $
+          renderExferenceCandidateDefinition Unqualified exferenceCandidate
+
+        let fixture = unlines
+              [ "module ContextualImpredicativeAssignmentFixture where"
+              , ""
+              , "class Assignable a"
+              , "data AssignmentIntLike"
+              , "data AssignmentBoolLike"
+              , "data ContextualBox a = MkContextualBox"
+              , ""
+              , "contextualBoxProvider :: forall selected hidden."
+              , "  ContextualBox selected"
+              , "contextualBoxProvider = MkContextualBox"
+              , ""
+              , "nestedPhantomProvider :: forall assigned. assigned"
+              , "nestedPhantomProvider = undefined"
+              , ""
+              , "rejectNestedPhantomAssignmentMismatch ::"
+              , "  ContextualBox AssignmentBoolLike"
+              , nestedSafeGenerated
+              , ""
+              , "useDjinnContextualAssignment ::"
+              , "  ContextualBox (forall a. Assignable a => a -> a)"
+              , djinnGenerated
+              , ""
+              , "useExferenceContextualAssignment ::"
+              , "  ContextualBox (forall a. Assignable a => a -> a)"
+              , exferenceGenerated
+              ]
+        withTemporaryHaskellModule fixture $ \sourcePath -> do
+          (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+            [ "-v0"
+            , "-fforce-recomp"
+            , "-fno-code"
+            , "-fno-write-interface"
+            , "-XHaskell2010"
+            , "-XAllowAmbiguousTypes"
+            , "-XImpredicativeTypes"
+            , "-XRankNTypes"
+            , "-XTypeApplications"
+            , sourcePath
+            ] ""
+          assertEqual
+            ("GHC rejected exact contextual assignments\nstdout:\n" ++ output
+              ++ "\nstderr:\n" ++ errors
+              ++ "\nDjinn generated:\n" ++ djinnGenerated
+              ++ "\nExference generated:\n" ++ exferenceGenerated)
+            ExitSuccess exitCode
+  , testCase
       "compile correlated impredicative instances through both engines" $ do
       let source =
             "(forall a b. f a b) -> "

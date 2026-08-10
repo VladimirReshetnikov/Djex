@@ -464,8 +464,14 @@ tests = testGroup "Exference private engine boundaries"
   , testCase "exact assignments retain structure, order, and non-vacuous bodies" $ do
       let selected = TypeForall [1] []
             $ TypeArrow (TypeVar 1) (TypeVar 1)
+          contextual = TypeForall [15]
+            [HsConstraint (name "Eq") [TypeVar 15]]
+            $ TypeArrow (TypeVar 15) (TypeVar 15)
           wrapper argument = TypeApp (TypeCons $ name "Wrapper") argument
           provider = TypeForall [0] [] $ wrapper $ TypeVar 0
+          contextualProvider = TypeForall [0]
+            [HsConstraint (name "C") [TypeVar 0]]
+            $ wrapper $ TypeVar 0
           token = TypeCons $ name "Token"
           structural = wrapper selected
           quantified binder body = TypeForall [binder] [] body
@@ -478,6 +484,7 @@ tests = testGroup "Exference private engine boundaries"
             ]
           fourBinderProvider = TypeForall [2, 3, 4, 5] [] token
       candidateProviderInstantiations [selected] provider @?= []
+      candidateProviderInstantiations [contextual] provider @?= []
       assignmentProviderInstantiations [[selected]] provider @?=
         [ GroundProviderInstantiation
             { groundProviderArguments = [selected]
@@ -485,6 +492,14 @@ tests = testGroup "Exference private engine boundaries"
             , groundProviderConstraints = []
             }
         ]
+      assignmentProviderInstantiations [[contextual]] provider @?=
+        [ GroundProviderInstantiation
+            { groundProviderArguments = [contextual]
+            , groundProviderType = wrapper contextual
+            , groundProviderConstraints = []
+            }
+        ]
+      assignmentProviderInstantiations [[selected]] contextualProvider @?= []
       assignmentProviderInstantiations [[structural]]
           (TypeForall [6] [] token) @?=
         [ GroundProviderInstantiation

@@ -10,6 +10,7 @@ module Djinn.Internal.Environment (
     preparedEnvironmentSource, preparedEnvironmentInventory,
     checkPreparedTypesKinds, checkPreparedSynthesisTypesKinds,
     preparedEnvironmentSynthesisFormulaTranslator,
+    preparedEnvironmentStructuralAssignmentFidelity,
     preparedEnvironmentNominalSynthesisFormulaTranslator,
     preparedEnvironmentPolarizedSynthesisFormulaPlans,
     preparedEnvironmentNominalPolarizedSynthesisFormulaPlans,
@@ -1205,6 +1206,25 @@ preparedEnvironmentSynthesisFormulaTranslator
 preparedEnvironmentSynthesisFormulaTranslator
         (PreparedEnvironment _ _ _ _ _ _ compiler _ _) =
     compileSynthesisFormula compiler
+
+-- | Mark an exact provider argument vector, substitute it into the retained
+-- scheme body, and check whether structural expansion preserves every reached
+-- nominal datatype argument. Exact visible type applications use this beside
+-- the structural translator so neither a phantom binder occurrence nor
+-- erasure nested inside an assigned type can masquerade as the requested type.
+preparedEnvironmentStructuralAssignmentFidelity
+    :: PreparedEnvironment
+    -> [HSymbol]
+    -> [SharedType.Type HSymbol]
+    -> SharedType.Type HSymbol
+    -> Either String Bool
+preparedEnvironmentStructuralAssignmentFidelity
+        (PreparedEnvironment _ _ _ _ _ _ compiler _ _)
+        binders arguments source =
+    structuralFormulaRetainsAssignments synthesisFormulaTypeView compiler
+        binders
+        (map SharedType.canonicalizeType arguments)
+        (SharedType.canonicalizeType source)
 
 -- | Translate with datatypes retained as complete nominal applications. This
 -- translator must accompany the nominal goal and premise projection when

@@ -263,13 +263,15 @@ two choices for one vacuous provider at the genuinely higher-order kind
 `(Type -> Type) -> Type`, using both a bare and a partially applied
 constructor.
 
-Both assignment forms require closed, context-free visible arguments, then
-substitute the complete vector and independently check the whole specialized
-body at kind `Type`. Contextual providers and kind-mismatched vectors are
-rejected. Scalar types and complete vectors are alpha-deduplicated only within
-one provider. All relations remain keyed by provider identity, not by scheme
-shape: two globals with alpha-equivalent schemes cannot donate evidence to one
-another.
+Both assignment forms require lexically closed specified visible arguments,
+then substitute the complete vector and independently check the whole
+specialized body at kind `Type`. An argument may be a contextual polytype; its
+nested context remains part of that selected type and does not become a
+provider obligation. Contextual provider schemes and kind-mismatched vectors
+are rejected. Scalar types and complete vectors are alpha-deduplicated only
+within one provider. All relations remain keyed by provider identity, not by
+scheme shape: two globals with alpha-equivalent schemes cannot donate evidence
+to one another.
 
 Calling either historical runner is definitionally the same as calling its
 `WithInstantiationCandidates` variant with `[]`; calling either the legacy
@@ -283,9 +285,22 @@ Djinn compiles each retained scalar specialization or exact vector into a
 direct specialized premise for that loaded polymorphic provider. The
 evidence-enriched structural and nominal plans also contain the historical
 query-local and loaded instantiation premises, so one checked proof may compose
-old and supplied evidence. For a nonempty evidence call this strict superset
-runs before the evidence-free loaded tails, preventing a productive loaded
-proof stream from starving the supplied route at the global candidate cutoff.
+old and supplied evidence. Wholly vacuous exact vectors remain in the
+structural projection. A non-vacuous vector enters that projection only when
+the prepared structural compiler can observe every relevant argument through
+its corresponding datatype formal. The complete vector is marked before
+substitution, so the walk checks both structure nested inside an assigned type
+and scheme-owned arguments applied to an assigned higher-kinded head. The check
+is per nominal argument boundary: it keeps faithful constructor fields and
+correlated faithful parameters, but rejects a wholly phantom formal or one
+independently erased occurrence of a repeated assignment. Recursive, unknown,
+and fully applied empty datatypes remain opaque exactly as they do during
+formula compilation. Rejected structural vectors remain in the nominal family,
+so erased phantom parameters cannot justify a nominally mismatched visible
+application. For a nonempty evidence call this
+strict superset runs before the evidence-free loaded tails, preventing a
+productive loaded proof stream from starving the supplied route at the global
+candidate cutoff.
 Scalar pools retain their five-binder, 512-attempt, and sixteen-per-scheme
 tuple windows; exact vectors bypass those reconstruction windows while
 remaining within the 32-premise family bound. The independent proof checker

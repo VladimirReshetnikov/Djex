@@ -36,10 +36,13 @@ module Djinn.Internal.TypeFormula
     , prepareFormulaCompiler
     , prepareFormulaCompilerWithRecursiveData
     , compileFormula
+    , structuralFormulaRetainsAssignments
     , compilePolarizedFormulaPlans
     ) where
 
 import Control.Monad (zipWithM)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.State.Strict (StateT, evalStateT, get, modify)
 import Data.Bifunctor (first)
 import Data.Graph (SCC(..), stronglyConnComp)
 import Data.List (intercalate, isSuffixOf, sortOn)
@@ -96,6 +99,12 @@ data ExpansionType
     | ExpansionUnion [(String, [ExpansionType])]
     | ExpansionAbstract String
     | ExpansionArgument ExpansionPath ExpansionType
+    -- An exact provider argument is marked before it is substituted into the
+    -- provider body.  Unlike an ordinary definition argument, this wrapper is
+    -- semantic provenance: the fidelity walk follows it through aliases and
+    -- higher-kinded application so structural expansion cannot silently erase
+    -- part of the caller's visible type application.
+    | ExpansionExactAssignment ExpansionType
 
 -- A constructor occurrence keeps its identity when substitution duplicates
 -- it. Query nodes are identified by their tree path. Nodes written in a
@@ -355,6 +364,45 @@ compileFormula view prepared source = do
     expanded <- expansionTypeAt view QueryOrigin [] source
     translatedFormula <$> lowerExpansionType
         OpaqueForalls prepared emptyExpansionPath [] expanded
+
+-- | Check that structural compilation preserves the complete nominal content
+-- of every exact provider argument which actually reaches the provider body.
+-- Each argument is marked before substitution, so the walk sees erasure both
+-- at a binder occurrence and inside the assigned type itself.  This also
+-- follows a higher-kinded assignment into applications supplied by the scheme:
+-- assigning @f := Phantom@ in @f Int@ must not authorize a premise usable as
+-- @Phantom Bool@.
+--
+-- A datatype formal is observable when at least one constructor-field path
+-- retains it.  The check is nevertheless performed independently at every
+-- application argument, so an observed correlated sibling cannot hide an
+-- erased one.  Aliases are definitionally transparent. Recursive datatypes,
+-- unknown or unsaturated applications, and foralls stay opaque under
+-- 'compileFormula' and therefore preserve their complete nominal identity.
+-- Fully applied empty datatypes do too: 'compileFormula' deliberately lowers
+-- them to an 'Empty' proposition keyed by the complete application.
+structuralFormulaRetainsAssignments
+    :: TypeView source
+    -> PreparedFormulaCompiler
+    -> [String]
+    -> [source]
+    -> source
+    -> Either String Bool
+structuralFormulaRetainsAssignments view definitions binders arguments source
+    | length binders /= length arguments =
+        Left "provider assignment vector does not match binder arity"
+    | otherwise = do
+        expanded <- expansionTypeAt view QueryOrigin [] source
+        expandedArguments <- mapM
+            (expansionTypeAt view QueryOrigin []) arguments
+        instantiated <- substituteExpansion
+            (firstExpansionSubstitutions $ zip binders $
+                map ExpansionExactAssignment expandedArguments)
+            expanded
+        evalStateT
+            (structuralAssignmentFaithful definitions
+                False emptyExpansionPath instantiated)
+            Map.empty
 
 -- | Compile the bounded rank-N fragment used by checked Djinn queries.
 -- Foralls in positive position are opened with fresh rigid proposition names.
@@ -626,6 +674,8 @@ instantiateDefinitionOrigins parent owner = instantiate
         abstract@(ExpansionAbstract _) -> abstract
         ExpansionArgument path argument ->
             ExpansionArgument path $ instantiate argument
+        ExpansionExactAssignment argument ->
+            ExpansionExactAssignment $ instantiate argument
 
     instantiateOrigin origin = case origin of
         DefinitionTemplateOrigin sourcePath ->
@@ -645,12 +695,15 @@ partialExpansionArrow source = case source of
         | expansionArrowHead headType -> Just argument
     ExpansionArgument origin function ->
         ExpansionArgument origin `fmap` partialExpansionArrow function
+    ExpansionExactAssignment function ->
+        ExpansionExactAssignment `fmap` partialExpansionArrow function
     _ -> Nothing
 
 expansionArrowHead :: ExpansionType -> Bool
 expansionArrowHead source = case source of
     ExpansionCon "->" _ -> True
     ExpansionArgument _ headType -> expansionArrowHead headType
+    ExpansionExactAssignment headType -> expansionArrowHead headType
     _ -> False
 
 lowerExpansionType
@@ -661,6 +714,8 @@ lowerExpansionType
     -> ExpansionType
     -> Either String FormulaTranslation
 lowerExpansionType lowering definitions path occurrencePath source = case source of
+    ExpansionExactAssignment argument ->
+        lowerExpansionType lowering definitions path occurrencePath argument
     ExpansionArgument origin argument ->
         lowerExpansionType lowering definitions
             (resumeExpansionArgument path origin) occurrencePath argument
@@ -941,6 +996,7 @@ expansionContainsForall source = case source of
         (any expansionContainsForall . snd) constructors
     ExpansionAbstract{} -> False
     ExpansionArgument _ argument -> expansionContainsForall argument
+    ExpansionExactAssignment argument -> expansionContainsForall argument
 
 -- Recover the shared source structure of a normalized, non-logical expansion
 -- subtree. Unions are formula definitions rather than Haskell source types and
@@ -965,6 +1021,7 @@ expansionSourceType source = SharedType.canonicalizeType <$> case source of
     ExpansionAbstract name -> SharedType.TypeConstructor
         <$> first show (SharedName.parseName name)
     ExpansionArgument _ argument -> expansionSourceType argument
+    ExpansionExactAssignment argument -> expansionSourceType argument
 
 -- A marker in function position is unwrapped without resetting the current
 -- definition path; a marker around the complete expression is handled by
@@ -976,6 +1033,8 @@ expansionApplication
 expansionApplication (ExpansionApp function argument) arguments =
     expansionApplication function (argument : arguments)
 expansionApplication (ExpansionArgument _ function) arguments =
+    expansionApplication function arguments
+expansionApplication (ExpansionExactAssignment function) arguments =
     expansionApplication function arguments
 expansionApplication headType arguments = (headType, arguments)
 
@@ -1006,6 +1065,7 @@ substituteExpansion replacements source = case source of
             pure (constructor, substitutedFields)
     abstract@(ExpansionAbstract _) -> Right abstract
     argument@(ExpansionArgument _ _) -> Right argument
+    exact@(ExpansionExactAssignment _) -> Right exact
 
 -- Definition parameters remain ordinary free variables when they occur under
 -- a nested forall. Substitute them through the shared capture-avoiding worker,
@@ -1112,6 +1172,8 @@ foldExpansionAliases
     -> ExpansionType
     -> Either String result
 foldExpansionAliases definitions algebra path source = case source of
+    ExpansionExactAssignment argument ->
+        foldExpansionAliases definitions algebra path argument
     ExpansionArgument origin argument ->
         foldExpansionAliases definitions algebra
             (resumeExpansionArgument path origin) argument
@@ -1167,6 +1229,248 @@ normalizeExpansionAliases
 normalizeExpansionAliases definitions =
     foldExpansionAliases definitions normalizedExpansionAlgebra
 
+type StructuralObservationCache = Map.Map String (Set.Set Int)
+
+type StructuralObservation a =
+    StateT StructuralObservationCache (Either String) a
+
+-- Follow exact-assignment provenance through the fully instantiated provider
+-- body.  @insideExact@ means the complete current subtree came from a visible
+-- type argument.  A marker in function position additionally makes every
+-- later argument of the saturated datatype application fidelity-relevant: for
+-- @f := Phantom@ in @f Int@, it is the exact choice of @Phantom@ which makes
+-- the otherwise scheme-owned @Int@ disappear.
+structuralAssignmentFaithful
+    :: PreparedFormulaCompiler
+    -> Bool
+    -> ExpansionPath
+    -> ExpansionType
+    -> StructuralObservation Bool
+structuralAssignmentFaithful definitions insideExact path source = case source of
+    ExpansionExactAssignment argument ->
+        structuralAssignmentFaithful definitions True path argument
+    ExpansionArgument origin argument ->
+        structuralAssignmentFaithful definitions insideExact
+            (resumeExpansionArgument path origin) argument
+    ExpansionVar{} -> pure True
+    ExpansionCon{} -> applicationFaithful
+    ExpansionApp{} -> applicationFaithful
+    ExpansionTuple types -> all id <$> mapM current types
+    ExpansionArrow argument result -> all id <$>
+        mapM current [argument, result]
+    -- Opaque-forall identity contains the complete substituted source type.
+    ExpansionForall{} -> pure True
+    ExpansionUnion constructors -> all id <$> mapM current
+        [field | (_, fields) <- constructors, field <- fields]
+    ExpansionAbstract{} -> pure True
+  where
+    current = structuralAssignmentFaithful definitions insideExact path
+
+    applicationFaithful = case fidelityExpansionApplication source [] False of
+        (ExpansionCon name origin, arguments, exactHead) ->
+            case lookupFormulaDefinition name definitions of
+                Just (parameters, body)
+                    | length parameters == length arguments ->
+                        if formulaDefinitionIsAlias name definitions
+                            then do
+                                expanded <- lift $ expandDefinitionStep
+                                    definitions path name origin parameters body
+                                    arguments
+                                structuralAssignmentFaithful definitions
+                                    (insideExact || exactHead)
+                                    (pushExpansion name origin path) expanded
+                            else if formulaDefinitionIsRecursiveData
+                                    name definitions || definitionIsEmpty body
+                                then pure True
+                                else do
+                                    observed <- definitionParameterObservations
+                                        definitions name parameters body
+                                    let exactBoundary = insideExact || exactHead
+                                        relevant =
+                                            [ exactBoundary ||
+                                                expansionContainsExact argument
+                                            | argument <- arguments
+                                            ]
+                                        retained = and
+                                            [ not isRelevant ||
+                                                index `Set.member` observed
+                                            | (index, isRelevant) <-
+                                                zip [0 :: Int ..] relevant
+                                            ]
+                                    nested <- and <$> sequence
+                                        [ structuralAssignmentFaithful
+                                            definitions exactBoundary path
+                                            argument
+                                        | argument <- arguments
+                                        ]
+                                    pure $ retained && nested
+                -- Unknown, unsaturated, and oversaturated applications are
+                -- opaque atoms containing their complete normalized source.
+                _ -> pure True
+        _ -> pure True
+
+    definitionIsEmpty body = case body of
+        ExpansionUnion [] -> True
+        _ -> False
+
+-- Collect an application spine while remembering whether an exact assignment
+-- supplied any part of its head.  Ordinary definition-argument wrappers keep
+-- the current expansion path in function position, matching
+-- 'expansionApplication'.
+fidelityExpansionApplication
+    :: ExpansionType
+    -> [ExpansionType]
+    -> Bool
+    -> (ExpansionType, [ExpansionType], Bool)
+fidelityExpansionApplication source arguments exactHead = case source of
+    ExpansionApp function argument ->
+        fidelityExpansionApplication function (argument : arguments) exactHead
+    ExpansionArgument _ function ->
+        fidelityExpansionApplication function arguments exactHead
+    ExpansionExactAssignment function ->
+        fidelityExpansionApplication function arguments True
+    headType -> (headType, arguments, exactHead)
+
+expansionContainsExact :: ExpansionType -> Bool
+expansionContainsExact source = case source of
+    ExpansionExactAssignment{} -> True
+    ExpansionApp function argument ->
+        expansionContainsExact function || expansionContainsExact argument
+    ExpansionTuple types -> any expansionContainsExact types
+    ExpansionArrow argument result ->
+        expansionContainsExact argument || expansionContainsExact result
+    ExpansionUnion constructors -> any
+        (any expansionContainsExact . snd) constructors
+    ExpansionArgument _ argument -> expansionContainsExact argument
+    ExpansionVar{} -> False
+    ExpansionCon{} -> False
+    ExpansionForall{} -> False
+    ExpansionAbstract{} -> False
+
+-- Expand one declaration with all of its formals marked at once, then cache
+-- the observed index set for the rest of this fidelity check.  The previous
+-- per-formal implementation expanded and traversed an n-parameter declaration
+-- n times; this work is linear in the declaration plus its argument vector.
+definitionParameterObservations
+    :: PreparedFormulaCompiler
+    -> String
+    -> [String]
+    -> ExpansionType
+    -> StructuralObservation (Set.Set Int)
+definitionParameterObservations definitions name parameters body = do
+    cached <- get
+    case Map.lookup name cached of
+        Just observed -> pure observed
+        Nothing -> do
+            let markers =
+                    [ "$djinn$structural-fidelity$" ++ show index
+                    | index <- [0 :: Int .. length parameters - 1]
+                    ]
+                selected = Set.fromList markers
+                origin = QueryOrigin []
+            expanded <- lift $ expandDefinitionStep definitions
+                emptyExpansionPath name origin parameters body
+                (map ExpansionVar markers)
+            observedVariables <- structuralVariableObservations definitions
+                selected (pushExpansion name origin emptyExpansionPath)
+                expanded
+            let observed = Set.fromList
+                    [ index
+                    | (index, marker) <- zip [0 :: Int ..] markers
+                    , marker `Set.member` observedVariables
+                    ]
+            modify $ Map.insert name observed
+            pure observed
+
+-- Existential variable observation in a declaration formula.  One faithful
+-- constructor-field path is enough for a formal, but callers test the returned
+-- index independently for every actual argument at every source boundary.
+structuralVariableObservations
+    :: PreparedFormulaCompiler
+    -> Set.Set String
+    -> ExpansionPath
+    -> ExpansionType
+    -> StructuralObservation (Set.Set String)
+structuralVariableObservations definitions selected path source = case source of
+    ExpansionExactAssignment argument -> current argument
+    ExpansionArgument origin argument ->
+        structuralVariableObservations definitions selected
+            (resumeExpansionArgument path origin) argument
+    ExpansionVar variable -> pure $
+        Set.singleton variable `Set.intersection` selected
+    ExpansionCon{} -> applicationObservations
+    ExpansionApp{} -> applicationObservations
+    ExpansionTuple types -> Set.unions <$> mapM current types
+    ExpansionArrow argument result -> Set.unions <$>
+        mapM current [argument, result]
+    ExpansionForall _ atom -> pure $ Set.intersection selected $
+        SharedTypeAtom.typeAtomFreeVariables atom
+    ExpansionUnion constructors -> Set.unions <$> mapM current
+        [field | (_, fields) <- constructors, field <- fields]
+    ExpansionAbstract{} -> pure Set.empty
+  where
+    current = structuralVariableObservations definitions selected path
+
+    applicationObservations = case expansionApplication source [] of
+        (ExpansionCon name origin, arguments) ->
+            case lookupFormulaDefinition name definitions of
+                Just (parameters, body)
+                    | length parameters == length arguments ->
+                        if formulaDefinitionIsAlias name definitions
+                            then do
+                                expanded <- lift $ expandDefinitionStep
+                                    definitions path name origin parameters body
+                                    arguments
+                                structuralVariableObservations definitions
+                                    selected (pushExpansion name origin path)
+                                    expanded
+                            else if formulaDefinitionIsRecursiveData
+                                    name definitions || definitionIsEmpty body
+                                then opaqueObservations
+                                else do
+                                    argumentObservations <- mapM current arguments
+                                    observed <- definitionParameterObservations
+                                        definitions name parameters body
+                                    pure $ Set.unions
+                                        [ variables
+                                        | (index, variables) <- zip
+                                            [0 :: Int ..] argumentObservations
+                                        , index `Set.member` observed
+                                        ]
+                _ -> opaqueObservations
+        _ -> opaqueObservations
+
+    opaqueObservations = do
+        normalized <- lift $
+            normalizeExpansionAliases definitions path source
+        pure $ Set.intersection selected $
+            expansionFreeVariables normalized
+
+    definitionIsEmpty body = case body of
+        ExpansionUnion [] -> True
+        _ -> False
+
+expansionFreeVariables :: ExpansionType -> Set.Set String
+expansionFreeVariables source = case source of
+    ExpansionApp function argument ->
+        expansionFreeVariables function `Set.union`
+            expansionFreeVariables argument
+    ExpansionVar variable -> Set.singleton variable
+    ExpansionCon{} -> Set.empty
+    ExpansionTuple types -> Set.unions $ map expansionFreeVariables types
+    ExpansionArrow argument result ->
+        expansionFreeVariables argument `Set.union`
+            expansionFreeVariables result
+    ExpansionForall _ atom -> SharedTypeAtom.typeAtomFreeVariables atom
+    ExpansionUnion constructors -> Set.unions
+        [ expansionFreeVariables field
+        | (_, fields) <- constructors
+        , field <- fields
+        ]
+    ExpansionAbstract{} -> Set.empty
+    ExpansionArgument _ argument -> expansionFreeVariables argument
+    ExpansionExactAssignment argument -> expansionFreeVariables argument
+
 normalizedExpansionAlgebra :: ExpansionAlgebra ExpansionType
 normalizedExpansionAlgebra = ExpansionAlgebra
     { algebraVariable = ExpansionVar
@@ -1190,6 +1494,8 @@ renderExpansionType source = showsExpansionType 0 source ""
 
 showsExpansionType :: Int -> ExpansionType -> ShowS
 showsExpansionType precedence source = case source of
+    ExpansionExactAssignment argument ->
+        showsExpansionType precedence argument
     ExpansionArgument _ argument ->
         showsExpansionType precedence argument
     ExpansionApp (ExpansionCon "[]" _) element ->
@@ -1416,5 +1722,6 @@ definitionReferences source = case source of
         [definitionReferences field |
             (_, fields) <- constructors, field <- fields]
     ExpansionArgument _ argument -> definitionReferences argument
+    ExpansionExactAssignment argument -> definitionReferences argument
     ExpansionVar _ -> Set.empty
     ExpansionAbstract _ -> Set.empty

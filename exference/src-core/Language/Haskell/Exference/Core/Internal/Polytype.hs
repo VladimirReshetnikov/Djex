@@ -325,7 +325,9 @@ candidateProviderInstantiations rawCandidates source =
 -- product nor requires the selected binders to be absent from the provider
 -- body. The stable boundary has already proved every argument's exact
 -- positional binder kind, while this worker independently retains closure,
--- context, arity, and visible application shape.
+-- provider context, arity, and visible application shape. Contexts nested in
+-- one closed argument remain part of that specified source type; they are not
+-- provider obligations.
 assignmentProviderInstantiations
   :: [[HsType]]
   -> HsType
@@ -359,14 +361,12 @@ assignmentProviderInstantiations rawAssignments source =
 
 -- | Structural boundary expected of one adapter-checked assignment argument.
 -- The adapter separately proves the provider binder's positional kind in its
--- sealed synonym and kind environment. Here we retain lexical closure,
--- context freedom, and the exact
--- generated visible-argument representation, including applications which
--- contain a nested quantified proper type.
+-- sealed synonym and kind environment. Here we retain lexical closure and the
+-- exact generated visible-argument representation, including
+-- applications which contain a nested quantified or contextual proper type.
 isProviderAssignmentArgument :: HsType -> Bool
 isProviderAssignmentArgument source =
   Set.null (SharedType.freeVariables source)
-    && null (SharedType.typeConstraints source)
     && case SharedGenerated.specifiedVisibleTypeArgument source of
       Right _ -> True
       Left _ -> False

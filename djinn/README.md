@@ -851,10 +851,13 @@ constructor's right-associated all-`Type` kind, which has `2 * 64 + 1` nodes;
 this capacity is independent of the five arguments allowed in one
 provider-assignment vector.
 
-Candidate types and assignment arguments are synonym-expanded in the sealed
-session and required to be closed, context-free, and representable as specified
-visible arguments. The legacy scalar Candidate route remains proper-type-only:
-it continues to check every candidate at kind `Type`.
+Candidate types are synonym-expanded in the sealed session and remain closed,
+context-free proper types. Assignment arguments are also synonym-expanded and
+must be lexically closed and representable as specified visible arguments, but
+an exact argument may itself be a contextual polytype. Its nested constraints
+remain part of the selected type rather than becoming provider obligations. The
+legacy scalar Candidate route remains proper-type-only and continues to check
+every candidate at kind `Type`.
 
 The legacy assignment runner infers each leading binder's ground kind from the
 retained provider body, defaults a vacuous binder to `Type`, and checks the
@@ -878,10 +881,25 @@ Each retained scalar specialization or exact vector produces a direct premise
 for that provider. The structural and, when relevant, nominal provider plans
 also carry the existing query-local and loaded-scheme instantiation premises,
 so one proof can compose historical inference with external evidence. For a
-nonempty call, those enriched plans run after the historical plain, nominal,
-and query-local plans but before the evidence-free loaded tails: a productive
-loaded stream therefore cannot spend the global candidate cutoff before the
-supplied route. The independent proof checker validates the specialized
+wholly vacuous vector the structural premise remains safe because no selected
+argument can affect the provider body. A non-vacuous exact vector enters the
+structural family only when the prepared datatype expansion preserves every
+reached argument at its own nominal boundary. The complete vector is marked
+before substitution, so this includes datatype structure inside an assigned
+type and scheme-owned arguments later applied to an assigned higher-kinded
+head. Each relevant argument must retain its own nested correlations and feed a
+datatype formal that is observable in at least one constructor field. Faithful
+fields and faithful correlated parameters therefore remain available for
+elimination, while a wholly phantom parameter or an independently erased
+duplicate position falls back to the nominal family. Recursive, unknown, and
+fully applied empty datatypes retain their complete opaque identity, matching
+formula compilation. This prevents a phantom datatype projection from
+presenting an exact assignment at a different nominal result type. For a nonempty call,
+those enriched plans run
+after the historical plain, nominal, and query-local plans but before the
+evidence-free loaded tails: a productive loaded stream therefore cannot spend
+the global candidate cutoff before the supplied route. The independent proof
+checker validates the specialized
 premise before conversion replaces its private identity with the real provider
 and ordered visible type applications. A target-named specialization remains
 diagnostic-only and cannot become a synthesized self-reference.

@@ -4206,6 +4206,17 @@ generatedTests = testGroup "generated syntax"
             $ SharedType.FunctionType
                 (SharedType.TypeVariable "a")
                 (SharedType.TypeVariable "a")
+          equality = right $ mkIdentifier "Eq"
+          contextual = SharedType.ForallType ["a"]
+            [Constraint equality [SharedType.TypeVariable "a"]]
+            $ SharedType.FunctionType
+                (SharedType.TypeVariable "a")
+                (SharedType.TypeVariable "a")
+          contextualRenamed = SharedType.ForallType ["renamed"]
+            [Constraint equality [SharedType.TypeVariable "renamed"]]
+            $ SharedType.FunctionType
+                (SharedType.TypeVariable "renamed")
+                (SharedType.TypeVariable "renamed")
           vacuousQuantified = SharedType.ForallType [] [] quantified
           renamed = SharedType.ForallType ["renamed"] []
             $ SharedType.FunctionType
@@ -4228,6 +4239,11 @@ generatedTests = testGroup "generated syntax"
             $ SharedType.FunctionType
                 (SharedType.TypeVariable outer)
                 (SharedType.TypeVariable outer)
+          expectedContextual = SharedType.ForallType [outer]
+            [Constraint equality [SharedType.TypeVariable outer]]
+            $ SharedType.FunctionType
+                (SharedType.TypeVariable outer)
+                (SharedType.TypeVariable outer)
           expectedShadowed = SharedType.ForallType [outer] []
             $ SharedType.FunctionType
                 (SharedType.TypeVariable outer)
@@ -4239,6 +4255,13 @@ generatedTests = testGroup "generated syntax"
         Left failure -> assertFailure $ show failure
         Right argument -> pure argument
       specifiedQuantified <- case specifiedVisibleTypeArgument quantified of
+        Left failure -> assertFailure $ show failure
+        Right argument -> pure argument
+      specifiedContextual <- case specifiedVisibleTypeArgument contextual of
+        Left failure -> assertFailure $ show failure
+        Right argument -> pure argument
+      specifiedContextualRenamed <- case
+          specifiedVisibleTypeArgument contextualRenamed of
         Left failure -> assertFailure $ show failure
         Right argument -> pure argument
       specifiedVacuous <- case specifiedVisibleTypeArgument vacuousSource of
@@ -4266,9 +4289,12 @@ generatedTests = testGroup "generated syntax"
       visibleTypeArgumentType specifiedQuantified @?= Nothing
       visibleTypeArgumentClosedType specifiedQuantified @?=
         Just expectedQuantified
+      visibleTypeArgumentClosedType specifiedContextual @?=
+        Just expectedContextual
       visibleTypeArgumentClosedType specifiedShadowed @?=
         Just expectedShadowed
       specifiedQuantified @?= specifiedRenamed
+      specifiedContextual @?= specifiedContextualRenamed
       specifiedVisibleTypeArgument (SharedType.TypeVariable "a") @?=
         Left (VisibleTypeArgumentVariable "a")
       specifiedVisibleTypeArgument open @?=
@@ -4743,11 +4769,21 @@ generatedTests = testGroup "generated syntax"
             $ SharedType.FunctionType
                 (SharedType.TypeVariable "identity")
                 (SharedType.TypeVariable "identity")
+          equality = right $ mkIdentifier "Eq"
+          contextual = right $ specifiedVisibleTypeArgument
+            $ SharedType.ForallType ["contextual"]
+                [Constraint equality [SharedType.TypeVariable "contextual"]]
+            $ SharedType.FunctionType
+                (SharedType.TypeVariable "contextual")
+                (SharedType.TypeVariable "contextual")
           applied :: Expression Int
           applied = VisibleTypeApplication (Global functionName') specified
           quantifiedApplied :: Expression Int
           quantifiedApplied =
             VisibleTypeApplication (Global functionName') quantified
+          contextualApplied :: Expression Int
+          contextualApplied =
+            VisibleTypeApplication (Global functionName') contextual
           inferred = VisibleTypeApplication applied inferredVisibleTypeArgument
           options qualification = RenderOptions qualification show []
       renderExpression (options Unqualified) inferred @?=
@@ -4755,6 +4791,9 @@ generatedTests = testGroup "generated syntax"
       renderExpression (options Unqualified)
           quantifiedApplied @?=
         Right "function @(forall a0_0. a0_0 -> a0_0)"
+      renderExpression (options Unqualified)
+          contextualApplied @?=
+        Right "function @(forall a0_0. (Eq a0_0) => a0_0 -> a0_0)"
       renderExpression (options FullyQualified) inferred @?=
         Right "function @(Data.Maybe.Maybe Int) @_"
       renderExpression (options Unqualified)

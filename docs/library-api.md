@@ -317,6 +317,18 @@ Unlike its scalar route, either exact Exference route may also instantiate
 binders which occur in the provider body because the complete correlated vector
 is already known.
 
+For Djinn, this higher-kinded route includes the canonical bare boxed pair
+constructor `(,)`. Its saturated application remains the normal structural
+`TupleType`, so existing pair synthesis and rendering are unchanged. The
+shared-to-Djinn projection still rejects a wider boxed or any unboxed tuple
+constructor left bare or partially applied, reporting
+`PartialTupleConstructorUnsupported`; callers must not treat the pair case as
+general partial-tuple support. Djinn unit/public regressions cover round-trip
+rendering, both rejection cases, non-vacuous exact substitution, and a
+contextual rank-N assignment. The facade integration regression exercises the
+same `(,)` and `Either Natural` heads through Djinn and Exference and asks GHC to
+check all generated definitions.
+
 First occurrences are retained. Scalar types are alpha-deduplicated per
 provider; assignments are alpha-deduplicated as whole ordered vectors per
 provider. Kinded assignments first require one consistent complete kind vector

@@ -263,6 +263,17 @@ two choices for one vacuous provider at the genuinely higher-order kind
 `(Type -> Type) -> Type`, using both a bare and a partially applied
 constructor.
 
+Shared normalization continues to represent a saturated boxed pair as
+`TupleType`. An exact substitution may instead leave its higher-kinded head
+beneath an opaque application or contextual polytype. At that Djinn projection
+boundary, only the canonical bare boxed arity-two `TypeConstructor` lowers to
+the historical `(,)` atom; its renderer recognizes that already-parenthesized
+spelling rather than producing `((,))`. Wider boxed and every unboxed tuple
+constructor left bare or partially applied still fail with
+`PartialTupleConstructorUnsupported`. This local compatibility rule preserves
+ordinary structural pair compilation without widening the supported tuple
+vocabulary.
+
 Both assignment forms require lexically closed specified visible arguments,
 then substitute the complete vector and independently check the whole
 specialized body at kind `Type`. An argument may be a contextual polytype; its
@@ -731,6 +742,12 @@ test-only seam as home modules. This preserves finite-identifier, queue
 representation, saturation, and strictness regressions whose artificial
 limits cannot be reached through production options, without exposing that
 seam from the `djex` library.
+
+The Djinn unit suite pins canonical bare/partial pair projection, wider-boxed
+and unboxed rejection, and non-vacuous exact and contextual rank-N assignment
+use through the public runner. The facade integration suite then carries the
+same boxed-pair and partial-`Either` evidence through both engines, renders all
+four definitions, and type-checks the combined fixture with GHC.
 
 The downstream API suite also compiles deliberately rejected probes to protect
 opaque-constructor boundaries. Benchmarks are separate Cabal components and are

@@ -327,6 +327,18 @@ adds the 129-node per-kind bound, and contextual provider schemes remain
 unsupported. The legacy scalar `ProviderInstantiationCandidate` entrances
 remain proper-type-only.
 
+Djinn's checked lowering deliberately recognizes one residual tuple head in
+that higher-kinded evidence: the bare boxed arity-two constructor is preserved
+and rendered canonically as `(,)`. A saturated pair such as `(Natural,
+Boolean)` remains the existing structural `TupleType`; the exception does not
+broaden tuple support generally. Bare or partially applied wider boxed tuple
+constructors, and bare or partially applied unboxed tuple constructors, remain
+fail-closed with `PartialTupleConstructorUnsupported`. Focused `djinn-tests` pin
+the bare and partial pair adapter, the negative tuple boundary, non-vacuous
+exact provider substitution, and contextual rank-N use. A `djex-tests` facade
+regression sends `(,)` and `Either Natural` through both engines, renders their
+evidence, and asks GHC to check the combined generated fixture.
+
 Djinn marks each complete legacy scalar tuple or exact vector before
 substituting it into a provider and admits the resulting non-vacuous premise to
 its constructor-expanding search projection only when every reached datatype

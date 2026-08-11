@@ -89,6 +89,7 @@ import Language.Haskell.Synthesis.Semantic.Length.Evaluate
 import Language.Haskell.Synthesis.Semantic.Length.Problem
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation
+import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response
 import Language.Haskell.Synthesis.Semantic.Problem
 import Language.Haskell.Synthesis.Search (SearchBatch)
 import Language.Haskell.Synthesis.Type (Type)
@@ -216,6 +217,8 @@ forbiddenConstructionAttempts =
           LengthVariableProbe LengthLocalProbe
           ArtifactKindProbe ArtifactKindProbe ArtifactKindProbe)
       "AssociatedLengthSMTLibSolverObservation"
+  , noGeneric @LengthSMTLibResponseLimits
+      "LengthSMTLibResponseLimits"
   , ( "CheckedLengthContract variable unexpectedly permits Coercible"
     , forbiddenCheckedLengthContractCoercion `seq` ()
     )

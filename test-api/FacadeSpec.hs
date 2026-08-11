@@ -471,11 +471,25 @@ facadeTests = testGroup "public Djex facade"
                   FacadeRawArtifact FacadeRawArtifact FacadeRawArtifact)
           queryObservationReplayer =
             replayAssociatedLengthSMTLibSolverObservation
+          checkResponseParser
+            :: LengthSMTLibResponseLimits
+            -> [Word8]
+            -> Either LengthSMTLibResponseError SolverStatus
+          checkResponseParser = parseLengthSMTLibCheckResponse
+          inputValueResponseParser
+            :: LengthSMTLibResponseLimits
+            -> LengthSMTLibQuery Int ExferenceLocal
+            -> [Word8]
+            -> Either
+                LengthSMTLibResponseError
+                [LengthSMTLibIntegerBinding]
+          inputValueResponseParser = parseLengthSMTLibInputValueResponse
       sealer `seq` candidateResultProjection `seq` problemProjection `seq`
         inputCountProjection `seq` preconditionProjection `seq`
         postconditionProjection `seq` basisProjection `seq`
         counterexampleValidator `seq` queryObservationAssociator `seq`
-        queryObservationReplayer `seq` pure ()
+        queryObservationReplayer `seq` checkResponseParser `seq`
+        inputValueResponseParser `seq` pure ()
       lengthProblemAssignmentInputs (LengthProblemAssignment [1, 2]) @?=
         [1, 2]
       (ProviderIndependentFiniteSpineModel :: LengthCounterexampleBasis) @?=
@@ -490,6 +504,9 @@ facadeTests = testGroup "public Djex facade"
       ( LengthSMTLibObservationQueryFingerprintMismatch
           :: LengthSMTLibObservationReplayError
         ) @?= LengthSMTLibObservationQueryFingerprintMismatch
+      mkLengthSMTLibResponseLimits
+          defaultLengthSMTLibResponseLimitSource @?=
+        Right defaultLengthSMTLibResponseLimits
   , testCase "rejects residual constraints at the Djinn render boundary" $ do
       target <- expectRight $ mkIdentifier "identity"
       checkedTarget <- expectRight $ mkDefinitionName target

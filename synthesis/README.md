@@ -135,6 +135,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and typed-candidate behavioral problems: exact context resealing, residual rejection, rigid root/provider authorization, lazy symbolic length interpretation, normalized counterexample formulas, and separate inventory/encoding/candidate/problem identities. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation and exact input-symbol model replay for one checked Length problem, without launching or trusting a solver. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` | Opaque query-specific association of bounded raw solver reports, with heuristic-only safe projections and exact problem-plus-query replay before payload access. |
+| `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response` | Pure bounded SMT-LIB 2.x check-status and query-specific input-valuation decoding; syntax remains untrusted and only independent Length replay may create evidence. |
 | `Language.Haskell.Synthesis.Semantic.Observation` | Raw three-valued solver and four-valued behavioral reports without candidate association or evidence claims. |
 | `Language.Haskell.Synthesis.Semantic.Problem` | Bounded raw artifacts associated with exact domain, inventory, encoding, candidate, and problem identities; every raw result is restricted to heuristic ranking, while domain-owned authoritative evidence has only a private construction seam. |
 | `Language.Haskell.Synthesis.Generated` | Scope-aware expressions, patterns, clauses, holes, mixed term/type application spines, bottom-up rewriting, simplification, alpha-equivalence, substitution, and Haskell rendering through the common qualification policy. |
@@ -178,6 +179,20 @@ or cache identity. A later executor must additionally seal the solver build,
 capability handshake, process and protocol state, parser schema, requested
 artifact policy, deadlines, cancellation, and resource limits; `unknown`
 should not be cached by query identity alone.
+
+`Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response` is the matching
+pure response boundary. It retains at most 65,536 bytes before parsing, so
+cyclic or infinite lazy input is rejected productively, then enforces separate
+list-depth, S-expression-node, source-token-byte, and integer-width limits. The
+private lexer handles exact SMT-LIB whitespace and comments, doubled-quote
+strings, quoted symbols, and all standard atom categories. The public surface
+accepts only `sat`, `unsat`, `unknown`, or the exact input valuation requested
+by one query; valuations are symbol-checked and restored to source order.
+Its versioned schema tag gives a later execution identity an exact parser and
+normalization policy to bind. This is not stream framing or execution
+association. Standard solver errors
+remain failures, `unsat` remains heuristic, and decoded values must still pass
+the existing exact Length model validator before any evidence exists.
 
 `Generated` separates backend-local identity from structural global `Name`s.
 Its checked `DefinitionName` narrows top-level output names once, and its scope

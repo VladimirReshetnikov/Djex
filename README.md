@@ -307,6 +307,23 @@ protocol session and sentinel state, parser schema, artifact policy, deadlines,
 cancellation, and resource limits. In particular, `unknown` must not be cached
 solely by query identity.
 
+`Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response` adds the pure
+response side without starting a process. It first retains one complete
+response under a total byte bound, then applies an explicit-stack SMT-LIB 2.x
+lexer and S-expression parser with independent nesting, node, token, and
+integer-width limits. Token limits count source bytes, including both bytes of
+a doubled quote. A versioned response-schema tag covers lexical,
+normalization, and shape-decoding policy for a future execution key. The
+public decoder admits only exact check statuses and
+the input-only valuation shape requested by a particular Length query. It
+normalizes quoted symbols, rejects malformed, missing, extra, duplicate,
+unknown, wrong-sort, and unsolicited bindings, and restores source input
+order. Parsed negative integers remain raw values for the existing natural
+domain validator to reject. Parsed statuses are observations only: process
+framing, request sentinels, solver execution identity, deadlines, and worker
+recovery remain obligations of the future executor, while only independent
+Length replay can create model-relative counterexample evidence.
+
 ## Building
 
 Build and test the complete graph from the repository root:

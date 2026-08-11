@@ -55,6 +55,7 @@ module Language.Haskell.Djex
   , module Language.Haskell.Synthesis.Semantic.Length.Problem
   , module Language.Haskell.Synthesis.Semantic.Length.SMTLib
   , module Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation
+  , module Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response
   , module Language.Haskell.Synthesis.Semantic.Observation
   , module Language.Haskell.Synthesis.Semantic.Problem
   , module Language.Haskell.Synthesis.Type
@@ -99,6 +100,7 @@ import Language.Haskell.Synthesis.Semantic.Length.Evaluate
 import Language.Haskell.Synthesis.Semantic.Length.Problem
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation
+import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response
 import Language.Haskell.Synthesis.Semantic.Observation
 import Language.Haskell.Synthesis.Semantic.Problem
 import Language.Haskell.Synthesis.Type

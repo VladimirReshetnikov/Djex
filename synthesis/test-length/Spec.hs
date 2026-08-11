@@ -44,6 +44,8 @@ import qualified Language.Haskell.Synthesis.Semantic.Length.Problem as LengthPro
 import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib as SMTLib
 import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation
   as SMTLibObservation
+import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response
+  as SMTLibResponse
 import qualified Language.Haskell.Synthesis.Semantic.Observation as Observation
 import qualified Language.Haskell.Synthesis.Semantic.Problem as SemanticProblem
 import Language.Haskell.Synthesis.Type (Type (..), Variable (..))
@@ -1039,7 +1041,7 @@ problemReplayTests = testGroup "exact candidate problem replay"
   ]
 
 smtLibTests :: TestTree
-smtLibTests = testGroup "bounded QF_LIA query and model boundary"
+smtLibTests = testGroup "bounded QF_LIA query, response, and model boundary"
   [ testCase "emit one exact canonical constant-zero query" $ do
       problem <- adversarialConstantZeroProblem identityLengthContract
       query <- expectRight $ SMTLib.sealLengthSMTLibQuery
@@ -1264,6 +1266,254 @@ smtLibTests = testGroup "bounded QF_LIA query and model boundary"
         Left
           (SMTLibObservation.LengthSMTLibObservationProblemMismatch
             SemanticProblem.ReplayEncodingFingerprintMismatch)
+  , testCase "parse exact statuses and classify standard solver failures" $ do
+      let parse = SMTLibResponse.parseLengthSMTLibCheckResponse
+            SMTLibResponse.defaultLengthSMTLibResponseLimits . asciiBytes
+      parse "sat" @?= Right Observation.SolverSatisfiable
+      parse "\t; before status\r\nunsat ; after status" @?=
+        Right Observation.SolverUnsatisfiable
+      parse "unknown\n" @?= Right Observation.SolverUnknown
+      parse "unsupported" @?=
+        Left SMTLibResponse.LengthSMTLibUnsupportedResponse
+      parse "(error \"bad \"\"model\"\"\\path\")" @?=
+        Left (SMTLibResponse.LengthSMTLibSolverErrorResponse
+          $ asciiBytes "bad \"model\"\\path")
+      parse "success" @?=
+        Left SMTLibResponse.LengthSMTLibSuccessWhereStatusExpected
+      parse "satjunk" @?=
+        Left SMTLibResponse.LengthSMTLibUnexpectedCheckResponse
+      parse "|sat|" @?=
+        Left SMTLibResponse.LengthSMTLibUnexpectedCheckResponse
+      parse "(sat)" @?=
+        Left SMTLibResponse.LengthSMTLibUnexpectedCheckResponse
+      parse "sat unsat" @?=
+        Left (SMTLibResponse.LengthSMTLibResponseSyntaxError
+          $ SMTLibResponse.SMTLibTrailingExpression 4)
+  , testCase "decode unordered quoted input valuations in query order" $ do
+      problem <- adversarialBinaryConstantZeroProblem identityLengthContract
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      case SMTLib.lengthSMTLibQueryInputSymbols query of
+        [first, second] -> do
+          bindings <- expectRight
+            $ SMTLibResponse.parseLengthSMTLibInputValueResponse
+                SMTLibResponse.defaultLengthSMTLibResponseLimits query
+                $ asciiBytes
+                  "((|djex_length_input_1| 7)\n\
+                  \ (djex_length_input_0 3))"
+          bindings @?=
+            [smtIntegerBinding first 3, smtIntegerBinding second 7]
+          evidence <- expectCounterexample
+            $ SMTLib.validateLengthSMTLibCounterexample
+                Evaluate.defaultLengthEvaluationLimits query bindings
+          receipt <- expectRight $ Djex.replayBehavioralEvidence
+            (LengthProblem.checkedLengthProblemBehavioralProblem problem)
+            evidence
+          Evaluate.validatedLengthCounterexampleInputs receipt @?= [3, 7]
+          Evaluate.validatedLengthCounterexampleResult receipt @?= 0
+        symbols -> assertFailure $ "unexpected input symbols: " ++ show symbols
+  , testCase "parse standard negative integers but leave naturals to replay" $ do
+      problem <- adversarialConstantZeroProblem identityLengthContract
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      case SMTLib.lengthSMTLibQueryInputSymbols query of
+        [symbol] -> do
+          bindings <- expectRight
+            $ SMTLibResponse.parseLengthSMTLibInputValueResponse
+                SMTLibResponse.defaultLengthSMTLibResponseLimits query
+                $ asciiBytes "((djex_length_input_0 (- 3)))"
+          bindings @?= [smtIntegerBinding symbol (-3)]
+          assertLeft
+            (SMTLib.LengthSMTLibNegativeInputValue 0 symbol (-3))
+            $ SMTLib.validateLengthSMTLibCounterexample
+                Evaluate.defaultLengthEvaluationLimits query bindings
+          assertLeft (SMTLibResponse.LengthSMTLibNegativeZeroIntegerValue 0)
+            $ SMTLibResponse.parseLengthSMTLibInputValueResponse
+                SMTLibResponse.defaultLengthSMTLibResponseLimits query
+                $ asciiBytes "((djex_length_input_0 (- 0)))"
+        symbols -> assertFailure $ "unexpected input symbols: " ++ show symbols
+  , testCase "reject malformed valuation shapes and sorts deterministically" $ do
+      unaryProblem <- adversarialConstantZeroProblem identityLengthContract
+      unaryQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits unaryProblem
+      binaryProblem <- adversarialBinaryConstantZeroProblem
+        identityLengthContract
+      binaryQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits binaryProblem
+      let parseUnary = SMTLibResponse.parseLengthSMTLibInputValueResponse
+            SMTLibResponse.defaultLengthSMTLibResponseLimits unaryQuery
+            . asciiBytes
+          parseBinary = SMTLibResponse.parseLengthSMTLibInputValueResponse
+            SMTLibResponse.defaultLengthSMTLibResponseLimits binaryQuery
+            . asciiBytes
+          unknown = asciiBytes "djex_length_input_9"
+          first = asciiBytes "djex_length_input_0"
+      parseUnary "()" @?= Left
+        (SMTLibResponse.LengthSMTLibInputValueArityMismatch 1 0)
+      parseUnary "((djex_length_input_0 1) (djex_length_input_0 2))" @?=
+        Left (SMTLibResponse.LengthSMTLibInputValueArityMismatch 1 2)
+      parseUnary "(djex_length_input_0)" @?=
+        Left (SMTLibResponse.LengthSMTLibValuationPairExpected 0)
+      parseUnary "((djex_length_input_0))" @?=
+        Left (SMTLibResponse.LengthSMTLibValuationPairArityMismatch 0 1)
+      parseUnary "(((djex_length_input_0) 1))" @?=
+        Left (SMTLibResponse.LengthSMTLibValuationTermNotSymbol 0)
+      parseUnary "((djex_length_input_9 1))" @?=
+        Left (SMTLibResponse.LengthSMTLibUnknownValuationSymbol 0 unknown)
+      parseBinary
+          "((djex_length_input_0 1) (djex_length_input_0 2))" @?=
+        Left (SMTLibResponse.LengthSMTLibDuplicateValuationSymbol 1 first)
+      map parseUnary
+          [ "((djex_length_input_0 1.0))"
+          , "((djex_length_input_0 #x01))"
+          , "((djex_length_input_0 #b01))"
+          , "((djex_length_input_0 (+ 1)))"
+          , "((djex_length_input_0 \"1\"))"
+          , "((djex_length_input_0 :reason))"
+          , "((djex_length_input_0 :56))"
+          , "((djex_length_input_0 let))"
+          ] @?= replicate 8
+            (Left $ SMTLibResponse.LengthSMTLibValuationValueNotInteger 0)
+      case parseUnary "((djex_length_input_0 01))" of
+        Left (SMTLibResponse.LengthSMTLibResponseSyntaxError
+            (SMTLibResponse.SMTLibInvalidBareToken _ token)) ->
+          token @?= asciiBytes "01"
+        other -> assertFailure $ "unexpected leading-zero result: " ++ show other
+      parseUnary "unsupported" @?=
+        Left SMTLibResponse.LengthSMTLibUnsupportedResponse
+      parseUnary "(error \"no model\")" @?=
+        Left (SMTLibResponse.LengthSMTLibSolverErrorResponse
+          $ asciiBytes "no model")
+  , testCase "keep quoted-symbol comments local and reject forbidden escapes" $ do
+      problem <- adversarialConstantZeroProblem identityLengthContract
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      let parse = SMTLibResponse.parseLengthSMTLibInputValueResponse
+            SMTLibResponse.defaultLengthSMTLibResponseLimits query
+          quotedUnknown = asciiBytes "djex_length_input_0;not-a-comment"
+      parse (asciiBytes "((|djex_length_input_0;not-a-comment| 1))") @?=
+        Left
+          (SMTLibResponse.LengthSMTLibUnknownValuationSymbol 0 quotedUnknown)
+      case parse (asciiBytes "((|djex_length\\input| 1))") of
+        Left (SMTLibResponse.LengthSMTLibResponseSyntaxError
+            (SMTLibResponse.SMTLibInvalidQuotedSymbolByte _ byte)) ->
+          byte @?= fromIntegral (fromEnum '\\')
+        other -> assertFailure $ "unexpected quoted-symbol result: " ++ show other
+  , testCase "reject incomplete syntax and retain opaque non-ASCII text" $ do
+      let parse = SMTLibResponse.parseLengthSMTLibCheckResponse
+            SMTLibResponse.defaultLengthSMTLibResponseLimits
+          syntax expected bytes = parse bytes @?=
+            Left (SMTLibResponse.LengthSMTLibResponseSyntaxError expected)
+      syntax SMTLibResponse.SMTLibEmptyResponse []
+      syntax (SMTLibResponse.SMTLibUnexpectedClosingParenthesis 0)
+        $ asciiBytes ")"
+      syntax (SMTLibResponse.SMTLibUnterminatedList 0)
+        $ asciiBytes "(sat"
+      syntax (SMTLibResponse.SMTLibUnterminatedString 7)
+        $ asciiBytes "(error \"unfinished"
+      syntax (SMTLibResponse.SMTLibUnterminatedQuotedSymbol 0)
+        $ asciiBytes "|unfinished"
+      syntax (SMTLibResponse.SMTLibInvalidStringByte 8 0)
+        $ asciiBytes "(error \"" ++ [0] ++ asciiBytes "\")"
+      parse (asciiBytes "(error \"" ++ [0x80, 0xff] ++ asciiBytes "\")") @?=
+        Left (SMTLibResponse.LengthSMTLibSolverErrorResponse [0x80, 0xff])
+
+      stringLimit <- expectRight
+        $ SMTLibResponse.mkLengthSMTLibResponseLimits
+            SMTLibResponse.defaultLengthSMTLibResponseLimitSource
+              { SMTLibResponse.lengthSMTLibResponseLimitSourceTokenBytes = 2 }
+      SMTLibResponse.parseLengthSMTLibCheckResponse stringLimit
+          (asciiBytes "\"abc\"") @?=
+        Left (SMTLibResponse.LengthSMTLibResponseSyntaxError
+          $ SMTLibResponse.SMTLibTokenByteLimitExceeded
+              SMTLibResponse.SMTLibStringToken 2 3)
+      SMTLibResponse.parseLengthSMTLibCheckResponse stringLimit
+          (asciiBytes "|abc|") @?=
+        Left (SMTLibResponse.LengthSMTLibResponseSyntaxError
+          $ SMTLibResponse.SMTLibTokenByteLimitExceeded
+              SMTLibResponse.SMTLibQuotedSymbolToken 2 3)
+  , testCase "enforce every response resource bound productively" $ do
+      problem <- adversarialConstantZeroProblem identityLengthContract
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      let limits change = expectRight $ SMTLibResponse.mkLengthSMTLibResponseLimits
+            $ change SMTLibResponse.defaultLengthSMTLibResponseLimitSource
+          parseWith configured =
+            SMTLibResponse.parseLengthSMTLibInputValueResponse configured query
+      noBytes <- limits $ \source -> source
+        { SMTLibResponse.lengthSMTLibResponseLimitSourceBytes = 0 }
+      parseWith noBytes (asciiBytes "(") @?=
+        Left (SMTLibResponse.LengthSMTLibResponseSyntaxError
+          $ SMTLibResponse.SMTLibResponseByteLimitExceeded 0 1)
+      oneDepth <- limits $ \source -> source
+        { SMTLibResponse.lengthSMTLibResponseLimitSourceNestingDepth = 1 }
+      parseWith oneDepth (asciiBytes "(())") @?=
+        Left (SMTLibResponse.LengthSMTLibResponseSyntaxError
+          $ SMTLibResponse.SMTLibNestingDepthLimitExceeded 1 2)
+      twoNodes <- limits $ \source -> source
+        { SMTLibResponse.lengthSMTLibResponseLimitSourceNodes = 2 }
+      parseWith twoNodes (asciiBytes "((djex_length_input_0 1))") @?=
+        Left (SMTLibResponse.LengthSMTLibResponseSyntaxError
+          $ SMTLibResponse.SMTLibNodeLimitExceeded 2 3)
+      twoTokenBytes <- limits $ \source -> source
+        { SMTLibResponse.lengthSMTLibResponseLimitSourceTokenBytes = 2 }
+      parseWith twoTokenBytes (asciiBytes "((djex_length_input_0 1))") @?=
+        Left (SMTLibResponse.LengthSMTLibResponseSyntaxError
+          $ SMTLibResponse.SMTLibTokenByteLimitExceeded
+              SMTLibResponse.SMTLibBareToken 2 3)
+      twoIntegerBits <- limits $ \source -> source
+        { SMTLibResponse.lengthSMTLibResponseLimitSourceIntegerBits = 2 }
+      parseWith twoIntegerBits
+          (asciiBytes "((djex_length_input_0 4))") @?=
+        Left (SMTLibResponse.LengthSMTLibResponseSyntaxError
+          $ SMTLibResponse.SMTLibNumeralBitLimitExceeded 2 3)
+
+      threeBytes <- limits $ \source -> source
+        { SMTLibResponse.lengthSMTLibResponseLimitSourceBytes = 3 }
+      let cyclicStatus = asciiBytes "sat" ++ cyclicStatus
+      cyclicResult <- evaluateWithin
+        $ SMTLibResponse.parseLengthSMTLibCheckResponse
+            threeBytes cyclicStatus
+      assertLeft
+        (SMTLibResponse.LengthSMTLibResponseSyntaxError
+          $ SMTLibResponse.SMTLibResponseByteLimitExceeded 3 4)
+        cyclicResult
+  , testCase "refuse unsolicited values for a zero-input query" $ do
+      let result = Length.LengthVariable Length.LengthResult
+          source = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result $ Length.LengthLiteral 1
+      problem <- adversarialZeroInputProblem source
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      let cyclicBytes = fromIntegral (fromEnum '(') : cyclicBytes
+      observed <- evaluateWithin
+        $ SMTLibResponse.parseLengthSMTLibInputValueResponse
+            SMTLibResponse.defaultLengthSMTLibResponseLimits query cyclicBytes
+      observed @?= Left SMTLibResponse.LengthSMTLibInputValueResponseNotExpected
+  , testCase "publish validated conservative response defaults" $ do
+      SMTLibResponse.lengthSMTLibResponseSchemaTag @?=
+        asciiBytes "djex-length-z3-smtlib2-response/v1"
+      SMTLibResponse.mkLengthSMTLibResponseLimits
+          SMTLibResponse.defaultLengthSMTLibResponseLimitSource @?=
+        Right SMTLibResponse.defaultLengthSMTLibResponseLimits
+      let limits = SMTLibResponse.defaultLengthSMTLibResponseLimits
+      SMTLibResponse.lengthSMTLibResponseByteLimit limits @?= 65536
+      SMTLibResponse.lengthSMTLibResponseNestingDepthLimit limits @?= 64
+      SMTLibResponse.lengthSMTLibResponseNodeLimit limits @?= 4096
+      SMTLibResponse.lengthSMTLibResponseTokenByteLimit limits @?= 4096
+      SMTLibResponse.lengthSMTLibResponseIntegerBitLimit limits @?= 4096
+      assertLeft
+        (SMTLibResponse.NegativeLengthSMTLibResponseLimit
+          SMTLibResponse.LengthSMTLibResponseNestingDepth (-1))
+        $ SMTLibResponse.mkLengthSMTLibResponseLimits
+            SMTLibResponse.defaultLengthSMTLibResponseLimitSource
+              { SMTLibResponse.lengthSMTLibResponseLimitSourceNestingDepth = -1 }
+      assertLeft
+        (SMTLibResponse.NegativeLengthSMTLibResponseLimit
+          SMTLibResponse.LengthSMTLibResponseIntegerBits (-1))
+        $ SMTLibResponse.mkLengthSMTLibResponseLimits
+            SMTLibResponse.defaultLengthSMTLibResponseLimitSource
+              { SMTLibResponse.lengthSMTLibResponseLimitSourceIntegerBits = -1 }
   , testCase "validate declaration and emission bounds productively" $ do
       SMTLib.mkLengthSMTLibLimits SMTLib.defaultLengthSMTLibLimitSource @?=
         Right SMTLib.defaultLengthSMTLibLimits

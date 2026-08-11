@@ -1,10 +1,11 @@
--- | Pure configuration for a future Length/Z3 execution boundary.
+-- | Pure configuration for the Length/Z3 live execution boundary.
 --
 -- This module seals launch spelling, finite solver and host budgets, artifact
 -- policy, and the exact response-decoder policy.  It performs no IO.  A
 -- successful value is not proof that the executable exists, matches an
 -- expected SHA-256 digest, speaks the required protocol, or has any solver
--- capability.  Those facts must be probed and bound by a later live session.
+-- capability.  The scoped live facade probes and binds those observations;
+-- constructing this value alone establishes none of them.
 --
 -- V2 uses a fixed direct argument prefix, policy-derived resource arguments,
 -- and an exact empty child environment;

@@ -419,6 +419,18 @@ and `unknown` remain heuristic observations and grant no pruning authority.
 The exact design and threat boundary are recorded in the
 [2026-08-11 ordinal-bound query-run report](docs/reports/2026-08-11-z3-query-runs.md).
 
+`Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` is the deliberately
+narrow public edge over that owner. It lends an opaque worker only through a
+rank-N scope and projects from each successful query only its exact query
+fingerprint, three-valued status, heuristic strength/use, and optional
+independently replayed counterexample evidence. Process handles, cancellation,
+paths, executable observations, barriers, ordinals, decoded valuations,
+transcripts, transport counters, and reversible run identities remain private.
+Public failures are mapped to byte-free classes plus a cleanup-incomplete bit;
+child-controlled payloads and operating-system details never cross the facade.
+The private session opener and configured per-query deadlines remain separate
+budgets rather than a claimed hard deadline for a caller-defined batch.
+
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` now seals the
 pure Z3 launch and protocol policy without launching anything. V2 fixes the
 direct prefix `-in -smt2 smtlib2_compliant=true`, derives exact launch-time

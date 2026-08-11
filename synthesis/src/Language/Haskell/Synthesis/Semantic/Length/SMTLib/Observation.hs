@@ -12,8 +12,8 @@
 -- still pass bounded parsing, exact symbol decoding, and independent Length
 -- replay before it can yield model-relative evidence.
 --
--- The query fingerprint is not a solver-run or cache identity.  A future
--- executor must separately bind the exact Z3 build and capabilities,
+-- The query fingerprint is not a solver-run or cache identity.  The live
+-- executor separately binds the observed Z3 file and capabilities,
 -- invocation and runtime options, protocol/session state, parser schema,
 -- requested artifact policy, deadlines, cancellation, and resource limits.
 module Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation

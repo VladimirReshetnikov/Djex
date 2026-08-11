@@ -4,8 +4,8 @@
 -- A query can be built only from one opaque 'CheckedLengthProblem'.  It
 -- retains a typed, versioned translation and emits bounded canonical SMT-LIB
 -- commands, but does not launch Z3 or assign authority to raw @sat@, @unsat@,
--- or @unknown@ reports.  Solver build and protocol identity belong to a later
--- execution envelope layered over the query fingerprint.
+-- or @unknown@ reports.  Solver build and protocol identity belong to the
+-- separate live execution envelope layered over the query fingerprint.
 --
 -- Model bindings contain inputs only.  'validateLengthSMTLibCounterexample'
 -- reorders an exact symbol set, rejects negative integers, recomputes the

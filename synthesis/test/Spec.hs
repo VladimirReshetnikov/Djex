@@ -47,6 +47,7 @@ import Test.Tasty.HUnit
   , (@?=)
   )
 import qualified Test.Tasty.QuickCheck as QC
+import SMTLibStreamSpec (smtLibStreamTests)
 
 main :: IO ()
 main = defaultMain tests
@@ -55,6 +56,7 @@ tests :: TestTree
 tests = testGroup "Djex synthesis foundation"
   [ candidateTests
   , semanticObservationTests
+  , smtLibStreamTests
   , classTests
   , collectionTests
   , freshTests

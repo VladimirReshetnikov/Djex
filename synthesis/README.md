@@ -190,10 +190,31 @@ strings, quoted symbols, and all standard atom categories. The public surface
 accepts only `sat`, `unsat`, `unknown`, or the exact input valuation requested
 by one query; valuations are symbol-checked and restored to source order.
 Its versioned schema tag gives a later execution identity an exact parser and
-normalization policy to bind. This is not stream framing or execution
-association. Standard solver errors
-remain failures, `unsat` remains heuristic, and decoded values must still pass
-the existing exact Length model validator before any evidence exists.
+normalization policy to bind. This decoder is not stream framing or execution
+association. Standard solver errors remain failures, `unsat` remains
+heuristic, and decoded values must still pass the existing exact Length model
+validator before any evidence exists.
+
+`Language.Haskell.Synthesis.Internal.SMTLib.Stream` supplies the separate,
+package-private framing primitive. It incrementally finds one exact top-level
+SMT-LIB 2.7 response across arbitrary byte chunks, preserving internal
+whitespace and comments and returning the original post-frame tail after at
+most one byte of lexical lookahead. The
+explicit state machine distinguishes doubled-quote strings, multiline quoted
+symbols, CR/LF comments, bare atoms, and bounded list nesting. Total-byte,
+retained-frame, and depth limits make leading trivia, cyclic chunks, and
+hostile nesting productive failures. Bare and quoted-symbol responses require
+the standard-mandated following whitespace instead of being accepted at EOF.
+A fixed 32-byte nonce becomes a package-owned lowercase-hex `echo` marker;
+both its command and its expected response retain the surrounding quotes
+required by the standard. Recognition is exact and positional only. The
+future live session must still enforce response/sentinel phase order, reject
+stale or duplicate output, re-feed every successful tail so all bytes are
+eventually accounted, bind the framing schema and resource policy into run
+identity, and poison a worker after any protocol failure. Its capability probe
+must establish that Z3's `echo` emits and flushes a trailing byte (normally a
+newline): a top-level string's closing quote is intentionally held for one-byte
+lookahead so a quote at the next chunk boundary can still form a doubled quote.
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` seals the next
 pure boundary. Its v1 protocol fixes direct `-in -smt2` arguments, a deliberately

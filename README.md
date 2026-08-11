@@ -319,10 +319,30 @@ the input-only valuation shape requested by a particular Length query. It
 normalizes quoted symbols, rejects malformed, missing, extra, duplicate,
 unknown, wrong-sort, and unsolicited bindings, and restores source input
 order. Parsed negative integers remain raw values for the existing natural
-domain validator to reject. Parsed statuses are observations only: process
-framing, request sentinels, solver execution identity, deadlines, and worker
-recovery remain obligations of the future executor, while only independent
-Length replay can create model-relative counterexample evidence.
+domain validator to reject. Parsed statuses are observations only. A private
+stream layer now supplies bounded lexical framing and exact echo markers, but
+phase sequencing, solver execution identity, deadlines, and worker recovery
+remain obligations of the future executor, while only independent Length
+replay can create model-relative counterexample evidence.
+
+`Language.Haskell.Synthesis.Internal.SMTLib.Stream` frames one exact SMT-LIB
+2.7 response incrementally without line-based assumptions. It carries lexical
+state across arbitrary chunks for doubled-quote strings, quoted symbols,
+comments, bare responses, and nested lists; bounds all consumed trivia,
+retained frame bytes, and nesting; and returns the original post-frame tail
+after at most one byte of lexical lookahead.
+Bare and quoted-symbol responses are not complete until the required following
+whitespace arrives. Package-owned echo sentinels encode exactly 32 nonce bytes
+as lowercase hex, and retain the standard-required surrounding quotes in both
+the command and expected response. Exact comparison never scans strings,
+comments, symbols, or nested expressions for marker text. This is still pure
+framing rather than a protocol receipt: a live session must enforce the exact
+response/sentinel position, reject premature, stale, duplicate, or unsolicited
+frames, re-feed every successful tail so its bytes are eventually accounted,
+and bind the framing schema and limits into its run identity. Because a
+top-level string needs one-byte lookahead to distinguish a doubled quote, the
+live Z3 capability probe must also establish that `echo` emits and flushes a
+trailing byte (normally its newline) after the marker's closing quote.
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` now seals the
 first pure Z3 launch policy without launching anything. V1 fixes direct

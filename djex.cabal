@@ -202,10 +202,13 @@ Library
     Language.Haskell.Exference.Session
 
   Other-Modules:
+    Djinn.Internal.CheckedCandidate
     Djinn.Internal.Declaration
+    Djinn.Internal.GeneratedDeduplication
     Djinn.Internal.HCheck.Implementation
     Djinn.Internal.Help
     Djinn.Internal.Instantiation
+    Djinn.Internal.InstantiationEvidence
     Djinn.Internal.ProofCheck.Evidence
     Djinn.Internal.ProofToGenerated
     Djinn.Internal.REPL
@@ -345,6 +348,9 @@ Test-Suite djinn-tests
     djinn/test-unit
     djinn/src-internal
   Other-Modules:
+    Djinn.Internal.CheckedCandidate
+    Djinn.Internal.GeneratedDeduplication
+    Djinn.Internal.InstantiationEvidence
     Djinn.Internal.ProofCheck.Evidence
     HCheckCompatibility
     HKindCompatibility

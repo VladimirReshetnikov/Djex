@@ -18,6 +18,8 @@ module Djinn.Internal.Generated
   ) where
 
 import qualified Data.Set as Set
+import Djinn.Internal.GeneratedDeduplication
+  ( deduplicateEtaEquivalentClausesOn )
 import Djinn.Internal.HIdentifier
   ( generatedGlobalName
   , generatedName
@@ -74,29 +76,8 @@ deduplicateEtaEquivalentClauses
   :: Ord local
   => [Generated.FunctionClause local]
   -> [Generated.FunctionClause local]
-deduplicateEtaEquivalentClauses = distinctBy etaAlphaEquivalent
- where
-  etaAlphaEquivalent left right = Generated.alphaEquivalentExpression
-    (etaNormalExpression left) (etaNormalExpression right)
-
-  etaNormalExpression = Generated.simplifyExpressionBy id
-    . splitLambdaGroups
-    . Generated.functionClauseExpression
-
-  splitLambdaGroups = Generated.rewriteExpressionBottomUp $ \expression ->
-    case expression of
-      Generated.Lambda patterns body -> foldr
-        (\pattern nested -> Generated.Lambda [pattern] nested)
-        body patterns
-      other -> other
-
-  distinctBy _ [] = []
-  distinctBy equivalent (firstClause : remaining) =
-    firstClause : distinctBy equivalent
-      [ clause
-      | clause <- remaining
-      , not $ equivalent firstClause clause
-      ]
+deduplicateEtaEquivalentClauses =
+  deduplicateEtaEquivalentClausesOn id
 
 -- | Erase Djinn's post-proof Haskell tree into the shared generated-code AST.
 -- Bound variables become backend-owned local identities; every free value and

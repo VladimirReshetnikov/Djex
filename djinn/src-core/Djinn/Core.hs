@@ -55,7 +55,7 @@ module Djinn.Core (
 
 import Control.Monad (foldM, unless)
 import Data.Bifunctor (first)
-import Data.List (intercalate, mapAccumL, sortOn)
+import Data.List (intercalate, mapAccumL)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import Data.Ratio ((%))
@@ -79,9 +79,20 @@ import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 
+import Djinn.Internal.CheckedCandidate
+    ( ValidatedCandidate
+    , ValidatedResult
+    , checkCandidateProofWith
+    , convertCheckedCandidate
+    , mkValidatedResult
+    , projectValidatedResult
+    , sortValidatedCandidates
+    , validatedCandidateOutput
+    )
 import Djinn.Internal.Environment
 import Djinn.Internal.Declaration
-import Djinn.Internal.Generated (deduplicateEtaEquivalentClauses)
+import Djinn.Internal.GeneratedDeduplication
+    ( deduplicateEtaEquivalentClausesOn )
 import Djinn.Internal.HTypes
 import Djinn.Internal.Instantiation
     ( closedMonotypeSubtrees
@@ -101,7 +112,7 @@ import Djinn.Internal.Instantiation
     , usesInstantiationEvidence
     )
 import Djinn.Internal.LJT
-import Djinn.Internal.ProofCheck (checkProof)
+import Djinn.Internal.ProofCheck.Evidence (checkProofWithEvidence)
 import Djinn.Internal.ProofEnv
 import Djinn.Internal.ProofToGenerated
     ( termToGeneratedClause
@@ -2120,7 +2131,7 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             nextLimit = candidateLimit - formulaPlanProofCount result
             continue =
                 formulaPlanFinished result &&
-                (collect || null (formulaPlanClauses result)) &&
+                (collect || null (formulaPlanCandidates result)) &&
                 evidenceCanBenefitFromAnotherPlan result
         if continue
             then runPlans collect
@@ -2168,12 +2179,19 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
 -- One formula plan retains clauses before cross-plan de-duplication and
 -- ranking. 'formulaPlanProofCount' counts raw proofs before either operation,
 -- which makes the caller's cutoff global across every translation.
+type ValidatedDjinnCandidate =
+    ValidatedCandidate DjinnCandidateDetails
+        (SharedGenerated.FunctionClause HSymbol)
+
+type ValidatedDjinnResult =
+    ValidatedResult DjinnQueryMetadata DjinnCandidateDetails
+        (SharedGenerated.FunctionClause HSymbol)
+
 data FormulaPlanResult = FormulaPlanResult
     { formulaPlanFormula :: String
     , formulaPlanFirstProof :: Maybe String
     , formulaPlanCompletion :: SharedSearch.Completion
-    , formulaPlanClauses ::
-        [SharedGenerated.FunctionClause HSymbol]
+    , formulaPlanCandidates :: [ValidatedDjinnCandidate]
     , formulaPlanEvidence :: SharedQuery.QueryEvidence
     , formulaPlanRemainingBudget :: Maybe Integer
     , formulaPlanProofCount :: Int
@@ -2249,14 +2267,15 @@ searchPreparedFormulaPlan options candidateLimit target externalEnv
                         diagnosticProof : _ -> do
                             internalFailure
                                 "generated an invalid self-reference proof" $
-                                checkProof diagnosticEnv form diagnosticProof
+                                () <$ checkProofWithEvidence
+                                    diagnosticEnv form diagnosticProof
                             return UnrealizableWithoutSelfReference
                         [] -> return Unrealizable
             return FormulaPlanResult {
                 formulaPlanFormula = show form,
                 formulaPlanFirstProof = Nothing,
                 formulaPlanCompletion = queryCompletion outcome,
-                formulaPlanClauses = [],
+                formulaPlanCandidates = [],
                 formulaPlanEvidence = outcomeEvidence failure,
                 formulaPlanRemainingBudget = remainingSearchBudget outcome,
                 formulaPlanProofCount = 0
@@ -2286,13 +2305,21 @@ searchPreparedFormulaPlan options candidateLimit target externalEnv
                                     visibleApplications
                             | otherwise = termToGeneratedClause
                     in convert target erased
-            -- Every candidate must check against the requested formula
-            -- before display names are restored and it is rendered.
-            internalFailure "generated an invalid proof" $
-                mapM_ (checkProof internalEnv form) internalProofs
-            generatedClauses <- internalFailure
+            -- Preserve the historical error precedence by checking every raw
+            -- proof before converting any of them. Each opaque intermediate
+            -- retains the exact evidence returned for that same raw proof;
+            -- conversion consumes the association directly rather than
+            -- rebuilding it positionally after erasure.
+            checkedProofs <- internalFailure "generated an invalid proof" $
+                mapM
+                    (checkCandidateProofWith $
+                        checkProofWithEvidence internalEnv form)
+                    internalProofs
+            generatedCandidates <- internalFailure
                 "cannot construct generated clause" $
-                mapM convertProof internalProofs
+                mapM
+                    (convertCheckedCandidate convertProof candidateDetails)
+                    checkedProofs
             let firstProof = case internalProofs of
                     firstProofTerm : _ -> Just $ show firstProofTerm
                     [] -> Nothing
@@ -2300,14 +2327,14 @@ searchPreparedFormulaPlan options candidateLimit target externalEnv
                     | candidateLimitReached = SharedSearch.truncated
                         SharedSearch.CandidateLimitReached
                     | otherwise = queryCompletion outcome
-                evidence = case generatedClauses of
+                evidence = case generatedCandidates of
                     [] -> SharedQuery.NoEvidence
                     _ : _ -> SharedQuery.ValidatedCandidates
             return FormulaPlanResult {
                 formulaPlanFormula = show form,
                 formulaPlanFirstProof = firstProof,
                 formulaPlanCompletion = completion,
-                formulaPlanClauses = generatedClauses,
+                formulaPlanCandidates = generatedCandidates,
                 formulaPlanEvidence = evidence,
                 formulaPlanRemainingBudget = remainingSearchBudget outcome,
                 formulaPlanProofCount = length internalProofs
@@ -2317,42 +2344,49 @@ formulaPlanFinished :: FormulaPlanResult -> Bool
 formulaPlanFinished result =
     formulaPlanCompletion result == SharedSearch.Finished
 
--- Build the public result only after all requested plans have run. Clauses
--- are structurally de-duplicated across the union, then the surviving
--- candidates are ranked once. Proof checking remains plan-local above.
+-- Build the public result only after all requested plans have run. Whole
+-- candidate/evidence associations are structurally de-duplicated across the
+-- union and ranked once; only then does the final private result project to
+-- the historical shared result. Proof checking remains plan-local above.
 mergeFormulaPlanResults
     :: QueryOptions
     -> [FormulaPlanResult]
     -> Either DjinnQueryError DjinnResult
 mergeFormulaPlanResults _ [] = internalQueryFailure
     "rank-N formula planning produced no search plan"
-mergeFormulaPlanResults options results = makeDjinnResult
-    (formulaPlanFormula metadataPlan)
-    (formulaPlanFirstProof metadataPlan)
-    (formulaPlanCompletion terminalPlan)
-    candidates
-    evidence
+mergeFormulaPlanResults options results =
+    first DjinnResultInvariantFailure $
+        projectValidatedResult validatedResult
   where
     terminalPlan = last results
-    metadataPlan = case filter (not . null . formulaPlanClauses) results of
+    metadataPlan = case filter
+            (not . null . formulaPlanCandidates) results of
         result : _ -> result
         [] -> terminalPlan
-    mergedClauses = concatMap formulaPlanClauses results
+    mergedCandidates = concatMap formulaPlanCandidates results
     -- Axiom-consuming proofs retain eta expansion because Haskell simplified
     -- subsumption is not closed under the propositional eta law. Use the
     -- historical eta-normal form only for alpha-aware de-duplication. This
     -- collapses safe expanded spellings against their earlier compact
     -- candidate without rewriting the first, potentially eta-sensitive output
     -- we retain.
-    distinctClauses = deduplicateEtaEquivalentClauses mergedClauses
-    unrankedCandidates = map makeCandidate distinctClauses
+    distinctCandidates = deduplicateEtaEquivalentClausesOn
+        validatedCandidateOutput mergedCandidates
     candidates
-        | optionSorted options = sortOn
-            SharedCandidate.candidateDetails unrankedCandidates
-        | otherwise = unrankedCandidates
+        | optionSorted options =
+            sortValidatedCandidates distinctCandidates
+        | otherwise = distinctCandidates
     evidence = case candidates of
         _ : _ -> SharedQuery.ValidatedCandidates
         [] -> formulaPlanEvidence terminalPlan
+    validatedResult :: ValidatedDjinnResult
+    validatedResult = mkValidatedResult
+        evidence
+        (formulaPlanCompletion terminalPlan)
+        (DjinnQueryMetadata
+            (formulaPlanFormula metadataPlan)
+            (formulaPlanFirstProof metadataPlan))
+        candidates
 
 candidateDetails
     :: SharedGenerated.FunctionClause HSymbol
@@ -2377,30 +2411,6 @@ candidateDetails clause
                     Just _ -> unusedCount
             !nextTotal = totalCount + 1
         in (nextUnused, nextTotal)
-
-makeCandidate
-    :: SharedGenerated.FunctionClause HSymbol
-    -> DjinnCandidate
-makeCandidate clause = SharedCandidate.Candidate {
-    SharedCandidate.candidateOutput = clause,
-    SharedCandidate.candidateResidualConstraints = [],
-    SharedCandidate.candidateDetails = candidateDetails clause
-    }
-
-makeDjinnResult
-    :: String
-    -> Maybe String
-    -> SharedSearch.Completion
-    -> [DjinnCandidate]
-    -> SharedQuery.QueryEvidence
-    -> Either DjinnQueryError DjinnResult
-makeDjinnResult formula proof completion candidates evidence =
-    first DjinnResultInvariantFailure $
-        SharedQuery.mkQueryResult evidence $
-            SharedSearch.SearchBatch
-                (SharedSearch.Completed completion)
-                (DjinnQueryMetadata formula proof)
-                candidates
 
 resultToGeneratedReport :: DjinnResult -> Either String GeneratedQueryReport
 resultToGeneratedReport result = case SharedSearch.batchProgress search of

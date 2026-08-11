@@ -4,6 +4,7 @@ import Control.Exception (evaluate)
 import Data.List (isInfixOf, isPrefixOf, isSuffixOf, nub, sort)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (listToMaybe)
+import qualified Data.Set as Set
 import Data.Void (Void, absurd)
 import Numeric.Natural (Natural)
 import System.Timeout (timeout)
@@ -14,7 +15,7 @@ import Text.Read (readMaybe)
 
 import Djinn.Core (
     Context, Declaration(..), DjinnCandidateDetails(..),
-    DjinnQueryMetadata(..),
+    DjinnQueryMetadata(..), DjinnResult,
     DjinnDeclarationNameRole(..), QueryOutcome(..),
     DjinnQueryError(..), DjinnQueryOptionsError(..),
     SynthesisDeclarationError(..), SynthesisEnvironmentError(..),
@@ -38,13 +39,17 @@ import Djinn.Core (
     toSynthesisType, typeDeclarations)
 import Djinn.Internal.Environment (validateEnvironment)
 import qualified Djinn.Internal.Environment as RawEnvironment
+import qualified Djinn.Internal.CheckedCandidate as CheckedCandidate
 import qualified Djinn.Internal.Generated as DjinnGenerated
+import Djinn.Internal.GeneratedDeduplication
+    (deduplicateEtaEquivalentClausesOn)
 import Djinn.Internal.HCheck (
     htCheckEnv, htCheckType, htCheckTypeKind, htCheckTypesKinds,
     htInferClassKinds)
 import Djinn.Internal.HIdentifier
 import Djinn.Internal.HTypes hiding (fromSynthesisKind, toSynthesisKind)
 import Djinn.Internal.LJT
+import qualified Djinn.Internal.InstantiationEvidence as InstantiationEvidence
 import Djinn.Internal.ProofCheck (checkProof)
 import qualified Djinn.Internal.ProofCheck.Evidence as ProofEvidence
 import Djinn.Internal.ProofEnv
@@ -184,6 +189,16 @@ tests =
     , ("isolate external proof identities", testProofEnvironment)
     , ("preserve proof-check compatibility through typed evidence",
           testCheckedProofEvidenceParity)
+    , ("project sidecar-retaining results without compatibility drift",
+          testValidatedCandidateResultParity)
+    , ("retain the first checked sidecar through eta de-duplication",
+          testValidatedCandidateDeduplication)
+    , ("move checked sidecars with stable candidate-detail sorting",
+          testValidatedCandidateSorting)
+    , ("project compatibility candidates without forcing sidecars",
+          testValidatedCandidateProjectionLaziness)
+    , ("retain production rank-N evidence before instantiation erasure",
+          testValidatedRankNProductionEvidence)
     , ("retain checker-known rank-N proof source types",
           testCheckedProofRankNTypes)
     , ("retain impredicative proof application intermediate types",
@@ -6713,6 +6728,321 @@ testCheckedProofEvidenceParity = do
             (checkProof environment expected term)
             (() <$ ProofEvidence.checkProofWithEvidence
                 environment expected term)
+
+type ValidatedTestCandidate =
+    CheckedCandidate.ValidatedCandidate DjinnCandidateDetails
+        (SharedGenerated.FunctionClause HSymbol)
+
+validatedCandidateForEvidence
+    :: ProofEvidence.CheckedProofEvidence
+    -> SharedGenerated.FunctionClause HSymbol
+    -> DjinnCandidateDetails
+    -> IO ValidatedTestCandidate
+validatedCandidateForEvidence evidence clause details = do
+    checked <- expectRight $ CheckedCandidate.checkCandidateProofWith
+        (\() -> Right evidence) ()
+    expectRight $ CheckedCandidate.convertCheckedCandidate
+        (\() -> Right clause)
+        (const details)
+        checked
+
+variableProofEvidence
+    :: String
+    -> IO ProofEvidence.CheckedProofEvidence
+variableProofEvidence spelling = do
+    let variable = Symbol spelling
+    expectRight $ ProofEvidence.checkProofWithEvidence
+        [(variable, atomA)] atomA (Var variable)
+
+assertEvidenceOwner
+    :: String
+    -> Symbol
+    -> ProofEvidence.CheckedProofEvidence
+    -> IO ()
+assertEvidenceOwner description expected evidence =
+    case ProofEvidence.checkedProofEnvironment evidence of
+        [(actual, _)] -> assertEqual description expected actual
+        environment -> fail $
+            description ++ ": unexpected environment width " ++
+                show (length environment)
+
+testValidatedCandidateResultParity :: IO ()
+testValidatedCandidateResultParity = do
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $
+        sharedName "sidecarParity"
+    firstEvidence <- variableProofEvidence "firstParityEvidence"
+    secondEvidence <- variableProofEvidence "secondParityEvidence"
+    let firstClause = SharedGenerated.FunctionClause target [] $
+            SharedGenerated.Global $ sharedName "firstParityOutput"
+        secondClause = SharedGenerated.FunctionClause target
+            [SharedGenerated.Bind "keptArgument"] $
+            SharedGenerated.Local "keptArgument"
+        firstDetails = DjinnCandidateDetails 0 0
+        secondDetails = DjinnCandidateDetails 0 1
+        metadata = DjinnQueryMetadata
+            "parity-formula"
+            (Just "parity-proof")
+        completion = SharedSearch.truncated
+            SharedSearch.CandidateLimitReached
+    firstCandidate <- validatedCandidateForEvidence
+        firstEvidence firstClause firstDetails
+    secondCandidate <- validatedCandidateForEvidence
+        secondEvidence secondClause secondDetails
+    let validated = CheckedCandidate.mkValidatedResult
+            SharedQuery.ValidatedCandidates
+            completion
+            metadata
+            [firstCandidate, secondCandidate]
+        projected = CheckedCandidate.projectValidatedResult validated
+            :: Either SharedQuery.QueryResultInvariantError DjinnResult
+        historical = SharedQuery.mkQueryResult
+            SharedQuery.ValidatedCandidates $
+                SharedSearch.SearchBatch
+                    (SharedSearch.Completed completion)
+                    metadata
+                    [ SharedCandidate.Candidate
+                        firstClause [] firstDetails
+                    , SharedCandidate.Candidate
+                        secondClause [] secondDetails
+                    ]
+            :: Either SharedQuery.QueryResultInvariantError DjinnResult
+    expected <- expectShownRight historical
+    actual <- expectShownRight projected
+    assertEqual
+        "the sidecar-retaining path changed the complete public result"
+        expected actual
+
+testValidatedCandidateDeduplication :: IO ()
+testValidatedCandidateDeduplication = do
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $
+        sharedName "sidecarDeduplication"
+    firstEvidence <- variableProofEvidence "firstDeduplicatedEvidence"
+    duplicateEvidence <- variableProofEvidence "duplicateEvidence"
+    let selector = sharedName "sidecarSelector"
+        compact = SharedGenerated.FunctionClause target [] $
+            SharedGenerated.Global selector
+        expanded = SharedGenerated.FunctionClause target
+            [ SharedGenerated.Bind "record"
+            , SharedGenerated.Bind "argument"
+            ] $
+            SharedGenerated.Apply
+                (SharedGenerated.Apply
+                    (SharedGenerated.Global selector)
+                    (SharedGenerated.Local "record"))
+                (SharedGenerated.Local "argument")
+        details = DjinnCandidateDetails 0 2
+    firstCandidate <- validatedCandidateForEvidence
+        firstEvidence expanded details
+    duplicateCandidate <- validatedCandidateForEvidence
+        duplicateEvidence compact details
+    case deduplicateEtaEquivalentClausesOn
+            CheckedCandidate.validatedCandidateOutput
+            [firstCandidate, duplicateCandidate] of
+        [survivor] -> do
+            assertEqual
+                "eta de-duplication changed the first clause spelling"
+                expanded
+                (CheckedCandidate.validatedCandidateOutput survivor)
+            assertEvidenceOwner
+                "eta de-duplication detached the first proof sidecar"
+                (Symbol "firstDeduplicatedEvidence")
+                (CheckedCandidate.validatedCandidateProofEvidence survivor)
+        survivors -> fail $
+            "expected one eta-equivalent sidecar, got " ++
+                show (length survivors)
+
+testValidatedCandidateSorting :: IO ()
+testValidatedCandidateSorting = do
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $
+        sharedName "sidecarSorting"
+    laterEvidence <- variableProofEvidence "laterSortedEvidence"
+    earlierEvidence <- variableProofEvidence "earlierSortedEvidence"
+    let laterClause = SharedGenerated.FunctionClause target [] $
+            SharedGenerated.Global $ sharedName "laterSortedOutput"
+        earlierClause = SharedGenerated.FunctionClause target [] $
+            SharedGenerated.Global $ sharedName "earlierSortedOutput"
+        laterDetails = DjinnCandidateDetails 1 2
+        earlierDetails = DjinnCandidateDetails 0 0
+    laterCandidate <- validatedCandidateForEvidence
+        laterEvidence laterClause laterDetails
+    earlierCandidate <- validatedCandidateForEvidence
+        earlierEvidence earlierClause earlierDetails
+    case CheckedCandidate.sortValidatedCandidates
+            [laterCandidate, earlierCandidate] of
+        [firstCandidate, secondCandidate] -> do
+            assertEqual "candidate-detail sorting lost the earlier clause"
+                earlierClause $
+                    CheckedCandidate.validatedCandidateOutput firstCandidate
+            assertEvidenceOwner
+                "candidate-detail sorting detached the earlier sidecar"
+                (Symbol "earlierSortedEvidence") $
+                    CheckedCandidate.validatedCandidateProofEvidence
+                        firstCandidate
+            assertEqual "candidate-detail sorting lost the later clause"
+                laterClause $
+                    CheckedCandidate.validatedCandidateOutput secondCandidate
+            assertEvidenceOwner
+                "candidate-detail sorting detached the later sidecar"
+                (Symbol "laterSortedEvidence") $
+                    CheckedCandidate.validatedCandidateProofEvidence
+                        secondCandidate
+        sortedCandidates -> fail $
+            "expected two sorted sidecars, got " ++
+                show (length sortedCandidates)
+    stableFirst <- validatedCandidateForEvidence
+        laterEvidence laterClause earlierDetails
+    stableSecond <- validatedCandidateForEvidence
+        earlierEvidence earlierClause earlierDetails
+    case CheckedCandidate.sortValidatedCandidates
+            [stableFirst, stableSecond] of
+        [firstCandidate, secondCandidate] -> do
+            assertEqual "equal candidate details changed clause order"
+                laterClause $
+                    CheckedCandidate.validatedCandidateOutput firstCandidate
+            assertEvidenceOwner
+                "equal candidate details changed sidecar order"
+                (Symbol "laterSortedEvidence") $
+                    CheckedCandidate.validatedCandidateProofEvidence
+                        firstCandidate
+            assertEqual "equal candidate details changed the second clause"
+                earlierClause $
+                    CheckedCandidate.validatedCandidateOutput secondCandidate
+            assertEvidenceOwner
+                "equal candidate details changed the second sidecar"
+                (Symbol "earlierSortedEvidence") $
+                    CheckedCandidate.validatedCandidateProofEvidence
+                        secondCandidate
+        stableCandidates -> fail $
+            "expected two stable sidecars, got " ++
+                show (length stableCandidates)
+
+testValidatedCandidateProjectionLaziness :: IO ()
+testValidatedCandidateProjectionLaziness = do
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $
+        sharedName "lazySidecarProjection"
+    let clause = SharedGenerated.FunctionClause target
+            [SharedGenerated.Bind "argument"] $
+            SharedGenerated.Local "argument"
+        details = DjinnCandidateDetails 0 1
+        poisonedEvidence = error $
+            "compatibility projection forced checked proof evidence"
+    checked <- expectRight $ CheckedCandidate.checkCandidateProofWith
+        (\() -> Right poisonedEvidence) ()
+    candidate <- expectRight $ CheckedCandidate.convertCheckedCandidate
+        (\() -> Right clause)
+        (const details)
+        checked
+    let validated = CheckedCandidate.mkValidatedResult
+            SharedQuery.ValidatedCandidates
+            SharedSearch.Finished
+            (DjinnQueryMetadata "lazy-formula" Nothing)
+            (candidate : error
+                "compatibility projection forced the sidecar tail")
+        projected = CheckedCandidate.projectValidatedResult validated
+            :: Either SharedQuery.QueryResultInvariantError DjinnResult
+    result <- expectShownRight projected
+    assertEqual "lazy projection lost query evidence"
+        SharedQuery.ValidatedCandidates $
+            SharedQuery.resultEvidence result
+    case SharedSearch.batchCandidates $ SharedQuery.resultSearch result of
+        publicCandidate : _ -> do
+            assertEqual "lazy projection changed the first clause"
+                clause $ SharedCandidate.candidateOutput publicCandidate
+            assertEqual "lazy projection changed candidate details"
+                details $ SharedCandidate.candidateDetails publicCandidate
+        [] -> fail "lazy sidecar projection produced no public candidate"
+
+testValidatedRankNProductionEvidence :: IO ()
+testValidatedRankNProductionEvidence = do
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $
+        sharedName "rankNProductionEvidence"
+    let instantiationAxiom = Symbol "$djinn$rankNInstantiation"
+        provider = Symbol "rankNProvider"
+        impredicativeWitness = Symbol "impredicativeWitness"
+        sourceType = SharedType.ForallType ["first", "second"] [] $
+            SharedType.FunctionType
+                (SharedType.TypeVariable "first")
+                (SharedType.TypeVariable "second")
+        impredicativeType = SharedType.ForallType ["element"] [] $
+            SharedType.FunctionType
+                (SharedType.TypeVariable "element")
+                (SharedType.TypeVariable "element")
+        resultType = SharedType.FunctionType
+            impredicativeType impredicativeType
+        sourceFormula = PVar $ opaqueTypeSymbol sourceType
+        impredicativeFormula = PVar $ opaqueTypeSymbol impredicativeType
+        resultFormula = PVar $ opaqueTypeSymbol resultType
+        axiomFormula =
+            sourceFormula :-> impredicativeFormula :-> resultFormula
+        environment =
+            [ (instantiationAxiom, axiomFormula)
+            , (provider, sourceFormula)
+            , (impredicativeWitness, impredicativeFormula)
+            ]
+        partialApplication =
+            Apply (Var instantiationAxiom) (Var provider)
+        rawProof =
+            Apply partialApplication (Var impredicativeWitness)
+        convertProductionProof term = do
+            let erased =
+                    InstantiationEvidence.eliminateInstantiationEvidence
+                        (Set.singleton instantiationAxiom) term
+            compatibilityClause <- termToHClause
+                (SharedGenerated.definitionSpelling target) erased
+            DjinnGenerated.toGeneratedClauseWithName
+                target compatibilityClause
+    checked <- expectRight $ CheckedCandidate.checkCandidateProofWith
+        (ProofEvidence.checkProofWithEvidence environment resultFormula)
+        rawProof
+    candidate <- expectRight $ CheckedCandidate.convertCheckedCandidate
+        convertProductionProof
+        (const $ DjinnCandidateDetails 0 0)
+        checked
+    rendered <- expectRight $ DjinnGenerated.renderGeneratedClause $
+        CheckedCandidate.validatedCandidateOutput candidate
+    assertBool
+        ("generated instantiation evidence was not erased: " ++ rendered)
+        (not $ "$djinn$rankNInstantiation" `isInfixOf` rendered)
+    assertBool
+        ("erased production clause lost the source application: " ++ rendered)
+        ("rankNProvider impredicativeWitness" `isInfixOf` rendered)
+    let evidence =
+            CheckedCandidate.validatedCandidateProofEvidence candidate
+        root = ProofEvidence.checkedProofRoot evidence
+    assertEqual
+        "the production sidecar retained the post-erasure term instead of the raw proof"
+        rawProof $ ProofEvidence.checkedProofNodeTerm root
+    assertEqual "the production proof root lost its exact rank-N result"
+        (Just resultFormula) $ checkedProofNodeExactFormula root
+    case ProofEvidence.checkedProofNodeChildren root of
+        [partial, witness] -> do
+            assertEqual
+                "the production proof lost its pre-erasure intermediate application"
+                partialApplication $ ProofEvidence.checkedProofNodeTerm partial
+            assertEqual
+                "the production proof lost its impredicative intermediate type"
+                (Just $ impredicativeFormula :-> resultFormula) $
+                    checkedProofNodeExactFormula partial
+            assertEqual "the production proof lost its impredicative argument"
+                (Just impredicativeFormula) $
+                    checkedProofNodeExactFormula witness
+            case ProofEvidence.checkedProofNodeChildren partial of
+                [axiom, checkedProvider] -> do
+                    assertEqual
+                        "the production sidecar erased its checker-visible axiom"
+                        (Var instantiationAxiom) $
+                            ProofEvidence.checkedProofNodeTerm axiom
+                    assertEqual
+                        "the production provider lost its exact source rank-N type"
+                        (Just sourceType) $
+                            checkedProofNodeExactFormula checkedProvider
+                                >>= proofFormulaOpaqueSource
+                children -> fail $
+                    "expected axiom and provider production children, got " ++
+                        show (length children)
+        children -> fail $
+            "expected partial and witness production children, got " ++
+                show (length children)
 
 testCheckedProofRankNTypes :: IO ()
 testCheckedProofRankNTypes = do

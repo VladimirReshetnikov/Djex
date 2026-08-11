@@ -46,6 +46,10 @@ import Data.List (sort, sortOn)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
+import Djinn.Internal.InstantiationEvidence
+    ( eliminateInstantiationEvidence
+    , usesInstantiationEvidence
+    )
 import Djinn.Internal.LJTFormula
 import Language.Haskell.Synthesis.Collection (distinctOn)
 import Language.Haskell.Synthesis.Constraint (constraintArguments)
@@ -965,50 +969,3 @@ instantiateSchemeBody scheme arguments =
         choose candidate
             | candidate `Set.member` reserved = choose $ candidate ++ "'"
             | otherwise = candidate
-
--- | Whether a checked proof actually refers to one of the query's erased
--- instantiation axioms. Merely having axioms in the proof environment must not
--- perturb historical simplification for proofs which do not consume them.
-usesInstantiationEvidence :: Set.Set Symbol -> Term -> Bool
-usesInstantiationEvidence axioms
-    | Set.null axioms = const False
-    | otherwise = go
-  where
-    go term = case term of
-        Var symbol -> symbol `Set.member` axioms
-        Lam _ body -> go body
-        Apply function argument -> go function || go argument
-        Xsel _ _ expression -> go expression
-        _ -> False
-
--- | Erase the caller-selected implicit instantiation evidence from a checked
--- proof before code generation. Semantically each selected axiom is the
--- identity function: an applied occurrence reduces to its argument, so the
--- generated Haskell uses the polymorphic hypothesis directly and GHC
--- re-instantiates it at the required type; a bare occurrence becomes an
--- explicit identity lambda, which GHC checks against the implication's rank-N
--- domain bidirectionally. Evidence with a visible type choice is deliberately
--- excluded by the caller and lowered separately. LJT allocates binders away
--- from every environment symbol, so an axiom symbol can never be shadowed
--- inside a proof term.
-eliminateInstantiationEvidence :: Set.Set Symbol -> Term -> Term
-eliminateInstantiationEvidence axioms
-    | Set.null axioms = id
-    | otherwise = go
-  where
-    go term = case term of
-        -- The applied test precedes recursion: rewriting the axiom variable
-        -- first would leave a redundant identity redex in the output.
-        Apply (Var symbol) argument
-            | symbol `Set.member` axioms -> go argument
-        Apply function argument -> Apply (go function) $ go argument
-        Var symbol
-            | symbol `Set.member` axioms ->
-                Lam identityBinder $ Var identityBinder
-        Lam binder body -> Lam binder $ go body
-        Xsel index arity body -> Xsel index arity $ go body
-        _ -> term
-
-    -- Renamed by generated-output freshening; the spelling only needs to be
-    -- outside the declared-function namespace.
-    identityBinder = Symbol "$djinn$instantiated"

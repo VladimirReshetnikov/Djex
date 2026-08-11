@@ -31,6 +31,7 @@ import qualified Language.Haskell.Synthesis.Inventory as Inventory
 import Language.Haskell.Synthesis.Query
 import Language.Haskell.Synthesis.Search
 import Language.Haskell.Synthesis.Selection
+import qualified Language.Haskell.Synthesis.Semantic.Observation as Observation
 import qualified Language.Haskell.Synthesis.TypeRender as TypeRender
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import Language.Haskell.Synthesis.TypeAtom
@@ -52,6 +53,7 @@ main = defaultMain tests
 tests :: TestTree
 tests = testGroup "Djex synthesis foundation"
   [ candidateTests
+  , semanticObservationTests
   , classTests
   , collectionTests
   , freshTests
@@ -148,6 +150,59 @@ candidateTests = testGroup "candidates"
         Left DuplicateLocalBinderIdentity
       renderCandidateDefinition options duplicate @?=
         Left DuplicateLocalBinderIdentity
+  ]
+
+semanticObservationTests :: TestTree
+semanticObservationTests = testGroup "solver and behavioral observations"
+  [ testCase "preserve all three solver statuses and their exact payloads" $ do
+      let satisfiable = Observation.SatisfiableObservation "model"
+            :: Observation.SolverObservation String Int Bool
+          unsatisfiable = Observation.UnsatisfiableObservation 17
+            :: Observation.SolverObservation String Int Bool
+          unknown = Observation.UnknownObservation True
+            :: Observation.SolverObservation String Int Bool
+      map Observation.solverObservationStatus
+          [satisfiable, unsatisfiable, unknown] @?=
+        [ Observation.SolverSatisfiable
+        , Observation.SolverUnsatisfiable
+        , Observation.SolverUnknown
+        ]
+      satisfiable @?= Observation.SatisfiableObservation "model"
+      unsatisfiable @?= Observation.UnsatisfiableObservation 17
+      unknown @?= Observation.UnknownObservation True
+  , testCase "keep behavioral claim statuses and payloads apart" $ do
+      let established = Observation.BehaviorEstablishedObservation
+            "relative-unsat"
+            :: Observation.BehavioralObservation String Int Bool Char
+          violated = Observation.BehaviorViolationObservation 3
+            :: Observation.BehavioralObservation String Int Bool Char
+          bounded = Observation.BehaviorBoundedObservation True
+            :: Observation.BehavioralObservation String Int Bool Char
+          unknown = Observation.BehaviorUnknownObservation 'u'
+            :: Observation.BehavioralObservation String Int Bool Char
+      map Observation.behavioralObservationStatus
+          [established, violated, bounded, unknown] @?=
+        [ Observation.BehaviorEstablished
+        , Observation.BehaviorViolated
+        , Observation.BehaviorValidatedWithin
+        , Observation.BehaviorUnknown
+        ]
+      show [established, violated, bounded, unknown] @?=
+        "[BehaviorEstablishedObservation \"relative-unsat\",\
+        \BehaviorViolationObservation 3,BehaviorBoundedObservation True,\
+        \BehaviorUnknownObservation 'u']"
+      established < violated @?= True
+      violated < bounded @?= True
+      bounded < unknown @?= True
+  , testCase "deep evaluation reaches every status-specific payload" $ do
+      let solver = Observation.UnknownObservation [1, 2]
+            :: Observation.SolverObservation [Int] [Int] [Int]
+          behavior = Observation.BehaviorViolationObservation [5, 6]
+            :: Observation.BehavioralObservation
+                [Int] [Int] [Int] [Int]
+      _ <- evaluate $ force solver
+      _ <- evaluate $ force behavior
+      pure ()
   ]
 
 observabilityTests :: TestTree

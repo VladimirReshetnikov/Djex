@@ -1,5 +1,6 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE EmptyDataDecls #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -21,6 +22,7 @@ module AbstractionBoundary
   , forbiddenConstructionAttempts
   ) where
 
+import Data.Coerce (Coercible, coerce)
 import Data.Proxy (Proxy (Proxy))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -75,6 +77,7 @@ import Language.Haskell.Synthesis.Diagnostic
   , SourceSpan
   )
 import Language.Haskell.Synthesis.Environment (Environment)
+import Language.Haskell.Synthesis.Fingerprint (Fingerprint)
 import Language.Haskell.Synthesis.Generated (DefinitionName)
 import Language.Haskell.Synthesis.Inventory
 import Language.Haskell.Synthesis.KindInference
@@ -94,9 +97,16 @@ import Language.Haskell.Synthesis.TypeSynonym
   , preparedTypeSynonyms
   )
 
+data FingerprintProbe
+data OtherFingerprintProbe
+
 forbiddenConstructionAttempts :: [(String, ())]
 forbiddenConstructionAttempts =
   [ noGeneric @(Environment Int Void ()) "Environment"
+  , noGeneric @(Fingerprint FingerprintProbe) "Fingerprint"
+  , ( "Fingerprint subject identity unexpectedly permits Coercible"
+    , forbiddenFingerprintCoercion `seq` ()
+    )
   , noGeneric @(Inventory Int ()) "Inventory"
   , noGeneric @(PreparedClassIndex Int) "PreparedClassIndex"
   , noGeneric @(PreparedClass Int) "PreparedClass"
@@ -259,6 +269,11 @@ forbiddenConstructionAttempts =
 allowedConstructionAttempts :: [(String, ())]
 allowedConstructionAttempts =
   [ ("QueryRequest Generic", genericMethod @(QueryRequest () ()))
+  , ( "Fingerprint same-domain Coercible"
+    , coercibleMethod
+        @(Fingerprint FingerprintProbe)
+        @(Fingerprint FingerprintProbe)
+    )
   , ( "QueryRequest.requestGoal HasField"
     , fieldMethod @"requestGoal" @(QueryRequest () ()) @()
     )
@@ -272,6 +287,23 @@ noGeneric label =
 -- value of the abstract type or forcing a representation.
 genericMethod :: forall value. Generic value => ()
 genericMethod = (from :: value -> Rep value ()) `seq` ()
+
+-- Keep the deferred role error in this binding's RHS.  The surrounding
+-- negative fixture can then force it inside its exception handler; if the
+-- subject role ever becomes phantom, this turns into a real coercion and the
+-- negative test fails.
+forbiddenFingerprintCoercion
+  :: Fingerprint FingerprintProbe
+  -> Fingerprint OtherFingerprintProbe
+forbiddenFingerprintCoercion = coerce
+
+-- Selecting 'coerce' forces the built-in coercion evidence without requiring
+-- a value of either abstract type.
+coercibleMethod
+  :: forall source target
+   . Coercible source target
+  => ()
+coercibleMethod = (coerce :: source -> target) `seq` ()
 
 noField
   :: forall (label :: TypeLits.Symbol) record field

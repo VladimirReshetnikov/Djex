@@ -202,17 +202,22 @@ main = defaultMain $ testGroup "Djex downstream API"
           Left exception -> assertFailure $
             description ++ " failed: " ++ displayException exception
           Right () -> pure ()
-  , testCase "opaque witnesses expose no representation constructors" $
-      projectionSignatures `seq`
+  , testCase "opaque witnesses expose no representation constructors" $ do
+      projectionSignatures `seq` pure ()
       forM_ forbiddenConstructionAttempts (\(description, attempt) -> do
         result <- try $ evaluate attempt
         case result :: Either SomeException () of
           Left exception -> do
             let message = displayException exception
                 isMissingDictionary =
-                  "No instance for" `isInfixOf` message &&
-                  ("Generic" `isInfixOf` message ||
-                    "HasField" `isInfixOf` message)
+                  ( "No instance for" `isInfixOf` message &&
+                    ( "Generic" `isInfixOf` message ||
+                      "HasField" `isInfixOf` message
+                    )
+                  ) ||
+                  ( "Couldn't match type" `isInfixOf` message &&
+                    "forbiddenFingerprintCoercion" `isInfixOf` message
+                  )
             assertBool
               (description ++ " raised an unrelated exception: " ++ message)
               isMissingDictionary

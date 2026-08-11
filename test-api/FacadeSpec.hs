@@ -3,6 +3,7 @@ module FacadeSpec (facadeTests) where
 import Data.Either (isRight)
 import qualified Data.Set as Set
 import Data.Void (Void)
+import Data.Word (Word8)
 
 import ExferencePatternImports (patternViewsRoundTrip)
 import Language.Haskell.Djex
@@ -45,6 +46,16 @@ facadeTests = testGroup "public Djex facade"
       synthesisMetricCode EngineStateVisited @?= "engine-state-visited"
       snapshotValue snapshot @?= "candidate"
       snapshotObservations snapshot @?= observations
+  , testCase "exports opaque fingerprints and solver-neutral observations" $ do
+      let solver = UnknownObservation "timeout"
+            :: SolverObservation String Int String
+          behavior = BehaviorBoundedObservation (7 :: Int)
+            :: BehavioralObservation String Bool Int Char
+      inspectFingerprint `seq` pure ()
+      solverObservationStatus solver @?= SolverUnknown
+      solver @?= UnknownObservation "timeout"
+      behavioralObservationStatus behavior @?= BehaviorValidatedWithin
+      behavior @?= BehaviorBoundedObservation 7
   , testCase "exports the prepared class authority" $ do
       className <- expectRight $ mkIdentifier "Class"
       missingName <- expectRight $ mkIdentifier "Missing"
@@ -437,6 +448,10 @@ facadeTests = testGroup "public Djex facade"
       elaboratePreparedTypes fresh prepared [(ProperTypeKind, goal)] @?=
         Right [goal]
   ]
+
+inspectFingerprint :: Fingerprint subject -> ([Word8], String)
+inspectFingerprint fingerprint =
+  (fingerprintCanonicalBytes fingerprint, fingerprintCode fingerprint)
 
 expectRight :: Show error => Either error value -> IO value
 expectRight result = case result of

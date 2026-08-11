@@ -1,0 +1,464 @@
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE RoleAnnotations #-}
+
+-- | Private construction for inventory-bound length semantic sessions.
+--
+-- A session is deliberately sealed from raw authority in one call.  In
+-- particular, it never accepts a checked spine context and a checked provider
+-- inventory as independent inputs: those values could have been produced by
+-- different source inventories.  Candidate interpretation and complete
+-- behavioral-problem construction are layered on this association below.
+module Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
+  ( LengthSemanticFingerprintPart (..)
+  , LengthEncodingPolicyFingerprintSubject
+  , LengthSessionError (..)
+  , CheckedLengthSession
+  , sealLengthSession
+  , checkedLengthSessionContext
+  , checkedLengthSessionProviderInventory
+  , lengthSessionInventoryFingerprint
+  , lengthSessionEncodingPolicyFingerprint
+  ) where
+
+import Control.DeepSeq (NFData (rnf))
+import qualified Data.List as List
+import qualified Data.Map.Strict as Map
+import Data.Map.Strict (Map)
+import Data.Void (Void, absurd)
+import GHC.Generics (Generic)
+import Numeric.Natural (Natural)
+
+import Language.Haskell.Synthesis.Constraint (Constraint (..))
+import Language.Haskell.Synthesis.Declaration
+  ( DataConstructor (..)
+  , Declaration (..)
+  , TypeParameter (..)
+  , ValueSignature (..)
+  , declarationTermSchemes
+  , declarationTypeVariables
+  )
+import Language.Haskell.Synthesis.Environment (environmentDeclarations)
+import Language.Haskell.Synthesis.Fingerprint (Fingerprint)
+import Language.Haskell.Synthesis.Internal.Alpha
+  ( AlphaVariable (..)
+  , BinderSlotPolicy (PositionalBinderSlots)
+  , alphaNormalizeTypeWith
+  )
+import Language.Haskell.Synthesis.Internal.Fingerprint
+  ( FingerprintBuilder (..)
+  , FingerprintField (..)
+  , FingerprintLimitError (..)
+  , buildFingerprintWithin
+  )
+import qualified Language.Haskell.Synthesis.Internal.Fingerprint.Type
+  as FingerprintType
+import Language.Haskell.Synthesis.Internal.Semantic.Length
+  ( CheckedLengthContext
+  , CheckedLengthProviderInventory
+  , FiniteListSpineLengthV1
+  , LengthLimits
+  , LengthProviderInventoryError
+  , LengthProviderSummarySource
+  , LengthSpineModelError
+  , LengthSpineModelSource
+  , ascii
+  , checkedLengthSpineModelField
+  , checkedLengthProviderSummaries
+  , finiteListSpineLengthDomainTag
+  , lengthContextSpineModel
+  , lengthContextInventory
+  , lengthFingerprintByteLimit
+  , providerSummaryField
+  , sealLengthContext
+  , sealLengthProviderInventoryInContext
+  , tagged
+  )
+import Language.Haskell.Synthesis.Inventory
+  ( Inventory
+  , inventoryEnvironment
+  , inventoryKindAssumptions
+  )
+import Language.Haskell.Synthesis.Kind (Kind (..))
+import Language.Haskell.Synthesis.KindInference
+  ( KindAssumptions (..)
+  )
+import Language.Haskell.Synthesis.Semantic.Problem
+  ( InventoryFingerprintSubject )
+import Language.Haskell.Synthesis.Type
+  ( Type
+  , Variable (..)
+  , freeVariablesInFirstOccurrenceOrder
+  )
+
+-- | Which independently constructed session identity exceeded its byte bound.
+data LengthSemanticFingerprintPart
+  = LengthSemanticInventoryFingerprint
+  | LengthSemanticEncodingFingerprint
+  deriving (Bounded, Enum, Eq, Ord, Show, Generic)
+
+instance NFData LengthSemanticFingerprintPart
+
+-- | Identity of the solver-neutral policy selected for a session.
+--
+-- This is intentionally not an 'EncodingFingerprintSubject': the complete
+-- behavioral encoding also depends on a re-sealed contract, the interpreter
+-- version, and the normalized candidate-specific formula.
+data LengthEncodingPolicyFingerprintSubject
+
+-- | Fixed-precedence rejection while atomically sealing one session.
+data LengthSessionError identity
+  = LengthSessionSpineModelRejected
+      (LengthSpineModelError (Variable identity))
+  | LengthSessionProviderInventoryRejected
+      (LengthProviderInventoryError (Variable identity))
+  | LengthSessionFingerprintLimitExceeded
+      !LengthSemanticFingerprintPart !Natural !Natural
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData identity => NFData (LengthSessionError identity)
+
+-- | Exact neutral inventory, checked finite-spine model, and provider laws
+-- retained under distinct complete structural identities.
+data CheckedLengthSession identity annotation = CheckedLengthSession
+  !(CheckedLengthContext (Variable identity) annotation)
+  !(CheckedLengthProviderInventory (Variable identity))
+  !(Fingerprint
+      (InventoryFingerprintSubject FiniteListSpineLengthV1))
+  !(Fingerprint
+      LengthEncodingPolicyFingerprintSubject)
+
+type role CheckedLengthSession nominal nominal
+
+instance (NFData identity, NFData annotation)
+    => NFData (CheckedLengthSession identity annotation) where
+  rnf (CheckedLengthSession context providers inventory encoding) =
+    rnf context `seq`
+    rnf providers `seq`
+    rnf inventory `seq`
+    rnf encoding
+
+-- | Seal all session authority from one raw source inventory.
+--
+-- Failure order is spine schema, provider summaries, exact inventory identity,
+-- then solver-neutral encoding identity.  The provider sealer resolves every
+-- named scheme from the context constructed immediately before it, so a
+-- successful value cannot contain cross-inventory checked projections.
+sealLengthSession
+  :: Ord identity
+  => LengthLimits
+  -> Inventory (Variable identity) annotation
+  -> LengthSpineModelSource
+  -> [LengthProviderSummarySource (Variable identity)]
+  -> Either
+      (LengthSessionError identity)
+      (CheckedLengthSession identity annotation)
+sealLengthSession limits inventory modelSource providerSources = do
+  context <- either (Left . LengthSessionSpineModelRejected) Right
+    $ sealLengthContext limits inventory modelSource
+  providers <- either
+    (Left . LengthSessionProviderInventoryRejected) Right
+    $ sealLengthProviderInventoryInContext limits context providerSources
+  inventoryFingerprint <- mapFingerprintFailure
+    LengthSemanticInventoryFingerprint
+    $ buildLengthInventoryFingerprint limits context providers
+  encodingFingerprint <- mapFingerprintFailure
+    LengthSemanticEncodingFingerprint
+    $ buildLengthEncodingFingerprint limits context
+  pure $ CheckedLengthSession
+    context providers inventoryFingerprint encodingFingerprint
+
+checkedLengthSessionContext
+  :: CheckedLengthSession identity annotation
+  -> CheckedLengthContext (Variable identity) annotation
+checkedLengthSessionContext (CheckedLengthSession context _ _ _) = context
+
+checkedLengthSessionProviderInventory
+  :: CheckedLengthSession identity annotation
+  -> CheckedLengthProviderInventory (Variable identity)
+checkedLengthSessionProviderInventory
+    (CheckedLengthSession _ providers _ _) = providers
+
+lengthSessionInventoryFingerprint
+  :: CheckedLengthSession identity annotation
+  -> Fingerprint (InventoryFingerprintSubject FiniteListSpineLengthV1)
+lengthSessionInventoryFingerprint
+    (CheckedLengthSession _ _ inventory _) = inventory
+
+lengthSessionEncodingPolicyFingerprint
+  :: CheckedLengthSession identity annotation
+  -> Fingerprint LengthEncodingPolicyFingerprintSubject
+lengthSessionEncodingPolicyFingerprint
+    (CheckedLengthSession _ _ _ encoding) = encoding
+
+mapFingerprintFailure
+  :: LengthSemanticFingerprintPart
+  -> Either FingerprintLimitError value
+  -> Either (LengthSessionError identity) value
+mapFingerprintFailure part = either reject Right
+ where
+  reject FingerprintLimitExceeded
+      { fingerprintMaximumBytes = maximumBytes
+      , fingerprintObservedBytesAtLeast = observedBytes
+      } = Left $ LengthSessionFingerprintLimitExceeded
+        part maximumBytes observedBytes
+
+buildLengthInventoryFingerprint
+  :: Ord identity
+  => LengthLimits
+  -> CheckedLengthContext (Variable identity) annotation
+  -> CheckedLengthProviderInventory (Variable identity)
+  -> Either FingerprintLimitError
+      (Fingerprint
+        (InventoryFingerprintSubject FiniteListSpineLengthV1))
+buildLengthInventoryFingerprint limits context providers =
+  buildFingerprintWithin (fromIntegral $ lengthFingerprintByteLimit limits)
+    FingerprintBuilder
+      { fingerprintBuilderVersion = 1
+      , fingerprintBuilderRole = ascii
+          "finite-list-spine-length/semantic-inventory"
+      , fingerprintBuilderFields =
+          [ tagged "dialect"
+              [FingerprintBytes finiteListSpineLengthDomainTag]
+          , tagged "annotation-policy"
+              [FingerprintBytes $ ascii "erase-source-annotations/v1"]
+          , tagged "neutral-source-inventory"
+              [inventoryField $ contextInventory context]
+          , tagged "spine-model"
+              [checkedLengthSpineModelField $ lengthContextSpineModel context]
+          , tagged "assumed-provider-laws"
+              [ FingerprintSequence $ map providerSummaryField
+                  $ checkedLengthProviderSummaries providers
+              ]
+          ]
+      }
+
+buildLengthEncodingFingerprint
+  :: LengthLimits
+  -> CheckedLengthContext (Variable identity) annotation
+  -> Either FingerprintLimitError
+      (Fingerprint
+        LengthEncodingPolicyFingerprintSubject)
+buildLengthEncodingFingerprint limits context =
+  buildFingerprintWithin (fromIntegral $ lengthFingerprintByteLimit limits)
+    FingerprintBuilder
+      { fingerprintBuilderVersion = 1
+      , fingerprintBuilderRole = ascii
+          "finite-list-spine-length/solver-neutral-encoding"
+      , fingerprintBuilderFields =
+          [ tagged "dialect"
+              [FingerprintBytes finiteListSpineLengthDomainTag]
+          , tagged "semantic-policy"
+              [ FingerprintBytes $ ascii "finite-spine-total/v1"
+              , FingerprintBytes $ ascii "opaque-payload/v1"
+              , FingerprintBytes $ ascii "unbounded-natural/v1"
+              , FingerprintBytes $ ascii "exact-truncated-monus/v1"
+              , FingerprintBytes $ ascii "exact-conditional/v1"
+              , FingerprintBytes $ ascii "assumed-provider-laws/v1"
+              ]
+          , tagged "normalization"
+              [FingerprintBytes $ ascii "length-normalizer/v1"]
+          , tagged "candidate-policy"
+              [ FingerprintBytes $ ascii "complete-typed-term-graph/v1"
+              , FingerprintBytes $ ascii "reject-unknown-semantics/v1"
+              ]
+          , tagged "spine-model"
+              [checkedLengthSpineModelField $ lengthContextSpineModel context]
+          ]
+      }
+
+contextInventory
+  :: CheckedLengthContext variable annotation
+  -> Inventory variable annotation
+contextInventory = lengthContextInventory
+
+inventoryField
+  :: Ord identity
+  => Inventory (Variable identity) annotation
+  -> FingerprintField
+inventoryField inventory = tagged "inventory"
+  [ tagged "declarations"
+      [ FingerprintSequence $ map declarationField
+          $ environmentDeclarations $ inventoryEnvironment inventory
+      ]
+  , kindAssumptionsField $ inventoryKindAssumptions inventory
+  ]
+
+declarationField
+  :: Ord identity
+  => Declaration (Variable identity) Void annotation
+  -> FingerprintField
+declarationField declaration = case declaration of
+  TypeSynonymDeclaration _ name parameters body -> tagged "type-synonym"
+    [ FingerprintName name
+    , parameterListField slots parameters
+    , typeField slots body
+    ]
+  DataTypeDeclaration _ name parameters constructors -> tagged "data-type"
+    [ FingerprintName name
+    , parameterListField slots parameters
+    , FingerprintSequence $ map (constructorField slots) constructors
+    ]
+  AbstractTypeDeclaration _ name kind -> tagged "abstract-type"
+    [FingerprintName name, kindField kind]
+  ValueDeclaration _ -> tagged "value"
+    [FingerprintSequence $ map (closedSignatureField slots) schemes]
+  ClassDeclaration _ name parameters superclasses _ -> tagged "class"
+    [ FingerprintName name
+    , parameterListField slots parameters
+    , FingerprintSequence $ map (constraintField slots) superclasses
+    , tagged "closed-method-schemes"
+        [FingerprintSequence $ map (closedSignatureField slots) schemes]
+    ]
+  InstanceDeclaration _ variables prerequisites headConstraint ->
+    let instanceSlots = inventoryVariableSlots
+          $ concatMap constraintVariables
+              $ prerequisites ++ [headConstraint]
+    in tagged "instance"
+      [ tagged "binders"
+          [ FingerprintNatural $ fromIntegral $ length variables
+          ]
+      , FingerprintSequence $ map (constraintField instanceSlots) prerequisites
+      , constraintField instanceSlots headConstraint
+      ]
+ where
+  slots = inventoryVariableSlots $ declarationTypeVariables declaration
+  schemes = declarationTermSchemes declaration
+  constraintVariables (Constraint _ arguments) = concatMap
+    freeVariablesInFirstOccurrenceOrder arguments
+
+parameterListField
+  :: Ord identity
+  => InventoryVariableSlots identity
+  -> [TypeParameter (Variable identity) Void]
+  -> FingerprintField
+parameterListField slots parameters = tagged "parameters"
+  [ FingerprintNatural $ fromIntegral $ length parameters
+  , FingerprintSequence $ map parameterField parameters
+  ]
+ where
+  parameterField (TypeParameter variable possibleKind) = tagged "parameter"
+    [ inventoryVariableField slots variable
+    , case possibleKind of
+      Nothing -> tagged "implicit-kind" []
+      Just kind -> tagged "explicit-kind" [kindField kind]
+    ]
+
+constructorField
+  :: Ord identity
+  => InventoryVariableSlots identity
+  -> DataConstructor (Variable identity) annotation
+  -> FingerprintField
+constructorField slots constructor = tagged "constructor"
+  [ FingerprintName $ constructorName constructor
+  , FingerprintSequence $ map (typeField slots)
+      $ constructorFields constructor
+  ]
+
+closedSignatureField
+  :: Ord identity
+  => InventoryVariableSlots identity
+  -> ValueSignature (Variable identity) annotation
+  -> FingerprintField
+closedSignatureField slots signature = tagged "closed-term-scheme"
+  [ FingerprintName $ valueName signature
+  , typeField slots $ valueType signature
+  ]
+
+constraintField
+  :: Ord identity
+  => InventoryVariableSlots identity
+  -> Constraint (Type (Variable identity))
+  -> FingerprintField
+constraintField slots (Constraint className arguments) = tagged "constraint"
+  [ FingerprintName className
+  , FingerprintSequence $ map (typeField slots) arguments
+  ]
+
+typeField
+  :: Ord identity
+  => InventoryVariableSlots identity
+  -> Type (Variable identity)
+  -> FingerprintField
+typeField slots = FingerprintType.typeFingerprintField
+    (alphaVariableField slots)
+  . FingerprintType.canonicalTypeFingerprintForm
+  . alphaNormalizeTypeWith PositionalBinderSlots
+
+data InventoryVariableSlots identity = InventoryVariableSlots
+  !(Map identity Natural)
+  !(Map identity Natural)
+
+inventoryVariableSlots
+  :: Ord identity
+  => [Variable identity]
+  -> InventoryVariableSlots identity
+inventoryVariableSlots = List.foldl' insert
+  $ InventoryVariableSlots Map.empty Map.empty
+ where
+  insert (InventoryVariableSlots flexible rigid) variable = case variable of
+    FlexibleVariable identity -> InventoryVariableSlots
+      (insertNext identity flexible) rigid
+    RigidVariable identity -> InventoryVariableSlots
+      flexible (insertNext identity rigid)
+
+  insertNext identity slots
+    | Map.member identity slots = slots
+    | otherwise = Map.insert identity (fromIntegral $ Map.size slots) slots
+
+inventoryVariableField
+  :: Ord identity
+  => InventoryVariableSlots identity
+  -> Variable identity
+  -> FingerprintField
+inventoryVariableField (InventoryVariableSlots flexible rigid) variable =
+  case variable of
+    FlexibleVariable identity -> tagged "flexible"
+      [slotField $ Map.lookup identity flexible]
+    RigidVariable identity -> tagged "rigid"
+      [slotField $ Map.lookup identity rigid]
+ where
+  slotField Nothing = tagged "missing-inventory-variable-slot" []
+  slotField (Just slot) = tagged "slot" [FingerprintNatural slot]
+
+alphaVariableField
+  :: Ord identity
+  => InventoryVariableSlots identity
+  -> AlphaVariable (Variable identity)
+  -> FingerprintField
+alphaVariableField slots variable = case variable of
+  AlphaBoundVariable scope slot -> tagged "bound"
+    [FingerprintNatural scope, FingerprintNatural slot]
+  AlphaFreeVariable free -> tagged "free"
+    [inventoryVariableField slots free]
+
+kindAssumptionsField :: KindAssumptions -> FingerprintField
+kindAssumptionsField assumptions = tagged "inferred-kind-assumptions"
+  [ tagged "type-constructors"
+      [ FingerprintSequence
+          [ tagged "type-constructor-kind"
+              [FingerprintName name, kindField kind]
+          | (name, kind) <- Map.toAscList
+              $ typeConstructorKinds assumptions
+          ]
+      ]
+  , tagged "classes"
+      [ FingerprintSequence
+          [ tagged "class-parameter-kinds"
+              [ FingerprintName name
+              , FingerprintSequence $ map possibleKindField kinds
+              ]
+          | (name, kinds) <- Map.toAscList
+              $ classParameterKinds assumptions
+          ]
+      ]
+  ]
+ where
+  possibleKindField Nothing = tagged "generalized-kind" []
+  possibleKindField (Just kind) = tagged "fixed-kind" [kindField kind]
+
+kindField :: Kind Void -> FingerprintField
+kindField kind = case kind of
+  ProperTypeKind -> tagged "proper-type-kind" []
+  KindVariable impossible -> absurd impossible
+  FunctionKind parameter result -> tagged "function-kind"
+    [kindField parameter, kindField result]

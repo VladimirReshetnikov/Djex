@@ -73,6 +73,13 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length
   , checkedLengthProviderSummaries
   , lookupCheckedLengthProviderSummary
   , lengthProviderInventoryFingerprint
+  , checkedLengthSpineModelField
+  , providerSummaryField
+  , contractVariableField
+  , lengthExpressionField
+  , lengthFormulaField
+  , tagged
+  , ascii
   ) where
 
 import Control.DeepSeq (NFData (rnf))

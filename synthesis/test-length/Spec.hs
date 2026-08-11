@@ -11,11 +11,13 @@ import Language.Haskell.Synthesis.Declaration
       ( AbstractTypeDeclaration
       , ClassDeclaration
       , DataTypeDeclaration
+      , InstanceDeclaration
       , ValueDeclaration
       )
   , TypeParameter (TypeParameter)
   , ValueSignature (ValueSignature)
   )
+import qualified Language.Haskell.Synthesis.Fingerprint as Fingerprint
 import Language.Haskell.Synthesis.Inventory
   ( Inventory
   , mkInventory
@@ -32,7 +34,8 @@ import Language.Haskell.Synthesis.Name
   )
 import qualified Language.Haskell.Synthesis.Semantic.Length as Length
 import qualified Language.Haskell.Synthesis.Semantic.Length.Evaluate as Evaluate
-import Language.Haskell.Synthesis.Type (Type (..))
+import qualified Language.Haskell.Synthesis.Semantic.Length.Problem as LengthProblem
+import Language.Haskell.Synthesis.Type (Type (..), Variable (..))
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit
   ( assertBool
@@ -50,10 +53,132 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , contextTests
   , contractTests
   , providerTests
+  , sessionTests
   , evaluationTests
   , normalizationTests
   , productiveBoundTests
   , fingerprintTests
+  ]
+
+sessionTests :: TestTree
+sessionTests = testGroup "checked length sessions"
+  [ testCase "bind context and provider laws to one exact inventory" $ do
+      providerName <- expectName "Fixture.sessionProvider"
+      let provider = sessionUnaryProvider providerName "element"
+          inventory = sessionInventory ()
+            [sessionProviderDeclaration () provider]
+      session <- expectRight $ LengthProblem.sealLengthSession
+        Length.defaultLengthLimits inventory Length.BuiltinListSpine [provider]
+      Length.lengthContextInventory
+          (LengthProblem.checkedLengthSessionContext session) @?= inventory
+      assertBool "checked provider disappeared from the atomic session" $
+        case Length.lookupCheckedLengthProviderSummary providerName
+            $ LengthProblem.checkedLengthSessionProviderInventory session of
+          Nothing -> False
+          Just _ -> True
+  , testCase "erase annotations but retain every neutral declaration" $ do
+      providerName <- expectName "Fixture.annotationProvider"
+      unusedName <- expectName "Fixture.unusedSessionValue"
+      let provider = sessionUnaryProvider providerName "element"
+          providerDeclaration annotation =
+            sessionProviderDeclaration annotation provider
+          base annotation = sessionInventory annotation
+            [providerDeclaration annotation]
+          widened = sessionInventory (3 :: Int)
+            [ providerDeclaration 3
+            , ValueDeclaration $ ValueSignature 3 unusedName sessionPayloadType
+            ]
+      first <- expectRight $ LengthProblem.sealLengthSession
+        Length.defaultLengthLimits (base (1 :: Int))
+        Length.BuiltinListSpine [provider]
+      annotated <- expectRight $ LengthProblem.sealLengthSession
+        Length.defaultLengthLimits (base (2 :: Int))
+        Length.BuiltinListSpine [provider]
+      withUnused <- expectRight $ LengthProblem.sealLengthSession
+        Length.defaultLengthLimits widened Length.BuiltinListSpine [provider]
+      LengthProblem.lengthSessionInventoryFingerprint first @?=
+        LengthProblem.lengthSessionInventoryFingerprint annotated
+      assertBool "an unused neutral declaration was absent from exact identity" $
+        LengthProblem.lengthSessionInventoryFingerprint first /=
+          LengthProblem.lengthSessionInventoryFingerprint withUnused
+      LengthProblem.lengthSessionEncodingPolicyFingerprint first @?=
+        LengthProblem.lengthSessionEncodingPolicyFingerprint withUnused
+  , testCase "canonicalize declaration and provider type binders together" $ do
+      providerName <- expectName "Fixture.alphaSessionProvider"
+      let firstProvider = sessionUnaryProvider providerName "first"
+          secondProvider = sessionUnaryProvider providerName "renamed"
+          firstInventory = sessionInventory ()
+            [sessionProviderDeclaration () firstProvider]
+          secondInventory = sessionInventory ()
+            [sessionProviderDeclaration () secondProvider]
+      first <- expectRight $ LengthProblem.sealLengthSession
+        Length.defaultLengthLimits firstInventory
+        Length.BuiltinListSpine [firstProvider]
+      second <- expectRight $ LengthProblem.sealLengthSession
+        Length.defaultLengthLimits secondInventory
+        Length.BuiltinListSpine [secondProvider]
+      LengthProblem.lengthSessionInventoryFingerprint first @?=
+        LengthProblem.lengthSessionInventoryFingerprint second
+      LengthProblem.lengthSessionEncodingPolicyFingerprint first @?=
+        LengthProblem.lengthSessionEncodingPolicyFingerprint second
+  , testCase "ignore instance binder spelling and declaration order" $ do
+      className <- expectName "Fixture.SessionRelation"
+      let classParameter identity = TypeParameter
+            (FlexibleVariable identity) (Just ProperTypeKind)
+          classDeclaration = ClassDeclaration () className
+            [classParameter "class-left", classParameter "class-right"] [] []
+          firstLeft = FlexibleVariable "first-left"
+          firstRight = FlexibleVariable "first-right"
+          renamedLeft = FlexibleVariable "renamed-left"
+          renamedRight = FlexibleVariable "renamed-right"
+          instanceDeclaration binders left right = InstanceDeclaration
+            () binders [] $ Constraint className
+              [TypeVariable left, TypeVariable right]
+          firstInventory = sessionInventory ()
+            [ classDeclaration
+            , instanceDeclaration
+                [firstLeft, firstRight] firstLeft firstRight
+            ]
+          reorderedInventory = sessionInventory ()
+            [ classDeclaration
+            , instanceDeclaration
+                [renamedRight, renamedLeft] renamedLeft renamedRight
+            ]
+      first <- expectRight $ LengthProblem.sealLengthSession
+        Length.defaultLengthLimits firstInventory Length.BuiltinListSpine []
+      reordered <- expectRight $ LengthProblem.sealLengthSession
+        Length.defaultLengthLimits reorderedInventory Length.BuiltinListSpine []
+      LengthProblem.lengthSessionInventoryFingerprint first @?=
+        LengthProblem.lengthSessionInventoryFingerprint reordered
+  , testCase "reject a provider projection not owned by the source inventory" $ do
+      providerName <- expectName "Fixture.foreignSessionProvider"
+      let provider = sessionUnaryProvider providerName "element"
+          inventory = sessionInventory () []
+      case LengthProblem.sealLengthSession Length.defaultLengthLimits
+          inventory Length.BuiltinListSpine [provider] of
+        Left (LengthProblem.LengthSessionProviderInventoryRejected
+            (Length.LengthProviderSummaryRejected 0 rejectedName
+              (Length.LengthProviderNotInSourceInventory missingName))) -> do
+          rejectedName @?= providerName
+          missingName @?= providerName
+        Left other -> assertFailure $ "unexpected rejection: " ++ show other
+        Right _ -> assertFailure "a foreign provider was admitted"
+  , testCase "surface the first bounded session identity failure" $ do
+      let inventory = sessionInventory () []
+      context <- expectRight $ Length.sealLengthContext
+        Length.defaultLengthLimits inventory Length.BuiltinListSpine
+      providers <- expectRight $ Length.sealLengthProviderInventoryInContext
+        Length.defaultLengthLimits context []
+      let providerBytes = length $ Fingerprint.fingerprintCanonicalBytes
+            $ Length.lengthProviderInventoryFingerprint providers
+          limits = limitsWith $ \source -> source
+            { Length.lengthLimitSourceFingerprintBytes = providerBytes }
+      assertLeft
+        (LengthProblem.LengthSessionFingerprintLimitExceeded
+          LengthProblem.LengthSemanticInventoryFingerprint
+          (fromIntegral providerBytes) (fromIntegral providerBytes + 1))
+        $ LengthProblem.sealLengthSession limits inventory
+            Length.BuiltinListSpine []
   ]
 
 limitTests :: TestTree
@@ -1445,6 +1570,49 @@ listLikeDeclaration typeName zeroName stepName recursiveFirst =
   fields
     | recursiveFirst = [recursive, payload]
     | otherwise = [payload, recursive]
+
+sessionInventory
+  :: annotation
+  -> [Declaration (Variable String) () annotation]
+  -> Inventory (Variable String) annotation
+sessionInventory _ declarations = case mkInventory
+    ClosedKindInventory declarations of
+  Left failure -> error $ "invalid session fixture inventory: " ++ show failure
+  Right inventory -> inventory
+
+sessionProviderDeclaration
+  :: annotation
+  -> Length.LengthProviderSummarySource (Variable String)
+  -> Declaration (Variable String) () annotation
+sessionProviderDeclaration annotation source = ValueDeclaration
+  $ ValueSignature annotation
+      (Length.lengthProviderName source)
+      (Length.lengthProviderScheme source)
+
+sessionUnaryProvider
+  :: Name
+  -> String
+  -> Length.LengthProviderSummarySource (Variable String)
+sessionUnaryProvider providerName identity = Length.AssumedProviderSummary
+  { Length.lengthProviderName = providerName
+  , Length.lengthProviderScheme = ForallType [variable] []
+      $ FunctionType
+          (sessionListOf $ TypeVariable variable)
+          (sessionListOf $ TypeVariable variable)
+  , Length.lengthProviderArgumentRoles = [Length.LengthSpineArgument]
+  , Length.lengthProviderTransfer = Length.LengthVariable
+      $ Length.LengthProviderArgument 0
+  }
+ where
+  variable = FlexibleVariable identity
+
+sessionPayloadType :: Type (Variable String)
+sessionPayloadType = TupleType Boxed []
+
+sessionListOf
+  :: Type (Variable String)
+  -> Type (Variable String)
+sessionListOf = TypeApplication $ TypeConstructor listName
 
 sealContract
   :: Length.LengthLimits

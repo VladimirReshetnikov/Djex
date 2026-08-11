@@ -199,17 +199,23 @@ fingerprints include the exact checked spine model. A contract fingerprint also
 identifies the normalized length relation and its ordered spine inputs, while
 an inventory fingerprint identifies the exact normalized provider assumptions.
 Opaque element types and caller-selected resource caps are not part of the
-contract fingerprint. A future encoding identity will bind that contract
-fingerprint, interpreter and lowering policy, arithmetic model, domain, and
-handling of unknown results. A separate candidate identity will bind the exact
-typed candidate graph, and a behavioral problem identity will combine the
-exact domain, source context, semantic-summary inventory, encoding, and
-candidate identities. The provider-inventory fingerprint does not by itself
-claim to identify provider implementations or the complete source inventory;
-that authority remains in the retained context. Consequently, a future
-behavioral-problem constructor must reseal the contract and provider
-projections through that exact context in the same atomic construction; it
-must not associate independently retained checked values by fingerprint alone.
+contract fingerprint. `Language.Haskell.Synthesis.Semantic.Length.Problem`
+now seals a `CheckedLengthSession` atomically from one raw inventory, spine
+model, and provider-summary source list. Its annotation-erased semantic
+inventory fingerprint retains every neutral declaration, inferred kind fact,
+the exact spine schema, and every normalized assumed provider law. Its separate
+encoding-policy fingerprint identifies only the solver-neutral arithmetic,
+normalization, and fail-closed candidate policy. It deliberately does not claim
+the generic behavioral encoding role: a concrete encoding must additionally
+bind a re-sealed contract and normalized interpreted candidate formula.
+
+The smaller provider-inventory fingerprint still does not identify provider
+implementations or the complete source inventory. The atomic session does, and
+prevents a context checked from one inventory from being combined with provider
+laws checked from another. A future candidate/problem sealer will build on that
+opaque association, re-seal the contract through its retained context, bind the
+exact typed candidate graph, and construct the concrete encoding, candidate,
+and complete behavioral-problem identities together.
 
 Contract arguments and results must expose the context's outer modeled spine;
 their element types remain opaque and may themselves be impredicative. A

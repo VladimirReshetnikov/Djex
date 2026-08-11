@@ -38,6 +38,8 @@ import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Sess
   as SMTLibSession
 import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process
   as SMTLibProcess
+import qualified Language.Haskell.Synthesis.Internal.SMTLib.Causal
+  as SMTLibCausal
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Stream
   as SMTLibStream
 import qualified Language.Haskell.Synthesis.Internal.TypedCandidate
@@ -3060,33 +3062,33 @@ expectProtocolWrite
   -> SMTLibProtocol.LengthSMTLibProtocolAction identity local
   -> IO (SMTLibProtocol.LengthSMTLibProtocolReceiver identity local)
 expectProtocolWrite expectedKind expectedBytes action = case action of
-  SMTLibProtocol.LengthSMTLibProtocolWrite kind bytes receiver -> do
+  SMTLibCausal.SMTLibCausalWrite kind bytes receiver -> do
     kind @?= expectedKind
     bytes @?= expectedBytes
     pure receiver
-  SMTLibProtocol.LengthSMTLibProtocolAwait{} ->
+  SMTLibCausal.SMTLibCausalAwait{} ->
     assertFailure "expected a protocol write action, observed await"
-  SMTLibProtocol.LengthSMTLibProtocolComplete{} ->
+  SMTLibCausal.SMTLibCausalComplete{} ->
     assertFailure "expected a protocol write action, observed completion"
 
 expectProtocolAwait
   :: SMTLibProtocol.LengthSMTLibProtocolAction identity local
   -> IO (SMTLibProtocol.LengthSMTLibProtocolReceiver identity local)
 expectProtocolAwait action = case action of
-  SMTLibProtocol.LengthSMTLibProtocolAwait receiver -> pure receiver
-  SMTLibProtocol.LengthSMTLibProtocolWrite{} ->
+  SMTLibCausal.SMTLibCausalAwait receiver -> pure receiver
+  SMTLibCausal.SMTLibCausalWrite{} ->
     assertFailure "expected a protocol await action, observed write"
-  SMTLibProtocol.LengthSMTLibProtocolComplete{} ->
+  SMTLibCausal.SMTLibCausalComplete{} ->
     assertFailure "expected a protocol await action, observed completion"
 
 expectProtocolComplete
   :: SMTLibProtocol.LengthSMTLibProtocolAction identity local
   -> IO (SMTLibProtocol.LengthSMTLibProtocolDecoded identity local)
 expectProtocolComplete action = case action of
-  SMTLibProtocol.LengthSMTLibProtocolComplete decoded -> pure decoded
-  SMTLibProtocol.LengthSMTLibProtocolWrite{} ->
+  SMTLibCausal.SMTLibCausalComplete decoded -> pure decoded
+  SMTLibCausal.SMTLibCausalWrite{} ->
     assertFailure "expected protocol completion, observed write"
-  SMTLibProtocol.LengthSMTLibProtocolAwait{} ->
+  SMTLibCausal.SMTLibCausalAwait{} ->
     assertFailure "expected protocol completion, observed await"
 
 feedProtocolChunks
@@ -3094,12 +3096,12 @@ feedProtocolChunks
   -> [[Word8]]
   -> IO (SMTLibProtocol.LengthSMTLibProtocolAction identity local)
 feedProtocolChunks receiver chunks = case chunks of
-  [] -> pure $ SMTLibProtocol.LengthSMTLibProtocolAwait receiver
+  [] -> pure $ SMTLibCausal.SMTLibCausalAwait receiver
   chunk : remaining -> do
     action <- expectRight
       $ SMTLibProtocol.feedLengthSMTLibProtocol receiver chunk
     case action of
-      SMTLibProtocol.LengthSMTLibProtocolAwait next ->
+      SMTLibCausal.SMTLibCausalAwait next ->
         feedProtocolChunks next remaining
       _
         | null remaining -> pure action

@@ -259,6 +259,7 @@ Library
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Response
     Language.Haskell.Synthesis.Internal.Semantic.Problem
+    Language.Haskell.Synthesis.Internal.SMTLib.Causal
     Language.Haskell.Synthesis.Internal.SMTLib.Response
     Language.Haskell.Synthesis.Internal.SMTLib.Stream
     Language.Haskell.Synthesis.Internal.TypedCandidate
@@ -379,6 +380,7 @@ Test-Suite synthesis-length-tests
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capability
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Driver
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process
+    Language.Haskell.Synthesis.Internal.SMTLib.Causal
     Language.Haskell.Synthesis.Internal.SMTLib.Stream
     Language.Haskell.Synthesis.Internal.TypedCandidate
   Build-Depends:

@@ -9,7 +9,6 @@
 module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Driver
   ( lengthSMTLibCausalDriverSchemaTag
   , LengthSMTLibCausalInitialBoundary (..)
-  , LengthSMTLibCausalAction (..)
   , LengthSMTLibCausalFailure (..)
   , LengthSMTLibCausalTranscript
   , lengthSMTLibCausalTranscriptInheritedBytes
@@ -28,6 +27,8 @@ import Data.Word (Word8)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
+import Language.Haskell.Synthesis.Internal.SMTLib.Causal
+  ( SMTLibCausalAction (..) )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process
   ( LengthSMTLibProcess
   , LengthSMTLibProcessCancellation
@@ -55,20 +56,6 @@ data LengthSMTLibCausalInitialBoundary
   deriving (Bounded, Enum, Eq, Ord, Show, Generic)
 
 instance NFData LengthSMTLibCausalInitialBoundary
-
-data LengthSMTLibCausalAction kind receiver outcome
-  = LengthSMTLibCausalWrite !kind [Word8] !receiver
-  | LengthSMTLibCausalAwait !receiver
-  | LengthSMTLibCausalComplete !outcome
-
-instance
-    (NFData kind, NFData receiver, NFData outcome) =>
-    NFData (LengthSMTLibCausalAction kind receiver outcome) where
-  rnf action = case action of
-    LengthSMTLibCausalWrite kind bytes receiver ->
-      rnf kind `seq` rnf bytes `seq` rnf receiver
-    LengthSMTLibCausalAwait receiver -> rnf receiver
-    LengthSMTLibCausalComplete outcome -> rnf outcome
 
 data LengthSMTLibCausalFailure machineFailure
   = LengthSMTLibCausalProcessFailure !LengthSMTLibProcessError
@@ -134,15 +121,15 @@ driveLengthSMTLibCausalActions
   -> (receiver
       -> [Word8]
       -> Either machineFailure
-          (LengthSMTLibCausalAction kind receiver outcome))
+          (SMTLibCausalAction kind receiver outcome))
   -> (receiver
       -> Either machineFailure
-          (LengthSMTLibCausalAction kind receiver outcome))
+          (SMTLibCausalAction kind receiver outcome))
   -> (Natural -> Word8 -> machineFailure)
   -> LengthSMTLibProcess
   -> LengthSMTLibProcessCancellation
   -> LengthSMTLibProcessDeadline
-  -> LengthSMTLibCausalAction kind receiver outcome
+  -> SMTLibCausalAction kind receiver outcome
   -> IO
       (Either
         (LengthSMTLibCausalFailure machineFailure)
@@ -152,7 +139,7 @@ driveLengthSMTLibCausalActions initialBoundary cumulativeMaximum
     process cancellation deadline = start
  where
   start action = case action of
-    LengthSMTLibCausalWrite kind bytes receiver -> do
+    SMTLibCausalWrite kind bytes receiver -> do
       admitted <- case initialBoundary of
         LengthSMTLibCausalRequireEmptyBoundary -> do
           checked <- checkLengthSMTLibProcessReady
@@ -173,7 +160,7 @@ driveLengthSMTLibCausalActions initialBoundary cumulativeMaximum
     _ -> pure $ Left LengthSMTLibCausalInternalFailure
 
   go inherited completed action = case action of
-    LengthSMTLibCausalWrite kind bytes receiver
+    SMTLibCausalWrite kind bytes receiver
       | null completed -> pure $ Left LengthSMTLibCausalInternalFailure
       | otherwise -> do
           boundary <- collectBoundaryWhitespace inherited completed
@@ -181,9 +168,9 @@ driveLengthSMTLibCausalActions initialBoundary cumulativeMaximum
             Left failure -> pure $ Left failure
             Right (whitespace, completed') ->
               issueWrite inherited completed' kind bytes receiver whitespace
-    LengthSMTLibCausalAwait _ -> pure $ Left
+    SMTLibCausalAwait _ -> pure $ Left
       LengthSMTLibCausalInternalFailure
-    LengthSMTLibCausalComplete outcome ->
+    SMTLibCausalComplete outcome ->
       completeAtBoundary inherited completed outcome
 
   issueWrite inherited completed kind bytes receiver boundaryWhitespace = do
@@ -202,7 +189,7 @@ driveLengthSMTLibCausalActions initialBoundary cumulativeMaximum
     | BS.null whitespace = Right receiver
     | otherwise = case feedReceiver receiver $ BS.unpack whitespace of
         Left failure -> Left $ LengthSMTLibCausalMachineFailure failure
-        Right (LengthSMTLibCausalAwait prepared) -> Right prepared
+        Right (SMTLibCausalAwait prepared) -> Right prepared
         Right _ -> Left LengthSMTLibCausalInternalFailure
 
   await inherited completed kind chunks boundaryOpen receiver = do
@@ -230,12 +217,12 @@ driveLengthSMTLibCausalActions initialBoundary cumulativeMaximum
         case feedReceiver receiver $ BS.unpack chunk of
           Left failure -> pure $ Left
             $ LengthSMTLibCausalMachineFailure failure
-          Right (LengthSMTLibCausalAwait nextReceiver) ->
+          Right (SMTLibCausalAwait nextReceiver) ->
             await nextInherited nextCompleted kind retained
               nextBoundaryOpen nextReceiver
-          Right nextAction@LengthSMTLibCausalWrite {} ->
+          Right nextAction@SMTLibCausalWrite {} ->
             go nextInherited (epochRecord : nextCompleted) nextAction
-          Right (LengthSMTLibCausalComplete outcome) ->
+          Right (SMTLibCausalComplete outcome) ->
             completeAtBoundary nextInherited
               (epochRecord : nextCompleted) outcome
 

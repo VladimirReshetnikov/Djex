@@ -164,8 +164,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   , lengthSMTLibExecutionPolicyFingerprint
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
-  ( LengthSMTLibProtocolAction (..)
-  , LengthSMTLibProtocolDecoded
+  ( LengthSMTLibProtocolDecoded
   , LengthSMTLibProtocolError (..)
   , LengthSMTLibProtocolLimits
   , LengthSMTLibProtocolPlan
@@ -185,7 +184,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   , startLengthSMTLibProtocol
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capability
-  ( LengthSMTLibCapabilityAction (..)
+  ( LengthSMTLibCapabilityAction
   , LengthSMTLibCapabilityError (..)
   , LengthSMTLibCapabilityLimits
   , LengthSMTLibCapabilityOutcome
@@ -201,8 +200,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capabi
   , startLengthSMTLibCapability
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Driver
-  ( LengthSMTLibCausalAction (..)
-  , LengthSMTLibCausalFailure (..)
+  ( LengthSMTLibCausalFailure (..)
   , LengthSMTLibCausalInitialBoundary (..)
   , LengthSMTLibCausalTranscript
   , LengthSMTLibCausalTranscriptEpoch
@@ -1113,24 +1111,14 @@ driveProtocolQuery worker deadline plan = do
   driven <- driveLengthSMTLibCausalActions
     LengthSMTLibCausalAdoptPredecessorWhitespace
     (lengthSMTLibProtocolCumulativeStdoutByteLimit protocolLimits)
-    feed finish LengthSMTLibProtocolUnexpectedPostBarrierByte
+    feedLengthSMTLibProtocol finishLengthSMTLibProtocol
+    LengthSMTLibProtocolUnexpectedPostBarrierByte
     (readyWorkerProcess worker) (readyWorkerCancellation worker) deadline
-    $ adapt $ startLengthSMTLibProtocol plan
+    $ startLengthSMTLibProtocol plan
   pure $ case driven of
     Left failure -> Left $ mapFailure failure
     Right value -> Right value
  where
-  adapt action = case action of
-    LengthSMTLibProtocolWrite kind bytes receiver ->
-      LengthSMTLibCausalWrite kind bytes receiver
-    LengthSMTLibProtocolAwait receiver ->
-      LengthSMTLibCausalAwait receiver
-    LengthSMTLibProtocolComplete outcome ->
-      LengthSMTLibCausalComplete outcome
-
-  feed receiver bytes = adapt <$> feedLengthSMTLibProtocol receiver bytes
-  finish receiver = adapt <$> finishLengthSMTLibProtocol receiver
-
   mapFailure failure = case failure of
     LengthSMTLibCausalProcessFailure processFailure ->
       queryProcessFailure processFailure
@@ -2224,27 +2212,14 @@ driveCapability limits process cancellation deadline action = do
   driven <- driveLengthSMTLibCausalActions
     LengthSMTLibCausalRequireEmptyBoundary
     (lengthSMTLibCapabilityCumulativeOutputByteLimit limits)
-    feed finish
+    feedLengthSMTLibCapability finishLengthSMTLibCapability
     LengthSMTLibCapabilityUnexpectedPostBarrierByte
     process cancellation deadline
-    $ adapt action
+    action
   pure $ case driven of
     Left failure -> Left $ mapFailure failure
     Right value -> Right value
  where
-  adapt current = case current of
-    LengthSMTLibCapabilityWrite kind bytes receiver ->
-      LengthSMTLibCausalWrite kind bytes receiver
-    LengthSMTLibCapabilityAwait receiver ->
-      LengthSMTLibCausalAwait receiver
-    LengthSMTLibCapabilityComplete outcome ->
-      LengthSMTLibCausalComplete outcome
-
-  feed receiver bytes = adapt <$>
-    feedLengthSMTLibCapability receiver bytes
-
-  finish receiver = adapt <$> finishLengthSMTLibCapability receiver
-
   mapFailure failure = case failure of
     LengthSMTLibCausalProcessFailure processFailure ->
       LengthSMTLibSessionProcessFailure processFailure

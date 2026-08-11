@@ -45,7 +45,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capabi
   , LengthSMTLibCapabilityWriteKind (..)
   , LengthSMTLibCapabilityReceiver
   , lengthSMTLibCapabilityReceiverPhase
-  , LengthSMTLibCapabilityAction (..)
+  , LengthSMTLibCapabilityAction
   , startLengthSMTLibCapability
   , feedLengthSMTLibCapability
   , finishLengthSMTLibCapability
@@ -77,6 +77,8 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   , lengthSMTLibExecutionQueryResetBytes
   , lengthSMTLibExecutionStartupCommandBytes
   )
+import Language.Haskell.Synthesis.Internal.SMTLib.Causal
+  ( SMTLibCausalAction (..) )
 import Language.Haskell.Synthesis.Internal.SMTLib.Stream
   ( SMTLibEchoSentinel
   , SMTLibEchoSentinelError
@@ -394,30 +396,19 @@ lengthSMTLibCapabilityReceiverPhase
 lengthSMTLibCapabilityReceiverPhase
     (LengthSMTLibCapabilityReceiver _ phase _ _ _) = phaseName phase
 
-data LengthSMTLibCapabilityAction identity
-  = LengthSMTLibCapabilityWrite
-      !LengthSMTLibCapabilityWriteKind
-      [Word8]
-      !(LengthSMTLibCapabilityReceiver identity)
-  | LengthSMTLibCapabilityAwait
-      !(LengthSMTLibCapabilityReceiver identity)
-  | LengthSMTLibCapabilityComplete
-      !(LengthSMTLibCapabilityOutcome identity)
-
-type role LengthSMTLibCapabilityAction nominal
-
-instance NFData (LengthSMTLibCapabilityAction identity) where
-  rnf action = case action of
-    LengthSMTLibCapabilityWrite kind bytes receiver ->
-      rnf kind `seq` rnf bytes `seq` rnf receiver
-    LengthSMTLibCapabilityAwait receiver -> rnf receiver
-    LengthSMTLibCapabilityComplete outcome -> rnf outcome
+-- | The shared causal action specialized to this plan's nominal receiver and
+-- decoded readiness outcome.  The shared type keeps all parameters nominal.
+type LengthSMTLibCapabilityAction identity =
+  SMTLibCausalAction
+    LengthSMTLibCapabilityWriteKind
+    (LengthSMTLibCapabilityReceiver identity)
+    (LengthSMTLibCapabilityOutcome identity)
 
 -- | Begin with the startup print-success suppression and its positional echo.
 startLengthSMTLibCapability
   :: LengthSMTLibCapabilityPlan identity
   -> LengthSMTLibCapabilityAction identity
-startLengthSMTLibCapability plan = LengthSMTLibCapabilityWrite
+startLengthSMTLibCapability plan = SMTLibCausalWrite
   LengthSMTLibCapabilityStartupWrite
   (lengthSMTLibCapabilityStartupWriteBytes plan)
   (newReceiver plan AwaitLengthSMTLibCapabilityStartupBarrier 0)
@@ -432,7 +423,7 @@ feedLengthSMTLibCapability receiver bytes = case
     feedSMTLibStreamFramer (receiverFramer receiver) bytes of
   Left failure -> Left $ classifyFramingFailure receiver failure
   Right (SMTLibStreamFramingPending next) ->
-    Right $ LengthSMTLibCapabilityAwait
+    Right $ SMTLibCausalAwait
       $ replaceReceiverFramer receiver next
   Right (SMTLibStreamFramingComplete frame tailBytes consumed) ->
     handleFrame receiver
@@ -495,7 +486,7 @@ handleFrame receiver consumed frame tailBytes = case receiverPhase receiver of
     crossBarrier
       LengthSMTLibCapabilityStartupBarrier
       (planStartupBarrier plan)
-      (LengthSMTLibCapabilityWrite
+      (SMTLibCausalWrite
         LengthSMTLibCapabilityCheckWrite
         (lengthSMTLibCapabilityCheckWriteBytes plan)
         . newReceiver plan AwaitLengthSMTLibCapabilityCheckStatus)
@@ -509,7 +500,7 @@ handleFrame receiver consumed frame tailBytes = case receiverPhase receiver of
     crossBarrier
       LengthSMTLibCapabilityCheckBarrier
       (planCheckBarrier plan)
-      (LengthSMTLibCapabilityWrite
+      (SMTLibCausalWrite
         LengthSMTLibCapabilityInputValueWrite
         (lengthSMTLibCapabilityInputValueWriteBytes plan)
         . newReceiver plan AwaitLengthSMTLibCapabilityInputValue)
@@ -523,7 +514,7 @@ handleFrame receiver consumed frame tailBytes = case receiverPhase receiver of
     crossBarrier
       LengthSMTLibCapabilityInputValueBarrier
       (planValueBarrier plan)
-      (LengthSMTLibCapabilityWrite
+      (SMTLibCausalWrite
         LengthSMTLibCapabilityReadyWrite
         (lengthSMTLibCapabilityReadyWriteBytes plan)
         . newReceiver plan AwaitLengthSMTLibCapabilityReadyStatus)
@@ -537,7 +528,7 @@ handleFrame receiver consumed frame tailBytes = case receiverPhase receiver of
     crossBarrier
       LengthSMTLibCapabilityReadyBarrier
       (planReadyBarrier plan)
-      (const $ LengthSMTLibCapabilityComplete
+      (const $ SMTLibCausalComplete
         $ LengthSMTLibCapabilityOutcome plan)
  where
   plan = receiverPlan receiver

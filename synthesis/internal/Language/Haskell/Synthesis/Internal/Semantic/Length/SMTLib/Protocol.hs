@@ -44,7 +44,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   , LengthSMTLibProtocolWriteKind (..)
   , LengthSMTLibProtocolReceiver
   , lengthSMTLibProtocolReceiverPhase
-  , LengthSMTLibProtocolAction (..)
+  , LengthSMTLibProtocolAction
   , startLengthSMTLibProtocol
   , feedLengthSMTLibProtocol
   , finishLengthSMTLibProtocol
@@ -82,6 +82,8 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   , lengthSMTLibExecutionQueryResetBytes
   , lengthSMTLibExecutionResponseLimits
   )
+import Language.Haskell.Synthesis.Internal.SMTLib.Causal
+  ( SMTLibCausalAction (..) )
 import Language.Haskell.Synthesis.Internal.SMTLib.Stream
   ( SMTLibEchoSentinel
   , SMTLibEchoSentinelError
@@ -417,28 +419,13 @@ lengthSMTLibProtocolReceiverPhase
 lengthSMTLibProtocolReceiverPhase
     (LengthSMTLibProtocolReceiver _ phase _ _ _) = phaseName phase
 
--- | A write action carries a causal obligation: its receiver must not be fed
--- until the exact bytes have been written completely.  'Await' means the previous
--- write remains outstanding for responses; 'Complete' is only a syntactic,
--- caller-feedable decode and does not attest execution.
-data LengthSMTLibProtocolAction identity local
-  = LengthSMTLibProtocolWrite
-      !LengthSMTLibProtocolWriteKind
-      [Word8]
-      !(LengthSMTLibProtocolReceiver identity local)
-  | LengthSMTLibProtocolAwait
-      !(LengthSMTLibProtocolReceiver identity local)
-  | LengthSMTLibProtocolComplete
-      !(LengthSMTLibProtocolDecoded identity local)
-
-type role LengthSMTLibProtocolAction nominal nominal
-
-instance NFData (LengthSMTLibProtocolAction identity local) where
-  rnf action = case action of
-    LengthSMTLibProtocolWrite kind bytes receiver ->
-      rnf kind `seq` rnf bytes `seq` rnf receiver
-    LengthSMTLibProtocolAwait receiver -> rnf receiver
-    LengthSMTLibProtocolComplete decoded -> rnf decoded
+-- | The shared causal action specialized to this plan's nominal receiver and
+-- decoded outcome.  The shared type keeps all three parameters nominal.
+type LengthSMTLibProtocolAction identity local =
+  SMTLibCausalAction
+    LengthSMTLibProtocolWriteKind
+    (LengthSMTLibProtocolReceiver identity local)
+    (LengthSMTLibProtocolDecoded identity local)
 
 -- | Start with reset, canonical check commands, and the status barrier in one
 -- exact write.  Any unexpected reset response consequently occupies the
@@ -446,7 +433,7 @@ instance NFData (LengthSMTLibProtocolAction identity local) where
 startLengthSMTLibProtocol
   :: LengthSMTLibProtocolPlan identity local
   -> LengthSMTLibProtocolAction identity local
-startLengthSMTLibProtocol plan = LengthSMTLibProtocolWrite
+startLengthSMTLibProtocol plan = SMTLibCausalWrite
   LengthSMTLibProtocolInitialQueryWrite
   (lengthSMTLibProtocolInitialWriteBytes plan)
   (newReceiver plan AwaitLengthSMTLibCheckStatus 0)
@@ -461,7 +448,7 @@ feedLengthSMTLibProtocol receiver bytes = case
     feedSMTLibStreamFramer (receiverFramer receiver) bytes of
   Left failure -> Left $ classifyFramingFailure receiver failure
   Right (SMTLibStreamFramingPending next) ->
-    Right $ LengthSMTLibProtocolAwait $ replaceReceiverFramer receiver next
+    Right $ SMTLibCausalAwait $ replaceReceiverFramer receiver next
   Right (SMTLibStreamFramingComplete frame tailBytes consumed) ->
     handleFrame receiver
       (receiverFrameStart receiver + consumed) frame tailBytes
@@ -580,14 +567,14 @@ handleFrame receiver consumed frame tailBytes = case receiverPhase receiver of
         (SolverSatisfiable, Just _, Just valueWrite) -> do
           afterBoundary <- consumePostBarrierWhitespace
             plan consumed tailBytes
-          Right $ LengthSMTLibProtocolWrite
+          Right $ SMTLibCausalWrite
             LengthSMTLibProtocolInputValueWrite valueWrite
             $ newReceiver plan
                 (AwaitLengthSMTLibInputValues status rawStatus)
                 afterBoundary
         _ -> do
           _ <- consumePostBarrierWhitespace plan consumed tailBytes
-          Right $ LengthSMTLibProtocolComplete
+          Right $ SMTLibCausalComplete
             $ LengthSMTLibProtocolDecoded plan status rawStatus
             $ terminalInputValues plan status
       else Left $ LengthSMTLibProtocolBarrierMismatch
@@ -610,7 +597,7 @@ handleFrame receiver consumed frame tailBytes = case receiverPhase receiver of
       Just barrier
         | isExactSMTLibEchoSentinelResponse barrier frame -> do
             _ <- consumePostBarrierWhitespace plan consumed tailBytes
-            Right $ LengthSMTLibProtocolComplete
+            Right $ SMTLibCausalComplete
               $ LengthSMTLibProtocolDecoded plan status rawStatus
               $ Just $ LengthSMTLibProtocolInputValues
                   (Just rawValues) bindings

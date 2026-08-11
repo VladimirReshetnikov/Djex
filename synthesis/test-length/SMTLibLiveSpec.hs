@@ -72,6 +72,8 @@ import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Sess
   as Capability
 import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process
   as Process
+import qualified Language.Haskell.Synthesis.Internal.SMTLib.Causal
+  as SMTLibCausal
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Stream
   as SMTLibStream
 import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
@@ -1546,13 +1548,13 @@ expectCapabilityWrite
   -> IO
       (Capability.LengthSMTLibCapabilityReceiver CapabilityFixtureIdentity)
 expectCapabilityWrite expectedKind expectedBytes action = case action of
-  Capability.LengthSMTLibCapabilityWrite kind bytes receiver -> do
+  SMTLibCausal.SMTLibCausalWrite kind bytes receiver -> do
     kind @?= expectedKind
     bytes @?= expectedBytes
     pure receiver
-  Capability.LengthSMTLibCapabilityAwait{} ->
+  SMTLibCausal.SMTLibCausalAwait{} ->
     assertFailure "expected a capability write action, observed await"
-  Capability.LengthSMTLibCapabilityComplete{} ->
+  SMTLibCausal.SMTLibCausalComplete{} ->
     assertFailure "expected a capability write action, observed completion"
 
 expectCapabilityAwait
@@ -1560,20 +1562,20 @@ expectCapabilityAwait
   -> IO
       (Capability.LengthSMTLibCapabilityReceiver CapabilityFixtureIdentity)
 expectCapabilityAwait action = case action of
-  Capability.LengthSMTLibCapabilityAwait receiver -> pure receiver
-  Capability.LengthSMTLibCapabilityWrite{} ->
+  SMTLibCausal.SMTLibCausalAwait receiver -> pure receiver
+  SMTLibCausal.SMTLibCausalWrite{} ->
     assertFailure "expected capability await, observed write"
-  Capability.LengthSMTLibCapabilityComplete{} ->
+  SMTLibCausal.SMTLibCausalComplete{} ->
     assertFailure "expected capability await, observed completion"
 
 expectCapabilityComplete
   :: Capability.LengthSMTLibCapabilityAction CapabilityFixtureIdentity
   -> IO (Capability.LengthSMTLibCapabilityOutcome CapabilityFixtureIdentity)
 expectCapabilityComplete action = case action of
-  Capability.LengthSMTLibCapabilityComplete outcome -> pure outcome
-  Capability.LengthSMTLibCapabilityWrite{} ->
+  SMTLibCausal.SMTLibCausalComplete outcome -> pure outcome
+  SMTLibCausal.SMTLibCausalWrite{} ->
     assertFailure "expected capability completion, observed write"
-  Capability.LengthSMTLibCapabilityAwait{} ->
+  SMTLibCausal.SMTLibCausalAwait{} ->
     assertFailure "expected capability completion, observed await"
 
 feedCapabilityChunks
@@ -1581,12 +1583,12 @@ feedCapabilityChunks
   -> [[Word8]]
   -> IO (Capability.LengthSMTLibCapabilityAction CapabilityFixtureIdentity)
 feedCapabilityChunks receiver chunks = case chunks of
-  [] -> pure $ Capability.LengthSMTLibCapabilityAwait receiver
+  [] -> pure $ SMTLibCausal.SMTLibCausalAwait receiver
   chunk : remaining -> do
     action <- expectRight
       $ Capability.feedLengthSMTLibCapability receiver chunk
     case action of
-      Capability.LengthSMTLibCapabilityAwait next ->
+      SMTLibCausal.SMTLibCausalAwait next ->
         feedCapabilityChunks next remaining
       _
         | null remaining -> pure action

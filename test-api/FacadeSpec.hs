@@ -452,10 +452,30 @@ facadeTests = testGroup "public Djex facade"
                     FiniteListSpineLengthV1
                     ValidatedLengthCounterexample))
           counterexampleValidator = validateLengthProblemCounterexample
+          queryObservationAssociator
+            :: LengthSMTLibQuery Int ExferenceLocal
+            -> LengthSMTLibRawSolverObservation
+                FacadeRawArtifact FacadeRawArtifact FacadeRawArtifact
+            -> AssociatedLengthSMTLibSolverObservation
+                Int ExferenceLocal
+                FacadeRawArtifact FacadeRawArtifact FacadeRawArtifact
+          queryObservationAssociator = associateLengthSMTLibSolverObservation
+          queryObservationReplayer
+            :: LengthSMTLibQuery Int ExferenceLocal
+            -> AssociatedLengthSMTLibSolverObservation
+                Int ExferenceLocal
+                FacadeRawArtifact FacadeRawArtifact FacadeRawArtifact
+            -> Either
+                LengthSMTLibObservationReplayError
+                (LengthSMTLibRawSolverObservation
+                  FacadeRawArtifact FacadeRawArtifact FacadeRawArtifact)
+          queryObservationReplayer =
+            replayAssociatedLengthSMTLibSolverObservation
       sealer `seq` candidateResultProjection `seq` problemProjection `seq`
         inputCountProjection `seq` preconditionProjection `seq`
         postconditionProjection `seq` basisProjection `seq`
-        counterexampleValidator `seq` pure ()
+        counterexampleValidator `seq` queryObservationAssociator `seq`
+        queryObservationReplayer `seq` pure ()
       lengthProblemAssignmentInputs (LengthProblemAssignment [1, 2]) @?=
         [1, 2]
       (ProviderIndependentFiniteSpineModel :: LengthCounterexampleBasis) @?=
@@ -467,6 +487,9 @@ facadeTests = testGroup "public Djex facade"
       lengthProblemEvaluationStepLimit defaultLengthProblemLimits @?= 65536
       mkLengthProblemLimits defaultTermGraphLimits 0 (-1) @?= Left
         (NegativeLengthProblemEvaluationStepLimit (-1))
+      ( LengthSMTLibObservationQueryFingerprintMismatch
+          :: LengthSMTLibObservationReplayError
+        ) @?= LengthSMTLibObservationQueryFingerprintMismatch
   , testCase "rejects residual constraints at the Djinn render boundary" $ do
       target <- expectRight $ mkIdentifier "identity"
       checkedTarget <- expectRight $ mkDefinitionName target

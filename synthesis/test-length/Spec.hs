@@ -42,6 +42,10 @@ import qualified Language.Haskell.Synthesis.Semantic.Length as Length
 import qualified Language.Haskell.Synthesis.Semantic.Length.Evaluate as Evaluate
 import qualified Language.Haskell.Synthesis.Semantic.Length.Problem as LengthProblem
 import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib as SMTLib
+import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation
+  as SMTLibObservation
+import qualified Language.Haskell.Synthesis.Semantic.Observation as Observation
+import qualified Language.Haskell.Synthesis.Semantic.Problem as SemanticProblem
 import Language.Haskell.Synthesis.Type (Type (..), Variable (..))
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit
@@ -1206,6 +1210,60 @@ smtLibTests = testGroup "bounded QF_LIA query and model boundary"
       assertBool "distinct checked problems shared one SMT-LIB query identity" $
         SMTLib.lengthSMTLibQueryFingerprint identityQuery /=
           SMTLib.lengthSMTLibQueryFingerprint trivialQuery
+  , testCase "associate and replay every bounded raw solver status exactly" $ do
+      problem <- adversarialConstantZeroProblem identityLengthContract
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      satisfiableArtifact <- smtRawArtifact [0x73, 0x61, 0x74] [1]
+      unsatisfiableArtifact <- smtRawArtifact [0x75, 0x6e, 0x73, 0x61, 0x74] [2]
+      unknownArtifact <- smtRawArtifact [0x75, 0x6e, 0x6b] [3]
+      let observations ::
+            [ SMTLibObservation.LengthSMTLibRawSolverObservation () () () ]
+          observations =
+            [ Observation.SatisfiableObservation satisfiableArtifact
+            , Observation.UnsatisfiableObservation unsatisfiableArtifact
+            , Observation.UnknownObservation unknownArtifact
+            ]
+          associated = map
+            (SMTLibObservation.associateLengthSMTLibSolverObservation query)
+            observations
+      map SMTLibObservation.associatedLengthSMTLibQueryFingerprint associated
+        @?= replicate 3 (SMTLib.lengthSMTLibQueryFingerprint query)
+      map SMTLibObservation.associatedLengthSMTLibSolverStatus associated @?=
+        [ Observation.SolverSatisfiable
+        , Observation.SolverUnsatisfiable
+        , Observation.SolverUnknown
+        ]
+      map SMTLibObservation.associatedLengthSMTLibResultStrength associated @?=
+        [ SemanticProblem.RawSolverModelHint
+        , SemanticProblem.RawSolverUnsatRelativeToEncoding
+        , SemanticProblem.RawSolverUnknown
+        ]
+      map SMTLibObservation.associatedLengthSMTLibUse associated @?=
+        replicate 3 SemanticProblem.HeuristicRankingOnly
+      map
+          (SMTLibObservation.replayAssociatedLengthSMTLibSolverObservation query)
+          associated
+        @?= map Right observations
+  , testCase "wrap a stale checked problem mismatch before revealing raw bytes" $ do
+      originalProblem <- adversarialConstantZeroProblem identityLengthContract
+      staleProblem <- adversarialConstantZeroProblem trivialLengthContract
+      originalQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits originalProblem
+      staleQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits staleProblem
+      artifact <- smtRawArtifact [0x75, 0x6e, 0x6b] [0]
+      let observation ::
+            SMTLibObservation.LengthSMTLibRawSolverObservation () () ()
+          observation = Observation.UnknownObservation artifact
+          associated =
+            SMTLibObservation.associateLengthSMTLibSolverObservation
+              originalQuery observation
+      SMTLibObservation.replayAssociatedLengthSMTLibSolverObservation
+          staleQuery associated @?=
+        Left
+          (SMTLibObservation.LengthSMTLibObservationProblemMismatch
+            SemanticProblem.ReplayEncodingFingerprintMismatch)
   , testCase "validate declaration and emission bounds productively" $ do
       SMTLib.mkLengthSMTLibLimits SMTLib.defaultLengthSMTLibLimitSource @?=
         Right SMTLib.defaultLengthSMTLibLimits
@@ -3160,6 +3218,14 @@ smtIntegerBinding symbol value = SMTLib.LengthSMTLibIntegerBinding
   { SMTLib.lengthSMTLibIntegerBindingSymbol = symbol
   , SMTLib.lengthSMTLibIntegerBindingValue = value
   }
+
+smtRawArtifact
+  :: [Word8]
+  -> [Word8]
+  -> IO (SemanticProblem.BoundedRawArtifact ())
+smtRawArtifact format bytes = expectRight
+  $ SemanticProblem.mkBoundedRawArtifact
+      SemanticProblem.defaultRawArtifactLimits format bytes
 
 expectName :: String -> IO Name
 expectName = expectRight . parseName

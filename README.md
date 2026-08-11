@@ -293,6 +293,20 @@ decoded integer bindings only for that query's input symbols and independently
 replays them against the retained problem; raw model text and even `unsat`
 remain heuristic observations, never pruning permission or proof.
 
+`Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` closes the
+remaining raw-report identity gap. Its opaque association binds bounded
+status-specific artifacts to both the solver-neutral behavioral problem and
+the exact canonical SMT-LIB query. Before exact replay, callers can inspect
+only status, query identity, conservative result strength, and the fixed
+`HeuristicRankingOnly` use; neither the raw payload nor the nested generic
+association is exposed. Successful replay reveals only the still-raw report:
+models still require independent validation, and `unsat` still proves nothing.
+The query fingerprint is deliberately not a run or cache key. A future
+executor must separately bind the exact Z3 build and capabilities, invocation,
+protocol session and sentinel state, parser schema, artifact policy, deadlines,
+cancellation, and resource limits. In particular, `unknown` must not be cached
+solely by query identity.
+
 ## Building
 
 Build and test the complete graph from the repository root:

@@ -133,6 +133,8 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Semantic.Length` | Exact inventory-bound finite-spine contexts, normalized contracts, source-bound assumed provider laws, and model-aware fingerprints. |
 | `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked contracts, provider transfers, and exact candidate problems; only independently validated model-relative violations receive problem-bound evidence with an explicit provider-assumption basis. |
 | `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and typed-candidate behavioral problems: exact context resealing, residual rejection, rigid root/provider authorization, lazy symbolic length interpretation, normalized counterexample formulas, and separate inventory/encoding/candidate/problem identities. |
+| `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation and exact input-symbol model replay for one checked Length problem, without launching or trusting a solver. |
+| `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` | Opaque query-specific association of bounded raw solver reports, with heuristic-only safe projections and exact problem-plus-query replay before payload access. |
 | `Language.Haskell.Synthesis.Semantic.Observation` | Raw three-valued solver and four-valued behavioral reports without candidate association or evidence claims. |
 | `Language.Haskell.Synthesis.Semantic.Problem` | Bounded raw artifacts associated with exact domain, inventory, encoding, candidate, and problem identities; every raw result is restricted to heuristic ranking, while domain-owned authoritative evidence has only a private construction seam. |
 | `Language.Haskell.Synthesis.Generated` | Scope-aware expressions, patterns, clauses, holes, mixed term/type application spines, bottom-up rewriting, simplification, alpha-equivalence, substitution, and Haskell rendering through the common qualification policy. |
@@ -163,6 +165,19 @@ contains bounded check and input-only `get-value` commands; it neither starts a
 solver nor associates a raw solver status. Decoded input bindings can produce a
 counterexample receipt only through independent replay against the retained
 problem, while raw models and even `unsat` remain heuristic observations.
+
+`Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` can associate
+such a bounded raw report with both the retained behavioral problem and the
+exact query fingerprint. Its opaque value deliberately projects no artifact or
+nested generic association before exact replay. Status, conservative strength,
+and use remain inspectable, and every status is restricted to
+`HeuristicRankingOnly`. Even after replay the report is still raw: a model must
+pass independent Length validation, while `unsat` never becomes evidence.
+Query identity is only the canonical semantic translation identity, not a run
+or cache identity. A later executor must additionally seal the solver build,
+capability handshake, process and protocol state, parser schema, requested
+artifact policy, deadlines, cancellation, and resource limits; `unknown`
+should not be cached by query identity alone.
 
 `Generated` separates backend-local identity from structural global `Name`s.
 Its checked `DefinitionName` narrows top-level output names once, and its scope

@@ -88,6 +88,7 @@ import Language.Haskell.Synthesis.Semantic.Length
 import Language.Haskell.Synthesis.Semantic.Length.Evaluate
 import Language.Haskell.Synthesis.Semantic.Length.Problem
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib
+import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation
 import Language.Haskell.Synthesis.Semantic.Problem
 import Language.Haskell.Synthesis.Search (SearchBatch)
 import Language.Haskell.Synthesis.Type (Type)
@@ -210,6 +211,11 @@ forbiddenConstructionAttempts =
   , noGeneric
       @(LengthSMTLibQuery LengthVariableProbe LengthLocalProbe)
       "LengthSMTLibQuery"
+  , noGeneric
+      @(AssociatedLengthSMTLibSolverObservation
+          LengthVariableProbe LengthLocalProbe
+          ArtifactKindProbe ArtifactKindProbe ArtifactKindProbe)
+      "AssociatedLengthSMTLibSolverObservation"
   , ( "CheckedLengthContract variable unexpectedly permits Coercible"
     , forbiddenCheckedLengthContractCoercion `seq` ()
     )
@@ -251,6 +257,27 @@ forbiddenConstructionAttempts =
     )
   , ( "LengthSMTLibQuery local unexpectedly permits Coercible"
     , forbiddenLengthSMTLibQueryLocalCoercion `seq` ()
+    )
+  , ( "AssociatedLengthSMTLibSolverObservation identity unexpectedly permits Coercible"
+    , forbiddenAssociatedLengthSMTLibIdentityCoercion `seq` ()
+    )
+  , ( "AssociatedLengthSMTLibSolverObservation local unexpectedly permits Coercible"
+    , forbiddenAssociatedLengthSMTLibLocalCoercion `seq` ()
+    )
+  , ( "AssociatedLengthSMTLibSolverObservation satisfiable artifact unexpectedly permits Coercible"
+    , forbiddenAssociatedLengthSMTLibSatisfiableCoercion `seq` ()
+    )
+  , ( "AssociatedLengthSMTLibSolverObservation unsatisfiable artifact unexpectedly permits Coercible"
+    , forbiddenAssociatedLengthSMTLibUnsatisfiableCoercion `seq` ()
+    )
+  , ( "AssociatedLengthSMTLibSolverObservation unknown artifact unexpectedly permits Coercible"
+    , forbiddenAssociatedLengthSMTLibUnknownCoercion `seq` ()
+    )
+  , ( "AssociatedLengthSMTLibSolverObservation regained a raw payload projection"
+    , forbiddenAssociatedLengthSMTLibObservationProjection `seq` ()
+    )
+  , ( "AssociatedLengthSMTLibSolverObservation regained a nested problem projection"
+    , forbiddenAssociatedLengthSMTLibProblemObservationProjection `seq` ()
     )
   , noGeneric @(Inventory Int ()) "Inventory"
   , noGeneric @(PreparedClassIndex Int) "PreparedClassIndex"
@@ -739,6 +766,70 @@ forbiddenLengthSMTLibQueryLocalCoercion
   :: LengthSMTLibQuery LengthVariableProbe LengthLocalProbe
   -> LengthSMTLibQuery LengthVariableProbe OtherLengthLocalProbe
 forbiddenLengthSMTLibQueryLocalCoercion = coerce
+
+forbiddenAssociatedLengthSMTLibIdentityCoercion
+  :: AssociatedLengthSMTLibSolverObservation
+      LengthVariableProbe LengthLocalProbe
+      ArtifactKindProbe ArtifactKindProbe ArtifactKindProbe
+  -> AssociatedLengthSMTLibSolverObservation
+      OtherLengthVariableProbe LengthLocalProbe
+      ArtifactKindProbe ArtifactKindProbe ArtifactKindProbe
+forbiddenAssociatedLengthSMTLibIdentityCoercion = coerce
+
+forbiddenAssociatedLengthSMTLibLocalCoercion
+  :: AssociatedLengthSMTLibSolverObservation
+      LengthVariableProbe LengthLocalProbe
+      ArtifactKindProbe ArtifactKindProbe ArtifactKindProbe
+  -> AssociatedLengthSMTLibSolverObservation
+      LengthVariableProbe OtherLengthLocalProbe
+      ArtifactKindProbe ArtifactKindProbe ArtifactKindProbe
+forbiddenAssociatedLengthSMTLibLocalCoercion = coerce
+
+forbiddenAssociatedLengthSMTLibSatisfiableCoercion
+  :: AssociatedLengthSMTLibSolverObservation
+      LengthVariableProbe LengthLocalProbe
+      ArtifactKindProbe ArtifactKindProbe ArtifactKindProbe
+  -> AssociatedLengthSMTLibSolverObservation
+      LengthVariableProbe LengthLocalProbe
+      OtherArtifactKindProbe ArtifactKindProbe ArtifactKindProbe
+forbiddenAssociatedLengthSMTLibSatisfiableCoercion = coerce
+
+forbiddenAssociatedLengthSMTLibUnsatisfiableCoercion
+  :: AssociatedLengthSMTLibSolverObservation
+      LengthVariableProbe LengthLocalProbe
+      ArtifactKindProbe ArtifactKindProbe ArtifactKindProbe
+  -> AssociatedLengthSMTLibSolverObservation
+      LengthVariableProbe LengthLocalProbe
+      ArtifactKindProbe OtherArtifactKindProbe ArtifactKindProbe
+forbiddenAssociatedLengthSMTLibUnsatisfiableCoercion = coerce
+
+forbiddenAssociatedLengthSMTLibUnknownCoercion
+  :: AssociatedLengthSMTLibSolverObservation
+      LengthVariableProbe LengthLocalProbe
+      ArtifactKindProbe ArtifactKindProbe ArtifactKindProbe
+  -> AssociatedLengthSMTLibSolverObservation
+      LengthVariableProbe LengthLocalProbe
+      ArtifactKindProbe ArtifactKindProbe OtherArtifactKindProbe
+forbiddenAssociatedLengthSMTLibUnknownCoercion = coerce
+
+forbiddenAssociatedLengthSMTLibObservationProjection
+  :: AssociatedLengthSMTLibSolverObservation
+      LengthVariableProbe LengthLocalProbe
+      ArtifactKindProbe ArtifactKindProbe ArtifactKindProbe
+  -> LengthSMTLibRawSolverObservation
+      ArtifactKindProbe ArtifactKindProbe ArtifactKindProbe
+forbiddenAssociatedLengthSMTLibObservationProjection =
+  associatedLengthSMTLibObservation
+
+forbiddenAssociatedLengthSMTLibProblemObservationProjection
+  :: AssociatedLengthSMTLibSolverObservation
+      LengthVariableProbe LengthLocalProbe
+      ArtifactKindProbe ArtifactKindProbe ArtifactKindProbe
+  -> AssociatedObservation FiniteListSpineLengthV1
+      (LengthSMTLibRawSolverObservation
+        ArtifactKindProbe ArtifactKindProbe ArtifactKindProbe)
+forbiddenAssociatedLengthSMTLibProblemObservationProjection =
+  associatedLengthSMTLibProblemObservation
 
 -- Selecting 'coerce' forces the built-in coercion evidence without requiring
 -- a value of either abstract type.

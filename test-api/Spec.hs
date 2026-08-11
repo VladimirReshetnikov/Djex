@@ -304,11 +304,18 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "forbiddenCheckedLengthProblemLocalCoercion"
                       , "forbiddenLengthSMTLibQueryIdentityCoercion"
                       , "forbiddenLengthSMTLibQueryLocalCoercion"
+                      , "forbiddenAssociatedLengthSMTLibIdentityCoercion"
+                      , "forbiddenAssociatedLengthSMTLibLocalCoercion"
+                      , "forbiddenAssociatedLengthSMTLibSatisfiableCoercion"
+                      , "forbiddenAssociatedLengthSMTLibUnsatisfiableCoercion"
+                      , "forbiddenAssociatedLengthSMTLibUnknownCoercion"
                       ]
                   ) ||
                   ( "not in scope" `isInfixOf` message &&
                     any (`isInfixOf` message)
                       [ "associatedObservation"
+                      , "associatedLengthSMTLibObservation"
+                      , "associatedLengthSMTLibProblemObservation"
                       , "behavioralEvidenceReceipt"
                       , "mkBehavioralEvidence"
                       , "ValidatedLengthCounterexampleReceipt"

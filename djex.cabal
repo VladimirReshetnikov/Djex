@@ -157,6 +157,7 @@ Library
     Language.Haskell.Synthesis.Semantic.Length.Evaluate
     Language.Haskell.Synthesis.Semantic.Length.Problem
     Language.Haskell.Synthesis.Semantic.Length.SMTLib
+    Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation
     Language.Haskell.Synthesis.Semantic.Observation
     Language.Haskell.Synthesis.Semantic.Problem
     Language.Haskell.Synthesis.Type
@@ -246,6 +247,7 @@ Library
     Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
     Language.Haskell.Synthesis.Internal.Semantic.Length.Problem.Candidate
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
+    Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Observation
     Language.Haskell.Synthesis.Internal.Semantic.Problem
     Language.Haskell.Synthesis.Internal.TypedCandidate
     Language.Haskell.Synthesis.Internal.TypedGenerated.Fingerprint

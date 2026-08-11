@@ -60,6 +60,7 @@ module Language.Haskell.Djex
   , module Language.Haskell.Synthesis.TypeSynonym
   , module Language.Haskell.Synthesis.TypedCandidate
   , module Language.Haskell.Synthesis.TypedGenerated
+  , module Language.Haskell.Synthesis.TypedGenerated.Fingerprint
   , Backend (..)
   , Capability (..)
   , BackendInfo (..)
@@ -99,6 +100,7 @@ import Language.Haskell.Synthesis.TypeRender
 import Language.Haskell.Synthesis.TypeSynonym
 import Language.Haskell.Synthesis.TypedCandidate
 import Language.Haskell.Synthesis.TypedGenerated
+import Language.Haskell.Synthesis.TypedGenerated.Fingerprint
 
 -- | A search engine shipped by Djex.
 data Backend

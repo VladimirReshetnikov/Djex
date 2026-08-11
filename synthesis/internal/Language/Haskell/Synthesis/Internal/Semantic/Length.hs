@@ -78,7 +78,6 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length
 import Control.DeepSeq (NFData (rnf))
 import Control.Monad (foldM)
 import Data.Bifunctor (first)
-import Data.Char (ord)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
@@ -88,10 +87,7 @@ import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Collection (observedListLength)
-import Language.Haskell.Synthesis.Constraint
-  ( Constraint (..)
-  , constraintArguments
-  )
+import Language.Haskell.Synthesis.Constraint (constraintArguments)
 import Language.Haskell.Synthesis.Declaration
   ( DataConstructor (..)
   , Declaration (..)
@@ -117,6 +113,8 @@ import Language.Haskell.Synthesis.Internal.Fingerprint
   , FingerprintLimitError (..)
   , buildFingerprintWithin
   )
+import qualified Language.Haskell.Synthesis.Internal.Fingerprint.Type
+  as FingerprintType
 import Language.Haskell.Synthesis.Inventory
   ( Inventory
   , inventoryEnvironment
@@ -128,8 +126,7 @@ import Language.Haskell.Synthesis.KindInference
   , checkTypesKinds
   )
 import Language.Haskell.Synthesis.Name
-  ( Boxity (..)
-  , Name
+  ( Name
   , consName
   , listName
   )
@@ -1540,35 +1537,8 @@ lengthFormulaField variableField source = case source of
 closedProviderSchemeField
   :: Type (AlphaVariable variable)
   -> FingerprintField
-closedProviderSchemeField source = case source of
-  TypeVariable variable -> tagged "type-variable"
-    [alphaVariableField variable]
-  TypeConstructor name -> tagged "type-constructor" [FingerprintName name]
-  TypeApplication function argument -> tagged "type-application"
-    [ closedProviderSchemeField function
-    , closedProviderSchemeField argument
-    ]
-  FunctionType parameter result -> tagged "function"
-    [ closedProviderSchemeField parameter
-    , closedProviderSchemeField result
-    ]
-  TupleType boxity fields -> tagged "tuple"
-    [ boxityField boxity
-    , FingerprintSequence $ map closedProviderSchemeField fields
-    ]
-  ForallType binders constraints body -> tagged "forall"
-    [ FingerprintSequence $ map alphaVariableField binders
-    , FingerprintSequence $ map closedConstraintField constraints
-    , closedProviderSchemeField body
-    ]
-
-closedConstraintField
-  :: Constraint (Type (AlphaVariable variable))
-  -> FingerprintField
-closedConstraintField (Constraint className arguments) = tagged "constraint"
-  [ FingerprintName className
-  , FingerprintSequence $ map closedProviderSchemeField arguments
-  ]
+closedProviderSchemeField =
+  FingerprintType.typeFingerprintField alphaVariableField
 
 alphaVariableField :: AlphaVariable variable -> FingerprintField
 alphaVariableField variable = case variable of
@@ -1579,13 +1549,8 @@ alphaVariableField variable = case variable of
   -- granting any useful identity to an open scheme.
   AlphaFreeVariable{} -> tagged "rejected-free-variable" []
 
-boxityField :: Boxity -> FingerprintField
-boxityField boxity = FingerprintBytes $ ascii $ case boxity of
-  Boxed -> "boxed"
-  Unboxed -> "unboxed"
-
 tagged :: String -> [FingerprintField] -> FingerprintField
-tagged tag = FingerprintTag $ ascii tag
+tagged = FingerprintType.taggedFingerprintField
 
 rnfFingerprintField :: FingerprintField -> ()
 rnfFingerprintField field = case field of
@@ -1602,4 +1567,4 @@ rnfFingerprintField field = case field of
   FingerprintName name -> rnf name
 
 ascii :: String -> [Word8]
-ascii = map $ fromIntegral . ord
+ascii = FingerprintType.asciiFingerprintBytes

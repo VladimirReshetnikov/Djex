@@ -125,6 +125,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Semantic.Problem` | Bounded raw artifacts associated with exact domain, inventory, encoding, candidate, and problem identities; every raw result is restricted to heuristic ranking, while authoritative evidence has only a future private construction seam. |
 | `Language.Haskell.Synthesis.Generated` | Scope-aware expressions, patterns, clauses, holes, mixed term/type application spines, bottom-up rewriting, simplification, alpha-equivalence, substitution, and Haskell rendering through the common qualification policy. |
 | `Language.Haskell.Synthesis.TypedGenerated` | Bounded typed candidate graphs with stable node, source-occurrence, and certificate identities; checked application and visible-specialization witnesses; a neutral sealing pass; exact graph metrics; and one-way projection to `Generated`. |
+| `Language.Haskell.Synthesis.TypedGenerated.Fingerprint` | Bounded, allocation- and alpha-insensitive structural identities for shared typed graphs, after resealing with the shared type checker; certificate- and constructor-schema-dependent graphs fail closed until their semantic authorities exist. |
 | `Language.Haskell.Synthesis.Observability` | Opaque exact counters, stable cross-engine metric codes, deterministic aggregation, and deliberately non-strict snapshots that can be inspected independently of a lazy result. |
 
 Logical evidence is independent of operational progress. A truncated search can
@@ -161,6 +162,22 @@ uses and must never be recovered from names or traversal paths. The existing
 candidate and query constructors remain unchanged while engines migrate, so a
 backend must report typed-view absence explicitly rather than inventing an
 annotation after erasure.
+
+`TypedGenerated.Fingerprint` reconstructs and reseals that graph with
+`sharedTypeStructure` before assigning its nominal v1 identity. Its rooted-tree
+encoding ignores table order and raw allocation numbers while preserving exact
+binding structure, hole equality, flexible/rigid free-variable flavor, globals,
+normalized types, patterns, witnesses, visible arguments, and branch order. It
+performs no beta, eta, let, or behavioral quotienting. The retained encoding has
+a caller-supplied byte bound (one MiB by default), while graph limits separately
+bound its preceding traversal. A certificate reference is rejected until a
+checked certificate table can replace its allocation number with semantic
+substitution and obligation identities. Constructor patterns likewise require
+an inventory-bound family schema which the generic shared checker does not
+possess. The result is only a
+structural graph key: it neither resolves an inventory nor establishes candidate
+completeness, behavioral interpretation, or evidence. Domain-owned sealers must
+bind those authorities separately.
 
 `Observability` is orthogonal to logical evidence and search progress. Its
 `Natural` counts cannot wrap, zero-valued entries have one canonical absent

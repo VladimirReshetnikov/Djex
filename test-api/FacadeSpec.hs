@@ -389,6 +389,22 @@ facadeTests = testGroup "public Djex facade"
       eraseTermGraph graph @?= Global globalName
       typedGraphSourceOccurrences (termGraphMetrics graph) @?= 1
 
+      let fingerprintSource
+            :: TermGraphSource (Type (Variable String)) Int
+          fingerprintSource = TermGraphSource (termNodeId 7)
+            [ ( termNodeId 7
+              , TermNode (TypeVariable $ FlexibleVariable "private") $
+                  TypedGlobal (occurrenceId 99) globalName
+              )
+            ]
+      fingerprintGraph <- expectRight $ sealTermGraph sharedTypeStructure
+        defaultTermGraphLimits fingerprintSource
+      graphFingerprint <- expectRight $ fingerprintSharedTermGraph
+        defaultTermGraphLimits defaultTermGraphFingerprintByteLimit
+        fingerprintGraph
+      assertBool "the canonical graph fingerprint was empty"
+        $ not $ null $ fingerprintCanonicalBytes graphFingerprint
+
       let quantified = ForallType ["bound"] [] $ TypeVariable "bound"
       isLeadingForallInstantiation quantified typeA typeA @?= True
   , testCase "rejects residual constraints at the Djinn render boundary" $ do

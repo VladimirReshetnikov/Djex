@@ -48,6 +48,9 @@ import Language.Haskell.Synthesis.Query
 import qualified Language.Haskell.Synthesis.Query as Query
 import qualified Language.Haskell.Synthesis.Search as Search
 import qualified Language.Haskell.Synthesis.Semantic.Length as Length
+import qualified Language.Haskell.Synthesis.TypedGenerated as TypedGenerated
+import qualified Language.Haskell.Synthesis.TypedGenerated.Fingerprint
+  as TypedGeneratedFingerprint
 import Language.Haskell.Synthesis.Type
   ( Type
   , Variable (RigidVariable)
@@ -216,6 +219,14 @@ projectionSignatures =
     -> Fingerprint.Fingerprint Length.LengthContractFingerprintSubject) `seq`
   (Length.checkedLengthProviderName
     :: Length.CheckedLengthProviderSummary Int -> Name) `seq`
+  (TypedGeneratedFingerprint.fingerprintSharedTermGraph
+    :: TypedGenerated.TermGraphLimits
+    -> Natural
+    -> TypedGenerated.TermGraph (Type (Variable Int)) Int
+    -> Either
+        (TypedGeneratedFingerprint.TermGraphFingerprintError Int Int)
+        (Fingerprint.Fingerprint
+          TypedGeneratedFingerprint.TermGraphFingerprintSubject)) `seq`
   (Length.checkedLengthProviderScheme
     :: Length.CheckedLengthProviderSummary Int -> Type Int) `seq`
   (Length.checkedLengthProviderArgumentRoles

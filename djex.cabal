@@ -162,6 +162,7 @@ Library
     Language.Haskell.Synthesis.TypeSynonym
     Language.Haskell.Synthesis.TypedCandidate
     Language.Haskell.Synthesis.TypedGenerated
+    Language.Haskell.Synthesis.TypedGenerated.Fingerprint
     Language.Haskell.Synthesis.TypeRender
     Djinn.Core
     Djinn.Internal.Environment
@@ -236,10 +237,12 @@ Library
     Language.Haskell.Djex.Exference.Internal.Session
     Language.Haskell.Synthesis.Internal.Alpha
     Language.Haskell.Synthesis.Internal.Fingerprint
+    Language.Haskell.Synthesis.Internal.Fingerprint.Type
     Language.Haskell.Synthesis.Internal.InstanceHead
     Language.Haskell.Synthesis.Internal.Semantic.Length
     Language.Haskell.Synthesis.Internal.Semantic.Problem
     Language.Haskell.Synthesis.Internal.TypedCandidate
+    Language.Haskell.Synthesis.Internal.TypedGenerated.Fingerprint
     Language.Haskell.Exference.Core.Internal.FlexibleIds
     Language.Haskell.Exference.Core.Internal.Candidate
     Language.Haskell.Exference.Core.Internal.ExferenceNode
@@ -322,6 +325,13 @@ Test-Suite synthesis-length-tests
   Type:             exitcode-stdio-1.0
   Main-Is:          Spec.hs
   Hs-Source-Dirs:   synthesis/test-length
+  Build-Depends:    djex
+
+Test-Suite synthesis-term-graph-fingerprint-tests
+  import:           tasty-hunit-test
+  Type:             exitcode-stdio-1.0
+  Main-Is:          Spec.hs
+  Hs-Source-Dirs:   synthesis/test-term-graph-fingerprint
   Build-Depends:    djex
 
 -- Compile the private fingerprint builder and behavioral problem sealer as

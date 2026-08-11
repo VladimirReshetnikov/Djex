@@ -101,6 +101,8 @@ import Language.Haskell.Synthesis.TypeSynonym
   )
 import Language.Haskell.Synthesis.TypedCandidate
 import Language.Haskell.Synthesis.TypedGenerated (TermGraph)
+import Language.Haskell.Synthesis.TypedGenerated.Fingerprint
+  ( TermGraphFingerprintSubject )
 
 data FingerprintProbe
 data OtherFingerprintProbe
@@ -123,6 +125,8 @@ forbiddenConstructionAttempts :: [(String, ())]
 forbiddenConstructionAttempts =
   [ noGeneric @(Environment Int Void ()) "Environment"
   , noGeneric @(Fingerprint FingerprintProbe) "Fingerprint"
+  , noGeneric @(Fingerprint TermGraphFingerprintSubject)
+      "TermGraphFingerprint"
   , ( "Fingerprint subject identity unexpectedly permits Coercible"
     , forbiddenFingerprintCoercion `seq` ()
     )

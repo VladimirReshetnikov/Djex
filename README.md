@@ -141,6 +141,34 @@ and [checker-boundary follow-up](docs/reports/2026-07-17-checker-boundary-follow
 record the larger strictness, compatibility, and raw-checker migrations that
 preceded it.
 
+## Canonical typed candidate identities
+
+`Language.Haskell.Synthesis.TypedGenerated.Fingerprint` assigns an opaque,
+nominal structural identity to a shared typed `TermGraph`. Before encoding, it
+reconstructs the raw graph and reseals it with `sharedTypeStructure` under the
+caller's explicit graph limits; an earlier seal performed with a different type
+checker is not trusted. The canonical rooted-tree key ignores node-table order
+and raw node, occurrence, local-binder, hole, and private type-variable
+allocation numbers. It preserves lexical binding and hole equality classes,
+flexible-versus-rigid free-variable flavor, exact global names, normalized node
+and pattern types, term and shared-checkable pattern forms, application and visible-type
+witnesses, inferred-versus-specified type arguments, and case-branch order.
+There is deliberately no beta, eta, let, or behavioral quotienting.
+
+Certificate allocation numbers are not identities. Until a checked certificate
+table can supply the corresponding substitution and obligation fingerprints,
+any certificate-bearing visible application is rejected. The shared checker
+also lacks constructor-family schemas, so constructor-pattern graphs fail
+closed until an inventory-bound sealer supplies that authority. Canonical
+construction has an explicit retained-byte bound (one MiB by default), while
+the preceding traversal is bounded separately by the supplied graph limits.
+
+This fingerprint identifies only the checked shared graph. It does not resolve
+globals against an `Inventory`, prove that holes or residual obligations are
+absent, identify a complete behavioral problem, or provide behavioral evidence.
+A domain-owned session or problem sealer must establish those facts and wrap the
+canonical bytes in its own candidate identity.
+
 ## Finite list-spine length contracts
 
 `Language.Haskell.Synthesis.Semantic.Length` defines the first checked

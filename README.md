@@ -355,14 +355,15 @@ which could have caused them. At the status-marker-to-value-write boundary,
 already-buffered bytes must be finitely bounded SMT-LIB whitespace, so a stale
 valid-looking valuation cannot cross that causal boundary. Every framing,
 decoder, marker, cumulative-output, unexpected-byte, or EOF failure returns no
-successor. The next live query driver must treat any retained receiver as spent
-and discard the worker.
+successor. The live query owner treats every such transaction as spent and
+discards the worker.
 The private plan key binds policy, query, framing limits, cumulative budget,
 phase schema, exact writes, and marker responses. This remains a pure,
 caller-feedable protocol decode—not an executed observation, attestation, or
 receipt. A live session must still generate barriers uniquely across its
 lifetime, enforce writes, capability-probe the process, and bind the actual
-transcript and termination outcome into a separate run identity.
+transcript into a separate run identity; the Session described below now owns
+those obligations.
 
 `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session` now
 provides that package-private live ownership checkpoint. It samples separate
@@ -393,12 +394,30 @@ contradictory zero/one assertions producing `unsat`. Delimiter and boundary
 whitespace are charged once and canonically retained with the preceding write,
 including a separately delivered final newline. The ready-worker identity
 binds the pure execution policy, process observation method, exact segmented
-capability transcript, secret-seed commitment, workspace policy, and future
-query limits. It still creates no solver observation or evidence. A later
-query driver must run the pure transaction plan through this owner and replay
-any decoded model independently before it can affect behavioral conclusions.
+capability transcript, secret-seed commitment, workspace policy, and configured
+live-query limits. Readiness itself creates no solver observation or evidence.
 The ownership and threat-model details are recorded in the
 [2026-08-11 scoped worker lease report](docs/reports/2026-08-11-z3-worker-lease.md).
+
+The same Session now owns ordinal-bound live queries through the private
+`...Session.Driver`. A masked serial gate allocates zero-based ordinals and two
+HMAC-SHA256 marker roles from the unexposed session seed, checks all markers
+against a bounded lease-wide set, and seals the exact pure protocol plan before
+reservation. The shared causal driver writes before activating each receiver,
+attributes delayed predecessor whitespace exactly once, and requires exact
+stdout-delta and stderr accounting. Every marker, protocol, transport, replay,
+or identity failure after reservation spends the ordinal, cancels the lease,
+and closes the process; plan, capacity, identity-admission, and query-count
+rejections before reservation remain non-mutating.
+
+Successful query runs retain an opaque nominal reversible identity over the
+ready worker, plan, ordinal, spent markers, absolute deadline, exact segmented
+transcript, decoded branch, replay policy, and transport counters. `sat` under
+the input-value policy yields counterexample evidence only after independent
+Length replay under explicit evaluation limits. Status-only `sat`, `unsat`,
+and `unknown` remain heuristic observations and grant no pruning authority.
+The exact design and threat boundary are recorded in the
+[2026-08-11 ordinal-bound query-run report](docs/reports/2026-08-11-z3-query-runs.md).
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` now seals the
 pure Z3 launch and protocol policy without launching anything. V2 fixes the

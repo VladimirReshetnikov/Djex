@@ -2,6 +2,11 @@
 
 Date: 2026-08-11
 
+> The [ordinal-bound query-run successor](2026-08-11-z3-query-runs.md) now
+> allocates live query ordinals and barriers, drives the pure protocol through
+> this lease, and independently replays satisfiable models. This report keeps
+> the worker-readiness checkpoint and its threat model explicit.
+
 ## Scope
 
 This checkpoint adds the first process-owning layer beneath the pure Length
@@ -16,9 +21,10 @@ The implementation remains package-private:
 - `...Session.Capability` owns the pure readiness phase machine; and
 - `...Session.Process` owns one direct child and its pipes.
 
-This is not yet the per-query executor. It creates neither a solver observation
-nor behavioral evidence, and it grants no pruning authority to `sat`, `unsat`,
-or `unknown`.
+This readiness checkpoint by itself creates neither a solver observation nor
+behavioral evidence, and it grants no pruning authority to `sat`, `unsat`, or
+`unknown`. Its package-private successor now adds the separate live query layer
+without changing that authority boundary.
 
 ## Honest executable observation
 
@@ -179,7 +185,8 @@ only its executable basename. It records argv, environment, cwd, initial cwd
 listing, commands, and output in a test-only sidecar outside the cwd, so the
 production empty-environment and empty-workspace policies remain observable.
 
-The focused Length suite now has 146 passing cases. Live cases cover:
+The current focused Length suite has 159 passing cases, including the query-run
+successor. Worker-lease cases cover:
 
 - healthy whole, split, singleton, empty-interleaved, and delayed-byte output;
 - exact argv, empty environment, initially empty cwd, matching executable
@@ -195,12 +202,13 @@ The focused Length suite now has 146 passing cases. Live cases cover:
 The fake worker compiles with `-Wall -Werror`. The complete suite returns in a
 few seconds and leaves no test workers behind.
 
-## Next checkpoint
+## Successor status
 
-The next layer should allocate a session query ordinal and fresh query barriers,
-seal the existing `LengthSMTLibProtocolPlan`, drive its exact write actions
-through this ready worker, and bind the actual branch and transcript to both the
-ready-worker identity and query identity. Any failure must poison the lease.
-Only a satisfiable model which subsequently passes the existing independent
-Length replay may create model-relative counterexample evidence; `unsat` and
-`unknown` remain heuristic observations.
+The ordinal-bound query-run layer now allocates session-wide marker roles,
+seals and drives `LengthSMTLibProtocolPlan`, binds the exact branch and
+transcript to the ready-worker and plan identities, and poisons the lease after
+every live failure. Only a satisfiable model which passes independent Length
+replay creates model-relative counterexample evidence; `unsat` and `unknown`
+remain heuristic observations. See the
+[query-run report](2026-08-11-z3-query-runs.md) for the new invariants and next
+integration boundary.

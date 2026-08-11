@@ -2,9 +2,10 @@
 
 Date: 2026-08-11
 
-> The [scoped worker lease successor](2026-08-11-z3-worker-lease.md) now
-> implements the process-owning readiness layer described here, while keeping
-> per-query execution and observation association as the next checkpoint.
+> The [scoped worker lease](2026-08-11-z3-worker-lease.md) and its
+> [ordinal-bound query-run successor](2026-08-11-z3-query-runs.md) now
+> implement the live process, causal execution, and observation association
+> described here while retaining this pure plan as a caller-feedable boundary.
 
 ## Scope
 
@@ -145,8 +146,8 @@ A process-owning session still needs to bind and enforce:
 8. an opaque query-run identity over the capability-probed worker, pure plan,
    actual branch, writes, frames, termination outcome, and bounded artifacts.
 
-The worker-lease successor now implements the process, workspace, readiness,
-and cleanup portions of items 1 through 3 and 5 through 7 under the explicit
-portable limitations above. Query ordinals, per-query marker allocation, the
-query driver, and item 8 remain. Even that later layer must not turn solver
-output into proof or pruning authority.
+The worker lease and query-run successors now implement all eight ownership
+items under the explicit portable limitations above. The live run remains a
+syntactic observation; only an independently replayed satisfiable model can
+produce model-relative counterexample evidence. Solver output is still not
+proof or pruning authority.

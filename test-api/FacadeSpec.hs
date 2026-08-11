@@ -35,6 +35,16 @@ facadeTests = testGroup "public Djex facade"
         , Just "present"
         , Just 5
         )
+  , testCase "exports exact shared synthesis observations" $ do
+      let observations :: ObservationCounts SynthesisMetric
+          observations = recordObservations EngineStateVisited 2
+            $ recordObservation RankNPlanCompiled noObservations
+          snapshot = observationSnapshot observations "candidate"
+      observationEntries observations @?=
+        [(RankNPlanCompiled, 1), (EngineStateVisited, 2)]
+      synthesisMetricCode EngineStateVisited @?= "engine-state-visited"
+      snapshotValue snapshot @?= "candidate"
+      snapshotObservations snapshot @?= observations
   , testCase "exports the prepared class authority" $ do
       className <- expectRight $ mkIdentifier "Class"
       missingName <- expectRight $ mkIdentifier "Missing"

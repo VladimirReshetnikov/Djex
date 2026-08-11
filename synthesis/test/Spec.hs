@@ -24,6 +24,7 @@ import qualified Language.Haskell.Synthesis.Environment as Environment
 import Language.Haskell.Synthesis.Fresh
 import Language.Haskell.Synthesis.Generated
 import Language.Haskell.Synthesis.Name
+import qualified Language.Haskell.Synthesis.Observability as Observability
 import qualified Language.Haskell.Synthesis.Kind as Kind
 import qualified Language.Haskell.Synthesis.KindInference as KindInference
 import qualified Language.Haskell.Synthesis.Inventory as Inventory
@@ -58,6 +59,7 @@ tests = testGroup "Djex synthesis foundation"
   , declarationTests
   , environmentTests
   , generatedTests
+  , observabilityTests
   , typedGeneratedTests
   , queryTests
   , searchTests
@@ -146,6 +148,82 @@ candidateTests = testGroup "candidates"
         Left DuplicateLocalBinderIdentity
       renderCandidateDefinition options duplicate @?=
         Left DuplicateLocalBinderIdentity
+  ]
+
+observabilityTests :: TestTree
+observabilityTests = testGroup "synthesis observability"
+  [ testCase "retain exact counts beyond machine-sized integers" $ do
+      let beyondInt = fromIntegral (maxBound :: Int) + 1 :: Natural
+          observations = Observability.recordObservations
+            Observability.EngineStateVisited 7
+            $ Observability.recordObservations
+                Observability.EngineStateVisited beyondInt
+                Observability.noObservations
+      Observability.observationCount
+          Observability.EngineStateVisited observations @?=
+        beyondInt + 7
+  , testCase "keep zero additions in the canonical empty representation" $ do
+      let empty = Observability.noObservations
+            :: Observability.ObservationCounts Observability.SynthesisMetric
+          unchanged = Observability.recordObservations
+            Observability.RawDerivationProduced 0 empty
+      unchanged @?= empty
+      Observability.observationEntries unchanged @?= []
+      Observability.observationCount
+          Observability.RawDerivationProduced unchanged @?= 0
+  , testCase "add independent observation sets exactly" $ do
+      let left = Observability.recordObservation
+            Observability.RankNPlanProposed Observability.noObservations
+          rightCounts = Observability.recordObservations
+            Observability.RankNPlanProposed 2
+            $ Observability.recordObservation
+                Observability.RankNPlanCompiled Observability.noObservations
+          combined = left <> rightCounts
+      Observability.observationEntries combined @?=
+        [ (Observability.RankNPlanProposed, 3)
+        , (Observability.RankNPlanCompiled, 1)
+        ]
+      (mempty <> combined, combined <> mempty) @?= (combined, combined)
+  , testCase "sum mapped key collisions and enumerate keys in order" $ do
+      let source = Observability.recordObservations (3 :: Int) 3
+            $ Observability.recordObservations 1 1
+            $ Observability.recordObservations 2 2
+                Observability.noObservations
+          mapped = Observability.mapObservationKeys (`mod` 2) source
+      Observability.observationEntries source @?=
+        [(1, 1), (2, 2), (3, 3)]
+      Observability.observationEntries mapped @?= [(0, 2), (1, 4)]
+  , testCase "assign stable codes to the fixed metric vocabulary" $
+      map Observability.synthesisMetricCode
+          [minBound .. maxBound] @?=
+        [ "rank-n-plan-proposed"
+        , "rank-n-plan-compiled"
+        , "formula-fingerprint-retained"
+        , "prepared-premise-fingerprint-retained"
+        , "prepared-premise-cache-hit"
+        , "engine-state-visited"
+        , "raw-derivation-produced"
+        , "rendered-group-produced"
+        , "semantic-duplicate-discarded"
+        , "exact-duplicate-discarded"
+        ]
+  , testCase "keep both snapshot fields lazy and traverse only the value" $ do
+      let observations = Observability.recordObservation
+            Observability.FormulaFingerprintRetained
+            Observability.noObservations
+          lazyObservations = Observability.observationSnapshot
+            (error "snapshot value forced its observations") "value"
+          lazyValue = Observability.observationSnapshot observations
+            (error "snapshot observations forced its value" :: String)
+          snapshot = Observability.observationSnapshot observations (41 :: Int)
+      Observability.snapshotValue lazyObservations @?= "value"
+      Observability.snapshotObservations lazyValue @?= observations
+      Observability.snapshotValue (fmap (+ 1) snapshot) @?= 42
+      toList snapshot @?= [41]
+      traverse (Just . (+ 1)) snapshot @?=
+        Just (Observability.observationSnapshot observations 42)
+      _ <- evaluate $ force snapshot
+      pure ()
   ]
 
 typedGeneratedTests :: TestTree

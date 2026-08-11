@@ -44,6 +44,7 @@ module Language.Haskell.Djex
   , module Language.Haskell.Synthesis.Kind
   , module Language.Haskell.Synthesis.KindInference
   , module Language.Haskell.Synthesis.Name
+  , module Language.Haskell.Synthesis.Observability
   , module Language.Haskell.Synthesis.Qualification
   , module Language.Haskell.Synthesis.Query
   , module Language.Haskell.Synthesis.Search
@@ -76,6 +77,7 @@ import Language.Haskell.Synthesis.Inventory
 import Language.Haskell.Synthesis.Kind
 import Language.Haskell.Synthesis.KindInference
 import Language.Haskell.Synthesis.Name
+import Language.Haskell.Synthesis.Observability
 import Language.Haskell.Synthesis.Qualification
 import Language.Haskell.Synthesis.Query
 import Language.Haskell.Synthesis.Search

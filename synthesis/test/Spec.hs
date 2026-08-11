@@ -35,6 +35,7 @@ import qualified Language.Haskell.Synthesis.Semantic.Observation as Observation
 import qualified Language.Haskell.Synthesis.TypeRender as TypeRender
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import Language.Haskell.Synthesis.TypeAtom
+import qualified Language.Haskell.Synthesis.TypeInstantiation as TypeInstantiation
 import qualified Language.Haskell.Synthesis.TypeSynonym as TypeSynonym
 import qualified Language.Haskell.Synthesis.TypedGenerated as Typed
 import Test.Tasty (TestTree, defaultMain, localOption, testGroup)
@@ -67,6 +68,7 @@ tests = testGroup "Djex synthesis foundation"
   , searchTests
   , selectionTests
   , typeTests
+  , typeInstantiationTests
   , synonymTests
   , kindInferenceTests
   , moduleTests
@@ -2769,6 +2771,145 @@ declarationTests = testGroup "declarations"
       Declaration.recursiveDataTypeNames declarations @?=
         Set.fromList [directName, leftName, rightName, duplicateName]
   ]
+
+typeInstantiationTests :: TestTree
+typeInstantiationTests = testGroup "context-free scheme instantiation"
+  [ testCase "infer one correlated monomorphic selection" $ do
+      let listType = SharedType.TypeApplication
+            $ SharedType.TypeConstructor listConstructor
+          variable = SharedType.TypeVariable
+          integer = SharedType.TypeConstructor integerName
+          boolean = SharedType.TypeConstructor booleanName
+          scheme = SharedType.ForallType ["a"] []
+            $ SharedType.FunctionType
+                (listType $ variable "a")
+                (listType $ variable "a")
+          matching = SharedType.FunctionType
+            (listType integer) (listType integer)
+          mismatching = SharedType.FunctionType
+            (listType integer) (listType boolean)
+      let matched = right $ TypeInstantiation.matchContextFreeScheme
+            scheme matching
+      case TypeInstantiation.contextFreeSchemeSelections matched of
+        [Just selection] -> do
+          TypeInstantiation.contextFreeSchemeSelectionFreeVariables selection
+            @?= Set.empty
+          TypeInstantiation.contextFreeSchemeSelectionVariable selection @?=
+            Nothing
+        _ -> assertFailure "unexpected selection shape"
+      assertSchemeMatchError TypeInstantiation.ContextFreeSchemeShapeMismatch
+        $ TypeInstantiation.matchContextFreeScheme scheme mismatching
+  , testCase "compare repeated impredicative images modulo alpha renaming" $ do
+      let variable = SharedType.TypeVariable
+          identity binder = SharedType.ForallType [binder] []
+            $ SharedType.FunctionType (variable binder) (variable binder)
+          scheme = SharedType.ForallType ["selected"] []
+            $ SharedType.FunctionType
+                (variable "selected") (variable "selected")
+          matching = SharedType.FunctionType
+            (identity "left") (identity "right")
+          mismatching = SharedType.FunctionType
+            (identity "left")
+            (SharedType.ForallType ["right"] []
+              $ SharedType.FunctionType
+                  (variable "right")
+                  $ SharedType.TypeConstructor integerName)
+      assertBool "alpha-renamed impredicative selections did not match" $
+        either (const False) (const True)
+          $ TypeInstantiation.matchContextFreeScheme scheme matching
+      assertSchemeMatchError TypeInstantiation.ContextFreeSchemeShapeMismatch
+        $ TypeInstantiation.matchContextFreeScheme scheme mismatching
+  , testCase "reject capture of a nested forall skolem" $ do
+      let variable = SharedType.TypeVariable
+          scheme = SharedType.ForallType ["outer"] []
+            $ SharedType.FunctionType
+                (SharedType.ForallType ["inner"] []
+                  $ SharedType.FunctionType
+                      (variable "outer") (variable "inner"))
+                $ SharedType.TypeConstructor integerName
+          captured = SharedType.FunctionType
+            (SharedType.ForallType ["paired"] []
+              $ SharedType.FunctionType
+                  (variable "paired") (variable "paired"))
+            $ SharedType.TypeConstructor integerName
+      assertSchemeMatchError TypeInstantiation.ContextFreeSchemeShapeMismatch
+        $ TypeInstantiation.matchContextFreeScheme scheme captured
+  , testCase "allow one binder to select a whole closed polytype" $ do
+      let variable = SharedType.TypeVariable
+          identity binder = SharedType.ForallType [binder] []
+            $ SharedType.FunctionType (variable binder) (variable binder)
+          scheme = SharedType.ForallType ["selected"] []
+            $ SharedType.FunctionType
+                (variable "selected") (variable "selected")
+          actual = SharedType.FunctionType
+            (identity "left") (identity "right")
+      let matched = right $ TypeInstantiation.matchContextFreeScheme
+            scheme actual
+      length (TypeInstantiation.contextFreeSchemeSelections matched) @?= 1
+  , testCase "report exact free variables in an inferred image" $ do
+      let variable = SharedType.TypeVariable
+          scheme = SharedType.ForallType ["selected"] []
+            $ variable "selected"
+      let matched = right $ TypeInstantiation.matchContextFreeScheme
+            scheme $ SharedType.FunctionType
+              (variable "root") (variable "closed-over")
+      case TypeInstantiation.contextFreeSchemeSelections matched of
+        [Just selection] ->
+          TypeInstantiation.contextFreeSchemeSelectionFreeVariables selection
+            @?= Set.fromList ["closed-over", "root"]
+        _ -> assertFailure "unexpected selection shape"
+  , testCase "retain source-order rigid opening selections" $ do
+      let flexible :: Int -> SharedType.Variable Int
+          flexible = SharedType.FlexibleVariable
+          rigid :: Int -> SharedType.Variable Int
+          rigid = SharedType.RigidVariable
+          variable = SharedType.TypeVariable
+          listType = SharedType.TypeApplication
+            $ SharedType.TypeConstructor listConstructor
+          scheme = SharedType.ForallType [flexible 0, flexible 1] []
+            $ SharedType.FunctionType
+                (listType $ variable $ flexible 1)
+                (listType $ variable $ flexible 0)
+          actual = SharedType.FunctionType
+            (listType $ variable $ rigid 9)
+            (listType $ variable $ rigid 4)
+      let matched = right $ TypeInstantiation.matchContextFreeScheme
+            scheme actual
+      map (>>= TypeInstantiation.contextFreeSchemeSelectionVariable)
+          (TypeInstantiation.contextFreeSchemeSelections matched) @?=
+        [Just $ rigid 4, Just $ rigid 9]
+  , testCase "distinguish shadowed leading binders and retain vacuous slots" $ do
+      let variable = SharedType.TypeVariable
+          scheme = SharedType.ForallType ["same", "unused"] []
+            $ SharedType.ForallType ["same"] [] $ variable "same"
+          actual = SharedType.TypeConstructor integerName
+      let matched = right $ TypeInstantiation.matchContextFreeScheme
+            scheme actual
+      case TypeInstantiation.contextFreeSchemeSelections matched of
+        [Nothing, Nothing, Just selection] -> do
+          TypeInstantiation.contextFreeSchemeSelectionFreeVariables selection
+            @?= Set.empty
+          TypeInstantiation.contextFreeSchemeSelectionVariable selection @?=
+            Nothing
+        _ -> assertFailure "unexpected selection shape"
+  , testCase "reject contextual schemes before comparing their body" $ do
+      let className = right $ mkIdentifier "SchemeContext"
+          variable = SharedType.TypeVariable
+          scheme = SharedType.ForallType ["a"]
+            [Constraint className [variable "a"]]
+            $ variable "a"
+      assertSchemeMatchError TypeInstantiation.ContextualLeadingScheme
+        $ TypeInstantiation.matchContextFreeScheme scheme
+          $ SharedType.TypeConstructor integerName
+  ]
+ where
+  assertSchemeMatchError expected result = case result of
+    Left actual -> actual @?= expected
+    Right _ -> assertFailure "unexpected successful scheme match"
+
+  listConstructor = listName
+  integerName = right $ mkIdentifier "Int"
+  booleanName = right $ mkIdentifier "Bool"
 
 typeTests :: TestTree
 typeTests = testGroup "source types"

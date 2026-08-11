@@ -57,6 +57,7 @@ derived projections of the shared authorities, not alternative source models.
 | `Language.Haskell.Synthesis.Constraint` | Nominal class names applied to backend-neutral type arguments, with shared namespace validation and rendering. |
 | `Language.Haskell.Synthesis.Type` | The common variable/constructor/application/function/tuple/forall tree; canonicalization, validation, free-variable and binder queries, spines, and capture-avoiding substitution. |
 | `Language.Haskell.Synthesis.TypeAtom` | Opaque rank-N atoms with retained source structure, cached lexical alpha-normal identity, free-variable queries, and checked capture-avoiding mapping and substitution. |
+| `Language.Haskell.Synthesis.TypeInstantiation` | One-way, capture-safe matching from a context-free leading-forall scheme to an actual type, with opaque source-order selections and exact free-variable observations for later policy checks. |
 | `Language.Haskell.Synthesis.TypeRender` | Haskell-like rendering of the shared type tree and constraints with caller-supplied variable spellings and optional shared qualification policy. The original entry points remain fully qualified. |
 | `Language.Haskell.Synthesis.Declaration` | Synonym, datatype, abstract type, value, class, and instance declarations plus declaration-local validation and recursion analysis. |
 
@@ -73,6 +74,16 @@ after a consistent binder rename, including when stored inside a list.
 retained tree only at their documented positive-introduction and scoped-use
 elimination boundaries. The original type tree is retained separately so
 rendering and diagnostics do not expose the normalized key.
+
+`TypeInstantiation` fills the narrower shared boundary needed after a backend
+has retained an implicitly instantiated typed global. It solves only the
+source scheme's complete leading binder prefix and treats every actual-side
+variable as a constant. A binder may select a whole closed impredicative type;
+nested `forall` binders are paired with private skolems before their bodies are
+compared, so an outer selection cannot capture a variable that exists only
+inside the nested scope. The resulting selections are opaque: domain modules
+may inspect their exact free-variable set or recognize one selected variable,
+but cannot manufacture a successful match.
 
 ### Checked environments and elaboration
 

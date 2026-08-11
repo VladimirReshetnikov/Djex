@@ -160,6 +160,7 @@ Library
     Language.Haskell.Synthesis.Semantic.Problem
     Language.Haskell.Synthesis.Type
     Language.Haskell.Synthesis.TypeAtom
+    Language.Haskell.Synthesis.TypeInstantiation
     Language.Haskell.Synthesis.TypeSynonym
     Language.Haskell.Synthesis.TypedCandidate
     Language.Haskell.Synthesis.TypedGenerated
@@ -245,6 +246,7 @@ Library
     Language.Haskell.Synthesis.Internal.Semantic.Problem
     Language.Haskell.Synthesis.Internal.TypedCandidate
     Language.Haskell.Synthesis.Internal.TypedGenerated.Fingerprint
+    Language.Haskell.Synthesis.Internal.TypeInstantiation
     Language.Haskell.Exference.Core.Internal.FlexibleIds
     Language.Haskell.Exference.Core.Internal.Candidate
     Language.Haskell.Exference.Core.Internal.ExferenceNode

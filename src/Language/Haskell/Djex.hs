@@ -57,6 +57,7 @@ module Language.Haskell.Djex
   , module Language.Haskell.Synthesis.Semantic.Problem
   , module Language.Haskell.Synthesis.Type
   , module Language.Haskell.Synthesis.TypeAtom
+  , module Language.Haskell.Synthesis.TypeInstantiation
   , module Language.Haskell.Synthesis.TypeRender
   , module Language.Haskell.Synthesis.TypeSynonym
   , module Language.Haskell.Synthesis.TypedCandidate
@@ -98,6 +99,7 @@ import Language.Haskell.Synthesis.Semantic.Observation
 import Language.Haskell.Synthesis.Semantic.Problem
 import Language.Haskell.Synthesis.Type
 import Language.Haskell.Synthesis.TypeAtom
+import Language.Haskell.Synthesis.TypeInstantiation
 import Language.Haskell.Synthesis.TypeRender
 import Language.Haskell.Synthesis.TypeSynonym
 import Language.Haskell.Synthesis.TypedCandidate

@@ -169,6 +169,17 @@ absent, identify a complete behavioral problem, or provide behavioral evidence.
 A domain-owned session or problem sealer must establish those facts and wrap the
 canonical bytes in its own candidate identity.
 
+`Language.Haskell.Synthesis.TypeInstantiation` supplies the missing checked
+association for an implicitly specialized typed global. It matches one exact
+context-free leading-forall source scheme against an actual type without ever
+solving an actual-side variable. Selections may be impredicative and repeated
+selections compare modulo lexical binder renaming. Nested binders are paired
+with private skolems, which rejects an apparent match that would capture a
+variable exposed only inside a nested `forall`. Length and future behavioral
+domains can therefore apply their own rigid-opening or authorized-free-variable
+policy to an opaque, source-ordered match rather than reusing an engine-private
+unifier.
+
 ## Finite list-spine length contracts
 
 `Language.Haskell.Synthesis.Semantic.Length` defines the first checked

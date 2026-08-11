@@ -98,6 +98,12 @@ facadeTests = testGroup "public Djex facade"
           , lengthLiteralBitLimit
           , lengthFingerprintByteLimit
           ] @?= [4096, 8, 1024, 32, 64, 256, 16, 256, 65536]
+      mkLengthEvaluationLimits defaultLengthEvaluationLimitSource @?=
+        Right defaultLengthEvaluationLimits
+      map ($ defaultLengthEvaluationLimits)
+          [ lengthAssignmentValueBitLimit
+          , lengthIntermediateValueBitLimit
+          ] @?= [4096, 4096]
 
       providerName <- expectRight $ mkIdentifier "lengthProvider"
       let input = LengthVariable (LengthInput 0)
@@ -120,25 +126,40 @@ facadeTests = testGroup "public Djex facade"
           payload = TupleType Boxed [] :: Type String
           listType = TypeApplication (TypeConstructor listName) payload
           target = FunctionType listType listType
+          providerScheme = ForallType ["element"] [] $ FunctionType
+            (TypeApplication
+              (TypeConstructor listName)
+              (TypeVariable "element"))
+            (TypeApplication
+              (TypeConstructor listName)
+              (TypeVariable "element"))
           provider :: LengthProviderSummarySource String
           provider = AssumedProviderSummary
             providerName
-            (ForallType ["element"] [] $ FunctionType
-              (TypeApplication
-                (TypeConstructor listName)
-                (TypeVariable "element"))
-              (TypeApplication
-                (TypeConstructor listName)
-                (TypeVariable "element")))
+            providerScheme
             [LengthSpineArgument]
             (LengthVariable $ LengthProviderArgument 0)
       sourceInventory <- expectRight
         (mkInventory ClosedKindInventory
-          ([] :: [Declaration String () ()]))
-      checkedContract <- expectRight $ sealLengthContract
-        defaultLengthLimits sourceInventory target contract
-      checkedProviders <- expectRight $ sealLengthProviderInventory
-        defaultLengthLimits sourceInventory [provider]
+          [ ValueDeclaration
+              $ ValueSignature () providerName providerScheme
+          ] :: Either
+              (InventoryError String Void)
+              (Inventory String ()))
+      checkedContext <- expectRight $ sealLengthContext
+        defaultLengthLimits sourceInventory BuiltinListSpine
+      checkedContract <- expectRight $ sealLengthContractInContext
+        defaultLengthLimits checkedContext target contract
+      checkedProviders <- expectRight $ sealLengthProviderInventoryInContext
+        defaultLengthLimits checkedContext [provider]
+      lengthContextInventory checkedContext @?= sourceInventory
+      let spineModel = lengthContextSpineModel checkedContext
+      checkedLengthSpineTypeName spineModel @?= listName
+      checkedLengthSpineZeroConstructor spineModel @?= listName
+      checkedLengthSpineStepConstructor spineModel @?= consName
+      checkedLengthSpineRecursiveField spineModel @?= 1
+      checkedLengthSpineModelTrust spineModel @?=
+        BuiltinStructuralListSpine
       lengthContractPrecondition contract @?= condition
       lengthContractPostcondition contract @?= LengthEqual result transfer
       checkedLengthContractTarget checkedContract @?= target
@@ -160,11 +181,19 @@ facadeTests = testGroup "public Djex facade"
           , LengthVariable $ LengthProviderArgument 0
           )
       case checkedLengthProviderSummaries checkedProviders of
-        [summary] -> checkedLengthProviderTrust summary @?= AssumedProviderLaw
+        [summary] -> do
+          checkedLengthProviderTrust summary @?= AssumedProviderLaw
+          evaluateLengthProviderApplication defaultLengthEvaluationLimits
+              summary [ObservedSpineLength 7] @?= Right 7
         summaries -> fail $ "unexpected checked provider count: "
           ++ show (length summaries)
+      evaluateLengthContractAssignment defaultLengthEvaluationLimits
+          checkedContract (LengthContractAssignment [0] 3) @?=
+        Right LengthPostconditionSatisfied
       [LengthSpineArgument, LengthUnobservedArgument] @?= [minBound .. maxBound]
       (AssumedProviderLaw :: LengthProviderTrust) @?= minBound
+      [BuiltinStructuralListSpine, DerivedFromListLikeDataDeclaration] @?=
+        [minBound .. maxBound]
   , testCase "exports the prepared class authority" $ do
       className <- expectRight $ mkIdentifier "Class"
       missingName <- expectRight $ mkIdentifier "Missing"

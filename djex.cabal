@@ -154,6 +154,7 @@ Library
     Language.Haskell.Synthesis.Search
     Language.Haskell.Synthesis.Selection
     Language.Haskell.Synthesis.Semantic.Length
+    Language.Haskell.Synthesis.Semantic.Length.Evaluate
     Language.Haskell.Synthesis.Semantic.Observation
     Language.Haskell.Synthesis.Semantic.Problem
     Language.Haskell.Synthesis.Type
@@ -460,6 +461,7 @@ Test-Suite exference-engine-tests
   Other-Modules:
     Language.Haskell.Exference.Core.Candidate
     Language.Haskell.Exference.Core.ConstraintSolver
+    Language.Haskell.Exference.Core.Declaration
     Language.Haskell.Exference.Core.ExferenceStats
     Language.Haskell.Exference.Core.Expression
     Language.Haskell.Exference.Core.ExpressionCheck

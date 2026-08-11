@@ -15,6 +15,7 @@ module Language.Haskell.Synthesis.Declaration
   , declarationSubjectName
   , declarationLookupNames
   , declarationTermSignatures
+  , declarationTermSchemes
   , declarationTypeVariables
   , validateDeclaration
   , recursiveDataTypeNames
@@ -184,6 +185,59 @@ declarationTermSignatures declaration = case declaration of
         ForallType variables (constraint : constraints) body
       _ -> ForallType [] [constraint] typeExpression
   _ -> []
+
+-- | Every term introduced by one declaration, with all declaration-owned type
+-- parameters closed over the callable type.
+--
+-- 'declarationTermSignatures' deliberately describes constructor and method
+-- types inside their owner's parameter scope.  Consumers which retain a term
+-- independently of that declaration -- semantic inventories, source
+-- certificates, and cache identities in particular -- need a closed scheme
+-- instead.  This projection keeps the declaration's parameter order, so
+-- visible specialization and higher-kinded parameters are never reconstructed
+-- from free-variable spelling or set order.
+--
+-- Free variables in ordinary value declarations are implicitly closed in
+-- first-occurrence order. Datatype constructors acquire one outer forall over
+-- their owner's parameters. Class methods keep the owner parameters and owner
+-- constraint at a distinct outer layer, so a method-local forall with a
+-- reused variable identity cannot capture the class constraint.
+declarationTermSchemes
+  :: Ord typeVariable
+  => Declaration typeVariable kindVariable annotation
+  -> [ValueSignature typeVariable annotation]
+declarationTermSchemes declaration = case declaration of
+  ValueDeclaration signature -> [closeImplicit signature]
+  DataTypeDeclaration _ _ parameters _ -> map (close ownerVariables)
+    $ declarationTermSignatures declaration
+   where
+    ownerVariables = map parameterVariable parameters
+  ClassDeclaration _ owner parameters _ methods -> map closeMethod methods
+   where
+    ownerVariables = map parameterVariable parameters
+    ownerSet = Set.fromList ownerVariables
+    ownerConstraint = Constraint owner $ map TypeVariable ownerVariables
+    closeMethod signature = signature
+      { valueType = ForallType ownerVariables [ownerConstraint]
+          $ closeVariables methodVariables $ valueType signature
+      }
+     where
+      methodVariables = filter (`Set.notMember` ownerSet)
+        $ implicitVariables $ valueType signature
+  _ -> []
+ where
+  closeImplicit signature = signature
+    { valueType = closeVariables (implicitVariables $ valueType signature)
+        $ valueType signature
+    }
+
+  close variables signature = signature
+    { valueType = closeVariables variables $ valueType signature }
+
+  closeVariables [] source = source
+  closeVariables variables source = ForallType variables [] source
+
+  implicitVariables = freeVariablesInFirstOccurrenceOrder
 
 -- | Every explicit type-variable occurrence in structural source order.
 -- Declaration parameters or instance binders precede the syntax they scope;

@@ -33,6 +33,19 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length
   , lengthProviderArgumentLimit
   , lengthLiteralBitLimit
   , lengthFingerprintByteLimit
+  , LengthSpineModelSource (..)
+  , LengthSpineModelTrust (..)
+  , LengthSpineModelError (..)
+  , CheckedLengthSpineModel
+  , checkedLengthSpineTypeName
+  , checkedLengthSpineZeroConstructor
+  , checkedLengthSpineStepConstructor
+  , checkedLengthSpineRecursiveField
+  , checkedLengthSpineModelTrust
+  , CheckedLengthContext
+  , sealLengthContext
+  , lengthContextInventory
+  , lengthContextSpineModel
   , LengthTypeCollectionSite (..)
   , LengthTypeBoundError (..)
   , LengthSyntaxCollectionSite (..)
@@ -42,6 +55,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length
   , LengthProviderInventoryError (..)
   , CheckedLengthContract
   , sealLengthContract
+  , sealLengthContractInContext
   , checkedLengthContractTarget
   , checkedLengthContractInputCount
   , checkedLengthContractPrecondition
@@ -55,6 +69,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length
   , checkedLengthProviderTrust
   , CheckedLengthProviderInventory
   , sealLengthProviderInventory
+  , sealLengthProviderInventoryInContext
   , checkedLengthProviderSummaries
   , lookupCheckedLengthProviderSummary
   , lengthProviderInventoryFingerprint
@@ -77,6 +92,19 @@ import Language.Haskell.Synthesis.Constraint
   ( Constraint (..)
   , constraintArguments
   )
+import Language.Haskell.Synthesis.Declaration
+  ( DataConstructor (..)
+  , Declaration (..)
+  , TypeParameter (..)
+  , ValueSignature (..)
+  , declarationTermSchemes
+  )
+import Language.Haskell.Synthesis.Environment
+  ( dataConstructorMap
+  , environmentDeclarations
+  , typeDeclarationMap
+  , valueSignatureMap
+  )
 import Language.Haskell.Synthesis.Fingerprint (Fingerprint)
 import Language.Haskell.Synthesis.Internal.Alpha
   ( AlphaVariable (..)
@@ -91,6 +119,7 @@ import Language.Haskell.Synthesis.Internal.Fingerprint
   )
 import Language.Haskell.Synthesis.Inventory
   ( Inventory
+  , inventoryEnvironment
   , inventoryKindAssumptions
   )
 import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
@@ -101,8 +130,8 @@ import Language.Haskell.Synthesis.KindInference
 import Language.Haskell.Synthesis.Name
   ( Boxity (..)
   , Name
-  , SpecialName (ListConstructor)
-  , nameSpecial
+  , consName
+  , listName
   )
 import Language.Haskell.Synthesis.Type
   ( Type (..)
@@ -333,6 +362,210 @@ data LengthTypeBoundError
 
 instance NFData LengthTypeBoundError
 
+-- | Which exact unary list-like family supplies the finite spine measured by
+-- this dialect.
+--
+-- The built-in model is the structural Haskell @[]@/@(:)@ pair.  A declared
+-- model names one checked datatype and its zero and successor constructors;
+-- 'sealLengthContext' derives and validates the complete two-constructor
+-- schema from the same opaque source inventory retained by the context.
+data LengthSpineModelSource
+  = BuiltinListSpine
+  | DeclaredListSpine Name Name Name
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSpineModelSource
+
+-- | Why a checked spine schema may be treated structurally.
+data LengthSpineModelTrust
+  = BuiltinStructuralListSpine
+  | DerivedFromListLikeDataDeclaration
+  deriving (Bounded, Enum, Eq, Ord, Show, Generic)
+
+instance NFData LengthSpineModelTrust
+
+-- | A declared spine is deliberately narrow: one proper-type parameter,
+-- exactly a nullary zero constructor, and one binary successor constructor
+-- whose fields are that opaque parameter and the recursive family occurrence
+-- in either order.
+data LengthSpineModelError variable
+  = LengthSpineTypeDeclarationMissing Name
+  | LengthSpineTypeIsNotData Name
+  | LengthSpineParameterArityMismatch Name Int
+  | LengthSpineConstructorArityMismatch Name Int
+  | LengthSpineConstructorsMustDiffer Name
+  | LengthSpineZeroConstructorMissing Name
+  | LengthSpineStepConstructorMissing Name
+  | LengthSpineZeroFieldArityMismatch Name Int
+  | LengthSpineStepFieldArityMismatch Name Int
+  | LengthSpineFieldBoundError Name Int LengthTypeBoundError
+  | LengthSpineFieldTypeError Name Int (TypeError variable)
+  | LengthSpineStepFieldsDoNotMatch
+      Name (Type variable) (Type variable)
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData variable => NFData (LengthSpineModelError variable)
+
+-- | Opaque, exact structural schema for one finite unary spine family.
+data CheckedLengthSpineModel variable = CheckedLengthSpineModel
+  !Name
+  !Name
+  !Name
+  !Int
+  !LengthSpineModelTrust
+  !FingerprintField
+
+type role CheckedLengthSpineModel nominal
+
+instance NFData (CheckedLengthSpineModel variable) where
+  rnf (CheckedLengthSpineModel typeName zero step recursive trust field) =
+    rnf typeName `seq`
+    rnf zero `seq`
+    rnf step `seq`
+    rnf recursive `seq`
+    rnf trust `seq`
+    rnfFingerprintField field
+
+-- | Exact unary type constructor recognized as the modeled spine.
+checkedLengthSpineTypeName :: CheckedLengthSpineModel variable -> Name
+checkedLengthSpineTypeName (CheckedLengthSpineModel name _ _ _ _ _) = name
+
+-- | Exact nullary constructor for the zero-length spine.
+checkedLengthSpineZeroConstructor
+  :: CheckedLengthSpineModel variable -> Name
+checkedLengthSpineZeroConstructor
+    (CheckedLengthSpineModel _ name _ _ _ _) = name
+
+-- | Exact binary constructor for one payload and a recursive tail.
+checkedLengthSpineStepConstructor
+  :: CheckedLengthSpineModel variable -> Name
+checkedLengthSpineStepConstructor
+    (CheckedLengthSpineModel _ _ name _ _ _) = name
+
+-- | Zero-based field containing the recursive tail in the step constructor.
+checkedLengthSpineRecursiveField :: CheckedLengthSpineModel variable -> Int
+checkedLengthSpineRecursiveField
+    (CheckedLengthSpineModel _ _ _ field _ _) = field
+
+-- | Recover the structural authority established while sealing the model.
+checkedLengthSpineModelTrust
+  :: CheckedLengthSpineModel variable -> LengthSpineModelTrust
+checkedLengthSpineModelTrust
+    (CheckedLengthSpineModel _ _ _ _ trust _) = trust
+
+-- | One source inventory retained together with the exact finite-spine model
+-- derived from it.  Keeping this association opaque prevents later contract
+-- and provider sealing from accidentally consulting a different inventory.
+data CheckedLengthContext variable annotation = CheckedLengthContext
+  !(Inventory variable annotation)
+  !(CheckedLengthSpineModel variable)
+
+type role CheckedLengthContext nominal nominal
+
+instance (NFData variable, NFData annotation) =>
+    NFData (CheckedLengthContext variable annotation) where
+  rnf (CheckedLengthContext inventory model) =
+    rnf inventory `seq` rnf model
+
+-- | Recover the exact source inventory retained by a checked context.
+lengthContextInventory
+  :: CheckedLengthContext variable annotation
+  -> Inventory variable annotation
+lengthContextInventory (CheckedLengthContext inventory _) = inventory
+
+-- | Recover the spine model derived or selected for a checked context.
+lengthContextSpineModel
+  :: CheckedLengthContext variable annotation
+  -> CheckedLengthSpineModel variable
+lengthContextSpineModel (CheckedLengthContext _ model) = model
+
+sealLengthContext
+  :: Ord variable
+  => LengthLimits
+  -> Inventory variable annotation
+  -> LengthSpineModelSource
+  -> Either
+      (LengthSpineModelError variable)
+      (CheckedLengthContext variable annotation)
+sealLengthContext _ inventory BuiltinListSpine = Right
+  $ CheckedLengthContext inventory builtinListSpineModel
+sealLengthContext limits inventory
+    (DeclaredListSpine typeName zeroName stepName) = do
+  declaration <- case Map.lookup typeName
+      $ typeDeclarationMap $ inventoryEnvironment inventory of
+    Nothing -> Left $ LengthSpineTypeDeclarationMissing typeName
+    Just value -> Right value
+  (parameters, constructors) <- case declaration of
+    DataTypeDeclaration _ _ declaredParameters declaredConstructors ->
+      Right (declaredParameters, declaredConstructors)
+    _ -> Left $ LengthSpineTypeIsNotData typeName
+  let parameterCount = observedListLength 1 parameters
+  if parameterCount == 1
+    then pure ()
+    else Left $ LengthSpineParameterArityMismatch typeName parameterCount
+  let constructorCount = observedListLength 2 constructors
+  if constructorCount == 2
+    then pure ()
+    else Left $ LengthSpineConstructorArityMismatch typeName constructorCount
+  if zeroName == stepName
+    then Left $ LengthSpineConstructorsMustDiffer zeroName
+    else pure ()
+  zeroConstructor <- case List.find ((== zeroName) . constructorName) constructors of
+    Nothing -> Left $ LengthSpineZeroConstructorMissing zeroName
+    Just constructor -> Right constructor
+  stepConstructor <- case List.find ((== stepName) . constructorName) constructors of
+    Nothing -> Left $ LengthSpineStepConstructorMissing stepName
+    Just constructor -> Right constructor
+  let zeroFields = constructorFields zeroConstructor
+      zeroFieldCount = observedListLength 0 zeroFields
+  if zeroFieldCount == 0
+    then pure ()
+    else Left $ LengthSpineZeroFieldArityMismatch zeroName zeroFieldCount
+  let stepFields = constructorFields stepConstructor
+      stepFieldCount = observedListLength 2 stepFields
+  if stepFieldCount == 2
+    then pure ()
+    else Left $ LengthSpineStepFieldArityMismatch stepName stepFieldCount
+  parameter <- case parameters of
+    [TypeParameter variable _] -> Right variable
+    _ -> Left $ LengthSpineParameterArityMismatch typeName parameterCount
+  normalizedFields <- mapM normalizeField $ zip [0 ..] stepFields
+  let payload = TypeVariable parameter
+      recursive = TypeApplication (TypeConstructor typeName) payload
+  recursiveField <- case normalizedFields of
+    [firstField, secondField]
+      | firstField == payload && secondField == recursive -> Right 1
+      | firstField == recursive && secondField == payload -> Right 0
+      | otherwise -> Left $ LengthSpineStepFieldsDoNotMatch
+          stepName firstField secondField
+    _ -> Left $ LengthSpineStepFieldArityMismatch stepName stepFieldCount
+  let model = CheckedLengthSpineModel
+        typeName zeroName stepName recursiveField
+        DerivedFromListLikeDataDeclaration
+        $ tagged "declared-list-spine-model"
+            [ FingerprintBytes $ ascii "declared-unary-list-schema/v1"
+            , FingerprintName typeName
+            , FingerprintName zeroName
+            , FingerprintName stepName
+            , FingerprintNatural $ fromIntegral recursiveField
+            ]
+  pure $ CheckedLengthContext inventory model
+ where
+  normalizeField (index, field) = do
+    _ <- first (LengthSpineFieldBoundError stepName index)
+      $ observeTypeWithin limits 0 field
+    first (LengthSpineFieldTypeError stepName index) $ normalizeType field
+
+builtinListSpineModel :: CheckedLengthSpineModel variable
+builtinListSpineModel = CheckedLengthSpineModel
+  listName listName consName 1 BuiltinStructuralListSpine
+  $ tagged "builtin-list-spine-model"
+      [ FingerprintBytes $ ascii "haskell-structural-list/v1"
+      , FingerprintName listName
+      , FingerprintName consName
+      , FingerprintNatural 1
+      ]
+
 data LengthSyntaxCollectionSite
   = LengthSumTerms
   | LengthConjunctionClauses
@@ -370,7 +603,12 @@ data LengthContractError variable
 instance NFData variable => NFData (LengthContractError variable)
 
 data LengthProviderSummaryError variable
-  = LengthProviderSchemeBoundError LengthTypeBoundError
+  = LengthProviderNotInSourceInventory Name
+  | LengthProviderSourceSchemeBoundError LengthTypeBoundError
+  | LengthProviderSourceSchemeTypeError (TypeError variable)
+  | LengthProviderSourceSchemeMismatch
+      (Type variable) (Type variable)
+  | LengthProviderSchemeBoundError LengthTypeBoundError
   | LengthProviderSchemeTypeError (TypeError variable)
   | LengthProviderSchemeKindError (KindInferenceError variable)
   | LengthProviderConstrainedScheme
@@ -395,9 +633,10 @@ data LengthProviderInventoryError variable
 instance NFData variable => NFData (LengthProviderInventoryError variable)
 
 -- | A bounded, normalized contract whose target has kind @Type@ in the exact
--- opaque source inventory supplied to 'sealLengthContract'.  The value does
--- not retain that inventory; the later behavioral problem boundary must bind
--- its exact inventory and target identities before replay.
+-- opaque source inventory supplied directly or retained by its checked
+-- context. The value carries the exact spine model in its fingerprint but
+-- does not retain the inventory; the later behavioral problem boundary must
+-- bind its exact context and target identities before replay.
 data CheckedLengthContract variable = CheckedLengthContract
   !(Type variable)
   !Int
@@ -506,9 +745,7 @@ lengthProviderInventoryFingerprint
 lengthProviderInventoryFingerprint
     (CheckedLengthProviderInventory _ fingerprint) = fingerprint
 
--- | Seal a list-spine contract relative to one opaque, kind-checked source
--- inventory.  The productive structural bound is checked before ordinary
--- type normalization and kind inference.
+-- | Compatibility entry point for Haskell's structural @[]@ spine.
 sealLengthContract
   :: Ord variable
   => LengthLimits
@@ -516,7 +753,21 @@ sealLengthContract
   -> Type variable
   -> LengthContractSource
   -> Either (LengthContractError variable) (CheckedLengthContract variable)
-sealLengthContract limits inventory rawTarget source = do
+sealLengthContract limits inventory = sealLengthContractInContext limits
+  $ CheckedLengthContext inventory builtinListSpineModel
+
+-- | Seal a contract against the exact inventory and spine model retained by
+-- one checked context.  The productive structural bound is checked before
+-- ordinary type normalization and kind inference.
+sealLengthContractInContext
+  :: Ord variable
+  => LengthLimits
+  -> CheckedLengthContext variable annotation
+  -> Type variable
+  -> LengthContractSource
+  -> Either (LengthContractError variable) (CheckedLengthContract variable)
+sealLengthContractInContext limits (CheckedLengthContext inventory model)
+    rawTarget source = do
   _ <- first LengthContractTargetBoundError
     $ observeTypeWithin limits 0 rawTarget
   target <- first LengthContractTargetTypeError $ normalizeType rawTarget
@@ -535,7 +786,7 @@ sealLengthContract limits inventory rawTarget source = do
       maximumInputs observedInputs
     else pure ()
   mapM_ requireInputList $ zip [0 ..] inputs
-  if isStructuralList result
+  if isModeledSpine model result
     then pure ()
     else Left $ LengthContractResultIsNotList result
   let inputCount = length inputs
@@ -560,12 +811,13 @@ sealLengthContract limits inventory rawTarget source = do
         afterPrecondition
         $ lengthContractPostcondition source
   fingerprint <- first contractFingerprintError
-    $ buildLengthContractFingerprint limits inputCount precondition postcondition
+    $ buildLengthContractFingerprint
+        limits model inputCount precondition postcondition
   pure $ CheckedLengthContract
     target inputCount precondition postcondition fingerprint
  where
   requireInputList (index, input)
-    | isStructuralList input = Right ()
+    | isModeledSpine model input = Right ()
     | otherwise = Left $ LengthContractInputIsNotList index input
 
   contractFingerprintError FingerprintLimitExceeded
@@ -573,9 +825,7 @@ sealLengthContract limits inventory rawTarget source = do
       , fingerprintObservedBytesAtLeast = observedBytes
       } = LengthContractFingerprintLimitExceeded maximumBytes observedBytes
 
--- | Seal assumed provider summaries relative to one opaque, kind-checked
--- source inventory.  Source order fixes diagnostics; successful identity and
--- projections use exact structural provider-name order.
+-- | Compatibility entry point for Haskell's structural @[]@ spine.
 sealLengthProviderInventory
   :: Ord variable
   => LengthLimits
@@ -584,7 +834,23 @@ sealLengthProviderInventory
   -> Either
       (LengthProviderInventoryError variable)
       (CheckedLengthProviderInventory variable)
-sealLengthProviderInventory limits inventory sources = do
+sealLengthProviderInventory limits inventory =
+  sealLengthProviderInventoryInContext limits
+    $ CheckedLengthContext inventory builtinListSpineModel
+
+-- | Seal assumed provider summaries against one retained source inventory and
+-- spine model. Source order fixes diagnostics; successful identity and
+-- projections use exact structural provider-name order.
+sealLengthProviderInventoryInContext
+  :: Ord variable
+  => LengthLimits
+  -> CheckedLengthContext variable annotation
+  -> [LengthProviderSummarySource variable]
+  -> Either
+      (LengthProviderInventoryError variable)
+      (CheckedLengthProviderInventory variable)
+sealLengthProviderInventoryInContext limits
+    (CheckedLengthContext inventory model) sources = do
   let maximumSummaries = lengthProviderSummaryLimit limits
       observedSummaries = observedListLength maximumSummaries sources
   if observedSummaries > maximumSummaries
@@ -595,7 +861,7 @@ sealLengthProviderInventory limits inventory sources = do
     (Map.empty, 0, emptySyntaxUsage)
     $ zip [0 ..] sources
   fingerprint <- first inventoryFingerprintError
-    $ buildLengthProviderInventoryFingerprint limits summaries
+    $ buildLengthProviderInventoryFingerprint limits model summaries
   pure $ CheckedLengthProviderInventory summaries fingerprint
  where
   sealOne (summaries, typeNodes, syntaxUsage) (index, source) = do
@@ -606,7 +872,7 @@ sealLengthProviderInventory limits inventory sources = do
         (checked, afterTypeNodes, afterSyntaxUsage) <- first
           (LengthProviderSummaryRejected index name)
           $ sealLengthProviderSummary
-              limits inventory typeNodes syntaxUsage source
+              limits inventory model typeNodes syntaxUsage source
         Right
           ( Map.insert name checked summaries
           , afterTypeNodes
@@ -626,13 +892,20 @@ sealLengthProviderSummary
   :: Ord variable
   => LengthLimits
   -> Inventory variable annotation
+  -> CheckedLengthSpineModel variable
   -> Int
   -> SyntaxUsage
   -> LengthProviderSummarySource variable
   -> Either
       (LengthProviderSummaryError variable)
       (CheckedLengthProviderSummary variable, Int, SyntaxUsage)
-sealLengthProviderSummary limits inventory typeNodes syntaxUsage source = do
+sealLengthProviderSummary limits inventory model
+    typeNodes syntaxUsage source = do
+  sourceScheme <- case inventoryTermScheme
+      inventory $ lengthProviderName source of
+    Nothing -> Left $ LengthProviderNotInSourceInventory
+      $ lengthProviderName source
+    Just scheme -> Right scheme
   let roles = lengthProviderArgumentRoles source
       maximumArguments = lengthProviderArgumentLimit limits
       observedRoles = observedListLength maximumArguments roles
@@ -640,10 +913,18 @@ sealLengthProviderSummary limits inventory typeNodes syntaxUsage source = do
     then Left $ LengthProviderArgumentLimitExceeded
       maximumArguments observedRoles
     else pure ()
-  afterTypeNodes <- first LengthProviderSchemeBoundError
-    $ observeTypeWithin limits typeNodes $ lengthProviderScheme source
-  scheme <- first LengthProviderSchemeTypeError
+  _ <- first LengthProviderSchemeBoundError
+    $ observeTypeWithin limits 0 $ lengthProviderScheme source
+  suppliedScheme <- first LengthProviderSchemeTypeError
     $ normalizeType $ lengthProviderScheme source
+  afterTypeNodes <- first LengthProviderSourceSchemeBoundError
+    $ observeTypeWithin limits typeNodes sourceScheme
+  scheme <- first LengthProviderSourceSchemeTypeError
+    $ normalizeType sourceScheme
+  if alphaNormalizeTypeWith PositionalBinderSlots scheme
+      == alphaNormalizeTypeWith PositionalBinderSlots suppliedScheme
+    then pure ()
+    else Left $ LengthProviderSourceSchemeMismatch scheme suppliedScheme
   first LengthProviderSchemeKindError
     $ checkTypesKinds (inventoryKindAssumptions inventory)
         [(ProperTypeKind, scheme)]
@@ -660,7 +941,7 @@ sealLengthProviderSummary limits inventory typeNodes syntaxUsage source = do
   if roleCount == argumentCount
     then pure ()
     else Left $ LengthProviderRoleArityMismatch argumentCount roleCount
-  if isStructuralList result
+  if isModeledSpine model result
     then pure ()
     else Left $ LengthProviderResultIsNotList result
   mapM_ requireSpineList $ zip3 [0 ..] roles arguments
@@ -684,14 +965,43 @@ sealLengthProviderSummary limits inventory typeNodes syntaxUsage source = do
   requireSpineList (index, role, argument) = case role of
     LengthUnobservedArgument -> Right ()
     LengthSpineArgument
-      | isStructuralList argument -> Right ()
+      | isModeledSpine model argument -> Right ()
       | otherwise -> Left
           $ LengthProviderSpineArgumentIsNotList index argument
 
-isStructuralList :: Type variable -> Bool
-isStructuralList source = case source of
+-- | Resolve only the requested term scheme. The environment's already sealed
+-- indexes reject a missing name without scanning declarations; a present name
+-- then walks source declarations only until its unique owner is reached.
+-- Crucially, this does not close or normalize unrelated schemes merely to
+-- validate one provider assumption.
+inventoryTermScheme
+  :: Ord variable
+  => Inventory variable annotation
+  -> Name
+  -> Maybe (Type variable)
+inventoryTermScheme inventory name
+  | not present = Nothing
+  | otherwise = findScheme declarations
+ where
+  environment = inventoryEnvironment inventory
+  declarations = environmentDeclarations environment
+  present = Map.member name (valueSignatureMap environment)
+    || Map.member name (dataConstructorMap environment)
+
+  findScheme [] = Nothing
+  findScheme (declaration : remaining) =
+    case List.find ((== name) . valueName)
+        $ declarationTermSchemes declaration of
+      Just signature -> Just $ valueType signature
+      Nothing -> findScheme remaining
+
+isModeledSpine
+  :: CheckedLengthSpineModel variable
+  -> Type variable
+  -> Bool
+isModeledSpine model source = case source of
   TypeApplication (TypeConstructor name) _ ->
-    nameSpecial name == Just ListConstructor
+    name == checkedLengthSpineTypeName model
   _ -> False
 
 observeTypeWithin
@@ -1070,16 +1380,17 @@ normalizeAll limits source = do
 
 buildLengthContractFingerprint
   :: LengthLimits
+  -> CheckedLengthSpineModel variable
   -> Int
   -> LengthFormula LengthContractVariable
   -> LengthFormula LengthContractVariable
   -> Either
       FingerprintLimitError
       (Fingerprint LengthContractFingerprintSubject)
-buildLengthContractFingerprint limits inputCount precondition postcondition =
+buildLengthContractFingerprint limits model inputCount precondition postcondition =
   buildFingerprintWithin (fromIntegral $ lengthFingerprintByteLimit limits)
     FingerprintBuilder
-      { fingerprintBuilderVersion = 1
+      { fingerprintBuilderVersion = 2
       , fingerprintBuilderRole = ascii
           "finite-list-spine-length/contract"
       , fingerprintBuilderFields =
@@ -1093,6 +1404,7 @@ buildLengthContractFingerprint limits inputCount precondition postcondition =
               ]
           , tagged "normalizer"
               [FingerprintBytes $ ascii "length-normalizer/v1"]
+          , tagged "spine-model" [checkedLengthSpineModelField model]
           , tagged "ordered-spine-inputs"
               [ FingerprintNatural $ fromIntegral inputCount
               , FingerprintSequence $ replicate inputCount
@@ -1107,14 +1419,15 @@ buildLengthContractFingerprint limits inputCount precondition postcondition =
 
 buildLengthProviderInventoryFingerprint
   :: LengthLimits
+  -> CheckedLengthSpineModel variable
   -> Map Name (CheckedLengthProviderSummary variable)
   -> Either
       FingerprintLimitError
       (Fingerprint LengthProviderInventoryFingerprintSubject)
-buildLengthProviderInventoryFingerprint limits summaries =
+buildLengthProviderInventoryFingerprint limits model summaries =
   buildFingerprintWithin (fromIntegral $ lengthFingerprintByteLimit limits)
     FingerprintBuilder
-      { fingerprintBuilderVersion = 1
+      { fingerprintBuilderVersion = 2
       , fingerprintBuilderRole = ascii
           "finite-list-spine-length/provider-inventory"
       , fingerprintBuilderFields =
@@ -1125,11 +1438,18 @@ buildLengthProviderInventoryFingerprint limits summaries =
               , FingerprintBytes $ ascii "unbounded-natural/v1"
               , FingerprintBytes $ ascii "length-normalizer/v1"
               ]
+          , tagged "spine-model" [checkedLengthSpineModelField model]
           , tagged "summaries"
               [FingerprintSequence $ map providerSummaryField
                 $ Map.elems summaries]
           ]
       }
+
+checkedLengthSpineModelField
+  :: CheckedLengthSpineModel variable
+  -> FingerprintField
+checkedLengthSpineModelField
+    (CheckedLengthSpineModel _ _ _ _ _ field) = field
 
 providerSummaryField
   :: CheckedLengthProviderSummary variable

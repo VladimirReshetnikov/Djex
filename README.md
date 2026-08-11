@@ -147,41 +147,56 @@ preceded it.
 behavioral-contract dialect in the engine-neutral foundation. It describes
 total finite list-spine lengths over unbounded natural numbers with a small,
 normalized expression and formula language. Construction is resource-bounded
-before normalization or fingerprinting. Both sealing operations require the
-exact opaque `Inventory` that supplies proper-kind authority, and checked
-contracts and provider inventories are opaque values available from the
-curated `Language.Haskell.Djex` facade.
+before normalization or fingerprinting. A `CheckedLengthContext` retains the
+exact opaque `Inventory` that supplies declaration and proper-kind authority,
+together with its checked spine model. The model can be the versioned Haskell
+`[]`/`(:)` structure or an exactly named unary datatype with one nullary and
+one binary payload/recursive constructor. Contracts and provider inventories
+sealed through that context remain opaque values available from the curated
+`Language.Haskell.Djex` facade.
 
-Provider summaries are an explicit trust boundary. Each summary is an assumed
-law, uniform over the instances of its retained closed, context-free scheme;
-it is search guidance, not behavioral evidence. A spine role says that the law
-may reference that argument's list length; it does not require the normalized
-transfer to mention it. An unobserved role does not assert purity, totality,
-strictness, absence of effects or type reflection, or even that the provider
-will not evaluate the argument.
+Provider summaries are an explicit trust boundary. A provider name must resolve
+in the retained source inventory, and the caller's claimed scheme must be
+alpha-equivalent to the closed scheme derived from that exact declaration. The
+checked value stores the source-derived scheme, never the caller's copy. Each
+summary is still only an assumed law, uniform over the instances of its closed,
+context-free scheme; it is search guidance, not behavioral evidence. A spine
+role says that the law may reference that argument's list length; it does not
+require the normalized transfer to mention it. An unobserved role does not
+assert purity, totality, strictness, absence of effects or type reflection, or
+even that the provider will not evaluate the argument.
 
-The identities deliberately remain split. A contract fingerprint identifies
-the normalized length relation and its ordered list inputs, while an inventory
-fingerprint identifies the exact normalized provider assumptions. Opaque list
-element types and caller-selected resource caps are not part of the contract
-fingerprint. A future encoding identity will bind that contract fingerprint,
-the interpreter and lowering policy, arithmetic model, domain, and handling of
-unknown results. A separate candidate identity will bind the exact typed
-candidate graph, and a behavioral problem identity will combine the exact
-domain, source inventory, semantic-summary inventory, encoding, and candidate
-identities. In particular, the current provider-inventory fingerprint records
-the assumed laws but does not claim to identify the source declarations or
-implementations whose kind authority admitted their schemes.
+The identities deliberately remain split. Contract and provider-inventory
+fingerprints include the exact checked spine model. A contract fingerprint also
+identifies the normalized length relation and its ordered spine inputs, while
+an inventory fingerprint identifies the exact normalized provider assumptions.
+Opaque element types and caller-selected resource caps are not part of the
+contract fingerprint. A future encoding identity will bind that contract
+fingerprint, interpreter and lowering policy, arithmetic model, domain, and
+handling of unknown results. A separate candidate identity will bind the exact
+typed candidate graph, and a behavioral problem identity will combine the
+exact domain, source context, semantic-summary inventory, encoding, and
+candidate identities. The provider-inventory fingerprint does not by itself
+claim to identify provider implementations or the complete source inventory;
+that authority remains in the retained context. Consequently, a future
+behavioral-problem constructor must reseal the contract and provider
+projections through that exact context in the same atomic construction; it
+must not associate independently retained checked values by fingerprint alone.
 
-Contract arguments and results must expose an outer structural list; their
-element types remain opaque and may themselves be impredicative. A direct
-rank-N contract argument is rejected. Provider schemes are closed and
-leading-context-free: spine-observed arguments and the result must be outer
-lists, while unobserved arguments may be non-list or rank-N values. This keeps
-the contract vocabulary independent of either synthesis engine. The planned
-interpreter and solver lowering will remain solver-neutral; a future Z3
-adapter can rank or challenge candidates, but raw solver output is not trusted
-evidence without independent replay against the exact associated identities.
+Contract arguments and results must expose the context's outer modeled spine;
+their element types remain opaque and may themselves be impredicative. A
+direct rank-N contract argument is rejected. Provider schemes are closed and
+leading-context-free: spine-observed arguments and the result must use that
+same modeled spine, while unobserved arguments may be non-spine or rank-N
+values. `Language.Haskell.Synthesis.Semantic.Length.Evaluate` supplies bounded,
+deterministic evaluation of one concrete assignment or assumed provider call,
+including exact natural-number monus and short-circuiting conditionals. Its
+three-way contract result distinguishes a failed precondition, a satisfied
+postcondition, and a violated postcondition. This is solver-independent replay
+for one assignment, not universal behavioral evidence or permission to prune
+search. A future Z3 adapter can rank or challenge candidates, but raw solver
+output is not trusted evidence without independent replay against the exact
+associated identities.
 
 ## Building
 

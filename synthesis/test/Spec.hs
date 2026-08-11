@@ -2518,6 +2518,56 @@ declarationTests = testGroup "declarations"
                 [Constraint className [a], Constraint constraintName [b]]
             $ SharedType.FunctionType a b
         ]
+  , testCase "close implicit value variables in first-occurrence order" $ do
+      let valueName = right $ mkIdentifier "composeResult"
+          a = SharedType.TypeVariable "a"
+          b = SharedType.TypeVariable "b"
+          body = SharedType.FunctionType b
+            $ SharedType.FunctionType a b
+          declaration = Declaration.ValueDeclaration
+            $ Declaration.ValueSignature () valueName body
+      Declaration.declarationTermSchemes declaration @?=
+        [ Declaration.ValueSignature () valueName
+            $ SharedType.ForallType ["b", "a"] [] body
+        ]
+  , testCase "close constructor owners in declaration parameter order" $ do
+      let pairName = right $ mkIdentifier "Pair"
+          pairConstructor = right $ mkIdentifier "MakePair"
+          rightVariable = SharedType.TypeVariable "right"
+          leftVariable = SharedType.TypeVariable "left"
+          parameters =
+            [ Declaration.TypeParameter "right" Nothing
+            , Declaration.TypeParameter "left" Nothing
+            ]
+          result = SharedType.TypeApplication
+            (SharedType.TypeApplication
+              (SharedType.TypeConstructor pairName) rightVariable)
+            leftVariable
+          declaration = Declaration.DataTypeDeclaration () pairName parameters
+            [Declaration.DataConstructor () pairConstructor
+              [leftVariable, rightVariable]]
+      Declaration.declarationTermSchemes declaration @?=
+        [ Declaration.ValueSignature () pairConstructor
+            $ SharedType.ForallType ["right", "left"] []
+            $ SharedType.FunctionType leftVariable
+            $ SharedType.FunctionType rightVariable result
+        ]
+  , testCase "keep class-owner evidence outside shadowed method binders" $ do
+      let className = right $ mkIdentifier "Shadowed"
+          methodName = right $ mkIdentifier "shadowedMethod"
+          owner = SharedType.TypeVariable "a"
+          methodLocal = SharedType.TypeVariable "a"
+          implicit = SharedType.TypeVariable "b"
+          methodType = SharedType.ForallType ["a"] []
+            $ SharedType.FunctionType methodLocal implicit
+          declaration = Declaration.ClassDeclaration () className
+            [Declaration.TypeParameter "a" Nothing] []
+            [Declaration.ValueSignature () methodName methodType]
+      Declaration.declarationTermSchemes declaration @?=
+        [ Declaration.ValueSignature () methodName
+            $ SharedType.ForallType ["a"] [Constraint className [owner]]
+            $ SharedType.ForallType ["b"] [] methodType
+        ]
   , testCase "validate kinded data and class declarations" $ do
       let maybeName = right $ mkIdentifier "Maybe"
           justName = right $ mkIdentifier "Just"

@@ -85,6 +85,7 @@ import Language.Haskell.Synthesis.KindInference
 import Language.Haskell.Synthesis.Name (ModuleName, Name)
 import Language.Haskell.Synthesis.Query
 import Language.Haskell.Synthesis.Semantic.Length
+import Language.Haskell.Synthesis.Semantic.Length.Evaluate
 import Language.Haskell.Synthesis.Semantic.Problem
 import Language.Haskell.Synthesis.Search (SearchBatch)
 import Language.Haskell.Synthesis.Type (Type)
@@ -115,6 +116,8 @@ newtype ArtifactKindProbe = ArtifactKindProbe Int
 newtype OtherArtifactKindProbe = OtherArtifactKindProbe Int
 newtype LengthVariableProbe = LengthVariableProbe Int
 newtype OtherLengthVariableProbe = OtherLengthVariableProbe Int
+newtype LengthAnnotationProbe = LengthAnnotationProbe Int
+newtype OtherLengthAnnotationProbe = OtherLengthAnnotationProbe Int
 
 forbiddenConstructionAttempts :: [(String, ())]
 forbiddenConstructionAttempts =
@@ -166,13 +169,28 @@ forbiddenConstructionAttempts =
     )
   , noGeneric @(CheckedLengthContract LengthVariableProbe)
       "CheckedLengthContract"
+  , noGeneric
+      @(CheckedLengthContext LengthVariableProbe LengthAnnotationProbe)
+      "CheckedLengthContext"
+  , noGeneric @(CheckedLengthSpineModel LengthVariableProbe)
+      "CheckedLengthSpineModel"
   , noGeneric @LengthLimits "LengthLimits"
+  , noGeneric @LengthEvaluationLimits "LengthEvaluationLimits"
   , noGeneric @(CheckedLengthProviderSummary LengthVariableProbe)
       "CheckedLengthProviderSummary"
   , noGeneric @(CheckedLengthProviderInventory LengthVariableProbe)
       "CheckedLengthProviderInventory"
   , ( "CheckedLengthContract variable unexpectedly permits Coercible"
     , forbiddenCheckedLengthContractCoercion `seq` ()
+    )
+  , ( "CheckedLengthContext variable unexpectedly permits Coercible"
+    , forbiddenCheckedLengthContextVariableCoercion `seq` ()
+    )
+  , ( "CheckedLengthContext annotation unexpectedly permits Coercible"
+    , forbiddenCheckedLengthContextAnnotationCoercion `seq` ()
+    )
+  , ( "CheckedLengthSpineModel variable unexpectedly permits Coercible"
+    , forbiddenCheckedLengthSpineModelCoercion `seq` ()
     )
   , ( "CheckedLengthProviderSummary variable unexpectedly permits Coercible"
     , forbiddenCheckedLengthProviderSummaryCoercion `seq` ()
@@ -351,6 +369,41 @@ forbiddenConstructionAttempts =
       @(Type LengthVariableProbe)
       "CheckedLengthContract.checkedLengthContractTarget"
   , noField
+      @"lengthContextInventory"
+      @(CheckedLengthContext LengthVariableProbe LengthAnnotationProbe)
+      @(Inventory LengthVariableProbe LengthAnnotationProbe)
+      "CheckedLengthContext.lengthContextInventory"
+  , noField
+      @"lengthContextSpineModel"
+      @(CheckedLengthContext LengthVariableProbe LengthAnnotationProbe)
+      @(CheckedLengthSpineModel LengthVariableProbe)
+      "CheckedLengthContext.lengthContextSpineModel"
+  , noField
+      @"checkedLengthSpineTypeName"
+      @(CheckedLengthSpineModel LengthVariableProbe)
+      @Name
+      "CheckedLengthSpineModel.checkedLengthSpineTypeName"
+  , noField
+      @"checkedLengthSpineZeroConstructor"
+      @(CheckedLengthSpineModel LengthVariableProbe)
+      @Name
+      "CheckedLengthSpineModel.checkedLengthSpineZeroConstructor"
+  , noField
+      @"checkedLengthSpineStepConstructor"
+      @(CheckedLengthSpineModel LengthVariableProbe)
+      @Name
+      "CheckedLengthSpineModel.checkedLengthSpineStepConstructor"
+  , noField
+      @"checkedLengthSpineRecursiveField"
+      @(CheckedLengthSpineModel LengthVariableProbe)
+      @Int
+      "CheckedLengthSpineModel.checkedLengthSpineRecursiveField"
+  , noField
+      @"checkedLengthSpineModelTrust"
+      @(CheckedLengthSpineModel LengthVariableProbe)
+      @LengthSpineModelTrust
+      "CheckedLengthSpineModel.checkedLengthSpineModelTrust"
+  , noField
       @"lengthTypeNodeLimit"
       @LengthLimits
       @Int
@@ -395,6 +448,16 @@ forbiddenConstructionAttempts =
       @LengthLimits
       @Int
       "LengthLimits.lengthFingerprintByteLimit"
+  , noField
+      @"lengthAssignmentValueBitLimit"
+      @LengthEvaluationLimits
+      @Int
+      "LengthEvaluationLimits.lengthAssignmentValueBitLimit"
+  , noField
+      @"lengthIntermediateValueBitLimit"
+      @LengthEvaluationLimits
+      @Int
+      "LengthEvaluationLimits.lengthIntermediateValueBitLimit"
   , noField
       @"checkedLengthContractInputCount"
       @(CheckedLengthContract LengthVariableProbe)
@@ -545,6 +608,21 @@ forbiddenCheckedLengthContractCoercion
   :: CheckedLengthContract LengthVariableProbe
   -> CheckedLengthContract OtherLengthVariableProbe
 forbiddenCheckedLengthContractCoercion = coerce
+
+forbiddenCheckedLengthContextVariableCoercion
+  :: CheckedLengthContext LengthVariableProbe LengthAnnotationProbe
+  -> CheckedLengthContext OtherLengthVariableProbe LengthAnnotationProbe
+forbiddenCheckedLengthContextVariableCoercion = coerce
+
+forbiddenCheckedLengthContextAnnotationCoercion
+  :: CheckedLengthContext LengthVariableProbe LengthAnnotationProbe
+  -> CheckedLengthContext LengthVariableProbe OtherLengthAnnotationProbe
+forbiddenCheckedLengthContextAnnotationCoercion = coerce
+
+forbiddenCheckedLengthSpineModelCoercion
+  :: CheckedLengthSpineModel LengthVariableProbe
+  -> CheckedLengthSpineModel OtherLengthVariableProbe
+forbiddenCheckedLengthSpineModelCoercion = coerce
 
 forbiddenCheckedLengthProviderSummaryCoercion
   :: CheckedLengthProviderSummary LengthVariableProbe

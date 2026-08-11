@@ -19,6 +19,7 @@ module Language.Haskell.Synthesis.Inventory
   , inventoryClassArity
   ) where
 
+import Control.DeepSeq (NFData (rnf))
 import qualified Data.Map.Strict as Map
 import Data.Void (Void)
 import GHC.Generics (Generic)
@@ -35,6 +36,11 @@ data Inventory typeVariable annotation = Inventory
   (Environment typeVariable Void annotation)
   KindAssumptions
   deriving (Eq, Show, Functor)
+
+instance (NFData typeVariable, NFData annotation) =>
+    NFData (Inventory typeVariable annotation) where
+  rnf (Inventory environment assumptions) =
+    rnf environment `seq` rnf assumptions
 
 -- Ordinary projections, rather than record fields, are deliberate. A record
 -- update does not require the hidden constructor to be in scope and would let

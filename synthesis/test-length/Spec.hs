@@ -6,20 +6,32 @@ import System.Timeout (timeout)
 
 import Language.Haskell.Synthesis.Constraint (Constraint (..))
 import Language.Haskell.Synthesis.Declaration
-  ( Declaration (ClassDeclaration) )
+  ( DataConstructor (DataConstructor)
+  , Declaration
+      ( AbstractTypeDeclaration
+      , ClassDeclaration
+      , DataTypeDeclaration
+      , ValueDeclaration
+      )
+  , TypeParameter (TypeParameter)
+  , ValueSignature (ValueSignature)
+  )
 import Language.Haskell.Synthesis.Inventory
   ( Inventory
   , mkInventory
   )
+import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
 import Language.Haskell.Synthesis.KindInference
   ( KindInventoryPolicy (ClosedKindInventory) )
 import Language.Haskell.Synthesis.Name
   ( Boxity (Boxed)
   , Name
+  , consName
   , listName
   , parseName
   )
 import qualified Language.Haskell.Synthesis.Semantic.Length as Length
+import qualified Language.Haskell.Synthesis.Semantic.Length.Evaluate as Evaluate
 import Language.Haskell.Synthesis.Type (Type (..))
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit
@@ -35,8 +47,10 @@ main = defaultMain lengthTests
 lengthTests :: TestTree
 lengthTests = testGroup "finite-list-spine-length/v1"
   [ limitTests
+  , contextTests
   , contractTests
   , providerTests
+  , evaluationTests
   , normalizationTests
   , productiveBoundTests
   , fingerprintTests
@@ -78,6 +92,149 @@ limitTests = testGroup "limits"
         ] @?= replicate 9 0
   ]
 
+contextTests :: TestTree
+contextTests = testGroup "checked semantic contexts"
+  [ testCase "retain the exact inventory and builtin structural-list model" $ do
+      context <- expectRight $ Length.sealLengthContext
+        Length.defaultLengthLimits fixtureInventory Length.BuiltinListSpine
+      Length.lengthContextInventory context @?= fixtureInventory
+      let model = Length.lengthContextSpineModel context
+      Length.checkedLengthSpineTypeName model @?= listName
+      Length.checkedLengthSpineZeroConstructor model @?= listName
+      Length.checkedLengthSpineStepConstructor model @?= consName
+      Length.checkedLengthSpineRecursiveField model @?= 1
+      Length.checkedLengthSpineModelTrust model @?=
+        Length.BuiltinStructuralListSpine
+  , testCase "derive both legal recursive-field orders from declarations" $ do
+      typeName <- expectName "Fixture.Sequence"
+      zeroName <- expectName "Fixture.Empty"
+      stepName <- expectName "Fixture.Link"
+      let source = Length.DeclaredListSpine typeName zeroName stepName
+          payloadFirstInventory = fixtureInventoryFromDeclarations
+            [listLikeDeclaration typeName zeroName stepName False]
+          recursiveFirstInventory = fixtureInventoryFromDeclarations
+            [listLikeDeclaration typeName zeroName stepName True]
+      payloadFirst <- expectRight $ Length.sealLengthContext
+        Length.defaultLengthLimits payloadFirstInventory source
+      recursiveFirst <- expectRight $ Length.sealLengthContext
+        Length.defaultLengthLimits recursiveFirstInventory source
+      let payloadFirstModel = Length.lengthContextSpineModel payloadFirst
+          recursiveFirstModel = Length.lengthContextSpineModel recursiveFirst
+      map Length.checkedLengthSpineTypeName
+          [payloadFirstModel, recursiveFirstModel] @?=
+        [typeName, typeName]
+      map Length.checkedLengthSpineZeroConstructor
+          [payloadFirstModel, recursiveFirstModel] @?=
+        [zeroName, zeroName]
+      map Length.checkedLengthSpineStepConstructor
+          [payloadFirstModel, recursiveFirstModel] @?=
+        [stepName, stepName]
+      map Length.checkedLengthSpineRecursiveField
+          [payloadFirstModel, recursiveFirstModel] @?=
+        [1, 0]
+      map Length.checkedLengthSpineModelTrust
+          [payloadFirstModel, recursiveFirstModel] @?=
+        replicate 2 Length.DerivedFromListLikeDataDeclaration
+  , testCase "reject absent, non-data, ambiguous, and malformed schemas" $ do
+      typeName <- expectName "Fixture.Sequence"
+      zeroName <- expectName "Fixture.Empty"
+      stepName <- expectName "Fixture.Link"
+      otherName <- expectName "Fixture.Other"
+      let source = Length.DeclaredListSpine typeName zeroName stepName
+          parameter = TypeParameter "element" Nothing
+          payload = TypeVariable "element"
+          recursive = TypeApplication (TypeConstructor typeName) payload
+          nonDataInventory = fixtureInventoryFromDeclarations
+            [AbstractTypeDeclaration () typeName ProperTypeKind]
+          noParameterInventory = fixtureInventoryFromDeclarations
+            [DataTypeDeclaration () typeName []
+              [DataConstructor () zeroName [], DataConstructor () stepName []]]
+          oneConstructorInventory = fixtureInventoryFromDeclarations
+            [DataTypeDeclaration () typeName [parameter]
+              [DataConstructor () zeroName []]]
+          malformedFieldsInventory = fixtureInventoryFromDeclarations
+            [DataTypeDeclaration () typeName [parameter]
+              [ DataConstructor () zeroName []
+              , DataConstructor () stepName [payload, payload]
+              ]]
+          nonemptyZeroInventory = fixtureInventoryFromDeclarations
+            [DataTypeDeclaration () typeName [parameter]
+              [ DataConstructor () zeroName [payload]
+              , DataConstructor () stepName [payload, recursive]
+              ]]
+          unaryStepInventory = fixtureInventoryFromDeclarations
+            [DataTypeDeclaration () typeName [parameter]
+              [ DataConstructor () zeroName []
+              , DataConstructor () stepName [recursive]
+              ]]
+          validInventory = fixtureInventoryFromDeclarations
+            [DataTypeDeclaration () typeName [parameter]
+              [ DataConstructor () zeroName []
+              , DataConstructor () stepName [payload, recursive]
+              ]]
+      assertLeft (Length.LengthSpineTypeDeclarationMissing typeName)
+        $ Length.sealLengthContext
+            Length.defaultLengthLimits fixtureInventory source
+      assertLeft (Length.LengthSpineTypeIsNotData typeName)
+        $ Length.sealLengthContext
+            Length.defaultLengthLimits nonDataInventory source
+      assertLeft (Length.LengthSpineParameterArityMismatch typeName 0)
+        $ Length.sealLengthContext
+            Length.defaultLengthLimits noParameterInventory source
+      assertLeft (Length.LengthSpineConstructorArityMismatch typeName 1)
+        $ Length.sealLengthContext
+            Length.defaultLengthLimits oneConstructorInventory source
+      assertLeft (Length.LengthSpineConstructorsMustDiffer zeroName)
+        $ Length.sealLengthContext Length.defaultLengthLimits validInventory
+            (Length.DeclaredListSpine typeName zeroName zeroName)
+      assertLeft (Length.LengthSpineZeroConstructorMissing otherName)
+        $ Length.sealLengthContext Length.defaultLengthLimits validInventory
+            (Length.DeclaredListSpine typeName otherName stepName)
+      assertLeft (Length.LengthSpineStepConstructorMissing otherName)
+        $ Length.sealLengthContext Length.defaultLengthLimits validInventory
+            (Length.DeclaredListSpine typeName zeroName otherName)
+      assertLeft (Length.LengthSpineZeroFieldArityMismatch zeroName 1)
+        $ Length.sealLengthContext
+            Length.defaultLengthLimits nonemptyZeroInventory source
+      assertLeft (Length.LengthSpineStepFieldArityMismatch stepName 1)
+        $ Length.sealLengthContext
+            Length.defaultLengthLimits unaryStepInventory source
+      assertLeft
+        (Length.LengthSpineStepFieldsDoNotMatch
+          stepName payload payload)
+        $ Length.sealLengthContext
+            Length.defaultLengthLimits malformedFieldsInventory source
+  , testCase "keep builtin and declared spine families disjoint" $ do
+      typeName <- expectName "Fixture.DisjointSequence"
+      zeroName <- expectName "Fixture.DisjointEmpty"
+      stepName <- expectName "Fixture.DisjointLink"
+      let inventory = fixtureInventoryFromDeclarations
+            [listLikeDeclaration typeName zeroName stepName False]
+          modeled payload = TypeApplication
+            (TypeConstructor typeName) payload
+          builtinTarget = FunctionType
+            (listOf closedPayloadType) (listOf closedPayloadType)
+          declaredTarget = FunctionType
+            (modeled closedPayloadType) (modeled closedPayloadType)
+      builtinContext <- expectRight $ Length.sealLengthContext
+        Length.defaultLengthLimits inventory Length.BuiltinListSpine
+      declaredContext <- expectRight $ Length.sealLengthContext
+        Length.defaultLengthLimits inventory
+        $ Length.DeclaredListSpine typeName zeroName stepName
+      assertLeft
+        (Length.LengthContractInputIsNotList 0
+          $ modeled closedPayloadType)
+        $ Length.sealLengthContractInContext
+            Length.defaultLengthLimits builtinContext
+            declaredTarget identityLengthContract
+      assertLeft
+        (Length.LengthContractInputIsNotList 0
+          $ listOf closedPayloadType)
+        $ Length.sealLengthContractInContext
+            Length.defaultLengthLimits declaredContext
+            builtinTarget identityLengthContract
+  ]
+
 contractTests :: TestTree
 contractTests = testGroup "checked contracts"
   [ testCase "admit opaque impredicative list payloads" $ do
@@ -112,12 +269,12 @@ contractTests = testGroup "checked contracts"
         Right _ -> assertFailure "an ill-kinded list payload was admitted"
   , testCase "reject a proper-kinded leading contract context" $ do
       className <- expectName "Fixture.ContractConstraint"
-      let declaration :: Declaration String () ()
-          declaration = ClassDeclaration () className [] [] []
+      let classDeclaration :: Declaration String () ()
+          classDeclaration = ClassDeclaration () className [] [] []
           target = ForallType [] [Constraint className []]
             $ listOf closedPayloadType
       inventory <- expectRight $ mkInventory
-        ClosedKindInventory [declaration]
+        ClosedKindInventory [classDeclaration]
       assertLeft Length.LengthContractConstrainedTarget
         $ Length.sealLengthContract Length.defaultLengthLimits
             inventory target trivialLengthContract
@@ -293,38 +450,103 @@ providerTests = testGroup "assumed provider inventory"
       map Length.checkedLengthProviderName
           (Length.checkedLengthProviderSummaries inventory) @?=
         sort [unobservedName, spineName]
-  , testCase "require proper-kind authority for unobserved provider arguments" $ do
-      providerName <- expectName "Fixture.illKinded"
-      let source = providerSource providerName
-            (FunctionType
-              (TypeConstructor listName)
-              (listOf closedPayloadType))
-            [Length.LengthUnobservedArgument]
-            (Length.LengthLiteral 0)
-      case sealProviderInventory Length.defaultLengthLimits [source] of
-        Left (Length.LengthProviderSummaryRejected 0 name
-            Length.LengthProviderSchemeKindError{}) ->
-          name @?= providerName
-        Left other -> assertFailure $ "unexpected rejection: " ++ show other
-        Right _ -> assertFailure "an ill-kinded provider scheme was admitted"
-  , testCase "reject open provider schemes" $ do
-      providerName <- expectName "Fixture.open"
-      let openScheme = FunctionType
-            (listOf $ TypeVariable "free")
-            (listOf $ TypeVariable "free")
-          source = providerSource providerName openScheme
-            [Length.LengthSpineArgument]
-            (Length.LengthVariable $ Length.LengthProviderArgument 0)
+  , testCase "resolve names before inspecting poisoned summary fields" $ do
+      providerName <- expectName "Fixture.missing"
+      let cyclicScheme = FunctionType cyclicScheme cyclicScheme
+          cyclicRoles = Length.LengthSpineArgument : cyclicRoles
+          cyclicTransfer = Length.LengthScale 1 cyclicTransfer
+          source = providerSource providerName cyclicScheme
+            cyclicRoles cyclicTransfer
+      observed <- evaluateWithin $ Length.sealLengthProviderInventory
+        Length.defaultLengthLimits fixtureInventory [source]
       assertLeft
         (Length.LengthProviderSummaryRejected 0 providerName
-          $ Length.LengthProviderOpenScheme ["free"])
-        $ sealProviderInventory
-            Length.defaultLengthLimits [source]
+          $ Length.LengthProviderNotInSourceInventory providerName)
+        observed
+  , testCase "reject source-scheme mismatch before semantic shape errors" $ do
+      providerName <- expectName "Fixture.mismatch"
+      let sourceScheme = ForallType ["source"] [] $ FunctionType
+            (listOf $ TypeVariable "source")
+            (listOf $ TypeVariable "source")
+          claimedScheme = ForallType ["claimed"] [] $ FunctionType
+            closedPayloadType (listOf $ TypeVariable "claimed")
+          source = providerSource providerName claimedScheme []
+            (Length.LengthVariable $ Length.LengthProviderArgument 99)
+          inventory = fixtureInventoryFromDeclarations
+            [ValueDeclaration $ ValueSignature () providerName sourceScheme]
+      assertLeft
+        (Length.LengthProviderSummaryRejected 0 providerName
+          $ Length.LengthProviderSourceSchemeMismatch
+              sourceScheme claimedScheme)
+        $ Length.sealLengthProviderInventory
+            Length.defaultLengthLimits inventory [source]
+  , testCase "accept alpha-equivalent claims and retain the source scheme" $ do
+      providerName <- expectName "Fixture.alphaClaim"
+      let sourceScheme = ForallType ["source"] [] $ FunctionType
+            (listOf $ TypeVariable "source")
+            (listOf $ TypeVariable "source")
+          claimedScheme = ForallType ["claimed"] [] $ FunctionType
+            (listOf $ TypeVariable "claimed")
+            (listOf $ TypeVariable "claimed")
+          source = providerSource providerName claimedScheme
+            [Length.LengthSpineArgument]
+            (Length.LengthVariable $ Length.LengthProviderArgument 0)
+          inventory = fixtureInventoryFromDeclarations
+            [ValueDeclaration $ ValueSignature () providerName sourceScheme]
+      checkedInventory <- expectRight $ Length.sealLengthProviderInventory
+        Length.defaultLengthLimits inventory [source]
+      checked <- case Length.lookupCheckedLengthProviderSummary
+          providerName checkedInventory of
+        Nothing -> assertFailure "alpha-equivalent provider disappeared"
+        Just summary -> pure summary
+      Length.checkedLengthProviderScheme checked @?= sourceScheme
+  , testCase "close implicit source variables before exact comparison" $ do
+      providerName <- expectName "Fixture.implicit"
+      let openSourceScheme = FunctionType
+            (listOf $ TypeVariable "free")
+            (listOf $ TypeVariable "free")
+          closedClaim = ForallType ["renamed"] [] $ FunctionType
+            (listOf $ TypeVariable "renamed")
+            (listOf $ TypeVariable "renamed")
+          source = providerSource providerName closedClaim
+            [Length.LengthSpineArgument]
+            (Length.LengthVariable $ Length.LengthProviderArgument 0)
+          inventory = fixtureInventoryFromDeclarations
+            [ValueDeclaration $ ValueSignature () providerName openSourceScheme]
+      checkedInventory <- expectRight $ Length.sealLengthProviderInventory
+        Length.defaultLengthLimits inventory [source]
+      case Length.lookupCheckedLengthProviderSummary
+          providerName checkedInventory of
+        Nothing -> assertFailure "implicitly closed provider disappeared"
+        Just checked -> Length.checkedLengthProviderScheme checked @?=
+          ForallType ["free"] [] openSourceScheme
+  , testCase "bound only the exact provider scheme, not unrelated terms" $ do
+      providerName <- expectName "Fixture.localScheme"
+      unrelatedName <- expectName "Fixture.unrelatedWideScheme"
+      let provider = unaryListProvider providerName
+            Length.LengthSpineArgument
+            (Length.LengthVariable $ Length.LengthProviderArgument 0)
+          unrelatedScheme = ForallType ["wide"] []
+            $ foldr FunctionType (TypeVariable "wide")
+            $ replicate 128 $ TypeVariable "wide"
+          inventory = fixtureInventoryFromDeclarations
+            [ ValueDeclaration
+                $ ValueSignature () unrelatedName unrelatedScheme
+            , ValueDeclaration
+                $ ValueSignature () providerName
+                $ Length.lengthProviderScheme provider
+            ]
+          exactSchemeLimit = limitsWith $ \limits -> limits
+            { Length.lengthLimitSourceTypeNodes = 8 }
+      checked <- expectRight $ Length.sealLengthProviderInventory
+        exactSchemeLimit inventory [provider]
+      map Length.checkedLengthProviderName
+          (Length.checkedLengthProviderSummaries checked) @?= [providerName]
   , testCase "reject a proper-kinded leading provider context" $ do
       className <- expectName "Fixture.ProviderConstraint"
       providerName <- expectName "Fixture.constrained"
-      let declaration :: Declaration String () ()
-          declaration = ClassDeclaration () className [] [] []
+      let classDeclaration :: Declaration String () ()
+          classDeclaration = ClassDeclaration () className [] [] []
           scheme = ForallType [] [Constraint className []]
             $ FunctionType
                 (listOf closedPayloadType)
@@ -333,7 +555,10 @@ providerTests = testGroup "assumed provider inventory"
             [Length.LengthSpineArgument]
             (Length.LengthVariable $ Length.LengthProviderArgument 0)
       inventory <- expectRight $ mkInventory
-        ClosedKindInventory [declaration]
+        ClosedKindInventory
+          [ classDeclaration
+          , ValueDeclaration $ ValueSignature () providerName scheme
+          ]
       assertLeft
         (Length.LengthProviderSummaryRejected 0 providerName
           Length.LengthProviderConstrainedScheme)
@@ -446,6 +671,251 @@ providerTests = testGroup "assumed provider inventory"
         (Length.LengthProviderInventoryFingerprintLimitExceeded 0 1)
         $ sealProviderInventory noFingerprint
             ([] :: [Length.LengthProviderSummarySource String])
+  ]
+
+evaluationTests :: TestTree
+evaluationTests = testGroup "solver-neutral concrete replay"
+  [ testCase "validate evaluation limits in declaration order" $ do
+      Evaluate.mkLengthEvaluationLimits
+          Evaluate.defaultLengthEvaluationLimitSource @?=
+        Right Evaluate.defaultLengthEvaluationLimits
+      Evaluate.lengthAssignmentValueBitLimit
+          Evaluate.defaultLengthEvaluationLimits @?= 4096
+      Evaluate.lengthIntermediateValueBitLimit
+          Evaluate.defaultLengthEvaluationLimits @?= 4096
+      let bothNegative = Evaluate.LengthEvaluationLimitSource
+            { Evaluate.lengthEvaluationLimitSourceAssignmentValueBits = -1
+            , Evaluate.lengthEvaluationLimitSourceIntermediateValueBits = -2
+            }
+          secondNegative = bothNegative
+            { Evaluate.lengthEvaluationLimitSourceAssignmentValueBits = 0 }
+          allZero = secondNegative
+            { Evaluate.lengthEvaluationLimitSourceIntermediateValueBits = 0 }
+      Evaluate.mkLengthEvaluationLimits bothNegative @?= Left
+        (Evaluate.NegativeLengthEvaluationLimit
+          Evaluate.LengthAssignmentValueBits (-1))
+      Evaluate.mkLengthEvaluationLimits secondNegative @?= Left
+        (Evaluate.NegativeLengthEvaluationLimit
+          Evaluate.LengthIntermediateValueBits (-2))
+      limits <- expectRight $ Evaluate.mkLengthEvaluationLimits allZero
+      map ($ limits)
+          [ Evaluate.lengthAssignmentValueBitLimit
+          , Evaluate.lengthIntermediateValueBitLimit
+          ] @?= [0, 0]
+  , testCase "classify the three contract outcomes exactly" $ do
+      let input = Length.LengthVariable $ Length.LengthInput 0
+          result = Length.LengthVariable Length.LengthResult
+          source = contractWith
+            (Length.LengthAtMost input $ Length.LengthLiteral 2)
+            (Length.LengthEqual result
+              $ Length.LengthSum [input, Length.LengthLiteral 1])
+          target = FunctionType
+            (listOf closedPayloadType) (listOf closedPayloadType)
+      contract <- expectRight $ sealContract
+        Length.defaultLengthLimits target source
+      let replay inputs observedResult =
+            Evaluate.evaluateLengthContractAssignment
+              Evaluate.defaultLengthEvaluationLimits contract
+              $ Evaluate.LengthContractAssignment inputs observedResult
+      replay [3] 99 @?= Right Evaluate.LengthPreconditionNotMet
+      replay [1] 2 @?= Right Evaluate.LengthPostconditionSatisfied
+      replay [1] 3 @?= Right Evaluate.LengthPostconditionViolated
+      [ Evaluate.LengthPreconditionNotMet
+        , Evaluate.LengthPostconditionSatisfied
+        , Evaluate.LengthPostconditionViolated
+        ] @?= [minBound .. maxBound]
+  , testCase "reject contract assignment arity before inspecting values" $ do
+      let target = FunctionType
+            (listOf closedPayloadType) (listOf closedPayloadType)
+      contract <- expectRight $ sealContract
+        Length.defaultLengthLimits target identityLengthContract
+      let replay inputs = Evaluate.evaluateLengthContractAssignment
+            Evaluate.defaultLengthEvaluationLimits contract
+            $ Evaluate.LengthContractAssignment inputs 0
+      replay [] @?= Left
+        (Evaluate.LengthContractAssignmentArityMismatch 1 0)
+      replay [0, 2 ^ (5000 :: Int)] @?= Left
+        (Evaluate.LengthContractAssignmentArityMismatch 1 2)
+  , testCase "reject cyclic assignments at the first excess cell" $ do
+      providerName <- expectName "Fixture.cyclicReplay"
+      let target = FunctionType
+            (listOf closedPayloadType) (listOf closedPayloadType)
+          cyclicInputs = 0 : cyclicInputs
+          cyclicArguments =
+            Evaluate.ObservedSpineLength 0 : cyclicArguments
+          provider = unaryListProvider providerName
+            Length.LengthSpineArgument
+            (Length.LengthVariable $ Length.LengthProviderArgument 0)
+      contract <- expectRight $ sealContract
+        Length.defaultLengthLimits target identityLengthContract
+      checkedProvider <- expectCheckedProvider provider
+      contractResult <- evaluateWithin
+        $ Evaluate.evaluateLengthContractAssignment
+            Evaluate.defaultLengthEvaluationLimits contract
+            $ Evaluate.LengthContractAssignment cyclicInputs 0
+      providerResult <- evaluateWithin
+        $ Evaluate.evaluateLengthProviderApplication
+            Evaluate.defaultLengthEvaluationLimits checkedProvider
+            cyclicArguments
+      contractResult @?= Left
+        (Evaluate.LengthContractAssignmentArityMismatch 1 2)
+      providerResult @?= Left
+        (Evaluate.LengthProviderAssignmentArityMismatch 1 2)
+  , testCase "enforce assignment and intermediate bit bounds by site" $ do
+      let target = FunctionType
+            (listOf closedPayloadType) (listOf closedPayloadType)
+          four = 4
+          inputLimits = evaluationLimitsWith 2 8
+      contract <- expectRight $ sealContract
+        Length.defaultLengthLimits target identityLengthContract
+      Evaluate.evaluateLengthContractAssignment inputLimits contract
+          (Evaluate.LengthContractAssignment [four] 0) @?= Left
+        (Evaluate.LengthEvaluationValueBitLimitExceeded
+          (Evaluate.LengthContractInputValue 0) 2 3)
+      Evaluate.evaluateLengthContractAssignment inputLimits contract
+          (Evaluate.LengthContractAssignment [0] four) @?= Left
+        (Evaluate.LengthEvaluationValueBitLimitExceeded
+          Evaluate.LengthContractResultValue 2 3)
+
+      providerName <- expectName "Fixture.bitBounded"
+      let transfer = Length.LengthScale 2
+            $ Length.LengthVariable $ Length.LengthProviderArgument 0
+          provider = unaryListProvider providerName
+            Length.LengthSpineArgument transfer
+      checked <- expectCheckedProvider provider
+      Evaluate.evaluateLengthProviderApplication inputLimits checked
+          [Evaluate.ObservedSpineLength four] @?= Left
+        (Evaluate.LengthEvaluationValueBitLimitExceeded
+          (Evaluate.LengthProviderSpineValue 0) 2 3)
+      let intermediateLimits = evaluationLimitsWith 3 3
+      Evaluate.evaluateLengthProviderApplication intermediateLimits checked
+          [Evaluate.ObservedSpineLength four] @?= Left
+        (Evaluate.LengthEvaluationValueBitLimitExceeded
+          Evaluate.LengthIntermediateValue 3 4)
+  , testCase "report multi-input assignment bounds from left to right" $ do
+      let target = FunctionType
+            (listOf closedPayloadType)
+            $ FunctionType
+                (listOf closedPayloadType) (listOf closedPayloadType)
+          limits = evaluationLimitsWith 2 8
+      contract <- expectRight $ sealContract
+        Length.defaultLengthLimits target trivialLengthContract
+      let replay inputs result = Evaluate.evaluateLengthContractAssignment
+            limits contract $ Evaluate.LengthContractAssignment inputs result
+      replay [4, 8] 16 @?= Left
+        (Evaluate.LengthEvaluationValueBitLimitExceeded
+          (Evaluate.LengthContractInputValue 0) 2 3)
+      replay [0, 4] 8 @?= Left
+        (Evaluate.LengthEvaluationValueBitLimitExceeded
+          (Evaluate.LengthContractInputValue 1) 2 3)
+      replay [0, 0] 4 @?= Left
+        (Evaluate.LengthEvaluationValueBitLimitExceeded
+          Evaluate.LengthContractResultValue 2 3)
+  , testCase "enforce exact provider arity and observed-role boundaries" $ do
+      providerName <- expectName "Fixture.rolesReplay"
+      let scheme = FunctionType
+            (listOf closedPayloadType)
+            $ FunctionType closedPayloadType (listOf closedPayloadType)
+          provider = providerSource providerName scheme
+            [ Length.LengthSpineArgument
+            , Length.LengthUnobservedArgument
+            ]
+            (Length.LengthVariable $ Length.LengthProviderArgument 0)
+      checked <- expectCheckedProvider provider
+      let replay = Evaluate.evaluateLengthProviderApplication
+            Evaluate.defaultLengthEvaluationLimits checked
+      replay [] @?= Left
+        (Evaluate.LengthProviderAssignmentArityMismatch 2 0)
+      replay
+          [ Evaluate.ObservedSpineLength 1
+          , Evaluate.UnobservedLengthArgument
+          , Evaluate.UnobservedLengthArgument
+          ] @?= Left
+        (Evaluate.LengthProviderAssignmentArityMismatch 2 3)
+      replay
+          [ Evaluate.UnobservedLengthArgument
+          , Evaluate.UnobservedLengthArgument
+          ] @?= Left
+        (Evaluate.LengthProviderArgumentRoleMismatch 0
+          Length.LengthSpineArgument Evaluate.UnobservedLengthArgument)
+      replay
+          [Evaluate.ObservedSpineLength 1, Evaluate.ObservedSpineLength 2] @?=
+        Left (Evaluate.LengthProviderArgumentRoleMismatch 1
+          Length.LengthUnobservedArgument
+          $ Evaluate.ObservedSpineLength 2)
+      replay
+          [Evaluate.ObservedSpineLength 7, Evaluate.UnobservedLengthArgument]
+        @?= Right 7
+  , testCase "evaluate natural operators without integer subtraction" $ do
+      providerName <- expectName "Fixture.operatorReplay"
+      let input = Length.LengthVariable $ Length.LengthProviderArgument 0
+          transfer = Length.LengthSum
+            [ Length.LengthScale 2 input
+            , Length.LengthMonus (Length.LengthLiteral 3)
+                (Length.LengthLiteral 5)
+            , Length.LengthMinimum
+                (Length.LengthLiteral 7) (Length.LengthLiteral 2)
+            , Length.LengthMaximum
+                (Length.LengthLiteral 1) (Length.LengthLiteral 6)
+            ]
+          provider = unaryListProvider providerName
+            Length.LengthSpineArgument transfer
+      checked <- expectCheckedProvider provider
+      Evaluate.evaluateLengthProviderApplication
+          Evaluate.defaultLengthEvaluationLimits checked
+          [Evaluate.ObservedSpineLength 4] @?= Right 16
+  , testCase "agree with direct natural arithmetic across small inputs" $ do
+      providerName <- expectName "Fixture.smallNaturalDifferential"
+      let input = Length.LengthVariable $ Length.LengthProviderArgument 0
+          condition = Length.LengthAll
+            [ Length.LengthAtMost input $ Length.LengthLiteral 4
+            , Length.LengthNot
+                $ Length.LengthEqual input $ Length.LengthLiteral 2
+            ]
+          transfer = Length.LengthIf condition
+            (Length.LengthSum
+              [ Length.LengthScale 2 input
+              , Length.LengthMonus
+                  (Length.LengthLiteral 5) input
+              , Length.LengthMinimum input $ Length.LengthLiteral 3
+              ])
+            (Length.LengthMaximum input $ Length.LengthLiteral 4)
+          expected value
+            | value <= 4 && value /= 2 =
+                2 * value
+                  + (if value <= 5 then 5 - value else 0)
+                  + min value 3
+            | otherwise = max value 4
+          provider = unaryListProvider providerName
+            Length.LengthSpineArgument transfer
+      checked <- expectCheckedProvider provider
+      mapM_ (\value ->
+        Evaluate.evaluateLengthProviderApplication
+            Evaluate.defaultLengthEvaluationLimits checked
+            [Evaluate.ObservedSpineLength value] @?= Right (expected value))
+        [0 .. 12]
+  , testCase "skip dead if branches and short-circuit conjunctions" $ do
+      providerName <- expectName "Fixture.shortCircuit"
+      let input = Length.LengthVariable $ Length.LengthProviderArgument 0
+          dangerous = Length.LengthScale 8
+            $ Length.LengthMaximum input $ Length.LengthLiteral 1
+          firstClause = Length.LengthEqual input $ Length.LengthLiteral 1
+          dangerousClause = Length.LengthEqual dangerous
+            $ Length.LengthLiteral 0
+          transfer = Length.LengthIf
+            (Length.LengthAll [firstClause, dangerousClause])
+            (Length.LengthLiteral 8)
+            (Length.LengthLiteral 1)
+          provider = unaryListProvider providerName
+            Length.LengthSpineArgument transfer
+          tightLimits = evaluationLimitsWith 4 1
+      checked <- expectCheckedProvider provider
+      Evaluate.evaluateLengthProviderApplication tightLimits checked
+          [Evaluate.ObservedSpineLength 0] @?= Right 1
+      Evaluate.evaluateLengthProviderApplication tightLimits checked
+          [Evaluate.ObservedSpineLength 1] @?= Left
+        (Evaluate.LengthEvaluationValueBitLimitExceeded
+          Evaluate.LengthIntermediateValue 1 2)
   ]
 
 normalizationTests :: TestTree
@@ -602,8 +1072,9 @@ productiveBoundTests = testGroup "productive bounded traversal"
             Length.LengthSpineArgument
             (Length.LengthVariable $ Length.LengthProviderArgument 0)
           cyclicProviders = provider : cyclicProviders
-      observed <- evaluateWithin $ sealProviderInventory
-        limits cyclicProviders
+          inventory = providerFixtureInventory [provider]
+      observed <- evaluateWithin $ Length.sealLengthProviderInventory
+        limits inventory cyclicProviders
       assertLeft (Length.LengthProviderSummaryLimitExceeded 1 2) observed
   , testCase "stop on a cyclic role list at the argument bound" $ do
       providerName <- expectName "Fixture.cyclicRoles"
@@ -799,6 +1270,50 @@ fingerprintTests = testGroup "identity sensitivity"
         baselineFingerprint /= Length.lengthProviderInventoryFingerprint scaled
       assertBool "provider scheme was omitted from inventory identity" $
         baselineFingerprint /= Length.lengthProviderInventoryFingerprint changed
+  , testCase "bind contract and provider identity to recursive-field order" $ do
+      typeName <- expectName "Fixture.ModelSensitive"
+      zeroName <- expectName "Fixture.ModelZero"
+      stepName <- expectName "Fixture.ModelStep"
+      providerName <- expectName "Fixture.modelProvider"
+      let payload = TypeVariable "element"
+          modeled = TypeApplication (TypeConstructor typeName) payload
+          providerScheme = ForallType ["element"] []
+            $ FunctionType modeled modeled
+          provider = providerSource providerName providerScheme
+            [Length.LengthSpineArgument]
+            (Length.LengthVariable $ Length.LengthProviderArgument 0)
+          declarations recursiveFirst =
+            [ listLikeDeclaration
+                typeName zeroName stepName recursiveFirst
+            , ValueDeclaration
+                $ ValueSignature () providerName providerScheme
+            ]
+          source = Length.DeclaredListSpine typeName zeroName stepName
+          target = FunctionType
+            (TypeApplication (TypeConstructor typeName) closedPayloadType)
+            (TypeApplication (TypeConstructor typeName) closedPayloadType)
+      payloadFirstContext <- expectRight $ Length.sealLengthContext
+        Length.defaultLengthLimits
+        (fixtureInventoryFromDeclarations $ declarations False) source
+      recursiveFirstContext <- expectRight $ Length.sealLengthContext
+        Length.defaultLengthLimits
+        (fixtureInventoryFromDeclarations $ declarations True) source
+      payloadFirstContract <- expectRight $ Length.sealLengthContractInContext
+        Length.defaultLengthLimits payloadFirstContext target identityLengthContract
+      recursiveFirstContract <- expectRight $ Length.sealLengthContractInContext
+        Length.defaultLengthLimits recursiveFirstContext target identityLengthContract
+      payloadFirstProviders <- expectRight
+        $ Length.sealLengthProviderInventoryInContext
+            Length.defaultLengthLimits payloadFirstContext [provider]
+      recursiveFirstProviders <- expectRight
+        $ Length.sealLengthProviderInventoryInContext
+            Length.defaultLengthLimits recursiveFirstContext [provider]
+      assertBool "spine-field order was omitted from contract identity" $
+        Length.lengthContractFingerprint payloadFirstContract /=
+          Length.lengthContractFingerprint recursiveFirstContract
+      assertBool "spine-field order was omitted from provider identity" $
+        Length.lengthProviderInventoryFingerprint payloadFirstProviders /=
+          Length.lengthProviderInventoryFingerprint recursiveFirstProviders
   ]
 
 negativeLimitCases
@@ -886,10 +1401,50 @@ contractWith precondition postcondition = Length.LengthContractSource
   }
 
 fixtureInventory :: Inventory String ()
-fixtureInventory = case mkInventory ClosedKindInventory
-    ([] :: [Declaration String () ()]) of
+fixtureInventory = fixtureInventoryFromDeclarations []
+
+fixtureInventoryFromDeclarations
+  :: [Declaration String () ()]
+  -> Inventory String ()
+fixtureInventoryFromDeclarations declarations = case mkInventory
+    ClosedKindInventory declarations of
   Left failure -> error $ "invalid fixture inventory: " ++ show failure
   Right inventory -> inventory
+
+providerFixtureInventory
+  :: [Length.LengthProviderSummarySource String]
+  -> Inventory String ()
+providerFixtureInventory = fixtureInventoryFromDeclarations
+  . uniqueProviderDeclarations []
+ where
+  uniqueProviderDeclarations _ [] = []
+  uniqueProviderDeclarations seen (source : remaining)
+    | providerName `elem` seen =
+        uniqueProviderDeclarations seen remaining
+    | otherwise =
+        ValueDeclaration
+          (ValueSignature () providerName $ Length.lengthProviderScheme source)
+          : uniqueProviderDeclarations (providerName : seen) remaining
+   where
+    providerName = Length.lengthProviderName source
+
+listLikeDeclaration
+  :: Name
+  -> Name
+  -> Name
+  -> Bool
+  -> Declaration String () ()
+listLikeDeclaration typeName zeroName stepName recursiveFirst =
+  DataTypeDeclaration () typeName [TypeParameter "element" Nothing]
+    [ DataConstructor () zeroName []
+    , DataConstructor () stepName fields
+    ]
+ where
+  payload = TypeVariable "element"
+  recursive = TypeApplication (TypeConstructor typeName) payload
+  fields
+    | recursiveFirst = [recursive, payload]
+    | otherwise = [payload, recursive]
 
 sealContract
   :: Length.LengthLimits
@@ -907,7 +1462,8 @@ sealProviderInventory
       (Length.LengthProviderInventoryError String)
       (Length.CheckedLengthProviderInventory String)
 sealProviderInventory limits =
-  Length.sealLengthProviderInventory limits fixtureInventory
+  \sources -> Length.sealLengthProviderInventory
+    limits (providerFixtureInventory sources) sources
 
 providerSource
   :: Name
@@ -934,6 +1490,27 @@ unaryListProvider providerName role transfer = providerSource providerName
     (listOf $ TypeVariable "element"))
   [role]
   transfer
+
+expectCheckedProvider
+  :: Length.LengthProviderSummarySource String
+  -> IO (Length.CheckedLengthProviderSummary String)
+expectCheckedProvider source = do
+  inventory <- expectRight $ sealProviderInventory
+    Length.defaultLengthLimits [source]
+  case Length.lookupCheckedLengthProviderSummary
+      (Length.lengthProviderName source) inventory of
+    Nothing -> assertFailure "checked provider disappeared from its inventory"
+    Just summary -> pure summary
+
+evaluationLimitsWith :: Int -> Int -> Evaluate.LengthEvaluationLimits
+evaluationLimitsWith assignmentBits intermediateBits = case
+    Evaluate.mkLengthEvaluationLimits Evaluate.LengthEvaluationLimitSource
+      { Evaluate.lengthEvaluationLimitSourceAssignmentValueBits = assignmentBits
+      , Evaluate.lengthEvaluationLimitSourceIntermediateValueBits =
+          intermediateBits
+      } of
+  Left failure -> error $ "invalid evaluation test limits: " ++ show failure
+  Right limits -> limits
 
 expectName :: String -> IO Name
 expectName = expectRight . parseName

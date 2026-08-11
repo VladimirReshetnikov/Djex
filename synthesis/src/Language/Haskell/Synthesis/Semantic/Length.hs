@@ -3,12 +3,16 @@
 -- This module describes only total finite list-spine lengths over unbounded
 -- natural numbers.  List payloads remain opaque.  Provider summaries are
 -- explicit assumptions for search guidance; they are not behavioral evidence.
--- Both sealing operations require the exact opaque @Inventory@ that supplies
--- kind authority, so an ill-kinded list payload or provider scheme cannot be
--- labeled checked.  The resulting values intentionally do not retain or
--- fingerprint that source inventory: a later behavioral-problem constructor
--- must bind its exact inventory, typed target/candidate, and encoding identities
--- before any observation may be replayed.
+-- A checked context retains the exact opaque @Inventory@ that supplies kind
+-- and declaration authority together with either the versioned built-in list
+-- spine or an exactly named, structurally validated unary datatype spine.
+-- Provider schemes are resolved from that inventory rather than trusted from
+-- caller input.  A later behavioral-problem constructor must still bind this
+-- context to its exact typed target/candidate and encoding identities before
+-- any observation may be replayed as evidence. Because the smaller checked
+-- contract and provider-inventory values retain fingerprints rather than the
+-- complete context, that future boundary must reseal their public projections
+-- through the supplied context as part of one atomic problem construction.
 module Language.Haskell.Synthesis.Semantic.Length
   ( FiniteListSpineLengthV1
   , LengthContractFingerprintSubject
@@ -38,6 +42,19 @@ module Language.Haskell.Synthesis.Semantic.Length
   , lengthProviderArgumentLimit
   , lengthLiteralBitLimit
   , lengthFingerprintByteLimit
+  , LengthSpineModelSource (..)
+  , LengthSpineModelTrust (..)
+  , LengthSpineModelError (..)
+  , CheckedLengthSpineModel
+  , checkedLengthSpineTypeName
+  , checkedLengthSpineZeroConstructor
+  , checkedLengthSpineStepConstructor
+  , checkedLengthSpineRecursiveField
+  , checkedLengthSpineModelTrust
+  , CheckedLengthContext
+  , sealLengthContext
+  , lengthContextInventory
+  , lengthContextSpineModel
   , LengthTypeCollectionSite (..)
   , LengthTypeBoundError (..)
   , LengthSyntaxCollectionSite (..)
@@ -47,6 +64,7 @@ module Language.Haskell.Synthesis.Semantic.Length
   , LengthProviderInventoryError (..)
   , CheckedLengthContract
   , sealLengthContract
+  , sealLengthContractInContext
   , checkedLengthContractTarget
   , checkedLengthContractInputCount
   , checkedLengthContractPrecondition
@@ -60,6 +78,7 @@ module Language.Haskell.Synthesis.Semantic.Length
   , checkedLengthProviderTrust
   , CheckedLengthProviderInventory
   , sealLengthProviderInventory
+  , sealLengthProviderInventoryInContext
   , checkedLengthProviderSummaries
   , lookupCheckedLengthProviderSummary
   , lengthProviderInventoryFingerprint

@@ -160,6 +160,9 @@ forbiddenConstructionAttempts =
   , noGeneric
       @(BehavioralEvidence BehavioralDomainProbe EvidenceReceiptProbe)
       "BehavioralEvidence"
+  , ( "BehavioralEvidence regained a public construction edge"
+    , forbiddenBehavioralEvidenceConstruction `seq` ()
+    )
   , ( "BehavioralEvidence domain unexpectedly permits Coercible"
     , forbiddenBehavioralEvidenceDomainCoercion `seq` ()
     )
@@ -183,6 +186,11 @@ forbiddenConstructionAttempts =
       "CheckedLengthSpineModel"
   , noGeneric @LengthLimits "LengthLimits"
   , noGeneric @LengthEvaluationLimits "LengthEvaluationLimits"
+  , noGeneric @ValidatedLengthCounterexample
+      "ValidatedLengthCounterexample"
+  , ( "ValidatedLengthCounterexample constructor became public"
+    , forbiddenValidatedLengthCounterexampleConstruction `seq` ()
+    )
   , noGeneric @(CheckedLengthProviderSummary LengthVariableProbe)
       "CheckedLengthProviderSummary"
   , noGeneric @(CheckedLengthProviderInventory LengthVariableProbe)
@@ -633,6 +641,18 @@ forbiddenBehavioralEvidenceReceiptProjection
   :: BehavioralEvidence BehavioralDomainProbe EvidenceReceiptProbe
   -> EvidenceReceiptProbe
 forbiddenBehavioralEvidenceReceiptProjection = behavioralEvidenceReceipt
+
+forbiddenBehavioralEvidenceConstruction
+  :: BehavioralProblem BehavioralDomainProbe
+  -> EvidenceReceiptProbe
+  -> BehavioralEvidence BehavioralDomainProbe EvidenceReceiptProbe
+forbiddenBehavioralEvidenceConstruction = mkBehavioralEvidence
+
+forbiddenValidatedLengthCounterexampleConstruction
+  :: ValidatedLengthCounterexample
+forbiddenValidatedLengthCounterexampleConstruction =
+  ValidatedLengthCounterexampleReceipt
+    [] 0 ProviderIndependentFiniteSpineModel
 
 forbiddenBoundedRawArtifactCoercion
   :: BoundedRawArtifact ArtifactKindProbe

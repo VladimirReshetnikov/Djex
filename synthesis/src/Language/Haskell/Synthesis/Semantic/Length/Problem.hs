@@ -34,6 +34,9 @@ module Language.Haskell.Synthesis.Semantic.Length.Problem
   , checkedLengthCandidateTermGraphFingerprint
   , checkedLengthCandidateFingerprint
   , checkedLengthProblemCandidate
+  , checkedLengthProblemInputCount
+  , checkedLengthProblemPrecondition
+  , checkedLengthProblemPostcondition
   , checkedLengthProblemCounterexampleCondition
   , checkedLengthProblemEncodingFingerprint
   , checkedLengthProblemBehavioralProblem

@@ -26,6 +26,9 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.Problem.Candidate
   , checkedLengthCandidateTermGraphFingerprint
   , checkedLengthCandidateFingerprint
   , checkedLengthProblemCandidate
+  , checkedLengthProblemInputCount
+  , checkedLengthProblemPrecondition
+  , checkedLengthProblemPostcondition
   , checkedLengthProblemCounterexampleCondition
   , checkedLengthProblemEncodingFingerprint
   , checkedLengthProblemBehavioralProblem
@@ -326,6 +329,9 @@ instance NFData (CheckedLengthCandidate identity local) where
 -- | Opaque complete Length counterexample problem for one checked candidate.
 data CheckedLengthProblem identity local = CheckedLengthProblem
   !(CheckedLengthCandidate identity local)
+  !Int
+  !(LengthFormula LengthContractVariable)
+  !(LengthFormula LengthContractVariable)
   !(LengthFormula LengthContractVariable)
   !(Fingerprint
       (EncodingFingerprintSubject FiniteListSpineLengthV1))
@@ -334,8 +340,10 @@ data CheckedLengthProblem identity local = CheckedLengthProblem
 type role CheckedLengthProblem nominal nominal
 
 instance NFData (CheckedLengthProblem identity local) where
-  rnf (CheckedLengthProblem candidate condition encoding problem) =
-    rnf candidate `seq` rnf condition `seq` rnf encoding `seq` rnf problem
+  rnf (CheckedLengthProblem candidate inputCount precondition postcondition
+      condition encoding problem) =
+    rnf candidate `seq` rnf inputCount `seq` rnf precondition `seq`
+    rnf postcondition `seq` rnf condition `seq` rnf encoding `seq` rnf problem
 
 -- | Normalized symbolic length computed for the candidate result.
 checkedLengthCandidateResult
@@ -368,14 +376,43 @@ checkedLengthCandidateFingerprint
 checkedLengthProblemCandidate
   :: CheckedLengthProblem identity local
   -> CheckedLengthCandidate identity local
-checkedLengthProblemCandidate (CheckedLengthProblem candidate _ _ _) = candidate
+checkedLengthProblemCandidate
+    (CheckedLengthProblem candidate _ _ _ _ _ _) = candidate
+
+-- | Number of source-ordered natural inputs admitted by the sealed contract.
+--
+-- This value is retained redundantly with the fingerprinted contract so a
+-- model decoder can reject missing or extra assignments without receiving a
+-- detachable contract from the caller.
+checkedLengthProblemInputCount
+  :: CheckedLengthProblem identity local
+  -> Int
+checkedLengthProblemInputCount
+    (CheckedLengthProblem _ inputCount _ _ _ _ _) =
+  inputCount
+
+-- | Normalized contract precondition retained for ordered concrete replay.
+checkedLengthProblemPrecondition
+  :: CheckedLengthProblem identity local
+  -> LengthFormula LengthContractVariable
+checkedLengthProblemPrecondition
+    (CheckedLengthProblem _ _ precondition _ _ _ _) = precondition
+
+-- | Normalized contract postcondition before candidate-result substitution.
+-- Concrete replay evaluates this only after the precondition succeeds and
+-- binds 'LengthResult' to the result computed from the checked candidate.
+checkedLengthProblemPostcondition
+  :: CheckedLengthProblem identity local
+  -> LengthFormula LengthContractVariable
+checkedLengthProblemPostcondition
+    (CheckedLengthProblem _ _ _ postcondition _ _ _) = postcondition
 
 -- | Solver-neutral bad-state formula: precondition and negated postcondition.
 checkedLengthProblemCounterexampleCondition
   :: CheckedLengthProblem identity local
   -> LengthFormula LengthContractVariable
 checkedLengthProblemCounterexampleCondition
-    (CheckedLengthProblem _ condition _ _) = condition
+    (CheckedLengthProblem _ _ _ _ condition _ _) = condition
 
 -- | Concrete identity of contract, policy, used laws, result, and bad state.
 checkedLengthProblemEncodingFingerprint
@@ -383,14 +420,14 @@ checkedLengthProblemEncodingFingerprint
   -> Fingerprint
       (EncodingFingerprintSubject FiniteListSpineLengthV1)
 checkedLengthProblemEncodingFingerprint
-    (CheckedLengthProblem _ _ encoding _) = encoding
+    (CheckedLengthProblem _ _ _ _ _ encoding _) = encoding
 
 -- | Generic domain/inventory/encoding/candidate/problem envelope.
 checkedLengthProblemBehavioralProblem
   :: CheckedLengthProblem identity local
   -> BehavioralProblem FiniteListSpineLengthV1
 checkedLengthProblemBehavioralProblem
-    (CheckedLengthProblem _ _ _ problem) = problem
+    (CheckedLengthProblem _ _ _ _ _ _ problem) = problem
 
 -- | Atomically retain, revalidate, interpret, identify, and envelope one
 -- engine-owned typed candidate.  Residual constraints fail before graph
@@ -477,7 +514,11 @@ sealLengthTypedCandidateProblem problemLimits session suppliedContract typed = d
         encodingFingerprint
         candidateFingerprint
         problemFingerprint
-  pure $ CheckedLengthProblem checkedCandidate condition
+  pure $ CheckedLengthProblem checkedCandidate
+    (checkedLengthContractInputCount contract)
+    (checkedLengthContractPrecondition contract)
+    (checkedLengthContractPostcondition contract)
+    condition
     encodingFingerprint behavioralProblem
 
 revalidateProviders

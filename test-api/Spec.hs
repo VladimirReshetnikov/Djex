@@ -304,10 +304,12 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "forbiddenCheckedLengthProblemLocalCoercion"
                       ]
                   ) ||
-                  ( "Variable not in scope" `isInfixOf` message &&
+                  ( "not in scope" `isInfixOf` message &&
                     any (`isInfixOf` message)
                       [ "associatedObservation"
                       , "behavioralEvidenceReceipt"
+                      , "mkBehavioralEvidence"
+                      , "ValidatedLengthCounterexampleReceipt"
                       ]
                   )
             assertBool

@@ -7,9 +7,10 @@
 --
 -- Association is not certification.  Every raw solver or behavioral result,
 -- including @unsat@, is exposed as 'HeuristicRankingOnly'.  The opaque
--- 'BehavioralEvidence' type is a future public-replay/private-build seam for
--- an authoritative verifier; this module deliberately exports no producer,
--- unchecked receipt projection, or raw-observation conversion.
+-- 'BehavioralEvidence' type is a public-replay/private-build seam for
+-- domain-owned authoritative verifiers; this generic module deliberately
+-- exports no producer, unchecked receipt projection, or raw-observation
+-- conversion.
 module Language.Haskell.Synthesis.Semantic.Problem
   ( ProblemFingerprintSubject
   , InventoryFingerprintSubject

@@ -252,13 +252,14 @@ step limits bound candidate work; the existing Length syntax budget jointly
 bounds the normalized result and the counterexample condition
 `precondition && not postcondition[result := interpretedResult]`.
 
-A successful `CheckedLengthProblem` carries separate inventory, concrete
-encoding, candidate, and complete problem fingerprints plus the generic
-`BehavioralProblem` envelope. The concrete encoding identifies the re-sealed
-contract, normalized result and counterexample condition, interpreter policy,
-and exactly the provider laws actually used. The candidate key wraps the fresh
-shared graph identity and explicitly describes candidate-only authority; it
-does not pretend to retain batch completion status.
+A successful `CheckedLengthProblem` carries its source-ordered input arity,
+separate inventory, concrete encoding, candidate, and complete problem
+fingerprints, plus the generic `BehavioralProblem` envelope. The concrete
+encoding identifies the re-sealed contract, normalized result and
+counterexample condition, interpreter policy, and exactly the provider laws
+actually used. The candidate key wraps the fresh shared graph identity and
+explicitly describes candidate-only authority; it does not pretend to retain
+batch completion status.
 
 Contract arguments and results must expose the context's outer modeled spine;
 their element types remain opaque and may themselves be impredicative. A
@@ -266,14 +267,22 @@ direct rank-N contract argument is rejected. Provider schemes are closed and
 leading-context-free: spine-observed arguments and the result must use that
 same modeled spine, while unobserved arguments may be non-spine or rank-N
 values. `Language.Haskell.Synthesis.Semantic.Length.Evaluate` supplies bounded,
-deterministic evaluation of one concrete assignment or assumed provider call,
-including exact natural-number monus and short-circuiting conditionals. Its
-three-way contract result distinguishes a failed precondition, a satisfied
-postcondition, and a violated postcondition. This is solver-independent replay
-for one assignment, not universal behavioral evidence or permission to prune
-search. A future Z3 adapter can rank or challenge candidates, but raw solver
-output is not trusted evidence without independent replay against the exact
-associated identities.
+deterministic evaluation of one concrete assignment, assumed provider call, or
+sealed candidate problem, including exact natural-number monus and
+short-circuiting conditionals. Its three-way detached-contract result
+distinguishes a failed precondition, a satisfied postcondition, and a violated
+postcondition. Whole-problem replay accepts only source-ordered inputs, computes
+the candidate result itself, and produces an opaque counterexample receipt
+bound to the exact problem tuple only when the normalized bad-state formula is
+true. Replay evaluates the retained precondition before the candidate and
+postcondition, independent of canonical conjunction ordering. The receipt
+explicitly distinguishes provider-independent finite-spine results from those
+conditional on a listed set of fingerprinted provider assumptions; it does not
+establish those implementations or realize the abstract model in a source
+language with bottoms or effects. This is not universal behavioral evidence or
+permission to prune other candidates. A future Z3 adapter can rank or challenge
+candidates, but raw solver output is not trusted evidence without this
+independent replay.
 
 ## Building
 

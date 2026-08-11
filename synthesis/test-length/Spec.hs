@@ -60,6 +60,7 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , providerTests
   , sessionTests
   , candidateProblemTests
+  , problemReplayTests
   , evaluationTests
   , normalizationTests
   , productiveBoundTests
@@ -899,6 +900,135 @@ candidateProblemTests = testGroup "typed candidate behavioral problems"
         (LengthProblem.LengthProblemEvaluationStepLimitExceeded 0 1)
         $ LengthProblem.sealLengthTypedCandidateProblem
             noEvaluation session contract candidate
+  ]
+
+problemReplayTests :: TestTree
+problemReplayTests = testGroup "exact candidate problem replay"
+  [ testCase "find no counterexample for one real Exference identity" $ do
+      (session, contract, candidate) <- realListIdentityFixture
+        $ TypeVariable $ FlexibleVariable 0
+      problem <- expectRight $ LengthProblem.sealLengthTypedCandidateProblem
+        LengthProblem.defaultLengthProblemLimits session contract candidate
+      LengthProblem.checkedLengthProblemInputCount problem @?= 1
+      mapM_ (\input -> expectNoCounterexample
+        $ Evaluate.validateLengthProblemCounterexample
+            Evaluate.defaultLengthEvaluationLimits problem
+            $ Evaluate.LengthProblemAssignment [input]) [0, 1, 8]
+  , testCase "compute a violating candidate result and bind its evidence" $ do
+      problem <- adversarialConstantZeroProblem identityLengthContract
+      LengthProblem.checkedLengthProblemInputCount problem @?= 1
+      evidence <- expectCounterexample
+        $ Evaluate.validateLengthProblemCounterexample
+            Evaluate.defaultLengthEvaluationLimits problem
+            $ Evaluate.LengthProblemAssignment [3]
+      receipt <- expectRight $ Djex.replayBehavioralEvidence
+        (LengthProblem.checkedLengthProblemBehavioralProblem problem) evidence
+      Evaluate.validatedLengthCounterexampleInputs receipt @?= [3]
+      Evaluate.validatedLengthCounterexampleResult receipt @?= 0
+      Evaluate.validatedLengthCounterexampleBasis receipt @?=
+        Evaluate.ProviderIndependentFiniteSpineModel
+
+      -- The assignment API has no result field: zero above is recomputed from
+      -- the sealed candidate rather than accepted from a model decoder.
+      expectNoCounterexample
+        $ Evaluate.validateLengthProblemCounterexample
+            Evaluate.defaultLengthEvaluationLimits problem
+            $ Evaluate.LengthProblemAssignment [0]
+
+      differentEncoding <- adversarialConstantZeroProblem trivialLengthContract
+      assertLeft Djex.ReplayEncodingFingerprintMismatch
+        $ Djex.replayBehavioralEvidence
+            (LengthProblem.checkedLengthProblemBehavioralProblem differentEncoding)
+            evidence
+  , testCase "reject problem assignment shape and values productively" $ do
+      problem <- adversarialConstantZeroProblem identityLengthContract
+      let replay limits inputs = Evaluate.validateLengthProblemCounterexample
+            limits problem $ Evaluate.LengthProblemAssignment inputs
+      assertLeft (Evaluate.LengthProblemAssignmentArityMismatch 1 0)
+        $ replay Evaluate.defaultLengthEvaluationLimits []
+      assertLeft (Evaluate.LengthProblemAssignmentArityMismatch 1 2)
+        $ replay Evaluate.defaultLengthEvaluationLimits
+            [0, 2 ^ (5000 :: Int)]
+      assertLeft
+        (Evaluate.LengthEvaluationValueBitLimitExceeded
+          (Evaluate.LengthProblemInputValue 0) 2 3)
+        $ replay (evaluationLimitsWith 2 8) [4]
+
+      let cyclicInputs = 0 : cyclicInputs
+      cyclicResult <- evaluateWithin
+        $ replay Evaluate.defaultLengthEvaluationLimits cyclicInputs
+      assertLeft (Evaluate.LengthProblemAssignmentArityMismatch 1 2)
+        cyclicResult
+  , testCase "short-circuit an input-dependent false precondition" $ do
+      let input = Length.LengthVariable $ Length.LengthInput 0
+          result = Length.LengthVariable Length.LengthResult
+          precondition = Length.LengthEqual input $ Length.LengthLiteral 0
+          postcondition = Length.LengthEqual result $ Length.LengthLiteral 0
+          source = contractWith precondition postcondition
+      problem <- adversarialConstantProviderProblem 7 source
+      LengthProblem.checkedLengthProblemInputCount problem @?= 1
+      LengthProblem.checkedLengthCandidateResult
+          (LengthProblem.checkedLengthProblemCandidate problem) @?=
+        Length.LengthLiteral 7
+      assertBool "the retained precondition was collapsed to false" $
+        LengthProblem.checkedLengthProblemPrecondition problem /=
+          Length.LengthTruth False
+      case LengthProblem.checkedLengthProblemPostcondition problem of
+        Length.LengthEqual left right -> assertBool
+          "the retained postcondition no longer references the result"
+          $ left == result || right == result
+        other -> assertFailure $ "unexpected retained postcondition: " ++ show other
+
+      -- Input one makes the precondition false.  If replay forces either the
+      -- candidate's literal seven or the result-dependent postcondition, the
+      -- zero-bit intermediate limit rejects it instead of returning Nothing.
+      expectNoCounterexample
+        $ Evaluate.validateLengthProblemCounterexample
+            (evaluationLimitsWith 1 0) problem
+            $ Evaluate.LengthProblemAssignment [1]
+
+      evidence <- expectCounterexample
+        $ Evaluate.validateLengthProblemCounterexample
+            Evaluate.defaultLengthEvaluationLimits problem
+            $ Evaluate.LengthProblemAssignment [0]
+      receipt <- expectRight $ Djex.replayBehavioralEvidence
+        (LengthProblem.checkedLengthProblemBehavioralProblem problem) evidence
+      providerName <- expectName "Fixture.problemReplayConstant"
+      Evaluate.validatedLengthCounterexampleInputs receipt @?= [0]
+      Evaluate.validatedLengthCounterexampleResult receipt @?= 7
+      Evaluate.validatedLengthCounterexampleBasis receipt @?=
+        Evaluate.FiniteSpineModelUnderAssumedProviderLaws [providerName]
+
+      -- With a true result-independent postcondition, replay also leaves the
+      -- shared candidate-result computation unforced after precondition
+      -- success.
+      irrelevantResult <- adversarialConstantProviderProblem
+        7 trivialLengthContract
+      expectNoCounterexample
+        $ Evaluate.validateLengthProblemCounterexample
+            (evaluationLimitsWith 0 0) irrelevantResult
+            $ Evaluate.LengthProblemAssignment [0]
+
+      -- Canonical conjunction ordering used to move this bad-postcondition
+      -- clause ahead of the false precondition.  Evaluating the scaled result
+      -- at input one exceeds the one-bit intermediate bound, so returning no
+      -- counterexample demonstrates that replay no longer consumes the sorted
+      -- combined formula as its operational plan.
+      let orderedPrecondition = Length.LengthNot
+            $ Length.LengthAtMost input $ Length.LengthLiteral 1
+          orderedSource = contractWith orderedPrecondition postcondition
+      scaledResult <- adversarialScaledProviderProblem 2 orderedSource
+      case LengthProblem.checkedLengthProblemCounterexampleCondition
+          scaledResult of
+        Length.LengthAll [firstClause, _] -> assertBool
+          "the adversarial combined formula did not reorder its bad post first"
+          $ firstClause /=
+              LengthProblem.checkedLengthProblemPrecondition scaledResult
+        other -> assertFailure $ "unexpected adversarial condition: " ++ show other
+      expectNoCounterexample
+        $ Evaluate.validateLengthProblemCounterexample
+            (evaluationLimitsWith 1 1) scaledResult
+            $ Evaluate.LengthProblemAssignment [1]
   ]
 
 limitTests :: TestTree
@@ -2439,6 +2569,129 @@ adversarialIdentityGraphSource spine = Djex.TermGraphSource
     )
   ]
 
+adversarialConstantZeroProblem
+  :: Length.LengthContractSource
+  -> IO
+      (LengthProblem.CheckedLengthProblem
+        AdversarialIdentity AdversarialLocal)
+adversarialConstantZeroProblem contractSource = do
+  session <- adversarialLengthSession [] []
+  let target = FunctionType adversarialClosedList adversarialClosedList
+      source = Djex.TermGraphSource (Djex.termNodeId 1)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode adversarialClosedList
+              $ Djex.TypedGlobal (Djex.occurrenceId 1) listName
+          )
+        , ( Djex.termNodeId 1
+          , Djex.TermNode target
+              $ Djex.TypedLambda
+                  [ Djex.TypedPattern
+                      (Djex.occurrenceId 0)
+                      adversarialClosedList
+                      Djex.TypedWildcard
+                  ]
+                  (Djex.termNodeId 0)
+          )
+        ]
+  contract <- adversarialLengthContract session target contractSource
+  graph <- sealAdversarialGraph source
+  expectRight $ LengthProblem.sealLengthTypedCandidateProblem
+    LengthProblem.defaultLengthProblemLimits session contract
+    $ adversarialTypedCandidate $ Right graph
+
+adversarialConstantProviderProblem
+  :: Natural
+  -> Length.LengthContractSource
+  -> IO
+      (LengthProblem.CheckedLengthProblem
+        AdversarialIdentity AdversarialLocal)
+adversarialConstantProviderProblem result contractSource = do
+  providerName <- expectName "Fixture.problemReplayConstant"
+  let target = FunctionType adversarialClosedList adversarialClosedList
+      provider = Length.AssumedProviderSummary
+        { Length.lengthProviderName = providerName
+        , Length.lengthProviderScheme = adversarialClosedList
+        , Length.lengthProviderArgumentRoles = []
+        , Length.lengthProviderTransfer = Length.LengthLiteral result
+        }
+      declaration = ValueDeclaration
+        $ ValueSignature () providerName adversarialClosedList
+      source = Djex.TermGraphSource (Djex.termNodeId 1)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode adversarialClosedList
+              $ Djex.TypedGlobal (Djex.occurrenceId 1) providerName
+          )
+        , ( Djex.termNodeId 1
+          , Djex.TermNode target
+              $ Djex.TypedLambda
+                  [ Djex.TypedPattern
+                      (Djex.occurrenceId 0)
+                      adversarialClosedList
+                      Djex.TypedWildcard
+                  ]
+                  (Djex.termNodeId 0)
+          )
+        ]
+  session <- adversarialLengthSession [declaration] [provider]
+  contract <- adversarialLengthContract session target contractSource
+  graph <- sealAdversarialGraph source
+  expectRight $ LengthProblem.sealLengthTypedCandidateProblem
+    LengthProblem.defaultLengthProblemLimits session contract
+    $ adversarialTypedCandidate $ Right graph
+
+adversarialScaledProviderProblem
+  :: Natural
+  -> Length.LengthContractSource
+  -> IO
+      (LengthProblem.CheckedLengthProblem
+        AdversarialIdentity AdversarialLocal)
+adversarialScaledProviderProblem factor contractSource = do
+  providerName <- expectName "Fixture.problemReplayScale"
+  let target = FunctionType adversarialClosedList adversarialClosedList
+      provider = Length.AssumedProviderSummary
+        { Length.lengthProviderName = providerName
+        , Length.lengthProviderScheme = target
+        , Length.lengthProviderArgumentRoles = [Length.LengthSpineArgument]
+        , Length.lengthProviderTransfer = Length.LengthScale factor
+            $ Length.LengthVariable $ Length.LengthProviderArgument 0
+        }
+      declaration = ValueDeclaration
+        $ ValueSignature () providerName target
+      source = Djex.TermGraphSource (Djex.termNodeId 3)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode target
+              $ Djex.TypedGlobal (Djex.occurrenceId 0) providerName
+          )
+        , ( Djex.termNodeId 1
+          , Djex.TermNode adversarialClosedList
+              $ Djex.TypedLocal (Djex.occurrenceId 1) 0
+          )
+        , ( Djex.termNodeId 2
+          , Djex.TermNode adversarialClosedList
+              $ Djex.TypedApply
+                  (Djex.termNodeId 0)
+                  (Djex.termNodeId 1)
+                  (Djex.ApplicationWitness
+                    adversarialClosedList adversarialClosedList)
+          )
+        , ( Djex.termNodeId 3
+          , Djex.TermNode target
+              $ Djex.TypedLambda
+                  [ Djex.TypedPattern
+                      (Djex.occurrenceId 2)
+                      adversarialClosedList
+                      (Djex.TypedBind 0)
+                  ]
+                  (Djex.termNodeId 2)
+          )
+        ]
+  session <- adversarialLengthSession [declaration] [provider]
+  contract <- adversarialLengthContract session target contractSource
+  graph <- sealAdversarialGraph source
+  expectRight $ LengthProblem.sealLengthTypedCandidateProblem
+    LengthProblem.defaultLengthProblemLimits session contract
+    $ adversarialTypedCandidate $ Right graph
+
 adversarialLetIdentityGraphSource
   :: AdversarialType
   -> Djex.TermGraphSource AdversarialType AdversarialLocal
@@ -2617,6 +2870,24 @@ expectRight :: Show error => Either error value -> IO value
 expectRight result = case result of
   Left failure -> assertFailure $ "unexpected rejection: " ++ show failure
   Right value -> pure value
+
+expectNoCounterexample
+  :: Show error
+  => Either error (Maybe evidence)
+  -> IO ()
+expectNoCounterexample result = case result of
+  Left failure -> assertFailure $ "unexpected replay rejection: " ++ show failure
+  Right Nothing -> pure ()
+  Right Just{} -> assertFailure "an assignment unexpectedly refuted the problem"
+
+expectCounterexample
+  :: Show error
+  => Either error (Maybe evidence)
+  -> IO evidence
+expectCounterexample result = case result of
+  Left failure -> assertFailure $ "unexpected replay rejection: " ++ show failure
+  Right Nothing -> assertFailure "the violating assignment produced no evidence"
+  Right (Just evidence) -> pure evidence
 
 assertLeft
   :: (Eq error, Show error)

@@ -402,8 +402,9 @@ instance NFData receipt => NFData (BehavioralEvidence domain receipt) where
   rnf (BehavioralEvidence association receipt) =
     rnf association `seq` rnf receipt
 
--- | Private seam for a future authoritative verifier such as a Lean adapter.
--- This generic checkpoint provides no producer which calls it.
+-- | Private seam for domain-owned authoritative verifiers.  Public generic
+-- code cannot call it; each producer must independently replay a concrete
+-- receipt before binding it to the exact problem tuple.
 mkBehavioralEvidence
   :: BehavioralProblem domain
   -> receipt

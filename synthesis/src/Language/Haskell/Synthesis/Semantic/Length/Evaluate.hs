@@ -1,14 +1,17 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
 
--- | Bounded, solver-independent evaluation for checked length contracts and
--- provider summaries.
+-- | Bounded, solver-independent evaluation for checked length contracts,
+-- provider summaries, and sealed candidate problems.
 --
 -- This is the replay authority for concrete natural-number assignments.  It
 -- deliberately consumes only opaque checked values: evaluating a caller-built
 -- raw syntax tree here could diverge before the length sealer's structural
--- bounds were established.  A successful result classifies one assignment; it
--- is neither universal behavioral evidence nor permission to prune search.
+-- bounds were established.  Detached contract and provider results classify
+-- one assignment without evidence authority.  Whole-problem replay can bind
+-- an exact model-relative counterexample receipt to the sealed problem
+-- identities; it still supplies neither universal evidence nor permission to
+-- prune other candidates.
 module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   ( LengthEvaluationLimitSource (..)
   , LengthEvaluationLimits
@@ -20,12 +23,19 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , lengthAssignmentValueBitLimit
   , lengthIntermediateValueBitLimit
   , LengthContractAssignment (..)
+  , LengthProblemAssignment (..)
   , LengthProviderArgumentValue (..)
   , LengthEvaluationValueSite (..)
   , LengthEvaluationError (..)
   , LengthContractEvaluation (..)
+  , LengthCounterexampleBasis (..)
+  , ValidatedLengthCounterexample
+  , validatedLengthCounterexampleInputs
+  , validatedLengthCounterexampleResult
+  , validatedLengthCounterexampleBasis
   , evaluateLengthContractAssignment
   , evaluateLengthProviderApplication
+  , validateLengthProblemCounterexample
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -34,9 +44,11 @@ import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Collection (observedListLength)
+import Language.Haskell.Synthesis.Name (Name)
 import Language.Haskell.Synthesis.Semantic.Length
   ( CheckedLengthContract
   , CheckedLengthProviderSummary
+  , FiniteListSpineLengthV1
   , LengthContractVariable (..)
   , LengthExpression (..)
   , LengthFormula (..)
@@ -47,6 +59,20 @@ import Language.Haskell.Synthesis.Semantic.Length
   , checkedLengthContractPrecondition
   , checkedLengthProviderArgumentRoles
   , checkedLengthProviderTransfer
+  )
+import Language.Haskell.Synthesis.Semantic.Length.Problem
+  ( CheckedLengthProblem
+  , checkedLengthCandidateResult
+  , checkedLengthCandidateUsedProviders
+  , checkedLengthProblemBehavioralProblem
+  , checkedLengthProblemCandidate
+  , checkedLengthProblemInputCount
+  , checkedLengthProblemPostcondition
+  , checkedLengthProblemPrecondition
+  )
+import Language.Haskell.Synthesis.Internal.Semantic.Problem
+  ( BehavioralEvidence
+  , mkBehavioralEvidence
   )
 
 -- | Raw operational bounds for concrete replay. Zero is valid: only the
@@ -131,6 +157,18 @@ data LengthContractAssignment = LengthContractAssignment
 
 instance NFData LengthContractAssignment
 
+-- | Source-ordered natural inputs decoded for one exact candidate problem.
+--
+-- There is deliberately no caller-supplied result.  The validator computes
+-- that value from the checked candidate retained by the problem, preventing
+-- a solver model decoder from pairing valid inputs with a spoofed output.
+data LengthProblemAssignment = LengthProblemAssignment
+  { lengthProblemAssignmentInputs :: [Natural]
+  }
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthProblemAssignment
+
 -- | A provider call supplies a number only where the checked role exposes a
 -- list spine.  Requiring the explicit unobserved marker prevents callers from
 -- smuggling a semantic claim about an opaque argument into replay.
@@ -145,6 +183,7 @@ instance NFData LengthProviderArgumentValue
 data LengthEvaluationValueSite
   = LengthContractInputValue Int
   | LengthContractResultValue
+  | LengthProblemInputValue Int
   | LengthProviderSpineValue Int
   | LengthIntermediateValue
   deriving (Eq, Ord, Show, Generic)
@@ -154,6 +193,7 @@ instance NFData LengthEvaluationValueSite
 -- | Deterministic failure while replaying one checked value.
 data LengthEvaluationError
   = LengthContractAssignmentArityMismatch !Int !Int
+  | LengthProblemAssignmentArityMismatch !Int !Int
   | LengthProviderAssignmentArityMismatch !Int !Int
   | LengthProviderArgumentRoleMismatch
       !Int !LengthProviderArgumentRole !LengthProviderArgumentValue
@@ -173,6 +213,59 @@ data LengthContractEvaluation
   deriving (Bounded, Enum, Eq, Ord, Show, Generic)
 
 instance NFData LengthContractEvaluation
+
+-- | Explicit semantic basis of a replayed Length counterexample.
+--
+-- Even the provider-independent case is a result in the versioned total
+-- finite-spine model, not automatically a realized counterexample in a source
+-- language with bottoms or effects.  Provider-backed results additionally
+-- depend on every named assumed law in the retained list.
+data LengthCounterexampleBasis
+  = ProviderIndependentFiniteSpineModel
+  | FiniteSpineModelUnderAssumedProviderLaws [Name]
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthCounterexampleBasis
+
+-- | Independently replayed model-relative violation of one sealed Length
+-- problem.
+--
+-- The constructor stays private.  The receipt is exact relative to the
+-- problem's fingerprinted semantic encoding.  Its explicit basis records any
+-- assumed provider laws; it is not evidence about an unverified provider
+-- implementation or source-language realization.  Its enclosing
+-- 'BehavioralEvidence' can reveal this value only after replay against the
+-- same complete problem identity succeeds.
+data ValidatedLengthCounterexample = ValidatedLengthCounterexampleReceipt
+  ![Natural]
+  !Natural
+  !LengthCounterexampleBasis
+  deriving (Eq, Ord, Show)
+
+instance NFData ValidatedLengthCounterexample where
+  rnf (ValidatedLengthCounterexampleReceipt inputs result basis) =
+    rnf inputs `seq` rnf result `seq` rnf basis
+
+-- | Source-ordered inputs which make the sealed bad-state formula true.
+validatedLengthCounterexampleInputs
+  :: ValidatedLengthCounterexample
+  -> [Natural]
+validatedLengthCounterexampleInputs
+    (ValidatedLengthCounterexampleReceipt inputs _ _) = inputs
+
+-- | Result computed from the sealed candidate, never supplied by the caller.
+validatedLengthCounterexampleResult
+  :: ValidatedLengthCounterexample
+  -> Natural
+validatedLengthCounterexampleResult
+    (ValidatedLengthCounterexampleReceipt _ result _) = result
+
+-- | Whether replay was provider-independent or conditional on named laws.
+validatedLengthCounterexampleBasis
+  :: ValidatedLengthCounterexample
+  -> LengthCounterexampleBasis
+validatedLengthCounterexampleBasis
+    (ValidatedLengthCounterexampleReceipt _ _ basis) = basis
 
 -- | Classify one concrete contract assignment.  Arity is checked before any
 -- value, inputs are bounded left-to-right before the result, and a false
@@ -234,6 +327,69 @@ evaluateLengthProviderApplication limits summary rawArguments = do
     case indexNatural position observed of
       Just (Just value) -> Right value
       _ -> Left $ LengthEvaluationInternalProviderReference variable
+
+-- | Independently validate decoded inputs against one exact candidate
+-- problem.  The checked precondition is evaluated first.  A false
+-- precondition is an ordinary non-counterexample and does not force the
+-- candidate result.  Otherwise one shared lazy result computation is bound
+-- while evaluating the checked postcondition.  A result-independent true
+-- postcondition does not force it; a false postcondition forces it before
+-- constructing a problem-bound evidence receipt.
+--
+-- In particular, this function does not consume a raw solver observation and
+-- cannot strengthen @unsat@ or @unknown@.  A satisfiable model remains a hint
+-- until its decoded natural inputs pass this replay boundary.
+validateLengthProblemCounterexample
+  :: LengthEvaluationLimits
+  -> CheckedLengthProblem identity local
+  -> LengthProblemAssignment
+  -> Either LengthEvaluationError
+      (Maybe
+        (BehavioralEvidence
+          FiniteListSpineLengthV1
+          ValidatedLengthCounterexample))
+validateLengthProblemCounterexample limits problem assignment = do
+  inputs <- exactAssignment
+    LengthProblemAssignmentArityMismatch
+    (checkedLengthProblemInputCount problem)
+    $ lengthProblemAssignmentInputs assignment
+  mapM_ (uncurry $ checkAssignedValue limits . LengthProblemInputValue)
+    $ zip [0 ..] inputs
+  let lookupInput variable = case variable of
+        LengthInput position -> case indexNatural position inputs of
+          Just value -> Right value
+          Nothing -> Left $ LengthEvaluationInternalContractReference variable
+        LengthResult -> Left
+          $ LengthEvaluationInternalContractReference LengthResult
+  precondition <- evaluateFormula limits lookupInput
+    $ checkedLengthProblemPrecondition problem
+  if not precondition
+    then Right Nothing
+    else do
+      let resultOr = evaluateExpression limits lookupInput
+            $ checkedLengthCandidateResult
+            $ checkedLengthProblemCandidate problem
+          lookupResult variable = case variable of
+            LengthResult -> resultOr
+            LengthInput position -> case indexNatural position inputs of
+              Just value -> Right value
+              Nothing -> Left
+                $ LengthEvaluationInternalContractReference variable
+      postcondition <- evaluateFormula limits lookupResult
+        $ checkedLengthProblemPostcondition problem
+      if postcondition
+        then Right Nothing
+        else do
+          result <- resultOr
+          let usedProviders = checkedLengthCandidateUsedProviders
+                $ checkedLengthProblemCandidate problem
+              basis = case usedProviders of
+                [] -> ProviderIndependentFiniteSpineModel
+                names -> FiniteSpineModelUnderAssumedProviderLaws names
+              receipt = ValidatedLengthCounterexampleReceipt
+                inputs result basis
+          pure $ Just $ mkBehavioralEvidence
+            (checkedLengthProblemBehavioralProblem problem) receipt
 
 exactAssignment
   :: (Int -> Int -> LengthEvaluationError)

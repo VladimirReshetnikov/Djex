@@ -131,10 +131,10 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Diagnostic` | Severity, stable code, checked source locations/spans, ordered context, and deterministic rendering. |
 | `Language.Haskell.Synthesis.Fingerprint` | Public inspection of opaque, nominal, collision-free canonical identities; construction and byte budgets remain package-private. |
 | `Language.Haskell.Synthesis.Semantic.Length` | Exact inventory-bound finite-spine contexts, normalized contracts, source-bound assumed provider laws, and model-aware fingerprints. |
-| `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked contracts and provider transfers for one concrete natural-number assignment; results carry no evidence authority. |
+| `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked contracts, provider transfers, and exact candidate problems; only independently validated model-relative violations receive problem-bound evidence with an explicit provider-assumption basis. |
 | `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and typed-candidate behavioral problems: exact context resealing, residual rejection, rigid root/provider authorization, lazy symbolic length interpretation, normalized counterexample formulas, and separate inventory/encoding/candidate/problem identities. |
 | `Language.Haskell.Synthesis.Semantic.Observation` | Raw three-valued solver and four-valued behavioral reports without candidate association or evidence claims. |
-| `Language.Haskell.Synthesis.Semantic.Problem` | Bounded raw artifacts associated with exact domain, inventory, encoding, candidate, and problem identities; every raw result is restricted to heuristic ranking, while authoritative evidence has only a future private construction seam. |
+| `Language.Haskell.Synthesis.Semantic.Problem` | Bounded raw artifacts associated with exact domain, inventory, encoding, candidate, and problem identities; every raw result is restricted to heuristic ranking, while domain-owned authoritative evidence has only a private construction seam. |
 | `Language.Haskell.Synthesis.Generated` | Scope-aware expressions, patterns, clauses, holes, mixed term/type application spines, bottom-up rewriting, simplification, alpha-equivalence, substitution, and Haskell rendering through the common qualification policy. |
 | `Language.Haskell.Synthesis.TypedGenerated` | Bounded typed candidate graphs with stable node, source-occurrence, and certificate identities; checked application and visible-specialization witnesses; a neutral sealing pass; exact graph metrics; and one-way projection to `Generated`. |
 | `Language.Haskell.Synthesis.TypedGenerated.Fingerprint` | Bounded, allocation- and alpha-insensitive structural identities for shared typed graphs, after resealing with the shared type checker; certificate- and constructor-schema-dependent graphs fail closed until their semantic authorities exist. |
@@ -152,9 +152,10 @@ limits before a solver or behavioral report can be associated with that exact
 tuple. Replay compares domain, inventory, encoding, candidate, and complete
 problem in that order and rejects the first mismatch. Even an `unsat` report is
 only relative to its encoding and grants `HeuristicRankingOnly`. The opaque
-`BehavioralEvidence` seam has no public constructor or raw-report conversion;
-a later authoritative checker must bind its own receipt to the same identities,
-and a public consumer can recover that receipt only through successful replay.
+`BehavioralEvidence` seam has no public constructor or raw-report conversion.
+Domain-owned checkers may bind independently replayed receipts to the same
+identities, and a public consumer can recover a receipt only through successful
+replay against the exact problem.
 
 `Generated` separates backend-local identity from structural global `Name`s.
 Its checked `DefinitionName` narrows top-level output names once, and its scope

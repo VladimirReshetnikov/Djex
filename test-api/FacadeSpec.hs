@@ -426,8 +426,40 @@ facadeTests = testGroup "public Djex facade"
             :: CheckedLengthProblem Int ExferenceLocal
             -> BehavioralProblem FiniteListSpineLengthV1
           problemProjection = checkedLengthProblemBehavioralProblem
+          inputCountProjection
+            :: CheckedLengthProblem Int ExferenceLocal
+            -> Int
+          inputCountProjection = checkedLengthProblemInputCount
+          preconditionProjection
+            :: CheckedLengthProblem Int ExferenceLocal
+            -> LengthFormula LengthContractVariable
+          preconditionProjection = checkedLengthProblemPrecondition
+          postconditionProjection
+            :: CheckedLengthProblem Int ExferenceLocal
+            -> LengthFormula LengthContractVariable
+          postconditionProjection = checkedLengthProblemPostcondition
+          basisProjection
+            :: ValidatedLengthCounterexample
+            -> LengthCounterexampleBasis
+          basisProjection = validatedLengthCounterexampleBasis
+          counterexampleValidator
+            :: LengthEvaluationLimits
+            -> CheckedLengthProblem Int ExferenceLocal
+            -> LengthProblemAssignment
+            -> Either LengthEvaluationError
+                (Maybe
+                  (BehavioralEvidence
+                    FiniteListSpineLengthV1
+                    ValidatedLengthCounterexample))
+          counterexampleValidator = validateLengthProblemCounterexample
       sealer `seq` candidateResultProjection `seq` problemProjection `seq`
-        pure ()
+        inputCountProjection `seq` preconditionProjection `seq`
+        postconditionProjection `seq` basisProjection `seq`
+        counterexampleValidator `seq` pure ()
+      lengthProblemAssignmentInputs (LengthProblemAssignment [1, 2]) @?=
+        [1, 2]
+      (ProviderIndependentFiniteSpineModel :: LengthCounterexampleBasis) @?=
+        ProviderIndependentFiniteSpineModel
       lengthProblemTermGraphLimits defaultLengthProblemLimits @?=
         defaultTermGraphLimits
       lengthProblemGraphFingerprintByteLimit defaultLengthProblemLimits @?=

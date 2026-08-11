@@ -12,8 +12,19 @@ import Test.Tasty.HUnit ((@?=), assertBool, assertEqual, testCase)
 import Language.Haskell.Exference.Core.Candidate
   ( emptyExferenceSourceTypeVariableHints )
 import Language.Haskell.Exference.Core.ConstraintSolver (filterUnresolved)
-import Language.Haskell.Exference.Core.Expression (Expression (..))
-import Language.Haskell.Exference.Core.ExpressionCheck (checkExpression)
+import Language.Haskell.Exference.Core.Expression
+  ( Expression (..), toGeneratedExpression )
+import Language.Haskell.Exference.Core.ExferenceStats (ExferenceStats (..))
+import Language.Haskell.Exference.Core.Internal.ExpressionCheck
+  ( CheckedExpressionEvidence
+  , ExferenceTermGraphAbsence (..)
+  , ExferenceTermGraphAvailability (..)
+  , ExferenceTermGraphConstructionLimit (..)
+  , checkedExpressionTermGraph
+  , checkExpression
+  , checkExpressionInContextWithNestedRigidProvenanceEvidence
+  , prepareExpressionCheckContext
+  )
 import Language.Haskell.Exference.Core.FunctionBinding
   ( ConstructorBinding (..)
   , DeconstructorBinding (..)
@@ -39,6 +50,7 @@ import Language.Haskell.Exference.Core.Internal.Polytype
 import Language.Haskell.Exference.Core.Internal.RigidScope
   ( RigidEscape (..)
   , emptyRigidScope
+  , nestedRigidProvenance
   , registerRigidScope
   , validateRigidSubstitutions
   )
@@ -48,12 +60,16 @@ import Language.Haskell.Exference.Core.Internal.VariableSupply
   ( supplyFromIdentifiers )
 import Language.Haskell.Exference.Core.Score (Penalty (..))
 import qualified Language.Haskell.Exference.Core.Score as Score
+import Language.Haskell.Exference.Core.RigidInstantiation
+  ( mkRigidInstantiationContext, planRigidInstantiation )
 import Language.Haskell.Exference.Core.Types
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
+import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
+import qualified Language.Haskell.Synthesis.TypedGenerated as Typed
 
 main :: IO ()
 main = defaultMain tests
@@ -752,6 +768,336 @@ tests = testGroup "Exference private engine boundaries"
       assertEqual "near-saturation accumulation order"
         (complexity nearSaturation legacy)
         (complexity nearSaturation structural)
+  , testCase "checker seals exact context-free visible specialization evidence" $ do
+      let integer = TypeCons $ name "Int"
+          provider = TypeForall [0] []
+            $ TypeArrow (TypeVar 0) (TypeVar 0)
+          result = TypeArrow integer integer
+          goal = TypeArrow provider result
+      argument <- expectRight $ Generated.specifiedVisibleTypeArgument integer
+      let expression = ExpLambda 1 provider
+            $ ExpTypeApply (ExpVar 1 provider) argument
+      evidence <- checkedEvidence emptyStaticClassEnv [] [] goal expression
+      let availability = checkedExpressionTermGraph 23 evidence
+      availability @?= checkedExpressionTermGraph 23 evidence
+      case availability of
+        ExferenceTermGraphUnavailable reason -> fail
+          $ "context-free visible application had no typed graph: "
+          ++ show reason
+        ExferenceTermGraphAvailable graph -> do
+          Typed.eraseTermGraph graph @?=
+            Generated.discardUnusedPatternBindingsBy id
+              (toGeneratedExpression expression)
+          Typed.typedGraphVisibleTypeApplications
+              (Typed.termGraphMetrics graph) @?= 1
+          let witnesses =
+                [ witness
+                | (_, Typed.TermNode _
+                    (Typed.TypedVisibleTypeApplication _ _ _ witness)) <-
+                      Typed.termGraphNodes graph
+                ]
+          witnesses @?=
+            [Typed.TypeApplicationWitness provider integer result Nothing]
+          case checkedExpressionTermGraph 24 evidence of
+            ExferenceTermGraphAvailable distinctGraph -> assertBool
+              "different candidate keys reused one term-node identity"
+              $ Typed.termGraphRoot distinctGraph /= Typed.termGraphRoot graph
+            ExferenceTermGraphUnavailable reason -> fail
+              $ "changing only the candidate key lost the graph: " ++ show reason
+  , testCase "final zonking seals a multi-binder inferred specialization" $ do
+      let integer = TypeCons $ name "Int"
+          boolean = TypeCons $ name "Bool"
+          provider = TypeForall [0, 1] []
+            $ TypeArrow (TypeVar 0)
+            $ TypeArrow (TypeVar 1) (TypeVar 0)
+          expectedRemaining = TypeForall [7] []
+            $ TypeArrow integer
+            $ TypeArrow (TypeVar 7) integer
+          expectedResult = TypeArrow integer
+            $ TypeArrow boolean integer
+      booleanArgument <- expectRight
+        $ Generated.specifiedVisibleTypeArgument boolean
+      let expression = ExpLambda 2 provider
+            $ ExpTypeApply
+                (ExpTypeApply (ExpVar 2 provider)
+                  Generated.inferredVisibleTypeArgument)
+                booleanArgument
+      evidence <- checkedEvidence emptyStaticClassEnv [] []
+        (TypeArrow provider expectedResult) expression
+      case checkedExpressionTermGraph 31 evidence of
+        ExferenceTermGraphUnavailable reason -> fail
+          $ "multi-binder specialization had no typed graph: " ++ show reason
+        ExferenceTermGraphAvailable graph -> do
+          let witnesses =
+                [ witness
+                | (_, Typed.TermNode _
+                    (Typed.TypedVisibleTypeApplication _ _ _ witness)) <-
+                      Typed.termGraphNodes graph
+                ]
+              firstWitnesses =
+                [ witness
+                | witness <- witnesses
+                , SharedTypeAtom.alphaEquivalentTypes
+                    (Typed.typeApplicationSource witness) provider
+                ]
+              secondWitnesses =
+                [ witness
+                | witness <- witnesses
+                , SharedTypeAtom.alphaEquivalentTypes
+                    (Typed.typeApplicationSource witness) expectedRemaining
+                ]
+          case firstWitnesses of
+            [witness] -> do
+              Typed.typeApplicationSelected witness @?= integer
+              assertBool "first visible result lost its remaining binder"
+                $ SharedTypeAtom.alphaEquivalentTypes
+                    (Typed.typeApplicationResult witness) expectedRemaining
+            _ -> fail "missing unique first multi-binder witness"
+          case secondWitnesses of
+            [witness] -> do
+              Typed.typeApplicationSelected witness @?= boolean
+              Typed.typeApplicationResult witness @?= expectedResult
+            _ -> fail "missing unique second multi-binder witness"
+          assertBool "a final visible witness was not a leading instantiation"
+            $ all
+                (\witness -> SharedTypeAtom.isLeadingForallInstantiation
+                  (Typed.typeApplicationSource witness)
+                  (Typed.typeApplicationSelected witness)
+                  (Typed.typeApplicationResult witness))
+                witnesses
+  , testCase "engine batches retain stable candidate-to-graph keying" $ do
+      let integer = TypeCons $ name "Int"
+          leftName = name "engineLeft"
+          rightName = name "engineRight"
+          binding bindingName = FunctionBinding integer bindingName 0 [] []
+          input = identityInput
+            { E.input_goalType = integer
+            , E.input_envFuncs = [binding leftName, binding rightName]
+            , E.input_maxSteps = 20
+            }
+          capacities = IdentifierCapacities 100 100 100 100
+          observe candidates = Map.fromList
+            [ (bindingName, Typed.termNodeIdValue $ Typed.termGraphRoot graph)
+            | (ExpName bindingName, _, ExferenceTermGraphAvailable graph) <-
+                candidates
+            ]
+      firstRun <- expectRight
+        $ findTypedEngineCandidatesWithIdentifierCapacitiesEither
+            capacities input
+      secondRun <- expectRight
+        $ findTypedEngineCandidatesWithIdentifierCapacitiesEither
+            capacities input
+      let first = observe firstRun
+          second = observe secondRun
+      Map.keysSet first @?= Set.fromList [leftName, rightName]
+      first @?= second
+      assertBool "two retained candidates reused one graph root identity"
+        $ Map.lookup leftName first /= Map.lookup rightName first
+  , testCase "engine batches retain impredicative multi-binder graphs" $ do
+      let selected = TypeForall [2] []
+            $ TypeArrow (TypeVar 2) (TypeVar 2)
+          selectedPair = TypeTuple Boxed [selected, selected]
+          provider = TypeForall [0, 1] [] selectedPair
+          input = identityInput
+            { E.input_goalType = TypeArrow provider selectedPair
+            , E.input_envFuncs = []
+            , E.input_maxSteps = 3
+            }
+          capacities = IdentifierCapacities 100 100 100 100
+          visibleWitnesses graph =
+            [ witness
+            | (_, Typed.TermNode _
+                (Typed.TypedVisibleTypeApplication _ _ _ witness)) <-
+                  Typed.termGraphNodes graph
+            ]
+      argument <- expectRight
+        $ Generated.specifiedVisibleTypeArgument selected
+      let expectedExpression = ExpLambda 1 provider
+            $ ExpTypeApply
+                (ExpTypeApply (ExpVar 1 provider) argument) argument
+      candidates <- expectRight
+        $ findTypedEngineCandidatesWithIdentifierCapacitiesEither
+            capacities input
+      let impredicativeGraphs =
+            [ (graph, witnesses)
+            | (expression, _, ExferenceTermGraphAvailable graph) <- candidates
+            , expression == expectedExpression
+            , let witnesses = visibleWitnesses graph
+            , length witnesses == 2
+            , all
+                (\witness -> SharedTypeAtom.alphaEquivalentTypes
+                  (Typed.typeApplicationSelected witness) selected)
+                witnesses
+            ]
+      case impredicativeGraphs of
+        [] -> fail
+          "production search retained no available impredicative multi-binder graph"
+        [(graph, witnesses)] -> do
+          Typed.typedGraphVisibleTypeApplications
+              (Typed.termGraphMetrics graph) @?= 2
+          assertBool "production witness chain is not leading-forall exact"
+            $ all
+                (\witness -> SharedTypeAtom.isLeadingForallInstantiation
+                  (Typed.typeApplicationSource witness)
+                  (Typed.typeApplicationSelected witness)
+                  (Typed.typeApplicationResult witness))
+                witnesses
+        _ -> fail
+          "production search duplicated the exact impredicative candidate"
+  , testCase "typed evidence explains the deliberately unsupported subset" $ do
+      let unit = TypeTuple Boxed []
+          polymorphic = TypeForall [0] [] $ TypeVar 0
+          implicitExpression = ExpLambda 1 polymorphic
+            $ ExpVar 1 $ TypeVar 2
+      implicitEvidence <- checkedEvidence emptyStaticClassEnv [] []
+        (TypeArrow polymorphic unit) implicitExpression
+      expectUnavailable "implicit local specialization"
+        (\reason -> case reason of
+          ImplicitLocalSpecialization{} -> True
+          _ -> False)
+        implicitEvidence
+
+      let distinct = TypeForall [1] []
+            $ TypeArrow (TypeVar 1) (TypeVar 1)
+          subsumedExpression = ExpLambda 1 polymorphic $ ExpVar 1 distinct
+      subsumedEvidence <- checkedEvidence emptyStaticClassEnv [] []
+        (TypeArrow polymorphic distinct) subsumedExpression
+      expectUnavailable "shallow local subsumption"
+        (\reason -> case reason of
+          SubsumedLocalSpecialization{} -> True
+          _ -> False)
+        subsumedEvidence
+
+      let outer = TypeVar 4
+          identityScheme = TypeForall [2] []
+            $ TypeArrow (TypeVar 2) (TypeVar 2)
+          rigidIdentity rigid local = ExpLambda local (TypeConstant rigid)
+            $ ExpVar local $ TypeConstant rigid
+          introducedExpression = ExpLambda 1 (TypeConstant 0)
+            $ rigidIdentity 1 2
+      introducedEvidence <- checkedEvidence emptyStaticClassEnv [] []
+        (TypeArrow outer identityScheme) introducedExpression
+      expectUnavailable "nested forall introduction"
+        (\reason -> case reason of
+          NestedForallIntroduction{} -> True
+          _ -> False)
+        introducedEvidence
+
+      let integer = TypeCons $ name "Int"
+          boxName = name "Box"
+          box argument = TypeApp (TypeCons boxName) argument
+          boxDeconstructor = DeconstructorBinding (box $ TypeVar 0)
+            [ConstructorBinding boxName [TypeVar 0]] False
+          matchedExpression = ExpLambda 1 (box integer)
+            $ ExpLetMatch boxName [(2, integer)]
+                (ExpVar 1 $ box integer)
+                (ExpVar 2 integer)
+      patternEvidence <- checkedEvidence emptyStaticClassEnv []
+        [boxDeconstructor] (TypeArrow (box integer) integer)
+        matchedExpression
+      expectUnavailable "nominal constructor pattern"
+        (\reason -> case reason of
+          NominalConstructorPattern{} -> True
+          _ -> False)
+        patternEvidence
+
+      pairName <- expectRight $ SharedName.tupleName Boxed 2
+      let pairType = TypeTuple Boxed [integer, integer]
+          tupleExpression = ExpLambda 1 pairType
+            $ ExpLetMatch pairName [(2, integer), (3, integer)]
+                (ExpVar 1 pairType)
+                (ExpVar 2 integer)
+      tupleEvidence <- checkedEvidence emptyStaticClassEnv [] []
+        (TypeArrow pairType integer) tupleExpression
+      expectUnavailable "structural tuple pattern"
+        (\reason -> case reason of
+          UnsupportedStructuralConstructorPattern{} -> True
+          _ -> False)
+        tupleEvidence
+
+      let className = name "C"
+          token = TypeCons $ name "Token"
+          constraint ty = HsConstraint className [ty]
+          contextualProvider = TypeForall [0]
+            [constraint $ TypeVar 0] token
+      contextualClasses <- expectRight $ mkStaticClassEnv
+        [HsTypeClass className [0] []]
+        [HsInstance [] $ constraint integer]
+      integerArgument <- expectRight
+        $ Generated.specifiedVisibleTypeArgument integer
+      let contextualExpression = ExpLambda 1 contextualProvider
+            $ ExpTypeApply (ExpVar 1 contextualProvider) integerArgument
+      contextualEvidence <- checkedEvidence contextualClasses [] []
+        (TypeArrow contextualProvider token) contextualExpression
+      expectUnavailable "contextual visible application"
+        (\reason -> case reason of
+          UnsupportedContextualVisibleApplication{} -> True
+          _ -> False)
+        contextualEvidence
+
+      let layeredContextualProvider = TypeForall [] [constraint integer]
+            $ TypeForall [0, 1] []
+            $ TypeArrow (TypeVar 0) (TypeVar 1)
+          layeredContextualResult = TypeForall [] [constraint integer]
+            $ TypeForall [1] []
+            $ TypeArrow integer (TypeVar 1)
+          layeredContextualExpression = ExpLambda 1 layeredContextualProvider
+            $ ExpTypeApply
+                (ExpVar 1 layeredContextualProvider) integerArgument
+      layeredContextualEvidence <- checkedEvidence contextualClasses [] []
+        (TypeArrow layeredContextualProvider layeredContextualResult)
+        layeredContextualExpression
+      case checkedExpressionTermGraph 37 layeredContextualEvidence of
+        ExferenceTermGraphUnavailable
+            (UnsupportedContextualVisibleApplication source selected result) -> do
+            assertBool "layered source changed before classification"
+              $ SharedTypeAtom.alphaEquivalentTypes
+                  source layeredContextualProvider
+            selected @?= integer
+            assertBool "layered result lost its remaining binder"
+              $ SharedTypeAtom.alphaEquivalentTypes
+                  result layeredContextualResult
+        ExferenceTermGraphUnavailable reason -> fail
+          $ "layered contextual application had the wrong reason: "
+          ++ show reason
+        ExferenceTermGraphAvailable _ -> fail
+          "layered contextual application unexpectedly produced a graph"
+  , testCase "typed evidence reports sealing and projection mismatches" $ do
+      let integer = TypeCons $ name "Int"
+          seedName = name "seed"
+          seed = FunctionBinding integer seedName 0 [] []
+          oversizedExpression = foldr
+            (\variable body -> ExpLet variable integer
+              (ExpName seedName) body)
+            (ExpName seedName)
+            [1 .. 2050]
+      oversizedEvidence <- checkedEvidence emptyStaticClassEnv [seed] []
+        integer oversizedExpression
+      expectUnavailable "graph node limit"
+        (\reason -> case reason of
+          TermGraphConstructionLimit
+              (TermGraphConstructionNodeLimitExceeded 4096 4097) -> True
+          _ -> False)
+        oversizedEvidence
+
+      let deepType = foldr TypeArrow integer $ replicate 2050 integer
+          deepName = name "deep"
+          deep = FunctionBinding deepType deepName 0 [] []
+      deepEvidence <- checkedEvidence emptyStaticClassEnv [deep] []
+        deepType $ ExpName deepName
+      expectUnavailable "typed-graph type sealing"
+        (\reason -> case reason of
+          TermGraphSealingFailure
+              (Typed.TermGraphTypeNodeLimitExceeded
+                (Typed.GraphTermNodeType _) 4096 4097) -> True
+          _ -> False)
+        deepEvidence
+
+      let unusedExpression = ExpLambda 1 integer $ ExpName seedName
+      unusedEvidence <- checkedEvidence emptyStaticClassEnv [seed] []
+        (TypeArrow integer integer) unusedExpression
+      expectUnavailable "unused-binder compatibility projection"
+        (== TermGraphProjectionMismatch) unusedEvidence
   , testCase "query-result projection preserves its envelope lazily" $ do
       targetName <- expectRight $ SharedName.mkOperator "<~>"
       target <- expectRight $ Generated.mkDefinitionName targetName
@@ -763,6 +1109,17 @@ tests = testGroup "Exference private engine boundaries"
       progress @?= SharedSearch.Continuing
       observedMetadata @?= metadata
       observedTarget @?= target
+      let (compatibilityStatus, compatibilityExpression,
+            compatibilityConstraints, compatibilityStatistics) =
+              compatibilityProjectionStrictnessForTesting
+          compatibilityExpected = ExpLambda 1 (TypeVar 0)
+            $ ExpVar 1 $ TypeVar 0
+      compatibilityStatus @?=
+        E.SearchStatus E.SearchRunning 2 3
+      assertBool "compatibility projection changed the candidate expression"
+        $ compatibilityExpression == compatibilityExpected
+      compatibilityConstraints @?= []
+      compatibilityStatistics @?= ExferenceStats 1 0 0
   ]
 
 identityInput :: E.ExferenceInput
@@ -822,6 +1179,36 @@ lastResult results = case results of
 lastElement :: value -> [value] -> value
 lastElement latest [] = latest
 lastElement _ (next : remaining) = lastElement next remaining
+
+checkedEvidence
+  :: StaticClassEnv
+  -> [FunctionBinding]
+  -> [DeconstructorBinding]
+  -> HsType
+  -> Expression
+  -> IO CheckedExpressionEvidence
+checkedEvidence classes functions deconstructors goal expression = do
+  plan <- expectRight $ planRigidInstantiation
+    (mkRigidInstantiationContext
+      $ EnvDictionary functions deconstructors classes)
+    [] goal
+  context <- expectRight $ prepareExpressionCheckContext plan
+    (mkQueryClassEnv classes []) functions deconstructors goal
+  expectRight $ checkExpressionInContextWithNestedRigidProvenanceEvidence
+    context (nestedRigidProvenance emptyRigidScope) [] expression
+
+expectUnavailable
+  :: String
+  -> (ExferenceTermGraphAbsence -> Bool)
+  -> CheckedExpressionEvidence
+  -> IO ()
+expectUnavailable label matches evidence =
+  case checkedExpressionTermGraph 23 evidence of
+    ExferenceTermGraphUnavailable reason
+      | matches reason -> pure ()
+      | otherwise -> fail $ label ++ ": wrong absence: " ++ show reason
+    ExferenceTermGraphAvailable graph ->
+      fail $ label ++ ": unexpectedly sealed: " ++ show graph
 
 checkedIdentifierTarget :: String -> IO Generated.DefinitionName
 checkedIdentifierTarget spelling = do

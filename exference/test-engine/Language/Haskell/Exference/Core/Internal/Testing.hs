@@ -7,8 +7,10 @@
 module Language.Haskell.Exference.Core.Internal.Testing
   ( IdentifierCapacities (..)
   , findExpressionsWithIdentifierCapacitiesEither
+  , findTypedEngineCandidatesWithIdentifierCapacitiesEither
   , findQueryResultsWithIdentifierCapacitiesEither
   , queryProjectionStrictnessForTesting
+  , compatibilityProjectionStrictnessForTesting
   , singleOptionValidationStrictnessForTesting
   , compatibilityPruningCount
   , compatibilityBindingUsageCounts
@@ -24,6 +26,10 @@ import qualified Data.PQueue.Prio.Max as Q
 import Numeric.Natural (Natural)
 
 import qualified Language.Haskell.Exference.Core.Internal.Exference as E
+import Language.Haskell.Exference.Core.Expression (Expression)
+import Language.Haskell.Exference.Core.ExferenceStats (ExferenceStats)
+import Language.Haskell.Exference.Core.Internal.ExpressionCheck
+  ( ExferenceTermGraphAvailability )
 import Language.Haskell.Exference.Core.Candidate
   ( ExferenceSourceTypeVariableHints
   , ExferenceTypeVariableHints
@@ -32,7 +38,7 @@ import Language.Haskell.Exference.Core.Name (QualifiedName)
 import Language.Haskell.Exference.Core.Internal.Options
   ( ExferenceHeuristicsConfig )
 import Language.Haskell.Exference.Core.Score (Penalty)
-import Language.Haskell.Exference.Core.Types (HsType)
+import Language.Haskell.Exference.Core.Types (HsConstraint, HsType)
 import Language.Haskell.Exference.Core.Internal.VariableSupply
   ( identifierSupplySize )
 import Language.Haskell.Exference.Core.RigidInstantiation
@@ -64,6 +70,18 @@ findExpressionsWithIdentifierCapacitiesEither capacities input = do
   pure $ E.findExpressionsWithAllocators
     (finiteSearchAllocators capacities) checked
 
+-- | Retain the exact private engine-candidate association instead of passing
+-- through either legacy projection.
+findTypedEngineCandidatesWithIdentifierCapacitiesEither
+  :: IdentifierCapacities
+  -> E.ExferenceInput
+  -> Either E.ExferenceInputError
+      [(Expression, ExferenceStats, ExferenceTermGraphAvailability)]
+findTypedEngineCandidatesWithIdentifierCapacitiesEither capacities input = do
+  checked <- E.prepareExferenceInput input
+  pure $ E.findEngineCandidatesWithAllocatorsForTesting
+    (finiteSearchAllocators capacities) checked
+
 -- | Exercise the canonical result path with bounded internal namespaces.
 -- Unlike the compatibility-input helpers above, this retains the checked
 -- definition target and shared logical-evidence envelope.
@@ -88,6 +106,15 @@ queryProjectionStrictnessForTesting
      , DefinitionName
      )
 queryProjectionStrictnessForTesting = E.queryProjectionStrictnessForTesting
+
+compatibilityProjectionStrictnessForTesting
+  :: ( E.SearchStatus
+     , Expression
+     , [HsConstraint]
+     , ExferenceStats
+     )
+compatibilityProjectionStrictnessForTesting =
+  E.compatibilityProjectionStrictnessForTesting
 
 -- | Check options, poison the original public query field, and enter the
 -- package-private checked-options runner. Success proves that preparation

@@ -6,12 +6,14 @@
 module Language.Haskell.Exference.Core.Internal.Exference
   ( findExpressions
   , findExpressionsWithAllocators
+  , findEngineCandidatesWithAllocatorsForTesting
   , findQueryResultsInEnvironmentEither
   , findQueryResultsInEnvironmentWithCheckedOptions
   , findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
   , findQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
   , findQueryResultsWithAllocators
   , queryProjectionStrictnessForTesting
+  , compatibilityProjectionStrictnessForTesting
   , prepareExferenceInput
   , prepareExferenceQuery
   , ExferenceInput (..)
@@ -58,7 +60,7 @@ import Language.Haskell.Exference.Core.Internal.Candidate
   , projectValidatedCandidate
   , typeVariableHintsWithPlan
   )
-import Language.Haskell.Exference.Core.ExpressionCheck
+import Language.Haskell.Exference.Core.Internal.ExpressionCheck
 import Language.Haskell.Exference.Core.Score
 import Language.Haskell.Exference.Core.ExferenceStats
 import Language.Haskell.Exference.Core.FunctionBinding
@@ -339,7 +341,19 @@ data ExferenceChunkElement = ExferenceChunkElement
 -- Keep the constructor private so the total canonical projector cannot be
 -- applied accidentally before type, scope, completeness, and syntax checks.
 data ValidatedEngineCandidate = ValidatedEngineCandidate
-  Expression [HsConstraint] ExferenceStats
+  Expression
+  [HsConstraint]
+  ExferenceStats
+  ExferenceTermGraphAvailability
+
+-- Stable within one deterministic query trace: the engine step identifies the
+-- producing batch and the pre-filter branch index identifies the candidate.
+candidateIdentity :: Int -> Natural -> Natural
+candidateIdentity step branch = pairNatural (fromIntegral $ max 0 step) branch
+ where
+  pairNatural left right = ((sum' * (sum' + 1)) `div` 2) + right
+   where
+    sum' = left + right
 
 -- The engine stores the lossless shared batch natively. Historical chunks are
 -- a saturating compatibility projection, never an intermediate authority for
@@ -587,7 +601,8 @@ findEngineBatchesWith allocators
           (ExferenceStats n' d
             $ SharedCount.saturatingNaturalToInt
             $ queueSizeNatural newNodes)
-      | solution <- potentialSolutions
+          typedGraphAvailability
+      | (solutionIndex, solution) <- zip [0 ..] potentialSolutions
       , let contxt = nodeQueryClassEnv solution
       , remainingScopedConstraints <- maybeToList
           $ resolveScopedConstraints filterUnresolved contxt
@@ -605,8 +620,10 @@ findEngineBatchesWith allocators
         -- output. Otherwise the solution is discarded.
       , allowUnused || unusedVarCount==0
       , rawExpression <- [nodeExpression solution]
-      , e <- maybeToList $ checkedSimplification
+      , (e, checkedEvidence) <- maybeToList $ checkedSimplification
           (nodeRigidScope solution) remainingConstraints rawExpression
+      , let typedGraphAvailability = checkedExpressionTermGraph
+              (candidateIdentity n' solutionIndex) checkedEvidence
       , let d = normalizePenalty $ sumScores
               [ nodeDepth solution
               , multiplyScore (heuristics_unusedVar heuristics)
@@ -656,10 +673,10 @@ findEngineBatchesWith allocators
         firstChecked _ _ [] = Nothing
         firstChecked candidateScope context
             (candidate : remainingCandidates) =
-          case checkExpressionInContextWithNestedRigidProvenance
+          case checkExpressionInContextWithNestedRigidProvenanceEvidence
               context (nestedRigidProvenance candidateScope)
               constraints candidate of
-            Right () -> Just candidate
+            Right evidence -> Just (candidate, evidence)
             Left _ -> firstChecked candidateScope context remainingCandidates
   helper :: FindExpressionsState -> Maybe (EngineBatch, FindExpressionsState)
   helper searchState | findSteps searchState >= maxSteps = Nothing
@@ -748,6 +765,20 @@ findExpressionsWithAllocators
 findExpressionsWithAllocators allocators' =
   map projectCompatibilityChunk . findEngineBatchesWith allocators'
 
+-- | Closed test observation of the exact association retained by the private
+-- engine candidate. Unlike either public projector, this reads the typed graph
+-- field produced inside 'transformSolutions'.
+findEngineCandidatesWithAllocatorsForTesting
+  :: SearchAllocators
+  -> CheckedExferenceQuery
+  -> [(Expression, ExferenceStats, ExferenceTermGraphAvailability)]
+findEngineCandidatesWithAllocatorsForTesting allocators' =
+  concatMap (map observe . SharedSearch.batchCandidates)
+    . findEngineBatchesWith allocators'
+ where
+  observe (ValidatedEngineCandidate expression _ statistics availability) =
+    (expression, statistics, availability)
+
 projectCompatibilityChunk :: EngineBatch -> ExferenceChunkElement
 projectCompatibilityChunk chunk = ExferenceChunkElement
   compatibilityStatus
@@ -771,7 +802,7 @@ projectCompatibilityChunk chunk = ExferenceChunkElement
       | otherwise -> SearchPruned
 
   projectCompatibilityCandidate
-    (ValidatedEngineCandidate expression constraints statistics) =
+    (ValidatedEngineCandidate expression constraints statistics _) =
       (expression, constraints, statistics)
 
 -- | Project exact engine totals into the historical chunk API without
@@ -916,7 +947,7 @@ projectQueryResult target typeHints =
     . fmap projectCandidate
  where
   projectCandidate
-      (ValidatedEngineCandidate candidateExpression constraints statistics) =
+      (ValidatedEngineCandidate candidateExpression constraints statistics _) =
     projectValidatedCandidate
       target typeHints candidateExpression constraints statistics
 
@@ -950,12 +981,43 @@ queryProjectionStrictnessForTesting target typeHints =
   validResult = projectQueryResult target typeHints
     $ SharedSearch.SearchBatch SharedSearch.Continuing metadata
       ( ValidatedEngineCandidate expression [] (ExferenceStats 1 0 0)
+          (error "query projection forced typed graph availability")
       : error "query projection forced the mapped candidate tail"
       )
   firstCandidate = case SharedSearch.batchCandidates
       $ SharedQuery.resultSearch validResult of
     candidate : _ -> candidate
     [] -> error "query projection lost a present candidate"
+
+-- | Compatibility counterpart to 'queryProjectionStrictnessForTesting'. The
+-- observations force the projected candidate head while the retained typed
+-- graph field and candidate tail remain poisoned.
+compatibilityProjectionStrictnessForTesting
+  :: (SearchStatus, Expression, [HsConstraint], ExferenceStats)
+compatibilityProjectionStrictnessForTesting =
+  ( chunkStatus poisonedChunk
+  , observedExpression
+  , observedConstraints
+  , observedStatistics
+  )
+ where
+  metadata = ExferenceBatchMetadata M.empty 2 3
+  poisonedChunk = projectCompatibilityChunk
+    $ SharedSearch.SearchBatch SharedSearch.Continuing metadata
+      ( error "compatibility projection forced a candidate head"
+      : error "compatibility projection forced a candidate tail"
+      )
+  expression = ExpLambda 1 (TypeVar 0) (ExpVar 1 $ TypeVar 0)
+  validChunk = projectCompatibilityChunk
+    $ SharedSearch.SearchBatch SharedSearch.Continuing metadata
+      ( ValidatedEngineCandidate expression [] (ExferenceStats 1 0 0)
+          (error "compatibility projection forced typed graph availability")
+      : error "compatibility projection forced the mapped candidate tail"
+      )
+  (observedExpression, observedConstraints, observedStatistics) =
+    case chunkElements validChunk of
+      candidate : _ -> candidate
+      [] -> error "compatibility projection lost a present candidate"
 
 constraintsRelaxedAtStep :: Bool -> Int -> Int -> Bool
 constraintsRelaxedAtStep allowConstraints stopStep currentStep =

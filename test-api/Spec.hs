@@ -216,7 +216,9 @@ main = defaultMain $ testGroup "Djex downstream API"
                     )
                   ) ||
                   ( "Couldn't match type" `isInfixOf` message &&
-                    "forbiddenFingerprintCoercion" `isInfixOf` message
+                    ( "forbiddenFingerprintCoercion" `isInfixOf` message ||
+                      "forbiddenTypedCandidateCoercion" `isInfixOf` message
+                    )
                   )
             assertBool
               (description ++ " raised an unrelated exception: " ++ message)

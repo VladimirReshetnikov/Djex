@@ -331,6 +331,14 @@ facadeTests = testGroup "public Djex facade"
           metadataProjection
             :: ExferenceResult -> ExferenceBatchMetadata
           metadataProjection = batchMetadata . resultSearch
+          typedCompatibilityProjection
+            :: ExferenceTypedCandidate -> ExferenceCandidate
+          typedCompatibilityProjection = typedCandidateCompatibility
+          typedGraphProjection
+            :: ExferenceTypedCandidate
+            -> Either ExferenceTermGraphAbsence
+                (TermGraph ExferenceType ExferenceLocal)
+          typedGraphProjection = typedCandidateTermGraph
           providerEvidenceProjection
             :: ProviderInstantiationCandidate String
             -> (Name, Type String)
@@ -378,6 +386,18 @@ facadeTests = testGroup "public Djex facade"
             -> Either Diagnostic [ExferenceResult]
           exferenceEvidenceRunner =
             runExferenceQueryWithInstantiationCandidates
+          exferenceTypedRunner
+            :: ExferenceSession
+            -> ExferenceRequest
+            -> Either Diagnostic [ExferenceTypedResult]
+          exferenceTypedRunner = runExferenceTypedQuery
+          exferenceTypedEvidenceRunner
+            :: ExferenceSession
+            -> [ProviderInstantiationCandidate ExferenceTypeVariable]
+            -> ExferenceRequest
+            -> Either Diagnostic [ExferenceTypedResult]
+          exferenceTypedEvidenceRunner =
+            runExferenceTypedQueryWithInstantiationCandidates
           exferenceAssignmentRunner
             :: ExferenceSession
             -> [ProviderInstantiationAssignment ExferenceTypeVariable]
@@ -385,6 +405,13 @@ facadeTests = testGroup "public Djex facade"
             -> Either Diagnostic [ExferenceResult]
           exferenceAssignmentRunner =
             runExferenceQueryWithInstantiationAssignments
+          exferenceTypedAssignmentRunner
+            :: ExferenceSession
+            -> [ProviderInstantiationAssignment ExferenceTypeVariable]
+            -> ExferenceRequest
+            -> Either Diagnostic [ExferenceTypedResult]
+          exferenceTypedAssignmentRunner =
+            runExferenceTypedQueryWithInstantiationAssignments
           exferenceKindedAssignmentRunner
             :: ExferenceSession
             -> [KindedProviderInstantiationAssignment ExferenceTypeVariable]
@@ -392,12 +419,20 @@ facadeTests = testGroup "public Djex facade"
             -> Either Diagnostic [ExferenceResult]
           exferenceKindedAssignmentRunner =
             runExferenceQueryWithKindedInstantiationAssignments
+          exferenceTypedKindedAssignmentRunner
+            :: ExferenceSession
+            -> [KindedProviderInstantiationAssignment ExferenceTypeVariable]
+            -> ExferenceRequest
+            -> Either Diagnostic [ExferenceTypedResult]
+          exferenceTypedKindedAssignmentRunner =
+            runExferenceTypedQueryWithKindedInstantiationAssignments
       djinnTypeProjection `seq` djinnRequestProjection `seq`
         djinnCandidateProjection `seq` djinnEnvironmentProjection `seq`
         inventoryProjection `seq`
         sessionEnvironmentProjection `seq`
         environmentProjection `seq`
         requestProjection `seq` candidateProjection `seq`
+        typedCompatibilityProjection `seq` typedGraphProjection `seq`
         residualRendererProjection `seq`
         qualifiedResidualRendererProjection `seq`
         metadataProjection `seq` providerEvidenceProjection `seq`
@@ -405,14 +440,95 @@ facadeTests = testGroup "public Djex facade"
         kindedProviderAssignmentProjection `seq`
         djinnEvidenceRunner `seq` djinnAssignmentRunner `seq`
         djinnKindedAssignmentRunner `seq`
-        exferenceEvidenceRunner `seq` exferenceAssignmentRunner `seq`
-        exferenceKindedAssignmentRunner `seq` pure ()
+        exferenceEvidenceRunner `seq` exferenceTypedRunner `seq`
+        exferenceTypedEvidenceRunner `seq` exferenceAssignmentRunner `seq`
+        exferenceTypedAssignmentRunner `seq`
+        exferenceKindedAssignmentRunner `seq`
+        exferenceTypedKindedAssignmentRunner `seq` pure ()
       mkDjinnRequest `seq` mkExferenceSession `seq`
         mkExferenceSessionWithPolicy `seq` pure ()
       maximumProviderInstantiationCandidates @?= 32
       maximumProviderInstantiationAssignments @?= 32
       maximumProviderInstantiationArguments @?= 6
       maximumProviderInstantiationKindNodes @?= 129
+  , testCase "retains checked Exference graphs beside exact legacy results" $ do
+      environment <- expectRight
+        (mkEnvironment [] ::
+          Either (EnvironmentError ExferenceTypeVariable)
+            ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      targetName <- expectRight $ mkIdentifier "typedIdentity"
+      target <- expectRight $ mkDefinitionName targetName
+      let variable = FlexibleVariable 0
+          goal = FunctionType (TypeVariable variable)
+            (TypeVariable variable)
+          query = QueryRequest
+            { requestTarget = target
+            , requestGoal = goal
+            , requestContexts = []
+            , requestOptions = defaultExferenceOptions
+                { exferenceMaximumSteps = 4 }
+            }
+      request <- expectRight $ mkExferenceRequest query
+      typedResults <- expectRight $ runExferenceTypedQuery session request
+      legacyResults <- expectRight $ runExferenceQuery session request
+      map (fmap typedCandidateCompatibility) typedResults @?= legacyResults
+      repeated <- expectRight $ runExferenceTypedQuery session request
+      typedResults @?= repeated
+      case
+          [ candidate
+          | result <- typedResults
+          , candidate <- batchCandidates $ resultSearch result
+          ] of
+        [] -> fail "the identity query returned no typed candidate"
+        candidate : _ -> case typedCandidateTermGraph candidate of
+          Left absence -> fail $ "the identity graph was unavailable: "
+            ++ show absence
+          Right graph -> do
+            eraseTermGraphToFunctionClause target graph @?=
+              candidateOutput (typedCandidateCompatibility candidate)
+            assertBool "the typed graph lost source occurrence identities"
+              $ typedGraphSourceOccurrences (termGraphMetrics graph) > 0
+  , testCase "retains explicit typed fallback without weakening evidence" $ do
+      environment <- expectRight
+        (mkEnvironment [] ::
+          Either (EnvironmentError ExferenceTypeVariable)
+            ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      targetName <- expectRight $ mkIdentifier "typedForallIdentity"
+      target <- expectRight $ mkDefinitionName targetName
+      let outerVariable = FlexibleVariable 0
+          nestedVariable = FlexibleVariable 1
+          goal = FunctionType (TypeVariable outerVariable)
+            $ ForallType [nestedVariable] []
+            $ FunctionType (TypeVariable nestedVariable)
+                (TypeVariable nestedVariable)
+          query = QueryRequest
+            { requestTarget = target
+            , requestGoal = goal
+            , requestContexts = []
+            , requestOptions = defaultExferenceOptions
+                { exferenceAllowUnused = True
+                , exferenceMaximumSteps = 20
+                }
+            }
+      request <- expectRight $ mkExferenceRequest query
+      typedResults <- expectRight $ runExferenceTypedQuery session request
+      legacyResults <- expectRight $ runExferenceQuery session request
+      map (fmap typedCandidateCompatibility) typedResults @?= legacyResults
+      case
+          [ (result, candidate)
+          | result <- typedResults
+          , candidate <- batchCandidates $ resultSearch result
+          ] of
+        [] -> fail "the forall identity query returned no candidate"
+        (result, candidate) : _ -> do
+          resultEvidence result @?= ValidatedCandidates
+          case typedCandidateTermGraph candidate of
+            Left NestedForallIntroduction{} -> pure ()
+            Left absence -> fail $ "unexpected typed fallback: "
+              ++ show absence
+            Right _ -> fail "the unsupported forall introduction claimed a graph"
   , testCase "seals Djinn from the neutral environment vocabulary" $ do
       let checkedEnvironment
             :: Either (EnvironmentError DjinnTypeVariable) DjinnEnvironment

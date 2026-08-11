@@ -7,11 +7,17 @@ module Language.Haskell.Exference.Core.Internal.Exference
   ( findExpressions
   , findExpressionsWithAllocators
   , findEngineCandidatesWithAllocatorsForTesting
+  , findTypedQueryResultsInEnvironmentEither
   , findQueryResultsInEnvironmentEither
+  , findTypedQueryResultsInEnvironmentWithCheckedOptions
   , findQueryResultsInEnvironmentWithCheckedOptions
+  , findTypedQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
   , findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
+  , findTypedQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
   , findQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
+  , findTypedQueryResultsWithAllocators
   , findQueryResultsWithAllocators
+  , typedQueryProjectionStrictnessForTesting
   , queryProjectionStrictnessForTesting
   , compatibilityProjectionStrictnessForTesting
   , prepareExferenceInput
@@ -25,6 +31,8 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , ExferenceBatchMetadata (..)
   , ExferenceCandidate
   , ExferenceResult
+  , ExferenceTypedCandidate
+  , ExferenceTypedResult
   , SearchCompletion (..)
   , SearchStatus (..)
   , constraintsRelaxedAtStep
@@ -92,6 +100,8 @@ import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Name as SynthesisName
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
 import qualified Language.Haskell.Synthesis.Query as SharedQuery
+import qualified Language.Haskell.Synthesis.Internal.TypedCandidate
+  as SharedTypedCandidate
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 
@@ -364,6 +374,17 @@ type EngineBatch =
 -- | One Exference engine batch in the backend-neutral query envelope.
 type ExferenceResult =
   SharedQuery.QueryResult ExferenceBatchMetadata ExferenceCandidate
+
+-- | A checked compatibility candidate paired with the exact result of
+-- retaining its typed term graph.  Construction stays private to the engine
+-- boundary which independently validated both projections.
+type ExferenceTypedCandidate =
+  SharedTypedCandidate.TypedCandidate
+    ExferenceTermGraphAbsence HsType TVarId ExferenceCandidate
+
+-- | One Exference engine batch whose candidates retain typed graph results.
+type ExferenceTypedResult =
+  SharedQuery.QueryResult ExferenceBatchMetadata ExferenceTypedCandidate
 
 -- | A search node paired with the next goal already removed from its goal
 -- sequence. The queue can therefore contain only work that 'stateStep' may
@@ -820,20 +841,45 @@ projectCompatibilityBindingUsages =
 -- hints without preparing the query a second time. The opaque hint value must
 -- retain the same canonical goal; a value sealed for another local integer
 -- namespace is rejected before the lazy trace is exposed.
+findTypedQueryResultsInEnvironmentEither
+  :: SharedGenerated.DefinitionName
+  -> ExferenceSourceTypeVariableHints
+  -> ExferenceEnvironment
+  -> ExferenceQuery
+  -> Either ExferenceInputError [ExferenceTypedResult]
+findTypedQueryResultsInEnvironmentEither =
+  findTypedQueryResultsWithAllocators defaultSearchAllocators
+
+-- | Historical query results are the one-way compatibility projection of the
+-- typed result path.  Mapping candidates cannot change the retained evidence,
+-- progress, metadata, batch order, or candidate order.
 findQueryResultsInEnvironmentEither
   :: SharedGenerated.DefinitionName
   -> ExferenceSourceTypeVariableHints
   -> ExferenceEnvironment
   -> ExferenceQuery
   -> Either ExferenceInputError [ExferenceResult]
-findQueryResultsInEnvironmentEither =
-  findQueryResultsWithAllocators defaultSearchAllocators
+findQueryResultsInEnvironmentEither target sourceHints environment query =
+  projectTypedQueryResults
+    $ findTypedQueryResultsInEnvironmentEither
+        target sourceHints environment query
 
 -- | Run a query whose options were checked before adapter-specific work.
 -- The witness is authoritative: replacing the query field also means this
 -- entrance cannot accidentally inspect or trust a second, unchecked copy.
 -- This operation is exported only from the Cabal-private implementation
 -- module and therefore does not weaken the public checked core boundary.
+findTypedQueryResultsInEnvironmentWithCheckedOptions
+  :: SharedGenerated.DefinitionName
+  -> ExferenceSourceTypeVariableHints
+  -> ExferenceEnvironment
+  -> ExferenceQuery
+  -> CheckedExferenceOptions
+  -> Either ExferenceInputError [ExferenceTypedResult]
+findTypedQueryResultsInEnvironmentWithCheckedOptions =
+  findTypedQueryResultsInEnvironmentWithCheckedOptionsAndEvidence
+    M.empty M.empty
+
 findQueryResultsInEnvironmentWithCheckedOptions
   :: SharedGenerated.DefinitionName
   -> ExferenceSourceTypeVariableHints
@@ -841,12 +887,27 @@ findQueryResultsInEnvironmentWithCheckedOptions
   -> ExferenceQuery
   -> CheckedExferenceOptions
   -> Either ExferenceInputError [ExferenceResult]
-findQueryResultsInEnvironmentWithCheckedOptions =
-  findQueryResultsInEnvironmentWithCheckedOptionsAndEvidence M.empty M.empty
+findQueryResultsInEnvironmentWithCheckedOptions
+    target sourceHints environment query checkedOptions =
+  projectTypedQueryResults
+    $ findTypedQueryResultsInEnvironmentWithCheckedOptions
+        target sourceHints environment query checkedOptions
 
 -- | Run a query with an adapter-checked, provider-local proper-type candidate
 -- map.  This entrance is Cabal-private: stable adapters establish kind and
 -- closure before any value can reach the raw search engine.
+findTypedQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
+  :: M.Map QualifiedName [HsType]
+  -> SharedGenerated.DefinitionName
+  -> ExferenceSourceTypeVariableHints
+  -> ExferenceEnvironment
+  -> ExferenceQuery
+  -> CheckedExferenceOptions
+  -> Either ExferenceInputError [ExferenceTypedResult]
+findTypedQueryResultsInEnvironmentWithCheckedOptionsAndCandidates candidates =
+  findTypedQueryResultsInEnvironmentWithCheckedOptionsAndEvidence
+    candidates M.empty
+
 findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
   :: M.Map QualifiedName [HsType]
   -> SharedGenerated.DefinitionName
@@ -855,12 +916,27 @@ findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
   -> ExferenceQuery
   -> CheckedExferenceOptions
   -> Either ExferenceInputError [ExferenceResult]
-findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates candidates =
-  findQueryResultsInEnvironmentWithCheckedOptionsAndEvidence candidates M.empty
+findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates candidates
+    target sourceHints environment query checkedOptions =
+  projectTypedQueryResults
+    $ findTypedQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
+        candidates target sourceHints environment query checkedOptions
 
 -- | Run a query with adapter-checked exact provider assignments. This private
 -- entrance preserves each ordered vector and keeps the historical flat
 -- candidate API on its unchanged search path.
+findTypedQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
+  :: M.Map QualifiedName [[HsType]]
+  -> SharedGenerated.DefinitionName
+  -> ExferenceSourceTypeVariableHints
+  -> ExferenceEnvironment
+  -> ExferenceQuery
+  -> CheckedExferenceOptions
+  -> Either ExferenceInputError [ExferenceTypedResult]
+findTypedQueryResultsInEnvironmentWithCheckedOptionsAndAssignments assignments =
+  findTypedQueryResultsInEnvironmentWithCheckedOptionsAndEvidence
+    M.empty assignments
+
 findQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
   :: M.Map QualifiedName [[HsType]]
   -> SharedGenerated.DefinitionName
@@ -869,10 +945,13 @@ findQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
   -> ExferenceQuery
   -> CheckedExferenceOptions
   -> Either ExferenceInputError [ExferenceResult]
-findQueryResultsInEnvironmentWithCheckedOptionsAndAssignments assignments =
-  findQueryResultsInEnvironmentWithCheckedOptionsAndEvidence M.empty assignments
+findQueryResultsInEnvironmentWithCheckedOptionsAndAssignments assignments
+    target sourceHints environment query checkedOptions =
+  projectTypedQueryResults
+    $ findTypedQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
+        assignments target sourceHints environment query checkedOptions
 
-findQueryResultsInEnvironmentWithCheckedOptionsAndEvidence
+findTypedQueryResultsInEnvironmentWithCheckedOptionsAndEvidence
   :: M.Map QualifiedName [HsType]
   -> M.Map QualifiedName [[HsType]]
   -> SharedGenerated.DefinitionName
@@ -880,14 +959,28 @@ findQueryResultsInEnvironmentWithCheckedOptionsAndEvidence
   -> ExferenceEnvironment
   -> ExferenceQuery
   -> CheckedExferenceOptions
-  -> Either ExferenceInputError [ExferenceResult]
-findQueryResultsInEnvironmentWithCheckedOptionsAndEvidence candidates assignments =
-  findQueryResultsWithCheckedOptionsAndAllocators
+  -> Either ExferenceInputError [ExferenceTypedResult]
+findTypedQueryResultsInEnvironmentWithCheckedOptionsAndEvidence
+    candidates assignments =
+  findTypedQueryResultsWithCheckedOptionsAndAllocators
     defaultSearchAllocators candidates assignments
 
 -- The allocator-parametric form is an internal test seam for exercising
 -- finite identifier exhaustion.  Keeping preparation here guarantees that
 -- production and those tests share the exact one-validation result path.
+findTypedQueryResultsWithAllocators
+  :: SearchAllocators
+  -> SharedGenerated.DefinitionName
+  -> ExferenceSourceTypeVariableHints
+  -> ExferenceEnvironment
+  -> ExferenceQuery
+  -> Either ExferenceInputError [ExferenceTypedResult]
+findTypedQueryResultsWithAllocators
+    allocators' target sourceHints environment query = do
+  checkedOptions <- checkExferenceOptions $ querySearchOptions query
+  findTypedQueryResultsWithCheckedOptionsAndAllocators
+    allocators' M.empty M.empty target sourceHints environment query checkedOptions
+
 findQueryResultsWithAllocators
   :: SearchAllocators
   -> SharedGenerated.DefinitionName
@@ -895,12 +988,13 @@ findQueryResultsWithAllocators
   -> ExferenceEnvironment
   -> ExferenceQuery
   -> Either ExferenceInputError [ExferenceResult]
-findQueryResultsWithAllocators allocators' target sourceHints environment query = do
-  checkedOptions <- checkExferenceOptions $ querySearchOptions query
-  findQueryResultsWithCheckedOptionsAndAllocators
-    allocators' M.empty M.empty target sourceHints environment query checkedOptions
+findQueryResultsWithAllocators
+    allocators' target sourceHints environment query =
+  projectTypedQueryResults
+    $ findTypedQueryResultsWithAllocators
+        allocators' target sourceHints environment query
 
-findQueryResultsWithCheckedOptionsAndAllocators
+findTypedQueryResultsWithCheckedOptionsAndAllocators
   :: SearchAllocators
   -> M.Map QualifiedName [HsType]
   -> M.Map QualifiedName [[HsType]]
@@ -909,8 +1003,8 @@ findQueryResultsWithCheckedOptionsAndAllocators
   -> ExferenceEnvironment
   -> ExferenceQuery
   -> CheckedExferenceOptions
-  -> Either ExferenceInputError [ExferenceResult]
-findQueryResultsWithCheckedOptionsAndAllocators
+  -> Either ExferenceInputError [ExferenceTypedResult]
+findTypedQueryResultsWithCheckedOptionsAndAllocators
     allocators' candidates assignments target sourceHints environment query
       checkedOptions = do
   checked@(CheckedExferenceQuery _ checkedQuery _ _ rigidPlan) <-
@@ -925,7 +1019,7 @@ findQueryResultsWithCheckedOptionsAndAllocators
     Right
     $ typeVariableHintsWithPlan
         (queryGoalType checkedQuery) rigidPlan sourceHints
-  pure $ map (projectQueryResult target typeHints)
+  pure $ map (projectTypedQueryResult target typeHints)
     $ findEngineBatchesWith allocators' checked
  where
   queryWithTargetExcluded = query
@@ -937,19 +1031,96 @@ findQueryResultsWithCheckedOptionsAndAllocators
 -- Keep this projection lazy in both the chunk and candidate dimensions.  The
 -- shared smart constructor observes only whether the candidate list is empty,
 -- so it neither invents logical evidence nor evaluates the candidate tail.
+projectTypedQueryResult
+  :: SharedGenerated.DefinitionName
+  -> ExferenceTypeVariableHints
+  -> EngineBatch
+  -> ExferenceTypedResult
+projectTypedQueryResult target typeHints =
+  SharedQuery.queryResultFromCandidates
+    . fmap projectCandidate
+ where
+  projectCandidate
+      (ValidatedEngineCandidate candidateExpression constraints statistics
+        availability) =
+    SharedTypedCandidate.mkTypedCandidate
+      (projectValidatedCandidate
+        target typeHints candidateExpression constraints statistics)
+      (case availability of
+        ExferenceTermGraphAvailable graph -> Right graph
+        ExferenceTermGraphUnavailable absence -> Left absence)
+
+-- | Project a typed query result without observing its graph result.  This is
+-- the sole canonical-to-legacy candidate edge.
 projectQueryResult
   :: SharedGenerated.DefinitionName
   -> ExferenceTypeVariableHints
   -> EngineBatch
   -> ExferenceResult
 projectQueryResult target typeHints =
-  SharedQuery.queryResultFromCandidates
-    . fmap projectCandidate
+  fmap SharedTypedCandidate.typedCandidateCompatibility
+    . projectTypedQueryResult target typeHints
+
+projectTypedQueryResults
+  :: Either ExferenceInputError [ExferenceTypedResult]
+  -> Either ExferenceInputError [ExferenceResult]
+projectTypedQueryResults = fmap
+  $ map $ fmap SharedTypedCandidate.typedCandidateCompatibility
+
+-- | Closed observations for the typed result boundary.  The three source
+-- batches poison, respectively, the candidate head, graph result, and mapped
+-- candidate tail so the test proves each public projection demands only its
+-- own selected value.
+typedQueryProjectionStrictnessForTesting
+  :: SharedGenerated.DefinitionName
+  -> ExferenceTypeVariableHints
+  -> ( Bool
+     , SharedSearch.Progress
+     , ExferenceBatchMetadata
+     , SharedGenerated.DefinitionName
+     , Bool
+     )
+typedQueryProjectionStrictnessForTesting target typeHints =
+  ( SharedQuery.resultEvidence poisonedResult
+      == SharedQuery.ValidatedCandidates
+  , SharedSearch.batchProgress $ SharedQuery.resultSearch poisonedResult
+  , SharedSearch.batchMetadata $ SharedQuery.resultSearch poisonedResult
+  , SharedGenerated.clauseName
+      $ SharedCandidate.candidateOutput compatibilityCandidate
+  , fallbackObserved
+  )
  where
-  projectCandidate
-      (ValidatedEngineCandidate candidateExpression constraints statistics _) =
-    projectValidatedCandidate
-      target typeHints candidateExpression constraints statistics
+  metadata = ExferenceBatchMetadata M.empty 2 3
+  poisonedResult = projectTypedQueryResult target typeHints
+    $ SharedSearch.SearchBatch SharedSearch.Continuing metadata
+      ( error "typed query projection forced a candidate head"
+      : error "typed query projection forced a candidate tail"
+      )
+  expression = ExpLambda 1 (TypeVar 0) (ExpVar 1 $ TypeVar 0)
+  compatibilityResult = projectTypedQueryResult target typeHints
+    $ SharedSearch.SearchBatch SharedSearch.Continuing metadata
+      ( ValidatedEngineCandidate expression [] (ExferenceStats 1 0 0)
+          (error "typed compatibility forced graph availability")
+      : error "typed compatibility forced the mapped candidate tail"
+      )
+  compatibilityCandidate = SharedTypedCandidate.typedCandidateCompatibility
+    $ firstTypedCandidate compatibilityResult
+  fallbackResult = projectTypedQueryResult target typeHints
+    $ SharedSearch.SearchBatch SharedSearch.Continuing metadata
+      ( ValidatedEngineCandidate
+          (error "typed graph lookup forced compatibility expression")
+          [] (ExferenceStats 1 0 0)
+          (ExferenceTermGraphUnavailable TermGraphEvidenceMismatch)
+      : error "typed graph lookup forced the mapped candidate tail"
+      )
+  fallbackObserved = case SharedTypedCandidate.typedCandidateTermGraph
+      $ firstTypedCandidate fallbackResult of
+    Left TermGraphEvidenceMismatch -> True
+    _ -> False
+  firstTypedCandidate result = case SharedSearch.batchCandidates
+      $ SharedQuery.resultSearch result of
+    candidate : _ -> candidate
+    [] -> error "typed query projection lost a present candidate"
 
 -- | Closed strictness probe compiled only by @exference-engine-tests@. It
 -- returns observations rather than accepting raw candidates, so the test seam

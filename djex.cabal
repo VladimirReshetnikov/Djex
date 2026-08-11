@@ -119,6 +119,7 @@ Library
   Hs-Source-Dirs:
     src
     synthesis/src
+    synthesis/internal
     djinn/src-core
     djinn/src-frontend
     exference/src-core
@@ -155,6 +156,7 @@ Library
     Language.Haskell.Synthesis.Type
     Language.Haskell.Synthesis.TypeAtom
     Language.Haskell.Synthesis.TypeSynonym
+    Language.Haskell.Synthesis.TypedCandidate
     Language.Haskell.Synthesis.TypedGenerated
     Language.Haskell.Synthesis.TypeRender
     Djinn.Core
@@ -227,6 +229,7 @@ Library
     Language.Haskell.Synthesis.Internal.Alpha
     Language.Haskell.Synthesis.Internal.Fingerprint
     Language.Haskell.Synthesis.Internal.InstanceHead
+    Language.Haskell.Synthesis.Internal.TypedCandidate
     Language.Haskell.Exference.Core.Internal.FlexibleIds
     Language.Haskell.Exference.Core.Internal.Candidate
     Language.Haskell.Exference.Core.Internal.ExferenceNode
@@ -428,6 +431,7 @@ Test-Suite exference-engine-tests
   Hs-Source-Dirs:
     exference/test-engine
     exference/src-core
+    synthesis/internal
   Other-Modules:
     Language.Haskell.Exference.Core.Candidate
     Language.Haskell.Exference.Core.ConstraintSolver
@@ -450,6 +454,7 @@ Test-Suite exference-engine-tests
     Language.Haskell.Exference.Core.Internal.SourceNames
     Language.Haskell.Exference.Core.Internal.Testing
     Language.Haskell.Exference.Core.Internal.VariableSupply
+    Language.Haskell.Synthesis.Internal.TypedCandidate
     Language.Haskell.Exference.Core.Name
     Language.Haskell.Exference.Core.RigidInstantiation
     Language.Haskell.Exference.Core.Score

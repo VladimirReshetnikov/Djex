@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveGeneric #-}
+
 -- | Independent validation of Exference's typed generated expressions.
 --
 -- This module reconstructs types without trusting the search tree. It shares
@@ -23,6 +25,7 @@ module Language.Haskell.Exference.Core.Internal.ExpressionCheck
   )
 where
 
+import Control.DeepSeq (NFData)
 import Control.Monad (foldM, replicateM, unless, when, zipWithM_)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict
@@ -33,6 +36,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Numeric.Natural (Natural)
+import GHC.Generics (Generic)
 
 import Language.Haskell.Exference.Core.Expression
 import Language.Haskell.Exference.Core.Declaration
@@ -119,7 +123,9 @@ data ExferenceTermGraphAbsence
   | TermGraphConstructionLimit ExferenceTermGraphConstructionLimit
   | TermGraphSealingFailure (SharedTyped.TermGraphError HsType TVarId)
   | TermGraphProjectionMismatch
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
+
+instance NFData ExferenceTermGraphAbsence
 
 -- | Productive bounds applied while lowering a checker draft, before the raw
 -- graph exists for 'SharedTyped.sealTermGraph' to inspect.
@@ -130,7 +136,9 @@ data ExferenceTermGraphConstructionLimit
   | TermGraphConstructionCollectionLimitExceeded
       SharedTyped.GraphCollectionSite Int Int
   | TermGraphConstructionOccurrenceLimitExceeded Natural Natural
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
+
+instance NFData ExferenceTermGraphConstructionLimit
 
 -- | Lazy engine payload for the first Exference typed-candidate checkpoint.
 -- Stable candidate facades do not expose it, and compatibility projections
@@ -138,7 +146,9 @@ data ExferenceTermGraphConstructionLimit
 data ExferenceTermGraphAvailability
   = ExferenceTermGraphAvailable (SharedTyped.TermGraph HsType TVarId)
   | ExferenceTermGraphUnavailable ExferenceTermGraphAbsence
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
+
+instance NFData ExferenceTermGraphAvailability
 
 -- | Checker-owned proof draft. Its constructor stays hidden so only a complete
 -- validation run can request graph sealing.

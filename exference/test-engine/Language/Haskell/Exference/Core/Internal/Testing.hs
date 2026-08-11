@@ -9,6 +9,7 @@ module Language.Haskell.Exference.Core.Internal.Testing
   , findExpressionsWithIdentifierCapacitiesEither
   , findTypedEngineCandidatesWithIdentifierCapacitiesEither
   , findQueryResultsWithIdentifierCapacitiesEither
+  , typedQueryProjectionStrictnessForTesting
   , queryProjectionStrictnessForTesting
   , compatibilityProjectionStrictnessForTesting
   , singleOptionValidationStrictnessForTesting
@@ -94,6 +95,19 @@ findQueryResultsWithIdentifierCapacitiesEither
   -> Either E.ExferenceInputError [E.ExferenceResult]
 findQueryResultsWithIdentifierCapacitiesEither capacities =
   E.findQueryResultsWithAllocators $ finiteSearchAllocators capacities
+
+-- | Closed observations from the typed engine-to-query strictness probe.
+typedQueryProjectionStrictnessForTesting
+  :: DefinitionName
+  -> ExferenceTypeVariableHints
+  -> ( Bool
+     , SharedSearch.Progress
+     , E.ExferenceBatchMetadata
+     , DefinitionName
+     , Bool
+     )
+typedQueryProjectionStrictnessForTesting =
+  E.typedQueryProjectionStrictnessForTesting
 
 -- | Closed observations from the final engine-to-query strictness probe.
 -- Production callers use 'E.findQueryResultsInEnvironmentEither'.

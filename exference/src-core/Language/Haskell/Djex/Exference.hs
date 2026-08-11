@@ -47,6 +47,10 @@ module Language.Haskell.Djex.Exference
     -- * Results
   , ExferenceResult
   , ExferenceCandidate
+  , ExferenceTypedResult
+  , ExferenceTypedCandidate
+  , ExferenceTermGraphAbsence (..)
+  , ExferenceTermGraphConstructionLimit (..)
   , ExferenceCandidateDetails
   , pattern ExferenceCandidateDetails
   , exferenceCandidateStatistics
@@ -65,6 +69,10 @@ module Language.Haskell.Djex.Exference
   , Qualification (..)
   , RenderError (..)
   , ExferenceResidualRenderError (..)
+  , runExferenceTypedQuery
+  , runExferenceTypedQueryWithInstantiationCandidates
+  , runExferenceTypedQueryWithInstantiationAssignments
+  , runExferenceTypedQueryWithKindedInstantiationAssignments
   , runExferenceQuery
   , runExferenceQueryWithInstantiationCandidates
   , runExferenceQueryWithInstantiationAssignments
@@ -113,6 +121,10 @@ import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.Internal.Candidate
   ( retargetExferenceSourceTypeVariableHints
   , validateExferenceTypeVariableSpelling
+  )
+import Language.Haskell.Exference.Core.Internal.ExpressionCheck
+  ( ExferenceTermGraphAbsence (..)
+  , ExferenceTermGraphConstructionLimit (..)
   )
 import Language.Haskell.Djex.Exference.Internal.Session
   ( ExferenceEnvironment
@@ -177,6 +189,7 @@ import Language.Haskell.Synthesis.Query
   ( KindedProviderInstantiationAssignment (..)
   , ProviderInstantiationCandidate (..)
   , ProviderInstantiationAssignment (..)
+  , QueryResult
   , QueryRequest (..)
   , maximumProviderInstantiationArguments
   , maximumProviderInstantiationAssignments
@@ -186,6 +199,10 @@ import Language.Haskell.Synthesis.Query
   )
 import Language.Haskell.Synthesis.Search
   ( batchMetadata
+  )
+import Language.Haskell.Synthesis.TypedCandidate
+  ( TypedCandidate
+  , typedCandidateCompatibility
   )
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
@@ -203,6 +220,20 @@ type ExferenceCandidate = Core.ExferenceCandidate
 -- selectors exported by "Language.Haskell.Synthesis.Query" and
 -- "Language.Haskell.Synthesis.Search".
 type ExferenceResult = Core.ExferenceResult
+
+-- | One independently checked compatibility candidate paired with either its
+-- sealed typed graph or the explicit reason typed retention was unavailable.
+-- Inspect the two lazy projections with 'typedCandidateCompatibility' and
+-- 'Language.Haskell.Synthesis.TypedCandidate.typedCandidateTermGraph'.
+type ExferenceTypedCandidate =
+  TypedCandidate ExferenceTermGraphAbsence
+    ExferenceType ExferenceLocal ExferenceCandidate
+
+-- | One checked Exference search batch retaining typed candidate results.
+-- Its logical evidence, progress, metadata, and ordering are identical to the
+-- compatibility result obtained by projecting each candidate.
+type ExferenceTypedResult =
+  QueryResult ExferenceBatchMetadata ExferenceTypedCandidate
 
 -- | Per-candidate search measurements retained by the checked result.
 type ExferenceCandidateMetrics = CoreStats.ExferenceStats
@@ -546,41 +577,42 @@ safeBoundedHint source = unsafePerformIO $ do
 
 {-# NOINLINE safeBoundedHint #-}
 
--- | Elaborate and lower the checked request against a sealed session, then
--- return its lazy batch trace. Query, option, and lowering failures are
--- reported before the 'Right' result is exposed.
-runExferenceQuery
+-- | Elaborate and lower a checked request, retaining the lazy typed graph
+-- result paired with every independently validated compatibility candidate.
+-- Query, option, and lowering failures are reported before the 'Right' trace
+-- is exposed; graph availability remains lazy per candidate.
+runExferenceTypedQuery
   :: ExferenceSession
   -> ExferenceRequest
-  -> Either Diagnostic [ExferenceResult]
-runExferenceQuery session =
-  runExferenceQueryWithProviderEvidence session []
+  -> Either Diagnostic [ExferenceTypedResult]
+runExferenceTypedQuery session =
+  runExferenceTypedQueryWithProviderEvidence session []
     $ InferredProviderInstantiationAssignments []
 
 -- | Run a checked request with a bounded collection of closed proper-type
 -- choices established for exact retained global providers.  Candidate
 -- associations are checked against this session after the request goal, and
 -- never become evidence for local values or another global provider.
-runExferenceQueryWithInstantiationCandidates
+runExferenceTypedQueryWithInstantiationCandidates
   :: ExferenceSession
   -> [ProviderInstantiationCandidate ExferenceTypeVariable]
   -> ExferenceRequest
-  -> Either Diagnostic [ExferenceResult]
-runExferenceQueryWithInstantiationCandidates session rawCandidates =
-  runExferenceQueryWithProviderEvidence session rawCandidates
+  -> Either Diagnostic [ExferenceTypedResult]
+runExferenceTypedQueryWithInstantiationCandidates session rawCandidates =
+  runExferenceTypedQueryWithProviderEvidence session rawCandidates
     $ InferredProviderInstantiationAssignments []
 
 -- | Run a checked request with complete ordered leading-binder assignments
 -- established for exact retained globals. Assignment vectors are checked in
 -- this session and consumed directly; they are never reconstructed as a
 -- Cartesian product or donated to another provider.
-runExferenceQueryWithInstantiationAssignments
+runExferenceTypedQueryWithInstantiationAssignments
   :: ExferenceSession
   -> [ProviderInstantiationAssignment ExferenceTypeVariable]
   -> ExferenceRequest
-  -> Either Diagnostic [ExferenceResult]
-runExferenceQueryWithInstantiationAssignments session rawAssignments =
-  runExferenceQueryWithProviderEvidence session []
+  -> Either Diagnostic [ExferenceTypedResult]
+runExferenceTypedQueryWithInstantiationAssignments session rawAssignments =
+  runExferenceTypedQueryWithProviderEvidence session []
     $ InferredProviderInstantiationAssignments rawAssignments
 
 -- | Run a checked request with complete assignments whose exact leading-binder
@@ -588,14 +620,66 @@ runExferenceQueryWithInstantiationAssignments session rawAssignments =
 -- every occurrence in the retained provider body, while a vacuous binder keeps
 -- the caller-established kind instead of taking the compatibility default of
 -- @Type@.
+runExferenceTypedQueryWithKindedInstantiationAssignments
+  :: ExferenceSession
+  -> [KindedProviderInstantiationAssignment ExferenceTypeVariable]
+  -> ExferenceRequest
+  -> Either Diagnostic [ExferenceTypedResult]
+runExferenceTypedQueryWithKindedInstantiationAssignments
+    session rawAssignments =
+  runExferenceTypedQueryWithProviderEvidence session []
+    $ KindedProviderInstantiationAssignments rawAssignments
+
+-- | Compatibility projection of 'runExferenceTypedQuery'.  It does not
+-- inspect graph availability and preserves the typed path's evidence,
+-- progress, metadata, batches, and candidate order exactly.
+runExferenceQuery
+  :: ExferenceSession
+  -> ExferenceRequest
+  -> Either Diagnostic [ExferenceResult]
+runExferenceQuery session request = projectTypedResults
+  $ runExferenceTypedQuery session request
+
+-- | Compatibility projection of
+-- 'runExferenceTypedQueryWithInstantiationCandidates'.
+runExferenceQueryWithInstantiationCandidates
+  :: ExferenceSession
+  -> [ProviderInstantiationCandidate ExferenceTypeVariable]
+  -> ExferenceRequest
+  -> Either Diagnostic [ExferenceResult]
+runExferenceQueryWithInstantiationCandidates session candidates request =
+  projectTypedResults
+    $ runExferenceTypedQueryWithInstantiationCandidates
+        session candidates request
+
+-- | Compatibility projection of
+-- 'runExferenceTypedQueryWithInstantiationAssignments'.
+runExferenceQueryWithInstantiationAssignments
+  :: ExferenceSession
+  -> [ProviderInstantiationAssignment ExferenceTypeVariable]
+  -> ExferenceRequest
+  -> Either Diagnostic [ExferenceResult]
+runExferenceQueryWithInstantiationAssignments session assignments request =
+  projectTypedResults
+    $ runExferenceTypedQueryWithInstantiationAssignments
+        session assignments request
+
+-- | Compatibility projection of
+-- 'runExferenceTypedQueryWithKindedInstantiationAssignments'.
 runExferenceQueryWithKindedInstantiationAssignments
   :: ExferenceSession
   -> [KindedProviderInstantiationAssignment ExferenceTypeVariable]
   -> ExferenceRequest
   -> Either Diagnostic [ExferenceResult]
-runExferenceQueryWithKindedInstantiationAssignments session rawAssignments =
-  runExferenceQueryWithProviderEvidence session []
-    $ KindedProviderInstantiationAssignments rawAssignments
+runExferenceQueryWithKindedInstantiationAssignments
+    session assignments request = projectTypedResults
+  $ runExferenceTypedQueryWithKindedInstantiationAssignments
+      session assignments request
+
+projectTypedResults
+  :: Either Diagnostic [ExferenceTypedResult]
+  -> Either Diagnostic [ExferenceResult]
+projectTypedResults = fmap $ map $ fmap typedCandidateCompatibility
 
 data ProviderInstantiationAssignmentEvidence
   = InferredProviderInstantiationAssignments
@@ -609,13 +693,13 @@ data ProviderInstantiationAssignmentInput
   | KindedProviderInstantiationAssignmentInput
       (KindedProviderInstantiationAssignment ExferenceTypeVariable)
 
-runExferenceQueryWithProviderEvidence
+runExferenceTypedQueryWithProviderEvidence
   :: ExferenceSession
   -> [ProviderInstantiationCandidate ExferenceTypeVariable]
   -> ProviderInstantiationAssignmentEvidence
   -> ExferenceRequest
-  -> Either Diagnostic [ExferenceResult]
-runExferenceQueryWithProviderEvidence
+  -> Either Diagnostic [ExferenceTypedResult]
+runExferenceTypedQueryWithProviderEvidence
     session rawCandidates assignmentEvidence request = do
   let query = exferenceRequestQuery request
       target = requestTarget query
@@ -655,10 +739,10 @@ runExferenceQueryWithProviderEvidence
         | otherwise = requestDiagnostic $ shownErrorDiagnostic
             "DJEX_EXF_QUERY" "Exference rejected the query" failure
   first searchFailure $ if Map.null providerAssignments
-    then CoreInternal.findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
+    then CoreInternal.findTypedQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
       providerCandidates target sourceHints
       (Session.sessionSearchEnvironment session) input checkedOptions
-    else CoreInternal.findQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
+    else CoreInternal.findTypedQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
       providerAssignments target sourceHints
       (Session.sessionSearchEnvironment session) input checkedOptions
 

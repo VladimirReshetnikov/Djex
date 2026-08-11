@@ -7,7 +7,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
-{-# OPTIONS_GHC -fdefer-type-errors -Wno-deferred-type-errors #-}
+{-# OPTIONS_GHC -fdefer-type-errors -Wno-deferred-type-errors -Wno-unused-top-binds #-}
 
 -- | Negative API fixtures for opaque invariant-bearing values.
 --
@@ -96,9 +96,13 @@ import Language.Haskell.Synthesis.TypeSynonym
   , preparedInventory
   , preparedTypeSynonyms
   )
+import Language.Haskell.Synthesis.TypedCandidate
+import Language.Haskell.Synthesis.TypedGenerated (TermGraph)
 
 data FingerprintProbe
 data OtherFingerprintProbe
+newtype TypedCandidateProbe = TypedCandidateProbe Int
+newtype OtherTypedCandidateProbe = OtherTypedCandidateProbe Int
 
 forbiddenConstructionAttempts :: [(String, ())]
 forbiddenConstructionAttempts =
@@ -106,6 +110,10 @@ forbiddenConstructionAttempts =
   , noGeneric @(Fingerprint FingerprintProbe) "Fingerprint"
   , ( "Fingerprint subject identity unexpectedly permits Coercible"
     , forbiddenFingerprintCoercion `seq` ()
+    )
+  , noGeneric @(TypedCandidate () (Type Int) Int ()) "TypedCandidate"
+  , ( "TypedCandidate payload unexpectedly permits Coercible"
+    , forbiddenTypedCandidateCoercion `seq` ()
     )
   , noGeneric @(Inventory Int ()) "Inventory"
   , noGeneric @(PreparedClassIndex Int) "PreparedClassIndex"
@@ -177,6 +185,16 @@ forbiddenConstructionAttempts =
       @(QueryResult () ())
       @(SearchBatch () ())
       "QueryResult.resultSearch"
+  , noField
+      @"typedCandidateCompatibility"
+      @(TypedCandidate () (Type Int) Int ())
+      @()
+      "TypedCandidate.typedCandidateCompatibility"
+  , noField
+      @"typedCandidateTermGraph"
+      @(TypedCandidate () (Type Int) Int ())
+      @(Either () (TermGraph (Type Int) Int))
+      "TypedCandidate.typedCandidateTermGraph"
   , noField
       @"rigidInstantiations"
       @RigidInstantiationPlan
@@ -297,6 +315,14 @@ forbiddenFingerprintCoercion
   -> Fingerprint OtherFingerprintProbe
 forbiddenFingerprintCoercion = coerce
 
+-- Every parameter of a retained typed-candidate association is nominal.  In
+-- particular, a representationally equal compatibility payload cannot be
+-- substituted while keeping the graph checked for the original candidate.
+forbiddenTypedCandidateCoercion
+  :: TypedCandidate () (Type Int) Int TypedCandidateProbe
+  -> TypedCandidate () (Type Int) Int OtherTypedCandidateProbe
+forbiddenTypedCandidateCoercion = coerce
+
 -- Selecting 'coerce' forces the built-in coercion evidence without requiring
 -- a value of either abstract type.
 coercibleMethod
@@ -333,6 +359,8 @@ selectorNamesInScope =
   inventoryKindAssumptions `seq`
   resultEvidence `seq`
   resultSearch `seq`
+  typedCandidateCompatibility `seq`
+  typedCandidateTermGraph `seq`
   rigidInstantiations `seq`
   preparedInventory `seq`
   preparedTypeSynonyms `seq`

@@ -1102,6 +1102,15 @@ tests = testGroup "Exference private engine boundaries"
       targetName <- expectRight $ SharedName.mkOperator "<~>"
       target <- expectRight $ Generated.mkDefinitionName targetName
       let metadata = E.ExferenceBatchMetadata Map.empty 2 3
+          (typedHasValidatedEvidence, typedProgress, typedMetadata,
+            typedTarget, typedFallbackObserved) =
+              typedQueryProjectionStrictnessForTesting target Map.empty
+      typedHasValidatedEvidence @?= True
+      typedProgress @?= SharedSearch.Continuing
+      typedMetadata @?= metadata
+      typedTarget @?= target
+      typedFallbackObserved @?= True
+      let
           (hasValidatedEvidence, progress, observedMetadata,
             observedTarget) =
               queryProjectionStrictnessForTesting target Map.empty

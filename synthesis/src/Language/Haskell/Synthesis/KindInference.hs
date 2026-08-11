@@ -31,6 +31,7 @@ module Language.Haskell.Synthesis.KindInference
   , inferDeclarationKindsWithClassPolicy
   ) where
 
+import Control.DeepSeq (NFData)
 import Control.Monad (foldM, zipWithM_)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict
@@ -85,6 +86,8 @@ data KindAssumptions = KindAssumptions
   }
   deriving (Eq, Show, Generic)
 
+instance NFData KindAssumptions
+
 -- | No known type constructors or classes.
 emptyKindAssumptions :: KindAssumptions
 emptyKindAssumptions = KindAssumptions Map.empty Map.empty
@@ -96,6 +99,8 @@ data KindInventoryPolicy
   | OpenKindInventory
   deriving (Eq, Ord, Show, Generic)
 
+instance NFData KindInventoryPolicy
+
 -- | How declared class parameters are finalized after class-local and
 -- superclass inference stabilizes. Both policies freeze residual variables
 -- beneath a known kind shape. Modern source inventories may retain a wholly
@@ -106,6 +111,8 @@ data ClassKindPolicy
   | DefaultClassKinds
   deriving (Eq, Ord, Show, Generic)
 
+instance NFData ClassKindPolicy
+
 -- | A declaration reduced to the information needed for kind inference.
 -- Every inferred body must be a proper type. A synonym contributes its one
 -- right-hand side; a datatype contributes all constructor fields; an empty
@@ -115,6 +122,8 @@ data TypeKindDeclaration variable
   = InferredTypeKind Name [variable] [Type variable]
   | DeclaredTypeKind Name GroundKind
   deriving (Eq, Ord, Show, Generic)
+
+instance NFData variable => NFData (TypeKindDeclaration variable)
 
 -- | A malformed kind obligation, unresolved nominal reference, or
 -- incompatible set of inferred kinds.
@@ -131,6 +140,8 @@ data KindInferenceError variable
   | RecursiveTypeDeclarations [Name]
   | DeclarationKindError Name (KindInferenceError variable)
   deriving (Eq, Ord, Show, Generic)
+
+instance NFData variable => NFData (KindInferenceError variable)
 
 data InferenceKind
   = InferenceProper

@@ -83,6 +83,88 @@ facadeTests = testGroup "public Djex facade"
         , RawBehaviorUnknown
         ] @?= [minBound .. maxBound]
       (HeuristicRankingOnly :: RawObservationUse) @?= minBound
+  , testCase "exports the finite list-spine length vocabulary" $ do
+      finiteListSpineLengthDomainTag @?=
+        map (fromIntegral . fromEnum) "finite-list-spine-length/v1"
+      mkLengthLimits defaultLengthLimitSource @?= Right defaultLengthLimits
+      map ($ defaultLengthLimits)
+          [ lengthTypeNodeLimit
+          , lengthContractInputLimit
+          , lengthSyntaxNodeLimit
+          , lengthFormulaClauseLimit
+          , lengthCollectionWidthLimit
+          , lengthProviderSummaryLimit
+          , lengthProviderArgumentLimit
+          , lengthLiteralBitLimit
+          , lengthFingerprintByteLimit
+          ] @?= [4096, 8, 1024, 32, 64, 256, 16, 256, 65536]
+
+      providerName <- expectRight $ mkIdentifier "lengthProvider"
+      let input = LengthVariable (LengthInput 0)
+          result = LengthVariable LengthResult
+          condition = LengthAll
+            [ LengthTruth True
+            , LengthNot (LengthTruth False)
+            , LengthEqual
+                (LengthSum [input, LengthLiteral 1])
+                (LengthMaximum input $ LengthLiteral 1)
+            , LengthAtMost input (LengthScale 2 input)
+            ]
+          transfer = LengthIf condition
+            (LengthMaximum
+              (LengthScale 2 input)
+              (LengthMonus result input))
+            (LengthMinimum input (LengthLiteral 0))
+          contract = LengthContractSource condition
+            (LengthEqual result transfer)
+          payload = TupleType Boxed [] :: Type String
+          listType = TypeApplication (TypeConstructor listName) payload
+          target = FunctionType listType listType
+          provider :: LengthProviderSummarySource String
+          provider = AssumedProviderSummary
+            providerName
+            (ForallType ["element"] [] $ FunctionType
+              (TypeApplication
+                (TypeConstructor listName)
+                (TypeVariable "element"))
+              (TypeApplication
+                (TypeConstructor listName)
+                (TypeVariable "element")))
+            [LengthSpineArgument]
+            (LengthVariable $ LengthProviderArgument 0)
+      sourceInventory <- expectRight
+        (mkInventory ClosedKindInventory
+          ([] :: [Declaration String () ()]))
+      checkedContract <- expectRight $ sealLengthContract
+        defaultLengthLimits sourceInventory target contract
+      checkedProviders <- expectRight $ sealLengthProviderInventory
+        defaultLengthLimits sourceInventory [provider]
+      lengthContractPrecondition contract @?= condition
+      lengthContractPostcondition contract @?= LengthEqual result transfer
+      checkedLengthContractTarget checkedContract @?= target
+      checkedLengthContractInputCount checkedContract @?= 1
+      ( lengthProviderName provider
+        , lengthProviderScheme provider
+        , lengthProviderArgumentRoles provider
+        , lengthProviderTransfer provider
+        ) @?=
+          ( providerName
+          , ForallType ["element"] [] $ FunctionType
+              (TypeApplication
+                (TypeConstructor listName)
+                (TypeVariable "element"))
+              (TypeApplication
+                (TypeConstructor listName)
+                (TypeVariable "element"))
+          , [LengthSpineArgument]
+          , LengthVariable $ LengthProviderArgument 0
+          )
+      case checkedLengthProviderSummaries checkedProviders of
+        [summary] -> checkedLengthProviderTrust summary @?= AssumedProviderLaw
+        summaries -> fail $ "unexpected checked provider count: "
+          ++ show (length summaries)
+      [LengthSpineArgument, LengthUnobservedArgument] @?= [minBound .. maxBound]
+      (AssumedProviderLaw :: LengthProviderTrust) @?= minBound
   , testCase "exports the prepared class authority" $ do
       className <- expectRight $ mkIdentifier "Class"
       missingName <- expectRight $ mkIdentifier "Missing"

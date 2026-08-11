@@ -33,6 +33,7 @@ import qualified Language.Haskell.Exference.Core.RigidInstantiation as Rigid
 import qualified Language.Haskell.Exference.Core.Types as CoreTypes
 import qualified Language.Haskell.Synthesis.Declaration as SynthesisDeclaration
 import qualified Language.Haskell.Synthesis.Environment as Environment
+import qualified Language.Haskell.Synthesis.Fingerprint as Fingerprint
 import Language.Haskell.Synthesis.Generated (mkDefinitionName)
 import qualified Language.Haskell.Synthesis.Inventory as Inventory
 import qualified Language.Haskell.Synthesis.KindInference as KindInference
@@ -46,6 +47,7 @@ import Language.Haskell.Synthesis.Query
   ( QueryRequest (..) )
 import qualified Language.Haskell.Synthesis.Query as Query
 import qualified Language.Haskell.Synthesis.Search as Search
+import qualified Language.Haskell.Synthesis.Semantic.Length as Length
 import Language.Haskell.Synthesis.Type
   ( Type
   , Variable (RigidVariable)
@@ -181,6 +183,57 @@ projectionSignatures =
   (ProofEnv.targetWasExcluded
     :: ProofEnv.ProofEnvironment
     -> Bool) `seq`
+  (Length.lengthTypeNodeLimit
+    :: Length.LengthLimits -> Int) `seq`
+  (Length.lengthContractInputLimit
+    :: Length.LengthLimits -> Int) `seq`
+  (Length.lengthSyntaxNodeLimit
+    :: Length.LengthLimits -> Int) `seq`
+  (Length.lengthFormulaClauseLimit
+    :: Length.LengthLimits -> Int) `seq`
+  (Length.lengthCollectionWidthLimit
+    :: Length.LengthLimits -> Int) `seq`
+  (Length.lengthProviderSummaryLimit
+    :: Length.LengthLimits -> Int) `seq`
+  (Length.lengthProviderArgumentLimit
+    :: Length.LengthLimits -> Int) `seq`
+  (Length.lengthLiteralBitLimit
+    :: Length.LengthLimits -> Int) `seq`
+  (Length.lengthFingerprintByteLimit
+    :: Length.LengthLimits -> Int) `seq`
+  (Length.checkedLengthContractTarget
+    :: Length.CheckedLengthContract Int -> Type Int) `seq`
+  (Length.checkedLengthContractInputCount
+    :: Length.CheckedLengthContract Int -> Int) `seq`
+  (Length.checkedLengthContractPrecondition
+    :: Length.CheckedLengthContract Int
+    -> Length.LengthFormula Length.LengthContractVariable) `seq`
+  (Length.checkedLengthContractPostcondition
+    :: Length.CheckedLengthContract Int
+    -> Length.LengthFormula Length.LengthContractVariable) `seq`
+  (Length.lengthContractFingerprint
+    :: Length.CheckedLengthContract Int
+    -> Fingerprint.Fingerprint Length.LengthContractFingerprintSubject) `seq`
+  (Length.checkedLengthProviderName
+    :: Length.CheckedLengthProviderSummary Int -> Name) `seq`
+  (Length.checkedLengthProviderScheme
+    :: Length.CheckedLengthProviderSummary Int -> Type Int) `seq`
+  (Length.checkedLengthProviderArgumentRoles
+    :: Length.CheckedLengthProviderSummary Int
+    -> [Length.LengthProviderArgumentRole]) `seq`
+  (Length.checkedLengthProviderTransfer
+    :: Length.CheckedLengthProviderSummary Int
+    -> Length.LengthExpression Length.LengthProviderVariable) `seq`
+  (Length.checkedLengthProviderTrust
+    :: Length.CheckedLengthProviderSummary Int
+    -> Length.LengthProviderTrust) `seq`
+  (Length.checkedLengthProviderSummaries
+    :: Length.CheckedLengthProviderInventory Int
+    -> [Length.CheckedLengthProviderSummary Int]) `seq`
+  (Length.lengthProviderInventoryFingerprint
+    :: Length.CheckedLengthProviderInventory Int
+    -> Fingerprint.Fingerprint
+        Length.LengthProviderInventoryFingerprintSubject) `seq`
   ()
 
 main :: IO ()
@@ -226,6 +279,9 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "forbiddenBehavioralEvidenceDomainCoercion"
                       , "forbiddenBehavioralEvidenceReceiptCoercion"
                       , "forbiddenBoundedRawArtifactCoercion"
+                      , "forbiddenCheckedLengthContractCoercion"
+                      , "forbiddenCheckedLengthProviderSummaryCoercion"
+                      , "forbiddenCheckedLengthProviderInventoryCoercion"
                       ]
                   ) ||
                   ( "Variable not in scope" `isInfixOf` message &&

@@ -141,6 +141,48 @@ and [checker-boundary follow-up](docs/reports/2026-07-17-checker-boundary-follow
 record the larger strictness, compatibility, and raw-checker migrations that
 preceded it.
 
+## Finite list-spine length contracts
+
+`Language.Haskell.Synthesis.Semantic.Length` defines the first checked
+behavioral-contract dialect in the engine-neutral foundation. It describes
+total finite list-spine lengths over unbounded natural numbers with a small,
+normalized expression and formula language. Construction is resource-bounded
+before normalization or fingerprinting. Both sealing operations require the
+exact opaque `Inventory` that supplies proper-kind authority, and checked
+contracts and provider inventories are opaque values available from the
+curated `Language.Haskell.Djex` facade.
+
+Provider summaries are an explicit trust boundary. Each summary is an assumed
+law, uniform over the instances of its retained closed, context-free scheme;
+it is search guidance, not behavioral evidence. A spine role says that the law
+may reference that argument's list length; it does not require the normalized
+transfer to mention it. An unobserved role does not assert purity, totality,
+strictness, absence of effects or type reflection, or even that the provider
+will not evaluate the argument.
+
+The identities deliberately remain split. A contract fingerprint identifies
+the normalized length relation and its ordered list inputs, while an inventory
+fingerprint identifies the exact normalized provider assumptions. Opaque list
+element types and caller-selected resource caps are not part of the contract
+fingerprint. A future encoding identity will bind that contract fingerprint,
+the interpreter and lowering policy, arithmetic model, domain, and handling of
+unknown results. A separate candidate identity will bind the exact typed
+candidate graph, and a behavioral problem identity will combine the exact
+domain, source inventory, semantic-summary inventory, encoding, and candidate
+identities. In particular, the current provider-inventory fingerprint records
+the assumed laws but does not claim to identify the source declarations or
+implementations whose kind authority admitted their schemes.
+
+Contract arguments and results must expose an outer structural list; their
+element types remain opaque and may themselves be impredicative. A direct
+rank-N contract argument is rejected. Provider schemes are closed and
+leading-context-free: spine-observed arguments and the result must be outer
+lists, while unobserved arguments may be non-list or rank-N values. This keeps
+the contract vocabulary independent of either synthesis engine. The planned
+interpreter and solver lowering will remain solver-neutral; a future Z3
+adapter can rank or challenge candidates, but raw solver output is not trusted
+evidence without independent replay against the exact associated identities.
+
 ## Building
 
 Build and test the complete graph from the repository root:

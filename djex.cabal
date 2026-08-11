@@ -153,6 +153,7 @@ Library
     Language.Haskell.Synthesis.Query
     Language.Haskell.Synthesis.Search
     Language.Haskell.Synthesis.Selection
+    Language.Haskell.Synthesis.Semantic.Length
     Language.Haskell.Synthesis.Semantic.Observation
     Language.Haskell.Synthesis.Semantic.Problem
     Language.Haskell.Synthesis.Type
@@ -235,6 +236,7 @@ Library
     Language.Haskell.Synthesis.Internal.Alpha
     Language.Haskell.Synthesis.Internal.Fingerprint
     Language.Haskell.Synthesis.Internal.InstanceHead
+    Language.Haskell.Synthesis.Internal.Semantic.Length
     Language.Haskell.Synthesis.Internal.Semantic.Problem
     Language.Haskell.Synthesis.Internal.TypedCandidate
     Language.Haskell.Exference.Core.Internal.FlexibleIds
@@ -312,6 +314,13 @@ Test-Suite synthesis-tests
   Type:             exitcode-stdio-1.0
   Main-Is:          Spec.hs
   Hs-Source-Dirs:   synthesis/test
+  Build-Depends:    djex
+
+Test-Suite synthesis-length-tests
+  import:           tasty-hunit-test
+  Type:             exitcode-stdio-1.0
+  Main-Is:          Spec.hs
+  Hs-Source-Dirs:   synthesis/test-length
   Build-Depends:    djex
 
 -- Compile the private fingerprint builder and behavioral problem sealer as

@@ -84,6 +84,7 @@ import Language.Haskell.Synthesis.KindInference
   ( GroundKind, KindAssumptions )
 import Language.Haskell.Synthesis.Name (ModuleName, Name)
 import Language.Haskell.Synthesis.Query
+import Language.Haskell.Synthesis.Semantic.Length
 import Language.Haskell.Synthesis.Semantic.Problem
 import Language.Haskell.Synthesis.Search (SearchBatch)
 import Language.Haskell.Synthesis.Type (Type)
@@ -112,6 +113,8 @@ newtype EvidenceReceiptProbe = EvidenceReceiptProbe Int
 newtype OtherEvidenceReceiptProbe = OtherEvidenceReceiptProbe Int
 newtype ArtifactKindProbe = ArtifactKindProbe Int
 newtype OtherArtifactKindProbe = OtherArtifactKindProbe Int
+newtype LengthVariableProbe = LengthVariableProbe Int
+newtype OtherLengthVariableProbe = OtherLengthVariableProbe Int
 
 forbiddenConstructionAttempts :: [(String, ())]
 forbiddenConstructionAttempts =
@@ -160,6 +163,22 @@ forbiddenConstructionAttempts =
       "BoundedRawArtifact"
   , ( "BoundedRawArtifact kind unexpectedly permits Coercible"
     , forbiddenBoundedRawArtifactCoercion `seq` ()
+    )
+  , noGeneric @(CheckedLengthContract LengthVariableProbe)
+      "CheckedLengthContract"
+  , noGeneric @LengthLimits "LengthLimits"
+  , noGeneric @(CheckedLengthProviderSummary LengthVariableProbe)
+      "CheckedLengthProviderSummary"
+  , noGeneric @(CheckedLengthProviderInventory LengthVariableProbe)
+      "CheckedLengthProviderInventory"
+  , ( "CheckedLengthContract variable unexpectedly permits Coercible"
+    , forbiddenCheckedLengthContractCoercion `seq` ()
+    )
+  , ( "CheckedLengthProviderSummary variable unexpectedly permits Coercible"
+    , forbiddenCheckedLengthProviderSummaryCoercion `seq` ()
+    )
+  , ( "CheckedLengthProviderInventory variable unexpectedly permits Coercible"
+    , forbiddenCheckedLengthProviderInventoryCoercion `seq` ()
     )
   , noGeneric @(Inventory Int ()) "Inventory"
   , noGeneric @(PreparedClassIndex Int) "PreparedClassIndex"
@@ -326,6 +345,111 @@ forbiddenConstructionAttempts =
       @ProofEnvironment
       @Bool
       "ProofEnvironment.targetWasExcluded"
+  , noField
+      @"checkedLengthContractTarget"
+      @(CheckedLengthContract LengthVariableProbe)
+      @(Type LengthVariableProbe)
+      "CheckedLengthContract.checkedLengthContractTarget"
+  , noField
+      @"lengthTypeNodeLimit"
+      @LengthLimits
+      @Int
+      "LengthLimits.lengthTypeNodeLimit"
+  , noField
+      @"lengthContractInputLimit"
+      @LengthLimits
+      @Int
+      "LengthLimits.lengthContractInputLimit"
+  , noField
+      @"lengthSyntaxNodeLimit"
+      @LengthLimits
+      @Int
+      "LengthLimits.lengthSyntaxNodeLimit"
+  , noField
+      @"lengthFormulaClauseLimit"
+      @LengthLimits
+      @Int
+      "LengthLimits.lengthFormulaClauseLimit"
+  , noField
+      @"lengthCollectionWidthLimit"
+      @LengthLimits
+      @Int
+      "LengthLimits.lengthCollectionWidthLimit"
+  , noField
+      @"lengthProviderSummaryLimit"
+      @LengthLimits
+      @Int
+      "LengthLimits.lengthProviderSummaryLimit"
+  , noField
+      @"lengthProviderArgumentLimit"
+      @LengthLimits
+      @Int
+      "LengthLimits.lengthProviderArgumentLimit"
+  , noField
+      @"lengthLiteralBitLimit"
+      @LengthLimits
+      @Int
+      "LengthLimits.lengthLiteralBitLimit"
+  , noField
+      @"lengthFingerprintByteLimit"
+      @LengthLimits
+      @Int
+      "LengthLimits.lengthFingerprintByteLimit"
+  , noField
+      @"checkedLengthContractInputCount"
+      @(CheckedLengthContract LengthVariableProbe)
+      @Int
+      "CheckedLengthContract.checkedLengthContractInputCount"
+  , noField
+      @"checkedLengthContractPrecondition"
+      @(CheckedLengthContract LengthVariableProbe)
+      @(LengthFormula LengthContractVariable)
+      "CheckedLengthContract.checkedLengthContractPrecondition"
+  , noField
+      @"checkedLengthContractPostcondition"
+      @(CheckedLengthContract LengthVariableProbe)
+      @(LengthFormula LengthContractVariable)
+      "CheckedLengthContract.checkedLengthContractPostcondition"
+  , noField
+      @"lengthContractFingerprint"
+      @(CheckedLengthContract LengthVariableProbe)
+      @(Fingerprint LengthContractFingerprintSubject)
+      "CheckedLengthContract.lengthContractFingerprint"
+  , noField
+      @"checkedLengthProviderName"
+      @(CheckedLengthProviderSummary LengthVariableProbe)
+      @Name
+      "CheckedLengthProviderSummary.checkedLengthProviderName"
+  , noField
+      @"checkedLengthProviderScheme"
+      @(CheckedLengthProviderSummary LengthVariableProbe)
+      @(Type LengthVariableProbe)
+      "CheckedLengthProviderSummary.checkedLengthProviderScheme"
+  , noField
+      @"checkedLengthProviderArgumentRoles"
+      @(CheckedLengthProviderSummary LengthVariableProbe)
+      @[LengthProviderArgumentRole]
+      "CheckedLengthProviderSummary.checkedLengthProviderArgumentRoles"
+  , noField
+      @"checkedLengthProviderTransfer"
+      @(CheckedLengthProviderSummary LengthVariableProbe)
+      @(LengthExpression LengthProviderVariable)
+      "CheckedLengthProviderSummary.checkedLengthProviderTransfer"
+  , noField
+      @"checkedLengthProviderTrust"
+      @(CheckedLengthProviderSummary LengthVariableProbe)
+      @LengthProviderTrust
+      "CheckedLengthProviderSummary.checkedLengthProviderTrust"
+  , noField
+      @"checkedLengthProviderSummaries"
+      @(CheckedLengthProviderInventory LengthVariableProbe)
+      @[CheckedLengthProviderSummary LengthVariableProbe]
+      "CheckedLengthProviderInventory.checkedLengthProviderSummaries"
+  , noField
+      @"lengthProviderInventoryFingerprint"
+      @(CheckedLengthProviderInventory LengthVariableProbe)
+      @(Fingerprint LengthProviderInventoryFingerprintSubject)
+      "CheckedLengthProviderInventory.lengthProviderInventoryFingerprint"
   ]
 
 -- Positive controls prove that both dictionary-forcing helpers work and that
@@ -416,6 +540,21 @@ forbiddenBoundedRawArtifactCoercion
   :: BoundedRawArtifact ArtifactKindProbe
   -> BoundedRawArtifact OtherArtifactKindProbe
 forbiddenBoundedRawArtifactCoercion = coerce
+
+forbiddenCheckedLengthContractCoercion
+  :: CheckedLengthContract LengthVariableProbe
+  -> CheckedLengthContract OtherLengthVariableProbe
+forbiddenCheckedLengthContractCoercion = coerce
+
+forbiddenCheckedLengthProviderSummaryCoercion
+  :: CheckedLengthProviderSummary LengthVariableProbe
+  -> CheckedLengthProviderSummary OtherLengthVariableProbe
+forbiddenCheckedLengthProviderSummaryCoercion = coerce
+
+forbiddenCheckedLengthProviderInventoryCoercion
+  :: CheckedLengthProviderInventory LengthVariableProbe
+  -> CheckedLengthProviderInventory OtherLengthVariableProbe
+forbiddenCheckedLengthProviderInventoryCoercion = coerce
 
 -- Selecting 'coerce' forces the built-in coercion evidence without requiring
 -- a value of either abstract type.

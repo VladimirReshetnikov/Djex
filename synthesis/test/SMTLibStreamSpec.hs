@@ -1,8 +1,10 @@
 module SMTLibStreamSpec (smtLibStreamTests) where
 
+import Control.DeepSeq (rnf)
 import Control.Exception (evaluate)
 import Control.Monad (forM_)
 import Data.Word (Word8)
+import Numeric.Natural (Natural)
 import System.Timeout (timeout)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit
@@ -31,7 +33,7 @@ sentinelTests :: TestTree
 sentinelTests = testGroup "exact echo sentinels"
   [ testCase "render one fixed quoted echo marker from 256 nonce bits" $ do
       smtLibStreamFramingSchemaTag @?=
-        ascii "djex-smtlib2-stream-framing/v1"
+        ascii "djex-smtlib2-stream-framing/v2"
       smtLibEchoSentinelNonceByteCount @?= 32
       sentinel <- expectRight $ mkSMTLibEchoSentinel [0 .. 31]
       let content =
@@ -69,6 +71,10 @@ defaultLimitTests = testGroup "independent framing limits"
       smtLibStreamTotalByteLimit defaultSMTLibStreamLimits @?= 131072
       smtLibStreamFrameByteLimit defaultSMTLibStreamLimits @?= 65536
       smtLibStreamNestingDepthLimit defaultSMTLibStreamLimits @?= 64
+  , testCase "deeply evaluate an opaque pending framer" $ do
+      pending <- expectPending $ feedFresh defaultSMTLibStreamLimits
+        $ ascii " ; pending"
+      rnf pending @?= ()
   ]
 
 chunkBoundaryTests :: TestTree
@@ -201,7 +207,7 @@ responseTerminationTests = testGroup "standard response termination"
   , testCase "complete parenthesized and quoted responses at lexical EOF" $ do
       listState <- expectComplete $ feedSMTLibStreamFramer
         (startSMTLibStreamFramer defaultSMTLibStreamLimits) $ ascii "(sat)"
-      listState @?= (ascii "(sat)", [])
+      listState @?= (ascii "(sat)", [], 5)
       stringState <- expectPending $ feedSMTLibStreamFramer
         (startSMTLibStreamFramer defaultSMTLibStreamLimits) $ ascii "\"done\""
       finishSMTLibStreamFramer stringState @?=
@@ -257,7 +263,7 @@ boundTests = testGroup "productive resource bounds"
       let totalThree = limits $ \source -> source
             { smtLibStreamLimitSourceTotalBytes = 3 }
       completed <- expectComplete $ feedFresh totalThree $ ascii "sat "
-      completed @?= (ascii "sat", ascii " ")
+      completed @?= (ascii "sat", ascii " ", 3)
   , testCase "enforce frame bytes and depth at exact boundaries" $ do
       let frameTwo = limits $ \source -> source
             { smtLibStreamLimitSourceFrameBytes = 2 }
@@ -266,13 +272,13 @@ boundTests = testGroup "productive resource bounds"
       let frameThree = limits $ \source -> source
             { smtLibStreamLimitSourceFrameBytes = 3 }
       completed <- expectComplete $ feedFresh frameThree $ ascii "sat "
-      completed @?= (ascii "sat", ascii " ")
+      completed @?= (ascii "sat", ascii " ", 3)
       let depthOne = limits $ \source -> source
             { smtLibStreamLimitSourceNestingDepth = 1 }
       assertLeft (SMTLibStreamNestingDepthLimitExceeded 1 2)
         $ feedFresh depthOne $ ascii "(("
       exactDepth <- expectComplete $ feedFresh depthOne $ ascii "()"
-      exactDepth @?= (ascii "()", [])
+      exactDepth @?= (ascii "()", [], 2)
   , testCase "stop cyclic trivia, comments, and atoms at max plus one" $ do
       let totalThree = limits $ \source -> source
             { smtLibStreamLimitSourceTotalBytes = 3 }
@@ -308,7 +314,7 @@ boundTests = testGroup "productive resource bounds"
           nested = replicate (fromIntegral depth) 40 ++
             replicate (fromIntegral depth) 41
           observed = case feedFresh configured nested of
-            Right (SMTLibStreamFramingComplete frame _) -> length frame
+            Right (SMTLibStreamFramingComplete frame _ _) -> length frame
             _ -> -1
       frameLength <- evaluateWithin observed
       frameLength @?= fromIntegral (2 * depth)
@@ -320,28 +326,42 @@ lazyTailTests = testGroup "untouched post-frame tails"
       listObserved <- evaluateWithin $ case feedFresh
           defaultSMTLibStreamLimits
           (ascii "(x)" ++ error "list tail forced") of
-        Right (SMTLibStreamFramingComplete frame _) -> frame == ascii "(x)"
+        Right (SMTLibStreamFramingComplete frame _ consumed) ->
+          frame == ascii "(x)" && consumed == 3
         _ -> False
       assertBool "list completion forced or lost its frame" listObserved
       bareObserved <- evaluateWithin $ case feedFresh
           defaultSMTLibStreamLimits
           (ascii "sat " ++ error "bare tail forced") of
-        Right (SMTLibStreamFramingComplete frame _) -> frame == ascii "sat"
+        Right (SMTLibStreamFramingComplete frame _ consumed) ->
+          frame == ascii "sat" && consumed == 3
         _ -> False
       assertBool "bare completion forced or lost its frame" bareObserved
       stringObserved <- evaluateWithin $ case feedFresh
           defaultSMTLibStreamLimits
           (ascii "\"x\" " ++ error "string tail forced") of
-        Right (SMTLibStreamFramingComplete frame _) ->
-          frame == ascii "\"x\""
+        Right (SMTLibStreamFramingComplete frame _ consumed) ->
+          frame == ascii "\"x\"" && consumed == 3
         _ -> False
       assertBool "string completion forced or lost its frame" stringObserved
       quotedObserved <- evaluateWithin $ case feedFresh
           defaultSMTLibStreamLimits
           (ascii "|x| " ++ error "quoted tail forced") of
-        Right (SMTLibStreamFramingComplete frame _) -> frame == ascii "|x|"
+        Right (SMTLibStreamFramingComplete frame _ consumed) ->
+          frame == ascii "|x|" && consumed == 3
         _ -> False
       assertBool "quoted completion forced or lost its frame" quotedObserved
+  , testCase "exclude untouched and inspected lookahead tails from counts" $ do
+      let fixtures =
+            [ (ascii " \n(x)tail", ascii "(x)", ascii "tail")
+            , (ascii " \nsat next", ascii "sat", ascii " next")
+            , (ascii " \n\"x\" tail", ascii "\"x\"", ascii " tail")
+            , (ascii " \n|x| tail", ascii "|x|", ascii " tail")
+            ]
+      forM_ fixtures $ \(transcript, expectedFrame, expectedTail) -> do
+        completed <- expectComplete $ feedFresh
+          defaultSMTLibStreamLimits transcript
+        completed @?= (expectedFrame, expectedTail, 5)
   , testCase "count only bytes consumed before the pending tail" $ do
       pending <- expectPending $ feedFresh defaultSMTLibStreamLimits
         $ ascii " ;x\n"
@@ -379,7 +399,7 @@ frameOne configured = go $ startSMTLibStreamFramer configured
       step <- feedSMTLibStreamFramer framer chunk
       case step of
         SMTLibStreamFramingPending next -> go next remaining
-        SMTLibStreamFramingComplete frame tailBytes ->
+        SMTLibStreamFramingComplete frame tailBytes _consumed ->
           Right (frame, tailBytes ++ concat remaining)
 
 collectFrames
@@ -405,7 +425,7 @@ collectFrames expected configured =
           case step of
             SMTLibStreamFramingPending next ->
               go remaining next reversedFrames later
-            SMTLibStreamFramingComplete frame tailBytes ->
+            SMTLibStreamFramingComplete frame tailBytes _consumed ->
               go (remaining - 1)
                 (startSMTLibStreamFramer configured)
                 (frame : reversedFrames)
@@ -422,16 +442,16 @@ expectPending
 expectPending result = case result of
   Left failure -> assertFailure ("unexpected framing rejection: " ++ show failure)
   Right (SMTLibStreamFramingPending framer) -> pure framer
-  Right (SMTLibStreamFramingComplete _ _) ->
+  Right (SMTLibStreamFramingComplete _ _ _) ->
     assertFailure "expected an incomplete frame"
 
 expectComplete
   :: Either SMTLibStreamFramingError SMTLibStreamFramingStep
-  -> IO ([Word8], [Word8])
+  -> IO ([Word8], [Word8], Natural)
 expectComplete result = case result of
   Left failure -> assertFailure ("unexpected framing rejection: " ++ show failure)
-  Right (SMTLibStreamFramingComplete frame tailBytes) ->
-    pure (frame, tailBytes)
+  Right (SMTLibStreamFramingComplete frame tailBytes consumed) ->
+    pure (frame, tailBytes, consumed)
   Right (SMTLibStreamFramingPending _) ->
     assertFailure "expected one complete frame"
 

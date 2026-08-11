@@ -41,7 +41,8 @@ these tiers explicitly.
 ## Components
 
 - The unnamed `djex` library is the complete product, compiled from `src/`,
-  `synthesis/src/`, both `src-core/` roots, and both `src-frontend/` roots.
+  `synthesis/src/`, `synthesis/internal/`, both `src-core/` roots,
+  `djinn/src-internal/`, and both `src-frontend/` roots.
   `Language.Haskell.Djex` is the curated neutral entry point;
   `Language.Haskell.Djex.Djinn` and `Language.Haskell.Djex.Exference` run
   both engines through the shared query/evidence/search envelope. Their
@@ -320,10 +321,11 @@ normalizes quoted symbols, rejects malformed, missing, extra, duplicate,
 unknown, wrong-sort, and unsolicited bindings, and restores source input
 order. Parsed negative integers remain raw values for the existing natural
 domain validator to reject. Parsed statuses are observations only. A private
-stream layer now supplies bounded lexical framing and exact echo markers, but
-phase sequencing, solver execution identity, deadlines, and worker recovery
-remain obligations of the future executor, while only independent Length
-replay can create model-relative counterexample evidence.
+stream and protocol layer now supplies bounded lexical framing, exact echo
+markers, and fail-closed phase sequencing. Solver execution identity,
+deadlines, and worker recovery remain obligations of the future live executor,
+while only independent Length replay can create model-relative counterexample
+evidence.
 
 `Language.Haskell.Synthesis.Internal.SMTLib.Stream` frames one exact SMT-LIB
 2.7 response incrementally without line-based assumptions. It carries lexical
@@ -335,14 +337,32 @@ Bare and quoted-symbol responses are not complete until the required following
 whitespace arrives. Package-owned echo sentinels encode exactly 32 nonce bytes
 as lowercase hex, and retain the standard-required surrounding quotes in both
 the command and expected response. Exact comparison never scans strings,
-comments, symbols, or nested expressions for marker text. This is still pure
-framing rather than a protocol receipt: a live session must enforce the exact
-response/sentinel position, reject premature, stale, duplicate, or unsolicited
-frames, re-feed every successful tail so its bytes are eventually accounted,
-and bind the framing schema and limits into its run identity. Because a
+comments, symbols, or nested expressions for marker text. Completed frames now
+report their exact charged byte count as well as the untouched tail so a
+composing transaction can enforce a cumulative stdout budget. Framing alone
+is still not a protocol receipt. Because a
 top-level string needs one-byte lookahead to distinguish a doubled quote, the
 live Z3 capability probe must also establish that `echo` emits and flushes a
 trailing byte (normally its newline) after the marker's closing quote.
+
+`Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` composes
+that framer with the sealed execution policy and query. Its initial action is
+one exact reset/check/status-marker write. It decodes exactly one status and
+accepts the marker only in the following position; only `sat` under the
+input-value artifact policy may then expose a second value-request/marker
+write. Status and value tails are recursively consumed only within the write
+which could have caused them. At the status-marker-to-value-write boundary,
+already-buffered bytes must be finitely bounded SMT-LIB whitespace, so a stale
+valid-looking valuation cannot cross that causal boundary. Every framing,
+decoder, marker, cumulative-output, unexpected-byte, or EOF failure returns no
+successor. The future live owner must treat any retained receiver as spent and
+discard the worker.
+The private plan key binds policy, query, framing limits, cumulative budget,
+phase schema, exact writes, and marker responses. This remains a pure,
+caller-feedable protocol decode—not an executed observation, attestation, or
+receipt. A live session must still generate barriers uniquely across its
+lifetime, enforce writes, attest and probe the process, and bind the actual
+transcript and termination outcome into a separate run identity.
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` now seals the
 pure Z3 launch and protocol policy without launching anything. V2 fixes the

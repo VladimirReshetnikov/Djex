@@ -55,9 +55,9 @@ import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 import System.FilePath (isAbsolute)
 
-import Language.Haskell.Synthesis.Fingerprint (Fingerprint)
 import Language.Haskell.Synthesis.Internal.Fingerprint
-  ( FingerprintBuilder (..)
+  ( Fingerprint
+  , FingerprintBuilder (..)
   , FingerprintField (..)
   , FingerprintLimitError (..)
   , buildFingerprintWithin

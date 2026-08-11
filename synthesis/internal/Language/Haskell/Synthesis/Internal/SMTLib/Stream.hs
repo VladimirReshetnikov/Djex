@@ -49,10 +49,12 @@ import Data.Word (Word8)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
--- | Lexical policy bound by the future live-session identity.
+-- | Lexical and charged-byte accounting policy bound by higher protocol and
+-- future live-session identities.  V2 adds the exact completion count without
+-- changing accepted frame syntax.
 smtLibStreamFramingSchemaTag :: [Word8]
 smtLibStreamFramingSchemaTag =
-  ascii "djex-smtlib2-stream-framing/v1"
+  ascii "djex-smtlib2-stream-framing/v2"
 
 smtLibEchoSentinelNonceByteCount :: Natural
 smtLibEchoSentinelNonceByteCount = 32
@@ -176,12 +178,14 @@ data SMTLibStreamFramingError
 instance NFData SMTLibStreamFramingError
 
 -- | A chunk either leaves an opaque continuation or completes exactly one
--- frame.  The tail is the original suffix following that frame.  Completion
--- may inspect its first byte as bounded lexical lookahead, but never evaluates
--- beyond that byte.
+-- frame.  The tail is the original suffix following that frame.  The final
+-- field of 'SMTLibStreamFramingComplete' is the exact number of bytes charged
+-- to this frame, including discarded leading trivia and retained frame bytes.
+-- Completion may inspect the tail's first byte as bounded lexical lookahead,
+-- but that byte and the rest of the untouched tail are not charged.
 data SMTLibStreamFramingStep
   = SMTLibStreamFramingPending SMTLibStreamFramer
-  | SMTLibStreamFramingComplete [Word8] [Word8]
+  | SMTLibStreamFramingComplete [Word8] [Word8] Natural
 
 data StreamMode
   = StreamNormal
@@ -191,6 +195,15 @@ data StreamMode
   | StreamQuotedSymbol !Natural
   | StreamQuotedSymbolNeedsWhitespace !Natural
   | StreamComment
+
+instance NFData StreamMode where
+  rnf StreamNormal = ()
+  rnf (StreamBare opening) = rnf opening
+  rnf (StreamString opening) = rnf opening
+  rnf (StreamStringAfterQuote opening) = rnf opening
+  rnf (StreamQuotedSymbol opening) = rnf opening
+  rnf (StreamQuotedSymbolNeedsWhitespace opening) = rnf opening
+  rnf StreamComment = ()
 
 -- | The opening-offset stack is bounded by depth and the reversed frame by
 -- retained bytes.  No constructor or raw buffer projection escapes the
@@ -204,6 +217,16 @@ data SMTLibStreamFramer = SMTLibStreamFramer
   , streamFrameReversed :: [Word8]
   , streamFrameBytes :: !Natural
   }
+
+instance NFData SMTLibStreamFramer where
+  rnf (SMTLibStreamFramer limits consumed openLists depth mode frame bytes) =
+    rnf limits `seq`
+    rnf consumed `seq`
+    rnf openLists `seq`
+    rnf depth `seq`
+    rnf mode `seq`
+    rnf frame `seq`
+    rnf bytes
 
 startSMTLibStreamFramer :: SMTLibStreamLimits -> SMTLibStreamFramer
 startSMTLibStreamFramer limits = SMTLibStreamFramer
@@ -489,7 +512,8 @@ appendFrameByte framer byte
   maximumBytes = smtLibStreamFrameByteLimit $ streamLimits framer
 
 completeFrame :: SMTLibStreamFramer -> [Word8] -> SMTLibStreamFramingStep
-completeFrame framer = SMTLibStreamFramingComplete $ currentFrame framer
+completeFrame framer tailBytes = SMTLibStreamFramingComplete
+  (currentFrame framer) tailBytes (streamConsumed framer)
 
 currentFrame :: SMTLibStreamFramer -> [Word8]
 currentFrame = reverse . streamFrameReversed

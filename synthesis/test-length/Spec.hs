@@ -1,7 +1,7 @@
 module Main (main) where
 
 import Control.Exception (evaluate)
-import Data.List (isInfixOf, nub, sort)
+import Data.List (intercalate, isInfixOf, nub, sort)
 import Data.Word (Word8)
 import Numeric.Natural (Natural)
 import qualified System.Info as SystemInfo
@@ -27,6 +27,12 @@ import Language.Haskell.Synthesis.Inventory
   ( Inventory
   , mkInventory
   )
+import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
+  as InternalSMTLibExecution
+import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
+  as SMTLibProtocol
+import qualified Language.Haskell.Synthesis.Internal.SMTLib.Stream
+  as SMTLibStream
 import qualified Language.Haskell.Synthesis.Internal.TypedCandidate
   as InternalTypedCandidate
 import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
@@ -73,6 +79,7 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , candidateProblemTests
   , problemReplayTests
   , smtLibTests
+  , smtLibProtocolTests
   , evaluationTests
   , normalizationTests
   , productiveBoundTests
@@ -1852,6 +1859,651 @@ smtLibTests = testGroup
           SMTLib.LengthSMTLibScaleNumeral 1 2)
         $ SMTLib.sealLengthSMTLibQuery oneBitNumerals scaledProblem
   ]
+
+smtLibProtocolTests :: TestTree
+smtLibProtocolTests = testGroup
+  "package-private bounded Length SMT-LIB protocol"
+  [ testCase "seal exact initial and conditional value writes" $ do
+      (query, plan) <- protocolUnaryPlan
+        InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+      checkBarrier <- protocolSentinel protocolCheckNonce
+      valueBarrier <- protocolSentinel protocolValueNonce
+      let expectedInitial =
+            InternalSMTLibExecution.lengthSMTLibExecutionQueryResetBytes ++
+            SMTLib.lengthSMTLibQueryCheckBytes query ++
+            SMTLibStream.smtLibEchoSentinelCommandBytes checkBarrier
+          expectedValue =
+            fmap (++ SMTLibStream.smtLibEchoSentinelCommandBytes valueBarrier)
+              $ SMTLib.lengthSMTLibQueryInputValueRequestBytes query
+      SMTLibProtocol.lengthSMTLibProtocolInitialWriteBytes plan @?=
+        expectedInitial
+      SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes plan @?=
+        expectedValue
+      checkReceiver <- expectProtocolWrite
+        SMTLibProtocol.LengthSMTLibProtocolInitialQueryWrite
+        expectedInitial
+        $ SMTLibProtocol.startLengthSMTLibProtocol plan
+      SMTLibProtocol.lengthSMTLibProtocolReceiverPhase checkReceiver @?=
+        SMTLibProtocol.LengthSMTLibProtocolCheckStatusPhase
+      checkAction <- feedProtocolChunks checkReceiver
+        $ map (: [])
+        $ asciiBytes "sat\n" ++
+          SMTLibStream.smtLibEchoSentinelResponseBytes checkBarrier ++
+          asciiBytes "\n"
+      valueReceiver <- expectProtocolWrite
+        SMTLibProtocol.LengthSMTLibProtocolInputValueWrite
+        (maybe [] id expectedValue) checkAction
+      SMTLibProtocol.lengthSMTLibProtocolReceiverPhase valueReceiver @?=
+        SMTLibProtocol.LengthSMTLibProtocolInputValuePhase
+      let rawValues = protocolValueFrame query [3]
+      valueAction <- feedProtocolChunks valueReceiver
+        $ map (: [])
+        $ rawValues ++ asciiBytes "\n" ++
+          SMTLibStream.smtLibEchoSentinelResponseBytes valueBarrier ++
+          asciiBytes "\n"
+      decoded <- expectProtocolComplete valueAction
+      SMTLibProtocol.lengthSMTLibProtocolDecodedStatus decoded @?=
+        Observation.SolverSatisfiable
+      SMTLibProtocol.lengthSMTLibProtocolDecodedStatusFrame decoded @?=
+        asciiBytes "sat"
+      SMTLibProtocol.lengthSMTLibProtocolDecodedInputValueFrame decoded @?=
+        Just rawValues
+      SMTLibProtocol.lengthSMTLibProtocolDecodedInputValues decoded @?=
+        Just [smtIntegerBinding (asciiBytes "djex_length_input_0") 3]
+      SMTLibProtocol.lengthSMTLibProtocolDecodedPlanFingerprint decoded @?=
+        SMTLibProtocol.lengthSMTLibProtocolPlanFingerprint plan
+  , testCase "publish schemas, validated defaults, and exact admission minima" $ do
+      SMTLibProtocol.lengthSMTLibProtocolPlanSchemaTag @?=
+        asciiBytes "djex-length-z3-smtlib2-protocol-plan/v1"
+      SMTLibProtocol.lengthSMTLibProtocolPhaseMachineSchemaTag @?=
+        asciiBytes "djex-length-z3-smtlib2-protocol-phase-machine/v1"
+      SMTLibProtocol.lengthSMTLibProtocolPostBarrierSchemaTag @?=
+        asciiBytes "djex-smtlib2-post-barrier-whitespace/v1"
+      assertBool "validated protocol defaults changed representation"
+        $ SMTLibProtocol.mkLengthSMTLibProtocolLimits
+            SMTLibProtocol.defaultLengthSMTLibProtocolLimitSource ==
+          SMTLibProtocol.defaultLengthSMTLibProtocolLimits
+      let defaults = SMTLibProtocol.defaultLengthSMTLibProtocolLimits
+          stream = SMTLibProtocol.lengthSMTLibProtocolStreamLimits defaults
+      stream @?= SMTLibStream.defaultSMTLibStreamLimits
+      SMTLibStream.smtLibStreamTotalByteLimit stream @?= 131072
+      SMTLibStream.smtLibStreamFrameByteLimit stream @?= 65536
+      SMTLibStream.smtLibStreamNestingDepthLimit stream @?= 64
+      SMTLibProtocol.lengthSMTLibProtocolCumulativeStdoutByteLimit defaults
+        @?= 524288
+      SMTLibProtocol.lengthSMTLibProtocolPlanFingerprintByteLimit defaults
+        @?= 262144
+
+      problem <- adversarialConstantZeroProblem identityLengthContract
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      execution <- protocolExecutionConfig
+        InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+      let seal limits configured =
+            SMTLibProtocol.sealLengthSMTLibProtocolPlan limits configured query
+              protocolCheckNonce $ Just protocolValueNonce
+          protocolLimits change = SMTLibProtocol.mkLengthSMTLibProtocolLimits
+            $ change SMTLibProtocol.defaultLengthSMTLibProtocolLimitSource
+          streamLimits change = protocolLimits $ \source -> source
+            { SMTLibProtocol.lengthSMTLibProtocolLimitSourceStreamLimits =
+                change SMTLibStream.defaultSMTLibStreamLimitSource }
+          tooSmall site field admitted required =
+            SMTLibProtocol.LengthSMTLibProtocolRequiredLimitTooSmall
+              site field admitted required
+      assertLeft
+        (tooSmall SMTLibProtocol.LengthSMTLibProtocolCheckStatusFrame
+          SMTLibProtocol.LengthSMTLibProtocolStreamTotalBytes 6 7)
+        $ seal (streamLimits $ \source -> source
+            { SMTLibStream.smtLibStreamLimitSourceTotalBytes = 6 }) execution
+      assertLeft
+        (tooSmall SMTLibProtocol.LengthSMTLibProtocolCheckStatusFrame
+          SMTLibProtocol.LengthSMTLibProtocolStreamFrameBytes 6 7)
+        $ seal (streamLimits $ \source -> source
+            { SMTLibStream.smtLibStreamLimitSourceFrameBytes = 6 }) execution
+      assertLeft
+        (tooSmall SMTLibProtocol.LengthSMTLibProtocolCheckBarrierFrame
+          SMTLibProtocol.LengthSMTLibProtocolStreamTotalBytes 86 87)
+        $ seal (streamLimits $ \source -> source
+            { SMTLibStream.smtLibStreamLimitSourceTotalBytes = 86 }) execution
+      assertLeft
+        (tooSmall SMTLibProtocol.LengthSMTLibProtocolInputValueFrame
+          SMTLibProtocol.LengthSMTLibProtocolStreamNestingDepth 1 2)
+        $ seal (streamLimits $ \source -> source
+            { SMTLibStream.smtLibStreamLimitSourceNestingDepth = 1 }) execution
+
+      let response change = expectRight $ SMTLibResponse.mkLengthSMTLibResponseLimits
+            $ change SMTLibResponse.defaultLengthSMTLibResponseLimitSource
+          responseCase change expected = do
+            configured <- protocolExecutionConfigWithResponse
+              InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+              =<< response change
+            assertLeft expected $ seal defaults configured
+      responseCase
+        (\source -> source
+          { SMTLibResponse.lengthSMTLibResponseLimitSourceBytes = 6 })
+        $ tooSmall SMTLibProtocol.LengthSMTLibProtocolCheckStatusFrame
+            SMTLibProtocol.LengthSMTLibProtocolResponseBytes 6 7
+      responseCase
+        (\source -> source
+          { SMTLibResponse.lengthSMTLibResponseLimitSourceNestingDepth = 1 })
+        $ tooSmall SMTLibProtocol.LengthSMTLibProtocolInputValueFrame
+            SMTLibProtocol.LengthSMTLibProtocolResponseNestingDepth 1 2
+      responseCase
+        (\source -> source
+          { SMTLibResponse.lengthSMTLibResponseLimitSourceNodes = 3 })
+        $ tooSmall SMTLibProtocol.LengthSMTLibProtocolInputValueFrame
+            SMTLibProtocol.LengthSMTLibProtocolResponseNodes 3 4
+      responseCase
+        (\source -> source
+          { SMTLibResponse.lengthSMTLibResponseLimitSourceTokenBytes = 18 })
+        $ tooSmall SMTLibProtocol.LengthSMTLibProtocolInputValueFrame
+            SMTLibProtocol.LengthSMTLibProtocolResponseTokenBytes 18 19
+
+      let tooLittleStdout = protocolLimits $ \source -> source
+            { SMTLibProtocol.lengthSMTLibProtocolLimitSourceCumulativeStdoutBytes =
+                204 }
+          noFingerprint = protocolLimits $ \source -> source
+            { SMTLibProtocol.lengthSMTLibProtocolLimitSourcePlanFingerprintBytes =
+                0 }
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolMinimumStdoutByteLimitExceeded
+          204 205)
+        $ seal tooLittleStdout execution
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolPlanFingerprintByteLimitExceeded
+          0 1)
+        $ seal noFingerprint execution
+  , testCase "complete every non-value status without a later write" $ do
+      checkBarrier <- protocolSentinel protocolCheckNonce
+      let marker = SMTLibStream.smtLibEchoSentinelResponseBytes checkBarrier
+          cases =
+            [ ("sat", Observation.SolverSatisfiable)
+            , ("unsat", Observation.SolverUnsatisfiable)
+            , ("unknown", Observation.SolverUnknown)
+            ]
+      (_, statusOnly) <- protocolUnaryPlan
+        InternalSMTLibExecution.LengthSMTLibStatusOnly
+      mapM_ (assertProtocolTerminalStatus statusOnly marker) cases
+      (_, values) <- protocolUnaryPlan
+        InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+      mapM_ (assertProtocolTerminalStatus values marker)
+        [ ("unsat", Observation.SolverUnsatisfiable)
+        , ("unknown", Observation.SolverUnknown)
+        ]
+      (_, zeroInput) <- protocolZeroInputPlan
+        InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+      SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes zeroInput @?=
+        Nothing
+      zeroReceiver <- expectProtocolWrite
+        SMTLibProtocol.LengthSMTLibProtocolInitialQueryWrite
+        (SMTLibProtocol.lengthSMTLibProtocolInitialWriteBytes zeroInput)
+        $ SMTLibProtocol.startLengthSMTLibProtocol zeroInput
+      zeroAction <- expectRight $ SMTLibProtocol.feedLengthSMTLibProtocol
+        zeroReceiver $ asciiBytes "sat\n" ++ marker ++ asciiBytes "\n"
+      zeroDecoded <- expectProtocolComplete zeroAction
+      SMTLibProtocol.lengthSMTLibProtocolDecodedStatus zeroDecoded @?=
+        Observation.SolverSatisfiable
+      SMTLibProtocol.lengthSMTLibProtocolDecodedInputValueFrame zeroDecoded @?=
+        Nothing
+      SMTLibProtocol.lengthSMTLibProtocolDecodedInputValues zeroDecoded @?=
+        Just []
+      (_, zeroStatusOnly) <- protocolZeroInputPlan
+        InternalSMTLibExecution.LengthSMTLibStatusOnly
+      assertProtocolTerminalStatus zeroStatusOnly marker
+        ("sat", Observation.SolverSatisfiable)
+  , testCase "reject absent, surplus, malformed, and repeated barrier nonces" $ do
+      problem <- adversarialConstantZeroProblem identityLengthContract
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      values <- protocolExecutionConfig
+        InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+      statusOnly <- protocolExecutionConfig
+        InternalSMTLibExecution.LengthSMTLibStatusOnly
+      let seal execution check value =
+            SMTLibProtocol.sealLengthSMTLibProtocolPlan
+              SMTLibProtocol.defaultLengthSMTLibProtocolLimits
+              execution query check value
+      assertLeft SMTLibProtocol.LengthSMTLibProtocolMissingInputValueBarrierNonce
+        $ seal values protocolCheckNonce Nothing
+      assertLeft SMTLibProtocol.LengthSMTLibProtocolUnexpectedInputValueBarrierNonce
+        $ seal statusOnly protocolCheckNonce $ Just protocolValueNonce
+      assertLeft SMTLibProtocol.LengthSMTLibProtocolRepeatedBarrierNonce
+        $ seal values protocolCheckNonce $ Just protocolCheckNonce
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolBarrierNonceError
+          SMTLibProtocol.LengthSMTLibProtocolCheckBarrier
+          $ SMTLibStream.SMTLibEchoSentinelNonceLengthMismatch 32 31)
+        $ seal values (replicate 31 0) $ Just protocolValueNonce
+      let cyclicNonce = 0 : cyclicNonce
+      cyclic <- evaluateWithin $ seal values cyclicNonce $ Just protocolValueNonce
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolBarrierNonceError
+          SMTLibProtocol.LengthSMTLibProtocolCheckBarrier
+          $ SMTLibStream.SMTLibEchoSentinelNonceLengthMismatch 32 33)
+        cyclic
+  , testCase "fail closed at decoder, framing, barrier, and EOF boundaries" $ do
+      (query, plan) <- protocolUnaryPlan
+        InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+      checkBarrier <- protocolSentinel protocolCheckNonce
+      wrongBarrier <- protocolSentinel protocolValueNonce
+      initial <- expectProtocolWrite
+        SMTLibProtocol.LengthSMTLibProtocolInitialQueryWrite
+        (SMTLibProtocol.lengthSMTLibProtocolInitialWriteBytes plan)
+        $ SMTLibProtocol.startLengthSMTLibProtocol plan
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolResponseFailure
+          SMTLibProtocol.LengthSMTLibProtocolCheckStatusPhase
+          SMTLibResponse.LengthSMTLibSuccessWhereStatusExpected)
+        $ SMTLibProtocol.feedLengthSMTLibProtocol initial
+        $ asciiBytes "success\n"
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolFramingFailure
+          SMTLibProtocol.LengthSMTLibProtocolCheckStatusPhase
+          $ SMTLibStream.SMTLibStreamUnexpectedClosingParenthesis 0)
+        $ SMTLibProtocol.feedLengthSMTLibProtocol initial [41]
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolUnexpectedEOF
+          SMTLibProtocol.LengthSMTLibProtocolCheckStatusPhase)
+        $ SMTLibProtocol.finishLengthSMTLibProtocol initial
+      partial <- expectProtocolAwait =<< expectRight
+        (SMTLibProtocol.feedLengthSMTLibProtocol initial $ asciiBytes "sa")
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolFramingFailure
+          SMTLibProtocol.LengthSMTLibProtocolCheckStatusPhase
+          $ SMTLibStream.SMTLibStreamMissingWhitespaceAfterAtom 2)
+        $ SMTLibProtocol.finishLengthSMTLibProtocol partial
+      checkPhase <- expectProtocolAwait =<< expectRight
+        (SMTLibProtocol.feedLengthSMTLibProtocol initial $ asciiBytes "sat\n")
+      SMTLibProtocol.lengthSMTLibProtocolReceiverPhase checkPhase @?=
+        SMTLibProtocol.LengthSMTLibProtocolCheckBarrierPhase
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolBarrierMismatch
+          SMTLibProtocol.LengthSMTLibProtocolCheckBarrier)
+        $ SMTLibProtocol.feedLengthSMTLibProtocol checkPhase
+        $ SMTLibStream.smtLibEchoSentinelResponseBytes wrongBarrier ++
+          asciiBytes "\n"
+      let staleValues = protocolValueFrame query [3]
+      case SMTLibProtocol.feedLengthSMTLibProtocol initial $
+          asciiBytes "sat\n" ++
+          SMTLibStream.smtLibEchoSentinelResponseBytes checkBarrier ++
+          asciiBytes "\n" ++ staleValues of
+        Left (SMTLibProtocol.LengthSMTLibProtocolUnexpectedPostBarrierByte
+            _ 40) -> pure ()
+        Left other -> assertFailure $ "unexpected stale-frame rejection: " ++
+          show other
+        Right _ -> assertFailure
+          "a valuation buffered before its write capability was accepted"
+  , testCase "bind semantic plan inputs but exclude fingerprint admission" $ do
+      problem <- adversarialConstantZeroProblem identityLengthContract
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      binaryProblem <- adversarialBinaryConstantZeroProblem
+        identityLengthContract
+      binaryQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits binaryProblem
+      execution <- protocolExecutionConfig
+        InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+      changedExecution <- expectRight
+        $ InternalSMTLibExecution.mkLengthSMTLibExecutionConfig
+            InternalSMTLibExecution.defaultLengthSMTLibExecutionLimits
+        $ (InternalSMTLibExecution.defaultLengthSMTLibExecutionConfigSource
+            absoluteFixtureExecutable Nothing)
+            { InternalSMTLibExecution.lengthSMTLibExecutionConfigSourceSolverTimeoutMilliseconds =
+                1001 }
+      let defaults = SMTLibProtocol.defaultLengthSMTLibProtocolLimits
+          source = SMTLibProtocol.defaultLengthSMTLibProtocolLimitSource
+          alteredStream = SMTLibProtocol.mkLengthSMTLibProtocolLimits
+            $ source
+              { SMTLibProtocol.lengthSMTLibProtocolLimitSourceStreamLimits =
+                  SMTLibStream.defaultSMTLibStreamLimitSource
+                    { SMTLibStream.smtLibStreamLimitSourceTotalBytes = 131071 }
+              }
+          alteredCumulative = SMTLibProtocol.mkLengthSMTLibProtocolLimits
+            $ source
+              { SMTLibProtocol.lengthSMTLibProtocolLimitSourceCumulativeStdoutBytes =
+                  524287 }
+          widerAdmission = SMTLibProtocol.mkLengthSMTLibProtocolLimits
+            $ source
+              { SMTLibProtocol.lengthSMTLibProtocolLimitSourcePlanFingerprintBytes =
+                  524288 }
+          seal limits configured selected checkNonce valueNonce = expectRight
+            $ SMTLibProtocol.sealLengthSMTLibProtocolPlan limits configured
+                selected checkNonce $ Just valueNonce
+      baseline <- seal defaults execution query
+        protocolCheckNonce protocolValueNonce
+      resealed <- seal widerAdmission execution query
+        protocolCheckNonce protocolValueNonce
+      SMTLibProtocol.lengthSMTLibProtocolPlanFingerprint resealed @?=
+        SMTLibProtocol.lengthSMTLibProtocolPlanFingerprint baseline
+      changed <- sequence
+        [ seal alteredStream execution query
+            protocolCheckNonce protocolValueNonce
+        , seal alteredCumulative execution query
+            protocolCheckNonce protocolValueNonce
+        , seal defaults changedExecution query
+            protocolCheckNonce protocolValueNonce
+        , seal defaults execution binaryQuery
+            protocolCheckNonce protocolValueNonce
+        , seal defaults execution query [1 .. 32] protocolValueNonce
+        , seal defaults execution query protocolCheckNonce [64 .. 95]
+        ]
+      let baselineFingerprint =
+            SMTLibProtocol.lengthSMTLibProtocolPlanFingerprint baseline
+          changedFingerprints =
+            map SMTLibProtocol.lengthSMTLibProtocolPlanFingerprint changed
+          fingerprints = baselineFingerprint : changedFingerprints
+      assertBool "a semantic protocol-plan input was absent from identity"
+        $ all (/= baselineFingerprint) changedFingerprints
+      assertBool "distinct protocol plans shared a private complete key"
+        $ length (nub fingerprints) == length fingerprints
+  , testCase "enforce exact cumulative accounting and value-phase barriers" $ do
+      (query, defaultPlan) <- protocolUnaryPlan
+        InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+      execution <- protocolExecutionConfig
+        InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+      let exactLimits = SMTLibProtocol.mkLengthSMTLibProtocolLimits
+            $ SMTLibProtocol.defaultLengthSMTLibProtocolLimitSource
+                { SMTLibProtocol.lengthSMTLibProtocolLimitSourceCumulativeStdoutBytes =
+                    205 }
+      exactPlan <- expectRight $ SMTLibProtocol.sealLengthSMTLibProtocolPlan
+        exactLimits execution query protocolCheckNonce $ Just protocolValueNonce
+      checkBarrier <- protocolSentinel protocolCheckNonce
+      valueBarrier <- protocolSentinel protocolValueNonce
+      let checkTranscript = asciiBytes "sat\n" ++
+            SMTLibStream.smtLibEchoSentinelResponseBytes checkBarrier ++
+            asciiBytes "\n"
+          rawValues = protocolValueFrame query [0]
+          valueTranscript = rawValues ++
+            SMTLibStream.smtLibEchoSentinelResponseBytes valueBarrier ++
+            asciiBytes "\n"
+          begin plan = expectProtocolWrite
+            SMTLibProtocol.LengthSMTLibProtocolInitialQueryWrite
+            (SMTLibProtocol.lengthSMTLibProtocolInitialWriteBytes plan)
+            $ SMTLibProtocol.startLengthSMTLibProtocol plan
+      exactInitial <- begin exactPlan
+      exactValueAction <- expectRight
+        $ SMTLibProtocol.feedLengthSMTLibProtocol exactInitial checkTranscript
+      exactValue <- expectProtocolWrite
+        SMTLibProtocol.LengthSMTLibProtocolInputValueWrite
+        (maybe [] id $ SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes
+          exactPlan)
+        exactValueAction
+      exactDecoded <- expectProtocolComplete =<< expectRight
+        (SMTLibProtocol.feedLengthSMTLibProtocol exactValue valueTranscript)
+      SMTLibProtocol.lengthSMTLibProtocolDecodedInputValues exactDecoded @?=
+        Just [smtIntegerBinding (asciiBytes "djex_length_input_0") 0]
+
+      overflowingInitial <- begin exactPlan
+      overflowingAction <- expectRight
+        $ SMTLibProtocol.feedLengthSMTLibProtocol
+            overflowingInitial checkTranscript
+      overflowingValue <- expectProtocolWrite
+        SMTLibProtocol.LengthSMTLibProtocolInputValueWrite
+        (maybe [] id $ SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes
+          exactPlan)
+        overflowingAction
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolCumulativeStdoutByteLimitExceeded
+          205 206)
+        $ SMTLibProtocol.feedLengthSMTLibProtocol overflowingValue
+        $ valueTranscript ++ asciiBytes " "
+      cyclicInitial <- begin exactPlan
+      cyclicAction <- expectRight
+        $ SMTLibProtocol.feedLengthSMTLibProtocol cyclicInitial checkTranscript
+      cyclicValue <- expectProtocolWrite
+        SMTLibProtocol.LengthSMTLibProtocolInputValueWrite
+        (maybe [] id $ SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes
+          exactPlan)
+        cyclicAction
+      let cyclicWhitespace = 32 : cyclicWhitespace
+      cyclicOverflow <- evaluateWithin
+        $ SMTLibProtocol.feedLengthSMTLibProtocol cyclicValue
+        $ rawValues ++
+          SMTLibStream.smtLibEchoSentinelResponseBytes valueBarrier ++
+          cyclicWhitespace
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolCumulativeStdoutByteLimitExceeded
+          205 206)
+        cyclicOverflow
+
+      statusExecution <- protocolExecutionConfig
+        InternalSMTLibExecution.LengthSMTLibStatusOnly
+      let equalCapLimits = SMTLibProtocol.mkLengthSMTLibProtocolLimits
+            $ SMTLibProtocol.defaultLengthSMTLibProtocolLimitSource
+                { SMTLibProtocol.lengthSMTLibProtocolLimitSourceStreamLimits =
+                    SMTLibStream.defaultSMTLibStreamLimitSource
+                      { SMTLibStream.smtLibStreamLimitSourceTotalBytes = 87 }
+                , SMTLibProtocol.lengthSMTLibProtocolLimitSourceCumulativeStdoutBytes =
+                    96
+                }
+      equalCapPlan <- expectRight $ SMTLibProtocol.sealLengthSMTLibProtocolPlan
+        equalCapLimits statusExecution query protocolCheckNonce Nothing
+      equalCapInitial <- begin equalCapPlan
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolFramingFailure
+          SMTLibProtocol.LengthSMTLibProtocolCheckBarrierPhase
+          $ SMTLibStream.SMTLibStreamTotalByteLimitExceeded 87 88)
+        $ SMTLibProtocol.feedLengthSMTLibProtocol equalCapInitial
+        $ asciiBytes "  unknown\n" ++
+          SMTLibStream.smtLibEchoSentinelResponseBytes checkBarrier ++
+          asciiBytes "\n"
+
+      defaultInitial <- begin defaultPlan
+      defaultValueAction <- expectRight
+        $ SMTLibProtocol.feedLengthSMTLibProtocol defaultInitial checkTranscript
+      defaultValue <- expectProtocolWrite
+        SMTLibProtocol.LengthSMTLibProtocolInputValueWrite
+        (maybe [] id $ SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes
+          defaultPlan)
+        defaultValueAction
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolUnexpectedEOF
+          SMTLibProtocol.LengthSMTLibProtocolInputValuePhase)
+        $ SMTLibProtocol.finishLengthSMTLibProtocol defaultValue
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolResponseFailure
+          SMTLibProtocol.LengthSMTLibProtocolInputValuePhase
+          SMTLibResponse.LengthSMTLibUnexpectedInputValueResponse)
+        $ SMTLibProtocol.feedLengthSMTLibProtocol defaultValue
+        $ asciiBytes "success\n"
+      valueBarrierPhase <- expectProtocolAwait =<< expectRight
+        (SMTLibProtocol.feedLengthSMTLibProtocol defaultValue
+          $ rawValues ++ asciiBytes "\n")
+      SMTLibProtocol.lengthSMTLibProtocolReceiverPhase valueBarrierPhase @?=
+        SMTLibProtocol.LengthSMTLibProtocolInputValueBarrierPhase
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolUnexpectedEOF
+          SMTLibProtocol.LengthSMTLibProtocolInputValueBarrierPhase)
+        $ SMTLibProtocol.finishLengthSMTLibProtocol valueBarrierPhase
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolBarrierMismatch
+          SMTLibProtocol.LengthSMTLibProtocolInputValueBarrier)
+        $ SMTLibProtocol.feedLengthSMTLibProtocol valueBarrierPhase
+        $ SMTLibStream.smtLibEchoSentinelResponseBytes checkBarrier ++
+          asciiBytes "\n"
+
+      (_, statusOnly) <- protocolUnaryPlan
+        InternalSMTLibExecution.LengthSMTLibStatusOnly
+      statusInitial <- begin statusOnly
+      statusDecoded <- expectProtocolComplete =<< expectRight
+        (SMTLibProtocol.feedLengthSMTLibProtocol statusInitial
+          $ asciiBytes "unknown\n" ++
+            SMTLibStream.smtLibEchoSentinelResponseBytes checkBarrier ++
+            [9, 10, 13, 32])
+      SMTLibProtocol.lengthSMTLibProtocolDecodedStatus statusDecoded @?=
+        Observation.SolverUnknown
+      commentInitial <- begin statusOnly
+      case SMTLibProtocol.feedLengthSMTLibProtocol commentInitial $
+          asciiBytes "unknown\n" ++
+          SMTLibStream.smtLibEchoSentinelResponseBytes checkBarrier ++
+          asciiBytes "; not transport whitespace" of
+        Left (SMTLibProtocol.LengthSMTLibProtocolUnexpectedPostBarrierByte
+            _ 59) -> pure ()
+        Left other -> assertFailure $ "unexpected post-barrier rejection: " ++
+          show other
+        Right _ -> assertFailure "a post-barrier comment was accepted as trivia"
+  ]
+
+protocolCheckNonce, protocolValueNonce :: [Word8]
+protocolCheckNonce = [0 .. 31]
+protocolValueNonce = [32 .. 63]
+
+protocolSentinel :: [Word8] -> IO SMTLibStream.SMTLibEchoSentinel
+protocolSentinel = expectRight . SMTLibStream.mkSMTLibEchoSentinel
+
+protocolExecutionConfig
+  :: InternalSMTLibExecution.LengthSMTLibArtifactPolicy
+  -> IO InternalSMTLibExecution.LengthSMTLibExecutionConfig
+protocolExecutionConfig policy = expectRight
+  $ protocolExecutionConfigWithResponseEither policy
+      SMTLibResponse.defaultLengthSMTLibResponseLimits
+
+protocolExecutionConfigWithResponse
+  :: InternalSMTLibExecution.LengthSMTLibArtifactPolicy
+  -> SMTLibResponse.LengthSMTLibResponseLimits
+  -> IO InternalSMTLibExecution.LengthSMTLibExecutionConfig
+protocolExecutionConfigWithResponse policy response = expectRight
+  $ protocolExecutionConfigWithResponseEither policy response
+
+protocolExecutionConfigWithResponseEither
+  :: InternalSMTLibExecution.LengthSMTLibArtifactPolicy
+  -> SMTLibResponse.LengthSMTLibResponseLimits
+  -> Either
+      InternalSMTLibExecution.LengthSMTLibExecutionConfigError
+      InternalSMTLibExecution.LengthSMTLibExecutionConfig
+protocolExecutionConfigWithResponseEither policy response =
+  InternalSMTLibExecution.mkLengthSMTLibExecutionConfig
+    InternalSMTLibExecution.defaultLengthSMTLibExecutionLimits
+  $ (InternalSMTLibExecution.defaultLengthSMTLibExecutionConfigSource
+      absoluteFixtureExecutable Nothing)
+      { InternalSMTLibExecution.lengthSMTLibExecutionConfigSourceArtifactPolicy =
+          policy
+      , InternalSMTLibExecution.lengthSMTLibExecutionConfigSourceResponseLimits =
+          response
+      }
+
+protocolUnaryPlan
+  :: InternalSMTLibExecution.LengthSMTLibArtifactPolicy
+  -> IO
+      ( SMTLib.LengthSMTLibQuery AdversarialIdentity AdversarialLocal
+      , SMTLibProtocol.LengthSMTLibProtocolPlan
+          AdversarialIdentity AdversarialLocal
+      )
+protocolUnaryPlan policy = do
+  problem <- adversarialConstantZeroProblem identityLengthContract
+  query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  execution <- protocolExecutionConfig policy
+  let valueNonce = case policy of
+        InternalSMTLibExecution.LengthSMTLibStatusOnly -> Nothing
+        InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable ->
+          Just protocolValueNonce
+  plan <- expectRight $ SMTLibProtocol.sealLengthSMTLibProtocolPlan
+    SMTLibProtocol.defaultLengthSMTLibProtocolLimits
+    execution query protocolCheckNonce valueNonce
+  pure (query, plan)
+
+protocolZeroInputPlan
+  :: InternalSMTLibExecution.LengthSMTLibArtifactPolicy
+  -> IO
+      ( SMTLib.LengthSMTLibQuery AdversarialIdentity AdversarialLocal
+      , SMTLibProtocol.LengthSMTLibProtocolPlan
+          AdversarialIdentity AdversarialLocal
+      )
+protocolZeroInputPlan policy = do
+  let result = Length.LengthVariable Length.LengthResult
+      source = contractWith (Length.LengthTruth True)
+        $ Length.LengthEqual result $ Length.LengthLiteral 1
+  problem <- adversarialZeroInputProblem source
+  query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  execution <- protocolExecutionConfig policy
+  plan <- expectRight $ SMTLibProtocol.sealLengthSMTLibProtocolPlan
+    SMTLibProtocol.defaultLengthSMTLibProtocolLimits
+    execution query protocolCheckNonce Nothing
+  pure (query, plan)
+
+protocolValueFrame
+  :: SMTLib.LengthSMTLibQuery identity local
+  -> [Integer]
+  -> [Word8]
+protocolValueFrame query values =
+  [40] ++ intercalate [32]
+    [ [40] ++ symbol ++ [32] ++ asciiBytes (show value) ++ [41]
+    | (symbol, value) <-
+        zip (SMTLib.lengthSMTLibQueryInputSymbols query) values
+    ] ++ [41]
+
+expectProtocolWrite
+  :: SMTLibProtocol.LengthSMTLibProtocolWriteKind
+  -> [Word8]
+  -> SMTLibProtocol.LengthSMTLibProtocolAction identity local
+  -> IO (SMTLibProtocol.LengthSMTLibProtocolReceiver identity local)
+expectProtocolWrite expectedKind expectedBytes action = case action of
+  SMTLibProtocol.LengthSMTLibProtocolWrite kind bytes receiver -> do
+    kind @?= expectedKind
+    bytes @?= expectedBytes
+    pure receiver
+  SMTLibProtocol.LengthSMTLibProtocolAwait{} ->
+    assertFailure "expected a protocol write action, observed await"
+  SMTLibProtocol.LengthSMTLibProtocolComplete{} ->
+    assertFailure "expected a protocol write action, observed completion"
+
+expectProtocolAwait
+  :: SMTLibProtocol.LengthSMTLibProtocolAction identity local
+  -> IO (SMTLibProtocol.LengthSMTLibProtocolReceiver identity local)
+expectProtocolAwait action = case action of
+  SMTLibProtocol.LengthSMTLibProtocolAwait receiver -> pure receiver
+  SMTLibProtocol.LengthSMTLibProtocolWrite{} ->
+    assertFailure "expected a protocol await action, observed write"
+  SMTLibProtocol.LengthSMTLibProtocolComplete{} ->
+    assertFailure "expected a protocol await action, observed completion"
+
+expectProtocolComplete
+  :: SMTLibProtocol.LengthSMTLibProtocolAction identity local
+  -> IO (SMTLibProtocol.LengthSMTLibProtocolDecoded identity local)
+expectProtocolComplete action = case action of
+  SMTLibProtocol.LengthSMTLibProtocolComplete decoded -> pure decoded
+  SMTLibProtocol.LengthSMTLibProtocolWrite{} ->
+    assertFailure "expected protocol completion, observed write"
+  SMTLibProtocol.LengthSMTLibProtocolAwait{} ->
+    assertFailure "expected protocol completion, observed await"
+
+feedProtocolChunks
+  :: SMTLibProtocol.LengthSMTLibProtocolReceiver identity local
+  -> [[Word8]]
+  -> IO (SMTLibProtocol.LengthSMTLibProtocolAction identity local)
+feedProtocolChunks receiver chunks = case chunks of
+  [] -> pure $ SMTLibProtocol.LengthSMTLibProtocolAwait receiver
+  chunk : remaining -> do
+    action <- expectRight
+      $ SMTLibProtocol.feedLengthSMTLibProtocol receiver chunk
+    case action of
+      SMTLibProtocol.LengthSMTLibProtocolAwait next ->
+        feedProtocolChunks next remaining
+      _
+        | null remaining -> pure action
+        | otherwise -> assertFailure
+            "the protocol produced an action before all response chunks"
+
+assertProtocolTerminalStatus
+  :: SMTLibProtocol.LengthSMTLibProtocolPlan identity local
+  -> [Word8]
+  -> (String, Observation.SolverStatus)
+  -> IO ()
+assertProtocolTerminalStatus plan marker (rawStatus, expectedStatus) = do
+  receiver <- expectProtocolWrite
+    SMTLibProtocol.LengthSMTLibProtocolInitialQueryWrite
+    (SMTLibProtocol.lengthSMTLibProtocolInitialWriteBytes plan)
+    $ SMTLibProtocol.startLengthSMTLibProtocol plan
+  action <- expectRight $ SMTLibProtocol.feedLengthSMTLibProtocol receiver
+    $ asciiBytes (rawStatus ++ "\n") ++ marker ++ asciiBytes "\n"
+  decoded <- expectProtocolComplete action
+  SMTLibProtocol.lengthSMTLibProtocolDecodedStatus decoded @?= expectedStatus
+  SMTLibProtocol.lengthSMTLibProtocolDecodedStatusFrame decoded @?=
+    asciiBytes rawStatus
+  SMTLibProtocol.lengthSMTLibProtocolDecodedInputValueFrame decoded @?= Nothing
+  SMTLibProtocol.lengthSMTLibProtocolDecodedInputValues decoded @?= Nothing
 
 constantZeroSMTLibCheck :: String
 constantZeroSMTLibCheck = unlines

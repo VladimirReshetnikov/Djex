@@ -137,6 +137,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` | Pure validated Z3 launch, resource, artifact, and response-decoder policy with a package-private complete identity; it performs no IO or attestation. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` | Opaque query-specific association of bounded raw solver reports, with heuristic-only safe projections and exact problem-plus-query replay before payload access. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response` | Pure bounded SMT-LIB 2.x check-status and query-specific input-valuation decoding; syntax remains untrusted and only independent Length replay may create evidence. |
+| `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` | Package-private incremental reset/check/value transaction planning with exact positional barriers, causal write boundaries, and bounded cumulative stdout; it performs no IO or attestation. |
 | `Language.Haskell.Synthesis.Semantic.Observation` | Raw three-valued solver and four-valued behavioral reports without candidate association or evidence claims. |
 | `Language.Haskell.Synthesis.Semantic.Problem` | Bounded raw artifacts associated with exact domain, inventory, encoding, candidate, and problem identities; every raw result is restricted to heuristic ranking, while domain-owned authoritative evidence has only a private construction seam. |
 | `Language.Haskell.Synthesis.Generated` | Scope-aware expressions, patterns, clauses, holes, mixed term/type application spines, bottom-up rewriting, simplification, alpha-equivalence, substitution, and Haskell rendering through the common qualification policy. |
@@ -207,14 +208,37 @@ hostile nesting productive failures. Bare and quoted-symbol responses require
 the standard-mandated following whitespace instead of being accepted at EOF.
 A fixed 32-byte nonce becomes a package-owned lowercase-hex `echo` marker;
 both its command and its expected response retain the surrounding quotes
-required by the standard. Recognition is exact and positional only. The
-future live session must still enforce response/sentinel phase order, reject
-stale or duplicate output, re-feed every successful tail so all bytes are
-eventually accounted, bind the framing schema and resource policy into run
-identity, and poison a worker after any protocol failure. Its capability probe
-must establish that Z3's `echo` emits and flushes a trailing byte (normally a
-newline): a top-level string's closing quote is intentionally held for one-byte
-lookahead so a quote at the next chunk boundary can still form a doubled quote.
+required by the standard. Recognition is exact and positional only. Completed
+frames report the exact count of charged leading trivia and frame bytes while
+leaving lexical lookahead in the returned tail. This lets the composing
+transaction account every accepted stdout byte without charging a tail twice.
+A live capability probe must establish that Z3's `echo` emits and flushes a
+trailing byte (normally a newline): a top-level string's closing quote is
+intentionally held for one-byte lookahead so a quote at the next chunk boundary
+can still form a doubled quote.
+
+`Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` owns the
+next pure boundary. It seals the execution-policy key, exact query key, stream
+limits, cumulative stdout budget, phase schema, and caller-supplied check/value
+markers into one private protocol plan. The initial action writes reset,
+canonical check commands, and a status marker together. The machine then
+accepts exactly one decoded status followed by that exact marker. Only `sat`
+under an input-value policy for a query with inputs exposes the separate
+`get-value`/marker write; unsatisfiable, unknown, status-only, and zero-input
+paths terminate without it. Satisfiable zero-input value policy is represented
+as a vacuous `Just []`, without fabricating an input-value frame. A decoded
+nonempty-query valuation is not released until its own exact marker arrives.
+
+Tails cross status-to-marker and value-to-marker phases only because those
+responses answer commands already in the same completed write. A tail crossing
+the status-marker-to-`get-value` boundary must contain only bounded SMT-LIB
+whitespace; a stale buffered valuation is rejected before the new write action
+exists. Framing, response, marker, cumulative-budget, unexpected-byte, and EOF
+failures expose no continuation. The future live owner must therefore destroy
+the worker on any failure, generate barriers uniquely across the session,
+perform each write before feeding its receiver, and bind attested process and
+observed transcript facts into a separate run identity. Pure decoded outcomes
+remain caller-feedable syntax, never execution receipts or semantic evidence.
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` seals the next
 pure boundary. Its v2 policy fixes the direct prefix

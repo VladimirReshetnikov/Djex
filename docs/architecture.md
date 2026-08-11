@@ -14,14 +14,16 @@ historical review notes rather than as the current API guide.
 | Path | Responsibility |
 | --- | --- |
 | `synthesis/src/` | Shared names, types, declarations, environments, kind inference, diagnostics, generated code, and query/result envelopes. |
+| `synthesis/internal/` | Package-private fingerprints, protocol machinery, and shared implementation invariants. |
 | `djinn/src-core/` | Djinn's checked adapter, logical translation, LJT proof search, and proof checking. |
+| `djinn/src-internal/` | Package-private Djinn implementation modules shared by the library and focused tests. |
 | `djinn/src-frontend/` | Historical `Djinn` API and compatibility Haskeline REPL. |
 | `exference/src-core/` | Exference's checked adapter, class environment, heuristic search, unification, scoring, and independent expression checker. |
 | `exference/src-frontend/` | Haskell-source extraction, environment loading, and the historical Exference command API. |
 | `src/` | The `Language.Haskell.Djex` facade, shared REPL and result presentation, and merged `djex` command. |
 | `app/`, `djinn/app/`, `exference/app/` | Thin executable launchers. |
 
-All six source roots compile into the unnamed `djex` library. The directory
+All eight source roots compile into the unnamed `djex` library. The directory
 split documents dependency direction and provenance; it is not a set of Cabal
 sublibraries.
 

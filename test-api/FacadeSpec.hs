@@ -407,6 +407,34 @@ facadeTests = testGroup "public Djex facade"
 
       let quantified = ForallType ["bound"] [] $ TypeVariable "bound"
       isLeadingForallInstantiation quantified typeA typeA @?= True
+  , testCase "exports atomic finite-spine candidate problems" $ do
+      let sealer
+            :: LengthProblemLimits
+            -> CheckedLengthSession Int ()
+            -> CheckedLengthContract ExferenceTypeVariable
+            -> ExferenceTypedCandidate
+            -> Either
+                (LengthProblemError
+                  ExferenceTermGraphAbsence Int ExferenceLocal)
+                (CheckedLengthProblem Int ExferenceLocal)
+          sealer = sealLengthTypedCandidateProblem
+          candidateResultProjection
+            :: CheckedLengthCandidate Int ExferenceLocal
+            -> LengthExpression LengthContractVariable
+          candidateResultProjection = checkedLengthCandidateResult
+          problemProjection
+            :: CheckedLengthProblem Int ExferenceLocal
+            -> BehavioralProblem FiniteListSpineLengthV1
+          problemProjection = checkedLengthProblemBehavioralProblem
+      sealer `seq` candidateResultProjection `seq` problemProjection `seq`
+        pure ()
+      lengthProblemTermGraphLimits defaultLengthProblemLimits @?=
+        defaultTermGraphLimits
+      lengthProblemGraphFingerprintByteLimit defaultLengthProblemLimits @?=
+        defaultTermGraphFingerprintByteLimit
+      lengthProblemEvaluationStepLimit defaultLengthProblemLimits @?= 65536
+      mkLengthProblemLimits defaultTermGraphLimits 0 (-1) @?= Left
+        (NegativeLengthProblemEvaluationStepLimit (-1))
   , testCase "rejects residual constraints at the Djinn render boundary" $ do
       target <- expectRight $ mkIdentifier "identity"
       checkedTarget <- expectRight $ mkDefinitionName target

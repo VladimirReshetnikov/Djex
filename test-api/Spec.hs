@@ -296,6 +296,12 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "forbiddenCheckedLengthSpineModelCoercion"
                       , "forbiddenCheckedLengthProviderSummaryCoercion"
                       , "forbiddenCheckedLengthProviderInventoryCoercion"
+                      , "forbiddenCheckedLengthSessionIdentityCoercion"
+                      , "forbiddenCheckedLengthSessionAnnotationCoercion"
+                      , "forbiddenCheckedLengthCandidateIdentityCoercion"
+                      , "forbiddenCheckedLengthCandidateLocalCoercion"
+                      , "forbiddenCheckedLengthProblemIdentityCoercion"
+                      , "forbiddenCheckedLengthProblemLocalCoercion"
                       ]
                   ) ||
                   ( "Variable not in scope" `isInfixOf` message &&

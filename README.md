@@ -223,10 +223,42 @@ bind a re-sealed contract and normalized interpreted candidate formula.
 The smaller provider-inventory fingerprint still does not identify provider
 implementations or the complete source inventory. The atomic session does, and
 prevents a context checked from one inventory from being combined with provider
-laws checked from another. A future candidate/problem sealer will build on that
-opaque association, re-seal the contract through its retained context, bind the
-exact typed candidate graph, and construct the concrete encoding, candidate,
-and complete behavioral-problem identities together.
+laws checked from another. It also reserves the modeled zero and step
+constructor names from provider laws, avoiding an ambiguous semantic global.
+
+`sealLengthTypedCandidateProblem` completes that association without accepting
+a detachable raw graph. It consumes an engine-owned `TypedCandidate`, re-seals
+the session's provider projections and the contract through the retained
+context, rejects the first residual dictionary before inspecting graph
+availability, and freshly rechecks and fingerprints the graph. The contract's
+free flexible variables are treated as implicit source quantifiers only at the
+root boundary; the engine's corresponding selections must be distinct rigid
+variables. Every provider occurrence is then matched capture-safely against
+its exact closed inventory scheme, and any free selected variable must be one
+of those authorized root rigids. Closed impredicative selections remain
+admissible. Every graph, pattern, application-witness, and visible-application
+type is kind-checked again under the session's exact inventory assumptions.
+A visible selection is checked at the kind inferred for the leading binder,
+so closed higher-kinded and impredicative selections remain legal while free
+flexibles, non-root rigids, and types from a foreign inventory fail closed.
+
+The first symbolic interpreter is deliberately narrow and lazy. It supports
+locals, lambdas, application, certificate-free visible type application,
+tuples, lets, bind/wildcard/tuple/as patterns, the checked zero and step
+constructors, and checked provider transfers. Holes, cases, constructor
+patterns, residual constraints, unknown globals, unmodeled inventory globals,
+and certificate-bearing graphs fail closed. Explicit graph-byte and evaluation
+step limits bound candidate work; the existing Length syntax budget jointly
+bounds the normalized result and the counterexample condition
+`precondition && not postcondition[result := interpretedResult]`.
+
+A successful `CheckedLengthProblem` carries separate inventory, concrete
+encoding, candidate, and complete problem fingerprints plus the generic
+`BehavioralProblem` envelope. The concrete encoding identifies the re-sealed
+contract, normalized result and counterexample condition, interpreter policy,
+and exactly the provider laws actually used. The candidate key wraps the fresh
+shared graph identity and explicitly describes candidate-only authority; it
+does not pretend to retain batch completion status.
 
 Contract arguments and results must expose the context's outer modeled spine;
 their element types remain opaque and may themselves be impredicative. A

@@ -243,6 +243,7 @@ Library
     Language.Haskell.Synthesis.Internal.InstanceHead
     Language.Haskell.Synthesis.Internal.Semantic.Length
     Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
+    Language.Haskell.Synthesis.Internal.Semantic.Length.Problem.Candidate
     Language.Haskell.Synthesis.Internal.Semantic.Problem
     Language.Haskell.Synthesis.Internal.TypedCandidate
     Language.Haskell.Synthesis.Internal.TypedGenerated.Fingerprint
@@ -325,10 +326,14 @@ Test-Suite synthesis-tests
   Build-Depends:    djex
 
 Test-Suite synthesis-length-tests
-  import:           tasty-hunit-test
+  import:           tasty-hunit-test, deepseq-dep
   Type:             exitcode-stdio-1.0
   Main-Is:          Spec.hs
-  Hs-Source-Dirs:   synthesis/test-length
+  Hs-Source-Dirs:
+    synthesis/test-length
+    synthesis/internal
+  Other-Modules:
+    Language.Haskell.Synthesis.Internal.TypedCandidate
   Build-Depends:    djex
 
 Test-Suite synthesis-term-graph-fingerprint-tests

@@ -18,6 +18,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
   , checkedLengthSessionProviderInventory
   , lengthSessionInventoryFingerprint
   , lengthSessionEncodingPolicyFingerprint
+  , checkedLengthSessionLimits
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -62,7 +63,10 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , LengthSpineModelError
   , LengthSpineModelSource
   , ascii
+  , checkedLengthProviderName
   , checkedLengthSpineModelField
+  , checkedLengthSpineStepConstructor
+  , checkedLengthSpineZeroConstructor
   , checkedLengthProviderSummaries
   , finiteListSpineLengthDomainTag
   , lengthContextSpineModel
@@ -82,6 +86,7 @@ import Language.Haskell.Synthesis.Kind (Kind (..))
 import Language.Haskell.Synthesis.KindInference
   ( KindAssumptions (..)
   )
+import Language.Haskell.Synthesis.Name (Name)
 import Language.Haskell.Synthesis.Semantic.Problem
   ( InventoryFingerprintSubject )
 import Language.Haskell.Synthesis.Type
@@ -93,7 +98,7 @@ import Language.Haskell.Synthesis.Type
 -- | Which independently constructed session identity exceeded its byte bound.
 data LengthSemanticFingerprintPart
   = LengthSemanticInventoryFingerprint
-  | LengthSemanticEncodingFingerprint
+  | LengthSemanticEncodingPolicyFingerprint
   deriving (Bounded, Enum, Eq, Ord, Show, Generic)
 
 instance NFData LengthSemanticFingerprintPart
@@ -111,6 +116,7 @@ data LengthSessionError identity
       (LengthSpineModelError (Variable identity))
   | LengthSessionProviderInventoryRejected
       (LengthProviderInventoryError (Variable identity))
+  | LengthSessionProviderConflictsWithSpineConstructor !Name
   | LengthSessionFingerprintLimitExceeded
       !LengthSemanticFingerprintPart !Natural !Natural
   deriving (Eq, Ord, Show, Generic)
@@ -120,6 +126,7 @@ instance NFData identity => NFData (LengthSessionError identity)
 -- | Exact neutral inventory, checked finite-spine model, and provider laws
 -- retained under distinct complete structural identities.
 data CheckedLengthSession identity annotation = CheckedLengthSession
+  !LengthLimits
   !(CheckedLengthContext (Variable identity) annotation)
   !(CheckedLengthProviderInventory (Variable identity))
   !(Fingerprint
@@ -131,7 +138,8 @@ type role CheckedLengthSession nominal nominal
 
 instance (NFData identity, NFData annotation)
     => NFData (CheckedLengthSession identity annotation) where
-  rnf (CheckedLengthSession context providers inventory encoding) =
+  rnf (CheckedLengthSession limits context providers inventory encoding) =
+    rnf limits `seq`
     rnf context `seq`
     rnf providers `seq`
     rnf inventory `seq`
@@ -139,10 +147,11 @@ instance (NFData identity, NFData annotation)
 
 -- | Seal all session authority from one raw source inventory.
 --
--- Failure order is spine schema, provider summaries, exact inventory identity,
--- then solver-neutral encoding identity.  The provider sealer resolves every
--- named scheme from the context constructed immediately before it, so a
--- successful value cannot contain cross-inventory checked projections.
+-- Failure order is spine schema, provider summaries, a provider name reserved
+-- by either modeled constructor, exact inventory identity, then solver-neutral
+-- encoding-policy identity.  The provider sealer resolves every named scheme
+-- from the context constructed immediately before it, so a successful value
+-- cannot contain cross-inventory checked projections.
 sealLengthSession
   :: Ord identity
   => LengthLimits
@@ -158,37 +167,62 @@ sealLengthSession limits inventory modelSource providerSources = do
   providers <- either
     (Left . LengthSessionProviderInventoryRejected) Right
     $ sealLengthProviderInventoryInContext limits context providerSources
+  rejectSpineConstructorProviders context providers
   inventoryFingerprint <- mapFingerprintFailure
     LengthSemanticInventoryFingerprint
     $ buildLengthInventoryFingerprint limits context providers
   encodingFingerprint <- mapFingerprintFailure
-    LengthSemanticEncodingFingerprint
+    LengthSemanticEncodingPolicyFingerprint
     $ buildLengthEncodingFingerprint limits context
   pure $ CheckedLengthSession
-    context providers inventoryFingerprint encodingFingerprint
+    limits context providers inventoryFingerprint encodingFingerprint
 
 checkedLengthSessionContext
   :: CheckedLengthSession identity annotation
   -> CheckedLengthContext (Variable identity) annotation
-checkedLengthSessionContext (CheckedLengthSession context _ _ _) = context
+checkedLengthSessionContext (CheckedLengthSession _ context _ _ _) = context
 
 checkedLengthSessionProviderInventory
   :: CheckedLengthSession identity annotation
   -> CheckedLengthProviderInventory (Variable identity)
 checkedLengthSessionProviderInventory
-    (CheckedLengthSession _ providers _ _) = providers
+    (CheckedLengthSession _ _ providers _ _) = providers
 
 lengthSessionInventoryFingerprint
   :: CheckedLengthSession identity annotation
   -> Fingerprint (InventoryFingerprintSubject FiniteListSpineLengthV1)
 lengthSessionInventoryFingerprint
-    (CheckedLengthSession _ _ inventory _) = inventory
+    (CheckedLengthSession _ _ _ inventory _) = inventory
 
 lengthSessionEncodingPolicyFingerprint
   :: CheckedLengthSession identity annotation
   -> Fingerprint LengthEncodingPolicyFingerprintSubject
 lengthSessionEncodingPolicyFingerprint
-    (CheckedLengthSession _ _ _ encoding) = encoding
+    (CheckedLengthSession _ _ _ _ encoding) = encoding
+
+-- | Original finite bounds used for every authority sealed into the session.
+-- Kept package-private so later atomic problem construction can revalidate
+-- projections without allowing a caller to substitute a different policy.
+checkedLengthSessionLimits
+  :: CheckedLengthSession identity annotation
+  -> LengthLimits
+checkedLengthSessionLimits (CheckedLengthSession limits _ _ _ _) = limits
+
+rejectSpineConstructorProviders
+  :: CheckedLengthContext variable annotation
+  -> CheckedLengthProviderInventory variable
+  -> Either (LengthSessionError identity) ()
+rejectSpineConstructorProviders context providers = case List.find conflicts
+    $ checkedLengthProviderSummaries providers of
+  Nothing -> Right ()
+  Just provider -> Left $ LengthSessionProviderConflictsWithSpineConstructor
+    $ checkedLengthProviderName provider
+ where
+  model = lengthContextSpineModel context
+  zeroName = checkedLengthSpineZeroConstructor model
+  stepName = checkedLengthSpineStepConstructor model
+  conflicts provider = let name = checkedLengthProviderName provider
+    in name == zeroName || name == stepName
 
 mapFingerprintFailure
   :: LengthSemanticFingerprintPart
@@ -241,7 +275,7 @@ buildLengthEncodingFingerprint
 buildLengthEncodingFingerprint limits context =
   buildFingerprintWithin (fromIntegral $ lengthFingerprintByteLimit limits)
     FingerprintBuilder
-      { fingerprintBuilderVersion = 1
+      { fingerprintBuilderVersion = 2
       , fingerprintBuilderRole = ascii
           "finite-list-spine-length/solver-neutral-encoding"
       , fingerprintBuilderFields =
@@ -259,6 +293,22 @@ buildLengthEncodingFingerprint limits context =
               [FingerprintBytes $ ascii "length-normalizer/v1"]
           , tagged "candidate-policy"
               [ FingerprintBytes $ ascii "complete-typed-term-graph/v1"
+              , FingerprintBytes $ ascii "lazy-symbolic-interpreter/v1"
+              , FingerprintBytes $ ascii "rigid-target-opening/v1"
+              , FingerprintBytes $ ascii
+                  "implicit-flexible-generalization/v1"
+              , FingerprintBytes $ ascii
+                  "authorized-provider-instantiation/v1"
+              , FingerprintBytes $ ascii
+                  "exact-session-graph-kinds/v1"
+              , FingerprintBytes $ ascii
+                  "binder-kind-checked-visible-selection/v1"
+              , FingerprintBytes $ ascii
+                  "authorized-visible-selection/v1"
+              , FingerprintBytes $ ascii
+                  "reject-certified-visible-application/v1"
+              , FingerprintBytes $ ascii
+                  "reject-case-and-constructor-pattern/v1"
               , FingerprintBytes $ ascii "reject-unknown-semantics/v1"
               ]
           , tagged "spine-model"

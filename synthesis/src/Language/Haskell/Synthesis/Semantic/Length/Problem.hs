@@ -16,6 +16,28 @@ module Language.Haskell.Synthesis.Semantic.Length.Problem
   , checkedLengthSessionProviderInventory
   , lengthSessionInventoryFingerprint
   , lengthSessionEncodingPolicyFingerprint
+  , LengthProblemLimits
+  , LengthProblemLimitError (..)
+  , mkLengthProblemLimits
+  , defaultLengthProblemLimits
+  , lengthProblemTermGraphLimits
+  , lengthProblemGraphFingerprintByteLimit
+  , lengthProblemEvaluationStepLimit
+  , LengthProblemFingerprintPart (..)
+  , LengthRootOpeningError (..)
+  , LengthProblemError (..)
+  , CheckedLengthCandidate
+  , CheckedLengthProblem
+  , sealLengthTypedCandidateProblem
+  , checkedLengthCandidateResult
+  , checkedLengthCandidateUsedProviders
+  , checkedLengthCandidateTermGraphFingerprint
+  , checkedLengthCandidateFingerprint
+  , checkedLengthProblemCandidate
+  , checkedLengthProblemCounterexampleCondition
+  , checkedLengthProblemEncodingFingerprint
+  , checkedLengthProblemBehavioralProblem
   ) where
 
 import Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
+import Language.Haskell.Synthesis.Internal.Semantic.Length.Problem.Candidate

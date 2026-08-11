@@ -86,6 +86,7 @@ import Language.Haskell.Synthesis.Name (ModuleName, Name)
 import Language.Haskell.Synthesis.Query
 import Language.Haskell.Synthesis.Semantic.Length
 import Language.Haskell.Synthesis.Semantic.Length.Evaluate
+import Language.Haskell.Synthesis.Semantic.Length.Problem
 import Language.Haskell.Synthesis.Semantic.Problem
 import Language.Haskell.Synthesis.Search (SearchBatch)
 import Language.Haskell.Synthesis.Type (Type)
@@ -120,6 +121,8 @@ newtype LengthVariableProbe = LengthVariableProbe Int
 newtype OtherLengthVariableProbe = OtherLengthVariableProbe Int
 newtype LengthAnnotationProbe = LengthAnnotationProbe Int
 newtype OtherLengthAnnotationProbe = OtherLengthAnnotationProbe Int
+newtype LengthLocalProbe = LengthLocalProbe Int
+newtype OtherLengthLocalProbe = OtherLengthLocalProbe Int
 
 forbiddenConstructionAttempts :: [(String, ())]
 forbiddenConstructionAttempts =
@@ -184,6 +187,16 @@ forbiddenConstructionAttempts =
       "CheckedLengthProviderSummary"
   , noGeneric @(CheckedLengthProviderInventory LengthVariableProbe)
       "CheckedLengthProviderInventory"
+  , noGeneric @LengthProblemLimits "LengthProblemLimits"
+  , noGeneric
+      @(CheckedLengthSession LengthVariableProbe LengthAnnotationProbe)
+      "CheckedLengthSession"
+  , noGeneric
+      @(CheckedLengthCandidate LengthVariableProbe LengthLocalProbe)
+      "CheckedLengthCandidate"
+  , noGeneric
+      @(CheckedLengthProblem LengthVariableProbe LengthLocalProbe)
+      "CheckedLengthProblem"
   , ( "CheckedLengthContract variable unexpectedly permits Coercible"
     , forbiddenCheckedLengthContractCoercion `seq` ()
     )
@@ -201,6 +214,24 @@ forbiddenConstructionAttempts =
     )
   , ( "CheckedLengthProviderInventory variable unexpectedly permits Coercible"
     , forbiddenCheckedLengthProviderInventoryCoercion `seq` ()
+    )
+  , ( "CheckedLengthSession identity unexpectedly permits Coercible"
+    , forbiddenCheckedLengthSessionIdentityCoercion `seq` ()
+    )
+  , ( "CheckedLengthSession annotation unexpectedly permits Coercible"
+    , forbiddenCheckedLengthSessionAnnotationCoercion `seq` ()
+    )
+  , ( "CheckedLengthCandidate identity unexpectedly permits Coercible"
+    , forbiddenCheckedLengthCandidateIdentityCoercion `seq` ()
+    )
+  , ( "CheckedLengthCandidate local unexpectedly permits Coercible"
+    , forbiddenCheckedLengthCandidateLocalCoercion `seq` ()
+    )
+  , ( "CheckedLengthProblem identity unexpectedly permits Coercible"
+    , forbiddenCheckedLengthProblemIdentityCoercion `seq` ()
+    )
+  , ( "CheckedLengthProblem local unexpectedly permits Coercible"
+    , forbiddenCheckedLengthProblemLocalCoercion `seq` ()
     )
   , noGeneric @(Inventory Int ()) "Inventory"
   , noGeneric @(PreparedClassIndex Int) "PreparedClassIndex"
@@ -637,6 +668,36 @@ forbiddenCheckedLengthProviderInventoryCoercion
   :: CheckedLengthProviderInventory LengthVariableProbe
   -> CheckedLengthProviderInventory OtherLengthVariableProbe
 forbiddenCheckedLengthProviderInventoryCoercion = coerce
+
+forbiddenCheckedLengthSessionIdentityCoercion
+  :: CheckedLengthSession LengthVariableProbe LengthAnnotationProbe
+  -> CheckedLengthSession OtherLengthVariableProbe LengthAnnotationProbe
+forbiddenCheckedLengthSessionIdentityCoercion = coerce
+
+forbiddenCheckedLengthSessionAnnotationCoercion
+  :: CheckedLengthSession LengthVariableProbe LengthAnnotationProbe
+  -> CheckedLengthSession LengthVariableProbe OtherLengthAnnotationProbe
+forbiddenCheckedLengthSessionAnnotationCoercion = coerce
+
+forbiddenCheckedLengthCandidateIdentityCoercion
+  :: CheckedLengthCandidate LengthVariableProbe LengthLocalProbe
+  -> CheckedLengthCandidate OtherLengthVariableProbe LengthLocalProbe
+forbiddenCheckedLengthCandidateIdentityCoercion = coerce
+
+forbiddenCheckedLengthCandidateLocalCoercion
+  :: CheckedLengthCandidate LengthVariableProbe LengthLocalProbe
+  -> CheckedLengthCandidate LengthVariableProbe OtherLengthLocalProbe
+forbiddenCheckedLengthCandidateLocalCoercion = coerce
+
+forbiddenCheckedLengthProblemIdentityCoercion
+  :: CheckedLengthProblem LengthVariableProbe LengthLocalProbe
+  -> CheckedLengthProblem OtherLengthVariableProbe LengthLocalProbe
+forbiddenCheckedLengthProblemIdentityCoercion = coerce
+
+forbiddenCheckedLengthProblemLocalCoercion
+  :: CheckedLengthProblem LengthVariableProbe LengthLocalProbe
+  -> CheckedLengthProblem LengthVariableProbe OtherLengthLocalProbe
+forbiddenCheckedLengthProblemLocalCoercion = coerce
 
 -- Selecting 'coerce' forces the built-in coercion evidence without requiring
 -- a value of either abstract type.

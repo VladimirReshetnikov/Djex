@@ -2,8 +2,11 @@ module Main (main) where
 
 import Control.Exception (evaluate)
 import Data.List (sort)
+import Numeric.Natural (Natural)
 import System.Timeout (timeout)
+import Unsafe.Coerce (unsafeCoerce)
 
+import qualified Language.Haskell.Djex as Djex
 import Language.Haskell.Synthesis.Constraint (Constraint (..))
 import Language.Haskell.Synthesis.Declaration
   ( DataConstructor (DataConstructor)
@@ -22,6 +25,8 @@ import Language.Haskell.Synthesis.Inventory
   ( Inventory
   , mkInventory
   )
+import qualified Language.Haskell.Synthesis.Internal.TypedCandidate
+  as InternalTypedCandidate
 import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
 import Language.Haskell.Synthesis.KindInference
   ( KindInventoryPolicy (ClosedKindInventory) )
@@ -54,6 +59,7 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , contractTests
   , providerTests
   , sessionTests
+  , candidateProblemTests
   , evaluationTests
   , normalizationTests
   , productiveBoundTests
@@ -179,6 +185,720 @@ sessionTests = testGroup "checked length sessions"
           (fromIntegral providerBytes) (fromIntegral providerBytes + 1))
         $ LengthProblem.sealLengthSession limits inventory
             Length.BuiltinListSpine []
+  , testCase "reserve modeled constructor names from provider laws" $ do
+      typeName <- expectName "Fixture.SessionSpine"
+      zeroName <- expectName "Fixture.SessionEmpty"
+      stepName <- expectName "Fixture.SessionStep"
+      let element = FlexibleVariable "element"
+          spine = TypeApplication (TypeConstructor typeName)
+            $ TypeVariable element
+          declaration = DataTypeDeclaration () typeName
+            [TypeParameter element Nothing]
+            [ DataConstructor () zeroName []
+            , DataConstructor () stepName [TypeVariable element, spine]
+            ]
+          inventory = sessionInventory () [declaration]
+          zeroScheme = ForallType [element] [] spine
+          conflicting = Length.AssumedProviderSummary
+            { Length.lengthProviderName = zeroName
+            , Length.lengthProviderScheme = zeroScheme
+            , Length.lengthProviderArgumentRoles = []
+            , Length.lengthProviderTransfer = Length.LengthLiteral 0
+            }
+      assertLeft
+        (LengthProblem.LengthSessionProviderConflictsWithSpineConstructor
+          zeroName)
+        $ LengthProblem.sealLengthSession Length.defaultLengthLimits inventory
+            (Length.DeclaredListSpine typeName zeroName stepName) [conflicting]
+  ]
+
+candidateProblemTests :: TestTree
+candidateProblemTests = testGroup "typed candidate behavioral problems"
+  [ testCase "interpret one real Exference list identity atomically" $ do
+      (lengthSession, contract, candidate) <- realListIdentityFixture
+        $ TypeVariable $ FlexibleVariable 0
+      problem <- case LengthProblem.sealLengthTypedCandidateProblem
+          LengthProblem.defaultLengthProblemLimits
+          lengthSession contract candidate of
+        Right value -> pure value
+        Left failure -> do
+          graph <- expectRight $ Djex.typedCandidateTermGraph candidate
+          let root = Djex.termGraphRoot graph
+              rootType = Djex.termNodeType <$> Djex.lookupTermNode root graph
+          assertFailure $ "unexpected candidate rejection: " ++ show failure
+            ++ "; contract target: "
+            ++ show (Length.checkedLengthContractTarget contract)
+            ++ "; graph root type: " ++ show rootType
+      let checkedCandidate = LengthProblem.checkedLengthProblemCandidate problem
+      LengthProblem.checkedLengthCandidateResult checkedCandidate @?=
+        Length.LengthVariable (Length.LengthInput 0)
+      LengthProblem.checkedLengthCandidateUsedProviders checkedCandidate @?= []
+      LengthProblem.checkedLengthProblemCounterexampleCondition problem @?=
+        Length.LengthTruth False
+      Djex.behavioralProblemDomain
+          (LengthProblem.checkedLengthProblemBehavioralProblem problem) @?=
+        Length.finiteListSpineLengthDomainTag
+      Djex.behavioralProblemCandidateFingerprint
+          (LengthProblem.checkedLengthProblemBehavioralProblem problem) @?=
+        LengthProblem.checkedLengthCandidateFingerprint checkedCandidate
+      Djex.behavioralProblemEncodingFingerprint
+          (LengthProblem.checkedLengthProblemBehavioralProblem problem) @?=
+        LengthProblem.checkedLengthProblemEncodingFingerprint problem
+  , testCase "separate contract identity from graph and candidate identity" $ do
+      session <- adversarialLengthSession [] []
+      let target = FunctionType adversarialClosedList adversarialClosedList
+      identityContract <- adversarialLengthContract
+        session target identityLengthContract
+      trivialContract <- adversarialLengthContract
+        session target trivialLengthContract
+      graph <- sealAdversarialGraph
+        $ adversarialIdentityGraphSource adversarialClosedList
+      let candidate = adversarialTypedCandidate $ Right graph
+      identityProblem <- expectRight
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            session identityContract candidate
+      trivialProblem <- expectRight
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            session trivialContract candidate
+      let identityCandidate = LengthProblem.checkedLengthProblemCandidate
+            identityProblem
+          trivialCandidate = LengthProblem.checkedLengthProblemCandidate
+            trivialProblem
+          identityEnvelope = LengthProblem.checkedLengthProblemBehavioralProblem
+            identityProblem
+          trivialEnvelope = LengthProblem.checkedLengthProblemBehavioralProblem
+            trivialProblem
+      LengthProblem.checkedLengthCandidateTermGraphFingerprint
+          identityCandidate @?=
+        LengthProblem.checkedLengthCandidateTermGraphFingerprint
+          trivialCandidate
+      LengthProblem.checkedLengthCandidateFingerprint identityCandidate @?=
+        LengthProblem.checkedLengthCandidateFingerprint trivialCandidate
+      assertBool "contract identity was omitted from concrete encoding" $
+        LengthProblem.checkedLengthProblemEncodingFingerprint identityProblem /=
+          LengthProblem.checkedLengthProblemEncodingFingerprint trivialProblem
+      assertBool "changed encoding did not reach complete problem identity" $
+        Djex.behavioralProblemFingerprint identityEnvelope /=
+          Djex.behavioralProblemFingerprint trivialEnvelope
+  , testCase "keep unused inventory identity out of candidate and encoding" $ do
+      unusedName <- expectName "Fixture.unusedProblemInventoryValue"
+      baseSession <- adversarialLengthSession [] []
+      widenedSession <- adversarialLengthSession
+        [ ValueDeclaration
+            $ ValueSignature () unusedName adversarialClosedList
+        ] []
+      let target = FunctionType adversarialClosedList adversarialClosedList
+      contract <- adversarialLengthContract
+        baseSession target identityLengthContract
+      graph <- sealAdversarialGraph
+        $ adversarialIdentityGraphSource adversarialClosedList
+      let candidate = adversarialTypedCandidate $ Right graph
+      baseProblem <- expectRight
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            baseSession contract candidate
+      widenedProblem <- expectRight
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            widenedSession contract candidate
+      let baseCandidate = LengthProblem.checkedLengthProblemCandidate baseProblem
+          widenedCandidate = LengthProblem.checkedLengthProblemCandidate
+            widenedProblem
+          baseEnvelope = LengthProblem.checkedLengthProblemBehavioralProblem
+            baseProblem
+          widenedEnvelope = LengthProblem.checkedLengthProblemBehavioralProblem
+            widenedProblem
+      assertBool "an unused declaration was omitted from inventory identity" $
+        Djex.behavioralProblemInventoryFingerprint baseEnvelope /=
+          Djex.behavioralProblemInventoryFingerprint widenedEnvelope
+      LengthProblem.checkedLengthCandidateTermGraphFingerprint baseCandidate @?=
+        LengthProblem.checkedLengthCandidateTermGraphFingerprint
+          widenedCandidate
+      LengthProblem.checkedLengthCandidateFingerprint baseCandidate @?=
+        LengthProblem.checkedLengthCandidateFingerprint widenedCandidate
+      LengthProblem.checkedLengthProblemEncodingFingerprint baseProblem @?=
+        LengthProblem.checkedLengthProblemEncodingFingerprint widenedProblem
+      assertBool "changed inventory did not reach complete problem identity" $
+        Djex.behavioralProblemFingerprint baseEnvelope /=
+          Djex.behavioralProblemFingerprint widenedEnvelope
+  , testCase "separate structural graph identity from concrete semantics" $ do
+      session <- adversarialLengthSession [] []
+      let target = FunctionType adversarialClosedList adversarialClosedList
+      contract <- adversarialLengthContract
+        session target identityLengthContract
+      directGraph <- sealAdversarialGraph
+        $ adversarialIdentityGraphSource adversarialClosedList
+      letGraph <- sealAdversarialGraph
+        $ adversarialLetIdentityGraphSource adversarialClosedList
+      directProblem <- expectRight
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session contract
+            $ adversarialTypedCandidate $ Right directGraph
+      letProblem <- expectRight
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session contract
+            $ adversarialTypedCandidate $ Right letGraph
+      let directCandidate = LengthProblem.checkedLengthProblemCandidate
+            directProblem
+          letCandidate = LengthProblem.checkedLengthProblemCandidate letProblem
+          directEnvelope = LengthProblem.checkedLengthProblemBehavioralProblem
+            directProblem
+          letEnvelope = LengthProblem.checkedLengthProblemBehavioralProblem
+            letProblem
+      LengthProblem.checkedLengthCandidateResult directCandidate @?=
+        LengthProblem.checkedLengthCandidateResult letCandidate
+      assertBool "structurally distinct graphs shared graph identity" $
+        LengthProblem.checkedLengthCandidateTermGraphFingerprint
+            directCandidate /=
+          LengthProblem.checkedLengthCandidateTermGraphFingerprint letCandidate
+      assertBool "structurally distinct graphs shared candidate identity" $
+        LengthProblem.checkedLengthCandidateFingerprint directCandidate /=
+          LengthProblem.checkedLengthCandidateFingerprint letCandidate
+      LengthProblem.checkedLengthProblemEncodingFingerprint directProblem @?=
+        LengthProblem.checkedLengthProblemEncodingFingerprint letProblem
+      assertBool "changed candidate did not reach complete problem identity" $
+        Djex.behavioralProblemFingerprint directEnvelope /=
+          Djex.behavioralProblemFingerprint letEnvelope
+  , testCase "validate candidate work limits before use" $ do
+      LengthProblem.mkLengthProblemLimits Djex.defaultTermGraphLimits 0 (-1)
+        @?= Left
+          (LengthProblem.NegativeLengthProblemEvaluationStepLimit (-1))
+      limits <- expectRight $ LengthProblem.mkLengthProblemLimits
+        Djex.defaultTermGraphLimits 0 0
+      LengthProblem.lengthProblemTermGraphLimits limits @?=
+        Djex.defaultTermGraphLimits
+      LengthProblem.lengthProblemGraphFingerprintByteLimit limits @?= 0
+      LengthProblem.lengthProblemEvaluationStepLimit limits @?= 0
+  , testCase "keep an impredicative list payload opaque end to end" $ do
+      let binder = FlexibleVariable 1
+          payload = ForallType [binder] []
+            $ FunctionType (TypeVariable binder) (TypeVariable binder)
+      (session, contract, candidate) <- realListIdentityFixture payload
+      problem <- expectRight $ LengthProblem.sealLengthTypedCandidateProblem
+        LengthProblem.defaultLengthProblemLimits session contract candidate
+      LengthProblem.checkedLengthCandidateResult
+          (LengthProblem.checkedLengthProblemCandidate problem) @?=
+        Length.LengthVariable (Length.LengthInput 0)
+      LengthProblem.checkedLengthProblemCounterexampleCondition problem @?=
+        Length.LengthTruth False
+  , testCase "apply one inventory-owned provider law through a real graph" $ do
+      providerName <- expectName "Fixture.lengthDouble"
+      let element = FlexibleVariable 0
+          providerSpine = TypeApplication (TypeConstructor listName)
+            $ TypeVariable element
+          providerScheme = ForallType [element] []
+            $ FunctionType providerSpine providerSpine
+          declaration = ValueDeclaration
+            $ ValueSignature () providerName providerScheme
+          provider = Length.AssumedProviderSummary
+            { Length.lengthProviderName = providerName
+            , Length.lengthProviderScheme = providerScheme
+            , Length.lengthProviderArgumentRoles =
+                [Length.LengthSpineArgument]
+            , Length.lengthProviderTransfer = Length.LengthScale 2
+                $ Length.LengthVariable $ Length.LengthProviderArgument 0
+            }
+      environment <- expectRight
+        (Djex.mkEnvironment [declaration] ::
+          Either (Djex.EnvironmentError Djex.ExferenceTypeVariable)
+            Djex.ExferenceEnvironment)
+      exferenceSession <- expectRight $ Djex.mkExferenceSession environment
+      session <- expectRight $ LengthProblem.sealLengthSession
+        Length.defaultLengthLimits
+        (Djex.exferenceSessionInventory exferenceSession)
+        Length.BuiltinListSpine [provider]
+      targetName <- expectName "lengthProviderCandidate"
+      target <- expectRight $ Djex.mkDefinitionName targetName
+      let goalElement = FlexibleVariable 1
+          goalSpine = TypeApplication (TypeConstructor listName)
+            $ TypeVariable goalElement
+          goal = FunctionType goalSpine goalSpine
+          query = Djex.QueryRequest
+            { Djex.requestTarget = target
+            , Djex.requestGoal = goal
+            , Djex.requestContexts = []
+            , Djex.requestOptions = Djex.defaultExferenceOptions
+                { Djex.exferenceMaximumSteps = 32 }
+            }
+      request <- expectRight $ Djex.mkExferenceRequest query
+      contract <- expectRight $ Length.sealLengthContractInContext
+        Length.defaultLengthLimits
+        (LengthProblem.checkedLengthSessionContext session)
+        goal identityLengthContract
+      results <- expectRight
+        $ Djex.runExferenceTypedQuery exferenceSession request
+      candidate <- case
+          [ value
+          | result <- results
+          , value <- Djex.batchCandidates $ Djex.resultSearch result
+          , Right graph <- [Djex.typedCandidateTermGraph value]
+          , any (isNamedGlobal providerName . snd) $ Djex.termGraphNodes graph
+          ] of
+        [] -> assertFailure "the provider query returned no retained provider"
+        value : _ -> pure value
+      problem <- expectRight $ LengthProblem.sealLengthTypedCandidateProblem
+        LengthProblem.defaultLengthProblemLimits session contract candidate
+      let checkedCandidate = LengthProblem.checkedLengthProblemCandidate problem
+      LengthProblem.checkedLengthCandidateResult checkedCandidate @?=
+        Length.LengthScale 2
+          (Length.LengthVariable $ Length.LengthInput 0)
+      LengthProblem.checkedLengthCandidateUsedProviders checkedCandidate @?=
+        [providerName]
+  , testCase "reject residual dictionaries before inspecting graph semantics" $ do
+      className <- expectName "C"
+      producerName <- expectName "Fixture.produceList"
+      let element = FlexibleVariable 0
+          elementType = TypeVariable element
+          resultType = TypeApplication (TypeConstructor listName) elementType
+          declarations =
+            [ ClassDeclaration () className
+                [TypeParameter element Nothing] [] []
+            , ValueDeclaration $ ValueSignature () producerName
+                $ ForallType [element]
+                    [Constraint className [elementType]] resultType
+            ]
+      environment <- expectRight
+        (Djex.mkEnvironment declarations ::
+          Either (Djex.EnvironmentError Djex.ExferenceTypeVariable)
+            Djex.ExferenceEnvironment)
+      exferenceSession <- expectRight $ Djex.mkExferenceSession environment
+      session <- expectRight $ LengthProblem.sealLengthSession
+        Length.defaultLengthLimits
+        (Djex.exferenceSessionInventory exferenceSession)
+        Length.BuiltinListSpine []
+      targetName <- expectName "residualLengthCandidate"
+      target <- expectRight $ Djex.mkDefinitionName targetName
+      let goalElement = FlexibleVariable 1
+          goal = TypeApplication (TypeConstructor listName)
+            $ TypeVariable goalElement
+          query = Djex.QueryRequest
+            { Djex.requestTarget = target
+            , Djex.requestGoal = goal
+            , Djex.requestContexts = []
+            , Djex.requestOptions = Djex.defaultExferenceOptions
+                { Djex.exferenceAllowResidualConstraints = True
+                , Djex.exferenceMaximumSteps = 64
+                }
+            }
+      request <- expectRight $ Djex.mkExferenceRequest query
+      contract <- expectRight $ Length.sealLengthContractInContext
+        Length.defaultLengthLimits
+        (LengthProblem.checkedLengthSessionContext session)
+        goal trivialLengthContract
+      results <- expectRight
+        $ Djex.runExferenceTypedQuery exferenceSession request
+      (candidate, residual) <- case
+          [ (value, firstResidual)
+          | result <- results
+          , value <- Djex.batchCandidates $ Djex.resultSearch result
+          , firstResidual : _ <-
+              [Djex.candidateResidualConstraints
+                $ Djex.typedCandidateCompatibility value]
+          ] of
+        [] -> assertFailure "the constrained query returned no residual"
+        value : _ -> pure value
+      assertLeft (LengthProblem.LengthProblemResidualConstraint residual)
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            session contract candidate
+  , testCase "interpret an inventory-authorized zero constructor" $ do
+      typeName <- expectName "Fixture.CandidateSpine"
+      zeroName <- expectName "Fixture.CandidateEmpty"
+      stepName <- expectName "Fixture.CandidateStep"
+      let declaredElement = FlexibleVariable 0
+          declaredSpine = TypeApplication (TypeConstructor typeName)
+            $ TypeVariable declaredElement
+          declaration = DataTypeDeclaration () typeName
+            [TypeParameter declaredElement Nothing]
+            [ DataConstructor () zeroName []
+            , DataConstructor () stepName
+                [TypeVariable declaredElement, declaredSpine]
+            ]
+      environment <- expectRight
+        (Djex.mkEnvironment [declaration] ::
+          Either (Djex.EnvironmentError Djex.ExferenceTypeVariable)
+            Djex.ExferenceEnvironment)
+      exferenceSession <- expectRight $ Djex.mkExferenceSession environment
+      session <- expectRight $ LengthProblem.sealLengthSession
+        Length.defaultLengthLimits
+        (Djex.exferenceSessionInventory exferenceSession)
+        (Length.DeclaredListSpine typeName zeroName stepName) []
+      targetName <- expectName "emptyLengthCandidate"
+      target <- expectRight $ Djex.mkDefinitionName targetName
+      let element = FlexibleVariable 0
+          goal = TypeApplication (TypeConstructor typeName)
+            $ TypeVariable element
+          query = Djex.QueryRequest
+            { Djex.requestTarget = target
+            , Djex.requestGoal = goal
+            , Djex.requestContexts = []
+            , Djex.requestOptions = Djex.defaultExferenceOptions
+                { Djex.exferenceMaximumSteps = 16 }
+            }
+          contractSource = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual
+                (Length.LengthVariable Length.LengthResult)
+                (Length.LengthLiteral 0)
+      request <- expectRight $ Djex.mkExferenceRequest query
+      contract <- expectRight $ Length.sealLengthContractInContext
+        Length.defaultLengthLimits
+        (LengthProblem.checkedLengthSessionContext session)
+        goal contractSource
+      results <- expectRight
+        $ Djex.runExferenceTypedQuery exferenceSession request
+      candidate <- case
+          [ value
+          | result <- results
+          , value <- Djex.batchCandidates $ Djex.resultSearch result
+          , Right graph <- [Djex.typedCandidateTermGraph value]
+          , any (isNamedGlobal zeroName . snd) $ Djex.termGraphNodes graph
+          ] of
+        [] -> assertFailure "the empty-list query returned no zero constructor"
+        value : _ -> pure value
+      problem <- expectRight $ LengthProblem.sealLengthTypedCandidateProblem
+        LengthProblem.defaultLengthProblemLimits session contract candidate
+      LengthProblem.checkedLengthCandidateResult
+          (LengthProblem.checkedLengthProblemCandidate problem) @?=
+        Length.LengthLiteral 0
+      LengthProblem.checkedLengthProblemCounterexampleCondition problem @?=
+        Length.LengthTruth False
+  , testCase "interpret the recursive field of an authorized step" $ do
+      typeName <- expectName "Fixture.StepSpine"
+      zeroName <- expectName "Fixture.StepEmpty"
+      stepName <- expectName "Fixture.StepLink"
+      let declaredElement = FlexibleVariable 0
+          declaredSpine = TypeApplication (TypeConstructor typeName)
+            $ TypeVariable declaredElement
+          declaration = DataTypeDeclaration () typeName
+            [TypeParameter declaredElement Nothing]
+            [ DataConstructor () zeroName []
+            , DataConstructor () stepName
+                [TypeVariable declaredElement, declaredSpine]
+            ]
+      environment <- expectRight
+        (Djex.mkEnvironment [declaration] ::
+          Either (Djex.EnvironmentError Djex.ExferenceTypeVariable)
+            Djex.ExferenceEnvironment)
+      exferenceSession <- expectRight $ Djex.mkExferenceSession environment
+      session <- expectRight $ LengthProblem.sealLengthSession
+        Length.defaultLengthLimits
+        (Djex.exferenceSessionInventory exferenceSession)
+        (Length.DeclaredListSpine typeName zeroName stepName) []
+      targetName <- expectName "stepLengthCandidate"
+      target <- expectRight $ Djex.mkDefinitionName targetName
+      let element = FlexibleVariable 1
+          innerSpine = TypeApplication (TypeConstructor typeName)
+            $ TypeVariable element
+          outerSpine = TypeApplication (TypeConstructor typeName) innerSpine
+          goal = FunctionType innerSpine
+            $ FunctionType outerSpine outerSpine
+          expectedResult = Length.LengthSum
+            [ Length.LengthVariable $ Length.LengthInput 1
+            , Length.LengthLiteral 1
+            ]
+          query = Djex.QueryRequest
+            { Djex.requestTarget = target
+            , Djex.requestGoal = goal
+            , Djex.requestContexts = []
+            , Djex.requestOptions = Djex.defaultExferenceOptions
+                { Djex.exferenceMaximumSteps = 32 }
+            }
+          contractSource = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual
+                (Length.LengthVariable Length.LengthResult) expectedResult
+      request <- expectRight $ Djex.mkExferenceRequest query
+      contract <- expectRight $ Length.sealLengthContractInContext
+        Length.defaultLengthLimits
+        (LengthProblem.checkedLengthSessionContext session)
+        goal contractSource
+      results <- expectRight
+        $ Djex.runExferenceTypedQuery exferenceSession request
+      candidate <- case
+          [ value
+          | result <- results
+          , value <- Djex.batchCandidates $ Djex.resultSearch result
+          , Right graph <- [Djex.typedCandidateTermGraph value]
+          , any (isNamedGlobal stepName . snd) $ Djex.termGraphNodes graph
+          ] of
+        [] -> assertFailure "the step query returned no step constructor"
+        value : _ -> pure value
+      problem <- expectRight $ LengthProblem.sealLengthTypedCandidateProblem
+        LengthProblem.defaultLengthProblemLimits session contract candidate
+      LengthProblem.checkedLengthCandidateResult
+          (LengthProblem.checkedLengthProblemCandidate problem) @?=
+        expectedResult
+      LengthProblem.checkedLengthProblemCounterexampleCondition problem @?=
+        Length.LengthTruth False
+  , testCase "require fresh distinct rigid root openings" $ do
+      session <- adversarialLengthSession [] []
+      let flexible = FlexibleVariable "root-flexible"
+          existingRigid = RigidVariable "root-existing-rigid"
+          freshRigid = RigidVariable "root-fresh-rigid"
+          flexibleSpine = adversarialListOf $ TypeVariable flexible
+          existingSpine = adversarialListOf $ TypeVariable existingRigid
+          freshSpine = adversarialListOf $ TypeVariable freshRigid
+          flexibleTarget = FunctionType flexibleSpine flexibleSpine
+      contract <- adversarialLengthContract
+        session flexibleTarget identityLengthContract
+
+      flexibleGraph <- sealAdversarialGraph
+        $ adversarialIdentityGraphSource flexibleSpine
+      assertLeft
+        (LengthProblem.LengthProblemRootOpeningRejected
+          $ LengthProblem.LengthRootOpeningSelectionIsNotRigid 0)
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session contract
+            $ adversarialTypedCandidate $ Right flexibleGraph
+
+      let collidingTarget = FunctionType flexibleSpine existingSpine
+      collidingContract <- adversarialLengthContract
+        session collidingTarget trivialLengthContract
+      collidingGraph <- sealAdversarialGraph
+        $ adversarialIdentityGraphSource existingSpine
+      assertLeft
+        (LengthProblem.LengthProblemRootOpeningRejected
+          $ LengthProblem.LengthRootOpeningRigidIsNotInjective
+              0 "root-existing-rigid")
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session collidingContract
+            $ adversarialTypedCandidate $ Right collidingGraph
+
+      freshGraph <- sealAdversarialGraph
+        $ adversarialIdentityGraphSource freshSpine
+      freshProblem <- expectRight
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session contract
+            $ adversarialTypedCandidate $ Right freshGraph
+      LengthProblem.checkedLengthCandidateResult
+          (LengthProblem.checkedLengthProblemCandidate freshProblem) @?=
+        Length.LengthVariable (Length.LengthInput 0)
+  , testCase "interpret an inventory-owned zero-arity provider" $ do
+      providerName <- expectName "Fixture.zeroArityLengthProvider"
+      let providerScheme = adversarialClosedList
+          provider = Length.AssumedProviderSummary
+            { Length.lengthProviderName = providerName
+            , Length.lengthProviderScheme = providerScheme
+            , Length.lengthProviderArgumentRoles = []
+            , Length.lengthProviderTransfer = Length.LengthLiteral 7
+            }
+          declaration = ValueDeclaration
+            $ ValueSignature () providerName providerScheme
+          contractSource = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual
+                (Length.LengthVariable Length.LengthResult)
+                (Length.LengthLiteral 7)
+      session <- adversarialLengthSession [declaration] [provider]
+      contract <- adversarialLengthContract session providerScheme contractSource
+      graph <- sealAdversarialGraph $ Djex.TermGraphSource
+        (Djex.termNodeId 0)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode providerScheme
+              $ Djex.TypedGlobal (Djex.occurrenceId 0) providerName
+          )
+        ]
+      problem <- expectRight $ LengthProblem.sealLengthTypedCandidateProblem
+        LengthProblem.defaultLengthProblemLimits session contract
+        $ adversarialTypedCandidate $ Right graph
+      let checked = LengthProblem.checkedLengthProblemCandidate problem
+      LengthProblem.checkedLengthCandidateResult checked @?=
+        Length.LengthLiteral 7
+      LengthProblem.checkedLengthCandidateUsedProviders checked @?=
+        [providerName]
+      LengthProblem.checkedLengthProblemCounterexampleCondition problem @?=
+        Length.LengthTruth False
+  , testCase "reject a visible selection outside the root rigid scope" $ do
+      providerName <- expectName "Fixture.visibleLengthProvider"
+      let binder = FlexibleVariable "provider-binder"
+          escaped = RigidVariable "escaped-visible-selection"
+          providerScheme = ForallType [binder] []
+            $ adversarialListOf $ TypeVariable binder
+          selected = TypeVariable escaped
+          selectedSpine = adversarialListOf selected
+          provider = Length.AssumedProviderSummary
+            { Length.lengthProviderName = providerName
+            , Length.lengthProviderScheme = providerScheme
+            , Length.lengthProviderArgumentRoles = []
+            , Length.lengthProviderTransfer = Length.LengthLiteral 0
+            }
+          declaration = ValueDeclaration
+            $ ValueSignature () providerName providerScheme
+          witness = Djex.TypeApplicationWitness
+            providerScheme selected selectedSpine Nothing
+          ignored = Djex.TypedPattern
+            (Djex.occurrenceId 2) selectedSpine Djex.TypedWildcard
+          source = Djex.TermGraphSource (Djex.termNodeId 3)
+            [ ( Djex.termNodeId 0
+              , Djex.TermNode providerScheme
+                  $ Djex.TypedGlobal (Djex.occurrenceId 0) providerName
+              )
+            , ( Djex.termNodeId 1
+              , Djex.TermNode selectedSpine
+                  $ Djex.TypedVisibleTypeApplication
+                      (Djex.occurrenceId 1)
+                      (Djex.termNodeId 0)
+                      Djex.inferredVisibleTypeArgument
+                      witness
+              )
+            , ( Djex.termNodeId 2
+              , Djex.TermNode adversarialClosedList
+                  $ Djex.TypedGlobal (Djex.occurrenceId 3) listName
+              )
+            , ( Djex.termNodeId 3
+              , Djex.TermNode adversarialClosedList
+                  $ Djex.TypedLet ignored
+                      (Djex.termNodeId 1) (Djex.termNodeId 2)
+              )
+            ]
+      session <- adversarialLengthSession [declaration] [provider]
+      contract <- adversarialLengthContract
+        session adversarialClosedList trivialLengthContract
+      graph <- sealAdversarialGraph source
+      assertLeft
+        (LengthProblem.LengthProblemVisibleTypeSelectionRejected
+          (Djex.termNodeId 1) selected)
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session contract
+            $ adversarialTypedCandidate $ Right graph
+  , testCase "admit closed visible selections at their inferred binder kind" $ do
+      higherProvider <- expectName "Fixture.higherKindedVisibleProvider"
+      let constructorBinder = FlexibleVariable "constructor-binder"
+          unitType = TupleType Boxed []
+          higherScheme = ForallType [constructorBinder] []
+            $ adversarialListOf
+            $ TypeApplication (TypeVariable constructorBinder) unitType
+          higherSelection = TypeConstructor listName
+          higherResult = adversarialListOf
+            $ adversarialListOf unitType
+      higherProblem <- expectRight
+        =<< adversarialVisibleProviderProblem
+          higherProvider higherScheme higherSelection higherResult Nothing
+      let higherCandidate = LengthProblem.checkedLengthProblemCandidate
+            higherProblem
+      LengthProblem.checkedLengthCandidateResult higherCandidate @?=
+        Length.LengthLiteral 0
+      LengthProblem.checkedLengthCandidateUsedProviders higherCandidate @?=
+        [higherProvider]
+
+      impredicativeProvider <- expectName
+        "Fixture.impredicativeVisibleProvider"
+      let elementBinder = FlexibleVariable "element-binder"
+          innerBinder = FlexibleVariable "inner-binder"
+          impredicativeScheme = ForallType [elementBinder] []
+            $ adversarialListOf $ TypeVariable elementBinder
+          impredicativeSelection = ForallType [innerBinder] []
+            $ FunctionType
+                (TypeVariable innerBinder) (TypeVariable innerBinder)
+          impredicativeResult = adversarialListOf impredicativeSelection
+      impredicativeProblem <- expectRight
+        =<< adversarialVisibleProviderProblem
+          impredicativeProvider
+          impredicativeScheme
+          impredicativeSelection
+          impredicativeResult
+          Nothing
+      LengthProblem.checkedLengthCandidateResult
+          (LengthProblem.checkedLengthProblemCandidate impredicativeProblem) @?=
+        Length.LengthLiteral 0
+  , testCase "reject certificate-bearing visible applications at graph identity" $ do
+      providerName <- expectName "Fixture.certifiedVisibleProvider"
+      let binder = FlexibleVariable "certified-binder"
+          selected = TupleType Boxed []
+          scheme = ForallType [binder] []
+            $ adversarialListOf $ TypeVariable binder
+          result = adversarialListOf selected
+          certificate = Djex.certificateId 37
+      assertLeft
+        (LengthProblem.LengthProblemTermGraphFingerprintRejected
+          $ Djex.TermGraphFingerprintUnsupportedCertificate certificate)
+        =<< adversarialVisibleProviderProblem
+          providerName scheme selected result (Just (certificate, 0))
+  , testCase "kind-check every graph annotation in the exact session" $ do
+      unknownTypeName <- expectName "Fixture.UnknownGraphType"
+      unknownValueName <- expectName "Fixture.unknownGraphValue"
+      let unknownType = TypeConstructor unknownTypeName
+          ignored = Djex.TypedPattern
+            (Djex.occurrenceId 1) unknownType Djex.TypedWildcard
+          source = Djex.TermGraphSource (Djex.termNodeId 2)
+            [ ( Djex.termNodeId 0
+              , Djex.TermNode unknownType
+                  $ Djex.TypedGlobal (Djex.occurrenceId 0) unknownValueName
+              )
+            , ( Djex.termNodeId 1
+              , Djex.TermNode adversarialClosedList
+                  $ Djex.TypedGlobal (Djex.occurrenceId 2) listName
+              )
+            , ( Djex.termNodeId 2
+              , Djex.TermNode adversarialClosedList
+                  $ Djex.TypedLet ignored
+                      (Djex.termNodeId 0) (Djex.termNodeId 1)
+              )
+            ]
+      session <- adversarialLengthSession [] []
+      contract <- adversarialLengthContract
+        session adversarialClosedList trivialLengthContract
+      graph <- sealAdversarialGraph source
+      case LengthProblem.sealLengthTypedCandidateProblem
+          LengthProblem.defaultLengthProblemLimits session contract
+          (adversarialTypedCandidate $ Right graph) of
+        Left LengthProblem.LengthProblemGraphKindRejected{} -> pure ()
+        Left other -> assertFailure $ "unexpected rejection: " ++ show other
+        Right _ -> assertFailure "an unknown graph type escaped session kinding"
+  , testCase "distinguish absent and semantically unmodeled globals" $ do
+      missingName <- expectName "Fixture.missingLengthGlobal"
+      unmodeledName <- expectName "Fixture.unmodeledLengthGlobal"
+      let declaration = ValueDeclaration
+            $ ValueSignature () unmodeledName adversarialClosedList
+          globalSource name = Djex.TermGraphSource (Djex.termNodeId 0)
+            [ ( Djex.termNodeId 0
+              , Djex.TermNode adversarialClosedList
+                  $ Djex.TypedGlobal (Djex.occurrenceId 0) name
+              )
+            ]
+      session <- adversarialLengthSession [declaration] []
+      contract <- adversarialLengthContract
+        session adversarialClosedList trivialLengthContract
+      missingGraph <- sealAdversarialGraph $ globalSource missingName
+      unmodeledGraph <- sealAdversarialGraph $ globalSource unmodeledName
+      assertLeft
+        (LengthProblem.LengthProblemGlobalNotInSourceInventory
+          (Djex.termNodeId 0) missingName)
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session contract
+            $ adversarialTypedCandidate $ Right missingGraph
+      assertLeft
+        (LengthProblem.LengthProblemGlobalHasNoLengthSummary
+          (Djex.termNodeId 0) unmodeledName)
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session contract
+            $ adversarialTypedCandidate $ Right unmodeledGraph
+  , testCase "retain typed-graph absence after contract resealing" $ do
+      session <- adversarialLengthSession [] []
+      contract <- adversarialLengthContract
+        session adversarialClosedList trivialLengthContract
+      assertLeft (LengthProblem.LengthProblemTypedGraphUnavailable
+          "fixture graph unavailable")
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session contract
+            $ adversarialTypedCandidate $ Left "fixture graph unavailable"
+  , testCase "bound graph identity before symbolic evaluation" $ do
+      (session, contract, candidate) <- realListIdentityFixture
+        $ TypeVariable $ FlexibleVariable 0
+      noGraphBytes <- expectRight $ LengthProblem.mkLengthProblemLimits
+        Djex.defaultTermGraphLimits 0 65536
+      assertLeft
+        (LengthProblem.LengthProblemTermGraphFingerprintRejected
+          $ Djex.TermGraphFingerprintByteLimitExceeded 0 1)
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            noGraphBytes session contract candidate
+      noEvaluation <- expectRight $ LengthProblem.mkLengthProblemLimits
+        Djex.defaultTermGraphLimits
+        Djex.defaultTermGraphFingerprintByteLimit 0
+      assertLeft
+        (LengthProblem.LengthProblemEvaluationStepLimitExceeded 0 1)
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            noEvaluation session contract candidate
   ]
 
 limitTests :: TestTree
@@ -1613,6 +2333,216 @@ sessionListOf
   :: Type (Variable String)
   -> Type (Variable String)
 sessionListOf = TypeApplication $ TypeConstructor listName
+
+type AdversarialIdentity = String
+type AdversarialLocal = Int
+type AdversarialType = Type (Variable AdversarialIdentity)
+type AdversarialGraph = Djex.TermGraph AdversarialType AdversarialLocal
+type AdversarialCandidate = Djex.TypedCandidate
+  String
+  AdversarialType
+  AdversarialLocal
+  (Djex.Candidate AdversarialType () ())
+
+adversarialLengthSession
+  :: [Declaration (Variable AdversarialIdentity) () ()]
+  -> [Length.LengthProviderSummarySource
+        (Variable AdversarialIdentity)]
+  -> IO (LengthProblem.CheckedLengthSession AdversarialIdentity ())
+adversarialLengthSession declarations providers = expectRight
+  $ LengthProblem.sealLengthSession
+      Length.defaultLengthLimits
+      (sessionInventory () declarations)
+      Length.BuiltinListSpine
+      providers
+
+adversarialLengthContract
+  :: LengthProblem.CheckedLengthSession AdversarialIdentity ()
+  -> AdversarialType
+  -> Length.LengthContractSource
+  -> IO (Length.CheckedLengthContract
+      (Variable AdversarialIdentity))
+adversarialLengthContract session target source = expectRight
+  $ Length.sealLengthContractInContext
+      Length.defaultLengthLimits
+      (LengthProblem.checkedLengthSessionContext session)
+      target
+      source
+
+adversarialListOf :: AdversarialType -> AdversarialType
+adversarialListOf = TypeApplication $ TypeConstructor listName
+
+adversarialClosedList :: AdversarialType
+adversarialClosedList = adversarialListOf $ TupleType Boxed []
+
+adversarialVisibleProviderProblem
+  :: Name
+  -> AdversarialType
+  -> AdversarialType
+  -> AdversarialType
+  -> Maybe (Djex.CertificateId, Natural)
+  -> IO
+      (Either
+        (LengthProblem.LengthProblemError
+          String AdversarialIdentity AdversarialLocal)
+        (LengthProblem.CheckedLengthProblem
+          AdversarialIdentity AdversarialLocal))
+adversarialVisibleProviderProblem providerName providerScheme selected result
+    certificate = do
+  let provider = Length.AssumedProviderSummary
+        { Length.lengthProviderName = providerName
+        , Length.lengthProviderScheme = providerScheme
+        , Length.lengthProviderArgumentRoles = []
+        , Length.lengthProviderTransfer = Length.LengthLiteral 0
+        }
+      declaration = ValueDeclaration
+        $ ValueSignature () providerName providerScheme
+      witness = Djex.TypeApplicationWitness
+        providerScheme selected result certificate
+      source = Djex.TermGraphSource (Djex.termNodeId 1)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode providerScheme
+              $ Djex.TypedGlobal (Djex.occurrenceId 0) providerName
+          )
+        , ( Djex.termNodeId 1
+          , Djex.TermNode result
+              $ Djex.TypedVisibleTypeApplication
+                  (Djex.occurrenceId 1)
+                  (Djex.termNodeId 0)
+                  Djex.inferredVisibleTypeArgument
+                  witness
+          )
+        ]
+  session <- adversarialLengthSession [declaration] [provider]
+  contract <- adversarialLengthContract session result trivialLengthContract
+  graph <- sealAdversarialGraph source
+  pure $ LengthProblem.sealLengthTypedCandidateProblem
+    LengthProblem.defaultLengthProblemLimits session contract
+    $ adversarialTypedCandidate $ Right graph
+
+adversarialIdentityGraphSource
+  :: AdversarialType
+  -> Djex.TermGraphSource AdversarialType AdversarialLocal
+adversarialIdentityGraphSource spine = Djex.TermGraphSource
+  (Djex.termNodeId 1)
+  [ ( Djex.termNodeId 0
+    , Djex.TermNode spine
+        $ Djex.TypedLocal (Djex.occurrenceId 1) 0
+    )
+  , ( Djex.termNodeId 1
+    , Djex.TermNode (FunctionType spine spine)
+        $ Djex.TypedLambda
+            [ Djex.TypedPattern
+                (Djex.occurrenceId 0) spine (Djex.TypedBind 0)
+            ]
+            (Djex.termNodeId 0)
+    )
+  ]
+
+adversarialLetIdentityGraphSource
+  :: AdversarialType
+  -> Djex.TermGraphSource AdversarialType AdversarialLocal
+adversarialLetIdentityGraphSource spine = Djex.TermGraphSource
+  (Djex.termNodeId 3)
+  [ ( Djex.termNodeId 0
+    , Djex.TermNode spine
+        $ Djex.TypedLocal (Djex.occurrenceId 1) 0
+    )
+  , ( Djex.termNodeId 1
+    , Djex.TermNode spine
+        $ Djex.TypedLocal (Djex.occurrenceId 3) 0
+    )
+  , ( Djex.termNodeId 2
+    , Djex.TermNode spine
+        $ Djex.TypedLet
+            (Djex.TypedPattern
+              (Djex.occurrenceId 2) spine Djex.TypedWildcard)
+            (Djex.termNodeId 0)
+            (Djex.termNodeId 1)
+    )
+  , ( Djex.termNodeId 3
+    , Djex.TermNode (FunctionType spine spine)
+        $ Djex.TypedLambda
+            [ Djex.TypedPattern
+                (Djex.occurrenceId 0) spine (Djex.TypedBind 0)
+            ]
+            (Djex.termNodeId 2)
+    )
+  ]
+
+sealAdversarialGraph
+  :: Djex.TermGraphSource AdversarialType AdversarialLocal
+  -> IO AdversarialGraph
+sealAdversarialGraph = expectRight
+  . Djex.sealTermGraph Djex.sharedTypeStructure Djex.defaultTermGraphLimits
+
+-- IMPORTANT: this coercion is confined to the adversarial same-package test
+-- component.
+-- Cabal compiles the exact private representation as a home module, whose unit
+-- identity is deliberately distinct from the library's opaque public type even
+-- though both definitions and all field types are identical.  Production code
+-- never receives this constructor or coercion; downstream opacity remains
+-- covered independently by the negative API tests.
+adversarialTypedCandidate
+  :: Either String AdversarialGraph
+  -> AdversarialCandidate
+adversarialTypedCandidate graph = unsafeCoerce
+  $ InternalTypedCandidate.mkTypedCandidate adversarialCompatibility graph
+
+adversarialCompatibility :: Djex.Candidate AdversarialType () ()
+adversarialCompatibility = Djex.Candidate
+  { Djex.candidateOutput = ()
+  , Djex.candidateResidualConstraints = []
+  , Djex.candidateDetails = ()
+  }
+
+realListIdentityFixture
+  :: Type (Variable Int)
+  -> IO
+      ( LengthProblem.CheckedLengthSession Int ()
+      , Length.CheckedLengthContract (Variable Int)
+      , Djex.ExferenceTypedCandidate
+      )
+realListIdentityFixture payload = do
+  environment <- expectRight
+    (Djex.mkEnvironment [] ::
+      Either (Djex.EnvironmentError Djex.ExferenceTypeVariable)
+        Djex.ExferenceEnvironment)
+  exferenceSession <- expectRight $ Djex.mkExferenceSession environment
+  lengthSession <- expectRight $ LengthProblem.sealLengthSession
+    Length.defaultLengthLimits
+    (Djex.exferenceSessionInventory exferenceSession)
+    Length.BuiltinListSpine []
+  targetName <- expectName "lengthIdentityCandidate"
+  target <- expectRight $ Djex.mkDefinitionName targetName
+  let spine = TypeApplication (TypeConstructor listName) payload
+      goal = FunctionType spine spine
+      query = Djex.QueryRequest
+        { Djex.requestTarget = target
+        , Djex.requestGoal = goal
+        , Djex.requestContexts = []
+        , Djex.requestOptions = Djex.defaultExferenceOptions
+            { Djex.exferenceMaximumSteps = 8 }
+        }
+  request <- expectRight $ Djex.mkExferenceRequest query
+  contract <- expectRight $ Length.sealLengthContractInContext
+    Length.defaultLengthLimits
+    (LengthProblem.checkedLengthSessionContext lengthSession)
+    goal identityLengthContract
+  results <- expectRight $ Djex.runExferenceTypedQuery exferenceSession request
+  candidate <- case
+      [ value
+      | result <- results
+      , value <- Djex.batchCandidates $ Djex.resultSearch result
+      ] of
+    [] -> assertFailure "the list identity query returned no candidate"
+    value : _ -> pure value
+  pure (lengthSession, contract, candidate)
+
+isNamedGlobal :: Name -> Djex.TermNode ty local -> Bool
+isNamedGlobal expected (Djex.TermNode _ form) = case form of
+  Djex.TypedGlobal _ actual -> actual == expected
+  _ -> False
 
 sealContract
   :: Length.LengthLimits

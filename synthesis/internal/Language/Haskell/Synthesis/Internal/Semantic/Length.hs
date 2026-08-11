@@ -80,6 +80,12 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length
   , lengthFormulaField
   , tagged
   , ascii
+  , SyntaxUsage
+  , emptySyntaxUsage
+  , normalizeLengthExpression
+  , normalizeLengthFormula
+  , inventoryTermScheme
+  , isModeledSpine
   ) where
 
 import Control.DeepSeq (NFData (rnf))

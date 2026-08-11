@@ -31,6 +31,13 @@ Name + Type + Constraint + Declaration
                   v
      QueryResult (SearchBatch Candidate)
                   |
+          +-------+-------+
+          |               |
+          v               v
+   checked TermGraph   compatibility
+     when retained      projection
+          |               |
+          +-------+-------+
                   v
        FunctionClause / Expression
 ```
@@ -112,6 +119,8 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Selection` | First, best, lookahead-best, all, and preferred-tier policies over lazy result batches. |
 | `Language.Haskell.Synthesis.Diagnostic` | Severity, stable code, checked source locations/spans, ordered context, and deterministic rendering. |
 | `Language.Haskell.Synthesis.Generated` | Scope-aware expressions, patterns, clauses, holes, mixed term/type application spines, bottom-up rewriting, simplification, alpha-equivalence, substitution, and Haskell rendering through the common qualification policy. |
+| `Language.Haskell.Synthesis.TypedGenerated` | Bounded typed candidate graphs with stable node, source-occurrence, and certificate identities; checked application and visible-specialization witnesses; a neutral sealing pass; exact graph metrics; and one-way projection to `Generated`. |
+| `Language.Haskell.Synthesis.Observability` | Opaque exact counters, stable cross-engine metric codes, deterministic aggregation, and deliberately non-strict snapshots that can be inspected independently of a lazy result. |
 
 Logical evidence is independent of operational progress. A truncated search can
 return validated candidates; a finished heuristic search can return no logical
@@ -125,6 +134,24 @@ qualification from becoming generated Haskell. Structural consumers can use
 `expressionFullApplicationSpine` without losing visible type arguments, and
 `rewriteExpressionBottomUp` or `rewriteExpressionBottomUpM` to cover every
 expression constructor in one postorder pass.
+
+`TypedGenerated` is the richer producer/consumer edge. A raw graph is not
+evidence: `sealTermGraph` first bounds every node, edge, pattern, collection,
+type annotation, and compatibility projection; rejects duplicate, dangling,
+cyclic, unreachable, or multiply referenced nodes; checks local scope and the
+neutral typing relationships; and stores the single checked `Generated`
+projection beside the graph. Stable occurrence identities distinguish equal
+uses and must never be recovered from names or traversal paths. The existing
+candidate and query constructors remain unchanged while engines migrate, so a
+backend must report typed-view absence explicitly rather than inventing an
+annotation after erasure.
+
+`Observability` is orthogonal to logical evidence and search progress. Its
+`Natural` counts cannot wrap, zero-valued entries have one canonical absent
+representation, mapped collisions sum exactly, and entries are inspected in
+key order. Both fields of an `ObservationSnapshot` are intentionally lazy:
+reading cumulative observations must not force a candidate stream, and reading
+the result must not perform diagnostic accounting.
 
 ### Small shared utilities
 

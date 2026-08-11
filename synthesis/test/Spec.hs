@@ -34,6 +34,7 @@ import qualified Language.Haskell.Synthesis.TypeRender as TypeRender
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import Language.Haskell.Synthesis.TypeAtom
 import qualified Language.Haskell.Synthesis.TypeSynonym as TypeSynonym
+import qualified Language.Haskell.Synthesis.TypedGenerated as Typed
 import Test.Tasty (TestTree, defaultMain, localOption, testGroup)
 import Test.Tasty.HUnit
   ( Assertion
@@ -57,6 +58,7 @@ tests = testGroup "Djex synthesis foundation"
   , declarationTests
   , environmentTests
   , generatedTests
+  , typedGeneratedTests
   , queryTests
   , searchTests
   , selectionTests
@@ -145,6 +147,290 @@ candidateTests = testGroup "candidates"
       renderCandidateDefinition options duplicate @?=
         Left DuplicateLocalBinderIdentity
   ]
+
+typedGeneratedTests :: TestTree
+typedGeneratedTests = testGroup "typed generated candidate graphs"
+  [ testCase "seal and project one typed lambda without semantic recovery" $ do
+      let pattern = typedBind 0 0 typeA
+          source = Typed.TermGraphSource (nodeId 1)
+            [ (nodeId 1, term (arrow typeA typeA) $
+                Typed.TypedLambda [pattern] (nodeId 0))
+            , (nodeId 0, term typeA $ Typed.TypedLocal (occurrence 1) 0)
+            ]
+          graph = right $ seal source
+      Typed.eraseTermGraph graph @?=
+        Lambda [Bind 0] (Local 0)
+      Typed.termGraphNodes graph @?= Typed.termGraphSourceNodes source
+      Typed.termGraphMetrics graph @?= mempty
+        { Typed.typedGraphTermNodes = 2
+        , Typed.typedGraphEdges = 1
+        , Typed.typedGraphPatternNodes = 1
+        , Typed.typedGraphSourceOccurrences = 2
+        , Typed.typedGraphLocalUses = 1
+        , Typed.typedGraphProjectedNodes = 2
+        }
+      let target = right $ mkDefinitionName $ right $ mkIdentifier "identity"
+      Typed.eraseTermGraphToFunctionClause target graph @?=
+        FunctionClause target [Bind 0] (Local 0)
+  , testCase "retain distinct occurrence identities for equal globals" $ do
+      let global = right $ parseName "Fixture.value"
+          tupleType = boxedTuple [typeA, typeA]
+          source = Typed.TermGraphSource (nodeId 2)
+            [ (nodeId 0, term typeA $
+                Typed.TypedGlobal (occurrence 10) global)
+            , (nodeId 1, term typeA $
+                Typed.TypedGlobal (occurrence 11) global)
+            , (nodeId 2, term tupleType $
+                Typed.TypedTuple [nodeId 0, nodeId 1])
+            ]
+          graph = right $ seal source
+      Typed.typedGraphSourceOccurrences (Typed.termGraphMetrics graph) @?= 2
+      Typed.eraseTermGraph graph @?=
+        Tuple [Global global, Global global]
+  , testCase "check application domains and results structurally" $ do
+      let function = right $ parseName "Fixture.convert"
+          binder = typedBind 0 0 typeA
+          valid = Typed.TermGraphSource (nodeId 3)
+            [ (nodeId 0, term (arrow typeA typeB) $
+                Typed.TypedGlobal (occurrence 1) function)
+            , (nodeId 1, term typeA $
+                Typed.TypedLocal (occurrence 2) 0)
+            , (nodeId 2, term typeB $
+                Typed.TypedApply (nodeId 0) (nodeId 1) $
+                  Typed.ApplicationWitness typeA typeB)
+            , (nodeId 3, term (arrow typeA typeB) $
+                Typed.TypedLambda [binder] (nodeId 2))
+            ]
+          invalid = valid
+            { Typed.termGraphSourceNodes =
+                replaceNode 2
+                  (term typeB $ Typed.TypedApply (nodeId 0) (nodeId 1) $
+                    Typed.ApplicationWitness typeB typeB)
+                  (Typed.termGraphSourceNodes valid)
+            }
+      Typed.eraseTermGraph (right $ seal valid) @?=
+        Lambda [Bind 0] (Apply (Global function) (Local 0))
+      seal invalid @?= Left
+        (Typed.ApplicationDomainTypeMismatch
+          (nodeId 2) typeA typeB)
+  , testCase "compare quantified witness types modulo binder spelling" $ do
+      let polymorphicA = SharedType.ForallType ["a"] []
+            (SharedType.TypeVariable "a")
+          polymorphicB = SharedType.ForallType ["b"] []
+            (SharedType.TypeVariable "b")
+          function = right $ parseName "Fixture.consume"
+          argument = right $ parseName "Fixture.identity"
+          source = Typed.TermGraphSource (nodeId 2)
+            [ (nodeId 0, term (arrow polymorphicA typeA) $
+                Typed.TypedGlobal (occurrence 0) function)
+            , (nodeId 1, term polymorphicB $
+                Typed.TypedGlobal (occurrence 1) argument)
+            , (nodeId 2, term typeA $
+                Typed.TypedApply (nodeId 0) (nodeId 1) $
+                  Typed.ApplicationWitness polymorphicB typeA)
+            ]
+      Typed.eraseTermGraph (right $ seal source) @?=
+        Apply (Global function) (Global argument)
+  , testCase "retain visible-specialization occurrence and certificate" $ do
+      let provider = right $ parseName "Fixture.provider"
+          sourceType = SharedType.ForallType ["a"] [] typeA
+          witness = Typed.TypeApplicationWitness
+            sourceType typeA (Just (Typed.certificateId 7, 0))
+          source = Typed.TermGraphSource (nodeId 1)
+            [ (nodeId 0, term sourceType $
+                Typed.TypedGlobal (occurrence 1) provider)
+            , (nodeId 1, term typeA $
+                Typed.TypedVisibleTypeApplication
+                  (occurrence 2)
+                  (nodeId 0)
+                  inferredVisibleTypeArgument
+                  witness)
+            ]
+          graph = right $ seal source
+      Typed.eraseTermGraph graph @?=
+        VisibleTypeApplication (Global provider) inferredVisibleTypeArgument
+      Typed.typedGraphVisibleTypeApplications
+        (Typed.termGraphMetrics graph) @?= 1
+      Typed.typedGraphSourceOccurrences (Typed.termGraphMetrics graph) @?= 2
+  , testCase "type-check tuple fields, cases, and typed pattern fields" $ do
+      let pairType = boxedTuple [typeA, typeB]
+          pairBinder = typedBind 0 0 pairType
+          fieldA = typedBind 2 1 typeA
+          fieldB = typedBind 3 2 typeB
+          branchPattern = Typed.TypedPattern
+            (occurrence 1) pairType
+            (Typed.TypedTuplePattern [fieldA, fieldB])
+          source = Typed.TermGraphSource (nodeId 3)
+            [ (nodeId 0, term pairType $
+                Typed.TypedLocal (occurrence 4) 0)
+            , (nodeId 1, term typeA $
+                Typed.TypedLocal (occurrence 5) 1)
+            , (nodeId 2, term typeA $
+                Typed.TypedCase (nodeId 0) [(branchPattern, nodeId 1)])
+            , (nodeId 3, term (arrow pairType typeA) $
+                Typed.TypedLambda [pairBinder] (nodeId 2))
+            ]
+      Typed.eraseTermGraph (right $ seal source) @?=
+        Lambda [Bind 0]
+          (Case (Local 0) [(TuplePattern [Bind 1, Bind 2], Local 1)])
+  , testCase "type-check let-bound structural fields" $ do
+      let first = right $ parseName "Fixture.first"
+          second = right $ parseName "Fixture.second"
+          pairType = boxedTuple [typeA, typeB]
+          fieldA = typedBind 1 0 typeA
+          fieldB = typedBind 2 1 typeB
+          pattern = Typed.TypedPattern
+            (occurrence 0) pairType
+            (Typed.TypedTuplePattern [fieldA, fieldB])
+          source = Typed.TermGraphSource (nodeId 4)
+            [ (nodeId 0, term typeA $
+                Typed.TypedGlobal (occurrence 3) first)
+            , (nodeId 1, term typeB $
+                Typed.TypedGlobal (occurrence 4) second)
+            , (nodeId 2, term pairType $
+                Typed.TypedTuple [nodeId 0, nodeId 1])
+            , (nodeId 3, term typeA $
+                Typed.TypedLocal (occurrence 5) 0)
+            , (nodeId 4, term typeA $
+                Typed.TypedLet pattern (nodeId 2) (nodeId 3))
+            ]
+      Typed.eraseTermGraph (right $ seal source) @?=
+        Let (TuplePattern [Bind 0, Bind 1])
+          (Tuple [Global first, Global second])
+          (Local 0)
+  , testCase "reject duplicate, dangling, cyclic, and unreachable nodes" $ do
+      let global = right $ parseName "Fixture.value"
+          leaf occurrenceValue = term typeA $
+            Typed.TypedGlobal (occurrence occurrenceValue) global
+          duplicate = Typed.TermGraphSource (nodeId 0)
+            [(nodeId 0, leaf 0), (nodeId 0, leaf 1)]
+          dangling = Typed.TermGraphSource (nodeId 0)
+            [(nodeId 0, term (arrow typeA typeA) $
+              Typed.TypedLambda [typedBind 0 0 typeA] (nodeId 1))]
+          cyclic = Typed.TermGraphSource (nodeId 0)
+            [(nodeId 0, term (arrow typeA typeA) $
+              Typed.TypedLambda [typedBind 0 0 typeA] (nodeId 0))]
+          unreachable = Typed.TermGraphSource (nodeId 0)
+            [(nodeId 0, leaf 0), (nodeId 1, leaf 1)]
+      seal duplicate @?= Left (Typed.DuplicateTermNodeId $ nodeId 0)
+      seal dangling @?= Left
+        (Typed.DanglingTermNodeReference (nodeId 0) (nodeId 1))
+      case seal cyclic of
+        Left Typed.CyclicTermNodeReference{} -> pure ()
+        other -> assertFailure $ "expected a cycle rejection, got " ++ show other
+      seal unreachable @?= Left (Typed.UnreachableTermNode $ nodeId 1)
+  , testCase "reject duplicate source occurrence identities" $ do
+      let global = right $ parseName "Fixture.value"
+          pairType = boxedTuple [typeA, typeA]
+          source = Typed.TermGraphSource (nodeId 2)
+            [ (nodeId 0, term typeA $
+                Typed.TypedGlobal (occurrence 0) global)
+            , (nodeId 1, term typeA $
+                Typed.TypedGlobal (occurrence 0) global)
+            , (nodeId 2, term pairType $
+                Typed.TypedTuple [nodeId 0, nodeId 1])
+            ]
+      seal source @?= Left (Typed.DuplicateOccurrenceId $ occurrence 0)
+  , testCase "bound cyclic node tables and recursive pattern values" $ do
+      let global = right $ parseName "Fixture.value"
+          leaf :: (Typed.TermNodeId,
+            Typed.TermNode (SharedType.Type String) Int)
+          leaf = (nodeId 0, term typeA $
+            Typed.TypedGlobal (occurrence 0) global)
+          cyclicNodes ::
+            [(Typed.TermNodeId, Typed.TermNode (SharedType.Type String) Int)]
+          cyclicNodes = let nodes = leaf : nodes in nodes
+          nodeLimits = right $ Typed.mkTermGraphLimits 1 1 1 1 1
+          recursivePattern ::
+            Typed.TypedPattern (SharedType.Type String) Int
+          recursivePattern =
+            let recursive = Typed.TypedPattern
+                  (occurrence 1) (boxedTuple [])
+                  (Typed.TypedTuplePattern [recursive])
+            in recursive
+          patternSource ::
+            Typed.TermGraphSource (SharedType.Type String) Int
+          patternSource = Typed.TermGraphSource (nodeId 1)
+            [ (nodeId 0, term typeA $
+                Typed.TypedGlobal (occurrence 0) global)
+            , (nodeId 1, term (arrow (boxedTuple []) typeA) $
+                Typed.TypedLambda [recursivePattern] (nodeId 0))
+            ]
+          patternLimits = right $ Typed.mkTermGraphLimits 2 1 1 1 2
+      Typed.sealTermGraph Typed.sharedTypeStructure nodeLimits
+        (Typed.TermGraphSource (nodeId 0) cyclicNodes) @?=
+          Left (Typed.TermGraphCollectionLimitExceeded
+            Typed.GraphNodeTable 1 2)
+      case Typed.sealTermGraph
+          Typed.sharedTypeStructure patternLimits patternSource of
+        Left (Typed.TermGraphPatternLimitExceeded 1 2) -> pure ()
+        other -> assertFailure $
+          "expected a bounded recursive-pattern rejection, got " ++ show other
+  , testCase "bound compatibility expansion of a shared DAG" $ do
+      let global = right $ parseName "Fixture.value"
+          pairA = boxedTuple [typeA, typeA]
+          pairPair = boxedTuple [pairA, pairA]
+          source :: Typed.TermGraphSource (SharedType.Type String) Int
+          source = Typed.TermGraphSource (nodeId 2)
+            [ (nodeId 0, term typeA $
+                Typed.TypedGlobal (occurrence 0) global)
+            , (nodeId 1, term pairA $
+                Typed.TypedTuple [nodeId 0, nodeId 0])
+            , (nodeId 2, term pairPair $
+                Typed.TypedTuple [nodeId 1, nodeId 1])
+            ]
+          limits = right $ Typed.mkTermGraphLimits 3 4 0 2 5
+      Typed.sealTermGraph Typed.sharedTypeStructure limits source @?=
+        Left (Typed.TermGraphProjectionLimitExceeded 5 6)
+  , testCase "delegate malformed legacy surface shapes to one projection gate" $ do
+      let source = Typed.TermGraphSource (nodeId 1)
+            [ (nodeId 0, term typeA $
+                Typed.TypedHole (occurrence 0) 0)
+            , (nodeId 1, term (boxedTuple [typeA]) $
+                Typed.TypedTuple [nodeId 0])
+            ]
+      seal source @?= Left
+        (Typed.ProjectedExpressionSyntaxError $
+          InvalidTupleExpressionArity 1)
+ ]
+ where
+  typeA :: SharedType.Type String
+  typeA = SharedType.TypeVariable "a"
+  typeB :: SharedType.Type String
+  typeB = SharedType.TypeVariable "b"
+  arrow :: SharedType.Type String
+    -> SharedType.Type String
+    -> SharedType.Type String
+  arrow = SharedType.FunctionType
+  boxedTuple :: [SharedType.Type String] -> SharedType.Type String
+  boxedTuple = SharedType.TupleType Boxed
+  nodeId :: Natural -> Typed.TermNodeId
+  nodeId = Typed.termNodeId
+  occurrence :: Natural -> Typed.OccurrenceId
+  occurrence = Typed.occurrenceId
+  term :: SharedType.Type String
+    -> Typed.TermNodeForm (SharedType.Type String) Int
+    -> Typed.TermNode (SharedType.Type String) Int
+  term = Typed.TermNode
+  typedBind :: Natural
+    -> Int
+    -> SharedType.Type String
+    -> Typed.TypedPattern (SharedType.Type String) Int
+  typedBind occurrenceValue local ty = Typed.TypedPattern
+    (occurrence occurrenceValue) ty (Typed.TypedBind local)
+  seal :: Typed.TermGraphSource (SharedType.Type String) Int
+    -> Either
+      (Typed.TermGraphError (SharedType.Type String) Int)
+      (Typed.TermGraph (SharedType.Type String) Int)
+  seal = Typed.sealTermGraph
+    (Typed.sharedTypeStructure :: Typed.TypeStructure (SharedType.Type String))
+    Typed.defaultTermGraphLimits
+  replaceNode :: Natural
+    -> Typed.TermNode (SharedType.Type String) Int
+    -> [(Typed.TermNodeId, Typed.TermNode (SharedType.Type String) Int)]
+    -> [(Typed.TermNodeId, Typed.TermNode (SharedType.Type String) Int)]
+  replaceNode wanted replacement = map $ \entry@(current, _)
+    -> if current == nodeId wanted then (current, replacement) else entry
 
 collectionTests :: TestTree
 collectionTests = testGroup "collections"

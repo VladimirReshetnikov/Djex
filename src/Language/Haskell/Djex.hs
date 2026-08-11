@@ -52,6 +52,7 @@ module Language.Haskell.Djex
   , module Language.Haskell.Synthesis.TypeAtom
   , module Language.Haskell.Synthesis.TypeRender
   , module Language.Haskell.Synthesis.TypeSynonym
+  , module Language.Haskell.Synthesis.TypedGenerated
   , Backend (..)
   , Capability (..)
   , BackendInfo (..)
@@ -83,6 +84,7 @@ import Language.Haskell.Synthesis.Type
 import Language.Haskell.Synthesis.TypeAtom
 import Language.Haskell.Synthesis.TypeRender
 import Language.Haskell.Synthesis.TypeSynonym
+import Language.Haskell.Synthesis.TypedGenerated
 
 -- | A search engine shipped by Djex.
 data Backend

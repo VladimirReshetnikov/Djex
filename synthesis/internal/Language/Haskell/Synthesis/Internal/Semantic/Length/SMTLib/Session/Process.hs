@@ -45,10 +45,12 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Proces
   , mkLengthSMTLibProcessDeadline
   , lengthSMTLibProcessDeadlineAfterMilliseconds
   , lengthSMTLibProcessMonotonicTimeNanoseconds
+  , lengthSMTLibProcessDeadlineFingerprintField
   , LengthSMTLibProcessCancellation
   , newLengthSMTLibProcessCancellation
   , cancelLengthSMTLibProcess
   , runBeforeLengthSMTLibProcessDeadline
+  , waitLengthSMTLibProcessControl
   , LengthSMTLibExecutableSnapshot
   , lengthSMTLibExecutableSnapshotSHA256
   , lengthSMTLibExecutableSnapshotByteCount
@@ -251,6 +253,7 @@ data LengthSMTLibProcessPhase
   | LengthSMTLibProcessStdoutPhase
   | LengthSMTLibProcessStderrPhase
   | LengthSMTLibProcessReadyPhase
+  | LengthSMTLibProcessQueryPhase
   | LengthSMTLibProcessClosePhase
   deriving (Bounded, Enum, Eq, Ord, Show)
 
@@ -437,6 +440,16 @@ lengthSMTLibProcessDeadlineAfterMilliseconds milliseconds
 
 lengthSMTLibProcessMonotonicTimeNanoseconds :: IO Word64
 lengthSMTLibProcessMonotonicTimeNanoseconds = getMonotonicTimeNSec
+
+lengthSMTLibProcessDeadlineFingerprintField
+  :: LengthSMTLibProcessDeadline
+  -> FingerprintField
+lengthSMTLibProcessDeadlineFingerprintField
+    (LengthSMTLibProcessDeadline nanoseconds) = FingerprintTag
+  (ascii "absolute-monotonic-deadline")
+  [ FingerprintBytes $ ascii "clock_gettime-monotonic-nanoseconds/v1"
+  , FingerprintNatural $ fromIntegral nanoseconds
+  ]
 
 newtype LengthSMTLibProcessCancellation =
   LengthSMTLibProcessCancellation (TVar Bool)
@@ -1550,6 +1563,20 @@ waitControlled process cancellation deadline phase action = go
                     pure $ case poisoned of
                       Just failure -> Left failure
                       Nothing -> value
+
+-- | Wait for one package-private, non-owning STM admission observation under
+-- the same process, cancellation, poison, lifecycle, and absolute-deadline
+-- precedence as pipe operations.  The action must not destructively acquire a
+-- resource: the final precedence check may discard its result.  Session first
+-- observes its query gate here, then claims it nonblockingly under masking.
+waitLengthSMTLibProcessControl
+  :: LengthSMTLibProcess
+  -> LengthSMTLibProcessCancellation
+  -> LengthSMTLibProcessDeadline
+  -> LengthSMTLibProcessPhase
+  -> STM value
+  -> IO (Either LengthSMTLibProcessError value)
+waitLengthSMTLibProcessControl = waitControlled
 
 -- A stdout terminal condition participates in write admission without becoming
 -- global poison.  Thus a write cannot start after the reader records terminal,

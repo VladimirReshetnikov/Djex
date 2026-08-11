@@ -39,6 +39,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   , lengthSMTLibProtocolInitialWriteBytes
   , lengthSMTLibProtocolInputValueWriteBytes
   , lengthSMTLibProtocolPlanFingerprint
+  , lengthSMTLibProtocolPlanMinimumStdoutByteCount
   , LengthSMTLibProtocolPhase (..)
   , LengthSMTLibProtocolWriteKind (..)
   , LengthSMTLibProtocolReceiver
@@ -345,6 +346,19 @@ lengthSMTLibProtocolPlanFingerprint
   -> Fingerprint LengthSMTLibProtocolPlanFingerprintSubject
 lengthSMTLibProtocolPlanFingerprint
     (LengthSMTLibProtocolPlan _ _ _ _ _ _ _ _ value) = value
+
+-- | Smallest complete live transcript admitted by this exact plan, including
+-- the required lexical delimiter after each bare status and final echo.  A
+-- session uses this before reserving an ordinal so the remaining process-wide
+-- stdout budget can admit at least one complete branch.
+lengthSMTLibProtocolPlanMinimumStdoutByteCount
+  :: LengthSMTLibProtocolPlan identity local
+  -> Natural
+lengthSMTLibProtocolPlanMinimumStdoutByteCount plan =
+  minimumProtocolStdoutBytes (planQuery plan)
+    $ case planValueBarrier plan of
+        Nothing -> False
+        Just _ -> True
 
 data LengthSMTLibProtocolPhase
   = LengthSMTLibProtocolCheckStatusPhase

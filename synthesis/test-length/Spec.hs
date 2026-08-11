@@ -1,6 +1,7 @@
 module Main (main) where
 
 import Control.Exception (evaluate)
+import qualified Data.ByteString as BS
 import Data.List (intercalate, isInfixOf, nub, sort)
 import Data.Word (Word8)
 import Numeric.Natural (Natural)
@@ -32,6 +33,10 @@ import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Exec
   as InternalSMTLibExecution
 import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   as SMTLibProtocol
+import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session
+  as SMTLibSession
+import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process
+  as SMTLibProcess
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Stream
   as SMTLibStream
 import qualified Language.Haskell.Synthesis.Internal.TypedCandidate
@@ -82,11 +87,372 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , smtLibTests
   , smtLibProtocolTests
   , SMTLibLiveSpec.smtLibLiveTests
+  , smtLibLiveQueryTests
   , evaluationTests
   , normalizationTests
   , productiveBoundTests
   , fingerprintTests
   ]
+
+smtLibLiveQueryTests :: TestTree
+smtLibLiveQueryTests = testGroup "Length SMT-LIB live queries"
+  [ testCase "run sequential unary values with ordinals, identity, and replay"
+      assertLiveSequentialUnaryQueries
+  , testGroup "status and artifact branches"
+      [ testCase "status-only satisfiable omits values"
+          assertLiveStatusOnlySatisfiable
+      , testCase "values policy unsatisfiable omits values"
+          $ assertLiveTerminalStatus "query-unsat"
+              Observation.SolverUnsatisfiable
+      , testCase "values policy unknown omits values"
+          $ assertLiveTerminalStatus "query-unknown"
+              Observation.SolverUnknown
+      , testCase "values policy admits a vacuous zero-input counterexample"
+          assertLiveZeroInputQuery
+      , testCase "values policy decodes and replays a binary assignment"
+          assertLiveBinaryQuery
+      ]
+  , testCase "complete unary values under split and drip stdout"
+      assertLiveQueryChunkModes
+  , testCase "reject stale pre-write values, omit get-value, and spend worker"
+      assertLiveQueryStalePreWrite
+  , testCase "bound a hung status and spend worker"
+      assertLiveQueryHangStatus
+  , testCase "admit exactly maximum queries and reject maximum plus one"
+      assertLiveQueryMaximum
+  ]
+
+assertLiveSequentialUnaryQueries :: IO ()
+assertLiveSequentialUnaryQueries = do
+  problem <- adversarialConstantZeroProblem identityLengthContract
+  query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  scoped <- SMTLibLiveSpec.withLiveQueryWorker "healthy"
+    InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable id
+    $ \executable worker -> do
+        first <- expectRight =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
+          Evaluate.defaultLengthEvaluationLimits worker query
+        second <- expectRight =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
+          Evaluate.defaultLengthEvaluationLimits worker query
+        SMTLibSession.lengthSMTLibQueryRunOrdinal first @?= 0
+        SMTLibSession.lengthSMTLibQueryRunOrdinal second @?= 1
+        assertLiveValueQueryRun query
+          [smtIntegerBinding (asciiBytes "djex_length_input_0") 3]
+          [3] first
+        assertLiveValueQueryRun query
+          [smtIntegerBinding (asciiBytes "djex_length_input_0") 3]
+          [3] second
+        assertBool "sequential query runs shared an identity"
+          $ SMTLibSession.lengthSMTLibQueryRunIdentityFingerprint first /=
+              SMTLibSession.lengthSMTLibQueryRunIdentityFingerprint second
+        SMTLibSession.lengthSMTLibQueryRunStdoutStart second @?=
+          SMTLibSession.lengthSMTLibQueryRunStdoutEnd first
+        SMTLibSession.lengthSMTLibQueryRunStderrStart second @?=
+          SMTLibSession.lengthSMTLibQueryRunStderrEnd first
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0, 1] events
+        assertFakeZ3EventOrdinals "query-get-value" [0, 1] events
+  _ <- expectRight scoped
+  pure ()
+
+assertLiveStatusOnlySatisfiable :: IO ()
+assertLiveStatusOnlySatisfiable = do
+  problem <- adversarialConstantZeroProblem identityLengthContract
+  query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  scoped <- SMTLibLiveSpec.withLiveQueryWorker "healthy"
+    InternalSMTLibExecution.LengthSMTLibStatusOnly id
+    $ \executable worker -> do
+        run <- expectRight =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
+          Evaluate.defaultLengthEvaluationLimits worker query
+        SMTLibSession.lengthSMTLibQueryRunOrdinal run @?= 0
+        assertLiveStatusQueryRun Observation.SolverSatisfiable run
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0] events
+        assertFakeZ3EventCount "query-get-value" 0 events
+  _ <- expectRight scoped
+  pure ()
+
+assertLiveTerminalStatus
+  :: String
+  -> Observation.SolverStatus
+  -> IO ()
+assertLiveTerminalStatus mode status = do
+  problem <- adversarialConstantZeroProblem identityLengthContract
+  query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  scoped <- SMTLibLiveSpec.withLiveQueryWorker mode
+    InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable id
+    $ \executable worker -> do
+        run <- expectRight =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
+          Evaluate.defaultLengthEvaluationLimits worker query
+        SMTLibSession.lengthSMTLibQueryRunOrdinal run @?= 0
+        assertLiveStatusQueryRun status run
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0] events
+        assertFakeZ3EventCount "query-get-value" 0 events
+  _ <- expectRight scoped
+  pure ()
+
+assertLiveZeroInputQuery :: IO ()
+assertLiveZeroInputQuery = do
+  let result = Length.LengthVariable Length.LengthResult
+      source = contractWith (Length.LengthTruth True)
+        $ Length.LengthEqual result $ Length.LengthLiteral 1
+  problem <- adversarialZeroInputProblem source
+  query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  scoped <- SMTLibLiveSpec.withLiveQueryWorker "healthy"
+    InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable id
+    $ \executable worker -> do
+        run <- expectRight =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
+          Evaluate.defaultLengthEvaluationLimits worker query
+        assertLiveValueQueryRun query [] [] run
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0] events
+        assertFakeZ3EventCount "query-get-value" 0 events
+  _ <- expectRight scoped
+  pure ()
+
+assertLiveBinaryQuery :: IO ()
+assertLiveBinaryQuery = do
+  problem <- adversarialBinaryConstantZeroProblem identityLengthContract
+  query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  scoped <- SMTLibLiveSpec.withLiveQueryWorker "healthy"
+    InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable id
+    $ \executable worker -> do
+        run <- expectRight =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
+          Evaluate.defaultLengthEvaluationLimits worker query
+        assertLiveValueQueryRun query
+          [ smtIntegerBinding (asciiBytes "djex_length_input_0") 3
+          , smtIntegerBinding (asciiBytes "djex_length_input_1") 5
+          ]
+          [3, 5] run
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-get-value" [0] events
+        case fakeZ3Events "query-get-value" events of
+          [event] -> SMTLibLiveSpec.fakeZ3FieldValues
+              (liveTestBytes "symbol") event @?=
+                map liveTestBytes
+                  ["djex_length_input_0", "djex_length_input_1"]
+          _ -> assertFailure "binary query emitted an unexpected value event set"
+  _ <- expectRight scoped
+  pure ()
+
+assertLiveQueryChunkModes :: IO ()
+assertLiveQueryChunkModes = mapM_ runMode ["split-output", "drip-output"]
+ where
+  runMode mode = do
+    problem <- adversarialConstantZeroProblem identityLengthContract
+    query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+      SMTLib.defaultLengthSMTLibLimits problem
+    scoped <- SMTLibLiveSpec.withLiveQueryWorker mode
+      InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable id
+      $ \executable worker -> do
+          run <- expectRight =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
+            Evaluate.defaultLengthEvaluationLimits worker query
+          assertLiveValueQueryRun query
+            [smtIntegerBinding (asciiBytes "djex_length_input_0") 3]
+            [3] run
+          events <- SMTLibLiveSpec.readFakeZ3Events executable
+          assertFakeZ3EventOrdinals "query-check" [0] events
+          assertFakeZ3EventOrdinals "query-get-value" [0] events
+    _ <- expectRight scoped
+    pure ()
+
+assertLiveQueryStalePreWrite :: IO ()
+assertLiveQueryStalePreWrite = do
+  problem <- adversarialConstantZeroProblem identityLengthContract
+  query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  scoped <- SMTLibLiveSpec.withLiveQueryWorker "query-stale-prewrite"
+    InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable id
+    $ \executable worker -> do
+        rejected <- SMTLibSession.runLengthSMTLibReadyWorkerQuery
+          Evaluate.defaultLengthEvaluationLimits worker query
+        case rejected of
+          Left failure -> do
+            case SMTLibSession.lengthSMTLibQueryRunPrimaryFailure failure of
+              SMTLibSession.LengthSMTLibQueryProtocolFailure
+                  (SMTLibProtocol.LengthSMTLibProtocolUnexpectedPostBarrierByte
+                    _ byte) -> byte @?= 40
+              unexpected -> assertFailure $ "wrong stale-output failure: " ++
+                show unexpected
+            case SMTLibSession.lengthSMTLibQueryRunProcessCleanupStatus failure of
+              Nothing -> assertFailure "stale-output failure did not close worker"
+              Just cleanup ->
+                SMTLibProcess.lengthSMTLibProcessCleanupReadersStopped cleanup
+                  @?= True
+          Right _ -> assertFailure "stale pre-write model was accepted"
+        spent <- SMTLibSession.runLengthSMTLibReadyWorkerQuery
+          Evaluate.defaultLengthEvaluationLimits worker query
+        assertLiveQueryFailure SMTLibSession.LengthSMTLibQueryWorkerSpent
+          False spent
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0] events
+        assertFakeZ3EventCount "query-get-value" 0 events
+  _ <- expectRight scoped
+  pure ()
+
+assertLiveQueryHangStatus :: IO ()
+assertLiveQueryHangStatus = do
+  problem <- adversarialConstantZeroProblem identityLengthContract
+  query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  scoped <- SMTLibLiveSpec.withLiveQueryWorker "query-hang-status"
+    InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable id
+    $ \executable worker -> do
+        rejected <- SMTLibSession.runLengthSMTLibReadyWorkerQuery
+          Evaluate.defaultLengthEvaluationLimits worker query
+        case rejected of
+          Left failure -> do
+            case SMTLibSession.lengthSMTLibQueryRunPrimaryFailure failure of
+              SMTLibSession.LengthSMTLibQueryDeadlineFailure processFailure ->
+                SMTLibProcess.lengthSMTLibProcessErrorClass processFailure @?=
+                  SMTLibProcess.LengthSMTLibProcessDeadlineExceeded
+              unexpected -> assertFailure $ "wrong query-hang failure: " ++
+                show unexpected
+            case SMTLibSession.lengthSMTLibQueryRunProcessCleanupStatus failure of
+              Nothing -> assertFailure "query deadline did not close worker"
+              Just cleanup ->
+                SMTLibProcess.lengthSMTLibProcessCleanupReadersStopped cleanup
+                  @?= True
+          Right _ -> assertFailure "hung query status completed"
+        spent <- SMTLibSession.runLengthSMTLibReadyWorkerQuery
+          Evaluate.defaultLengthEvaluationLimits worker query
+        assertLiveQueryFailure SMTLibSession.LengthSMTLibQueryWorkerSpent
+          False spent
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0] events
+        assertFakeZ3EventCount "query-get-value" 0 events
+        case fakeZ3Events "query-hang" events of
+          [event] -> SMTLibLiveSpec.fakeZ3FieldValues
+              (liveTestBytes "phase") event @?= [liveTestBytes "status"]
+          _ -> assertFailure "query status hang emitted an unexpected event set"
+  _ <- expectRight scoped
+  pure ()
+
+assertLiveQueryMaximum :: IO ()
+assertLiveQueryMaximum = do
+  problem <- adversarialConstantZeroProblem identityLengthContract
+  query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  let maximumQueries source = source
+        { SMTLibSession.lengthSMTLibSessionLimitSourceMaximumQueries = 2 }
+  scoped <- SMTLibLiveSpec.withLiveQueryWorker "healthy"
+    InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+    maximumQueries $ \executable worker -> do
+      first <- expectRight =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
+        Evaluate.defaultLengthEvaluationLimits worker query
+      second <- expectRight =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
+        Evaluate.defaultLengthEvaluationLimits worker query
+      SMTLibSession.lengthSMTLibQueryRunOrdinal first @?= 0
+      SMTLibSession.lengthSMTLibQueryRunOrdinal second @?= 1
+      rejected <- SMTLibSession.runLengthSMTLibReadyWorkerQuery
+        Evaluate.defaultLengthEvaluationLimits worker query
+      assertLiveQueryFailure
+        (SMTLibSession.LengthSMTLibQueryLimitExceeded 2 3) False rejected
+      events <- SMTLibLiveSpec.readFakeZ3Events executable
+      assertFakeZ3EventOrdinals "query-check" [0, 1] events
+      assertFakeZ3EventOrdinals "query-get-value" [0, 1] events
+  _ <- expectRight scoped
+  pure ()
+
+assertLiveStatusQueryRun
+  :: Observation.SolverStatus
+  -> SMTLibSession.LengthSMTLibQueryRun epoch identity local
+  -> IO ()
+assertLiveStatusQueryRun expectedStatus run = do
+  SMTLibSession.lengthSMTLibQueryRunSolverStatus run @?= expectedStatus
+  SMTLibSession.lengthSMTLibQueryRunInputValues run @?= Nothing
+  case SMTLibSession.lengthSMTLibQueryRunCounterexampleEvidence run of
+    Nothing -> pure ()
+    Just _ -> assertFailure "status-only run retained counterexample evidence"
+  assertLiveQueryRunAccounting run
+
+assertLiveValueQueryRun
+  :: SMTLib.LengthSMTLibQuery identity local
+  -> [SMTLib.LengthSMTLibIntegerBinding]
+  -> [Natural]
+  -> SMTLibSession.LengthSMTLibQueryRun epoch identity local
+  -> IO ()
+assertLiveValueQueryRun query expectedBindings expectedInputs run = do
+  SMTLibSession.lengthSMTLibQueryRunSolverStatus run @?=
+    Observation.SolverSatisfiable
+  SMTLibSession.lengthSMTLibQueryRunInputValues run @?=
+    Just expectedBindings
+  evidence <- case
+      SMTLibSession.lengthSMTLibQueryRunCounterexampleEvidence run of
+    Nothing -> assertFailure "satisfiable values run omitted replay evidence"
+    Just value -> pure value
+  receipt <- expectRight $ Djex.replayBehavioralEvidence
+    (SMTLib.lengthSMTLibQueryBehavioralProblem query) evidence
+  Evaluate.validatedLengthCounterexampleInputs receipt @?= expectedInputs
+  Evaluate.validatedLengthCounterexampleResult receipt @?= 0
+  assertLiveQueryRunAccounting run
+
+assertLiveQueryRunAccounting
+  :: SMTLibSession.LengthSMTLibQueryRun epoch identity local
+  -> IO ()
+assertLiveQueryRunAccounting run = do
+  let stdoutStart = SMTLibSession.lengthSMTLibQueryRunStdoutStart run
+      stdoutEnd = SMTLibSession.lengthSMTLibQueryRunStdoutEnd run
+      stderrStart = SMTLibSession.lengthSMTLibQueryRunStderrStart run
+      stderrEnd = SMTLibSession.lengthSMTLibQueryRunStderrEnd run
+      transcriptBytes =
+        SMTLibSession.lengthSMTLibQueryRunTranscriptByteCount run
+  assertBool "live query observed a decreasing stdout boundary"
+    $ stdoutEnd >= stdoutStart
+  transcriptBytes @?= stdoutEnd - stdoutStart
+  assertBool "live query produced an empty transcript" $ transcriptBytes > 0
+  stderrEnd @?= stderrStart
+  BS.length (SMTLibSession.lengthSMTLibQueryRunTranscriptSHA256 run) @?= 32
+
+assertLiveQueryFailure
+  :: SMTLibSession.LengthSMTLibQueryRunFailure
+  -> Bool
+  -> Either SMTLibSession.LengthSMTLibQueryRunError value
+  -> IO ()
+assertLiveQueryFailure expectedFailure expectedCleanup result = case result of
+  Left failure -> do
+    SMTLibSession.lengthSMTLibQueryRunPrimaryFailure failure @?=
+      expectedFailure
+    case ( expectedCleanup
+         , SMTLibSession.lengthSMTLibQueryRunProcessCleanupStatus failure) of
+      (False, Nothing) -> pure ()
+      (True, Just _) -> pure ()
+      _ -> assertFailure "query failure carried the wrong cleanup ownership"
+  Right _ -> assertFailure $ "expected live query failure: " ++
+    show expectedFailure
+
+assertFakeZ3EventOrdinals
+  :: String
+  -> [Natural]
+  -> [SMTLibLiveSpec.FakeZ3Event]
+  -> IO ()
+assertFakeZ3EventOrdinals tag expected events =
+  map (SMTLibLiveSpec.fakeZ3FieldValues $ liveTestBytes "ordinal")
+      (fakeZ3Events tag events) @?=
+    map (\ordinal -> [liveTestBytes $ show ordinal]) expected
+
+assertFakeZ3EventCount
+  :: String
+  -> Int
+  -> [SMTLibLiveSpec.FakeZ3Event]
+  -> IO ()
+assertFakeZ3EventCount tag expected events =
+  length (fakeZ3Events tag events) @?= expected
+
+fakeZ3Events
+  :: String
+  -> [SMTLibLiveSpec.FakeZ3Event]
+  -> [SMTLibLiveSpec.FakeZ3Event]
+fakeZ3Events tag = filter
+  ((== liveTestBytes tag) . SMTLibLiveSpec.fakeZ3EventTag)
+
+liveTestBytes :: String -> BS.ByteString
+liveTestBytes = BS.pack . asciiBytes
 
 sessionTests :: TestTree
 sessionTests = testGroup "checked length sessions"

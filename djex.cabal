@@ -254,6 +254,7 @@ Library
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capability
+    Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Driver
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Response
     Language.Haskell.Synthesis.Internal.Semantic.Problem
@@ -284,6 +285,7 @@ Library
 
   Build-Depends:
     bytestring >= 0.11 && < 0.13,
+    containers >= 0.6 && < 0.8,
     cryptohash-sha256 >= 0.11.102 && < 0.12,
     entropy >= 0.4.1 && < 0.5,
     exceptions >= 0.10 && < 0.11,
@@ -374,11 +376,13 @@ Test-Suite synthesis-length-tests
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capability
+    Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Driver
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process
     Language.Haskell.Synthesis.Internal.SMTLib.Stream
     Language.Haskell.Synthesis.Internal.TypedCandidate
   Build-Depends:
     bytestring >= 0.11 && < 0.13,
+    containers >= 0.6 && < 0.8,
     cryptohash-sha256 >= 0.11.102 && < 0.12,
     djex,
     entropy >= 0.4.1 && < 0.5,

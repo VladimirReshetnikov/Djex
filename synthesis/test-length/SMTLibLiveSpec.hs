@@ -2,7 +2,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 
-module SMTLibLiveSpec (smtLibLiveTests) where
+module SMTLibLiveSpec
+  ( smtLibLiveTests
+  , FakeZ3Event
+  , fakeZ3EventTag
+  , fakeZ3FieldValues
+  , readFakeZ3Events
+  , withLiveQueryWorker
+  ) where
 
 import Control.Concurrent (forkIO, myThreadId, throwTo)
 import Control.Concurrent.MVar
@@ -610,13 +617,55 @@ liveSessionConfig executable expectedDigest changeProcess changeSession = do
     session process Capability.defaultLengthSMTLibCapabilityLimits
     Protocol.defaultLengthSMTLibProtocolLimits execution
 
+-- | Test-only entry point for typed live-query fixtures owned by @Spec.hs@.
+-- The fake mode remains selected solely by the copied executable basename.
+withLiveQueryWorker
+  :: String
+  -> Execution.LengthSMTLibArtifactPolicy
+  -> (Session.LengthSMTLibSessionLimitSource
+      -> Session.LengthSMTLibSessionLimitSource)
+  -> (forall epoch.
+      FilePath
+      -> Session.LengthSMTLibReadyWorker epoch
+      -> IO result)
+  -> IO (Either Session.LengthSMTLibSessionScopeError result)
+withLiveQueryWorker mode artifactPolicy changeSession use =
+  withFakeZ3Mode mode $ \executable _ -> do
+    execution <- liveExecutionConfigWith executable Nothing $ \source -> source
+      { Execution.lengthSMTLibExecutionConfigSourceArtifactPolicy =
+          artifactPolicy
+      , Execution.lengthSMTLibExecutionConfigSourceHostDeadlineMilliseconds =
+          liveQueryHostDeadlineMilliseconds
+      }
+    process <- expectRight $ Process.mkLengthSMTLibProcessLimits
+      Process.defaultLengthSMTLibProcessLimitSource
+    session <- expectRight $ Session.mkLengthSMTLibSessionLimits
+      $ changeSession
+      $ Session.defaultLengthSMTLibSessionLimitSource
+          { Session.lengthSMTLibSessionLimitSourceOpenerDeadlineMilliseconds =
+              3000 }
+    config <- expectRight $ Session.sealLengthSMTLibSessionConfig
+      session process Capability.defaultLengthSMTLibCapabilityLimits
+      Protocol.defaultLengthSMTLibProtocolLimits execution
+    runReadyWorkerBounded 8000000 config $ use executable
+
 liveExecutionConfig
   :: FilePath
   -> Maybe ByteString
   -> IO Execution.LengthSMTLibExecutionConfig
 liveExecutionConfig executable expectedDigest =
+  liveExecutionConfigWith executable expectedDigest id
+
+liveExecutionConfigWith
+  :: FilePath
+  -> Maybe ByteString
+  -> (Execution.LengthSMTLibExecutionConfigSource
+      -> Execution.LengthSMTLibExecutionConfigSource)
+  -> IO Execution.LengthSMTLibExecutionConfig
+liveExecutionConfigWith executable expectedDigest changeSource =
   expectRight $ Execution.mkLengthSMTLibExecutionConfig
     Execution.defaultLengthSMTLibExecutionLimits
+    $ changeSource
     $ (Execution.defaultLengthSMTLibExecutionConfigSource executable
         $ BS.unpack <$> expectedDigest)
       { Execution.lengthSMTLibExecutionConfigSourceSolverTimeoutMilliseconds =
@@ -695,6 +744,9 @@ liveSolverResourceLimit = 4242
 
 liveHostDeadlineMilliseconds :: Int
 liveHostDeadlineMilliseconds = 400
+
+liveQueryHostDeadlineMilliseconds :: Int
+liveQueryHostDeadlineMilliseconds = 1000
 
 alterDigest :: ByteString -> ByteString
 alterDigest digest = case BS.uncons digest of
@@ -813,6 +865,10 @@ data FakeZ3Event = FakeZ3Event
   { fakeZ3EventTag :: ByteString
   , fakeZ3EventFields :: [(ByteString, ByteString)]
   }
+
+readFakeZ3Events :: FilePath -> IO [FakeZ3Event]
+readFakeZ3Events executable =
+  expectRight . parseFakeZ3Events =<< BS.readFile (fakeZ3EventPath executable)
 
 parseFakeZ3Events :: ByteString -> Either String [FakeZ3Event]
 parseFakeZ3Events bytes

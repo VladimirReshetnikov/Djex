@@ -22,6 +22,7 @@ import qualified Data.ByteString.Char8 as BSC
 import Data.Char (ord, toLower)
 import Data.List (sort)
 import Data.Word (Word8)
+import Numeric.Natural (Natural)
 import System.Directory (getCurrentDirectory, listDirectory)
 import System.Environment (getArgs, getEnvironment, getExecutablePath)
 import System.Exit (ExitCode (ExitFailure), exitSuccess, exitWith)
@@ -55,12 +56,20 @@ data Mode
   | SplitOutput
   | StubbornEOF
   | StdoutEOFHang
+  | QueryUnsat
+  | QueryUnknown
+  | QueryStalePrewrite
+  | QueryHangStatus
+  | QueryHangValue
   | UnknownMode String
   deriving (Eq)
 
-data ProbeAssertions = ProbeAssertions
+data WorkerState = WorkerState
   { sawProbeZero :: Bool
   , sawProbeOne :: Bool
+  , nextQueryOrdinal :: Natural
+  , pendingQueryCheckEcho :: Maybe Natural
+  , activeQueryOrdinal :: Maybe Natural
   }
 
 main :: IO ()
@@ -124,15 +133,15 @@ runMode trace mode = case mode of
     hangForever
   StderrByte -> do
     emitStderr trace "!"
-    protocolLoop trace mode emptyProbeAssertions BS.empty
+    protocolLoop trace mode initialWorkerState BS.empty
   StderrFlood -> do
     -- This is deliberately larger than ordinary pipe buffers, but finite.
     emitStderr trace $ BS.replicate (256 * 1024) 88
-    protocolLoop trace mode emptyProbeAssertions BS.empty
-  _ -> protocolLoop trace mode emptyProbeAssertions BS.empty
+    protocolLoop trace mode initialWorkerState BS.empty
+  _ -> protocolLoop trace mode initialWorkerState BS.empty
 
-protocolLoop :: Handle -> Mode -> ProbeAssertions -> ByteString -> IO ()
-protocolLoop trace mode assertions buffered = do
+protocolLoop :: Handle -> Mode -> WorkerState -> ByteString -> IO ()
+protocolLoop trace mode state buffered = do
   next <- nextProtocolLine buffered
   case next of
     Nothing -> do
@@ -144,10 +153,10 @@ protocolLoop trace mode assertions buffered = do
         else recordEvent trace "process-exit" [field "status" "success"]
     Just (input, remaining) -> do
       recordEvent trace "stdin" [field "bytes" input]
-      (continue, nextAssertions) <-
-        handleCommand trace mode assertions $ trimSMTLine input
+      (continue, nextState) <-
+        handleCommand trace mode state $ trimSMTLine input
       if continue
-        then protocolLoop trace mode nextAssertions remaining
+        then protocolLoop trace mode nextState remaining
         else if mode == StubbornEOF
           then do
             recordEvent trace "hang" [field "phase" "after-exit-command"]
@@ -176,62 +185,179 @@ nextProtocolLine buffered = case BS.elemIndex lineFeed buffered of
 handleCommand
   :: Handle
   -> Mode
-  -> ProbeAssertions
+  -> WorkerState
   -> ByteString
-  -> IO (Bool, ProbeAssertions)
-handleCommand trace mode assertions command
+  -> IO (Bool, WorkerState)
+handleCommand trace mode state command
   | command == "(exit)" = do
-      recordCommand trace "exit"
-      pure (False, assertions)
+    recordCommand trace "exit"
+    pure (False, state)
   | command == "(check-sat)" = do
-      recordCommand trace "check-sat"
-      emitResponse trace mode $ case mode of
-        WrongStatus -> "unknown\n"
-        _ | contradictoryProbe assertions -> "unsat\n"
-        _ -> "sat\n"
-      pure (True, assertions)
+    recordCommand trace "check-sat"
+    handleCheckSatisfiable trace mode state
   | Just argument <- echoArgument command = do
-      recordCommand trace "echo"
-      emitResponse trace mode $ case mode of
-        WrongEcho -> "\"djex-fake-wrong-echo\"\n"
-        _ -> argument <> "\n"
-      pure (True, assertions)
+    recordCommand trace "echo"
+    let response = case mode of
+          WrongEcho -> "\"djex-fake-wrong-echo\"\n"
+          _ -> argument <> "\n"
+        nextState = state {pendingQueryCheckEcho = Nothing}
+    case (mode, pendingQueryCheckEcho state) of
+      (QueryStalePrewrite, Just _) ->
+        emitStdout trace $ response <> staleQueryValueResponse
+      _ -> emitResponse trace mode response
+    pure (True, nextState)
   | "(get-value " `BS.isPrefixOf` command = do
-      recordCommand trace "get-value"
-      emitResponse trace mode $ case mode of
-        WrongValue -> "((djex_capability_input 1))\n"
-        _ -> "((djex_capability_input 0))\n"
-      pure (True, assertions)
+    recordCommand trace "get-value"
+    handleGetValue trace mode state command
   | command == "(reset)" = do
-      recordCommand trace "reset"
-      if mode == UnsolicitedResetSuccess
-        then emitResponse trace mode "success\n"
-        else pure ()
-      pure (True, emptyProbeAssertions)
+    recordCommand trace "reset"
+    if mode == UnsolicitedResetSuccess
+      then emitResponse trace mode "success\n"
+      else pure ()
+    pure (True, resetWorkerScope state)
   | command == probeZeroAssertion = do
-      recordCommand trace "probe-assert-zero"
-      pure (True, assertions {sawProbeZero = True})
+    recordCommand trace "probe-assert-zero"
+    pure (True, state {sawProbeZero = True})
   | command == probeOneAssertion = do
-      recordCommand trace "probe-assert-one"
-      pure (True, assertions {sawProbeOne = True})
+    recordCommand trace "probe-assert-one"
+    pure (True, state {sawProbeOne = True})
   | any (`BS.isPrefixOf` command) silentCommandPrefixes = do
-      recordCommand trace "silent"
-      pure (True, assertions)
+    recordCommand trace "silent"
+    pure (True, state)
   | BS.null command = do
-      recordCommand trace "blank"
-      pure (True, assertions)
+    recordCommand trace "blank"
+    pure (True, state)
   | otherwise = do
-      -- Unknown input is deliberately silent, matching print-success=false.
-      -- Its exact bytes remain available in the preceding stdin event.
-      recordCommand trace "unknown-silent"
-      pure (True, assertions)
+    -- Unknown input is deliberately silent, matching print-success=false.
+    -- Its exact bytes remain available in the preceding stdin event.
+    recordCommand trace "unknown-silent"
+    pure (True, state)
 
-emptyProbeAssertions :: ProbeAssertions
-emptyProbeAssertions = ProbeAssertions False False
+initialWorkerState :: WorkerState
+initialWorkerState = WorkerState
+  { sawProbeZero = False
+  , sawProbeOne = False
+  , nextQueryOrdinal = 0
+  , pendingQueryCheckEcho = Nothing
+  , activeQueryOrdinal = Nothing
+  }
 
-contradictoryProbe :: ProbeAssertions -> Bool
-contradictoryProbe assertions =
-  sawProbeZero assertions && sawProbeOne assertions
+resetWorkerScope :: WorkerState -> WorkerState
+resetWorkerScope state = state
+  { sawProbeZero = False
+  , sawProbeOne = False
+  , pendingQueryCheckEcho = Nothing
+  , activeQueryOrdinal = Nothing
+  }
+
+contradictoryProbe :: WorkerState -> Bool
+contradictoryProbe state = sawProbeZero state && sawProbeOne state
+
+handleCheckSatisfiable
+  :: Handle
+  -> Mode
+  -> WorkerState
+  -> IO (Bool, WorkerState)
+handleCheckSatisfiable trace mode state
+  | mode == WrongStatus = do
+      emitResponse trace mode "unknown\n"
+      pure (True, state)
+  | contradictoryProbe state = do
+      emitResponse trace mode "unsat\n"
+      pure (True, state)
+  | sawProbeZero state = do
+      emitResponse trace mode "sat\n"
+      pure (True, state)
+  | otherwise = do
+      let ordinal = nextQueryOrdinal state
+          status = queryStatus mode
+          nextState = state
+            { nextQueryOrdinal = ordinal + 1
+            , pendingQueryCheckEcho = Just ordinal
+            , activeQueryOrdinal = Just ordinal
+            }
+      recordEvent trace "query-check"
+        [ field "ordinal" $ decimal ordinal
+        , field "status" status
+        ]
+      if mode == QueryHangStatus
+        then do
+          recordQueryHang trace ordinal "status"
+          hangForever
+        else do
+          emitResponse trace mode $ status <> "\n"
+          pure (True, nextState)
+
+queryStatus :: Mode -> ByteString
+queryStatus mode = case mode of
+  QueryUnsat -> "unsat"
+  QueryUnknown -> "unknown"
+  QueryHangStatus -> "hang"
+  _ -> "sat"
+
+handleGetValue
+  :: Handle
+  -> Mode
+  -> WorkerState
+  -> ByteString
+  -> IO (Bool, WorkerState)
+handleGetValue trace mode state command
+  | mode == WrongValue = do
+      emitResponse trace mode "((djex_capability_input 1))\n"
+      pure (True, state)
+  | command == capabilityValueRequest = do
+      emitResponse trace mode "((djex_capability_input 0))\n"
+      pure (True, state)
+  | Just symbols <- queryValueRequestSymbols command
+  , Just ordinal <- activeQueryOrdinal state = do
+      recordEvent trace "query-get-value" $
+        [ field "ordinal" $ decimal ordinal
+        , field "symbol-count" $ decimal $ length symbols
+        ] ++ map (field "symbol") symbols
+      if mode == QueryHangValue
+        then do
+          recordQueryHang trace ordinal "value"
+          hangForever
+        else do
+          emitResponse trace mode $ renderQueryValues symbols
+          pure (True, state)
+  | otherwise = do
+      -- Preserve the old bounded fallback for an unrecognized request.  A
+      -- real query will reject this capability-only binding structurally.
+      emitResponse trace mode "((djex_capability_input 0))\n"
+      pure (True, state)
+
+recordQueryHang :: Handle -> Natural -> ByteString -> IO ()
+recordQueryHang trace ordinal phase = recordEvent trace "query-hang"
+  [ field "ordinal" $ decimal ordinal
+  , field "phase" phase
+  ]
+
+capabilityValueRequest :: ByteString
+capabilityValueRequest = "(get-value (djex_capability_input))"
+
+queryValueRequestSymbols :: ByteString -> Maybe [ByteString]
+queryValueRequestSymbols command = do
+  afterPrefix <- BS.stripPrefix "(get-value (" command
+  symbolsBytes <- BS.stripSuffix "))" afterPrefix
+  let symbols = BSC.words symbolsBytes
+      admitted =
+        [take count queryInputSymbols | count <- [1 .. length queryInputSymbols]]
+  if symbols `elem` admitted then Just symbols else Nothing
+
+queryInputSymbols :: [ByteString]
+queryInputSymbols =
+  [ascii $ "djex_length_input_" ++ show index | index <- [0 :: Int .. 7]]
+
+renderQueryValues :: [ByteString] -> ByteString
+renderQueryValues symbols = "(" <> BSC.intercalate " " bindings <> ")\n"
+ where
+  bindings = zipWith renderBinding symbols [3, 5 ..]
+  renderBinding symbol value =
+    "(" <> symbol <> " " <> decimal (value :: Integer) <> ")"
+
+staleQueryValueResponse :: ByteString
+staleQueryValueResponse = "((djex_length_input_0 3))\n"
 
 probeZeroAssertion :: ByteString
 probeZeroAssertion = "(assert (= djex_capability_input 0))"
@@ -335,6 +461,11 @@ modeFromName originalName = case portableStem originalName of
   "djex-fake-z3-split-output" -> SplitOutput
   "djex-fake-z3-stubborn-eof" -> StubbornEOF
   "djex-fake-z3-stdout-eof-hang" -> StdoutEOFHang
+  "djex-fake-z3-query-unsat" -> QueryUnsat
+  "djex-fake-z3-query-unknown" -> QueryUnknown
+  "djex-fake-z3-query-stale-prewrite" -> QueryStalePrewrite
+  "djex-fake-z3-query-hang-status" -> QueryHangStatus
+  "djex-fake-z3-query-hang-value" -> QueryHangValue
   _ -> UnknownMode originalName
 
 portableStem :: FilePath -> FilePath
@@ -358,6 +489,11 @@ modeName mode = case mode of
   SplitOutput -> "split-output"
   StubbornEOF -> "stubborn-eof"
   StdoutEOFHang -> "stdout-eof-hang"
+  QueryUnsat -> "query-unsat"
+  QueryUnknown -> "query-unknown"
+  QueryStalePrewrite -> "query-stale-prewrite"
+  QueryHangStatus -> "query-hang-status"
+  QueryHangValue -> "query-hang-value"
   UnknownMode _ -> "unknown"
 
 hangForever :: IO a

@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
@@ -13,10 +14,13 @@
 -- candidate constructors.
 --
 -- The raw graph is intentionally caller-constructible.  'sealTermGraph'
--- bounds and validates it, rejects duplicate or dangling identities and
--- cycles, checks the neutral typing relationships, and stores the one checked
--- compatibility projection.  Consumers of a sealed 'TermGraph' therefore do
--- not need their own graph walk or type recovery pass.
+-- bounds and validates it, rejects duplicate, dangling, cyclic, and repeated
+-- references, checks the neutral typing relationships, and stores the one
+-- checked compatibility projection. Repeated references are rejected because
+-- legacy tree erasure would otherwise duplicate one source occurrence
+-- identity into several surface uses. Explicit 'TypedLet' nodes represent
+-- semantic sharing. Consumers of a sealed 'TermGraph' therefore do not need
+-- their own graph walk or type recovery pass.
 module Language.Haskell.Synthesis.TypedGenerated
   ( TermNodeId
   , termNodeId
@@ -34,8 +38,10 @@ module Language.Haskell.Synthesis.TypedGenerated
   , maximumTermGraphNodes
   , maximumTermGraphEdges
   , maximumTermGraphPatternNodes
+  , maximumTermGraphTypeNodes
   , maximumTermGraphCollectionWidth
   , maximumTermGraphProjectionNodes
+  , TypeStructureLimitError (..)
   , TypeStructure (..)
   , sharedTypeStructure
   , ApplicationWitness (..)
@@ -46,6 +52,7 @@ module Language.Haskell.Synthesis.TypedGenerated
   , TermNodeForm (..)
   , TermGraphSource (..)
   , GraphCollectionSite (..)
+  , GraphTypeSite (..)
   , TermGraphError (..)
   , TypedGraphMetrics (..)
   , TermGraph
@@ -65,10 +72,12 @@ import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
+import Data.Either (isRight)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Collection (observedListLength)
+import Language.Haskell.Synthesis.Constraint (constraintArguments)
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import Language.Haskell.Synthesis.Name (Boxity (Boxed), Name)
 import qualified Language.Haskell.Synthesis.Type as SharedType
@@ -120,14 +129,16 @@ certificateIdValue (CertificateId value) = value
 -- | Finite resources used while sealing a caller-built graph.
 --
 -- The graph-node bound controls stored semantic nodes.  Pattern nodes are
--- separate because one elimination pattern may expose many typed fields.  A
--- collection-width bound prevents an infinite lambda/tuple/case child list
--- from being forced, and the projection bound prevents a small shared DAG
--- from expanding into an unbounded compatibility tree.
+-- separate because one elimination pattern may expose many typed fields. The
+-- type-node bound applies independently to every stored annotation, while the
+-- collection-width bound covers graph, pattern, and type-owned lists. The
+-- projection bound counts both term and pattern nodes in the compatibility
+-- tree.
 data TermGraphLimits = TermGraphLimits
   { maximumTermGraphNodes :: !Int
   , maximumTermGraphEdges :: !Int
   , maximumTermGraphPatternNodes :: !Int
+  , maximumTermGraphTypeNodes :: !Int
   , maximumTermGraphCollectionWidth :: !Int
   , maximumTermGraphProjectionNodes :: !Int
   }
@@ -139,6 +150,7 @@ data TermGraphLimitError
   = NegativeTermGraphNodeLimit Int
   | NegativeTermGraphEdgeLimit Int
   | NegativeTermGraphPatternLimit Int
+  | NegativeTermGraphTypeNodeLimit Int
   | NegativeTermGraphCollectionWidth Int
   | NegativeTermGraphProjectionLimit Int
   deriving (Eq, Ord, Show, Generic)
@@ -153,17 +165,20 @@ mkTermGraphLimits
   -> Int
   -> Int
   -> Int
+  -> Int
   -> Either TermGraphLimitError TermGraphLimits
-mkTermGraphLimits nodes edges patterns width projection
+mkTermGraphLimits nodes edges patterns typeNodes width projection
   | nodes < 0 = Left $ NegativeTermGraphNodeLimit nodes
   | edges < 0 = Left $ NegativeTermGraphEdgeLimit edges
   | patterns < 0 = Left $ NegativeTermGraphPatternLimit patterns
+  | typeNodes < 0 = Left $ NegativeTermGraphTypeNodeLimit typeNodes
   | width < 0 = Left $ NegativeTermGraphCollectionWidth width
   | projection < 0 = Left $ NegativeTermGraphProjectionLimit projection
   | otherwise = Right TermGraphLimits
       { maximumTermGraphNodes = nodes
       , maximumTermGraphEdges = edges
       , maximumTermGraphPatternNodes = patterns
+      , maximumTermGraphTypeNodes = typeNodes
       , maximumTermGraphCollectionWidth = width
       , maximumTermGraphProjectionNodes = projection
       }
@@ -177,6 +192,7 @@ defaultTermGraphLimits = TermGraphLimits
   { maximumTermGraphNodes = 4096
   , maximumTermGraphEdges = 16384
   , maximumTermGraphPatternNodes = 4096
+  , maximumTermGraphTypeNodes = 4096
   , maximumTermGraphCollectionWidth = 256
   , maximumTermGraphProjectionNodes = 16384
   }
@@ -187,10 +203,24 @@ defaultTermGraphLimits = TermGraphLimits
 -- substitution requires the later certificate table.  Constructor-pattern
 -- field schemas similarly remain source-certified until family descriptors
 -- are introduced.
+data TypeStructureLimitError
+  = TypeStructureNodeLimitExceeded Int
+  | TypeStructureCollectionLimitExceeded Int
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData TypeStructureLimitError
+
 data TypeStructure ty = TypeStructure
   { equivalentTypes :: ty -> ty -> Bool
+  , observeTypeWithin
+      :: Int -> Int -> ty -> Either TypeStructureLimitError ()
+    -- ^ Bound type nodes and each type-owned collection width, in that order.
+  , validTypeAnnotation :: ty -> Bool
   , functionTypeComponents :: ty -> Maybe (ty, ty)
   , tupleTypeComponents :: ty -> Maybe [ty]
+  , constructorPatternFieldTypes :: Name -> ty -> Maybe [ty]
+  , validTypeApplicationWitness
+      :: Generated.VisibleTypeArgument -> TypeApplicationWitness ty -> Bool
   }
 
 -- | Structural observations for the shared synthesis type language.
@@ -201,13 +231,65 @@ sharedTypeStructure
   => TypeStructure (SharedType.Type variable)
 sharedTypeStructure = TypeStructure
   { equivalentTypes = TypeAtom.alphaEquivalentTypes
+  , observeTypeWithin = observeSharedTypeWithin
+  , validTypeAnnotation = isRight . SharedType.validateType
   , functionTypeComponents = \ty -> case ty of
       SharedType.FunctionType domain result -> Just (domain, result)
       _ -> Nothing
   , tupleTypeComponents = \ty -> case ty of
       SharedType.TupleType Boxed fields -> Just fields
       _ -> Nothing
+  , constructorPatternFieldTypes = \_ _ -> Nothing
+  , validTypeApplicationWitness = \argument witness ->
+      TypeAtom.isLeadingForallInstantiation
+        (typeApplicationSource witness)
+        (typeApplicationSelected witness)
+        (typeApplicationResult witness)
+        && case Generated.visibleTypeArgumentClosedType argument of
+          Nothing -> True
+          Just specified -> TypeAtom.alphaEquivalentClosedTypes
+            (typeApplicationSelected witness) specified
   }
+
+observeSharedTypeWithin
+  :: Int
+  -> Int
+  -> SharedType.Type variable
+  -> Either TypeStructureLimitError ()
+observeSharedTypeWithin maximumNodes maximumWidth source =
+  () <$ inspect 0 source
+ where
+  inspect !count ty
+    | count >= maximumNodes = Left $ TypeStructureNodeLimitExceeded
+        $ saturatedSuccessor maximumNodes
+    | otherwise = case ty of
+        SharedType.TypeVariable{} -> Right next
+        SharedType.TypeConstructor{} -> Right next
+        SharedType.TypeApplication function argument ->
+          inspect next function >>= (`inspect` argument)
+        SharedType.FunctionType domain result ->
+          inspect next domain >>= (`inspect` result)
+        SharedType.TupleType _ fields -> do
+          observeCollection fields
+          foldM inspect next fields
+        SharedType.ForallType binders constraints body -> do
+          observeCollection binders
+          observeCollection constraints
+          afterConstraints <- foldM inspectConstraint next constraints
+          inspect afterConstraints body
+   where
+    next = count + 1
+
+  inspectConstraint !count constraint = do
+    let arguments = constraintArguments constraint
+    observeCollection arguments
+    foldM inspect count arguments
+
+  observeCollection values =
+    let observed = observedListLength maximumWidth values
+    in if observed <= maximumWidth
+        then Right ()
+        else Left $ TypeStructureCollectionLimitExceeded observed
 
 -- | Exact neutral domain and result used for one term application.
 data ApplicationWitness ty = ApplicationWitness
@@ -227,7 +309,11 @@ instance NFData ty => NFData (ApplicationWitness ty)
 -- mandatory for certificate-owned occurrences.
 data TypeApplicationWitness ty = TypeApplicationWitness
   { typeApplicationSource :: ty
+    -- ^ Exact quantified type before consuming one leading binder.
+  , typeApplicationSelected :: ty
+    -- ^ Exact type selected for that binder, including an impredicative type.
   , typeApplicationResult :: ty
+    -- ^ Capture-avoiding result after consuming the binder.
   , typeApplicationCertificate :: Maybe (CertificateId, Natural)
     -- ^ Certificate identity and its source-telescope slot.
   }
@@ -237,6 +323,10 @@ instance NFData ty => NFData (TypeApplicationWitness ty)
 
 -- | One typed pattern node.  Its occurrence identifies the exact source or
 -- generated binding/elimination site independently of local spelling.
+-- A 'TypedBind' or 'TypedAs' local identity is unique across the whole sealed
+-- graph, including disjoint branches. Backends must allocate a fresh identity
+-- for source-level shadowing; this makes every 'TypedLocal' annotation
+-- unambiguous without recovering a lexical binder during type checking.
 data TypedPattern ty local = TypedPattern
   { typedPatternOccurrence :: !OccurrenceId
   , typedPatternType :: ty
@@ -308,15 +398,34 @@ data GraphCollectionSite
 
 instance NFData GraphCollectionSite
 
+-- | Exact annotation site used by bounded type diagnostics.
+data GraphTypeSite
+  = GraphTermNodeType TermNodeId
+  | GraphPatternType OccurrenceId
+  | GraphApplicationDomainType TermNodeId
+  | GraphApplicationResultType TermNodeId
+  | GraphTypeApplicationSourceType TermNodeId
+  | GraphTypeApplicationSelectedType TermNodeId
+  | GraphTypeApplicationResultType TermNodeId
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData GraphTypeSite
+
 -- | Focused rejection from the sealed typed-candidate boundary.
 data TermGraphError ty local
   = TermGraphCollectionLimitExceeded
       GraphCollectionSite Int Int
   | TermGraphEdgeLimitExceeded Int Int
   | TermGraphPatternLimitExceeded Int Int
+  | TermGraphTypeNodeLimitExceeded GraphTypeSite Int Int
+  | TermGraphTypeCollectionLimitExceeded GraphTypeSite Int Int
+  | InvalidTermGraphTypeAnnotation GraphTypeSite ty
   | DuplicateTermNodeId TermNodeId
   | MissingTermGraphRoot TermNodeId
   | DanglingTermNodeReference TermNodeId TermNodeId
+  | RepeatedTermNodeReference TermNodeId TermNodeId TermNodeId
+    -- ^ Referenced node, first parent, and repeated parent. A repeated parent
+    -- may equal the first when one collection names the child twice.
   | CyclicTermNodeReference [TermNodeId]
   | UnreachableTermNode TermNodeId
   | DuplicateOccurrenceId OccurrenceId
@@ -331,6 +440,8 @@ data TermGraphError ty local
   | ApplicationResultTypeMismatch TermNodeId ty ty
   | VisibleTypeApplicationSourceMismatch TermNodeId ty ty
   | VisibleTypeApplicationResultMismatch TermNodeId ty ty
+  | InvalidVisibleTypeApplicationWitness
+      TermNodeId Generated.VisibleTypeArgument (TypeApplicationWitness ty)
   | ExpectedTupleType TermNodeId ty
   | TupleArityTypeMismatch TermNodeId Int Int
   | TupleFieldTypeMismatch TermNodeId Int ty ty
@@ -342,6 +453,9 @@ data TermGraphError ty local
   | TuplePatternArityTypeMismatch OccurrenceId Int Int
   | TuplePatternFieldTypeMismatch OccurrenceId Int ty ty
   | AsPatternTypeMismatch OccurrenceId ty ty
+  | UnknownConstructorPatternSchema OccurrenceId Name ty
+  | ConstructorPatternArityTypeMismatch OccurrenceId Int Int
+  | ConstructorPatternFieldTypeMismatch OccurrenceId Int ty ty
   | TermGraphProjectionLimitExceeded Int Int
   | ProjectedExpressionScopeError (Generated.ScopeError local)
   | ProjectedExpressionSyntaxError Generated.RenderError
@@ -453,9 +567,11 @@ sealTermGraph typeStructure limits source = do
   unless (Map.member root nodes) $ Left $ MissingTermGraphRoot root
   (patternCount, occurrences, binderTypes) <-
     validateNodeCollections limits rawNodes
+  validateGraphTypeAnnotations typeStructure limits rawNodes
   references <- traverse nodeReferences rawNodes
   edgeCount <- validateEdgeCount limits references
   validateReferences nodes references
+  validateUniqueParents references
   reachable <- validateAcyclic references root
   case [nodeId' | (nodeId', _) <- rawNodes,
       nodeId' `Set.notMember` reachable] of
@@ -576,6 +692,59 @@ validateNodeCollections limits nodes = do
             $ collectionBinderTypes state
         }
 
+validateGraphTypeAnnotations
+  :: TypeStructure ty
+  -> TermGraphLimits
+  -> [(TermNodeId, TermNode ty local)]
+  -> Either (TermGraphError ty local) ()
+validateGraphTypeAnnotations typeStructure limits = mapM_ visitNode
+ where
+  maximumNodes = maximumTermGraphTypeNodes limits
+  maximumWidth = maximumTermGraphCollectionWidth limits
+
+  inspect site ty = do
+    case observeTypeWithin typeStructure maximumNodes maximumWidth ty of
+      Left (TypeStructureNodeLimitExceeded observed) -> Left $
+        TermGraphTypeNodeLimitExceeded site maximumNodes observed
+      Left (TypeStructureCollectionLimitExceeded observed) -> Left $
+        TermGraphTypeCollectionLimitExceeded site maximumWidth observed
+      Right () -> Right ()
+    unless (validTypeAnnotation typeStructure ty) $ Left $
+      InvalidTermGraphTypeAnnotation site ty
+
+  visitNode (nodeId', TermNode ty form) = do
+    inspect (GraphTermNodeType nodeId') ty
+    case form of
+      TypedLocal{} -> Right ()
+      TypedGlobal{} -> Right ()
+      TypedLambda patterns _ -> mapM_ visitPattern patterns
+      TypedApply _ _ witness -> do
+        inspect (GraphApplicationDomainType nodeId')
+          $ applicationDomain witness
+        inspect (GraphApplicationResultType nodeId')
+          $ applicationResult witness
+      TypedVisibleTypeApplication _ _ _ witness -> do
+        inspect (GraphTypeApplicationSourceType nodeId')
+          $ typeApplicationSource witness
+        inspect (GraphTypeApplicationSelectedType nodeId')
+          $ typeApplicationSelected witness
+        inspect (GraphTypeApplicationResultType nodeId')
+          $ typeApplicationResult witness
+      TypedTuple{} -> Right ()
+      TypedHole{} -> Right ()
+      TypedLet pattern _ _ -> visitPattern pattern
+      TypedCase _ alternatives -> mapM_ (visitPattern . fst) alternatives
+
+  visitPattern pattern = do
+    inspect (GraphPatternType $ typedPatternOccurrence pattern)
+      $ typedPatternType pattern
+    case typedPatternNode pattern of
+      TypedBind{} -> Right ()
+      TypedWildcard -> Right ()
+      TypedConstructor _ fields -> mapM_ visitPattern fields
+      TypedTuplePattern fields -> mapM_ visitPattern fields
+      TypedAs _ nested -> visitPattern nested
+
 nodeReferences
   :: (TermNodeId, TermNode ty local)
   -> Either (TermGraphError ty local) (TermNodeId, [TermNodeId])
@@ -602,6 +771,22 @@ validateReferences nodes = mapM_ validateOwner
   validateOwner (owner, references) = mapM_ (validateReference owner) references
   validateReference owner reference = unless (Map.member reference nodes) $
     Left $ DanglingTermNodeReference owner reference
+
+-- A compatibility expression is a tree of occurrences. Sharing a stored node
+-- would duplicate its complete occurrence-bearing subtree during erasure, so
+-- the raw table uses graph identities for validation but seals only trees.
+-- Explicit let/local nodes retain semantic sharing without identity collapse.
+validateUniqueParents
+  :: [(TermNodeId, [TermNodeId])]
+  -> Either (TermGraphError ty local) ()
+validateUniqueParents references = () <$ foldM visitOwner Map.empty references
+ where
+  visitOwner parents (owner, children) = foldM (visitChild owner) parents children
+
+  visitChild owner parents child = case Map.lookup child parents of
+    Nothing -> Right $ Map.insert child owner parents
+    Just firstOwner -> Left $
+      RepeatedTermNodeReference child firstOwner owner
 
 validateEdgeCount
   :: TermGraphLimits
@@ -679,7 +864,7 @@ validateNodeTypes typeStructure nodes binderTypes = mapM_ validateNode
           result (applicationResult witness)
       unless (termNodeType node `equivalent` result) $ Left $
         ApplicationResultTypeMismatch nodeId' result (termNodeType node)
-    TypedVisibleTypeApplication _ function _ witness -> do
+    TypedVisibleTypeApplication _ function argument witness -> do
       functionType <- lookupNodeType nodeId' function
       unless (functionType `equivalent` typeApplicationSource witness) $ Left $
         VisibleTypeApplicationSourceMismatch nodeId'
@@ -688,6 +873,8 @@ validateNodeTypes typeStructure nodes binderTypes = mapM_ validateNode
           `equivalent` typeApplicationResult witness) $ Left $
         VisibleTypeApplicationResultMismatch nodeId'
           (typeApplicationResult witness) (termNodeType node)
+      unless (validTypeApplicationWitness typeStructure argument witness) $
+        Left $ InvalidVisibleTypeApplicationWitness nodeId' argument witness
     TypedTuple elements -> validateTuple nodeId' (termNodeType node) elements
     TypedHole{} -> Right ()
     TypedLet pattern binding body -> do
@@ -723,8 +910,10 @@ validateNodeTypes typeStructure nodes binderTypes = mapM_ validateNode
     expected <- case tupleTypeComponents typeStructure tupleType of
       Nothing -> Left $ ExpectedTupleType nodeId' tupleType
       Just fields -> Right fields
-    unless (length expected == length elements) $ Left $
-      TupleArityTypeMismatch nodeId' (length expected) (length elements)
+    let actualCount = length elements
+        expectedCount = observedListLength actualCount expected
+    unless (expectedCount == actualCount) $ Left $
+      TupleArityTypeMismatch nodeId' expectedCount actualCount
     mapM_ (validateTupleField nodeId') $ zip3 [0 ..] expected elements
 
   validateTupleField nodeId' (index, expected, element) = do
@@ -747,17 +936,33 @@ validateNodeTypes typeStructure nodes binderTypes = mapM_ validateNode
   validatePattern pattern = case typedPatternNode pattern of
     TypedBind{} -> Right ()
     TypedWildcard -> Right ()
-    TypedConstructor _ fields -> mapM_ validatePattern fields
+    TypedConstructor name fields -> do
+      expected <- case constructorPatternFieldTypes typeStructure name
+          $ typedPatternType pattern of
+        Nothing -> Left $ UnknownConstructorPatternSchema
+          (typedPatternOccurrence pattern) name (typedPatternType pattern)
+        Just fieldTypes -> Right fieldTypes
+      let actualCount = length fields
+          expectedCount = observedListLength actualCount expected
+      unless (expectedCount == actualCount) $ Left $
+        ConstructorPatternArityTypeMismatch
+          (typedPatternOccurrence pattern) expectedCount actualCount
+      mapM_ (validateConstructorPatternField
+          $ typedPatternOccurrence pattern) $
+        zip3 [0 ..] expected fields
+      mapM_ validatePattern fields
     TypedTuplePattern fields -> do
       expected <- case tupleTypeComponents typeStructure
           $ typedPatternType pattern of
         Nothing -> Left $ ExpectedTuplePatternType
           (typedPatternOccurrence pattern) (typedPatternType pattern)
         Just fieldTypes -> Right fieldTypes
-      unless (length expected == length fields) $ Left $
+      let actualCount = length fields
+          expectedCount = observedListLength actualCount expected
+      unless (expectedCount == actualCount) $ Left $
         TuplePatternArityTypeMismatch
           (typedPatternOccurrence pattern)
-          (length expected) (length fields)
+          expectedCount actualCount
       mapM_ (validatePatternField $ typedPatternOccurrence pattern) $
         zip3 [0 ..] expected fields
       mapM_ validatePattern fields
@@ -774,6 +979,11 @@ validateNodeTypes typeStructure nodes binderTypes = mapM_ validateNode
       TuplePatternFieldTypeMismatch occurrence index
         expected (typedPatternType field)
 
+  validateConstructorPatternField occurrence (index, expected, field) =
+    unless (typedPatternType field `equivalent` expected) $ Left $
+      ConstructorPatternFieldTypeMismatch occurrence index
+        expected (typedPatternType field)
+
 projectGraph
   :: TermGraphLimits
   -> Map TermNodeId (TermNode ty local)
@@ -786,22 +996,27 @@ projectGraph limits nodes root = do
     (maximumTermGraphProjectionNodes limits) root
   pure (expression, maximumTermGraphProjectionNodes limits - remaining)
  where
-  projectNode remaining nodeId'
+  consumeProjectionNode remaining
     | remaining <= 0 = Left $ TermGraphProjectionLimitExceeded
         (maximumTermGraphProjectionNodes limits)
         (saturatedSuccessor $ maximumTermGraphProjectionNodes limits)
-    | otherwise = case Map.lookup nodeId' nodes of
-        Nothing -> Left $ DanglingTermNodeReference nodeId' nodeId'
-        Just (TermNode _ form) -> projectForm (remaining - 1) form
+    | otherwise = Right $ remaining - 1
+
+  projectNode remaining nodeId' = do
+    remaining' <- consumeProjectionNode remaining
+    case Map.lookup nodeId' nodes of
+      Nothing -> Left $ DanglingTermNodeReference nodeId' nodeId'
+      Just (TermNode _ form) -> projectForm remaining' form
 
   projectForm remaining form = case form of
     TypedLocal _ local -> Right (Generated.Local local, remaining)
     TypedGlobal _ name -> Right (Generated.Global name, remaining)
     TypedLambda patterns body -> do
-      (bodyExpression, remaining') <- projectNode remaining body
+      (projectedPatterns, remaining') <- projectPatterns remaining patterns
+      (bodyExpression, remaining'') <- projectNode remaining' body
       pure
-        ( Generated.Lambda (map erasePattern patterns) bodyExpression
-        , remaining'
+        ( Generated.Lambda projectedPatterns bodyExpression
+        , remaining''
         )
     TypedApply function argument _ -> do
       (functionExpression, remaining') <- projectNode remaining function
@@ -819,12 +1034,13 @@ projectGraph limits nodes root = do
       pure (Generated.Tuple (reverse expressions), remaining')
     TypedHole _ local -> Right (Generated.Hole local, remaining)
     TypedLet pattern binding body -> do
-      (bindingExpression, remaining') <- projectNode remaining binding
-      (bodyExpression, remaining'') <- projectNode remaining' body
+      (projectedPattern, remaining') <- projectPattern remaining pattern
+      (bindingExpression, remaining'') <- projectNode remaining' binding
+      (bodyExpression, remaining''') <- projectNode remaining'' body
       pure
-        ( Generated.Let (erasePattern pattern)
+        ( Generated.Let projectedPattern
             bindingExpression bodyExpression
-        , remaining''
+        , remaining'''
         )
     TypedCase scrutinee alternatives -> do
       (scrutineeExpression, remaining') <- projectNode remaining scrutinee
@@ -841,23 +1057,39 @@ projectGraph limits nodes root = do
       (expression, available') <- projectNode available nodeId'
       pure (expression : reversed, available')
 
+  projectPatterns remaining patterns = do
+    (reversed, remaining') <- foldM projectPatternOne
+      ([], remaining) patterns
+    pure (reverse reversed, remaining')
+   where
+    projectPatternOne (reversed, available) pattern = do
+      (projected, available') <- projectPattern available pattern
+      pure (projected : reversed, available')
+
+  projectPattern remaining pattern = do
+    remaining' <- consumeProjectionNode remaining
+    case typedPatternNode pattern of
+      TypedBind local -> Right (Generated.Bind local, remaining')
+      TypedWildcard -> Right (Generated.Wildcard, remaining')
+      TypedConstructor name fields -> do
+        (projected, remaining'') <- projectPatterns remaining' fields
+        pure (Generated.Constructor name projected, remaining'')
+      TypedTuplePattern fields -> do
+        (projected, remaining'') <- projectPatterns remaining' fields
+        pure (Generated.TuplePattern projected, remaining'')
+      TypedAs local nested -> do
+        (projected, remaining'') <- projectPattern remaining' nested
+        pure (Generated.As local projected, remaining'')
+
   projectAlternative (reversed, remaining) (pattern, body) = do
-    (bodyExpression, remaining') <- projectNode remaining body
-    pure ((erasePattern pattern, bodyExpression) : reversed, remaining')
+    (projectedPattern, remaining') <- projectPattern remaining pattern
+    (bodyExpression, remaining'') <- projectNode remaining' body
+    pure ((projectedPattern, bodyExpression) : reversed, remaining'')
 
 saturatedSuccessor :: Int -> Int
 saturatedSuccessor value
   | value == maxBound = maxBound
   | otherwise = value + 1
-
-erasePattern :: TypedPattern ty local -> Generated.Pattern local
-erasePattern pattern = case typedPatternNode pattern of
-  TypedBind local -> Generated.Bind local
-  TypedWildcard -> Generated.Wildcard
-  TypedConstructor name fields ->
-    Generated.Constructor name $ map erasePattern fields
-  TypedTuplePattern fields -> Generated.TuplePattern $ map erasePattern fields
-  TypedAs local nested -> Generated.As local $ erasePattern nested
 
 graphMetrics
   :: [(TermNodeId, TermNode ty local)]

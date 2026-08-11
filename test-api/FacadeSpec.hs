@@ -214,6 +214,24 @@ facadeTests = testGroup "public Djex facade"
           (VisibleTypeApplication function inferredVisibleTypeArgument)
           (Hole "value")
       rewriteExpressionBottomUpM preserve source @?= Right source
+  , testCase "exports the checked typed-candidate boundary" $ do
+      globalName <- expectRight $ parseName "Fixture.value"
+      let typeA = TypeVariable "a"
+          source :: TermGraphSource (Type String) Int
+          source = TermGraphSource (termNodeId 0)
+            [ ( termNodeId 0
+              , TermNode typeA $
+                  TypedGlobal (occurrenceId 0) globalName
+              )
+            ]
+      graph <- expectRight $ sealTermGraph
+        (sharedTypeStructure :: TypeStructure (Type String))
+        defaultTermGraphLimits source
+      eraseTermGraph graph @?= Global globalName
+      typedGraphSourceOccurrences (termGraphMetrics graph) @?= 1
+
+      let quantified = ForallType ["bound"] [] $ TypeVariable "bound"
+      isLeadingForallInstantiation quantified typeA typeA @?= True
   , testCase "rejects residual constraints at the Djinn render boundary" $ do
       target <- expectRight $ mkIdentifier "identity"
       checkedTarget <- expectRight $ mkDefinitionName target

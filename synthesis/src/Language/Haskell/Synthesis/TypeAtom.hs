@@ -23,6 +23,8 @@ module Language.Haskell.Synthesis.TypeAtom
   , mapTypeAtomVariables
   , substituteTypeAtomVariables
   , alphaEquivalentTypes
+  , alphaEquivalentClosedTypes
+  , isLeadingForallInstantiation
   ) where
 
 import Control.DeepSeq (NFData)
@@ -33,9 +35,10 @@ import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC.Generics (Generic)
+import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Internal.Alpha
-  ( AlphaVariable
+  ( AlphaVariable (..)
   , BinderSlotPolicy (PositionalBinderSlots)
   , alphaNormalizeTypeWith
   )
@@ -200,6 +203,126 @@ alphaEquivalentTypes
   -> Bool
 alphaEquivalentTypes left right =
   alphaTypeKey left == alphaTypeKey right
+
+-- | Compare lexically closed shared types across variable representations.
+--
+-- Both inputs are canonicalized and structurally validated before comparison.
+-- Explicit forall binders are compared by lexical scope and position rather
+-- than by their backend-owned identities.  If either input contains a
+-- genuinely free variable, the comparison returns 'False'; this makes the
+-- helper a safe bridge to closed generated visible type arguments without
+-- conflating unrelated free-variable namespaces.
+alphaEquivalentClosedTypes
+  :: (Ord leftVariable, Ord rightVariable)
+  => Type leftVariable
+  -> Type rightVariable
+  -> Bool
+alphaEquivalentClosedTypes left right =
+  case (normalizeType left, normalizeType right) of
+    (Right normalizedLeft, Right normalizedRight) ->
+      case (closeAlphaType normalizedLeft, closeAlphaType normalizedRight) of
+        (Just closedLeft, Just closedRight) -> closedLeft == closedRight
+        _ -> False
+    _ -> False
+
+-- | Check one exact, capture-avoiding instantiation of the first leading
+-- forall binder.
+--
+-- The source, selected type, and claimed result are canonicalized and
+-- structurally validated.  A leading @forall a b. body@ is instantiated one
+-- slot at a time: selecting @chosen@ for @a@ leaves @forall b.@ in the result.
+-- Constraints in the same forall scope are instantiated together with the
+-- body.  Comparison ignores lexical binder spelling, but preserves all free
+-- variable identities.
+--
+-- Bound variables from the source, selected type, and result are first moved
+-- into disjoint internal namespaces.  Consequently a free variable in the
+-- selected type cannot be captured by a same-spelled remaining source binder,
+-- and no caller-provided fresh-name allocator is needed.
+isLeadingForallInstantiation
+  :: Ord variable
+  => Type variable
+  -> Type variable
+  -> Type variable
+  -> Bool
+isLeadingForallInstantiation source selected result =
+  case (normalizeType source, normalizeType selected, normalizeType result) of
+    (Right normalizedSource, Right normalizedSelected, Right normalizedResult) ->
+      case prepareInstantiationType SourceInstantiationBound normalizedSource of
+        ForallType (selectedBinder : remainingBinders) constraints body ->
+          let selectedType = prepareInstantiationType
+                SelectedInstantiationBound normalizedSelected
+              instantiate = replaceInstantiationVariable
+                selectedBinder selectedType
+              instantiatedConstraints = map (fmap instantiate) constraints
+              instantiatedBody = instantiate body
+              expected = case (remainingBinders, instantiatedConstraints) of
+                ([], []) -> instantiatedBody
+                _ -> ForallType remainingBinders
+                  instantiatedConstraints instantiatedBody
+              claimed = prepareInstantiationType
+                ResultInstantiationBound normalizedResult
+          in alphaEquivalentTypes expected claimed
+        _ -> False
+    _ -> False
+
+data InstantiationVariable variable
+  = SourceInstantiationBound !Natural !Natural
+  | SelectedInstantiationBound !Natural !Natural
+  | ResultInstantiationBound !Natural !Natural
+  | InstantiationFree variable
+  deriving (Eq, Ord)
+
+prepareInstantiationType
+  :: Ord variable
+  => (Natural -> Natural -> InstantiationVariable variable)
+  -> Type variable
+  -> Type (InstantiationVariable variable)
+prepareInstantiationType boundVariable = fmap convert
+  . alphaNormalizeTypeWith PositionalBinderSlots
+  . atomCanonicalForm
+ where
+  convert variable = case variable of
+    AlphaBoundVariable scope slot -> boundVariable scope slot
+    AlphaFreeVariable free -> InstantiationFree free
+
+replaceInstantiationVariable
+  :: Eq variable
+  => variable
+  -> Type variable
+  -> Type variable
+  -> Type variable
+replaceInstantiationVariable selected replacement source = case source of
+  TypeVariable variable
+    | variable == selected -> replacement
+    | otherwise -> source
+  TypeConstructor{} -> source
+  TypeApplication function argument -> TypeApplication
+    (replaceInstantiationVariable selected replacement function)
+    (replaceInstantiationVariable selected replacement argument)
+  FunctionType parameter result -> FunctionType
+    (replaceInstantiationVariable selected replacement parameter)
+    (replaceInstantiationVariable selected replacement result)
+  TupleType boxity elements -> TupleType boxity
+    $ map (replaceInstantiationVariable selected replacement) elements
+  ForallType variables constraints body
+    | selected `elem` variables -> source
+    | otherwise -> ForallType variables
+        (map (fmap $ replaceInstantiationVariable selected replacement)
+          constraints)
+        (replaceInstantiationVariable selected replacement body)
+
+closeAlphaType
+  :: Ord variable
+  => Type variable
+  -> Maybe (Type (Natural, Natural))
+closeAlphaType = traverse closeVariable
+  . alphaNormalizeTypeWith PositionalBinderSlots
+  . atomCanonicalForm
+ where
+  closeVariable variable = case variable of
+    AlphaBoundVariable scope slot -> Just (scope, slot)
+    AlphaFreeVariable{} -> Nothing
 
 sealTypeAtom :: Ord variable => Type variable -> TypeAtom variable
 sealTypeAtom source = TypeAtom source

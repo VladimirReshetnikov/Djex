@@ -167,7 +167,7 @@ typedGeneratedTests = testGroup "typed generated candidate graphs"
         , Typed.typedGraphPatternNodes = 1
         , Typed.typedGraphSourceOccurrences = 2
         , Typed.typedGraphLocalUses = 1
-        , Typed.typedGraphProjectedNodes = 2
+        , Typed.typedGraphProjectedNodes = 3
         }
       let target = right $ mkDefinitionName $ right $ mkIdentifier "identity"
       Typed.eraseTermGraphToFunctionClause target graph @?=
@@ -235,7 +235,7 @@ typedGeneratedTests = testGroup "typed generated candidate graphs"
       let provider = right $ parseName "Fixture.provider"
           sourceType = SharedType.ForallType ["a"] [] typeA
           witness = Typed.TypeApplicationWitness
-            sourceType typeA (Just (Typed.certificateId 7, 0))
+            sourceType typeA typeA (Just (Typed.certificateId 7, 0))
           source = Typed.TermGraphSource (nodeId 1)
             [ (nodeId 0, term sourceType $
                 Typed.TypedGlobal (occurrence 1) provider)
@@ -252,6 +252,22 @@ typedGeneratedTests = testGroup "typed generated candidate graphs"
       Typed.typedGraphVisibleTypeApplications
         (Typed.termGraphMetrics graph) @?= 1
       Typed.typedGraphSourceOccurrences (Typed.termGraphMetrics graph) @?= 2
+  , testCase "reject a self-consistent but false visible specialization" $ do
+      let provider = right $ parseName "Fixture.provider"
+          witness = Typed.TypeApplicationWitness typeA typeA typeB Nothing
+          source = Typed.TermGraphSource (nodeId 1)
+            [ (nodeId 0, term typeA $
+                Typed.TypedGlobal (occurrence 0) provider)
+            , (nodeId 1, term typeB $
+                Typed.TypedVisibleTypeApplication
+                  (occurrence 1)
+                  (nodeId 0)
+                  inferredVisibleTypeArgument
+                  witness)
+            ]
+      seal source @?= Left
+        (Typed.InvalidVisibleTypeApplicationWitness
+          (nodeId 1) inferredVisibleTypeArgument witness)
   , testCase "type-check tuple fields, cases, and typed pattern fields" $ do
       let pairType = boxedTuple [typeA, typeB]
           pairBinder = typedBind 0 0 pairType
@@ -331,6 +347,24 @@ typedGeneratedTests = testGroup "typed generated candidate graphs"
                 Typed.TypedTuple [nodeId 0, nodeId 1])
             ]
       seal source @?= Left (Typed.DuplicateOccurrenceId $ occurrence 0)
+  , testCase "require fresh local identities across disjoint branches" $ do
+      let scrutinee = right $ parseName "Fixture.scrutinee"
+          first = right $ parseName "Fixture.first"
+          second = right $ parseName "Fixture.second"
+          source = Typed.TermGraphSource (nodeId 3)
+            [ (nodeId 0, term typeA $
+                Typed.TypedGlobal (occurrence 0) scrutinee)
+            , (nodeId 1, term typeB $
+                Typed.TypedGlobal (occurrence 3) first)
+            , (nodeId 2, term typeB $
+                Typed.TypedGlobal (occurrence 4) second)
+            , (nodeId 3, term typeB $
+                Typed.TypedCase (nodeId 0)
+                  [ (typedBind 1 0 typeA, nodeId 1)
+                  , (typedBind 2 0 typeA, nodeId 2)
+                  ])
+            ]
+      seal source @?= Left (Typed.DuplicateTypedLocalBinder 0)
   , testCase "bound cyclic node tables and recursive pattern values" $ do
       let global = right $ parseName "Fixture.value"
           leaf :: (Typed.TermNodeId,
@@ -340,7 +374,7 @@ typedGeneratedTests = testGroup "typed generated candidate graphs"
           cyclicNodes ::
             [(Typed.TermNodeId, Typed.TermNode (SharedType.Type String) Int)]
           cyclicNodes = let nodes = leaf : nodes in nodes
-          nodeLimits = right $ Typed.mkTermGraphLimits 1 1 1 1 1
+          nodeLimits = right $ Typed.mkTermGraphLimits 1 1 1 4 1 1
           recursivePattern ::
             Typed.TypedPattern (SharedType.Type String) Int
           recursivePattern =
@@ -356,7 +390,7 @@ typedGeneratedTests = testGroup "typed generated candidate graphs"
             , (nodeId 1, term (arrow (boxedTuple []) typeA) $
                 Typed.TypedLambda [recursivePattern] (nodeId 0))
             ]
-          patternLimits = right $ Typed.mkTermGraphLimits 2 1 1 1 2
+          patternLimits = right $ Typed.mkTermGraphLimits 2 1 1 8 1 2
       Typed.sealTermGraph Typed.sharedTypeStructure nodeLimits
         (Typed.TermGraphSource (nodeId 0) cyclicNodes) @?=
           Left (Typed.TermGraphCollectionLimitExceeded
@@ -366,7 +400,7 @@ typedGeneratedTests = testGroup "typed generated candidate graphs"
         Left (Typed.TermGraphPatternLimitExceeded 1 2) -> pure ()
         other -> assertFailure $
           "expected a bounded recursive-pattern rejection, got " ++ show other
-  , testCase "bound compatibility expansion of a shared DAG" $ do
+  , testCase "reject shared nodes that would conflate surface occurrences" $ do
       let global = right $ parseName "Fixture.value"
           pairA = boxedTuple [typeA, typeA]
           pairPair = boxedTuple [pairA, pairA]
@@ -379,19 +413,82 @@ typedGeneratedTests = testGroup "typed generated candidate graphs"
             , (nodeId 2, term pairPair $
                 Typed.TypedTuple [nodeId 1, nodeId 1])
             ]
-          limits = right $ Typed.mkTermGraphLimits 3 4 0 2 5
+          limits = right $ Typed.mkTermGraphLimits 3 4 0 16 2 8
       Typed.sealTermGraph Typed.sharedTypeStructure limits source @?=
-        Left (Typed.TermGraphProjectionLimitExceeded 5 6)
-  , testCase "delegate malformed legacy surface shapes to one projection gate" $ do
-      let source = Typed.TermGraphSource (nodeId 1)
+        Left (Typed.RepeatedTermNodeReference
+          (nodeId 0) (nodeId 1) (nodeId 1))
+  , testCase "bound cyclic annotations and type-owned collections" $ do
+      let global = right $ parseName "Fixture.value"
+          cyclicType =
+            let recursive = SharedType.FunctionType typeA recursive
+            in recursive
+          cyclicSource = Typed.TermGraphSource (nodeId 0)
+            [(nodeId 0, term cyclicType $
+              Typed.TypedGlobal (occurrence 0) global)]
+          cyclicLimits = right $ Typed.mkTermGraphLimits 1 0 0 2 1 1
+          cyclicBinders = let binders = "a" : binders in binders
+          wideType = SharedType.ForallType cyclicBinders [] typeA
+          wideSource = Typed.TermGraphSource (nodeId 0)
+            [(nodeId 0, term wideType $
+              Typed.TypedGlobal (occurrence 0) global)]
+          widthLimits = right $ Typed.mkTermGraphLimits 1 0 0 4 1 1
+      Typed.sealTermGraph Typed.sharedTypeStructure
+        cyclicLimits cyclicSource @?=
+          Left (Typed.TermGraphTypeNodeLimitExceeded
+            (Typed.GraphTermNodeType $ nodeId 0) 2 3)
+      Typed.sealTermGraph Typed.sharedTypeStructure
+        widthLimits wideSource @?=
+          Left (Typed.TermGraphTypeCollectionLimitExceeded
+            (Typed.GraphTermNodeType $ nodeId 0) 1 2)
+  , testCase "count expanded pattern nodes against the projection bound" $ do
+      let global = right $ parseName "Fixture.value"
+          pairType = boxedTuple [typeA, typeB]
+          pattern = Typed.TypedPattern
+            (occurrence 0) pairType
+            (Typed.TypedTuplePattern
+              [ Typed.TypedPattern
+                  (occurrence 1) typeA Typed.TypedWildcard
+              , Typed.TypedPattern
+                  (occurrence 2) typeB Typed.TypedWildcard
+              ])
+          source = Typed.TermGraphSource (nodeId 1)
             [ (nodeId 0, term typeA $
-                Typed.TypedHole (occurrence 0) 0)
-            , (nodeId 1, term (boxedTuple [typeA]) $
-                Typed.TypedTuple [nodeId 0])
+                Typed.TypedGlobal (occurrence 3) global)
+            , (nodeId 1, term (arrow pairType typeA) $
+                Typed.TypedLambda [pattern] (nodeId 0))
+            ]
+          limits = right $ Typed.mkTermGraphLimits 2 1 3 16 2 2
+      Typed.sealTermGraph Typed.sharedTypeStructure limits source @?=
+        Left (Typed.TermGraphProjectionLimitExceeded 2 3)
+  , testCase "fail closed without a constructor family schema" $ do
+      let scrutinee = right $ parseName "Fixture.scrutinee"
+          result = right $ parseName "Fixture.result"
+          constructor = right $ parseName "Fixture.Constructor"
+          pattern = Typed.TypedPattern
+            (occurrence 1) typeA
+            (Typed.TypedConstructor constructor [])
+          source = Typed.TermGraphSource (nodeId 2)
+            [ (nodeId 0, term typeA $
+                Typed.TypedGlobal (occurrence 0) scrutinee)
+            , (nodeId 1, term typeB $
+                Typed.TypedGlobal (occurrence 2) result)
+            , (nodeId 2, term typeB $
+                Typed.TypedCase (nodeId 0) [(pattern, nodeId 1)])
+            ]
+      seal source @?= Left
+        (Typed.UnknownConstructorPatternSchema
+          (occurrence 1) constructor typeA)
+  , testCase "delegate malformed legacy surface shapes to one projection gate" $ do
+      let global = right $ parseName "Fixture.value"
+          source = Typed.TermGraphSource (nodeId 1)
+            [ (nodeId 0, term typeA $
+                Typed.TypedGlobal (occurrence 0) global)
+            , (nodeId 1, term typeA $
+                Typed.TypedLambda [] (nodeId 0))
             ]
       seal source @?= Left
         (Typed.ProjectedExpressionSyntaxError $
-          InvalidTupleExpressionArity 1)
+          EmptyLambda)
  ]
  where
   typeA :: SharedType.Type String
@@ -2579,6 +2676,95 @@ typeTests = testGroup "source types"
       typeAtomType leftAtom @?= leftType
       alphaEquivalentTypes leftType renamedType @?= True
       alphaEquivalentTypes leftType differentFreeType @?= False
+  , testCase "compare closed types across variable representations" $ do
+      let variable = SharedType.TypeVariable
+          left :: SharedType.Type String
+          left = SharedType.ForallType ["outer"] []
+            $ SharedType.FunctionType (variable "outer")
+            $ SharedType.ForallType ["inner"] []
+            $ SharedType.FunctionType (variable "inner") (variable "outer")
+          rightType :: SharedType.Type Int
+          rightType = SharedType.ForallType [11] []
+            $ SharedType.FunctionType (variable 11)
+            $ SharedType.ForallType [29] []
+            $ SharedType.FunctionType (variable 29) (variable 11)
+      alphaEquivalentClosedTypes left rightType @?= True
+      case visibleTypeArgumentClosedType
+          $ right $ specifiedVisibleTypeArgument left of
+        Nothing -> assertFailure "a specified visible type became inferred"
+        Just generatedClosed ->
+          alphaEquivalentClosedTypes rightType generatedClosed @?= True
+  , testCase "reject free variables in cross-representation comparison" $ do
+      let freeLeft :: SharedType.Type String
+          freeLeft = SharedType.TypeVariable "free"
+          freeRight :: SharedType.Type Int
+          freeRight = SharedType.TypeVariable 0
+          closedLeft :: SharedType.Type String
+          closedLeft = SharedType.ForallType ["bound"] []
+            $ SharedType.TypeVariable "bound"
+          closedRight :: SharedType.Type Int
+          closedRight = SharedType.ForallType [0] []
+            $ SharedType.TypeVariable 0
+      alphaEquivalentClosedTypes freeLeft freeRight @?= False
+      alphaEquivalentClosedTypes freeLeft closedRight @?= False
+      alphaEquivalentClosedTypes closedLeft freeRight @?= False
+  , testCase "check one leading forall slot modulo alpha-renaming" $ do
+      let variable = SharedType.TypeVariable
+          className = right $ mkIdentifier "C"
+          intName = right $ mkIdentifier "Int"
+          intType = SharedType.TypeConstructor intName
+          source = SharedType.ForallType ["selected", "remaining"]
+            [Constraint className [variable "selected"]]
+            $ SharedType.FunctionType
+                (variable "selected") (variable "remaining")
+          result = SharedType.ForallType ["renamed"]
+            [Constraint className [intType]]
+            $ SharedType.FunctionType intType (variable "renamed")
+      isLeadingForallInstantiation source intType result @?= True
+  , testCase "instantiate a leading forall with an impredicative type" $ do
+      let variable = SharedType.TypeVariable
+          holderName = right $ mkIdentifier "Holder"
+          holder argument = SharedType.TypeApplication
+            (SharedType.TypeConstructor holderName) argument
+          source = SharedType.ForallType ["item"] []
+            $ holder $ variable "item"
+          selected = SharedType.ForallType ["element"] []
+            $ SharedType.FunctionType
+                (variable "element") (variable "element")
+          renamedSelected = SharedType.ForallType ["value"] []
+            $ SharedType.FunctionType
+                (variable "value") (variable "value")
+      isLeadingForallInstantiation source selected
+          (holder renamedSelected) @?= True
+  , testCase "avoid capture while instantiating a leading forall" $ do
+      let variable = SharedType.TypeVariable
+          source = SharedType.ForallType ["selected", "remaining"] []
+            $ SharedType.FunctionType
+                (variable "selected") (variable "remaining")
+          selected = variable "remaining"
+          captureAvoidingResult = SharedType.ForallType ["fresh"] []
+            $ SharedType.FunctionType
+                (variable "remaining") (variable "fresh")
+          capturedResult = SharedType.ForallType ["remaining"] []
+            $ SharedType.FunctionType
+                (variable "remaining") (variable "remaining")
+      isLeadingForallInstantiation source selected
+          captureAvoidingResult @?= True
+      isLeadingForallInstantiation source selected capturedResult @?= False
+  , testCase "reject a leading instantiation without a forall" $ do
+      let variable = SharedType.TypeVariable
+          source = SharedType.FunctionType
+            (variable "parameter") (variable "result")
+      isLeadingForallInstantiation source (variable "selected") source @?=
+        False
+  , testCase "reject an incorrect leading forall result" $ do
+      let variable = SharedType.TypeVariable
+          intType = SharedType.TypeConstructor $ right $ mkIdentifier "Int"
+          boolType = SharedType.TypeConstructor $ right $ mkIdentifier "Bool"
+          source = SharedType.ForallType ["a"] []
+            $ SharedType.FunctionType (variable "a") (variable "a")
+          wrongResult = SharedType.FunctionType intType boolType
+      isLeadingForallInstantiation source intType wrongResult @?= False
   , testCase "alpha-renaming preserves binder positions" $ do
       let variable = SharedType.TypeVariable
           source = SharedType.ForallType ["a", "b"] []

@@ -134,6 +134,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked contracts, provider transfers, and exact candidate problems; only independently validated model-relative violations receive problem-bound evidence with an explicit provider-assumption basis. |
 | `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and typed-candidate behavioral problems: exact context resealing, residual rejection, rigid root/provider authorization, lazy symbolic length interpretation, normalized counterexample formulas, and separate inventory/encoding/candidate/problem identities. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation and exact input-symbol model replay for one checked Length problem, without launching or trusting a solver. |
+| `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` | Pure validated Z3 launch, resource, artifact, and response-decoder policy with a package-private complete identity; it performs no IO or attestation. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` | Opaque query-specific association of bounded raw solver reports, with heuristic-only safe projections and exact problem-plus-query replay before payload access. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response` | Pure bounded SMT-LIB 2.x check-status and query-specific input-valuation decoding; syntax remains untrusted and only independent Length replay may create evidence. |
 | `Language.Haskell.Synthesis.Semantic.Observation` | Raw three-valued solver and four-valued behavioral reports without candidate association or evidence claims. |
@@ -193,6 +194,30 @@ normalization policy to bind. This is not stream framing or execution
 association. Standard solver errors
 remain failures, `unsat` remains heuristic, and decoded values must still pass
 the existing exact Length model validator before any evidence exists.
+
+`Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` seals the next
+pure boundary. Its v1 protocol fixes direct `-in -smt2` arguments, a deliberately
+empty child environment, and a fresh empty working-directory policy instead of
+inheriting ambient process state. Construction productively bounds and checks
+an absolute Unicode-scalar executable path, optionally records an exact
+32-byte SHA-256 executable-file pin, rejects unbounded solver time and resource
+settings, requires a host deadline with an explicit response/cleanup margin,
+and retains the requested status-only or satisfiable-input artifact policy.
+The package-private complete canonical fingerprint binds those fields, the
+fixed launch constants, the response schema, and every response byte, nesting,
+node, token, and integer bound. Its reversible bytes are not publicly exposed.
+The separate admission limits only bound sealing work and do not alter a
+successfully sealed policy's identity.
+
+This policy performs no IO: it neither resolves nor hashes the path, starts Z3,
+probes a version or capability, frames a stream, handles cancellation, nor
+constructs a solver observation. A future live session must bind what was
+actually opened and observed and defend resolution, hashing, and spawn against
+replacement races. The optional SHA-256 bytes are a named external digest-pin
+expectation, not Djex's collision-free identity for an unbounded executable
+file. Policy equality is therefore not run identity, cache authority, or
+semantic evidence; all eventual statuses remain heuristic until the existing
+independent Length replay validates a concrete counterexample.
 
 `Generated` separates backend-local identity from structural global `Name`s.
 Its checked `DefinitionName` narrows top-level output names once, and its scope

@@ -1,9 +1,10 @@
 module Main (main) where
 
 import Control.Exception (evaluate)
-import Data.List (isInfixOf, sort)
+import Data.List (isInfixOf, nub, sort)
 import Data.Word (Word8)
 import Numeric.Natural (Natural)
+import qualified System.Info as SystemInfo
 import System.Timeout (timeout)
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -42,6 +43,8 @@ import qualified Language.Haskell.Synthesis.Semantic.Length as Length
 import qualified Language.Haskell.Synthesis.Semantic.Length.Evaluate as Evaluate
 import qualified Language.Haskell.Synthesis.Semantic.Length.Problem as LengthProblem
 import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib as SMTLib
+import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
+  as SMTLibExecution
 import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation
   as SMTLibObservation
 import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response
@@ -1041,8 +1044,269 @@ problemReplayTests = testGroup "exact candidate problem replay"
   ]
 
 smtLibTests :: TestTree
-smtLibTests = testGroup "bounded QF_LIA query, response, and model boundary"
-  [ testCase "emit one exact canonical constant-zero query" $ do
+smtLibTests = testGroup
+  "bounded QF_LIA query, execution policy, response, and model boundary"
+  [ testCase "publish one pure fixed Z3 execution-policy default" $ do
+      SMTLibExecution.lengthSMTLibExecutionPolicySchemaTag @?=
+        asciiBytes "djex-length-z3-smtlib2-execution-policy/v1"
+      SMTLibExecution.lengthSMTLibExecutionArgumentVector @?=
+        ["-in", "-smt2"]
+      SMTLibExecution.lengthSMTLibExecutionEnvironmentPolicyTag @?=
+        asciiBytes "empty-environment/v1"
+      SMTLibExecution.lengthSMTLibExecutionWorkingDirectoryPolicyTag @?=
+        asciiBytes "fresh-empty-working-directory/v1"
+      SMTLibExecution.lengthSMTLibExecutionExpectedDigestSchemaTag @?=
+        asciiBytes "sha256/exact-executable-file-bytes/v1"
+      SMTLibExecution.lengthSMTLibMinimumHostDeadlineMarginMilliseconds @?= 100
+      assertBool "validated execution defaults changed representation"
+        $ SMTLibExecution.mkLengthSMTLibExecutionLimits
+            SMTLibExecution.defaultLengthSMTLibExecutionLimitSource ==
+          SMTLibExecution.defaultLengthSMTLibExecutionLimits
+      SMTLibExecution.lengthSMTLibExecutionExecutablePathCharacterLimit
+          SMTLibExecution.defaultLengthSMTLibExecutionLimits @?= 4096
+      SMTLibExecution.lengthSMTLibExecutionPolicyFingerprintByteLimit
+          SMTLibExecution.defaultLengthSMTLibExecutionLimits @?= 262144
+      config <- expectRight $ SMTLibExecution.mkLengthSMTLibExecutionConfig
+        SMTLibExecution.defaultLengthSMTLibExecutionLimits
+        $ SMTLibExecution.defaultLengthSMTLibExecutionConfigSource
+            absoluteFixtureExecutable Nothing
+      SMTLibExecution.lengthSMTLibExecutionSolverTimeoutMilliseconds config
+        @?= 1000
+      SMTLibExecution.lengthSMTLibExecutionSolverResourceLimit config
+        @?= 100000
+      SMTLibExecution.lengthSMTLibExecutionHostDeadlineMilliseconds config
+        @?= 1500
+      SMTLibExecution.lengthSMTLibExecutionArtifactPolicy config @?=
+        SMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+      SMTLibExecution.lengthSMTLibExecutionResponseLimits config @?=
+        SMTLibResponse.defaultLengthSMTLibResponseLimits
+  , testCase "reject signed policy fields in declaration order" $ do
+      let defaults = SMTLibExecution.defaultLengthSMTLibExecutionConfigSource
+            "relative-z3" (Just [0])
+          seal source = SMTLibExecution.mkLengthSMTLibExecutionConfig
+            SMTLibExecution.defaultLengthSMTLibExecutionLimits source
+      assertLeft
+        (SMTLibExecution.NegativeLengthSMTLibExecutionConfigField
+          SMTLibExecution.LengthSMTLibExecutionSolverTimeoutMilliseconds (-1))
+        $ seal defaults
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverTimeoutMilliseconds = -1
+            , SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverResourceLimit = -1
+            , SMTLibExecution.lengthSMTLibExecutionConfigSourceHostDeadlineMilliseconds = -1
+            }
+      assertLeft
+        (SMTLibExecution.NegativeLengthSMTLibExecutionConfigField
+          SMTLibExecution.LengthSMTLibExecutionSolverResourceLimit (-1))
+        $ seal defaults
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverResourceLimit = -1
+            , SMTLibExecution.lengthSMTLibExecutionConfigSourceHostDeadlineMilliseconds = -1
+            }
+      assertLeft
+        (SMTLibExecution.NegativeLengthSMTLibExecutionConfigField
+          SMTLibExecution.LengthSMTLibExecutionHostDeadlineMilliseconds (-1))
+        $ seal defaults
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceHostDeadlineMilliseconds = -1
+            }
+  , testCase "bound and validate executable paths and digest pins productively" $ do
+      let defaults path digest =
+            SMTLibExecution.defaultLengthSMTLibExecutionConfigSource path digest
+          sealWith limits = SMTLibExecution.mkLengthSMTLibExecutionConfig limits
+          seal = sealWith SMTLibExecution.defaultLengthSMTLibExecutionLimits
+      assertLeft SMTLibExecution.LengthSMTLibExecutionEmptyExecutablePath
+        $ seal $ defaults "" Nothing
+      assertLeft SMTLibExecution.LengthSMTLibExecutionExecutablePathNotAbsolute
+        $ seal $ defaults "z3" $ Just []
+      assertLeft
+        (SMTLibExecution.LengthSMTLibExecutionInvalidExecutablePathCharacter 3
+          SMTLibExecution.LengthSMTLibExecutionPathContainsNul)
+        $ seal $ defaults (absoluteFixturePrefix ++ ['\0']) Nothing
+      assertLeft
+        (SMTLibExecution.LengthSMTLibExecutionInvalidExecutablePathCharacter 3
+          SMTLibExecution.LengthSMTLibExecutionPathContainsSurrogate)
+        $ seal $ defaults (absoluteFixturePrefix ++ [toEnum 0xd800]) Nothing
+      let tinyLimits = SMTLibExecution.mkLengthSMTLibExecutionLimits
+            SMTLibExecution.defaultLengthSMTLibExecutionLimitSource
+              { SMTLibExecution.lengthSMTLibExecutionLimitSourceExecutablePathCharacters = 3 }
+      assertLeft
+        (SMTLibExecution.LengthSMTLibExecutionExecutablePathCharacterLimitExceeded
+          3 4)
+        $ sealWith tinyLimits $ defaults (absoluteFixturePrefix ++ "x") Nothing
+      let cyclicTail = 'z' : cyclicTail
+          cyclicPath = absoluteFixturePrefix ++ cyclicTail
+      cyclicPathResult <- evaluateWithin
+        $ sealWith tinyLimits $ defaults cyclicPath Nothing
+      assertLeft
+        (SMTLibExecution.LengthSMTLibExecutionExecutablePathCharacterLimitExceeded
+          3 4)
+        cyclicPathResult
+      _ <- expectRight
+        $ seal $ defaults absoluteFixtureExecutable $ Just $ replicate 32 0
+      assertLeft
+        (SMTLibExecution.LengthSMTLibExecutionExpectedExecutableSHA256LengthMismatch
+          32 31)
+        $ seal $ defaults absoluteFixtureExecutable $ Just $ replicate 31 0
+      assertLeft
+        (SMTLibExecution.LengthSMTLibExecutionExpectedExecutableSHA256LengthMismatch
+          32 33)
+        $ seal $ defaults absoluteFixtureExecutable $ Just $ replicate 33 0
+      let cyclicDigest = 0 : cyclicDigest
+      cyclicDigestResult <- evaluateWithin
+        $ seal $ defaults absoluteFixtureExecutable $ Just cyclicDigest
+      assertLeft
+        (SMTLibExecution.LengthSMTLibExecutionExpectedExecutableSHA256LengthMismatch
+          32 33)
+        cyclicDigestResult
+  , testCase "validate finite solver and stricter host time budgets" $ do
+      let defaults = SMTLibExecution.defaultLengthSMTLibExecutionConfigSource
+            absoluteFixtureExecutable Nothing
+          seal source = SMTLibExecution.mkLengthSMTLibExecutionConfig
+            SMTLibExecution.defaultLengthSMTLibExecutionLimits source
+          fieldError field maximumValue observed =
+            SMTLibExecution.LengthSMTLibExecutionConfigFieldAboveMaximum
+              field maximumValue observed
+      assertLeft
+        (SMTLibExecution.ZeroLengthSMTLibExecutionConfigField
+          SMTLibExecution.LengthSMTLibExecutionSolverTimeoutMilliseconds)
+        $ seal defaults
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverTimeoutMilliseconds = 0 }
+      assertLeft
+        (SMTLibExecution.ZeroLengthSMTLibExecutionConfigField
+          SMTLibExecution.LengthSMTLibExecutionSolverResourceLimit)
+        $ seal defaults
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverResourceLimit = 0 }
+      let word32Maximum = 4294967295 :: Integer
+      if toInteger (maxBound :: Int) >= word32Maximum
+        then do
+          let maximumInt = fromInteger word32Maximum
+          assertLeft
+            (fieldError
+              SMTLibExecution.LengthSMTLibExecutionSolverTimeoutMilliseconds
+              (word32Maximum - 1) word32Maximum)
+            $ seal defaults
+                { SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverTimeoutMilliseconds =
+                    maximumInt }
+          _ <- expectRight $ seal defaults
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverResourceLimit =
+                maximumInt }
+          pure ()
+        else pure ()
+      if toInteger (maxBound :: Int) > word32Maximum
+        then do
+          let aboveMaximumInt = fromInteger $ word32Maximum + 1
+          assertLeft
+            (fieldError SMTLibExecution.LengthSMTLibExecutionSolverResourceLimit
+              word32Maximum (word32Maximum + 1))
+            $ seal defaults
+                { SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverResourceLimit =
+                    aboveMaximumInt }
+        else pure ()
+      assertLeft
+        (SMTLibExecution.LengthSMTLibExecutionHostDeadlineMarginTooSmall
+          1000 1099 100)
+        $ seal defaults
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceHostDeadlineMilliseconds =
+                1099 }
+      exactMargin <- expectRight $ seal defaults
+        { SMTLibExecution.lengthSMTLibExecutionConfigSourceHostDeadlineMilliseconds =
+            1100 }
+      SMTLibExecution.lengthSMTLibExecutionHostDeadlineMilliseconds exactMargin
+        @?= 1100
+      let overflowDeadline = maxBound `div` 1000 + 1
+      assertLeft
+        (SMTLibExecution.LengthSMTLibExecutionHostDeadlineMicrosecondsOverflow
+          overflowDeadline)
+        $ seal defaults
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceHostDeadlineMilliseconds =
+                overflowDeadline }
+  , testCase "bind every configurable policy field into private identity" $ do
+      let source = SMTLibExecution.defaultLengthSMTLibExecutionConfigSource
+            absoluteFixtureExecutable Nothing
+          sealWith limits candidate = expectRight
+            $ SMTLibExecution.mkLengthSMTLibExecutionConfig limits candidate
+          seal = sealWith SMTLibExecution.defaultLengthSMTLibExecutionLimits
+          response change = expectRight
+            $ SMTLibResponse.mkLengthSMTLibResponseLimits
+            $ change SMTLibResponse.defaultLengthSMTLibResponseLimitSource
+      baseline <- seal source
+      responseBytes <- response $ \limits -> limits
+        { SMTLibResponse.lengthSMTLibResponseLimitSourceBytes = 65535 }
+      responseDepth <- response $ \limits -> limits
+        { SMTLibResponse.lengthSMTLibResponseLimitSourceNestingDepth = 63 }
+      responseNodes <- response $ \limits -> limits
+        { SMTLibResponse.lengthSMTLibResponseLimitSourceNodes = 4095 }
+      responseTokens <- response $ \limits -> limits
+        { SMTLibResponse.lengthSMTLibResponseLimitSourceTokenBytes = 4095 }
+      responseIntegers <- response $ \limits -> limits
+        { SMTLibResponse.lengthSMTLibResponseLimitSourceIntegerBits = 4095 }
+      changed <- mapM seal
+        [ source
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceExecutablePath =
+                absoluteFixtureExecutable ++ "-other" }
+        , source
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceExecutablePath =
+                absoluteFixtureExecutable ++ "-\945" }
+        , source
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceExecutablePath =
+                absoluteFixtureExecutable ++ [toEnum 0x0101] }
+        , source
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceExecutablePath =
+                absoluteFixtureExecutable ++ [toEnum 0x0201] }
+        , source
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceExpectedExecutableSHA256 =
+                Just $ replicate 32 0 }
+        , source
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceExpectedExecutableSHA256 =
+                Just $ 1 : replicate 31 0 }
+        , source
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverTimeoutMilliseconds =
+                1001 }
+        , source
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverResourceLimit =
+                100001 }
+        , source
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceHostDeadlineMilliseconds =
+                1501 }
+        , source
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceArtifactPolicy =
+                SMTLibExecution.LengthSMTLibStatusOnly }
+        , source
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceResponseLimits =
+                responseBytes }
+        , source
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceResponseLimits =
+                responseDepth }
+        , source
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceResponseLimits =
+                responseNodes }
+        , source
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceResponseLimits =
+                responseTokens }
+        , source
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceResponseLimits =
+                responseIntegers }
+        ]
+      assertBool "a retained policy field was absent from private identity"
+        $ all (/= baseline) changed
+      assertBool "distinct retained field values shared private identity"
+        $ length (nub $ baseline : changed) == length changed + 1
+      let widerAdmission = SMTLibExecution.mkLengthSMTLibExecutionLimits
+            SMTLibExecution.defaultLengthSMTLibExecutionLimitSource
+              { SMTLibExecution.lengthSMTLibExecutionLimitSourceExecutablePathCharacters =
+                  8192 }
+      resealed <- sealWith widerAdmission source
+      assertBool "admission-only limits changed sealed policy identity"
+        $ resealed == baseline
+  , testCase "bound the private complete policy fingerprint" $ do
+      let noFingerprint = SMTLibExecution.mkLengthSMTLibExecutionLimits
+            SMTLibExecution.defaultLengthSMTLibExecutionLimitSource
+              { SMTLibExecution.lengthSMTLibExecutionLimitSourcePolicyFingerprintBytes =
+                  0 }
+      assertLeft
+        (SMTLibExecution.LengthSMTLibExecutionPolicyFingerprintByteLimitExceeded
+          0 1)
+        $ SMTLibExecution.mkLengthSMTLibExecutionConfig noFingerprint
+        $ SMTLibExecution.defaultLengthSMTLibExecutionConfigSource
+            absoluteFixtureExecutable Nothing
+  , testCase "emit one exact canonical constant-zero query" $ do
       problem <- adversarialConstantZeroProblem identityLengthContract
       query <- expectRight $ SMTLib.sealLengthSMTLibQuery
         SMTLib.defaultLengthSMTLibLimits problem
@@ -3459,6 +3723,16 @@ evaluationLimitsWith assignmentBits intermediateBits = case
 
 asciiBytes :: String -> [Word8]
 asciiBytes = map $ fromIntegral . fromEnum
+
+absoluteFixtureExecutable :: FilePath
+absoluteFixtureExecutable
+  | SystemInfo.os == "mingw32" = "C:\\djex\\z3.exe"
+  | otherwise = "/usr/bin/z3"
+
+absoluteFixturePrefix :: FilePath
+absoluteFixturePrefix
+  | SystemInfo.os == "mingw32" = "C:\\"
+  | otherwise = "/z3"
 
 smtIntegerBinding
   :: [Word8]

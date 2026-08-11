@@ -484,12 +484,49 @@ facadeTests = testGroup "public Djex facade"
                 LengthSMTLibResponseError
                 [LengthSMTLibIntegerBinding]
           inputValueResponseParser = parseLengthSMTLibInputValueResponse
+          executionLimitsBuilder
+            :: LengthSMTLibExecutionLimitSource
+            -> LengthSMTLibExecutionLimits
+          executionLimitsBuilder = mkLengthSMTLibExecutionLimits
+          executionConfigSealer
+            :: LengthSMTLibExecutionLimits
+            -> LengthSMTLibExecutionConfigSource
+            -> Either
+                LengthSMTLibExecutionConfigError
+                LengthSMTLibExecutionConfig
+          executionConfigSealer = mkLengthSMTLibExecutionConfig
+          executionTimeoutProjection
+            :: LengthSMTLibExecutionConfig
+            -> Int
+          executionTimeoutProjection =
+            lengthSMTLibExecutionSolverTimeoutMilliseconds
+          executionResourceProjection
+            :: LengthSMTLibExecutionConfig
+            -> Int
+          executionResourceProjection = lengthSMTLibExecutionSolverResourceLimit
+          executionDeadlineProjection
+            :: LengthSMTLibExecutionConfig
+            -> Int
+          executionDeadlineProjection =
+            lengthSMTLibExecutionHostDeadlineMilliseconds
+          executionArtifactProjection
+            :: LengthSMTLibExecutionConfig
+            -> LengthSMTLibArtifactPolicy
+          executionArtifactProjection = lengthSMTLibExecutionArtifactPolicy
+          executionResponseProjection
+            :: LengthSMTLibExecutionConfig
+            -> LengthSMTLibResponseLimits
+          executionResponseProjection = lengthSMTLibExecutionResponseLimits
       sealer `seq` candidateResultProjection `seq` problemProjection `seq`
         inputCountProjection `seq` preconditionProjection `seq`
         postconditionProjection `seq` basisProjection `seq`
         counterexampleValidator `seq` queryObservationAssociator `seq`
         queryObservationReplayer `seq` checkResponseParser `seq`
-        inputValueResponseParser `seq` pure ()
+        inputValueResponseParser `seq` executionLimitsBuilder `seq`
+        executionConfigSealer `seq` executionTimeoutProjection `seq`
+        executionResourceProjection `seq` executionDeadlineProjection `seq`
+        executionArtifactProjection `seq` executionResponseProjection `seq`
+        pure ()
       lengthProblemAssignmentInputs (LengthProblemAssignment [1, 2]) @?=
         [1, 2]
       (ProviderIndependentFiniteSpineModel :: LengthCounterexampleBasis) @?=
@@ -507,6 +544,9 @@ facadeTests = testGroup "public Djex facade"
       mkLengthSMTLibResponseLimits
           defaultLengthSMTLibResponseLimitSource @?=
         Right defaultLengthSMTLibResponseLimits
+      lengthSMTLibExecutionArgumentVector @?= ["-in", "-smt2"]
+      lengthSMTLibExecutionEnvironmentPolicyTag @?=
+        map (fromIntegral . fromEnum) ("empty-environment/v1" :: String)
   , testCase "rejects residual constraints at the Djinn render boundary" $ do
       target <- expectRight $ mkIdentifier "identity"
       checkedTarget <- expectRight $ mkDefinitionName target

@@ -157,6 +157,7 @@ Library
     Language.Haskell.Synthesis.Semantic.Length.Evaluate
     Language.Haskell.Synthesis.Semantic.Length.Problem
     Language.Haskell.Synthesis.Semantic.Length.SMTLib
+    Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
     Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation
     Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response
     Language.Haskell.Synthesis.Semantic.Observation
@@ -248,6 +249,7 @@ Library
     Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
     Language.Haskell.Synthesis.Internal.Semantic.Length.Problem.Candidate
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
+    Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Observation
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Response
     Language.Haskell.Synthesis.Internal.Semantic.Problem

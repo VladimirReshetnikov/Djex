@@ -27,6 +27,7 @@ import Data.Proxy (Proxy (Proxy))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
+import Data.Word (Word8)
 import Djinn.Internal.LJTFormula (Formula, Symbol)
 -- Whole-module imports are deliberate for modules whose former record labels
 -- are probed below. GHC solves built-in 'HasField' constraints only when the
@@ -88,6 +89,7 @@ import Language.Haskell.Synthesis.Semantic.Length
 import Language.Haskell.Synthesis.Semantic.Length.Evaluate
 import Language.Haskell.Synthesis.Semantic.Length.Problem
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib
+import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response
 import Language.Haskell.Synthesis.Semantic.Problem
@@ -219,6 +221,21 @@ forbiddenConstructionAttempts =
       "AssociatedLengthSMTLibSolverObservation"
   , noGeneric @LengthSMTLibResponseLimits
       "LengthSMTLibResponseLimits"
+  , noGeneric @LengthSMTLibExecutionLimits
+      "LengthSMTLibExecutionLimits"
+  , noGeneric @LengthSMTLibExecutionConfig
+      "LengthSMTLibExecutionConfig"
+  , noOrd @LengthSMTLibExecutionConfig
+      "LengthSMTLibExecutionConfig"
+  , ( "LengthSMTLibExecutionConfig exposed its executable path"
+    , forbiddenLengthSMTLibExecutionPathProjection `seq` ()
+    )
+  , ( "LengthSMTLibExecutionConfig exposed its executable digest pin"
+    , forbiddenLengthSMTLibExecutionDigestProjection `seq` ()
+    )
+  , ( "LengthSMTLibExecutionConfig exposed its reversible fingerprint"
+    , forbiddenLengthSMTLibExecutionFingerprintProjection `seq` ()
+    )
   , ( "CheckedLengthContract variable unexpectedly permits Coercible"
     , forbiddenCheckedLengthContractCoercion `seq` ()
     )
@@ -618,10 +635,17 @@ noGeneric :: forall value. Generic value => String -> (String, ())
 noGeneric label =
   (label ++ " unexpectedly has Generic", genericMethod @value)
 
+noOrd :: forall value. Ord value => String -> (String, ())
+noOrd label =
+  (label ++ " unexpectedly has Ord", ordMethod @value)
+
 -- Selecting the method forces the instance dictionary without needing a
 -- value of the abstract type or forcing a representation.
 genericMethod :: forall value. Generic value => ()
 genericMethod = (from :: value -> Rep value ()) `seq` ()
+
+ordMethod :: forall value. Ord value => ()
+ordMethod = (compare :: value -> value -> Ordering) `seq` ()
 
 -- Keep the deferred role error in this binding's RHS.  The surrounding
 -- negative fixture can then force it inside its exception handler; if the
@@ -833,6 +857,27 @@ forbiddenAssociatedLengthSMTLibProblemObservationProjection
         ArtifactKindProbe ArtifactKindProbe ArtifactKindProbe)
 forbiddenAssociatedLengthSMTLibProblemObservationProjection =
   associatedLengthSMTLibProblemObservation
+
+-- Launch spellings and the reversible complete fingerprint stay private.
+-- Future process execution belongs inside the checked package boundary rather
+-- than in downstream code which could leak these policy details.
+forbiddenLengthSMTLibExecutionPathProjection
+  :: LengthSMTLibExecutionConfig
+  -> FilePath
+forbiddenLengthSMTLibExecutionPathProjection =
+  lengthSMTLibExecutionExecutablePath
+
+forbiddenLengthSMTLibExecutionDigestProjection
+  :: LengthSMTLibExecutionConfig
+  -> Maybe [Word8]
+forbiddenLengthSMTLibExecutionDigestProjection =
+  lengthSMTLibExecutionExpectedExecutableSHA256
+
+forbiddenLengthSMTLibExecutionFingerprintProjection
+  :: LengthSMTLibExecutionConfig
+  -> ()
+forbiddenLengthSMTLibExecutionFingerprintProjection =
+  lengthSMTLibExecutionPolicyFingerprint `seq` const ()
 
 -- Selecting 'coerce' forces the built-in coercion evidence without requiring
 -- a value of either abstract type.

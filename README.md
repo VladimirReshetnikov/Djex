@@ -324,6 +324,21 @@ framing, request sentinels, solver execution identity, deadlines, and worker
 recovery remain obligations of the future executor, while only independent
 Length replay can create model-relative counterexample evidence.
 
+`Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` now seals the
+first pure Z3 launch policy without launching anything. V1 fixes direct
+arguments to `-in -smt2`, an empty child environment, and a fresh empty working
+directory; validates a bounded absolute, NUL-free Unicode path plus an optional
+exact 32-byte SHA-256 pin; and retains finite solver timeout, Z3 resource,
+stricter host deadline, requested artifact, and exact response-decoder limits.
+Its package-private complete fingerprint binds every retained policy field,
+including the response schema and all five response bounds, while public
+callers see only safe operational projections. Admission limits are not
+execution semantics. This is configuration, not a run receipt: it performs no
+path resolution, hashing, spawn, version or capability probe, stream framing,
+or process attestation. SHA-256 names an external executable-file pin and is
+not a collision-free identity for the executable's unbounded bytes. Parsed
+statuses still have no pruning or proof authority.
+
 ## Building
 
 Build and test the complete graph from the repository root:

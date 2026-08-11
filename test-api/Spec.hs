@@ -276,7 +276,10 @@ main = defaultMain $ testGroup "Djex downstream API"
                 isMissingDictionary =
                   ( "No instance for" `isInfixOf` message &&
                     ( "Generic" `isInfixOf` message ||
-                      "HasField" `isInfixOf` message
+                      "HasField" `isInfixOf` message ||
+                      ( "Ord" `isInfixOf` message &&
+                        "LengthSMTLibExecutionConfig" `isInfixOf` message
+                      )
                     )
                   ) ||
                   ( "Couldn't match type" `isInfixOf` message &&
@@ -317,6 +320,9 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "associatedLengthSMTLibObservation"
                       , "associatedLengthSMTLibProblemObservation"
                       , "behavioralEvidenceReceipt"
+                      , "lengthSMTLibExecutionExecutablePath"
+                      , "lengthSMTLibExecutionExpectedExecutableSHA256"
+                      , "lengthSMTLibExecutionPolicyFingerprint"
                       , "mkBehavioralEvidence"
                       , "ValidatedLengthCounterexampleReceipt"
                       ]

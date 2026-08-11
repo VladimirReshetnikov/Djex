@@ -345,19 +345,30 @@ live Z3 capability probe must also establish that `echo` emits and flushes a
 trailing byte (normally its newline) after the marker's closing quote.
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` now seals the
-first pure Z3 launch policy without launching anything. V1 fixes direct
-arguments to `-in -smt2`, an empty child environment, and a fresh empty working
-directory; validates a bounded absolute, NUL-free Unicode path plus an optional
-exact 32-byte SHA-256 pin; and retains finite solver timeout, Z3 resource,
-stricter host deadline, requested artifact, and exact response-decoder limits.
-Its package-private complete fingerprint binds every retained policy field,
-including the response schema and all five response bounds, while public
-callers see only safe operational projections. Admission limits are not
-execution semantics. This is configuration, not a run receipt: it performs no
-path resolution, hashing, spawn, version or capability probe, stream framing,
-or process attestation. SHA-256 names an external executable-file pin and is
-not a collision-free identity for the executable's unbounded bytes. Parsed
-statuses still have no pruning or proof authority.
+pure Z3 launch and protocol policy without launching anything. V2 fixes the
+direct prefix `-in -smt2 smtlib2_compliant=true`, derives exact launch-time
+`timeout` and `rlimit` arguments from the validated policy, uses an empty child
+environment and a fresh empty working directory, and retains a bounded
+absolute executable path plus an optional exact 32-byte SHA-256 pin. Standard
+compliance makes `echo` responses quoted; exact startup bytes immediately
+disable `:print-success`, and the reset prefix repeats that suppression before
+every self-contained query. The canonical QF_LIA query now emits start-mode
+options before `set-logic` and uses fixed nonzero random seed `1`.
+The legacy `lengthSMTLibExecutionArgumentVector` projection names only the
+fixed prefix; launchers must use
+`lengthSMTLibExecutionConfiguredArgumentVector` for the complete argv.
+
+The package-private complete fingerprint binds the protocol schema, complete
+argv, exact startup and reset bytes, every retained execution field, the
+response schema, and all five response bounds; public callers see only safe
+operational projections. Admission limits are not execution semantics. This
+is configuration, not a run receipt: it performs no path resolution, hashing,
+spawn, version or capability probe, stream framing, or process attestation.
+The live opener must verify that the selected Z3 build exhibits the required
+quoted-echo, print-suppression, and reset behavior before accepting it.
+SHA-256 names an external executable-file pin and is not a collision-free
+identity for the executable's unbounded bytes. Parsed statuses still have no
+pruning or proof authority.
 
 ## Building
 

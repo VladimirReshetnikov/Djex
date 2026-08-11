@@ -544,7 +544,14 @@ facadeTests = testGroup "public Djex facade"
       mkLengthSMTLibResponseLimits
           defaultLengthSMTLibResponseLimitSource @?=
         Right defaultLengthSMTLibResponseLimits
-      lengthSMTLibExecutionArgumentVector @?= ["-in", "-smt2"]
+      lengthSMTLibExecutionArgumentPrefix @?=
+        ["-in", "-smt2", "smtlib2_compliant=true"]
+      lengthSMTLibExecutionProtocolSchemaTag @?=
+        map (fromIntegral . fromEnum)
+          ("djex-length-z3-smtlib2-session-protocol/v1" :: String)
+      lengthSMTLibExecutionStartupCommandBytes @?=
+        map (fromIntegral . fromEnum)
+          ("(set-option :print-success false)\n" :: String)
       lengthSMTLibExecutionEnvironmentPolicyTag @?=
         map (fromIntegral . fromEnum) ("empty-environment/v1" :: String)
   , testCase "rejects residual constraints at the Djinn render boundary" $ do

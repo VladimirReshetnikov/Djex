@@ -217,28 +217,43 @@ newline): a top-level string's closing quote is intentionally held for one-byte
 lookahead so a quote at the next chunk boundary can still form a doubled quote.
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` seals the next
-pure boundary. Its v1 protocol fixes direct `-in -smt2` arguments, a deliberately
-empty child environment, and a fresh empty working-directory policy instead of
-inheriting ambient process state. Construction productively bounds and checks
-an absolute Unicode-scalar executable path, optionally records an exact
-32-byte SHA-256 executable-file pin, rejects unbounded solver time and resource
-settings, requires a host deadline with an explicit response/cleanup margin,
-and retains the requested status-only or satisfiable-input artifact policy.
-The package-private complete canonical fingerprint binds those fields, the
-fixed launch constants, the response schema, and every response byte, nesting,
-node, token, and integer bound. Its reversible bytes are not publicly exposed.
-The separate admission limits only bound sealing work and do not alter a
-successfully sealed policy's identity.
+pure boundary. Its v2 policy fixes the direct prefix
+`-in -smt2 smtlib2_compliant=true`, derives exact launch-time `timeout` and
+`rlimit` arguments, and selects a deliberately empty child environment plus a
+fresh empty working-directory policy instead of inheriting ambient process
+state. Compliance mode supplies standard quoted `echo` responses. Exact
+startup bytes disable `:print-success`, while the per-query reset prefix
+repeats that suppression before replaying every query's complete start-mode
+options and logic. The QF_LIA translator now places `:produce-models` and
+`:random-seed 1` before `set-logic`, keeping each reset/replay sequence
+standard-conforming while avoiding seed zero's implementation-chosen value.
+The legacy `lengthSMTLibExecutionArgumentVector` name projects only the fixed
+prefix; a process launcher must use
+`lengthSMTLibExecutionConfiguredArgumentVector` to retain both resource
+arguments.
+
+Construction productively bounds and checks an absolute Unicode-scalar
+executable path, optionally records an exact 32-byte SHA-256 executable-file
+pin, rejects unbounded solver time and resource settings, requires a host
+deadline with an explicit response/cleanup margin, and retains the requested
+status-only or satisfiable-input artifact policy. The package-private complete
+canonical fingerprint binds those fields, the protocol schema, complete argv,
+exact startup and reset bytes, the response schema, and every response byte,
+nesting, node, token, and integer bound. Its reversible bytes are not publicly
+exposed. The separate admission limits only bound sealing work and do not
+alter a successfully sealed policy's identity.
 
 This policy performs no IO: it neither resolves nor hashes the path, starts Z3,
 probes a version or capability, frames a stream, handles cancellation, nor
 constructs a solver observation. A future live session must bind what was
-actually opened and observed and defend resolution, hashing, and spawn against
-replacement races. The optional SHA-256 bytes are a named external digest-pin
-expectation, not Djex's collision-free identity for an unbounded executable
-file. Policy equality is therefore not run identity, cache authority, or
-semantic evidence; all eventual statuses remain heuristic until the existing
-independent Length replay validates a concrete counterexample.
+actually opened and observed, establish the required quoted-echo,
+print-suppression, and reset behavior, and defend resolution, hashing, and
+spawn against replacement races. The optional SHA-256 bytes are a named
+external digest-pin expectation, not Djex's collision-free identity for an
+unbounded executable file. Policy equality is therefore not run identity,
+cache authority, or semantic evidence; all eventual statuses remain heuristic
+until the existing independent Length replay validates a concrete
+counterexample.
 
 `Generated` separates backend-local identity from structural global `Name`s.
 Its checked `DefinitionName` narrows top-level output names once, and its scope

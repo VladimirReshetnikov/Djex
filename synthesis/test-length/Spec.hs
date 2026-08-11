@@ -1048,9 +1048,17 @@ smtLibTests = testGroup
   "bounded QF_LIA query, execution policy, response, and model boundary"
   [ testCase "publish one pure fixed Z3 execution-policy default" $ do
       SMTLibExecution.lengthSMTLibExecutionPolicySchemaTag @?=
-        asciiBytes "djex-length-z3-smtlib2-execution-policy/v1"
+        asciiBytes "djex-length-z3-smtlib2-execution-policy/v2"
+      SMTLibExecution.lengthSMTLibExecutionProtocolSchemaTag @?=
+        asciiBytes "djex-length-z3-smtlib2-session-protocol/v1"
+      SMTLibExecution.lengthSMTLibExecutionArgumentPrefix @?=
+        ["-in", "-smt2", "smtlib2_compliant=true"]
       SMTLibExecution.lengthSMTLibExecutionArgumentVector @?=
-        ["-in", "-smt2"]
+        SMTLibExecution.lengthSMTLibExecutionArgumentPrefix
+      SMTLibExecution.lengthSMTLibExecutionStartupCommandBytes @?=
+        asciiBytes "(set-option :print-success false)\n"
+      SMTLibExecution.lengthSMTLibExecutionQueryResetBytes @?=
+        asciiBytes "(reset)\n(set-option :print-success false)\n"
       SMTLibExecution.lengthSMTLibExecutionEnvironmentPolicyTag @?=
         asciiBytes "empty-environment/v1"
       SMTLibExecution.lengthSMTLibExecutionWorkingDirectoryPolicyTag @?=
@@ -1074,6 +1082,31 @@ smtLibTests = testGroup
         @?= 1000
       SMTLibExecution.lengthSMTLibExecutionSolverResourceLimit config
         @?= 100000
+      SMTLibExecution.lengthSMTLibExecutionConfiguredArgumentVector config @?=
+        [ "-in"
+        , "-smt2"
+        , "smtlib2_compliant=true"
+        , "timeout=1000"
+        , "rlimit=100000"
+        ]
+      nondefaultConfig <- expectRight
+        $ SMTLibExecution.mkLengthSMTLibExecutionConfig
+            SMTLibExecution.defaultLengthSMTLibExecutionLimits
+        $ (SMTLibExecution.defaultLengthSMTLibExecutionConfigSource
+            absoluteFixtureExecutable Nothing)
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverTimeoutMilliseconds =
+                17
+            , SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverResourceLimit =
+                23
+            }
+      SMTLibExecution.lengthSMTLibExecutionConfiguredArgumentVector
+          nondefaultConfig @?=
+        [ "-in"
+        , "-smt2"
+        , "smtlib2_compliant=true"
+        , "timeout=17"
+        , "rlimit=23"
+        ]
       SMTLibExecution.lengthSMTLibExecutionHostDeadlineMilliseconds config
         @?= 1500
       SMTLibExecution.lengthSMTLibExecutionArtifactPolicy config @?=
@@ -1311,7 +1344,7 @@ smtLibTests = testGroup
       query <- expectRight $ SMTLib.sealLengthSMTLibQuery
         SMTLib.defaultLengthSMTLibLimits problem
       SMTLib.lengthSMTLibQuerySchemaTag @?=
-        asciiBytes "djex-length-z3-qf-lia-smtlib2/v1"
+        asciiBytes "djex-length-z3-qf-lia-smtlib2/v2"
       SMTLib.lengthSMTLibQueryLogic @?= asciiBytes "QF_LIA"
       SMTLib.lengthSMTLibQueryInputSymbols query @?=
         [asciiBytes "djex_length_input_0"]
@@ -1822,9 +1855,9 @@ smtLibTests = testGroup
 
 constantZeroSMTLibCheck :: String
 constantZeroSMTLibCheck = unlines
-  [ "(set-logic QF_LIA)"
-  , "(set-option :produce-models true)"
-  , "(set-option :random-seed 0)"
+  [ "(set-option :produce-models true)"
+  , "(set-option :random-seed 1)"
+  , "(set-logic QF_LIA)"
   , "(define-fun djex_nat_monus ((x Int) (y Int)) Int (ite (<= y x) (- x y) 0))"
   , "(define-fun djex_nat_min ((x Int) (y Int)) Int (ite (<= x y) x y))"
   , "(define-fun djex_nat_max ((x Int) (y Int)) Int (ite (<= x y) y x))"

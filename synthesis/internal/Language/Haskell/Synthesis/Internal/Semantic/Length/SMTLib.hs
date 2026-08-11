@@ -92,7 +92,7 @@ data LengthSMTLibQueryFingerprintSubject
 -- | Stable translator schema.  This is deliberately distinct from the
 -- solver-neutral Length encoding fingerprint.
 lengthSMTLibQuerySchemaTag :: [Word8]
-lengthSMTLibQuerySchemaTag = ascii "djex-length-z3-qf-lia-smtlib2/v1"
+lengthSMTLibQuerySchemaTag = ascii "djex-length-z3-qf-lia-smtlib2/v2"
 
 -- | The only logic emitted by this translator.
 lengthSMTLibQueryLogic :: [Word8]
@@ -424,9 +424,9 @@ retainModelSymbol bindingIndex maximumBytes = go maximumBytes
 
 fixedPreamble :: [SMTCommand]
 fixedPreamble =
-  [ SMTSetLogic lengthSMTLibQueryLogic
-  , SMTSetOption (ascii ":produce-models") (ascii "true")
-  , SMTSetOption (ascii ":random-seed") (ascii "0")
+  [ SMTSetOption (ascii ":produce-models") (ascii "true")
+  , SMTSetOption (ascii ":random-seed") (ascii "1")
+  , SMTSetLogic lengthSMTLibQueryLogic
   , helperDefinition SMTNaturalMonus
   , helperDefinition SMTIntegerMinimum
   , helperDefinition SMTIntegerMaximum
@@ -560,7 +560,7 @@ buildQueryFingerprint limits problem plan checkBytes valueRequestBytes =
         , tagged "logic" [FingerprintBytes lengthSMTLibQueryLogic]
         , tagged "fixed-options"
             [ FingerprintBytes $ ascii ":produce-models=true"
-            , FingerprintBytes $ ascii ":random-seed=0"
+            , FingerprintBytes $ ascii ":random-seed=1"
             ]
         , tagged "problem-domain"
             [FingerprintBytes $ behavioralProblemDomain behavioral]

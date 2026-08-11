@@ -12,7 +12,12 @@
 -- canonical representation is reversible rather than a digest.
 module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   ( lengthSMTLibExecutionPolicySchemaTag
+  , lengthSMTLibExecutionProtocolSchemaTag
+  , lengthSMTLibExecutionArgumentPrefix
   , lengthSMTLibExecutionArgumentVector
+  , lengthSMTLibExecutionConfiguredArgumentVector
+  , lengthSMTLibExecutionStartupCommandBytes
+  , lengthSMTLibExecutionQueryResetBytes
   , lengthSMTLibExecutionEnvironmentPolicyTag
   , lengthSMTLibExecutionWorkingDirectoryPolicyTag
   , lengthSMTLibExecutionExpectedDigestSchemaTag
@@ -72,18 +77,68 @@ import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response
 -- run identities will use distinct schema tags.
 lengthSMTLibExecutionPolicySchemaTag :: [Word8]
 lengthSMTLibExecutionPolicySchemaTag =
-  ascii "djex-length-z3-smtlib2-execution-policy/v1"
+  ascii "djex-length-z3-smtlib2-execution-policy/v2"
 
--- | Ordered argument vector passed directly to @process@ without a shell.
+-- | Exact protocol contract whose command bytes and launch spelling are bound
+-- into the pure policy.  A live opener must still probe the corresponding Z3
+-- behavior before accepting a worker.
+lengthSMTLibExecutionProtocolSchemaTag :: [Word8]
+lengthSMTLibExecutionProtocolSchemaTag =
+  ascii "djex-length-z3-smtlib2-session-protocol/v1"
+
+-- | Fixed argument prefix passed directly to @process@ without a shell.
+-- Compliance mode gives @echo@ its standard quoted response spelling.  It
+-- also starts with @:print-success true@, which the startup command disables.
+lengthSMTLibExecutionArgumentPrefix :: [String]
+lengthSMTLibExecutionArgumentPrefix =
+  ["-in", "-smt2", "smtlib2_compliant=true"]
+
+-- | Legacy compatibility spelling for the fixed prefix.  This is not a
+-- complete argv: process launchers must use
+-- 'lengthSMTLibExecutionConfiguredArgumentVector' so timeout and resource
+-- arguments cannot be omitted silently.
 lengthSMTLibExecutionArgumentVector :: [String]
-lengthSMTLibExecutionArgumentVector = ["-in", "-smt2"]
+lengthSMTLibExecutionArgumentVector = lengthSMTLibExecutionArgumentPrefix
 
--- | V1 launches with @env = Just []@.  It never inherits ambient variables.
+-- | Complete ordered argv for one sealed policy.  Resource controls are Z3
+-- launch parameters rather than input commands so updating them cannot
+-- re-enable compliance-mode success responses mid-session.
+lengthSMTLibExecutionConfiguredArgumentVector
+  :: LengthSMTLibExecutionConfig
+  -> [String]
+lengthSMTLibExecutionConfiguredArgumentVector config =
+  configuredArgumentVector
+    (lengthSMTLibExecutionSolverTimeoutMilliseconds config)
+    (lengthSMTLibExecutionSolverResourceLimit config)
+
+configuredArgumentVector :: Int -> Int -> [String]
+configuredArgumentVector timeout resource =
+  lengthSMTLibExecutionArgumentPrefix ++
+    [ "timeout=" ++ show timeout
+    , "rlimit=" ++ show resource
+    ]
+
+-- | Exact startup command.  In required compliance mode the option affects
+-- its own response, so a conforming Z3 worker emits no @success@ for it.
+lengthSMTLibExecutionStartupCommandBytes :: [Word8]
+lengthSMTLibExecutionStartupCommandBytes =
+  ascii "(set-option :print-success false)\n"
+
+-- | Exact reset prefix replayed before every canonical query.  The required
+-- Z3 capability retains disabled success printing across @reset@, so reset
+-- emits no frame; suppression is then repeated explicitly for the new query.
+-- A future capability handshake must establish this response behavior before
+-- the worker can enter the query phase.
+lengthSMTLibExecutionQueryResetBytes :: [Word8]
+lengthSMTLibExecutionQueryResetBytes = ascii
+  "(reset)\n(set-option :print-success false)\n"
+
+-- | V2 launches with @env = Just []@.  It never inherits ambient variables.
 -- A later platform-specific allowlist requires a new versioned policy.
 lengthSMTLibExecutionEnvironmentPolicyTag :: [Word8]
 lengthSMTLibExecutionEnvironmentPolicyTag = ascii "empty-environment/v1"
 
--- | V1 requires a fresh empty working directory owned by the live session.
+-- | V2 requires a fresh empty working directory owned by the live session.
 -- Its concrete path belongs to that session identity and must never be an
 -- inherited caller directory.
 lengthSMTLibExecutionWorkingDirectoryPolicyTag :: [Word8]
@@ -220,7 +275,7 @@ data LengthSMTLibExecutionConfig = LengthSMTLibExecutionConfig
   !(Fingerprint LengthSMTLibExecutionPolicyFingerprintSubject)
 
 -- Equality intentionally means exact sealed-policy equivalence and observes
--- only the private complete key.  V1 contains no inherited environment or
+-- only the private complete key.  V2 contains no inherited environment or
 -- caller-supplied secret field.  A future schema must revisit this instance
 -- before admitting secret launch material.
 instance Eq LengthSMTLibExecutionConfig where
@@ -462,9 +517,12 @@ buildPolicyFingerprint limits executable expectedDigest timeout resource
       , fingerprintBuilderRole = ascii "length-z3-execution-policy"
       , fingerprintBuilderFields =
           [ FingerprintBytes lengthSMTLibExecutionPolicySchemaTag
+          , FingerprintBytes lengthSMTLibExecutionProtocolSchemaTag
           , textField executable
           , FingerprintSequence $ map textField
-              lengthSMTLibExecutionArgumentVector
+              $ configuredArgumentVector timeout resource
+          , FingerprintBytes lengthSMTLibExecutionStartupCommandBytes
+          , FingerprintBytes lengthSMTLibExecutionQueryResetBytes
           , FingerprintBytes lengthSMTLibExecutionEnvironmentPolicyTag
           , FingerprintBytes lengthSMTLibExecutionWorkingDirectoryPolicyTag
           , optionalBytesField

@@ -6,7 +6,8 @@
 -- expected SHA-256 digest, speaks the required protocol, or has any solver
 -- capability.  Those facts must be probed and bound by a later live session.
 --
--- V1 uses a fixed direct argument vector and an exact empty child environment;
+-- V2 uses a fixed direct argument prefix, policy-derived resource arguments,
+-- and an exact empty child environment;
 -- it never invokes a shell or inherits ambient variables.  A live session
 -- must also create and select a fresh empty working directory instead of
 -- inheriting the caller's directory.  The optional
@@ -21,12 +22,17 @@
 -- remain heuristic, and only independent Length replay can create
 -- model-relative counterexample evidence.
 --
--- Opaque configurations support equality as exact policy equivalence.  V1
+-- Opaque configurations support equality as exact policy equivalence.  V2
 -- contains no inherited environment or secret launch material; a future
 -- schema must revisit that API before admitting any secret-bearing field.
 module Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
   ( lengthSMTLibExecutionPolicySchemaTag
+  , lengthSMTLibExecutionProtocolSchemaTag
+  , lengthSMTLibExecutionArgumentPrefix
   , lengthSMTLibExecutionArgumentVector
+  , lengthSMTLibExecutionConfiguredArgumentVector
+  , lengthSMTLibExecutionStartupCommandBytes
+  , lengthSMTLibExecutionQueryResetBytes
   , lengthSMTLibExecutionEnvironmentPolicyTag
   , lengthSMTLibExecutionWorkingDirectoryPolicyTag
   , lengthSMTLibExecutionExpectedDigestSchemaTag

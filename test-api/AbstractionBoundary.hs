@@ -87,6 +87,7 @@ import Language.Haskell.Synthesis.Query
 import Language.Haskell.Synthesis.Semantic.Length
 import Language.Haskell.Synthesis.Semantic.Length.Evaluate
 import Language.Haskell.Synthesis.Semantic.Length.Problem
+import Language.Haskell.Synthesis.Semantic.Length.SMTLib
 import Language.Haskell.Synthesis.Semantic.Problem
 import Language.Haskell.Synthesis.Search (SearchBatch)
 import Language.Haskell.Synthesis.Type (Type)
@@ -205,6 +206,10 @@ forbiddenConstructionAttempts =
   , noGeneric
       @(CheckedLengthProblem LengthVariableProbe LengthLocalProbe)
       "CheckedLengthProblem"
+  , noGeneric @LengthSMTLibLimits "LengthSMTLibLimits"
+  , noGeneric
+      @(LengthSMTLibQuery LengthVariableProbe LengthLocalProbe)
+      "LengthSMTLibQuery"
   , ( "CheckedLengthContract variable unexpectedly permits Coercible"
     , forbiddenCheckedLengthContractCoercion `seq` ()
     )
@@ -240,6 +245,12 @@ forbiddenConstructionAttempts =
     )
   , ( "CheckedLengthProblem local unexpectedly permits Coercible"
     , forbiddenCheckedLengthProblemLocalCoercion `seq` ()
+    )
+  , ( "LengthSMTLibQuery identity unexpectedly permits Coercible"
+    , forbiddenLengthSMTLibQueryIdentityCoercion `seq` ()
+    )
+  , ( "LengthSMTLibQuery local unexpectedly permits Coercible"
+    , forbiddenLengthSMTLibQueryLocalCoercion `seq` ()
     )
   , noGeneric @(Inventory Int ()) "Inventory"
   , noGeneric @(PreparedClassIndex Int) "PreparedClassIndex"
@@ -718,6 +729,16 @@ forbiddenCheckedLengthProblemLocalCoercion
   :: CheckedLengthProblem LengthVariableProbe LengthLocalProbe
   -> CheckedLengthProblem LengthVariableProbe OtherLengthLocalProbe
 forbiddenCheckedLengthProblemLocalCoercion = coerce
+
+forbiddenLengthSMTLibQueryIdentityCoercion
+  :: LengthSMTLibQuery LengthVariableProbe LengthLocalProbe
+  -> LengthSMTLibQuery OtherLengthVariableProbe LengthLocalProbe
+forbiddenLengthSMTLibQueryIdentityCoercion = coerce
+
+forbiddenLengthSMTLibQueryLocalCoercion
+  :: LengthSMTLibQuery LengthVariableProbe LengthLocalProbe
+  -> LengthSMTLibQuery LengthVariableProbe OtherLengthLocalProbe
+forbiddenLengthSMTLibQueryLocalCoercion = coerce
 
 -- Selecting 'coerce' forces the built-in coercion evidence without requiring
 -- a value of either abstract type.

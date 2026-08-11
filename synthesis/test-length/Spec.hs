@@ -1,7 +1,8 @@
 module Main (main) where
 
 import Control.Exception (evaluate)
-import Data.List (sort)
+import Data.List (isInfixOf, sort)
+import Data.Word (Word8)
 import Numeric.Natural (Natural)
 import System.Timeout (timeout)
 import Unsafe.Coerce (unsafeCoerce)
@@ -40,6 +41,7 @@ import Language.Haskell.Synthesis.Name
 import qualified Language.Haskell.Synthesis.Semantic.Length as Length
 import qualified Language.Haskell.Synthesis.Semantic.Length.Evaluate as Evaluate
 import qualified Language.Haskell.Synthesis.Semantic.Length.Problem as LengthProblem
+import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib as SMTLib
 import Language.Haskell.Synthesis.Type (Type (..), Variable (..))
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit
@@ -61,6 +63,7 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , sessionTests
   , candidateProblemTests
   , problemReplayTests
+  , smtLibTests
   , evaluationTests
   , normalizationTests
   , productiveBoundTests
@@ -1029,6 +1032,234 @@ problemReplayTests = testGroup "exact candidate problem replay"
         $ Evaluate.validateLengthProblemCounterexample
             (evaluationLimitsWith 1 1) scaledResult
             $ Evaluate.LengthProblemAssignment [1]
+  ]
+
+smtLibTests :: TestTree
+smtLibTests = testGroup "bounded QF_LIA query and model boundary"
+  [ testCase "emit one exact canonical constant-zero query" $ do
+      problem <- adversarialConstantZeroProblem identityLengthContract
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      SMTLib.lengthSMTLibQuerySchemaTag @?=
+        asciiBytes "djex-length-z3-qf-lia-smtlib2/v1"
+      SMTLib.lengthSMTLibQueryLogic @?= asciiBytes "QF_LIA"
+      SMTLib.lengthSMTLibQueryInputSymbols query @?=
+        [asciiBytes "djex_length_input_0"]
+      SMTLib.lengthSMTLibQueryCheckBytes query @?=
+        asciiBytes constantZeroSMTLibCheck
+      SMTLib.lengthSMTLibQueryInputValueRequestBytes query @?=
+        Just (asciiBytes "(get-value (djex_length_input_0))\n")
+      Djex.behavioralProblemFingerprint
+          (SMTLib.lengthSMTLibQueryBehavioralProblem query) @?=
+        Djex.behavioralProblemFingerprint
+          (LengthProblem.checkedLengthProblemBehavioralProblem problem)
+  , testCase "decode input symbols order independently and replay the model" $ do
+      problem <- adversarialBinaryConstantZeroProblem identityLengthContract
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      case SMTLib.lengthSMTLibQueryInputSymbols query of
+        [first, second] -> do
+          evidence <- expectCounterexample
+            $ SMTLib.validateLengthSMTLibCounterexample
+                Evaluate.defaultLengthEvaluationLimits query
+                [ smtIntegerBinding second 7
+                , smtIntegerBinding first 3
+                ]
+          receipt <- expectRight $ Djex.replayBehavioralEvidence
+            (LengthProblem.checkedLengthProblemBehavioralProblem problem)
+            evidence
+          Evaluate.validatedLengthCounterexampleInputs receipt @?= [3, 7]
+          Evaluate.validatedLengthCounterexampleResult receipt @?= 0
+        symbols -> assertFailure $ "unexpected input symbols: " ++ show symbols
+  , testCase "omit value requests for a zero-input counterexample" $ do
+      let result = Length.LengthVariable Length.LengthResult
+          source = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result $ Length.LengthLiteral 1
+      problem <- adversarialZeroInputProblem source
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      SMTLib.lengthSMTLibQueryInputSymbols query @?= []
+      SMTLib.lengthSMTLibQueryInputValueRequestBytes query @?= Nothing
+      evidence <- expectCounterexample
+        $ SMTLib.validateLengthSMTLibCounterexample
+            Evaluate.defaultLengthEvaluationLimits query []
+      receipt <- expectRight $ Djex.replayBehavioralEvidence
+        (LengthProblem.checkedLengthProblemBehavioralProblem problem) evidence
+      Evaluate.validatedLengthCounterexampleInputs receipt @?= []
+      Evaluate.validatedLengthCounterexampleResult receipt @?= 0
+  , testCase "translate every normalized Length operator into QF_LIA" $ do
+      let input = Length.LengthVariable $ Length.LengthInput 0
+          literal = Length.LengthLiteral
+          bounded expression = Length.LengthAtMost expression $ literal 100
+          source = contractWith
+            (Length.LengthAll
+              [ bounded $ Length.LengthSum [input, literal 1]
+              , bounded $ Length.LengthScale 2 input
+              , bounded $ Length.LengthMonus input $ literal 1
+              , bounded $ Length.LengthMinimum input $ literal 2
+              , bounded $ Length.LengthMaximum input $ literal 3
+              , bounded $ Length.LengthIf
+                  (Length.LengthAtMost input $ literal 4)
+                  input
+                  $ literal 1
+              , Length.LengthEqual input $ literal 5
+              , Length.LengthNot $ Length.LengthEqual input $ literal 6
+              ])
+            $ Length.LengthTruth False
+      problem <- adversarialConstantZeroProblem source
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      let script = map (toEnum . fromIntegral)
+            $ SMTLib.lengthSMTLibQueryCheckBytes query
+          expectedFragments =
+            [ "(<= (+ djex_length_input_0 1) 100)"
+            , "(<= (* 2 djex_length_input_0) 100)"
+            , "(<= (djex_nat_monus djex_length_input_0 1) 100)"
+            , "(<= (djex_nat_min djex_length_input_0 2) 100)"
+            , "(<= (djex_nat_max djex_length_input_0 3) 100)"
+            , "(<= (ite (<= djex_length_input_0 4) \
+                \djex_length_input_0 1) 100)"
+            , "(= djex_length_input_0 5)"
+            , "(not (= djex_length_input_0 6))"
+            ]
+      mapM_ (\fragment -> assertBool
+          ("missing translated fragment: " ++ fragment)
+          $ fragment `isInfixOf` script)
+        expectedFragments
+      evidence <- expectCounterexample
+        $ SMTLib.validateLengthSMTLibCounterexample
+            Evaluate.defaultLengthEvaluationLimits query
+            [smtIntegerBinding (asciiBytes "djex_length_input_0") 5]
+      _ <- expectRight $ Djex.replayBehavioralEvidence
+        (LengthProblem.checkedLengthProblemBehavioralProblem problem) evidence
+      pure ()
+  , testCase "replay a decoded identity model without manufacturing evidence" $ do
+      (session, contract, candidate) <- realListIdentityFixture
+        $ TypeVariable $ FlexibleVariable 0
+      problem <- expectRight $ LengthProblem.sealLengthTypedCandidateProblem
+        LengthProblem.defaultLengthProblemLimits session contract candidate
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      case SMTLib.lengthSMTLibQueryInputSymbols query of
+        [symbol] -> expectNoCounterexample
+          $ SMTLib.validateLengthSMTLibCounterexample
+              Evaluate.defaultLengthEvaluationLimits query
+              [smtIntegerBinding symbol 8]
+        symbols -> assertFailure $ "unexpected input symbols: " ++ show symbols
+  , testCase "reject malformed decoded models before independent replay" $ do
+      unaryProblem <- adversarialConstantZeroProblem identityLengthContract
+      unaryQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits unaryProblem
+      binaryProblem <- adversarialBinaryConstantZeroProblem
+        identityLengthContract
+      binaryQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits binaryProblem
+      case ( SMTLib.lengthSMTLibQueryInputSymbols unaryQuery
+           , SMTLib.lengthSMTLibQueryInputSymbols binaryQuery
+           ) of
+        ([unary], [first, _]) -> do
+          let validateUnary = SMTLib.validateLengthSMTLibCounterexample
+                Evaluate.defaultLengthEvaluationLimits unaryQuery
+              unknown = asciiBytes "djex.input.999"
+          assertLeft (SMTLib.LengthSMTLibBindingArityMismatch 1 0)
+            $ validateUnary []
+          assertLeft (SMTLib.LengthSMTLibBindingArityMismatch 1 2)
+            $ validateUnary
+                [smtIntegerBinding unary 1, smtIntegerBinding unary 2]
+          assertLeft (SMTLib.LengthSMTLibUnknownInputSymbol 0 unknown)
+            $ validateUnary [smtIntegerBinding unknown 1]
+          assertLeft (SMTLib.LengthSMTLibNegativeInputValue 0 unary (-1))
+            $ validateUnary [smtIntegerBinding unary (-1)]
+          assertLeft (SMTLib.LengthSMTLibDuplicateInputSymbol 1 first)
+            $ SMTLib.validateLengthSMTLibCounterexample
+                Evaluate.defaultLengthEvaluationLimits binaryQuery
+                [smtIntegerBinding first 1, smtIntegerBinding first 2]
+          assertLeft
+            (SMTLib.LengthSMTLibCounterexampleReplayRejected
+              $ Evaluate.LengthEvaluationValueBitLimitExceeded
+                  (Evaluate.LengthProblemInputValue 0) 2 3)
+            $ SMTLib.validateLengthSMTLibCounterexample
+                (evaluationLimitsWith 2 8) unaryQuery
+                [smtIntegerBinding unary 4]
+
+          let cyclicBindings = smtIntegerBinding unary 1 : cyclicBindings
+          cyclicBindingsResult <- evaluateWithin $ validateUnary cyclicBindings
+          assertLeft (SMTLib.LengthSMTLibBindingArityMismatch 1 2)
+            cyclicBindingsResult
+
+          let cyclicSymbol = fromIntegral (fromEnum 'x') : cyclicSymbol
+              symbolLimit = fromIntegral $ length unary
+          cyclicSymbolResult <- evaluateWithin $ validateUnary
+            [smtIntegerBinding cyclicSymbol 1]
+          assertLeft
+            (SMTLib.LengthSMTLibBindingSymbolByteLimitExceeded
+              0 symbolLimit (symbolLimit + 1))
+            cyclicSymbolResult
+        symbols -> assertFailure $ "unexpected input symbols: " ++ show symbols
+  , testCase "bind query identity to the exact checked problem" $ do
+      identityProblem <- adversarialConstantZeroProblem identityLengthContract
+      trivialProblem <- adversarialConstantZeroProblem trivialLengthContract
+      identityQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits identityProblem
+      trivialQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits trivialProblem
+      assertBool "distinct checked problems shared one SMT-LIB query identity" $
+        SMTLib.lengthSMTLibQueryFingerprint identityQuery /=
+          SMTLib.lengthSMTLibQueryFingerprint trivialQuery
+  , testCase "validate declaration and emission bounds productively" $ do
+      SMTLib.mkLengthSMTLibLimits SMTLib.defaultLengthSMTLibLimitSource @?=
+        Right SMTLib.defaultLengthSMTLibLimits
+      SMTLib.lengthSMTLibCommandByteLimit SMTLib.defaultLengthSMTLibLimits
+        @?= 65536
+      SMTLib.lengthSMTLibFingerprintByteLimit
+          SMTLib.defaultLengthSMTLibLimits @?= 262144
+      SMTLib.lengthSMTLibNumeralBitLimit SMTLib.defaultLengthSMTLibLimits
+        @?= 4096
+      assertLeft
+        (SMTLib.NegativeLengthSMTLibLimit
+          SMTLib.LengthSMTLibNumeralBits (-1))
+        $ SMTLib.mkLengthSMTLibLimits
+            SMTLib.defaultLengthSMTLibLimitSource
+              { SMTLib.lengthSMTLibLimitSourceNumeralBits = -1 }
+
+      problem <- adversarialConstantZeroProblem identityLengthContract
+      noCommand <- expectRight $ SMTLib.mkLengthSMTLibLimits
+        SMTLib.defaultLengthSMTLibLimitSource
+          { SMTLib.lengthSMTLibLimitSourceCommandBytes = 0 }
+      assertLeft
+        (SMTLib.LengthSMTLibCommandByteLimitExceeded
+          SMTLib.LengthSMTLibCheckCommand 0 1)
+        $ SMTLib.sealLengthSMTLibQuery noCommand problem
+
+      noFingerprint <- expectRight $ SMTLib.mkLengthSMTLibLimits
+        SMTLib.defaultLengthSMTLibLimitSource
+          { SMTLib.lengthSMTLibLimitSourceFingerprintBytes = 0 }
+      assertLeft (SMTLib.LengthSMTLibFingerprintByteLimitExceeded 0 1)
+        $ SMTLib.sealLengthSMTLibQuery noFingerprint problem
+
+      scaledProblem <- adversarialScaledProviderProblem 2
+        identityLengthContract
+      oneBitNumerals <- expectRight $ SMTLib.mkLengthSMTLibLimits
+        SMTLib.defaultLengthSMTLibLimitSource
+          { SMTLib.lengthSMTLibLimitSourceNumeralBits = 1 }
+      assertLeft
+        (SMTLib.LengthSMTLibNumeralBitLimitExceeded
+          SMTLib.LengthSMTLibScaleNumeral 1 2)
+        $ SMTLib.sealLengthSMTLibQuery oneBitNumerals scaledProblem
+  ]
+
+constantZeroSMTLibCheck :: String
+constantZeroSMTLibCheck = unlines
+  [ "(set-logic QF_LIA)"
+  , "(set-option :produce-models true)"
+  , "(set-option :random-seed 0)"
+  , "(define-fun djex_nat_monus ((x Int) (y Int)) Int (ite (<= y x) (- x y) 0))"
+  , "(define-fun djex_nat_min ((x Int) (y Int)) Int (ite (<= x y) x y))"
+  , "(define-fun djex_nat_max ((x Int) (y Int)) Int (ite (<= x y) y x))"
+  , "(declare-const djex_length_input_0 Int)"
+  , "(assert (<= 0 djex_length_input_0))"
+  , "(assert (not (= djex_length_input_0 0)))"
+  , "(check-sat)"
   ]
 
 limitTests :: TestTree
@@ -2599,6 +2830,61 @@ adversarialConstantZeroProblem contractSource = do
     LengthProblem.defaultLengthProblemLimits session contract
     $ adversarialTypedCandidate $ Right graph
 
+adversarialZeroInputProblem
+  :: Length.LengthContractSource
+  -> IO
+      (LengthProblem.CheckedLengthProblem
+        AdversarialIdentity AdversarialLocal)
+adversarialZeroInputProblem contractSource = do
+  session <- adversarialLengthSession [] []
+  let source = Djex.TermGraphSource (Djex.termNodeId 0)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode adversarialClosedList
+              $ Djex.TypedGlobal (Djex.occurrenceId 0) listName
+          )
+        ]
+  contract <- adversarialLengthContract
+    session adversarialClosedList contractSource
+  graph <- sealAdversarialGraph source
+  expectRight $ LengthProblem.sealLengthTypedCandidateProblem
+    LengthProblem.defaultLengthProblemLimits session contract
+    $ adversarialTypedCandidate $ Right graph
+
+adversarialBinaryConstantZeroProblem
+  :: Length.LengthContractSource
+  -> IO
+      (LengthProblem.CheckedLengthProblem
+        AdversarialIdentity AdversarialLocal)
+adversarialBinaryConstantZeroProblem contractSource = do
+  session <- adversarialLengthSession [] []
+  let target = FunctionType adversarialClosedList
+        $ FunctionType adversarialClosedList adversarialClosedList
+      source = Djex.TermGraphSource (Djex.termNodeId 1)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode adversarialClosedList
+              $ Djex.TypedGlobal (Djex.occurrenceId 2) listName
+          )
+        , ( Djex.termNodeId 1
+          , Djex.TermNode target
+              $ Djex.TypedLambda
+                  [ Djex.TypedPattern
+                      (Djex.occurrenceId 0)
+                      adversarialClosedList
+                      Djex.TypedWildcard
+                  , Djex.TypedPattern
+                      (Djex.occurrenceId 1)
+                      adversarialClosedList
+                      Djex.TypedWildcard
+                  ]
+                  (Djex.termNodeId 0)
+          )
+        ]
+  contract <- adversarialLengthContract session target contractSource
+  graph <- sealAdversarialGraph source
+  expectRight $ LengthProblem.sealLengthTypedCandidateProblem
+    LengthProblem.defaultLengthProblemLimits session contract
+    $ adversarialTypedCandidate $ Right graph
+
 adversarialConstantProviderProblem
   :: Natural
   -> Length.LengthContractSource
@@ -2862,6 +3148,18 @@ evaluationLimitsWith assignmentBits intermediateBits = case
       } of
   Left failure -> error $ "invalid evaluation test limits: " ++ show failure
   Right limits -> limits
+
+asciiBytes :: String -> [Word8]
+asciiBytes = map $ fromIntegral . fromEnum
+
+smtIntegerBinding
+  :: [Word8]
+  -> Integer
+  -> SMTLib.LengthSMTLibIntegerBinding
+smtIntegerBinding symbol value = SMTLib.LengthSMTLibIntegerBinding
+  { SMTLib.lengthSMTLibIntegerBindingSymbol = symbol
+  , SMTLib.lengthSMTLibIntegerBindingValue = value
+  }
 
 expectName :: String -> IO Name
 expectName = expectRight . parseName

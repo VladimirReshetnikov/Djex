@@ -284,6 +284,15 @@ permission to prune other candidates. A future Z3 adapter can rank or challenge
 candidates, but raw solver output is not trusted evidence without this
 independent replay.
 
+`Language.Haskell.Synthesis.Semantic.Length.SMTLib` is a pure Z3-facing
+translation boundary that seals an opaque nominal QF_LIA query from one exact
+`CheckedLengthProblem`. It emits bounded canonical check commands and an
+input-only `get-value` command, but launches no solver and assigns no authority
+to `sat`, `unsat`, or `unknown`. `validateLengthSMTLibCounterexample` accepts
+decoded integer bindings only for that query's input symbols and independently
+replays them against the retained problem; raw model text and even `unsat`
+remain heuristic observations, never pruning permission or proof.
+
 ## Building
 
 Build and test the complete graph from the repository root:

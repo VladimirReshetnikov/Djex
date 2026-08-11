@@ -157,6 +157,13 @@ Domain-owned checkers may bind independently replayed receipts to the same
 identities, and a public consumer can recover a receipt only through successful
 replay against the exact problem.
 
+`Language.Haskell.Synthesis.Semantic.Length.SMTLib` provides a pure canonical
+QF_LIA boundary over an exact checked length problem. Its opaque nominal query
+contains bounded check and input-only `get-value` commands; it neither starts a
+solver nor associates a raw solver status. Decoded input bindings can produce a
+counterexample receipt only through independent replay against the retained
+problem, while raw models and even `unsat` remain heuristic observations.
+
 `Generated` separates backend-local identity from structural global `Name`s.
 Its checked `DefinitionName` narrows top-level output names once, and its scope
 checker and renderer prevent free locals, binder reuse, capture, and ambiguous

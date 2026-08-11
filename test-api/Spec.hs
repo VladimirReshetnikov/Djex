@@ -302,6 +302,8 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "forbiddenCheckedLengthCandidateLocalCoercion"
                       , "forbiddenCheckedLengthProblemIdentityCoercion"
                       , "forbiddenCheckedLengthProblemLocalCoercion"
+                      , "forbiddenLengthSMTLibQueryIdentityCoercion"
+                      , "forbiddenLengthSMTLibQueryLocalCoercion"
                       ]
                   ) ||
                   ( "not in scope" `isInfixOf` message &&

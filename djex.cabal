@@ -154,6 +154,7 @@ Library
     Language.Haskell.Synthesis.Search
     Language.Haskell.Synthesis.Selection
     Language.Haskell.Synthesis.Semantic.Observation
+    Language.Haskell.Synthesis.Semantic.Problem
     Language.Haskell.Synthesis.Type
     Language.Haskell.Synthesis.TypeAtom
     Language.Haskell.Synthesis.TypeSynonym
@@ -234,6 +235,7 @@ Library
     Language.Haskell.Synthesis.Internal.Alpha
     Language.Haskell.Synthesis.Internal.Fingerprint
     Language.Haskell.Synthesis.Internal.InstanceHead
+    Language.Haskell.Synthesis.Internal.Semantic.Problem
     Language.Haskell.Synthesis.Internal.TypedCandidate
     Language.Haskell.Exference.Core.Internal.FlexibleIds
     Language.Haskell.Exference.Core.Internal.Candidate
@@ -312,8 +314,8 @@ Test-Suite synthesis-tests
   Hs-Source-Dirs:   synthesis/test
   Build-Depends:    djex
 
--- Compile the private fingerprint builder as a home module so its canonical
--- encoding can be tested without exposing construction through the library.
+-- Compile the private fingerprint builder and behavioral problem sealer as
+-- home modules so their invariants can be tested without exposing construction.
 Test-Suite synthesis-fingerprint-tests
   import:           tasty-hunit-test, deepseq-dep
   Type:             exitcode-stdio-1.0
@@ -321,9 +323,12 @@ Test-Suite synthesis-fingerprint-tests
   Hs-Source-Dirs:
     synthesis/test-fingerprint
     synthesis/src
+    synthesis/internal
   Other-Modules:
     Language.Haskell.Synthesis.Internal.Fingerprint
+    Language.Haskell.Synthesis.Internal.Semantic.Problem
     Language.Haskell.Synthesis.Name
+    Language.Haskell.Synthesis.Semantic.Observation
 
 -- The one library exposes the historical Djinn facade, its core API, and the
 -- checked adapter together.

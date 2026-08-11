@@ -118,6 +118,9 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Candidate` | Generated output with residual constraints and backend-owned details, plus common candidate renderers. |
 | `Language.Haskell.Synthesis.Selection` | First, best, lookahead-best, all, and preferred-tier policies over lazy result batches. |
 | `Language.Haskell.Synthesis.Diagnostic` | Severity, stable code, checked source locations/spans, ordered context, and deterministic rendering. |
+| `Language.Haskell.Synthesis.Fingerprint` | Public inspection of opaque, nominal, collision-free canonical identities; construction and byte budgets remain package-private. |
+| `Language.Haskell.Synthesis.Semantic.Observation` | Raw three-valued solver and four-valued behavioral reports without candidate association or evidence claims. |
+| `Language.Haskell.Synthesis.Semantic.Problem` | Bounded raw artifacts associated with exact domain, inventory, encoding, candidate, and problem identities; every raw result is restricted to heuristic ranking, while authoritative evidence has only a future private construction seam. |
 | `Language.Haskell.Synthesis.Generated` | Scope-aware expressions, patterns, clauses, holes, mixed term/type application spines, bottom-up rewriting, simplification, alpha-equivalence, substitution, and Haskell rendering through the common qualification policy. |
 | `Language.Haskell.Synthesis.TypedGenerated` | Bounded typed candidate graphs with stable node, source-occurrence, and certificate identities; checked application and visible-specialization witnesses; a neutral sealing pass; exact graph metrics; and one-way projection to `Generated`. |
 | `Language.Haskell.Synthesis.Observability` | Opaque exact counters, stable cross-engine metric codes, deterministic aggregation, and deliberately non-strict snapshots that can be inspected independently of a lazy result. |
@@ -126,6 +129,17 @@ Logical evidence is independent of operational progress. A truncated search can
 return validated candidates; a finished heuristic search can return no logical
 conclusion. Candidate selection is likewise a frontend policy and does not
 change backend search semantics.
+
+Behavioral observations remain independent of logical evidence too.  A domain
+module constructs all four structural fingerprints before sealing a
+`BehavioralProblem`; raw artifact format and payload bytes must fit explicit
+limits before a solver or behavioral report can be associated with that exact
+tuple. Replay compares domain, inventory, encoding, candidate, and complete
+problem in that order and rejects the first mismatch. Even an `unsat` report is
+only relative to its encoding and grants `HeuristicRankingOnly`. The opaque
+`BehavioralEvidence` seam has no public constructor or raw-report conversion;
+a later authoritative checker must bind its own receipt to the same identities,
+and a public consumer can recover that receipt only through successful replay.
 
 `Generated` separates backend-local identity from structural global `Name`s.
 Its checked `DefinitionName` narrows top-level output names once, and its scope

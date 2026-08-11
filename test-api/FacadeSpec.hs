@@ -10,6 +10,9 @@ import Language.Haskell.Djex
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit ((@?=), assertBool, testCase)
 
+type FacadeBehavioralDomain = ()
+type FacadeRawArtifact = ()
+
 facadeTests :: TestTree
 facadeTests = testGroup "public Djex facade"
   [ testCase "enumerates both checked backends" $
@@ -56,6 +59,30 @@ facadeTests = testGroup "public Djex facade"
       solver @?= UnknownObservation "timeout"
       behavioralObservationStatus behavior @?= BehaviorValidatedWithin
       behavior @?= BehaviorBoundedObservation 7
+  , testCase "exports bounded raw behavioral problem observations" $ do
+      let limits = mkRawArtifactLimits 4 3
+      raw <- expectRight
+        (mkBoundedRawArtifact limits [0x72, 0x61, 0x77] [1, 2, 3]
+          :: Either RawArtifactLimitError
+              (BoundedRawArtifact FacadeRawArtifact))
+      rawArtifactFormatByteLimit limits @?= 4
+      rawArtifactPayloadByteLimit limits @?= 3
+      boundedRawArtifactFormat raw @?= [0x72, 0x61, 0x77]
+      boundedRawArtifactBytes raw @?= [1, 2, 3]
+      mkBoundedRawArtifact limits [0, 1, 2, 3, 4] [] @?=
+        (Left $ RawArtifactLimitExceeded RawArtifactFormat 4 5
+          :: Either RawArtifactLimitError
+              (BoundedRawArtifact FacadeRawArtifact))
+      inspectBehavioralProblem `seq` inspectBehavioralEvidence `seq` pure ()
+      [ RawSolverModelHint
+        , RawSolverUnsatRelativeToEncoding
+        , RawSolverUnknown
+        , RawBehaviorEstablishedClaim
+        , RawBehaviorCounterexampleClaim
+        , RawBehaviorBoundedValidation
+        , RawBehaviorUnknown
+        ] @?= [minBound .. maxBound]
+      (HeuristicRankingOnly :: RawObservationUse) @?= minBound
   , testCase "exports the prepared class authority" $ do
       className <- expectRight $ mkIdentifier "Class"
       missingName <- expectRight $ mkIdentifier "Missing"
@@ -568,6 +595,36 @@ facadeTests = testGroup "public Djex facade"
 inspectFingerprint :: Fingerprint subject -> ([Word8], String)
 inspectFingerprint fingerprint =
   (fingerprintCanonicalBytes fingerprint, fingerprintCode fingerprint)
+
+inspectBehavioralProblem
+  :: BehavioralProblem FacadeBehavioralDomain
+  -> ([Word8], String, String, String, String)
+inspectBehavioralProblem problem =
+  ( behavioralProblemDomain problem
+  , fingerprintCode $ behavioralProblemInventoryFingerprint problem
+  , fingerprintCode $ behavioralProblemEncodingFingerprint problem
+  , fingerprintCode $ behavioralProblemCandidateFingerprint problem
+  , fingerprintCode $ behavioralProblemFingerprint problem
+  )
+
+inspectBehavioralEvidence
+  :: BehavioralProblem FacadeBehavioralDomain
+  -> BehavioralEvidence FacadeBehavioralDomain String
+  -> ( [Word8]
+     , String
+     , String
+     , String
+     , String
+     , Either ReplayMismatch String
+     )
+inspectBehavioralEvidence problem evidence =
+  ( behavioralEvidenceDomain evidence
+  , fingerprintCode $ behavioralEvidenceInventoryFingerprint evidence
+  , fingerprintCode $ behavioralEvidenceEncodingFingerprint evidence
+  , fingerprintCode $ behavioralEvidenceCandidateFingerprint evidence
+  , fingerprintCode $ behavioralEvidenceProblemFingerprint evidence
+  , replayBehavioralEvidence problem evidence
+  )
 
 expectRight :: Show error => Either error value -> IO value
 expectRight result = case result of

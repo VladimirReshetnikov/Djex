@@ -11,7 +11,9 @@ module Language.Haskell.Synthesis.Internal.Fingerprint
   ( Fingerprint (..)
   , FingerprintBuilder (..)
   , FingerprintField (..)
+  , FingerprintLimitError (..)
   , buildFingerprint
+  , buildFingerprintWithin
   , fingerprintCanonicalBytes
   , fingerprintCode
   ) where
@@ -81,6 +83,18 @@ data FingerprintField
   | FingerprintName Name
   deriving (Eq, Ord, Show)
 
+-- | A canonical fingerprint exceeded its caller-supplied byte budget.
+--
+-- The observed size is deliberately capped at @maximum + 1@.  Construction
+-- only needs to distinguish a fitting encoding from an oversized one, and
+-- stopping at that first excess keeps rejection productive for infinite byte
+-- lists and cyclic field structures.
+data FingerprintLimitError = FingerprintLimitExceeded
+  { fingerprintMaximumBytes :: !Natural
+  , fingerprintObservedBytesAtLeast :: !Natural
+  }
+  deriving (Eq, Ord, Show)
+
 -- | Seal a complete builder into its collision-free canonical byte key.
 buildFingerprint :: FingerprintBuilder subject -> Fingerprint subject
 buildFingerprint builder = Fingerprint $
@@ -91,6 +105,33 @@ buildFingerprint builder = Fingerprint $
       (FingerprintBytes $ fingerprintBuilderRole builder)
   ++ encodeField
       (FingerprintSequence $ fingerprintBuilderFields builder)
+
+-- | Seal a fingerprint only when its complete canonical encoding fits within
+-- the given byte budget.
+--
+-- This is not implemented as @length . buildFingerprint@: the ordinary
+-- encoding writes a field's payload length before its payload and therefore
+-- must first traverse that payload.  The bounded encoder carries each
+-- payload's exact byte count alongside its bytes, charges every eventual
+-- output byte against the remaining budget, and stops following an infinite
+-- byte list, field list, or cyclic nested field at the first excess.  This
+-- bounds structural traversal by the encoded-byte budget; it does not claim a
+-- constant-time bound for arithmetic on one already-constructed unbounded
+-- 'Natural' or for inspection of one validated 'Name'.
+buildFingerprintWithin
+  :: Natural
+  -> FingerprintBuilder subject
+  -> Either FingerprintLimitError (Fingerprint subject)
+buildFingerprintWithin maximumBytes builder = do
+  (magic, _, afterMagic) <- retainBytes
+    maximumBytes maximumBytes fingerprintMagic
+  (version, _, afterVersion) <- encodeFieldWithin maximumBytes afterMagic
+    $ FingerprintNatural $ fingerprintBuilderVersion builder
+  (role, _, afterRole) <- encodeFieldWithin maximumBytes afterVersion
+    $ FingerprintBytes $ fingerprintBuilderRole builder
+  (fields, _, _) <- encodeFieldWithin maximumBytes afterRole
+    $ FingerprintSequence $ fingerprintBuilderFields builder
+  pure $ Fingerprint $ magic ++ version ++ role ++ fields
 
 -- | Recover the exact canonical key bytes.
 fingerprintCanonicalBytes :: Fingerprint subject -> [Word8]
@@ -121,6 +162,118 @@ encodeField field = case field of
     ++ encodeField (FingerprintSequence fields)
   FingerprintName name -> sizedField 0x05 $
     encodeField $ FingerprintSequence $ nameFields name
+
+-- Count output bytes before recursively entering a payload.  Although a
+-- sized field emits its length before its payload, accounting for its tag,
+-- then payload, then length is byte-count equivalent and makes a cyclic
+-- payload consume the finite budget productively.
+encodeFieldWithin
+  :: Natural
+  -> Natural
+  -> FingerprintField
+  -> Either FingerprintLimitError ([Word8], Natural, Natural)
+encodeFieldWithin maximumBytes remaining field = case field of
+  FingerprintNatural value ->
+    sizedFieldWithin maximumBytes remaining 0x01
+      $ \available -> encodeNaturalWithin maximumBytes available value
+  FingerprintBytes bytes ->
+    sizedFieldWithin maximumBytes remaining 0x02
+      $ \available -> retainBytes maximumBytes available bytes
+  FingerprintSequence fields ->
+    sizedFieldWithin maximumBytes remaining 0x03
+      $ \available -> encodeFieldsWithin maximumBytes available fields
+  FingerprintTag tag fields ->
+    sizedFieldWithin maximumBytes remaining 0x04 $ \afterTag -> do
+      (encodedTag, encodedTagLength, afterEncodedTag) <-
+        encodeFieldWithin maximumBytes afterTag $ FingerprintBytes tag
+      (encodedFields, encodedFieldsLength, afterEncodedFields) <-
+        encodeFieldWithin maximumBytes afterEncodedTag
+          $ FingerprintSequence fields
+      pure
+        ( encodedTag ++ encodedFields
+        , encodedTagLength + encodedFieldsLength
+        , afterEncodedFields
+        )
+  FingerprintName name ->
+    sizedFieldWithin maximumBytes remaining 0x05 $ \available ->
+      encodeFieldWithin maximumBytes available
+        $ FingerprintSequence $ nameFields name
+
+sizedFieldWithin
+  :: Natural
+  -> Natural
+  -> Word8
+  -> (Natural -> Either FingerprintLimitError ([Word8], Natural, Natural))
+  -> Either FingerprintLimitError ([Word8], Natural, Natural)
+sizedFieldWithin maximumBytes remaining fieldTag encodePayload = do
+  (_, tagLength, afterTag) <- retainBytes
+    maximumBytes remaining [fieldTag]
+  (payload, payloadLength, afterPayload) <- encodePayload afterTag
+  (encodedLength, encodedLengthLength, afterLength) <- retainBytes
+    maximumBytes afterPayload $ encodeVariableNatural payloadLength
+  pure
+    ( fieldTag : encodedLength ++ payload
+    , tagLength + encodedLengthLength + payloadLength
+    , afterLength
+    )
+
+encodeFieldsWithin
+  :: Natural
+  -> Natural
+  -> [FingerprintField]
+  -> Either FingerprintLimitError ([Word8], Natural, Natural)
+encodeFieldsWithin _ remaining [] = Right ([], 0, remaining)
+encodeFieldsWithin maximumBytes remaining (field : fields) = do
+  (encodedField, encodedFieldLength, afterField) <-
+    encodeFieldWithin maximumBytes remaining field
+  (encodedFields, encodedFieldsLength, afterFields) <- encodeFieldsWithin
+    maximumBytes afterField fields
+  pure
+    ( encodedField ++ encodedFields
+    , encodedFieldLength + encodedFieldsLength
+    , afterFields
+    )
+
+retainBytes
+  :: Natural
+  -> Natural
+  -> [Word8]
+  -> Either FingerprintLimitError ([Word8], Natural, Natural)
+retainBytes _ remaining [] = Right ([], 0, remaining)
+retainBytes maximumBytes 0 (_ : _) = Left FingerprintLimitExceeded
+  { fingerprintMaximumBytes = maximumBytes
+  , fingerprintObservedBytesAtLeast = maximumBytes + 1
+  }
+retainBytes maximumBytes remaining (byte : bytes) = do
+  (retained, retainedLength, afterBytes) <- retainBytes
+    maximumBytes (remaining - 1) bytes
+  pure (byte : retained, retainedLength + 1, afterBytes)
+
+-- Build the minimal big-endian magnitude by prepending each successively more
+-- significant base-256 digit.  Unlike 'encodeNatural', this does not first
+-- reverse a complete unbounded digit list: once the available output budget is
+-- exhausted, one remaining non-zero quotient is enough to reject the value.
+encodeNaturalWithin
+  :: Natural
+  -> Natural
+  -> Natural
+  -> Either FingerprintLimitError ([Word8], Natural, Natural)
+encodeNaturalWithin maximumBytes remaining 0 =
+  retainBytes maximumBytes remaining [0]
+encodeNaturalWithin maximumBytes remaining value = go remaining value [] 0
+ where
+  go 0 _ _ _ = Left FingerprintLimitExceeded
+    { fingerprintMaximumBytes = maximumBytes
+    , fingerprintObservedBytesAtLeast = maximumBytes + 1
+    }
+  go available unencoded encoded encodedLength =
+    let (quotient, remainder) = unencoded `quotRem` 256
+        retained = fromIntegral remainder : encoded
+        retainedLength = encodedLength + 1
+        afterDigit = available - 1
+    in if quotient == 0
+        then Right (retained, retainedLength, afterDigit)
+        else go afterDigit quotient retained retainedLength
 
 sizedField :: Word8 -> [Word8] -> [Word8]
 sizedField fieldTag payload =

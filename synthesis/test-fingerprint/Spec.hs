@@ -9,12 +9,14 @@ import Data.Word (Word8)
 import Numeric.Natural (Natural)
 
 import qualified Language.Haskell.Synthesis.Internal.Fingerprint as Fingerprint
+import qualified Language.Haskell.Synthesis.Internal.Semantic.Problem as Problem
 import Language.Haskell.Synthesis.Name
   ( Boxity (..)
   , Name
   , parseName
   , tupleName
   )
+import qualified Language.Haskell.Synthesis.Semantic.Observation as Observation
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit
   ( assertBool
@@ -24,6 +26,8 @@ import Test.Tasty.HUnit
   )
 
 data FixtureFingerprint
+data FixtureDomain
+data FixtureArtifact
 
 main :: IO ()
 main = defaultMain fingerprintTests
@@ -124,7 +128,211 @@ fingerprintTests = testGroup "canonical structural fingerprints"
         nameFingerprint qualified /= nameFingerprint unqualified
       assertBool "tuple boxity was erased" $
         nameFingerprint boxedTuple /= nameFingerprint unboxedTuple
+  , boundedFingerprintTests
+  , behavioralProblemTests
   ]
+
+boundedFingerprintTests :: TestTree
+boundedFingerprintTests = testGroup "bounded canonical construction"
+  [ testCase "accept the exact byte boundary and preserve canonical bytes" $ do
+      let builder = fixtureBuilder 1 [0x62]
+            [ Fingerprint.FingerprintNatural 7
+            , Fingerprint.FingerprintBytes [8, 9]
+            ]
+          unbounded = Fingerprint.buildFingerprint builder
+          exactLimit = fromIntegral $ length
+            $ Fingerprint.fingerprintCanonicalBytes unbounded
+      Fingerprint.buildFingerprintWithin exactLimit builder @?= Right unbounded
+      Fingerprint.buildFingerprintWithin (exactLimit - 1) builder @?=
+        Left Fingerprint.FingerprintLimitExceeded
+          { Fingerprint.fingerprintMaximumBytes = exactLimit - 1
+          , Fingerprint.fingerprintObservedBytesAtLeast = exactLimit
+          }
+  , testCase "match every finite field shape at its exact byte boundary" $ do
+      qualifiedName <- expectRight $ parseName "Fixture.Inner.value"
+      let builder = fixtureBuilder 513 (replicate 128 0x72)
+            [ Fingerprint.FingerprintNatural 65536
+            , Fingerprint.FingerprintBytes $ replicate 130 0xab
+            , Fingerprint.FingerprintTag [0x74, 0x61, 0x67]
+                [ Fingerprint.FingerprintSequence
+                    [ Fingerprint.FingerprintNatural 256
+                    , Fingerprint.FingerprintTag [0x6e, 0x65, 0x73, 0x74]
+                        [Fingerprint.FingerprintBytes [1, 2, 3]]
+                    ]
+                , Fingerprint.FingerprintName qualifiedName
+                ]
+            , Fingerprint.FingerprintSequence
+                [ Fingerprint.FingerprintBytes $ replicate 128 0xcd
+                , Fingerprint.FingerprintName qualifiedName
+                ]
+            ]
+          unbounded = Fingerprint.buildFingerprint builder
+          exactLimit = fromIntegral $ length
+            $ Fingerprint.fingerprintCanonicalBytes unbounded
+      Fingerprint.buildFingerprintWithin exactLimit builder @?= Right unbounded
+      Fingerprint.buildFingerprintWithin (exactLimit - 1) builder @?=
+        Left Fingerprint.FingerprintLimitExceeded
+          { Fingerprint.fingerprintMaximumBytes = exactLimit - 1
+          , Fingerprint.fingerprintObservedBytesAtLeast = exactLimit
+          }
+  , testCase "reject infinite byte input after limit plus one" $ do
+      let maximumBytes = 32
+          builder = fixtureBuilder 1 (repeat 0x72) []
+      Fingerprint.buildFingerprintWithin maximumBytes builder @?=
+        Left Fingerprint.FingerprintLimitExceeded
+          { Fingerprint.fingerprintMaximumBytes = maximumBytes
+          , Fingerprint.fingerprintObservedBytesAtLeast = maximumBytes + 1
+          }
+  , testCase "reject a cyclic field without traversing forever" $ do
+      let maximumBytes = 64
+          cyclicField = Fingerprint.FingerprintTag [] [cyclicField]
+          builder = fixtureBuilder 1 [0x72] [cyclicField]
+      Fingerprint.buildFingerprintWithin maximumBytes builder @?=
+        Left Fingerprint.FingerprintLimitExceeded
+          { Fingerprint.fingerprintMaximumBytes = maximumBytes
+          , Fingerprint.fingerprintObservedBytesAtLeast = maximumBytes + 1
+          }
+  , testCase "bound a huge Natural before constructing its full magnitude" $ do
+      let maximumBytes = 32
+          hugeNatural = 256 ^ (100000 :: Int)
+          builder = fixtureBuilder 1 [0x72]
+            [Fingerprint.FingerprintNatural hugeNatural]
+      Fingerprint.buildFingerprintWithin maximumBytes builder @?=
+        Left Fingerprint.FingerprintLimitExceeded
+          { Fingerprint.fingerprintMaximumBytes = maximumBytes
+          , Fingerprint.fingerprintObservedBytesAtLeast = maximumBytes + 1
+          }
+  ]
+
+behavioralProblemTests :: TestTree
+behavioralProblemTests = testGroup "solver-neutral behavioral problem envelope"
+  [ testCase "bound exact raw bytes productively in fixed part order" $ do
+      let limits = Problem.mkRawArtifactLimits 2 3
+      artifact <- expectRight
+        (Problem.mkBoundedRawArtifact limits [1, 2] [3, 4, 5]
+          :: Either Problem.RawArtifactLimitError
+              (Problem.BoundedRawArtifact FixtureArtifact))
+      Problem.boundedRawArtifactFormat artifact @?= [1, 2]
+      Problem.boundedRawArtifactBytes artifact @?= [3, 4, 5]
+      Problem.mkBoundedRawArtifact limits [1, 2, 3] (repeat 4) @?=
+        Left (Problem.RawArtifactLimitExceeded
+          Problem.RawArtifactFormat 2 3)
+      Problem.mkBoundedRawArtifact limits [1] (repeat 4) @?=
+        Left (Problem.RawArtifactLimitExceeded
+          Problem.RawArtifactPayload 3 4)
+  , testCase "associate every raw solver result as heuristic-only" $ do
+      artifact <- fixtureArtifact
+      let problem = fixtureProblem [0x64] 1 2 3 4
+          observations =
+            [ Observation.SatisfiableObservation artifact
+            , Observation.UnsatisfiableObservation artifact
+            , Observation.UnknownObservation artifact
+            ]
+          associated = map (Problem.associateSolverObservation problem)
+            observations
+      map Problem.associatedObservationResultStrength associated @?=
+        [ Problem.RawSolverModelHint
+        , Problem.RawSolverUnsatRelativeToEncoding
+        , Problem.RawSolverUnknown
+        ]
+      map Problem.associatedObservationUse associated @?=
+        replicate 3 Problem.HeuristicRankingOnly
+      map (Problem.replayAssociatedObservation problem) associated @?=
+        map Right observations
+      map Problem.associatedObservationInventoryFingerprint associated @?=
+        replicate 3 (Problem.behavioralProblemInventoryFingerprint problem)
+      map Problem.associatedObservationEncodingFingerprint associated @?=
+        replicate 3 (Problem.behavioralProblemEncodingFingerprint problem)
+      map Problem.associatedObservationCandidateFingerprint associated @?=
+        replicate 3 (Problem.behavioralProblemCandidateFingerprint problem)
+      map Problem.associatedObservationProblemFingerprint associated @?=
+        replicate 3 (Problem.behavioralProblemFingerprint problem)
+  , testCase "associate every raw behavioral result as heuristic-only" $ do
+      artifact <- fixtureArtifact
+      let problem = fixtureProblem [0x64] 1 2 3 4
+          observations =
+            [ Observation.BehaviorEstablishedObservation artifact
+            , Observation.BehaviorViolationObservation artifact
+            , Observation.BehaviorBoundedObservation artifact
+            , Observation.BehaviorUnknownObservation artifact
+            ]
+          associated = map (Problem.associateBehavioralObservation problem)
+            observations
+      map Problem.associatedObservationResultStrength associated @?=
+        [ Problem.RawBehaviorEstablishedClaim
+        , Problem.RawBehaviorCounterexampleClaim
+        , Problem.RawBehaviorBoundedValidation
+        , Problem.RawBehaviorUnknown
+        ]
+      map Problem.associatedObservationUse associated @?=
+        replicate 4 Problem.HeuristicRankingOnly
+      map (Problem.replayAssociatedObservation problem) associated @?=
+        map Right observations
+  , testCase "fail replay in domain-to-problem precedence" $ do
+      artifact <- fixtureArtifact
+      let original = fixtureProblem [0x64] 1 2 3 4
+          associated = Problem.associateSolverObservation original
+            $ Observation.UnknownObservation artifact
+          replays =
+            [ Problem.replayAssociatedObservation
+                (fixtureProblem [0x65] 9 9 9 9) associated
+            , Problem.replayAssociatedObservation
+                (fixtureProblem [0x64] 9 9 9 9) associated
+            , Problem.replayAssociatedObservation
+                (fixtureProblem [0x64] 1 9 9 9) associated
+            , Problem.replayAssociatedObservation
+                (fixtureProblem [0x64] 1 2 9 9) associated
+            , Problem.replayAssociatedObservation
+                (fixtureProblem [0x64] 1 2 3 9) associated
+            ]
+      map (either Just $ const Nothing) replays @?=
+        map Just
+          [ Problem.ReplayDomainMismatch
+          , Problem.ReplayInventoryFingerprintMismatch
+          , Problem.ReplayEncodingFingerprintMismatch
+          , Problem.ReplayCandidateFingerprintMismatch
+          , Problem.ReplayProblemFingerprintMismatch
+          ]
+  , testCase "retain only a private authoritative evidence construction seam" $ do
+      let problem = fixtureProblem [0x64] 1 2 3 4
+          evidence = Problem.mkBehavioralEvidence problem "lean-receipt"
+      Problem.behavioralEvidenceDomain evidence @?= [0x64]
+      Problem.replayBehavioralEvidence problem evidence @?=
+        Right "lean-receipt"
+      Problem.replayBehavioralEvidence
+          (fixtureProblem [0x64] 1 2 9 4) evidence @?=
+        Left Problem.ReplayCandidateFingerprintMismatch
+  ]
+
+fixtureArtifact :: IO (Problem.BoundedRawArtifact FixtureArtifact)
+fixtureArtifact = expectRight $ Problem.mkBoundedRawArtifact
+  Problem.defaultRawArtifactLimits [0x72, 0x61, 0x77] [1, 2, 3]
+
+fixtureProblem
+  :: [Word8]
+  -> Natural
+  -> Natural
+  -> Natural
+  -> Natural
+  -> Problem.BehavioralProblem FixtureDomain
+fixtureProblem domain inventory encoding candidate problem =
+  Problem.mkBehavioralProblem domain
+    (identityFingerprint [0x69] inventory)
+    (identityFingerprint [0x65] encoding)
+    (identityFingerprint [0x63] candidate)
+    (identityFingerprint [0x70] problem)
+
+identityFingerprint
+  :: [Word8]
+  -> Natural
+  -> Fingerprint.Fingerprint subject
+identityFingerprint role value = Fingerprint.buildFingerprint
+  Fingerprint.FingerprintBuilder
+    { Fingerprint.fingerprintBuilderVersion = 1
+    , Fingerprint.fingerprintBuilderRole = role
+    , Fingerprint.fingerprintBuilderFields =
+        [Fingerprint.FingerprintNatural value]
+    }
 
 fixture
   :: Natural
@@ -132,11 +340,18 @@ fixture
   -> [Fingerprint.FingerprintField]
   -> Fingerprint.Fingerprint FixtureFingerprint
 fixture version role fields = Fingerprint.buildFingerprint $
-  Fingerprint.FingerprintBuilder
-    { Fingerprint.fingerprintBuilderVersion = version
-    , Fingerprint.fingerprintBuilderRole = role
-    , Fingerprint.fingerprintBuilderFields = fields
-    }
+  fixtureBuilder version role fields
+
+fixtureBuilder
+  :: Natural
+  -> [Word8]
+  -> [Fingerprint.FingerprintField]
+  -> Fingerprint.FingerprintBuilder FixtureFingerprint
+fixtureBuilder version role fields = Fingerprint.FingerprintBuilder
+  { Fingerprint.fingerprintBuilderVersion = version
+  , Fingerprint.fingerprintBuilderRole = role
+  , Fingerprint.fingerprintBuilderFields = fields
+  }
 
 nameFingerprint :: Name -> Fingerprint.Fingerprint FixtureFingerprint
 nameFingerprint name = fixture 1 [0x6e, 0x61, 0x6d, 0x65]

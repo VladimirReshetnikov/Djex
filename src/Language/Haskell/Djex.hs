@@ -51,6 +51,7 @@ module Language.Haskell.Djex
   , module Language.Haskell.Synthesis.Search
   , module Language.Haskell.Synthesis.Selection
   , module Language.Haskell.Synthesis.Semantic.Observation
+  , module Language.Haskell.Synthesis.Semantic.Problem
   , module Language.Haskell.Synthesis.Type
   , module Language.Haskell.Synthesis.TypeAtom
   , module Language.Haskell.Synthesis.TypeRender
@@ -87,6 +88,7 @@ import Language.Haskell.Synthesis.Query
 import Language.Haskell.Synthesis.Search
 import Language.Haskell.Synthesis.Selection
 import Language.Haskell.Synthesis.Semantic.Observation
+import Language.Haskell.Synthesis.Semantic.Problem
 import Language.Haskell.Synthesis.Type
 import Language.Haskell.Synthesis.TypeAtom
 import Language.Haskell.Synthesis.TypeRender

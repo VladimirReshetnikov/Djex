@@ -216,9 +216,23 @@ main = defaultMain $ testGroup "Djex downstream API"
                     )
                   ) ||
                   ( "Couldn't match type" `isInfixOf` message &&
-                    ( "forbiddenFingerprintCoercion" `isInfixOf` message ||
-                      "forbiddenTypedCandidateCoercion" `isInfixOf` message
-                    )
+                    any (`isInfixOf` message)
+                      [ "forbiddenFingerprintCoercion"
+                      , "forbiddenTypedCandidateCoercion"
+                      , "forbiddenBehavioralProblemCoercion"
+                      , "forbiddenBehavioralFingerprintRoleCoercion"
+                      , "forbiddenAssociatedObservationDomainCoercion"
+                      , "forbiddenAssociatedObservationPayloadCoercion"
+                      , "forbiddenBehavioralEvidenceDomainCoercion"
+                      , "forbiddenBehavioralEvidenceReceiptCoercion"
+                      , "forbiddenBoundedRawArtifactCoercion"
+                      ]
+                  ) ||
+                  ( "Variable not in scope" `isInfixOf` message &&
+                    any (`isInfixOf` message)
+                      [ "associatedObservation"
+                      , "behavioralEvidenceReceipt"
+                      ]
                   )
             assertBool
               (description ++ " raised an unrelated exception: " ++ message)

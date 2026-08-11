@@ -7,7 +7,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
-{-# OPTIONS_GHC -fdefer-type-errors -Wno-deferred-type-errors -Wno-unused-top-binds #-}
+{-# OPTIONS_GHC -fdefer-type-errors -Wno-deferred-type-errors -Wno-deferred-out-of-scope-variables -Wno-unused-top-binds #-}
 
 -- | Negative API fixtures for opaque invariant-bearing values.
 --
@@ -84,6 +84,7 @@ import Language.Haskell.Synthesis.KindInference
   ( GroundKind, KindAssumptions )
 import Language.Haskell.Synthesis.Name (ModuleName, Name)
 import Language.Haskell.Synthesis.Query
+import Language.Haskell.Synthesis.Semantic.Problem
 import Language.Haskell.Synthesis.Search (SearchBatch)
 import Language.Haskell.Synthesis.Type (Type)
 import Language.Haskell.Synthesis.TypeSynonym
@@ -103,6 +104,14 @@ data FingerprintProbe
 data OtherFingerprintProbe
 newtype TypedCandidateProbe = TypedCandidateProbe Int
 newtype OtherTypedCandidateProbe = OtherTypedCandidateProbe Int
+newtype BehavioralDomainProbe = BehavioralDomainProbe Int
+newtype OtherBehavioralDomainProbe = OtherBehavioralDomainProbe Int
+newtype ObservationProbe = ObservationProbe Int
+newtype OtherObservationProbe = OtherObservationProbe Int
+newtype EvidenceReceiptProbe = EvidenceReceiptProbe Int
+newtype OtherEvidenceReceiptProbe = OtherEvidenceReceiptProbe Int
+newtype ArtifactKindProbe = ArtifactKindProbe Int
+newtype OtherArtifactKindProbe = OtherArtifactKindProbe Int
 
 forbiddenConstructionAttempts :: [(String, ())]
 forbiddenConstructionAttempts =
@@ -114,6 +123,43 @@ forbiddenConstructionAttempts =
   , noGeneric @(TypedCandidate () (Type Int) Int ()) "TypedCandidate"
   , ( "TypedCandidate payload unexpectedly permits Coercible"
     , forbiddenTypedCandidateCoercion `seq` ()
+    )
+  , noGeneric @(BehavioralProblem BehavioralDomainProbe)
+      "BehavioralProblem"
+  , ( "Behavioral fingerprint roles unexpectedly permit Coercible"
+    , forbiddenBehavioralFingerprintRoleCoercion `seq` ()
+    )
+  , ( "BehavioralProblem domain unexpectedly permits Coercible"
+    , forbiddenBehavioralProblemCoercion `seq` ()
+    )
+  , noGeneric
+      @(AssociatedObservation BehavioralDomainProbe ObservationProbe)
+      "AssociatedObservation"
+  , ( "AssociatedObservation domain unexpectedly permits Coercible"
+    , forbiddenAssociatedObservationDomainCoercion `seq` ()
+    )
+  , ( "AssociatedObservation payload unexpectedly permits Coercible"
+    , forbiddenAssociatedObservationPayloadCoercion `seq` ()
+    )
+  , ( "AssociatedObservation regained an unchecked payload projection"
+    , forbiddenAssociatedObservationProjection `seq` ()
+    )
+  , noGeneric
+      @(BehavioralEvidence BehavioralDomainProbe EvidenceReceiptProbe)
+      "BehavioralEvidence"
+  , ( "BehavioralEvidence domain unexpectedly permits Coercible"
+    , forbiddenBehavioralEvidenceDomainCoercion `seq` ()
+    )
+  , ( "BehavioralEvidence receipt unexpectedly permits Coercible"
+    , forbiddenBehavioralEvidenceReceiptCoercion `seq` ()
+    )
+  , ( "BehavioralEvidence regained an unchecked receipt projection"
+    , forbiddenBehavioralEvidenceReceiptProjection `seq` ()
+    )
+  , noGeneric @(BoundedRawArtifact ArtifactKindProbe)
+      "BoundedRawArtifact"
+  , ( "BoundedRawArtifact kind unexpectedly permits Coercible"
+    , forbiddenBoundedRawArtifactCoercion `seq` ()
     )
   , noGeneric @(Inventory Int ()) "Inventory"
   , noGeneric @(PreparedClassIndex Int) "PreparedClassIndex"
@@ -322,6 +368,54 @@ forbiddenTypedCandidateCoercion
   :: TypedCandidate () (Type Int) Int TypedCandidateProbe
   -> TypedCandidate () (Type Int) Int OtherTypedCandidateProbe
 forbiddenTypedCandidateCoercion = coerce
+
+forbiddenBehavioralProblemCoercion
+  :: BehavioralProblem BehavioralDomainProbe
+  -> BehavioralProblem OtherBehavioralDomainProbe
+forbiddenBehavioralProblemCoercion = coerce
+
+forbiddenBehavioralFingerprintRoleCoercion
+  :: Fingerprint (InventoryFingerprintSubject BehavioralDomainProbe)
+  -> Fingerprint (EncodingFingerprintSubject BehavioralDomainProbe)
+forbiddenBehavioralFingerprintRoleCoercion = coerce
+
+forbiddenAssociatedObservationDomainCoercion
+  :: AssociatedObservation BehavioralDomainProbe ObservationProbe
+  -> AssociatedObservation OtherBehavioralDomainProbe ObservationProbe
+forbiddenAssociatedObservationDomainCoercion = coerce
+
+forbiddenAssociatedObservationPayloadCoercion
+  :: AssociatedObservation BehavioralDomainProbe ObservationProbe
+  -> AssociatedObservation BehavioralDomainProbe OtherObservationProbe
+forbiddenAssociatedObservationPayloadCoercion = coerce
+
+-- These names must remain absent from the downstream public module.  If a
+-- direct payload selector is reintroduced, either binding becomes an ordinary
+-- function and its negative construction attempt unexpectedly succeeds.
+forbiddenAssociatedObservationProjection
+  :: AssociatedObservation BehavioralDomainProbe ObservationProbe
+  -> ObservationProbe
+forbiddenAssociatedObservationProjection = associatedObservation
+
+forbiddenBehavioralEvidenceReceiptCoercion
+  :: BehavioralEvidence BehavioralDomainProbe EvidenceReceiptProbe
+  -> BehavioralEvidence BehavioralDomainProbe OtherEvidenceReceiptProbe
+forbiddenBehavioralEvidenceReceiptCoercion = coerce
+
+forbiddenBehavioralEvidenceDomainCoercion
+  :: BehavioralEvidence BehavioralDomainProbe EvidenceReceiptProbe
+  -> BehavioralEvidence OtherBehavioralDomainProbe EvidenceReceiptProbe
+forbiddenBehavioralEvidenceDomainCoercion = coerce
+
+forbiddenBehavioralEvidenceReceiptProjection
+  :: BehavioralEvidence BehavioralDomainProbe EvidenceReceiptProbe
+  -> EvidenceReceiptProbe
+forbiddenBehavioralEvidenceReceiptProjection = behavioralEvidenceReceipt
+
+forbiddenBoundedRawArtifactCoercion
+  :: BoundedRawArtifact ArtifactKindProbe
+  -> BoundedRawArtifact OtherArtifactKindProbe
+forbiddenBoundedRawArtifactCoercion = coerce
 
 -- Selecting 'coerce' forces the built-in coercion evidence without requiring
 -- a value of either abstract type.

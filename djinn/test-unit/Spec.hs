@@ -46,6 +46,7 @@ import Djinn.Internal.HIdentifier
 import Djinn.Internal.HTypes hiding (fromSynthesisKind, toSynthesisKind)
 import Djinn.Internal.LJT
 import Djinn.Internal.ProofCheck (checkProof)
+import qualified Djinn.Internal.ProofCheck.Evidence as ProofEvidence
 import Djinn.Internal.ProofEnv
 import HCheckCompatibility (hCheckCompatibilityTests)
 import HKindCompatibility (hKindCompatibilityTests)
@@ -181,6 +182,16 @@ tests =
     , ("justify self-reference diagnostics with proof evidence",
           testSelfReferenceEvidence)
     , ("isolate external proof identities", testProofEnvironment)
+    , ("preserve proof-check compatibility through typed evidence",
+          testCheckedProofEvidenceParity)
+    , ("retain checker-known rank-N proof source types",
+          testCheckedProofRankNTypes)
+    , ("retain impredicative proof application intermediate types",
+          testCheckedProofImpredicativeApplications)
+    , ("fully prune every retained proof-node type",
+          testCheckedProofFinalPruning)
+    , ("retain correlated unresolved intermediate proof types",
+          testCheckedProofUnconstrainedIntermediate)
     , ("type-check generated proofs independently", testGeneratedProofsCheck)
     , ("allocate wide proof metavariable plans without reuse",
           testWideProofMetas)
@@ -6641,6 +6652,264 @@ testProofEnvironment = do
                 (map (restoreProofTerm environment) $
                     prove False bindings atomA)
         [] -> fail "expected safe proof bindings"
+
+testCheckedProofEvidenceParity :: IO ()
+testCheckedProofEvidenceParity = do
+    let identity = Symbol "identity"
+        missing = Symbol "missing"
+        duplicate = Symbol "duplicate"
+        unused = Symbol "unused"
+        argument = Symbol "argument"
+        inner = Symbol "inner"
+        leftConstructor = ConsDesc "Left" 1
+        cases =
+            [ ("successful identity",
+                [], atomA :-> atomA, Lam identity $ Var identity,
+                Right ())
+            , ("unbound variable",
+                [], atomA, Var missing,
+                Left "unbound proof variable: missing")
+            , ("duplicate environment",
+                [(duplicate, atomA), (duplicate, atomB)],
+                atomA, Var duplicate,
+                Left "duplicate proof identity in environment: duplicate")
+            , ("duplicate environment precedes malformed metadata",
+                [(duplicate, atomA), (duplicate, atomB)],
+                atomA, Ctuple (-1),
+                Left "duplicate proof identity in environment: duplicate")
+            , ("root mismatch",
+                [], atomA :-> atomB, Lam identity $ Var identity,
+                Left "proof type mismatch: a vs b")
+            , ("malformed metadata",
+                [], atomA, Ctuple (-1),
+                Left "tuple arity is negative: -1")
+            , ("metadata validation precedes inference",
+                [], atomA, Apply (Var missing) (Ctuple (-1)),
+                Left "tuple arity is negative: -1")
+            , ("constrained injection failure",
+                [], atomA :-> (atomA |: atomB),
+                Lam identity $
+                    Apply (Cinj leftConstructor 2) (Var identity),
+                Left $
+                    "injection index 2 is outside a sum with 2 alternatives")
+            , ("unsupported legacy selector",
+                [(identity, atomA)], atomA, Xsel 0 1 $ Var identity,
+                Left "legacy Xsel has no proof-type semantics")
+            , ("unconstrained intermediate domain",
+                [(unused, atomA)], atomA,
+                Apply
+                    (Lam argument $ Var unused)
+                    (Lam inner $ Var inner),
+                Right ())
+            ]
+    mapM_ comparePaths cases
+  where
+    comparePaths (description, environment, expected, term, baseline) = do
+        assertEqual
+            (description ++ " changed its frozen historical result or error")
+            baseline (checkProof environment expected term)
+        assertEqual
+            (description ++ " changed the historical checker result or error")
+            (checkProof environment expected term)
+            (() <$ ProofEvidence.checkProofWithEvidence
+                environment expected term)
+
+testCheckedProofRankNTypes :: IO ()
+testCheckedProofRankNTypes = do
+    let provider = Symbol "rankNProvider"
+        sourceType = SharedType.ForallType ["element"] [] $
+            SharedType.FunctionType
+                (SharedType.TypeVariable "element")
+                (SharedType.TypeVariable "element")
+        sourceFormula = PVar $ opaqueTypeSymbol sourceType
+        environment = [(provider, sourceFormula)]
+        term = Var provider
+    evidence <- either fail return $
+        ProofEvidence.checkProofWithEvidence
+            environment sourceFormula term
+    assertEqual "evidence retains the exact checked proof environment"
+        environment (ProofEvidence.checkedProofEnvironment evidence)
+    assertEqual "evidence retains the exact checked root obligation"
+        sourceFormula (ProofEvidence.checkedProofExpectedType evidence)
+    let root = ProofEvidence.checkedProofRoot evidence
+    assertEqual "the root retains its exact rank-N proof occurrence"
+        term (ProofEvidence.checkedProofNodeTerm root)
+    assertEqual "the root retains the opaque rank-N logical atom"
+        (Just sourceFormula) (checkedProofNodeExactFormula root)
+    assertEqual "the opaque atom still owns its full source type"
+        (Just sourceType)
+        (checkedProofNodeExactFormula root >>= proofFormulaOpaqueSource)
+    assertEqual "a ground rank-N atom retains no unconstrained identity"
+        0 (checkedProofNodeUnconstrainedCount root)
+    assertEqual "a variable proof has no invented typed children"
+        0 (length $ ProofEvidence.checkedProofNodeChildren root)
+
+testCheckedProofImpredicativeApplications :: IO ()
+testCheckedProofImpredicativeApplications = do
+    let instantiationAxiom = Symbol "instantiationAxiom"
+        provider = Symbol "provider"
+        impredicativeWitness = Symbol "impredicativeWitness"
+        sourceType = SharedType.ForallType ["first", "second"] [] $
+            SharedType.FunctionType
+                (SharedType.TypeVariable "first")
+                (SharedType.TypeVariable "second")
+        impredicativeType = SharedType.ForallType ["element"] [] $
+            SharedType.FunctionType
+                (SharedType.TypeVariable "element")
+                (SharedType.TypeVariable "element")
+        resultType = SharedType.FunctionType
+            impredicativeType impredicativeType
+        sourceFormula = PVar $ opaqueTypeSymbol sourceType
+        impredicativeFormula = PVar $ opaqueTypeSymbol impredicativeType
+        resultFormula = PVar $ opaqueTypeSymbol resultType
+        axiomFormula =
+            sourceFormula :-> impredicativeFormula :-> resultFormula
+        environment =
+            [ (instantiationAxiom, axiomFormula)
+            , (provider, sourceFormula)
+            , (impredicativeWitness, impredicativeFormula)
+            ]
+        partialApplication =
+            Apply (Var instantiationAxiom) (Var provider)
+        term = Apply partialApplication (Var impredicativeWitness)
+    evidence <- either fail return $
+        ProofEvidence.checkProofWithEvidence environment resultFormula term
+    let root = ProofEvidence.checkedProofRoot evidence
+    assertEqual "the complete application retains its exact result type"
+        (Just resultFormula) (checkedProofNodeExactFormula root)
+    case ProofEvidence.checkedProofNodeChildren root of
+        [partial, witness] -> do
+            assertEqual
+                "the first application retains its multi-binder intermediate"
+                (Just $ impredicativeFormula :-> resultFormula)
+                (checkedProofNodeExactFormula partial)
+            assertEqual "the argument retains its impredicative atom"
+                (Just impredicativeFormula)
+                (checkedProofNodeExactFormula witness)
+            case ProofEvidence.checkedProofNodeChildren partial of
+                [axiom, checkedProvider] -> do
+                    assertEqual "the axiom retains its complete source/result spine"
+                        (Just axiomFormula)
+                        (checkedProofNodeExactFormula axiom)
+                    assertEqual "the provider retains the exact source scheme atom"
+                        (Just sourceType)
+                        (checkedProofNodeExactFormula checkedProvider
+                            >>= proofFormulaOpaqueSource)
+                children -> fail $
+                    "expected axiom and provider children, got " ++
+                    show (length children)
+        children -> fail $
+            "expected partial and witness children, got " ++
+            show (length children)
+    -- Visible type arguments are attached only later by Instantiation and
+    -- ProofToGenerated.  This test intentionally verifies only the source and
+    -- application types representable in the checked LJT term.
+
+testCheckedProofFinalPruning :: IO ()
+testCheckedProofFinalPruning = do
+    let outer = Symbol "outer"
+        inner = Symbol "inner"
+        identityApplication =
+            Apply (Lam inner $ Var inner) (Var outer)
+        term = Lam outer identityApplication
+        expected = atomA :-> atomA
+    evidence <- either fail return $
+        ProofEvidence.checkProofWithEvidence [] expected term
+    let root = ProofEvidence.checkedProofRoot evidence
+    assertEqual "the root metavariable chain resolves to the exact goal"
+        (Just expected) (checkedProofNodeExactFormula root)
+    case ProofEvidence.checkedProofNodeChildren root of
+        [application] -> do
+            assertEqual "the application result is fully substituted"
+                (Just atomA) (checkedProofNodeExactFormula application)
+            case ProofEvidence.checkedProofNodeChildren application of
+                [identity, argument] -> do
+                    assertEqual "the inferred identity type is fully substituted"
+                        (Just expected) (checkedProofNodeExactFormula identity)
+                    assertEqual "the outer occurrence is fully substituted"
+                        (Just atomA) (checkedProofNodeExactFormula argument)
+                    case ProofEvidence.checkedProofNodeChildren identity of
+                        [body] -> assertEqual
+                            "the inner occurrence is fully substituted"
+                            (Just atomA) (checkedProofNodeExactFormula body)
+                        children -> fail $
+                            "expected one identity body, got " ++
+                            show (length children)
+                children -> fail $
+                    "expected function and argument children, got " ++
+                    show (length children)
+        children -> fail $
+            "expected one lambda body, got " ++ show (length children)
+
+testCheckedProofUnconstrainedIntermediate :: IO ()
+testCheckedProofUnconstrainedIntermediate = do
+    let supplied = Symbol "supplied"
+        ignored = Symbol "ignored"
+        identity = Symbol "identity"
+        term = Apply
+            (Lam ignored $ Var supplied)
+            (Lam identity $ Var identity)
+    evidence <- either fail return $
+        ProofEvidence.checkProofWithEvidence
+            [(supplied, atomA)] atomA term
+    let root = ProofEvidence.checkedProofRoot evidence
+    assertEqual "the successful application root remains exact"
+        (Just atomA) (checkedProofNodeExactFormula root)
+    assertEqual "the exact root contains no unconstrained identity"
+        0 (checkedProofNodeUnconstrainedCount root)
+    case ProofEvidence.checkedProofNodeChildren root of
+        [function, argument] -> do
+            assertEqual
+                "the constant function exposes a partial nested checker type"
+                Nothing (checkedProofNodeExactFormula function)
+            assertBool
+                "the constant function must report its unknown domain"
+                (checkedProofNodeHasUnconstrained function)
+            assertEqual
+                "the function domain is correlated with the argument type"
+                1 (checkedProofNodeUnconstrainedCount function)
+            assertEqual
+                "the identity argument cannot be guessed as an exact formula"
+                Nothing (checkedProofNodeExactFormula argument)
+            assertEqual
+                "both identity positions retain one correlated unknown"
+                1 (checkedProofNodeUnconstrainedCount argument)
+            case ProofEvidence.checkedProofNodeChildren argument of
+                [body] -> do
+                    assertEqual "the identity body remains explicitly unknown"
+                        Nothing (checkedProofNodeExactFormula body)
+                    assertEqual "the body retains that one unknown identity"
+                        1 (checkedProofNodeUnconstrainedCount body)
+                children -> fail $
+                    "expected one identity body, got " ++
+                    show (length children)
+        children -> fail $
+            "expected function and argument children, got " ++
+            show (length children)
+
+checkedProofNodeExactFormula
+    :: ProofEvidence.CheckedProofNode
+    -> Maybe Formula
+checkedProofNodeExactFormula =
+    ProofEvidence.checkedProofTypeExactFormula
+        . ProofEvidence.checkedProofNodeType
+
+checkedProofNodeHasUnconstrained :: ProofEvidence.CheckedProofNode -> Bool
+checkedProofNodeHasUnconstrained =
+    ProofEvidence.checkedProofTypeHasUnconstrained
+        . ProofEvidence.checkedProofNodeType
+
+checkedProofNodeUnconstrainedCount
+    :: ProofEvidence.CheckedProofNode
+    -> Natural
+checkedProofNodeUnconstrainedCount =
+    ProofEvidence.checkedProofTypeUnconstrainedCount
+        . ProofEvidence.checkedProofNodeType
+
+proofFormulaOpaqueSource :: Formula -> Maybe (SharedType.Type String)
+proofFormulaOpaqueSource formula = case formula of
+    PVar symbol -> opaqueSymbolSource symbol
+    _ -> Nothing
 
 testGeneratedProofsCheck :: IO ()
 testGeneratedProofsCheck = do

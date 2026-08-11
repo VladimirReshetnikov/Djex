@@ -121,6 +121,7 @@ Library
     synthesis/src
     synthesis/internal
     djinn/src-core
+    djinn/src-internal
     djinn/src-frontend
     exference/src-core
     exference/src-frontend
@@ -205,6 +206,7 @@ Library
     Djinn.Internal.HCheck.Implementation
     Djinn.Internal.Help
     Djinn.Internal.Instantiation
+    Djinn.Internal.ProofCheck.Evidence
     Djinn.Internal.ProofToGenerated
     Djinn.Internal.REPL
     Djinn.Internal.Type
@@ -336,11 +338,14 @@ Executable djinn
   Build-Depends:  djex
 
 Test-Suite djinn-tests
-  import:         tasty-hunit-test, containers-dep
+  import:         tasty-hunit-test, containers-dep, transformers-dep
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
-  Hs-Source-Dirs: djinn/test-unit
+  Hs-Source-Dirs:
+    djinn/test-unit
+    djinn/src-internal
   Other-Modules:
+    Djinn.Internal.ProofCheck.Evidence
     HCheckCompatibility
     HKindCompatibility
     HTypeCompatibility

@@ -8,6 +8,7 @@ import qualified System.Info as SystemInfo
 import System.Timeout (timeout)
 import Unsafe.Coerce (unsafeCoerce)
 
+import qualified SMTLibLiveSpec
 import qualified Language.Haskell.Djex as Djex
 import Language.Haskell.Synthesis.Constraint (Constraint (..))
 import Language.Haskell.Synthesis.Declaration
@@ -80,6 +81,7 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , problemReplayTests
   , smtLibTests
   , smtLibProtocolTests
+  , SMTLibLiveSpec.smtLibLiveTests
   , evaluationTests
   , normalizationTests
   , productiveBoundTests

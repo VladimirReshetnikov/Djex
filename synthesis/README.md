@@ -138,6 +138,9 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` | Opaque query-specific association of bounded raw solver reports, with heuristic-only safe projections and exact problem-plus-query replay before payload access. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response` | Pure bounded SMT-LIB 2.x check-status and query-specific input-valuation decoding; syntax remains untrusted and only independent Length replay may create evidence. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` | Package-private incremental reset/check/value transaction planning with exact positional barriers, causal write boundaries, and bounded cumulative stdout; it performs no IO or attestation. |
+| `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capability` | Package-private four-write readiness probe for print suppression, reset replay, exact `sat`, input valuation, contradictory `unsat`, and positional fresh barriers. |
+| `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process` | Bounded direct-process owner with a pre-spawn executable-file snapshot, exact isolated launch, FIFO stdout framing support, first-byte stderr poison, cancellation/deadlines, and staged cleanup. |
+| `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session` | Rank-N scoped ownership of one capability-probed worker, with secret/public entropy separation, a fresh fd-observed workspace, exact segmented probe transcript, and no public process handle. |
 | `Language.Haskell.Synthesis.Semantic.Observation` | Raw three-valued solver and four-valued behavioral reports without candidate association or evidence claims. |
 | `Language.Haskell.Synthesis.Semantic.Problem` | Bounded raw artifacts associated with exact domain, inventory, encoding, candidate, and problem identities; every raw result is restricted to heuristic ranking, while domain-owned authoritative evidence has only a private construction seam. |
 | `Language.Haskell.Synthesis.Generated` | Scope-aware expressions, patterns, clauses, holes, mixed term/type application spines, bottom-up rewriting, simplification, alpha-equivalence, substitution, and Haskell rendering through the common qualification policy. |
@@ -234,11 +237,50 @@ responses answer commands already in the same completed write. A tail crossing
 the status-marker-to-`get-value` boundary must contain only bounded SMT-LIB
 whitespace; a stale buffered valuation is rejected before the new write action
 exists. Framing, response, marker, cumulative-budget, unexpected-byte, and EOF
-failures expose no continuation. The future live owner must therefore destroy
-the worker on any failure, generate barriers uniquely across the session,
-perform each write before feeding its receiver, and bind attested process and
-observed transcript facts into a separate run identity. Pure decoded outcomes
-remain caller-feedable syntax, never execution receipts or semantic evidence.
+failures expose no continuation. The next live query driver must therefore
+destroy the worker on any failure, generate barriers uniquely across the session,
+perform each write before feeding its receiver, and bind the process snapshot
+and observed transcript facts into a separate run identity. Pure decoded
+outcomes remain caller-feedable syntax, never execution receipts or semantic
+evidence.
+
+`Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session` now owns
+the first live layer. It samples 64 bytes of OS entropy and separates the
+secret barrier seed from the public workspace label. On POSIX it creates an
+exclusive owner-only directory, retains a no-follow directory descriptor, and
+checks descriptor/path device, inode, owner, mode, and canonical path before
+spawn. Cleanup never traverses or deletes workspace contents: after the direct
+child is closed it rechecks the retained identity and attempts only an
+empty-directory removal. Windows uses the explicitly weaker portable
+pathname-observation policy because the current dependencies expose no stable
+directory file ID or private-ACL proof.
+
+The process layer hashes and bounds the configured executable pathname before
+direct spawn, checks an optional SHA-256 pin, supplies the exact configured
+argv, empty environment, fresh cwd, and three pipes, then owns all readers and
+writes. This is a capability-probed pre-spawn pathname snapshot under a stable
+namespace assumption, not executed-image attestation: portable `process`
+cannot execute the already-hashed descriptor, and the digest excludes the
+dynamic loader and shared libraries. Stdout remains FIFO ordered; the first
+stderr byte poisons the worker while the reader continues discarding a finite
+flood so teardown cannot deadlock. Absolute monotonic deadlines and explicit
+cancellation gate each operation. Cleanup closes stdin, polls the direct child
+without blocking a non-threaded runtime, then applies bounded TERM/KILL stages
+and bounded reader/handle cleanup. Descendant cleanup remains best effort.
+
+Before lending the worker through a rank-N callback, the Session drives a
+four-write capability plan: startup print suppression and echo; reset/replay
+with `input = 0`, `sat`, and echo; exact input `get-value` and echo; then a
+fresh reset/replay with contradictory `input = 0` and `input = 1`, `unsat`,
+and a final echo. Every barrier is derived from the unexposed secret seed.
+Write-boundary whitespace is charged once, canonically attributed to the
+preceding write, and must include a delimiter after the final quoted echo.
+The opaque ready-worker identity binds the pure execution key, process
+snapshot strength and policy, capability plan, exact segmented transcript,
+secret-seed commitment, workspace policy/path, and semantic limits. It is
+still not a solver result, proof, pruning authority, or general Z3 feature
+claim. The next layer must drive individual query plans through the scoped
+worker and independently replay any model before evidence exists.
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` seals the next
 pure boundary. Its v2 policy fixes the direct prefix
@@ -269,10 +311,10 @@ alter a successfully sealed policy's identity.
 
 This policy performs no IO: it neither resolves nor hashes the path, starts Z3,
 probes a version or capability, frames a stream, handles cancellation, nor
-constructs a solver observation. A future live session must bind what was
-actually opened and observed, establish the required quoted-echo,
-print-suppression, and reset behavior, and defend resolution, hashing, and
-spawn against replacement races. The optional SHA-256 bytes are a named
+constructs a solver observation. The package-private live Session separately
+binds its pre-spawn pathname observation, establishes quoted-echo,
+print-suppression, reset, valuation, and contradictory-check behavior, and
+records the remaining stable-namespace limitation. The optional SHA-256 bytes are a named
 external digest-pin expectation, not Djex's collision-free identity for an
 unbounded executable file. Policy equality is therefore not run identity,
 cache authority, or semantic evidence; all eventual statuses remain heuristic

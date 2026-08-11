@@ -322,10 +322,10 @@ unknown, wrong-sort, and unsolicited bindings, and restores source input
 order. Parsed negative integers remain raw values for the existing natural
 domain validator to reject. Parsed statuses are observations only. A private
 stream and protocol layer now supplies bounded lexical framing, exact echo
-markers, and fail-closed phase sequencing. Solver execution identity,
-deadlines, and worker recovery remain obligations of the future live executor,
-while only independent Length replay can create model-relative counterexample
-evidence.
+markers, and fail-closed phase sequencing. The package-private live Session now
+owns worker identity, deadlines, and recovery; query-specific execution and
+observation association remain obligations of the next driver. Only independent
+Length replay can create model-relative counterexample evidence.
 
 `Language.Haskell.Synthesis.Internal.SMTLib.Stream` frames one exact SMT-LIB
 2.7 response incrementally without line-based assumptions. It carries lexical
@@ -355,14 +355,50 @@ which could have caused them. At the status-marker-to-value-write boundary,
 already-buffered bytes must be finitely bounded SMT-LIB whitespace, so a stale
 valid-looking valuation cannot cross that causal boundary. Every framing,
 decoder, marker, cumulative-output, unexpected-byte, or EOF failure returns no
-successor. The future live owner must treat any retained receiver as spent and
-discard the worker.
+successor. The next live query driver must treat any retained receiver as spent
+and discard the worker.
 The private plan key binds policy, query, framing limits, cumulative budget,
 phase schema, exact writes, and marker responses. This remains a pure,
 caller-feedable protocol decode—not an executed observation, attestation, or
 receipt. A live session must still generate barriers uniquely across its
-lifetime, enforce writes, attest and probe the process, and bind the actual
+lifetime, enforce writes, capability-probe the process, and bind the actual
 transcript and termination outcome into a separate run identity.
+
+`Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session` now
+provides that package-private live ownership checkpoint. It samples separate
+secret barrier and public workspace material, launches the exact configured
+argv with an empty environment in a fresh directory, and lends the resulting
+worker only through a rank-N callback. On POSIX the workspace is observed
+through a retained no-follow directory descriptor and matched by device,
+inode, owner, mode, and canonical path; cleanup never traverses contents and
+attempts only identity-checked empty-directory removal. The portable Windows
+fallback explicitly claims only repeated pathname observations.
+
+The process owner bounds a pre-spawn SHA-256 observation of the configured
+executable file, compares an optional pin, owns separate stdout/stderr pipes,
+poisons on the first stderr byte, and continues draining a finite stderr flood
+so cleanup cannot deadlock. FIFO stdout, absolute monotonic deadlines,
+cancellation, isolated writes, staged direct-child shutdown, and idempotent
+cleanup are all retained in private policy identity. Shutdown uses bounded
+nonblocking exit polling, so it also progresses in a non-threaded runtime.
+This is not executed-image attestation: pathname hashing plus portable direct
+spawn has a same-UID namespace race, and neither the loader nor shared
+libraries are measured. Descendant cleanup is best effort after the direct
+child exits.
+
+Readiness requires four causally separated writes and fresh positional echo
+barriers. The probe checks startup print suppression; reset/replay with an
+`input = 0` satisfiable problem; exact input valuation; and a second reset with
+contradictory zero/one assertions producing `unsat`. Delimiter and boundary
+whitespace are charged once and canonically retained with the preceding write,
+including a separately delivered final newline. The ready-worker identity
+binds the pure execution policy, process observation method, exact segmented
+capability transcript, secret-seed commitment, workspace policy, and future
+query limits. It still creates no solver observation or evidence. A later
+query driver must run the pure transaction plan through this owner and replay
+any decoded model independently before it can affect behavioral conclusions.
+The ownership and threat-model details are recorded in the
+[2026-08-11 scoped worker lease report](docs/reports/2026-08-11-z3-worker-lease.md).
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` now seals the
 pure Z3 launch and protocol policy without launching anything. V2 fixes the
@@ -383,9 +419,10 @@ argv, exact startup and reset bytes, every retained execution field, the
 response schema, and all five response bounds; public callers see only safe
 operational projections. Admission limits are not execution semantics. This
 is configuration, not a run receipt: it performs no path resolution, hashing,
-spawn, version or capability probe, stream framing, or process attestation.
-The live opener must verify that the selected Z3 build exhibits the required
-quoted-echo, print-suppression, and reset behavior before accepting it.
+spawn, version or capability probe, stream framing, or process observation.
+The package-private live Session separately verifies that the selected worker
+exhibits the required quoted-echo, print-suppression, reset, valuation, and
+contradictory-check behavior before accepting it.
 SHA-256 names an external executable-file pin and is not a collision-free
 identity for the executable's unbounded bytes. Parsed statuses still have no
 pruning or proof authority.

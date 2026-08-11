@@ -2,6 +2,10 @@
 
 Date: 2026-08-11
 
+> The [scoped worker lease successor](2026-08-11-z3-worker-lease.md) now
+> implements the process-owning readiness layer described here, while keeping
+> per-query execution and observation association as the next checkpoint.
+
 ## Scope
 
 This checkpoint closes the pure boundary between canonical Length SMT-LIB
@@ -13,7 +17,7 @@ The package-private owner is
 `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol`.
 Keeping it private avoids freezing nonce injection, continuation handling, or
 raw transcript access as a downstream API before the live session has an
-attested worker abstraction.
+capability-probed worker abstraction.
 
 ## Threat addressed
 
@@ -123,12 +127,14 @@ Even an `unsat` outcome remains heuristic. Decoded satisfiable values must still
 pass `validateLengthSMTLibCounterexample`, whose independent Length evaluator is
 the only route to model-relative behavioral evidence.
 
-## Next live layers
+## Successor live layers
 
 A process-owning session still needs to bind and enforce:
 
-1. race-resistant executable resolution, hashing, and spawn;
-2. the observed executable image and any configured SHA-256 pin comparison;
+1. bounded executable resolution, hashing, pin comparison, and direct spawn,
+   with an explicit stable-namespace limitation;
+2. an honestly named pre-spawn executable-file snapshot rather than an
+   executed-image attestation;
 3. an exact Z3 capability handshake for quoted `echo`, print suppression,
    reset behavior, logic/options, and supported commands;
 4. a worker/session epoch, query ordinal, and session-wide marker allocation;
@@ -136,8 +142,11 @@ A process-owning session still needs to bind and enforce:
 6. monotonic deadlines, cancellation, bounded stderr, process exit, and cleanup;
 7. poisoning and teardown after every framing, decoder, marker, timeout, IO, or
    capability failure; and
-8. an opaque executed-observation identity over the attested worker, pure plan,
+8. an opaque query-run identity over the capability-probed worker, pure plan,
    actual branch, writes, frames, termination outcome, and bounded artifacts.
 
-Only that later layer may claim that a protocol outcome came from a particular
-Z3 process. It still must not turn solver output into proof or pruning authority.
+The worker-lease successor now implements the process, workspace, readiness,
+and cleanup portions of items 1 through 3 and 5 through 7 under the explicit
+portable limitations above. Query ordinals, per-query marker allocation, the
+query driver, and item 8 remain. Even that later layer must not turn solver
+output into proof or pruning authority.

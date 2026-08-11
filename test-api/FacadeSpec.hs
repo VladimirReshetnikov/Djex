@@ -1,9 +1,13 @@
+{-# LANGUAGE RankNTypes #-}
+
 module FacadeSpec (facadeTests) where
 
+import Control.DeepSeq (rnf)
 import Data.Either (isRight)
 import qualified Data.Set as Set
 import Data.Void (Void)
 import Data.Word (Word8)
+import Numeric.Natural (Natural)
 
 import ExferencePatternImports (patternViewsRoundTrip)
 import Language.Haskell.Djex
@@ -12,6 +16,9 @@ import Test.Tasty.HUnit ((@?=), assertBool, testCase)
 
 type FacadeBehavioralDomain = ()
 type FacadeRawArtifact = ()
+data FacadeLiveEpoch
+data FacadeLiveIdentity
+data FacadeLiveLocal
 
 facadeTests :: TestTree
 facadeTests = testGroup "public Djex facade"
@@ -83,6 +90,123 @@ facadeTests = testGroup "public Djex facade"
         , RawBehaviorUnknown
         ] @?= [minBound .. maxBound]
       (HeuristicRankingOnly :: RawObservationUse) @?= minBound
+  , testCase "exports only the scoped live Length facade" $ do
+      let _scopedRunner
+            :: LengthSMTLibExecutionConfig
+            -> (forall epoch. LengthSMTLibLiveSession epoch -> IO result)
+            -> IO (Either LengthSMTLibLiveSessionError result)
+          _scopedRunner = withLengthSMTLibLiveSession
+          queryRunner
+            :: LengthEvaluationLimits
+            -> LengthSMTLibLiveSession FacadeLiveEpoch
+            -> LengthSMTLibQuery FacadeLiveIdentity FacadeLiveLocal
+            -> IO
+                (Either
+                  LengthSMTLibLiveQueryError
+                  (LengthSMTLibLiveQueryObservation
+                    FacadeLiveEpoch FacadeLiveIdentity FacadeLiveLocal))
+          queryRunner = runLengthSMTLibLiveQuery
+          sessionFailureProjection
+            :: LengthSMTLibLiveSessionError
+            -> LengthSMTLibLiveSessionFailure
+          sessionFailureProjection = lengthSMTLibLiveSessionPrimaryFailure
+          sessionCleanupProjection
+            :: LengthSMTLibLiveSessionError
+            -> Bool
+          sessionCleanupProjection = lengthSMTLibLiveSessionCleanupIncomplete
+          queryFailureProjection
+            :: LengthSMTLibLiveQueryError
+            -> LengthSMTLibLiveQueryFailure
+          queryFailureProjection = lengthSMTLibLiveQueryPrimaryFailure
+          queryCleanupProjection
+            :: LengthSMTLibLiveQueryError
+            -> Bool
+          queryCleanupProjection = lengthSMTLibLiveQueryCleanupIncomplete
+          queryFingerprintProjection
+            :: LengthSMTLibLiveQueryObservation
+                FacadeLiveEpoch FacadeLiveIdentity FacadeLiveLocal
+            -> Fingerprint LengthSMTLibQueryFingerprintSubject
+          queryFingerprintProjection =
+            lengthSMTLibLiveQueryObservationQueryFingerprint
+          solverStatusProjection
+            :: LengthSMTLibLiveQueryObservation
+                FacadeLiveEpoch FacadeLiveIdentity FacadeLiveLocal
+            -> SolverStatus
+          solverStatusProjection =
+            lengthSMTLibLiveQueryObservationSolverStatus
+          resultStrengthProjection
+            :: LengthSMTLibLiveQueryObservation
+                FacadeLiveEpoch FacadeLiveIdentity FacadeLiveLocal
+            -> RawResultStrength
+          resultStrengthProjection =
+            lengthSMTLibLiveQueryObservationResultStrength
+          observationUseProjection
+            :: LengthSMTLibLiveQueryObservation
+                FacadeLiveEpoch FacadeLiveIdentity FacadeLiveLocal
+            -> RawObservationUse
+          observationUseProjection = lengthSMTLibLiveQueryObservationUse
+          evidenceProjection
+            :: LengthSMTLibLiveQueryObservation
+                FacadeLiveEpoch FacadeLiveIdentity FacadeLiveLocal
+            -> Maybe
+                (BehavioralEvidence
+                  FiniteListSpineLengthV1
+                  ValidatedLengthCounterexample)
+          evidenceProjection =
+            lengthSMTLibLiveQueryObservationCounterexampleEvidence
+          sessionErrorEq =
+            ((==) :: LengthSMTLibLiveSessionError
+              -> LengthSMTLibLiveSessionError -> Bool)
+          sessionErrorOrd =
+            (compare :: LengthSMTLibLiveSessionError
+              -> LengthSMTLibLiveSessionError -> Ordering)
+          sessionErrorShow =
+            (show :: LengthSMTLibLiveSessionError -> String)
+          queryErrorEq =
+            ((==) :: LengthSMTLibLiveQueryError
+              -> LengthSMTLibLiveQueryError -> Bool)
+          queryErrorOrd =
+            (compare :: LengthSMTLibLiveQueryError
+              -> LengthSMTLibLiveQueryError -> Ordering)
+          queryErrorShow =
+            (show :: LengthSMTLibLiveQueryError -> String)
+      queryRunner `seq` sessionFailureProjection `seq`
+        sessionCleanupProjection `seq`
+        queryFailureProjection `seq` queryCleanupProjection `seq`
+        queryFingerprintProjection `seq` solverStatusProjection `seq`
+        resultStrengthProjection `seq` observationUseProjection `seq`
+        evidenceProjection `seq` sessionErrorEq `seq` sessionErrorOrd `seq`
+        sessionErrorShow `seq` queryErrorEq `seq` queryErrorOrd `seq`
+        queryErrorShow `seq`
+        (rnf :: LengthSMTLibLiveSessionError -> ()) `seq`
+        (rnf :: LengthSMTLibLiveQueryError -> ()) `seq`
+        (rnf :: LengthSMTLibLiveQueryObservation
+          FacadeLiveEpoch FacadeLiveIdentity FacadeLiveLocal -> ()) `seq`
+        pure ()
+      (defaultLengthSMTLibLiveSessionMaximumQueries :: Natural) @?= 64
+      [ LengthSMTLibLiveSessionDeadlineExceeded
+        , LengthSMTLibLiveSessionWorkspaceUnavailable
+        , LengthSMTLibLiveSessionExecutableUnavailable
+        , LengthSMTLibLiveSessionExecutableRejected
+        , LengthSMTLibLiveSessionLaunchFailed
+        , LengthSMTLibLiveSessionCapabilityRejected
+        , LengthSMTLibLiveSessionResourceLimitExceeded
+        , LengthSMTLibLiveSessionTransportFailed
+        , LengthSMTLibLiveSessionCleanupFailed
+        , LengthSMTLibLiveSessionInternalFailure
+        ] @?= [minBound .. maxBound]
+      let queryFailures =
+            [ LengthSMTLibLiveQuerySessionUnavailable
+            , LengthSMTLibLiveQueryLimitExceeded 64 65
+            , LengthSMTLibLiveQueryDeadlineExceeded
+            , LengthSMTLibLiveQueryConfigurationRejected
+            , LengthSMTLibLiveQueryResourceLimitExceeded
+            , LengthSMTLibLiveQueryTransportFailed
+            , LengthSMTLibLiveQueryProtocolRejected
+            , LengthSMTLibLiveQueryCounterexampleRejected
+            , LengthSMTLibLiveQueryInternalFailure
+            ]
+      length queryFailures @?= 9
   , testCase "exports the finite list-spine length vocabulary" $ do
       finiteListSpineLengthDomainTag @?=
         map (fromIntegral . fromEnum) "finite-list-spine-length/v1"

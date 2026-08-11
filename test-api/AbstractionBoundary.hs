@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -90,8 +91,10 @@ import Language.Haskell.Synthesis.Semantic.Length.Evaluate
 import Language.Haskell.Synthesis.Semantic.Length.Problem
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
+import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response
+import Language.Haskell.Synthesis.Semantic.Observation (SolverStatus)
 import Language.Haskell.Synthesis.Semantic.Problem
 import Language.Haskell.Synthesis.Search (SearchBatch)
 import Language.Haskell.Synthesis.Type (Type)
@@ -109,6 +112,24 @@ import Language.Haskell.Synthesis.TypedCandidate
 import Language.Haskell.Synthesis.TypedGenerated (TermGraph)
 import Language.Haskell.Synthesis.TypedGenerated.Fingerprint
   ( TermGraphFingerprintSubject )
+import Language.Haskell.TH (lookupValueName)
+
+-- Importing an abstract type with the same spelling as its hidden constructor
+-- makes an ordinary deferred term probe a hard namespace error.  Ask the value
+-- namespace directly instead: any hit means downstream code can name a
+-- representation constructor and the API-test component must stop compiling.
+$(do
+    let constructors =
+          [ "LengthSMTLibLiveSession"
+          , "LengthSMTLibLiveQueryObservation"
+          , "LengthSMTLibLiveSessionError"
+          , "LengthSMTLibLiveQueryError"
+          ]
+    resolved <- mapM lookupValueName constructors
+    case [name | (name, Just _) <- zip constructors resolved] of
+      [] -> pure []
+      visible -> fail $ "public live representation constructors: " ++ show visible
+ )
 
 data FingerprintProbe
 data OtherFingerprintProbe
@@ -128,6 +149,12 @@ newtype LengthAnnotationProbe = LengthAnnotationProbe Int
 newtype OtherLengthAnnotationProbe = OtherLengthAnnotationProbe Int
 newtype LengthLocalProbe = LengthLocalProbe Int
 newtype OtherLengthLocalProbe = OtherLengthLocalProbe Int
+newtype LiveEpochProbe = LiveEpochProbe Int
+newtype OtherLiveEpochProbe = OtherLiveEpochProbe Int
+newtype LiveIdentityProbe = LiveIdentityProbe Int
+newtype OtherLiveIdentityProbe = OtherLiveIdentityProbe Int
+newtype LiveLocalProbe = LiveLocalProbe Int
+newtype OtherLiveLocalProbe = OtherLiveLocalProbe Int
 
 forbiddenConstructionAttempts :: [(String, ())]
 forbiddenConstructionAttempts =
@@ -235,6 +262,88 @@ forbiddenConstructionAttempts =
     )
   , ( "LengthSMTLibExecutionConfig exposed its reversible fingerprint"
     , forbiddenLengthSMTLibExecutionFingerprintProjection `seq` ()
+    )
+  , noGeneric @(LengthSMTLibLiveSession LiveEpochProbe)
+      "LengthSMTLibLiveSession"
+  , noEq @(LengthSMTLibLiveSession LiveEpochProbe)
+      "LengthSMTLibLiveSession"
+  , noOrd @(LengthSMTLibLiveSession LiveEpochProbe)
+      "LengthSMTLibLiveSession"
+  , noShow @(LengthSMTLibLiveSession LiveEpochProbe)
+      "LengthSMTLibLiveSession"
+  , noGeneric
+      @(LengthSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      "LengthSMTLibLiveQueryObservation"
+  , noEq
+      @(LengthSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      "LengthSMTLibLiveQueryObservation"
+  , noOrd
+      @(LengthSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      "LengthSMTLibLiveQueryObservation"
+  , noShow
+      @(LengthSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      "LengthSMTLibLiveQueryObservation"
+  , noGeneric @LengthSMTLibLiveSessionError
+      "LengthSMTLibLiveSessionError"
+  , noGeneric @LengthSMTLibLiveQueryError
+      "LengthSMTLibLiveQueryError"
+  , ( "LengthSMTLibLiveSession epoch unexpectedly permits Coercible"
+    , forbiddenLengthSMTLibLiveSessionCoercion `seq` ()
+    )
+  , ( "LengthSMTLibLiveQueryObservation epoch unexpectedly permits Coercible"
+    , forbiddenLengthSMTLibLiveObservationEpochCoercion `seq` ()
+    )
+  , ( "LengthSMTLibLiveQueryObservation identity unexpectedly permits Coercible"
+    , forbiddenLengthSMTLibLiveObservationIdentityCoercion `seq` ()
+    )
+  , ( "LengthSMTLibLiveQueryObservation local unexpectedly permits Coercible"
+    , forbiddenLengthSMTLibLiveObservationLocalCoercion `seq` ()
+    )
+  , ( "LengthSMTLibLiveSession exposed its private worker"
+    , forbiddenLengthSMTLibLiveSessionWorkerProjection `seq` ()
+    )
+  , ( "LengthSMTLibLiveQueryObservation exposed its ordinal"
+    , forbiddenLengthSMTLibLiveObservationOrdinalProjection `seq` ()
+    )
+  , ( "LengthSMTLibLiveQueryObservation exposed decoded input values"
+    , forbiddenLengthSMTLibLiveObservationInputValuesProjection `seq` ()
+    )
+  , ( "LengthSMTLibLiveQueryObservation exposed its reversible run identity"
+    , forbiddenLengthSMTLibLiveObservationRunIdentityProjection `seq` ()
+    )
+  , ( "LengthSMTLibLiveQueryObservation exposed its transcript digest"
+    , forbiddenLengthSMTLibLiveObservationTranscriptDigestProjection `seq` ()
+    )
+  , ( "LengthSMTLibLiveQueryObservation exposed transcript bytes"
+    , forbiddenLengthSMTLibLiveObservationTranscriptBytesProjection `seq` ()
+    )
+  , ( "LengthSMTLibLiveQueryObservation exposed stdout counters"
+    , forbiddenLengthSMTLibLiveObservationStdoutProjection `seq` ()
+    )
+  , ( "LengthSMTLibLiveQueryObservation exposed stderr counters"
+    , forbiddenLengthSMTLibLiveObservationStderrProjection `seq` ()
+    )
+  , ( "LengthSMTLibLiveSessionError exposed child-controlled bytes"
+    , forbiddenLengthSMTLibLiveSessionErrorBytesProjection `seq` ()
+    )
+  , ( "LengthSMTLibLiveQueryError exposed child-controlled bytes"
+    , forbiddenLengthSMTLibLiveQueryErrorBytesProjection `seq` ()
+    )
+  , ( "LengthSMTLibLive facade exposed the internal ready worker type"
+    , forbiddenLengthSMTLibReadyWorkerTypeExposure `seq` ()
+    )
+  , ( "LengthSMTLibLive facade exposed the internal session config type"
+    , forbiddenLengthSMTLibSessionConfigTypeExposure `seq` ()
+    )
+  , ( "LengthSMTLibLive facade exposed the internal query run type"
+    , forbiddenLengthSMTLibQueryRunTypeExposure `seq` ()
+    )
+  , ( "LengthSMTLibLive facade exposed the internal process type"
+    , forbiddenLengthSMTLibProcessTypeExposure `seq` ()
     )
   , ( "CheckedLengthContract variable unexpectedly permits Coercible"
     , forbiddenCheckedLengthContractCoercion `seq` ()
@@ -614,6 +723,59 @@ forbiddenConstructionAttempts =
       @(CheckedLengthProviderInventory LengthVariableProbe)
       @(Fingerprint LengthProviderInventoryFingerprintSubject)
       "CheckedLengthProviderInventory.lengthProviderInventoryFingerprint"
+  , noField
+      @"lengthSMTLibLiveSessionPrimaryFailure"
+      @LengthSMTLibLiveSessionError
+      @LengthSMTLibLiveSessionFailure
+      "LengthSMTLibLiveSessionError.lengthSMTLibLiveSessionPrimaryFailure"
+  , noField
+      @"lengthSMTLibLiveSessionCleanupIncomplete"
+      @LengthSMTLibLiveSessionError
+      @Bool
+      "LengthSMTLibLiveSessionError.lengthSMTLibLiveSessionCleanupIncomplete"
+  , noField
+      @"lengthSMTLibLiveQueryPrimaryFailure"
+      @LengthSMTLibLiveQueryError
+      @LengthSMTLibLiveQueryFailure
+      "LengthSMTLibLiveQueryError.lengthSMTLibLiveQueryPrimaryFailure"
+  , noField
+      @"lengthSMTLibLiveQueryCleanupIncomplete"
+      @LengthSMTLibLiveQueryError
+      @Bool
+      "LengthSMTLibLiveQueryError.lengthSMTLibLiveQueryCleanupIncomplete"
+  , noField
+      @"lengthSMTLibLiveQueryObservationQueryFingerprint"
+      @(LengthSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      @(Fingerprint LengthSMTLibQueryFingerprintSubject)
+      "LengthSMTLibLiveQueryObservation.queryFingerprint"
+  , noField
+      @"lengthSMTLibLiveQueryObservationSolverStatus"
+      @(LengthSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      @SolverStatus
+      "LengthSMTLibLiveQueryObservation.solverStatus"
+  , noField
+      @"lengthSMTLibLiveQueryObservationResultStrength"
+      @(LengthSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      @RawResultStrength
+      "LengthSMTLibLiveQueryObservation.resultStrength"
+  , noField
+      @"lengthSMTLibLiveQueryObservationUse"
+      @(LengthSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      @RawObservationUse
+      "LengthSMTLibLiveQueryObservation.use"
+  , noField
+      @"lengthSMTLibLiveQueryObservationCounterexampleEvidence"
+      @(LengthSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      @(Maybe
+        (BehavioralEvidence
+          FiniteListSpineLengthV1
+          ValidatedLengthCounterexample))
+      "LengthSMTLibLiveQueryObservation.counterexampleEvidence"
   ]
 
 -- Positive controls prove that both dictionary-forcing helpers work and that
@@ -639,6 +801,14 @@ noOrd :: forall value. Ord value => String -> (String, ())
 noOrd label =
   (label ++ " unexpectedly has Ord", ordMethod @value)
 
+noEq :: forall value. Eq value => String -> (String, ())
+noEq label =
+  (label ++ " unexpectedly has Eq", eqMethod @value)
+
+noShow :: forall value. Show value => String -> (String, ())
+noShow label =
+  (label ++ " unexpectedly has Show", showMethod @value)
+
 -- Selecting the method forces the instance dictionary without needing a
 -- value of the abstract type or forcing a representation.
 genericMethod :: forall value. Generic value => ()
@@ -646,6 +816,12 @@ genericMethod = (from :: value -> Rep value ()) `seq` ()
 
 ordMethod :: forall value. Ord value => ()
 ordMethod = (compare :: value -> value -> Ordering) `seq` ()
+
+eqMethod :: forall value. Eq value => ()
+eqMethod = ((==) :: value -> value -> Bool) `seq` ()
+
+showMethod :: forall value. Show value => ()
+showMethod = (show :: value -> String) `seq` ()
 
 -- Keep the deferred role error in this binding's RHS.  The surrounding
 -- negative fixture can then force it inside its exception handler; if the
@@ -879,6 +1055,119 @@ forbiddenLengthSMTLibExecutionFingerprintProjection
 forbiddenLengthSMTLibExecutionFingerprintProjection =
   lengthSMTLibExecutionPolicyFingerprint `seq` const ()
 
+forbiddenLengthSMTLibLiveSessionCoercion
+  :: LengthSMTLibLiveSession LiveEpochProbe
+  -> LengthSMTLibLiveSession OtherLiveEpochProbe
+forbiddenLengthSMTLibLiveSessionCoercion = coerce
+
+forbiddenLengthSMTLibLiveObservationEpochCoercion
+  :: LengthSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> LengthSMTLibLiveQueryObservation
+      OtherLiveEpochProbe LiveIdentityProbe LiveLocalProbe
+forbiddenLengthSMTLibLiveObservationEpochCoercion = coerce
+
+forbiddenLengthSMTLibLiveObservationIdentityCoercion
+  :: LengthSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> LengthSMTLibLiveQueryObservation
+      LiveEpochProbe OtherLiveIdentityProbe LiveLocalProbe
+forbiddenLengthSMTLibLiveObservationIdentityCoercion = coerce
+
+forbiddenLengthSMTLibLiveObservationLocalCoercion
+  :: LengthSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> LengthSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe OtherLiveLocalProbe
+forbiddenLengthSMTLibLiveObservationLocalCoercion = coerce
+
+forbiddenLengthSMTLibLiveSessionWorkerProjection
+  :: LengthSMTLibLiveSession LiveEpochProbe
+  -> ()
+forbiddenLengthSMTLibLiveSessionWorkerProjection =
+  lengthSMTLibLiveSessionWorker `seq` const ()
+
+forbiddenLengthSMTLibLiveObservationOrdinalProjection
+  :: LengthSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> ()
+forbiddenLengthSMTLibLiveObservationOrdinalProjection =
+  lengthSMTLibLiveQueryObservationOrdinal `seq` const ()
+
+forbiddenLengthSMTLibLiveObservationInputValuesProjection
+  :: LengthSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> ()
+forbiddenLengthSMTLibLiveObservationInputValuesProjection =
+  lengthSMTLibLiveQueryObservationInputValues `seq` const ()
+
+forbiddenLengthSMTLibLiveObservationRunIdentityProjection
+  :: LengthSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> ()
+forbiddenLengthSMTLibLiveObservationRunIdentityProjection =
+  lengthSMTLibLiveQueryObservationRunIdentityFingerprint `seq` const ()
+
+forbiddenLengthSMTLibLiveObservationTranscriptDigestProjection
+  :: LengthSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> ()
+forbiddenLengthSMTLibLiveObservationTranscriptDigestProjection =
+  lengthSMTLibLiveQueryObservationTranscriptSHA256 `seq` const ()
+
+forbiddenLengthSMTLibLiveObservationTranscriptBytesProjection
+  :: LengthSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> ()
+forbiddenLengthSMTLibLiveObservationTranscriptBytesProjection =
+  lengthSMTLibLiveQueryObservationTranscriptByteCount `seq` const ()
+
+forbiddenLengthSMTLibLiveObservationStdoutProjection
+  :: LengthSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> ()
+forbiddenLengthSMTLibLiveObservationStdoutProjection =
+  lengthSMTLibLiveQueryObservationStdoutCounters `seq` const ()
+
+forbiddenLengthSMTLibLiveObservationStderrProjection
+  :: LengthSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> ()
+forbiddenLengthSMTLibLiveObservationStderrProjection =
+  lengthSMTLibLiveQueryObservationStderrCounters `seq` const ()
+
+forbiddenLengthSMTLibLiveSessionErrorBytesProjection
+  :: LengthSMTLibLiveSessionError
+  -> ()
+forbiddenLengthSMTLibLiveSessionErrorBytesProjection =
+  lengthSMTLibLiveSessionErrorChildBytes `seq` const ()
+
+forbiddenLengthSMTLibLiveQueryErrorBytesProjection
+  :: LengthSMTLibLiveQueryError
+  -> ()
+forbiddenLengthSMTLibLiveQueryErrorBytesProjection =
+  lengthSMTLibLiveQueryErrorChildBytes `seq` const ()
+
+forbiddenLengthSMTLibReadyWorkerTypeExposure
+  :: ()
+forbiddenLengthSMTLibReadyWorkerTypeExposure =
+  LengthSMTLibReadyWorker `seq` ()
+
+forbiddenLengthSMTLibSessionConfigTypeExposure
+  :: ()
+forbiddenLengthSMTLibSessionConfigTypeExposure =
+  LengthSMTLibSessionConfig `seq` ()
+
+forbiddenLengthSMTLibQueryRunTypeExposure
+  :: ()
+forbiddenLengthSMTLibQueryRunTypeExposure =
+  LengthSMTLibQueryRun `seq` ()
+
+forbiddenLengthSMTLibProcessTypeExposure
+  :: ()
+forbiddenLengthSMTLibProcessTypeExposure =
+  LengthSMTLibProcess `seq` ()
+
 -- Selecting 'coerce' forces the built-in coercion evidence without requiring
 -- a value of either abstract type.
 coercibleMethod
@@ -934,4 +1223,13 @@ selectorNamesInScope =
   proofBindings `seq`
   proofBindingsIncludingTarget `seq`
   targetWasExcluded `seq`
+  lengthSMTLibLiveSessionPrimaryFailure `seq`
+  lengthSMTLibLiveSessionCleanupIncomplete `seq`
+  lengthSMTLibLiveQueryPrimaryFailure `seq`
+  lengthSMTLibLiveQueryCleanupIncomplete `seq`
+  lengthSMTLibLiveQueryObservationQueryFingerprint `seq`
+  lengthSMTLibLiveQueryObservationSolverStatus `seq`
+  lengthSMTLibLiveQueryObservationResultStrength `seq`
+  lengthSMTLibLiveQueryObservationUse `seq`
+  lengthSMTLibLiveQueryObservationCounterexampleEvidence `seq`
   ()

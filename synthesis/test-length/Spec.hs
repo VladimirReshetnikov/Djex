@@ -2,6 +2,7 @@ module Main (main) where
 
 import Control.Exception (evaluate)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BSC
 import Data.List (intercalate, isInfixOf, nub, sort)
 import Data.Word (Word8)
 import Numeric.Natural (Natural)
@@ -57,6 +58,8 @@ import qualified Language.Haskell.Synthesis.Semantic.Length.Problem as LengthPro
 import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib as SMTLib
 import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
   as SMTLibExecution
+import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live
+  as SMTLibLive
 import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation
   as SMTLibObservation
 import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response
@@ -88,6 +91,7 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , smtLibProtocolTests
   , SMTLibLiveSpec.smtLibLiveTests
   , smtLibLiveQueryTests
+  , smtLibLiveFacadeTests
   , evaluationTests
   , normalizationTests
   , productiveBoundTests
@@ -121,6 +125,254 @@ smtLibLiveQueryTests = testGroup "Length SMT-LIB live queries"
   , testCase "admit exactly maximum queries and reject maximum plus one"
       assertLiveQueryMaximum
   ]
+
+smtLibLiveFacadeTests :: TestTree
+smtLibLiveFacadeTests = testGroup "public Length SMT-LIB live facade"
+  [ testCase
+      "associate sequential unary and binary observations with replay evidence"
+      assertLiveFacadeSequentialEvidence
+  , testCase "report satisfiable status-only without evidence"
+      assertLiveFacadeStatusOnlySatisfiable
+  , testGroup "terminal heuristic observations"
+      [ testCase "report unsatisfiable without evidence"
+          $ assertLiveFacadeTerminalStatus "query-unsat"
+              Observation.SolverUnsatisfiable
+              SemanticProblem.RawSolverUnsatRelativeToEncoding
+      , testCase "report unknown without evidence"
+          $ assertLiveFacadeTerminalStatus "query-unknown"
+              Observation.SolverUnknown
+              SemanticProblem.RawSolverUnknown
+      ]
+  , testCase
+      "sanitize stale output, spend the session, and hide dynamic payloads"
+      assertLiveFacadeStaleFailure
+  , testCase "sanitize a deadline and reject reuse of the spent session"
+      assertLiveFacadeDeadlineFailure
+  ]
+
+assertLiveFacadeSequentialEvidence :: IO ()
+assertLiveFacadeSequentialEvidence = do
+  unaryProblem <- adversarialConstantZeroProblem identityLengthContract
+  binaryProblem <- adversarialBinaryConstantZeroProblem identityLengthContract
+  unaryQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits unaryProblem
+  binaryQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits binaryProblem
+  assertBool "distinct facade fixtures shared a query fingerprint"
+    $ SMTLib.lengthSMTLibQueryFingerprint unaryQuery /=
+        SMTLib.lengthSMTLibQueryFingerprint binaryQuery
+  scoped <- SMTLibLiveSpec.withLiveFacadeSession "healthy"
+    SMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+    $ \executable session -> do
+        unary <- expectRight =<< SMTLibLive.runLengthSMTLibLiveQuery
+          Evaluate.defaultLengthEvaluationLimits session unaryQuery
+        binary <- expectRight =<< SMTLibLive.runLengthSMTLibLiveQuery
+          Evaluate.defaultLengthEvaluationLimits session binaryQuery
+        assertLiveFacadeEvidence unaryQuery [3] unary
+        assertLiveFacadeEvidence binaryQuery [3, 5] binary
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0, 1] events
+        assertFakeZ3EventOrdinals "query-get-value" [0, 1] events
+  _ <- expectRight scoped
+  pure ()
+
+assertLiveFacadeEvidence
+  :: SMTLib.LengthSMTLibQuery identity local
+  -> [Natural]
+  -> SMTLibLive.LengthSMTLibLiveQueryObservation epoch identity local
+  -> IO ()
+assertLiveFacadeEvidence query expectedInputs observation = do
+  SMTLibLive.lengthSMTLibLiveQueryObservationQueryFingerprint observation @?=
+    SMTLib.lengthSMTLibQueryFingerprint query
+  SMTLibLive.lengthSMTLibLiveQueryObservationSolverStatus observation @?=
+    Observation.SolverSatisfiable
+  SMTLibLive.lengthSMTLibLiveQueryObservationResultStrength observation @?=
+    SemanticProblem.RawSolverModelHint
+  SMTLibLive.lengthSMTLibLiveQueryObservationUse observation @?=
+    SemanticProblem.HeuristicRankingOnly
+  evidence <- case
+      SMTLibLive.lengthSMTLibLiveQueryObservationCounterexampleEvidence
+        observation of
+    Nothing -> assertFailure
+      "satisfiable public facade observation omitted replay evidence"
+    Just value -> pure value
+  receipt <- expectRight $ Djex.replayBehavioralEvidence
+    (SMTLib.lengthSMTLibQueryBehavioralProblem query) evidence
+  Evaluate.validatedLengthCounterexampleInputs receipt @?= expectedInputs
+  Evaluate.validatedLengthCounterexampleResult receipt @?= 0
+
+assertLiveFacadeStatusOnlySatisfiable :: IO ()
+assertLiveFacadeStatusOnlySatisfiable = do
+  problem <- adversarialConstantZeroProblem identityLengthContract
+  query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  scoped <- SMTLibLiveSpec.withLiveFacadeSession "healthy"
+    SMTLibExecution.LengthSMTLibStatusOnly
+    $ \executable session -> do
+        observation <- expectRight =<< SMTLibLive.runLengthSMTLibLiveQuery
+          Evaluate.defaultLengthEvaluationLimits session query
+        assertLiveFacadeStatusObservation query
+          Observation.SolverSatisfiable
+          SemanticProblem.RawSolverModelHint observation
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0] events
+        assertFakeZ3EventCount "query-get-value" 0 events
+  _ <- expectRight scoped
+  pure ()
+
+assertLiveFacadeTerminalStatus
+  :: String
+  -> Observation.SolverStatus
+  -> SemanticProblem.RawResultStrength
+  -> IO ()
+assertLiveFacadeTerminalStatus mode expectedStatus expectedStrength = do
+  problem <- adversarialConstantZeroProblem identityLengthContract
+  query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  scoped <- SMTLibLiveSpec.withLiveFacadeSession mode
+    SMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+    $ \executable session -> do
+        observation <- expectRight =<< SMTLibLive.runLengthSMTLibLiveQuery
+          Evaluate.defaultLengthEvaluationLimits session query
+        assertLiveFacadeStatusObservation query expectedStatus expectedStrength
+          observation
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0] events
+        assertFakeZ3EventCount "query-get-value" 0 events
+  _ <- expectRight scoped
+  pure ()
+
+assertLiveFacadeStatusObservation
+  :: SMTLib.LengthSMTLibQuery identity local
+  -> Observation.SolverStatus
+  -> SemanticProblem.RawResultStrength
+  -> SMTLibLive.LengthSMTLibLiveQueryObservation epoch identity local
+  -> IO ()
+assertLiveFacadeStatusObservation query expectedStatus expectedStrength
+    observation = do
+  SMTLibLive.lengthSMTLibLiveQueryObservationQueryFingerprint observation @?=
+    SMTLib.lengthSMTLibQueryFingerprint query
+  SMTLibLive.lengthSMTLibLiveQueryObservationSolverStatus observation @?=
+    expectedStatus
+  SMTLibLive.lengthSMTLibLiveQueryObservationResultStrength observation @?=
+    expectedStrength
+  SMTLibLive.lengthSMTLibLiveQueryObservationUse observation @?=
+    SemanticProblem.HeuristicRankingOnly
+  case SMTLibLive.lengthSMTLibLiveQueryObservationCounterexampleEvidence
+      observation of
+    Nothing -> pure ()
+    Just _ -> assertFailure
+      "status-only public facade observation retained replay evidence"
+
+assertLiveFacadeStaleFailure :: IO ()
+assertLiveFacadeStaleFailure = do
+  problem <- adversarialConstantZeroProblem identityLengthContract
+  query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  scoped <- SMTLibLiveSpec.withLiveFacadeSession "query-stale-prewrite"
+    SMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+    $ \executable session -> do
+        rejected <- SMTLibLive.runLengthSMTLibLiveQuery
+          Evaluate.defaultLengthEvaluationLimits session query
+        stale <- expectLiveFacadeQueryFailure
+          SMTLibLive.LengthSMTLibLiveQueryProtocolRejected rejected
+        spentResult <- SMTLibLive.runLengthSMTLibLiveQuery
+          Evaluate.defaultLengthEvaluationLimits session query
+        spent <- expectLiveFacadeQueryFailure
+          SMTLibLive.LengthSMTLibLiveQuerySessionUnavailable spentResult
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0] events
+        assertFakeZ3EventCount "query-get-value" 0 events
+        assertLiveFacadeErrorShowSanitized True executable events [stale, spent]
+  _ <- expectRight scoped
+  pure ()
+
+assertLiveFacadeDeadlineFailure :: IO ()
+assertLiveFacadeDeadlineFailure = do
+  problem <- adversarialConstantZeroProblem identityLengthContract
+  query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  scoped <- SMTLibLiveSpec.withLiveFacadeSession "query-hang-status"
+    SMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+    $ \executable session -> do
+        rejected <- SMTLibLive.runLengthSMTLibLiveQuery
+          Evaluate.defaultLengthEvaluationLimits session query
+        deadline <- expectLiveFacadeQueryFailure
+          SMTLibLive.LengthSMTLibLiveQueryDeadlineExceeded rejected
+        spentResult <- SMTLibLive.runLengthSMTLibLiveQuery
+          Evaluate.defaultLengthEvaluationLimits session query
+        spent <- expectLiveFacadeQueryFailure
+          SMTLibLive.LengthSMTLibLiveQuerySessionUnavailable spentResult
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0] events
+        assertFakeZ3EventCount "query-get-value" 0 events
+        assertLiveFacadeErrorShowSanitized False executable events
+          [deadline, spent]
+  _ <- expectRight scoped
+  pure ()
+
+expectLiveFacadeQueryFailure
+  :: SMTLibLive.LengthSMTLibLiveQueryFailure
+  -> Either SMTLibLive.LengthSMTLibLiveQueryError value
+  -> IO SMTLibLive.LengthSMTLibLiveQueryError
+expectLiveFacadeQueryFailure expected result = case result of
+  Left failure -> do
+    SMTLibLive.lengthSMTLibLiveQueryPrimaryFailure failure @?= expected
+    SMTLibLive.lengthSMTLibLiveQueryCleanupIncomplete failure @?= False
+    pure failure
+  Right _ -> assertFailure $ "expected public facade query failure: " ++
+    show expected
+
+assertLiveFacadeErrorShowSanitized
+  :: Bool
+  -> FilePath
+  -> [SMTLibLiveSpec.FakeZ3Event]
+  -> [SMTLibLive.LengthSMTLibLiveQueryError]
+  -> IO ()
+assertLiveFacadeErrorShowSanitized requireValue executable events failures = do
+  let bytePayloads = concatMap
+        (SMTLibLiveSpec.fakeZ3FieldValues $ liveTestBytes "bytes") events
+      stdoutPayloads = concatMap
+        (SMTLibLiveSpec.fakeZ3FieldValues $ liveTestBytes "bytes")
+        $ fakeZ3Events "stdout" events
+      markers = concatMap quotedResponseBodies stdoutPayloads
+      symbol = liveTestBytes "djex_length_input_0"
+      valuation = liveTestBytes "((djex_length_input_0 3))"
+  assertBool "fake trace omitted the generated query symbol"
+    $ any (BS.isInfixOf symbol) bytePayloads
+  assertBool "fake trace omitted dynamic quoted marker responses"
+    $ not $ null markers
+  if requireValue
+    then assertBool "stale fake trace omitted its raw valuation"
+      $ any (BS.isInfixOf valuation) bytePayloads
+    else pure ()
+  let fixedForbidden =
+        [ ("executable path", executable)
+        , ("generated SMT symbol", BSC.unpack symbol)
+        ] ++ if requireValue
+          then
+            [ ("raw valuation", BSC.unpack valuation)
+            , ("decoded integer value", "3")
+            ]
+          else []
+      dynamicForbidden =
+        [("dynamic protocol marker", BSC.unpack marker) | marker <- markers]
+  mapM_ (assertRenderingSanitized $ fixedForbidden ++ dynamicForbidden)
+    $ map show failures
+
+assertRenderingSanitized :: [(String, String)] -> String -> IO ()
+assertRenderingSanitized forbidden rendered = mapM_ reject forbidden
+ where
+  reject (label, bytes) = assertBool
+    ("public query error Show leaked " ++ label ++ ": " ++ rendered)
+    $ not $ bytes `isInfixOf` rendered
+
+quotedResponseBodies :: BS.ByteString -> [BS.ByteString]
+quotedResponseBodies payload = case BS.uncons payload of
+  Just (34, afterOpen) ->
+    let (body, afterBody) = BS.break (== 34) afterOpen
+    in [body | not (BS.null body), not (BS.null afterBody)]
+  _ -> []
 
 assertLiveSequentialUnaryQueries :: IO ()
 assertLiveSequentialUnaryQueries = do

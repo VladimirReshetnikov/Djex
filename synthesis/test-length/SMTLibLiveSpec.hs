@@ -8,6 +8,7 @@ module SMTLibLiveSpec
   , fakeZ3EventTag
   , fakeZ3FieldValues
   , readFakeZ3Events
+  , withLiveFacadeSession
   , withLiveQueryWorker
   ) where
 
@@ -73,6 +74,10 @@ import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Sess
   as Process
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Stream
   as SMTLibStream
+import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
+  as PublicExecution
+import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live
+  as Live
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit
   ( assertBool
@@ -535,6 +540,12 @@ callbackExceptionTests = testGroup "callback exception cleanup"
       assertLiveSynchronousCallbackException
   , testCase "rethrow a throwTo exception after removing the workspace"
       assertLiveAsynchronousCallbackException
+  , testCase
+      "public facade rethrows a synchronous exception after workspace cleanup"
+      assertLiveFacadeSynchronousCallbackException
+  , testCase
+      "public facade rethrows a throwTo exception after workspace cleanup"
+      assertLiveFacadeAsynchronousCallbackException
   ]
 
 data LiveSynchronousCallbackException = LiveSynchronousCallbackException
@@ -586,6 +597,53 @@ assertLiveAsynchronousCallbackException =
       Just () -> pure ()
     assertCapturedWorkspaceRemoved "throwTo callback exception" workspaceRef
 
+assertLiveFacadeSynchronousCallbackException :: IO ()
+assertLiveFacadeSynchronousCallbackException =
+  withFakeZ3Mode "healthy" $ \executable _ -> do
+    execution <- liveFacadeExecutionConfig executable
+      PublicExecution.LengthSMTLibInputValuesAfterSatisfiable
+    attempted <- try $ runLiveFacadeSessionBounded 8000000 execution
+      $ \_ -> throwIO LiveSynchronousCallbackException
+    case attempted of
+      Left failure -> failure @?= LiveSynchronousCallbackException
+      Right _ -> assertFailure
+        "public facade did not rethrow the synchronous callback exception"
+    assertFakeWorkerWorkspaceRemoved
+      "public synchronous callback exception" executable
+
+assertLiveFacadeAsynchronousCallbackException :: IO ()
+assertLiveFacadeAsynchronousCallbackException =
+  withFakeZ3Mode "healthy" $ \executable _ -> do
+    target <- myThreadId
+    throwerFinished <- newEmptyMVar
+    callbackBlock <- newEmptyMVar
+    execution <- liveFacadeExecutionConfig executable
+      PublicExecution.LengthSMTLibInputValuesAfterSatisfiable
+    attempted <- try $ runLiveFacadeSessionBounded 8000000 execution $ \_ -> do
+      _ <- forkIO $ throwTo target LiveAsynchronousCallbackException
+        `finally` putMVar throwerFinished ()
+      takeMVar callbackBlock
+    case attempted of
+      Left failure -> failure @?= LiveAsynchronousCallbackException
+      Right _ -> assertFailure
+        "public facade did not rethrow the throwTo callback exception"
+    thrower <- timeout 1000000 $ takeMVar throwerFinished
+    case thrower of
+      Nothing -> assertFailure "public facade throwTo helper did not terminate"
+      Just () -> pure ()
+    assertFakeWorkerWorkspaceRemoved
+      "public throwTo callback exception" executable
+
+assertFakeWorkerWorkspaceRemoved :: String -> FilePath -> IO ()
+assertFakeWorkerWorkspaceRemoved label executable = do
+  events <- readFakeZ3Events executable
+  start <- expectFakeZ3Event "start" events
+  workspace <- case fakeZ3FieldValues "cwd" start of
+    [raw] -> pure $ BSC.unpack raw
+    _ -> assertFailure $ label ++ " trace omitted its unique cwd"
+  retained <- doesPathExist workspace
+  assertBool (label ++ " retained its hidden workspace") $ not retained
+
 assertCapturedWorkspaceRemoved
   :: String
   -> IORef (Maybe FilePath)
@@ -616,6 +674,55 @@ liveSessionConfig executable expectedDigest changeProcess changeSession = do
   expectRight $ Session.sealLengthSMTLibSessionConfig
     session process Capability.defaultLengthSMTLibCapabilityLimits
     Protocol.defaultLengthSMTLibProtocolLimits execution
+
+-- | Test-only entry point for typed public-facade fixtures owned by @Spec.hs@.
+-- The concrete executable is exposed only to the test callback so it can
+-- inspect the fake worker's output-only sidecar; the public session remains
+-- the sole query authority.
+withLiveFacadeSession
+  :: String
+  -> PublicExecution.LengthSMTLibArtifactPolicy
+  -> (forall epoch.
+      FilePath
+      -> Live.LengthSMTLibLiveSession epoch
+      -> IO result)
+  -> IO (Either Live.LengthSMTLibLiveSessionError result)
+withLiveFacadeSession mode artifactPolicy use =
+  withFakeZ3Mode mode $ \executable _ -> do
+    execution <- liveFacadeExecutionConfig executable artifactPolicy
+    runLiveFacadeSessionBounded 8000000 execution $ use executable
+
+liveFacadeExecutionConfig
+  :: FilePath
+  -> PublicExecution.LengthSMTLibArtifactPolicy
+  -> IO PublicExecution.LengthSMTLibExecutionConfig
+liveFacadeExecutionConfig executable artifactPolicy = expectRight
+  $ PublicExecution.mkLengthSMTLibExecutionConfig
+      PublicExecution.defaultLengthSMTLibExecutionLimits
+  $ (PublicExecution.defaultLengthSMTLibExecutionConfigSource
+      executable Nothing)
+    { PublicExecution.lengthSMTLibExecutionConfigSourceSolverTimeoutMilliseconds =
+        liveSolverTimeoutMilliseconds
+    , PublicExecution.lengthSMTLibExecutionConfigSourceSolverResourceLimit =
+        liveSolverResourceLimit
+    , PublicExecution.lengthSMTLibExecutionConfigSourceArtifactPolicy =
+        artifactPolicy
+    , PublicExecution.lengthSMTLibExecutionConfigSourceHostDeadlineMilliseconds =
+        liveQueryHostDeadlineMilliseconds
+    }
+
+runLiveFacadeSessionBounded
+  :: Int
+  -> PublicExecution.LengthSMTLibExecutionConfig
+  -> (forall epoch. Live.LengthSMTLibLiveSession epoch -> IO result)
+  -> IO (Either Live.LengthSMTLibLiveSessionError result)
+runLiveFacadeSessionBounded microseconds execution use = do
+  bounded <- timeout microseconds
+    $ Live.withLengthSMTLibLiveSession execution use
+  case bounded of
+    Nothing -> assertFailure $ "public live facade exceeded outer bound of " ++
+      show microseconds ++ " microseconds"
+    Just result -> pure result
 
 -- | Test-only entry point for typed live-query fixtures owned by @Spec.hs@.
 -- The fake mode remains selected solely by the copied executable basename.

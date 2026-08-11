@@ -158,6 +158,7 @@ Library
     Language.Haskell.Synthesis.Semantic.Length.Problem
     Language.Haskell.Synthesis.Semantic.Length.SMTLib
     Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
+    Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live
     Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation
     Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response
     Language.Haskell.Synthesis.Semantic.Observation
@@ -476,7 +477,7 @@ Test-Suite djinn-cli-tests
 -- downstream library dependency. AbstractionBoundary additionally pins the
 -- opaque-constructor contract with deliberately rejected compile probes.
 Test-Suite djex-api-tests
-  import:         tasty-hunit-test, containers-dep
+  import:         tasty-hunit-test, containers-dep, deepseq-dep
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: test-api
@@ -484,7 +485,7 @@ Test-Suite djex-api-tests
     AbstractionBoundary
     ExferencePatternImports
     FacadeSpec
-  Build-Depends:  djex
+  Build-Depends:  djex, template-haskell
 
 Benchmark exference-bench
   import:         tasty-benchmark

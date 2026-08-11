@@ -278,7 +278,15 @@ main = defaultMain $ testGroup "Djex downstream API"
                     ( "Generic" `isInfixOf` message ||
                       "HasField" `isInfixOf` message ||
                       ( "Ord" `isInfixOf` message &&
-                        "LengthSMTLibExecutionConfig" `isInfixOf` message
+                        ( "LengthSMTLibExecutionConfig" `isInfixOf` message ||
+                          "LengthSMTLibLiveSession" `isInfixOf` message ||
+                          "LengthSMTLibLiveQueryObservation" `isInfixOf` message
+                        )
+                      ) ||
+                      ( ("Eq" `isInfixOf` message || "Show" `isInfixOf` message) &&
+                        ( "LengthSMTLibLiveSession" `isInfixOf` message ||
+                          "LengthSMTLibLiveQueryObservation" `isInfixOf` message
+                        )
                       )
                     )
                   ) ||
@@ -312,6 +320,10 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "forbiddenAssociatedLengthSMTLibSatisfiableCoercion"
                       , "forbiddenAssociatedLengthSMTLibUnsatisfiableCoercion"
                       , "forbiddenAssociatedLengthSMTLibUnknownCoercion"
+                      , "forbiddenLengthSMTLibLiveSessionCoercion"
+                      , "forbiddenLengthSMTLibLiveObservationEpochCoercion"
+                      , "forbiddenLengthSMTLibLiveObservationIdentityCoercion"
+                      , "forbiddenLengthSMTLibLiveObservationLocalCoercion"
                       ]
                   ) ||
                   ( "not in scope" `isInfixOf` message &&
@@ -323,6 +335,24 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "lengthSMTLibExecutionExecutablePath"
                       , "lengthSMTLibExecutionExpectedExecutableSHA256"
                       , "lengthSMTLibExecutionPolicyFingerprint"
+                      , "LengthSMTLibLiveSession"
+                      , "LengthSMTLibLiveQueryObservation"
+                      , "LengthSMTLibLiveSessionError"
+                      , "LengthSMTLibLiveQueryError"
+                      , "lengthSMTLibLiveSessionWorker"
+                      , "lengthSMTLibLiveQueryObservationOrdinal"
+                      , "lengthSMTLibLiveQueryObservationInputValues"
+                      , "lengthSMTLibLiveQueryObservationRunIdentityFingerprint"
+                      , "lengthSMTLibLiveQueryObservationTranscriptSHA256"
+                      , "lengthSMTLibLiveQueryObservationTranscriptByteCount"
+                      , "lengthSMTLibLiveQueryObservationStdoutCounters"
+                      , "lengthSMTLibLiveQueryObservationStderrCounters"
+                      , "lengthSMTLibLiveSessionErrorChildBytes"
+                      , "lengthSMTLibLiveQueryErrorChildBytes"
+                      , "LengthSMTLibReadyWorker"
+                      , "LengthSMTLibSessionConfig"
+                      , "LengthSMTLibQueryRun"
+                      , "LengthSMTLibProcess"
                       , "mkBehavioralEvidence"
                       , "ValidatedLengthCounterexampleReceipt"
                       ]

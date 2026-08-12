@@ -144,6 +144,8 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal` | Domain-neutral pure write/await/complete action algebra with nominal write-kind, receiver, and outcome associations. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream` | Domain-neutral cumulative framing policy and opaque zero-start cursor, completed-frame, and validated-boundary continuations; it prevents tails, offsets, and budgets from being detached across same-write frames or causal write boundaries. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver` | Domain-neutral causal transport algorithm and exact segmented transcript ownership, with write-before-feed, positional EOF precedence, and delayed-boundary-whitespace attribution. |
+| `Language.Haskell.Synthesis.Internal.SMTLib.Response` | Domain-neutral bounded SMT-LIB response lexer and S-expression parser with productive total, depth, node, token, and numeral limits. |
+| `Language.Haskell.Synthesis.Internal.SMTLib.Response.Standard` | Canonical solver-status bytes, bounded standard check-response decoding, and shared `unsupported`/solver-error classification without process or semantic authority. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Transport` | Length/Z3 adapter which binds one process, cancellation token, and absolute deadline behind the generic causal driver operations. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session` | Rank-N scoped ownership of one capability-probed worker, with secret/public entropy separation, a fresh fd-observed workspace, exact segmented probe transcript, and no public process handle. |
 | `Language.Haskell.Synthesis.Semantic.Observation` | Raw three-valued solver and four-valued behavioral reports without candidate association or evidence claims. |
@@ -206,10 +208,17 @@ should not be cached by query identity alone.
 pure response boundary. It retains at most 65,536 bytes before parsing, so
 cyclic or infinite lazy input is rejected productively, then enforces separate
 list-depth, S-expression-node, source-token-byte, and integer-width limits. The
-private lexer handles exact SMT-LIB whitespace and comments, doubled-quote
-strings, quoted symbols, and all standard atom categories. The public surface
+shared package-private lexer handles exact SMT-LIB whitespace and comments,
+doubled-quote strings, quoted symbols, and all standard atom categories. The public surface
 accepts only `sat`, `unsat`, `unknown`, or the exact input valuation requested
 by one query; valuations are symbol-checked and restored to source order.
+The package-private shared Standard layer owns canonical status bytes, bounded
+check-status decoding, and standard `unsupported`/solver-error shapes. Length
+exhaustively maps those closed failures into its compatibility vocabulary and
+continues to own its limit wrapper and defaults, valuation shape, and response
+schema. The readiness capability imports only canonical `sat`/`unsat` bytes
+and retains byte-exact,
+payload-free phase failures.
 Its versioned schema tag gives a later execution identity an exact parser and
 normalization policy to bind. This decoder is not stream framing or execution
 association. Standard solver errors remain failures, `unsat` remains

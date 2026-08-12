@@ -76,6 +76,8 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   ( lengthSMTLibExecutionProtocolSchemaTag )
 import Language.Haskell.Synthesis.Internal.SMTLib.Causal
   ( SMTLibCausalAction (..) )
+import Language.Haskell.Synthesis.Internal.SMTLib.Response.Standard
+  ( smtLibSolverStatusResponseBytes )
 import Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
   ( z3SMTLibExecutionQueryResetBytes
   , z3SMTLibExecutionStartupCommandBytes
@@ -116,6 +118,8 @@ import Language.Haskell.Synthesis.Internal.SMTLib.Stream
   , smtLibStreamTotalByteLimit
   , smtLibWhitespaceBytes
   )
+import Language.Haskell.Synthesis.Semantic.Observation
+  ( SolverStatus (..) )
 
 -- | Complete pure capability-plan schema.  It identifies neither a process
 -- nor an executable image.
@@ -938,14 +942,16 @@ capabilityInputValueRequestBytes =
   ascii "(get-value (djex_capability_input))\n"
 
 capabilitySatisfiableResponseBytes :: [Word8]
-capabilitySatisfiableResponseBytes = ascii "sat"
+capabilitySatisfiableResponseBytes =
+  smtLibSolverStatusResponseBytes SolverSatisfiable
 
 capabilityInputValueResponseBytes :: [Word8]
 capabilityInputValueResponseBytes =
   ascii "((djex_capability_input 0))"
 
 capabilityUnsatisfiableResponseBytes :: [Word8]
-capabilityUnsatisfiableResponseBytes = ascii "unsat"
+capabilityUnsatisfiableResponseBytes =
+  smtLibSolverStatusResponseBytes SolverUnsatisfiable
 
 tagged :: String -> [FingerprintField] -> FingerprintField
 tagged name = FingerprintTag $ ascii name

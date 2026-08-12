@@ -50,6 +50,7 @@ import Test.Tasty.HUnit
 import qualified Test.Tasty.QuickCheck as QC
 import SMTLibCausalDriverSpec (smtLibCausalDriverTests)
 import SMTLibCausalStreamSpec (smtLibCausalStreamTests)
+import SMTLibStandardResponseSpec (smtLibStandardResponseTests)
 import SMTLibStreamSpec (smtLibStreamTests)
 
 main :: IO ()
@@ -61,6 +62,7 @@ tests = testGroup "Djex synthesis foundation"
   , semanticObservationTests
   , smtLibCausalDriverTests
   , smtLibCausalStreamTests
+  , smtLibStandardResponseTests
   , smtLibStreamTests
   , classTests
   , collectionTests

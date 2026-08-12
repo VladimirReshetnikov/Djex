@@ -93,6 +93,14 @@ The receiver then permits only these transitions:
 6. frame and compare the exact value marker; and
 7. expose the decoded syntactic outcome atomically.
 
+The package-private generic Standard response layer owns the canonical
+`sat`/`unsat`/`unknown` spellings, bounded check-status classification, and
+standard `unsupported`/solver-error shapes. The Length decoder maps that closed
+failure vocabulary into its unchanged compatibility errors and separately owns
+query-specific valuation shape. The readiness capability reuses only the
+canonical `sat` and `unsat` bytes: it still performs exact frame equality and
+collapses every mismatch to its phase-only failure.
+
 Unexpected reset output occupies the first status slot and fails. Markers are
 never decoded as ordinary responses, and the machine never scans past a wrong
 frame looking for a later match. A required malformed or missing valuation is

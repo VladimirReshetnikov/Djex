@@ -371,10 +371,16 @@ response side without starting a process. It first retains one complete
 response under a total byte bound, then applies an explicit-stack SMT-LIB 2.x
 lexer and S-expression parser with independent nesting, node, token, and
 integer-width limits. Token limits count source bytes, including both bytes of
-a doubled quote. A versioned response-schema tag covers lexical,
-normalization, and shape-decoding policy for a future execution key. The
-public decoder admits only exact check statuses and
-the input-only valuation shape requested by a particular Length query. It
+a doubled quote. Below the Length compatibility surface,
+`Language.Haskell.Synthesis.Internal.SMTLib.Response.Standard` owns canonical
+`sat`/`unsat`/`unknown` bytes, bounded check-status classification, and the
+standard `unsupported` and `(error "...")` failure shapes. Length maps that
+closed vocabulary into its established errors and retains query-specific
+valuation decoding; the readiness capability reuses only the canonical status
+bytes and keeps exact frame comparison. A versioned response-schema tag covers
+lexical, normalization, and shape-decoding policy for a future execution key.
+The public decoder admits only exact check statuses and the input-only
+valuation shape requested by a particular Length query. It
 normalizes quoted symbols, rejects malformed, missing, extra, duplicate,
 unknown, wrong-sort, and unsolicited bindings, and restores source input
 order. Parsed negative integers remain raw values for the existing natural

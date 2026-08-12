@@ -52,14 +52,15 @@ import Language.Haskell.Synthesis.Internal.SMTLib.Response
   , smtLibResponseTokenByteLimit
   , smtLibSymbolBytes
   )
+import qualified Language.Haskell.Synthesis.Internal.SMTLib.Response.Standard
+  as Standard
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib
   ( LengthSMTLibIntegerBinding (..)
   , LengthSMTLibQuery
   , lengthSMTLibQueryInputSymbols
   , lengthSMTLibQueryInputValueRequestBytes
   )
-import Language.Haskell.Synthesis.Semantic.Observation
-  ( SolverStatus (..))
+import Language.Haskell.Synthesis.Semantic.Observation (SolverStatus)
 
 -- | Versioned lexical, shape-checking, symbol-normalization, and integer
 -- decoding policy.  A future execution identity must bind this schema as well
@@ -223,18 +224,11 @@ parseLengthSMTLibCheckResponse
   :: LengthSMTLibResponseLimits
   -> [Word8]
   -> Either LengthSMTLibResponseError SolverStatus
-parseLengthSMTLibCheckResponse limits bytes = do
-  expression <- parseResponse limits bytes
-  case expression of
-    SMTLibAtomExpression (SMTLibSimpleSymbol token)
-      | token == ascii "sat" -> Right SolverSatisfiable
-      | token == ascii "unsat" -> Right SolverUnsatisfiable
-      | token == ascii "unknown" -> Right SolverUnknown
-      | token == ascii "success" ->
-          Left LengthSMTLibSuccessWhereStatusExpected
-    _ -> case solverFailure expression of
-      Just failure -> Left failure
-      Nothing -> Left LengthSMTLibUnexpectedCheckResponse
+parseLengthSMTLibCheckResponse
+    (LengthSMTLibResponseLimits parserLimits) bytes =
+  case Standard.parseSMTLibCheckResponse parserLimits bytes of
+    Left failure -> Left $ mapCheckResponseError failure
+    Right status -> Right status
 
 -- | Decode the exact valuation set requested by one canonical query.  Pairs
 -- may arrive in any order, but the returned bindings are restored to query
@@ -251,8 +245,8 @@ parseLengthSMTLibInputValueResponse limits query bytes = do
     Nothing -> Left LengthSMTLibInputValueResponseNotExpected
     Just _ -> Right ()
   expression <- parseResponse limits bytes
-  case solverFailure expression of
-    Just failure -> Left failure
+  case Standard.classifySMTLibStandardResponseFailure expression of
+    Just failure -> Left $ mapStandardResponseFailure failure
     Nothing -> decodeValuations query expression
 
 parseResponse
@@ -264,18 +258,27 @@ parseResponse (LengthSMTLibResponseLimits parserLimits) bytes =
     Left failure -> Left $ LengthSMTLibResponseSyntaxError failure
     Right expression -> Right expression
 
-solverFailure :: SMTLibSExpression -> Maybe LengthSMTLibResponseError
-solverFailure expression = case expression of
-  SMTLibAtomExpression (SMTLibSimpleSymbol token)
-    | token == ascii "unsupported" ->
-        Just LengthSMTLibUnsupportedResponse
-  SMTLibListExpression
-      [ SMTLibAtomExpression (SMTLibSimpleSymbol name)
-      , SMTLibAtomExpression (SMTLibString message)
-      ]
-    | name == ascii "error" ->
-        Just $ LengthSMTLibSolverErrorResponse message
-  _ -> Nothing
+mapCheckResponseError
+  :: Standard.SMTLibCheckResponseError
+  -> LengthSMTLibResponseError
+mapCheckResponseError failure = case failure of
+  Standard.SMTLibCheckResponseSyntaxError syntax ->
+    LengthSMTLibResponseSyntaxError syntax
+  Standard.SMTLibCheckResponseStandardFailure standard ->
+    mapStandardResponseFailure standard
+  Standard.SMTLibCheckResponseSuccessWhereStatusExpected ->
+    LengthSMTLibSuccessWhereStatusExpected
+  Standard.SMTLibCheckResponseUnexpected ->
+    LengthSMTLibUnexpectedCheckResponse
+
+mapStandardResponseFailure
+  :: Standard.SMTLibStandardResponseFailure
+  -> LengthSMTLibResponseError
+mapStandardResponseFailure failure = case failure of
+  Standard.SMTLibStandardUnsupportedResponse ->
+    LengthSMTLibUnsupportedResponse
+  Standard.SMTLibStandardSolverErrorResponse message ->
+    LengthSMTLibSolverErrorResponse message
 
 decodeValuations
   :: LengthSMTLibQuery identity local

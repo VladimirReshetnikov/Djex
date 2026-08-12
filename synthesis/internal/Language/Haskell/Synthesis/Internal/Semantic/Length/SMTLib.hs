@@ -241,9 +241,6 @@ data LengthSMTLibPlan = LengthSMTLibPlan
   !SMTBooleanExpression
   ![SMTCommand]
   !(Maybe SMTCommand)
-  deriving (Eq, Ord, Show, Generic)
-
-instance NFData LengthSMTLibPlan
 
 -- | Opaque association of one checked problem, exact input symbols, bounded
 -- commands, and collision-free structural translation identity.

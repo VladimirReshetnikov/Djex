@@ -3,10 +3,11 @@
 --
 -- A query can be built only from one opaque 'CheckedLengthProblem'.  It
 -- structurally fingerprints a typed, versioned translation before retaining
--- only its exact input symbols and bounded canonical SMT-LIB command bytes.
--- It does not launch Z3 or assign authority to raw @sat@, @unsat@, or
--- @unknown@ reports.  Solver build and protocol identity belong to the
--- separate live execution envelope layered over the query fingerprint.
+-- the checked problem, exact input symbols, bounded canonical SMT-LIB command
+-- bytes, and complete fingerprint needed by execution and replay.  It does not
+-- launch Z3 or assign authority to raw @sat@, @unsat@, or @unknown@ reports.
+-- Solver build and protocol identity belong to the separate live execution
+-- envelope layered over the query fingerprint.
 --
 -- Model bindings contain inputs only.  'validateLengthSMTLibCounterexample'
 -- reorders an exact symbol set, rejects negative integers, recomputes the

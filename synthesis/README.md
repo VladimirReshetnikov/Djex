@@ -158,8 +158,11 @@ Behavioral observations remain independent of logical evidence too.  A domain
 module constructs all four structural fingerprints before sealing a
 `BehavioralProblem`; raw artifact format and payload bytes must fit explicit
 limits before a solver or behavioral report can be associated with that exact
-tuple. Replay compares domain, inventory, encoding, candidate, and complete
-problem in that order and rejects the first mismatch. Even an `unsat` report is
+tuple. Associated observations and domain-owned evidence retain that same
+opaque problem directly, so there is no parallel fingerprint-tuple
+representation which can drift from the problem authority. Replay compares
+domain, inventory, encoding, candidate, and complete problem in that order and
+rejects the first mismatch. Even an `unsat` report is
 only relative to its encoding and grants `HeuristicRankingOnly`. The opaque
 `BehavioralEvidence` seam has no public constructor or raw-report conversion.
 Domain-owned checkers may bind independently replayed receipts to the same

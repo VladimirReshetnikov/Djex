@@ -5,7 +5,9 @@
 --
 -- Domain modules are responsible for producing the four exact fingerprints.
 -- This module seals their association and is the only construction edge for
--- future authoritative evidence.  Raw observations never cross that edge.
+-- future authoritative evidence.  Associated values retain that same opaque
+-- problem directly rather than copying its identity into a parallel private
+-- representation.  Raw observations never cross that edge.
 module Language.Haskell.Synthesis.Internal.Semantic.Problem
   ( ProblemFingerprintSubject
   , InventoryFingerprintSubject
@@ -248,29 +250,12 @@ data RawObservationUse = HeuristicRankingOnly
 instance NFData RawObservationUse where
   rnf use = use `seq` ()
 
-data ProblemAssociation domain = ProblemAssociation
-  ![Word8]
-  !(Fingerprint (InventoryFingerprintSubject domain))
-  !(Fingerprint (EncodingFingerprintSubject domain))
-  !(Fingerprint (CandidateFingerprintSubject domain))
-  !(Fingerprint (ProblemFingerprintSubject domain))
-
-type role ProblemAssociation nominal
-
-instance NFData (ProblemAssociation domain) where
-  rnf (ProblemAssociation domain inventory encoding candidate problem) =
-    rnf domain `seq`
-    rnf inventory `seq`
-    rnf encoding `seq`
-    rnf candidate `seq`
-    rnf problem
-
 -- | A raw observation immutably associated with one exact problem tuple.
 --
 -- The observation parameter is nominal so callers cannot use 'coerce' to
 -- relabel status-specific artifact domains after association.
 data AssociatedObservation domain observation = AssociatedObservation
-  !(ProblemAssociation domain)
+  !(BehavioralProblem domain)
   !RawResultStrength
   observation
 
@@ -278,8 +263,8 @@ type role AssociatedObservation nominal nominal
 
 instance NFData observation
     => NFData (AssociatedObservation domain observation) where
-  rnf (AssociatedObservation association strength observation) =
-    rnf association `seq` rnf strength `seq` rnf observation
+  rnf (AssociatedObservation problem strength observation) =
+    rnf problem `seq` rnf strength `seq` rnf observation
 
 associateSolverObservation
   :: BehavioralProblem domain
@@ -293,7 +278,7 @@ associateSolverObservation
         (BoundedRawArtifact unsatisfiable)
         (BoundedRawArtifact unknown))
 associateSolverObservation problem observation = AssociatedObservation
-  (problemAssociation problem)
+  problem
   (case observation of
     SatisfiableObservation{} -> RawSolverModelHint
     UnsatisfiableObservation{} -> RawSolverUnsatRelativeToEncoding
@@ -314,7 +299,7 @@ associateBehavioralObservation
         (BoundedRawArtifact bounded)
         (BoundedRawArtifact unknown))
 associateBehavioralObservation problem observation = AssociatedObservation
-  (problemAssociation problem)
+  problem
   (case observation of
     BehaviorEstablishedObservation{} -> RawBehaviorEstablishedClaim
     BehaviorViolationObservation{} -> RawBehaviorCounterexampleClaim
@@ -325,32 +310,35 @@ associateBehavioralObservation problem observation = AssociatedObservation
 associatedObservationDomain
   :: AssociatedObservation domain observation
   -> [Word8]
-associatedObservationDomain (AssociatedObservation association _ _) =
-  associationDomain association
+associatedObservationDomain (AssociatedObservation problem _ _) =
+  behavioralProblemDomain problem
 
 associatedObservationInventoryFingerprint
   :: AssociatedObservation domain observation
   -> Fingerprint (InventoryFingerprintSubject domain)
 associatedObservationInventoryFingerprint
-    (AssociatedObservation association _ _) = associationInventory association
+    (AssociatedObservation problem _ _) =
+  behavioralProblemInventoryFingerprint problem
 
 associatedObservationEncodingFingerprint
   :: AssociatedObservation domain observation
   -> Fingerprint (EncodingFingerprintSubject domain)
 associatedObservationEncodingFingerprint
-    (AssociatedObservation association _ _) = associationEncoding association
+    (AssociatedObservation problem _ _) =
+  behavioralProblemEncodingFingerprint problem
 
 associatedObservationCandidateFingerprint
   :: AssociatedObservation domain observation
   -> Fingerprint (CandidateFingerprintSubject domain)
 associatedObservationCandidateFingerprint
-    (AssociatedObservation association _ _) = associationCandidate association
+    (AssociatedObservation problem _ _) =
+  behavioralProblemCandidateFingerprint problem
 
 associatedObservationProblemFingerprint
   :: AssociatedObservation domain observation
   -> Fingerprint (ProblemFingerprintSubject domain)
 associatedObservationProblemFingerprint
-    (AssociatedObservation association _ _) = associationProblem association
+    (AssociatedObservation problem _ _) = behavioralProblemFingerprint problem
 
 associatedObservationResultStrength
   :: AssociatedObservation domain observation
@@ -385,7 +373,7 @@ replayAssociatedObservation
   -> Either ReplayMismatch observation
 replayAssociatedObservation expected
     (AssociatedObservation actual _ observation) =
-  observation <$ compareAssociation (problemAssociation expected) actual
+  observation <$ compareAssociation expected actual
 
 -- | Future checker receipt associated with exactly the same problem tuple.
 --
@@ -393,14 +381,14 @@ replayAssociatedObservation expected
 -- conversion from 'AssociatedObservation': a solver model, core, or @unsat@
 -- response cannot manufacture this type.
 data BehavioralEvidence domain receipt = BehavioralEvidence
-  !(ProblemAssociation domain)
+  !(BehavioralProblem domain)
   receipt
 
 type role BehavioralEvidence nominal nominal
 
 instance NFData receipt => NFData (BehavioralEvidence domain receipt) where
-  rnf (BehavioralEvidence association receipt) =
-    rnf association `seq` rnf receipt
+  rnf (BehavioralEvidence problem receipt) =
+    rnf problem `seq` rnf receipt
 
 -- | Private seam for domain-owned authoritative verifiers.  Public generic
 -- code cannot call it; each producer must independently replay a concrete
@@ -409,83 +397,60 @@ mkBehavioralEvidence
   :: BehavioralProblem domain
   -> receipt
   -> BehavioralEvidence domain receipt
-mkBehavioralEvidence problem = BehavioralEvidence $ problemAssociation problem
+mkBehavioralEvidence = BehavioralEvidence
 
 behavioralEvidenceDomain :: BehavioralEvidence domain receipt -> [Word8]
-behavioralEvidenceDomain (BehavioralEvidence association _) =
-  associationDomain association
+behavioralEvidenceDomain (BehavioralEvidence problem _) =
+  behavioralProblemDomain problem
 
 behavioralEvidenceInventoryFingerprint
   :: BehavioralEvidence domain receipt
   -> Fingerprint (InventoryFingerprintSubject domain)
-behavioralEvidenceInventoryFingerprint (BehavioralEvidence association _) =
-  associationInventory association
+behavioralEvidenceInventoryFingerprint (BehavioralEvidence problem _) =
+  behavioralProblemInventoryFingerprint problem
 
 behavioralEvidenceEncodingFingerprint
   :: BehavioralEvidence domain receipt
   -> Fingerprint (EncodingFingerprintSubject domain)
-behavioralEvidenceEncodingFingerprint (BehavioralEvidence association _) =
-  associationEncoding association
+behavioralEvidenceEncodingFingerprint (BehavioralEvidence problem _) =
+  behavioralProblemEncodingFingerprint problem
 
 behavioralEvidenceCandidateFingerprint
   :: BehavioralEvidence domain receipt
   -> Fingerprint (CandidateFingerprintSubject domain)
-behavioralEvidenceCandidateFingerprint (BehavioralEvidence association _) =
-  associationCandidate association
+behavioralEvidenceCandidateFingerprint (BehavioralEvidence problem _) =
+  behavioralProblemCandidateFingerprint problem
 
 behavioralEvidenceProblemFingerprint
   :: BehavioralEvidence domain receipt
   -> Fingerprint (ProblemFingerprintSubject domain)
-behavioralEvidenceProblemFingerprint (BehavioralEvidence association _) =
-  associationProblem association
+behavioralEvidenceProblemFingerprint (BehavioralEvidence problem _) =
+  behavioralProblemFingerprint problem
 
 replayBehavioralEvidence
   :: BehavioralProblem domain
   -> BehavioralEvidence domain receipt
   -> Either ReplayMismatch receipt
 replayBehavioralEvidence expected (BehavioralEvidence actual receipt) =
-  receipt <$ compareAssociation (problemAssociation expected) actual
-
-problemAssociation :: BehavioralProblem domain -> ProblemAssociation domain
-problemAssociation (BehavioralProblem domain inventory encoding candidate problem) =
-  ProblemAssociation domain inventory encoding candidate problem
-
-associationDomain :: ProblemAssociation domain -> [Word8]
-associationDomain (ProblemAssociation domain _ _ _ _) = domain
-
-associationInventory
-  :: ProblemAssociation domain
-  -> Fingerprint (InventoryFingerprintSubject domain)
-associationInventory (ProblemAssociation _ inventory _ _ _) = inventory
-
-associationEncoding
-  :: ProblemAssociation domain
-  -> Fingerprint (EncodingFingerprintSubject domain)
-associationEncoding (ProblemAssociation _ _ encoding _ _) = encoding
-
-associationCandidate
-  :: ProblemAssociation domain
-  -> Fingerprint (CandidateFingerprintSubject domain)
-associationCandidate (ProblemAssociation _ _ _ candidate _) = candidate
-
-associationProblem
-  :: ProblemAssociation domain
-  -> Fingerprint (ProblemFingerprintSubject domain)
-associationProblem (ProblemAssociation _ _ _ _ problem) = problem
+  receipt <$ compareAssociation expected actual
 
 compareAssociation
-  :: ProblemAssociation domain
-  -> ProblemAssociation domain
+  :: BehavioralProblem domain
+  -> BehavioralProblem domain
   -> Either ReplayMismatch ()
 compareAssociation expected actual
-  | associationDomain expected /= associationDomain actual =
+  | behavioralProblemDomain expected /= behavioralProblemDomain actual =
       Left ReplayDomainMismatch
-  | associationInventory expected /= associationInventory actual =
+  | behavioralProblemInventoryFingerprint expected
+      /= behavioralProblemInventoryFingerprint actual =
       Left ReplayInventoryFingerprintMismatch
-  | associationEncoding expected /= associationEncoding actual =
+  | behavioralProblemEncodingFingerprint expected
+      /= behavioralProblemEncodingFingerprint actual =
       Left ReplayEncodingFingerprintMismatch
-  | associationCandidate expected /= associationCandidate actual =
+  | behavioralProblemCandidateFingerprint expected
+      /= behavioralProblemCandidateFingerprint actual =
       Left ReplayCandidateFingerprintMismatch
-  | associationProblem expected /= associationProblem actual =
+  | behavioralProblemFingerprint expected
+      /= behavioralProblemFingerprint actual =
       Left ReplayProblemFingerprintMismatch
   | otherwise = Right ()

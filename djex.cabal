@@ -264,6 +264,7 @@ Library
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream
     Language.Haskell.Synthesis.Internal.SMTLib.Response
     Language.Haskell.Synthesis.Internal.SMTLib.Stream
+    Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
     Language.Haskell.Synthesis.Internal.TypedCandidate
     Language.Haskell.Synthesis.Internal.TypedGenerated.Fingerprint
     Language.Haskell.Synthesis.Internal.TypeInstantiation
@@ -393,6 +394,7 @@ Test-Suite synthesis-length-tests
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream
     Language.Haskell.Synthesis.Internal.SMTLib.Stream
+    Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
     Language.Haskell.Synthesis.Internal.TypedCandidate
   Build-Depends:
     bytestring >= 0.11 && < 0.13,

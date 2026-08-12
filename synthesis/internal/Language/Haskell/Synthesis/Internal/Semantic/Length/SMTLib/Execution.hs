@@ -1,13 +1,14 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
 
--- | Private sealing for the first, deliberately pure Z3 execution policy.
+-- | Length-specific sealing around the shared pure Z3 execution profile.
 --
 -- This module does not resolve, inspect, hash, or launch an executable.  In
 -- particular, caller-supplied SHA-256 bytes are an expectation to be checked
 -- by a later live session opener, not an attestation or receipt.  That opener
 -- must bind the observed digest even when no expectation is configured and
 -- must defend the resolution/hash/spawn path against replacement races.
+-- The shared profile owns only reusable launch facts; this module retains the
+-- Length protocol, artifact, response, fingerprint, and public-error policy.
 -- The complete policy fingerprint is kept package-private because its
 -- canonical representation is reversible rather than a digest.
 module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
@@ -46,8 +47,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   , lengthSMTLibExecutionResponseLimits
   , LengthSMTLibExecutionPolicyFingerprintSubject
   , lengthSMTLibExecutionPolicyFingerprint
-  , lengthSMTLibExecutionExecutablePath
-  , lengthSMTLibExecutionExpectedExecutableSHA256
+  , lengthSMTLibExecutionZ3Profile
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -55,7 +55,6 @@ import Data.Char (ord)
 import Data.Word (Word8)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
-import System.FilePath (isAbsolute)
 
 import Language.Haskell.Synthesis.Internal.Fingerprint
   ( Fingerprint
@@ -64,6 +63,8 @@ import Language.Haskell.Synthesis.Internal.Fingerprint
   , FingerprintLimitError (..)
   , buildFingerprintWithin
   )
+import qualified Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
+  as Z3
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response
   ( LengthSMTLibResponseLimits
   , defaultLengthSMTLibResponseLimits
@@ -92,8 +93,7 @@ lengthSMTLibExecutionProtocolSchemaTag =
 -- Compliance mode gives @echo@ its standard quoted response spelling.  It
 -- also starts with @:print-success true@, which the startup command disables.
 lengthSMTLibExecutionArgumentPrefix :: [String]
-lengthSMTLibExecutionArgumentPrefix =
-  ["-in", "-smt2", "smtlib2_compliant=true"]
+lengthSMTLibExecutionArgumentPrefix = Z3.z3SMTLibExecutionArgumentPrefix
 
 -- | Legacy compatibility spelling for the fixed prefix.  This is not a
 -- complete argv: process launchers must use
@@ -108,23 +108,15 @@ lengthSMTLibExecutionArgumentVector = lengthSMTLibExecutionArgumentPrefix
 lengthSMTLibExecutionConfiguredArgumentVector
   :: LengthSMTLibExecutionConfig
   -> [String]
-lengthSMTLibExecutionConfiguredArgumentVector config =
-  configuredArgumentVector
-    (lengthSMTLibExecutionSolverTimeoutMilliseconds config)
-    (lengthSMTLibExecutionSolverResourceLimit config)
-
-configuredArgumentVector :: Int -> Int -> [String]
-configuredArgumentVector timeout resource =
-  lengthSMTLibExecutionArgumentPrefix ++
-    [ "timeout=" ++ show timeout
-    , "rlimit=" ++ show resource
-    ]
+lengthSMTLibExecutionConfiguredArgumentVector =
+  Z3.z3SMTLibExecutionConfiguredArgumentVector
+    . lengthSMTLibExecutionZ3Profile
 
 -- | Exact startup command.  In required compliance mode the option affects
 -- its own response, so a conforming Z3 worker emits no @success@ for it.
 lengthSMTLibExecutionStartupCommandBytes :: [Word8]
 lengthSMTLibExecutionStartupCommandBytes =
-  ascii "(set-option :print-success false)\n"
+  Z3.z3SMTLibExecutionStartupCommandBytes
 
 -- | Exact reset prefix replayed before every canonical query.  The required
 -- Z3 capability retains disabled success printing across @reset@, so reset
@@ -132,30 +124,31 @@ lengthSMTLibExecutionStartupCommandBytes =
 -- A future capability handshake must establish this response behavior before
 -- the worker can enter the query phase.
 lengthSMTLibExecutionQueryResetBytes :: [Word8]
-lengthSMTLibExecutionQueryResetBytes = ascii
-  "(reset)\n(set-option :print-success false)\n"
+lengthSMTLibExecutionQueryResetBytes = Z3.z3SMTLibExecutionQueryResetBytes
 
 -- | V2 launches with @env = Just []@.  It never inherits ambient variables.
 -- A later platform-specific allowlist requires a new versioned policy.
 lengthSMTLibExecutionEnvironmentPolicyTag :: [Word8]
-lengthSMTLibExecutionEnvironmentPolicyTag = ascii "empty-environment/v1"
+lengthSMTLibExecutionEnvironmentPolicyTag =
+  Z3.z3SMTLibExecutionEnvironmentPolicyTag
 
 -- | V2 requires a fresh empty working directory owned by the live session.
 -- Its concrete path belongs to that session identity and must never be an
 -- inherited caller directory.
 lengthSMTLibExecutionWorkingDirectoryPolicyTag :: [Word8]
 lengthSMTLibExecutionWorkingDirectoryPolicyTag =
-  ascii "fresh-empty-working-directory/v1"
+  Z3.z3SMTLibExecutionWorkingDirectoryPolicyTag
 
 -- | Meaning of optional expected digest bytes.  The digest is a named
 -- external digest/pin format, not a collision-free identity for file bytes.
 lengthSMTLibExecutionExpectedDigestSchemaTag :: [Word8]
 lengthSMTLibExecutionExpectedDigestSchemaTag =
-  ascii "sha256/exact-executable-file-bytes/v1"
+  Z3.z3SMTLibExecutionExpectedDigestSchemaTag
 
 -- | Minimum host-side response and cleanup time beyond the solver timeout.
 lengthSMTLibMinimumHostDeadlineMarginMilliseconds :: Natural
-lengthSMTLibMinimumHostDeadlineMarginMilliseconds = 100
+lengthSMTLibMinimumHostDeadlineMarginMilliseconds =
+  Z3.z3SMTLibMinimumHostDeadlineMarginMilliseconds
 
 -- | Artifacts the future executor may request after a check response.
 -- Neither policy grants semantic authority to the returned status or bytes.
@@ -177,18 +170,19 @@ data LengthSMTLibExecutionLimitSource = LengthSMTLibExecutionLimitSource
 instance NFData LengthSMTLibExecutionLimitSource
 
 data LengthSMTLibExecutionLimits = LengthSMTLibExecutionLimits
-  !Natural !Natural
+  !Z3.Z3SMTLibExecutionLimits !Natural
   deriving (Eq, Ord)
 
 instance NFData LengthSMTLibExecutionLimits where
-  rnf (LengthSMTLibExecutionLimits path fingerprint) =
-    rnf path `seq` rnf fingerprint
+  rnf (LengthSMTLibExecutionLimits z3 fingerprint) =
+    rnf z3 `seq` rnf fingerprint
 
 mkLengthSMTLibExecutionLimits
   :: LengthSMTLibExecutionLimitSource
   -> LengthSMTLibExecutionLimits
 mkLengthSMTLibExecutionLimits source = LengthSMTLibExecutionLimits
-  (lengthSMTLibExecutionLimitSourceExecutablePathCharacters source)
+  (Z3.mkZ3SMTLibExecutionLimits
+    $ lengthSMTLibExecutionLimitSourceExecutablePathCharacters source)
   (lengthSMTLibExecutionLimitSourcePolicyFingerprintBytes source)
 
 defaultLengthSMTLibExecutionLimitSource
@@ -206,7 +200,8 @@ lengthSMTLibExecutionExecutablePathCharacterLimit
   :: LengthSMTLibExecutionLimits
   -> Natural
 lengthSMTLibExecutionExecutablePathCharacterLimit
-    (LengthSMTLibExecutionLimits value _) = value
+    (LengthSMTLibExecutionLimits value _) =
+  Z3.z3SMTLibExecutionExecutablePathCharacterLimit value
 
 lengthSMTLibExecutionPolicyFingerprintByteLimit
   :: LengthSMTLibExecutionLimits
@@ -267,11 +262,7 @@ defaultLengthSMTLibExecutionConfigSource executable expectedDigest =
 -- | Opaque validated policy.  There is intentionally no 'Show' or 'Generic'
 -- instance and no public projection of its reversible canonical fingerprint.
 data LengthSMTLibExecutionConfig = LengthSMTLibExecutionConfig
-  FilePath
-  (Maybe [Word8])
-  !Int
-  !Int
-  !Int
+  !Z3.Z3SMTLibExecutionProfile
   !LengthSMTLibArtifactPolicy
   !LengthSMTLibResponseLimits
   !(Fingerprint LengthSMTLibExecutionPolicyFingerprintSubject)
@@ -286,11 +277,8 @@ instance Eq LengthSMTLibExecutionConfig where
 
 instance NFData LengthSMTLibExecutionConfig where
   rnf (LengthSMTLibExecutionConfig
-      executable expectedDigest timeout resource deadline artifacts responses
-      fingerprint) =
-    rnf executable `seq` rnf expectedDigest `seq` rnf timeout `seq`
-    rnf resource `seq` rnf deadline `seq` rnf artifacts `seq`
-    rnf responses `seq` rnf fingerprint
+      z3 artifacts responses fingerprint) =
+    rnf z3 `seq` rnf artifacts `seq` rnf responses `seq` rnf fingerprint
 
 -- | Whether one sealed policy contains an executable-file digest expectation.
 --
@@ -310,9 +298,9 @@ instance NFData LengthSMTLibExecutableDigestExpectation
 lengthSMTLibExecutionExecutableDigestExpectation
   :: LengthSMTLibExecutionConfig
   -> LengthSMTLibExecutableDigestExpectation
-lengthSMTLibExecutionExecutableDigestExpectation
-    (LengthSMTLibExecutionConfig _ expectedDigest _ _ _ _ _ _) =
-  case expectedDigest of
+lengthSMTLibExecutionExecutableDigestExpectation config =
+  case Z3.z3SMTLibExecutionExpectedExecutableSHA256
+      $ lengthSMTLibExecutionZ3Profile config of
     Nothing -> LengthSMTLibExecutableDigestExpectationAbsent
     Just _ -> LengthSMTLibExecutableDigestExpectationPresent
 
@@ -364,53 +352,59 @@ mkLengthSMTLibExecutionConfig
   -> LengthSMTLibExecutionConfigSource
   -> Either LengthSMTLibExecutionConfigError LengthSMTLibExecutionConfig
 mkLengthSMTLibExecutionConfig limits source = do
-  timeout <- validateSolverTimeout
-    $ lengthSMTLibExecutionConfigSourceSolverTimeoutMilliseconds source
-  resource <- validateSolverResourceLimit
-    $ lengthSMTLibExecutionConfigSourceSolverResourceLimit source
-  deadline <- validateHostDeadline timeout
-    $ lengthSMTLibExecutionConfigSourceHostDeadlineMilliseconds source
-  executable <- retainExecutablePath
-    (lengthSMTLibExecutionExecutablePathCharacterLimit limits)
-    $ lengthSMTLibExecutionConfigSourceExecutablePath source
-  expectedDigest <- traverse retainExpectedDigest
-    $ lengthSMTLibExecutionConfigSourceExpectedExecutableSHA256 source
+  z3 <- case Z3.mkZ3SMTLibExecutionProfile z3Limits Z3.Z3SMTLibExecutionSource
+      { Z3.z3SMTLibExecutionSourceExecutablePath =
+          lengthSMTLibExecutionConfigSourceExecutablePath source
+      , Z3.z3SMTLibExecutionSourceExpectedExecutableSHA256 =
+          lengthSMTLibExecutionConfigSourceExpectedExecutableSHA256 source
+      , Z3.z3SMTLibExecutionSourceSolverTimeoutMilliseconds =
+          lengthSMTLibExecutionConfigSourceSolverTimeoutMilliseconds source
+      , Z3.z3SMTLibExecutionSourceSolverResourceLimit =
+          lengthSMTLibExecutionConfigSourceSolverResourceLimit source
+      , Z3.z3SMTLibExecutionSourceHostDeadlineMilliseconds =
+          lengthSMTLibExecutionConfigSourceHostDeadlineMilliseconds source
+      } of
+    Left failure -> Left $ mapZ3ExecutionError failure
+    Right profile -> Right profile
   let artifacts = lengthSMTLibExecutionConfigSourceArtifactPolicy source
       responses = lengthSMTLibExecutionConfigSourceResponseLimits source
-  fingerprint <- buildPolicyFingerprint limits executable expectedDigest
-    timeout resource deadline artifacts responses
-  pure $ LengthSMTLibExecutionConfig executable expectedDigest
-    timeout resource deadline artifacts responses fingerprint
+  fingerprint <- buildPolicyFingerprint limits z3 artifacts responses
+  pure $ LengthSMTLibExecutionConfig z3 artifacts responses fingerprint
+ where
+  LengthSMTLibExecutionLimits z3Limits _ = limits
 
 lengthSMTLibExecutionSolverTimeoutMilliseconds
   :: LengthSMTLibExecutionConfig
   -> Int
-lengthSMTLibExecutionSolverTimeoutMilliseconds
-    (LengthSMTLibExecutionConfig _ _ value _ _ _ _ _) = value
+lengthSMTLibExecutionSolverTimeoutMilliseconds =
+  Z3.z3SMTLibExecutionSolverTimeoutMilliseconds
+    . lengthSMTLibExecutionZ3Profile
 
 lengthSMTLibExecutionSolverResourceLimit
   :: LengthSMTLibExecutionConfig
   -> Int
-lengthSMTLibExecutionSolverResourceLimit
-    (LengthSMTLibExecutionConfig _ _ _ value _ _ _ _) = value
+lengthSMTLibExecutionSolverResourceLimit =
+  Z3.z3SMTLibExecutionSolverResourceLimit
+    . lengthSMTLibExecutionZ3Profile
 
 lengthSMTLibExecutionHostDeadlineMilliseconds
   :: LengthSMTLibExecutionConfig
   -> Int
-lengthSMTLibExecutionHostDeadlineMilliseconds
-    (LengthSMTLibExecutionConfig _ _ _ _ value _ _ _) = value
+lengthSMTLibExecutionHostDeadlineMilliseconds =
+  Z3.z3SMTLibExecutionHostDeadlineMilliseconds
+    . lengthSMTLibExecutionZ3Profile
 
 lengthSMTLibExecutionArtifactPolicy
   :: LengthSMTLibExecutionConfig
   -> LengthSMTLibArtifactPolicy
 lengthSMTLibExecutionArtifactPolicy
-    (LengthSMTLibExecutionConfig _ _ _ _ _ value _ _) = value
+    (LengthSMTLibExecutionConfig _ value _ _) = value
 
 lengthSMTLibExecutionResponseLimits
   :: LengthSMTLibExecutionConfig
   -> LengthSMTLibResponseLimits
 lengthSMTLibExecutionResponseLimits
-    (LengthSMTLibExecutionConfig _ _ _ _ _ _ value _) = value
+    (LengthSMTLibExecutionConfig _ _ value _) = value
 
 data LengthSMTLibExecutionPolicyFingerprintSubject
 
@@ -418,147 +412,83 @@ lengthSMTLibExecutionPolicyFingerprint
   :: LengthSMTLibExecutionConfig
   -> Fingerprint LengthSMTLibExecutionPolicyFingerprintSubject
 lengthSMTLibExecutionPolicyFingerprint
-    (LengthSMTLibExecutionConfig _ _ _ _ _ _ _ value) = value
+    (LengthSMTLibExecutionConfig _ _ _ value) = value
 
-lengthSMTLibExecutionExecutablePath
+lengthSMTLibExecutionZ3Profile
   :: LengthSMTLibExecutionConfig
-  -> FilePath
-lengthSMTLibExecutionExecutablePath
-    (LengthSMTLibExecutionConfig value _ _ _ _ _ _ _) = value
+  -> Z3.Z3SMTLibExecutionProfile
+lengthSMTLibExecutionZ3Profile
+    (LengthSMTLibExecutionConfig value _ _ _) = value
 
-lengthSMTLibExecutionExpectedExecutableSHA256
-  :: LengthSMTLibExecutionConfig
-  -> Maybe [Word8]
-lengthSMTLibExecutionExpectedExecutableSHA256
-    (LengthSMTLibExecutionConfig _ value _ _ _ _ _ _) = value
-
-validateSolverTimeout
-  :: Int
-  -> Either LengthSMTLibExecutionConfigError Int
-validateSolverTimeout value = validatePositiveWord32BelowInfinity
-  LengthSMTLibExecutionSolverTimeoutMilliseconds True value
-
-validateSolverResourceLimit
-  :: Int
-  -> Either LengthSMTLibExecutionConfigError Int
-validateSolverResourceLimit value = validatePositiveWord32BelowInfinity
-  LengthSMTLibExecutionSolverResourceLimit False value
-
-validatePositiveWord32BelowInfinity
-  :: LengthSMTLibExecutionConfigField
-  -> Bool
-  -> Int
-  -> Either LengthSMTLibExecutionConfigError Int
-validatePositiveWord32BelowInfinity field excludesMaximum value
-  | value < 0 = Left $ NegativeLengthSMTLibExecutionConfigField field value
-  | value == 0 = Left $ ZeroLengthSMTLibExecutionConfigField field
-  | toInteger value > maximumValue = Left $
-      LengthSMTLibExecutionConfigFieldAboveMaximum
-        field maximumValue $ toInteger value
-  | otherwise = Right value
- where
-  word32Maximum = 4294967295
-  maximumValue
-    | excludesMaximum = word32Maximum - 1
-    | otherwise = word32Maximum
-
-validateHostDeadline
-  :: Int
-  -> Int
-  -> Either LengthSMTLibExecutionConfigError Int
-validateHostDeadline timeout value
-  | value < 0 = Left $ NegativeLengthSMTLibExecutionConfigField
-      LengthSMTLibExecutionHostDeadlineMilliseconds value
-  | value == 0 = Left $ ZeroLengthSMTLibExecutionConfigField
-      LengthSMTLibExecutionHostDeadlineMilliseconds
-  | toInteger value * 1000 > toInteger (maxBound :: Int) =
-      Left $ LengthSMTLibExecutionHostDeadlineMicrosecondsOverflow value
-  | toInteger value < toInteger timeout + toInteger minimumMargin =
-      Left $ LengthSMTLibExecutionHostDeadlineMarginTooSmall
-        timeout value minimumMargin
-  | otherwise = Right value
- where
-  minimumMargin = lengthSMTLibMinimumHostDeadlineMarginMilliseconds
-
-retainExecutablePath
-  :: Natural
-  -> FilePath
-  -> Either LengthSMTLibExecutionConfigError FilePath
-retainExecutablePath maximumCharacters = go 0 maximumCharacters []
- where
-  go !_ _ reversed [] =
-    let retained = reverse reversed
-    in if null retained
-        then Left LengthSMTLibExecutionEmptyExecutablePath
-        else if isAbsolute retained
-          then Right retained
-          else Left LengthSMTLibExecutionExecutablePathNotAbsolute
-  go !_ 0 _ (_ : _) = Left $
+mapZ3ExecutionError
+  :: Z3.Z3SMTLibExecutionError
+  -> LengthSMTLibExecutionConfigError
+mapZ3ExecutionError failure = case failure of
+  Z3.NegativeZ3SMTLibExecutionField field value ->
+    NegativeLengthSMTLibExecutionConfigField
+      (mapZ3ExecutionField field) value
+  Z3.ZeroZ3SMTLibExecutionField field ->
+    ZeroLengthSMTLibExecutionConfigField $ mapZ3ExecutionField field
+  Z3.Z3SMTLibExecutionFieldAboveMaximum field maximumValue observed ->
+    LengthSMTLibExecutionConfigFieldAboveMaximum
+      (mapZ3ExecutionField field) maximumValue observed
+  Z3.Z3SMTLibExecutionHostDeadlineMarginTooSmall timeout deadline margin ->
+    LengthSMTLibExecutionHostDeadlineMarginTooSmall timeout deadline margin
+  Z3.Z3SMTLibExecutionHostDeadlineMicrosecondsOverflow deadline ->
+    LengthSMTLibExecutionHostDeadlineMicrosecondsOverflow deadline
+  Z3.Z3SMTLibExecutionExecutablePathCharacterLimitExceeded
+      maximumCharacters observed ->
     LengthSMTLibExecutionExecutablePathCharacterLimitExceeded
-      maximumCharacters (maximumCharacters + 1)
-  go !offset remaining reversed (character : characters)
-    | character == '\0' = Left $
-        LengthSMTLibExecutionInvalidExecutablePathCharacter offset
-          LengthSMTLibExecutionPathContainsNul
-    | isSurrogate character = Left $
-        LengthSMTLibExecutionInvalidExecutablePathCharacter offset
-          LengthSMTLibExecutionPathContainsSurrogate
-    | otherwise = go (offset + 1) (remaining - 1)
-        (character : reversed) characters
+      maximumCharacters observed
+  Z3.Z3SMTLibExecutionInvalidExecutablePathCharacter offset reason ->
+    LengthSMTLibExecutionInvalidExecutablePathCharacter offset
+      $ mapZ3PathCharacterError reason
+  Z3.Z3SMTLibExecutionEmptyExecutablePath ->
+    LengthSMTLibExecutionEmptyExecutablePath
+  Z3.Z3SMTLibExecutionExecutablePathNotAbsolute ->
+    LengthSMTLibExecutionExecutablePathNotAbsolute
+  Z3.Z3SMTLibExecutionExpectedExecutableSHA256LengthMismatch
+      expected observed ->
+    LengthSMTLibExecutionExpectedExecutableSHA256LengthMismatch
+      expected observed
 
-retainExpectedDigest
-  :: [Word8]
-  -> Either LengthSMTLibExecutionConfigError [Word8]
-retainExpectedDigest = go 0 []
- where
-  expected = 32
-  go !observed reversed []
-    | observed == expected = Right $ reverse reversed
-    | otherwise = Left $
-        LengthSMTLibExecutionExpectedExecutableSHA256LengthMismatch
-          expected observed
-  go !observed _ (_ : _)
-    | observed == expected = Left $
-        LengthSMTLibExecutionExpectedExecutableSHA256LengthMismatch
-          expected (expected + 1)
-  go !observed reversed (byte : bytes) =
-    go (observed + 1) (byte : reversed) bytes
+mapZ3ExecutionField
+  :: Z3.Z3SMTLibExecutionField
+  -> LengthSMTLibExecutionConfigField
+mapZ3ExecutionField field = case field of
+  Z3.Z3SMTLibExecutionSolverTimeoutMilliseconds ->
+    LengthSMTLibExecutionSolverTimeoutMilliseconds
+  Z3.Z3SMTLibExecutionSolverResourceLimit ->
+    LengthSMTLibExecutionSolverResourceLimit
+  Z3.Z3SMTLibExecutionHostDeadlineMilliseconds ->
+    LengthSMTLibExecutionHostDeadlineMilliseconds
+
+mapZ3PathCharacterError
+  :: Z3.Z3SMTLibExecutionPathCharacterError
+  -> LengthSMTLibExecutionPathCharacterError
+mapZ3PathCharacterError reason = case reason of
+  Z3.Z3SMTLibExecutionPathContainsNul ->
+    LengthSMTLibExecutionPathContainsNul
+  Z3.Z3SMTLibExecutionPathContainsSurrogate ->
+    LengthSMTLibExecutionPathContainsSurrogate
 
 buildPolicyFingerprint
   :: LengthSMTLibExecutionLimits
-  -> FilePath
-  -> Maybe [Word8]
-  -> Int
-  -> Int
-  -> Int
+  -> Z3.Z3SMTLibExecutionProfile
   -> LengthSMTLibArtifactPolicy
   -> LengthSMTLibResponseLimits
   -> Either
       LengthSMTLibExecutionConfigError
       (Fingerprint LengthSMTLibExecutionPolicyFingerprintSubject)
-buildPolicyFingerprint limits executable expectedDigest timeout resource
-    deadline artifacts responses =
+buildPolicyFingerprint limits z3 artifacts responses =
   case buildFingerprintWithin maximumBytes FingerprintBuilder
       { fingerprintBuilderVersion = 1
       , fingerprintBuilderRole = ascii "length-z3-execution-policy"
       , fingerprintBuilderFields =
           [ FingerprintBytes lengthSMTLibExecutionPolicySchemaTag
           , FingerprintBytes lengthSMTLibExecutionProtocolSchemaTag
-          , textField executable
-          , FingerprintSequence $ map textField
-              $ configuredArgumentVector timeout resource
-          , FingerprintBytes lengthSMTLibExecutionStartupCommandBytes
-          , FingerprintBytes lengthSMTLibExecutionQueryResetBytes
-          , FingerprintBytes lengthSMTLibExecutionEnvironmentPolicyTag
-          , FingerprintBytes lengthSMTLibExecutionWorkingDirectoryPolicyTag
-          , optionalBytesField
-              lengthSMTLibExecutionExpectedDigestSchemaTag expectedDigest
-          , FingerprintNatural $ fromIntegral timeout
-          , FingerprintNatural $ fromIntegral resource
-          , FingerprintNatural $ fromIntegral deadline
-          , FingerprintNatural
-              lengthSMTLibMinimumHostDeadlineMarginMilliseconds
-          , artifactPolicyField artifacts
+          ] ++ Z3.z3SMTLibExecutionFingerprintFields z3 ++
+          [ artifactPolicyField artifacts
           , FingerprintBytes lengthSMTLibResponseSchemaTag
           , FingerprintNatural $ lengthSMTLibResponseByteLimit responses
           , FingerprintNatural $ fromIntegral
@@ -576,12 +506,7 @@ buildPolicyFingerprint limits executable expectedDigest timeout resource
           maximumBytesObserved observed
     Right fingerprint -> Right fingerprint
  where
-  maximumBytes = lengthSMTLibExecutionPolicyFingerprintByteLimit limits
-
-optionalBytesField :: [Word8] -> Maybe [Word8] -> FingerprintField
-optionalBytesField tag value = FingerprintTag tag $ case value of
-  Nothing -> [FingerprintTag (ascii "absent") []]
-  Just bytes -> [FingerprintTag (ascii "present") [FingerprintBytes bytes]]
+ maximumBytes = lengthSMTLibExecutionPolicyFingerprintByteLimit limits
 
 artifactPolicyField :: LengthSMTLibArtifactPolicy -> FingerprintField
 artifactPolicyField policy = FingerprintTag (ascii "artifact-policy")
@@ -590,15 +515,6 @@ artifactPolicyField policy = FingerprintTag (ascii "artifact-policy")
       LengthSMTLibInputValuesAfterSatisfiable ->
         ascii "input-values-after-satisfiable"
   ]
-
-textField :: String -> FingerprintField
-textField = FingerprintSequence
-  . map (FingerprintNatural . fromIntegral . ord)
-
-isSurrogate :: Char -> Bool
-isSurrogate character =
-  let code = ord character
-  in code >= 0xd800 && code <= 0xdfff
 
 ascii :: String -> [Word8]
 ascii = map $ fromIntegral . ord

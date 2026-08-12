@@ -284,7 +284,8 @@ main = defaultMain $ testGroup "Djex downstream API"
                         )
                       ) ||
                       ( ("Eq" `isInfixOf` message || "Show" `isInfixOf` message) &&
-                        ( "LengthSMTLibLiveSession" `isInfixOf` message ||
+                        ( "LengthSMTLibExecutionConfig" `isInfixOf` message ||
+                          "LengthSMTLibLiveSession" `isInfixOf` message ||
                           "LengthSMTLibLiveQueryObservation" `isInfixOf` message
                         )
                       )
@@ -340,6 +341,7 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "lengthSMTLibExecutionExecutablePath"
                       , "lengthSMTLibExecutionExpectedExecutableSHA256"
                       , "lengthSMTLibExecutionPolicyFingerprint"
+                      , "lengthSMTLibExecutionZ3Profile"
                       , "LengthSMTLibLiveSession"
                       , "LengthSMTLibLiveQueryObservation"
                       , "LengthSMTLibLiveSessionError"

@@ -45,6 +45,8 @@ import qualified Language.Haskell.Synthesis.Internal.SMTLib.Causal
   as SMTLibCausal
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Stream
   as SMTLibStream
+import qualified Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
+  as Z3Execution
 import qualified Language.Haskell.Synthesis.Internal.TypedCandidate
   as InternalTypedCandidate
 import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
@@ -1875,6 +1877,73 @@ smtLibTests = testGroup
         SMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
       SMTLibExecution.lengthSMTLibExecutionResponseLimits config @?=
         SMTLibResponse.defaultLengthSMTLibResponseLimits
+  , testCase "share one admitted Z3 launch profile below Length policy" $ do
+      Z3Execution.z3SMTLibExecutionArgumentPrefix @?=
+        SMTLibExecution.lengthSMTLibExecutionArgumentPrefix
+      Z3Execution.z3SMTLibExecutionStartupCommandBytes @?=
+        SMTLibExecution.lengthSMTLibExecutionStartupCommandBytes
+      Z3Execution.z3SMTLibExecutionQueryResetBytes @?=
+        SMTLibExecution.lengthSMTLibExecutionQueryResetBytes
+      Z3Execution.z3SMTLibExecutionChildEnvironment @?= Just []
+      Z3Execution.z3SMTLibExecutionEnvironmentPolicyTag @?=
+        SMTLibExecution.lengthSMTLibExecutionEnvironmentPolicyTag
+      Z3Execution.z3SMTLibExecutionWorkingDirectoryPolicyTag @?=
+        SMTLibExecution.lengthSMTLibExecutionWorkingDirectoryPolicyTag
+      Z3Execution.z3SMTLibExecutionExpectedDigestSchemaTag @?=
+        SMTLibExecution.lengthSMTLibExecutionExpectedDigestSchemaTag
+      Z3Execution.z3SMTLibMinimumHostDeadlineMarginMilliseconds @?=
+        SMTLibExecution.lengthSMTLibMinimumHostDeadlineMarginMilliseconds
+      let limits = Z3Execution.mkZ3SMTLibExecutionLimits 4096
+          source = Z3Execution.Z3SMTLibExecutionSource
+            { Z3Execution.z3SMTLibExecutionSourceExecutablePath =
+                absoluteFixtureExecutable
+            , Z3Execution.z3SMTLibExecutionSourceExpectedExecutableSHA256 =
+                Nothing
+            , Z3Execution.z3SMTLibExecutionSourceSolverTimeoutMilliseconds =
+                1000
+            , Z3Execution.z3SMTLibExecutionSourceSolverResourceLimit = 100000
+            , Z3Execution.z3SMTLibExecutionSourceHostDeadlineMilliseconds =
+                1500
+            }
+      profile <- expectRight
+        $ Z3Execution.mkZ3SMTLibExecutionProfile limits source
+      Z3Execution.z3SMTLibExecutionExecutablePathCharacterLimit limits @?=
+        4096
+      Z3Execution.z3SMTLibExecutionExecutablePath profile @?=
+        absoluteFixtureExecutable
+      Z3Execution.z3SMTLibExecutionExpectedExecutableSHA256 profile @?=
+        Nothing
+      Z3Execution.z3SMTLibExecutionSolverTimeoutMilliseconds profile @?= 1000
+      Z3Execution.z3SMTLibExecutionSolverResourceLimit profile @?= 100000
+      Z3Execution.z3SMTLibExecutionHostDeadlineMilliseconds profile @?= 1500
+      Z3Execution.z3SMTLibExecutionConfiguredArgumentVector profile @?=
+        [ "-in"
+        , "-smt2"
+        , "smtlib2_compliant=true"
+        , "timeout=1000"
+        , "rlimit=100000"
+        ]
+      length (Z3Execution.z3SMTLibExecutionFingerprintFields profile) @?= 11
+  , testCase "preserve the complete Length execution identity bytes" $ do
+      config <- expectRight
+        $ InternalSMTLibExecution.mkLengthSMTLibExecutionConfig
+            InternalSMTLibExecution.defaultLengthSMTLibExecutionLimits
+        $ InternalSMTLibExecution.defaultLengthSMTLibExecutionConfigSource
+            "//djex/z3" $ Just [0 .. 31]
+      -- This digest is only a regression snapshot of the collision-free
+      -- canonical bytes. The complete reversible fingerprint remains the
+      -- actual policy identity.
+      let canonical = InternalFingerprint.fingerprintCanonicalBytes
+            $ InternalSMTLibExecution.lengthSMTLibExecutionPolicyFingerprint
+                config
+      length canonical @?= 687
+      SHA256.hash (BS.pack canonical) @?=
+        BS.pack
+          [ 120, 191, 6, 55, 236, 94, 65, 71
+          , 119, 151, 24, 172, 60, 109, 49, 218
+          , 119, 204, 67, 169, 246, 79, 102, 234
+          , 34, 15, 131, 202, 152, 1, 148, 128
+          ]
   , testCase "classify only sealed executable digest expectation presence" $ do
       let seal expectedDigest = expectRight
             $ SMTLibExecution.mkLengthSMTLibExecutionConfig
@@ -1917,6 +1986,84 @@ smtLibTests = testGroup
           SMTLibExecution.LengthSMTLibExecutionHostDeadlineMilliseconds (-1))
         $ seal defaults
             { SMTLibExecution.lengthSMTLibExecutionConfigSourceHostDeadlineMilliseconds = -1
+            }
+  , testCase "preserve launch validation demand and failure order" $ do
+      let defaults = SMTLibExecution.defaultLengthSMTLibExecutionConfigSource
+            absoluteFixtureExecutable Nothing
+          sealWith limits = SMTLibExecution.mkLengthSMTLibExecutionConfig limits
+          seal = sealWith SMTLibExecution.defaultLengthSMTLibExecutionLimits
+          poisonLater source = source
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceExecutablePath =
+                error "path-demand"
+            , SMTLibExecution.lengthSMTLibExecutionConfigSourceExpectedExecutableSHA256 =
+                error "digest-demand"
+            , SMTLibExecution.lengthSMTLibExecutionConfigSourceArtifactPolicy =
+                error "artifact-demand"
+            , SMTLibExecution.lengthSMTLibExecutionConfigSourceResponseLimits =
+                error "response-demand"
+            }
+      assertLeft
+        (SMTLibExecution.NegativeLengthSMTLibExecutionConfigField
+          SMTLibExecution.LengthSMTLibExecutionSolverTimeoutMilliseconds (-1))
+        $ seal $ (poisonLater defaults)
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverTimeoutMilliseconds =
+                -1
+            , SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverResourceLimit =
+                error "resource-demand"
+            , SMTLibExecution.lengthSMTLibExecutionConfigSourceHostDeadlineMilliseconds =
+                error "deadline-demand"
+            }
+      assertLeft
+        (SMTLibExecution.NegativeLengthSMTLibExecutionConfigField
+          SMTLibExecution.LengthSMTLibExecutionSolverResourceLimit (-1))
+        $ seal $ (poisonLater defaults)
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverResourceLimit =
+                -1
+            , SMTLibExecution.lengthSMTLibExecutionConfigSourceHostDeadlineMilliseconds =
+                error "deadline-demand"
+            }
+      assertLeft
+        (SMTLibExecution.NegativeLengthSMTLibExecutionConfigField
+          SMTLibExecution.LengthSMTLibExecutionHostDeadlineMilliseconds (-1))
+        $ seal $ (poisonLater defaults)
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceHostDeadlineMilliseconds =
+                -1
+            }
+      assertLeft SMTLibExecution.LengthSMTLibExecutionExecutablePathNotAbsolute
+        $ seal defaults
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceExecutablePath =
+                "z3"
+            , SMTLibExecution.lengthSMTLibExecutionConfigSourceExpectedExecutableSHA256 =
+                error "digest-demand"
+            , SMTLibExecution.lengthSMTLibExecutionConfigSourceArtifactPolicy =
+                error "artifact-demand"
+            , SMTLibExecution.lengthSMTLibExecutionConfigSourceResponseLimits =
+                error "response-demand"
+            }
+      assertLeft
+        (SMTLibExecution.LengthSMTLibExecutionExpectedExecutableSHA256LengthMismatch
+          32 1)
+        $ seal defaults
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceExpectedExecutableSHA256 =
+                Just [0]
+            , SMTLibExecution.lengthSMTLibExecutionConfigSourceArtifactPolicy =
+                error "artifact-demand"
+            , SMTLibExecution.lengthSMTLibExecutionConfigSourceResponseLimits =
+                error "response-demand"
+            }
+      let noFingerprint = SMTLibExecution.mkLengthSMTLibExecutionLimits
+            SMTLibExecution.defaultLengthSMTLibExecutionLimitSource
+              { SMTLibExecution.lengthSMTLibExecutionLimitSourcePolicyFingerprintBytes =
+                  0
+              }
+      assertLeft
+        (SMTLibExecution.LengthSMTLibExecutionPolicyFingerprintByteLimitExceeded
+          0 1)
+        $ sealWith noFingerprint defaults
+            { SMTLibExecution.lengthSMTLibExecutionConfigSourceArtifactPolicy =
+                error "artifact-demand"
+            , SMTLibExecution.lengthSMTLibExecutionConfigSourceResponseLimits =
+                error "response-demand"
             }
   , testCase "bound and validate executable paths and digest pins productively" $ do
       let defaults path digest =

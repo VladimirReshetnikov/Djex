@@ -72,12 +72,13 @@ import Language.Haskell.Synthesis.Semantic.Length.SMTLib
   , lengthSMTLibQuerySchemaTag
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
-  ( lengthSMTLibExecutionProtocolSchemaTag
-  , lengthSMTLibExecutionQueryResetBytes
-  , lengthSMTLibExecutionStartupCommandBytes
-  )
+  ( lengthSMTLibExecutionProtocolSchemaTag )
 import Language.Haskell.Synthesis.Internal.SMTLib.Causal
   ( SMTLibCausalAction (..) )
+import Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
+  ( z3SMTLibExecutionQueryResetBytes
+  , z3SMTLibExecutionStartupCommandBytes
+  )
 import Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream
   ( SMTLibCausalStreamBoundary
   , SMTLibCausalStreamCompletedFrame
@@ -310,12 +311,12 @@ sealLengthSMTLibCapabilityPlan limits rawStartup rawCheck rawValue rawReady = do
 
 renderCapabilityStartupWrite :: SMTLibEchoSentinel -> [Word8]
 renderCapabilityStartupWrite startup =
-  lengthSMTLibExecutionStartupCommandBytes ++
+  z3SMTLibExecutionStartupCommandBytes ++
   smtLibEchoSentinelCommandBytes startup
 
 renderCapabilityCheckWrite :: SMTLibEchoSentinel -> [Word8]
 renderCapabilityCheckWrite check =
-  lengthSMTLibExecutionQueryResetBytes ++
+  z3SMTLibExecutionQueryResetBytes ++
   capabilityCanonicalPreambleBytes ++
   capabilityDeclarationBytes ++
   capabilityAssertZeroBytes ++
@@ -329,7 +330,7 @@ renderCapabilityInputValueWrite value =
 
 renderCapabilityReadyWrite :: SMTLibEchoSentinel -> [Word8]
 renderCapabilityReadyWrite ready =
-  lengthSMTLibExecutionQueryResetBytes ++
+  z3SMTLibExecutionQueryResetBytes ++
   capabilityCanonicalPreambleBytes ++
   capabilityDeclarationBytes ++
   capabilityAssertZeroBytes ++
@@ -849,18 +850,18 @@ buildCapabilityPlanFingerprint limits startup check value ready
             ]
         , tagged "writes"
             [ tagged "startup"
-                [ FingerprintBytes lengthSMTLibExecutionStartupCommandBytes
+                [ FingerprintBytes z3SMTLibExecutionStartupCommandBytes
                 , FingerprintBytes $
                     smtLibEchoSentinelCommandBytes startup
                 , FingerprintBytes startupWrite
                 ]
             , tagged "check"
-                [ FingerprintBytes lengthSMTLibExecutionQueryResetBytes
+                [ FingerprintBytes z3SMTLibExecutionQueryResetBytes
                 , FingerprintBytes checkWrite
                 ]
             , tagged "input-value" [FingerprintBytes valueWrite]
             , tagged "ready"
-                [ FingerprintBytes lengthSMTLibExecutionQueryResetBytes
+                [ FingerprintBytes z3SMTLibExecutionQueryResetBytes
                 , FingerprintBytes readyWrite
                 ]
             ]

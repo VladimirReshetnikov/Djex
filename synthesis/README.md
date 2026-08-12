@@ -341,8 +341,16 @@ cannot make receipt replay observable, while a successful result without a
 receipt remains only an exactly associated heuristic status. The gate exposes
 no process, transcript, decoded valuation, or stronger use for `unsat`.
 
-`Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` seals the next
-pure boundary. Its v2 policy fixes the direct prefix
+`Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution` seals the shared
+pure launch profile below domain protocols. It owns path/pin admission,
+timeout, `rlimit`, host deadline, complete argv, exact startup/reset commands,
+empty environment, fresh-cwd policy, and the flat launch field slice consumed
+by a domain-owned complete fingerprint. It owns no standalone schema,
+fingerprint budget, response grammar, or solver authority.
+`Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` keeps its
+unchanged public compatibility surface and combines that profile with the
+Length policy/protocol tags, artifact policy, response limits, and complete
+Length fingerprint. Its v2 policy therefore still fixes the direct prefix
 `-in -smt2 smtlib2_compliant=true`, derives exact launch-time `timeout` and
 `rlimit` arguments, and selects a deliberately empty child environment plus a
 fresh empty working-directory policy instead of inheriting ambient process

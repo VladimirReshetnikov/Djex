@@ -514,16 +514,24 @@ Child-controlled payloads and operating-system details never cross the facade.
 The private session opener and configured per-query deadlines remain separate
 budgets rather than a claimed hard deadline for a caller-defined batch.
 
-`Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` now seals the
-pure Z3 launch and protocol policy without launching anything. V2 fixes the
-direct prefix `-in -smt2 smtlib2_compliant=true`, derives exact launch-time
-`timeout` and `rlimit` arguments from the validated policy, uses an empty child
-environment and a fresh empty working directory, and retains a bounded
-absolute executable path plus an optional exact 32-byte SHA-256 pin. Standard
-compliance makes `echo` responses quoted; exact startup bytes immediately
-disable `:print-success`, and the reset prefix repeats that suppression before
-every self-contained query. The canonical QF_LIA query now emits start-mode
-options before `set-logic` and uses fixed nonzero random seed `1`.
+`Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution` now owns the shared
+pure launch profile below behavioral domains: bounded absolute executable path,
+optional exact 32-byte SHA-256 expectation, timeout, `rlimit`, host deadline,
+complete argv, startup/reset bytes, empty child environment, fresh working
+directory policy, and their flat canonical fingerprint-field slice. It builds
+no standalone fingerprint and grants no process or solver authority.
+`Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` retains the
+unchanged public source and error API, and wraps that profile with the
+Length-specific protocol tags, artifact policy, response grammar/limits, one
+fingerprint budget, and complete Length policy identity. V2 therefore still
+fixes the direct prefix `-in -smt2 smtlib2_compliant=true`, derives exact
+launch-time `timeout` and `rlimit` arguments, uses an empty child environment
+and a fresh empty working directory, and retains the same path and optional
+pin. Standard compliance makes `echo` responses quoted; exact startup bytes
+immediately disable `:print-success`, and the reset prefix repeats that
+suppression before every self-contained query. The canonical QF_LIA query now
+emits start-mode options before `set-logic` and uses fixed nonzero random seed
+`1`.
 The legacy `lengthSMTLibExecutionArgumentVector` projection names only the
 fixed prefix; launchers must use
 `lengthSMTLibExecutionConfiguredArgumentVector` for the complete argv.

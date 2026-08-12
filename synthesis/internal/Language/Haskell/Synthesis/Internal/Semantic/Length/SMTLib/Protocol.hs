@@ -75,11 +75,12 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   , LengthSMTLibExecutionConfig
   , lengthSMTLibExecutionArtifactPolicy
   , lengthSMTLibExecutionPolicyFingerprint
-  , lengthSMTLibExecutionQueryResetBytes
   , lengthSMTLibExecutionResponseLimits
   )
 import Language.Haskell.Synthesis.Internal.SMTLib.Causal
   ( SMTLibCausalAction (..) )
+import Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
+  ( z3SMTLibExecutionQueryResetBytes )
 import Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream
   ( SMTLibCausalStreamBoundary
   , SMTLibCausalStreamCompletedFrame
@@ -341,7 +342,7 @@ renderProtocolInitialWrite
   -> SMTLibEchoSentinel
   -> [Word8]
 renderProtocolInitialWrite query barrier =
-  lengthSMTLibExecutionQueryResetBytes ++
+  z3SMTLibExecutionQueryResetBytes ++
   lengthSMTLibQueryCheckBytes query ++
   smtLibEchoSentinelCommandBytes barrier
 
@@ -873,7 +874,7 @@ buildPlanFingerprint limits execution query valueRequest checkBarrier valueBarri
                 ]
             ]
         , tagged "initial-write"
-            [ FingerprintBytes lengthSMTLibExecutionQueryResetBytes
+            [ FingerprintBytes z3SMTLibExecutionQueryResetBytes
             , FingerprintBytes $ lengthSMTLibQueryCheckBytes query
             , FingerprintBytes $ smtLibEchoSentinelCommandBytes checkBarrier
             , FingerprintBytes initialWrite

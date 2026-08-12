@@ -289,6 +289,8 @@ forbiddenConstructionAttempts =
       "LengthSMTLibExecutionConfig"
   , noOrd @LengthSMTLibExecutionConfig
       "LengthSMTLibExecutionConfig"
+  , noShow @LengthSMTLibExecutionConfig
+      "LengthSMTLibExecutionConfig"
   , ( "LengthSMTLibExecutionConfig exposed its executable path"
     , forbiddenLengthSMTLibExecutionPathProjection `seq` ()
     )
@@ -297,6 +299,9 @@ forbiddenConstructionAttempts =
     )
   , ( "LengthSMTLibExecutionConfig exposed its reversible fingerprint"
     , forbiddenLengthSMTLibExecutionFingerprintProjection `seq` ()
+    )
+  , ( "LengthSMTLibExecutionConfig exposed its generic Z3 profile"
+    , forbiddenLengthSMTLibExecutionZ3ProfileProjection `seq` ()
     )
   , noGeneric @(LengthSMTLibLiveSession LiveEpochProbe)
       "LengthSMTLibLiveSession"
@@ -1119,6 +1124,12 @@ forbiddenLengthSMTLibExecutionFingerprintProjection
   -> ()
 forbiddenLengthSMTLibExecutionFingerprintProjection =
   lengthSMTLibExecutionPolicyFingerprint `seq` const ()
+
+forbiddenLengthSMTLibExecutionZ3ProfileProjection
+  :: LengthSMTLibExecutionConfig
+  -> ()
+forbiddenLengthSMTLibExecutionZ3ProfileProjection =
+  lengthSMTLibExecutionZ3Profile `seq` const ()
 
 forbiddenLengthSMTLibLiveSessionCoercion
   :: LengthSMTLibLiveSession LiveEpochProbe

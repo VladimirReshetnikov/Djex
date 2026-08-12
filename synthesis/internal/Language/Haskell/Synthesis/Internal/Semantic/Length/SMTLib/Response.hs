@@ -45,6 +45,11 @@ import Language.Haskell.Synthesis.Internal.SMTLib.Response
   , SMTLibTokenPart (..)
   , mkSMTLibResponseLimits
   , parseSMTLibSExpression
+  , smtLibResponseByteLimit
+  , smtLibResponseNestingDepthLimit
+  , smtLibResponseNodeLimit
+  , smtLibResponseNumeralBitLimit
+  , smtLibResponseTokenByteLimit
   , smtLibSymbolBytes
   )
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib
@@ -75,16 +80,33 @@ data LengthSMTLibResponseLimitSource = LengthSMTLibResponseLimitSource
 
 instance NFData LengthSMTLibResponseLimitSource
 
--- | Validated response limits plus their private shared parser policy.
+-- | Validated response limits whose shared parser policy is their single
+-- retained owner.  The strict outer data wrapper preserves the Length-specific
+-- abstraction and its established weak-head demand.
 data LengthSMTLibResponseLimits = LengthSMTLibResponseLimits
-  !Natural !Int !Natural !Natural !Int !SMTLibResponseLimits
-  deriving (Eq, Ord, Show)
+  !SMTLibResponseLimits
+  deriving (Eq, Ord)
+
+-- Preserve the historical six-field derived spelling even though the first
+-- five values are now projections from the final parser-policy owner.
+instance Show LengthSMTLibResponseLimits where
+  showsPrec precedence limits@(LengthSMTLibResponseLimits parserLimits) =
+    showParen (precedence > 10)
+      $ showString "LengthSMTLibResponseLimits "
+      . showsPrec 11 (lengthSMTLibResponseByteLimit limits)
+      . showChar ' '
+      . showsPrec 11 (lengthSMTLibResponseNestingDepthLimit limits)
+      . showChar ' '
+      . showsPrec 11 (lengthSMTLibResponseNodeLimit limits)
+      . showChar ' '
+      . showsPrec 11 (lengthSMTLibResponseTokenByteLimit limits)
+      . showChar ' '
+      . showsPrec 11 (lengthSMTLibResponseIntegerBitLimit limits)
+      . showChar ' '
+      . showsPrec 11 parserLimits
 
 instance NFData LengthSMTLibResponseLimits where
-  rnf (LengthSMTLibResponseLimits
-      bytes depth nodes tokenBytes integerBits parserLimits) =
-    rnf bytes `seq` rnf depth `seq` rnf nodes `seq`
-    rnf tokenBytes `seq` rnf integerBits `seq` rnf parserLimits
+  rnf (LengthSMTLibResponseLimits parserLimits) = rnf parserLimits
 
 data LengthSMTLibResponseLimitField
   = LengthSMTLibResponseNestingDepth
@@ -129,7 +151,6 @@ buildLengthSMTLibResponseLimits
   :: LengthSMTLibResponseLimitSource
   -> LengthSMTLibResponseLimits
 buildLengthSMTLibResponseLimits source = LengthSMTLibResponseLimits
-  bytes depth nodes tokenBytes integerBits
   $ mkSMTLibResponseLimits SMTLibResponseLimitSource
       { smtLibResponseLimitSourceBytes = bytes
       , smtLibResponseLimitSourceNestingDepth = fromIntegral depth
@@ -146,29 +167,31 @@ buildLengthSMTLibResponseLimits source = LengthSMTLibResponseLimits
 
 lengthSMTLibResponseByteLimit :: LengthSMTLibResponseLimits -> Natural
 lengthSMTLibResponseByteLimit
-    (LengthSMTLibResponseLimits value _ _ _ _ _) = value
+    (LengthSMTLibResponseLimits limits) = smtLibResponseByteLimit limits
 
 lengthSMTLibResponseNestingDepthLimit
   :: LengthSMTLibResponseLimits
   -> Int
 lengthSMTLibResponseNestingDepthLimit
-    (LengthSMTLibResponseLimits _ value _ _ _ _) = value
+    (LengthSMTLibResponseLimits limits) = fromIntegral
+      $ smtLibResponseNestingDepthLimit limits
 
 lengthSMTLibResponseNodeLimit :: LengthSMTLibResponseLimits -> Natural
 lengthSMTLibResponseNodeLimit
-    (LengthSMTLibResponseLimits _ _ value _ _ _) = value
+    (LengthSMTLibResponseLimits limits) = smtLibResponseNodeLimit limits
 
 lengthSMTLibResponseTokenByteLimit
   :: LengthSMTLibResponseLimits
   -> Natural
 lengthSMTLibResponseTokenByteLimit
-    (LengthSMTLibResponseLimits _ _ _ value _ _) = value
+    (LengthSMTLibResponseLimits limits) = smtLibResponseTokenByteLimit limits
 
 lengthSMTLibResponseIntegerBitLimit
   :: LengthSMTLibResponseLimits
   -> Int
 lengthSMTLibResponseIntegerBitLimit
-    (LengthSMTLibResponseLimits _ _ _ _ value _) = value
+    (LengthSMTLibResponseLimits limits) = fromIntegral
+      $ smtLibResponseNumeralBitLimit limits
 
 -- | A syntactically valid response can still be the wrong response for the
 -- command.  Symbol-bearing errors retain only bytes already checked against
@@ -236,7 +259,7 @@ parseResponse
   :: LengthSMTLibResponseLimits
   -> [Word8]
   -> Either LengthSMTLibResponseError SMTLibSExpression
-parseResponse (LengthSMTLibResponseLimits _ _ _ _ _ parserLimits) bytes =
+parseResponse (LengthSMTLibResponseLimits parserLimits) bytes =
   case parseSMTLibSExpression parserLimits bytes of
     Left failure -> Left $ LengthSMTLibResponseSyntaxError failure
     Right expression -> Right expression

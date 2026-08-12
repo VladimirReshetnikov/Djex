@@ -627,6 +627,29 @@ facadeTests = testGroup "public Djex facade"
                 LengthSMTLibResponseError
                 [LengthSMTLibIntegerBinding]
           inputValueResponseParser = parseLengthSMTLibInputValueResponse
+          responseByteLimitProjection
+            :: LengthSMTLibResponseLimits
+            -> Natural
+          responseByteLimitProjection = lengthSMTLibResponseByteLimit
+          responseNestingDepthLimitProjection
+            :: LengthSMTLibResponseLimits
+            -> Int
+          responseNestingDepthLimitProjection =
+            lengthSMTLibResponseNestingDepthLimit
+          responseNodeLimitProjection
+            :: LengthSMTLibResponseLimits
+            -> Natural
+          responseNodeLimitProjection = lengthSMTLibResponseNodeLimit
+          responseTokenByteLimitProjection
+            :: LengthSMTLibResponseLimits
+            -> Natural
+          responseTokenByteLimitProjection =
+            lengthSMTLibResponseTokenByteLimit
+          responseIntegerBitLimitProjection
+            :: LengthSMTLibResponseLimits
+            -> Int
+          responseIntegerBitLimitProjection =
+            lengthSMTLibResponseIntegerBitLimit
           executionLimitsBuilder
             :: LengthSMTLibExecutionLimitSource
             -> LengthSMTLibExecutionLimits
@@ -671,7 +694,10 @@ facadeTests = testGroup "public Djex facade"
         counterexampleValidator `seq` queryInputSymbolsProjection `seq`
         queryInputValueRequestProjection `seq` queryObservationAssociator `seq`
         queryObservationReplayer `seq` checkResponseParser `seq`
-        inputValueResponseParser `seq` executionLimitsBuilder `seq`
+        inputValueResponseParser `seq` responseByteLimitProjection `seq`
+        responseNestingDepthLimitProjection `seq`
+        responseNodeLimitProjection `seq` responseTokenByteLimitProjection `seq`
+        responseIntegerBitLimitProjection `seq` executionLimitsBuilder `seq`
         executionConfigSealer `seq`
         executionDigestExpectationProjection `seq`
         executionTimeoutProjection `seq`

@@ -2606,6 +2606,34 @@ smtLibTests = testGroup
       SMTLibResponse.lengthSMTLibResponseNodeLimit limits @?= 4096
       SMTLibResponse.lengthSMTLibResponseTokenByteLimit limits @?= 4096
       SMTLibResponse.lengthSMTLibResponseIntegerBitLimit limits @?= 4096
+      let legacyShow =
+            "LengthSMTLibResponseLimits 65536 64 4096 4096 4096 " ++
+            "(SMTLibResponseLimits 65536 64 4096 4096 4096)"
+      show limits @?= legacyShow
+      showsPrec 11 limits "" @?= "(" ++ legacyShow ++ ")"
+
+      let customSource = SMTLibResponse.LengthSMTLibResponseLimitSource
+            { SMTLibResponse.lengthSMTLibResponseLimitSourceBytes = 17
+            , SMTLibResponse.lengthSMTLibResponseLimitSourceNestingDepth = 3
+            , SMTLibResponse.lengthSMTLibResponseLimitSourceNodes = 19
+            , SMTLibResponse.lengthSMTLibResponseLimitSourceTokenBytes = 23
+            , SMTLibResponse.lengthSMTLibResponseLimitSourceIntegerBits = 29
+            }
+          largerSource = customSource
+            { SMTLibResponse.lengthSMTLibResponseLimitSourceIntegerBits = 31 }
+      custom <- expectRight
+        $ SMTLibResponse.mkLengthSMTLibResponseLimits customSource
+      larger <- expectRight
+        $ SMTLibResponse.mkLengthSMTLibResponseLimits largerSource
+      ( SMTLibResponse.lengthSMTLibResponseByteLimit custom
+        , SMTLibResponse.lengthSMTLibResponseNestingDepthLimit custom
+        , SMTLibResponse.lengthSMTLibResponseNodeLimit custom
+        , SMTLibResponse.lengthSMTLibResponseTokenByteLimit custom
+        , SMTLibResponse.lengthSMTLibResponseIntegerBitLimit custom
+        ) @?= (17, 3, 19, 23, 29)
+      SMTLibResponse.mkLengthSMTLibResponseLimits customSource @?= Right custom
+      compare custom larger @?= compare customSource largerSource
+
       assertLeft
         (SMTLibResponse.NegativeLengthSMTLibResponseLimit
           SMTLibResponse.LengthSMTLibResponseNestingDepth (-1))
@@ -2618,6 +2646,51 @@ smtLibTests = testGroup
         $ SMTLibResponse.mkLengthSMTLibResponseLimits
             SMTLibResponse.defaultLengthSMTLibResponseLimitSource
               { SMTLibResponse.lengthSMTLibResponseLimitSourceIntegerBits = -1 }
+
+      let poisonNaturalFields = SMTLibResponse.LengthSMTLibResponseLimitSource
+            { SMTLibResponse.lengthSMTLibResponseLimitSourceBytes =
+                error "response-byte-demand"
+            , SMTLibResponse.lengthSMTLibResponseLimitSourceNestingDepth = -1
+            , SMTLibResponse.lengthSMTLibResponseLimitSourceNodes =
+                error "response-node-demand"
+            , SMTLibResponse.lengthSMTLibResponseLimitSourceTokenBytes =
+                error "response-token-demand"
+            , SMTLibResponse.lengthSMTLibResponseLimitSourceIntegerBits =
+                error "response-integer-demand"
+            }
+      assertLeft
+        (SMTLibResponse.NegativeLengthSMTLibResponseLimit
+          SMTLibResponse.LengthSMTLibResponseNestingDepth (-1))
+        $ SMTLibResponse.mkLengthSMTLibResponseLimits poisonNaturalFields
+      assertLeft
+        (SMTLibResponse.NegativeLengthSMTLibResponseLimit
+          SMTLibResponse.LengthSMTLibResponseIntegerBits (-1))
+        $ SMTLibResponse.mkLengthSMTLibResponseLimits
+            poisonNaturalFields
+              { SMTLibResponse.lengthSMTLibResponseLimitSourceNestingDepth = 0
+              , SMTLibResponse.lengthSMTLibResponseLimitSourceIntegerBits = -1
+              }
+
+      let poisonSuccessfulSource = customSource
+            { SMTLibResponse.lengthSMTLibResponseLimitSourceNodes =
+                error "response-node-demand"
+            }
+          poisonSuccessful = SMTLibResponse.mkLengthSMTLibResponseLimits
+            poisonSuccessfulSource
+      case poisonSuccessful of
+        Left failure -> assertFailure
+          $ "poisoned admitted limits were unexpectedly rejected: " ++
+            show failure
+        Right _ -> pure ()
+      attempted <- try $ evaluate $ case poisonSuccessful of
+        Left _ -> 0
+        Right admitted -> SMTLibResponse.lengthSMTLibResponseByteLimit admitted
+      case attempted :: Either SomeException Natural of
+        Left failure -> assertBool
+          "forcing admitted response limits did not force the shared policy"
+          $ "response-node-demand" `isInfixOf` displayException failure
+        Right _ -> assertFailure
+          "forcing admitted response limits left a poisoned shared field lazy"
   , testCase "validate declaration and emission bounds productively" $ do
       SMTLib.mkLengthSMTLibLimits SMTLib.defaultLengthSMTLibLimitSource @?=
         Right SMTLib.defaultLengthSMTLibLimits

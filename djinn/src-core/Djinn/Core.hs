@@ -1066,7 +1066,8 @@ inhabitSynthesisTypedResultPreparedChecked options prepared contexts candidates
 
 -- All stable result views meet at this sidecar-retaining worker.  Projection
 -- happens only after proof checking, conversion, cross-plan de-duplication,
--- and ranking have moved whole associations into their final order.
+-- and the configured final ordering step has moved whole associations into
+-- their final order.
 inhabitSynthesisValidatedResultPreparedChecked
     :: QueryOptions
     -> PreparedEnvironment
@@ -2509,8 +2510,9 @@ formulaPlanFinished result =
 
 -- Build the public result only after all requested plans have run. Whole
 -- candidate/evidence associations are structurally de-duplicated across the
--- union and ranked once; only then does the final private result project to
--- the historical shared result. Proof checking remains plan-local above.
+-- union and, when requested, stably ranked once; only then does the final
+-- private result project to the historical shared result. Proof checking
+-- remains plan-local above.
 mergeFormulaPlanResults
     :: QueryOptions
     -> [FormulaPlanResult]

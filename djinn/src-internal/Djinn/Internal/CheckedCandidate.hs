@@ -109,8 +109,9 @@ sortValidatedCandidates = sortOn validatedCandidateDetails
 
 -- | The final private Djinn result before compatibility erasure.  It retains
 -- every surviving candidate sidecar through cross-plan de-duplication and
--- ranking.  The result constructor is hidden so the historical shared result
--- and typed result can be built only through the projections below.
+-- any configured stable ranking.  The result constructor is hidden so the
+-- historical shared result and typed result can be built only through the
+-- projections below.
 data ValidatedResult metadata details output = ValidatedResult
     SharedQuery.QueryEvidence
     SharedSearch.Completion
@@ -161,10 +162,10 @@ projectValidatedResult = projectValidatedResultWith projectCandidate
 -- This is the package-private typed-result seam.  In particular, the caller
 -- receives a deterministic final candidate key plus the output, details, and
 -- checker evidence from one constructor at a time; it never zips a separately
--- projected compatibility list onto a sidecar list after de-duplication or
--- sorting. The key is allocated only after those operations, so a future graph
--- builder can derive disjoint node identities without trusting search-plan
--- ordinals discarded by de-duplication.
+-- projected compatibility list onto a sidecar list after de-duplication or an
+-- optional sort. The key is allocated only after the configured final ordering
+-- step, so a future graph builder can derive disjoint node identities without
+-- trusting search-plan ordinals discarded by de-duplication.
 projectValidatedResultWith
     :: (Natural -> ValidatedCandidate details output -> candidate)
     -> ValidatedResult metadata details output

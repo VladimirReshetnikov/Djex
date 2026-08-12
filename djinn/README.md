@@ -470,14 +470,15 @@ declaration language while eliminating the frontend's former direct
 The checked adapter also exposes `DjinnTypedCandidate`, `DjinnTypedResult`,
 and four `runDjinnTypedQuery...` entrances parallel to the provider-evidence
 runners. They preserve each candidate's checked-proof association through
-cross-plan de-duplication and stable ranking before constructing the shared
-typed envelope. The graph projection currently returns only
+cross-plan de-duplication and any configured stable ranking before constructing
+the shared typed envelope. The graph projection currently returns only
 `DjinnTermGraphSourceTypingContextUnavailable`: LJT formula types and the raw
 pre-erasure proof do not yet contain the exact source-variable roles and final
 term transformation authority required to seal a `TermGraph`. The reserved
-graph vocabulary is `DjinnTermGraphType = Type (Variable
-DjinnTypeVariable)`, so an eventual implementation can distinguish flexible
-variables from rigid skolems. Legacy runners are lazy compatibility
+graph vocabulary is `DjinnTermGraphType = Type DjinnTermGraphTypeVariable`,
+where `DjinnTermGraphTypeVariable = Variable HSymbol`, so an eventual
+implementation can distinguish flexible variables from rigid skolems. Legacy
+runners are lazy compatibility
 projections of these typed results and neither inspect graph availability nor
 change historical results.
 

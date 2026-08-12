@@ -46,11 +46,11 @@ collection, eta-aware de-duplication, and stable sorting.
 
 The private `projectValidatedResultWith` consumes each whole final association
 and gives its projector a deterministic `Natural` candidate key. Keys are
-allocated lazily with `zipWith [0..]` only after de-duplication and ranking.
-Future graph node and occurrence identities can therefore derive from a final
-candidate key instead of colliding across sibling plans or depending on
-discarded proof ordinals. Compatibility projection ignores the key and never
-traverses proof evidence.
+allocated lazily with `zipWith [0..]` only after de-duplication and any
+configured stable ranking. Future graph node and occurrence identities can
+therefore derive from a final candidate key instead of colliding across sibling
+plans or depending on discarded proof ordinals. Compatibility projection
+ignores the key and never traverses proof evidence.
 
 ## Future source-type domain
 
@@ -60,7 +60,7 @@ whether a source identity is flexible or a rigid skolem, so its reserved type
 is:
 
 ```haskell
-type DjinnTermGraphTypeVariable = Variable DjinnTypeVariable
+type DjinnTermGraphTypeVariable = Variable HSymbol
 type DjinnTermGraphType = Type DjinnTermGraphTypeVariable
 ```
 

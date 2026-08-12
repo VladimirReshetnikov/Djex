@@ -370,9 +370,10 @@ Exference's typed candidate may contain its checked graph. Djinn currently
 returns the explicit `DjinnTermGraphSourceTypingContextUnavailable` absence:
 the retained LJT proof evidence is exact for its formula but predates the
 source-typed proof transformations needed by a shared graph. Its public future
-graph domain is already `DjinnTermGraphType = Type (Variable
-DjinnTypeVariable)`, not the role-erased compatibility `DjinnType`. Thus the
-typed API unifies result association without claiming behavioral
+graph domain is already `DjinnTermGraphType = Type
+DjinnTermGraphTypeVariable`, where `DjinnTermGraphTypeVariable = Variable
+HSymbol`, not the role-erased compatibility `DjinnType`. Thus the typed API
+unifies result association without claiming behavioral
 interoperability before the required source-variable role plan exists.
 
 Nonempty evidence is additive, with engine- and payload-specific scheduling:

@@ -83,8 +83,6 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , LengthExpression (..)
   , LengthFormula (..)
   , LengthProviderArgumentRole (..)
-  , LengthProviderInventoryError
-  , LengthProviderSummarySource (..)
   , LengthProviderVariable (..)
   , LengthSpineModelTrust (..)
   , LengthSyntaxError (..)
@@ -96,7 +94,6 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , checkedLengthProviderArgumentRoles
   , checkedLengthProviderName
   , checkedLengthProviderScheme
-  , checkedLengthProviderSummaries
   , checkedLengthProviderTransfer
   , checkedLengthSpineModelTrust
   , checkedLengthSpineRecursiveField
@@ -114,13 +111,11 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , lengthExpressionField
   , lengthFingerprintByteLimit
   , lengthFormulaField
-  , lengthProviderInventoryFingerprint
   , lookupCheckedLengthProviderSummary
   , normalizeLengthExpression
   , normalizeLengthFormula
   , providerSummaryField
   , sealLengthContractInContext
-  , sealLengthProviderInventoryInContext
   , tagged
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
@@ -267,10 +262,7 @@ instance NFData identity => NFData (LengthRootOpeningError identity)
 
 -- | Fixed-precedence failure while sealing one complete typed candidate.
 data LengthProblemError failure identity local
-  = LengthProblemProviderResealRejected
-      (LengthProviderInventoryError (Variable identity))
-  | LengthProblemProviderContextMismatch
-  | LengthProblemContractResealRejected
+  = LengthProblemContractResealRejected
       (LengthContractError (Variable identity))
   | LengthProblemContractContextMismatch
   | LengthProblemResidualConstraint
@@ -429,8 +421,10 @@ checkedLengthProblemBehavioralProblem
 checkedLengthProblemBehavioralProblem
     (CheckedLengthProblem _ _ _ _ _ _ problem) = problem
 
--- | Atomically retain, revalidate, interpret, identify, and envelope one
--- engine-owned typed candidate.  Residual constraints fail before graph
+-- | Atomically retain, interpret, identify, and envelope one engine-owned
+-- typed candidate. The provider inventory is consumed directly from the
+-- opaque checked session; only the separately supplied contract is revalidated
+-- through that session's context. Residual constraints fail before graph
 -- availability, and every semantic/global check fails closed.
 --
 -- The fresh graph fingerprint enforces the caller's graph limits before the
@@ -451,7 +445,7 @@ sealLengthTypedCandidateProblem
       (LengthProblemError failure identity local)
       (CheckedLengthProblem identity local)
 sealLengthTypedCandidateProblem problemLimits session suppliedContract typed = do
-  providers <- revalidateProviders session
+  let providers = checkedLengthSessionProviderInventory session
   contract <- revalidateContract session suppliedContract
   let compatibility = typedCandidateCompatibility typed
   case candidateResidualConstraints compatibility of
@@ -520,33 +514,6 @@ sealLengthTypedCandidateProblem problemLimits session suppliedContract typed = d
     (checkedLengthContractPostcondition contract)
     condition
     encodingFingerprint behavioralProblem
-
-revalidateProviders
-  :: Ord identity
-  => CheckedLengthSession identity annotation
-  -> Either
-      (LengthProblemError failure identity local)
-      (CheckedLengthProviderInventory (Variable identity))
-revalidateProviders session = do
-  let original = checkedLengthSessionProviderInventory session
-      sources = map providerSource $ checkedLengthProviderSummaries original
-  checked <- first LengthProblemProviderResealRejected
-    $ sealLengthProviderInventoryInContext
-        (checkedLengthSessionLimits session)
-        (checkedLengthSessionContext session)
-        sources
-  if lengthProviderInventoryFingerprint checked
-      == lengthProviderInventoryFingerprint original
-    then Right checked
-    else Left LengthProblemProviderContextMismatch
- where
-  providerSource provider = AssumedProviderSummary
-    { lengthProviderName = checkedLengthProviderName provider
-    , lengthProviderScheme = checkedLengthProviderScheme provider
-    , lengthProviderArgumentRoles =
-        checkedLengthProviderArgumentRoles provider
-    , lengthProviderTransfer = checkedLengthProviderTransfer provider
-    }
 
 revalidateContract
   :: Ord identity

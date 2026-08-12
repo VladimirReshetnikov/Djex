@@ -9,10 +9,11 @@
 -- Provider schemes are resolved from that inventory rather than trusted from
 -- caller input.  A later behavioral-problem constructor must still bind this
 -- context to its exact typed target/candidate and encoding identities before
--- any observation may be replayed as evidence. Because the smaller checked
--- contract and provider-inventory values retain fingerprints rather than the
--- complete context, that future boundary must reseal their public projections
--- through the supplied context as part of one atomic problem construction.
+-- any observation may be replayed as evidence. The smaller checked contract
+-- and provider-inventory values retain fingerprints rather than the complete
+-- context. The atomic session therefore owns the checked provider
+-- inventory directly, while a later problem boundary must revalidate any
+-- separately supplied contract through that session's context.
 module Language.Haskell.Synthesis.Semantic.Length
   ( FiniteListSpineLengthV1
   , LengthContractFingerprintSubject

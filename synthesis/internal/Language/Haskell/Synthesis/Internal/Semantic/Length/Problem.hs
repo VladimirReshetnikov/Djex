@@ -201,8 +201,9 @@ lengthSessionEncodingPolicyFingerprint
     (CheckedLengthSession _ _ _ _ encoding) = encoding
 
 -- | Original finite bounds used for every authority sealed into the session.
--- Kept package-private so later atomic problem construction can revalidate
--- projections without allowing a caller to substitute a different policy.
+-- Kept package-private so candidate construction can revalidate a detachable
+-- contract, normalize interpreted syntax, and build bounded identities without
+-- allowing a caller to substitute a different policy.
 checkedLengthSessionLimits
   :: CheckedLengthSession identity annotation
   -> LengthLimits

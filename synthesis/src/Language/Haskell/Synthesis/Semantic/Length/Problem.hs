@@ -3,9 +3,10 @@
 -- The first checked layer binds one exact annotation-erased neutral inventory,
 -- finite-spine model, and normalized provider-law table.  Inventory identity
 -- remains distinct from the solver-neutral encoding policy.  Candidate and
--- complete problem sealing build on this opaque association; callers cannot
--- combine a context checked from one inventory with providers checked from
--- another.
+-- complete problem sealing consume the provider inventory directly from this
+-- opaque association and revalidate only the separately supplied contract;
+-- callers cannot combine a context checked from one inventory with providers
+-- checked from another.
 module Language.Haskell.Synthesis.Semantic.Length.Problem
   ( LengthSemanticFingerprintPart (..)
   , LengthEncodingPolicyFingerprintSubject

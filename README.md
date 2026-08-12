@@ -265,10 +265,11 @@ laws checked from another. It also reserves the modeled zero and step
 constructor names from provider laws, avoiding an ambiguous semantic global.
 
 `sealLengthTypedCandidateProblem` completes that association without accepting
-a detachable raw graph. It consumes an engine-owned `TypedCandidate`, re-seals
-the session's provider projections and the contract through the retained
-context, rejects the first residual dictionary before inspecting graph
-availability, and freshly rechecks and fingerprints the graph. The contract's
+a detachable raw graph. It consumes an engine-owned `TypedCandidate`, uses the
+provider inventory already owned by the opaque checked session, re-seals the
+separately supplied contract through the retained context, rejects the first
+residual dictionary before inspecting graph availability, and freshly rechecks
+and fingerprints the graph. The contract's
 free flexible variables are treated as implicit source quantifiers only at the
 root boundary; the engine's corresponding selections must be distinct rigid
 variables. Every provider occurrence is then matched capture-safely against

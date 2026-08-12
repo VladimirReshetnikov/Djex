@@ -117,22 +117,28 @@ import Language.Haskell.TH (lookupValueName)
 -- Importing an abstract type with the same spelling as its hidden constructor
 -- makes an ordinary deferred term probe a hard namespace error.  Ask the value
 -- namespace directly instead.  The same check pins private observation
--- projections whose public visibility would bypass the checked replay gate:
--- any hit means downstream code can name a representation internal and the
--- API-test component must stop compiling.
+-- projections whose public visibility would bypass the checked replay gate,
+-- plus retired candidate-problem failures that could arise only by resealing
+-- the session's own provider inventory. Any hit means downstream code can name
+-- an intentionally unavailable edge and the API-test component must stop
+-- compiling.
 $(do
     let hiddenValues =
           [ "LengthSMTLibLiveSession"
           , "LengthSMTLibLiveQueryObservation"
           , "LengthSMTLibLiveSessionError"
           , "LengthSMTLibLiveQueryError"
+          , "CheckedLengthSession"
+          , "CheckedLengthProviderInventory"
           , "lengthSMTLibLiveQueryObservationQueryFingerprint"
           , "lengthSMTLibLiveQueryObservationCounterexampleEvidence"
+          , "LengthProblemProviderResealRejected"
+          , "LengthProblemProviderContextMismatch"
           ]
     resolved <- mapM lookupValueName hiddenValues
     case [name | (name, Just _) <- zip hiddenValues resolved] of
       [] -> pure []
-      visible -> fail $ "public live representation internals: " ++ show visible
+      visible -> fail $ "public representation internals: " ++ show visible
  )
 
 data FingerprintProbe

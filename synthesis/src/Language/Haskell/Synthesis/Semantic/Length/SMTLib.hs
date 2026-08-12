@@ -2,9 +2,10 @@
 -- checked finite-list-spine Length domain.
 --
 -- A query can be built only from one opaque 'CheckedLengthProblem'.  It
--- retains a typed, versioned translation and emits bounded canonical SMT-LIB
--- commands, but does not launch Z3 or assign authority to raw @sat@, @unsat@,
--- or @unknown@ reports.  Solver build and protocol identity belong to the
+-- structurally fingerprints a typed, versioned translation before retaining
+-- only its exact input symbols and bounded canonical SMT-LIB command bytes.
+-- It does not launch Z3 or assign authority to raw @sat@, @unsat@, or
+-- @unknown@ reports.  Solver build and protocol identity belong to the
 -- separate live execution envelope layered over the query fingerprint.
 --
 -- Model bindings contain inputs only.  'validateLengthSMTLibCounterexample'

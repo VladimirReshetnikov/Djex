@@ -1,6 +1,7 @@
 module Main (main) where
 
 import Control.Exception (SomeException, displayException, evaluate, try)
+import qualified Crypto.Hash.SHA256 as SHA256
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import Data.List (intercalate, isInfixOf, nub, sort)
@@ -2025,6 +2026,17 @@ smtLibTests = testGroup
       SMTLib.lengthSMTLibQuerySchemaTag @?=
         asciiBytes "djex-length-z3-qf-lia-smtlib2/v2"
       SMTLib.lengthSMTLibQueryLogic @?= asciiBytes "QF_LIA"
+      -- This digest is only a test snapshot of the collision-free canonical
+      -- bytes; it is not used as query identity or semantic authority.
+      SHA256.hash
+          (BS.pack $ Fingerprint.fingerprintCanonicalBytes
+            $ SMTLib.lengthSMTLibQueryFingerprint query) @?=
+        BS.pack
+          [ 209, 111, 73, 15, 12, 24, 186, 130
+          , 32, 104, 129, 178, 73, 50, 110, 191
+          , 144, 242, 145, 73, 4, 107, 47, 175
+          , 155, 72, 215, 75, 81, 111, 212, 114
+          ]
       SMTLib.lengthSMTLibQueryInputSymbols query @?=
         [asciiBytes "djex_length_input_0"]
       SMTLib.lengthSMTLibQueryCheckBytes query @?=

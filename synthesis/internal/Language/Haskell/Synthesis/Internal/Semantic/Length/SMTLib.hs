@@ -6,9 +6,10 @@
 -- | Private construction of canonical SMT-LIB queries for checked Length
 -- problems.
 --
--- The typed query plan is retained separately from its rendering.  Raw solver
--- statuses do not enter this module: a decoded input assignment can acquire
--- evidence only by passing the independent concrete replay boundary.
+-- The typed query plan is constructed transiently beside its rendering and
+-- bound structurally into the sealed fingerprint.  Raw solver statuses do not
+-- enter this module: a decoded input assignment can acquire evidence only by
+-- passing the independent concrete replay boundary.
 module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   ( LengthSMTLibQueryFingerprintSubject
   , lengthSMTLibQuerySchemaTag
@@ -231,9 +232,10 @@ data SMTCommand
 
 instance NFData SMTCommand
 
--- The complete typed plan stays retained even though only canonical bytes are
--- projected.  This keeps rendering from becoming the semantic source of
--- truth and gives the query fingerprint a structural input.
+-- The complete typed plan remains local through bounded rendering and
+-- structural fingerprinting.  Rendering therefore never becomes the semantic
+-- source of truth, while the sealed query can retain only the runtime/replay
+-- material which has a post-seal consumer.
 data LengthSMTLibPlan = LengthSMTLibPlan
   ![[Word8]]
   !SMTBooleanExpression
@@ -243,11 +245,11 @@ data LengthSMTLibPlan = LengthSMTLibPlan
 
 instance NFData LengthSMTLibPlan
 
--- | Opaque association of one checked problem, typed translation, bounded
--- commands, and collision-free translation identity.
+-- | Opaque association of one checked problem, exact input symbols, bounded
+-- commands, and collision-free structural translation identity.
 data LengthSMTLibQuery identity local = LengthSMTLibQuery
   !(CheckedLengthProblem identity local)
-  !LengthSMTLibPlan
+  ![[Word8]]
   ![Word8]
   !(Maybe [Word8])
   !(Fingerprint LengthSMTLibQueryFingerprintSubject)
@@ -255,8 +257,8 @@ data LengthSMTLibQuery identity local = LengthSMTLibQuery
 type role LengthSMTLibQuery nominal nominal
 
 instance NFData (LengthSMTLibQuery identity local) where
-  rnf (LengthSMTLibQuery problem plan check request fingerprint) =
-    rnf problem `seq` rnf plan `seq` rnf check `seq` rnf request `seq`
+  rnf (LengthSMTLibQuery problem symbols check request fingerprint) =
+    rnf problem `seq` rnf symbols `seq` rnf check `seq` rnf request `seq`
     rnf fingerprint
 
 -- | Translate and seal one exact checked problem.  The combined bad-state
@@ -286,13 +288,14 @@ sealLengthSMTLibQuery limits problem = do
       LengthSMTLibInputValueRequest (renderCommand command)
   fingerprint <- buildQueryFingerprint limits problem plan
     checkBytes valueRequestBytes
-  pure $ LengthSMTLibQuery problem plan checkBytes valueRequestBytes fingerprint
+  pure $ LengthSMTLibQuery problem symbols checkBytes valueRequestBytes
+    fingerprint
 
 lengthSMTLibQueryInputSymbols
   :: LengthSMTLibQuery identity local
   -> [[Word8]]
 lengthSMTLibQueryInputSymbols
-    (LengthSMTLibQuery _ (LengthSMTLibPlan symbols _ _ _) _ _ _) = symbols
+    (LengthSMTLibQuery _ symbols _ _ _) = symbols
 
 lengthSMTLibQueryCheckBytes
   :: LengthSMTLibQuery identity local

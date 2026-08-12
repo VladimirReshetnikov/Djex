@@ -176,6 +176,11 @@ contains bounded check and input-only `get-value` commands; it neither starts a
 solver nor associates a raw solver status. Decoded input bindings can produce a
 counterexample receipt only through independent replay against the retained
 problem, while raw models and even `unsat` remain heuristic observations.
+The complete typed SMT plan remains transient through bounded rendering and
+structural fingerprinting. The sealed query retains only the checked problem,
+exact decoder-symbol order, canonical command bytes, and complete fingerprint;
+the unchanged structural plan field in that fingerprint keeps rendered bytes
+from becoming the semantic source of truth.
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` can associate
 such a bounded raw report with both the retained behavioral problem and the

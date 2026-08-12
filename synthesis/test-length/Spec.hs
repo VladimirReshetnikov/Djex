@@ -131,7 +131,7 @@ smtLibLiveQueryTests = testGroup "Length SMT-LIB live queries"
 smtLibLiveFacadeTests :: TestTree
 smtLibLiveFacadeTests = testGroup "public Length SMT-LIB live facade"
   [ testCase
-      "associate sequential unary and binary observations with replay evidence"
+      "replay sequential evidence and reject a stale exact query first"
       assertLiveFacadeSequentialEvidence
   , testCase "report satisfiable status-only without evidence"
       assertLiveFacadeStatusOnlySatisfiable
@@ -172,6 +172,7 @@ assertLiveFacadeSequentialEvidence = do
           Evaluate.defaultLengthEvaluationLimits session binaryQuery
         assertLiveFacadeEvidence unaryQuery [3] unary
         assertLiveFacadeEvidence binaryQuery [3, 5] binary
+        assertLiveFacadeQueryMismatch binaryQuery unary
         events <- SMTLibLiveSpec.readFakeZ3Events executable
         assertFakeZ3EventOrdinals "query-check" [0, 1] events
         assertFakeZ3EventOrdinals "query-get-value" [0, 1] events
@@ -192,16 +193,35 @@ assertLiveFacadeEvidence query expectedInputs observation = do
     SemanticProblem.RawSolverModelHint
   SMTLibLive.lengthSMTLibLiveQueryObservationUse observation @?=
     SemanticProblem.HeuristicRankingOnly
-  evidence <- case
+  case
       SMTLibLive.lengthSMTLibLiveQueryObservationCounterexampleEvidence
         observation of
     Nothing -> assertFailure
       "satisfiable public facade observation omitted replay evidence"
-    Just value -> pure value
-  receipt <- expectRight $ Djex.replayBehavioralEvidence
-    (SMTLib.lengthSMTLibQueryBehavioralProblem query) evidence
+    Just _ -> pure ()
+  receipt <- case SMTLibLive.replayLengthSMTLibLiveQueryObservation
+      query observation of
+    Left failure -> assertFailure
+      $ "matching live observation replay failed: " ++ show failure
+    Right Nothing -> assertFailure
+      "matching live observation replay omitted its evidence"
+    Right (Just value) -> pure value
   Evaluate.validatedLengthCounterexampleInputs receipt @?= expectedInputs
   Evaluate.validatedLengthCounterexampleResult receipt @?= 0
+
+-- The unary observation carries unary evidence as well as its unary query
+-- key.  Replaying it against the binary query therefore pins the public
+-- query-before-evidence failure precedence.
+assertLiveFacadeQueryMismatch
+  :: SMTLib.LengthSMTLibQuery identity local
+  -> SMTLibLive.LengthSMTLibLiveQueryObservation epoch identity local
+  -> IO ()
+assertLiveFacadeQueryMismatch query observation = case
+    SMTLibLive.replayLengthSMTLibLiveQueryObservation query observation of
+  Left failure -> failure @?=
+    SMTLibLive.LengthSMTLibLiveObservationQueryFingerprintMismatch
+  Right _ -> assertFailure
+    "stale live observation replay unexpectedly succeeded"
 
 assertLiveFacadeStatusOnlySatisfiable :: IO ()
 assertLiveFacadeStatusOnlySatisfiable = do
@@ -265,6 +285,12 @@ assertLiveFacadeStatusObservation query expectedStatus expectedStrength
     Nothing -> pure ()
     Just _ -> assertFailure
       "status-only public facade observation retained replay evidence"
+  case SMTLibLive.replayLengthSMTLibLiveQueryObservation query observation of
+    Left failure -> assertFailure
+      $ "matching status-only observation replay failed: " ++ show failure
+    Right Nothing -> pure ()
+    Right (Just _) -> assertFailure
+      "status-only live observation replay invented evidence"
 
 assertLiveFacadeStaleFailure :: IO ()
 assertLiveFacadeStaleFailure = do

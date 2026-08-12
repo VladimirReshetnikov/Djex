@@ -13,7 +13,9 @@
 -- Solver status remains an observation.  In particular, @unsat@ is relative to
 -- the checked encoding and every status is restricted to
 -- 'HeuristicRankingOnly'.  Only the optional 'BehavioralEvidence' has survived
--- independent Length replay against the exact query problem.
+-- independent Length replay against the exact query problem.  Consumers can
+-- reveal its receipt through 'replayLengthSMTLibLiveQueryObservation', which
+-- checks the complete query identity before inspecting that evidence.
 --
 -- Private session defaults own opener and finalizer deadlines; the supplied
 -- execution policy owns the host deadline for each query.  This scope does not
@@ -32,9 +34,11 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live
   , LengthSMTLibLiveQueryError
   , lengthSMTLibLiveQueryPrimaryFailure
   , lengthSMTLibLiveQueryCleanupIncomplete
+  , LengthSMTLibLiveObservationReplayError (..)
   , defaultLengthSMTLibLiveSessionMaximumQueries
   , withLengthSMTLibLiveSession
   , runLengthSMTLibLiveQuery
+  , replayLengthSMTLibLiveQueryObservation
   , lengthSMTLibLiveQueryObservationQueryFingerprint
   , lengthSMTLibLiveQueryObservationSolverStatus
   , lengthSMTLibLiveQueryObservationResultStrength
@@ -69,6 +73,7 @@ import Language.Haskell.Synthesis.Semantic.Length.Evaluate
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib
   ( LengthSMTLibQuery
   , LengthSMTLibQueryFingerprintSubject
+  , lengthSMTLibQueryBehavioralProblem
   , lengthSMTLibQueryFingerprint
   )
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
@@ -79,6 +84,8 @@ import Language.Haskell.Synthesis.Semantic.Problem
   ( BehavioralEvidence
   , RawObservationUse (..)
   , RawResultStrength (..)
+  , ReplayMismatch
+  , replayBehavioralEvidence
   )
 
 -- | A scoped, capability-probed worker.  The constructor and all underlying
@@ -172,6 +179,20 @@ lengthSMTLibLiveQueryCleanupIncomplete
 lengthSMTLibLiveQueryCleanupIncomplete
     (LengthSMTLibLiveQueryError _ incomplete) = incomplete
 
+-- | Why a completed live observation could not be replayed against one exact
+-- query.  The query fingerprint is checked before optional evidence, so a
+-- stale query fails without inspecting or replaying a retained receipt.
+data LengthSMTLibLiveObservationReplayError
+  = LengthSMTLibLiveObservationQueryFingerprintMismatch
+  | LengthSMTLibLiveObservationEvidenceProblemMismatch !ReplayMismatch
+  deriving (Eq, Ord, Show)
+
+instance NFData LengthSMTLibLiveObservationReplayError where
+  rnf failure = case failure of
+    LengthSMTLibLiveObservationQueryFingerprintMismatch -> ()
+    LengthSMTLibLiveObservationEvidenceProblemMismatch mismatch ->
+      rnf mismatch
+
 -- | Safe projection of one completed query.  It freshly copies only public
 -- association and authority fields instead of wrapping the private run.
 data LengthSMTLibLiveQueryObservation epoch identity local =
@@ -235,6 +256,34 @@ runLengthSMTLibLiveQuery evaluationLimits
       (Session.lengthSMTLibQueryRunSolverStatus run)
       (solverStatusStrength $ Session.lengthSMTLibQueryRunSolverStatus run)
       (Session.lengthSMTLibQueryRunCounterexampleEvidence run)
+
+-- | Replay the safe semantic payload of one completed observation against the
+-- exact sealed query supplied by its consumer.
+--
+-- The collision-free query fingerprint is compared first.  Only after it
+-- matches is optional evidence replayed against the query's retained
+-- @BehavioralProblem@.  A successful 'Nothing' confirms exact association of
+-- a status-only observation but grants no evidence; a successful 'Just'
+-- reveals only the already independently validated, finite-spine
+-- counterexample receipt.  Solver status remains 'HeuristicRankingOnly'.
+replayLengthSMTLibLiveQueryObservation
+  :: LengthSMTLibQuery identity local
+  -> LengthSMTLibLiveQueryObservation epoch identity local
+  -> Either
+      LengthSMTLibLiveObservationReplayError
+      (Maybe ValidatedLengthCounterexample)
+replayLengthSMTLibLiveQueryObservation query observation
+  | lengthSMTLibQueryFingerprint query /=
+      lengthSMTLibLiveQueryObservationQueryFingerprint observation =
+        Left LengthSMTLibLiveObservationQueryFingerprintMismatch
+  | otherwise = case
+      lengthSMTLibLiveQueryObservationCounterexampleEvidence observation of
+    Nothing -> Right Nothing
+    Just evidence -> case replayBehavioralEvidence
+        (lengthSMTLibQueryBehavioralProblem query) evidence of
+      Left mismatch -> Left
+        $ LengthSMTLibLiveObservationEvidenceProblemMismatch mismatch
+      Right receipt -> Right $ Just receipt
 
 lengthSMTLibLiveQueryObservationQueryFingerprint
   :: LengthSMTLibLiveQueryObservation epoch identity local

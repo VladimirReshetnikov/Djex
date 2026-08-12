@@ -135,7 +135,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and typed-candidate behavioral problems: exact context resealing, residual rejection, rigid root/provider authorization, lazy symbolic length interpretation, normalized counterexample formulas, and separate inventory/encoding/candidate/problem identities. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation and exact input-symbol model replay for one checked Length problem, without launching or trusting a solver. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` | Pure validated Z3 launch, resource, artifact, and response-decoder policy with a package-private complete identity; it performs no IO or attestation. |
-| `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` | Rank-N scoped capability-probed Z3 ownership with byte-free failures and only query association, heuristic status/strength/use, and independently replayed counterexample evidence projected publicly. |
+| `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` | Rank-N scoped capability-probed Z3 ownership with byte-free failures, heuristic status/strength/use, and a query-first replay gate for independently validated counterexample evidence. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` | Opaque query-specific association of bounded raw solver reports, with heuristic-only safe projections and exact problem-plus-query replay before payload access. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response` | Pure bounded SMT-LIB 2.x check-status and query-specific input-valuation decoding; syntax remains untrusted and only independent Length replay may create evidence. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` | Package-private incremental reset/check/value transaction planning with exact positional barriers, causal write boundaries, and bounded cumulative stdout; it performs no IO or attestation. |
@@ -286,6 +286,15 @@ secret-seed commitment, workspace policy/path, and semantic limits. It is
 still not a solver result, proof, pruning authority, or general Z3 feature
 claim. The next layer must drive individual query plans through the scoped
 worker and independently replay any model before evidence exists.
+
+The public live facade copies only safe association and authority fields out
+of each private run. `replayLengthSMTLibLiveQueryObservation` is the checked
+consumer edge: it compares the complete collision-free query key before it
+inspects optional evidence, then replays any retained evidence against the
+exact `BehavioralProblem` owned by that query. A mismatched query therefore
+cannot make receipt replay observable, while a successful result without a
+receipt remains only an exactly associated heuristic status. The gate exposes
+no process, transcript, decoded valuation, or stronger use for `unsat`.
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` seals the next
 pure boundary. Its v2 policy fixes the direct prefix

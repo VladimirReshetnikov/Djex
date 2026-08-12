@@ -313,6 +313,8 @@ forbiddenConstructionAttempts =
       "LengthSMTLibLiveSessionError"
   , noGeneric @LengthSMTLibLiveQueryError
       "LengthSMTLibLiveQueryError"
+  , noGeneric @LengthSMTLibLiveObservationReplayError
+      "LengthSMTLibLiveObservationReplayError"
   , ( "LengthSMTLibLiveSession epoch unexpectedly permits Coercible"
     , forbiddenLengthSMTLibLiveSessionCoercion `seq` ()
     )

@@ -69,9 +69,12 @@ is relative to this bounded encoding, not a solver certificate or proof, and it
 grants no pruning authority. A satisfiable values-policy run succeeds only
 after the private owner decodes the exact symbol set and independently replays
 the resulting natural-number assignment against the checked Length problem.
-Only that replay can construct the optional evidence. Public consumers should
-replay the evidence once more against the exact retained problem before making
-a candidate-specific ranking decision.
+Only that replay can construct the optional evidence. Public consumers call
+`replayLengthSMTLibLiveQueryObservation`, which checks the complete query
+fingerprint before inspecting the optional evidence and then replays any
+evidence once more against the exact behavioral problem retained by that
+query. A successful `Nothing` confirms exact query association but grants no
+evidence or stronger status authority.
 
 ## Sanitized failures
 
@@ -117,8 +120,10 @@ they are never converted into `unknown` or a sanitized solver failure.
 The intended Leant consumer remains after Lean callback acceptance and before
 candidate text is projected into bindings. Leant can retain each checked
 handoff, seal its pure query, run eligible candidates serially in one lexical
-live scope, check the returned query fingerprint, and replay optional evidence
-against the exact retained problem.
+live scope, and use the public query-first replay gate before making a
+candidate-specific ranking decision. After query sealing, the query itself
+retains the exact behavioral problem; the live ranking state need not retain a
+second copy of the heavier handoff solely for evidence replay.
 
 The safe initial ranking policy is stable demotion, never pruning:
 

@@ -463,8 +463,13 @@ fingerprint, three-valued status, heuristic strength/use, and optional
 independently replayed counterexample evidence. Process handles, cancellation,
 paths, executable observations, barriers, ordinals, decoded valuations,
 transcripts, transport counters, and reversible run identities remain private.
-Public failures are mapped to byte-free classes plus a cleanup-incomplete bit;
-child-controlled payloads and operating-system details never cross the facade.
+`replayLengthSMTLibLiveQueryObservation` checks the exact query fingerprint
+before inspecting optional evidence, then replays that evidence against the
+query's retained behavioral problem. A successful `Nothing` remains only an
+exactly associated heuristic status. Public session and query execution
+failures are mapped to byte-free classes plus a cleanup-incomplete bit; the
+pure replay gate returns its own closed byte-free association error.
+Child-controlled payloads and operating-system details never cross the facade.
 The private session opener and configured per-query deadlines remain separate
 budgets rather than a claimed hard deadline for a caller-defined batch.
 

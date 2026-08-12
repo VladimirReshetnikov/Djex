@@ -106,6 +106,14 @@ facadeTests = testGroup "public Djex facade"
                   (LengthSMTLibLiveQueryObservation
                     FacadeLiveEpoch FacadeLiveIdentity FacadeLiveLocal))
           queryRunner = runLengthSMTLibLiveQuery
+          observationReplay
+            :: LengthSMTLibQuery FacadeLiveIdentity FacadeLiveLocal
+            -> LengthSMTLibLiveQueryObservation
+                FacadeLiveEpoch FacadeLiveIdentity FacadeLiveLocal
+            -> Either
+                LengthSMTLibLiveObservationReplayError
+                (Maybe ValidatedLengthCounterexample)
+          observationReplay = replayLengthSMTLibLiveQueryObservation
           sessionFailureProjection
             :: LengthSMTLibLiveSessionError
             -> LengthSMTLibLiveSessionFailure
@@ -170,16 +178,27 @@ facadeTests = testGroup "public Djex facade"
               -> LengthSMTLibLiveQueryError -> Ordering)
           queryErrorShow =
             (show :: LengthSMTLibLiveQueryError -> String)
+          replayErrorEq =
+            ((==) :: LengthSMTLibLiveObservationReplayError
+              -> LengthSMTLibLiveObservationReplayError -> Bool)
+          replayErrorOrd =
+            (compare :: LengthSMTLibLiveObservationReplayError
+              -> LengthSMTLibLiveObservationReplayError -> Ordering)
+          replayErrorShow =
+            (show :: LengthSMTLibLiveObservationReplayError -> String)
       queryRunner `seq` sessionFailureProjection `seq`
+        observationReplay `seq`
         sessionCleanupProjection `seq`
         queryFailureProjection `seq` queryCleanupProjection `seq`
         queryFingerprintProjection `seq` solverStatusProjection `seq`
         resultStrengthProjection `seq` observationUseProjection `seq`
         evidenceProjection `seq` sessionErrorEq `seq` sessionErrorOrd `seq`
         sessionErrorShow `seq` queryErrorEq `seq` queryErrorOrd `seq`
-        queryErrorShow `seq`
+        queryErrorShow `seq` replayErrorEq `seq` replayErrorOrd `seq`
+        replayErrorShow `seq`
         (rnf :: LengthSMTLibLiveSessionError -> ()) `seq`
         (rnf :: LengthSMTLibLiveQueryError -> ()) `seq`
+        (rnf :: LengthSMTLibLiveObservationReplayError -> ()) `seq`
         (rnf :: LengthSMTLibLiveQueryObservation
           FacadeLiveEpoch FacadeLiveIdentity FacadeLiveLocal -> ()) `seq`
         pure ()
@@ -207,6 +226,12 @@ facadeTests = testGroup "public Djex facade"
             , LengthSMTLibLiveQueryInternalFailure
             ]
       length queryFailures @?= 9
+      let replayFailures =
+            [ LengthSMTLibLiveObservationQueryFingerprintMismatch
+            , LengthSMTLibLiveObservationEvidenceProblemMismatch
+                ReplayDomainMismatch
+            ]
+      length replayFailures @?= 2
   , testCase "exports the finite list-spine length vocabulary" $ do
       finiteListSpineLengthDomainTag @?=
         map (fromIntegral . fromEnum) "finite-list-spine-length/v1"

@@ -36,6 +36,11 @@ adopted predecessor boundary, Driver opens it only after the first exact write
 succeeds, preserving write-before-feed even under bottom-valued receipt
 payloads. Later completed-epoch drains retain their prior
 append-before-next-write timing.
+Ordinary stdout reads likewise cross the generic transport seam only through
+an opaque `Internal.SMTLib.Causal.StdoutChunk` receipt minted before Process
+enqueue. It proves the strict chunk is nonempty, so a successful read cannot
+spin the driver without progress. FIFO origin, the configured chunk bound,
+and process/cancellation/deadline association remain Length adapter laws.
 For both readiness and ordinary queries, Session now takes the driver's final
 transcript cap from the exact sealed plan whose initial action it drives. Query
 run identity-size admission uses that same protocol-plan projection before

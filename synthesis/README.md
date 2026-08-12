@@ -143,6 +143,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process` | Bounded direct-process owner which consumes only the admitted shared Z3 launch profile and binds observed launch facts—not the complete Length policy—into a pre-spawn executable-file snapshot, with FIFO stdout framing support, first-byte stderr poison, cancellation/deadlines, and staged cleanup. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal` | Domain-neutral pure write/await/complete action algebra with nominal write-kind, receiver, and outcome associations. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal.BoundaryWhitespace` | Opaque content proof for finite strict SMT-LIB boundary whitespace, with lexical admission and safe FIFO-chunk concatenation but no transport-origin or schema authority. |
+| `Language.Haskell.Synthesis.Internal.SMTLib.Causal.StdoutChunk` | Opaque proof that one strict causal-transport stdout chunk is nonempty, without FIFO-origin, configured-bound, process-association, or schema authority. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream` | Domain-neutral cumulative framing policy and opaque zero-start cursor, completed-frame, and validated-boundary continuations; it prevents tails, offsets, and budgets from being detached across same-write frames or causal write boundaries. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver` | Domain-neutral causal transport algorithm and exact segmented transcript ownership, with write-before-feed, positional EOF precedence, and delayed-boundary-whitespace attribution. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Lexical` | Schema-free owner of the exact SMT-LIB whitespace predicate and canonical `[HT, LF, CR, SP]` fingerprint order shared by parsing, framing, causal accounting, boundary draining, and domain plans. |
@@ -268,9 +269,11 @@ bytes into an opaque content proof. Process mints nonempty receipts while its
 STM inspection can still restore a rejected FIFO snapshot. For the initial
 adopted predecessor boundary, Driver opens the successful receipt only after
 the first exact write succeeds; later completed-epoch drains retain their
-existing append-before-next-write timing. The receipt does not claim FIFO
-origin, boundedness, process association, or restoration: those remain
-concrete transport laws.
+existing append-before-next-write timing. A separate opaque stdout receipt is
+minted for every nonempty strict Process read before enqueue, so the generic
+driver's successful read cannot express an empty, zero-progress chunk. These
+receipts do not claim FIFO origin, configured bounds, process association, or
+restoration: those remain concrete transport laws.
 
 `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` owns the
 next pure boundary. It seals the execution-policy key, exact query key, stream

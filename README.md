@@ -438,7 +438,11 @@ boundary drain, and both plan fingerprints. The package-private
 `Internal.SMTLib.Causal.BoundaryWhitespace` leaf admits finite strict bytes
 into an opaque content-valid receipt. Process validates queued chunks inside
 its all-or-nothing STM inspection, so a non-whitespace snapshot is restored
-before poison; the driver cannot receive raw successful drain bytes.
+before poison; the driver cannot receive raw successful drain bytes. The
+separate schema-free `Internal.SMTLib.Causal.StdoutChunk` leaf admits each
+nonempty strict Process read before enqueue. Successful generic transport
+reads therefore cannot represent zero progress; FIFO origin, configured byte
+bounds, and process/deadline association remain concrete transport laws.
 
 `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` composes
 that cumulative cursor with the sealed execution policy and query. Its initial
@@ -477,6 +481,9 @@ so cleanup cannot deadlock. FIFO stdout, absolute monotonic deadlines,
 cancellation, isolated writes, staged direct-child shutdown, and idempotent
 cleanup are all retained in private policy identity. Shutdown uses bounded
 nonblocking exit polling, so it also progresses in a non-threaded runtime.
+Every successful stdout queue event carries the opaque nonempty-chunk receipt;
+an empty OS read remains EOF, while a nonempty permitted prefix still precedes
+the maximum-plus-one terminal event in the same FIFO transaction.
 This is not executed-image attestation: pathname hashing plus portable direct
 spawn has a same-UID namespace race, and neither the loader nor shared
 libraries are measured. Descendant cleanup is best effort after the direct

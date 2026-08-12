@@ -42,12 +42,13 @@ nonempty Process drain is admitted at the source.
 
 `drainLengthSMTLibProcessBoundaryWhitespace` still removes the currently
 queued stdout events in one STM transaction. It now admits each original
-`StdoutChunk` before advancing through the snapshot and retains the resulting
-receipts in reverse traversal order. On the first non-whitespace chunk it
-projects prior receipts only to restore those exact chunks followed by the
-offending event and untouched suffix in original FIFO order, then returns the
-same ready-phase `UnexpectedPendingStdout` failure. A queued terminal retains
-its existing positional precedence and consumption behavior.
+`StdoutChunk` before advancing through the snapshot and retains each original
+opaque stdout-chunk receipt beside the resulting whitespace receipt in reverse
+traversal order. On the first non-whitespace chunk it restores those original
+stdout receipts followed by the offending event and untouched suffix in exact
+FIFO order, then returns the same ready-phase `UnexpectedPendingStdout`
+failure. A queued terminal retains its existing positional precedence and
+consumption behavior.
 
 On success the Process concatenates only the admitted chunk receipts. There is
 no validation scan after dequeue, when restoration would be impossible. As
@@ -92,3 +93,8 @@ composition, and deep-evaluates a receipt. Scripted Driver tests prove:
 The full Length suite continues to exercise the real Process adapter through
 capability probing, split/drip output, live queries, stale output, accounting,
 poisoning, and cleanup.
+
+The later nonempty stdout-receipt checkpoint strengthens the queue itself. It
+does not change this whitespace proof: Process projects an already-admitted
+nonempty stdout receipt only for lexical admission, and keeps the original
+receipt intact for exact rollback.

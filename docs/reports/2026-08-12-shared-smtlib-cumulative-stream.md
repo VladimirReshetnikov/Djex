@@ -91,6 +91,12 @@ while it can still restore an invalid FIFO snapshot. Driver defers projection
 of the initial adopted predecessor receipt until after its first exact write;
 later completed-epoch drains keep their prior append timing.
 
+The sibling schema-free `Internal.SMTLib.Causal.StdoutChunk` receipt proves
+only that each successful strict transport read is nonempty. It closes the
+generic driver's zero-progress success shape without changing cumulative
+cursor ownership, transcript bytes, FIFO laws, configured bounds, or domain
+identity.
+
 ## Domain ownership retained
 
 Protocol and Capability each store the exact shared policy in their validated

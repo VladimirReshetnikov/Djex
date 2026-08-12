@@ -32,6 +32,10 @@ import Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver
   , smtLibCausalTranscriptEpochs
   , smtLibCausalTranscriptInheritedBytes
   )
+import Language.Haskell.Synthesis.Internal.SMTLib.Causal.StdoutChunk
+  ( SMTLibCausalStdoutChunk
+  , admitSMTLibCausalStdoutChunk
+  )
 
 smtLibCausalDriverTests :: TestTree
 smtLibCausalDriverTests = testGroup "causal SMT-LIB transport driver"
@@ -68,7 +72,7 @@ smtLibCausalDriverTests = testGroup "causal SMT-LIB transport driver"
         [Right ()]
         [Right $ boundaryWhitespace "  ", Right $ boundaryWhitespace ""]
         [Right (), Right ()]
-        [Right $ bytes "first\n", Right $ bytes "second\n"]
+        [Right $ stdoutChunk "first\n", Right $ stdoutChunk "second\n"]
       result <- driveTestMachine
         SMTLibCausalRequireEmptyBoundary 64 twoWriteFeed
         (error "finish forced for completed two-write machine")
@@ -91,12 +95,43 @@ smtLibCausalDriverTests = testGroup "causal SMT-LIB transport driver"
         , TestNext
         , TestDrain
         ]
+  , testCase "open a typed delayed boundary before the next write" $ do
+      transport <- newTestTransport
+        [Right ()]
+        [Right $ boundaryWhitespace "", Right $ boundaryWhitespace ""]
+        [Right (), Right ()]
+        [ Right $ stdoutChunk "first"
+        , Right $ stdoutChunk " \n"
+        , Right $ stdoutChunk "second\n"
+        ]
+      result <- driveTestMachine
+        SMTLibCausalRequireEmptyBoundary 64 delayedBoundaryFeed
+        (error "finish forced for completed delayed-boundary machine")
+        transport initialWrite
+      case result of
+        Left failure -> assertFailure $
+          "delayed-boundary driver failed: " ++ show failure
+        Right (outcome, transcript) -> do
+          outcome @?= "complete"
+          assertTranscript transcript BS.empty
+            [(TestFirst, bytes "first \n"), (TestSecond, bytes "second\n")]
+      events <- readIORef $ testTransportEvents transport
+      events @?=
+        [ TestReady
+        , TestWrite $ bytes "command-1"
+        , TestNext
+        , TestNext
+        , TestDrain
+        , TestWrite $ bytes "command-2"
+        , TestNext
+        , TestDrain
+        ]
   , testCase "adopt only admitted inherited boundary whitespace" $ do
       transport <- newTestTransport
         []
         [Right $ boundaryWhitespace " \t", Right $ boundaryWhitespace ""]
         [Right ()]
-        [Right $ bytes "ok\n\n"]
+        [Right $ stdoutChunk "ok\n\n"]
       result <- driveTestMachine
         SMTLibCausalAdoptPredecessorWhitespace 6
         adoptedSingleWriteFeed
@@ -120,7 +155,7 @@ smtLibCausalDriverTests = testGroup "causal SMT-LIB transport driver"
         []
         [Right $ boundaryWhitespace " \t", Right $ boundaryWhitespace ""]
         [Right ()]
-        [Right $ bytes "ok\n\n"]
+        [Right $ stdoutChunk "ok\n\n"]
       rejected <- driveTestMachine
         SMTLibCausalAdoptPredecessorWhitespace 5
         adoptedSingleWriteFeed
@@ -131,7 +166,7 @@ smtLibCausalDriverTests = testGroup "causal SMT-LIB transport driver"
   , testCase "reject a stale boundary byte before the next write" $ do
       transport <- newTestTransport
         [Right ()] [] [Right ()]
-        [Right $ bytes "first", Right $ bytes " x"]
+        [Right $ stdoutChunk "first", Right $ stdoutChunk " x"]
       result <- driveTestMachine
         SMTLibCausalRequireEmptyBoundary 64 boundaryWriteFeed
         (error "finish forced after stale boundary byte")
@@ -203,7 +238,7 @@ data TestTransport = TestTransport
       IORef [Either TestTransportFailure SMTLibCausalBoundaryWhitespace]
   , testTransportWriteResults :: IORef [Either TestTransportFailure ()]
   , testTransportNextResults ::
-      IORef [Either TestTransportFailure ByteString]
+      IORef [Either TestTransportFailure SMTLibCausalStdoutChunk]
   , testTransportEvents :: IORef [TestTransportEvent]
   }
 
@@ -211,7 +246,7 @@ newTestTransport
   :: [Either TestTransportFailure ()]
   -> [Either TestTransportFailure SMTLibCausalBoundaryWhitespace]
   -> [Either TestTransportFailure ()]
-  -> [Either TestTransportFailure ByteString]
+  -> [Either TestTransportFailure SMTLibCausalStdoutChunk]
   -> IO TestTransport
 newTestTransport ready drain write next = TestTransport
   <$> newIORef ready
@@ -289,6 +324,22 @@ twoWriteFeed receiver input = case (receiver, input) of
         SMTLibCausalComplete "complete"
   _ -> Left $ TestMachineFailure "unexpected feed"
 
+delayedBoundaryFeed
+  :: TestReceiver
+  -> [Word8]
+  -> Either TestMachineFailure
+      (SMTLibCausalAction TestKind TestReceiver String)
+delayedBoundaryFeed receiver input = case (receiver, input) of
+  (TestInitial, observed)
+    | observed == ascii "first" -> Right $
+        SMTLibCausalWrite TestSecond (ascii "command-2") TestSecondReceiver
+  (TestSecondReceiver, observed)
+    | observed == ascii " \n" -> Right $
+        SMTLibCausalAwait TestSecondReceiver
+    | observed == ascii "second\n" -> Right $
+        SMTLibCausalComplete "complete"
+  _ -> Left $ TestMachineFailure "unexpected delayed-boundary feed"
+
 boundaryWriteFeed
   :: TestReceiver
   -> [Word8]
@@ -312,7 +363,7 @@ successfulSingleWrite
 successfulSingleWrite maximumBytes = do
   transport <- newTestTransport
     [Right ()] [Right $ boundaryWhitespace ""]
-    [Right ()] [Right $ bytes "ok\n\n"]
+    [Right ()] [Right $ stdoutChunk "ok\n\n"]
   driveTestMachine SMTLibCausalRequireEmptyBoundary maximumBytes
     singleWriteFeed
     (error "finish forced for complete response")
@@ -370,6 +421,11 @@ assertDriverFailure expected result = case result of
 
 bytes :: String -> ByteString
 bytes = BS.pack . ascii
+
+stdoutChunk :: String -> SMTLibCausalStdoutChunk
+stdoutChunk input = case admitSMTLibCausalStdoutChunk $ bytes input of
+  Nothing -> error "empty scripted stdout chunk"
+  Just chunk -> chunk
 
 boundaryWhitespace :: String -> SMTLibCausalBoundaryWhitespace
 boundaryWhitespace value = case

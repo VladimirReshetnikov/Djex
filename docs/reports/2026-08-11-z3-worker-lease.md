@@ -150,6 +150,14 @@ write has completed; later completed-epoch drains preserve their existing
 append timing. This internal type change does not alter capability transcript
 bytes, plan or ready-worker identity, or any schema tag.
 
+Each ordinary queued stdout event now carries a second schema-free receipt:
+`SMTLibCausalStdoutChunk` proves that its strict byte string is nonempty.
+Process mints it immediately after a successful OS read and before enqueue;
+empty reads remain FIFO terminal EOF. At the stdout limit, a nonempty permitted
+prefix is admitted and enqueued before the maximum-plus-one terminal, while an
+empty prefix is not representable as a successful chunk. The receipt grants no
+FIFO-origin, configured-bound, process, cancellation, or deadline authority.
+
 The pure cursor owns framing and cumulative classification; the separate
 causal transport driver owns write-before-feed ordering, pipe reads, delayed
 predecessor attribution, and the final transcript assertion. This split changes

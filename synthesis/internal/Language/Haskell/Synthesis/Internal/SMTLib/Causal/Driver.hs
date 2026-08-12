@@ -38,6 +38,10 @@ import Language.Haskell.Synthesis.Internal.SMTLib.Causal.BoundaryWhitespace
   , concatSMTLibCausalBoundaryWhitespace
   , smtLibCausalBoundaryWhitespaceBytes
   )
+import Language.Haskell.Synthesis.Internal.SMTLib.Causal.StdoutChunk
+  ( SMTLibCausalStdoutChunk
+  , smtLibCausalStdoutChunkBytes
+  )
 import Language.Haskell.Synthesis.Internal.SMTLib.Lexical
   ( isSMTLibWhitespaceByte )
 
@@ -122,8 +126,8 @@ smtLibCausalTranscriptEpochBytes
 --   whitespace, and is all-or-nothing (on encountering other bytes it restores
 --   them in order and fails);
 -- * @write@ succeeds only after every exact byte has been written and flushed;
--- * @nextStdoutChunk@ preserves FIFO order and returns a finite, nonempty,
---   bounded chunk;
+-- * @nextStdoutChunk@ preserves FIFO order and returns an opaque nonempty
+--   strict-byte receipt; the concrete adapter owns its configured byte bound;
 -- * the EOF predicate recognizes exactly stdout EOF.
 --
 -- The driver's cumulative maximum is asserted when the machine completes.
@@ -140,7 +144,7 @@ data SMTLibCausalTransportOps transport transportFailure =
     , smtLibCausalTransportWrite
         :: transport -> ByteString -> IO (Either transportFailure ())
     , smtLibCausalTransportNextStdoutChunk
-        :: transport -> IO (Either transportFailure ByteString)
+        :: transport -> IO (Either transportFailure SMTLibCausalStdoutChunk)
     , smtLibCausalTransportFailureIsStdoutEOF
         :: transportFailure -> Bool
     }
@@ -252,8 +256,9 @@ driveSMTLibCausalActions initialBoundary cumulativeMaximum
                 $ SMTLibCausalMachineFailure machineFailure
               Right _ -> Left $ SMTLibCausalTransportFailure failure
         | otherwise -> pure $ Left $ SMTLibCausalTransportFailure failure
-      Right chunk -> do
-        let (priorWhitespace, retainedChunk, nextBoundaryOpen) =
+      Right chunkReceipt -> do
+        let chunk = smtLibCausalStdoutChunkBytes chunkReceipt
+            (priorWhitespace, retainedChunk, nextBoundaryOpen) =
               splitBoundaryWhitespace boundaryOpen chunk
             (nextInherited, nextCompleted) =
               appendPredecessor priorWhitespace inherited completed
@@ -293,14 +298,16 @@ driveSMTLibCausalActions initialBoundary cumulativeMaximum
           next <- smtLibCausalTransportNextStdoutChunk transportOps transport
           case next of
             Left failure -> pure $ Left $ SMTLibCausalTransportFailure failure
-            Right bytes -> case firstNonWhitespace bytes of
-              Just (offset, byte) -> pure $ Left $ SMTLibCausalMachineFailure
-                $ unexpectedBoundaryByte
-                    (byteCount inherited + completedByteCount completed + offset)
-                    byte
-              Nothing -> case appendLatest bytes completed of
-                Nothing -> pure $ Left SMTLibCausalInternalFailure
-                Just completed' -> drainMore bytes completed'
+            Right chunkReceipt ->
+              let bytes = smtLibCausalStdoutChunkBytes chunkReceipt
+              in case firstNonWhitespace bytes of
+                Just (offset, byte) -> pure $ Left $ SMTLibCausalMachineFailure
+                  $ unexpectedBoundaryByte
+                      (byteCount inherited + completedByteCount completed + offset)
+                      byte
+                Nothing -> case appendLatest bytes completed of
+                  Nothing -> pure $ Left SMTLibCausalInternalFailure
+                  Just completed' -> drainMore bytes completed'
 
   drainMore retained completed = do
     drained <- smtLibCausalTransportDrainBoundaryWhitespace

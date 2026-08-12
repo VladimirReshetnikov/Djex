@@ -77,6 +77,8 @@ import qualified Language.Haskell.Synthesis.Internal.Fingerprint
   as Fingerprint
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Causal
   as SMTLibCausal
+import qualified Language.Haskell.Synthesis.Internal.SMTLib.Causal.StdoutChunk
+  as SMTLibStdoutChunk
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Stream
   as SMTLibStream
 import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
@@ -259,7 +261,8 @@ collectRawProcessPrefix process cancellation deadline = do
     received <- Process.nextLengthSMTLibProcessStdoutChunk
       process cancellation deadline
     case received of
-      Right chunk -> go $ chunk : chunks
+      Right chunk -> go
+        $ SMTLibStdoutChunk.smtLibCausalStdoutChunkBytes chunk : chunks
       Left terminal -> pure (BS.concat $ reverse chunks, terminal)
 
 liveSessionTests :: TestTree

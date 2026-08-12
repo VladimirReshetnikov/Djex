@@ -17,9 +17,11 @@
 -- The owner keeps stdout and stderr separate.  Stdout is the only stream a
 -- protocol layer may consume; the first observed stderr byte poisons the whole
 -- process.  Stdout is charged before enqueueing, so its queue is bounded by the
--- session limit rather than consumer speed.  After stderr poison, strict chunks
--- are discarded to keep finite floods from retaining the child; its retained
--- count saturates at the configured maximum plus one.
+-- session limit rather than consumer speed. Every queued stdout chunk carries
+-- an opaque proof that it is nonempty, so a successful generic read cannot
+-- report zero progress. After stderr poison, strict chunks are discarded to
+-- keep finite floods from retaining the child; its retained count saturates at
+-- the configured maximum plus one.
 --
 -- Cleanup owns and reaps the direct child.  Process-group signalling is
 -- best-effort only while that leader has not been observed reaped.  This
@@ -207,7 +209,11 @@ import Language.Haskell.Synthesis.Internal.SMTLib.Causal.BoundaryWhitespace
   ( SMTLibCausalBoundaryWhitespace
   , admitSMTLibCausalBoundaryWhitespace
   , concatSMTLibCausalBoundaryWhitespace
-  , smtLibCausalBoundaryWhitespaceBytes
+  )
+import Language.Haskell.Synthesis.Internal.SMTLib.Causal.StdoutChunk
+  ( SMTLibCausalStdoutChunk
+  , admitSMTLibCausalStdoutChunk
+  , smtLibCausalStdoutChunkBytes
   )
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
   as Z3
@@ -566,7 +572,7 @@ data ProcessLifecycle = ProcessOpen | ProcessClosing | ProcessClosed
 -- Stdout terminal conditions stay in the same FIFO as chunks.  In particular,
 -- EOF cannot overtake bytes which were read before it.
 data StdoutEvent
-  = StdoutChunk !ByteString
+  = StdoutChunk !SMTLibCausalStdoutChunk
   | StdoutTerminal !LengthSMTLibProcessError
 
 data ManagedThread = ManagedThread !ThreadId !(TMVar ())
@@ -1026,31 +1032,35 @@ stdoutReader process = loop
         Left _ -> atomically $ setStdoutTerminalSTM process $ processError
           LengthSMTLibProcessStdoutPhase
           LengthSMTLibProcessStdoutReadFailed (Just count)
-        Right bytes
-          | BS.null bytes -> atomically $ setStdoutTerminalSTM process
-              $ processError LengthSMTLibProcessStdoutPhase
-                  LengthSMTLibProcessStdoutEOF (Just count)
-          | otherwise -> do
-              continue <- atomically $ do
-                current <- readTVar $ processStdoutCount process
-                let observed = current + fromIntegral (BS.length bytes)
-                if observed > maximumBytes
-                  then do
-                    let remaining = maximumBytes - min current maximumBytes
-                        permitted = BS.take (fromIntegral remaining) bytes
-                    writeTVar (processStdoutCount process) $ maximumBytes + 1
-                    when (not $ BS.null permitted) $ writeTQueue
-                      (processStdoutQueue process) $ StdoutChunk permitted
-                    setStdoutTerminalSTM process $ processError
-                      LengthSMTLibProcessStdoutPhase
-                      LengthSMTLibProcessStdoutByteLimitExceeded
-                      (Just $ maximumBytes + 1)
-                    pure False
-                  else do
-                    writeTVar (processStdoutCount process) observed
-                    writeTQueue (processStdoutQueue process) $ StdoutChunk bytes
-                    pure True
-              when continue loop
+        Right bytes -> case admitSMTLibCausalStdoutChunk bytes of
+          Nothing -> atomically $ setStdoutTerminalSTM process
+            $ processError LengthSMTLibProcessStdoutPhase
+                LengthSMTLibProcessStdoutEOF (Just count)
+          Just stdoutChunk -> do
+            continue <- atomically $ do
+              current <- readTVar $ processStdoutCount process
+              let observed = current + fromIntegral (BS.length bytes)
+              if observed > maximumBytes
+                then do
+                  let remaining = maximumBytes - min current maximumBytes
+                      permitted = BS.take (fromIntegral remaining) bytes
+                  writeTVar (processStdoutCount process) $ maximumBytes + 1
+                  case admitSMTLibCausalStdoutChunk permitted of
+                    Nothing -> pure ()
+                    Just permittedChunk -> writeTQueue
+                      (processStdoutQueue process)
+                      $ StdoutChunk permittedChunk
+                  setStdoutTerminalSTM process $ processError
+                    LengthSMTLibProcessStdoutPhase
+                    LengthSMTLibProcessStdoutByteLimitExceeded
+                    (Just $ maximumBytes + 1)
+                  pure False
+                else do
+                  writeTVar (processStdoutCount process) observed
+                  writeTQueue (processStdoutQueue process)
+                    $ StdoutChunk stdoutChunk
+                  pure True
+            when continue loop
 
 stderrReader :: LengthSMTLibProcess -> IO ()
 stderrReader process = loop
@@ -1144,7 +1154,7 @@ nextLengthSMTLibProcessStdoutChunk
   :: LengthSMTLibProcess
   -> LengthSMTLibProcessCancellation
   -> LengthSMTLibProcessDeadline
-  -> IO (Either LengthSMTLibProcessError ByteString)
+  -> IO (Either LengthSMTLibProcessError SMTLibCausalStdoutChunk)
 nextLengthSMTLibProcessStdoutChunk process cancellation deadline = do
   result <- waitControlled process cancellation deadline
     LengthSMTLibProcessStdoutPhase
@@ -1152,7 +1162,7 @@ nextLengthSMTLibProcessStdoutChunk process cancellation deadline = do
   case result of
     Left failure -> poisonOperation process failure
     Right event -> case event of
-      StdoutChunk bytes -> pure $ Right bytes
+      StdoutChunk chunk -> pure $ Right chunk
       StdoutTerminal failure -> poisonOperation process failure
 
 -- | Drain output which is causally attributable to the preceding protocol
@@ -1188,18 +1198,20 @@ drainLengthSMTLibProcessBoundaryWhitespace process cancellation deadline = do
         takeQueued $ event : reversed
 
   inspect [] reversedWhitespace = pure $ Right
-    $ concatSMTLibCausalBoundaryWhitespace $ reverse reversedWhitespace
-  inspect events@(StdoutChunk bytes : remaining) reversedWhitespace =
-    case admitSMTLibCausalBoundaryWhitespace bytes of
-      Just whitespace -> inspect remaining $ whitespace : reversedWhitespace
+    $ concatSMTLibCausalBoundaryWhitespace
+    $ map snd
+    $ reverse reversedWhitespace
+  inspect events@(StdoutChunk chunk : remaining) reversedWhitespace =
+    case admitSMTLibCausalBoundaryWhitespace
+        $ smtLibCausalStdoutChunkBytes chunk of
+      Just whitespace -> inspect remaining
+        $ (chunk, whitespace) : reversedWhitespace
       Nothing -> do
         -- Restore all prior whitespace too; draining is all-or-nothing when a
         -- non-whitespace chunk is present.
         mapM_ (writeTQueue $ processStdoutQueue process)
           $ reverse
-              (map
-                (StdoutChunk . smtLibCausalBoundaryWhitespaceBytes)
-                reversedWhitespace)
+              (map (StdoutChunk . fst) reversedWhitespace)
             ++ events
         pure $ Left $ processError LengthSMTLibProcessReadyPhase
           LengthSMTLibProcessUnexpectedPendingStdout Nothing

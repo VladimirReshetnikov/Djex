@@ -201,7 +201,6 @@ data LengthSMTLibLiveQueryObservation epoch identity local =
   LengthSMTLibLiveQueryObservation
     !(Fingerprint LengthSMTLibQueryFingerprintSubject)
     !SolverStatus
-    !RawResultStrength
     !(Maybe
         (BehavioralEvidence
           FiniteListSpineLengthV1
@@ -211,8 +210,8 @@ type role LengthSMTLibLiveQueryObservation nominal nominal nominal
 
 instance NFData
     (LengthSMTLibLiveQueryObservation epoch identity local) where
-  rnf (LengthSMTLibLiveQueryObservation query status strength evidence) =
-    rnf query `seq` rnf status `seq` rnf strength `seq` rnf evidence
+  rnf (LengthSMTLibLiveQueryObservation query status evidence) =
+    rnf query `seq` rnf status `seq` rnf evidence
 
 -- | The fixed private session default.  A scope admits at most this many
 -- serial queries and rejects maximum-plus-one before writing it.
@@ -256,7 +255,6 @@ runLengthSMTLibLiveQuery evaluationLimits
     Right run -> Right $ LengthSMTLibLiveQueryObservation
       (lengthSMTLibQueryFingerprint query)
       (Session.lengthSMTLibQueryRunSolverStatus run)
-      (solverStatusStrength $ Session.lengthSMTLibQueryRunSolverStatus run)
       (Session.lengthSMTLibQueryRunCounterexampleEvidence run)
 
 -- | Replay the safe semantic payload of one completed observation against the
@@ -294,19 +292,20 @@ lengthSMTLibLiveQueryObservationQueryFingerprint
   :: LengthSMTLibLiveQueryObservation epoch identity local
   -> Fingerprint LengthSMTLibQueryFingerprintSubject
 lengthSMTLibLiveQueryObservationQueryFingerprint
-    (LengthSMTLibLiveQueryObservation query _ _ _) = query
+    (LengthSMTLibLiveQueryObservation query _ _) = query
 
 lengthSMTLibLiveQueryObservationSolverStatus
   :: LengthSMTLibLiveQueryObservation epoch identity local
   -> SolverStatus
 lengthSMTLibLiveQueryObservationSolverStatus
-    (LengthSMTLibLiveQueryObservation _ status _ _) = status
+    (LengthSMTLibLiveQueryObservation _ status _) = status
 
 lengthSMTLibLiveQueryObservationResultStrength
   :: LengthSMTLibLiveQueryObservation epoch identity local
   -> RawResultStrength
-lengthSMTLibLiveQueryObservationResultStrength
-    (LengthSMTLibLiveQueryObservation _ _ strength _) = strength
+lengthSMTLibLiveQueryObservationResultStrength observation =
+  solverStatusStrength
+    $ lengthSMTLibLiveQueryObservationSolverStatus observation
 
 -- | Live observations have heuristic ranking authority only, including
 -- satisfiable observations which also carry independently replayed evidence.
@@ -325,7 +324,7 @@ lengthSMTLibLiveQueryObservationCounterexampleEvidence
         FiniteListSpineLengthV1
         ValidatedLengthCounterexample)
 lengthSMTLibLiveQueryObservationCounterexampleEvidence
-    (LengthSMTLibLiveQueryObservation _ _ _ evidence) = evidence
+    (LengthSMTLibLiveQueryObservation _ _ evidence) = evidence
 
 defaultLiveSessionConfig
   :: LengthSMTLibExecutionConfig

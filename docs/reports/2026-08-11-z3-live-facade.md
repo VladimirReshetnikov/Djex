@@ -58,15 +58,18 @@ diagnostic and capability-disclosure surface.
 
 ## Observation and evidence authority
 
-A successful public query observation freshly copies only:
+A successful public query observation freshly retains only:
 
 - the exact public query fingerprint;
 - `SolverSatisfiable`, `SolverUnsatisfiable`, or `SolverUnknown`;
-- the corresponding raw strength (`RawSolverModelHint`,
-  `RawSolverUnsatRelativeToEncoding`, or `RawSolverUnknown`);
-- the constant use `HeuristicRankingOnly`; and
 - optional `BehavioralEvidence FiniteListSpineLengthV1
   ValidatedLengthCounterexample`.
+
+The raw strength selector derives `RawSolverModelHint`,
+`RawSolverUnsatRelativeToEncoding`, or `RawSolverUnknown` directly from the
+retained status. The observation does not store a second strength fact which
+could drift from that status. Its use selector similarly returns the constant
+`HeuristicRankingOnly` without retaining another field.
 
 The observation has nominal epoch, identity, and local roles and supports
 `NFData` only. Public selectors expose status, strength, and heuristic use. The

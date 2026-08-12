@@ -288,8 +288,10 @@ claim. The next layer must drive individual query plans through the scoped
 worker and independently replay any model before evidence exists.
 
 The public live facade copies only bounded association and authority fields out
-of each private run. Public selectors expose status, heuristic strength, and
-use, but not the retained query key or optional evidence.
+of each private run. It retains status once and derives the corresponding
+heuristic strength rather than storing a duplicate fact. Public selectors
+expose status, derived strength, and use, but not the retained query key or
+optional evidence.
 `replayLengthSMTLibLiveQueryObservation` is the sole checked semantic
 extraction edge for
 those hidden fields: it compares the complete collision-free query key before

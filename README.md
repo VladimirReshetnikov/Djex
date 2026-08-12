@@ -459,10 +459,11 @@ The exact design and threat boundary are recorded in the
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` is the deliberately
 narrow public edge over that owner. It lends an opaque worker only through a
 rank-N scope. Each successful query observation internally retains its exact
-query fingerprint, three-valued status, heuristic strength, and optional
-independently replayed counterexample evidence, but public selectors expose
-only status, strength, and heuristic use. The fingerprint and evidence have no
-detached projection: `replayLengthSMTLibLiveQueryObservation` is their only
+query fingerprint, three-valued status, and optional independently replayed
+counterexample evidence. Its heuristic strength is derived from the retained
+status rather than stored as a second fact; public selectors expose status,
+that derived strength, and heuristic use. The fingerprint and evidence have
+no detached projection: `replayLengthSMTLibLiveQueryObservation` is their only
 public consumer. It checks the exact query fingerprint before inspecting
 optional evidence, then replays that evidence against the query's retained
 behavioral problem. A successful `Nothing` remains only an exactly associated

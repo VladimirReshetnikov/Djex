@@ -174,7 +174,6 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   , finishLengthSMTLibProtocol
   , lengthSMTLibProtocolCumulativeStdoutByteLimit
   , lengthSMTLibProtocolDecodedInputValues
-  , lengthSMTLibProtocolDecodedInputValueFrame
   , lengthSMTLibProtocolDecodedStatus
   , lengthSMTLibProtocolInputValueWriteBytes
   , lengthSMTLibProtocolPlanFingerprint
@@ -1421,11 +1420,14 @@ queryDecodedOutcomeField decoded = tagged "decoded-branch"
   , FingerprintBytes $ ascii valuesTag
   ]
  where
+  -- The v1 protocol never emits @get-value@ for a zero-input query, while the
+  -- query-aware decoder requires exact arity for every emitted nonempty
+  -- request.  The retained binding spine therefore preserves the former raw
+  -- frame distinction without retaining the frame itself.
   valuesTag = case lengthSMTLibProtocolDecodedInputValues decoded of
     Nothing -> "absent"
-    Just _ -> case lengthSMTLibProtocolDecodedInputValueFrame decoded of
-      Nothing -> "vacuous-zero-input"
-      Just _ -> "framed-input-values"
+    Just [] -> "vacuous-zero-input"
+    Just (_ : _) -> "framed-input-values"
 
 queryReplayField
   :: LengthEvaluationLimits

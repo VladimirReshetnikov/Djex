@@ -2727,8 +2727,6 @@ smtLibProtocolTests = testGroup
       decoded <- expectProtocolComplete valueAction
       SMTLibProtocol.lengthSMTLibProtocolDecodedStatus decoded @?=
         Observation.SolverSatisfiable
-      SMTLibProtocol.lengthSMTLibProtocolDecodedInputValueFrame decoded @?=
-        Just rawValues
       SMTLibProtocol.lengthSMTLibProtocolDecodedInputValues decoded @?=
         Just [smtIntegerBinding (asciiBytes "djex_length_input_0") 3]
       SMTLibProtocol.lengthSMTLibProtocolDecodedPlanFingerprint decoded @?=
@@ -2864,8 +2862,6 @@ smtLibProtocolTests = testGroup
       zeroDecoded <- expectProtocolComplete zeroAction
       SMTLibProtocol.lengthSMTLibProtocolDecodedStatus zeroDecoded @?=
         Observation.SolverSatisfiable
-      SMTLibProtocol.lengthSMTLibProtocolDecodedInputValueFrame zeroDecoded @?=
-        Nothing
       SMTLibProtocol.lengthSMTLibProtocolDecodedInputValues zeroDecoded @?=
         Just []
       (_, zeroStatusOnly) <- protocolZeroInputPlan
@@ -3321,7 +3317,6 @@ assertProtocolTerminalStatus plan marker (rawStatus, expectedStatus) = do
     $ asciiBytes (rawStatus ++ "\n") ++ marker ++ asciiBytes "\n"
   decoded <- expectProtocolComplete action
   SMTLibProtocol.lengthSMTLibProtocolDecodedStatus decoded @?= expectedStatus
-  SMTLibProtocol.lengthSMTLibProtocolDecodedInputValueFrame decoded @?= Nothing
   SMTLibProtocol.lengthSMTLibProtocolDecodedInputValues decoded @?= Nothing
   SMTLibProtocol.lengthSMTLibProtocolDecodedPlanFingerprint decoded @?=
     SMTLibProtocol.lengthSMTLibProtocolPlanFingerprint plan

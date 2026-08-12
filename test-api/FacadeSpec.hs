@@ -586,6 +586,15 @@ facadeTests = testGroup "public Djex facade"
                     FiniteListSpineLengthV1
                     ValidatedLengthCounterexample))
           counterexampleValidator = validateLengthProblemCounterexample
+          queryInputSymbolsProjection
+            :: LengthSMTLibQuery Int ExferenceLocal
+            -> [[Word8]]
+          queryInputSymbolsProjection = lengthSMTLibQueryInputSymbols
+          queryInputValueRequestProjection
+            :: LengthSMTLibQuery Int ExferenceLocal
+            -> Maybe [Word8]
+          queryInputValueRequestProjection =
+            lengthSMTLibQueryInputValueRequestBytes
           queryObservationAssociator
             :: LengthSMTLibQuery Int ExferenceLocal
             -> LengthSMTLibRawSolverObservation
@@ -659,7 +668,8 @@ facadeTests = testGroup "public Djex facade"
       sealer `seq` candidateResultProjection `seq` problemProjection `seq`
         inputCountProjection `seq` preconditionProjection `seq`
         postconditionProjection `seq` basisProjection `seq`
-        counterexampleValidator `seq` queryObservationAssociator `seq`
+        counterexampleValidator `seq` queryInputSymbolsProjection `seq`
+        queryInputValueRequestProjection `seq` queryObservationAssociator `seq`
         queryObservationReplayer `seq` checkResponseParser `seq`
         inputValueResponseParser `seq` executionLimitsBuilder `seq`
         executionConfigSealer `seq`

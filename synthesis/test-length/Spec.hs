@@ -2122,6 +2122,32 @@ smtLibTests = testGroup
           (SMTLib.lengthSMTLibQueryBehavioralProblem query) @?=
         Djex.behavioralProblemFingerprint
           (LengthProblem.checkedLengthProblemBehavioralProblem problem)
+  , testCase "rederive a widened exact symbol and request plan productively" $ do
+      let inputCount = 32
+          expectedSymbols =
+            [ asciiBytes $ "djex_length_input_" ++ show index
+            | index <- [0 .. inputCount - 1]
+            ]
+          expectedRequest = Just $ asciiBytes $
+            "(get-value (" ++ intercalate " "
+              (map (BSC.unpack . BS.pack) expectedSymbols) ++ "))\n"
+      problem <- adversarialWideConstantZeroProblem inputCount
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      exact <- evaluateWithin $
+        SMTLib.lengthSMTLibQueryInputSymbols query == expectedSymbols &&
+        SMTLib.lengthSMTLibQueryInputValueRequestBytes query == expectedRequest
+      assertBool "widened query artifacts were not canonically rederived" exact
+      execution <- protocolExecutionConfig
+        InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+      plan <- expectRight =<< evaluateWithin
+        (SMTLibProtocol.sealLengthSMTLibProtocolPlan
+          SMTLibProtocol.defaultLengthSMTLibProtocolLimits
+          execution query protocolCheckNonce $ Just protocolValueNonce)
+      valueBarrier <- protocolSentinel protocolValueNonce
+      SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes plan @?=
+        fmap (++ SMTLibStream.smtLibEchoSentinelCommandBytes valueBarrier)
+          expectedRequest
   , testCase "decode input symbols order independently and replay the model" $ do
       problem <- adversarialBinaryConstantZeroProblem identityLengthContract
       query <- expectRight $ SMTLib.sealLengthSMTLibQuery
@@ -4909,6 +4935,44 @@ adversarialBinaryConstantZeroProblem contractSource = do
           )
         ]
   contract <- adversarialLengthContract session target contractSource
+  graph <- sealAdversarialGraph source
+  expectRight $ LengthProblem.sealLengthTypedCandidateProblem
+    LengthProblem.defaultLengthProblemLimits session contract
+    $ adversarialTypedCandidate $ Right graph
+
+adversarialWideConstantZeroProblem
+  :: Int
+  -> IO
+      (LengthProblem.CheckedLengthProblem
+        AdversarialIdentity AdversarialLocal)
+adversarialWideConstantZeroProblem inputCount = do
+  let limits = limitsWith $ \limitSource -> limitSource
+        { Length.lengthLimitSourceContractInputs = inputCount }
+      target = foldr FunctionType adversarialClosedList
+        $ replicate inputCount adversarialClosedList
+      patterns =
+        [ Djex.TypedPattern
+            (Djex.occurrenceId $ fromIntegral index)
+            adversarialClosedList
+            Djex.TypedWildcard
+        | index <- [0 .. inputCount - 1]
+        ]
+      source = Djex.TermGraphSource (Djex.termNodeId 1)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode adversarialClosedList
+              $ Djex.TypedGlobal
+                  (Djex.occurrenceId $ fromIntegral inputCount) listName
+          )
+        , ( Djex.termNodeId 1
+          , Djex.TermNode target
+              $ Djex.TypedLambda patterns (Djex.termNodeId 0)
+          )
+        ]
+  session <- expectRight $ LengthProblem.sealLengthSession limits
+    (sessionInventory () []) Length.BuiltinListSpine []
+  contract <- expectRight $ Length.sealLengthContractInContext limits
+    (LengthProblem.checkedLengthSessionContext session)
+    target trivialLengthContract
   graph <- sealAdversarialGraph source
   expectRight $ LengthProblem.sealLengthTypedCandidateProblem
     LengthProblem.defaultLengthProblemLimits session contract

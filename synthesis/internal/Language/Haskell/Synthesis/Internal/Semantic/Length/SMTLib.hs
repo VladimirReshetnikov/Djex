@@ -242,21 +242,19 @@ data LengthSMTLibPlan = LengthSMTLibPlan
   ![SMTCommand]
   !(Maybe SMTCommand)
 
--- | Opaque association of one checked problem, exact input symbols, bounded
--- commands, and collision-free structural translation identity.
+-- | Opaque association of one checked problem, bounded check commands, and
+-- collision-free structural translation identity.  Exact input symbols and
+-- the canonical value request are derived from the problem's sealed arity.
 data LengthSMTLibQuery identity local = LengthSMTLibQuery
   !(CheckedLengthProblem identity local)
-  ![[Word8]]
   ![Word8]
-  !(Maybe [Word8])
   !(Fingerprint LengthSMTLibQueryFingerprintSubject)
 
 type role LengthSMTLibQuery nominal nominal
 
 instance NFData (LengthSMTLibQuery identity local) where
-  rnf (LengthSMTLibQuery problem symbols check request fingerprint) =
-    rnf problem `seq` rnf symbols `seq` rnf check `seq` rnf request `seq`
-    rnf fingerprint
+  rnf (LengthSMTLibQuery problem check fingerprint) =
+    rnf problem `seq` rnf check `seq` rnf fingerprint
 
 -- | Translate and seal one exact checked problem.  The combined bad-state
 -- formula is never accepted separately from its problem authority.
@@ -266,16 +264,14 @@ sealLengthSMTLibQuery
   -> Either LengthSMTLibQueryError (LengthSMTLibQuery identity local)
 sealLengthSMTLibQuery limits problem = do
   let inputCount = checkedLengthProblemInputCount problem
-      symbols = map inputSymbol [0 .. inputCount - 1]
+      symbols = inputSymbolsForCount inputCount
+      valueRequest = inputValueRequestForSymbols symbols
   condition <- translateFormula limits inputCount
     $ checkedLengthProblemCounterexampleCondition problem
   let checkCommands = fixedPreamble
         ++ map SMTDeclareInteger symbols
         ++ map (SMTAssert . nonnegative . SMTIntegerSymbol) symbols
         ++ [SMTAssert condition, SMTCheckSatisfiable]
-      valueRequest = case symbols of
-        [] -> Nothing
-        _ -> Just $ SMTGetValues $ map SMTIntegerSymbol symbols
       plan = LengthSMTLibPlan symbols condition checkCommands valueRequest
   checkBytes <- retainCommand limits LengthSMTLibCheckCommand
     $ renderCommands checkCommands
@@ -285,36 +281,42 @@ sealLengthSMTLibQuery limits problem = do
       LengthSMTLibInputValueRequest (renderCommand command)
   fingerprint <- buildQueryFingerprint limits problem plan
     checkBytes valueRequestBytes
-  pure $ LengthSMTLibQuery problem symbols checkBytes valueRequestBytes
-    fingerprint
+  pure $ LengthSMTLibQuery problem checkBytes fingerprint
 
 lengthSMTLibQueryInputSymbols
   :: LengthSMTLibQuery identity local
   -> [[Word8]]
-lengthSMTLibQueryInputSymbols
-    (LengthSMTLibQuery _ symbols _ _ _) = symbols
+lengthSMTLibQueryInputSymbols = fst . lengthSMTLibQueryInputArtifacts
 
 lengthSMTLibQueryCheckBytes
   :: LengthSMTLibQuery identity local
   -> [Word8]
-lengthSMTLibQueryCheckBytes (LengthSMTLibQuery _ _ bytes _ _) = bytes
+lengthSMTLibQueryCheckBytes (LengthSMTLibQuery _ bytes _) = bytes
 
 lengthSMTLibQueryInputValueRequestBytes
   :: LengthSMTLibQuery identity local
   -> Maybe [Word8]
-lengthSMTLibQueryInputValueRequestBytes
-    (LengthSMTLibQuery _ _ _ bytes _) = bytes
+lengthSMTLibQueryInputValueRequestBytes =
+  snd . lengthSMTLibQueryInputArtifacts
+
+lengthSMTLibQueryInputArtifacts
+  :: LengthSMTLibQuery identity local
+  -> ([[Word8]], Maybe [Word8])
+lengthSMTLibQueryInputArtifacts (LengthSMTLibQuery problem _ _) =
+  let symbols = inputSymbolsForCount
+        $ checkedLengthProblemInputCount problem
+  in (symbols, fmap renderCommand $ inputValueRequestForSymbols symbols)
 
 lengthSMTLibQueryFingerprint
   :: LengthSMTLibQuery identity local
   -> Fingerprint LengthSMTLibQueryFingerprintSubject
-lengthSMTLibQueryFingerprint (LengthSMTLibQuery _ _ _ _ fingerprint) =
+lengthSMTLibQueryFingerprint (LengthSMTLibQuery _ _ fingerprint) =
   fingerprint
 
 lengthSMTLibQueryBehavioralProblem
   :: LengthSMTLibQuery identity local
   -> BehavioralProblem FiniteListSpineLengthV1
-lengthSMTLibQueryBehavioralProblem (LengthSMTLibQuery problem _ _ _ _) =
+lengthSMTLibQueryBehavioralProblem (LengthSMTLibQuery problem _ _) =
   checkedLengthProblemBehavioralProblem problem
 
 -- | One parser-decoded integer associated with its exact returned symbol.
@@ -380,7 +382,7 @@ validateLengthSMTLibCounterexample evaluationLimits query rawBindings = do
 queryProblem
   :: LengthSMTLibQuery identity local
   -> CheckedLengthProblem identity local
-queryProblem (LengthSMTLibQuery problem _ _ _ _) = problem
+queryProblem (LengthSMTLibQuery problem _ _) = problem
 
 decodeBinding
   :: Natural
@@ -718,6 +720,18 @@ helperSymbol helper = ascii $ case helper of
   SMTNaturalMonus -> "djex_nat_monus"
   SMTIntegerMinimum -> "djex_nat_min"
   SMTIntegerMaximum -> "djex_nat_max"
+
+-- | Canonical decoder symbols derived from the exact sealed contract arity.
+-- Query sealing uses this list before rendering and fingerprinting; public
+-- projections later recompute the same bounded values without retaining a
+-- parallel cache inside the opaque query.
+inputSymbolsForCount :: Int -> [[Word8]]
+inputSymbolsForCount inputCount = map inputSymbol [0 .. inputCount - 1]
+
+inputValueRequestForSymbols :: [[Word8]] -> Maybe SMTCommand
+inputValueRequestForSymbols symbols = case symbols of
+  [] -> Nothing
+  _ -> Just $ SMTGetValues $ map SMTIntegerSymbol symbols
 
 inputSymbol :: Int -> [Word8]
 inputSymbol = inputSymbolNatural . fromIntegral

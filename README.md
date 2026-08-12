@@ -341,10 +341,13 @@ remain heuristic observations, never pruning permission or proof.
 
 The typed SMT plan remains transient through canonical rendering and
 structural query fingerprinting. After that seal succeeds, the opaque query
-retains only the checked problem, exact input symbols, bounded command bytes,
-and complete fingerprint needed by execution, association, and independent
-replay. The structural `typed-plan` fingerprint field remains unchanged; the
-rendered script is not promoted into the semantic source of truth.
+retains only the checked problem, bounded check bytes, and complete fingerprint
+needed by execution, association, and independent replay. Exact ordered input
+symbols and optional canonical `get-value` bytes are rederived from the
+problem's sealed arity; query sealing still constructs, bounds, and
+structurally fingerprints both before discarding those parallel caches. The
+structural `typed-plan` fingerprint field remains unchanged; the rendered
+script is not promoted into the semantic source of truth.
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` closes the
 remaining raw-report identity gap. Its opaque association binds bounded

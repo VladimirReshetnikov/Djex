@@ -3,9 +3,12 @@
 --
 -- A query can be built only from one opaque 'CheckedLengthProblem'.  It
 -- structurally fingerprints a typed, versioned translation before retaining
--- the checked problem, exact input symbols, bounded canonical SMT-LIB command
--- bytes, and complete fingerprint needed by execution and replay.  It does not
--- launch Z3 or assign authority to raw @sat@, @unsat@, or @unknown@ reports.
+-- only the checked problem, bounded canonical check bytes, and complete
+-- fingerprint needed by execution and replay. Exact input symbols and the
+-- optional canonical @get-value@ bytes are rederived from the problem's sealed
+-- arity; both were already bounded and structurally fingerprinted during the
+-- seal. It does not launch Z3 or assign authority to raw @sat@, @unsat@, or
+-- @unknown@ reports.
 -- Solver build and protocol identity belong to the separate live execution
 -- envelope layered over the query fingerprint.
 --

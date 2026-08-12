@@ -290,7 +290,13 @@ sealLengthSMTLibProtocolPlan
       (LengthSMTLibProtocolPlan identity local)
 sealLengthSMTLibProtocolPlan limits execution query
     rawCheckNonce rawValueNonce = do
-  validatePlanFraming limits execution query requiresValues
+  let symbols = lengthSMTLibQueryInputSymbols query
+      valueRequest = lengthSMTLibQueryInputValueRequestBytes query
+      requiresValues =
+        lengthSMTLibExecutionArtifactPolicy execution ==
+          LengthSMTLibInputValuesAfterSatisfiable &&
+        isJust valueRequest
+  validatePlanFraming limits execution symbols requiresValues
   checkBarrier <- first
     (LengthSMTLibProtocolBarrierNonceError
       LengthSMTLibProtocolCheckBarrier)
@@ -315,21 +321,16 @@ sealLengthSMTLibProtocolPlan limits execution query
         lengthSMTLibQueryCheckBytes query ++
         smtLibEchoSentinelCommandBytes checkBarrier
       valueWrite = case
-          (lengthSMTLibQueryInputValueRequestBytes query, valueBarrier) of
+          (valueRequest, valueBarrier) of
         (Just request, Just barrier) -> Just $
           request ++ smtLibEchoSentinelCommandBytes barrier
         _ -> Nothing
-  fingerprint <- buildPlanFingerprint limits execution query
+  fingerprint <- buildPlanFingerprint limits execution query valueRequest
     checkBarrier valueBarrier initialWrite valueWrite
   pure $ LengthSMTLibProtocolPlan execution query
     (lengthSMTLibProtocolStreamLimits limits)
     (lengthSMTLibProtocolCumulativeStdoutByteLimit limits)
     checkBarrier valueBarrier initialWrite valueWrite fingerprint
- where
-  requiresValues =
-    lengthSMTLibExecutionArtifactPolicy execution ==
-      LengthSMTLibInputValuesAfterSatisfiable &&
-    isJust (lengthSMTLibQueryInputValueRequestBytes query)
 
 lengthSMTLibProtocolInitialWriteBytes
   :: LengthSMTLibProtocolPlan identity local
@@ -357,7 +358,9 @@ lengthSMTLibProtocolPlanMinimumStdoutByteCount
   :: LengthSMTLibProtocolPlan identity local
   -> Natural
 lengthSMTLibProtocolPlanMinimumStdoutByteCount plan =
-  minimumProtocolStdoutBytes (planQuery plan)
+  minimumProtocolStdoutBytes
+    (minimalInputValueFrameByteCount
+      $ lengthSMTLibQueryInputSymbols $ planQuery plan)
     $ case planValueBarrier plan of
         Nothing -> False
         Just _ -> True
@@ -765,10 +768,10 @@ planValueBarrier
 validatePlanFraming
   :: LengthSMTLibProtocolLimits
   -> LengthSMTLibExecutionConfig
-  -> LengthSMTLibQuery identity local
+  -> [[Word8]]
   -> Bool
   -> Either LengthSMTLibProtocolPlanError ()
-validatePlanFraming limits execution query requiresValues = do
+validatePlanFraming limits execution symbols requiresValues = do
   validateStreamFrame LengthSMTLibProtocolCheckStatusFrame
     checkStatusFrameByteCount 0
   validateResponseFrame LengthSMTLibProtocolCheckStatusFrame
@@ -783,7 +786,7 @@ validatePlanFraming limits execution query requiresValues = do
       validateStreamFrame LengthSMTLibProtocolInputValueBarrierFrame
         fixedSentinelResponseByteCount 0
     else Right ()
-  let minimumBytes = minimumProtocolStdoutBytes query requiresValues
+  let minimumBytes = minimumProtocolStdoutBytes valueBytes requiresValues
       maximumBytes = lengthSMTLibProtocolCumulativeStdoutByteLimit limits
   if maximumBytes < minimumBytes
     then Left $ LengthSMTLibProtocolMinimumStdoutByteLimitExceeded
@@ -792,11 +795,11 @@ validatePlanFraming limits execution query requiresValues = do
  where
   stream = lengthSMTLibProtocolStreamLimits limits
   responses = lengthSMTLibExecutionResponseLimits execution
-  valueBytes = minimalInputValueFrameByteCount query
+  valueBytes = minimalInputValueFrameByteCount symbols
   valueNodes = 1 + 3 * genericLength
-    (lengthSMTLibQueryInputSymbols query)
+    symbols
   valueTokenBytes = maximum $ 1 : map genericLength
-    (lengthSMTLibQueryInputSymbols query)
+    symbols
 
   validateStreamFrame site required depth = do
     validateRequiredLimit site LengthSMTLibProtocolStreamTotalBytes
@@ -836,10 +839,10 @@ fixedSentinelResponseByteCount =
   2 + genericLength (ascii "djex-smtlib-frame/v1/") + 64
 
 minimumProtocolStdoutBytes
-  :: LengthSMTLibQuery identity local
+  :: Natural
   -> Bool
   -> Natural
-minimumProtocolStdoutBytes query requiresValues =
+minimumProtocolStdoutBytes valueBytes requiresValues =
   max unknownPath valuePath
  where
   marker = fixedSentinelResponseByteCount
@@ -848,15 +851,15 @@ minimumProtocolStdoutBytes query requiresValues =
   valuePath
     | requiresValues =
         3 + 1 + marker + 1 +
-        minimalInputValueFrameByteCount query + marker + 1
+        valueBytes + marker + 1
     | otherwise = 3 + 1 + marker + 1
 
 minimalInputValueFrameByteCount
-  :: LengthSMTLibQuery identity local
+  :: [[Word8]]
   -> Natural
-minimalInputValueFrameByteCount query = genericLength $
+minimalInputValueFrameByteCount symbols = genericLength $
   [openParen] ++ concatMap binding
-    (lengthSMTLibQueryInputSymbols query) ++ [closeParen]
+    symbols ++ [closeParen]
  where
   binding symbol =
     [openParen] ++ symbol ++ [space, digitZero, closeParen]
@@ -865,6 +868,7 @@ buildPlanFingerprint
   :: LengthSMTLibProtocolLimits
   -> LengthSMTLibExecutionConfig
   -> LengthSMTLibQuery identity local
+  -> Maybe [Word8]
   -> SMTLibEchoSentinel
   -> Maybe SMTLibEchoSentinel
   -> [Word8]
@@ -872,7 +876,7 @@ buildPlanFingerprint
   -> Either
       LengthSMTLibProtocolPlanError
       (Fingerprint LengthSMTLibProtocolPlanFingerprintSubject)
-buildPlanFingerprint limits execution query checkBarrier valueBarrier
+buildPlanFingerprint limits execution query valueRequest checkBarrier valueBarrier
     initialWrite valueWrite = case
   buildFingerprintWithin maximumBytes FingerprintBuilder
     { fingerprintBuilderVersion = 1
@@ -923,7 +927,7 @@ buildPlanFingerprint limits execution query checkBarrier valueBarrier
             , FingerprintBytes $ smtLibEchoSentinelResponseBytes checkBarrier
             ]
         , tagged "input-values" [case
-              ( lengthSMTLibQueryInputValueRequestBytes query
+              ( valueRequest
               , valueBarrier
               , valueWrite
               ) of

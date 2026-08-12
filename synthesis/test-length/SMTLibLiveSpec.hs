@@ -1418,11 +1418,26 @@ assertCapabilityPhaseFailures = do
         ]
   forM_ wrongExactCases $ \(receiver, bytes, expected) ->
     assertLeft expected $ Capability.feedLengthSMTLibCapability receiver bytes
+  assertLeft
+    (Capability.LengthSMTLibCapabilityUnexpectedExactResponse
+      Capability.LengthSMTLibCapabilityCheckStatusPhase)
+    $ Capability.feedLengthSMTLibCapability
+        (receiverCheckStatus receivers)
+    $ ascii "unknown\n" ++
+        error "capability exact-response rejection forced its frame tail"
   forM_ wrongBarrierCases $ \(receiver, sentinel, barrier) ->
     assertLeft
       (Capability.LengthSMTLibCapabilityBarrierMismatch barrier)
       $ Capability.feedLengthSMTLibCapability receiver
       $ sentinelResponse sentinel ++ ascii "\n"
+  assertLeft
+    (Capability.LengthSMTLibCapabilityBarrierMismatch
+      Capability.LengthSMTLibCapabilityCheckBarrier)
+    $ Capability.feedLengthSMTLibCapability
+        (receiverCheckBarrier receivers)
+    $ sentinelResponse (fixtureStartupSentinel fixture) ++
+        ascii "\n" ++
+        error "capability barrier mismatch forced its frame tail"
   forM_ eofCases $ \(phase, receiver) -> do
     Capability.lengthSMTLibCapabilityReceiverPhase receiver @?= phase
     assertLeft

@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE RoleAnnotations #-}
 
@@ -79,28 +78,41 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   )
 import Language.Haskell.Synthesis.Internal.SMTLib.Causal
   ( SMTLibCausalAction (..) )
+import Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream
+  ( SMTLibCausalStreamBoundary
+  , SMTLibCausalStreamCompletedFrame
+  , SMTLibCausalStreamCursor
+  , SMTLibCausalStreamFailure (..)
+  , SMTLibCausalStreamPolicy
+  , SMTLibCausalStreamStep (..)
+  , continueSMTLibCausalStreamCompletedFrame
+  , consumeSMTLibCausalStreamBoundaryWhitespace
+  , feedSMTLibCausalStreamCursor
+  , finishSMTLibCausalStreamCursor
+  , mkSMTLibCausalStreamPolicy
+  , smtLibCausalStreamCompletedFrameBytes
+  , smtLibCausalStreamPolicyCumulativeByteLimit
+  , smtLibCausalStreamPolicyStreamLimits
+  , startSMTLibCausalStreamCursor
+  , startSMTLibCausalStreamCursorAtBoundary
+  )
 import Language.Haskell.Synthesis.Internal.SMTLib.Stream
   ( SMTLibEchoSentinel
   , SMTLibEchoSentinelError
-  , SMTLibStreamFramer
   , SMTLibStreamFramingError (..)
-  , SMTLibStreamFramingStep (..)
   , SMTLibStreamLimitSource (..)
   , SMTLibStreamLimits
   , defaultSMTLibStreamLimitSource
-  , feedSMTLibStreamFramer
-  , finishSMTLibStreamFramer
   , isExactSMTLibEchoSentinelResponse
   , mkSMTLibEchoSentinel
   , mkSMTLibStreamLimits
   , smtLibEchoSentinelCommandBytes
   , smtLibEchoSentinelResponseBytes
   , smtLibStreamFrameByteLimit
-  , smtLibStreamFramerTotalByteLimit
   , smtLibStreamFramingSchemaTag
   , smtLibStreamNestingDepthLimit
   , smtLibStreamTotalByteLimit
-  , startSMTLibStreamFramer
+  , smtLibWhitespaceBytes
   )
 
 -- | Complete pure capability-plan schema.  It identifies neither a process
@@ -140,20 +152,21 @@ data LengthSMTLibCapabilityLimitSource = LengthSMTLibCapabilityLimitSource
 instance NFData LengthSMTLibCapabilityLimitSource
 
 data LengthSMTLibCapabilityLimits = LengthSMTLibCapabilityLimits
-  !SMTLibStreamLimits !Natural !Natural
+  !SMTLibCausalStreamPolicy !Natural
   deriving (Eq, Ord)
 
 instance NFData LengthSMTLibCapabilityLimits where
-  rnf (LengthSMTLibCapabilityLimits stream cumulative fingerprint) =
-    rnf stream `seq` rnf cumulative `seq` rnf fingerprint
+  rnf (LengthSMTLibCapabilityLimits streamPolicy fingerprint) =
+    rnf streamPolicy `seq` rnf fingerprint
 
 mkLengthSMTLibCapabilityLimits
   :: LengthSMTLibCapabilityLimitSource
   -> LengthSMTLibCapabilityLimits
 mkLengthSMTLibCapabilityLimits source = LengthSMTLibCapabilityLimits
-  (mkSMTLibStreamLimits
-    $ lengthSMTLibCapabilityLimitSourceStreamLimits source)
-  (lengthSMTLibCapabilityLimitSourceCumulativeOutputBytes source)
+  (mkSMTLibCausalStreamPolicy
+    (mkSMTLibStreamLimits
+      $ lengthSMTLibCapabilityLimitSourceStreamLimits source)
+    (lengthSMTLibCapabilityLimitSourceCumulativeOutputBytes source))
   (lengthSMTLibCapabilityLimitSourcePlanFingerprintBytes source)
 
 defaultLengthSMTLibCapabilityLimitSource
@@ -173,19 +186,21 @@ lengthSMTLibCapabilityStreamLimits
   :: LengthSMTLibCapabilityLimits
   -> SMTLibStreamLimits
 lengthSMTLibCapabilityStreamLimits
-    (LengthSMTLibCapabilityLimits value _ _) = value
+    (LengthSMTLibCapabilityLimits streamPolicy _) =
+      smtLibCausalStreamPolicyStreamLimits streamPolicy
 
 lengthSMTLibCapabilityCumulativeOutputByteLimit
   :: LengthSMTLibCapabilityLimits
   -> Natural
 lengthSMTLibCapabilityCumulativeOutputByteLimit
-    (LengthSMTLibCapabilityLimits _ value _) = value
+    (LengthSMTLibCapabilityLimits streamPolicy _) =
+      smtLibCausalStreamPolicyCumulativeByteLimit streamPolicy
 
 lengthSMTLibCapabilityPlanFingerprintByteLimit
   :: LengthSMTLibCapabilityLimits
   -> Natural
 lengthSMTLibCapabilityPlanFingerprintByteLimit
-    (LengthSMTLibCapabilityLimits _ _ value) = value
+    (LengthSMTLibCapabilityLimits _ value) = value
 
 data LengthSMTLibCapabilityBarrier
   = LengthSMTLibCapabilityStartupBarrier
@@ -234,11 +249,11 @@ data LengthSMTLibCapabilityPlanError
 
 instance NFData LengthSMTLibCapabilityPlanError
 
--- | Opaque association of framing policy, four positional barriers, their
--- deterministically rendered exact writes, and a complete reversible plan key.
+-- | Opaque association of one cumulative framing policy, four positional
+-- barriers, their deterministically rendered exact writes, and a complete
+-- reversible plan key.
 data LengthSMTLibCapabilityPlan identity = LengthSMTLibCapabilityPlan
-  !SMTLibStreamLimits
-  !Natural
+  !SMTLibCausalStreamPolicy
   !SMTLibEchoSentinel
   !SMTLibEchoSentinel
   !SMTLibEchoSentinel
@@ -248,9 +263,9 @@ data LengthSMTLibCapabilityPlan identity = LengthSMTLibCapabilityPlan
 type role LengthSMTLibCapabilityPlan nominal
 
 instance NFData (LengthSMTLibCapabilityPlan identity) where
-  rnf (LengthSMTLibCapabilityPlan stream cumulative startup check value ready
+  rnf (LengthSMTLibCapabilityPlan streamPolicy startup check value ready
       fingerprint) =
-    rnf stream `seq` rnf cumulative `seq`
+    rnf streamPolicy `seq`
     rnf startup `seq` rnf check `seq` rnf value `seq` rnf ready `seq`
     rnf fingerprint
 
@@ -287,8 +302,7 @@ sealLengthSMTLibCapabilityPlan limits rawStartup rawCheck rawValue rawReady = do
   fingerprint <- buildCapabilityPlanFingerprint limits
     startup check value ready startupWrite checkWrite valueWrite readyWrite
   pure $ LengthSMTLibCapabilityPlan
-    (lengthSMTLibCapabilityStreamLimits limits)
-    (lengthSMTLibCapabilityCumulativeOutputByteLimit limits)
+    (limitsStreamPolicy limits)
     startup check value ready fingerprint
  where
   makeBarrier site = first (LengthSMTLibCapabilityBarrierNonceError site)
@@ -351,7 +365,7 @@ lengthSMTLibCapabilityPlanFingerprint
   :: LengthSMTLibCapabilityPlan identity
   -> Fingerprint LengthSMTLibCapabilityPlanFingerprintSubject
 lengthSMTLibCapabilityPlanFingerprint
-    (LengthSMTLibCapabilityPlan _ _ _ _ _ _ value) = value
+    (LengthSMTLibCapabilityPlan _ _ _ _ _ value) = value
 
 data LengthSMTLibCapabilityPhase
   = LengthSMTLibCapabilityStartupBarrierPhase
@@ -390,20 +404,19 @@ data LengthSMTLibCapabilityReceiver identity =
   LengthSMTLibCapabilityReceiver
     !(LengthSMTLibCapabilityPlan identity)
     !LengthSMTLibCapabilityPhaseState
-    !Natural
-    !SMTLibStreamFramer
+    !SMTLibCausalStreamCursor
 
 type role LengthSMTLibCapabilityReceiver nominal
 
 instance NFData (LengthSMTLibCapabilityReceiver identity) where
-  rnf (LengthSMTLibCapabilityReceiver plan phase frameStart framer) =
-    rnf plan `seq` rnf phase `seq` rnf frameStart `seq` rnf framer
+  rnf (LengthSMTLibCapabilityReceiver plan phase cursor) =
+    rnf plan `seq` rnf phase `seq` rnf cursor
 
 lengthSMTLibCapabilityReceiverPhase
   :: LengthSMTLibCapabilityReceiver identity
   -> LengthSMTLibCapabilityPhase
 lengthSMTLibCapabilityReceiverPhase
-    (LengthSMTLibCapabilityReceiver _ phase _ _) = phaseName phase
+    (LengthSMTLibCapabilityReceiver _ phase _) = phaseName phase
 
 -- | The shared causal action specialized to this plan's nominal receiver and
 -- decoded readiness outcome.  The shared type keeps all parameters nominal.
@@ -420,7 +433,7 @@ startLengthSMTLibCapability
 startLengthSMTLibCapability plan = SMTLibCausalWrite
   LengthSMTLibCapabilityStartupWrite
   (lengthSMTLibCapabilityStartupWriteBytes plan)
-  (newReceiver plan AwaitLengthSMTLibCapabilityStartupBarrier 0)
+  (startReceiver plan AwaitLengthSMTLibCapabilityStartupBarrier)
 
 feedLengthSMTLibCapability
   :: LengthSMTLibCapabilityReceiver identity
@@ -428,15 +441,11 @@ feedLengthSMTLibCapability
   -> Either
       LengthSMTLibCapabilityError
       (LengthSMTLibCapabilityAction identity)
-feedLengthSMTLibCapability receiver bytes = case
-    feedSMTLibStreamFramer (receiverFramer receiver) bytes of
-  Left failure -> Left $ classifyFramingFailure receiver failure
-  Right (SMTLibStreamFramingPending next) ->
-    Right $ SMTLibCausalAwait
-      $ replaceReceiverFramer receiver next
-  Right (SMTLibStreamFramingComplete frame tailBytes consumed) ->
-    handleFrame receiver
-      (receiverFrameStart receiver + consumed) frame tailBytes
+feedLengthSMTLibCapability receiver bytes = do
+  step <- first
+    (mapStreamFailure $ lengthSMTLibCapabilityReceiverPhase receiver)
+    $ feedSMTLibCausalStreamCursor (receiverCursor receiver) bytes
+  acceptStreamStep (receiverPlan receiver) (receiverPhase receiver) step
 
 -- | EOF never completes readiness for a reusable worker.
 finishLengthSMTLibCapability
@@ -445,8 +454,9 @@ finishLengthSMTLibCapability
       LengthSMTLibCapabilityError
       (LengthSMTLibCapabilityAction identity)
 finishLengthSMTLibCapability receiver = case
-    finishSMTLibStreamFramer $ receiverFramer receiver of
-  Left failure -> Left $ classifyFramingFailure receiver failure
+    finishSMTLibCausalStreamCursor $ receiverCursor receiver of
+  Left failure -> Left $ mapStreamFailure
+    (lengthSMTLibCapabilityReceiverPhase receiver) failure
   Right _ -> Left $ LengthSMTLibCapabilityUnexpectedEOF
     $ lengthSMTLibCapabilityReceiverPhase receiver
 
@@ -485,54 +495,56 @@ lengthSMTLibCapabilityOutcomePlanFingerprint
   fingerprint
 
 handleFrame
-  :: LengthSMTLibCapabilityReceiver identity
-  -> Natural
-  -> [Word8]
-  -> [Word8]
+  :: LengthSMTLibCapabilityPlan identity
+  -> LengthSMTLibCapabilityPhaseState
+  -> SMTLibCausalStreamCompletedFrame
   -> Either
       LengthSMTLibCapabilityError
       (LengthSMTLibCapabilityAction identity)
-handleFrame receiver consumed frame tailBytes = case receiverPhase receiver of
+handleFrame plan phase completed = case phase of
   AwaitLengthSMTLibCapabilityStartupBarrier ->
     crossBarrier
       LengthSMTLibCapabilityStartupBarrier
       (planStartupBarrier plan)
-      (SMTLibCausalWrite
+      (\boundary -> SMTLibCausalWrite
         LengthSMTLibCapabilityCheckWrite
         (lengthSMTLibCapabilityCheckWriteBytes plan)
-        . newReceiver plan AwaitLengthSMTLibCapabilityCheckStatus)
+        $ receiverAtBoundary plan
+            AwaitLengthSMTLibCapabilityCheckStatus boundary)
   AwaitLengthSMTLibCapabilityCheckStatus ->
     if frame == capabilitySatisfiableResponseBytes
       then continueWithinWrite plan
-        AwaitLengthSMTLibCapabilityCheckBarrier consumed tailBytes
+        AwaitLengthSMTLibCapabilityCheckBarrier completed
       else Left $ LengthSMTLibCapabilityUnexpectedExactResponse
         LengthSMTLibCapabilityCheckStatusPhase
   AwaitLengthSMTLibCapabilityCheckBarrier ->
     crossBarrier
       LengthSMTLibCapabilityCheckBarrier
       (planCheckBarrier plan)
-      (SMTLibCausalWrite
+      (\boundary -> SMTLibCausalWrite
         LengthSMTLibCapabilityInputValueWrite
         (lengthSMTLibCapabilityInputValueWriteBytes plan)
-        . newReceiver plan AwaitLengthSMTLibCapabilityInputValue)
+        $ receiverAtBoundary plan
+            AwaitLengthSMTLibCapabilityInputValue boundary)
   AwaitLengthSMTLibCapabilityInputValue ->
     if frame == capabilityInputValueResponseBytes
       then continueWithinWrite plan
-        AwaitLengthSMTLibCapabilityInputValueBarrier consumed tailBytes
+        AwaitLengthSMTLibCapabilityInputValueBarrier completed
       else Left $ LengthSMTLibCapabilityUnexpectedExactResponse
         LengthSMTLibCapabilityInputValuePhase
   AwaitLengthSMTLibCapabilityInputValueBarrier ->
     crossBarrier
       LengthSMTLibCapabilityInputValueBarrier
       (planValueBarrier plan)
-      (SMTLibCausalWrite
+      (\boundary -> SMTLibCausalWrite
         LengthSMTLibCapabilityReadyWrite
         (lengthSMTLibCapabilityReadyWriteBytes plan)
-        . newReceiver plan AwaitLengthSMTLibCapabilityReadyStatus)
+        $ receiverAtBoundary plan
+            AwaitLengthSMTLibCapabilityReadyStatus boundary)
   AwaitLengthSMTLibCapabilityReadyStatus ->
     if frame == capabilityUnsatisfiableResponseBytes
       then continueWithinWrite plan
-        AwaitLengthSMTLibCapabilityReadyBarrier consumed tailBytes
+        AwaitLengthSMTLibCapabilityReadyBarrier completed
       else Left $ LengthSMTLibCapabilityUnexpectedExactResponse
         LengthSMTLibCapabilityReadyStatusPhase
   AwaitLengthSMTLibCapabilityReadyBarrier ->
@@ -543,116 +555,86 @@ handleFrame receiver consumed frame tailBytes = case receiverPhase receiver of
         $ LengthSMTLibCapabilityOutcome
         $ lengthSMTLibCapabilityPlanFingerprint plan)
  where
-  plan = receiverPlan receiver
+  frame = smtLibCausalStreamCompletedFrameBytes completed
   crossBarrier site barrier next
     | isExactSMTLibEchoSentinelResponse barrier frame = do
-        afterBoundary <- consumePostBarrierWhitespace plan consumed tailBytes
-        Right $ next afterBoundary
+        boundary <- consumeBoundary (phaseName phase) completed
+        Right $ next boundary
     | otherwise = Left $ LengthSMTLibCapabilityBarrierMismatch site
 
 continueWithinWrite
   :: LengthSMTLibCapabilityPlan identity
   -> LengthSMTLibCapabilityPhaseState
-  -> Natural
-  -> [Word8]
+  -> SMTLibCausalStreamCompletedFrame
   -> Either
       LengthSMTLibCapabilityError
       (LengthSMTLibCapabilityAction identity)
-continueWithinWrite plan phase consumed tailBytes =
-  feedLengthSMTLibCapability (newReceiver plan phase consumed) tailBytes
+continueWithinWrite plan phase completed = do
+  step <- first (mapStreamFailure $ phaseName phase)
+    $ continueSMTLibCausalStreamCompletedFrame completed
+  acceptStreamStep plan phase step
 
-consumePostBarrierWhitespace
-  :: LengthSMTLibCapabilityPlan identity
-  -> Natural
-  -> [Word8]
-  -> Either LengthSMTLibCapabilityError Natural
-consumePostBarrierWhitespace plan = go
- where
-  maximumBytes = planCumulativeOutputByteLimit plan
-
-  go !consumed [] = Right consumed
-  go !consumed (byte : bytes)
-    | consumed >= maximumBytes = Left $
-        LengthSMTLibCapabilityCumulativeOutputByteLimitExceeded
-          maximumBytes (maximumBytes + 1)
-    | isSMTLibWhitespace byte = go (consumed + 1) bytes
-    | otherwise = Left $
-        LengthSMTLibCapabilityUnexpectedPostBarrierByte consumed byte
-
-newReceiver
+startReceiver
   :: LengthSMTLibCapabilityPlan identity
   -> LengthSMTLibCapabilityPhaseState
-  -> Natural
   -> LengthSMTLibCapabilityReceiver identity
-newReceiver plan phase frameStart = LengthSMTLibCapabilityReceiver
-  plan phase frameStart $ startSMTLibStreamFramer effectiveLimits
- where
-  configured = planStreamLimits plan
-  cumulativeMaximum = planCumulativeOutputByteLimit plan
-  remaining
-    | frameStart >= cumulativeMaximum = 0
-    | otherwise = cumulativeMaximum - frameStart
-  configuredTotal = smtLibStreamTotalByteLimit configured
-  effectiveLimits = mkSMTLibStreamLimits SMTLibStreamLimitSource
-    { smtLibStreamLimitSourceTotalBytes = min configuredTotal remaining
-    , smtLibStreamLimitSourceFrameBytes =
-        smtLibStreamFrameByteLimit configured
-    , smtLibStreamLimitSourceNestingDepth =
-        smtLibStreamNestingDepthLimit configured
-    }
+startReceiver plan phase = LengthSMTLibCapabilityReceiver plan phase
+  $ startSMTLibCausalStreamCursor $ planStreamPolicy plan
 
-classifyFramingFailure
-  :: LengthSMTLibCapabilityReceiver identity
-  -> SMTLibStreamFramingError
+receiverAtBoundary
+  :: LengthSMTLibCapabilityPlan identity
+  -> LengthSMTLibCapabilityPhaseState
+  -> SMTLibCausalStreamBoundary
+  -> LengthSMTLibCapabilityReceiver identity
+receiverAtBoundary plan phase boundary = LengthSMTLibCapabilityReceiver
+  plan phase $ startSMTLibCausalStreamCursorAtBoundary boundary
+
+acceptStreamStep
+  :: LengthSMTLibCapabilityPlan identity
+  -> LengthSMTLibCapabilityPhaseState
+  -> SMTLibCausalStreamStep
+  -> Either
+      LengthSMTLibCapabilityError
+      (LengthSMTLibCapabilityAction identity)
+acceptStreamStep plan phase step = case step of
+  SMTLibCausalStreamPending cursor -> Right $ SMTLibCausalAwait
+    $ LengthSMTLibCapabilityReceiver plan phase cursor
+  SMTLibCausalStreamComplete completed -> handleFrame plan phase completed
+
+consumeBoundary
+  :: LengthSMTLibCapabilityPhase
+  -> SMTLibCausalStreamCompletedFrame
+  -> Either LengthSMTLibCapabilityError SMTLibCausalStreamBoundary
+consumeBoundary phase = first (mapStreamFailure phase)
+  . consumeSMTLibCausalStreamBoundaryWhitespace
+
+mapStreamFailure
+  :: LengthSMTLibCapabilityPhase
+  -> SMTLibCausalStreamFailure
   -> LengthSMTLibCapabilityError
-classifyFramingFailure receiver failure = case failure of
-  SMTLibStreamTotalByteLimitExceeded _ _
-    | receiverCumulativeCapsFrame receiver ->
-        LengthSMTLibCapabilityCumulativeOutputByteLimitExceeded
-          cumulativeMaximum (cumulativeMaximum + 1)
-  _ -> LengthSMTLibCapabilityFramingFailure
-    (lengthSMTLibCapabilityReceiverPhase receiver) failure
- where
-  cumulativeMaximum = planCumulativeOutputByteLimit $ receiverPlan receiver
+mapStreamFailure phase failure = case failure of
+  SMTLibCausalStreamFramingFailure framing ->
+    LengthSMTLibCapabilityFramingFailure phase framing
+  SMTLibCausalStreamCumulativeByteLimitExceeded maximumBytes observed ->
+    LengthSMTLibCapabilityCumulativeOutputByteLimitExceeded
+      maximumBytes observed
+  SMTLibCausalStreamUnexpectedBoundaryByte offset byte ->
+    LengthSMTLibCapabilityUnexpectedPostBarrierByte offset byte
 
 receiverPlan
   :: LengthSMTLibCapabilityReceiver identity
   -> LengthSMTLibCapabilityPlan identity
-receiverPlan (LengthSMTLibCapabilityReceiver value _ _ _) = value
+receiverPlan (LengthSMTLibCapabilityReceiver value _ _) = value
 
 receiverPhase
   :: LengthSMTLibCapabilityReceiver identity
   -> LengthSMTLibCapabilityPhaseState
-receiverPhase (LengthSMTLibCapabilityReceiver _ value _ _) = value
+receiverPhase (LengthSMTLibCapabilityReceiver _ value _) = value
 
-receiverFrameStart
+receiverCursor
   :: LengthSMTLibCapabilityReceiver identity
-  -> Natural
-receiverFrameStart (LengthSMTLibCapabilityReceiver _ _ value _) = value
-
--- The configured frame-total error wins an exact tie.  Cumulative failure is
--- selected only when the remaining transaction budget is strictly lower.
-receiverCumulativeCapsFrame
-  :: LengthSMTLibCapabilityReceiver identity
-  -> Bool
-receiverCumulativeCapsFrame receiver =
-  smtLibStreamFramerTotalByteLimit (receiverFramer receiver) < configuredTotal
- where
-  plan = receiverPlan receiver
-  configuredTotal = smtLibStreamTotalByteLimit $ planStreamLimits plan
-
-receiverFramer
-  :: LengthSMTLibCapabilityReceiver identity
-  -> SMTLibStreamFramer
-receiverFramer (LengthSMTLibCapabilityReceiver _ _ _ value) = value
-
-replaceReceiverFramer
-  :: LengthSMTLibCapabilityReceiver identity
-  -> SMTLibStreamFramer
-  -> LengthSMTLibCapabilityReceiver identity
-replaceReceiverFramer
-    (LengthSMTLibCapabilityReceiver plan phase start _) framer =
-  LengthSMTLibCapabilityReceiver plan phase start framer
+  -> SMTLibCausalStreamCursor
+receiverCursor (LengthSMTLibCapabilityReceiver _ _ value) = value
 
 phaseName
   :: LengthSMTLibCapabilityPhaseState
@@ -673,41 +655,40 @@ phaseName phase = case phase of
   AwaitLengthSMTLibCapabilityReadyBarrier ->
     LengthSMTLibCapabilityReadyBarrierPhase
 
-planStreamLimits
+planStreamPolicy
   :: LengthSMTLibCapabilityPlan identity
-  -> SMTLibStreamLimits
-planStreamLimits
-    (LengthSMTLibCapabilityPlan value _ _ _ _ _ _) = value
+  -> SMTLibCausalStreamPolicy
+planStreamPolicy
+    (LengthSMTLibCapabilityPlan value _ _ _ _ _) = value
 
-planCumulativeOutputByteLimit
-  :: LengthSMTLibCapabilityPlan identity
-  -> Natural
-planCumulativeOutputByteLimit
-    (LengthSMTLibCapabilityPlan _ value _ _ _ _ _) = value
+limitsStreamPolicy
+  :: LengthSMTLibCapabilityLimits
+  -> SMTLibCausalStreamPolicy
+limitsStreamPolicy (LengthSMTLibCapabilityLimits value _) = value
 
 planStartupBarrier
   :: LengthSMTLibCapabilityPlan identity
   -> SMTLibEchoSentinel
 planStartupBarrier
-    (LengthSMTLibCapabilityPlan _ _ value _ _ _ _) = value
+    (LengthSMTLibCapabilityPlan _ value _ _ _ _) = value
 
 planCheckBarrier
   :: LengthSMTLibCapabilityPlan identity
   -> SMTLibEchoSentinel
 planCheckBarrier
-    (LengthSMTLibCapabilityPlan _ _ _ value _ _ _) = value
+    (LengthSMTLibCapabilityPlan _ _ value _ _ _) = value
 
 planValueBarrier
   :: LengthSMTLibCapabilityPlan identity
   -> SMTLibEchoSentinel
 planValueBarrier
-    (LengthSMTLibCapabilityPlan _ _ _ _ value _ _) = value
+    (LengthSMTLibCapabilityPlan _ _ _ value _ _) = value
 
 planReadyBarrier
   :: LengthSMTLibCapabilityPlan identity
   -> SMTLibEchoSentinel
 planReadyBarrier
-    (LengthSMTLibCapabilityPlan _ _ _ _ _ value _) = value
+    (LengthSMTLibCapabilityPlan _ _ _ _ value _) = value
 
 validateDistinctBarriers
   :: [(LengthSMTLibCapabilityBarrier, SMTLibEchoSentinel)]
@@ -960,18 +941,5 @@ capabilityUnsatisfiableResponseBytes = ascii "unsat"
 tagged :: String -> [FingerprintField] -> FingerprintField
 tagged name = FingerprintTag $ ascii name
 
-isSMTLibWhitespace :: Word8 -> Bool
-isSMTLibWhitespace byte = byte == horizontalTab || byte == lineFeed ||
-  byte == carriageReturn || byte == space
-
-smtLibWhitespaceBytes :: [Word8]
-smtLibWhitespaceBytes = [horizontalTab, lineFeed, carriageReturn, space]
-
 ascii :: String -> [Word8]
 ascii = map $ fromIntegral . fromEnum
-
-horizontalTab, lineFeed, carriageReturn, space :: Word8
-horizontalTab = 9
-lineFeed = 10
-carriageReturn = 13
-space = 32

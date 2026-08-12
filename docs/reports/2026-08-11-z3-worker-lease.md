@@ -109,10 +109,15 @@ or semantic soundness.
 
 ## Causal output and exact transcript identity
 
-The probe integrates the bounded SMT-LIB stream framer rather than treating
-pipe reads as lines. Status-to-marker and value-to-marker tails may advance
-within one write because both responses were already caused by that write.
-Across a write boundary, only the four SMT-LIB whitespace bytes are admitted.
+The probe integrates the shared cumulative SMT-LIB stream cursor rather than
+treating pipe reads as lines. Its opaque policy combines the bounded
+single-frame lexer with the complete readiness-output maximum. Status-to-marker
+and value-to-marker tails may advance only through the completed frame's hidden
+same-write continuation because both responses were already caused by that
+write. Across a write boundary, the hidden tail must first become a validated
+input containing only the four canonical SMT-LIB whitespace bytes; consuming
+and charging it produces the opaque boundary which alone can start the next
+cursor under the same policy and absolute offset.
 
 Every final quoted echo must be followed by at least one such delimiter. If a
 pipe chunk ends exactly at the closing quote, the owner waits for the delimiter
@@ -127,6 +132,11 @@ capability-wide budget charges them exactly once. At readiness commit, exact
 segmented transcript length must equal the process owner's observed stdout
 count; a mismatch fails closed. The complete bytes, segmentation policy,
 capability plan, and cumulative limit enter private identity.
+
+The pure cursor owns framing and cumulative classification; the separate
+causal transport driver owns write-before-feed ordering, pipe reads, delayed
+predecessor attribution, and the final transcript assertion. This split changes
+neither capability-plan fingerprint fields nor ready-worker identity bytes.
 
 ## Bounded process ownership
 

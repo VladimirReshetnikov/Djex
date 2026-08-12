@@ -207,6 +207,8 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   , lengthSMTLibExecutionExpectedExecutableSHA256
   , lengthSMTLibExecutionPolicyFingerprint
   )
+import Language.Haskell.Synthesis.Internal.SMTLib.Stream
+  ( isSMTLibWhitespaceByte )
 
 -- | Explicitly weaker than an executed-image attestation method.
 lengthSMTLibExecutableSnapshotStrengthTag :: ByteString
@@ -1182,7 +1184,7 @@ drainLengthSMTLibProcessBoundaryWhitespace process cancellation deadline = do
   inspect [] reversedChunks =
     pure $ Right $ BS.concat $ reverse reversedChunks
   inspect events@(StdoutChunk bytes : remaining) reversedChunks
-    | BS.all isSMTLibWhitespace bytes =
+    | BS.all isSMTLibWhitespaceByte bytes =
         inspect remaining $ bytes : reversedChunks
     | otherwise = do
         -- Restore all prior whitespace too; draining is all-or-nothing when a
@@ -1883,10 +1885,6 @@ asciiBytes = BS.pack . ascii
 
 ascii :: String -> [Word8]
 ascii = map $ fromIntegral . ord
-
-isSMTLibWhitespace :: Word8 -> Bool
-isSMTLibWhitespace byte =
-  byte == 9 || byte == 10 || byte == 13 || byte == 32
 
 tryAny :: IO value -> IO (Either SomeException value)
 tryAny = try

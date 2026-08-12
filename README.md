@@ -381,9 +381,9 @@ order. Parsed negative integers remain raw values for the existing natural
 domain validator to reject. Parsed statuses are observations only. A private
 stream and protocol layer now supplies bounded lexical framing, exact echo
 markers, and fail-closed phase sequencing. The package-private live Session now
-owns worker identity, deadlines, and recovery; query-specific execution and
-observation association remain obligations of the next driver. Only independent
-Length replay can create model-relative counterexample evidence.
+owns worker identity, deadlines, recovery, query-specific execution, and raw
+observation association. Only independent Length replay can create
+model-relative counterexample evidence.
 
 `Language.Haskell.Synthesis.Internal.SMTLib.Stream` frames one exact SMT-LIB
 2.7 response incrementally without line-based assumptions. It carries lexical
@@ -403,10 +403,23 @@ top-level string needs one-byte lookahead to distinguish a doubled quote, the
 live Z3 capability probe must also establish that `echo` emits and flushes a
 trailing byte (normally its newline) after the marker's closing quote.
 
+`Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream` is the shared pure
+transaction layer above that single-frame framer. One opaque policy owns the
+configured frame limits and cumulative maximum. Its zero-start cursor keeps
+the absolute charged offset and effective remaining frame budget together;
+opaque completed frames carry their hidden tails into an associated same-write
+frame, while validated boundaries carry the same policy and exact charged
+offset into a next-write receiver. Protocol and readiness therefore cannot
+restart a detached tail under a different offset or budget.
+The configured frame-total failure still wins an exact tie, while a strictly
+tighter cumulative budget reports its established maximum-plus-one failure.
+The base framer also owns the canonical ordered SMT-LIB whitespace vocabulary
+used by this cursor, causal transport attribution, and both plan fingerprints.
+
 `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` composes
-that framer with the sealed execution policy and query. Its initial action is
-one exact reset/check/status-marker write. It decodes exactly one status and
-accepts the marker only in the following position; only `sat` under the
+that cumulative cursor with the sealed execution policy and query. Its initial
+action is one exact reset/check/status-marker write. It decodes exactly one
+status and accepts the marker only in the following position; only `sat` under the
 input-value artifact policy may then expose a second value-request/marker
 write. Status and value tails are recursively consumed only within the write
 which could have caused them. At the status-marker-to-value-write boundary,

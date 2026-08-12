@@ -33,6 +33,8 @@ import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Internal.SMTLib.Causal
   ( SMTLibCausalAction (..) )
+import Language.Haskell.Synthesis.Internal.SMTLib.Stream
+  ( isSMTLibWhitespaceByte )
 
 -- | A new driver may require an empty transport boundary, while a successor
 -- operation may adopt delayed whitespace from its committed predecessor.
@@ -314,10 +316,6 @@ firstNonWhitespace bytes = case BS.findIndex
     (not . isSMTLibWhitespaceByte) bytes of
   Nothing -> Nothing
   Just offset -> Just (fromIntegral offset, BS.index bytes offset)
-
-isSMTLibWhitespaceByte :: Word8 -> Bool
-isSMTLibWhitespaceByte byte =
-  byte == 9 || byte == 10 || byte == 13 || byte == 32
 
 byteCount :: ByteString -> Natural
 byteCount = fromIntegral . BS.length

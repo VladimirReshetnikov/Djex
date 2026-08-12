@@ -100,9 +100,20 @@ not downgraded to a status-only result.
 
 ## Byte accounting and write boundaries
 
-The shared stream framer now reports the exact number of bytes charged to a
-completed frame. This includes discarded leading trivia and retained frame
-bytes, while excluding its untouched lexical lookahead tail.
+The base stream framer reports the exact number of bytes charged to a completed
+frame. This includes discarded leading trivia and retained frame bytes, while
+excluding its untouched lexical lookahead tail. The domain-neutral
+`Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream` layer now owns the
+transaction-wide policy and absolute cursor used here and by the readiness
+capability machine.
+
+The opaque initial cursor can begin only at absolute offset zero. A completed
+frame retains its policy, absolute end, and untouched tail without exposing
+them. Its same-write continuation starts the next frame at that exact end and
+feeds that exact tail. Its separate boundary operation first validates and
+charges all remaining whitespace, then returns an opaque boundary which alone
+can start the first frame after a new write. Callers therefore cannot detach a
+tail from its admitted offset, cumulative maximum, or frame policy.
 
 Within one write group, the protocol starts the next framer on that tail:
 
@@ -116,13 +127,20 @@ cumulative stdout budget and may contain only the four SMT-LIB whitespace
 bytes. Comments and all non-whitespace output fail. Only then may the value
 write or completion action be returned.
 
-Each new frame receives the smaller of its configured total-byte bound and the
-transaction's remaining cumulative budget. When the cumulative budget is the
-active bound, its error is reported at maximum plus one. This prevents repeated
-per-frame budgets or a large post-marker tail from evading the transaction-wide
-limit. If the two bounds are exactly equal, the frame-total error wins the
-documented tie; cumulative failure is selected only for a strictly smaller
-remaining transaction budget.
+Each cursor frame receives the smaller of its configured total-byte bound and
+the transaction's remaining cumulative budget. When the cumulative budget is
+the active bound, its error is reported at maximum plus one. This prevents
+repeated per-frame budgets or a large post-marker tail from evading the
+transaction-wide limit. If the two bounds are exactly equal, the frame-total
+error wins the documented tie; cumulative failure is selected only for a
+strictly smaller remaining transaction budget. At a write boundary, exhaustion
+is checked before the next tail byte is inspected, so maximum-plus-one also
+remains productive for finite, poisoned, or cyclic whitespace.
+
+The ordered whitespace vocabulary remains the exact bytes 9, 10, 13, and 32.
+Its package-private owner is the base stream module; the single-frame lexer,
+cumulative cursor, causal transport attribution, and unchanged protocol and
+capability fingerprints all consume that same definition.
 
 EOF never completes a reusable-worker transaction. Lexically malformed EOF has
 priority; every otherwise clean or string-completing EOF is reported as missing

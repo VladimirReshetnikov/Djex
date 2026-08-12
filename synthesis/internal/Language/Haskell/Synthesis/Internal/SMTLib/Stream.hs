@@ -20,6 +20,8 @@
 -- the process ended.
 module Language.Haskell.Synthesis.Internal.SMTLib.Stream
   ( smtLibStreamFramingSchemaTag
+  , isSMTLibWhitespaceByte
+  , smtLibWhitespaceBytes
   , smtLibEchoSentinelNonceByteCount
   , SMTLibEchoSentinel
   , SMTLibEchoSentinelError (..)
@@ -56,6 +58,16 @@ import Numeric.Natural (Natural)
 smtLibStreamFramingSchemaTag :: [Word8]
 smtLibStreamFramingSchemaTag =
   ascii "djex-smtlib2-stream-framing/v2"
+
+-- | The four whitespace bytes admitted by SMT-LIB 2.7 lexical framing and
+-- causal write-boundary accounting, in their canonical fingerprint order.
+isSMTLibWhitespaceByte :: Word8 -> Bool
+isSMTLibWhitespaceByte byte =
+  byte == horizontalTab || byte == lineFeed ||
+  byte == carriageReturn || byte == space
+
+smtLibWhitespaceBytes :: [Word8]
+smtLibWhitespaceBytes = [horizontalTab, lineFeed, carriageReturn, space]
 
 smtLibEchoSentinelNonceByteCount :: Natural
 smtLibEchoSentinelNonceByteCount = 32
@@ -571,9 +583,7 @@ isPotentialBareByte byte = byte >= 33 && byte <= 126 &&
     byte == doubleQuote || byte == verticalBar)
 
 isWhitespace :: Word8 -> Bool
-isWhitespace byte =
-  byte == horizontalTab || byte == lineFeed ||
-  byte == carriageReturn || byte == space
+isWhitespace = isSMTLibWhitespaceByte
 
 isStringCharacter :: Word8 -> Bool
 isStringCharacter byte = isWhitespace byte || isPrintable byte

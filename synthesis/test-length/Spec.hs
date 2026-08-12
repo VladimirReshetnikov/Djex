@@ -3007,6 +3007,13 @@ smtLibProtocolTests = testGroup
         $ SMTLibProtocol.feedLengthSMTLibProtocol initial
         $ asciiBytes "success\n"
       assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolResponseFailure
+          SMTLibProtocol.LengthSMTLibProtocolCheckStatusPhase
+          SMTLibResponse.LengthSMTLibSuccessWhereStatusExpected)
+        $ SMTLibProtocol.feedLengthSMTLibProtocol initial
+        $ asciiBytes "success\n" ++
+            error "protocol decoder rejection forced its completed-frame tail"
+      assertLeft
         (SMTLibProtocol.LengthSMTLibProtocolFramingFailure
           SMTLibProtocol.LengthSMTLibProtocolCheckStatusPhase
           $ SMTLibStream.SMTLibStreamUnexpectedClosingParenthesis 0)
@@ -3032,6 +3039,13 @@ smtLibProtocolTests = testGroup
         $ SMTLibProtocol.feedLengthSMTLibProtocol checkPhase
         $ SMTLibStream.smtLibEchoSentinelResponseBytes wrongBarrier ++
           asciiBytes "\n"
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolBarrierMismatch
+          SMTLibProtocol.LengthSMTLibProtocolCheckBarrier)
+        $ SMTLibProtocol.feedLengthSMTLibProtocol checkPhase
+        $ SMTLibStream.smtLibEchoSentinelResponseBytes wrongBarrier ++
+            asciiBytes "\n" ++
+            error "protocol barrier mismatch forced its completed-frame tail"
       let staleValues = protocolValueFrame query [3]
       case SMTLibProtocol.feedLengthSMTLibProtocol initial $
           asciiBytes "sat\n" ++

@@ -142,6 +142,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capability` | Package-private four-write readiness probe for print suppression, reset replay, exact `sat`, input valuation, contradictory `unsat`, and positional fresh barriers. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process` | Bounded direct-process owner with a pre-spawn executable-file snapshot, exact isolated launch, FIFO stdout framing support, first-byte stderr poison, cancellation/deadlines, and staged cleanup. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal` | Domain-neutral pure write/await/complete action algebra with nominal write-kind, receiver, and outcome associations. |
+| `Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream` | Domain-neutral cumulative framing policy and opaque zero-start cursor, completed-frame, and validated-boundary continuations; it prevents tails, offsets, and budgets from being detached across same-write frames or causal write boundaries. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver` | Domain-neutral causal transport algorithm and exact segmented transcript ownership, with write-before-feed, positional EOF precedence, and delayed-boundary-whitespace attribution. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Transport` | Length/Z3 adapter which binds one process, cancellation token, and absolute deadline behind the generic causal driver operations. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session` | Rank-N scoped ownership of one capability-probed worker, with secret/public entropy separation, a fresh fd-observed workspace, exact segmented probe transcript, and no public process handle. |
@@ -236,6 +237,20 @@ trailing byte (normally a newline): a top-level string's closing quote is
 intentionally held for one-byte lookahead so a quote at the next chunk boundary
 can still form a doubled quote.
 
+`Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream` owns cumulative
+framing once for both the query protocol and readiness capability machine. An
+opaque policy combines the exact single-frame limits with the transaction
+maximum. Its public initial cursor always starts at absolute offset zero;
+nonzero restarts can be obtained only from an opaque completed frame or a
+successfully validated write boundary. Same-write continuation feeds the
+completed frame's hidden tail under the same policy and offset. Cross-write
+continuation first admits and discards only the canonical four SMT-LIB
+whitespace bytes, then carries the same policy and exact charged offset into
+the next receiver. The configured frame-total error wins an equal-limit tie;
+only a strictly tighter remaining cumulative budget is reclassified at maximum
+plus one. The base `SMTLib.Stream` module supplies that ordered whitespace
+vocabulary to the framer, cursor, transport driver, and domain fingerprints.
+
 `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` owns the
 next pure boundary. It seals the execution-policy key, exact query key, stream
 limits, cumulative stdout budget, phase schema, and caller-supplied check/value
@@ -255,8 +270,9 @@ the optional write does not render request bytes.
 After response frames are bounded and decoded, the protocol phase state and
 terminal decoded branch retain only the closed status and optional integer
 bindings. The opaque receiver separately owns the still-driving plan and
-framer; a live driver also retains that plan directly for run identity instead
-of copying its key into the decoded branch. Exact raw status-frame and
+shared cumulative cursor; the live Session separately carries that plan
+through execution and binds its key directly into run identity instead of
+copying it into the decoded branch. Exact raw status-frame and
 input-value-frame bytes have one live owner in the causal transcript. Those
 transcript bytes are bound into the query-run identity rather than being copied
 into the decoded value.
@@ -266,9 +282,9 @@ responses answer commands already in the same completed write. A tail crossing
 the status-marker-to-`get-value` boundary must contain only bounded SMT-LIB
 whitespace; a stale buffered valuation is rejected before the new write action
 exists. Framing, response, marker, cumulative-budget, unexpected-byte, and EOF
-failures expose no continuation. The next live query driver must therefore
-destroy the worker on any failure, generate barriers uniquely across the session,
-perform each write before feeding its receiver, and bind the process snapshot
+failures expose no continuation. The live Session therefore destroys the
+worker on any failure, generates barriers uniquely across the session,
+performs each write before feeding its receiver, and binds the process snapshot
 and observed transcript facts into a separate run identity. Pure decoded
 outcomes remain caller-feedable syntax, never execution receipts or semantic
 evidence.
@@ -308,8 +324,8 @@ The opaque ready-worker identity binds the pure execution key, process
 snapshot strength and policy, capability plan, exact segmented transcript,
 secret-seed commitment, workspace policy/path, and semantic limits. It is
 still not a solver result, proof, pruning authority, or general Z3 feature
-claim. The next layer must drive individual query plans through the scoped
-worker and independently replay any model before evidence exists.
+claim. The same Session drives individual query plans through the scoped worker
+and independently replays any model before evidence exists.
 
 The public live facade copies only bounded association and authority fields out
 of each private run. It retains status once and derives the corresponding

@@ -21,12 +21,23 @@ receiver, or raw transcript accessor is exposed.
 Readiness and ordinary queries now share
 `Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver`. The generic driver
 owns exact writes, stdout reads, incremental machine feeds, EOF precedence,
-boundary delimiters, and cumulative accounting for either pure action machine.
+boundary delimiters, and the final transcript-limit assertion for either pure
+action machine.
 The private Length `...SMTLib.Session.Transport` adapter keeps the exact
 process, cancellation token, and deadline together behind that neutral
 transport seam.
 
-Its important ordering rule is:
+The two Length action machines separately share
+`Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream`. That pure layer
+owns their common frame policy, absolute cumulative cursor, same-write hidden
+tail continuation, and validated cross-write boundary. The transport driver
+does not own a protocol plan or parse a response: Session carries the exact
+plan through driving and run-identity construction, while each pure receiver
+maps the shared cursor's closed failures into its own phase vocabulary. Domain
+schema tags and canonical plan fingerprint fields remain byte-for-byte
+unchanged.
+
+The driver's important ordering rule is:
 
 1. collect only bounded SMT-LIB whitespace left by the preceding write;
 2. perform and flush the new exact write;

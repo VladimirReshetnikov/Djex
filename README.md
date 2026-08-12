@@ -396,10 +396,13 @@ owner of the exact SMT-LIB whitespace set and its canonical fingerprint order:
 horizontal tab, line feed, carriage return, then space. The bounded response
 parser and stream framer classify through that one predicate; cumulative
 boundary accounting, causal transcript attribution, and the live process
-drain enforce the same set; and both Length plan identities bind the same
-ordered bytes. Any vocabulary change must therefore revise the affected
-response, framing, and plan schema identities rather than silently changing a
-consumer.
+drain enforce the same set; the drain returns an opaque receipt proving that
+lexical content before the causal driver accepts it; and both Length plan
+identities bind the same ordered bytes. The receipt proves content only, while
+the concrete transport still owns FIFO origin, boundedness, and restoration on
+non-whitespace rejection. Any vocabulary change must therefore revise the
+affected response, framing, and plan schema identities rather than silently
+changing a consumer.
 
 `Language.Haskell.Synthesis.Internal.SMTLib.Stream` frames one exact SMT-LIB
 2.7 response incrementally without line-based assumptions. It carries lexical
@@ -431,7 +434,11 @@ The configured frame-total failure still wins an exact tie, while a strictly
 tighter cumulative budget reports its established maximum-plus-one failure.
 The schema-free lexical leaf supplies the canonical ordered SMT-LIB whitespace
 vocabulary used by the parser, framer, cursor, causal transport, process
-boundary drain, and both plan fingerprints.
+boundary drain, and both plan fingerprints. The package-private
+`Internal.SMTLib.Causal.BoundaryWhitespace` leaf admits finite strict bytes
+into an opaque content-valid receipt. Process validates queued chunks inside
+its all-or-nothing STM inspection, so a non-whitespace snapshot is restored
+before poison; the driver cannot receive raw successful drain bytes.
 
 `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` composes
 that cumulative cursor with the sealed execution policy and query. Its initial
@@ -503,8 +510,10 @@ absolute deadline as a single transport handle. A masked serial gate allocates
 zero-based ordinals and two HMAC-SHA256 marker roles from the unexposed session
 seed, checks all markers against a bounded lease-wide set, and seals the exact
 pure protocol plan before reservation. The shared causal driver writes before
-activating each receiver, attributes delayed predecessor whitespace exactly
-once, and requires exact stdout-delta and stderr accounting. Every marker,
+feeding admitted boundary bytes and activating their receiver. For the initial
+adopted predecessor boundary it also defers receipt projection until that first
+write succeeds. It attributes delayed predecessor whitespace exactly once and
+requires exact stdout-delta and stderr accounting. Every marker,
 protocol, transport, replay, or identity failure after reservation spends the
 ordinal, cancels the lease, and closes the process; plan, capacity,
 identity-admission, and query-count rejections before reservation remain

@@ -82,6 +82,15 @@ vocabulary. The bounded response parser, single-frame lexer, cumulative cursor,
 causal transport driver, live process boundary drain, and both unchanged
 domain fingerprints consume the same definition.
 
+The separate schema-free `Internal.SMTLib.Causal.BoundaryWhitespace` leaf now
+turns finite strict transport-drain bytes into an opaque lexical-content
+receipt. It does not replace the cursor's opaque policy-and-offset boundary:
+the receipt protects the IO transport seam, while the cumulative boundary
+protects pure offset and budget association. Process admits nonempty receipts
+while it can still restore an invalid FIFO snapshot. Driver defers projection
+of the initial adopted predecessor receipt until after its first exact write;
+later completed-epoch drains keep their prior append timing.
+
 ## Domain ownership retained
 
 Protocol and Capability each store the exact shared policy in their validated

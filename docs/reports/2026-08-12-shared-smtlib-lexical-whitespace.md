@@ -15,13 +15,15 @@ framing, parsing, transport, process, or semantic authority.
 
 ## Consumers
 
-The following package-private layers import the lexical owner directly:
+The following package-private layers consume the lexical owner directly or
+through its opaque causal boundary-whitespace receipt:
 
 - bounded response parsing;
 - incremental single-frame parsing;
 - cumulative post-barrier accounting;
 - causal delayed-boundary attribution;
-- the live process's all-or-nothing queued-whitespace drain; and
+- opaque receipt admission used by the live Process's all-or-nothing
+  queued-whitespace drain; and
 - the protocol and readiness-capability fingerprint builders.
 
 Direct imports avoid making the framer a vocabulary re-export hub and prevent
@@ -37,6 +39,11 @@ lookahead and byte charging, cumulative maximum-before-head inspection, FIFO
 transport attribution, and process drain behavior are unchanged. Protocol and
 capability fingerprint fields therefore remain byte-for-byte identical; no
 schema or version changes in this checkpoint.
+
+The later `Internal.SMTLib.Causal.BoundaryWhitespace` leaf consumes this sole
+predicate to mint an opaque receipt. That receipt proves content only. FIFO
+origin, boundedness, restoration, cancellation, deadline, and process
+association remain responsibilities of the concrete transport and Process.
 
 The lexical leaf deliberately has no identity of its own. Any future change to
 the admitted bytes or their canonical order must instead revise every affected

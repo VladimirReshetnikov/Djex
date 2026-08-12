@@ -260,6 +260,7 @@ Library
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Response
     Language.Haskell.Synthesis.Internal.Semantic.Problem
     Language.Haskell.Synthesis.Internal.SMTLib.Causal
+    Language.Haskell.Synthesis.Internal.SMTLib.Causal.BoundaryWhitespace
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream
     Language.Haskell.Synthesis.Internal.SMTLib.Lexical
@@ -365,12 +366,14 @@ Test-Suite synthesis-tests
     synthesis/test
     synthesis/internal
   Other-Modules:
+    SMTLibCausalBoundaryWhitespaceSpec
     SMTLibCausalDriverSpec
     SMTLibCausalStreamSpec
     SMTLibLexicalSpec
     SMTLibStandardResponseSpec
     SMTLibStreamSpec
     Language.Haskell.Synthesis.Internal.SMTLib.Causal
+    Language.Haskell.Synthesis.Internal.SMTLib.Causal.BoundaryWhitespace
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream
     Language.Haskell.Synthesis.Internal.SMTLib.Lexical
@@ -398,6 +401,7 @@ Test-Suite synthesis-length-tests
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Transport
     Language.Haskell.Synthesis.Internal.SMTLib.Causal
+    Language.Haskell.Synthesis.Internal.SMTLib.Causal.BoundaryWhitespace
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream
     Language.Haskell.Synthesis.Internal.SMTLib.Lexical

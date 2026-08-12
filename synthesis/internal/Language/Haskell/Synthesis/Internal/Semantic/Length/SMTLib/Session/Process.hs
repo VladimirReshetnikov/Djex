@@ -203,8 +203,12 @@ import System.Posix.Signals (sigKILL, sigTERM, signalProcessGroup)
 
 import Language.Haskell.Synthesis.Internal.Fingerprint
   ( FingerprintField (..) )
-import Language.Haskell.Synthesis.Internal.SMTLib.Lexical
-  ( isSMTLibWhitespaceByte )
+import Language.Haskell.Synthesis.Internal.SMTLib.Causal.BoundaryWhitespace
+  ( SMTLibCausalBoundaryWhitespace
+  , admitSMTLibCausalBoundaryWhitespace
+  , concatSMTLibCausalBoundaryWhitespace
+  , smtLibCausalBoundaryWhitespaceBytes
+  )
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
   as Z3
 
@@ -1153,14 +1157,16 @@ nextLengthSMTLibProcessStdoutChunk process cancellation deadline = do
 
 -- | Drain output which is causally attributable to the preceding protocol
 -- write but arrived after that receiver completed.  Only SMT-LIB whitespace is
--- admitted.  A non-whitespace chunk is restored in its original FIFO position
--- before the process is poisoned; a queued terminal condition is propagated
--- at its exact position after any preceding whitespace.
+-- admitted into the opaque causal-boundary receipt.  A non-whitespace chunk is
+-- restored in its original FIFO position before the process is poisoned; a
+-- queued terminal condition is propagated at its exact position after any
+-- preceding whitespace.
 drainLengthSMTLibProcessBoundaryWhitespace
   :: LengthSMTLibProcess
   -> LengthSMTLibProcessCancellation
   -> LengthSMTLibProcessDeadline
-  -> IO (Either LengthSMTLibProcessError ByteString)
+  -> IO
+      (Either LengthSMTLibProcessError SMTLibCausalBoundaryWhitespace)
 drainLengthSMTLibProcessBoundaryWhitespace process cancellation deadline = do
   drained <- waitControlled process cancellation deadline
     LengthSMTLibProcessReadyPhase drainQueued
@@ -1181,16 +1187,20 @@ drainLengthSMTLibProcessBoundaryWhitespace process cancellation deadline = do
         event <- readTQueue $ processStdoutQueue process
         takeQueued $ event : reversed
 
-  inspect [] reversedChunks =
-    pure $ Right $ BS.concat $ reverse reversedChunks
-  inspect events@(StdoutChunk bytes : remaining) reversedChunks
-    | BS.all isSMTLibWhitespaceByte bytes =
-        inspect remaining $ bytes : reversedChunks
-    | otherwise = do
+  inspect [] reversedWhitespace = pure $ Right
+    $ concatSMTLibCausalBoundaryWhitespace $ reverse reversedWhitespace
+  inspect events@(StdoutChunk bytes : remaining) reversedWhitespace =
+    case admitSMTLibCausalBoundaryWhitespace bytes of
+      Just whitespace -> inspect remaining $ whitespace : reversedWhitespace
+      Nothing -> do
         -- Restore all prior whitespace too; draining is all-or-nothing when a
         -- non-whitespace chunk is present.
         mapM_ (writeTQueue $ processStdoutQueue process)
-          $ reverse (map StdoutChunk reversedChunks) ++ events
+          $ reverse
+              (map
+                (StdoutChunk . smtLibCausalBoundaryWhitespaceBytes)
+                reversedWhitespace)
+            ++ events
         pure $ Left $ processError LengthSMTLibProcessReadyPhase
           LengthSMTLibProcessUnexpectedPendingStdout Nothing
   inspect (StdoutTerminal failure : _) _ = pure $ Left failure

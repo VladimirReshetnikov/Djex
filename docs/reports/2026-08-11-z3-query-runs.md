@@ -26,6 +26,16 @@ action machine.
 The private Length `...SMTLib.Session.Transport` adapter keeps the exact
 process, cancellation token, and deadline together behind that neutral
 transport seam.
+Its successful queued-boundary drain now returns the opaque
+`Internal.SMTLib.Causal.BoundaryWhitespace` receipt instead of raw bytes.
+Lexical admission proves content; the adapter law still owns finite bounded
+FIFO origin, nonblocking behavior, and all-or-nothing restoration on a
+non-whitespace rejection. Process mints each nonempty receipt inside the STM
+inspection which can still restore the original chunks. For the initial
+adopted predecessor boundary, Driver opens it only after the first exact write
+succeeds, preserving write-before-feed even under bottom-valued receipt
+payloads. Later completed-epoch drains retain their prior
+append-before-next-write timing.
 For both readiness and ordinary queries, Session now takes the driver's final
 transcript cap from the exact sealed plan whose initial action it drives. Query
 run identity-size admission uses that same protocol-plan projection before
@@ -59,6 +69,12 @@ caused by a predecessor but first observed by its successor is retained in a
 separate inherited segment, fed exactly once for protocol charging, and counted
 exactly once in the process stdout delta. This makes whole, split, singleton,
 and delayed output agree independently of pipe chunking.
+
+The receipt changes no transcript byte, process failure, plan field, wire
+command, fingerprint, or schema tag. A final cancellation, deadline, or poison
+check may still discard an already-dequeued successful snapshot and poison the
+Process as before; only explicit non-whitespace rejection promises atomic
+restoration.
 
 ## Lease, ordinals, and barriers
 

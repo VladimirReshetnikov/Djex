@@ -48,6 +48,8 @@ import Test.Tasty.HUnit
   , (@?=)
   )
 import qualified Test.Tasty.QuickCheck as QC
+import SMTLibCausalBoundaryWhitespaceSpec
+  ( smtLibCausalBoundaryWhitespaceTests )
 import SMTLibCausalDriverSpec (smtLibCausalDriverTests)
 import SMTLibCausalStreamSpec (smtLibCausalStreamTests)
 import SMTLibLexicalSpec (smtLibLexicalTests)
@@ -61,6 +63,7 @@ tests :: TestTree
 tests = testGroup "Djex synthesis foundation"
   [ candidateTests
   , semanticObservationTests
+  , smtLibCausalBoundaryWhitespaceTests
   , smtLibCausalDriverTests
   , smtLibCausalStreamTests
   , smtLibLexicalTests

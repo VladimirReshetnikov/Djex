@@ -33,6 +33,11 @@ import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Internal.SMTLib.Causal
   ( SMTLibCausalAction (..) )
+import Language.Haskell.Synthesis.Internal.SMTLib.Causal.BoundaryWhitespace
+  ( SMTLibCausalBoundaryWhitespace
+  , concatSMTLibCausalBoundaryWhitespace
+  , smtLibCausalBoundaryWhitespaceBytes
+  )
 import Language.Haskell.Synthesis.Internal.SMTLib.Lexical
   ( isSMTLibWhitespaceByte )
 
@@ -113,8 +118,9 @@ smtLibCausalTranscriptEpochBytes
 --
 -- * @checkReady@ succeeds only for a live transport with no queued output;
 -- * @drainBoundaryWhitespace@ is a finite, caller-bounded, nonblocking FIFO
---   snapshot which succeeds only with SMT-LIB whitespace, and is all-or-nothing
---   (on encountering other bytes it restores them in order and fails);
+--   snapshot whose successful opaque receipt proves every byte is SMT-LIB
+--   whitespace, and is all-or-nothing (on encountering other bytes it restores
+--   them in order and fails);
 -- * @write@ succeeds only after every exact byte has been written and flushed;
 -- * @nextStdoutChunk@ preserves FIFO order and returns a finite, nonempty,
 --   bounded chunk;
@@ -128,7 +134,9 @@ data SMTLibCausalTransportOps transport transportFailure =
     { smtLibCausalTransportCheckReady
         :: transport -> IO (Either transportFailure ())
     , smtLibCausalTransportDrainBoundaryWhitespace
-        :: transport -> IO (Either transportFailure ByteString)
+        :: transport
+        -> IO
+            (Either transportFailure SMTLibCausalBoundaryWhitespace)
     , smtLibCausalTransportWrite
         :: transport -> ByteString -> IO (Either transportFailure ())
     , smtLibCausalTransportNextStdoutChunk
@@ -175,7 +183,7 @@ driveSMTLibCausalActions initialBoundary cumulativeMaximum
           checked <- smtLibCausalTransportCheckReady transportOps transport
           pure $ case checked of
             Left failure -> Left $ SMTLibCausalTransportFailure failure
-            Right () -> Right BS.empty
+            Right () -> Right $ concatSMTLibCausalBoundaryWhitespace []
         SMTLibCausalAdoptPredecessorWhitespace -> do
           drained <- smtLibCausalTransportDrainBoundaryWhitespace
             transportOps transport
@@ -184,8 +192,9 @@ driveSMTLibCausalActions initialBoundary cumulativeMaximum
             Right whitespace -> Right whitespace
       case admitted of
         Left failure -> pure $ Left failure
-        Right inherited ->
-          issueWrite inherited [] kind bytes receiver inherited
+        Right inheritedReceipt ->
+          issueWriteWithBoundaryReceipt [] kind bytes receiver
+            inheritedReceipt
     _ -> pure $ Left SMTLibCausalInternalFailure
 
   go inherited completed action = case action of
@@ -201,16 +210,30 @@ driveSMTLibCausalActions initialBoundary cumulativeMaximum
     SMTLibCausalComplete outcome ->
       completeAtBoundary inherited completed outcome
 
-  issueWrite inherited completed kind bytes receiver boundaryWhitespace = do
+  issueWrite inherited completed kind bytes receiver boundaryWhitespace =
+    issueWriteWith (const (inherited, boundaryWhitespace))
+      completed kind bytes receiver
+
+  issueWriteWithBoundaryReceipt completed kind bytes receiver
+      boundaryWhitespace =
+    issueWriteWith
+      (\() ->
+        let bytes' = smtLibCausalBoundaryWhitespaceBytes boundaryWhitespace
+        in (bytes', bytes'))
+      completed kind bytes receiver
+
+  issueWriteWith boundaryBytes completed kind bytes receiver = do
     written <- smtLibCausalTransportWrite transportOps transport $ BS.pack bytes
     case written of
       Left failure -> pure $ Left $ SMTLibCausalTransportFailure failure
-      Right () -> case feedBoundary boundaryWhitespace receiver of
-        Left failure -> pure $ Left failure
-        Right prepared -> await inherited completed kind []
-          (not (null completed) ||
-            initialBoundary == SMTLibCausalAdoptPredecessorWhitespace)
-          prepared
+      Right () ->
+        let (inherited, boundaryWhitespace) = boundaryBytes ()
+        in case feedBoundary boundaryWhitespace receiver of
+          Left failure -> pure $ Left failure
+          Right prepared -> await inherited completed kind []
+            (not (null completed) ||
+              initialBoundary == SMTLibCausalAdoptPredecessorWhitespace)
+            prepared
 
   feedBoundary whitespace receiver
     | BS.null whitespace = Right receiver
@@ -284,9 +307,11 @@ driveSMTLibCausalActions initialBoundary cumulativeMaximum
       transportOps transport
     case drained of
       Left failure -> pure $ Left $ SMTLibCausalTransportFailure failure
-      Right bytes -> case appendLatest bytes completed of
-        Nothing -> pure $ Left SMTLibCausalInternalFailure
-        Just completed' -> pure $ Right (retained <> bytes, completed')
+      Right whitespace ->
+        let bytes = smtLibCausalBoundaryWhitespaceBytes whitespace
+        in case appendLatest bytes completed of
+          Nothing -> pure $ Left SMTLibCausalInternalFailure
+          Just completed' -> pure $ Right (retained <> bytes, completed')
 
   appendPredecessor bytes inherited completed
     | BS.null bytes = (inherited, completed)

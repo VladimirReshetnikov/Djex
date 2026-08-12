@@ -139,6 +139,17 @@ segmented transcript length must equal the process owner's observed stdout
 count; a mismatch fails closed. The complete bytes, segmentation policy,
 capability plan, and cumulative limit enter private identity.
 
+Queued boundary drains now cross the transport seam only as opaque
+`SMTLibCausalBoundaryWhitespace` receipts. Process admits each strict chunk
+inside its existing all-or-nothing STM inspection and restores the original
+FIFO chunks before poisoning on a non-whitespace rejection. The receipt proves
+only lexical content; the concrete Length transport continues to own source,
+boundedness, and process/deadline association. For the initial adopted
+predecessor boundary, Driver does not project the receipt until its first exact
+write has completed; later completed-epoch drains preserve their existing
+append timing. This internal type change does not alter capability transcript
+bytes, plan or ready-worker identity, or any schema tag.
+
 The pure cursor owns framing and cumulative classification; the separate
 causal transport driver owns write-before-feed ordering, pipe reads, delayed
 predecessor attribution, and the final transcript assertion. This split changes

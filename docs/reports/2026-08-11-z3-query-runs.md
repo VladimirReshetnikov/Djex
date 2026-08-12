@@ -19,9 +19,12 @@ receiver, or raw transcript accessor is exposed.
 ## Shared causal driver
 
 Readiness and ordinary queries now share
-`...SMTLib.Session.Driver`. The driver owns exact writes, stdout reads,
-incremental machine feeds, EOF precedence, boundary delimiters, and cumulative
-accounting for either pure action machine.
+`Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver`. The generic driver
+owns exact writes, stdout reads, incremental machine feeds, EOF precedence,
+boundary delimiters, and cumulative accounting for either pure action machine.
+The private Length `...SMTLib.Session.Transport` adapter keeps the exact
+process, cancellation token, and deadline together behind that neutral
+transport seam.
 
 Its important ordering rule is:
 

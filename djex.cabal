@@ -255,11 +255,12 @@ Library
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capability
-    Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Driver
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process
+    Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Transport
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Response
     Language.Haskell.Synthesis.Internal.Semantic.Problem
     Language.Haskell.Synthesis.Internal.SMTLib.Causal
+    Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver
     Language.Haskell.Synthesis.Internal.SMTLib.Response
     Language.Haskell.Synthesis.Internal.SMTLib.Stream
     Language.Haskell.Synthesis.Internal.TypedCandidate
@@ -360,9 +361,14 @@ Test-Suite synthesis-tests
     synthesis/test
     synthesis/internal
   Other-Modules:
+    SMTLibCausalDriverSpec
     SMTLibStreamSpec
+    Language.Haskell.Synthesis.Internal.SMTLib.Causal
+    Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver
     Language.Haskell.Synthesis.Internal.SMTLib.Stream
-  Build-Depends:    djex
+  Build-Depends:
+    bytestring >= 0.11 && < 0.13,
+    djex
 
 Test-Suite synthesis-length-tests
   import:           tasty-hunit-test, deepseq-dep, directory-dep
@@ -378,9 +384,10 @@ Test-Suite synthesis-length-tests
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capability
-    Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Driver
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process
+    Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Transport
     Language.Haskell.Synthesis.Internal.SMTLib.Causal
+    Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver
     Language.Haskell.Synthesis.Internal.SMTLib.Stream
     Language.Haskell.Synthesis.Internal.TypedCandidate
   Build-Depends:

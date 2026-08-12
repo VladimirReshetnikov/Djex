@@ -457,16 +457,19 @@ live-query limits. Readiness itself creates no solver observation or evidence.
 The ownership and threat-model details are recorded in the
 [2026-08-11 scoped worker lease report](docs/reports/2026-08-11-z3-worker-lease.md).
 
-The same Session now owns ordinal-bound live queries through the private
-`...Session.Driver`. A masked serial gate allocates zero-based ordinals and two
-HMAC-SHA256 marker roles from the unexposed session seed, checks all markers
-against a bounded lease-wide set, and seals the exact pure protocol plan before
-reservation. The shared causal driver writes before activating each receiver,
-attributes delayed predecessor whitespace exactly once, and requires exact
-stdout-delta and stderr accounting. Every marker, protocol, transport, replay,
-or identity failure after reservation spends the ordinal, cancels the lease,
-and closes the process; plan, capacity, identity-admission, and query-count
-rejections before reservation remain non-mutating.
+The same Session now owns ordinal-bound live queries through the generic private
+`Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver`; its Length-specific
+`...Session.Transport` adapter binds one process, cancellation token, and
+absolute deadline as a single transport handle. A masked serial gate allocates
+zero-based ordinals and two HMAC-SHA256 marker roles from the unexposed session
+seed, checks all markers against a bounded lease-wide set, and seals the exact
+pure protocol plan before reservation. The shared causal driver writes before
+activating each receiver, attributes delayed predecessor whitespace exactly
+once, and requires exact stdout-delta and stderr accounting. Every marker,
+protocol, transport, replay, or identity failure after reservation spends the
+ordinal, cancels the lease, and closes the process; plan, capacity,
+identity-admission, and query-count rejections before reservation remain
+non-mutating.
 
 Successful query runs retain an opaque nominal reversible identity over the
 ready worker, plan, ordinal, spent markers, absolute deadline, exact segmented

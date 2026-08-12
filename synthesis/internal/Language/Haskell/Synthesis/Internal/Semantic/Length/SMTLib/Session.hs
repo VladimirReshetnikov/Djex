@@ -198,19 +198,6 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capabi
   , sealLengthSMTLibCapabilityPlan
   , startLengthSMTLibCapability
   )
-import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Driver
-  ( LengthSMTLibCausalFailure (..)
-  , LengthSMTLibCausalInitialBoundary (..)
-  , LengthSMTLibCausalTranscript
-  , LengthSMTLibCausalTranscriptEpoch
-  , driveLengthSMTLibCausalActions
-  , lengthSMTLibCausalDriverSchemaTag
-  , lengthSMTLibCausalTranscriptByteCount
-  , lengthSMTLibCausalTranscriptEpochBytes
-  , lengthSMTLibCausalTranscriptEpochKind
-  , lengthSMTLibCausalTranscriptEpochs
-  , lengthSMTLibCausalTranscriptInheritedBytes
-  )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process
   ( LengthSMTLibProcess
   , LengthSMTLibProcessCancellation
@@ -239,6 +226,22 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Proces
   , openLengthSMTLibProcess
   , runBeforeLengthSMTLibProcessDeadline
   , waitLengthSMTLibProcessControl
+  )
+import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Transport
+  ( lengthSMTLibCausalTransport
+  , lengthSMTLibCausalTransportOps
+  )
+import Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver
+  ( SMTLibCausalFailure (..)
+  , SMTLibCausalInitialBoundary (..)
+  , SMTLibCausalTranscript
+  , SMTLibCausalTranscriptEpoch
+  , driveSMTLibCausalActions
+  , smtLibCausalTranscriptByteCount
+  , smtLibCausalTranscriptEpochBytes
+  , smtLibCausalTranscriptEpochKind
+  , smtLibCausalTranscriptEpochs
+  , smtLibCausalTranscriptInheritedBytes
   )
 import Language.Haskell.Synthesis.Internal.SMTLib.Stream
   ( smtLibStreamFrameByteLimit
@@ -269,6 +272,13 @@ import Language.Haskell.Synthesis.Semantic.Problem
 lengthSMTLibSessionSchemaTag :: [Word8]
 lengthSMTLibSessionSchemaTag =
   ascii "djex-length-z3-scoped-worker-session/v3"
+
+-- The driver implementation is now domain-neutral, but the historical
+-- Length/Z3 literal remains owned by this identity layer so the abstraction
+-- move cannot change ready-worker or query-run fingerprint bytes.
+lengthSMTLibCausalDriverSchemaTag :: [Word8]
+lengthSMTLibCausalDriverSchemaTag = ascii
+  "djex-length-z3-causal-byte-stream-driver/v1"
 
 lengthSMTLibReadyWorkerSchemaTag :: [Word8]
 lengthSMTLibReadyWorkerSchemaTag =
@@ -1057,7 +1067,7 @@ executePreparedLengthSMTLibQueryRun evaluationLimits worker query deadline
                     Right (stdoutCommitted, stderrCommitted)
                       | stdoutCommitted /= stdoutEnd -> pure $ Left
                           $ LengthSMTLibQueryTranscriptAccountingMismatch
-                              (lengthSMTLibCausalTranscriptByteCount transcript)
+                              (smtLibCausalTranscriptByteCount transcript)
                               (stdoutCommitted -| stdoutStart)
                       | stderrCommitted /= stderrEnd -> pure $ Left
                           $ LengthSMTLibQueryStderrAccountingMismatch
@@ -1077,7 +1087,7 @@ executePreparedLengthSMTLibQueryRun evaluationLimits worker query deadline
                             Right (stdoutFinal, stderrFinal)
                               | stdoutFinal /= stdoutCommitted -> Left
                                   $ LengthSMTLibQueryTranscriptAccountingMismatch
-                                      (lengthSMTLibCausalTranscriptByteCount
+                                      (smtLibCausalTranscriptByteCount
                                         transcript)
                                       (stdoutFinal -| stdoutStart)
                               | stderrFinal /= stderrCommitted -> Left
@@ -1097,32 +1107,34 @@ driveProtocolQuery
       (Either
         LengthSMTLibQueryRunFailure
         ( LengthSMTLibProtocolDecoded identity local
-        , LengthSMTLibCausalTranscript LengthSMTLibProtocolWriteKind
+        , SMTLibCausalTranscript LengthSMTLibProtocolWriteKind
         ))
 driveProtocolQuery worker deadline plan = do
   let LengthSMTLibSessionConfig _ _ _ protocolLimits _ =
         readyWorkerConfig worker
-  driven <- driveLengthSMTLibCausalActions
-    LengthSMTLibCausalAdoptPredecessorWhitespace
+  driven <- driveSMTLibCausalActions
+    SMTLibCausalAdoptPredecessorWhitespace
     (lengthSMTLibProtocolCumulativeStdoutByteLimit protocolLimits)
     feedLengthSMTLibProtocol finishLengthSMTLibProtocol
     LengthSMTLibProtocolUnexpectedPostBarrierByte
-    (readyWorkerProcess worker) (readyWorkerCancellation worker) deadline
+    lengthSMTLibCausalTransportOps
+    (lengthSMTLibCausalTransport
+      (readyWorkerProcess worker) (readyWorkerCancellation worker) deadline)
     $ startLengthSMTLibProtocol plan
   pure $ case driven of
     Left failure -> Left $ mapFailure failure
     Right value -> Right value
  where
   mapFailure failure = case failure of
-    LengthSMTLibCausalProcessFailure processFailure ->
+    SMTLibCausalTransportFailure processFailure ->
       queryProcessFailure processFailure
-    LengthSMTLibCausalMachineFailure protocolFailure ->
+    SMTLibCausalMachineFailure protocolFailure ->
       LengthSMTLibQueryProtocolFailure protocolFailure
-    LengthSMTLibCausalCumulativeOutputByteLimitExceeded maximumBytes observed ->
+    SMTLibCausalCumulativeOutputByteLimitExceeded maximumBytes observed ->
       LengthSMTLibQueryProtocolFailure
         $ LengthSMTLibProtocolCumulativeStdoutByteLimitExceeded
             maximumBytes observed
-    LengthSMTLibCausalInternalFailure -> LengthSMTLibQueryInternalFailure
+    SMTLibCausalInternalFailure -> LengthSMTLibQueryInternalFailure
 
 observeLengthSMTLibQueryBoundary
   :: LengthSMTLibReadyWorker epoch
@@ -1141,7 +1153,7 @@ observeLengthSMTLibQueryBoundary worker deadline = do
       pure $ Right (stdoutCount, stderrCount)
 
 validateLengthSMTLibQueryAccounting
-  :: LengthSMTLibCausalTranscript kind
+  :: SMTLibCausalTranscript kind
   -> Natural
   -> Natural
   -> Natural
@@ -1157,7 +1169,7 @@ validateLengthSMTLibQueryAccounting transcript stdoutStart stdoutEnd
       $ LengthSMTLibQueryStderrAccountingMismatch stderrStart stderrEnd
   | otherwise = Right ()
  where
-  transcriptCount = lengthSMTLibCausalTranscriptByteCount transcript
+  transcriptCount = smtLibCausalTranscriptByteCount transcript
 
 replayLengthSMTLibQuery
   :: LengthEvaluationLimits
@@ -1211,7 +1223,7 @@ buildLengthSMTLibQueryRunIdentity
       (BehavioralEvidence
         FiniteListSpineLengthV1
         ValidatedLengthCounterexample)
-  -> LengthSMTLibCausalTranscript LengthSMTLibProtocolWriteKind
+  -> SMTLibCausalTranscript LengthSMTLibProtocolWriteKind
   -> Natural
   -> Natural
   -> Natural
@@ -1231,7 +1243,7 @@ buildLengthSMTLibQueryRunIdentity worker plan evaluationLimits ordinal deadline
           [queryRunTranscriptField transcript] ++
           queryRunIdentitySuffixFields evaluationLimits decoded evidence
             stdoutStart stdoutEnd stderrStart stderrEnd
-            (lengthSMTLibCausalTranscriptByteCount transcript)
+            (smtLibCausalTranscriptByteCount transcript)
       } of
     Left (FingerprintLimitExceeded fingerprintMaximum observed) -> Left
       $ LengthSMTLibQueryRunIdentityFingerprintByteLimitExceeded
@@ -1328,7 +1340,7 @@ queryRunIdentityPrefixFields worker plan ordinal deadline
   ordinalWord = fromIntegral ordinal
 
 queryRunTranscriptField
-  :: LengthSMTLibCausalTranscript LengthSMTLibProtocolWriteKind
+  :: SMTLibCausalTranscript LengthSMTLibProtocolWriteKind
   -> FingerprintField
 queryRunTranscriptField transcript = tagged "causal-transcript"
   [ FingerprintBytes lengthSMTLibCausalDriverSchemaTag
@@ -1343,17 +1355,17 @@ queryRunTranscriptField transcript = tagged "causal-transcript"
       [FingerprintBytes $ BS.unpack $ causalTranscriptBytes transcript]
   ]
  where
-  inherited = lengthSMTLibCausalTranscriptInheritedBytes transcript
-  epochs = lengthSMTLibCausalTranscriptEpochs transcript
+  inherited = smtLibCausalTranscriptInheritedBytes transcript
+  epochs = smtLibCausalTranscriptEpochs transcript
 
 queryRunTranscriptEpochLayout
-  :: LengthSMTLibCausalTranscriptEpoch LengthSMTLibProtocolWriteKind
+  :: SMTLibCausalTranscriptEpoch LengthSMTLibProtocolWriteKind
   -> FingerprintField
 queryRunTranscriptEpochLayout epoch = tagged "write-epoch"
   [ queryProtocolWriteKindField
-      $ lengthSMTLibCausalTranscriptEpochKind epoch
+      $ smtLibCausalTranscriptEpochKind epoch
   , FingerprintNatural $ byteCountBytes
-      $ lengthSMTLibCausalTranscriptEpochBytes epoch
+      $ smtLibCausalTranscriptEpochBytes epoch
   ]
 
 queryRunIdentitySuffixFields
@@ -1701,7 +1713,7 @@ withLengthSMTLibReadyWorker config use = mask $ \restore -> do
             stdoutCount <- lengthSMTLibProcessObservedStdoutBytes process
             stderrCount <- lengthSMTLibProcessObservedStderrBytes process
             let transcriptBytes =
-                  lengthSMTLibCausalTranscriptByteCount transcript
+                  smtLibCausalTranscriptByteCount transcript
             if transcriptBytes /= stdoutCount
               then finishFailure workspace process
                 $ LengthSMTLibSessionTranscriptAccountingMismatch
@@ -2180,7 +2192,7 @@ probeReadyWorker
       (Either
         LengthSMTLibSessionError
         ( LengthSMTLibCapabilityOutcome epoch
-        , LengthSMTLibCausalTranscript LengthSMTLibCapabilityWriteKind
+        , SMTLibCausalTranscript LengthSMTLibCapabilityWriteKind
         ))
 probeReadyWorker limits process cancellation deadline epoch = do
   let barriers = readinessBarriers epoch
@@ -2205,30 +2217,31 @@ driveCapability
       (Either
         LengthSMTLibSessionError
         ( LengthSMTLibCapabilityOutcome epoch
-        , LengthSMTLibCausalTranscript LengthSMTLibCapabilityWriteKind
+        , SMTLibCausalTranscript LengthSMTLibCapabilityWriteKind
         ))
 driveCapability limits process cancellation deadline action = do
-  driven <- driveLengthSMTLibCausalActions
-    LengthSMTLibCausalRequireEmptyBoundary
+  driven <- driveSMTLibCausalActions
+    SMTLibCausalRequireEmptyBoundary
     (lengthSMTLibCapabilityCumulativeOutputByteLimit limits)
     feedLengthSMTLibCapability finishLengthSMTLibCapability
     LengthSMTLibCapabilityUnexpectedPostBarrierByte
-    process cancellation deadline
+    lengthSMTLibCausalTransportOps
+    (lengthSMTLibCausalTransport process cancellation deadline)
     action
   pure $ case driven of
     Left failure -> Left $ mapFailure failure
     Right value -> Right value
  where
   mapFailure failure = case failure of
-    LengthSMTLibCausalProcessFailure processFailure ->
+    SMTLibCausalTransportFailure processFailure ->
       LengthSMTLibSessionProcessFailure processFailure
-    LengthSMTLibCausalMachineFailure capabilityFailure ->
+    SMTLibCausalMachineFailure capabilityFailure ->
       LengthSMTLibSessionCapabilityFailure capabilityFailure
-    LengthSMTLibCausalCumulativeOutputByteLimitExceeded maximumBytes observed ->
+    SMTLibCausalCumulativeOutputByteLimitExceeded maximumBytes observed ->
       LengthSMTLibSessionCapabilityFailure
         $ LengthSMTLibCapabilityCumulativeOutputByteLimitExceeded
             maximumBytes observed
-    LengthSMTLibCausalInternalFailure ->
+    SMTLibCausalInternalFailure ->
       LengthSMTLibSessionProcessFailure
         $ internalProcessFailure LengthSMTLibProcessInternalFailure
 
@@ -2238,7 +2251,7 @@ buildReadyWorkerIdentity
   -> LengthSMTLibExecutionConfig
   -> LengthSMTLibProcess
   -> LengthSMTLibCapabilityOutcome epoch
-  -> LengthSMTLibCausalTranscript LengthSMTLibCapabilityWriteKind
+  -> SMTLibCausalTranscript LengthSMTLibCapabilityWriteKind
   -> Workspace
   -> Natural
   -> Natural
@@ -2273,9 +2286,9 @@ buildReadyWorkerIdentity
                   "leading-boundary-whitespace-to-preceding-write/v1"
               , tagged "inherited-predecessor-whitespace"
                   [FingerprintBytes $ BS.unpack
-                    $ lengthSMTLibCausalTranscriptInheritedBytes transcript]
+                    $ smtLibCausalTranscriptInheritedBytes transcript]
               , FingerprintSequence $ map capabilityTranscriptEpochField
-                  $ lengthSMTLibCausalTranscriptEpochs transcript
+                  $ smtLibCausalTranscriptEpochs transcript
               ]
           , tagged "session-epoch"
               [ FingerprintBytes lengthSMTLibSessionEpochSchemaTag
@@ -2319,14 +2332,14 @@ protocolLimitsField limits = tagged "live-query-protocol-policy"
   stream = lengthSMTLibProtocolStreamLimits limits
 
 capabilityTranscriptEpochField
-  :: LengthSMTLibCausalTranscriptEpoch LengthSMTLibCapabilityWriteKind
+  :: SMTLibCausalTranscriptEpoch LengthSMTLibCapabilityWriteKind
   -> FingerprintField
 capabilityTranscriptEpochField epoch = tagged "write-epoch"
-  [ capabilityWriteKindField $ lengthSMTLibCausalTranscriptEpochKind epoch
+  [ capabilityWriteKindField $ smtLibCausalTranscriptEpochKind epoch
   , FingerprintBytes $ BS.unpack bytes
   ]
  where
-  bytes = lengthSMTLibCausalTranscriptEpochBytes epoch
+  bytes = smtLibCausalTranscriptEpochBytes epoch
 
 capabilityWriteKindField :: LengthSMTLibCapabilityWriteKind -> FingerprintField
 capabilityWriteKindField kind = FingerprintBytes $ ascii $ case kind of
@@ -2335,11 +2348,11 @@ capabilityWriteKindField kind = FingerprintBytes $ ascii $ case kind of
   LengthSMTLibCapabilityInputValueWrite -> "input-value"
   LengthSMTLibCapabilityReadyWrite -> "ready"
 
-causalTranscriptBytes :: LengthSMTLibCausalTranscript kind -> ByteString
+causalTranscriptBytes :: SMTLibCausalTranscript kind -> ByteString
 causalTranscriptBytes transcript = BS.concat
-  $ lengthSMTLibCausalTranscriptInheritedBytes transcript
-  : map lengthSMTLibCausalTranscriptEpochBytes
-      (lengthSMTLibCausalTranscriptEpochs transcript)
+  $ smtLibCausalTranscriptInheritedBytes transcript
+  : map smtLibCausalTranscriptEpochBytes
+      (smtLibCausalTranscriptEpochs transcript)
 
 workspaceEpoch :: Workspace -> ByteString
 workspaceEpoch (Workspace barrierSeed _ _ _) = barrierSeed

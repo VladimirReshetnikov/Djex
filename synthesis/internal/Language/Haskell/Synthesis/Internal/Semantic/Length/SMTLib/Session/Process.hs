@@ -3,6 +3,11 @@
 
 -- | Private ownership of one raw Length/Z3 subprocess.
 --
+-- Launch admission is supplied by the domain-neutral opaque Z3 execution
+-- profile.  This layer binds only launch and observed-process facts; the live
+-- Session owner separately binds the complete Length execution policy once in
+-- the ready-worker identity.
+--
 -- The executable observation retained here is deliberately a bounded
 -- pre-spawn pathname snapshot.  The original pathname is subsequently passed
 -- to 'proc'.  A concurrent namespace or file-content mutation can therefore
@@ -197,14 +202,7 @@ import System.Posix.Signals (sigKILL, sigTERM, signalProcessGroup)
 #endif
 
 import Language.Haskell.Synthesis.Internal.Fingerprint
-  ( FingerprintField (..)
-  , fingerprintCanonicalBytes
-  )
-import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
-  ( LengthSMTLibExecutionConfig
-  , lengthSMTLibExecutionPolicyFingerprint
-  , lengthSMTLibExecutionZ3Profile
-  )
+  ( FingerprintField (..) )
 import Language.Haskell.Synthesis.Internal.SMTLib.Lexical
   ( isSMTLibWhitespaceByte )
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
@@ -217,7 +215,7 @@ lengthSMTLibExecutableSnapshotStrengthTag = asciiBytes
 
 lengthSMTLibProcessSchemaTag :: ByteString
 lengthSMTLibProcessSchemaTag = asciiBytes
-  "djex-length-z3-raw-process/v1"
+  "djex-length-z3-raw-process/v2"
 
 data LengthSMTLibProcessLimitSource = LengthSMTLibProcessLimitSource
   { lengthSMTLibProcessLimitSourceExecutableBytes :: !Natural
@@ -620,10 +618,10 @@ openLengthSMTLibProcess
   :: LengthSMTLibProcessLimits
   -> LengthSMTLibProcessCancellation
   -> LengthSMTLibProcessDeadline
-  -> LengthSMTLibExecutionConfig
+  -> Z3.Z3SMTLibExecutionProfile
   -> FilePath
   -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
-openLengthSMTLibProcess limits cancellation deadline config workingDirectory =
+openLengthSMTLibProcess limits cancellation deadline profile workingDirectory =
   mask $ \restore -> do
     initial <- checkCancellationDeadline
       LengthSMTLibProcessSnapshotPhase cancellation deadline
@@ -631,7 +629,7 @@ openLengthSMTLibProcess limits cancellation deadline config workingDirectory =
       Left failure -> pure $ Left failure
       Right () -> do
         observed <- restore $ snapshotExecutable limits cancellation deadline
-          config workingDirectory
+          profile workingDirectory
         case observed of
           Left failure -> pure $ Left failure
           Right (snapshot, canonicalWorkingDirectory) -> do
@@ -643,9 +641,8 @@ openLengthSMTLibProcess limits cancellation deadline config workingDirectory =
  where
   spawn snapshot canonicalWorkingDirectory = do
     rollbackStatus <- newEmptyTMVarIO
-    let z3 = lengthSMTLibExecutionZ3Profile config
-        executablePath = Z3.z3SMTLibExecutionExecutablePath z3
-        arguments = Z3.z3SMTLibExecutionConfiguredArgumentVector z3
+    let executablePath = Z3.z3SMTLibExecutionExecutablePath profile
+        arguments = Z3.z3SMTLibExecutionConfiguredArgumentVector profile
         specification = (proc executablePath arguments)
           { cwd = Just canonicalWorkingDirectory
           , env = Z3.z3SMTLibExecutionChildEnvironment
@@ -768,19 +765,19 @@ snapshotExecutable
   :: LengthSMTLibProcessLimits
   -> LengthSMTLibProcessCancellation
   -> LengthSMTLibProcessDeadline
-  -> LengthSMTLibExecutionConfig
+  -> Z3.Z3SMTLibExecutionProfile
   -> FilePath
   -> IO
       (Either
         LengthSMTLibProcessError
         (LengthSMTLibExecutableSnapshot, FilePath))
-snapshotExecutable limits cancellation deadline config workingDirectory = do
+snapshotExecutable limits cancellation deadline profile workingDirectory = do
   cwdResult <- inspectWorkingDirectory cancellation deadline workingDirectory
   case cwdResult of
     Left failure -> pure $ Left failure
     Right canonicalWorkingDirectory -> do
       let executablePath = Z3.z3SMTLibExecutionExecutablePath
-            $ lengthSMTLibExecutionZ3Profile config
+            profile
       canonicalBeforeResult <- tryIOError $ canonicalizePath executablePath
       case canonicalBeforeResult of
         Left _ -> pure $ Left $ processError LengthSMTLibProcessSnapshotPhase
@@ -811,15 +808,14 @@ snapshotExecutable limits cancellation deadline config workingDirectory = do
                       LengthSMTLibProcessExecutableUnavailable Nothing
  where
   finishSnapshot canonicalWorkingDirectory canonical metadata digest count =
-    let expected = BS.pack
-          <$> Z3.z3SMTLibExecutionExpectedExecutableSHA256
-            (lengthSMTLibExecutionZ3Profile config)
+    let expected =
+          BS.pack <$> Z3.z3SMTLibExecutionExpectedExecutableSHA256 profile
     in case expected of
       Just pinned | pinned /= digest -> pure $ Left $ processError
         LengthSMTLibProcessSnapshotPhase
         LengthSMTLibProcessExecutableDigestMismatch Nothing
       _ -> do
-        let field = executableSnapshotField config workingDirectory
+        let field = executableSnapshotField profile workingDirectory
               canonicalWorkingDirectory canonical metadata digest count expected
         pure $ Right
           ( LengthSMTLibExecutableSnapshot digest count field
@@ -1748,7 +1744,7 @@ boundedReadSize chunk maximumBytes observed = fromIntegral $ max 1
       else maximumBytes - observed + 1
 
 executableSnapshotField
-  :: LengthSMTLibExecutionConfig
+  :: Z3.Z3SMTLibExecutionProfile
   -> FilePath
   -> FilePath
   -> FilePath
@@ -1757,14 +1753,12 @@ executableSnapshotField
   -> Natural
   -> Maybe ByteString
   -> FingerprintField
-executableSnapshotField config requestedCwd canonicalCwd canonicalExecutable
+executableSnapshotField profile requestedCwd canonicalCwd canonicalExecutable
     metadata digest count expected = FingerprintTag
   (ascii "pre-spawn-path-executable-snapshot")
   [ FingerprintBytes $ BS.unpack lengthSMTLibExecutableSnapshotStrengthTag
-  , FingerprintBytes $ fingerprintCanonicalBytes
-      $ lengthSMTLibExecutionPolicyFingerprint config
   , FingerprintTag (ascii "requested-executable-path")
-      [textField $ Z3.z3SMTLibExecutionExecutablePath z3]
+      [textField $ Z3.z3SMTLibExecutionExecutablePath profile]
   , FingerprintTag (ascii "canonical-executable-path")
       [textField canonicalExecutable]
   , metadataField metadata
@@ -1775,10 +1769,10 @@ executableSnapshotField config requestedCwd canonicalCwd canonicalExecutable
       Just pinned -> FingerprintTag (ascii "snapshot-pin-matched")
         [FingerprintBytes $ BS.unpack pinned]
   , FingerprintTag (ascii "spawn-path-original-request")
-      [textField $ Z3.z3SMTLibExecutionExecutablePath z3]
+      [textField $ Z3.z3SMTLibExecutionExecutablePath profile]
   , FingerprintTag (ascii "spawn-argv")
       [FingerprintSequence $ map textField
-        $ Z3.z3SMTLibExecutionConfiguredArgumentVector z3]
+        $ Z3.z3SMTLibExecutionConfiguredArgumentVector profile]
   , FingerprintTag (ascii "spawn-empty-environment") []
   , FingerprintTag (ascii "requested-working-directory")
       [textField requestedCwd]
@@ -1792,8 +1786,6 @@ executableSnapshotField config requestedCwd canonicalCwd canonicalExecutable
       , "process-jobs"
       ]
   ]
- where
-  z3 = lengthSMTLibExecutionZ3Profile config
 
 metadataField :: CapturedMetadata -> FingerprintField
 metadataField (CapturedMetadata portable

@@ -48,6 +48,12 @@ path-snapshot-then-direct-spawn/stable-namespace-assumption/v1
 A future stronger backend must use a different tag and identity schema rather
 than aliasing this observation.
 
+The raw Process boundary accepts only the admitted shared Z3 launch profile.
+Its v2 identity binds the launch facts it enforces and observes, but no
+artifact policy, response policy, or complete Length execution key. The live
+Session retains that complete domain policy and binds its key once at the
+ready-worker boundary.
+
 ## Workspace and barrier separation
 
 Each allocation attempt requests 64 bytes from the OS entropy source and splits
@@ -170,7 +176,7 @@ reported rather than falsely claimed complete.
 
 The private nominal ready-worker identity binds:
 
-- the pure execution-policy fingerprint;
+- the complete Length execution-policy fingerprint exactly once;
 - the process limits, exact configured argv and cwd observation, snapshot
   digest/count/strength, and direct-process policy tags;
 - the capability-plan fingerprint and exact segmented transcript;
@@ -178,6 +184,13 @@ The private nominal ready-worker identity binds:
 - the future per-query protocol framing and cumulative limits;
 - the session opener deadline and query-count limit; and
 - stdout/stderr counts at the point-in-time ready commit.
+
+The raw-process schema is v2 and the ready-worker schema is v4. Query-run
+schema does not cascade because it embeds the already-versioned ready-worker
+key as one unchanged association field. Removing the former nested copy of the
+complete execution key shortens ready-worker and transitive query-run keys, so
+a tight custom identity-byte budget can newly admit an otherwise unchanged
+worker or run. No formerly admitted key becomes too large.
 
 The callback receives no process handle or secret-seed accessor, and its
 phantom epoch cannot escape the rank-N scope directly. The package-private,
@@ -195,7 +208,7 @@ only its executable basename. It records argv, environment, cwd, initial cwd
 listing, commands, and output in a test-only sidecar outside the cwd, so the
 production empty-environment and empty-workspace policies remain observable.
 
-The current focused Length suite has 173 passing cases, including the query-run
+The current focused Length suite has 180 passing cases, including the query-run
 successor. Worker-lease cases cover:
 
 - healthy whole, split, singleton, empty-interleaved, and delayed-byte output;

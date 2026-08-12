@@ -140,7 +140,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response` | Pure bounded SMT-LIB 2.x check-status and query-specific input-valuation decoding; syntax remains untrusted and only independent Length replay may create evidence. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` | Package-private incremental reset/check/value transaction planning with exact positional barriers, causal write boundaries, and bounded cumulative stdout; it performs no IO or attestation. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capability` | Package-private four-write readiness probe for print suppression, reset replay, exact `sat`, input valuation, contradictory `unsat`, and positional fresh barriers. |
-| `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process` | Bounded direct-process owner with a pre-spawn executable-file snapshot, exact isolated launch, FIFO stdout framing support, first-byte stderr poison, cancellation/deadlines, and staged cleanup. |
+| `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process` | Bounded direct-process owner which consumes only the admitted shared Z3 launch profile and binds observed launch facts—not the complete Length policy—into a pre-spawn executable-file snapshot, with FIFO stdout framing support, first-byte stderr poison, cancellation/deadlines, and staged cleanup. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal` | Domain-neutral pure write/await/complete action algebra with nominal write-kind, receiver, and outcome associations. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream` | Domain-neutral cumulative framing policy and opaque zero-start cursor, completed-frame, and validated-boundary continuations; it prevents tails, offsets, and budgets from being detached across same-write frames or causal write boundaries. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver` | Domain-neutral causal transport algorithm and exact segmented transcript ownership, with write-before-feed, positional EOF precedence, and delayed-boundary-whitespace attribution. |
@@ -315,7 +315,12 @@ directory file ID or private-ACL proof.
 The process layer hashes and bounds the configured executable pathname before
 direct spawn, checks an optional SHA-256 pin, supplies the exact configured
 argv, empty environment, fresh cwd, and three pipes, then owns all readers and
-writes. This is a capability-probed pre-spawn pathname snapshot under a stable
+writes. It consumes only the shared admitted Z3 launch profile. Its raw v2
+identity retains the facts it enforces and observes—requested and canonical
+paths, metadata, digest and pin result, argv, environment, cwd, process limits,
+deadline, and launch flags—without embedding artifact policy, response policy,
+or a second copy of the complete Length execution key. This is a
+capability-probed pre-spawn pathname snapshot under a stable
 namespace assumption, not executed-image attestation: portable `process`
 cannot execute the already-hashed descriptor, and the digest excludes the
 dynamic loader and shared libraries. Stdout remains FIFO ordered; the first
@@ -332,9 +337,10 @@ fresh reset/replay with contradictory `input = 0` and `input = 1`, `unsat`,
 and a final echo. Every barrier is derived from the unexposed secret seed.
 Write-boundary whitespace is charged once, canonically attributed to the
 preceding write, and must include a delimiter after the final quoted echo.
-The opaque ready-worker identity binds the pure execution key, process
-snapshot strength and policy, capability plan, exact segmented transcript,
-secret-seed commitment, workspace policy/path, and semantic limits. It is
+The opaque v4 ready-worker identity binds the complete Length execution key
+once, then the process launch snapshot and policy, capability plan, exact
+segmented transcript, secret-seed commitment, workspace policy/path, and
+semantic limits. It is
 still not a solver result, proof, pruning authority, or general Z3 feature
 claim. The same Session drives individual query plans through the scoped worker
 and independently replays any model before evidence exists.
@@ -376,6 +382,14 @@ The legacy `lengthSMTLibExecutionArgumentVector` name projects only the fixed
 prefix; a process launcher must use
 `lengthSMTLibExecutionConfiguredArgumentVector` to retain both resource
 arguments.
+
+The package-private Process opener consumes only this profile. The
+ready-worker identity binds one occurrence of the complete Length execution
+key beside the profile-derived raw process observation, rather than embedding
+a second occurrence inside that observation. Removing the former nested
+duplicate deliberately shortens private ready-worker and query-run keys. A
+custom identity-byte budget at the old boundary can therefore newly admit the
+same policy; no previously admitted policy becomes oversized.
 
 Construction productively bounds and checks an absolute Unicode-scalar
 executable path, optionally records an exact 32-byte SHA-256 executable-file

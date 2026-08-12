@@ -475,15 +475,24 @@ spawn has a same-UID namespace race, and neither the loader nor shared
 libraries are measured. Descendant cleanup is best effort after the direct
 child exits.
 
+The raw process owner consumes only the admitted shared Z3 launch profile. Its
+v2 identity binds the path observation, pin result, argv, environment, working
+directory, deadline, process limits, and launch flags which that layer
+enforces; it no longer embeds artifact/response policy or a duplicate complete
+Length execution key. The Session's v4 ready-worker identity contains one
+complete-key occurrence beside the raw process field, rather than another
+copy inside that field.
+
 Readiness requires four causally separated writes and fresh positional echo
 barriers. The probe checks startup print suppression; reset/replay with an
 `input = 0` satisfiable problem; exact input valuation; and a second reset with
 contradictory zero/one assertions producing `unsat`. Delimiter and boundary
 whitespace are charged once and canonically retained with the preceding write,
 including a separately delivered final newline. The ready-worker identity
-binds the pure execution policy, process observation method, exact segmented
-capability transcript, secret-seed commitment, workspace policy, and configured
-live-query limits. Readiness itself creates no solver observation or evidence.
+binds the complete Length execution policy once, the process launch
+observation method, exact segmented capability transcript, secret-seed
+commitment, workspace policy, and configured live-query limits. Readiness
+itself creates no solver observation or evidence.
 The ownership and threat-model details are recorded in the
 [2026-08-11 scoped worker lease report](docs/reports/2026-08-11-z3-worker-lease.md).
 
@@ -552,6 +561,15 @@ emits start-mode options before `set-logic` and uses fixed nonzero random seed
 The legacy `lengthSMTLibExecutionArgumentVector` projection names only the
 fixed prefix; launchers must use
 `lengthSMTLibExecutionConfiguredArgumentVector` for the complete argv.
+
+The raw Process boundary accepts only this shared profile. The scoped Session
+binds the complete Length policy once in its ready-worker identity, next to the
+profile-derived raw process observation. Removing the former nested duplicate
+changes and shortens the private ready-worker key and every query-run key which
+embeds it. This can make a tight custom identity-byte budget newly admit an
+otherwise unchanged worker or run; the versioned identity deliberately treats
+that as an authority/admission improvement rather than padding the removed
+duplicate.
 
 The package-private complete fingerprint binds the protocol schema, complete
 argv, exact startup and reset bytes, every retained execution field, the

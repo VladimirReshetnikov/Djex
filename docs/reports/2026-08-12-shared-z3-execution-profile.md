@@ -72,12 +72,25 @@ digest bytes.
 
 ## Live use
 
-The Length process owner now takes path, digest expectation, configured argv,
-and `Just []` child environment from the shared profile. It still accepts the
-complete Length policy and binds that complete key into the pre-spawn process
-snapshot identity before the requested/canonical path, metadata, observed
-digest, pin result, argv, cwd, and process flags. The authority did not narrow
-to the generic launch slice.
+The Length process owner now accepts only the shared profile. Its raw-process
+v2 identity binds requested and canonical paths, metadata, observed digest and
+byte count, the exact pin result, configured argv, empty environment, requested
+and canonical cwd, process flags, the absolute deadline, and process limits.
+It no longer accepts or embeds the complete Length execution policy.
+
+The live Session retains the complete Length wrapper. Its ready-worker v4
+identity binds the complete policy key once, immediately beside the raw
+process field. Artifact and response policy therefore first enter live
+identity at the Session owner which actually needs the complete domain policy,
+not at the lower launch transport.
+
+The raw-process and ready-worker versions distinguish this representation.
+Query-run schema remains unchanged because it embeds the already-versioned
+ready-worker key. The removed duplicate shortens both ready-worker and
+transitive query-run canonical keys. A custom ready-worker or query-run
+identity-byte budget near the former size can newly admit the same policy;
+no previously admitted value becomes oversized. This is intentional and is
+not hidden with padding or a redundant preflight.
 
 The pure Length protocol and readiness capability use the generic reset and
 startup command bytes. They retain their Length-specific plans, schemas,
@@ -97,9 +110,13 @@ The focused suite now pins:
 - the unchanged protocol-plan fingerprint snapshot;
 - the live five-argument argv, empty environment, fresh cwd, digest pin, and
   pre-spawn rejection behavior; and
+- cancellation and invalid-cwd precedence before launch-profile demand, the
+  raw-process v2 and ready-worker v4 tags, zero complete-policy copies in the
+  raw process field, and exactly one in ready-worker identity; and
 - the downstream absence of path, digest, generic-profile, and reversible-key
   projections.
 
-This checkpoint introduces no public API, Cabal exposed module, Main behavior,
-wire schema, fingerprint schema, file format, solver evidence, or pruning
-authority.
+This successor changes only private raw-process and ready-worker fingerprint
+schemas and their transitive private keys. It introduces no public API, Cabal
+exposed module, Main behavior, SMT-LIB wire schema, file format, solver
+evidence, or pruning authority.

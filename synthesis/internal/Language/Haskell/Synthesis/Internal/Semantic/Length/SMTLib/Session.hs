@@ -162,6 +162,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   , lengthSMTLibExecutionArtifactPolicy
   , lengthSMTLibExecutionHostDeadlineMilliseconds
   , lengthSMTLibExecutionPolicyFingerprint
+  , lengthSMTLibExecutionZ3Profile
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   ( LengthSMTLibProtocolDecoded
@@ -283,7 +284,7 @@ lengthSMTLibCausalDriverSchemaTag = ascii
 
 lengthSMTLibReadyWorkerSchemaTag :: [Word8]
 lengthSMTLibReadyWorkerSchemaTag =
-  ascii "djex-length-z3-capability-probed-ready-worker/v3"
+  ascii "djex-length-z3-capability-probed-ready-worker/v4"
 
 -- | Each exclusive workspace attempt samples independent secret and public
 -- 256-bit halves.  The public half names the directory; readiness barriers are
@@ -1693,7 +1694,8 @@ withLengthSMTLibReadyWorker config use = mask $ \restore -> do
                   { lengthSMTLibSessionWorkspaceCleanupStatus = workspaceCleanup }
             Right () -> do
               opened <- restore (openLengthSMTLibProcess processLimits
-                cancellation deadline execution $ workspacePath workspace)
+                cancellation deadline (lengthSMTLibExecutionZ3Profile execution)
+                $ workspacePath workspace)
                 `onException` protectOpen
               case opened of
                 Left failure -> do

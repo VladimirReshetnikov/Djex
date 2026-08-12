@@ -22,6 +22,7 @@ import Control.Exception
   ( Exception
   , bracket
   , finally
+  , onException
   , throwIO
   , try
   )
@@ -33,7 +34,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import Data.Char (ord)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.List (find)
+import Data.List (find, isPrefixOf, tails)
 import Data.Word (Word8)
 import Numeric.Natural (Natural)
 import System.Directory
@@ -72,6 +73,8 @@ import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Sess
   as Capability
 import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process
   as Process
+import qualified Language.Haskell.Synthesis.Internal.Fingerprint
+  as Fingerprint
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Causal
   as SMTLibCausal
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Stream
@@ -127,9 +130,71 @@ healthyChunkTests = testGroup "exact four-write transcript across chunking"
 
 rawProcessTests :: TestTree
 rawProcessTests = testGroup "raw bounded Process transport"
-  [ testCase "stdout limit preserves prefix before terminal across read chunks"
+  [ testCase "reject cancellation before demanding the launch profile"
+      assertRawProcessCancellationPrecedence
+  , testCase "reject a relative cwd before demanding the launch profile"
+      assertRawProcessWorkingDirectoryPrecedence
+  , testCase "publish a profile-only raw process identity"
+      assertRawProcessProfileIdentity
+  , testCase "stdout limit preserves prefix before terminal across read chunks"
       assertRawProcessStdoutLimitPrefix
   ]
+
+assertRawProcessCancellationPrecedence :: IO ()
+assertRawProcessCancellationPrecedence = do
+  limits <- expectRight $ Process.mkLengthSMTLibProcessLimits
+    Process.defaultLengthSMTLibProcessLimitSource
+  cancellation <- Process.newLengthSMTLibProcessCancellation
+  Process.cancelLengthSMTLibProcess cancellation
+  deadline <- expectRight =<<
+    Process.lengthSMTLibProcessDeadlineAfterMilliseconds 3000
+  opened <- Process.openLengthSMTLibProcess limits cancellation deadline
+    (error "cancelled raw Process demanded its launch profile")
+    (error "cancelled raw Process demanded its working directory")
+  assertRawProcessOpenFailure Process.LengthSMTLibProcessSnapshotPhase
+    Process.LengthSMTLibProcessCancelled opened
+
+assertRawProcessWorkingDirectoryPrecedence :: IO ()
+assertRawProcessWorkingDirectoryPrecedence = do
+  limits <- expectRight $ Process.mkLengthSMTLibProcessLimits
+    Process.defaultLengthSMTLibProcessLimitSource
+  cancellation <- Process.newLengthSMTLibProcessCancellation
+  deadline <- expectRight =<<
+    Process.lengthSMTLibProcessDeadlineAfterMilliseconds 3000
+  opened <- Process.openLengthSMTLibProcess limits cancellation deadline
+    (error "relative cwd rejection demanded the launch profile")
+    "relative-process-working-directory"
+  assertRawProcessOpenFailure
+    Process.LengthSMTLibProcessWorkingDirectoryPhase
+    Process.LengthSMTLibProcessWorkingDirectoryNotAbsolute opened
+
+assertRawProcessProfileIdentity :: IO ()
+assertRawProcessProfileIdentity = withFakeZ3Mode "healthy"
+  $ \executable _ -> withFreshTestDirectory $ \workingDirectory -> do
+    execution <- liveExecutionConfig executable Nothing
+    limits <- expectRight $ Process.mkLengthSMTLibProcessLimits
+      Process.defaultLengthSMTLibProcessLimitSource
+    cancellation <- Process.newLengthSMTLibProcessCancellation
+    deadline <- expectRight =<<
+      Process.lengthSMTLibProcessDeadlineAfterMilliseconds 3000
+    process <- expectRight =<< Process.openLengthSMTLibProcess
+      limits cancellation deadline
+        (Execution.lengthSMTLibExecutionZ3Profile execution)
+        workingDirectory
+    (do
+      Process.lengthSMTLibProcessSchemaTag @?=
+        utf8Bytes "djex-length-z3-raw-process/v2"
+      let completePolicy = Fingerprint.fingerprintCanonicalBytes
+            $ Execution.lengthSMTLibExecutionPolicyFingerprint execution
+      countExactFingerprintBytes completePolicy
+        (Process.lengthSMTLibProcessFingerprintField process) @?= 0)
+      `onException` (Process.closeLengthSMTLibProcess process >> pure ())
+    cleanup <- Process.closeLengthSMTLibProcess process
+    assertBool "profile-only Process cleanup remained incomplete"
+      $ Process.lengthSMTLibProcessCleanupEscalation cleanup /=
+          Process.LengthSMTLibProcessCleanupIncomplete
+    Process.lengthSMTLibProcessCleanupFailureCount cleanup @?= 0
+    Process.lengthSMTLibProcessCleanupReadersStopped cleanup @?= True
 
 assertRawProcessStdoutLimitPrefix :: IO ()
 assertRawProcessStdoutLimitPrefix = do
@@ -147,7 +212,9 @@ assertRawProcessStdoutLimitPrefix = do
         deadline <- expectRight =<<
           Process.lengthSMTLibProcessDeadlineAfterMilliseconds 3000
         process <- expectRight =<< Process.openLengthSMTLibProcess
-          limits cancellation deadline execution workingDirectory
+          limits cancellation deadline
+            (Execution.lengthSMTLibExecutionZ3Profile execution)
+            workingDirectory
         (prefix, terminal) <- collectRawProcessPrefix
           process cancellation deadline
         rejected <- Process.writeLengthSMTLibProcess
@@ -213,6 +280,8 @@ liveSessionTests = testGroup "live Session integration"
       assertLiveStubbornCleanup
   , testCase "enforce executable snapshot byte cap at exact and maximum plus one"
       assertLiveExecutableByteCap
+  , testCase "reject a ready identity at the first byte past its cap"
+      assertLiveReadyIdentityByteCap
   , testCase "distinguish independently opened worker identities"
       assertLiveIdentityFreshness
   , posixWorkspaceReplacementTest
@@ -221,6 +290,7 @@ liveSessionTests = testGroup "live Session integration"
 
 assertLiveHealthyIsolation :: IO ()
 assertLiveHealthyIsolation = withFakeZ3Mode "healthy" $ \executable image -> do
+  execution <- liveExecutionConfig executable Nothing
   config <- liveSessionConfig executable Nothing id id
   scoped <- runReadyWorkerBounded 6000000 config $ \worker -> do
     let workspace = Session.lengthSMTLibReadyWorkerWorkingDirectory worker
@@ -256,6 +326,13 @@ assertLiveHealthyIsolation = withFakeZ3Mode "healthy" $ \executable image -> do
       Session.lengthSMTLibReadyWorkerObservedStdoutBytes worker
     BS.length (Session.lengthSMTLibReadyWorkerCapabilityTranscriptSHA256 worker)
       @?= 32
+    let completePolicy = Fingerprint.fingerprintCanonicalBytes
+          $ Execution.lengthSMTLibExecutionPolicyFingerprint execution
+        readyIdentity = Fingerprint.fingerprintCanonicalBytes
+          $ Session.lengthSMTLibReadyWorkerIdentityFingerprint worker
+    Session.lengthSMTLibReadyWorkerSchemaTag @?=
+      ascii "djex-length-z3-capability-probed-ready-worker/v4"
+    countContiguous completePolicy readyIdentity @?= 1
     pure workspace
   workspace <- expectRight scoped
   retained <- doesPathExist workspace
@@ -420,6 +497,36 @@ assertLiveExecutableByteCap = withFakeZ3Mode "healthy"
     Session.lengthSMTLibSessionProcessCleanupStatus cleanup @?= Nothing
     Session.lengthSMTLibSessionWorkspaceCleanupStatus cleanup @?=
       Session.LengthSMTLibSessionWorkspaceRemoved 0
+
+assertLiveReadyIdentityByteCap :: IO ()
+assertLiveReadyIdentityByteCap = withFakeZ3Mode "healthy"
+  $ \executable _ -> do
+    let maximumBytes = 1
+        withMaximum source = source
+          { Session.lengthSMTLibSessionLimitSourceIdentityFingerprintBytes =
+              maximumBytes }
+    overflowConfig <- liveSessionConfig executable Nothing id withMaximum
+    overflow <- runReadyWorkerBounded 6000000 overflowConfig $ \_ ->
+      assertFailure "maximum-plus-one ready identity reached the callback"
+    case overflow of
+      Left scope -> do
+        Session.lengthSMTLibSessionScopePrimaryError scope @?=
+          Session.LengthSMTLibSessionIdentityFingerprintByteLimitExceeded
+            maximumBytes (maximumBytes + 1)
+        let cleanup = Session.lengthSMTLibSessionScopeCleanupStatus scope
+        case Session.lengthSMTLibSessionProcessCleanupStatus cleanup of
+          Nothing -> assertFailure
+            "ready identity rejection omitted process cleanup"
+          Just processCleanup -> do
+            assertBool "ready identity rejection left process cleanup incomplete"
+              $ Process.lengthSMTLibProcessCleanupEscalation processCleanup /=
+                  Process.LengthSMTLibProcessCleanupIncomplete
+            Process.lengthSMTLibProcessCleanupFailureCount processCleanup @?= 0
+            Process.lengthSMTLibProcessCleanupReadersStopped processCleanup @?=
+              True
+        Session.lengthSMTLibSessionWorkspaceCleanupStatus cleanup @?=
+          Session.LengthSMTLibSessionWorkspaceRemoved 0
+      Right _ -> assertFailure "oversized ready identity was admitted"
 
 assertLiveIdentityFreshness :: IO ()
 assertLiveIdentityFreshness = withFakeZ3Mode "healthy"
@@ -1667,6 +1774,40 @@ replaceAt :: Int -> value -> [value] -> [value]
 replaceAt target replacement values =
   [if index == target then replacement else value
   | (index, value) <- zip [0 ..] values]
+
+countExactFingerprintBytes
+  :: [Word8]
+  -> Fingerprint.FingerprintField
+  -> Int
+countExactFingerprintBytes target field = case field of
+  Fingerprint.FingerprintNatural _ -> 0
+  Fingerprint.FingerprintBytes bytes -> fromEnum $ bytes == target
+  Fingerprint.FingerprintSequence fields ->
+    sum $ map (countExactFingerprintBytes target) fields
+  Fingerprint.FingerprintTag _ fields ->
+    sum $ map (countExactFingerprintBytes target) fields
+  Fingerprint.FingerprintName _ -> 0
+
+countContiguous :: Eq value => [value] -> [value] -> Int
+countContiguous needle haystack
+  | null needle = 0
+  | otherwise = length
+      $ filter (needle `isPrefixOf`)
+      $ tails haystack
+
+assertRawProcessOpenFailure
+  :: Process.LengthSMTLibProcessPhase
+  -> Process.LengthSMTLibProcessFailureClass
+  -> Either Process.LengthSMTLibProcessError Process.LengthSMTLibProcess
+  -> IO ()
+assertRawProcessOpenFailure expectedPhase expectedClass opened = case opened of
+  Left failure -> do
+    Process.lengthSMTLibProcessErrorPhase failure @?= expectedPhase
+    Process.lengthSMTLibProcessErrorClass failure @?= expectedClass
+    Process.lengthSMTLibProcessErrorObservedAtLeast failure @?= Nothing
+  Right process -> do
+    _ <- Process.closeLengthSMTLibProcess process
+    assertFailure "raw Process unexpectedly opened"
 
 minimumCapabilityTranscriptBytes :: Natural
 minimumCapabilityTranscriptBytes = 389

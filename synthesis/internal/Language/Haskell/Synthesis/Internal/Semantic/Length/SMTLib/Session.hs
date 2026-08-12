@@ -507,7 +507,6 @@ data LengthSMTLibQueryRunError = LengthSMTLibQueryRunError
 
 data QueryLeaseMode
   = QueryLeaseAccepting
-  | QueryLeaseExhausted
   | QueryLeaseClosing
   | QueryLeaseSpent
   deriving (Eq)
@@ -792,7 +791,7 @@ runLengthSMTLibReadyWorkerQuery evaluationLimits worker query =
               Left failure -> spendLengthSMTLibQueryWorker worker failure
               Right run -> do
                 committed <- commitLengthSMTLibQueryRun
-                  worker maximumQueries ordinal
+                  worker ordinal
                   (lengthSMTLibQueryRunStdoutEnd run)
                   (lengthSMTLibQueryRunStderrEnd run)
                 if committed
@@ -860,8 +859,6 @@ queryLeaseAdmission maximumQueries
     (QueryLeaseState mode nextOrdinal _ _ _ _) = case mode of
   QueryLeaseClosing -> Left LengthSMTLibQueryWorkerClosing
   QueryLeaseSpent -> Left LengthSMTLibQueryWorkerSpent
-  QueryLeaseExhausted -> Left $ LengthSMTLibQueryLimitExceeded
-    maximumQueries (maximumQueries + 1)
   QueryLeaseAccepting
     | nextOrdinal >= maximumQueries -> Left
         $ LengthSMTLibQueryLimitExceeded maximumQueries (maximumQueries + 1)
@@ -982,9 +979,8 @@ commitLengthSMTLibQueryRun
   -> Natural
   -> Natural
   -> Natural
-  -> Natural
   -> IO Bool
-commitLengthSMTLibQueryRun worker maximumQueries ordinal stdoutEnd stderrEnd =
+commitLengthSMTLibQueryRun worker ordinal stdoutEnd stderrEnd =
   atomically $ do
     QueryLeaseState mode nextOrdinal used inFlight _ _ <-
       readTVar $ readyWorkerQueryState worker
@@ -992,12 +988,8 @@ commitLengthSMTLibQueryRun worker maximumQueries ordinal stdoutEnd stderrEnd =
         mode == QueryLeaseSpent
       then pure False
       else do
-        let committedMode = case mode of
-              QueryLeaseClosing -> QueryLeaseClosing
-              _ | nextOrdinal >= maximumQueries -> QueryLeaseExhausted
-                | otherwise -> QueryLeaseAccepting
         writeTVar (readyWorkerQueryState worker) $ QueryLeaseState
-          committedMode nextOrdinal used Nothing stdoutEnd stderrEnd
+          mode nextOrdinal used Nothing stdoutEnd stderrEnd
         pure True
 
 spendLengthSMTLibQueryWorker
@@ -1782,7 +1774,6 @@ closeQueryAdmission worker = mask $ \_ -> do
       readTVar $ readyWorkerQueryState worker
     let closing = case mode of
           QueryLeaseAccepting -> QueryLeaseClosing
-          QueryLeaseExhausted -> QueryLeaseClosing
           _ -> mode
     writeTVar (readyWorkerQueryState worker)
       $ QueryLeaseState closing ordinal barriers inFlight

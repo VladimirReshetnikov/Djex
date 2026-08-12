@@ -51,7 +51,7 @@ controller's final precedence check.
 
 The lease state retains:
 
-- `Accepting`, `Exhausted`, `Closing`, or `Spent` mode;
+- `Accepting`, `Closing`, or `Spent` mode;
 - the next zero-based ordinal;
 - all four readiness markers and both query-role markers for every reserved
   ordinal;
@@ -68,9 +68,11 @@ query-barrier-schema || role-byte || ordinal-u64be
 Both check and input-value roles are derived, checked against the bounded
 session-wide marker set, and reserved even when the particular branch will not
 request values. Maximum query count is validated against the chosen `Word64`
-ordinal representation. Plan construction, remaining transport capacity, and
-run-identity capacity are checked before reservation. Once reserved, an
-ordinal and both markers are burned on every outcome.
+ordinal representation. Exhaustion is derived from the next ordinal and that
+fixed maximum instead of being stored as a parallel lease mode. Plan
+construction, remaining transport capacity, and run-identity capacity are
+checked before reservation. Once reserved, an ordinal and both markers are
+burned on every outcome.
 
 Callback return changes a healthy lease to `Closing` before it waits for the
 gate. A transaction which already owns the gate may finish, but its commit

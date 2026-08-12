@@ -540,16 +540,15 @@ data LengthSMTLibQueryRun epoch identity local = LengthSMTLibQueryRun
   !Natural
   !Natural
   !Natural
-  !Natural
 
 type role LengthSMTLibQueryRun nominal nominal nominal
 
 instance NFData (LengthSMTLibQueryRun epoch identity local) where
-  rnf (LengthSMTLibQueryRun ordinal decoded evidence identity digest bytes
+  rnf (LengthSMTLibQueryRun ordinal decoded evidence identity digest
       stdoutStart stdoutEnd stderrStart stderrEnd) =
     rnf ordinal `seq` rnf decoded `seq` rnf evidence `seq` rnf identity `seq`
-    rnf digest `seq` rnf bytes `seq` rnf stdoutStart `seq` rnf stdoutEnd `seq`
-    rnf stderrStart `seq` rnf stderrEnd
+    rnf digest `seq` rnf stdoutStart `seq` rnf stdoutEnd `seq` rnf stderrStart
+      `seq` rnf stderrEnd
 
 data LengthSMTLibReadyWorkerIdentitySubject
 
@@ -561,7 +560,6 @@ data LengthSMTLibReadyWorker epoch = LengthSMTLibReadyWorker
       :: !(Fingerprint LengthSMTLibReadyWorkerIdentitySubject)
   , readyWorkerSnapshot :: !LengthSMTLibExecutableSnapshot
   , readyWorkerTranscriptDigest :: !ByteString
-  , readyWorkerTranscriptBytes :: !Natural
   , readyWorkerStdoutAtCommit :: !Natural
   , readyWorkerStderrAtCommit :: !Natural
   , readyWorkerWorkspace :: FilePath
@@ -618,7 +616,10 @@ lengthSMTLibReadyWorkerCapabilityTranscriptSHA256 = readyWorkerTranscriptDigest
 lengthSMTLibReadyWorkerCapabilityTranscriptByteCount
   :: LengthSMTLibReadyWorker epoch
   -> Natural
-lengthSMTLibReadyWorkerCapabilityTranscriptByteCount = readyWorkerTranscriptBytes
+-- Readiness construction admits the worker only after proving the causal
+-- transcript count equals this immutable ready-point stdout boundary.
+lengthSMTLibReadyWorkerCapabilityTranscriptByteCount =
+  readyWorkerStdoutAtCommit
 
 lengthSMTLibReadyWorkerObservedStdoutBytes
   :: LengthSMTLibReadyWorker epoch
@@ -639,20 +640,20 @@ lengthSMTLibQueryRunOrdinal
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunOrdinal
-    (LengthSMTLibQueryRun value _ _ _ _ _ _ _ _ _) = value
+    (LengthSMTLibQueryRun value _ _ _ _ _ _ _ _) = value
 
 lengthSMTLibQueryRunSolverStatus
   :: LengthSMTLibQueryRun epoch identity local
   -> SolverStatus
 lengthSMTLibQueryRunSolverStatus
-    (LengthSMTLibQueryRun _ decoded _ _ _ _ _ _ _ _) =
+    (LengthSMTLibQueryRun _ decoded _ _ _ _ _ _ _) =
   lengthSMTLibProtocolDecodedStatus decoded
 
 lengthSMTLibQueryRunInputValues
   :: LengthSMTLibQueryRun epoch identity local
   -> Maybe [LengthSMTLibIntegerBinding]
 lengthSMTLibQueryRunInputValues
-    (LengthSMTLibQueryRun _ decoded _ _ _ _ _ _ _ _) =
+    (LengthSMTLibQueryRun _ decoded _ _ _ _ _ _ _) =
   lengthSMTLibProtocolDecodedInputValues decoded
 
 lengthSMTLibQueryRunCounterexampleEvidence
@@ -662,13 +663,13 @@ lengthSMTLibQueryRunCounterexampleEvidence
         FiniteListSpineLengthV1
         ValidatedLengthCounterexample)
 lengthSMTLibQueryRunCounterexampleEvidence
-    (LengthSMTLibQueryRun _ _ value _ _ _ _ _ _ _) = value
+    (LengthSMTLibQueryRun _ _ value _ _ _ _ _ _) = value
 
 lengthSMTLibQueryRunIdentityFingerprint
   :: LengthSMTLibQueryRun epoch identity local
   -> Fingerprint LengthSMTLibQueryRunIdentitySubject
 lengthSMTLibQueryRunIdentityFingerprint
-    (LengthSMTLibQueryRun _ _ _ value _ _ _ _ _ _) = value
+    (LengthSMTLibQueryRun _ _ _ value _ _ _ _ _) = value
 
 lengthSMTLibQueryRunIdentityFingerprintField
   :: LengthSMTLibQueryRun epoch identity local
@@ -681,37 +682,41 @@ lengthSMTLibQueryRunTranscriptSHA256
   :: LengthSMTLibQueryRun epoch identity local
   -> ByteString
 lengthSMTLibQueryRunTranscriptSHA256
-    (LengthSMTLibQueryRun _ _ _ _ value _ _ _ _ _) = value
+    (LengthSMTLibQueryRun _ _ _ _ value _ _ _ _) = value
 
 lengthSMTLibQueryRunTranscriptByteCount
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
+-- The private constructor is reached only after exact transcript accounting
+-- proves that these immutable boundaries are ordered and their delta is the
+-- causal transcript count.
 lengthSMTLibQueryRunTranscriptByteCount
-    (LengthSMTLibQueryRun _ _ _ _ _ value _ _ _ _) = value
+    (LengthSMTLibQueryRun _ _ _ _ _ stdoutStart stdoutEnd _ _) =
+      stdoutEnd - stdoutStart
 
 lengthSMTLibQueryRunStdoutStart
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunStdoutStart
-    (LengthSMTLibQueryRun _ _ _ _ _ _ value _ _ _) = value
+    (LengthSMTLibQueryRun _ _ _ _ _ value _ _ _) = value
 
 lengthSMTLibQueryRunStdoutEnd
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunStdoutEnd
-    (LengthSMTLibQueryRun _ _ _ _ _ _ _ value _ _) = value
+    (LengthSMTLibQueryRun _ _ _ _ _ _ value _ _) = value
 
 lengthSMTLibQueryRunStderrStart
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunStderrStart
-    (LengthSMTLibQueryRun _ _ _ _ _ _ _ _ value _) = value
+    (LengthSMTLibQueryRun _ _ _ _ _ _ _ value _) = value
 
 lengthSMTLibQueryRunStderrEnd
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunStderrEnd
-    (LengthSMTLibQueryRun _ _ _ _ _ _ _ _ _ value) = value
+    (LengthSMTLibQueryRun _ _ _ _ _ _ _ _ value) = value
 
 data PreparedLengthSMTLibQueryRun identity local =
   PreparedLengthSMTLibQueryRun
@@ -1091,7 +1096,6 @@ executePreparedLengthSMTLibQueryRun evaluationLimits worker query deadline
                               | otherwise -> Right $ LengthSMTLibQueryRun
                                   ordinal decoded evidence identity
                                   transcriptDigest
-                                  (fromIntegral $ BS.length transcriptBytes)
                                   stdoutStart stdoutFinal
                                   stderrStart stderrFinal
 
@@ -1723,7 +1727,6 @@ withLengthSMTLibReadyWorker config use = mask $ \restore -> do
                       , readyWorkerIdentity = identity
                       , readyWorkerSnapshot = lengthSMTLibProcessSnapshot process
                       , readyWorkerTranscriptDigest = transcriptDigest
-                      , readyWorkerTranscriptBytes = transcriptBytes
                       , readyWorkerStdoutAtCommit = stdoutCount
                       , readyWorkerStderrAtCommit = stderrCount
                       , readyWorkerWorkspace = workspacePath workspace

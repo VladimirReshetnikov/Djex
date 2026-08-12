@@ -138,7 +138,8 @@ The identity binds, in order:
 - independent replay policy, limits, and successful outcome; and
 - start/end stdout and stderr counts plus the final readiness policy.
 
-The transcript SHA-256 and count are convenient projections only; they never
+The retained transcript SHA-256 and the byte count derived from the already
+validated stdout boundaries are convenient projections only; they never
 replace the exact bytes in identity. Because the canonical fingerprint is
 reversible, package consumers can recover the spent markers and bounded
 transcript. The secret seed remains unprojected.

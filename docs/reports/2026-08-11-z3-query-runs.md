@@ -91,10 +91,16 @@ wire representation. The prepared transaction retains only the authoritative
 `Natural` lease ordinal; its `Word64` form is transiently derived at the HMAC
 and run-identity encoding edges rather than cached beside it. Exhaustion is
 derived from the next ordinal and that fixed maximum instead of being stored as
-a parallel lease mode. Plan
-construction, remaining transport capacity, and run-identity capacity are
-checked before reservation. Once reserved, an ordinal and both markers are
-burned on every outcome.
+a parallel lease mode. Plan construction, remaining transport capacity, and
+run-identity capacity are
+checked before reservation. The prepared value contains no process-accounting
+anchors and cannot enter execution. The atomic reservation which burns the
+ordinal and both markers also reads the last-committed stdout and stderr
+anchors from the lease state and mints the private epoch-bound receipt accepted
+by execution and commit. That receipt retains the admitted evaluation limits,
+deadline, exact protocol plan, markers, and anchors; replay projects the exact
+query from the plan instead of accepting a separately pairable value. Once
+reserved, an ordinal and both markers are burned on every outcome.
 
 Callback return changes a healthy lease to `Closing` before it waits for the
 gate. A transaction which already owns the gate may finish, but its commit

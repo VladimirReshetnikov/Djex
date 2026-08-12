@@ -2932,6 +2932,9 @@ smtLibProtocolTests = testGroup
         expectedInitial
       SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes plan @?=
         expectedValue
+      SMTLib.lengthSMTLibQueryFingerprint
+          (SMTLibProtocol.lengthSMTLibProtocolPlanQuery plan) @?=
+        SMTLib.lengthSMTLibQueryFingerprint query
       -- This digest is only a regression snapshot of the collision-free
       -- canonical bytes. It is not used as protocol identity or authority.
       SHA256.hash

@@ -38,6 +38,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   , lengthSMTLibProtocolInitialWriteBytes
   , lengthSMTLibProtocolInputValueWriteBytes
   , lengthSMTLibProtocolPlanFingerprint
+  , lengthSMTLibProtocolPlanQuery
   , lengthSMTLibProtocolPlanCumulativeStdoutByteLimit
   , lengthSMTLibProtocolPlanMinimumStdoutByteCount
   , LengthSMTLibProtocolPhase (..)
@@ -376,6 +377,12 @@ lengthSMTLibProtocolPlanFingerprint
   -> Fingerprint LengthSMTLibProtocolPlanFingerprintSubject
 lengthSMTLibProtocolPlanFingerprint
     (LengthSMTLibProtocolPlan _ _ _ _ _ value) = value
+
+-- | Exact query retained by this sealed protocol plan.
+lengthSMTLibProtocolPlanQuery
+  :: LengthSMTLibProtocolPlan identity local
+  -> LengthSMTLibQuery identity local
+lengthSMTLibProtocolPlanQuery = planQuery
 
 -- | Final causal transcript cap retained by this exact sealed plan.
 lengthSMTLibProtocolPlanCumulativeStdoutByteLimit

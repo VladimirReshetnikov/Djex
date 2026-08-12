@@ -178,6 +178,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   , lengthSMTLibProtocolInputValueWriteBytes
   , lengthSMTLibProtocolPlanCumulativeStdoutByteLimit
   , lengthSMTLibProtocolPlanFingerprint
+  , lengthSMTLibProtocolPlanQuery
   , lengthSMTLibProtocolPlanMinimumStdoutByteCount
   , lengthSMTLibProtocolStreamLimits
   , sealLengthSMTLibProtocolPlan
@@ -726,14 +727,28 @@ lengthSMTLibQueryRunStderrEnd
 lengthSMTLibQueryRunStderrEnd
     (LengthSMTLibQueryRun _ _ _ _ _ _ _ _ value) = value
 
-data PreparedLengthSMTLibQueryRun identity local =
+data PreparedLengthSMTLibQueryRun epoch identity local =
   PreparedLengthSMTLibQueryRun
     !Natural
     !ByteString
     !ByteString
     !(LengthSMTLibProtocolPlan identity local)
+    !LengthEvaluationLimits
+    !LengthSMTLibProcessDeadline
+
+type role PreparedLengthSMTLibQueryRun nominal nominal nominal
+
+-- The last-committed accounting anchors are read from the lease state in the
+-- same STM transaction which burns the ordinal and both marker roles.  Only
+-- this receipt can cross the execution boundary; a merely prepared plan has
+-- no transport-commit anchor.
+data ReservedLengthSMTLibQueryRun epoch identity local =
+  ReservedLengthSMTLibQueryRun
+    !(PreparedLengthSMTLibQueryRun epoch identity local)
     !Natural
     !Natural
+
+type role ReservedLengthSMTLibQueryRun nominal nominal nominal
 
 -- | Execute one serial, ordinal-bound query against a scoped ready worker.
 -- The returned value is a live syntactic observation with independently
@@ -768,9 +783,8 @@ runLengthSMTLibReadyWorkerQuery evaluationLimits worker query =
             (runWithGate restore deadline)
             (atomically $ putTMVar (readyWorkerQueryGate worker) ())
  where
-  LengthSMTLibSessionConfig sessionLimits _ _ _ execution =
+  LengthSMTLibSessionConfig _ _ _ _ execution =
     readyWorkerConfig worker
-  LengthSMTLibSessionLimits _ _ maximumQueries _ _ = sessionLimits
 
   runWithGate restore deadline = do
     prepared <- prepareLengthSMTLibQueryRun
@@ -779,10 +793,8 @@ runLengthSMTLibReadyWorkerQuery evaluationLimits worker query =
       Left (mustSpend, failure)
         | mustSpend -> spendLengthSMTLibQueryWorker worker failure
         | otherwise -> pure $ queryRunLeft failure
-      Right preparation@(PreparedLengthSMTLibQueryRun
-          ordinal checkBarrier valueBarrier _ _ _) -> do
-        reserved <- reserveLengthSMTLibQueryOrdinal
-          worker maximumQueries ordinal checkBarrier valueBarrier
+      Right preparation -> do
+        reserved <- reservePreparedLengthSMTLibQueryRun worker preparation
         case reserved of
           Left LengthSMTLibQueryBarrierCollision ->
             spendLengthSMTLibQueryWorker worker
@@ -791,18 +803,14 @@ runLengthSMTLibReadyWorkerQuery evaluationLimits worker query =
             spendLengthSMTLibQueryWorker worker
               LengthSMTLibQueryInternalFailure
           Left failure -> pure $ queryRunLeft failure
-          Right () -> do
+          Right reservation -> do
             executed <- restore
-              (executePreparedLengthSMTLibQueryRun
-                evaluationLimits worker query deadline preparation)
+              (executeReservedLengthSMTLibQueryRun worker reservation)
               `onException` abandonLengthSMTLibQueryWorker worker
             case executed of
               Left failure -> spendLengthSMTLibQueryWorker worker failure
               Right run -> do
-                committed <- commitLengthSMTLibQueryRun
-                  worker ordinal
-                  (lengthSMTLibQueryRunStdoutEnd run)
-                  (lengthSMTLibQueryRunStderrEnd run)
+                committed <- commitLengthSMTLibQueryRun worker reservation run
                 if committed
                   then pure $ Right run
                   else spendLengthSMTLibQueryWorker worker
@@ -890,9 +898,9 @@ prepareLengthSMTLibQueryRun
   -> IO
       (Either
         (Bool, LengthSMTLibQueryRunFailure)
-        (PreparedLengthSMTLibQueryRun identity local))
+        (PreparedLengthSMTLibQueryRun epoch identity local))
 prepareLengthSMTLibQueryRun evaluationLimits worker query deadline = do
-  state@(QueryLeaseState _ ordinal used inFlight stdoutStart stderrStart) <-
+  state@(QueryLeaseState _ ordinal used inFlight _ _) <-
     atomically $ readTVar $ readyWorkerQueryState worker
   case queryLeaseAdmission maximumQueries state of
     Left failure -> pure $ Left (False, failure)
@@ -908,8 +916,7 @@ prepareLengthSMTLibQueryRun evaluationLimits worker query deadline = do
               LengthSMTLibProcessDeadlineExceeded
           , queryProcessFailure failure
           )
-        Right () -> prepareControlled
-          ordinal used stdoutStart stderrStart
+        Right () -> prepareControlled ordinal used
  where
   LengthSMTLibSessionConfig
       (LengthSMTLibSessionLimits _ _ maximumQueries _ runIdentityLimit)
@@ -917,7 +924,7 @@ prepareLengthSMTLibQueryRun evaluationLimits worker query deadline = do
   process = readyWorkerProcess worker
   transportMaximum = lengthSMTLibProcessStdoutByteLimit processLimits
 
-  prepareControlled ordinal used stdoutStart stderrStart = do
+  prepareControlled ordinal used = do
     let ordinalWord = fromIntegral ordinal
         checkBarrier = deriveQueryBarrier
           (readyWorkerBarrierSeed worker) ordinalWord queryCheckBarrierRole
@@ -954,18 +961,18 @@ prepareLengthSMTLibQueryRun evaluationLimits worker query deadline = do
                   checkBarrier valueBarrier of
                 Left failure -> pure $ Left (False, failure)
                 Right () -> pure $ Right $ PreparedLengthSMTLibQueryRun
-                  ordinal checkBarrier valueBarrier plan
-                  stdoutStart stderrStart
+                  ordinal checkBarrier valueBarrier plan evaluationLimits deadline
 
-reserveLengthSMTLibQueryOrdinal
+reservePreparedLengthSMTLibQueryRun
   :: LengthSMTLibReadyWorker epoch
-  -> Natural
-  -> Natural
-  -> ByteString
-  -> ByteString
-  -> IO (Either LengthSMTLibQueryRunFailure ())
-reserveLengthSMTLibQueryOrdinal worker maximumQueries ordinal
-    checkBarrier valueBarrier = atomically $ do
+  -> PreparedLengthSMTLibQueryRun epoch identity local
+  -> IO
+      (Either
+        LengthSMTLibQueryRunFailure
+        (ReservedLengthSMTLibQueryRun epoch identity local))
+reservePreparedLengthSMTLibQueryRun worker
+    preparation@(PreparedLengthSMTLibQueryRun
+      ordinal checkBarrier valueBarrier _ _ _) = atomically $ do
   state@(QueryLeaseState mode nextOrdinal used inFlight stdoutCount stderrCount) <-
     readTVar $ readyWorkerQueryState worker
   case queryLeaseAdmission maximumQueries state of
@@ -981,25 +988,41 @@ reserveLengthSMTLibQueryOrdinal worker maximumQueries ordinal
             QueryLeaseAccepting (ordinal + 1)
             (Set.insert valueBarrier $ Set.insert checkBarrier used)
             (Just ordinal) stdoutCount stderrCount
-          pure $ Right ()
+          pure $ Right $ ReservedLengthSMTLibQueryRun
+            preparation stdoutCount stderrCount
+ where
+  LengthSMTLibSessionConfig
+      (LengthSMTLibSessionLimits _ _ maximumQueries _ _)
+      _ _ _ _ = readyWorkerConfig worker
 
 commitLengthSMTLibQueryRun
   :: LengthSMTLibReadyWorker epoch
-  -> Natural
-  -> Natural
-  -> Natural
+  -> ReservedLengthSMTLibQueryRun epoch identity local
+  -> LengthSMTLibQueryRun epoch identity local
   -> IO Bool
-commitLengthSMTLibQueryRun worker ordinal stdoutEnd stderrEnd =
+commitLengthSMTLibQueryRun worker
+    (ReservedLengthSMTLibQueryRun
+      (PreparedLengthSMTLibQueryRun ordinal _ _ _ _ _)
+      stdoutStart stderrStart)
+    run =
   atomically $ do
-    QueryLeaseState mode nextOrdinal used inFlight _ _ <-
+    QueryLeaseState mode nextOrdinal used inFlight
+        stateStdoutStart stateStderrStart <-
       readTVar $ readyWorkerQueryState worker
     if inFlight /= Just ordinal || nextOrdinal /= ordinal + 1 ||
-        mode == QueryLeaseSpent
+        mode == QueryLeaseSpent ||
+        stateStdoutStart /= stdoutStart || stateStderrStart /= stderrStart ||
+        lengthSMTLibQueryRunOrdinal run /= ordinal ||
+        lengthSMTLibQueryRunStdoutStart run /= stdoutStart ||
+        lengthSMTLibQueryRunStderrStart run /= stderrStart
       then pure False
       else do
         writeTVar (readyWorkerQueryState worker) $ QueryLeaseState
           mode nextOrdinal used Nothing stdoutEnd stderrEnd
         pure True
+ where
+  stdoutEnd = lengthSMTLibQueryRunStdoutEnd run
+  stderrEnd = lengthSMTLibQueryRunStderrEnd run
 
 spendLengthSMTLibQueryWorker
   :: LengthSMTLibReadyWorker epoch
@@ -1030,19 +1053,19 @@ queryProcessFailure failure
         LengthSMTLibQueryDeadlineFailure failure
   | otherwise = LengthSMTLibQueryProcessFailure failure
 
-executePreparedLengthSMTLibQueryRun
-  :: LengthEvaluationLimits
-  -> LengthSMTLibReadyWorker epoch
-  -> LengthSMTLibQuery identity local
-  -> LengthSMTLibProcessDeadline
-  -> PreparedLengthSMTLibQueryRun identity local
+executeReservedLengthSMTLibQueryRun
+  :: LengthSMTLibReadyWorker epoch
+  -> ReservedLengthSMTLibQueryRun epoch identity local
   -> IO
       (Either
         LengthSMTLibQueryRunFailure
         (LengthSMTLibQueryRun epoch identity local))
-executePreparedLengthSMTLibQueryRun evaluationLimits worker query deadline
-    (PreparedLengthSMTLibQueryRun ordinal checkBarrier valueBarrier
-      plan stdoutStart stderrStart) = do
+executeReservedLengthSMTLibQueryRun worker
+    (ReservedLengthSMTLibQueryRun
+      (PreparedLengthSMTLibQueryRun ordinal checkBarrier valueBarrier plan
+        evaluationLimits deadline)
+      stdoutStart stderrStart) = do
+  let query = lengthSMTLibProtocolPlanQuery plan
   driven <- driveProtocolQuery worker deadline plan
   case driven of
     Left failure -> pure $ Left failure

@@ -233,8 +233,8 @@ data LengthSMTLibCapabilityPlanError
 
 instance NFData LengthSMTLibCapabilityPlanError
 
--- | Opaque association of framing policy, four positional barriers, four
--- exact writes, and a complete reversible plan key.
+-- | Opaque association of framing policy, four positional barriers, their
+-- deterministically rendered exact writes, and a complete reversible plan key.
 data LengthSMTLibCapabilityPlan identity = LengthSMTLibCapabilityPlan
   !SMTLibStreamLimits
   !Natural
@@ -242,21 +242,16 @@ data LengthSMTLibCapabilityPlan identity = LengthSMTLibCapabilityPlan
   !SMTLibEchoSentinel
   !SMTLibEchoSentinel
   !SMTLibEchoSentinel
-  [Word8]
-  [Word8]
-  [Word8]
-  [Word8]
   !(Fingerprint LengthSMTLibCapabilityPlanFingerprintSubject)
 
 type role LengthSMTLibCapabilityPlan nominal
 
 instance NFData (LengthSMTLibCapabilityPlan identity) where
   rnf (LengthSMTLibCapabilityPlan stream cumulative startup check value ready
-      startupWrite checkWrite valueWrite readyWrite fingerprint) =
+      fingerprint) =
     rnf stream `seq` rnf cumulative `seq`
     rnf startup `seq` rnf check `seq` rnf value `seq` rnf ready `seq`
-    rnf startupWrite `seq` rnf checkWrite `seq` rnf valueWrite `seq`
-    rnf readyWrite `seq` rnf fingerprint
+    rnf fingerprint
 
 data LengthSMTLibCapabilityPlanFingerprintSubject
 
@@ -284,63 +279,78 @@ sealLengthSMTLibCapabilityPlan limits rawStartup rawCheck rawValue rawReady = do
     , (LengthSMTLibCapabilityInputValueBarrier, value)
     , (LengthSMTLibCapabilityReadyBarrier, ready)
     ]
-  let startupWrite = lengthSMTLibExecutionStartupCommandBytes ++
-        smtLibEchoSentinelCommandBytes startup
-      checkWrite = lengthSMTLibExecutionQueryResetBytes ++
-        capabilityCanonicalPreambleBytes ++
-        capabilityDeclarationBytes ++
-        capabilityAssertZeroBytes ++
-        capabilityCheckSatisfiableBytes ++
-        smtLibEchoSentinelCommandBytes check
-      valueWrite = capabilityInputValueRequestBytes ++
-        smtLibEchoSentinelCommandBytes value
-      readyWrite = lengthSMTLibExecutionQueryResetBytes ++
-        capabilityCanonicalPreambleBytes ++
-        capabilityDeclarationBytes ++
-        capabilityAssertZeroBytes ++
-        capabilityAssertOneBytes ++
-        capabilityCheckSatisfiableBytes ++
-        smtLibEchoSentinelCommandBytes ready
+  let startupWrite = renderCapabilityStartupWrite startup
+      checkWrite = renderCapabilityCheckWrite check
+      valueWrite = renderCapabilityInputValueWrite value
+      readyWrite = renderCapabilityReadyWrite ready
   fingerprint <- buildCapabilityPlanFingerprint limits
     startup check value ready startupWrite checkWrite valueWrite readyWrite
   pure $ LengthSMTLibCapabilityPlan
     (lengthSMTLibCapabilityStreamLimits limits)
     (lengthSMTLibCapabilityCumulativeOutputByteLimit limits)
-    startup check value ready startupWrite checkWrite valueWrite readyWrite
-    fingerprint
+    startup check value ready fingerprint
  where
   makeBarrier site = first (LengthSMTLibCapabilityBarrierNonceError site)
     . mkSMTLibEchoSentinel
 
+renderCapabilityStartupWrite :: SMTLibEchoSentinel -> [Word8]
+renderCapabilityStartupWrite startup =
+  lengthSMTLibExecutionStartupCommandBytes ++
+  smtLibEchoSentinelCommandBytes startup
+
+renderCapabilityCheckWrite :: SMTLibEchoSentinel -> [Word8]
+renderCapabilityCheckWrite check =
+  lengthSMTLibExecutionQueryResetBytes ++
+  capabilityCanonicalPreambleBytes ++
+  capabilityDeclarationBytes ++
+  capabilityAssertZeroBytes ++
+  capabilityCheckSatisfiableBytes ++
+  smtLibEchoSentinelCommandBytes check
+
+renderCapabilityInputValueWrite :: SMTLibEchoSentinel -> [Word8]
+renderCapabilityInputValueWrite value =
+  capabilityInputValueRequestBytes ++
+  smtLibEchoSentinelCommandBytes value
+
+renderCapabilityReadyWrite :: SMTLibEchoSentinel -> [Word8]
+renderCapabilityReadyWrite ready =
+  lengthSMTLibExecutionQueryResetBytes ++
+  capabilityCanonicalPreambleBytes ++
+  capabilityDeclarationBytes ++
+  capabilityAssertZeroBytes ++
+  capabilityAssertOneBytes ++
+  capabilityCheckSatisfiableBytes ++
+  smtLibEchoSentinelCommandBytes ready
+
 lengthSMTLibCapabilityStartupWriteBytes
   :: LengthSMTLibCapabilityPlan identity
   -> [Word8]
-lengthSMTLibCapabilityStartupWriteBytes
-    (LengthSMTLibCapabilityPlan _ _ _ _ _ _ value _ _ _ _) = value
+lengthSMTLibCapabilityStartupWriteBytes =
+  renderCapabilityStartupWrite . planStartupBarrier
 
 lengthSMTLibCapabilityCheckWriteBytes
   :: LengthSMTLibCapabilityPlan identity
   -> [Word8]
-lengthSMTLibCapabilityCheckWriteBytes
-    (LengthSMTLibCapabilityPlan _ _ _ _ _ _ _ value _ _ _) = value
+lengthSMTLibCapabilityCheckWriteBytes =
+  renderCapabilityCheckWrite . planCheckBarrier
 
 lengthSMTLibCapabilityInputValueWriteBytes
   :: LengthSMTLibCapabilityPlan identity
   -> [Word8]
-lengthSMTLibCapabilityInputValueWriteBytes
-    (LengthSMTLibCapabilityPlan _ _ _ _ _ _ _ _ value _ _) = value
+lengthSMTLibCapabilityInputValueWriteBytes =
+  renderCapabilityInputValueWrite . planValueBarrier
 
 lengthSMTLibCapabilityReadyWriteBytes
   :: LengthSMTLibCapabilityPlan identity
   -> [Word8]
-lengthSMTLibCapabilityReadyWriteBytes
-    (LengthSMTLibCapabilityPlan _ _ _ _ _ _ _ _ _ value _) = value
+lengthSMTLibCapabilityReadyWriteBytes =
+  renderCapabilityReadyWrite . planReadyBarrier
 
 lengthSMTLibCapabilityPlanFingerprint
   :: LengthSMTLibCapabilityPlan identity
   -> Fingerprint LengthSMTLibCapabilityPlanFingerprintSubject
 lengthSMTLibCapabilityPlanFingerprint
-    (LengthSMTLibCapabilityPlan _ _ _ _ _ _ _ _ _ _ value) = value
+    (LengthSMTLibCapabilityPlan _ _ _ _ _ _ value) = value
 
 data LengthSMTLibCapabilityPhase
   = LengthSMTLibCapabilityStartupBarrierPhase
@@ -667,37 +677,37 @@ planStreamLimits
   :: LengthSMTLibCapabilityPlan identity
   -> SMTLibStreamLimits
 planStreamLimits
-    (LengthSMTLibCapabilityPlan value _ _ _ _ _ _ _ _ _ _) = value
+    (LengthSMTLibCapabilityPlan value _ _ _ _ _ _) = value
 
 planCumulativeOutputByteLimit
   :: LengthSMTLibCapabilityPlan identity
   -> Natural
 planCumulativeOutputByteLimit
-    (LengthSMTLibCapabilityPlan _ value _ _ _ _ _ _ _ _ _) = value
+    (LengthSMTLibCapabilityPlan _ value _ _ _ _ _) = value
 
 planStartupBarrier
   :: LengthSMTLibCapabilityPlan identity
   -> SMTLibEchoSentinel
 planStartupBarrier
-    (LengthSMTLibCapabilityPlan _ _ value _ _ _ _ _ _ _ _) = value
+    (LengthSMTLibCapabilityPlan _ _ value _ _ _ _) = value
 
 planCheckBarrier
   :: LengthSMTLibCapabilityPlan identity
   -> SMTLibEchoSentinel
 planCheckBarrier
-    (LengthSMTLibCapabilityPlan _ _ _ value _ _ _ _ _ _ _) = value
+    (LengthSMTLibCapabilityPlan _ _ _ value _ _ _) = value
 
 planValueBarrier
   :: LengthSMTLibCapabilityPlan identity
   -> SMTLibEchoSentinel
 planValueBarrier
-    (LengthSMTLibCapabilityPlan _ _ _ _ value _ _ _ _ _ _) = value
+    (LengthSMTLibCapabilityPlan _ _ _ _ value _ _) = value
 
 planReadyBarrier
   :: LengthSMTLibCapabilityPlan identity
   -> SMTLibEchoSentinel
 planReadyBarrier
-    (LengthSMTLibCapabilityPlan _ _ _ _ _ value _ _ _ _ _) = value
+    (LengthSMTLibCapabilityPlan _ _ _ _ _ value _) = value
 
 validateDistinctBarriers
   :: [(LengthSMTLibCapabilityBarrier, SMTLibEchoSentinel)]

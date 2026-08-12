@@ -114,7 +114,8 @@ smtLibCausalTranscriptEpochBytes
 --   snapshot which succeeds only with SMT-LIB whitespace, and is all-or-nothing
 --   (on encountering other bytes it restores them in order and fails);
 -- * @write@ succeeds only after every exact byte has been written and flushed;
--- * @nextStdoutChunk@ preserves FIFO order and returns a finite bounded chunk;
+-- * @nextStdoutChunk@ preserves FIFO order and returns a finite, nonempty,
+--   bounded chunk;
 -- * the EOF predicate recognizes exactly stdout EOF.
 --
 -- The driver's cumulative maximum is asserted when the machine completes.

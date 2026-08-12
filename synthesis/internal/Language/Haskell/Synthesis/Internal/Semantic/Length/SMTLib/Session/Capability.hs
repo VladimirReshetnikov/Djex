@@ -457,21 +457,23 @@ data LengthSMTLibCapabilityError
 instance NFData LengthSMTLibCapabilityError
 
 -- | Pure completion of the exact readiness transcript.  This is not process
--- evidence and deliberately retains no caller-fed frame bytes.
+-- evidence and retains only the complete sealed plan key, not the plan's
+-- barriers, writes, limits, or caller-fed frame bytes.
 data LengthSMTLibCapabilityOutcome identity =
-  LengthSMTLibCapabilityOutcome !(LengthSMTLibCapabilityPlan identity)
+  LengthSMTLibCapabilityOutcome
+    !(Fingerprint LengthSMTLibCapabilityPlanFingerprintSubject)
 
 type role LengthSMTLibCapabilityOutcome nominal
 
 instance NFData (LengthSMTLibCapabilityOutcome identity) where
-  rnf (LengthSMTLibCapabilityOutcome plan) = rnf plan
+  rnf (LengthSMTLibCapabilityOutcome fingerprint) = rnf fingerprint
 
 lengthSMTLibCapabilityOutcomePlanFingerprint
   :: LengthSMTLibCapabilityOutcome identity
   -> Fingerprint LengthSMTLibCapabilityPlanFingerprintSubject
 lengthSMTLibCapabilityOutcomePlanFingerprint
-    (LengthSMTLibCapabilityOutcome plan) =
-  lengthSMTLibCapabilityPlanFingerprint plan
+    (LengthSMTLibCapabilityOutcome fingerprint) =
+  fingerprint
 
 handleFrame
   :: LengthSMTLibCapabilityReceiver identity
@@ -529,7 +531,8 @@ handleFrame receiver consumed frame tailBytes = case receiverPhase receiver of
       LengthSMTLibCapabilityReadyBarrier
       (planReadyBarrier plan)
       (const $ SMTLibCausalComplete
-        $ LengthSMTLibCapabilityOutcome plan)
+        $ LengthSMTLibCapabilityOutcome
+        $ lengthSMTLibCapabilityPlanFingerprint plan)
  where
   plan = receiverPlan receiver
   crossBarrier site barrier next

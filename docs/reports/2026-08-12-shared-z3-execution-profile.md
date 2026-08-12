@@ -72,11 +72,14 @@ digest bytes.
 
 ## Live use
 
-The Length process owner now accepts only the shared profile. Its raw-process
-v2 identity binds requested and canonical paths, metadata, observed digest and
-byte count, the exact pin result, configured argv, empty environment, requested
-and canonical cwd, process flags, the absolute deadline, and process limits.
-It no longer accepts or embeds the complete Length execution policy.
+The shared raw Z3 process owner now accepts only the shared profile. It binds
+requested and canonical paths, metadata, observed digest and byte count, the
+exact pin result, configured argv, empty environment, requested and canonical
+cwd, process flags, the absolute deadline, and process limits to one opaque
+runtime. Its schema-free observation slice excludes the strict limits retained
+alongside it. It owns no domain identity schema. The Length Process facade
+seals both associated field groups under the raw-process v2 root without
+accepting or embedding the complete Length execution policy.
 
 The live Session retains the complete Length wrapper. Its ready-worker v4
 identity binds the complete policy key once, immediately beside the raw

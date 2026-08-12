@@ -474,13 +474,15 @@ inode, owner, mode, and canonical path; cleanup never traverses contents and
 attempts only identity-checked empty-directory removal. The portable Windows
 fallback explicitly claims only repeated pathname observations.
 
-The process owner bounds a pre-spawn SHA-256 observation of the configured
-executable file, compares an optional pin, owns separate stdout/stderr pipes,
-poisons on the first stderr byte, and continues draining a finite stderr flood
-so cleanup cannot deadlock. FIFO stdout, absolute monotonic deadlines,
-cancellation, isolated writes, staged direct-child shutdown, and idempotent
-cleanup are all retained in private policy identity. Shutdown uses bounded
-nonblocking exit polling, so it also progresses in a non-threaded runtime.
+The shared package-private
+`Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process` owner bounds a
+pre-spawn SHA-256 observation of the configured executable file, compares an
+optional pin, owns separate stdout/stderr pipes, poisons on the first stderr
+byte, and continues draining a finite stderr flood so cleanup cannot deadlock.
+FIFO stdout, absolute monotonic deadlines, cancellation, isolated writes,
+staged direct-child shutdown, and idempotent cleanup remain associated with
+that one opaque runtime. Shutdown uses bounded nonblocking exit polling, so it
+also progresses in a non-threaded runtime.
 Every successful stdout queue event carries the opaque nonempty-chunk receipt;
 an empty OS read remains EOF, while a nonempty permitted prefix still precedes
 the maximum-plus-one terminal event in the same FIFO transaction.
@@ -489,13 +491,18 @@ spawn has a same-UID namespace race, and neither the loader nor shared
 libraries are measured. Descendant cleanup is best effort after the direct
 child exits.
 
-The raw process owner consumes only the admitted shared Z3 launch profile. Its
-v2 identity binds the path observation, pin result, argv, environment, working
-directory, deadline, process limits, and launch flags which that layer
-enforces; it no longer embeds artifact/response policy or a duplicate complete
-Length execution key. The Session's v4 ready-worker identity contains one
-complete-key occurrence beside the raw process field, rather than another
-copy inside that field.
+The raw process owner consumes only the admitted shared Z3 launch profile and
+retains a schema-free ordered observation. The existing Length
+`...Session.Process` facade maps the generic sanitized failures exhaustively
+and seals that associated observation and its exact limits under the unchanged
+v2 Length root. The resulting identity binds the path observation, pin result,
+argv, environment, working directory, deadline, process limits, and launch
+flags, but no artifact/response policy or duplicate complete Length execution
+key. The Session's v4 ready-worker identity contains one complete-key
+occurrence beside the raw process field, rather than another copy inside that
+field.
+The extraction is detailed in the
+[shared raw Z3 process report](docs/reports/2026-08-12-shared-z3-process-runtime.md).
 
 Readiness requires four causally separated writes and fresh positional echo
 barriers. The probe checks startup print suppression; reset/replay with an
@@ -578,14 +585,16 @@ The legacy `lengthSMTLibExecutionArgumentVector` projection names only the
 fixed prefix; launchers must use
 `lengthSMTLibExecutionConfiguredArgumentVector` for the complete argv.
 
-The raw Process boundary accepts only this shared profile. The scoped Session
-binds the complete Length policy once in its ready-worker identity, next to the
-profile-derived raw process observation. Removing the former nested duplicate
-changes and shortens the private ready-worker key and every query-run key which
-embeds it. This can make a tight custom identity-byte budget newly admit an
-otherwise unchanged worker or run; the versioned identity deliberately treats
-that as an authority/admission improvement rather than padding the removed
-duplicate.
+The shared raw Z3 Process boundary accepts only this profile and owns no
+domain schema, fingerprint root, or fingerprint budget. The Length Process
+facade seals its associated launch observation without rebuilding the IO
+runtime, and the scoped Session binds the complete Length policy once in its
+ready-worker identity next to that raw process field. Removing the former
+nested duplicate changes and shortens the private ready-worker key and every
+query-run key which embeds it. This can make a tight custom identity-byte
+budget newly admit an otherwise unchanged worker or run; the versioned
+identity deliberately treats that as an authority/admission improvement rather
+than padding the removed duplicate.
 
 The package-private complete fingerprint binds the protocol schema, complete
 argv, exact startup and reset bytes, every retained execution field, the

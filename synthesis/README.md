@@ -140,7 +140,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response` | Pure bounded SMT-LIB 2.x check-status and query-specific input-valuation decoding; syntax remains untrusted and only independent Length replay may create evidence. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` | Package-private incremental reset/check/value transaction planning with exact positional barriers, causal write boundaries, and bounded cumulative stdout; it performs no IO or attestation. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capability` | Package-private four-write readiness probe for print suppression, reset replay, exact `sat`, input valuation, contradictory `unsat`, and positional fresh barriers. |
-| `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process` | Bounded direct-process owner which consumes only the admitted shared Z3 launch profile and binds observed launch facts—not the complete Length policy—into a pre-spawn executable-file snapshot, with FIFO stdout framing support, first-byte stderr poison, cancellation/deadlines, and staged cleanup. |
+| `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process` | Length compatibility and identity facade which exhaustively maps the shared runtime's sanitized vocabulary and seals its associated observation and limits under the unchanged raw-process v2 root. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal` | Domain-neutral pure write/await/complete action algebra with nominal write-kind, receiver, and outcome associations. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal.BoundaryWhitespace` | Opaque content proof for finite strict SMT-LIB boundary whitespace, with lexical admission and safe FIFO-chunk concatenation but no transport-origin or schema authority. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal.StdoutChunk` | Opaque proof that one strict causal-transport stdout chunk is nonempty, without FIFO-origin, configured-bound, process-association, or schema authority. |
@@ -149,6 +149,8 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Internal.SMTLib.Lexical` | Schema-free owner of the exact SMT-LIB whitespace predicate and canonical `[HT, LF, CR, SP]` fingerprint order shared by parsing, framing, causal accounting, boundary draining, and domain plans. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Response` | Domain-neutral bounded SMT-LIB response lexer and S-expression parser with productive total, depth, node, token, and numeral limits. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Response.Standard` | Canonical solver-status bytes, bounded standard check-response decoding, and shared `unsupported`/solver-error classification without process or semantic authority. |
+| `Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution` | Domain-neutral admitted Z3 launch profile, mechanical startup/reset facts, configured argv, and flat launch fingerprint-field slice without process or domain-schema authority. |
+| `Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process` | Domain-neutral opaque direct-process runtime owning pre-spawn observation, pipes, FIFO events, cancellation/deadlines, and bounded cleanup while exposing only associated schema-free observation and limit fields to a domain facade. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Transport` | Length/Z3 adapter which binds one process, cancellation token, and absolute deadline behind the generic causal driver operations. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session` | Rank-N scoped ownership of one capability-probed worker, with secret/public entropy separation, a fresh fd-observed workspace, exact segmented probe transcript, and no public process handle. |
 | `Language.Haskell.Synthesis.Semantic.Observation` | Raw three-valued solver and four-valued behavioral reports without candidate association or evidence claims. |
@@ -324,11 +326,14 @@ empty-directory removal. Windows uses the explicitly weaker portable
 pathname-observation policy because the current dependencies expose no stable
 directory file ID or private-ACL proof.
 
-The process layer hashes and bounds the configured executable pathname before
-direct spawn, checks an optional SHA-256 pin, supplies the exact configured
-argv, empty environment, fresh cwd, and three pipes, then owns all readers and
-writes. It consumes only the shared admitted Z3 launch profile. Its raw v2
-identity retains the facts it enforces and observes—requested and canonical
+The shared `Internal.SMTLib.Z3.Process` layer hashes and bounds the configured
+executable pathname before direct spawn, checks an optional SHA-256 pin,
+supplies the exact configured argv, empty environment, fresh cwd, and three
+pipes, then owns all readers and writes. It consumes only the shared admitted
+Z3 launch profile and retains the exact observation and limits with that opaque
+runtime. The Length `Session.Process` facade maps its closed failures and seals
+those associated schema-free fields under the raw v2 identity. That identity
+retains the facts the runtime enforces and observes—requested and canonical
 paths, metadata, digest and pin result, argv, environment, cwd, process limits,
 deadline, and launch flags—without embedding artifact policy, response policy,
 or a second copy of the complete Length execution key. This is a
@@ -399,13 +404,14 @@ prefix; a process launcher must use
 `lengthSMTLibExecutionConfiguredArgumentVector` to retain both resource
 arguments.
 
-The package-private Process opener consumes only this profile. The
-ready-worker identity binds one occurrence of the complete Length execution
-key beside the profile-derived raw process observation, rather than embedding
-a second occurrence inside that observation. Removing the former nested
-duplicate deliberately shortens private ready-worker and query-run keys. A
-custom identity-byte budget at the old boundary can therefore newly admit the
-same policy; no previously admitted policy becomes oversized.
+The package-private shared Process opener consumes only this profile and owns
+no domain identity schema. The Length facade seals its exact associated
+observation, and ready-worker identity binds one occurrence of the complete
+Length execution key beside that raw process field rather than embedding a
+second occurrence inside it. Removing the former nested duplicate deliberately
+shortens private ready-worker and query-run keys. A custom identity-byte budget
+at the old boundary can therefore newly admit the same policy; no previously
+admitted policy becomes oversized.
 
 Construction productively bounds and checks an absolute Unicode-scalar
 executable path, optionally records an exact 32-byte SHA-256 executable-file

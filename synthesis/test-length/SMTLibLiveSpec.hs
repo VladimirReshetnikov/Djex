@@ -132,9 +132,9 @@ healthyChunkTests = testGroup "exact four-write transcript across chunking"
 
 rawProcessTests :: TestTree
 rawProcessTests = testGroup "raw bounded Process transport"
-  [ testCase "reject cancellation before demanding the launch profile"
+  [ testCase "reject cancellation before demanding runtime inputs"
       assertRawProcessCancellationPrecedence
-  , testCase "reject a relative cwd before demanding the launch profile"
+  , testCase "reject a relative cwd before demanding limits or launch profile"
       assertRawProcessWorkingDirectoryPrecedence
   , testCase "publish a profile-only raw process identity"
       assertRawProcessProfileIdentity
@@ -144,13 +144,13 @@ rawProcessTests = testGroup "raw bounded Process transport"
 
 assertRawProcessCancellationPrecedence :: IO ()
 assertRawProcessCancellationPrecedence = do
-  limits <- expectRight $ Process.mkLengthSMTLibProcessLimits
-    Process.defaultLengthSMTLibProcessLimitSource
   cancellation <- Process.newLengthSMTLibProcessCancellation
   Process.cancelLengthSMTLibProcess cancellation
   deadline <- expectRight =<<
     Process.lengthSMTLibProcessDeadlineAfterMilliseconds 3000
-  opened <- Process.openLengthSMTLibProcess limits cancellation deadline
+  opened <- Process.openLengthSMTLibProcess
+    (error "cancelled raw Process demanded its limits")
+    cancellation deadline
     (error "cancelled raw Process demanded its launch profile")
     (error "cancelled raw Process demanded its working directory")
   assertRawProcessOpenFailure Process.LengthSMTLibProcessSnapshotPhase
@@ -158,12 +158,12 @@ assertRawProcessCancellationPrecedence = do
 
 assertRawProcessWorkingDirectoryPrecedence :: IO ()
 assertRawProcessWorkingDirectoryPrecedence = do
-  limits <- expectRight $ Process.mkLengthSMTLibProcessLimits
-    Process.defaultLengthSMTLibProcessLimitSource
   cancellation <- Process.newLengthSMTLibProcessCancellation
   deadline <- expectRight =<<
     Process.lengthSMTLibProcessDeadlineAfterMilliseconds 3000
-  opened <- Process.openLengthSMTLibProcess limits cancellation deadline
+  opened <- Process.openLengthSMTLibProcess
+    (error "relative cwd rejection demanded the process limits")
+    cancellation deadline
     (error "relative cwd rejection demanded the launch profile")
     "relative-process-working-directory"
   assertRawProcessOpenFailure
@@ -186,10 +186,24 @@ assertRawProcessProfileIdentity = withFakeZ3Mode "healthy"
     (do
       Process.lengthSMTLibProcessSchemaTag @?=
         utf8Bytes "djex-length-z3-raw-process/v2"
-      let completePolicy = Fingerprint.fingerprintCanonicalBytes
+      let rawIdentity = Process.lengthSMTLibProcessFingerprintField process
+          completePolicy = Fingerprint.fingerprintCanonicalBytes
             $ Execution.lengthSMTLibExecutionPolicyFingerprint execution
-      countExactFingerprintBytes completePolicy
-        (Process.lengthSMTLibProcessFingerprintField process) @?= 0)
+      countExactFingerprintBytes completePolicy rawIdentity @?= 0
+      case rawIdentity of
+        Fingerprint.FingerprintTag root fields -> do
+          root @?= ascii "length-z3-launched-transport"
+          length fields @?= 17
+          case fields of
+            Fingerprint.FingerprintBytes schema : snapshot : remaining -> do
+              schema @?= BS.unpack Process.lengthSMTLibProcessSchemaTag
+              snapshot @?=
+                Process.lengthSMTLibExecutableSnapshotFingerprintField
+                  (Process.lengthSMTLibProcessSnapshot process)
+              last remaining @?=
+                Process.lengthSMTLibProcessLimitsFingerprintField limits
+            _ -> assertFailure "raw process identity lost its schema prefix"
+        _ -> assertFailure "raw process identity lost its Length root")
       `onException` (Process.closeLengthSMTLibProcess process >> pure ())
     cleanup <- Process.closeLengthSMTLibProcess process
     assertBool "profile-only Process cleanup remained incomplete"

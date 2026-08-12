@@ -1,33 +1,9 @@
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE CPP #-}
-
--- | Private ownership of one raw Length/Z3 subprocess.
+-- | Length compatibility and identity facade for the shared raw Z3 process.
 --
--- Launch admission is supplied by the domain-neutral opaque Z3 execution
--- profile.  This layer binds only launch and observed-process facts; the live
--- Session owner separately binds the complete Length execution policy once in
--- the ready-worker identity.
---
--- The executable observation retained here is deliberately a bounded
--- pre-spawn pathname snapshot.  The original pathname is subsequently passed
--- to 'proc'.  A concurrent namespace or file-content mutation can therefore
--- make the executed file differ from the snapshot.  Neither the SHA-256 value
--- nor a successful pin comparison is executed-image attestation.
---
--- The owner keeps stdout and stderr separate.  Stdout is the only stream a
--- protocol layer may consume; the first observed stderr byte poisons the whole
--- process.  Stdout is charged before enqueueing, so its queue is bounded by the
--- session limit rather than consumer speed. Every queued stdout chunk carries
--- an opaque proof that it is nonempty, so a successful generic read cannot
--- report zero progress. After stderr poison, strict chunks are discarded to
--- keep finite floods from retaining the child; its retained count saturates at
--- the configured maximum plus one.
---
--- Cleanup owns and reaps the direct child.  Process-group signalling is
--- best-effort only while that leader has not been observed reaped.  This
--- portable implementation cannot census descendants or prove ownership of a
--- numeric process-group identifier after leader exit, so it makes no claim
--- that detached or surviving descendants have been killed.
+-- The domain-neutral runtime owns subprocess allocation, bounded pipe IO,
+-- cancellation, deadlines, and cleanup.  This facade preserves the existing
+-- Length-specific sanitized vocabulary and is the sole owner of the raw
+-- Length process schema, fingerprint root, and process-limit wrapper tag.
 module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process
   ( lengthSMTLibExecutableSnapshotStrengthTag
   , lengthSMTLibProcessSchemaTag
@@ -75,153 +51,29 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Proces
   , closeLengthSMTLibProcess
   ) where
 
-import Control.Concurrent
-  ( ThreadId
-  , forkIO
-  , forkIOWithUnmask
-  , killThread
-  , threadDelay
-  )
-import Control.Concurrent.MVar
-  ( MVar
-  , modifyMVar
-  , modifyMVar_
-  , newEmptyMVar
-  , newMVar
-  , putMVar
-  , readMVar
-  , takeMVar
-  )
-import Control.Concurrent.STM
-  ( STM
-  , TMVar
-  , TQueue
-  , TVar
-  , atomically
-  , isEmptyTQueue
-  , modifyTVar'
-  , newEmptyTMVarIO
-  , newTQueueIO
-  , newTMVarIO
-  , newTVarIO
-  , orElse
-  , peekTQueue
-  , putTMVar
-  , readTQueue
-  , readTMVar
-  , readTVar
-  , retry
-  , takeTMVar
-  , tryPutTMVar
-  , tryReadTMVar
-  , writeTQueue
-  , writeTVar
-  )
-import Control.Exception
-  ( SomeException
-  , evaluate
-  , finally
-  , mask
-  , mask_
-  , onException
-  , try
-  )
-import Control.Monad (void, when)
-import qualified Crypto.Hash.SHA256 as SHA256
+import Control.Concurrent.STM (STM)
+import Control.Exception (mask, mask_)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Char (ord)
 import Data.Word (Word8, Word64)
-import GHC.Clock (getMonotonicTimeNSec)
 import Numeric.Natural (Natural)
-import System.Directory
-  ( canonicalizePath
-  , doesDirectoryExist
-  , doesFileExist
-  , doesPathExist
-  , executable
-  , getFileSize
-  , getModificationTime
-  , getPermissions
-  , readable
-  , searchable
-  , writable
-  )
 import System.Exit (ExitCode)
-import System.FilePath (isAbsolute)
-import System.IO
-  ( BufferMode (NoBuffering)
-  , Handle
-  , IOMode (ReadMode)
-  , hClose
-  , hFlush
-  , hSetBinaryMode
-  , hSetBuffering
-  , withBinaryFile
-  )
-import System.IO.Error (tryIOError)
-import System.Process
-  ( CreateProcess
-      ( close_fds
-      , create_group
-      , cwd
-      , delegate_ctlc
-      , env
-      , std_err
-      , std_in
-      , std_out
-      , use_process_jobs
-      )
-  , ProcessHandle
-  , StdStream (CreatePipe)
-  , createProcess
-  , getPid
-  , getProcessExitCode
-  , proc
-  , terminateProcess
-  )
-#ifdef mingw32_HOST_OS
-import System.Directory (listDirectory)
-import System.Process (interruptProcessGroupOf)
-#endif
-import System.Timeout (timeout)
-
-#ifndef mingw32_HOST_OS
-import Control.Exception (bracket)
-import qualified System.Posix.Directory as PosixDirectory
-import System.Posix.Files
-  ( deviceID
-  , fileID
-  , fileMode
-  , fileSize
-  , getFileStatus
-  , isRegularFile
-  , linkCount
-  , modificationTime
-  , statusChangeTime
-  )
-import System.Posix.Signals (sigKILL, sigTERM, signalProcessGroup)
-#endif
 
 import Language.Haskell.Synthesis.Internal.Fingerprint
   ( FingerprintField (..) )
 import Language.Haskell.Synthesis.Internal.SMTLib.Causal.BoundaryWhitespace
-  ( SMTLibCausalBoundaryWhitespace
-  , admitSMTLibCausalBoundaryWhitespace
-  , concatSMTLibCausalBoundaryWhitespace
-  )
+  ( SMTLibCausalBoundaryWhitespace )
 import Language.Haskell.Synthesis.Internal.SMTLib.Causal.StdoutChunk
-  ( SMTLibCausalStdoutChunk
-  , admitSMTLibCausalStdoutChunk
-  , smtLibCausalStdoutChunkBytes
-  )
+  ( SMTLibCausalStdoutChunk )
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
-  as Z3
+  as Z3Execution
+import qualified Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process
+  as Z3Process
 
--- | Explicitly weaker than an executed-image attestation method.
 lengthSMTLibExecutableSnapshotStrengthTag :: ByteString
-lengthSMTLibExecutableSnapshotStrengthTag = asciiBytes
-  "path-snapshot-then-direct-spawn/stable-namespace-assumption/v1"
+lengthSMTLibExecutableSnapshotStrengthTag =
+  Z3Process.z3SMTLibExecutableSnapshotStrengthTag
 
 lengthSMTLibProcessSchemaTag :: ByteString
 lengthSMTLibProcessSchemaTag = asciiBytes
@@ -239,18 +91,69 @@ data LengthSMTLibProcessLimitSource = LengthSMTLibProcessLimitSource
   deriving (Eq, Ord, Show)
 
 defaultLengthSMTLibProcessLimitSource :: LengthSMTLibProcessLimitSource
-defaultLengthSMTLibProcessLimitSource = LengthSMTLibProcessLimitSource
-  { lengthSMTLibProcessLimitSourceExecutableBytes = 268435456
-  , lengthSMTLibProcessLimitSourceStdoutBytes = 1048576
-  , lengthSMTLibProcessLimitSourceStderrBytes = 65536
-  , lengthSMTLibProcessLimitSourceReadChunkBytes = 4096
-  , lengthSMTLibProcessLimitSourceGracefulCloseMilliseconds = 100
-  , lengthSMTLibProcessLimitSourceTerminateMilliseconds = 500
-  , lengthSMTLibProcessLimitSourceKillMilliseconds = 500
-  }
+defaultLengthSMTLibProcessLimitSource = fromZ3ProcessLimitSource
+  Z3Process.defaultZ3SMTLibProcessLimitSource
 
 data LengthSMTLibProcessLimits = LengthSMTLibProcessLimits
-  !Natural !Natural !Natural !Int !Int !Int !Int
+  !Z3Process.Z3SMTLibProcessLimits
+
+mkLengthSMTLibProcessLimits
+  :: LengthSMTLibProcessLimitSource
+  -> Either LengthSMTLibProcessError LengthSMTLibProcessLimits
+mkLengthSMTLibProcessLimits source =
+  case Z3Process.mkZ3SMTLibProcessLimits $ toZ3ProcessLimitSource source of
+    Left failure -> Left $ fromZ3ProcessError failure
+    Right limits -> Right $ LengthSMTLibProcessLimits limits
+
+lengthSMTLibProcessExecutableByteLimit
+  :: LengthSMTLibProcessLimits
+  -> Natural
+lengthSMTLibProcessExecutableByteLimit =
+  Z3Process.z3SMTLibProcessExecutableByteLimit . toZ3ProcessLimits
+
+lengthSMTLibProcessStdoutByteLimit
+  :: LengthSMTLibProcessLimits
+  -> Natural
+lengthSMTLibProcessStdoutByteLimit =
+  Z3Process.z3SMTLibProcessStdoutByteLimit . toZ3ProcessLimits
+
+lengthSMTLibProcessStderrByteLimit
+  :: LengthSMTLibProcessLimits
+  -> Natural
+lengthSMTLibProcessStderrByteLimit =
+  Z3Process.z3SMTLibProcessStderrByteLimit . toZ3ProcessLimits
+
+lengthSMTLibProcessReadChunkByteLimit
+  :: LengthSMTLibProcessLimits
+  -> Natural
+lengthSMTLibProcessReadChunkByteLimit =
+  Z3Process.z3SMTLibProcessReadChunkByteLimit . toZ3ProcessLimits
+
+lengthSMTLibProcessGracefulCloseMilliseconds
+  :: LengthSMTLibProcessLimits
+  -> Natural
+lengthSMTLibProcessGracefulCloseMilliseconds =
+  Z3Process.z3SMTLibProcessGracefulCloseMilliseconds . toZ3ProcessLimits
+
+lengthSMTLibProcessTerminateMilliseconds
+  :: LengthSMTLibProcessLimits
+  -> Natural
+lengthSMTLibProcessTerminateMilliseconds =
+  Z3Process.z3SMTLibProcessTerminateMilliseconds . toZ3ProcessLimits
+
+lengthSMTLibProcessKillMilliseconds
+  :: LengthSMTLibProcessLimits
+  -> Natural
+lengthSMTLibProcessKillMilliseconds =
+  Z3Process.z3SMTLibProcessKillMilliseconds . toZ3ProcessLimits
+
+lengthSMTLibProcessLimitsFingerprintField
+  :: LengthSMTLibProcessLimits
+  -> FingerprintField
+lengthSMTLibProcessLimitsFingerprintField limits = FingerprintTag
+  (ascii "length-z3-process-limits/v1")
+  $ Z3Process.z3SMTLibProcessLimitFingerprintFields
+  $ toZ3ProcessLimits limits
 
 data LengthSMTLibProcessPhase
   = LengthSMTLibProcessLimitPhase
@@ -267,8 +170,6 @@ data LengthSMTLibProcessPhase
   | LengthSMTLibProcessClosePhase
   deriving (Bounded, Enum, Eq, Ord, Show)
 
--- | Stable sanitized classes.  No constructor retains a path, digest, command,
--- output byte, exception string, or operating-system error text.
 data LengthSMTLibProcessFailureClass
   = LengthSMTLibProcessNonPositiveLimit
   | LengthSMTLibProcessLimitConversionOverflow
@@ -323,164 +224,43 @@ data LengthSMTLibProcessError = LengthSMTLibProcessError
   }
   deriving (Eq, Ord, Show)
 
-mkLengthSMTLibProcessLimits
-  :: LengthSMTLibProcessLimitSource
-  -> Either LengthSMTLibProcessError LengthSMTLibProcessLimits
-mkLengthSMTLibProcessLimits source = do
-  executableMaximum <- positive
-    $ lengthSMTLibProcessLimitSourceExecutableBytes source
-  chunk <- positiveInt
-    $ lengthSMTLibProcessLimitSourceReadChunkBytes source
-  graceful <- milliseconds
-    $ lengthSMTLibProcessLimitSourceGracefulCloseMilliseconds source
-  terminate <- milliseconds
-    $ lengthSMTLibProcessLimitSourceTerminateMilliseconds source
-  kill <- milliseconds
-    $ lengthSMTLibProcessLimitSourceKillMilliseconds source
-  pure $ LengthSMTLibProcessLimits
-    executableMaximum
-    (lengthSMTLibProcessLimitSourceStdoutBytes source)
-    (lengthSMTLibProcessLimitSourceStderrBytes source)
-    chunk graceful terminate kill
- where
-  positive value
-    | value == 0 = Left $ processError LengthSMTLibProcessLimitPhase
-        LengthSMTLibProcessNonPositiveLimit $ Just value
-    | otherwise = Right value
-  positiveInt value = do
-    retained <- positive value
-    if retained > fromIntegral (maxBound :: Int)
-      then Left $ processError LengthSMTLibProcessLimitPhase
-        LengthSMTLibProcessLimitConversionOverflow $ Just retained
-      else Right $ fromIntegral retained
-  milliseconds value = do
-    retained <- positive value
-    if retained > fromIntegral ((maxBound :: Int) `div` 1000)
-      then Left $ processError LengthSMTLibProcessLimitPhase
-        LengthSMTLibProcessLimitConversionOverflow $ Just retained
-      else Right $ fromIntegral retained
-
-lengthSMTLibProcessExecutableByteLimit
-  :: LengthSMTLibProcessLimits
-  -> Natural
-lengthSMTLibProcessExecutableByteLimit
-    (LengthSMTLibProcessLimits value _ _ _ _ _ _) = value
-
-lengthSMTLibProcessStdoutByteLimit
-  :: LengthSMTLibProcessLimits
-  -> Natural
-lengthSMTLibProcessStdoutByteLimit
-    (LengthSMTLibProcessLimits _ value _ _ _ _ _) = value
-
-lengthSMTLibProcessStderrByteLimit
-  :: LengthSMTLibProcessLimits
-  -> Natural
-lengthSMTLibProcessStderrByteLimit
-    (LengthSMTLibProcessLimits _ _ value _ _ _ _) = value
-
-lengthSMTLibProcessReadChunkByteLimit
-  :: LengthSMTLibProcessLimits
-  -> Natural
-lengthSMTLibProcessReadChunkByteLimit
-    (LengthSMTLibProcessLimits _ _ _ value _ _ _) = fromIntegral value
-
-lengthSMTLibProcessGracefulCloseMilliseconds
-  :: LengthSMTLibProcessLimits
-  -> Natural
-lengthSMTLibProcessGracefulCloseMilliseconds
-    (LengthSMTLibProcessLimits _ _ _ _ value _ _) = fromIntegral value
-
-lengthSMTLibProcessTerminateMilliseconds
-  :: LengthSMTLibProcessLimits
-  -> Natural
-lengthSMTLibProcessTerminateMilliseconds
-    (LengthSMTLibProcessLimits _ _ _ _ _ value _) = fromIntegral value
-
-lengthSMTLibProcessKillMilliseconds
-  :: LengthSMTLibProcessLimits
-  -> Natural
-lengthSMTLibProcessKillMilliseconds
-    (LengthSMTLibProcessLimits _ _ _ _ _ _ value) = fromIntegral value
-
-lengthSMTLibProcessLimitsFingerprintField
-  :: LengthSMTLibProcessLimits
-  -> FingerprintField
-lengthSMTLibProcessLimitsFingerprintField limits = FingerprintTag
-  (ascii "length-z3-process-limits/v1")
-  [ FingerprintTag (ascii "executable-bytes")
-      [FingerprintNatural $ lengthSMTLibProcessExecutableByteLimit limits]
-  , FingerprintTag (ascii "stdout-bytes")
-      [FingerprintNatural $ lengthSMTLibProcessStdoutByteLimit limits]
-  , FingerprintTag (ascii "stderr-bytes")
-      [FingerprintNatural $ lengthSMTLibProcessStderrByteLimit limits]
-  , FingerprintTag (ascii "read-chunk-bytes")
-      [FingerprintNatural $ lengthSMTLibProcessReadChunkByteLimit limits]
-  , FingerprintTag (ascii "graceful-close-milliseconds")
-      [ FingerprintNatural
-          $ lengthSMTLibProcessGracefulCloseMilliseconds limits
-      ]
-  , FingerprintTag (ascii "terminate-milliseconds")
-      [FingerprintNatural $ lengthSMTLibProcessTerminateMilliseconds limits]
-  , FingerprintTag (ascii "kill-milliseconds")
-      [FingerprintNatural $ lengthSMTLibProcessKillMilliseconds limits]
-  ]
-
-newtype LengthSMTLibProcessDeadline = LengthSMTLibProcessDeadline Word64
+data LengthSMTLibProcessDeadline = LengthSMTLibProcessDeadline
+  !Z3Process.Z3SMTLibProcessDeadline
 
 mkLengthSMTLibProcessDeadline :: Word64 -> LengthSMTLibProcessDeadline
 mkLengthSMTLibProcessDeadline = LengthSMTLibProcessDeadline
+  . Z3Process.mkZ3SMTLibProcessDeadline
 
 lengthSMTLibProcessDeadlineAfterMilliseconds
   :: Int
   -> IO (Either LengthSMTLibProcessError LengthSMTLibProcessDeadline)
-lengthSMTLibProcessDeadlineAfterMilliseconds milliseconds
-  | milliseconds <= 0 = pure $ Left $ processError
-      LengthSMTLibProcessDeadlinePhase
-      LengthSMTLibProcessNonPositiveLimit
-      (Just $ fromIntegral $ max 0 milliseconds)
-  | otherwise = do
-      now <- getMonotonicTimeNSec
-      let delta = toInteger milliseconds * 1000000
-          target = toInteger now + delta
-      pure $ if target > toInteger (maxBound :: Word64)
-        then Left $ processError LengthSMTLibProcessDeadlinePhase
-          LengthSMTLibProcessLimitConversionOverflow
-          (Just $ fromIntegral milliseconds)
-        else Right $ LengthSMTLibProcessDeadline $ fromInteger target
+lengthSMTLibProcessDeadlineAfterMilliseconds milliseconds = do
+  result <- Z3Process.z3SMTLibProcessDeadlineAfterMilliseconds milliseconds
+  pure $ case result of
+    Left failure -> Left $ fromZ3ProcessError failure
+    Right deadline -> Right $ LengthSMTLibProcessDeadline deadline
 
 lengthSMTLibProcessMonotonicTimeNanoseconds :: IO Word64
-lengthSMTLibProcessMonotonicTimeNanoseconds = getMonotonicTimeNSec
+lengthSMTLibProcessMonotonicTimeNanoseconds =
+  Z3Process.z3SMTLibProcessMonotonicTimeNanoseconds
 
 lengthSMTLibProcessDeadlineFingerprintField
   :: LengthSMTLibProcessDeadline
   -> FingerprintField
-lengthSMTLibProcessDeadlineFingerprintField
-    (LengthSMTLibProcessDeadline nanoseconds) = FingerprintTag
-  (ascii "absolute-monotonic-deadline")
-  [ FingerprintBytes $ ascii "clock_gettime-monotonic-nanoseconds/v1"
-  , FingerprintNatural $ fromIntegral nanoseconds
-  ]
+lengthSMTLibProcessDeadlineFingerprintField =
+  Z3Process.z3SMTLibProcessDeadlineFingerprintField . toZ3ProcessDeadline
 
-newtype LengthSMTLibProcessCancellation =
-  LengthSMTLibProcessCancellation (TVar Bool)
+data LengthSMTLibProcessCancellation = LengthSMTLibProcessCancellation
+  !Z3Process.Z3SMTLibProcessCancellation
 
 newLengthSMTLibProcessCancellation :: IO LengthSMTLibProcessCancellation
-newLengthSMTLibProcessCancellation =
-  LengthSMTLibProcessCancellation <$> newTVarIO False
+newLengthSMTLibProcessCancellation = LengthSMTLibProcessCancellation
+  <$> Z3Process.newZ3SMTLibProcessCancellation
 
 cancelLengthSMTLibProcess :: LengthSMTLibProcessCancellation -> IO ()
-cancelLengthSMTLibProcess (LengthSMTLibProcessCancellation cancelled) =
-  atomically $ writeTVar cancelled True
+cancelLengthSMTLibProcess = Z3Process.cancelZ3SMTLibProcess
+  . toZ3ProcessCancellation
 
--- | Run pre-process allocation work under the same absolute opener deadline.
--- The action runs unmasked in a private thread.  Cancellation or deadline
--- failure interrupts and joins that thread before returning.  If the action
--- produced a value but lost the final cancellation/deadline check, the supplied
--- rollback is run on that value before it is discarded.  Exception payloads
--- from either callback are never retained.  Completion of interruption and
--- rollback is intentionally joined; its latency therefore depends on the
--- interruptibility of these closed, package-private allocation actions rather
--- than claiming a bound for arbitrary 'IO'.
 runBeforeLengthSMTLibProcessDeadline
   :: LengthSMTLibProcessCancellation
   -> LengthSMTLibProcessDeadline
@@ -489,613 +269,83 @@ runBeforeLengthSMTLibProcessDeadline
   -> IO (Either LengthSMTLibProcessError value)
 runBeforeLengthSMTLibProcessDeadline cancellation deadline action rollback =
   mask $ \restore -> do
-    initial <- checkCancellationDeadline
-      LengthSMTLibProcessDeadlinePhase cancellation deadline
-    case initial of
-      Left failure -> pure $ Left failure
-      Right () -> do
-        outcome <- newEmptyTMVarIO
-        done <- newEmptyTMVarIO
-        thread <- forkIOWithUnmask $ \unmask ->
-          (tryAny (unmask action) >>= atomically . putTMVar outcome)
-          `finally` atomically (putTMVar done ())
-        let await = waitBeforeDeadline cancellation deadline outcome
-            producedValue = do
-              observed <- atomically $ tryReadTMVar outcome
-              pure $ case observed of
-                Just (Right value) -> Just value
-                _ -> Nothing
-            rollbackProduced = do
-              produced <- producedValue
-              case produced of
-                Nothing -> pure ()
-                Just value -> void $ tryAny $ rollback value
-            stopJoinRollback = do
-              killThread thread
-              atomically $ readTMVar done
-              rollbackProduced
-        result <- restore await `onException` stopJoinRollback
-        case result of
-          Left failure -> do
-            stopJoinRollback
-            pure $ Left failure
-          Right attempted -> do
-            atomically $ readTMVar done
-            finalControl <- checkCancellationDeadline
-              LengthSMTLibProcessDeadlinePhase cancellation deadline
-            case finalControl of
-              Left failure -> do
-                rollbackProduced
-                pure $ Left failure
-              Right () -> case attempted of
-                Left _ -> pure $ Left $ processError
-                  LengthSMTLibProcessDeadlinePhase
-                  LengthSMTLibProcessInternalFailure Nothing
-                Right value -> pure $ Right value
-
-data PortableMetadata = PortableMetadata
-  !Integer !Bool !Bool !Bool !Bool !String
-  deriving (Eq)
-
-#ifndef mingw32_HOST_OS
-data PosixMetadata = PosixMetadata
-  !Integer !Integer !Integer !Integer !Integer !String !String
-  deriving (Eq)
-#endif
+    result <- restore $ Z3Process.runBeforeZ3SMTLibProcessDeadline
+      (toZ3ProcessCancellation cancellation)
+      (toZ3ProcessDeadline deadline)
+      action rollback
+    retainZ3ProcessResult result
 
 data LengthSMTLibExecutableSnapshot = LengthSMTLibExecutableSnapshot
-  !ByteString
-  !Natural
-  !FingerprintField
+  !Z3Process.Z3SMTLibExecutableSnapshot
 
 lengthSMTLibExecutableSnapshotSHA256
   :: LengthSMTLibExecutableSnapshot
   -> ByteString
-lengthSMTLibExecutableSnapshotSHA256
-    (LengthSMTLibExecutableSnapshot digest _ _) = digest
+lengthSMTLibExecutableSnapshotSHA256 =
+  Z3Process.z3SMTLibExecutableSnapshotSHA256 . toZ3ExecutableSnapshot
 
 lengthSMTLibExecutableSnapshotByteCount
   :: LengthSMTLibExecutableSnapshot
   -> Natural
-lengthSMTLibExecutableSnapshotByteCount
-    (LengthSMTLibExecutableSnapshot _ count _) = count
+lengthSMTLibExecutableSnapshotByteCount =
+  Z3Process.z3SMTLibExecutableSnapshotByteCount . toZ3ExecutableSnapshot
 
 lengthSMTLibExecutableSnapshotFingerprintField
   :: LengthSMTLibExecutableSnapshot
   -> FingerprintField
-lengthSMTLibExecutableSnapshotFingerprintField
-    (LengthSMTLibExecutableSnapshot _ _ field) = field
-
-data ProcessLifecycle = ProcessOpen | ProcessClosing | ProcessClosed
-  deriving (Eq)
-
--- Stdout terminal conditions stay in the same FIFO as chunks.  In particular,
--- EOF cannot overtake bytes which were read before it.
-data StdoutEvent
-  = StdoutChunk !SMTLibCausalStdoutChunk
-  | StdoutTerminal !LengthSMTLibProcessError
-
-data ManagedThread = ManagedThread !ThreadId !(TMVar ())
-
-data CloseState
-  = CloseNotStarted
-  | CloseRunning !(MVar LengthSMTLibProcessCleanupStatus)
-  | CloseFinished !LengthSMTLibProcessCleanupStatus
+lengthSMTLibExecutableSnapshotFingerprintField =
+  Z3Process.z3SMTLibExecutableSnapshotFingerprintField
+  . toZ3ExecutableSnapshot
 
 data LengthSMTLibProcess = LengthSMTLibProcess
-  { processInput :: !Handle
-  , processOutput :: !Handle
-  , processErrorOutput :: !Handle
-  , processHandle :: !ProcessHandle
-  , processGroupIdentifier :: !(Maybe Integer)
-  , processLimits :: !LengthSMTLibProcessLimits
-  , processSnapshot :: !LengthSMTLibExecutableSnapshot
-  , processIdentityField :: !FingerprintField
-  , processStdoutQueue :: !(TQueue StdoutEvent)
-  , processStdoutTerminal :: !(TVar (Maybe LengthSMTLibProcessError))
-  , processPoison :: !(TVar (Maybe LengthSMTLibProcessError))
-  , processStdoutCount :: !(TVar Natural)
-  , processStderrCount :: !(TVar Natural)
-  , processLifecycle :: !(TVar ProcessLifecycle)
-  , processWriteToken :: !(TMVar ())
-  , processThreads :: !(TVar [ManagedThread])
-  , processCloseState :: !(MVar CloseState)
-  }
-
-lengthSMTLibProcessSnapshot
-  :: LengthSMTLibProcess
-  -> LengthSMTLibExecutableSnapshot
-lengthSMTLibProcessSnapshot = processSnapshot
-
-lengthSMTLibProcessFingerprintField
-  :: LengthSMTLibProcess
-  -> FingerprintField
-lengthSMTLibProcessFingerprintField = processIdentityField
-
-lengthSMTLibProcessObservedStdoutBytes
-  :: LengthSMTLibProcess
-  -> IO Natural
-lengthSMTLibProcessObservedStdoutBytes process =
-  atomically $ readTVar $ processStdoutCount process
-
-lengthSMTLibProcessObservedStderrBytes
-  :: LengthSMTLibProcess
-  -> IO Natural
-lengthSMTLibProcessObservedStderrBytes process =
-  atomically $ readTVar $ processStderrCount process
+  !Z3Process.Z3SMTLibProcess
+  !FingerprintField
 
 openLengthSMTLibProcess
   :: LengthSMTLibProcessLimits
   -> LengthSMTLibProcessCancellation
   -> LengthSMTLibProcessDeadline
-  -> Z3.Z3SMTLibExecutionProfile
+  -> Z3Execution.Z3SMTLibExecutionProfile
   -> FilePath
   -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
 openLengthSMTLibProcess limits cancellation deadline profile workingDirectory =
   mask $ \restore -> do
-    initial <- checkCancellationDeadline
-      LengthSMTLibProcessSnapshotPhase cancellation deadline
-    case initial of
-      Left failure -> pure $ Left failure
-      Right () -> do
-        observed <- restore $ snapshotExecutable limits cancellation deadline
-          profile workingDirectory
-        case observed of
-          Left failure -> pure $ Left failure
-          Right (snapshot, canonicalWorkingDirectory) -> do
-            beforeSpawn <- checkCancellationDeadline
-              LengthSMTLibProcessSpawnPhase cancellation deadline
-            case beforeSpawn of
-              Left failure -> pure $ Left failure
-              Right () -> spawn snapshot canonicalWorkingDirectory
- where
-  spawn snapshot canonicalWorkingDirectory = do
-    rollbackStatus <- newEmptyTMVarIO
-    let executablePath = Z3.z3SMTLibExecutionExecutablePath profile
-        arguments = Z3.z3SMTLibExecutionConfiguredArgumentVector profile
-        specification = (proc executablePath arguments)
-          { cwd = Just canonicalWorkingDirectory
-          , env = Z3.z3SMTLibExecutionChildEnvironment
-          , std_in = CreatePipe
-          , std_out = CreatePipe
-          , std_err = CreatePipe
-          , close_fds = True
-          , create_group = True
-          , delegate_ctlc = False
-          , use_process_jobs = True
-          }
-        rollbackCreated attempted = case attempted of
-          Left _ -> pure ()
-          Right (input, output, errorOutput, handle) -> do
-            pidResult <- tryIOError $ getPid handle
-            let groupIdentifier = case pidResult of
-                  Right (Just pid) -> Just $ toInteger pid
-                  _ -> Nothing
-            attemptedCleanup <- tryAny $ cleanupAcquired limits input output
-              errorOutput handle groupIdentifier []
-            let cleanup = case attemptedCleanup of
-                  Right status -> status
-                  Left _ -> incompleteCleanupStatus
-            atomically $ void $ tryPutTMVar rollbackStatus cleanup
-    controlledCreate <- runBeforeLengthSMTLibProcessDeadline
-      cancellation deadline (tryIOError $ createProcess specification)
-      rollbackCreated
-    case controlledCreate of
-      Left failure -> do
-        cleanup <- atomically $ tryReadTMVar rollbackStatus
-        pure $ Left $ case cleanup of
-          Nothing -> failure
-          Just status -> attachCleanup status failure
-      Right created -> finishCreated snapshot canonicalWorkingDirectory created
+    opened <- restore $ Z3Process.openZ3SMTLibProcess
+      (toZ3ProcessLimits limits)
+      (toZ3ProcessCancellation cancellation)
+      (toZ3ProcessDeadline deadline)
+      profile workingDirectory
+    case opened of
+      Left failure ->
+        let retained = fromZ3ProcessError failure
+        in retained `seq` pure (Left retained)
+      Right process ->
+        let retained = LengthSMTLibProcess process
+              $ processFingerprintField process
+        in retained `seq` pure (Right retained)
 
-  finishCreated snapshot canonicalWorkingDirectory created =
-    case created of
-      Left _ -> pure $ Left $ processError LengthSMTLibProcessSpawnPhase
-        LengthSMTLibProcessSpawnFailed Nothing
-      Right (input, output, errorOutput, handle) -> do
-        pidResult <- tryIOError $ getPid handle
-        let groupIdentifier = case pidResult of
-              Right (Just pid) -> Just $ toInteger pid
-              _ -> Nothing
-        case (input, output, errorOutput) of
-          (Just inputHandle, Just outputHandle, Just errorHandle) -> do
-            allocated <- tryAny $ allocateProcess inputHandle outputHandle
-              errorHandle handle groupIdentifier snapshot
-              canonicalWorkingDirectory
-            case allocated of
-              Left _ -> do
-                cleanup <- cleanupAcquired limits input output errorOutput handle
-                  groupIdentifier []
-                pure $ Left $ attachCleanup cleanup $ processError
-                  LengthSMTLibProcessConfigurePhase
-                  LengthSMTLibProcessInternalFailure Nothing
-              Right process -> do
-                let initialize = do
-                      configured <- configureHandles process
-                      case configured of
-                        Left failure -> closeAfterOpenFailure process failure
-                        Right () -> do
-                          started <- startReaders process
-                          case started of
-                            Left failure -> closeAfterOpenFailure process failure
-                            Right () -> do
-                              ready <- checkLengthSMTLibProcessReady
-                                process cancellation deadline
-                              case ready of
-                                Left failure ->
-                                  closeAfterOpenFailure process failure
-                                Right () -> pure $ Right process
-                initialize `onException`
-                  void (closeLengthSMTLibProcess process)
-          _ -> do
-            cleanup <- cleanupAcquired limits input output errorOutput handle
-              groupIdentifier []
-            pure $ Left $ attachCleanup cleanup $ processError
-              LengthSMTLibProcessSpawnPhase
-              LengthSMTLibProcessMissingPipe Nothing
-
-  allocateProcess input output errorOutput handle groupIdentifier snapshot
-      canonicalWorkingDirectory = do
-    stdoutQueue <- newTQueueIO
-    stdoutTerminal <- newTVarIO Nothing
-    poison <- newTVarIO Nothing
-    stdoutCount <- newTVarIO 0
-    stderrCount <- newTVarIO 0
-    lifecycle <- newTVarIO ProcessOpen
-    writeToken <- newTMVarIO ()
-    threads <- newTVarIO []
-    closeState <- newMVar CloseNotStarted
-    let pidField = case groupIdentifier of
-          Nothing -> FingerprintTag (ascii "pid-unavailable") []
-          Just pid -> FingerprintTag (ascii "pid-observed")
-            [integerTextField pid]
-        identity = processFingerprintField limits deadline snapshot
-          canonicalWorkingDirectory pidField
-    pure LengthSMTLibProcess
-      { processInput = input
-      , processOutput = output
-      , processErrorOutput = errorOutput
-      , processHandle = handle
-      , processGroupIdentifier = groupIdentifier
-      , processLimits = limits
-      , processSnapshot = snapshot
-      , processIdentityField = identity
-      , processStdoutQueue = stdoutQueue
-      , processStdoutTerminal = stdoutTerminal
-      , processPoison = poison
-      , processStdoutCount = stdoutCount
-      , processStderrCount = stderrCount
-      , processLifecycle = lifecycle
-      , processWriteToken = writeToken
-      , processThreads = threads
-      , processCloseState = closeState
-      }
-
-snapshotExecutable
-  :: LengthSMTLibProcessLimits
-  -> LengthSMTLibProcessCancellation
-  -> LengthSMTLibProcessDeadline
-  -> Z3.Z3SMTLibExecutionProfile
-  -> FilePath
-  -> IO
-      (Either
-        LengthSMTLibProcessError
-        (LengthSMTLibExecutableSnapshot, FilePath))
-snapshotExecutable limits cancellation deadline profile workingDirectory = do
-  cwdResult <- inspectWorkingDirectory cancellation deadline workingDirectory
-  case cwdResult of
-    Left failure -> pure $ Left failure
-    Right canonicalWorkingDirectory -> do
-      let executablePath = Z3.z3SMTLibExecutionExecutablePath
-            profile
-      canonicalBeforeResult <- tryIOError $ canonicalizePath executablePath
-      case canonicalBeforeResult of
-        Left _ -> pure $ Left $ processError LengthSMTLibProcessSnapshotPhase
-          LengthSMTLibProcessExecutableUnavailable Nothing
-        Right canonicalBefore -> do
-          beforeResult <- captureMetadata executablePath
-          case beforeResult of
-            Left failure -> pure $ Left failure
-            Right before -> do
-              hashed <- hashExecutable limits cancellation deadline
-                executablePath
-              case hashed of
-                Left failure -> pure $ Left failure
-                Right (digest, count) -> do
-                  afterResult <- captureMetadata executablePath
-                  canonicalAfterResult <- tryIOError
-                    $ canonicalizePath executablePath
-                  case (afterResult, canonicalAfterResult) of
-                    (Right after, Right canonicalAfter)
-                      | canonicalBefore == canonicalAfter && before == after ->
-                          finishSnapshot canonicalWorkingDirectory
-                            canonicalBefore before digest count
-                      | otherwise -> pure $ Left $ processError
-                          LengthSMTLibProcessSnapshotPhase
-                          LengthSMTLibProcessExecutableMetadataChanged Nothing
-                    _ -> pure $ Left $ processError
-                      LengthSMTLibProcessSnapshotPhase
-                      LengthSMTLibProcessExecutableUnavailable Nothing
- where
-  finishSnapshot canonicalWorkingDirectory canonical metadata digest count =
-    let expected =
-          BS.pack <$> Z3.z3SMTLibExecutionExpectedExecutableSHA256 profile
-    in case expected of
-      Just pinned | pinned /= digest -> pure $ Left $ processError
-        LengthSMTLibProcessSnapshotPhase
-        LengthSMTLibProcessExecutableDigestMismatch Nothing
-      _ -> do
-        let field = executableSnapshotField profile workingDirectory
-              canonicalWorkingDirectory canonical metadata digest count expected
-        pure $ Right
-          ( LengthSMTLibExecutableSnapshot digest count field
-          , canonicalWorkingDirectory
-          )
-
-inspectWorkingDirectory
-  :: LengthSMTLibProcessCancellation
-  -> LengthSMTLibProcessDeadline
-  -> FilePath
-  -> IO (Either LengthSMTLibProcessError FilePath)
-inspectWorkingDirectory cancellation deadline path
-  | not $ isAbsolute path = pure $ Left $ processError
-      LengthSMTLibProcessWorkingDirectoryPhase
-      LengthSMTLibProcessWorkingDirectoryNotAbsolute Nothing
-  | otherwise = do
-      controlled <- checkCancellationDeadline
-        LengthSMTLibProcessWorkingDirectoryPhase cancellation deadline
-      case controlled of
-        Left failure -> pure $ Left failure
-        Right () -> do
-          inspected <- tryIOError $ do
-            present <- doesDirectoryExist path
-            empty <- if present
-              then processWorkingDirectoryIsEmpty path
-              else pure False
-            canonical <- canonicalizePath path
-            pure (present, empty, canonical)
-          pure $ case inspected of
-            Left _ -> Left $ processError
-              LengthSMTLibProcessWorkingDirectoryPhase
-              LengthSMTLibProcessWorkingDirectoryUnavailable Nothing
-            Right (False, _, _) -> Left $ processError
-              LengthSMTLibProcessWorkingDirectoryPhase
-              LengthSMTLibProcessWorkingDirectoryUnavailable Nothing
-            Right (True, False, _) -> Left $ processError
-              LengthSMTLibProcessWorkingDirectoryPhase
-              LengthSMTLibProcessWorkingDirectoryNotEmpty Nothing
-            Right (True, True, canonical) -> Right canonical
-
-processWorkingDirectoryIsEmpty :: FilePath -> IO Bool
-#ifndef mingw32_HOST_OS
-processWorkingDirectoryIsEmpty path = bracket
-  (PosixDirectory.openDirStream path)
-  PosixDirectory.closeDirStream
-  $ \stream -> go stream (3 :: Int)
- where
-  go _ 0 = pure False
-  go stream remaining = do
-    entry <- PosixDirectory.readDirStream stream
-    if null entry
-      then pure True
-      else if entry == "." || entry == ".."
-        then go stream $ remaining - 1
-        else pure False
-#else
-processWorkingDirectoryIsEmpty path = null <$> listDirectory path
-#endif
-
-data CapturedMetadata = CapturedMetadata
-  !PortableMetadata
-#ifndef mingw32_HOST_OS
-  !PosixMetadata
-#endif
-  deriving (Eq)
-
-captureMetadata
-  :: FilePath
-  -> IO (Either LengthSMTLibProcessError CapturedMetadata)
-captureMetadata path = do
-  existence <- tryIOError $ (,) <$> doesPathExist path <*> doesFileExist path
-  case existence of
-    Left _ -> pure $ Left $ processError LengthSMTLibProcessSnapshotPhase
-      LengthSMTLibProcessExecutableUnavailable Nothing
-    Right (False, _) -> pure $ Left $ processError
-      LengthSMTLibProcessSnapshotPhase
-      LengthSMTLibProcessExecutableUnavailable Nothing
-    Right (True, False) -> pure $ Left $ processError
-      LengthSMTLibProcessSnapshotPhase
-      LengthSMTLibProcessExecutableNotRegular Nothing
-    Right (True, True) -> capture
- where
-  capture = do
-    captured <- tryIOError $ do
-      size <- getFileSize path
-      permissions <- getPermissions path
-      modified <- getModificationTime path
-      let portable = PortableMetadata
-            (toInteger size)
-            (readable permissions)
-            (writable permissions)
-            (executable permissions)
-            (searchable permissions)
-            (show modified)
-#ifndef mingw32_HOST_OS
-      status <- getFileStatus path
-      let posix = PosixMetadata
-            (toInteger $ deviceID status)
-            (toInteger $ fileID status)
-            (toInteger $ fileMode status)
-            (toInteger $ fileSize status)
-            (toInteger $ linkCount status)
-            (show $ modificationTime status)
-            (show $ statusChangeTime status)
-      pure (portable, status, posix)
-#else
-      pure $ CapturedMetadata portable
-#endif
-    pure $ case captured of
-      Left _ -> Left $ processError LengthSMTLibProcessSnapshotPhase
-        LengthSMTLibProcessExecutableUnavailable Nothing
-#ifndef mingw32_HOST_OS
-      Right (_, status, _) | not $ isRegularFile status ->
-        Left $ processError LengthSMTLibProcessSnapshotPhase
-          LengthSMTLibProcessExecutableNotRegular Nothing
-      Right (portable, _, posix) -> Right $ CapturedMetadata portable posix
-#else
-      Right metadata -> Right metadata
-#endif
-
-hashExecutable
-  :: LengthSMTLibProcessLimits
-  -> LengthSMTLibProcessCancellation
-  -> LengthSMTLibProcessDeadline
-  -> FilePath
-  -> IO (Either LengthSMTLibProcessError (ByteString, Natural))
-hashExecutable (LengthSMTLibProcessLimits maximumBytes _ _ chunk _ _ _)
-    cancellation deadline path = do
-  attempted <- tryIOError $ withBinaryFile path ReadMode $ \handle -> do
-    hSetBinaryMode handle True
-    go handle SHA256.init 0
-  pure $ case attempted of
-    Left _ -> Left $ processError LengthSMTLibProcessSnapshotPhase
-      LengthSMTLibProcessExecutableUnavailable Nothing
-    Right result -> result
- where
-  go handle !context !count = do
-    controlled <- checkCancellationDeadline
-      LengthSMTLibProcessSnapshotPhase cancellation deadline
-    case controlled of
-      Left failure -> pure $ Left failure
-      Right () -> do
-        let request = boundedReadSize chunk maximumBytes count
-        bytes <- BS.hGetSome handle request
-        if BS.null bytes
-          then do
-            let digest = SHA256.finalize context
-            _ <- evaluate $ BS.length digest
-            pure $ Right (digest, count)
-          else do
-            let observed = count + fromIntegral (BS.length bytes)
-            if observed > maximumBytes
-              then pure $ Left $ processError
-                LengthSMTLibProcessSnapshotPhase
-                LengthSMTLibProcessExecutableByteLimitExceeded
-                (Just $ maximumBytes + 1)
-              else go handle (SHA256.update context bytes) observed
-
-configureHandles
+lengthSMTLibProcessSnapshot
   :: LengthSMTLibProcess
-  -> IO (Either LengthSMTLibProcessError ())
-configureHandles process = do
-  configured <- tryIOError $ mapM_ configure
-    [ processInput process
-    , processOutput process
-    , processErrorOutput process
-    ]
-  pure $ case configured of
-    Left _ -> Left $ processError LengthSMTLibProcessConfigurePhase
-      LengthSMTLibProcessHandleConfigurationFailed Nothing
-    Right () -> Right ()
- where
-  configure handle = do
-    hSetBinaryMode handle True
-    hSetBuffering handle NoBuffering
+  -> LengthSMTLibExecutableSnapshot
+lengthSMTLibProcessSnapshot = LengthSMTLibExecutableSnapshot
+  . Z3Process.z3SMTLibProcessSnapshot . toZ3Process
 
-startReaders
+lengthSMTLibProcessFingerprintField
   :: LengthSMTLibProcess
-  -> IO (Either LengthSMTLibProcessError ())
-startReaders process = do
-  stdoutStarted <- startManagedThread process
-    LengthSMTLibProcessConfigurePhase (pure Nothing) $ stdoutReader process
-  case stdoutStarted of
-    Left failure -> pure $ Left failure
-    Right _ -> do
-      stderrStarted <- startManagedThread process
-        LengthSMTLibProcessConfigurePhase (pure Nothing) $ stderrReader process
-      pure $ case stderrStarted of
-        Left failure -> Left failure
-        Right _ -> Right ()
+  -> FingerprintField
+lengthSMTLibProcessFingerprintField (LengthSMTLibProcess _ field) = field
 
-stdoutReader :: LengthSMTLibProcess -> IO ()
-stdoutReader process = loop
- where
-  LengthSMTLibProcessLimits _ maximumBytes _ chunk _ _ _ =
-    processLimits process
-  loop = do
-    lifecycle <- atomically $ readTVar $ processLifecycle process
-    when (lifecycle == ProcessOpen) $ do
-      count <- atomically $ readTVar $ processStdoutCount process
-      received <- tryIOError $ BS.hGetSome (processOutput process)
-        $ boundedReadSize chunk maximumBytes count
-      case received of
-        Left _ -> atomically $ setStdoutTerminalSTM process $ processError
-          LengthSMTLibProcessStdoutPhase
-          LengthSMTLibProcessStdoutReadFailed (Just count)
-        Right bytes -> case admitSMTLibCausalStdoutChunk bytes of
-          Nothing -> atomically $ setStdoutTerminalSTM process
-            $ processError LengthSMTLibProcessStdoutPhase
-                LengthSMTLibProcessStdoutEOF (Just count)
-          Just stdoutChunk -> do
-            continue <- atomically $ do
-              current <- readTVar $ processStdoutCount process
-              let observed = current + fromIntegral (BS.length bytes)
-              if observed > maximumBytes
-                then do
-                  let remaining = maximumBytes - min current maximumBytes
-                      permitted = BS.take (fromIntegral remaining) bytes
-                  writeTVar (processStdoutCount process) $ maximumBytes + 1
-                  case admitSMTLibCausalStdoutChunk permitted of
-                    Nothing -> pure ()
-                    Just permittedChunk -> writeTQueue
-                      (processStdoutQueue process)
-                      $ StdoutChunk permittedChunk
-                  setStdoutTerminalSTM process $ processError
-                    LengthSMTLibProcessStdoutPhase
-                    LengthSMTLibProcessStdoutByteLimitExceeded
-                    (Just $ maximumBytes + 1)
-                  pure False
-                else do
-                  writeTVar (processStdoutCount process) observed
-                  writeTQueue (processStdoutQueue process)
-                    $ StdoutChunk stdoutChunk
-                  pure True
-            when continue loop
+lengthSMTLibProcessObservedStdoutBytes
+  :: LengthSMTLibProcess
+  -> IO Natural
+lengthSMTLibProcessObservedStdoutBytes =
+  Z3Process.z3SMTLibProcessObservedStdoutBytes . toZ3Process
 
-stderrReader :: LengthSMTLibProcess -> IO ()
-stderrReader process = loop
- where
-  LengthSMTLibProcessLimits _ _ maximumBytes chunk _ _ _ =
-    processLimits process
-  loop = do
-    count <- atomically $ readTVar $ processStderrCount process
-    let request
-          | count > maximumBytes = chunk
-          | otherwise = boundedReadSize chunk maximumBytes count
-    received <- tryIOError $ BS.hGetSome (processErrorOutput process) request
-    case received of
-      Left _ -> poisonIfOpen process $ processError
-        LengthSMTLibProcessStderrPhase
-        LengthSMTLibProcessStderrReadFailed (Just count)
-      Right bytes
-        | BS.null bytes -> poisonIfOpen process $ processError
-            LengthSMTLibProcessStderrPhase
-            LengthSMTLibProcessStderrEOF (Just count)
-        | otherwise -> do
-            atomically $ do
-              current <- readTVar $ processStderrCount process
-              let observed = min (maximumBytes + 1)
-                    $ current + fromIntegral (BS.length bytes)
-              writeTVar (processStderrCount process) observed
-              setFirstPoisonSTM process $ processError
-                LengthSMTLibProcessStderrPhase
-                LengthSMTLibProcessStderrObserved
-                (Just observed)
-            -- Continue discarding even after lifecycle enters Closing.  The
-            -- cleanup owner first closes stdin and then reaps or kills the
-            -- child before it asks this reader to stop, so a finite flood
-            -- cannot retain the child by filling its stderr pipe.
-            loop
+lengthSMTLibProcessObservedStderrBytes
+  :: LengthSMTLibProcess
+  -> IO Natural
+lengthSMTLibProcessObservedStderrBytes =
+  Z3Process.z3SMTLibProcessObservedStderrBytes . toZ3Process
 
 writeLengthSMTLibProcess
   :: LengthSMTLibProcess
@@ -1105,494 +355,52 @@ writeLengthSMTLibProcess
   -> IO (Either LengthSMTLibProcessError ())
 writeLengthSMTLibProcess process cancellation deadline bytes =
   mask $ \restore -> do
-    _ <- evaluate $ BS.length bytes
-    token <- waitWriteControlled process cancellation deadline
-      LengthSMTLibProcessWritePhase
-      $ takeTMVar $ processWriteToken process
-    case token of
-      Left failure -> rejectWrite process failure
-      Right () -> finally
-        (do
-          outcome <- newEmptyTMVarIO
-          started <- startManagedThread process
-            LengthSMTLibProcessWritePhase
-            (readTVar $ processStdoutTerminal process) $ do
-              written <- tryIOError $ do
-                BS.hPut (processInput process) bytes
-                hFlush $ processInput process
-              atomically $ putTMVar outcome written
-          case started of
-            Left failure -> rejectWrite process failure
-            Right managed -> do
-              let stop = stopManagedThread managed
-                  await = waitWriteControlled process cancellation deadline
-                    LengthSMTLibProcessWritePhase $ readTMVar outcome
-                  settle = waitWriteControlled process cancellation deadline
-                    LengthSMTLibProcessWritePhase
-                    $ managedThreadFinishedSTM managed
-              result <- restore await `onException` do
-                atomically $ setFirstPoisonSTM process $ processError
-                  LengthSMTLibProcessWritePhase
-                  LengthSMTLibProcessCancelled Nothing
-                stop
-              case result of
-                Left failure -> stop >> rejectWrite process failure
-                Right written -> do
-                  settled <- settle
-                  case settled of
-                    Left failure -> stop >> rejectWrite process failure
-                    Right () -> do
-                      unregisterManagedThread process managed
-                      case written of
-                        Left _ -> poisonOperation process $ processError
-                          LengthSMTLibProcessWritePhase
-                          LengthSMTLibProcessWriteFailed Nothing
-                        Right () -> pure $ Right ())
-        (atomically $ putTMVar (processWriteToken process) ())
+    result <- restore $ Z3Process.writeZ3SMTLibProcess
+      (toZ3Process process)
+      (toZ3ProcessCancellation cancellation)
+      (toZ3ProcessDeadline deadline)
+      bytes
+    retainZ3ProcessResult result
 
 nextLengthSMTLibProcessStdoutChunk
   :: LengthSMTLibProcess
   -> LengthSMTLibProcessCancellation
   -> LengthSMTLibProcessDeadline
   -> IO (Either LengthSMTLibProcessError SMTLibCausalStdoutChunk)
-nextLengthSMTLibProcessStdoutChunk process cancellation deadline = do
-  result <- waitControlled process cancellation deadline
-    LengthSMTLibProcessStdoutPhase
-    $ readTQueue $ processStdoutQueue process
-  case result of
-    Left failure -> poisonOperation process failure
-    Right event -> case event of
-      StdoutChunk chunk -> pure $ Right chunk
-      StdoutTerminal failure -> poisonOperation process failure
+nextLengthSMTLibProcessStdoutChunk process cancellation deadline =
+  mask $ \restore -> do
+    result <- restore $ Z3Process.nextZ3SMTLibProcessStdoutChunk
+      (toZ3Process process)
+      (toZ3ProcessCancellation cancellation)
+      (toZ3ProcessDeadline deadline)
+    retainZ3ProcessResult result
 
--- | Drain output which is causally attributable to the preceding protocol
--- write but arrived after that receiver completed.  Only SMT-LIB whitespace is
--- admitted into the opaque causal-boundary receipt.  A non-whitespace chunk is
--- restored in its original FIFO position before the process is poisoned; a
--- queued terminal condition is propagated at its exact position after any
--- preceding whitespace.
 drainLengthSMTLibProcessBoundaryWhitespace
   :: LengthSMTLibProcess
   -> LengthSMTLibProcessCancellation
   -> LengthSMTLibProcessDeadline
-  -> IO
-      (Either LengthSMTLibProcessError SMTLibCausalBoundaryWhitespace)
-drainLengthSMTLibProcessBoundaryWhitespace process cancellation deadline = do
-  drained <- waitControlled process cancellation deadline
-    LengthSMTLibProcessReadyPhase drainQueued
-  case drained of
-    Left failure -> poisonOperation process failure
-    Right (Left failure) -> poisonOperation process failure
-    Right (Right bytes) -> pure $ Right bytes
- where
-  drainQueued = do
-    events <- takeQueued []
-    inspect events []
-
-  takeQueued reversed = do
-    empty <- isEmptyTQueue $ processStdoutQueue process
-    if empty
-      then pure $ reverse reversed
-      else do
-        event <- readTQueue $ processStdoutQueue process
-        takeQueued $ event : reversed
-
-  inspect [] reversedWhitespace = pure $ Right
-    $ concatSMTLibCausalBoundaryWhitespace
-    $ map snd
-    $ reverse reversedWhitespace
-  inspect events@(StdoutChunk chunk : remaining) reversedWhitespace =
-    case admitSMTLibCausalBoundaryWhitespace
-        $ smtLibCausalStdoutChunkBytes chunk of
-      Just whitespace -> inspect remaining
-        $ (chunk, whitespace) : reversedWhitespace
-      Nothing -> do
-        -- Restore all prior whitespace too; draining is all-or-nothing when a
-        -- non-whitespace chunk is present.
-        mapM_ (writeTQueue $ processStdoutQueue process)
-          $ reverse
-              (map (StdoutChunk . fst) reversedWhitespace)
-            ++ events
-        pure $ Left $ processError LengthSMTLibProcessReadyPhase
-          LengthSMTLibProcessUnexpectedPendingStdout Nothing
-  inspect (StdoutTerminal failure : _) _ = pure $ Left failure
+  -> IO (Either LengthSMTLibProcessError SMTLibCausalBoundaryWhitespace)
+drainLengthSMTLibProcessBoundaryWhitespace process cancellation deadline =
+  mask $ \restore -> do
+    result <- restore $ Z3Process.drainZ3SMTLibProcessBoundaryWhitespace
+      (toZ3Process process)
+      (toZ3ProcessCancellation cancellation)
+      (toZ3ProcessDeadline deadline)
+    retainZ3ProcessResult result
 
 checkLengthSMTLibProcessReady
   :: LengthSMTLibProcess
   -> LengthSMTLibProcessCancellation
   -> LengthSMTLibProcessDeadline
   -> IO (Either LengthSMTLibProcessError ())
-checkLengthSMTLibProcessReady process cancellation deadline = do
-  preflight <- checkReadySnapshot process cancellation deadline
-  case preflight of
-    Left failure -> poisonOperation process failure
-    Right () -> do
-      exited <- tryIOError $ getProcessExitCode $ processHandle process
-      case exited of
-        Left _ -> poisonOperation process $ processError
-          LengthSMTLibProcessReadyPhase LengthSMTLibProcessExited Nothing
-        Right (Just _) -> poisonOperation process $ processError
-          LengthSMTLibProcessReadyPhase LengthSMTLibProcessExited Nothing
-        Right Nothing -> do
-          final <- checkReadySnapshot process cancellation deadline
-          case final of
-            Left failure -> poisonOperation process failure
-            Right () -> pure $ Right ()
+checkLengthSMTLibProcessReady process cancellation deadline =
+  mask $ \restore -> do
+    result <- restore $ Z3Process.checkZ3SMTLibProcessReady
+      (toZ3Process process)
+      (toZ3ProcessCancellation cancellation)
+      (toZ3ProcessDeadline deadline)
+    retainZ3ProcessResult result
 
-checkReadySnapshot
-  :: LengthSMTLibProcess
-  -> LengthSMTLibProcessCancellation
-  -> LengthSMTLibProcessDeadline
-  -> IO (Either LengthSMTLibProcessError ())
-checkReadySnapshot process cancellation deadline = do
-  control <- checkCancellationDeadline
-    LengthSMTLibProcessReadyPhase cancellation deadline
-  case control of
-    Left failure -> pure $ Left failure
-    Right () -> atomically $ do
-      poisoned <- readTVar $ processPoison process
-      case poisoned of
-        Just failure -> pure $ Left failure
-        Nothing -> do
-          empty <- isEmptyTQueue $ processStdoutQueue process
-          lifecycle <- readTVar $ processLifecycle process
-          if lifecycle /= ProcessOpen
-            then pure $ Left $ processError LengthSMTLibProcessReadyPhase
-              LengthSMTLibProcessClosed Nothing
-            else if empty
-              then pure $ Right ()
-              else do
-                pending <- peekTQueue $ processStdoutQueue process
-                pure $ case pending of
-                  StdoutTerminal failure -> Left failure
-                  StdoutChunk _ -> Left $ processError
-                    LengthSMTLibProcessReadyPhase
-                    LengthSMTLibProcessUnexpectedPendingStdout Nothing
-
-closeLengthSMTLibProcess
-  :: LengthSMTLibProcess
-  -> IO LengthSMTLibProcessCleanupStatus
-closeLengthSMTLibProcess process = mask_ $ do
-  gate <- modifyMVar (processCloseState process) $ \state -> case state of
-    CloseNotStarted -> do
-      result <- newEmptyMVar
-      atomically $ do
-        writeTVar (processLifecycle process) ProcessClosing
-        setFirstPoisonSTM process $ processError
-          LengthSMTLibProcessClosePhase LengthSMTLibProcessClosed Nothing
-      _ <- forkIO $ do
-        attempted <- tryAny $ cleanupProcess process
-        let status = case attempted of
-              Right completed -> completed
-              Left _ -> LengthSMTLibProcessCleanupStatus
-                { lengthSMTLibProcessCleanupEscalation =
-                    LengthSMTLibProcessCleanupIncomplete
-                , lengthSMTLibProcessCleanupExitCode = Nothing
-                , lengthSMTLibProcessCleanupFailureCount = 1
-                , lengthSMTLibProcessCleanupReadersStopped = False
-                }
-        atomically $ writeTVar (processLifecycle process) ProcessClosed
-        modifyMVar_ (processCloseState process)
-          $ const $ pure $ CloseFinished status
-        putMVar result status
-      pure (CloseRunning result, result)
-    CloseRunning result -> pure (state, result)
-    CloseFinished status -> do
-      result <- newMVar status
-      pure (state, result)
-  readMVar gate
-
-cleanupProcess :: LengthSMTLibProcess -> IO LengthSMTLibProcessCleanupStatus
-cleanupProcess process = do
-  threads <- atomically $ readTVar $ processThreads process
-  status <- cleanupAcquired
-    (processLimits process)
-    (Just $ processInput process)
-    (Just $ processOutput process)
-    (Just $ processErrorOutput process)
-    (processHandle process)
-    (processGroupIdentifier process)
-    threads
-  atomically $ writeTVar (processLifecycle process) ProcessClosed
-  pure status
-
-cleanupAcquired
-  :: LengthSMTLibProcessLimits
-  -> Maybe Handle
-  -> Maybe Handle
-  -> Maybe Handle
-  -> ProcessHandle
-  -> Maybe Integer
-  -> [ManagedThread]
-  -> IO LengthSMTLibProcessCleanupStatus
-cleanupAcquired limits input output errorOutput handle groupIdentifier threads =
-  mask_ $ do
-    inputClosed <- closeMaybe input
-    graceful <- boundedWait handle gracefulMilliseconds
-    (escalation, exitCode, signalFailures) <- case graceful of
-      Just status -> pure
-        (LengthSMTLibProcessClosedGracefully, Just status, 0)
-      Nothing -> do
-        terminateFailures <- terminateOwnedGroup handle groupIdentifier
-        terminated <- boundedWait handle terminateMilliseconds
-        case terminated of
-          Just status -> pure
-            (LengthSMTLibProcessTerminated, Just status, terminateFailures)
-          Nothing -> do
-            killFailures <- forceKill groupIdentifier
-            killed <- boundedWait handle killMilliseconds
-            pure $ case killed of
-              Just status ->
-                ( LengthSMTLibProcessKilled
-                , Just status
-                , terminateFailures + killFailures
-                )
-              Nothing ->
-                ( LengthSMTLibProcessCleanupIncomplete
-                , Nothing
-                , terminateFailures + killFailures
-                )
-    mapM_ stopManagedThread threads
-    readersStopped <- waitManagedThreads killMilliseconds threads
-    (outputClosed, errorClosed) <- if readersStopped
-      then (,) <$> closeMaybe output <*> closeMaybe errorOutput
-      else pure (False, False)
-    let closeFailures = boolFailure inputClosed + boolFailure outputClosed
-          + boolFailure errorClosed
-        totalFailures = signalFailures + closeFailures
-          + if readersStopped then 0 else 1
-        finalEscalation
-          | exitCode == Nothing || not readersStopped =
-              LengthSMTLibProcessCleanupIncomplete
-          | otherwise = escalation
-    pure LengthSMTLibProcessCleanupStatus
-      { lengthSMTLibProcessCleanupEscalation = finalEscalation
-      , lengthSMTLibProcessCleanupExitCode = exitCode
-      , lengthSMTLibProcessCleanupFailureCount = totalFailures
-      , lengthSMTLibProcessCleanupReadersStopped = readersStopped
-      }
- where
-  LengthSMTLibProcessLimits _ _ _ _ gracefulMilliseconds
-      terminateMilliseconds killMilliseconds = limits
-  closeMaybe Nothing = pure True
-  closeMaybe (Just stream) = boundedClose killMilliseconds stream
-  boolFailure True = 0
-  boolFailure False = 1
-
--- Polling avoids 'waitForProcess': its blocking @waitpid@ can hold the sole RTS
--- capability in a non-threaded embedding, preventing the timeout/escalation
--- owner itself from running.  'getProcessExitCode' uses a nonblocking status
--- observation and reaps/caches the child when it has exited.
-boundedWait :: ProcessHandle -> Int -> IO (Maybe ExitCode)
-boundedWait handle milliseconds = do
-  started <- getMonotonicTimeNSec
-  let deadline = toInteger started + toInteger milliseconds * 1000000
-  go deadline
- where
-  go deadline = do
-    observed <- tryIOError $ getProcessExitCode handle
-    case observed of
-      Left _ -> pure Nothing
-      Right (Just status) -> pure $ Just status
-      Right Nothing -> do
-        now <- getMonotonicTimeNSec
-        if toInteger now >= deadline
-          then pure Nothing
-          else do
-            let remainingMicroseconds =
-                  (deadline - toInteger now + 999) `div` 1000
-                pause = fromInteger $ max 1 $ min 5000 remainingMicroseconds
-            threadDelay pause
-            go deadline
-
--- Never let a lock-contended 'hClose' hold the cleanup owner indefinitely.
--- A timed-out helper is interrupted best-effort and the incomplete close is
--- reflected in cleanup status; the owner does not wait unboundedly to join an
--- uninterruptible handle operation.
-boundedClose :: Int -> Handle -> IO Bool
-boundedClose milliseconds stream = mask $ \restore -> do
-  result <- newEmptyTMVarIO
-  thread <- forkIOWithUnmask $ \unmask -> do
-    attempted <- tryAny $ unmask $ hClose stream
-    atomically $ void $ tryPutTMVar result attempted
-  observed <- restore $ timeout (milliseconds * 1000)
-    $ atomically $ readTMVar result
-  case observed of
-    Just (Right ()) -> pure True
-    Just (Left _) -> pure False
-    Nothing -> do
-      _ <- forkIO $ killThread thread
-      pure False
-
-terminateOwnedGroup :: ProcessHandle -> Maybe Integer -> IO Natural
-#ifndef mingw32_HOST_OS
-terminateOwnedGroup handle Nothing = do
-  terminated <- tryIOError $ terminateProcess handle
-  -- The additional failure records that descendant cleanup was unavailable.
-  pure $ 1 + unitFailure terminated
-terminateOwnedGroup handle (Just identifier) = do
-  groupTerminated <- tryIOError $ signalProcessGroup sigTERM
-    $ fromInteger identifier
-  case groupTerminated of
-    Right () -> pure 0
-    Left _ -> do
-      -- The ProcessHandle remains a safe leader fallback; do not retry a stale
-      -- numeric group identifier after group addressing failed.
-      terminated <- tryIOError $ terminateProcess handle
-      pure $ 1 + unitFailure terminated
-#else
-terminateOwnedGroup handle _ = do
-  interrupted <- tryIOError $ interruptProcessGroupOf handle
-  terminated <- tryIOError $ terminateProcess handle
-  pure $ unitFailure interrupted + unitFailure terminated
-#endif
-
-forceKill :: Maybe Integer -> IO Natural
-#ifndef mingw32_HOST_OS
-forceKill Nothing = pure 1
-forceKill (Just identifier) = do
-  killed <- tryIOError $ signalProcessGroup sigKILL $ fromInteger identifier
-  pure $ unitFailure killed
-#else
-forceKill _ = pure 0
-#endif
-
-unitFailure :: Either failure () -> Natural
-unitFailure (Left _) = 1
-unitFailure (Right ()) = 0
-
-waitManagedThreads :: Int -> [ManagedThread] -> IO Bool
-waitManagedThreads milliseconds threads = do
-  waited <- timeout (milliseconds * 1000)
-    $ atomically $ mapM_ managedThreadFinishedSTM threads
-  pure $ case waited of
-    Nothing -> False
-    Just () -> True
-
-startManagedThread
-  :: LengthSMTLibProcess
-  -> LengthSMTLibProcessPhase
-  -> STM (Maybe LengthSMTLibProcessError)
-  -> IO ()
-  -> IO (Either LengthSMTLibProcessError ManagedThread)
-startManagedThread process phase extraFailure action = mask_ $ do
-  start <- newEmptyMVar
-  done <- newEmptyTMVarIO
-  thread <- forkIOWithUnmask $ \unmask ->
-    (do
-      shouldRun <- takeMVar start
-      when shouldRun $ unmask action)
-    `finally` atomically (putTMVar done ())
-  let managed = ManagedThread thread done
-  admitted <- atomically $ do
-    lifecycle <- readTVar $ processLifecycle process
-    poisoned <- readTVar $ processPoison process
-    extra <- extraFailure
-    case (lifecycle, poisoned, extra) of
-      (ProcessOpen, Nothing, Nothing) -> do
-        modifyTVar' (processThreads process) (managed :)
-        pure $ Right ()
-      (_, Just failure, _) -> pure $ Left failure
-      (_, _, Just failure) -> pure $ Left failure
-      _ -> pure $ Left $ processError phase LengthSMTLibProcessClosed Nothing
-  case admitted of
-    Right () -> do
-      putMVar start True
-      pure $ Right managed
-    Left failure -> do
-      putMVar start False
-      atomically $ managedThreadFinishedSTM managed
-      pure $ Left failure
-
-stopManagedThread :: ManagedThread -> IO ()
-stopManagedThread (ManagedThread thread _) = void $ forkIO $ killThread thread
-
-managedThreadFinishedSTM :: ManagedThread -> STM ()
-managedThreadFinishedSTM (ManagedThread _ done) = readTMVar done
-
-unregisterManagedThread :: LengthSMTLibProcess -> ManagedThread -> IO ()
-unregisterManagedThread process target = atomically $ modifyTVar'
-  (processThreads process) $ filter $ not . sameManagedThread target
-
-sameManagedThread :: ManagedThread -> ManagedThread -> Bool
-sameManagedThread (ManagedThread left _) (ManagedThread right _) = left == right
-
-waitBeforeDeadline
-  :: LengthSMTLibProcessCancellation
-  -> LengthSMTLibProcessDeadline
-  -> TMVar (Either SomeException value)
-  -> IO
-      (Either
-        LengthSMTLibProcessError
-        (Either SomeException value))
-waitBeforeDeadline cancellation deadline outcome = go
- where
-  go = do
-    control <- checkCancellationDeadline
-      LengthSMTLibProcessDeadlinePhase cancellation deadline
-    case control of
-      Left failure -> pure $ Left failure
-      Right () -> do
-        remaining <- remainingDeadlineMicroseconds deadline
-        case remaining of
-          Nothing -> pure $ Left $ processError
-            LengthSMTLibProcessDeadlinePhase
-            LengthSMTLibProcessDeadlineExceeded Nothing
-          Just microseconds -> do
-            observed <- timeout microseconds $ atomically $
-              cancellationSTM cancellation LengthSMTLibProcessDeadlinePhase
-              `orElse` (Right <$> readTMVar outcome)
-            case observed of
-              Nothing -> go
-              Just value -> do
-                finalControl <- checkCancellationDeadline
-                  LengthSMTLibProcessDeadlinePhase cancellation deadline
-                pure $ case finalControl of
-                  Left failure -> Left failure
-                  Right () -> value
-
-waitControlled
-  :: LengthSMTLibProcess
-  -> LengthSMTLibProcessCancellation
-  -> LengthSMTLibProcessDeadline
-  -> LengthSMTLibProcessPhase
-  -> STM value
-  -> IO (Either LengthSMTLibProcessError value)
-waitControlled process cancellation deadline phase action = go
- where
-  go = do
-    control <- checkCancellationDeadline phase cancellation deadline
-    case control of
-      Left failure -> pure $ Left failure
-      Right () -> do
-        remaining <- remainingDeadlineMicroseconds deadline
-        case remaining of
-          Nothing -> pure $ Left $ processError phase
-            LengthSMTLibProcessDeadlineExceeded Nothing
-          Just microseconds -> do
-            observed <- timeout microseconds $ atomically $
-              cancellationSTM cancellation phase
-              `orElse` poisonSTM process
-              `orElse` lifecycleSTM process phase
-              `orElse` (Right <$> action)
-            case observed of
-              Nothing -> go
-              Just value -> do
-                finalControl <- checkCancellationDeadline
-                  phase cancellation deadline
-                case finalControl of
-                  Left failure -> pure $ Left failure
-                  Right () -> do
-                    poisoned <- atomically $ readTVar $ processPoison process
-                    pure $ case poisoned of
-                      Just failure -> Left failure
-                      Nothing -> value
-
--- | Wait for one package-private, non-owning STM admission observation under
--- the same process, cancellation, poison, lifecycle, and absolute-deadline
--- precedence as pipe operations.  The action must not destructively acquire a
--- resource: the final precedence check may discard its result.  Session first
--- observes its query gate here, then claims it nonblockingly under masking.
 waitLengthSMTLibProcessControl
   :: LengthSMTLibProcess
   -> LengthSMTLibProcessCancellation
@@ -1600,311 +408,239 @@ waitLengthSMTLibProcessControl
   -> LengthSMTLibProcessPhase
   -> STM value
   -> IO (Either LengthSMTLibProcessError value)
-waitLengthSMTLibProcessControl = waitControlled
+waitLengthSMTLibProcessControl process cancellation deadline phase action =
+  mask $ \restore -> do
+    result <- restore $ Z3Process.waitZ3SMTLibProcessControl
+      (toZ3Process process)
+      (toZ3ProcessCancellation cancellation)
+      (toZ3ProcessDeadline deadline)
+      (toZ3ProcessPhase phase)
+      action
+    retainZ3ProcessResult result
 
--- A stdout terminal condition participates in write admission without becoming
--- global poison.  Thus a write cannot start after the reader records terminal,
--- while 'nextLengthSMTLibProcessStdoutChunk' can still deliver chunks which
--- precede that terminal in the stdout FIFO.
-waitWriteControlled
+closeLengthSMTLibProcess
   :: LengthSMTLibProcess
-  -> LengthSMTLibProcessCancellation
-  -> LengthSMTLibProcessDeadline
-  -> LengthSMTLibProcessPhase
-  -> STM value
-  -> IO (Either LengthSMTLibProcessError value)
-waitWriteControlled process cancellation deadline phase action = do
-  result <- waitControlled process cancellation deadline phase $ do
-    terminal <- readTVar $ processStdoutTerminal process
-    case terminal of
-      Just failure -> pure $ Left failure
-      Nothing -> Right <$> action
-  pure $ result >>= id
+  -> IO LengthSMTLibProcessCleanupStatus
+closeLengthSMTLibProcess process = mask_ $ do
+  cleanup <- Z3Process.closeZ3SMTLibProcess $ toZ3Process process
+  let retained = fromZ3ProcessCleanupStatus cleanup
+  retained `seq` pure retained
 
-cancellationSTM
-  :: LengthSMTLibProcessCancellation
-  -> LengthSMTLibProcessPhase
-  -> STM (Either LengthSMTLibProcessError value)
-cancellationSTM (LengthSMTLibProcessCancellation cancelled) phase = do
-  value <- readTVar cancelled
-  if value
-    then pure $ Left $ processError phase LengthSMTLibProcessCancelled Nothing
-    else retry
+processFingerprintField :: Z3Process.Z3SMTLibProcess -> FingerprintField
+processFingerprintField process = FingerprintTag
+  (ascii "length-z3-launched-transport")
+  $ FingerprintBytes (BS.unpack lengthSMTLibProcessSchemaTag)
+  : Z3Process.z3SMTLibProcessObservationFingerprintFields process
+  ++ [ lengthSMTLibProcessLimitsFingerprintField
+      $ LengthSMTLibProcessLimits
+      $ Z3Process.z3SMTLibProcessLimits process
+     ]
 
-poisonSTM
-  :: LengthSMTLibProcess
-  -> STM (Either LengthSMTLibProcessError value)
-poisonSTM process = do
-  poisoned <- readTVar $ processPoison process
-  case poisoned of
-    Nothing -> retry
-    Just failure -> pure $ Left failure
-
-lifecycleSTM
-  :: LengthSMTLibProcess
-  -> LengthSMTLibProcessPhase
-  -> STM (Either LengthSMTLibProcessError value)
-lifecycleSTM process phase = do
-  lifecycle <- readTVar $ processLifecycle process
-  if lifecycle == ProcessOpen
-    then retry
-    else pure $ Left $ processError phase LengthSMTLibProcessClosed Nothing
-
-checkCancellationDeadline
-  :: LengthSMTLibProcessPhase
-  -> LengthSMTLibProcessCancellation
-  -> LengthSMTLibProcessDeadline
-  -> IO (Either LengthSMTLibProcessError ())
-checkCancellationDeadline phase
-    (LengthSMTLibProcessCancellation cancelled)
-    (LengthSMTLibProcessDeadline deadline) = do
-  isCancelled <- atomically $ readTVar cancelled
-  if isCancelled
-    then pure $ Left $ processError phase LengthSMTLibProcessCancelled Nothing
-    else do
-      now <- getMonotonicTimeNSec
-      pure $ if now >= deadline
-        then Left $ processError phase LengthSMTLibProcessDeadlineExceeded Nothing
-        else Right ()
-
-remainingDeadlineMicroseconds
-  :: LengthSMTLibProcessDeadline
-  -> IO (Maybe Int)
-remainingDeadlineMicroseconds (LengthSMTLibProcessDeadline deadline) = do
-  now <- getMonotonicTimeNSec
-  pure $ if now >= deadline
-    then Nothing
-    else Just $ fromIntegral $ min (toInteger (maxBound :: Int))
-      $ (toInteger deadline - toInteger now + 999) `div` 1000
-
-poisonOperation
-  :: LengthSMTLibProcess
-  -> LengthSMTLibProcessError
-  -> IO (Either LengthSMTLibProcessError value)
-poisonOperation process failure = do
-  atomically $ setFirstPoisonSTM process failure
-  pure $ Left failure
-
-rejectWrite
-  :: LengthSMTLibProcess
-  -> LengthSMTLibProcessError
-  -> IO (Either LengthSMTLibProcessError value)
-rejectWrite process failure = do
-  terminal <- atomically $ readTVar $ processStdoutTerminal process
-  case terminal of
-    Just known | known == failure -> pure $ Left failure
-    _ -> poisonOperation process failure
-
-poisonIfOpen :: LengthSMTLibProcess -> LengthSMTLibProcessError -> IO ()
-poisonIfOpen process failure = atomically $ do
-  lifecycle <- readTVar $ processLifecycle process
-  when (lifecycle == ProcessOpen) $ setFirstPoisonSTM process failure
-
-setFirstPoisonSTM
-  :: LengthSMTLibProcess
-  -> LengthSMTLibProcessError
-  -> STM ()
-setFirstPoisonSTM process failure = do
-  current <- readTVar $ processPoison process
-  case current of
-    Nothing -> writeTVar (processPoison process) $ Just failure
-    Just _ -> pure ()
-
-setStdoutTerminalSTM
-  :: LengthSMTLibProcess
-  -> LengthSMTLibProcessError
-  -> STM ()
-setStdoutTerminalSTM process failure = do
-  current <- readTVar $ processStdoutTerminal process
-  case current of
-    Just _ -> pure ()
-    Nothing -> do
-      writeTVar (processStdoutTerminal process) $ Just failure
-      writeTQueue (processStdoutQueue process) $ StdoutTerminal failure
-
-closeAfterOpenFailure
-  :: LengthSMTLibProcess
-  -> LengthSMTLibProcessError
-  -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
-closeAfterOpenFailure process failure = do
-  atomically $ setFirstPoisonSTM process failure
-  cleanup <- closeLengthSMTLibProcess process
-  pure $ Left $ attachCleanup cleanup failure
-
-processError
-  :: LengthSMTLibProcessPhase
-  -> LengthSMTLibProcessFailureClass
-  -> Maybe Natural
-  -> LengthSMTLibProcessError
-processError phase failure observed = LengthSMTLibProcessError
-  { lengthSMTLibProcessErrorPhase = phase
-  , lengthSMTLibProcessErrorClass = failure
-  , lengthSMTLibProcessErrorObservedAtLeast = observed
-  , lengthSMTLibProcessErrorCleanupStatus = Nothing
+toZ3ProcessLimitSource
+  :: LengthSMTLibProcessLimitSource
+  -> Z3Process.Z3SMTLibProcessLimitSource
+toZ3ProcessLimitSource source = Z3Process.Z3SMTLibProcessLimitSource
+  { Z3Process.z3SMTLibProcessLimitSourceExecutableBytes =
+      lengthSMTLibProcessLimitSourceExecutableBytes source
+  , Z3Process.z3SMTLibProcessLimitSourceStdoutBytes =
+      lengthSMTLibProcessLimitSourceStdoutBytes source
+  , Z3Process.z3SMTLibProcessLimitSourceStderrBytes =
+      lengthSMTLibProcessLimitSourceStderrBytes source
+  , Z3Process.z3SMTLibProcessLimitSourceReadChunkBytes =
+      lengthSMTLibProcessLimitSourceReadChunkBytes source
+  , Z3Process.z3SMTLibProcessLimitSourceGracefulCloseMilliseconds =
+      lengthSMTLibProcessLimitSourceGracefulCloseMilliseconds source
+  , Z3Process.z3SMTLibProcessLimitSourceTerminateMilliseconds =
+      lengthSMTLibProcessLimitSourceTerminateMilliseconds source
+  , Z3Process.z3SMTLibProcessLimitSourceKillMilliseconds =
+      lengthSMTLibProcessLimitSourceKillMilliseconds source
   }
 
-attachCleanup
-  :: LengthSMTLibProcessCleanupStatus
-  -> LengthSMTLibProcessError
-  -> LengthSMTLibProcessError
-attachCleanup cleanup failure = failure
-  { lengthSMTLibProcessErrorCleanupStatus = Just cleanup }
-
-incompleteCleanupStatus :: LengthSMTLibProcessCleanupStatus
-incompleteCleanupStatus = LengthSMTLibProcessCleanupStatus
-  { lengthSMTLibProcessCleanupEscalation =
-      LengthSMTLibProcessCleanupIncomplete
-  , lengthSMTLibProcessCleanupExitCode = Nothing
-  , lengthSMTLibProcessCleanupFailureCount = 1
-  , lengthSMTLibProcessCleanupReadersStopped = False
+fromZ3ProcessLimitSource
+  :: Z3Process.Z3SMTLibProcessLimitSource
+  -> LengthSMTLibProcessLimitSource
+fromZ3ProcessLimitSource source = LengthSMTLibProcessLimitSource
+  { lengthSMTLibProcessLimitSourceExecutableBytes =
+      Z3Process.z3SMTLibProcessLimitSourceExecutableBytes source
+  , lengthSMTLibProcessLimitSourceStdoutBytes =
+      Z3Process.z3SMTLibProcessLimitSourceStdoutBytes source
+  , lengthSMTLibProcessLimitSourceStderrBytes =
+      Z3Process.z3SMTLibProcessLimitSourceStderrBytes source
+  , lengthSMTLibProcessLimitSourceReadChunkBytes =
+      Z3Process.z3SMTLibProcessLimitSourceReadChunkBytes source
+  , lengthSMTLibProcessLimitSourceGracefulCloseMilliseconds =
+      Z3Process.z3SMTLibProcessLimitSourceGracefulCloseMilliseconds source
+  , lengthSMTLibProcessLimitSourceTerminateMilliseconds =
+      Z3Process.z3SMTLibProcessLimitSourceTerminateMilliseconds source
+  , lengthSMTLibProcessLimitSourceKillMilliseconds =
+      Z3Process.z3SMTLibProcessLimitSourceKillMilliseconds source
   }
 
-boundedReadSize :: Int -> Natural -> Natural -> Int
-boundedReadSize chunk maximumBytes observed = fromIntegral $ max 1
-  $ min (fromIntegral chunk) $ if observed >= maximumBytes
-      then 1
-      else maximumBytes - observed + 1
-
-executableSnapshotField
-  :: Z3.Z3SMTLibExecutionProfile
-  -> FilePath
-  -> FilePath
-  -> FilePath
-  -> CapturedMetadata
-  -> ByteString
-  -> Natural
-  -> Maybe ByteString
-  -> FingerprintField
-executableSnapshotField profile requestedCwd canonicalCwd canonicalExecutable
-    metadata digest count expected = FingerprintTag
-  (ascii "pre-spawn-path-executable-snapshot")
-  [ FingerprintBytes $ BS.unpack lengthSMTLibExecutableSnapshotStrengthTag
-  , FingerprintTag (ascii "requested-executable-path")
-      [textField $ Z3.z3SMTLibExecutionExecutablePath profile]
-  , FingerprintTag (ascii "canonical-executable-path")
-      [textField canonicalExecutable]
-  , metadataField metadata
-  , FingerprintTag (ascii "sha256") [FingerprintBytes $ BS.unpack digest]
-  , FingerprintNatural count
-  , case expected of
-      Nothing -> FingerprintTag (ascii "snapshot-pin-absent") []
-      Just pinned -> FingerprintTag (ascii "snapshot-pin-matched")
-        [FingerprintBytes $ BS.unpack pinned]
-  , FingerprintTag (ascii "spawn-path-original-request")
-      [textField $ Z3.z3SMTLibExecutionExecutablePath profile]
-  , FingerprintTag (ascii "spawn-argv")
-      [FingerprintSequence $ map textField
-        $ Z3.z3SMTLibExecutionConfiguredArgumentVector profile]
-  , FingerprintTag (ascii "spawn-empty-environment") []
-  , FingerprintTag (ascii "requested-working-directory")
-      [textField requestedCwd]
-  , FingerprintTag (ascii "spawn-working-directory-exact-canonical-path")
-      [textField canonicalCwd]
-  , FingerprintTag (ascii "spawn-flags") $ map (FingerprintBytes . ascii)
-      [ "three-create-pipes"
-      , "close-fds"
-      , "create-group"
-      , "no-delegated-ctlc"
-      , "process-jobs"
-      ]
-  ]
-
-metadataField :: CapturedMetadata -> FingerprintField
-metadataField (CapturedMetadata portable
-#ifndef mingw32_HOST_OS
-    posix
-#endif
-    ) = FingerprintTag (ascii "before-after-consistent-metadata")
-  [portableMetadataField portable
-#ifndef mingw32_HOST_OS
-  , posixMetadataField posix
-#endif
-  ]
-
-portableMetadataField :: PortableMetadata -> FingerprintField
-portableMetadataField
-    (PortableMetadata size canRead canWrite canExecute canSearch modified) =
-  FingerprintTag (ascii "portable-metadata")
-    [ integerTextField size
-    , booleanField canRead
-    , booleanField canWrite
-    , booleanField canExecute
-    , booleanField canSearch
-    , textField modified
-    ]
-
-#ifndef mingw32_HOST_OS
-posixMetadataField :: PosixMetadata -> FingerprintField
-posixMetadataField (PosixMetadata device inode mode size links modified changed) =
-  FingerprintTag (ascii "posix-regular-file-metadata")
-    $ map integerTextField [device, inode, mode, size, links]
-      ++ [textField modified, textField changed]
-#endif
-
-processFingerprintField
+toZ3ProcessLimits
   :: LengthSMTLibProcessLimits
-  -> LengthSMTLibProcessDeadline
-  -> LengthSMTLibExecutableSnapshot
-  -> FilePath
-  -> FingerprintField
-  -> FingerprintField
-processFingerprintField limits
-    (LengthSMTLibProcessDeadline deadline)
-    snapshot canonicalWorkingDirectory pidField =
-  FingerprintTag (ascii "length-z3-launched-transport")
-    [ FingerprintBytes $ BS.unpack lengthSMTLibProcessSchemaTag
-    , lengthSMTLibExecutableSnapshotFingerprintField snapshot
-    , FingerprintTag (ascii "canonical-working-directory-observation")
-        [textField canonicalWorkingDirectory]
-    , workingDirectoryEmptinessObservationField
-    , pidField
-    , FingerprintTag (ascii "alive-at-open-snapshot") []
-    , FingerprintTag (ascii "separate-binary-pipes") []
-    , FingerprintTag (ascii "stderr-first-byte-poisons-session") []
-    , FingerprintTag
-        (ascii "stderr-post-poison-discard-count-capped-at-max-plus-one/v1") []
-    , FingerprintTag
-        (ascii "stdout-cumulative-charge-before-fifo-enqueue/v1") []
-    , FingerprintTag (ascii "stdout-chunks-before-terminal-fifo/v1") []
-    , FingerprintTag (ascii "writes-exact-bytes-then-flush/v1") []
-    , FingerprintTag
-        (ascii "control-priority-cancel-deadline-poison-output/v1") []
-    , FingerprintTag
-        (ascii "cleanup-leader-close-wait-term-wait-kill-wait/v1") []
-    , FingerprintTag
-        (ascii "descendant-cleanup-best-effort-no-post-reap-group-signal/v1")
-        []
-    , FingerprintTag (ascii "absolute-monotonic-deadline-nanoseconds")
-        [FingerprintNatural $ fromIntegral deadline]
-    , lengthSMTLibProcessLimitsFingerprintField limits
-    ]
+  -> Z3Process.Z3SMTLibProcessLimits
+toZ3ProcessLimits (LengthSMTLibProcessLimits limits) = limits
 
-workingDirectoryEmptinessObservationField :: FingerprintField
-#ifndef mingw32_HOST_OS
-workingDirectoryEmptinessObservationField = FingerprintTag
-  (ascii "working-directory-observed-empty-posix-dir-stream-at-most-three-reads/v1")
-  []
-#else
-workingDirectoryEmptinessObservationField = FingerprintTag
-  (ascii "working-directory-observed-empty-windows-list-fallback-no-read-bound/v1")
-  []
-#endif
+toZ3ProcessDeadline
+  :: LengthSMTLibProcessDeadline
+  -> Z3Process.Z3SMTLibProcessDeadline
+toZ3ProcessDeadline (LengthSMTLibProcessDeadline deadline) = deadline
 
-textField :: String -> FingerprintField
-textField = FingerprintSequence
-  . map (FingerprintNatural . fromIntegral . ord)
+toZ3ProcessCancellation
+  :: LengthSMTLibProcessCancellation
+  -> Z3Process.Z3SMTLibProcessCancellation
+toZ3ProcessCancellation (LengthSMTLibProcessCancellation cancellation) =
+  cancellation
 
-integerTextField :: Integer -> FingerprintField
-integerTextField = textField . show
+toZ3ExecutableSnapshot
+  :: LengthSMTLibExecutableSnapshot
+  -> Z3Process.Z3SMTLibExecutableSnapshot
+toZ3ExecutableSnapshot (LengthSMTLibExecutableSnapshot snapshot) = snapshot
 
-booleanField :: Bool -> FingerprintField
-booleanField value = FingerprintBytes $ ascii $ if value then "true" else "false"
+toZ3Process :: LengthSMTLibProcess -> Z3Process.Z3SMTLibProcess
+toZ3Process (LengthSMTLibProcess process _) = process
+
+-- Finish the compatibility mapping while the delegating operation's outer
+-- mask is restored.  In particular, a successfully acquired process or
+-- destructively dequeued receipt is never separated from its Length result by
+-- a new asynchronous-exception window in this facade.
+retainZ3ProcessResult
+  :: Either Z3Process.Z3SMTLibProcessError value
+  -> IO (Either LengthSMTLibProcessError value)
+retainZ3ProcessResult result = case result of
+  Left failure ->
+    let retained = fromZ3ProcessError failure
+    in retained `seq` pure (Left retained)
+  Right value -> pure $ Right value
+
+fromZ3ProcessError
+  :: Z3Process.Z3SMTLibProcessError
+  -> LengthSMTLibProcessError
+fromZ3ProcessError failure = LengthSMTLibProcessError
+  { lengthSMTLibProcessErrorPhase = fromZ3ProcessPhase
+      $ Z3Process.z3SMTLibProcessErrorPhase failure
+  , lengthSMTLibProcessErrorClass = fromZ3ProcessFailureClass
+      $ Z3Process.z3SMTLibProcessErrorClass failure
+  , lengthSMTLibProcessErrorObservedAtLeast =
+      Z3Process.z3SMTLibProcessErrorObservedAtLeast failure
+  , lengthSMTLibProcessErrorCleanupStatus = case
+      Z3Process.z3SMTLibProcessErrorCleanupStatus failure of
+        Nothing -> Nothing
+        Just cleanup -> Just $ fromZ3ProcessCleanupStatus cleanup
+  }
+
+fromZ3ProcessCleanupStatus
+  :: Z3Process.Z3SMTLibProcessCleanupStatus
+  -> LengthSMTLibProcessCleanupStatus
+fromZ3ProcessCleanupStatus cleanup = LengthSMTLibProcessCleanupStatus
+  { lengthSMTLibProcessCleanupEscalation = fromZ3ProcessCleanupEscalation
+      $ Z3Process.z3SMTLibProcessCleanupEscalation cleanup
+  , lengthSMTLibProcessCleanupExitCode =
+      Z3Process.z3SMTLibProcessCleanupExitCode cleanup
+  , lengthSMTLibProcessCleanupFailureCount =
+      Z3Process.z3SMTLibProcessCleanupFailureCount cleanup
+  , lengthSMTLibProcessCleanupReadersStopped =
+      Z3Process.z3SMTLibProcessCleanupReadersStopped cleanup
+  }
+
+toZ3ProcessPhase
+  :: LengthSMTLibProcessPhase
+  -> Z3Process.Z3SMTLibProcessPhase
+toZ3ProcessPhase phase = case phase of
+  LengthSMTLibProcessLimitPhase -> Z3Process.Z3SMTLibProcessLimitPhase
+  LengthSMTLibProcessDeadlinePhase -> Z3Process.Z3SMTLibProcessDeadlinePhase
+  LengthSMTLibProcessWorkingDirectoryPhase ->
+    Z3Process.Z3SMTLibProcessWorkingDirectoryPhase
+  LengthSMTLibProcessSnapshotPhase -> Z3Process.Z3SMTLibProcessSnapshotPhase
+  LengthSMTLibProcessSpawnPhase -> Z3Process.Z3SMTLibProcessSpawnPhase
+  LengthSMTLibProcessConfigurePhase -> Z3Process.Z3SMTLibProcessConfigurePhase
+  LengthSMTLibProcessWritePhase -> Z3Process.Z3SMTLibProcessWritePhase
+  LengthSMTLibProcessStdoutPhase -> Z3Process.Z3SMTLibProcessStdoutPhase
+  LengthSMTLibProcessStderrPhase -> Z3Process.Z3SMTLibProcessStderrPhase
+  LengthSMTLibProcessReadyPhase -> Z3Process.Z3SMTLibProcessReadyPhase
+  LengthSMTLibProcessQueryPhase -> Z3Process.Z3SMTLibProcessQueryPhase
+  LengthSMTLibProcessClosePhase -> Z3Process.Z3SMTLibProcessClosePhase
+
+fromZ3ProcessPhase
+  :: Z3Process.Z3SMTLibProcessPhase
+  -> LengthSMTLibProcessPhase
+fromZ3ProcessPhase phase = case phase of
+  Z3Process.Z3SMTLibProcessLimitPhase -> LengthSMTLibProcessLimitPhase
+  Z3Process.Z3SMTLibProcessDeadlinePhase -> LengthSMTLibProcessDeadlinePhase
+  Z3Process.Z3SMTLibProcessWorkingDirectoryPhase ->
+    LengthSMTLibProcessWorkingDirectoryPhase
+  Z3Process.Z3SMTLibProcessSnapshotPhase -> LengthSMTLibProcessSnapshotPhase
+  Z3Process.Z3SMTLibProcessSpawnPhase -> LengthSMTLibProcessSpawnPhase
+  Z3Process.Z3SMTLibProcessConfigurePhase -> LengthSMTLibProcessConfigurePhase
+  Z3Process.Z3SMTLibProcessWritePhase -> LengthSMTLibProcessWritePhase
+  Z3Process.Z3SMTLibProcessStdoutPhase -> LengthSMTLibProcessStdoutPhase
+  Z3Process.Z3SMTLibProcessStderrPhase -> LengthSMTLibProcessStderrPhase
+  Z3Process.Z3SMTLibProcessReadyPhase -> LengthSMTLibProcessReadyPhase
+  Z3Process.Z3SMTLibProcessQueryPhase -> LengthSMTLibProcessQueryPhase
+  Z3Process.Z3SMTLibProcessClosePhase -> LengthSMTLibProcessClosePhase
+
+fromZ3ProcessFailureClass
+  :: Z3Process.Z3SMTLibProcessFailureClass
+  -> LengthSMTLibProcessFailureClass
+fromZ3ProcessFailureClass failure = case failure of
+  Z3Process.Z3SMTLibProcessNonPositiveLimit ->
+    LengthSMTLibProcessNonPositiveLimit
+  Z3Process.Z3SMTLibProcessLimitConversionOverflow ->
+    LengthSMTLibProcessLimitConversionOverflow
+  Z3Process.Z3SMTLibProcessCancelled -> LengthSMTLibProcessCancelled
+  Z3Process.Z3SMTLibProcessDeadlineExceeded ->
+    LengthSMTLibProcessDeadlineExceeded
+  Z3Process.Z3SMTLibProcessWorkingDirectoryNotAbsolute ->
+    LengthSMTLibProcessWorkingDirectoryNotAbsolute
+  Z3Process.Z3SMTLibProcessWorkingDirectoryUnavailable ->
+    LengthSMTLibProcessWorkingDirectoryUnavailable
+  Z3Process.Z3SMTLibProcessWorkingDirectoryNotEmpty ->
+    LengthSMTLibProcessWorkingDirectoryNotEmpty
+  Z3Process.Z3SMTLibProcessExecutableUnavailable ->
+    LengthSMTLibProcessExecutableUnavailable
+  Z3Process.Z3SMTLibProcessExecutableNotRegular ->
+    LengthSMTLibProcessExecutableNotRegular
+  Z3Process.Z3SMTLibProcessExecutableByteLimitExceeded ->
+    LengthSMTLibProcessExecutableByteLimitExceeded
+  Z3Process.Z3SMTLibProcessExecutableMetadataChanged ->
+    LengthSMTLibProcessExecutableMetadataChanged
+  Z3Process.Z3SMTLibProcessExecutableDigestMismatch ->
+    LengthSMTLibProcessExecutableDigestMismatch
+  Z3Process.Z3SMTLibProcessSpawnFailed -> LengthSMTLibProcessSpawnFailed
+  Z3Process.Z3SMTLibProcessMissingPipe -> LengthSMTLibProcessMissingPipe
+  Z3Process.Z3SMTLibProcessHandleConfigurationFailed ->
+    LengthSMTLibProcessHandleConfigurationFailed
+  Z3Process.Z3SMTLibProcessWriteFailed -> LengthSMTLibProcessWriteFailed
+  Z3Process.Z3SMTLibProcessStdoutByteLimitExceeded ->
+    LengthSMTLibProcessStdoutByteLimitExceeded
+  Z3Process.Z3SMTLibProcessStdoutEOF -> LengthSMTLibProcessStdoutEOF
+  Z3Process.Z3SMTLibProcessStdoutReadFailed ->
+    LengthSMTLibProcessStdoutReadFailed
+  Z3Process.Z3SMTLibProcessUnexpectedPendingStdout ->
+    LengthSMTLibProcessUnexpectedPendingStdout
+  Z3Process.Z3SMTLibProcessStderrObserved ->
+    LengthSMTLibProcessStderrObserved
+  Z3Process.Z3SMTLibProcessStderrEOF -> LengthSMTLibProcessStderrEOF
+  Z3Process.Z3SMTLibProcessStderrReadFailed ->
+    LengthSMTLibProcessStderrReadFailed
+  Z3Process.Z3SMTLibProcessExited -> LengthSMTLibProcessExited
+  Z3Process.Z3SMTLibProcessClosed -> LengthSMTLibProcessClosed
+  Z3Process.Z3SMTLibProcessInternalFailure ->
+    LengthSMTLibProcessInternalFailure
+
+fromZ3ProcessCleanupEscalation
+  :: Z3Process.Z3SMTLibProcessCleanupEscalation
+  -> LengthSMTLibProcessCleanupEscalation
+fromZ3ProcessCleanupEscalation escalation = case escalation of
+  Z3Process.Z3SMTLibProcessClosedGracefully ->
+    LengthSMTLibProcessClosedGracefully
+  Z3Process.Z3SMTLibProcessTerminated -> LengthSMTLibProcessTerminated
+  Z3Process.Z3SMTLibProcessKilled -> LengthSMTLibProcessKilled
+  Z3Process.Z3SMTLibProcessCleanupIncomplete ->
+    LengthSMTLibProcessCleanupIncomplete
 
 asciiBytes :: String -> ByteString
 asciiBytes = BS.pack . ascii
 
 ascii :: String -> [Word8]
 ascii = map $ fromIntegral . ord
-
-tryAny :: IO value -> IO (Either SomeException value)
-tryAny = try

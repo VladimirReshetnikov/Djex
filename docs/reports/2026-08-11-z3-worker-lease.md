@@ -19,7 +19,10 @@ The implementation remains package-private:
 - `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session` owns the
   complete scope;
 - `...Session.Capability` owns the pure readiness phase machine; and
-- `...Session.Process` owns one direct child and its pipes.
+- `Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process` owns one direct child,
+  its pipes, cancellation/deadline control, and bounded cleanup; while
+- `...Session.Process` preserves the Length failure vocabulary and seals the
+  associated generic observation under the raw Length identity.
 
 This readiness checkpoint by itself creates neither a solver observation nor
 behavioral evidence, and it grants no pruning authority to `sat`, `unsat`, or
@@ -28,11 +31,11 @@ without changing that authority boundary.
 
 ## Honest executable observation
 
-The process owner validates and canonicalizes the requested executable path,
-reads its bytes under a configured maximum, computes SHA-256, and compares an
-optional exact pin before direct spawn. The child receives exactly the sealed
-argument vector, an empty environment, the fresh workspace as cwd, and three
-new pipes.
+The shared Z3 process owner validates and canonicalizes the requested
+executable path, reads its bytes under a configured maximum, computes SHA-256,
+and compares an optional exact pin before direct spawn. The child receives
+exactly the sealed argument vector, an empty environment, the fresh workspace
+as cwd, and three new pipes.
 
 The resulting value is deliberately called a pre-spawn executable-file
 snapshot, not an attested executable image. The portable `process` API cannot
@@ -48,11 +51,12 @@ path-snapshot-then-direct-spawn/stable-namespace-assumption/v1
 A future stronger backend must use a different tag and identity schema rather
 than aliasing this observation.
 
-The raw Process boundary accepts only the admitted shared Z3 launch profile.
-Its v2 identity binds the launch facts it enforces and observes, but no
-artifact policy, response policy, or complete Length execution key. The live
-Session retains that complete domain policy and binds its key once at the
-ready-worker boundary.
+The raw Process boundary accepts only the admitted shared Z3 launch profile and
+retains schema-free launch observations. The Length Process facade owns the v2
+root which binds those facts and exact process limits, but no artifact policy,
+response policy, or complete Length execution key. The live Session retains
+that complete domain policy and binds its key once at the ready-worker
+boundary.
 
 ## Workspace and barrier separation
 
@@ -178,10 +182,11 @@ only that no stderr byte had been observed at that point; it cannot prove that
 the child generated no stderr for a particular command.
 
 Cancellation and absolute monotonic deadlines gate snapshotting, spawn,
-writes, reads, boundary checks, and readiness. Cleanup is idempotent and owns
-the direct child: it closes stdin, waits briefly for graceful exit, then applies
-TERM and KILL stages when required, stops managed readers, and bounds handle
-closure. Direct-child exit is polled with nonblocking `getProcessExitCode`
+writes, reads, boundary checks, and readiness. The generic runtime's cleanup is
+idempotent and owns the direct child: it closes stdin, waits briefly for
+graceful exit, then applies TERM and KILL stages when required, stops managed
+readers, and bounds handle closure. Direct-child exit is polled with
+nonblocking `getProcessExitCode`
 instead of a helper `waitForProcess`; the latter issued blocking `wait4` and
 froze a non-threaded runtime during adversarial tests.
 

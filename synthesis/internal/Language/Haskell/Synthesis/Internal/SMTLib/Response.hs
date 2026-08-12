@@ -37,6 +37,9 @@ import Data.Word (Word8)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
+import Language.Haskell.Synthesis.Internal.SMTLib.Lexical
+  ( isSMTLibWhitespaceByte )
+
 -- | Raw independent limits for one response slice.  All fields are natural;
 -- zero is meaningful and rejects the first corresponding unit of work.
 data SMTLibResponseLimitSource = SMTLibResponseLimitSource
@@ -277,7 +280,7 @@ skipTrivia = go
  where
   go !offset [] = (offset, [])
   go !offset input@(byte : bytes)
-    | isWhitespace byte = go (offset + 1) bytes
+    | isSMTLibWhitespaceByte byte = go (offset + 1) bytes
     | byte == semicolon = skipComment (offset + 1) bytes
     | otherwise = (offset, input)
 
@@ -466,20 +469,16 @@ parseNumeralWithin maximumBits token = go 0 token
 
 isBareDelimiter :: Word8 -> Bool
 isBareDelimiter byte =
-  isWhitespace byte ||
+  isSMTLibWhitespaceByte byte ||
   byte == openParen || byte == closeParen ||
   byte == semicolon || byte == doubleQuote || byte == verticalBar
 
-isWhitespace :: Word8 -> Bool
-isWhitespace byte =
-  byte == horizontalTab || byte == lineFeed ||
-  byte == carriageReturn || byte == space
-
 isStringCharacter :: Word8 -> Bool
-isStringCharacter byte = isWhitespace byte || isPrintable byte
+isStringCharacter byte = isSMTLibWhitespaceByte byte || isPrintable byte
 
 isQuotedSymbolCharacter :: Word8 -> Bool
-isQuotedSymbolCharacter byte = isWhitespace byte || isPrintable byte
+isQuotedSymbolCharacter byte =
+  isSMTLibWhitespaceByte byte || isPrintable byte
 
 isPrintable :: Word8 -> Bool
 isPrintable byte = (byte >= 32 && byte <= 126) || byte >= 128
@@ -522,7 +521,7 @@ ascii :: String -> [Word8]
 ascii = map $ fromIntegral . fromEnum
 
 openParen, closeParen, semicolon, doubleQuote, verticalBar, backslash,
-  horizontalTab, lineFeed, carriageReturn, space, period, numberSign,
+  lineFeed, carriageReturn, period, numberSign,
   keywordColon, digitZero, digitOne, digitNine, upperA, upperF, upperZ,
   lowerA, lowerB, lowerF, lowerX, lowerZ :: Word8
 openParen = 40
@@ -531,10 +530,8 @@ semicolon = 59
 doubleQuote = 34
 verticalBar = 124
 backslash = 92
-horizontalTab = 9
 lineFeed = 10
 carriageReturn = 13
-space = 32
 period = 46
 numberSign = 35
 keywordColon = 58

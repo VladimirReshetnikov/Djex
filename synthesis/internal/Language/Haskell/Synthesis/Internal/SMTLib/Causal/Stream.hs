@@ -36,6 +36,8 @@ import Data.Word (Word8)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
+import Language.Haskell.Synthesis.Internal.SMTLib.Lexical
+  ( isSMTLibWhitespaceByte )
 import Language.Haskell.Synthesis.Internal.SMTLib.Stream
   ( SMTLibStreamFramer
   , SMTLibStreamFramingError (..)
@@ -44,7 +46,6 @@ import Language.Haskell.Synthesis.Internal.SMTLib.Stream
   , SMTLibStreamLimits
   , feedSMTLibStreamFramer
   , finishSMTLibStreamFramer
-  , isSMTLibWhitespaceByte
   , mkSMTLibStreamLimits
   , smtLibStreamFrameByteLimit
   , smtLibStreamFramerTotalByteLimit

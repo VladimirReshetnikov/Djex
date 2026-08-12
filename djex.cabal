@@ -262,6 +262,7 @@ Library
     Language.Haskell.Synthesis.Internal.SMTLib.Causal
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream
+    Language.Haskell.Synthesis.Internal.SMTLib.Lexical
     Language.Haskell.Synthesis.Internal.SMTLib.Response
     Language.Haskell.Synthesis.Internal.SMTLib.Response.Standard
     Language.Haskell.Synthesis.Internal.SMTLib.Stream
@@ -366,11 +367,13 @@ Test-Suite synthesis-tests
   Other-Modules:
     SMTLibCausalDriverSpec
     SMTLibCausalStreamSpec
+    SMTLibLexicalSpec
     SMTLibStandardResponseSpec
     SMTLibStreamSpec
     Language.Haskell.Synthesis.Internal.SMTLib.Causal
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream
+    Language.Haskell.Synthesis.Internal.SMTLib.Lexical
     Language.Haskell.Synthesis.Internal.SMTLib.Response
     Language.Haskell.Synthesis.Internal.SMTLib.Response.Standard
     Language.Haskell.Synthesis.Internal.SMTLib.Stream
@@ -397,6 +400,7 @@ Test-Suite synthesis-length-tests
     Language.Haskell.Synthesis.Internal.SMTLib.Causal
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream
+    Language.Haskell.Synthesis.Internal.SMTLib.Lexical
     Language.Haskell.Synthesis.Internal.SMTLib.Response
     Language.Haskell.Synthesis.Internal.SMTLib.Response.Standard
     Language.Haskell.Synthesis.Internal.SMTLib.Stream

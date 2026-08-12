@@ -20,8 +20,6 @@
 -- the process ended.
 module Language.Haskell.Synthesis.Internal.SMTLib.Stream
   ( smtLibStreamFramingSchemaTag
-  , isSMTLibWhitespaceByte
-  , smtLibWhitespaceBytes
   , smtLibEchoSentinelNonceByteCount
   , SMTLibEchoSentinel
   , SMTLibEchoSentinelError (..)
@@ -52,22 +50,15 @@ import Data.Word (Word8)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
+import Language.Haskell.Synthesis.Internal.SMTLib.Lexical
+  ( isSMTLibWhitespaceByte )
+
 -- | Lexical and charged-byte accounting policy bound by higher protocol and
 -- future live-session identities.  V2 adds the exact completion count without
 -- changing accepted frame syntax.
 smtLibStreamFramingSchemaTag :: [Word8]
 smtLibStreamFramingSchemaTag =
   ascii "djex-smtlib2-stream-framing/v2"
-
--- | The four whitespace bytes admitted by SMT-LIB 2.7 lexical framing and
--- causal write-boundary accounting, in their canonical fingerprint order.
-isSMTLibWhitespaceByte :: Word8 -> Bool
-isSMTLibWhitespaceByte byte =
-  byte == horizontalTab || byte == lineFeed ||
-  byte == carriageReturn || byte == space
-
-smtLibWhitespaceBytes :: [Word8]
-smtLibWhitespaceBytes = [horizontalTab, lineFeed, carriageReturn, space]
 
 smtLibEchoSentinelNonceByteCount :: Natural
 smtLibEchoSentinelNonceByteCount = 32
@@ -268,10 +259,10 @@ feedSMTLibStreamFramer = go
         | not (insideList framer), byte /= doubleQuote ->
             Right $ completeFrame framer input
       StreamBare _
-        | not (insideList framer), isWhitespace byte ->
+        | not (insideList framer), isSMTLibWhitespaceByte byte ->
             Right $ completeFrame framer input
       StreamQuotedSymbolNeedsWhitespace _
-        | isWhitespace byte -> Right $ completeFrame framer input
+        | isSMTLibWhitespaceByte byte -> Right $ completeFrame framer input
       _ -> do
         (offset, charged) <- chargeTotalByte framer
         transition <- processChargedByte offset charged byte
@@ -340,7 +331,7 @@ processNormalByte
   -> Word8
   -> Either SMTLibStreamFramingError StreamTransition
 processNormalByte offset framer byte
-  | isWhitespace byte = continueInsideListOrIgnore framer byte
+  | isSMTLibWhitespaceByte byte = continueInsideListOrIgnore framer byte
   | byte == semicolon = do
       retained <- retainInsideListOrIgnore framer byte
       pure $ StreamContinue retained { streamMode = StreamComment }
@@ -377,7 +368,7 @@ processBareByte offset opening framer byte
       if insideList framer
         then processNormalByte offset
           framer { streamMode = StreamNormal } byte
-        else if isWhitespace byte
+        else if isSMTLibWhitespaceByte byte
           then pure $ StreamComplete framer { streamMode = StreamNormal }
           else Left $ SMTLibStreamNonWhitespaceAfterAtom offset byte
   | otherwise = do
@@ -439,7 +430,7 @@ processAtomWhitespace
   -> Word8
   -> Either SMTLibStreamFramingError StreamTransition
 processAtomWhitespace offset _opening framer byte
-  | isWhitespace byte = pure $ StreamComplete framer
+  | isSMTLibWhitespaceByte byte = pure $ StreamComplete framer
       { streamMode = StreamNormal }
   | otherwise = Left $ SMTLibStreamNonWhitespaceAfterAtom offset byte
 
@@ -574,7 +565,7 @@ insideList framer = streamDepth framer /= 0
 
 isBareDelimiter :: Word8 -> Bool
 isBareDelimiter byte =
-  isWhitespace byte || byte == openParen || byte == closeParen ||
+  isSMTLibWhitespaceByte byte || byte == openParen || byte == closeParen ||
   byte == semicolon || byte == doubleQuote || byte == verticalBar
 
 isPotentialBareByte :: Word8 -> Bool
@@ -582,14 +573,12 @@ isPotentialBareByte byte = byte >= 33 && byte <= 126 &&
   not (byte == openParen || byte == closeParen || byte == semicolon ||
     byte == doubleQuote || byte == verticalBar)
 
-isWhitespace :: Word8 -> Bool
-isWhitespace = isSMTLibWhitespaceByte
-
 isStringCharacter :: Word8 -> Bool
-isStringCharacter byte = isWhitespace byte || isPrintable byte
+isStringCharacter byte = isSMTLibWhitespaceByte byte || isPrintable byte
 
 isQuotedSymbolCharacter :: Word8 -> Bool
-isQuotedSymbolCharacter byte = isWhitespace byte || isPrintable byte
+isQuotedSymbolCharacter byte =
+  isSMTLibWhitespaceByte byte || isPrintable byte
 
 isPrintable :: Word8 -> Bool
 isPrintable byte = (byte >= 32 && byte <= 126) || byte >= 128
@@ -598,16 +587,14 @@ ascii :: String -> [Word8]
 ascii = map $ fromIntegral . fromEnum
 
 openParen, closeParen, semicolon, doubleQuote, verticalBar, backslash,
-  horizontalTab, lineFeed, carriageReturn, space, digitZero, lowerA :: Word8
+  lineFeed, carriageReturn, digitZero, lowerA :: Word8
 openParen = 40
 closeParen = 41
 semicolon = 59
 doubleQuote = 34
 verticalBar = 124
 backslash = 92
-horizontalTab = 9
 lineFeed = 10
 carriageReturn = 13
-space = 32
 digitZero = 48
 lowerA = 97

@@ -77,9 +77,10 @@ bottom-valued byte payload, or cyclic whitespace stream fails at maximum plus
 one without demanding data beyond that boundary. The accepted bytes remain
 exactly horizontal tab, line feed, carriage return, and space.
 
-The base `Internal.SMTLib.Stream` module now owns that ordered whitespace
-vocabulary. The single-frame lexer, cumulative cursor, causal transport driver,
-and both unchanged domain fingerprints consume the same definition.
+The schema-free `Internal.SMTLib.Lexical` leaf owns that ordered whitespace
+vocabulary. The bounded response parser, single-frame lexer, cumulative cursor,
+causal transport driver, live process boundary drain, and both unchanged
+domain fingerprints consume the same definition.
 
 ## Domain ownership retained
 

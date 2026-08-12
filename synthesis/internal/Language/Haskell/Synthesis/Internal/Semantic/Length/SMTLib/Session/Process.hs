@@ -205,7 +205,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   , lengthSMTLibExecutionPolicyFingerprint
   , lengthSMTLibExecutionZ3Profile
   )
-import Language.Haskell.Synthesis.Internal.SMTLib.Stream
+import Language.Haskell.Synthesis.Internal.SMTLib.Lexical
   ( isSMTLibWhitespaceByte )
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
   as Z3

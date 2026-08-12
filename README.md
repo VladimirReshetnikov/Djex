@@ -391,6 +391,16 @@ owns worker identity, deadlines, recovery, query-specific execution, and raw
 observation association. Only independent Length replay can create
 model-relative counterexample evidence.
 
+`Language.Haskell.Synthesis.Internal.SMTLib.Lexical` is the schema-free leaf
+owner of the exact SMT-LIB whitespace set and its canonical fingerprint order:
+horizontal tab, line feed, carriage return, then space. The bounded response
+parser and stream framer classify through that one predicate; cumulative
+boundary accounting, causal transcript attribution, and the live process
+drain enforce the same set; and both Length plan identities bind the same
+ordered bytes. Any vocabulary change must therefore revise the affected
+response, framing, and plan schema identities rather than silently changing a
+consumer.
+
 `Language.Haskell.Synthesis.Internal.SMTLib.Stream` frames one exact SMT-LIB
 2.7 response incrementally without line-based assumptions. It carries lexical
 state across arbitrary chunks for doubled-quote strings, quoted symbols,
@@ -419,8 +429,9 @@ offset into a next-write receiver. Protocol and readiness therefore cannot
 restart a detached tail under a different offset or budget.
 The configured frame-total failure still wins an exact tie, while a strictly
 tighter cumulative budget reports its established maximum-plus-one failure.
-The base framer also owns the canonical ordered SMT-LIB whitespace vocabulary
-used by this cursor, causal transport attribution, and both plan fingerprints.
+The schema-free lexical leaf supplies the canonical ordered SMT-LIB whitespace
+vocabulary used by the parser, framer, cursor, causal transport, process
+boundary drain, and both plan fingerprints.
 
 `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` composes
 that cumulative cursor with the sealed execution policy and query. Its initial

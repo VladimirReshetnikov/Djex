@@ -101,6 +101,8 @@ import Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream
   , startSMTLibCausalStreamCursor
   , startSMTLibCausalStreamCursorAtBoundary
   )
+import Language.Haskell.Synthesis.Internal.SMTLib.Lexical
+  ( smtLibWhitespaceBytes )
 import Language.Haskell.Synthesis.Internal.SMTLib.Stream
   ( SMTLibEchoSentinel
   , SMTLibEchoSentinelError
@@ -117,7 +119,6 @@ import Language.Haskell.Synthesis.Internal.SMTLib.Stream
   , smtLibStreamFramingSchemaTag
   , smtLibStreamNestingDepthLimit
   , smtLibStreamTotalByteLimit
-  , smtLibWhitespaceBytes
   )
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib
   ( LengthSMTLibIntegerBinding

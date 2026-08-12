@@ -18,9 +18,7 @@ import Language.Haskell.Synthesis.Internal.SMTLib.Stream
   ( SMTLibStreamFramingError (..)
   , SMTLibStreamLimitSource (..)
   , SMTLibStreamLimits
-  , isSMTLibWhitespaceByte
   , mkSMTLibStreamLimits
-  , smtLibWhitespaceBytes
   , smtLibStreamFrameByteLimit
   , smtLibStreamNestingDepthLimit
   , smtLibStreamTotalByteLimit
@@ -28,11 +26,7 @@ import Language.Haskell.Synthesis.Internal.SMTLib.Stream
 
 smtLibCausalStreamTests :: TestTree
 smtLibCausalStreamTests = testGroup "cumulative causal SMT-LIB framing"
-  [ testCase "share the canonical SMT-LIB whitespace vocabulary" $ do
-      smtLibWhitespaceBytes @?= [9, 10, 13, 32]
-      map isSMTLibWhitespaceByte [0, 9, 10, 13, 32, 59] @?=
-        [False, True, True, True, True, False]
-  , testCase "retain one exact frame and cumulative policy" $ do
+  [ testCase "retain one exact frame and cumulative policy" $ do
       let configured = streamLimits 17
           selectedPolicy = mkSMTLibCausalStreamPolicy configured 29
       smtLibCausalStreamPolicyStreamLimits selectedPolicy @?= configured

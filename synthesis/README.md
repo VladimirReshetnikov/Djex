@@ -144,6 +144,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal` | Domain-neutral pure write/await/complete action algebra with nominal write-kind, receiver, and outcome associations. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream` | Domain-neutral cumulative framing policy and opaque zero-start cursor, completed-frame, and validated-boundary continuations; it prevents tails, offsets, and budgets from being detached across same-write frames or causal write boundaries. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver` | Domain-neutral causal transport algorithm and exact segmented transcript ownership, with write-before-feed, positional EOF precedence, and delayed-boundary-whitespace attribution. |
+| `Language.Haskell.Synthesis.Internal.SMTLib.Lexical` | Schema-free owner of the exact SMT-LIB whitespace predicate and canonical `[HT, LF, CR, SP]` fingerprint order shared by parsing, framing, causal accounting, boundary draining, and domain plans. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Response` | Domain-neutral bounded SMT-LIB response lexer and S-expression parser with productive total, depth, node, token, and numeral limits. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Response.Standard` | Canonical solver-status bytes, bounded standard check-response decoding, and shared `unsupported`/solver-error classification without process or semantic authority. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Transport` | Length/Z3 adapter which binds one process, cancellation token, and absolute deadline behind the generic causal driver operations. |
@@ -208,8 +209,9 @@ should not be cached by query identity alone.
 pure response boundary. It retains at most 65,536 bytes before parsing, so
 cyclic or infinite lazy input is rejected productively, then enforces separate
 list-depth, S-expression-node, source-token-byte, and integer-width limits. The
-shared package-private lexer handles exact SMT-LIB whitespace and comments,
-doubled-quote strings, quoted symbols, and all standard atom categories. The public surface
+shared package-private response lexer handles comments, doubled-quote strings,
+quoted symbols, and all standard atom categories while importing the exact
+whitespace set from `Internal.SMTLib.Lexical`. The public surface
 accepts only `sat`, `unsat`, `unknown`, or the exact input valuation requested
 by one query; valuations are symbol-checked and restored to source order.
 The package-private shared Standard layer owns canonical status bytes, bounded
@@ -257,8 +259,9 @@ continuation first admits and discards only the canonical four SMT-LIB
 whitespace bytes, then carries the same policy and exact charged offset into
 the next receiver. The configured frame-total error wins an equal-limit tie;
 only a strictly tighter remaining cumulative budget is reclassified at maximum
-plus one. The base `SMTLib.Stream` module supplies that ordered whitespace
-vocabulary to the framer, cursor, transport driver, and domain fingerprints.
+plus one. The schema-free `Internal.SMTLib.Lexical` leaf supplies that ordered
+whitespace vocabulary to the response parser, framer, cursor, transport
+driver, process boundary drain, and domain fingerprints.
 
 `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` owns the
 next pure boundary. It seals the execution-policy key, exact query key, stream

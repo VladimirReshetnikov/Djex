@@ -146,9 +146,10 @@ is checked before the next tail byte is inspected, so maximum-plus-one also
 remains productive for finite, poisoned, or cyclic whitespace.
 
 The ordered whitespace vocabulary remains the exact bytes 9, 10, 13, and 32.
-Its package-private owner is the base stream module; the single-frame lexer,
-cumulative cursor, causal transport attribution, and unchanged protocol and
-capability fingerprints all consume that same definition.
+Its schema-free package-private owner is `Internal.SMTLib.Lexical`; the bounded
+response parser, single-frame lexer, cumulative cursor, causal transport
+attribution, process boundary drain, and unchanged protocol and capability
+fingerprints all consume that same definition.
 
 EOF never completes a reusable-worker transaction. Lexically malformed EOF has
 priority; every otherwise clean or string-completing EOF is reported as missing

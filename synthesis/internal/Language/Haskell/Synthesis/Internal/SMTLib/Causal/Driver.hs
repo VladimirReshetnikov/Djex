@@ -33,7 +33,7 @@ import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Internal.SMTLib.Causal
   ( SMTLibCausalAction (..) )
-import Language.Haskell.Synthesis.Internal.SMTLib.Stream
+import Language.Haskell.Synthesis.Internal.SMTLib.Lexical
   ( isSMTLibWhitespaceByte )
 
 -- | A new driver may require an empty transport boundary, while a successor

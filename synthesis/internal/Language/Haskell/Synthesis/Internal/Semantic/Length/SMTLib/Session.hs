@@ -213,8 +213,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Driver
   , lengthSMTLibCausalTranscriptInheritedBytes
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process
-  ( LengthSMTLibExecutableSnapshot
-  , LengthSMTLibProcess
+  ( LengthSMTLibProcess
   , LengthSMTLibProcessCancellation
   , LengthSMTLibProcessCleanupEscalation (..)
   , LengthSMTLibProcessCleanupStatus (..)
@@ -558,7 +557,6 @@ data LengthSMTLibReadyWorker epoch = LengthSMTLibReadyWorker
   , readyWorkerConfig :: !LengthSMTLibSessionConfig
   , readyWorkerIdentity
       :: !(Fingerprint LengthSMTLibReadyWorkerIdentitySubject)
-  , readyWorkerSnapshot :: !LengthSMTLibExecutableSnapshot
   , readyWorkerTranscriptDigest :: !ByteString
   , readyWorkerStdoutAtCommit :: !Natural
   , readyWorkerStderrAtCommit :: !Natural
@@ -594,13 +592,15 @@ lengthSMTLibReadyWorkerExecutableSHA256
   :: LengthSMTLibReadyWorker epoch
   -> ByteString
 lengthSMTLibReadyWorkerExecutableSHA256 =
-  lengthSMTLibExecutableSnapshotSHA256 . readyWorkerSnapshot
+  lengthSMTLibExecutableSnapshotSHA256 .
+    lengthSMTLibProcessSnapshot . readyWorkerProcess
 
 lengthSMTLibReadyWorkerExecutableByteCount
   :: LengthSMTLibReadyWorker epoch
   -> Natural
 lengthSMTLibReadyWorkerExecutableByteCount =
-  lengthSMTLibExecutableSnapshotByteCount . readyWorkerSnapshot
+  lengthSMTLibExecutableSnapshotByteCount .
+    lengthSMTLibProcessSnapshot . readyWorkerProcess
 
 lengthSMTLibReadyWorkerExecutableSnapshotStrengthTag
   :: LengthSMTLibReadyWorker epoch
@@ -1725,7 +1725,6 @@ withLengthSMTLibReadyWorker config use = mask $ \restore -> do
                       , readyWorkerCancellation = cancellation
                       , readyWorkerConfig = config
                       , readyWorkerIdentity = identity
-                      , readyWorkerSnapshot = lengthSMTLibProcessSnapshot process
                       , readyWorkerTranscriptDigest = transcriptDigest
                       , readyWorkerStdoutAtCommit = stdoutCount
                       , readyWorkerStderrAtCommit = stderrCount

@@ -60,16 +60,16 @@ smtLibEchoSentinelNonceByteCount :: Natural
 smtLibEchoSentinelNonceByteCount = 32
 
 -- | One package-owned echo marker.  Its fixed safe spelling needs no SMT-LIB
--- escaping, and its exact response includes the surrounding double quotes as
--- required by the standard's @echo@ command.
-data SMTLibEchoSentinel = SMTLibEchoSentinel [Word8] [Word8]
+-- escaping.  The retained exact response includes the surrounding double
+-- quotes required by the standard's @echo@ command; the command is its fixed
+-- canonical wrapper.
+data SMTLibEchoSentinel = SMTLibEchoSentinel [Word8]
 
 instance Eq SMTLibEchoSentinel where
-  SMTLibEchoSentinel left _ == SMTLibEchoSentinel right _ = left == right
+  SMTLibEchoSentinel left == SMTLibEchoSentinel right = left == right
 
 instance NFData SMTLibEchoSentinel where
-  rnf (SMTLibEchoSentinel command response) =
-    rnf command `seq` rnf response
+  rnf (SMTLibEchoSentinel response) = rnf response
 
 data SMTLibEchoSentinelError
   = SMTLibEchoSentinelNonceLengthMismatch !Natural !Natural
@@ -89,14 +89,14 @@ mkSMTLibEchoSentinel rawNonce = do
   nonce <- retainExactNonce rawNonce
   let content = ascii "djex-smtlib-frame/v1/" ++ concatMap hexadecimalByte nonce
       response = doubleQuote : content ++ [doubleQuote]
-      command = ascii "(echo " ++ response ++ [closeParen, lineFeed]
-  pure $ SMTLibEchoSentinel command response
+  pure $ SMTLibEchoSentinel response
 
 smtLibEchoSentinelCommandBytes :: SMTLibEchoSentinel -> [Word8]
-smtLibEchoSentinelCommandBytes (SMTLibEchoSentinel command _) = command
+smtLibEchoSentinelCommandBytes (SMTLibEchoSentinel response) =
+  ascii "(echo " ++ response ++ [closeParen, lineFeed]
 
 smtLibEchoSentinelResponseBytes :: SMTLibEchoSentinel -> [Word8]
-smtLibEchoSentinelResponseBytes (SMTLibEchoSentinel _ response) = response
+smtLibEchoSentinelResponseBytes (SMTLibEchoSentinel response) = response
 
 -- | Exact positional comparison only.  The future protocol layer must call
 -- this for the frame where its state machine expects a sentinel; it must not

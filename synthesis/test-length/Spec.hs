@@ -2661,7 +2661,18 @@ smtLibTests = testGroup
 smtLibProtocolTests :: TestTree
 smtLibProtocolTests = testGroup
   "package-private bounded Length SMT-LIB protocol"
-  [ testCase "seal exact initial and conditional value writes" $ do
+  [ testCase "derive one canonical echo command from its exact response" $ do
+      sentinel <- protocolSentinel protocolCheckNonce
+      let content = concat
+            [ "djex-smtlib-frame/v1/"
+            , "000102030405060708090a0b0c0d0e0f"
+            , "101112131415161718191a1b1c1d1e1f"
+            ]
+      SMTLibStream.smtLibEchoSentinelResponseBytes sentinel @?=
+        asciiBytes ('"' : content ++ "\"")
+      SMTLibStream.smtLibEchoSentinelCommandBytes sentinel @?=
+        asciiBytes ("(echo \"" ++ content ++ "\")\n")
+  , testCase "seal exact initial and conditional value writes" $ do
       (query, plan) <- protocolUnaryPlan
         InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
       checkBarrier <- protocolSentinel protocolCheckNonce

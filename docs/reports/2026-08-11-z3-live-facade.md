@@ -157,7 +157,7 @@ before live wiring is enabled.
 
 The 34-test downstream API suite pins the rank-N signatures, safe projections,
 fixed query maximum, error instances, hidden constructors, nominal roles, and
-absence of raw/internal projections. The 171-test Length suite exercises the
+absence of raw/internal projections. The 172-test Length suite exercises the
 same public surface against the compiled closed-mode fake worker, including
 healthy sequential association and evidence, neutral status branches,
 spent-worker faults, deadline cleanup, callback exceptions, and

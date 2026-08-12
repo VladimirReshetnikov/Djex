@@ -222,7 +222,7 @@ retained-frame, and depth limits make leading trivia, cyclic chunks, and
 hostile nesting productive failures. Bare and quoted-symbol responses require
 the standard-mandated following whitespace instead of being accepted at EOF.
 A fixed 32-byte nonce becomes a package-owned lowercase-hex `echo` marker;
-both its command and its expected response retain the surrounding quotes
+both its command and its expected response include the surrounding quotes
 required by the standard. Recognition is exact and positional only. Completed
 frames report the exact count of charged leading trivia and frame bytes while
 leaving lexical lookahead in the returned tail. This lets the composing

@@ -393,7 +393,7 @@ retained frame bytes, and nesting; and returns the original post-frame tail
 after at most one byte of lexical lookahead.
 Bare and quoted-symbol responses are not complete until the required following
 whitespace arrives. Package-owned echo sentinels encode exactly 32 nonce bytes
-as lowercase hex, and retain the standard-required surrounding quotes in both
+as lowercase hex, and include the standard-required surrounding quotes in both
 the command and expected response. Exact comparison never scans strings,
 comments, symbols, or nested expressions for marker text. Completed frames now
 report their exact charged byte count as well as the untouched tail so a

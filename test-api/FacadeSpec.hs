@@ -629,6 +629,11 @@ facadeTests = testGroup "public Djex facade"
                 LengthSMTLibExecutionConfigError
                 LengthSMTLibExecutionConfig
           executionConfigSealer = mkLengthSMTLibExecutionConfig
+          executionDigestExpectationProjection
+            :: LengthSMTLibExecutionConfig
+            -> LengthSMTLibExecutableDigestExpectation
+          executionDigestExpectationProjection =
+            lengthSMTLibExecutionExecutableDigestExpectation
           executionTimeoutProjection
             :: LengthSMTLibExecutionConfig
             -> Int
@@ -657,9 +662,12 @@ facadeTests = testGroup "public Djex facade"
         counterexampleValidator `seq` queryObservationAssociator `seq`
         queryObservationReplayer `seq` checkResponseParser `seq`
         inputValueResponseParser `seq` executionLimitsBuilder `seq`
-        executionConfigSealer `seq` executionTimeoutProjection `seq`
+        executionConfigSealer `seq`
+        executionDigestExpectationProjection `seq`
+        executionTimeoutProjection `seq`
         executionResourceProjection `seq` executionDeadlineProjection `seq`
         executionArtifactProjection `seq` executionResponseProjection `seq`
+        (rnf :: LengthSMTLibExecutableDigestExpectation -> ()) `seq`
         pure ()
       lengthProblemAssignmentInputs (LengthProblemAssignment [1, 2]) @?=
         [1, 2]
@@ -683,6 +691,9 @@ facadeTests = testGroup "public Djex facade"
       lengthSMTLibExecutionProtocolSchemaTag @?=
         map (fromIntegral . fromEnum)
           ("djex-length-z3-smtlib2-session-protocol/v1" :: String)
+      [ LengthSMTLibExecutableDigestExpectationAbsent
+        , LengthSMTLibExecutableDigestExpectationPresent
+        ] @?= [minBound .. maxBound]
       lengthSMTLibExecutionStartupCommandBytes @?=
         map (fromIntegral . fromEnum)
           ("(set-option :print-success false)\n" :: String)

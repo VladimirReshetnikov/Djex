@@ -1775,6 +1775,23 @@ smtLibTests = testGroup
         SMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
       SMTLibExecution.lengthSMTLibExecutionResponseLimits config @?=
         SMTLibResponse.defaultLengthSMTLibResponseLimits
+  , testCase "classify only sealed executable digest expectation presence" $ do
+      let seal expectedDigest = expectRight
+            $ SMTLibExecution.mkLengthSMTLibExecutionConfig
+                SMTLibExecution.defaultLengthSMTLibExecutionLimits
+            $ SMTLibExecution.defaultLengthSMTLibExecutionConfigSource
+                absoluteFixtureExecutable expectedDigest
+      withoutExpectation <- seal Nothing
+      withExpectation <- seal $ Just $ replicate 32 0
+      SMTLibExecution.lengthSMTLibExecutionExecutableDigestExpectation
+          withoutExpectation @?=
+        SMTLibExecution.LengthSMTLibExecutableDigestExpectationAbsent
+      SMTLibExecution.lengthSMTLibExecutionExecutableDigestExpectation
+          withExpectation @?=
+        SMTLibExecution.LengthSMTLibExecutableDigestExpectationPresent
+      [ SMTLibExecution.LengthSMTLibExecutableDigestExpectationAbsent
+        , SMTLibExecution.LengthSMTLibExecutableDigestExpectationPresent
+        ] @?= [minBound .. maxBound]
   , testCase "reject signed policy fields in declaration order" $ do
       let defaults = SMTLibExecution.defaultLengthSMTLibExecutionConfigSource
             "relative-z3" (Just [0])

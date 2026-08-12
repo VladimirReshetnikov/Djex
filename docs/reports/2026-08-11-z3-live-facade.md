@@ -18,6 +18,14 @@ and artifact policy. Constructing it still performs no IO. Opening the live
 scope observes and capability-probes the configured worker under the private
 ownership policy described by the worker-lease and query-run reports.
 
+The execution facade exposes one deliberately smaller policy classification:
+`lengthSMTLibExecutionExecutableDigestExpectation` reports only whether the
+sealed configuration contains a digest expectation. Its closed absent/present
+result exposes neither the expected bytes nor the executable path, and it is
+not a claim that a later observed executable matches the expectation. This lets
+an outer configuration owner require an explicit pin without retaining a
+second raw-source-derived Boolean beside the sealed policy.
+
 ## Scoped authority
 
 `withLengthSMTLibLiveSession` lends an opaque session through a rank-N callback.
@@ -144,9 +152,9 @@ before live wiring is enabled.
 
 ## Verification
 
-The 33-test downstream API suite pins the rank-N signatures, safe projections,
+The 34-test downstream API suite pins the rank-N signatures, safe projections,
 fixed query maximum, error instances, hidden constructors, nominal roles, and
-absence of raw/internal projections. The 167-test Length suite exercises the
+absence of raw/internal projections. The 169-test Length suite exercises the
 same public surface against the compiled closed-mode fake worker, including
 healthy sequential association and evidence, neutral status branches,
 spent-worker faults, deadline cleanup, callback exceptions, and

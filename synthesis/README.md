@@ -134,7 +134,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked contracts, provider transfers, and exact candidate problems; only independently validated model-relative violations receive problem-bound evidence with an explicit provider-assumption basis. |
 | `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and typed-candidate behavioral problems: exact context resealing, residual rejection, rigid root/provider authorization, lazy symbolic length interpretation, normalized counterexample formulas, and separate inventory/encoding/candidate/problem identities. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation and exact input-symbol model replay for one checked Length problem, without launching or trusting a solver. |
-| `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` | Pure validated Z3 launch, resource, artifact, and response-decoder policy with a package-private complete identity; it performs no IO or attestation. |
+| `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` | Pure validated Z3 launch, resource, artifact, and response-decoder policy with a package-private complete identity and a byte-free digest-expectation presence classifier; it performs no IO or attestation. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` | Rank-N scoped capability-probed Z3 ownership with byte-free failures, heuristic status/strength/use, and a query-first replay gate for independently validated counterexample evidence. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` | Opaque query-specific association of bounded raw solver reports, with heuristic-only safe projections and exact problem-plus-query replay before payload access. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response` | Pure bounded SMT-LIB 2.x check-status and query-specific input-valuation decoding; syntax remains untrusted and only independent Length replay may create evidence. |
@@ -324,19 +324,22 @@ canonical fingerprint binds those fields, the protocol schema, complete argv,
 exact startup and reset bytes, the response schema, and every response byte,
 nesting, node, token, and integer bound. Its reversible bytes are not publicly
 exposed. The separate admission limits only bound sealing work and do not
-alter a successfully sealed policy's identity.
+alter a successfully sealed policy's identity. The public
+`lengthSMTLibExecutionExecutableDigestExpectation` classifier reveals only
+whether that sealed policy contains an expectation. It cannot recover the
+digest or path and does not claim that a later live executable matches either.
 
 This policy performs no IO: it neither resolves nor hashes the path, starts Z3,
 probes a version or capability, frames a stream, handles cancellation, nor
 constructs a solver observation. The package-private live Session separately
 binds its pre-spawn pathname observation, establishes quoted-echo,
 print-suppression, reset, valuation, and contradictory-check behavior, and
-records the remaining stable-namespace limitation. The optional SHA-256 bytes are a named
-external digest-pin expectation, not Djex's collision-free identity for an
-unbounded executable file. Policy equality is therefore not run identity,
-cache authority, or semantic evidence; all eventual statuses remain heuristic
-until the existing independent Length replay validates a concrete
-counterexample.
+records the remaining stable-namespace limitation. The optional SHA-256 bytes
+are a named external digest-pin expectation, not Djex's collision-free
+identity for an unbounded executable file. Policy equality is therefore not
+run identity, cache authority, or semantic evidence; all eventual statuses
+remain heuristic until the existing independent Length replay validates a
+concrete counterexample.
 
 `Generated` separates backend-local identity from structural global `Name`s.
 Its checked `DefinitionName` narrows top-level output names once, and its scope

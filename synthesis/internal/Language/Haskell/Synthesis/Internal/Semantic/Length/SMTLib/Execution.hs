@@ -33,6 +33,8 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   , LengthSMTLibExecutionConfigSource (..)
   , defaultLengthSMTLibExecutionConfigSource
   , LengthSMTLibExecutionConfig
+  , LengthSMTLibExecutableDigestExpectation (..)
+  , lengthSMTLibExecutionExecutableDigestExpectation
   , LengthSMTLibExecutionConfigField (..)
   , LengthSMTLibExecutionPathCharacterError (..)
   , LengthSMTLibExecutionConfigError (..)
@@ -289,6 +291,30 @@ instance NFData LengthSMTLibExecutionConfig where
     rnf executable `seq` rnf expectedDigest `seq` rnf timeout `seq`
     rnf resource `seq` rnf deadline `seq` rnf artifacts `seq`
     rnf responses `seq` rnf fingerprint
+
+-- | Whether one sealed policy contains an executable-file digest expectation.
+--
+-- This classification deliberately reveals neither the expected SHA-256
+-- bytes nor whether a later live executable observation matched them.  It is
+-- only enough for an outer configuration owner to require that an expectation
+-- was explicitly supplied before granting permission to open a live scope.
+data LengthSMTLibExecutableDigestExpectation
+  = LengthSMTLibExecutableDigestExpectationAbsent
+  | LengthSMTLibExecutableDigestExpectationPresent
+  deriving (Bounded, Enum, Eq, Ord, Show, Generic)
+
+instance NFData LengthSMTLibExecutableDigestExpectation
+
+-- | Classify the sealed policy without projecting its path or digest bytes.
+-- Only the optional field's outer constructor is inspected.
+lengthSMTLibExecutionExecutableDigestExpectation
+  :: LengthSMTLibExecutionConfig
+  -> LengthSMTLibExecutableDigestExpectation
+lengthSMTLibExecutionExecutableDigestExpectation
+    (LengthSMTLibExecutionConfig _ expectedDigest _ _ _ _ _ _) =
+  case expectedDigest of
+    Nothing -> LengthSMTLibExecutableDigestExpectationAbsent
+    Just _ -> LengthSMTLibExecutableDigestExpectationPresent
 
 data LengthSMTLibExecutionConfigField
   = LengthSMTLibExecutionSolverTimeoutMilliseconds

@@ -18,6 +18,9 @@
 -- The live opener must always bind the observed digest, even without a pin,
 -- and must defend executable resolution, hashing, and spawn against path
 -- replacement races.
+-- 'lengthSMTLibExecutionExecutableDigestExpectation' reveals only whether the
+-- sealed policy contains such an expectation.  It exposes no digest bytes and
+-- says nothing about a later executable observation or match.
 --
 -- No policy or parsed response grants semantic authority.  Solver reports
 -- remain heuristic, and only independent Length replay can create
@@ -49,6 +52,8 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
   , LengthSMTLibExecutionConfigSource (..)
   , defaultLengthSMTLibExecutionConfigSource
   , LengthSMTLibExecutionConfig
+  , LengthSMTLibExecutableDigestExpectation (..)
+  , lengthSMTLibExecutionExecutableDigestExpectation
   , LengthSMTLibExecutionConfigField (..)
   , LengthSMTLibExecutionPathCharacterError (..)
   , LengthSMTLibExecutionConfigError (..)

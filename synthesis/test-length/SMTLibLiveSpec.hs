@@ -1451,6 +1451,19 @@ assertCapabilityAccounting = do
         { Capability.lengthSMTLibCapabilityLimitSourceCumulativeOutputBytes =
             minimumCapabilityTranscriptBytes }
   exactFixture <- capabilityFixture exactLimits
+  cappedStartup <- expectCapabilityWrite
+    Capability.LengthSMTLibCapabilityStartupWrite
+    (expectedStartupWrite exactFixture)
+    $ Capability.startLengthSMTLibCapability $ fixturePlan exactFixture
+  cappedPending <- expectCapabilityAwait =<< expectRight
+    (Capability.feedLengthSMTLibCapability cappedStartup
+      $ replicate (fromIntegral minimumCapabilityTranscriptBytes) 32)
+  assertLeft
+    (Capability.LengthSMTLibCapabilityCumulativeOutputByteLimitExceeded
+      minimumCapabilityTranscriptBytes
+      (minimumCapabilityTranscriptBytes + 1))
+    $ Capability.feedLengthSMTLibCapability cappedPending [32]
+
   assertHealthyCapability exactFixture wholeChunks
   exactReady <- driveCapabilityToReady exactFixture wholeChunks
   assertLeft

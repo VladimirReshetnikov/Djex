@@ -96,6 +96,7 @@ import Language.Haskell.Synthesis.Internal.SMTLib.Stream
   , smtLibEchoSentinelCommandBytes
   , smtLibEchoSentinelResponseBytes
   , smtLibStreamFrameByteLimit
+  , smtLibStreamFramerTotalByteLimit
   , smtLibStreamFramingSchemaTag
   , smtLibStreamNestingDepthLimit
   , smtLibStreamTotalByteLimit
@@ -390,21 +391,19 @@ data LengthSMTLibCapabilityReceiver identity =
     !(LengthSMTLibCapabilityPlan identity)
     !LengthSMTLibCapabilityPhaseState
     !Natural
-    !Bool
     !SMTLibStreamFramer
 
 type role LengthSMTLibCapabilityReceiver nominal
 
 instance NFData (LengthSMTLibCapabilityReceiver identity) where
-  rnf (LengthSMTLibCapabilityReceiver plan phase frameStart capped framer) =
-    rnf plan `seq` rnf phase `seq` rnf frameStart `seq`
-    rnf capped `seq` rnf framer
+  rnf (LengthSMTLibCapabilityReceiver plan phase frameStart framer) =
+    rnf plan `seq` rnf phase `seq` rnf frameStart `seq` rnf framer
 
 lengthSMTLibCapabilityReceiverPhase
   :: LengthSMTLibCapabilityReceiver identity
   -> LengthSMTLibCapabilityPhase
 lengthSMTLibCapabilityReceiverPhase
-    (LengthSMTLibCapabilityReceiver _ phase _ _ _) = phaseName phase
+    (LengthSMTLibCapabilityReceiver _ phase _ _) = phaseName phase
 
 -- | The shared causal action specialized to this plan's nominal receiver and
 -- decoded readiness outcome.  The shared type keeps all parameters nominal.
@@ -586,8 +585,7 @@ newReceiver
   -> Natural
   -> LengthSMTLibCapabilityReceiver identity
 newReceiver plan phase frameStart = LengthSMTLibCapabilityReceiver
-  plan phase frameStart cumulativeCapsFrame
-  $ startSMTLibStreamFramer effectiveLimits
+  plan phase frameStart $ startSMTLibStreamFramer effectiveLimits
  where
   configured = planStreamLimits plan
   cumulativeMaximum = planCumulativeOutputByteLimit plan
@@ -595,9 +593,6 @@ newReceiver plan phase frameStart = LengthSMTLibCapabilityReceiver
     | frameStart >= cumulativeMaximum = 0
     | otherwise = cumulativeMaximum - frameStart
   configuredTotal = smtLibStreamTotalByteLimit configured
-  -- The configured frame-total error wins an exact tie.  Cumulative failure
-  -- is selected only when the remaining transaction budget is strictly lower.
-  cumulativeCapsFrame = remaining < configuredTotal
   effectiveLimits = mkSMTLibStreamLimits SMTLibStreamLimitSource
     { smtLibStreamLimitSourceTotalBytes = min configuredTotal remaining
     , smtLibStreamLimitSourceFrameBytes =
@@ -623,36 +618,41 @@ classifyFramingFailure receiver failure = case failure of
 receiverPlan
   :: LengthSMTLibCapabilityReceiver identity
   -> LengthSMTLibCapabilityPlan identity
-receiverPlan (LengthSMTLibCapabilityReceiver value _ _ _ _) = value
+receiverPlan (LengthSMTLibCapabilityReceiver value _ _ _) = value
 
 receiverPhase
   :: LengthSMTLibCapabilityReceiver identity
   -> LengthSMTLibCapabilityPhaseState
-receiverPhase (LengthSMTLibCapabilityReceiver _ value _ _ _) = value
+receiverPhase (LengthSMTLibCapabilityReceiver _ value _ _) = value
 
 receiverFrameStart
   :: LengthSMTLibCapabilityReceiver identity
   -> Natural
-receiverFrameStart (LengthSMTLibCapabilityReceiver _ _ value _ _) = value
+receiverFrameStart (LengthSMTLibCapabilityReceiver _ _ value _) = value
 
+-- The configured frame-total error wins an exact tie.  Cumulative failure is
+-- selected only when the remaining transaction budget is strictly lower.
 receiverCumulativeCapsFrame
   :: LengthSMTLibCapabilityReceiver identity
   -> Bool
-receiverCumulativeCapsFrame
-    (LengthSMTLibCapabilityReceiver _ _ _ value _) = value
+receiverCumulativeCapsFrame receiver =
+  smtLibStreamFramerTotalByteLimit (receiverFramer receiver) < configuredTotal
+ where
+  plan = receiverPlan receiver
+  configuredTotal = smtLibStreamTotalByteLimit $ planStreamLimits plan
 
 receiverFramer
   :: LengthSMTLibCapabilityReceiver identity
   -> SMTLibStreamFramer
-receiverFramer (LengthSMTLibCapabilityReceiver _ _ _ _ value) = value
+receiverFramer (LengthSMTLibCapabilityReceiver _ _ _ value) = value
 
 replaceReceiverFramer
   :: LengthSMTLibCapabilityReceiver identity
   -> SMTLibStreamFramer
   -> LengthSMTLibCapabilityReceiver identity
 replaceReceiverFramer
-    (LengthSMTLibCapabilityReceiver plan phase start capped _) framer =
-  LengthSMTLibCapabilityReceiver plan phase start capped framer
+    (LengthSMTLibCapabilityReceiver plan phase start _) framer =
+  LengthSMTLibCapabilityReceiver plan phase start framer
 
 phaseName
   :: LengthSMTLibCapabilityPhaseState

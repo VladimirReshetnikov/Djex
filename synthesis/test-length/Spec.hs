@@ -3123,6 +3123,15 @@ smtLibProtocolTests = testGroup
       SMTLibProtocol.lengthSMTLibProtocolDecodedInputValues exactDecoded @?=
         Just [smtIntegerBinding (asciiBytes "djex_length_input_0") 0]
 
+      cappedInitial <- begin exactPlan
+      cappedPending <- expectProtocolAwait =<< expectRight
+        (SMTLibProtocol.feedLengthSMTLibProtocol cappedInitial
+          $ replicate 205 32)
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolCumulativeStdoutByteLimitExceeded
+          205 206)
+        $ SMTLibProtocol.feedLengthSMTLibProtocol cappedPending [32]
+
       overflowingInitial <- begin exactPlan
       overflowingAction <- expectRight
         $ SMTLibProtocol.feedLengthSMTLibProtocol

@@ -99,6 +99,7 @@ import Language.Haskell.Synthesis.Internal.SMTLib.Stream
   , smtLibEchoSentinelCommandBytes
   , smtLibEchoSentinelResponseBytes
   , smtLibStreamFrameByteLimit
+  , smtLibStreamFramerTotalByteLimit
   , smtLibStreamFramingSchemaTag
   , smtLibStreamNestingDepthLimit
   , smtLibStreamTotalByteLimit
@@ -415,21 +416,19 @@ data LengthSMTLibProtocolReceiver identity local =
     !(LengthSMTLibProtocolPlan identity local)
     !LengthSMTLibProtocolPhaseState
     !Natural
-    !Bool
     !SMTLibStreamFramer
 
 type role LengthSMTLibProtocolReceiver nominal nominal
 
 instance NFData (LengthSMTLibProtocolReceiver identity local) where
-  rnf (LengthSMTLibProtocolReceiver plan phase frameStart capped framer) =
-    rnf plan `seq` rnf phase `seq` rnf frameStart `seq`
-    rnf capped `seq` rnf framer
+  rnf (LengthSMTLibProtocolReceiver plan phase frameStart framer) =
+    rnf plan `seq` rnf phase `seq` rnf frameStart `seq` rnf framer
 
 lengthSMTLibProtocolReceiverPhase
   :: LengthSMTLibProtocolReceiver identity local
   -> LengthSMTLibProtocolPhase
 lengthSMTLibProtocolReceiverPhase
-    (LengthSMTLibProtocolReceiver _ phase _ _ _) = phaseName phase
+    (LengthSMTLibProtocolReceiver _ phase _ _) = phaseName phase
 
 -- | The shared causal action specialized to this plan's nominal receiver and
 -- decoded outcome.  The shared type keeps all three parameters nominal.
@@ -644,8 +643,7 @@ newReceiver
   -> Natural
   -> LengthSMTLibProtocolReceiver identity local
 newReceiver plan phase frameStart = LengthSMTLibProtocolReceiver
-  plan phase frameStart cumulativeCapsFrame
-  $ startSMTLibStreamFramer effectiveLimits
+  plan phase frameStart $ startSMTLibStreamFramer effectiveLimits
  where
   configured = planStreamLimits plan
   cumulativeMaximum = planCumulativeStdoutByteLimit plan
@@ -653,9 +651,6 @@ newReceiver plan phase frameStart = LengthSMTLibProtocolReceiver
     | frameStart >= cumulativeMaximum = 0
     | otherwise = cumulativeMaximum - frameStart
   configuredTotal = smtLibStreamTotalByteLimit configured
-  -- The frame-total error wins an exact tie; cumulative failure is reported
-  -- only when the transaction's remaining budget is the strictly smaller cap.
-  cumulativeCapsFrame = remaining < configuredTotal
   effectiveLimits = mkSMTLibStreamLimits SMTLibStreamLimitSource
     { smtLibStreamLimitSourceTotalBytes = min configuredTotal remaining
     , smtLibStreamLimitSourceFrameBytes =
@@ -681,36 +676,41 @@ classifyFramingFailure receiver failure = case failure of
 receiverPlan
   :: LengthSMTLibProtocolReceiver identity local
   -> LengthSMTLibProtocolPlan identity local
-receiverPlan (LengthSMTLibProtocolReceiver value _ _ _ _) = value
+receiverPlan (LengthSMTLibProtocolReceiver value _ _ _) = value
 
 receiverPhase
   :: LengthSMTLibProtocolReceiver identity local
   -> LengthSMTLibProtocolPhaseState
-receiverPhase (LengthSMTLibProtocolReceiver _ value _ _ _) = value
+receiverPhase (LengthSMTLibProtocolReceiver _ value _ _) = value
 
 receiverFrameStart
   :: LengthSMTLibProtocolReceiver identity local
   -> Natural
-receiverFrameStart (LengthSMTLibProtocolReceiver _ _ value _ _) = value
+receiverFrameStart (LengthSMTLibProtocolReceiver _ _ value _) = value
 
+-- The frame-total error wins an exact tie; cumulative failure is reported only
+-- when the transaction's remaining budget is the strictly smaller cap.
 receiverCumulativeCapsFrame
   :: LengthSMTLibProtocolReceiver identity local
   -> Bool
-receiverCumulativeCapsFrame
-    (LengthSMTLibProtocolReceiver _ _ _ value _) = value
+receiverCumulativeCapsFrame receiver =
+  smtLibStreamFramerTotalByteLimit (receiverFramer receiver) < configuredTotal
+ where
+  plan = receiverPlan receiver
+  configuredTotal = smtLibStreamTotalByteLimit $ planStreamLimits plan
 
 receiverFramer
   :: LengthSMTLibProtocolReceiver identity local
   -> SMTLibStreamFramer
-receiverFramer (LengthSMTLibProtocolReceiver _ _ _ _ value) = value
+receiverFramer (LengthSMTLibProtocolReceiver _ _ _ value) = value
 
 replaceReceiverFramer
   :: LengthSMTLibProtocolReceiver identity local
   -> SMTLibStreamFramer
   -> LengthSMTLibProtocolReceiver identity local
 replaceReceiverFramer
-    (LengthSMTLibProtocolReceiver plan phase start capped _) framer =
-  LengthSMTLibProtocolReceiver plan phase start capped framer
+    (LengthSMTLibProtocolReceiver plan phase start _) framer =
+  LengthSMTLibProtocolReceiver plan phase start framer
 
 phaseName :: LengthSMTLibProtocolPhaseState -> LengthSMTLibProtocolPhase
 phaseName phase = case phase of

@@ -41,6 +41,7 @@ module Language.Haskell.Synthesis.Internal.SMTLib.Stream
   , startSMTLibStreamFramer
   , feedSMTLibStreamFramer
   , finishSMTLibStreamFramer
+  , smtLibStreamFramerTotalByteLimit
   , smtLibStreamFramerConsumedBytes
   ) where
 
@@ -295,6 +296,10 @@ finishSMTLibStreamFramer framer = case streamMode framer of
 
 smtLibStreamFramerConsumedBytes :: SMTLibStreamFramer -> Natural
 smtLibStreamFramerConsumedBytes = streamConsumed
+
+-- | Effective total bound retained by this package-private continuation.
+smtLibStreamFramerTotalByteLimit :: SMTLibStreamFramer -> Natural
+smtLibStreamFramerTotalByteLimit = smtLibStreamTotalByteLimit . streamLimits
 
 data StreamTransition
   = StreamContinue !SMTLibStreamFramer

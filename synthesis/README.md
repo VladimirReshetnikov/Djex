@@ -243,6 +243,11 @@ under an input-value policy for a query with inputs exposes the separate
 paths terminate without it. Satisfiable zero-input value policy is represented
 as a vacuous `Just []`, without fabricating an input-value frame. A decoded
 nonempty-query valuation is not released until its own exact marker arrives.
+The plan does not cache the concatenated initial and optional value writes: it
+renders the bytes transiently for the complete fingerprint and derives them
+again on demand from the retained sealed query and positional markers through
+the selectors used at their causal write edges. Presence-only inspection of
+the optional write does not render request bytes.
 
 Tails cross status-to-marker and value-to-marker phases only because those
 responses answer commands already in the same completed write. A tail crossing

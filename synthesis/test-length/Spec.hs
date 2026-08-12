@@ -31,6 +31,8 @@ import Language.Haskell.Synthesis.Inventory
   ( Inventory
   , mkInventory
   )
+import qualified Language.Haskell.Synthesis.Internal.Fingerprint
+  as InternalFingerprint
 import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   as InternalSMTLibExecution
 import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
@@ -2688,6 +2690,18 @@ smtLibProtocolTests = testGroup
         expectedInitial
       SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes plan @?=
         expectedValue
+      -- This digest is only a regression snapshot of the collision-free
+      -- canonical bytes. It is not used as protocol identity or authority.
+      SHA256.hash
+          (BS.pack
+            $ InternalFingerprint.fingerprintCanonicalBytes
+            $ SMTLibProtocol.lengthSMTLibProtocolPlanFingerprint plan) @?=
+        BS.pack
+          [ 221, 130, 39, 239, 54, 32, 140, 197
+          , 236, 141, 77, 110, 94, 225, 199, 43
+          , 110, 76, 180, 49, 196, 31, 210, 79
+          , 235, 16, 123, 227, 255, 11, 110, 194
+          ]
       checkReceiver <- expectProtocolWrite
         SMTLibProtocol.LengthSMTLibProtocolInitialQueryWrite
         expectedInitial

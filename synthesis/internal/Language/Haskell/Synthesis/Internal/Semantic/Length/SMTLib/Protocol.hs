@@ -253,7 +253,10 @@ data LengthSMTLibProtocolPlanError
 instance NFData LengthSMTLibProtocolPlanError
 
 -- | Opaque association of exact policy, query, framing policy, barriers, and
--- writes.  The private fingerprint is a reversible complete key, not a digest.
+-- the complete identity of their deterministic writes.  The writes are
+-- rendered transiently for fingerprint admission and later derived on demand
+-- through the selectors used at their causal action edges; the private
+-- fingerprint remains a reversible complete key, not a digest.
 data LengthSMTLibProtocolPlan identity local = LengthSMTLibProtocolPlan
   !LengthSMTLibExecutionConfig
   !(LengthSMTLibQuery identity local)
@@ -261,18 +264,15 @@ data LengthSMTLibProtocolPlan identity local = LengthSMTLibProtocolPlan
   !Natural
   !SMTLibEchoSentinel
   !(Maybe SMTLibEchoSentinel)
-  [Word8]
-  !(Maybe [Word8])
   !(Fingerprint LengthSMTLibProtocolPlanFingerprintSubject)
 
 type role LengthSMTLibProtocolPlan nominal nominal
 
 instance NFData (LengthSMTLibProtocolPlan identity local) where
   rnf (LengthSMTLibProtocolPlan execution query stream cumulative
-      checkBarrier valueBarrier initialWrite valueWrite fingerprint) =
+      checkBarrier valueBarrier fingerprint) =
     rnf execution `seq` rnf query `seq` rnf stream `seq` rnf cumulative `seq`
-    rnf checkBarrier `seq` rnf valueBarrier `seq` rnf initialWrite `seq`
-    rnf valueWrite `seq` rnf fingerprint
+    rnf checkBarrier `seq` rnf valueBarrier `seq` rnf fingerprint
 
 data LengthSMTLibProtocolPlanFingerprintSubject
 
@@ -316,39 +316,53 @@ sealLengthSMTLibProtocolPlan limits execution query
       | barrier == checkBarrier ->
           Left LengthSMTLibProtocolRepeatedBarrierNonce
     _ -> Right ()
-  let initialWrite =
-        lengthSMTLibExecutionQueryResetBytes ++
-        lengthSMTLibQueryCheckBytes query ++
-        smtLibEchoSentinelCommandBytes checkBarrier
-      valueWrite = case
-          (valueRequest, valueBarrier) of
-        (Just request, Just barrier) -> Just $
-          request ++ smtLibEchoSentinelCommandBytes barrier
-        _ -> Nothing
+  let initialWrite = renderProtocolInitialWrite query checkBarrier
+      valueWrite = renderProtocolInputValueWrite valueRequest valueBarrier
   fingerprint <- buildPlanFingerprint limits execution query valueRequest
     checkBarrier valueBarrier initialWrite valueWrite
   pure $ LengthSMTLibProtocolPlan execution query
     (lengthSMTLibProtocolStreamLimits limits)
     (lengthSMTLibProtocolCumulativeStdoutByteLimit limits)
-    checkBarrier valueBarrier initialWrite valueWrite fingerprint
+    checkBarrier valueBarrier fingerprint
+
+renderProtocolInitialWrite
+  :: LengthSMTLibQuery identity local
+  -> SMTLibEchoSentinel
+  -> [Word8]
+renderProtocolInitialWrite query barrier =
+  lengthSMTLibExecutionQueryResetBytes ++
+  lengthSMTLibQueryCheckBytes query ++
+  smtLibEchoSentinelCommandBytes barrier
+
+renderProtocolInputValueWrite
+  :: Maybe [Word8]
+  -> Maybe SMTLibEchoSentinel
+  -> Maybe [Word8]
+renderProtocolInputValueWrite _ Nothing = Nothing
+renderProtocolInputValueWrite request (Just barrier) =
+  fmap (++ smtLibEchoSentinelCommandBytes barrier)
+    request
 
 lengthSMTLibProtocolInitialWriteBytes
   :: LengthSMTLibProtocolPlan identity local
   -> [Word8]
 lengthSMTLibProtocolInitialWriteBytes
-    (LengthSMTLibProtocolPlan _ _ _ _ _ _ value _ _) = value
+    (LengthSMTLibProtocolPlan _ query _ _ checkBarrier _ _) =
+      renderProtocolInitialWrite query checkBarrier
 
 lengthSMTLibProtocolInputValueWriteBytes
   :: LengthSMTLibProtocolPlan identity local
   -> Maybe [Word8]
 lengthSMTLibProtocolInputValueWriteBytes
-    (LengthSMTLibProtocolPlan _ _ _ _ _ _ _ value _) = value
+    (LengthSMTLibProtocolPlan _ query _ _ _ valueBarrier _) =
+      renderProtocolInputValueWrite
+        (lengthSMTLibQueryInputValueRequestBytes query) valueBarrier
 
 lengthSMTLibProtocolPlanFingerprint
   :: LengthSMTLibProtocolPlan identity local
   -> Fingerprint LengthSMTLibProtocolPlanFingerprintSubject
 lengthSMTLibProtocolPlanFingerprint
-    (LengthSMTLibProtocolPlan _ _ _ _ _ _ _ _ value) = value
+    (LengthSMTLibProtocolPlan _ _ _ _ _ _ value) = value
 
 -- | Smallest complete live transcript admitted by this exact plan, including
 -- the required lexical delimiter after each bare status and final echo.  A
@@ -739,35 +753,35 @@ phaseName phase = case phase of
 planExecution
   :: LengthSMTLibProtocolPlan identity local
   -> LengthSMTLibExecutionConfig
-planExecution (LengthSMTLibProtocolPlan value _ _ _ _ _ _ _ _) = value
+planExecution (LengthSMTLibProtocolPlan value _ _ _ _ _ _) = value
 
 planQuery
   :: LengthSMTLibProtocolPlan identity local
   -> LengthSMTLibQuery identity local
-planQuery (LengthSMTLibProtocolPlan _ value _ _ _ _ _ _ _) = value
+planQuery (LengthSMTLibProtocolPlan _ value _ _ _ _ _) = value
 
 planStreamLimits
   :: LengthSMTLibProtocolPlan identity local
   -> SMTLibStreamLimits
-planStreamLimits (LengthSMTLibProtocolPlan _ _ value _ _ _ _ _ _) = value
+planStreamLimits (LengthSMTLibProtocolPlan _ _ value _ _ _ _) = value
 
 planCumulativeStdoutByteLimit
   :: LengthSMTLibProtocolPlan identity local
   -> Natural
 planCumulativeStdoutByteLimit
-    (LengthSMTLibProtocolPlan _ _ _ value _ _ _ _ _) = value
+    (LengthSMTLibProtocolPlan _ _ _ value _ _ _) = value
 
 planCheckBarrier
   :: LengthSMTLibProtocolPlan identity local
   -> SMTLibEchoSentinel
 planCheckBarrier
-    (LengthSMTLibProtocolPlan _ _ _ _ value _ _ _ _) = value
+    (LengthSMTLibProtocolPlan _ _ _ _ value _ _) = value
 
 planValueBarrier
   :: LengthSMTLibProtocolPlan identity local
   -> Maybe SMTLibEchoSentinel
 planValueBarrier
-    (LengthSMTLibProtocolPlan _ _ _ _ _ value _ _ _) = value
+    (LengthSMTLibProtocolPlan _ _ _ _ _ value _) = value
 
 validatePlanFraming
   :: LengthSMTLibProtocolLimits

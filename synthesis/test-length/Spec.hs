@@ -2727,8 +2727,6 @@ smtLibProtocolTests = testGroup
       decoded <- expectProtocolComplete valueAction
       SMTLibProtocol.lengthSMTLibProtocolDecodedStatus decoded @?=
         Observation.SolverSatisfiable
-      SMTLibProtocol.lengthSMTLibProtocolDecodedStatusFrame decoded @?=
-        asciiBytes "sat"
       SMTLibProtocol.lengthSMTLibProtocolDecodedInputValueFrame decoded @?=
         Just rawValues
       SMTLibProtocol.lengthSMTLibProtocolDecodedInputValues decoded @?=
@@ -3323,8 +3321,6 @@ assertProtocolTerminalStatus plan marker (rawStatus, expectedStatus) = do
     $ asciiBytes (rawStatus ++ "\n") ++ marker ++ asciiBytes "\n"
   decoded <- expectProtocolComplete action
   SMTLibProtocol.lengthSMTLibProtocolDecodedStatus decoded @?= expectedStatus
-  SMTLibProtocol.lengthSMTLibProtocolDecodedStatusFrame decoded @?=
-    asciiBytes rawStatus
   SMTLibProtocol.lengthSMTLibProtocolDecodedInputValueFrame decoded @?= Nothing
   SMTLibProtocol.lengthSMTLibProtocolDecodedInputValues decoded @?= Nothing
   SMTLibProtocol.lengthSMTLibProtocolDecodedPlanFingerprint decoded @?=

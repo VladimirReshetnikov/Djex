@@ -51,7 +51,6 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   , LengthSMTLibProtocolError (..)
   , LengthSMTLibProtocolDecoded
   , lengthSMTLibProtocolDecodedStatus
-  , lengthSMTLibProtocolDecodedStatusFrame
   , lengthSMTLibProtocolDecodedInputValueFrame
   , lengthSMTLibProtocolDecodedInputValues
   , lengthSMTLibProtocolDecodedPlanFingerprint
@@ -397,21 +396,18 @@ instance NFData LengthSMTLibProtocolWriteKind
 
 data LengthSMTLibProtocolPhaseState
   = AwaitLengthSMTLibCheckStatus
-  | AwaitLengthSMTLibCheckBarrier !SolverStatus [Word8]
-  | AwaitLengthSMTLibInputValues !SolverStatus [Word8]
+  | AwaitLengthSMTLibCheckBarrier !SolverStatus
+  | AwaitLengthSMTLibInputValues !SolverStatus
   | AwaitLengthSMTLibInputValueBarrier
-      !SolverStatus [Word8] [Word8] [LengthSMTLibIntegerBinding]
+      !SolverStatus [Word8] [LengthSMTLibIntegerBinding]
 
 instance NFData LengthSMTLibProtocolPhaseState where
   rnf state = case state of
     AwaitLengthSMTLibCheckStatus -> ()
-    AwaitLengthSMTLibCheckBarrier status rawStatus ->
-      rnf status `seq` rnf rawStatus
-    AwaitLengthSMTLibInputValues status rawStatus ->
-      rnf status `seq` rnf rawStatus
-    AwaitLengthSMTLibInputValueBarrier
-        status rawStatus rawValues bindings ->
-      rnf status `seq` rnf rawStatus `seq` rnf rawValues `seq` rnf bindings
+    AwaitLengthSMTLibCheckBarrier status -> rnf status
+    AwaitLengthSMTLibInputValues status -> rnf status
+    AwaitLengthSMTLibInputValueBarrier status rawValues bindings ->
+      rnf status `seq` rnf rawValues `seq` rnf bindings
 
 -- | A continuation for bytes received only after the write which produced it
 -- has completed.  Constructors and raw framing state never leave the package.
@@ -508,37 +504,32 @@ instance NFData LengthSMTLibProtocolInputValues where
 -- retains the exact sealed plan identity rather than the already-exercised
 -- plan itself.  A satisfiable zero-input query under the input-value policy
 -- carries a vacuous @Just []@ result without fabricating a frame or emitting
--- an empty @get-value@ command.  This type is intentionally not named or
--- represented as an execution observation.
+-- an empty @get-value@ command.  In a live run raw status bytes remain in the
+-- process-owning causal transcript rather than being copied into this decoded
+-- branch.  This type is intentionally not named or represented as an execution
+-- observation.
 data LengthSMTLibProtocolDecoded identity local = LengthSMTLibProtocolDecoded
   !(Fingerprint LengthSMTLibProtocolPlanFingerprintSubject)
   !SolverStatus
-  [Word8]
   !(Maybe LengthSMTLibProtocolInputValues)
 
 type role LengthSMTLibProtocolDecoded nominal nominal
 
 instance NFData (LengthSMTLibProtocolDecoded identity local) where
-  rnf (LengthSMTLibProtocolDecoded planFingerprint status rawStatus values) =
-    rnf planFingerprint `seq` rnf status `seq` rnf rawStatus `seq` rnf values
+  rnf (LengthSMTLibProtocolDecoded planFingerprint status values) =
+    rnf planFingerprint `seq` rnf status `seq` rnf values
 
 lengthSMTLibProtocolDecodedStatus
   :: LengthSMTLibProtocolDecoded identity local
   -> SolverStatus
 lengthSMTLibProtocolDecodedStatus
-    (LengthSMTLibProtocolDecoded _ value _ _) = value
-
-lengthSMTLibProtocolDecodedStatusFrame
-  :: LengthSMTLibProtocolDecoded identity local
-  -> [Word8]
-lengthSMTLibProtocolDecodedStatusFrame
-    (LengthSMTLibProtocolDecoded _ _ value _) = value
+    (LengthSMTLibProtocolDecoded _ value _) = value
 
 lengthSMTLibProtocolDecodedInputValueFrame
   :: LengthSMTLibProtocolDecoded identity local
   -> Maybe [Word8]
 lengthSMTLibProtocolDecodedInputValueFrame
-    (LengthSMTLibProtocolDecoded _ _ _ values) = case values of
+    (LengthSMTLibProtocolDecoded _ _ values) = case values of
       Nothing -> Nothing
       Just (LengthSMTLibProtocolInputValues frame _) -> frame
 
@@ -546,7 +537,7 @@ lengthSMTLibProtocolDecodedInputValues
   :: LengthSMTLibProtocolDecoded identity local
   -> Maybe [LengthSMTLibIntegerBinding]
 lengthSMTLibProtocolDecodedInputValues
-    (LengthSMTLibProtocolDecoded _ _ _ values) = case values of
+    (LengthSMTLibProtocolDecoded _ _ values) = case values of
       Nothing -> Nothing
       Just (LengthSMTLibProtocolInputValues _ bindings) -> Just bindings
 
@@ -554,7 +545,7 @@ lengthSMTLibProtocolDecodedPlanFingerprint
   :: LengthSMTLibProtocolDecoded identity local
   -> Fingerprint LengthSMTLibProtocolPlanFingerprintSubject
 lengthSMTLibProtocolDecodedPlanFingerprint
-    (LengthSMTLibProtocolDecoded fingerprint _ _ _) =
+    (LengthSMTLibProtocolDecoded fingerprint _ _) =
   fingerprint
 
 handleFrame
@@ -574,8 +565,8 @@ handleFrame receiver consumed frame tailBytes = case receiverPhase receiver of
         LengthSMTLibProtocolCheckStatusPhase)
       $ parseLengthSMTLibCheckResponse limits frame
     continueWithinWrite plan
-      (AwaitLengthSMTLibCheckBarrier status frame) consumed tailBytes
-  AwaitLengthSMTLibCheckBarrier status rawStatus -> do
+      (AwaitLengthSMTLibCheckBarrier status) consumed tailBytes
+  AwaitLengthSMTLibCheckBarrier status -> do
     let plan = receiverPlan receiver
     if isExactSMTLibEchoSentinelResponse (planCheckBarrier plan) frame
       then case
@@ -589,17 +580,17 @@ handleFrame receiver consumed frame tailBytes = case receiverPhase receiver of
           Right $ SMTLibCausalWrite
             LengthSMTLibProtocolInputValueWrite valueWrite
             $ newReceiver plan
-                (AwaitLengthSMTLibInputValues status rawStatus)
+                (AwaitLengthSMTLibInputValues status)
                 afterBoundary
         _ -> do
           _ <- consumePostBarrierWhitespace plan consumed tailBytes
           Right $ SMTLibCausalComplete
             $ LengthSMTLibProtocolDecoded
-                (lengthSMTLibProtocolPlanFingerprint plan) status rawStatus
+                (lengthSMTLibProtocolPlanFingerprint plan) status
             $ terminalInputValues plan status
       else Left $ LengthSMTLibProtocolBarrierMismatch
         LengthSMTLibProtocolCheckBarrier
-  AwaitLengthSMTLibInputValues status rawStatus -> do
+  AwaitLengthSMTLibInputValues status -> do
     let plan = receiverPlan receiver
         limits = lengthSMTLibExecutionResponseLimits $ planExecution plan
     bindings <- first
@@ -608,10 +599,10 @@ handleFrame receiver consumed frame tailBytes = case receiverPhase receiver of
       $ parseLengthSMTLibInputValueResponse limits (planQuery plan) frame
     continueWithinWrite plan
       (AwaitLengthSMTLibInputValueBarrier
-        status rawStatus frame bindings)
+        status frame bindings)
       consumed tailBytes
   AwaitLengthSMTLibInputValueBarrier
-      status rawStatus rawValues bindings -> do
+      status rawValues bindings -> do
     let plan = receiverPlan receiver
     case planValueBarrier plan of
       Just barrier
@@ -619,7 +610,7 @@ handleFrame receiver consumed frame tailBytes = case receiverPhase receiver of
             _ <- consumePostBarrierWhitespace plan consumed tailBytes
             Right $ SMTLibCausalComplete
               $ LengthSMTLibProtocolDecoded
-                  (lengthSMTLibProtocolPlanFingerprint plan) status rawStatus
+                  (lengthSMTLibProtocolPlanFingerprint plan) status
               $ Just $ LengthSMTLibProtocolInputValues
                   (Just rawValues) bindings
       _ -> Left $ LengthSMTLibProtocolBarrierMismatch

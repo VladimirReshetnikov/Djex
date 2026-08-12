@@ -176,6 +176,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   , lengthSMTLibProtocolDecodedInputValues
   , lengthSMTLibProtocolDecodedStatus
   , lengthSMTLibProtocolInputValueWriteBytes
+  , lengthSMTLibProtocolPlanCumulativeStdoutByteLimit
   , lengthSMTLibProtocolPlanFingerprint
   , lengthSMTLibProtocolPlanMinimumStdoutByteCount
   , lengthSMTLibProtocolStreamLimits
@@ -183,8 +184,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   , startLengthSMTLibProtocol
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capability
-  ( LengthSMTLibCapabilityAction
-  , LengthSMTLibCapabilityError (..)
+  ( LengthSMTLibCapabilityError (..)
   , LengthSMTLibCapabilityLimits
   , LengthSMTLibCapabilityOutcome
   , LengthSMTLibCapabilityPlan
@@ -192,9 +192,9 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capabi
   , LengthSMTLibCapabilityWriteKind (..)
   , feedLengthSMTLibCapability
   , finishLengthSMTLibCapability
-  , lengthSMTLibCapabilityCumulativeOutputByteLimit
   , lengthSMTLibCapabilityOutcomePlanFingerprint
   , lengthSMTLibCapabilityMinimumOutputByteCount
+  , lengthSMTLibCapabilityPlanCumulativeOutputByteLimit
   , sealLengthSMTLibCapabilityPlan
   , startLengthSMTLibCapability
   )
@@ -949,7 +949,7 @@ prepareLengthSMTLibQueryRun evaluationLimits worker query deadline = do
                 LengthSMTLibQueryProcessStdoutCapacityTooSmall
                   remaining required)
               else case admitLengthSMTLibQueryRunIdentity
-                  runIdentityLimit protocolLimits processLimits worker plan
+                  runIdentityLimit processLimits worker plan
                   evaluationLimits ordinal deadline
                   checkBarrier valueBarrier of
                 Left failure -> pure $ Left (False, failure)
@@ -1110,11 +1110,9 @@ driveProtocolQuery
         , SMTLibCausalTranscript LengthSMTLibProtocolWriteKind
         ))
 driveProtocolQuery worker deadline plan = do
-  let LengthSMTLibSessionConfig _ _ _ protocolLimits _ =
-        readyWorkerConfig worker
   driven <- driveSMTLibCausalActions
     SMTLibCausalAdoptPredecessorWhitespace
-    (lengthSMTLibProtocolCumulativeStdoutByteLimit protocolLimits)
+    (lengthSMTLibProtocolPlanCumulativeStdoutByteLimit plan)
     feedLengthSMTLibProtocol finishLengthSMTLibProtocol
     LengthSMTLibProtocolUnexpectedPostBarrierByte
     lengthSMTLibCausalTransportOps
@@ -1256,7 +1254,6 @@ buildLengthSMTLibQueryRunIdentity worker plan evaluationLimits ordinal deadline
 
 admitLengthSMTLibQueryRunIdentity
   :: Natural
-  -> LengthSMTLibProtocolLimits
   -> LengthSMTLibProcessLimits
   -> LengthSMTLibReadyWorker epoch
   -> LengthSMTLibProtocolPlan identity local
@@ -1266,7 +1263,7 @@ admitLengthSMTLibQueryRunIdentity
   -> ByteString
   -> ByteString
   -> Either LengthSMTLibQueryRunFailure ()
-admitLengthSMTLibQueryRunIdentity maximumBytes protocolLimits processLimits
+admitLengthSMTLibQueryRunIdentity maximumBytes processLimits
     worker plan evaluationLimits ordinal deadline checkBarrier valueBarrier
   | requiredMaximum > maximumBytes = Left
       $ LengthSMTLibQueryRunIdentityAdmissionTooSmall
@@ -1274,7 +1271,7 @@ admitLengthSMTLibQueryRunIdentity maximumBytes protocolLimits processLimits
   | otherwise = Right ()
  where
   transcriptMaximum =
-    lengthSMTLibProtocolCumulativeStdoutByteLimit protocolLimits
+    lengthSMTLibProtocolPlanCumulativeStdoutByteLimit plan
   epochMaximum = if isJust $ lengthSMTLibProtocolInputValueWriteBytes plan
     then 2
     else 1
@@ -2203,31 +2200,29 @@ probeReadyWorker limits process cancellation deadline epoch = do
           (BS.unpack startup) (BS.unpack check) (BS.unpack value) (BS.unpack ready) of
         Left failure -> pure $ Left
           $ LengthSMTLibSessionCapabilityPlanFailure failure
-        Right plan -> driveCapability limits process cancellation deadline
-          $ startLengthSMTLibCapability plan
+        Right plan -> driveCapability plan process cancellation deadline
       _ -> pure $ Left LengthSMTLibSessionBarrierDerivationCollision
 
 driveCapability
-  :: LengthSMTLibCapabilityLimits
+  :: LengthSMTLibCapabilityPlan epoch
   -> LengthSMTLibProcess
   -> LengthSMTLibProcessCancellation
   -> LengthSMTLibProcessDeadline
-  -> LengthSMTLibCapabilityAction epoch
   -> IO
       (Either
         LengthSMTLibSessionError
         ( LengthSMTLibCapabilityOutcome epoch
         , SMTLibCausalTranscript LengthSMTLibCapabilityWriteKind
         ))
-driveCapability limits process cancellation deadline action = do
+driveCapability plan process cancellation deadline = do
   driven <- driveSMTLibCausalActions
     SMTLibCausalRequireEmptyBoundary
-    (lengthSMTLibCapabilityCumulativeOutputByteLimit limits)
+    (lengthSMTLibCapabilityPlanCumulativeOutputByteLimit plan)
     feedLengthSMTLibCapability finishLengthSMTLibCapability
     LengthSMTLibCapabilityUnexpectedPostBarrierByte
     lengthSMTLibCausalTransportOps
     (lengthSMTLibCausalTransport process cancellation deadline)
-    action
+    $ startLengthSMTLibCapability plan
   pure $ case driven of
     Left failure -> Left $ mapFailure failure
     Right value -> Right value

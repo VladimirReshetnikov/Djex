@@ -3009,6 +3009,14 @@ smtLibProtocolTests = testGroup
           tooSmall site field admitted required =
             SMTLibProtocol.LengthSMTLibProtocolRequiredLimitTooSmall
               site field admitted required
+      let nondefaultCumulative = 600000
+          nondefaultLimits = protocolLimits $ \source -> source
+            { SMTLibProtocol.lengthSMTLibProtocolLimitSourceCumulativeStdoutBytes =
+                nondefaultCumulative }
+      nondefaultPlan <- expectRight $ seal nondefaultLimits execution
+      SMTLibProtocol.lengthSMTLibProtocolPlanCumulativeStdoutByteLimit
+          nondefaultPlan @?=
+        nondefaultCumulative
       assertLeft
         (tooSmall SMTLibProtocol.LengthSMTLibProtocolCheckStatusFrame
           SMTLibProtocol.LengthSMTLibProtocolStreamTotalBytes 6 7)

@@ -1130,6 +1130,8 @@ capabilityFixture
   -> IO CapabilityFixture
 capabilityFixture limits = do
   plan <- expectRight $ sealCapability limits fixtureNonces
+  Capability.lengthSMTLibCapabilityPlanCumulativeOutputByteLimit plan @?=
+    Capability.lengthSMTLibCapabilityCumulativeOutputByteLimit limits
   startup <- expectRight $ SMTLibStream.mkSMTLibEchoSentinel startupNonce
   check <- expectRight $ SMTLibStream.mkSMTLibEchoSentinel checkNonce
   value <- expectRight $ SMTLibStream.mkSMTLibEchoSentinel valueNonce

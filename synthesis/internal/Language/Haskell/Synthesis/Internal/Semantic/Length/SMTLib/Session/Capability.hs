@@ -40,6 +40,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capabi
   , lengthSMTLibCapabilityInputValueWriteBytes
   , lengthSMTLibCapabilityReadyWriteBytes
   , lengthSMTLibCapabilityPlanFingerprint
+  , lengthSMTLibCapabilityPlanCumulativeOutputByteLimit
   , LengthSMTLibCapabilityPhase (..)
   , LengthSMTLibCapabilityWriteKind (..)
   , LengthSMTLibCapabilityReceiver
@@ -367,6 +368,13 @@ lengthSMTLibCapabilityPlanFingerprint
   -> Fingerprint LengthSMTLibCapabilityPlanFingerprintSubject
 lengthSMTLibCapabilityPlanFingerprint
     (LengthSMTLibCapabilityPlan _ _ _ _ _ value) = value
+
+-- | Final causal transcript cap retained by this exact sealed plan.
+lengthSMTLibCapabilityPlanCumulativeOutputByteLimit
+  :: LengthSMTLibCapabilityPlan identity
+  -> Natural
+lengthSMTLibCapabilityPlanCumulativeOutputByteLimit =
+  smtLibCausalStreamPolicyCumulativeByteLimit . planStreamPolicy
 
 data LengthSMTLibCapabilityPhase
   = LengthSMTLibCapabilityStartupBarrierPhase

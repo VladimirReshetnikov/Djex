@@ -26,6 +26,11 @@ action machine.
 The private Length `...SMTLib.Session.Transport` adapter keeps the exact
 process, cancellation token, and deadline together behind that neutral
 transport seam.
+For both readiness and ordinary queries, Session now takes the driver's final
+transcript cap from the exact sealed plan whose initial action it drives. Query
+run identity-size admission uses that same protocol-plan projection before
+reservation. Neither path pairs the plan with a second limits/config projection
+which could drift from its retained cumulative stream policy.
 
 The two Length action machines separately share
 `Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream`. That pure layer

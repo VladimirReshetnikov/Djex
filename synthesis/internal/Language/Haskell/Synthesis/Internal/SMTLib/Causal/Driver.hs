@@ -143,7 +143,9 @@ type role SMTLibCausalTransportOps nominal nominal
 -- write. Every later write is separated from its predecessor by at least one
 -- SMT-LIB whitespace delimiter, and no non-whitespace byte may cross that
 -- causal boundary. EOF is offered to the pure machine for exact positional
--- classification before the transport failure is used.
+-- classification before the transport failure is used. The cumulative
+-- maximum must come from the exact sealed plan which produced the initial
+-- action, rather than from a separately pairable limits value.
 driveSMTLibCausalActions
   :: SMTLibCausalInitialBoundary
   -> Natural

@@ -38,6 +38,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   , lengthSMTLibProtocolInitialWriteBytes
   , lengthSMTLibProtocolInputValueWriteBytes
   , lengthSMTLibProtocolPlanFingerprint
+  , lengthSMTLibProtocolPlanCumulativeStdoutByteLimit
   , lengthSMTLibProtocolPlanMinimumStdoutByteCount
   , LengthSMTLibProtocolPhase (..)
   , LengthSMTLibProtocolWriteKind (..)
@@ -375,6 +376,13 @@ lengthSMTLibProtocolPlanFingerprint
   -> Fingerprint LengthSMTLibProtocolPlanFingerprintSubject
 lengthSMTLibProtocolPlanFingerprint
     (LengthSMTLibProtocolPlan _ _ _ _ _ value) = value
+
+-- | Final causal transcript cap retained by this exact sealed plan.
+lengthSMTLibProtocolPlanCumulativeStdoutByteLimit
+  :: LengthSMTLibProtocolPlan identity local
+  -> Natural
+lengthSMTLibProtocolPlanCumulativeStdoutByteLimit =
+  smtLibCausalStreamPolicyCumulativeByteLimit . planStreamPolicy
 
 -- | Smallest complete live transcript admitted by this exact plan, including
 -- the required lexical delimiter after each bare status and final echo.  A

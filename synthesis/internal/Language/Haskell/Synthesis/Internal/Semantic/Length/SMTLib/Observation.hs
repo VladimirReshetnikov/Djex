@@ -37,8 +37,9 @@ import Language.Haskell.Synthesis.Semantic.Length.SMTLib
 import Language.Haskell.Synthesis.Semantic.Observation
   ( SolverObservation
   , SolverStatus
-  , solverObservationStatus
   )
+import Language.Haskell.Synthesis.Internal.Semantic.Problem
+  ( associatedSolverObservationStatus )
 import Language.Haskell.Synthesis.Semantic.Problem
   ( AssociatedObservation
   , BoundedRawArtifact
@@ -69,7 +70,6 @@ data AssociatedLengthSMTLibSolverObservation
     identity local satisfiable unsatisfiable unknown =
   AssociatedLengthSMTLibSolverObservation
     !(Fingerprint LengthSMTLibQueryFingerprintSubject)
-    !SolverStatus
     !(AssociatedObservation
         FiniteListSpineLengthV1
         (LengthSMTLibRawSolverObservation
@@ -81,8 +81,8 @@ type role AssociatedLengthSMTLibSolverObservation
 instance NFData
     (AssociatedLengthSMTLibSolverObservation
       identity local satisfiable unsatisfiable unknown) where
-  rnf (AssociatedLengthSMTLibSolverObservation query status associated) =
-    rnf query `seq` rnf status `seq` rnf associated
+  rnf (AssociatedLengthSMTLibSolverObservation query associated) =
+    rnf query `seq` rnf associated
 
 -- | Bind a bounded raw report atomically to one exact query and its retained
 -- behavioral problem.  Association does not validate the report, strengthen
@@ -95,7 +95,6 @@ associateLengthSMTLibSolverObservation
 associateLengthSMTLibSolverObservation query observation =
   AssociatedLengthSMTLibSolverObservation
     (lengthSMTLibQueryFingerprint query)
-    (solverObservationStatus observation)
     (associateSolverObservation
       (lengthSMTLibQueryBehavioralProblem query)
       observation)
@@ -106,7 +105,7 @@ associatedLengthSMTLibQueryFingerprint
       identity local satisfiable unsatisfiable unknown
   -> Fingerprint LengthSMTLibQueryFingerprintSubject
 associatedLengthSMTLibQueryFingerprint
-    (AssociatedLengthSMTLibSolverObservation query _ _) = query
+    (AssociatedLengthSMTLibSolverObservation query _) = query
 
 -- | Raw reported status, inspectable without exposing or forcing its artifact.
 associatedLengthSMTLibSolverStatus
@@ -114,7 +113,8 @@ associatedLengthSMTLibSolverStatus
       identity local satisfiable unsatisfiable unknown
   -> SolverStatus
 associatedLengthSMTLibSolverStatus
-    (AssociatedLengthSMTLibSolverObservation _ status _) = status
+    (AssociatedLengthSMTLibSolverObservation _ associated) =
+  associatedSolverObservationStatus associated
 
 -- | Conservative generic strength of the raw report.
 associatedLengthSMTLibResultStrength
@@ -122,7 +122,7 @@ associatedLengthSMTLibResultStrength
       identity local satisfiable unsatisfiable unknown
   -> RawResultStrength
 associatedLengthSMTLibResultStrength
-    (AssociatedLengthSMTLibSolverObservation _ _ associated) =
+    (AssociatedLengthSMTLibSolverObservation _ associated) =
   associatedObservationResultStrength associated
 
 -- | The only permission granted to any associated raw result, including
@@ -132,7 +132,7 @@ associatedLengthSMTLibUse
       identity local satisfiable unsatisfiable unknown
   -> RawObservationUse
 associatedLengthSMTLibUse
-    (AssociatedLengthSMTLibSolverObservation _ _ associated) =
+    (AssociatedLengthSMTLibSolverObservation _ associated) =
   associatedObservationUse associated
 
 -- | Exact replay rejected either the retained solver-neutral problem tuple or
@@ -161,7 +161,7 @@ replayAssociatedLengthSMTLibSolverObservation
         satisfiable unsatisfiable unknown)
 replayAssociatedLengthSMTLibSolverObservation query
     (AssociatedLengthSMTLibSolverObservation
-      retainedQuery _ associated) = do
+      retainedQuery associated) = do
   observation <- first LengthSMTLibObservationProblemMismatch
     $ replayAssociatedObservation
         (lengthSMTLibQueryBehavioralProblem query)

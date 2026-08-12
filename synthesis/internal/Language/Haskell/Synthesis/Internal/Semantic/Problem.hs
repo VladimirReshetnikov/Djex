@@ -36,6 +36,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Problem
   , AssociatedObservation
   , associateSolverObservation
   , associateBehavioralObservation
+  , associatedSolverObservationStatus
   , associatedObservationDomain
   , associatedObservationInventoryFingerprint
   , associatedObservationEncodingFingerprint
@@ -63,6 +64,8 @@ import Language.Haskell.Synthesis.Internal.Fingerprint (Fingerprint)
 import Language.Haskell.Synthesis.Semantic.Observation
   ( BehavioralObservation (..)
   , SolverObservation (..)
+  , SolverStatus
+  , solverObservationStatus
   )
 
 -- These subjects are intentionally distinct even when their exact bytes
@@ -306,6 +309,18 @@ associateBehavioralObservation problem observation = AssociatedObservation
     BehaviorBoundedObservation{} -> RawBehaviorBoundedValidation
     BehaviorUnknownObservation{} -> RawBehaviorUnknown)
   observation
+
+-- | Inspect the status constructor retained inside an associated raw solver
+-- report without exposing the generic association or forcing its artifact.
+-- Domain-specific association layers use this package-private projection to
+-- avoid storing the same status a second time.
+associatedSolverObservationStatus
+  :: AssociatedObservation domain
+      (SolverObservation satisfiable unsatisfiable unknown)
+  -> SolverStatus
+associatedSolverObservationStatus
+    (AssociatedObservation _ _ observation) =
+  solverObservationStatus observation
 
 associatedObservationDomain
   :: AssociatedObservation domain observation

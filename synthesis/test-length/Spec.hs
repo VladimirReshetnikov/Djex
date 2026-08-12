@@ -2292,6 +2292,13 @@ smtLibTests = testGroup
           associated = map
             (SMTLibObservation.associateLengthSMTLibSolverObservation query)
             observations
+          poisonObservation ::
+            SMTLibObservation.LengthSMTLibRawSolverObservation () () ()
+          poisonObservation = Observation.SatisfiableObservation
+            (error "status projection forced a raw artifact")
+          poisonAssociated =
+            SMTLibObservation.associateLengthSMTLibSolverObservation
+              query poisonObservation
       map SMTLibObservation.associatedLengthSMTLibQueryFingerprint associated
         @?= replicate 3 (SMTLib.lengthSMTLibQueryFingerprint query)
       map SMTLibObservation.associatedLengthSMTLibSolverStatus associated @?=
@@ -2306,6 +2313,12 @@ smtLibTests = testGroup
         ]
       map SMTLibObservation.associatedLengthSMTLibUse associated @?=
         replicate 3 SemanticProblem.HeuristicRankingOnly
+      SMTLibObservation.associatedLengthSMTLibSolverStatus poisonAssociated
+        @?= Observation.SolverSatisfiable
+      SMTLibObservation.associatedLengthSMTLibResultStrength poisonAssociated
+        @?= SemanticProblem.RawSolverModelHint
+      SMTLibObservation.associatedLengthSMTLibUse poisonAssociated
+        @?= SemanticProblem.HeuristicRankingOnly
       map
           (SMTLibObservation.replayAssociatedLengthSMTLibSolverObservation query)
           associated

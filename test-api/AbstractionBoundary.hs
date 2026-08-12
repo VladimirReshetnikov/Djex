@@ -132,6 +132,7 @@ $(do
           , "CheckedLengthProviderInventory"
           , "lengthSMTLibLiveQueryObservationQueryFingerprint"
           , "lengthSMTLibLiveQueryObservationCounterexampleEvidence"
+          , "associatedSolverObservationStatus"
           , "LengthProblemProviderResealRejected"
           , "LengthProblemProviderContextMismatch"
           , "LengthProblemUsedProviderMissing"

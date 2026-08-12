@@ -946,10 +946,6 @@ candidateProblemTests = testGroup "typed candidate behavioral problems"
             identityProblem
           trivialEnvelope = LengthProblem.checkedLengthProblemBehavioralProblem
             trivialProblem
-      LengthProblem.checkedLengthCandidateTermGraphFingerprint
-          identityCandidate @?=
-        LengthProblem.checkedLengthCandidateTermGraphFingerprint
-          trivialCandidate
       LengthProblem.checkedLengthCandidateFingerprint identityCandidate @?=
         LengthProblem.checkedLengthCandidateFingerprint trivialCandidate
       assertBool "contract identity was omitted from concrete encoding" $
@@ -989,9 +985,6 @@ candidateProblemTests = testGroup "typed candidate behavioral problems"
       assertBool "an unused declaration was omitted from inventory identity" $
         Djex.behavioralProblemInventoryFingerprint baseEnvelope /=
           Djex.behavioralProblemInventoryFingerprint widenedEnvelope
-      LengthProblem.checkedLengthCandidateTermGraphFingerprint baseCandidate @?=
-        LengthProblem.checkedLengthCandidateTermGraphFingerprint
-          widenedCandidate
       LengthProblem.checkedLengthCandidateFingerprint baseCandidate @?=
         LengthProblem.checkedLengthCandidateFingerprint widenedCandidate
       LengthProblem.checkedLengthProblemEncodingFingerprint baseProblem @?=
@@ -1025,10 +1018,6 @@ candidateProblemTests = testGroup "typed candidate behavioral problems"
             letProblem
       LengthProblem.checkedLengthCandidateResult directCandidate @?=
         LengthProblem.checkedLengthCandidateResult letCandidate
-      assertBool "structurally distinct graphs shared graph identity" $
-        LengthProblem.checkedLengthCandidateTermGraphFingerprint
-            directCandidate /=
-          LengthProblem.checkedLengthCandidateTermGraphFingerprint letCandidate
       assertBool "structurally distinct graphs shared candidate identity" $
         LengthProblem.checkedLengthCandidateFingerprint directCandidate /=
           LengthProblem.checkedLengthCandidateFingerprint letCandidate

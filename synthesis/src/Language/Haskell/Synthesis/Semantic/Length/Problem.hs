@@ -32,7 +32,6 @@ module Language.Haskell.Synthesis.Semantic.Length.Problem
   , sealLengthTypedCandidateProblem
   , checkedLengthCandidateResult
   , checkedLengthCandidateUsedProviders
-  , checkedLengthCandidateTermGraphFingerprint
   , checkedLengthCandidateFingerprint
   , checkedLengthProblemCandidate
   , checkedLengthProblemInputCount

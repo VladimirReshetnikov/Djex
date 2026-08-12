@@ -302,8 +302,10 @@ fingerprints; it also binds the candidate fingerprint retained by the
 interpreted candidate receipt. The concrete encoding identifies the re-sealed
 contract, normalized result and counterexample condition, interpreter policy,
 and exactly the provider laws actually used. The candidate key wraps the fresh
-shared graph identity and explicitly describes candidate-only authority; it
-does not pretend to retain batch completion status.
+shared graph identity and explicitly describes candidate-only authority. The
+raw graph fingerprint is transient after those exact bytes enter that key, so
+the receipt retains no parallel graph-identity field. It does not pretend to
+retain batch completion status.
 
 Contract arguments and results must expose the context's outer modeled spine;
 their element types remain opaque and may themselves be impredicative. A

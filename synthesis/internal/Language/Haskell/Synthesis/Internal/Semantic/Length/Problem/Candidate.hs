@@ -23,7 +23,6 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.Problem.Candidate
   , sealLengthTypedCandidateProblem
   , checkedLengthCandidateResult
   , checkedLengthCandidateUsedProviders
-  , checkedLengthCandidateTermGraphFingerprint
   , checkedLengthCandidateFingerprint
   , checkedLengthProblemCandidate
   , checkedLengthProblemInputCount
@@ -301,22 +300,21 @@ instance
     (NFData failure, NFData identity, NFData local) =>
     NFData (LengthProblemError failure identity local)
 
--- | Opaque interpreted result and identities for one engine-owned candidate.
+-- | Opaque interpreted result and identity for one engine-owned candidate.
 --
 -- This receipt is candidate-local: it deliberately carries no search-batch
 -- completion or selection-status authority.
 data CheckedLengthCandidate identity local = CheckedLengthCandidate
   !(LengthExpression LengthContractVariable)
   ![Name]
-  !(Fingerprint TermGraphFingerprintSubject)
   !(Fingerprint
       (CandidateFingerprintSubject FiniteListSpineLengthV1))
 
 type role CheckedLengthCandidate nominal nominal
 
 instance NFData (CheckedLengthCandidate identity local) where
-  rnf (CheckedLengthCandidate result providers graph candidate) =
-    rnf result `seq` rnf providers `seq` rnf graph `seq` rnf candidate
+  rnf (CheckedLengthCandidate result providers candidate) =
+    rnf result `seq` rnf providers `seq` rnf candidate
 
 -- | Opaque complete Length counterexample problem for one checked candidate.
 data CheckedLengthProblem identity local = CheckedLengthProblem
@@ -340,28 +338,21 @@ instance NFData (CheckedLengthProblem identity local) where
 checkedLengthCandidateResult
   :: CheckedLengthCandidate identity local
   -> LengthExpression LengthContractVariable
-checkedLengthCandidateResult (CheckedLengthCandidate result _ _ _) = result
+checkedLengthCandidateResult (CheckedLengthCandidate result _ _) = result
 
 -- | Exact provider laws reached by lazy interpretation, in name order.
 checkedLengthCandidateUsedProviders
   :: CheckedLengthCandidate identity local -> [Name]
 checkedLengthCandidateUsedProviders
-    (CheckedLengthCandidate _ providers _ _) = providers
-
--- | Canonical identity of the freshly re-sealed shared typed term graph.
-checkedLengthCandidateTermGraphFingerprint
-  :: CheckedLengthCandidate identity local
-  -> Fingerprint TermGraphFingerprintSubject
-checkedLengthCandidateTermGraphFingerprint
-    (CheckedLengthCandidate _ _ graph _) = graph
+    (CheckedLengthCandidate _ providers _) = providers
 
 -- | Domain-wrapped candidate-only identity.
 checkedLengthCandidateFingerprint
   :: CheckedLengthCandidate identity local
   -> Fingerprint
-      (CandidateFingerprintSubject FiniteListSpineLengthV1)
+    (CandidateFingerprintSubject FiniteListSpineLengthV1)
 checkedLengthCandidateFingerprint
-    (CheckedLengthCandidate _ _ _ candidate) = candidate
+    (CheckedLengthCandidate _ _ candidate) = candidate
 
 -- | Recover the interpreted candidate receipt retained by the problem.
 checkedLengthProblemCandidate
@@ -503,7 +494,7 @@ sealLengthTypedCandidateProblem problemLimits session suppliedContract typed = d
     $ buildCompleteProblemFingerprint session encodingFingerprint
         candidateFingerprint
   let checkedCandidate = CheckedLengthCandidate
-        result usedProviderNames graphFingerprint candidateFingerprint
+        result usedProviderNames candidateFingerprint
       behavioralProblem = mkBehavioralProblem
         finiteListSpineLengthDomainTag
         (lengthSessionInventoryFingerprint session)

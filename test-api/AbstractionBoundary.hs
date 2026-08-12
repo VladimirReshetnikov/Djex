@@ -135,6 +135,7 @@ $(do
           , "LengthProblemProviderResealRejected"
           , "LengthProblemProviderContextMismatch"
           , "LengthProblemUsedProviderMissing"
+          , "checkedLengthCandidateTermGraphFingerprint"
           ]
     resolved <- mapM lookupValueName hiddenValues
     case [name | (name, Just _) <- zip hiddenValues resolved] of

@@ -2802,8 +2802,6 @@ smtLibProtocolTests = testGroup
         Observation.SolverSatisfiable
       SMTLibProtocol.lengthSMTLibProtocolDecodedInputValues decoded @?=
         Just [smtIntegerBinding (asciiBytes "djex_length_input_0") 3]
-      SMTLibProtocol.lengthSMTLibProtocolDecodedPlanFingerprint decoded @?=
-        SMTLibProtocol.lengthSMTLibProtocolPlanFingerprint plan
   , testCase "publish schemas, validated defaults, and exact admission minima" $ do
       SMTLibProtocol.lengthSMTLibProtocolPlanSchemaTag @?=
         asciiBytes "djex-length-z3-smtlib2-protocol-plan/v1"
@@ -3400,8 +3398,6 @@ assertProtocolTerminalStatus plan marker (rawStatus, expectedStatus) = do
   decoded <- expectProtocolComplete action
   SMTLibProtocol.lengthSMTLibProtocolDecodedStatus decoded @?= expectedStatus
   SMTLibProtocol.lengthSMTLibProtocolDecodedInputValues decoded @?= Nothing
-  SMTLibProtocol.lengthSMTLibProtocolDecodedPlanFingerprint decoded @?=
-    SMTLibProtocol.lengthSMTLibProtocolPlanFingerprint plan
 
 constantZeroSMTLibCheck :: String
 constantZeroSMTLibCheck = unlines

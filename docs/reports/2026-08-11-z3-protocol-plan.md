@@ -133,13 +133,14 @@ every protocol failure because no continuation is returned.
 
 `LengthSMTLibProtocolDecoded` means only that caller-fed bytes passed framing,
 shape decoding, and positional marker checks for this pure plan. It deliberately
-retains the complete sealed plan key, closed status, and optional decoded
-integer bindings privately, not the already-exercised plan. In a live run raw
-status-frame and input-value-frame bytes remain in the process-owning causal
-transcript rather than being copied into the decoded branch. A pure caller-fed
-decode needs no diagnostic copy. This value is not an execution observation,
-and even an `unsat` outcome remains heuristic. Decoded satisfiable values must
-still pass
+retains only the closed status and optional decoded integer bindings. The
+caller retains the exact plan through driving and, in a live session, through
+run-identity construction; the terminal branch does not copy either that plan
+or its complete key. Raw status-frame and input-value-frame bytes likewise
+remain in the process-owning causal transcript rather than being copied into
+the decoded branch. A pure caller-fed decode needs no diagnostic copy. This
+value is not an execution observation, and even an `unsat` outcome remains
+heuristic. Decoded satisfiable values must still pass
 `validateLengthSMTLibCounterexample`, whose independent Length evaluator is the
 only route to model-relative behavioral evidence.
 

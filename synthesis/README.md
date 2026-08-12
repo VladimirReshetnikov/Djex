@@ -249,11 +249,14 @@ renders the bytes transiently for the complete fingerprint and derives them
 again on demand from the retained sealed query and positional markers through
 the selectors used at their causal write edges. Presence-only inspection of
 the optional write does not render request bytes.
-After response frames are bounded and decoded, protocol continuations and the
+After response frames are bounded and decoded, the protocol phase state and
 terminal decoded branch retain only the closed status and optional integer
-bindings. In a live run the exact raw status-frame and input-value-frame bytes
-have one owner in the causal transcript. Those exact transcript bytes are bound
-into the query-run identity rather than being copied into the decoded value.
+bindings. The opaque receiver separately owns the still-driving plan and
+framer; a live driver also retains that plan directly for run identity instead
+of copying its key into the decoded branch. Exact raw status-frame and
+input-value-frame bytes have one live owner in the causal transcript. Those
+transcript bytes are bound into the query-run identity rather than being copied
+into the decoded value.
 
 Tails cross status-to-marker and value-to-marker phases only because those
 responses answer commands already in the same completed write. A tail crossing

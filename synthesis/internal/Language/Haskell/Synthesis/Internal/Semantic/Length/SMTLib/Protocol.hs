@@ -52,7 +52,6 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   , LengthSMTLibProtocolDecoded
   , lengthSMTLibProtocolDecodedStatus
   , lengthSMTLibProtocolDecodedInputValues
-  , lengthSMTLibProtocolDecodedPlanFingerprint
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -491,43 +490,35 @@ data LengthSMTLibProtocolError
 
 instance NFData LengthSMTLibProtocolError
 
--- | Pure, syntactically decoded transcript outcome.  The completed outcome
--- retains the exact sealed plan identity rather than the already-exercised
--- plan itself.  A satisfiable zero-input query under the input-value policy
--- carries a vacuous @Just []@ result without fabricating a frame or emitting
--- an empty @get-value@ command.  In a live run raw status and input-value
--- frames remain in the process-owning causal transcript rather than being
--- copied into this decoded branch.  This type is intentionally not named or
--- represented as an execution observation.
+-- | Pure, syntactically decoded transcript outcome.  A satisfiable zero-input
+-- query under the input-value policy carries a vacuous @Just []@ result
+-- without fabricating a frame or emitting an empty @get-value@ command.  The
+-- receiver owns the plan until completion, and a live driver retains that
+-- same plan separately as the exact run-identity input; it is not copied into
+-- this terminal branch.  In a live run raw status and input-value frames
+-- likewise remain in the process-owning causal transcript.  This type is
+-- intentionally not named or represented as an execution observation.
 data LengthSMTLibProtocolDecoded identity local = LengthSMTLibProtocolDecoded
-  !(Fingerprint LengthSMTLibProtocolPlanFingerprintSubject)
   !SolverStatus
   !(Maybe [LengthSMTLibIntegerBinding])
 
 type role LengthSMTLibProtocolDecoded nominal nominal
 
 instance NFData (LengthSMTLibProtocolDecoded identity local) where
-  rnf (LengthSMTLibProtocolDecoded planFingerprint status values) =
-    rnf planFingerprint `seq` rnf status `seq` rnf values
+  rnf (LengthSMTLibProtocolDecoded status values) =
+    rnf status `seq` rnf values
 
 lengthSMTLibProtocolDecodedStatus
   :: LengthSMTLibProtocolDecoded identity local
   -> SolverStatus
 lengthSMTLibProtocolDecodedStatus
-    (LengthSMTLibProtocolDecoded _ value _) = value
+    (LengthSMTLibProtocolDecoded value _) = value
 
 lengthSMTLibProtocolDecodedInputValues
   :: LengthSMTLibProtocolDecoded identity local
   -> Maybe [LengthSMTLibIntegerBinding]
 lengthSMTLibProtocolDecodedInputValues
-    (LengthSMTLibProtocolDecoded _ _ values) = values
-
-lengthSMTLibProtocolDecodedPlanFingerprint
-  :: LengthSMTLibProtocolDecoded identity local
-  -> Fingerprint LengthSMTLibProtocolPlanFingerprintSubject
-lengthSMTLibProtocolDecodedPlanFingerprint
-    (LengthSMTLibProtocolDecoded fingerprint _ _) =
-  fingerprint
+    (LengthSMTLibProtocolDecoded _ values) = values
 
 handleFrame
   :: LengthSMTLibProtocolReceiver identity local
@@ -566,8 +557,7 @@ handleFrame receiver consumed frame tailBytes = case receiverPhase receiver of
         _ -> do
           _ <- consumePostBarrierWhitespace plan consumed tailBytes
           Right $ SMTLibCausalComplete
-            $ LengthSMTLibProtocolDecoded
-                (lengthSMTLibProtocolPlanFingerprint plan) status
+            $ LengthSMTLibProtocolDecoded status
             $ terminalInputValues plan status
       else Left $ LengthSMTLibProtocolBarrierMismatch
         LengthSMTLibProtocolCheckBarrier
@@ -590,9 +580,7 @@ handleFrame receiver consumed frame tailBytes = case receiverPhase receiver of
         | isExactSMTLibEchoSentinelResponse barrier frame -> do
             _ <- consumePostBarrierWhitespace plan consumed tailBytes
             Right $ SMTLibCausalComplete
-              $ LengthSMTLibProtocolDecoded
-                  (lengthSMTLibProtocolPlanFingerprint plan) status
-              $ Just bindings
+              $ LengthSMTLibProtocolDecoded status $ Just bindings
       _ -> Left $ LengthSMTLibProtocolBarrierMismatch
         LengthSMTLibProtocolInputValueBarrier
 

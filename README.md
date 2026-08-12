@@ -165,9 +165,12 @@ domain may authorize root skolems. Final candidate keys are already allocated
 after cross-plan de-duplication and the configured final ordering step, so
 later graph node and occurrence identities need not reuse discarded
 search-plan ordinals. The four
-legacy Djinn runners are lazy `typedCandidateCompatibility` projections of the
-typed runners and preserve evidence, completion, metadata, ordering, output,
-and diagnostics exactly.
+legacy Djinn runners lift the shared `typedQueryResultCompatibility` projection
+over their single-result error channel. Exference lifts the same per-result
+projection over its lazy result trace. The helper maps only the opaque
+candidate payload, so both paths preserve evidence, completion, metadata,
+ordering, output, and diagnostics exactly without observing graph
+availability.
 
 `TermGraph` itself is nominal in both its type and local-identity parameters.
 This remains necessary after `typedCandidateTermGraph` projects a graph out of

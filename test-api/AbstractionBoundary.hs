@@ -135,6 +135,12 @@ data FingerprintProbe
 data OtherFingerprintProbe
 newtype TypedCandidateProbe = TypedCandidateProbe Int
 newtype OtherTypedCandidateProbe = OtherTypedCandidateProbe Int
+newtype TypedCandidateFailureProbe = TypedCandidateFailureProbe Int
+newtype OtherTypedCandidateFailureProbe = OtherTypedCandidateFailureProbe Int
+newtype TypedCandidateTypeProbe = TypedCandidateTypeProbe Int
+newtype OtherTypedCandidateTypeProbe = OtherTypedCandidateTypeProbe Int
+newtype TypedCandidateLocalProbe = TypedCandidateLocalProbe Int
+newtype OtherTypedCandidateLocalProbe = OtherTypedCandidateLocalProbe Int
 newtype BehavioralDomainProbe = BehavioralDomainProbe Int
 newtype OtherBehavioralDomainProbe = OtherBehavioralDomainProbe Int
 newtype ObservationProbe = ObservationProbe Int
@@ -169,6 +175,15 @@ forbiddenConstructionAttempts =
   , noGeneric @(TermGraph Int Int) "TermGraph"
   , ( "TypedCandidate payload unexpectedly permits Coercible"
     , forbiddenTypedCandidateCoercion `seq` ()
+    )
+  , ( "TypedCandidate failure domain unexpectedly permits Coercible"
+    , forbiddenTypedCandidateFailureCoercion `seq` ()
+    )
+  , ( "TypedCandidate graph type domain unexpectedly permits Coercible"
+    , forbiddenTypedCandidateTypeCoercion `seq` ()
+    )
+  , ( "TypedCandidate graph local domain unexpectedly permits Coercible"
+    , forbiddenTypedCandidateLocalCoercion `seq` ()
     )
   , ( "TermGraph type domain unexpectedly permits Coercible"
     , forbiddenTermGraphTypeCoercion `seq` ()
@@ -846,6 +861,21 @@ forbiddenTypedCandidateCoercion
   :: TypedCandidate () (Type Int) Int TypedCandidateProbe
   -> TypedCandidate () (Type Int) Int OtherTypedCandidateProbe
 forbiddenTypedCandidateCoercion = coerce
+
+forbiddenTypedCandidateFailureCoercion
+  :: TypedCandidate TypedCandidateFailureProbe (Type Int) Int ()
+  -> TypedCandidate OtherTypedCandidateFailureProbe (Type Int) Int ()
+forbiddenTypedCandidateFailureCoercion = coerce
+
+forbiddenTypedCandidateTypeCoercion
+  :: TypedCandidate () TypedCandidateTypeProbe Int ()
+  -> TypedCandidate () OtherTypedCandidateTypeProbe Int ()
+forbiddenTypedCandidateTypeCoercion = coerce
+
+forbiddenTypedCandidateLocalCoercion
+  :: TypedCandidate () (Type Int) TypedCandidateLocalProbe ()
+  -> TypedCandidate () (Type Int) OtherTypedCandidateLocalProbe ()
+forbiddenTypedCandidateLocalCoercion = coerce
 
 -- A projected graph remains bound to the exact type and local-identity
 -- domains under which it was sealed. TypedCandidate's nominal roles cannot

@@ -1058,14 +1058,14 @@ projectQueryResult
   -> EngineBatch
   -> ExferenceResult
 projectQueryResult target typeHints =
-  fmap SharedTypedCandidate.typedCandidateCompatibility
+  SharedTypedCandidate.typedQueryResultCompatibility
     . projectTypedQueryResult target typeHints
 
 projectTypedQueryResults
   :: Either ExferenceInputError [ExferenceTypedResult]
   -> Either ExferenceInputError [ExferenceResult]
 projectTypedQueryResults = fmap
-  $ map $ fmap SharedTypedCandidate.typedCandidateCompatibility
+  $ map SharedTypedCandidate.typedQueryResultCompatibility
 
 -- | Closed observations for the typed result boundary.  The three source
 -- batches poison, respectively, the candidate head, graph result, and mapped

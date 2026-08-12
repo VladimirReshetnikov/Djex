@@ -10,11 +10,13 @@ module Language.Haskell.Synthesis.Internal.TypedCandidate
   ( TypedCandidate
   , mkTypedCandidate
   , typedCandidateCompatibility
+  , typedQueryResultCompatibility
   , typedCandidateTermGraph
   ) where
 
 import Control.DeepSeq (NFData (rnf))
 
+import Language.Haskell.Synthesis.Query (QueryResult)
 import Language.Haskell.Synthesis.TypedGenerated (TermGraph)
 
 -- | One compatibility candidate paired with the result of retaining its
@@ -55,6 +57,16 @@ typedCandidateCompatibility
   :: TypedCandidate failure ty local candidate
   -> candidate
 typedCandidateCompatibility (TypedCandidate compatibility _) = compatibility
+
+-- | Erase typed-candidate retention from one checked query result without
+-- revalidating or changing its envelope.  The result's logical evidence,
+-- operational progress, metadata, candidate cardinality, and ordering are
+-- therefore unchanged.  Graph availability remains unobserved and candidate
+-- tails stay lazy.
+typedQueryResultCompatibility
+  :: QueryResult metadata (TypedCandidate failure ty local candidate)
+  -> QueryResult metadata candidate
+typedQueryResultCompatibility = fmap typedCandidateCompatibility
 
 -- | Recover either the explicit reason typed retention was unavailable or the
 -- independently sealed typed graph.

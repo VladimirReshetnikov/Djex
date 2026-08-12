@@ -37,6 +37,7 @@ import qualified Language.Haskell.Synthesis.Type as SharedType
 import Language.Haskell.Synthesis.TypeAtom
 import qualified Language.Haskell.Synthesis.TypeInstantiation as TypeInstantiation
 import qualified Language.Haskell.Synthesis.TypeSynonym as TypeSynonym
+import qualified Language.Haskell.Synthesis.TypedCandidate as TypedCandidate
 import qualified Language.Haskell.Synthesis.TypedGenerated as Typed
 import Test.Tasty (TestTree, defaultMain, localOption, testGroup)
 import Test.Tasty.HUnit
@@ -4723,6 +4724,18 @@ searchTests = testGroup "search status"
       fmap (+ 1) truncatedWithCandidate @?= mappedExpected
       _ <- evaluate $ force truncatedWithCandidate
       pure ()
+  , testCase "typed-result erasure preserves the checked envelope" $ do
+      let typedResult
+            :: QueryResult String
+                (TypedCandidate.TypedCandidate () () () Int)
+          typedResult = right $ mkQueryResult ProvedUninhabitable
+            $ SearchBatch (Completed Finished) "metadata" []
+          compatibilityResult :: QueryResult String Int
+          compatibilityResult =
+            TypedCandidate.typedQueryResultCompatibility typedResult
+      resultEvidence compatibilityResult @?= ProvedUninhabitable
+      resultSearch compatibilityResult @?=
+        SearchBatch (Completed Finished) "metadata" []
   , testCase "check every evidence and candidate-presence combination" $ do
       let emptyBatch = SearchBatch Continuing "metadata" ([] :: [Int])
           nonemptyBatch = SearchBatch Continuing "metadata" [1 :: Int]

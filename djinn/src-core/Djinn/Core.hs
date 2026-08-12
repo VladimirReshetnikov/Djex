@@ -1044,7 +1044,7 @@ inhabitSynthesisResultPreparedChecked
     -> Either DjinnQueryError DjinnResult
 inhabitSynthesisResultPreparedChecked options prepared contexts candidates
         assignmentEvidence target goal =
-    fmap (fmap SharedTypedCandidate.typedCandidateCompatibility) $
+    fmap SharedTypedCandidate.typedQueryResultCompatibility $
         inhabitSynthesisTypedResultPreparedChecked
             options prepared contexts candidates assignmentEvidence target goal
 

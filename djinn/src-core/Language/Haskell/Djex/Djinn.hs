@@ -125,7 +125,7 @@ import Language.Haskell.Synthesis.Query
   , withRequestProvenance
   )
 import Language.Haskell.Synthesis.TypedCandidate
-  ( typedCandidateCompatibility )
+  ( typedQueryResultCompatibility )
 
 -- | Parse the type portion of a Djinn query.  The accepted context grammar is
 -- exactly the historical one: either one constraint or a comma-separated
@@ -235,7 +235,7 @@ runDjinnQuery
   :: DjinnSession
   -> DjinnRequest
   -> Either Diagnostic DjinnResult
-runDjinnQuery session = fmap (fmap typedCandidateCompatibility)
+runDjinnQuery session = fmap typedQueryResultCompatibility
   . runDjinnTypedQuery session
 
 -- | Compatibility projection of
@@ -246,7 +246,7 @@ runDjinnQueryWithInstantiationCandidates
   -> DjinnRequest
   -> Either Diagnostic DjinnResult
 runDjinnQueryWithInstantiationCandidates session candidates =
-  fmap (fmap typedCandidateCompatibility)
+  fmap typedQueryResultCompatibility
     . runDjinnTypedQueryWithInstantiationCandidates session candidates
 
 -- | Compatibility projection of
@@ -257,7 +257,7 @@ runDjinnQueryWithInstantiationAssignments
   -> DjinnRequest
   -> Either Diagnostic DjinnResult
 runDjinnQueryWithInstantiationAssignments session assignments =
-  fmap (fmap typedCandidateCompatibility)
+  fmap typedQueryResultCompatibility
     . runDjinnTypedQueryWithInstantiationAssignments session assignments
 
 -- | Compatibility projection of
@@ -268,7 +268,7 @@ runDjinnQueryWithKindedInstantiationAssignments
   -> DjinnRequest
   -> Either Diagnostic DjinnResult
 runDjinnQueryWithKindedInstantiationAssignments session assignments =
-  fmap (fmap typedCandidateCompatibility)
+  fmap typedQueryResultCompatibility
     . runDjinnTypedQueryWithKindedInstantiationAssignments session assignments
 
 data DjinnProviderEvidence

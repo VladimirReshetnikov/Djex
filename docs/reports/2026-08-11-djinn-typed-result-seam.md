@@ -8,8 +8,8 @@ Djinn now publishes the same opaque typed-candidate result shape as Exference
 without manufacturing a shared typed graph from insufficient evidence.
 `Language.Haskell.Djex.Djinn` exports `DjinnTypedCandidate`,
 `DjinnTypedResult`, and typed counterparts of all four checked query runners.
-The legacy runners are one-way `typedCandidateCompatibility` projections of
-those typed paths.
+The legacy runners lift the shared one-way
+`typedQueryResultCompatibility` projection over those typed paths.
 
 Every current Djinn candidate reports
 `DjinnTermGraphSourceTypingContextUnavailable`. This is a precise capability
@@ -95,7 +95,8 @@ The refactor preserves the established failure order: all raw proofs are
 checked before any proof is converted, complete associations are de-duplicated
 and ranked, and only then is a result view selected. Typed graph absence is a
 lazy per-candidate payload and does not force proof evidence or a candidate
-tail.
+tail. `typedQueryResultCompatibility` maps only the candidate parameter of the
+existing checked result; it never reconstructs evidence, progress, or metadata.
 
 Focused coverage establishes:
 
@@ -106,8 +107,9 @@ Focused coverage establishes:
 - explicit graph absence without forcing the checked sidecar or candidate
   tail;
 - direct Core typed-to-legacy parity; and
-- compile-fail `Coercible` probes for both `TermGraph` parameters plus a
-  missing-`Generic` probe for constructor opacity.
+- compile-fail `Coercible` probes for all four `TypedCandidate` parameters and
+  both `TermGraph` parameters, plus missing-`Generic` probes for constructor
+  opacity.
 
 This checkpoint unifies the engine result boundary. It does not yet make a
 Djinn candidate eligible for Length interpretation, Z3 ranking, or any other

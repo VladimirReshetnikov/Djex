@@ -6834,7 +6834,7 @@ testTypedDjinnCoreProjectionParity = do
     typed <- expectShownRight $ inhabitTypedSynthesisResultPrepared
         defaultQueryOptions prepared [] target goal
     assertEqual "typed Core projection changed the complete legacy result"
-        legacy $ fmap SharedTypedCandidate.typedCandidateCompatibility typed
+        legacy $ SharedTypedCandidate.typedQueryResultCompatibility typed
     case SharedSearch.batchCandidates $ SharedQuery.resultSearch typed of
         [] -> fail "typed Core identity produced no candidate"
         candidate : _ -> assertEqual

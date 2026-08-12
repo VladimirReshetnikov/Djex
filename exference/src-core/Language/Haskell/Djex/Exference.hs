@@ -202,7 +202,7 @@ import Language.Haskell.Synthesis.Search
   )
 import Language.Haskell.Synthesis.TypedCandidate
   ( TypedCandidate
-  , typedCandidateCompatibility
+  , typedQueryResultCompatibility
   )
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
@@ -223,7 +223,9 @@ type ExferenceResult = Core.ExferenceResult
 
 -- | One independently checked compatibility candidate paired with either its
 -- sealed typed graph or the explicit reason typed retention was unavailable.
--- Inspect the two lazy projections with 'typedCandidateCompatibility' and
+-- Project an enclosing typed result with 'typedQueryResultCompatibility', and
+-- inspect this candidate directly with
+-- 'Language.Haskell.Synthesis.TypedCandidate.typedCandidateCompatibility' or
 -- 'Language.Haskell.Synthesis.TypedCandidate.typedCandidateTermGraph'.
 type ExferenceTypedCandidate =
   TypedCandidate ExferenceTermGraphAbsence
@@ -679,7 +681,7 @@ runExferenceQueryWithKindedInstantiationAssignments
 projectTypedResults
   :: Either Diagnostic [ExferenceTypedResult]
   -> Either Diagnostic [ExferenceResult]
-projectTypedResults = fmap $ map $ fmap typedCandidateCompatibility
+projectTypedResults = fmap $ map typedQueryResultCompatibility
 
 data ProviderInstantiationAssignmentEvidence
   = InferredProviderInstantiationAssignments

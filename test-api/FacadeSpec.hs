@@ -730,6 +730,9 @@ facadeTests = testGroup "public Djex facade"
             -> Either DjinnTermGraphAbsence
                 (TermGraph DjinnTermGraphType DjinnLocal)
           djinnTypedGraphProjection = typedCandidateTermGraph
+          djinnTypedResultProjection
+            :: DjinnTypedResult -> DjinnResult
+          djinnTypedResultProjection = typedQueryResultCompatibility
           djinnEnvironmentProjection
             :: DjinnEnvironment
             -> Environment DjinnTypeVariable Void ()
@@ -772,6 +775,9 @@ facadeTests = testGroup "public Djex facade"
             -> Either ExferenceTermGraphAbsence
                 (TermGraph ExferenceType ExferenceLocal)
           typedGraphProjection = typedCandidateTermGraph
+          exferenceTypedResultProjection
+            :: ExferenceTypedResult -> ExferenceResult
+          exferenceTypedResultProjection = typedQueryResultCompatibility
           providerEvidenceProjection
             :: ProviderInstantiationCandidate String
             -> (Name, Type String)
@@ -884,12 +890,14 @@ facadeTests = testGroup "public Djex facade"
         djinnCandidateProjection `seq`
         djinnTypedCompatibilityProjection `seq`
         djinnTypedGraphProjection `seq`
+        djinnTypedResultProjection `seq`
         djinnEnvironmentProjection `seq`
         inventoryProjection `seq`
         sessionEnvironmentProjection `seq`
         environmentProjection `seq`
         requestProjection `seq` candidateProjection `seq`
         typedCompatibilityProjection `seq` typedGraphProjection `seq`
+        exferenceTypedResultProjection `seq`
         residualRendererProjection `seq`
         qualifiedResidualRendererProjection `seq`
         metadataProjection `seq` providerEvidenceProjection `seq`
@@ -929,25 +937,25 @@ facadeTests = testGroup "public Djex facade"
       request <- expectRight $ mkDjinnRequest query
       typed <- expectRight $ runDjinnTypedQuery session request
       legacy <- expectRight $ runDjinnQuery session request
-      fmap typedCandidateCompatibility typed @?= legacy
+      typedQueryResultCompatibility typed @?= legacy
       typedCandidateEvidence <- expectRight $
         runDjinnTypedQueryWithInstantiationCandidates session [] request
       legacyCandidateEvidence <- expectRight $
         runDjinnQueryWithInstantiationCandidates session [] request
-      fmap typedCandidateCompatibility typedCandidateEvidence @?=
+      typedQueryResultCompatibility typedCandidateEvidence @?=
         legacyCandidateEvidence
       typedAssignments <- expectRight $
         runDjinnTypedQueryWithInstantiationAssignments session [] request
       legacyAssignments <- expectRight $
         runDjinnQueryWithInstantiationAssignments session [] request
-      fmap typedCandidateCompatibility typedAssignments @?=
+      typedQueryResultCompatibility typedAssignments @?=
         legacyAssignments
       typedKindedAssignments <- expectRight $
         runDjinnTypedQueryWithKindedInstantiationAssignments
           session [] request
       legacyKindedAssignments <- expectRight $
         runDjinnQueryWithKindedInstantiationAssignments session [] request
-      fmap typedCandidateCompatibility typedKindedAssignments @?=
+      typedQueryResultCompatibility typedKindedAssignments @?=
         legacyKindedAssignments
       repeated <- expectRight $ runDjinnTypedQuery session request
       typed @?= repeated
@@ -978,7 +986,27 @@ facadeTests = testGroup "public Djex facade"
       request <- expectRight $ mkExferenceRequest query
       typedResults <- expectRight $ runExferenceTypedQuery session request
       legacyResults <- expectRight $ runExferenceQuery session request
-      map (fmap typedCandidateCompatibility) typedResults @?= legacyResults
+      map typedQueryResultCompatibility typedResults @?= legacyResults
+      typedCandidateEvidence <- expectRight $
+        runExferenceTypedQueryWithInstantiationCandidates session [] request
+      legacyCandidateEvidence <- expectRight $
+        runExferenceQueryWithInstantiationCandidates session [] request
+      map typedQueryResultCompatibility typedCandidateEvidence @?=
+        legacyCandidateEvidence
+      typedAssignments <- expectRight $
+        runExferenceTypedQueryWithInstantiationAssignments session [] request
+      legacyAssignments <- expectRight $
+        runExferenceQueryWithInstantiationAssignments session [] request
+      map typedQueryResultCompatibility typedAssignments @?=
+        legacyAssignments
+      typedKindedAssignments <- expectRight $
+        runExferenceTypedQueryWithKindedInstantiationAssignments
+          session [] request
+      legacyKindedAssignments <- expectRight $
+        runExferenceQueryWithKindedInstantiationAssignments
+          session [] request
+      map typedQueryResultCompatibility typedKindedAssignments @?=
+        legacyKindedAssignments
       repeated <- expectRight $ runExferenceTypedQuery session request
       typedResults @?= repeated
       case
@@ -1021,7 +1049,7 @@ facadeTests = testGroup "public Djex facade"
       request <- expectRight $ mkExferenceRequest query
       typedResults <- expectRight $ runExferenceTypedQuery session request
       legacyResults <- expectRight $ runExferenceQuery session request
-      map (fmap typedCandidateCompatibility) typedResults @?= legacyResults
+      map typedQueryResultCompatibility typedResults @?= legacyResults
       case
           [ (result, candidate)
           | result <- typedResults

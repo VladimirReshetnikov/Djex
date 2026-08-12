@@ -353,17 +353,20 @@ elimination that a whole-formula nominal comparison would discard, while
 independently erased phantom positions remain nominal-only.
 
 The original runners retain their exact historical behavior. Each engine has a
-canonical typed path, and each legacy result is its lazy
-`typedCandidateCompatibility` projection. Empty candidate and assignment calls
-return the same result, ordering, diagnostics, and finite-budget observations:
+canonical typed path, and `typedQueryResultCompatibility` is the shared lazy
+projection for one checked result. Djinn lifts it over a singular `Either`;
+Exference maps it over its lazy result trace. Empty candidate and assignment
+calls return the same result, ordering, diagnostics, and finite-budget
+observations:
 
 ```haskell
 runDjinnTypedQuery session =
   runDjinnTypedQueryWithInstantiationCandidates session []
 runDjinnQuery session =
-  fmap (fmap typedCandidateCompatibility) . runDjinnTypedQuery session
+  fmap typedQueryResultCompatibility . runDjinnTypedQuery session
 runExferenceQuery session =
-  runExferenceQueryWithInstantiationCandidates session []
+  fmap (map typedQueryResultCompatibility)
+    . runExferenceTypedQuery session
 ```
 
 Exference's typed candidate may contain its checked graph. Djinn currently

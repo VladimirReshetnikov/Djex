@@ -366,6 +366,17 @@ still not a solver result, proof, pruning authority, or general Z3 feature
 claim. The same Session drives individual query plans through the scoped worker
 and independently replays any model before evidence exists.
 
+The live worker does not retain the whole pre-readiness Session configuration.
+Its private strict query policy keeps only the query-count cap, query-run
+identity budget, protocol limits, and complete execution policy needed to
+derive each query deadline and seal future plans. Exact process limits are
+projected from the retained opaque
+runtime. Workspace-allocation, capability, and ready-identity admission work
+has completed before lending; the opener deadline and Session
+workspace-cleanup authority remain with the enclosing scope.
+Once a plan is sealed, replay reads the exact query and artifact policy from
+that plan rather than pairing it with independent worker-wide fields.
+
 The public live facade copies only bounded association and authority fields out
 of each private run. It retains status once and derives the corresponding
 heuristic strength rather than storing a duplicate fact. Public selectors

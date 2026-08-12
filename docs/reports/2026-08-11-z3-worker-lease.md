@@ -225,6 +225,18 @@ roles will be derived. The value is a worker lease, not a receipt. In
 particular, the identity is not an image attestation, and capability success is
 not a solver answer.
 
+The identity remains complete, but the runtime worker no longer retains the
+whole pre-readiness `LengthSMTLibSessionConfig`. Its strict post-probe query
+policy contains only maximum queries, the query-run identity budget, protocol
+limits, and the complete execution policy needed to derive query deadlines and
+seal future query plans.
+The exact process limits remain associated with and are projected from the
+opaque process. Workspace-allocation attempts, capability limits, and the
+ready-identity admission budget have finished before lending; the opener
+deadline and Session workspace-cleanup authority remain in the enclosing rank-N
+scope. Process shutdown limits remain associated with the process. This storage
+consolidation changes no v4 identity field or canonical byte.
+
 ## Verification
 
 The compiled `djex-fake-z3` fixture chooses from a closed behavior set using
@@ -232,7 +244,7 @@ only its executable basename. It records argv, environment, cwd, initial cwd
 listing, commands, and output in a test-only sidecar outside the cwd, so the
 production empty-environment and empty-workspace policies remain observable.
 
-The current focused Length suite has 180 passing cases, including the query-run
+The current focused Length suite has 182 passing cases, including the query-run
 successor. Worker-lease cases cover:
 
 - healthy whole, split, singleton, empty-interleaved, and delayed-byte output;

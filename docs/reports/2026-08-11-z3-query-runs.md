@@ -168,6 +168,16 @@ Only `Just BehavioralEvidence` is retained by a successful query run. This is
 model-relative counterexample evidence, not solver-soundness evidence and not
 permission to treat an unsatisfiable result as proof.
 
+The sealed protocol plan is also the sole replay source for its exact query and
+artifact policy. The worker retains the execution policy to derive each query
+deadline and seal future plans; it is not paired independently with a completed
+plan during replay.
+Query-count and query-run-identity caps come from the worker's strict post-probe
+query policy, while stdout/stderr capacity comes from limits associated with
+the exact retained process. Run-identity admission derives those limits from
+the worker internally, so callers cannot pair a plan with detached transport
+caps.
+
 ## Reversible run identity
 
 The opaque nominal run identity is a collision-free canonical fingerprint, not
@@ -202,7 +212,7 @@ The compiled fake worker now supports healthy ordered input models, `unsat`,
 the four-stage capability probe exact. Query events record zero-based ordinals
 and whether `get-value` was actually written.
 
-The Length suite has 173 passing tests. Eleven live-query cases cover:
+The Length suite has 182 passing tests. Thirteen live-query cases cover:
 
 - exact admission of the `Word64` ordinal boundary and rejection at maximum
   plus one;
@@ -212,7 +222,10 @@ The Length suite has 173 passing tests. Eleven live-query cases cover:
 - split and delayed output with exact transcript accounting;
 - stale pre-write model rejection with no get-value command and no reuse;
 - absolute-deadline teardown of a hung status; and
-- exact maximum-query admission followed by maximum-plus-one rejection.
+- exact maximum-query admission followed by maximum-plus-one rejection;
+- repeatable pre-reservation rejection under an undersized query-run identity
+  cap; and
+- process-owned remaining-stdout-capacity rejection before any query write.
 
 ## Next checkpoint
 

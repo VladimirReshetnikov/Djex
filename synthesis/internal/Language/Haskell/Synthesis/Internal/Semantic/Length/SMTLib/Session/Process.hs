@@ -40,6 +40,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Proces
   , lengthSMTLibExecutableSnapshotFingerprintField
   , LengthSMTLibProcess
   , openLengthSMTLibProcess
+  , lengthSMTLibProcessLimits
   , lengthSMTLibProcessSnapshot
   , lengthSMTLibProcessFingerprintField
   , lengthSMTLibProcessObservedStdoutBytes
@@ -329,6 +330,13 @@ lengthSMTLibProcessSnapshot
   -> LengthSMTLibExecutableSnapshot
 lengthSMTLibProcessSnapshot = LengthSMTLibExecutableSnapshot
   . Z3Process.z3SMTLibProcessSnapshot . toZ3Process
+
+-- | Exact process limits associated with this admitted runtime.
+lengthSMTLibProcessLimits
+  :: LengthSMTLibProcess
+  -> LengthSMTLibProcessLimits
+lengthSMTLibProcessLimits = LengthSMTLibProcessLimits
+  . Z3Process.z3SMTLibProcessLimits . toZ3Process
 
 lengthSMTLibProcessFingerprintField
   :: LengthSMTLibProcess

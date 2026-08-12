@@ -39,6 +39,8 @@ import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Prot
   as SMTLibProtocol
 import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session
   as SMTLibSession
+import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capability
+  as SMTLibCapability
 import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process
   as SMTLibProcess
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Causal
@@ -133,6 +135,10 @@ smtLibLiveQueryTests = testGroup "Length SMT-LIB live queries"
       assertLiveQueryHangStatus
   , testCase "admit exactly maximum queries and reject maximum plus one"
       assertLiveQueryMaximum
+  , testCase "retain the query-run identity cap after readiness"
+      assertLiveQueryRunIdentityMaximum
+  , testCase "source remaining stdout capacity from the retained process"
+      assertLiveQueryProcessCapacity
   ]
 
 assertLiveQueryOrdinalBoundary :: IO ()
@@ -670,6 +676,78 @@ assertLiveQueryMaximum = do
       events <- SMTLibLiveSpec.readFakeZ3Events executable
       assertFakeZ3EventOrdinals "query-check" [0, 1] events
       assertFakeZ3EventOrdinals "query-get-value" [0, 1] events
+  _ <- expectRight scoped
+  pure ()
+
+assertLiveQueryRunIdentityMaximum :: IO ()
+assertLiveQueryRunIdentityMaximum = do
+  problem <- adversarialConstantZeroProblem identityLengthContract
+  query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  let withMaximum source = source
+        { SMTLibSession.lengthSMTLibSessionLimitSourceQueryRunIdentityFingerprintBytes =
+            1
+        }
+  scoped <- SMTLibLiveSpec.withLiveQueryWorker "healthy"
+    InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+    withMaximum $ \executable worker -> do
+      first <- SMTLibSession.runLengthSMTLibReadyWorkerQuery
+        Evaluate.defaultLengthEvaluationLimits worker query
+      assertIdentityAdmission first
+      second <- SMTLibSession.runLengthSMTLibReadyWorkerQuery
+        Evaluate.defaultLengthEvaluationLimits worker query
+      assertIdentityAdmission second
+      events <- SMTLibLiveSpec.readFakeZ3Events executable
+      assertFakeZ3EventCount "query-check" 0 events
+  _ <- expectRight scoped
+  pure ()
+ where
+  assertIdentityAdmission result = case result of
+    Left failure -> do
+      case SMTLibSession.lengthSMTLibQueryRunPrimaryFailure failure of
+        SMTLibSession.LengthSMTLibQueryRunIdentityAdmissionTooSmall
+            maximumBytes observed -> do
+          maximumBytes @?= 1
+          assertBool "query-run identity admission did not report an excess"
+            $ observed > maximumBytes
+        unexpected -> assertFailure $ "wrong query-run identity failure: " ++
+          show unexpected
+      SMTLibSession.lengthSMTLibQueryRunProcessCleanupStatus failure @?= Nothing
+    Right _ -> assertFailure "one-byte query-run identity cap admitted a run"
+
+assertLiveQueryProcessCapacity :: IO ()
+assertLiveQueryProcessCapacity = do
+  problem <- adversarialConstantZeroProblem identityLengthContract
+  query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  let liveCapabilityBytes =
+        SMTLibCapability.lengthSMTLibCapabilityMinimumOutputByteCount + 1
+      withMaximum source = source
+        { SMTLibProcess.lengthSMTLibProcessLimitSourceStdoutBytes =
+            liveCapabilityBytes
+        }
+  scoped <- SMTLibLiveSpec.withLiveQueryWorkerLimits "healthy"
+    InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+    withMaximum id $ \executable worker -> do
+      SMTLibSession.lengthSMTLibReadyWorkerObservedStdoutBytes worker @?=
+        liveCapabilityBytes
+      rejected <- SMTLibSession.runLengthSMTLibReadyWorkerQuery
+        Evaluate.defaultLengthEvaluationLimits worker query
+      case rejected of
+        Left failure -> do
+          case SMTLibSession.lengthSMTLibQueryRunPrimaryFailure failure of
+            SMTLibSession.LengthSMTLibQueryProcessStdoutCapacityTooSmall
+                remaining required -> do
+              remaining @?= 0
+              assertBool "query protocol reported an empty minimum"
+                $ required > 0
+            unexpected -> assertFailure $ "wrong query-capacity failure: " ++
+              show unexpected
+          SMTLibSession.lengthSMTLibQueryRunProcessCleanupStatus failure @?=
+            Nothing
+        Right _ -> assertFailure "exhausted process stdout cap admitted a query"
+      events <- SMTLibLiveSpec.readFakeZ3Events executable
+      assertFakeZ3EventCount "query-check" 0 events
   _ <- expectRight scoped
   pure ()
 
@@ -2935,6 +3013,8 @@ smtLibProtocolTests = testGroup
       SMTLib.lengthSMTLibQueryFingerprint
           (SMTLibProtocol.lengthSMTLibProtocolPlanQuery plan) @?=
         SMTLib.lengthSMTLibQueryFingerprint query
+      SMTLibProtocol.lengthSMTLibProtocolPlanArtifactPolicy plan @?=
+        InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
       -- This digest is only a regression snapshot of the collision-free
       -- canonical bytes. It is not used as protocol identity or authority.
       SHA256.hash

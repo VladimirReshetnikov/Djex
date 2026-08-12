@@ -10,6 +10,7 @@ module SMTLibLiveSpec
   , readFakeZ3Events
   , withLiveFacadeSession
   , withLiveQueryWorker
+  , withLiveQueryWorkerLimits
   ) where
 
 import Control.Concurrent (forkIO, myThreadId, throwTo)
@@ -189,6 +190,9 @@ assertRawProcessProfileIdentity = withFakeZ3Mode "healthy"
       let rawIdentity = Process.lengthSMTLibProcessFingerprintField process
           completePolicy = Fingerprint.fingerprintCanonicalBytes
             $ Execution.lengthSMTLibExecutionPolicyFingerprint execution
+      Process.lengthSMTLibProcessLimitsFingerprintField
+          (Process.lengthSMTLibProcessLimits process) @?=
+        Process.lengthSMTLibProcessLimitsFingerprintField limits
       countExactFingerprintBytes completePolicy rawIdentity @?= 0
       case rawIdentity of
         Fingerprint.FingerprintTag root fields -> do
@@ -863,6 +867,23 @@ withLiveQueryWorker
       -> IO result)
   -> IO (Either Session.LengthSMTLibSessionScopeError result)
 withLiveQueryWorker mode artifactPolicy changeSession use =
+  withLiveQueryWorkerLimits mode artifactPolicy id changeSession use
+
+-- | Test-only entry point for independently nondefault process and Session
+-- limits while retaining the same exact live-query fixture construction.
+withLiveQueryWorkerLimits
+  :: String
+  -> Execution.LengthSMTLibArtifactPolicy
+  -> (Process.LengthSMTLibProcessLimitSource
+      -> Process.LengthSMTLibProcessLimitSource)
+  -> (Session.LengthSMTLibSessionLimitSource
+      -> Session.LengthSMTLibSessionLimitSource)
+  -> (forall epoch.
+      FilePath
+      -> Session.LengthSMTLibReadyWorker epoch
+      -> IO result)
+  -> IO (Either Session.LengthSMTLibSessionScopeError result)
+withLiveQueryWorkerLimits mode artifactPolicy changeProcess changeSession use =
   withFakeZ3Mode mode $ \executable _ -> do
     execution <- liveExecutionConfigWith executable Nothing $ \source -> source
       { Execution.lengthSMTLibExecutionConfigSourceArtifactPolicy =
@@ -871,7 +892,7 @@ withLiveQueryWorker mode artifactPolicy changeSession use =
           liveQueryHostDeadlineMilliseconds
       }
     process <- expectRight $ Process.mkLengthSMTLibProcessLimits
-      Process.defaultLengthSMTLibProcessLimitSource
+      $ changeProcess Process.defaultLengthSMTLibProcessLimitSource
     session <- expectRight $ Session.mkLengthSMTLibSessionLimits
       $ changeSession
       $ Session.defaultLengthSMTLibSessionLimitSource

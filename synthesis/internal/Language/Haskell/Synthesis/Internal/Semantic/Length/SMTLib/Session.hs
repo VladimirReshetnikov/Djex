@@ -13,6 +13,13 @@
 -- raw process handle or secret barrier seed is projected.  The private,
 -- reversible identity deliberately retains spent readiness barriers and their
 -- transcript; those values cannot derive the seed used by later query roles.
+-- After readiness, the worker retains only the query-count and run-identity
+-- caps, protocol limits, and complete execution policy needed to derive each
+-- query deadline and seal future plans.  Process limits remain owned by the
+-- exact retained process; opener,
+-- workspace-allocation, capability, and ready-identity bounds stay outside the
+-- lent worker.  Replay projects its query and artifact policy from the exact
+-- sealed plan rather than pairing that plan with worker-wide copies.
 --
 -- The executable identity is intentionally named a pre-spawn pathname
 -- snapshot rather than an attested image.  The portable @process@ backend
@@ -179,6 +186,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   , lengthSMTLibProtocolInputValueWriteBytes
   , lengthSMTLibProtocolPlanCumulativeStdoutByteLimit
   , lengthSMTLibProtocolPlanFingerprint
+  , lengthSMTLibProtocolPlanArtifactPolicy
   , lengthSMTLibProtocolPlanQuery
   , lengthSMTLibProtocolPlanMinimumStdoutByteCount
   , lengthSMTLibProtocolStreamLimits
@@ -219,6 +227,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Proces
   , lengthSMTLibProcessDeadlineAfterMilliseconds
   , lengthSMTLibProcessDeadlineFingerprintField
   , lengthSMTLibProcessFingerprintField
+  , lengthSMTLibProcessLimits
   , lengthSMTLibProcessObservedStderrBytes
   , lengthSMTLibProcessObservedStdoutBytes
   , lengthSMTLibProcessStderrByteLimit
@@ -561,10 +570,31 @@ instance NFData (LengthSMTLibQueryRun epoch identity local) where
 
 data LengthSMTLibReadyWorkerIdentitySubject
 
+-- | Exact policy the worker itself still needs after capability admission.
+-- Workspace-allocation, capability, and ready-identity bounds have completed;
+-- the opener deadline and Session workspace-cleanup authority remain in the
+-- enclosing scope, while process limits remain associated with the process.
+data LengthSMTLibReadyWorkerQueryPolicy = LengthSMTLibReadyWorkerQueryPolicy
+  { readyQueryMaximumQueries :: !Natural
+  , readyQueryRunIdentityFingerprintByteLimit :: !Natural
+  , readyQueryProtocolLimits :: !LengthSMTLibProtocolLimits
+  , readyQueryExecution :: !LengthSMTLibExecutionConfig
+  }
+
+retainLengthSMTLibReadyWorkerQueryPolicy
+  :: LengthSMTLibSessionLimits
+  -> LengthSMTLibProtocolLimits
+  -> LengthSMTLibExecutionConfig
+  -> LengthSMTLibReadyWorkerQueryPolicy
+retainLengthSMTLibReadyWorkerQueryPolicy
+    (LengthSMTLibSessionLimits _ _ maximumQueries _ runIdentityLimit)
+    protocolLimits execution = LengthSMTLibReadyWorkerQueryPolicy
+      maximumQueries runIdentityLimit protocolLimits execution
+
 data LengthSMTLibReadyWorker epoch = LengthSMTLibReadyWorker
   { readyWorkerProcess :: !LengthSMTLibProcess
   , readyWorkerCancellation :: !LengthSMTLibProcessCancellation
-  , readyWorkerConfig :: !LengthSMTLibSessionConfig
+  , readyWorkerQueryPolicy :: !LengthSMTLibReadyWorkerQueryPolicy
   , readyWorkerIdentity
       :: !(Fingerprint LengthSMTLibReadyWorkerIdentitySubject)
   , readyWorkerTranscriptDigest :: !ByteString
@@ -784,8 +814,7 @@ runLengthSMTLibReadyWorkerQuery evaluationLimits worker query =
             (runWithGate restore deadline)
             (atomically $ putTMVar (readyWorkerQueryGate worker) ())
  where
-  LengthSMTLibSessionConfig _ _ _ _ execution =
-    readyWorkerConfig worker
+  execution = readyQueryExecution $ readyWorkerQueryPolicy worker
 
   runWithGate restore deadline = do
     prepared <- prepareLengthSMTLibQueryRun
@@ -828,9 +857,7 @@ acquireLengthSMTLibQueryGate
   -> IO (Either LengthSMTLibQueryRunFailure ())
 acquireLengthSMTLibQueryGate worker deadline = mask $ \_ -> loop
  where
-  LengthSMTLibSessionConfig
-      (LengthSMTLibSessionLimits _ _ maximumQueries _ _)
-      _ _ _ _ = readyWorkerConfig worker
+  maximumQueries = readyQueryMaximumQueries $ readyWorkerQueryPolicy worker
   process = readyWorkerProcess worker
   cancellation = readyWorkerCancellation worker
   stateVariable = readyWorkerQueryState worker
@@ -919,10 +946,12 @@ prepareLengthSMTLibQueryRun evaluationLimits worker query deadline = do
           )
         Right () -> prepareControlled ordinal used
  where
-  LengthSMTLibSessionConfig
-      (LengthSMTLibSessionLimits _ _ maximumQueries _ runIdentityLimit)
-      processLimits _ protocolLimits execution = readyWorkerConfig worker
+  policy = readyWorkerQueryPolicy worker
+  maximumQueries = readyQueryMaximumQueries policy
+  protocolLimits = readyQueryProtocolLimits policy
+  execution = readyQueryExecution policy
   process = readyWorkerProcess worker
+  processLimits = lengthSMTLibProcessLimits process
   transportMaximum = lengthSMTLibProcessStdoutByteLimit processLimits
 
   prepareControlled ordinal used = do
@@ -957,7 +986,7 @@ prepareLengthSMTLibQueryRun evaluationLimits worker query deadline = do
                 LengthSMTLibQueryProcessStdoutCapacityTooSmall
                   remaining required)
               else case admitLengthSMTLibQueryRunIdentity
-                  runIdentityLimit processLimits worker plan
+                  worker plan
                   evaluationLimits ordinal deadline
                   checkBarrier valueBarrier of
                 Left failure -> pure $ Left (False, failure)
@@ -992,9 +1021,7 @@ reservePreparedLengthSMTLibQueryRun worker
           pure $ Right $ ReservedLengthSMTLibQueryRun
             preparation stdoutCount stderrCount
  where
-  LengthSMTLibSessionConfig
-      (LengthSMTLibSessionLimits _ _ maximumQueries _ _)
-      _ _ _ _ = readyWorkerConfig worker
+  maximumQueries = readyQueryMaximumQueries $ readyWorkerQueryPolicy worker
 
 commitLengthSMTLibQueryRun
   :: LengthSMTLibReadyWorker epoch
@@ -1066,7 +1093,6 @@ executeReservedLengthSMTLibQueryRun worker
       (PreparedLengthSMTLibQueryRun ordinal checkBarrier valueBarrier plan
         evaluationLimits deadline)
       stdoutStart stderrStart) = do
-  let query = lengthSMTLibProtocolPlanQuery plan
   driven <- driveProtocolQuery worker deadline plan
   case driven of
     Left failure -> pure $ Left failure
@@ -1080,7 +1106,7 @@ executeReservedLengthSMTLibQueryRun worker
             Left failure -> pure $ Left failure
             Right () -> do
               replayed <- replayLengthSMTLibQuery
-                evaluationLimits worker query deadline decoded
+                evaluationLimits worker plan deadline decoded
               case replayed of
                 Left failure -> pure $ Left failure
                 Right evidence -> do
@@ -1196,7 +1222,7 @@ validateLengthSMTLibQueryAccounting transcript stdoutStart stdoutEnd
 replayLengthSMTLibQuery
   :: LengthEvaluationLimits
   -> LengthSMTLibReadyWorker epoch
-  -> LengthSMTLibQuery identity local
+  -> LengthSMTLibProtocolPlan identity local
   -> LengthSMTLibProcessDeadline
   -> LengthSMTLibProtocolDecoded identity local
   -> IO
@@ -1206,9 +1232,9 @@ replayLengthSMTLibQuery
           (BehavioralEvidence
             FiniteListSpineLengthV1
             ValidatedLengthCounterexample)))
-replayLengthSMTLibQuery evaluationLimits worker query deadline decoded =
+replayLengthSMTLibQuery evaluationLimits worker plan deadline decoded =
   case ( lengthSMTLibProtocolDecodedStatus decoded
-       , lengthSMTLibExecutionArtifactPolicy execution
+       , lengthSMTLibProtocolPlanArtifactPolicy plan
        , lengthSMTLibProtocolDecodedInputValues decoded) of
     (SolverSatisfiable, LengthSMTLibInputValuesAfterSatisfiable, Just values) -> do
       replayed <- runBeforeLengthSMTLibProcessDeadline
@@ -1225,7 +1251,7 @@ replayLengthSMTLibQuery evaluationLimits worker query deadline decoded =
       pure $ Left LengthSMTLibQueryInternalFailure
     _ -> pure $ Right Nothing
  where
-  LengthSMTLibSessionConfig _ _ _ _ execution = readyWorkerConfig worker
+  query = lengthSMTLibProtocolPlanQuery plan
 
 (-|) :: Natural -> Natural -> Natural
 left -| right
@@ -1272,14 +1298,11 @@ buildLengthSMTLibQueryRunIdentity worker plan evaluationLimits ordinal deadline
           fingerprintMaximum observed
     Right identity -> Right identity
  where
-  LengthSMTLibSessionConfig
-      (LengthSMTLibSessionLimits _ _ _ _ maximumBytes)
-      _ _ _ _ = readyWorkerConfig worker
+  maximumBytes = readyQueryRunIdentityFingerprintByteLimit
+    $ readyWorkerQueryPolicy worker
 
 admitLengthSMTLibQueryRunIdentity
-  :: Natural
-  -> LengthSMTLibProcessLimits
-  -> LengthSMTLibReadyWorker epoch
+  :: LengthSMTLibReadyWorker epoch
   -> LengthSMTLibProtocolPlan identity local
   -> LengthEvaluationLimits
   -> Natural
@@ -1287,13 +1310,16 @@ admitLengthSMTLibQueryRunIdentity
   -> ByteString
   -> ByteString
   -> Either LengthSMTLibQueryRunFailure ()
-admitLengthSMTLibQueryRunIdentity maximumBytes processLimits
-    worker plan evaluationLimits ordinal deadline checkBarrier valueBarrier
+admitLengthSMTLibQueryRunIdentity worker plan evaluationLimits
+    ordinal deadline checkBarrier valueBarrier
   | requiredMaximum > maximumBytes = Left
       $ LengthSMTLibQueryRunIdentityAdmissionTooSmall
           maximumBytes requiredMaximum
   | otherwise = Right ()
  where
+  maximumBytes = readyQueryRunIdentityFingerprintByteLimit
+    $ readyWorkerQueryPolicy worker
+  processLimits = lengthSMTLibProcessLimits $ readyWorkerProcess worker
   transcriptMaximum =
     lengthSMTLibProtocolPlanCumulativeStdoutByteLimit plan
   epochMaximum = if isJust $ lengthSMTLibProtocolInputValueWriteBytes plan
@@ -1752,10 +1778,12 @@ withLengthSMTLibReadyWorker config use = mask $ \restore -> do
                 queryGate <- newTMVarIO ()
                 let transcriptDigest = SHA256.hash
                       $ causalTranscriptBytes transcript
+                    queryPolicy = retainLengthSMTLibReadyWorkerQueryPolicy
+                      sessionLimits protocolLimits execution
                     worker = LengthSMTLibReadyWorker
                       { readyWorkerProcess = process
                       , readyWorkerCancellation = cancellation
-                      , readyWorkerConfig = config
+                      , readyWorkerQueryPolicy = queryPolicy
                       , readyWorkerIdentity = identity
                       , readyWorkerTranscriptDigest = transcriptDigest
                       , readyWorkerStdoutAtCommit = stdoutCount

@@ -187,10 +187,11 @@ keeps rendered bytes from becoming the semantic source of truth.
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` can associate
 such a bounded raw report with both the retained behavioral problem and the
 exact query fingerprint. Its opaque value deliberately projects no artifact or
-nested generic association before exact replay. Status, conservative strength,
-and use remain inspectable, and every status is restricted to
-`HeuristicRankingOnly`. Even after replay the report is still raw: a model must
-pass independent Length validation, while `unsat` never becomes evidence.
+nested generic association before exact replay. Status and conservative
+strength are derived from the singly retained raw observation, while the fixed
+use remains inspectable and every status is restricted to
+`HeuristicRankingOnly`. Even after replay the report is still raw: a model
+must pass independent Length validation, while `unsat` never becomes evidence.
 Query identity is only the canonical semantic translation identity, not a run
 or cache identity. A later executor must additionally seal the solver build,
 capability handshake, process and protocol state, parser schema, requested

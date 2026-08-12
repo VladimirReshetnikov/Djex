@@ -352,10 +352,10 @@ script is not promoted into the semantic source of truth.
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` closes the
 remaining raw-report identity gap. Its opaque association binds bounded
 status-specific artifacts to both the solver-neutral behavioral problem and
-the exact canonical SMT-LIB query. The outer Length association stores no
-additional status or strength: it derives status from the retained raw
-observation and delegates strength to the generic association's single
-classification. Before exact replay, callers can inspect only status, query
+the exact canonical SMT-LIB query. The generic association retains the raw
+observation once, and the outer Length association stores no additional status
+or strength: both projections are derived from that single observation
+constructor. Before exact replay, callers can inspect only status, query
 identity, conservative result strength, and the fixed
 `HeuristicRankingOnly` use; neither the raw payload nor the nested generic
 association is exposed. Successful replay reveals only the still-raw report:

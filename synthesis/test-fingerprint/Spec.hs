@@ -268,6 +268,35 @@ behavioralProblemTests = testGroup "solver-neutral behavioral problem envelope"
         replicate 4 Problem.HeuristicRankingOnly
       map (Problem.replayAssociatedObservation problem) associated @?=
         map Right observations
+  , testCase "derive raw classifications without forcing artifacts" $ do
+      let problem = fixtureProblem [0x64] 1 2 3 4
+          solverObservation = Observation.SatisfiableObservation
+            (error "solver artifact forced")
+              :: Observation.SolverObservation
+                  (Problem.BoundedRawArtifact FixtureArtifact)
+                  (Problem.BoundedRawArtifact FixtureArtifact)
+                  (Problem.BoundedRawArtifact FixtureArtifact)
+          solverAssociated =
+            Problem.associateSolverObservation problem solverObservation
+          behavioralObservation = Observation.BehaviorViolationObservation
+            (error "behavioral artifact forced")
+              :: Observation.BehavioralObservation
+                  (Problem.BoundedRawArtifact FixtureArtifact)
+                  (Problem.BoundedRawArtifact FixtureArtifact)
+                  (Problem.BoundedRawArtifact FixtureArtifact)
+                  (Problem.BoundedRawArtifact FixtureArtifact)
+          behavioralAssociated = Problem.associateBehavioralObservation
+            problem behavioralObservation
+      Problem.associatedSolverObservationStatus solverAssociated @?=
+        Observation.SolverSatisfiable
+      Problem.associatedObservationResultStrength solverAssociated @?=
+        Problem.RawSolverModelHint
+      Problem.associatedObservationUse solverAssociated @?=
+        Problem.HeuristicRankingOnly
+      Problem.associatedObservationResultStrength behavioralAssociated @?=
+        Problem.RawBehaviorCounterexampleClaim
+      Problem.associatedObservationUse behavioralAssociated @?=
+        Problem.HeuristicRankingOnly
   , testCase "fail replay in domain-to-problem precedence" $ do
       artifact <- fixtureArtifact
       let original = fixtureProblem [0x64] 1 2 3 4

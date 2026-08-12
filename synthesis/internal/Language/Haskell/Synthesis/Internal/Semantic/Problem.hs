@@ -1,4 +1,5 @@
 {-# LANGUAGE EmptyDataDecls #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE RoleAnnotations #-}
 
 -- | Private construction for solver-neutral behavioral problem envelopes.
@@ -256,18 +257,43 @@ instance NFData RawObservationUse where
 -- | A raw observation immutably associated with one exact problem tuple.
 --
 -- The observation parameter is nominal so callers cannot use 'coerce' to
--- relabel status-specific artifact domains after association.
-data AssociatedObservation domain observation = AssociatedObservation
-  !(BehavioralProblem domain)
-  !RawResultStrength
-  observation
+-- relabel status-specific artifact domains after association.  The two
+-- private constructors retain the observation family itself, so conservative
+-- strength is derived from that single raw owner instead of copied beside it.
+data AssociatedObservation domain observation where
+  AssociatedSolverObservation
+    :: !(BehavioralProblem domain)
+    -> !(SolverObservation
+          (BoundedRawArtifact satisfiable)
+          (BoundedRawArtifact unsatisfiable)
+          (BoundedRawArtifact unknown))
+    -> AssociatedObservation domain
+        (SolverObservation
+          (BoundedRawArtifact satisfiable)
+          (BoundedRawArtifact unsatisfiable)
+          (BoundedRawArtifact unknown))
+  AssociatedBehavioralObservation
+    :: !(BehavioralProblem domain)
+    -> !(BehavioralObservation
+          (BoundedRawArtifact established)
+          (BoundedRawArtifact counterexample)
+          (BoundedRawArtifact bounded)
+          (BoundedRawArtifact unknown))
+    -> AssociatedObservation domain
+        (BehavioralObservation
+          (BoundedRawArtifact established)
+          (BoundedRawArtifact counterexample)
+          (BoundedRawArtifact bounded)
+          (BoundedRawArtifact unknown))
 
 type role AssociatedObservation nominal nominal
 
-instance NFData observation
-    => NFData (AssociatedObservation domain observation) where
-  rnf (AssociatedObservation problem strength observation) =
-    rnf problem `seq` rnf strength `seq` rnf observation
+instance NFData (AssociatedObservation domain observation) where
+  rnf associated = case associated of
+    AssociatedSolverObservation problem observation ->
+      rnf problem `seq` rnf observation
+    AssociatedBehavioralObservation problem observation ->
+      rnf problem `seq` rnf observation
 
 associateSolverObservation
   :: BehavioralProblem domain
@@ -280,13 +306,7 @@ associateSolverObservation
         (BoundedRawArtifact satisfiable)
         (BoundedRawArtifact unsatisfiable)
         (BoundedRawArtifact unknown))
-associateSolverObservation problem observation = AssociatedObservation
-  problem
-  (case observation of
-    SatisfiableObservation{} -> RawSolverModelHint
-    UnsatisfiableObservation{} -> RawSolverUnsatRelativeToEncoding
-    UnknownObservation{} -> RawSolverUnknown)
-  observation
+associateSolverObservation = AssociatedSolverObservation
 
 associateBehavioralObservation
   :: BehavioralProblem domain
@@ -301,14 +321,7 @@ associateBehavioralObservation
         (BoundedRawArtifact counterexample)
         (BoundedRawArtifact bounded)
         (BoundedRawArtifact unknown))
-associateBehavioralObservation problem observation = AssociatedObservation
-  problem
-  (case observation of
-    BehaviorEstablishedObservation{} -> RawBehaviorEstablishedClaim
-    BehaviorViolationObservation{} -> RawBehaviorCounterexampleClaim
-    BehaviorBoundedObservation{} -> RawBehaviorBoundedValidation
-    BehaviorUnknownObservation{} -> RawBehaviorUnknown)
-  observation
+associateBehavioralObservation = AssociatedBehavioralObservation
 
 -- | Inspect the status constructor retained inside an associated raw solver
 -- report without exposing the generic association or forcing its artifact.
@@ -319,47 +332,61 @@ associatedSolverObservationStatus
       (SolverObservation satisfiable unsatisfiable unknown)
   -> SolverStatus
 associatedSolverObservationStatus
-    (AssociatedObservation _ _ observation) =
+    (AssociatedSolverObservation _ observation) =
   solverObservationStatus observation
+
+associatedObservationProblem
+  :: AssociatedObservation domain observation
+  -> BehavioralProblem domain
+associatedObservationProblem associated = case associated of
+  AssociatedSolverObservation problem _ -> problem
+  AssociatedBehavioralObservation problem _ -> problem
 
 associatedObservationDomain
   :: AssociatedObservation domain observation
   -> [Word8]
-associatedObservationDomain (AssociatedObservation problem _ _) =
-  behavioralProblemDomain problem
+associatedObservationDomain =
+  behavioralProblemDomain . associatedObservationProblem
 
 associatedObservationInventoryFingerprint
   :: AssociatedObservation domain observation
   -> Fingerprint (InventoryFingerprintSubject domain)
-associatedObservationInventoryFingerprint
-    (AssociatedObservation problem _ _) =
-  behavioralProblemInventoryFingerprint problem
+associatedObservationInventoryFingerprint =
+  behavioralProblemInventoryFingerprint . associatedObservationProblem
 
 associatedObservationEncodingFingerprint
   :: AssociatedObservation domain observation
   -> Fingerprint (EncodingFingerprintSubject domain)
-associatedObservationEncodingFingerprint
-    (AssociatedObservation problem _ _) =
-  behavioralProblemEncodingFingerprint problem
+associatedObservationEncodingFingerprint =
+  behavioralProblemEncodingFingerprint . associatedObservationProblem
 
 associatedObservationCandidateFingerprint
   :: AssociatedObservation domain observation
   -> Fingerprint (CandidateFingerprintSubject domain)
-associatedObservationCandidateFingerprint
-    (AssociatedObservation problem _ _) =
-  behavioralProblemCandidateFingerprint problem
+associatedObservationCandidateFingerprint =
+  behavioralProblemCandidateFingerprint . associatedObservationProblem
 
 associatedObservationProblemFingerprint
   :: AssociatedObservation domain observation
   -> Fingerprint (ProblemFingerprintSubject domain)
-associatedObservationProblemFingerprint
-    (AssociatedObservation problem _ _) = behavioralProblemFingerprint problem
+associatedObservationProblemFingerprint =
+  behavioralProblemFingerprint . associatedObservationProblem
 
+-- | Conservative strength derived from the singly retained raw observation's
+-- closed family and status constructor, without inspecting its artifact.
 associatedObservationResultStrength
   :: AssociatedObservation domain observation
   -> RawResultStrength
-associatedObservationResultStrength (AssociatedObservation _ strength _) =
-  strength
+associatedObservationResultStrength associated = case associated of
+  AssociatedSolverObservation _ observation -> case observation of
+    SatisfiableObservation{} -> RawSolverModelHint
+    UnsatisfiableObservation{} -> RawSolverUnsatRelativeToEncoding
+    UnknownObservation{} -> RawSolverUnknown
+  AssociatedBehavioralObservation _ observation -> case observation of
+    BehaviorEstablishedObservation{} -> RawBehaviorEstablishedClaim
+    BehaviorViolationObservation{} -> RawBehaviorCounterexampleClaim
+    BehaviorBoundedObservation{} -> RawBehaviorBoundedValidation
+    BehaviorUnknownObservation{} -> RawBehaviorUnknown
 
 associatedObservationUse
   :: AssociatedObservation domain observation
@@ -386,9 +413,11 @@ replayAssociatedObservation
   :: BehavioralProblem domain
   -> AssociatedObservation domain observation
   -> Either ReplayMismatch observation
-replayAssociatedObservation expected
-    (AssociatedObservation actual _ observation) =
-  observation <$ compareAssociation expected actual
+replayAssociatedObservation expected associated = case associated of
+  AssociatedSolverObservation actual observation ->
+    observation <$ compareAssociation expected actual
+  AssociatedBehavioralObservation actual observation ->
+    observation <$ compareAssociation expected actual
 
 -- | Future checker receipt associated with exactly the same problem tuple.
 --

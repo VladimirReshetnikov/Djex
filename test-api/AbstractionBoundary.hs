@@ -166,8 +166,15 @@ forbiddenConstructionAttempts =
     , forbiddenFingerprintCoercion `seq` ()
     )
   , noGeneric @(TypedCandidate () (Type Int) Int ()) "TypedCandidate"
+  , noGeneric @(TermGraph Int Int) "TermGraph"
   , ( "TypedCandidate payload unexpectedly permits Coercible"
     , forbiddenTypedCandidateCoercion `seq` ()
+    )
+  , ( "TermGraph type domain unexpectedly permits Coercible"
+    , forbiddenTermGraphTypeCoercion `seq` ()
+    )
+  , ( "TermGraph local domain unexpectedly permits Coercible"
+    , forbiddenTermGraphLocalCoercion `seq` ()
     )
   , noGeneric @(BehavioralProblem BehavioralDomainProbe)
       "BehavioralProblem"
@@ -839,6 +846,19 @@ forbiddenTypedCandidateCoercion
   :: TypedCandidate () (Type Int) Int TypedCandidateProbe
   -> TypedCandidate () (Type Int) Int OtherTypedCandidateProbe
 forbiddenTypedCandidateCoercion = coerce
+
+-- A projected graph remains bound to the exact type and local-identity
+-- domains under which it was sealed. TypedCandidate's nominal roles cannot
+-- protect those domains after 'typedCandidateTermGraph' projects the graph.
+forbiddenTermGraphTypeCoercion
+  :: TermGraph LengthVariableProbe Int
+  -> TermGraph OtherLengthVariableProbe Int
+forbiddenTermGraphTypeCoercion = coerce
+
+forbiddenTermGraphLocalCoercion
+  :: TermGraph Int LengthLocalProbe
+  -> TermGraph Int OtherLengthLocalProbe
+forbiddenTermGraphLocalCoercion = coerce
 
 forbiddenBehavioralProblemCoercion
   :: BehavioralProblem BehavioralDomainProbe

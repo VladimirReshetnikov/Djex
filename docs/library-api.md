@@ -352,17 +352,28 @@ identity. This occurrence-sensitive boundary keeps valid constructor
 elimination that a whole-formula nominal comparison would discard, while
 independently erased phantom positions remain nominal-only.
 
-The original runners retain their exact historical behavior. They delegate
-through the empty candidate path, and an explicit empty call to either the
-legacy or kinded assignment runner returns the same result, ordering,
-diagnostics, and finite-budget observations:
+The original runners retain their exact historical behavior. Each engine has a
+canonical typed path, and each legacy result is its lazy
+`typedCandidateCompatibility` projection. Empty candidate and assignment calls
+return the same result, ordering, diagnostics, and finite-budget observations:
 
 ```haskell
+runDjinnTypedQuery session =
+  runDjinnTypedQueryWithInstantiationCandidates session []
 runDjinnQuery session =
-  runDjinnQueryWithInstantiationCandidates session []
+  fmap (fmap typedCandidateCompatibility) . runDjinnTypedQuery session
 runExferenceQuery session =
   runExferenceQueryWithInstantiationCandidates session []
 ```
+
+Exference's typed candidate may contain its checked graph. Djinn currently
+returns the explicit `DjinnTermGraphSourceTypingContextUnavailable` absence:
+the retained LJT proof evidence is exact for its formula but predates the
+source-typed proof transformations needed by a shared graph. Its public future
+graph domain is already `DjinnTermGraphType = Type (Variable
+DjinnTypeVariable)`, not the role-erased compatibility `DjinnType`. Thus the
+typed API unifies result association without claiming behavioral
+interoperability before the required source-variable role plan exists.
 
 Nonempty evidence is additive, with engine- and payload-specific scheduling:
 

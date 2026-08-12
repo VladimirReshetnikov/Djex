@@ -43,12 +43,18 @@ module Djinn.Core (
     resolvePreparedContext, resolvePreparedInstanceMethods,
     QueryOptions(..), defaultQueryOptions,
     DjinnCandidateDetails(..), DjinnCandidate,
-    DjinnQueryMetadata(..), DjinnResult,
+    DjinnTermGraphTypeVariable, DjinnTermGraphType,
+    DjinnTermGraphAbsence(..), DjinnTypedCandidate,
+    DjinnQueryMetadata(..), DjinnResult, DjinnTypedResult,
     DjinnQueryOptionsError(..), DjinnQueryError(..),
     inhabitResult, inhabitResultPrepared, inhabitSynthesisResultPrepared,
+    inhabitTypedSynthesisResultPrepared,
     inhabitSynthesisResultPreparedWithInstantiationCandidates,
+    inhabitTypedSynthesisResultPreparedWithInstantiationCandidates,
     inhabitSynthesisResultPreparedWithInstantiationAssignments,
+    inhabitTypedSynthesisResultPreparedWithInstantiationAssignments,
     inhabitSynthesisResultPreparedWithKindedInstantiationAssignments,
+    inhabitTypedSynthesisResultPreparedWithKindedInstantiationAssignments,
     GeneratedQueryReport(..), inhabitGenerated, inhabitGeneratedPrepared,
     QueryOutcome(..), QueryReport(..), inhabit
     ) where
@@ -78,6 +84,8 @@ import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
+import qualified Language.Haskell.Synthesis.Internal.TypedCandidate
+    as SharedTypedCandidate
 
 import Djinn.Internal.CheckedCandidate
     ( ValidatedCandidate
@@ -85,8 +93,9 @@ import Djinn.Internal.CheckedCandidate
     , checkCandidateProofWith
     , convertCheckedCandidate
     , mkValidatedResult
-    , projectValidatedResult
+    , projectValidatedResultWith
     , sortValidatedCandidates
+    , validatedCandidateDetails
     , validatedCandidateOutput
     )
 import Djinn.Internal.Environment
@@ -667,6 +676,34 @@ type DjinnCandidate =
     SharedCandidate.Candidate (SharedType.Type HSymbol) DjinnCandidateDetails
         (SharedGenerated.FunctionClause HSymbol)
 
+-- | Why a checked Djinn candidate does not yet carry a shared source-typed
+-- graph.
+--
+-- Djinn's retained proof evidence is exact in the LJT formula vocabulary, but
+-- structural datatype expansion and later proof restoration, instantiation
+-- erasure, visible application, and generated-term cleanup are not yet sealed
+-- into one source-typed authority.  Reporting that gap is sounder than
+-- reconstructing source types from rendered formula atoms or generated code.
+data DjinnTermGraphAbsence
+    = DjinnTermGraphSourceTypingContextUnavailable
+    deriving (Bounded, Enum, Eq, Ord, Show)
+
+-- | Future graph-local source identity domain.  Keeping flexible variables
+-- distinct from rigid skolems is required before a Djinn graph can cross the
+-- behavioral root-opening boundary; the compatibility 'DjinnCandidate' type
+-- deliberately retains its historical untagged variable domain.
+type DjinnTermGraphTypeVariable = SharedType.Variable HSymbol
+
+-- | Source-type vocabulary reserved for an eventual checked Djinn graph.
+type DjinnTermGraphType = SharedType.Type DjinnTermGraphTypeVariable
+
+-- | One checked compatibility candidate paired with its explicit typed-graph
+-- availability.  The association is constructed before proof evidence is
+-- erased from the final result.
+type DjinnTypedCandidate =
+    SharedTypedCandidate.TypedCandidate DjinnTermGraphAbsence
+        DjinnTermGraphType HSymbol DjinnCandidate
+
 -- | Djinn-specific explanatory data retained in the shared result batch.
 -- Formula translation and the first explored proof are diagnostics rather
 -- than operational search status or logical evidence.
@@ -681,6 +718,12 @@ data DjinnQueryMetadata = DjinnQueryMetadata {
 -- value without unpacking and rebuilding an intermediate report.
 type DjinnResult =
     SharedQuery.QueryResult DjinnQueryMetadata DjinnCandidate
+
+-- | Canonical Djinn result retaining the typed-candidate association.
+-- Logical evidence, completion, metadata, candidate ordering, and
+-- compatibility output are identical to 'DjinnResult'.
+type DjinnTypedResult =
+    SharedQuery.QueryResult DjinnQueryMetadata DjinnTypedCandidate
 
 -- | Failure from the canonical checked result path. Invalid controls,
 -- ordinary input rejection, internal proof/projection failures, and an
@@ -826,6 +869,20 @@ inhabitSynthesisResultPrepared options prepared contexts target goal =
     inhabitSynthesisResultPreparedWithInstantiationCandidates
         options prepared contexts [] target goal
 
+-- | Typed-result counterpart of 'inhabitSynthesisResultPrepared'.  This is
+-- the canonical checked path; the compatibility runner is its graph-ignoring
+-- projection.
+inhabitTypedSynthesisResultPrepared
+    :: QueryOptions
+    -> PreparedEnvironment
+    -> [Constraint (SharedType.Type HSymbol)]
+    -> SharedGenerated.DefinitionName
+    -> SharedType.Type HSymbol
+    -> Either DjinnQueryError DjinnTypedResult
+inhabitTypedSynthesisResultPrepared options prepared contexts target goal =
+    inhabitTypedSynthesisResultPreparedWithInstantiationCandidates
+        options prepared contexts [] target goal
+
 -- | Search a sealed Djinn environment with externally established,
 -- provider-local type choices. Each association is checked against the exact
 -- prepared provider and type/kind/synonym scope before it can add a separate
@@ -850,6 +907,23 @@ inhabitSynthesisResultPreparedWithInstantiationCandidates options prepared
         options prepared contexts candidates
         (InferredProviderInstantiationAssignments []) target goal
 
+-- | Typed-result counterpart of
+-- 'inhabitSynthesisResultPreparedWithInstantiationCandidates'.
+inhabitTypedSynthesisResultPreparedWithInstantiationCandidates
+    :: QueryOptions
+    -> PreparedEnvironment
+    -> [Constraint (SharedType.Type HSymbol)]
+    -> [SharedQuery.ProviderInstantiationCandidate HSymbol]
+    -> SharedGenerated.DefinitionName
+    -> SharedType.Type HSymbol
+    -> Either DjinnQueryError DjinnTypedResult
+inhabitTypedSynthesisResultPreparedWithInstantiationCandidates options prepared
+        contexts candidates target goal = do
+    first DjinnQueryOptionsFailure $ validateQueryOptions options
+    inhabitSynthesisTypedResultPreparedChecked
+        options prepared contexts candidates
+        (InferredProviderInstantiationAssignments []) target goal
+
 -- | Search a sealed Djinn environment with externally established complete
 -- leading-binder assignments for exact providers.  Each ordered vector is
 -- validated and consumed directly, without reconstructing candidate tuples.
@@ -870,6 +944,23 @@ inhabitSynthesisResultPreparedWithInstantiationAssignments options prepared
         options prepared contexts []
         (InferredProviderInstantiationAssignments assignments) target goal
 
+-- | Typed-result counterpart of
+-- 'inhabitSynthesisResultPreparedWithInstantiationAssignments'.
+inhabitTypedSynthesisResultPreparedWithInstantiationAssignments
+    :: QueryOptions
+    -> PreparedEnvironment
+    -> [Constraint (SharedType.Type HSymbol)]
+    -> [SharedQuery.ProviderInstantiationAssignment HSymbol]
+    -> SharedGenerated.DefinitionName
+    -> SharedType.Type HSymbol
+    -> Either DjinnQueryError DjinnTypedResult
+inhabitTypedSynthesisResultPreparedWithInstantiationAssignments options prepared
+        contexts assignments target goal = do
+    first DjinnQueryOptionsFailure $ validateQueryOptions options
+    inhabitSynthesisTypedResultPreparedChecked
+        options prepared contexts []
+        (InferredProviderInstantiationAssignments assignments) target goal
+
 -- | Search a sealed Djinn environment with complete assignments whose exact
 -- leading-binder ground kinds were retained by the caller. Supplied kinds are
 -- checked against every occurrence in the provider body; unlike the
@@ -887,6 +978,23 @@ inhabitSynthesisResultPreparedWithKindedInstantiationAssignments options
         prepared contexts assignments target goal = do
     first DjinnQueryOptionsFailure $ validateQueryOptions options
     inhabitSynthesisResultPreparedChecked
+        options prepared contexts []
+        (KindedProviderInstantiationAssignments assignments) target goal
+
+-- | Typed-result counterpart of
+-- 'inhabitSynthesisResultPreparedWithKindedInstantiationAssignments'.
+inhabitTypedSynthesisResultPreparedWithKindedInstantiationAssignments
+    :: QueryOptions
+    -> PreparedEnvironment
+    -> [Constraint (SharedType.Type HSymbol)]
+    -> [SharedQuery.KindedProviderInstantiationAssignment HSymbol]
+    -> SharedGenerated.DefinitionName
+    -> SharedType.Type HSymbol
+    -> Either DjinnQueryError DjinnTypedResult
+inhabitTypedSynthesisResultPreparedWithKindedInstantiationAssignments options
+        prepared contexts assignments target goal = do
+    first DjinnQueryOptionsFailure $ validateQueryOptions options
+    inhabitSynthesisTypedResultPreparedChecked
         options prepared contexts []
         (KindedProviderInstantiationAssignments assignments) target goal
 
@@ -935,6 +1043,40 @@ inhabitSynthesisResultPreparedChecked
     -> SharedType.Type HSymbol
     -> Either DjinnQueryError DjinnResult
 inhabitSynthesisResultPreparedChecked options prepared contexts candidates
+        assignmentEvidence target goal =
+    fmap (fmap SharedTypedCandidate.typedCandidateCompatibility) $
+        inhabitSynthesisTypedResultPreparedChecked
+            options prepared contexts candidates assignmentEvidence target goal
+
+inhabitSynthesisTypedResultPreparedChecked
+    :: QueryOptions
+    -> PreparedEnvironment
+    -> [Constraint (SharedType.Type HSymbol)]
+    -> [SharedQuery.ProviderInstantiationCandidate HSymbol]
+    -> ProviderInstantiationAssignmentEvidence
+    -> SharedGenerated.DefinitionName
+    -> SharedType.Type HSymbol
+    -> Either DjinnQueryError DjinnTypedResult
+inhabitSynthesisTypedResultPreparedChecked options prepared contexts candidates
+        assignmentEvidence target goal = do
+    validated <- inhabitSynthesisValidatedResultPreparedChecked
+        options prepared contexts candidates assignmentEvidence target goal
+    first DjinnResultInvariantFailure $
+        projectValidatedTypedDjinnResult validated
+
+-- All stable result views meet at this sidecar-retaining worker.  Projection
+-- happens only after proof checking, conversion, cross-plan de-duplication,
+-- and ranking have moved whole associations into their final order.
+inhabitSynthesisValidatedResultPreparedChecked
+    :: QueryOptions
+    -> PreparedEnvironment
+    -> [Constraint (SharedType.Type HSymbol)]
+    -> [SharedQuery.ProviderInstantiationCandidate HSymbol]
+    -> ProviderInstantiationAssignmentEvidence
+    -> SharedGenerated.DefinitionName
+    -> SharedType.Type HSymbol
+    -> Either DjinnQueryError ValidatedDjinnResult
+inhabitSynthesisValidatedResultPreparedChecked options prepared contexts candidates
         assignmentEvidence target goal = do
     elaboratedGoal <- resolveSynthesisQueryContexts prepared
         ( "goal type " ++ renderSynthesisType goal
@@ -1313,7 +1455,7 @@ searchPreparedFormula
     -> Bool
     -> PolarizedFormulaPlans
     -> PolarizedFormulaPlans
-    -> Either DjinnQueryError DjinnResult
+    -> Either DjinnQueryError ValidatedDjinnResult
 searchPreparedFormula options prepared providerCandidates providerAssignments
         target elaboratedGoal parametricDataRelevant formulaPlans
         nominalFormulaPlans = do
@@ -2187,6 +2329,27 @@ type ValidatedDjinnResult =
     ValidatedResult DjinnQueryMetadata DjinnCandidateDetails
         (SharedGenerated.FunctionClause HSymbol)
 
+-- | Package the final whole candidate association into the shared typed
+-- envelope.  The explicit absence is deliberately lazy and payload-free;
+-- compatibility projection therefore does not traverse checked proof
+-- evidence or attempt an unsound source-type reconstruction.
+projectValidatedTypedDjinnResult
+    :: ValidatedDjinnResult
+    -> Either SharedQuery.QueryResultInvariantError DjinnTypedResult
+projectValidatedTypedDjinnResult =
+    projectValidatedResultWith projectCandidate
+  where
+    projectCandidate _candidateKey validated =
+        SharedTypedCandidate.mkTypedCandidate
+        (SharedCandidate.Candidate
+            { SharedCandidate.candidateOutput =
+                validatedCandidateOutput validated
+            , SharedCandidate.candidateResidualConstraints = []
+            , SharedCandidate.candidateDetails =
+                validatedCandidateDetails validated
+            })
+        (Left DjinnTermGraphSourceTypingContextUnavailable)
+
 data FormulaPlanResult = FormulaPlanResult
     { formulaPlanFormula :: String
     , formulaPlanFirstProof :: Maybe String
@@ -2351,12 +2514,10 @@ formulaPlanFinished result =
 mergeFormulaPlanResults
     :: QueryOptions
     -> [FormulaPlanResult]
-    -> Either DjinnQueryError DjinnResult
+    -> Either DjinnQueryError ValidatedDjinnResult
 mergeFormulaPlanResults _ [] = internalQueryFailure
     "rank-N formula planning produced no search plan"
-mergeFormulaPlanResults options results =
-    first DjinnResultInvariantFailure $
-        projectValidatedResult validatedResult
+mergeFormulaPlanResults options results = Right validatedResult
   where
     terminalPlan = last results
     metadataPlan = case filter

@@ -21,10 +21,12 @@ module Djinn.Internal.CheckedCandidate
     , ValidatedResult
     , mkValidatedResult
     , validatedResultCandidates
+    , projectValidatedResultWith
     , projectValidatedResult
     ) where
 
 import Data.List (sortOn)
+import Numeric.Natural (Natural)
 
 import Djinn.Internal.ProofCheck.Evidence (CheckedProofEvidence)
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
@@ -108,7 +110,7 @@ sortValidatedCandidates = sortOn validatedCandidateDetails
 -- | The final private Djinn result before compatibility erasure.  It retains
 -- every surviving candidate sidecar through cross-plan de-duplication and
 -- ranking.  The result constructor is hidden so the historical shared result
--- can be built in exactly one direction by 'projectValidatedResult'.
+-- and typed result can be built only through the projections below.
 data ValidatedResult metadata details output = ValidatedResult
     SharedQuery.QueryEvidence
     SharedSearch.Completion
@@ -144,17 +146,34 @@ projectValidatedResult
     -> Either SharedQuery.QueryResultInvariantError
         (SharedQuery.QueryResult metadata
             (SharedCandidate.Candidate ty details output))
-projectValidatedResult
-        (ValidatedResult evidence completion metadata candidates) =
-    SharedQuery.mkQueryResult evidence $
-        SharedSearch.SearchBatch
-            (SharedSearch.Completed completion)
-            metadata
-            (map projectCandidate candidates)
+projectValidatedResult = projectValidatedResultWith projectCandidate
   where
-    projectCandidate (ValidatedCandidate output details _) =
+    projectCandidate _ (ValidatedCandidate output details _) =
         SharedCandidate.Candidate
             { SharedCandidate.candidateOutput = output
             , SharedCandidate.candidateResidualConstraints = []
             , SharedCandidate.candidateDetails = details
             }
+
+-- | Project a complete result while retaining each candidate as one opaque
+-- association until the supplied candidate projection consumes it.
+--
+-- This is the package-private typed-result seam.  In particular, the caller
+-- receives a deterministic final candidate key plus the output, details, and
+-- checker evidence from one constructor at a time; it never zips a separately
+-- projected compatibility list onto a sidecar list after de-duplication or
+-- sorting. The key is allocated only after those operations, so a future graph
+-- builder can derive disjoint node identities without trusting search-plan
+-- ordinals discarded by de-duplication.
+projectValidatedResultWith
+    :: (Natural -> ValidatedCandidate details output -> candidate)
+    -> ValidatedResult metadata details output
+    -> Either SharedQuery.QueryResultInvariantError
+        (SharedQuery.QueryResult metadata candidate)
+projectValidatedResultWith projectCandidate
+        (ValidatedResult evidence completion metadata candidates) =
+    SharedQuery.mkQueryResult evidence $
+        SharedSearch.SearchBatch
+            (SharedSearch.Completed completion)
+            metadata
+            (zipWith projectCandidate [0 ..] candidates)

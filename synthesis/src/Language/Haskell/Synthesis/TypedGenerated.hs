@@ -4,6 +4,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE RoleAnnotations #-}
 
 -- | A bounded, typed candidate graph beside the compatibility generated AST.
 --
@@ -65,7 +66,7 @@ module Language.Haskell.Synthesis.TypedGenerated
   , eraseTermGraphToFunctionClause
   ) where
 
-import Control.DeepSeq (NFData)
+import Control.DeepSeq (NFData (rnf))
 import Control.Monad (foldM, unless, when)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
@@ -519,9 +520,17 @@ data TermGraph ty local = TermGraph
   !(Map TermNodeId (TermNode ty local))
   (Generated.Expression local)
   !TypedGraphMetrics
-  deriving (Eq, Ord, Show, Generic)
+  deriving (Eq, Ord, Show)
 
-instance (NFData ty, NFData local) => NFData (TermGraph ty local)
+type role TermGraph nominal nominal
+
+instance (NFData ty, NFData local) => NFData (TermGraph ty local) where
+  rnf (TermGraph root nodes nodeMap expression metrics) =
+    rnf root `seq`
+      rnf nodes `seq`
+        rnf nodeMap `seq`
+          rnf expression `seq`
+            rnf metrics
 
 termGraphRoot :: TermGraph ty local -> TermNodeId
 termGraphRoot (TermGraph root _ _ _ _) = root

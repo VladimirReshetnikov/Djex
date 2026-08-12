@@ -417,7 +417,7 @@ scanning when a file name itself begins with `+` or `-`.
 | --- | --- |
 | `app/Main.hs` | Thin executable launcher. |
 | `Djinn.Core` | The stable, validated library API (see below). |
-| `Language.Haskell.Djex.Djinn` | Opaque checked session and shared query/evidence/search adapter. |
+| `Language.Haskell.Djex.Djinn` | Opaque checked session and shared query/evidence/search adapter, including canonical typed results with explicit graph absence. |
 | `Djinn.Internal.Declaration` | Djinn declaration compatibility values and checked shared-IR lowering. |
 | `Djinn` (`src-frontend/Djinn.hs`) | CLI frontend: settings, command parser, and printing, built on `Djinn.Core`. |
 | `Djinn.Internal.REPL` | Haskeline loop and EOF handling. |
@@ -466,6 +466,20 @@ shared logical evidence and operational completion independently, and render
 the `FunctionClause` output of returned shared `Candidate`s. This preserves the
 declaration language while eliminating the frontend's former direct
 `inhabit`/`QueryReport` path.
+
+The checked adapter also exposes `DjinnTypedCandidate`, `DjinnTypedResult`,
+and four `runDjinnTypedQuery...` entrances parallel to the provider-evidence
+runners. They preserve each candidate's checked-proof association through
+cross-plan de-duplication and stable ranking before constructing the shared
+typed envelope. The graph projection currently returns only
+`DjinnTermGraphSourceTypingContextUnavailable`: LJT formula types and the raw
+pre-erasure proof do not yet contain the exact source-variable roles and final
+term transformation authority required to seal a `TermGraph`. The reserved
+graph vocabulary is `DjinnTermGraphType = Type (Variable
+DjinnTypeVariable)`, so an eventual implementation can distinguish flexible
+variables from rigid skolems. Legacy runners are lazy compatibility
+projections of these typed results and neither inspect graph availability nor
+change historical results.
 
 ## Using Djinn through the `djex` library
 

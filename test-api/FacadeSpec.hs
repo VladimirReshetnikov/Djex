@@ -722,6 +722,14 @@ facadeTests = testGroup "public Djex facade"
             -> Candidate DjinnType DjinnCandidateDetails
                 (FunctionClause DjinnLocal)
           djinnCandidateProjection = id
+          djinnTypedCompatibilityProjection
+            :: DjinnTypedCandidate -> DjinnCandidate
+          djinnTypedCompatibilityProjection = typedCandidateCompatibility
+          djinnTypedGraphProjection
+            :: DjinnTypedCandidate
+            -> Either DjinnTermGraphAbsence
+                (TermGraph DjinnTermGraphType DjinnLocal)
+          djinnTypedGraphProjection = typedCandidateTermGraph
           djinnEnvironmentProjection
             :: DjinnEnvironment
             -> Environment DjinnTypeVariable Void ()
@@ -791,12 +799,26 @@ facadeTests = testGroup "public Djex facade"
             -> DjinnRequest
             -> Either Diagnostic DjinnResult
           djinnEvidenceRunner = runDjinnQueryWithInstantiationCandidates
+          djinnTypedEvidenceRunner
+            :: DjinnSession
+            -> [ProviderInstantiationCandidate DjinnTypeVariable]
+            -> DjinnRequest
+            -> Either Diagnostic DjinnTypedResult
+          djinnTypedEvidenceRunner =
+            runDjinnTypedQueryWithInstantiationCandidates
           djinnAssignmentRunner
             :: DjinnSession
             -> [ProviderInstantiationAssignment DjinnTypeVariable]
             -> DjinnRequest
             -> Either Diagnostic DjinnResult
           djinnAssignmentRunner = runDjinnQueryWithInstantiationAssignments
+          djinnTypedAssignmentRunner
+            :: DjinnSession
+            -> [ProviderInstantiationAssignment DjinnTypeVariable]
+            -> DjinnRequest
+            -> Either Diagnostic DjinnTypedResult
+          djinnTypedAssignmentRunner =
+            runDjinnTypedQueryWithInstantiationAssignments
           djinnKindedAssignmentRunner
             :: DjinnSession
             -> [KindedProviderInstantiationAssignment DjinnTypeVariable]
@@ -804,6 +826,13 @@ facadeTests = testGroup "public Djex facade"
             -> Either Diagnostic DjinnResult
           djinnKindedAssignmentRunner =
             runDjinnQueryWithKindedInstantiationAssignments
+          djinnTypedKindedAssignmentRunner
+            :: DjinnSession
+            -> [KindedProviderInstantiationAssignment DjinnTypeVariable]
+            -> DjinnRequest
+            -> Either Diagnostic DjinnTypedResult
+          djinnTypedKindedAssignmentRunner =
+            runDjinnTypedQueryWithKindedInstantiationAssignments
           exferenceEvidenceRunner
             :: ExferenceSession
             -> [ProviderInstantiationCandidate ExferenceTypeVariable]
@@ -852,7 +881,10 @@ facadeTests = testGroup "public Djex facade"
           exferenceTypedKindedAssignmentRunner =
             runExferenceTypedQueryWithKindedInstantiationAssignments
       djinnTypeProjection `seq` djinnRequestProjection `seq`
-        djinnCandidateProjection `seq` djinnEnvironmentProjection `seq`
+        djinnCandidateProjection `seq`
+        djinnTypedCompatibilityProjection `seq`
+        djinnTypedGraphProjection `seq`
+        djinnEnvironmentProjection `seq`
         inventoryProjection `seq`
         sessionEnvironmentProjection `seq`
         environmentProjection `seq`
@@ -863,8 +895,10 @@ facadeTests = testGroup "public Djex facade"
         metadataProjection `seq` providerEvidenceProjection `seq`
         providerAssignmentProjection `seq`
         kindedProviderAssignmentProjection `seq`
-        djinnEvidenceRunner `seq` djinnAssignmentRunner `seq`
+        djinnEvidenceRunner `seq` djinnTypedEvidenceRunner `seq`
+        djinnAssignmentRunner `seq` djinnTypedAssignmentRunner `seq`
         djinnKindedAssignmentRunner `seq`
+        djinnTypedKindedAssignmentRunner `seq`
         exferenceEvidenceRunner `seq` exferenceTypedRunner `seq`
         exferenceTypedEvidenceRunner `seq` exferenceAssignmentRunner `seq`
         exferenceTypedAssignmentRunner `seq`
@@ -876,6 +910,53 @@ facadeTests = testGroup "public Djex facade"
       maximumProviderInstantiationAssignments @?= 32
       maximumProviderInstantiationArguments @?= 6
       maximumProviderInstantiationKindNodes @?= 129
+  , testCase "retains explicit Djinn typed absence without compatibility drift" $ do
+      environment <- expectRight
+        (mkEnvironment [] ::
+          Either (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+      session <- expectRight $ mkDjinnSession environment
+      targetName <- expectRight $ mkIdentifier "typedDjinnIdentity"
+      target <- expectRight $ mkDefinitionName targetName
+      let goal = FunctionType
+            (TypeVariable "element")
+            (TypeVariable "element")
+          query = QueryRequest
+            { requestTarget = target
+            , requestGoal = goal
+            , requestContexts = []
+            , requestOptions = defaultQueryOptions
+            }
+      request <- expectRight $ mkDjinnRequest query
+      typed <- expectRight $ runDjinnTypedQuery session request
+      legacy <- expectRight $ runDjinnQuery session request
+      fmap typedCandidateCompatibility typed @?= legacy
+      typedCandidateEvidence <- expectRight $
+        runDjinnTypedQueryWithInstantiationCandidates session [] request
+      legacyCandidateEvidence <- expectRight $
+        runDjinnQueryWithInstantiationCandidates session [] request
+      fmap typedCandidateCompatibility typedCandidateEvidence @?=
+        legacyCandidateEvidence
+      typedAssignments <- expectRight $
+        runDjinnTypedQueryWithInstantiationAssignments session [] request
+      legacyAssignments <- expectRight $
+        runDjinnQueryWithInstantiationAssignments session [] request
+      fmap typedCandidateCompatibility typedAssignments @?=
+        legacyAssignments
+      typedKindedAssignments <- expectRight $
+        runDjinnTypedQueryWithKindedInstantiationAssignments
+          session [] request
+      legacyKindedAssignments <- expectRight $
+        runDjinnQueryWithKindedInstantiationAssignments session [] request
+      fmap typedCandidateCompatibility typedKindedAssignments @?=
+        legacyKindedAssignments
+      repeated <- expectRight $ runDjinnTypedQuery session request
+      typed @?= repeated
+      case batchCandidates $ resultSearch typed of
+        [] -> fail "the Djinn identity query returned no typed candidate"
+        candidate : _ -> do
+          resultEvidence typed @?= ValidatedCandidates
+          typedCandidateTermGraph candidate @?=
+            Left DjinnTermGraphSourceTypingContextUnavailable
   , testCase "retains checked Exference graphs beside exact legacy results" $ do
       environment <- expectRight
         (mkEnvironment [] ::

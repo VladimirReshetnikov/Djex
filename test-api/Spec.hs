@@ -294,6 +294,8 @@ main = defaultMain $ testGroup "Djex downstream API"
                     any (`isInfixOf` message)
                       [ "forbiddenFingerprintCoercion"
                       , "forbiddenTypedCandidateCoercion"
+                      , "forbiddenTermGraphTypeCoercion"
+                      , "forbiddenTermGraphLocalCoercion"
                       , "forbiddenBehavioralProblemCoercion"
                       , "forbiddenBehavioralFingerprintRoleCoercion"
                       , "forbiddenAssociatedObservationDomainCoercion"

@@ -144,6 +144,38 @@ preceded it.
 
 ## Canonical typed candidate identities
 
+Both checked engines now expose the same typed-result shape. Exference may
+retain a sealed graph or an engine-specific absence reason.
+`runDjinnTypedQuery` and its three provider-evidence variants retain each
+post-deduplication, post-ranking Djinn candidate in the same opaque
+`TypedCandidate` envelope, but currently report the explicit
+`DjinnTermGraphSourceTypingContextUnavailable` absence. Djinn's checked LJT
+sidecar predates assumption-name restoration, provider rewriting,
+instantiation-evidence erasure, visible applications, and generated-term
+cleanup; its formulas have also erased source nominal structure. Reconstructing
+a shared graph from either rendered formulas or final generated code would
+therefore invent authority.
+
+The graph type is nevertheless fixed at the sound future boundary:
+`DjinnTermGraphType = Type (Variable DjinnTypeVariable)`, distinct from the
+historical compatibility `DjinnType = Type DjinnTypeVariable`. A future lowerer
+must retain whether an identity is flexible or rigid before Length or another
+behavioral domain may authorize root skolems. Final candidate keys are already
+allocated after cross-plan de-duplication and ranking, so later graph node and
+occurrence identities need not reuse discarded search-plan ordinals. The four
+legacy Djinn runners are lazy `typedCandidateCompatibility` projections of the
+typed runners and preserve evidence, completion, metadata, ordering, output,
+and diagnostics exactly.
+
+`TermGraph` itself is nominal in both its type and local-identity parameters.
+This remains necessary after `typedCandidateTermGraph` projects a graph out of
+the already nominal `TypedCandidate`: representationally equal newtypes cannot
+relabel the domains under which the graph was sealed. Its public `Generic`
+instance has also been removed, so the private constructor cannot be recreated
+through `GHC.Generics.to`; deep evaluation uses an explicit `NFData`
+implementation instead. See the
+[Djinn typed-result seam report](docs/reports/2026-08-11-djinn-typed-result-seam.md).
+
 `Language.Haskell.Synthesis.TypedGenerated.Fingerprint` assigns an opaque,
 nominal structural identity to a shared typed `TermGraph`. Before encoding, it
 reconstructs the raw graph and reseals it with `sharedTypeStructure` under the

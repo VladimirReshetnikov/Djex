@@ -16,6 +16,7 @@ import Text.Read (readMaybe)
 import Djinn.Core (
     Context, Declaration(..), DjinnCandidateDetails(..),
     DjinnQueryMetadata(..), DjinnResult,
+    DjinnTermGraphAbsence(..),
     DjinnDeclarationNameRole(..), QueryOutcome(..),
     DjinnQueryError(..), DjinnQueryOptionsError(..),
     SynthesisDeclarationError(..), SynthesisEnvironmentError(..),
@@ -25,7 +26,7 @@ import Djinn.Core (
     generatedReportCompletion, generatedReportEvidence,
     inhabit, inhabitGenerated, inhabitResult,
     inhabitGeneratedPrepared, inhabitResultPrepared,
-    inhabitSynthesisResultPrepared,
+    inhabitSynthesisResultPrepared, inhabitTypedSynthesisResultPrepared,
     kArrow, kStar, optionAlternatives, optionBudget, optionCutoff, optionSorted,
     fromSynthesisDeclaration, fromSynthesisEnvironment,
     fromSynthesisKind, fromSynthesisType,
@@ -73,6 +74,8 @@ import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeRender as SharedTypeRender
 import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
+import qualified Language.Haskell.Synthesis.TypedCandidate
+    as SharedTypedCandidate
 
 main :: IO ()
 main = defaultMain $ testGroup "Djinn unit tests" $
@@ -191,12 +194,18 @@ tests =
           testCheckedProofEvidenceParity)
     , ("project sidecar-retaining results without compatibility drift",
           testValidatedCandidateResultParity)
+    , ("project typed Djinn results through the retained association",
+          testTypedDjinnCoreProjectionParity)
     , ("retain the first checked sidecar through eta de-duplication",
           testValidatedCandidateDeduplication)
     , ("move checked sidecars with stable candidate-detail sorting",
           testValidatedCandidateSorting)
+    , ("allocate typed candidate keys after final ranking",
+          testValidatedCandidateFinalKeys)
     , ("project compatibility candidates without forcing sidecars",
           testValidatedCandidateProjectionLaziness)
+    , ("project typed absence without forcing sidecars",
+          testValidatedTypedProjectionLaziness)
     , ("retain production rank-N evidence before instantiation erasure",
           testValidatedRankNProductionEvidence)
     , ("retain checker-known rank-N proof source types",
@@ -6812,6 +6821,27 @@ testValidatedCandidateResultParity = do
         "the sidecar-retaining path changed the complete public result"
         expected actual
 
+testTypedDjinnCoreProjectionParity :: IO ()
+testTypedDjinnCoreProjectionParity = do
+    prepared <- expectShownRight $ prepareEnvironment emptyEnvironment
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $
+        sharedName "typedCoreIdentity"
+    let goal = SharedType.FunctionType
+            (SharedType.TypeVariable "element")
+            (SharedType.TypeVariable "element")
+    legacy <- expectShownRight $ inhabitSynthesisResultPrepared
+        defaultQueryOptions prepared [] target goal
+    typed <- expectShownRight $ inhabitTypedSynthesisResultPrepared
+        defaultQueryOptions prepared [] target goal
+    assertEqual "typed Core projection changed the complete legacy result"
+        legacy $ fmap SharedTypedCandidate.typedCandidateCompatibility typed
+    case SharedSearch.batchCandidates $ SharedQuery.resultSearch typed of
+        [] -> fail "typed Core identity produced no candidate"
+        candidate : _ -> assertEqual
+            "typed Core projection invented a source-typed graph"
+            (Left DjinnTermGraphSourceTypingContextUnavailable)
+            (SharedTypedCandidate.typedCandidateTermGraph candidate)
+
 testValidatedCandidateDeduplication :: IO ()
 testValidatedCandidateDeduplication = do
     target <- expectShownRight $ SharedGenerated.mkDefinitionName $
@@ -6916,6 +6946,38 @@ testValidatedCandidateSorting = do
             "expected two stable sidecars, got " ++
                 show (length stableCandidates)
 
+testValidatedCandidateFinalKeys :: IO ()
+testValidatedCandidateFinalKeys = do
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $
+        sharedName "finalCandidateKeys"
+    laterEvidence <- variableProofEvidence "laterKeyEvidence"
+    earlierEvidence <- variableProofEvidence "earlierKeyEvidence"
+    let laterClause = SharedGenerated.FunctionClause target [] $
+            SharedGenerated.Global $ sharedName "laterKeyOutput"
+        earlierClause = SharedGenerated.FunctionClause target [] $
+            SharedGenerated.Global $ sharedName "earlierKeyOutput"
+    later <- validatedCandidateForEvidence laterEvidence laterClause $
+        DjinnCandidateDetails 1 2
+    earlier <- validatedCandidateForEvidence earlierEvidence earlierClause $
+        DjinnCandidateDetails 0 0
+    let ranked = CheckedCandidate.sortValidatedCandidates [later, earlier]
+        validated = CheckedCandidate.mkValidatedResult
+            SharedQuery.ValidatedCandidates
+            SharedSearch.Finished
+            (DjinnQueryMetadata "candidate-key-formula" Nothing)
+            ranked
+        projected = CheckedCandidate.projectValidatedResultWith
+            (\key candidate ->
+                (key, CheckedCandidate.validatedCandidateOutput candidate))
+            validated
+            :: Either SharedQuery.QueryResultInvariantError
+                (SharedQuery.QueryResult DjinnQueryMetadata
+                    (Natural, SharedGenerated.FunctionClause String))
+    result <- expectShownRight projected
+    assertEqual "final candidate keys were not allocated after ranking"
+        [(0, earlierClause), (1, laterClause)] $
+        SharedSearch.batchCandidates $ SharedQuery.resultSearch result
+
 testValidatedCandidateProjectionLaziness :: IO ()
 testValidatedCandidateProjectionLaziness = do
     target <- expectShownRight $ SharedGenerated.mkDefinitionName $
@@ -6951,6 +7013,47 @@ testValidatedCandidateProjectionLaziness = do
             assertEqual "lazy projection changed candidate details"
                 details $ SharedCandidate.candidateDetails publicCandidate
         [] -> fail "lazy sidecar projection produced no public candidate"
+
+testValidatedTypedProjectionLaziness :: IO ()
+testValidatedTypedProjectionLaziness = do
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $
+        sharedName "lazyTypedSidecarProjection"
+    let clause = SharedGenerated.FunctionClause target
+            [SharedGenerated.Bind "argument"] $
+            SharedGenerated.Local "argument"
+        details = DjinnCandidateDetails 0 1
+        poisonedEvidence = error $
+            "typed projection forced checked proof evidence"
+    checked <- expectRight $ CheckedCandidate.checkCandidateProofWith
+        (\() -> Right poisonedEvidence) ()
+    candidate <- expectRight $ CheckedCandidate.convertCheckedCandidate
+        (\() -> Right clause)
+        (const details)
+        checked
+    let validated = CheckedCandidate.mkValidatedResult
+            SharedQuery.ValidatedCandidates
+            SharedSearch.Finished
+            (DjinnQueryMetadata "lazy-typed-formula" Nothing)
+            (candidate : error "typed projection forced the candidate tail")
+        projected = CheckedCandidate.projectValidatedResultWith
+            (\_ retained ->
+                ( CheckedCandidate.validatedCandidateOutput retained
+                , Left DjinnTermGraphSourceTypingContextUnavailable
+                    :: Either DjinnTermGraphAbsence ()
+                ))
+            validated
+            :: Either SharedQuery.QueryResultInvariantError
+                (SharedQuery.QueryResult DjinnQueryMetadata
+                    (SharedGenerated.FunctionClause String,
+                     Either DjinnTermGraphAbsence ()))
+    result <- expectShownRight projected
+    case SharedSearch.batchCandidates $ SharedQuery.resultSearch result of
+        (actualClause, graph) : _ -> do
+            assertEqual "typed lazy projection changed compatibility output"
+                clause actualClause
+            assertEqual "typed lazy projection changed graph absence"
+                (Left DjinnTermGraphSourceTypingContextUnavailable) graph
+        [] -> fail "lazy typed sidecar projection produced no candidate"
 
 testValidatedRankNProductionEvidence :: IO ()
 testValidatedRankNProductionEvidence = do

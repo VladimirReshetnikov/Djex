@@ -35,11 +35,20 @@ module Language.Haskell.Djex.Djinn
 
     -- * Results
   , DjinnCandidate
+  , DjinnTypedCandidate
+  , DjinnTermGraphTypeVariable
+  , DjinnTermGraphType
+  , DjinnTermGraphAbsence (..)
   , DjinnCandidateDetails (..)
   , Qualification (..)
   , RenderError (..)
   , DjinnQueryMetadata (..)
   , DjinnResult
+  , DjinnTypedResult
+  , runDjinnTypedQuery
+  , runDjinnTypedQueryWithInstantiationCandidates
+  , runDjinnTypedQueryWithInstantiationAssignments
+  , runDjinnTypedQueryWithKindedInstantiationAssignments
   , runDjinnQuery
   , runDjinnQueryWithInstantiationCandidates
   , runDjinnQueryWithInstantiationAssignments
@@ -51,9 +60,14 @@ module Language.Haskell.Djex.Djinn
 import Djinn.Core
   ( DjinnCandidateDetails (..)
   , DjinnCandidate
+  , DjinnTermGraphAbsence (..)
+  , DjinnTermGraphType
+  , DjinnTermGraphTypeVariable
+  , DjinnTypedCandidate
   , DjinnQueryError (..)
   , DjinnQueryMetadata (..)
   , DjinnResult
+  , DjinnTypedResult
   )
 import qualified Djinn.Core as Core
 import Language.Haskell.Djex.Djinn.Internal.Request
@@ -110,6 +124,8 @@ import Language.Haskell.Synthesis.Query
   , resultSearch
   , withRequestProvenance
   )
+import Language.Haskell.Synthesis.TypedCandidate
+  ( typedCandidateCompatibility )
 
 -- | Parse the type portion of a Djinn query.  The accepted context grammar is
 -- exactly the historical one: either one constraint or a comma-separated
@@ -163,54 +179,97 @@ parseDjinnRequestWithCheckedTarget _session options checkedTarget
         }
   Request.mkDjinnRequestWithProvenance provenance query
 
--- | Run one complete configured Djinn search and package it into a single
--- terminal shared batch.  Logical evidence stays independent of operational
--- completion: a validated candidate found before a budget expires remains a
--- candidate, while an empty truncated search remains undecided.
-runDjinnQuery
+-- | Run one complete configured Djinn search while retaining the canonical
+-- typed-candidate association.  Logical evidence stays independent of
+-- operational completion and graph availability.
+runDjinnTypedQuery
   :: DjinnSession
   -> DjinnRequest
-  -> Either Diagnostic DjinnResult
-runDjinnQuery session =
-  runDjinnQueryWithInstantiationCandidates session []
+  -> Either Diagnostic DjinnTypedResult
+runDjinnTypedQuery session =
+  runDjinnTypedQueryWithInstantiationCandidates session []
 
 -- | Run one checked Djinn search with externally established type choices for
 -- exact named providers. Ordinary request validation retains precedence; the
 -- evidence list is then bounded, elaborated, kind-checked, and kept
 -- provider-local against this exact session before it can add a separate
 -- proof-producing search tail.
+runDjinnTypedQueryWithInstantiationCandidates
+  :: DjinnSession
+  -> [ProviderInstantiationCandidate DjinnTypeVariable]
+  -> DjinnRequest
+  -> Either Diagnostic DjinnTypedResult
+runDjinnTypedQueryWithInstantiationCandidates session candidates =
+  runDjinnTypedQueryWithProviderEvidence session $
+    CandidateEvidence candidates
+
+-- | Run one checked Djinn search with complete ordered leading-forall
+-- assignments established for exact named providers.  Each assignment vector
+-- is bounded, elaborated, and checked against its provider's exact arity, then
+-- supplied directly to proof search without Cartesian reconstruction.
+runDjinnTypedQueryWithInstantiationAssignments
+  :: DjinnSession
+  -> [ProviderInstantiationAssignment DjinnTypeVariable]
+  -> DjinnRequest
+  -> Either Diagnostic DjinnTypedResult
+runDjinnTypedQueryWithInstantiationAssignments session assignments =
+  runDjinnTypedQueryWithProviderEvidence session $
+    AssignmentEvidence assignments
+
+-- | Run one checked Djinn search with complete ordered assignments and the
+-- exact ground kind of every leading provider binder. The supplied kind vector
+-- is validated against the retained provider body, so it can refine a vacuous
+-- binder without weakening any inferred non-vacuous constraint.
+runDjinnTypedQueryWithKindedInstantiationAssignments
+  :: DjinnSession
+  -> [KindedProviderInstantiationAssignment DjinnTypeVariable]
+  -> DjinnRequest
+  -> Either Diagnostic DjinnTypedResult
+runDjinnTypedQueryWithKindedInstantiationAssignments session assignments =
+  runDjinnTypedQueryWithProviderEvidence session $
+    KindedAssignmentEvidence assignments
+
+-- | Compatibility projection of 'runDjinnTypedQuery'.  Mapping does not
+-- inspect typed-graph availability or checked proof evidence.
+runDjinnQuery
+  :: DjinnSession
+  -> DjinnRequest
+  -> Either Diagnostic DjinnResult
+runDjinnQuery session = fmap (fmap typedCandidateCompatibility)
+  . runDjinnTypedQuery session
+
+-- | Compatibility projection of
+-- 'runDjinnTypedQueryWithInstantiationCandidates'.
 runDjinnQueryWithInstantiationCandidates
   :: DjinnSession
   -> [ProviderInstantiationCandidate DjinnTypeVariable]
   -> DjinnRequest
   -> Either Diagnostic DjinnResult
 runDjinnQueryWithInstantiationCandidates session candidates =
-  runDjinnQueryWithProviderEvidence session $ CandidateEvidence candidates
+  fmap (fmap typedCandidateCompatibility)
+    . runDjinnTypedQueryWithInstantiationCandidates session candidates
 
--- | Run one checked Djinn search with complete ordered leading-forall
--- assignments established for exact named providers.  Each assignment vector
--- is bounded, elaborated, and checked against its provider's exact arity, then
--- supplied directly to proof search without Cartesian reconstruction.
+-- | Compatibility projection of
+-- 'runDjinnTypedQueryWithInstantiationAssignments'.
 runDjinnQueryWithInstantiationAssignments
   :: DjinnSession
   -> [ProviderInstantiationAssignment DjinnTypeVariable]
   -> DjinnRequest
   -> Either Diagnostic DjinnResult
 runDjinnQueryWithInstantiationAssignments session assignments =
-  runDjinnQueryWithProviderEvidence session $ AssignmentEvidence assignments
+  fmap (fmap typedCandidateCompatibility)
+    . runDjinnTypedQueryWithInstantiationAssignments session assignments
 
--- | Run one checked Djinn search with complete ordered assignments and the
--- exact ground kind of every leading provider binder. The supplied kind vector
--- is validated against the retained provider body, so it can refine a vacuous
--- binder without weakening any inferred non-vacuous constraint.
+-- | Compatibility projection of
+-- 'runDjinnTypedQueryWithKindedInstantiationAssignments'.
 runDjinnQueryWithKindedInstantiationAssignments
   :: DjinnSession
   -> [KindedProviderInstantiationAssignment DjinnTypeVariable]
   -> DjinnRequest
   -> Either Diagnostic DjinnResult
 runDjinnQueryWithKindedInstantiationAssignments session assignments =
-  runDjinnQueryWithProviderEvidence session $
-    KindedAssignmentEvidence assignments
+  fmap (fmap typedCandidateCompatibility)
+    . runDjinnTypedQueryWithKindedInstantiationAssignments session assignments
 
 data DjinnProviderEvidence
   = CandidateEvidence
@@ -220,18 +279,18 @@ data DjinnProviderEvidence
   | KindedAssignmentEvidence
       [KindedProviderInstantiationAssignment DjinnTypeVariable]
 
-runDjinnQueryWithProviderEvidence
+runDjinnTypedQueryWithProviderEvidence
   :: DjinnSession
   -> DjinnProviderEvidence
   -> DjinnRequest
-  -> Either Diagnostic DjinnResult
-runDjinnQueryWithProviderEvidence session evidence request = do
+  -> Either Diagnostic DjinnTypedResult
+runDjinnTypedQueryWithProviderEvidence session evidence request = do
   let query = djinnRequestQuery request
   (contexts, goal) <- Request.prepareDjinnRequest
     (Session.sessionClassArity session) request
   let execute = case evidence of
         CandidateEvidence candidates ->
-          Core.inhabitSynthesisResultPreparedWithInstantiationCandidates
+          Core.inhabitTypedSynthesisResultPreparedWithInstantiationCandidates
             (requestOptions query)
             (Session.sessionPreparedEnvironment session)
             contexts
@@ -239,7 +298,7 @@ runDjinnQueryWithProviderEvidence session evidence request = do
             (requestTarget query)
             goal
         AssignmentEvidence assignments ->
-          Core.inhabitSynthesisResultPreparedWithInstantiationAssignments
+          Core.inhabitTypedSynthesisResultPreparedWithInstantiationAssignments
             (requestOptions query)
             (Session.sessionPreparedEnvironment session)
             contexts
@@ -247,7 +306,7 @@ runDjinnQueryWithProviderEvidence session evidence request = do
             (requestTarget query)
             goal
         KindedAssignmentEvidence assignments ->
-          Core.inhabitSynthesisResultPreparedWithKindedInstantiationAssignments
+          Core.inhabitTypedSynthesisResultPreparedWithKindedInstantiationAssignments
             (requestOptions query)
             (Session.sessionPreparedEnvironment session)
             contexts

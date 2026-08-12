@@ -719,7 +719,6 @@ lengthSMTLibQueryRunStderrEnd
 data PreparedLengthSMTLibQueryRun identity local =
   PreparedLengthSMTLibQueryRun
     !Natural
-    !Word64
     !ByteString
     !ByteString
     !(LengthSMTLibProtocolPlan identity local)
@@ -771,7 +770,7 @@ runLengthSMTLibReadyWorkerQuery evaluationLimits worker query =
         | mustSpend -> spendLengthSMTLibQueryWorker worker failure
         | otherwise -> pure $ queryRunLeft failure
       Right preparation@(PreparedLengthSMTLibQueryRun
-          ordinal _ checkBarrier valueBarrier _ _ _) -> do
+          ordinal checkBarrier valueBarrier _ _ _) -> do
         reserved <- reserveLengthSMTLibQueryOrdinal
           worker maximumQueries ordinal checkBarrier valueBarrier
         case reserved of
@@ -941,11 +940,11 @@ prepareLengthSMTLibQueryRun evaluationLimits worker query deadline = do
                   remaining required)
               else case admitLengthSMTLibQueryRunIdentity
                   runIdentityLimit protocolLimits processLimits worker plan
-                  evaluationLimits ordinalWord deadline
+                  evaluationLimits ordinal deadline
                   checkBarrier valueBarrier of
                 Left failure -> pure $ Left (False, failure)
                 Right () -> pure $ Right $ PreparedLengthSMTLibQueryRun
-                  ordinal ordinalWord checkBarrier valueBarrier plan
+                  ordinal checkBarrier valueBarrier plan
                   stdoutStart stderrStart
 
 reserveLengthSMTLibQueryOrdinal
@@ -1032,7 +1031,7 @@ executePreparedLengthSMTLibQueryRun
         LengthSMTLibQueryRunFailure
         (LengthSMTLibQueryRun epoch identity local))
 executePreparedLengthSMTLibQueryRun evaluationLimits worker query deadline
-    (PreparedLengthSMTLibQueryRun ordinal ordinalWord checkBarrier valueBarrier
+    (PreparedLengthSMTLibQueryRun ordinal checkBarrier valueBarrier
       plan stdoutStart stderrStart) = do
   driven <- driveProtocolQuery worker deadline plan
   case driven of
@@ -1064,7 +1063,7 @@ executePreparedLengthSMTLibQueryRun evaluationLimits worker query deadline
                           $ LengthSMTLibQueryStderrAccountingMismatch
                               stderrStart stderrCommitted
                       | otherwise -> case buildLengthSMTLibQueryRunIdentity
-                          worker plan evaluationLimits ordinalWord deadline
+                          worker plan evaluationLimits ordinal deadline
                           checkBarrier valueBarrier decoded evidence transcript
                           stdoutStart stdoutCommitted stderrStart stderrCommitted of
                         Left failure -> pure $ Left failure
@@ -1203,7 +1202,7 @@ buildLengthSMTLibQueryRunIdentity
   :: LengthSMTLibReadyWorker epoch
   -> LengthSMTLibProtocolPlan identity local
   -> LengthEvaluationLimits
-  -> Word64
+  -> Natural
   -> LengthSMTLibProcessDeadline
   -> ByteString
   -> ByteString
@@ -1250,7 +1249,7 @@ admitLengthSMTLibQueryRunIdentity
   -> LengthSMTLibReadyWorker epoch
   -> LengthSMTLibProtocolPlan identity local
   -> LengthEvaluationLimits
-  -> Word64
+  -> Natural
   -> LengthSMTLibProcessDeadline
   -> ByteString
   -> ByteString
@@ -1287,7 +1286,7 @@ queryRunFingerprintRole = ascii
 queryRunIdentityPrefixFields
   :: LengthSMTLibReadyWorker epoch
   -> LengthSMTLibProtocolPlan identity local
-  -> Word64
+  -> Natural
   -> LengthSMTLibProcessDeadline
   -> ByteString
   -> ByteString
@@ -1307,8 +1306,8 @@ queryRunIdentityPrefixFields worker plan ordinal deadline
       [ FingerprintBytes lengthSMTLibQueryBarrierSchemaTag
       , FingerprintBytes $ ascii
           "zero-based-u64be/reserve-both-roles/burn-on-live-failure/v1"
-      , FingerprintNatural $ fromIntegral ordinal
-      , FingerprintBytes $ BS.unpack $ encodeWord64BE ordinal
+      , FingerprintNatural ordinal
+      , FingerprintBytes $ BS.unpack $ encodeWord64BE ordinalWord
       , tagged "check-role-spent-marker"
           [FingerprintBytes $ BS.unpack checkBarrier]
       , tagged "input-value-role-spent-marker"
@@ -1322,6 +1321,11 @@ queryRunIdentityPrefixFields worker plan ordinal deadline
       ]
   , lengthSMTLibProcessDeadlineFingerprintField deadline
   ]
+ where
+  -- Session-limit admission proves every runnable ordinal fits the chosen
+  -- wire representation. Keep the Natural lease ordinal authoritative and
+  -- derive its fixed-width encoding only at this identity edge.
+  ordinalWord = fromIntegral ordinal
 
 queryRunTranscriptField
   :: LengthSMTLibCausalTranscript LengthSMTLibProtocolWriteKind

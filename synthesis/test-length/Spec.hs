@@ -5,7 +5,7 @@ import qualified Crypto.Hash.SHA256 as SHA256
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import Data.List (intercalate, isInfixOf, nub, sort)
-import Data.Word (Word8)
+import Data.Word (Word64, Word8)
 import Numeric.Natural (Natural)
 import qualified System.Info as SystemInfo
 import System.Timeout (timeout)
@@ -105,7 +105,9 @@ lengthTests = testGroup "finite-list-spine-length/v1"
 
 smtLibLiveQueryTests :: TestTree
 smtLibLiveQueryTests = testGroup "Length SMT-LIB live queries"
-  [ testCase "run sequential unary values with ordinals, identity, and replay"
+  [ testCase "admit the exact Word64 ordinal boundary"
+      assertLiveQueryOrdinalBoundary
+  , testCase "run sequential unary values with ordinals, identity, and replay"
       assertLiveSequentialUnaryQueries
   , testGroup "status and artifact branches"
       [ testCase "status-only satisfiable omits values"
@@ -130,6 +132,26 @@ smtLibLiveQueryTests = testGroup "Length SMT-LIB live queries"
   , testCase "admit exactly maximum queries and reject maximum plus one"
       assertLiveQueryMaximum
   ]
+
+assertLiveQueryOrdinalBoundary :: IO ()
+assertLiveQueryOrdinalBoundary = do
+  let maximumOrdinal = fromIntegral (maxBound :: Word64)
+      source = SMTLibSession.defaultLengthSMTLibSessionLimitSource
+        { SMTLibSession.lengthSMTLibSessionLimitSourceMaximumQueries =
+            maximumOrdinal
+        }
+  _ <- expectRight $ SMTLibSession.mkLengthSMTLibSessionLimits source
+  case SMTLibSession.mkLengthSMTLibSessionLimits
+      (source
+        { SMTLibSession.lengthSMTLibSessionLimitSourceMaximumQueries =
+            maximumOrdinal + 1
+        }) of
+    Left (SMTLibSession.LengthSMTLibSessionLimitConversionOverflow
+      SMTLibSession.LengthSMTLibSessionMaximumQueries observed) ->
+      observed @?= maximumOrdinal + 1
+    Left failure -> assertFailure $
+      "unexpected ordinal-bound rejection: " ++ show failure
+    Right _ -> assertFailure "maximum plus one entered the Word64 ordinal"
 
 smtLibLiveFacadeTests :: TestTree
 smtLibLiveFacadeTests = testGroup "public Length SMT-LIB live facade"

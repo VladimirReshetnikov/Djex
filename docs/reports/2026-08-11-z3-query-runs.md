@@ -68,8 +68,11 @@ query-barrier-schema || role-byte || ordinal-u64be
 Both check and input-value roles are derived, checked against the bounded
 session-wide marker set, and reserved even when the particular branch will not
 request values. Maximum query count is validated against the chosen `Word64`
-ordinal representation. Exhaustion is derived from the next ordinal and that
-fixed maximum instead of being stored as a parallel lease mode. Plan
+wire representation. The prepared transaction retains only the authoritative
+`Natural` lease ordinal; its `Word64` form is transiently derived at the HMAC
+and run-identity encoding edges rather than cached beside it. Exhaustion is
+derived from the next ordinal and that fixed maximum instead of being stored as
+a parallel lease mode. Plan
 construction, remaining transport capacity, and run-identity capacity are
 checked before reservation. Once reserved, an ordinal and both markers are
 burned on every outcome.
@@ -153,8 +156,10 @@ The compiled fake worker now supports healthy ordered input models, `unsat`,
 the four-stage capability probe exact. Query events record zero-based ordinals
 and whether `get-value` was actually written.
 
-The Length suite has 159 passing tests. Ten live-query cases cover:
+The Length suite has 173 passing tests. Eleven live-query cases cover:
 
+- exact admission of the `Word64` ordinal boundary and rejection at maximum
+  plus one;
 - two sequential satisfiable model runs with distinct ordinals and identities;
 - status-only `sat`, values-policy `unsat` and `unknown`;
 - vacuous zero-input and ordered binary assignments;

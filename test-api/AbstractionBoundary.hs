@@ -118,10 +118,10 @@ import Language.Haskell.TH (lookupValueName)
 -- makes an ordinary deferred term probe a hard namespace error.  Ask the value
 -- namespace directly instead.  The same check pins private observation
 -- projections whose public visibility would bypass the checked replay gate,
--- plus retired candidate-problem failures that could arise only by resealing
--- the session's own provider inventory. Any hit means downstream code can name
--- an intentionally unavailable edge and the API-test component must stop
--- compiling.
+-- plus retired candidate-problem failures that attempted to reconstruct or
+-- rediscover authority already carried by opaque checked values. Any hit means
+-- downstream code can name an intentionally unavailable edge and the API-test
+-- component must stop compiling.
 $(do
     let hiddenValues =
           [ "LengthSMTLibLiveSession"
@@ -134,6 +134,7 @@ $(do
           , "lengthSMTLibLiveQueryObservationCounterexampleEvidence"
           , "LengthProblemProviderResealRejected"
           , "LengthProblemProviderContextMismatch"
+          , "LengthProblemUsedProviderMissing"
           ]
     resolved <- mapM lookupValueName hiddenValues
     case [name | (name, Just _) <- zip hiddenValues resolved] of

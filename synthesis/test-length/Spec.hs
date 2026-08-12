@@ -1122,6 +1122,92 @@ candidateProblemTests = testGroup "typed candidate behavioral problems"
           (Length.LengthVariable $ Length.LengthInput 0)
       LengthProblem.checkedLengthCandidateUsedProviders checkedCandidate @?=
         [providerName]
+  , testCase "retain used provider laws in canonical name order" $ do
+      earlierName <- expectName "Fixture.alphaUsedProvider"
+      laterName <- expectName "Fixture.omegaUsedProvider"
+      let target = FunctionType adversarialClosedList adversarialClosedList
+          provider name factor = Length.AssumedProviderSummary
+            { Length.lengthProviderName = name
+            , Length.lengthProviderScheme = target
+            , Length.lengthProviderArgumentRoles =
+                [Length.LengthSpineArgument]
+            , Length.lengthProviderTransfer = Length.LengthScale factor
+                $ Length.LengthVariable $ Length.LengthProviderArgument 0
+            }
+          earlier = provider earlierName 2
+          later = provider laterName 3
+          declaration name = ValueDeclaration
+            $ ValueSignature () name target
+          compositionSource outer inner =
+            Djex.TermGraphSource (Djex.termNodeId 5)
+              [ ( Djex.termNodeId 0
+                , Djex.TermNode target
+                    $ Djex.TypedGlobal (Djex.occurrenceId 0) outer
+                )
+              , ( Djex.termNodeId 1
+                , Djex.TermNode target
+                    $ Djex.TypedGlobal (Djex.occurrenceId 1) inner
+                )
+              , ( Djex.termNodeId 2
+                , Djex.TermNode adversarialClosedList
+                    $ Djex.TypedLocal (Djex.occurrenceId 2) 0
+                )
+              , ( Djex.termNodeId 3
+                , Djex.TermNode adversarialClosedList
+                    $ Djex.TypedApply
+                        (Djex.termNodeId 1)
+                        (Djex.termNodeId 2)
+                        (Djex.ApplicationWitness
+                          adversarialClosedList adversarialClosedList)
+                )
+              , ( Djex.termNodeId 4
+                , Djex.TermNode adversarialClosedList
+                    $ Djex.TypedApply
+                        (Djex.termNodeId 0)
+                        (Djex.termNodeId 3)
+                        (Djex.ApplicationWitness
+                          adversarialClosedList adversarialClosedList)
+                )
+              , ( Djex.termNodeId 5
+                , Djex.TermNode target
+                    $ Djex.TypedLambda
+                        [ Djex.TypedPattern
+                            (Djex.occurrenceId 3)
+                            adversarialClosedList
+                            (Djex.TypedBind 0)
+                        ]
+                        (Djex.termNodeId 4)
+                )
+              ]
+      session <- adversarialLengthSession
+        [declaration laterName, declaration earlierName]
+        [later, earlier]
+      contract <- adversarialLengthContract
+        session target identityLengthContract
+      earlierThenLater <- sealAdversarialGraph
+        $ compositionSource laterName earlierName
+      laterThenEarlier <- sealAdversarialGraph
+        $ compositionSource earlierName laterName
+      first <- expectRight $ LengthProblem.sealLengthTypedCandidateProblem
+        LengthProblem.defaultLengthProblemLimits session contract
+        $ adversarialTypedCandidate $ Right earlierThenLater
+      second <- expectRight $ LengthProblem.sealLengthTypedCandidateProblem
+        LengthProblem.defaultLengthProblemLimits session contract
+        $ adversarialTypedCandidate $ Right laterThenEarlier
+      let firstCandidate = LengthProblem.checkedLengthProblemCandidate first
+          secondCandidate = LengthProblem.checkedLengthProblemCandidate second
+          canonicalNames = [earlierName, laterName]
+      LengthProblem.checkedLengthCandidateUsedProviders firstCandidate @?=
+        canonicalNames
+      LengthProblem.checkedLengthCandidateUsedProviders secondCandidate @?=
+        canonicalNames
+      LengthProblem.checkedLengthCandidateResult firstCandidate @?=
+        LengthProblem.checkedLengthCandidateResult secondCandidate
+      LengthProblem.checkedLengthProblemEncodingFingerprint first @?=
+        LengthProblem.checkedLengthProblemEncodingFingerprint second
+      assertBool "distinct provider compositions shared candidate identity" $
+        LengthProblem.checkedLengthCandidateFingerprint firstCandidate /=
+          LengthProblem.checkedLengthCandidateFingerprint secondCandidate
   , testCase "reject residual dictionaries before inspecting graph semantics" $ do
       className <- expectName "C"
       producerName <- expectName "Fixture.produceList"

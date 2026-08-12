@@ -291,7 +291,6 @@ data LengthProblemError failure identity local
   | LengthProblemTupleArityMismatch !OccurrenceId !Int !Int
   | LengthProblemEvaluationStepLimitExceeded !Int !Int
   | LengthProblemProviderTransferInvariant Name !Natural
-  | LengthProblemUsedProviderMissing Name
   | LengthProblemSyntaxRejected LengthSyntaxError
   | LengthProblemFingerprintLimitExceeded
       !LengthProblemFingerprintPart !Natural !Natural
@@ -488,12 +487,14 @@ sealLengthTypedCandidateProblem problemLimits session suppliedContract typed = d
         ]
   (condition, _) <- first LengthProblemSyntaxRejected
     $ normalizeLengthFormula limits checkCandidateVariable usage rawCondition
-  let usedProviderNames = Set.toAscList
-        $ evaluationUsedProviders evaluationState
-  usedProviders <- resolveUsedProviders providers usedProviderNames
+  let usedProvidersByName = evaluationUsedProviders evaluationState
+      usedProviderNames = materializeProviderNames usedProvidersByName
+  -- Preserve pre-fingerprint materialization without forcing name payloads.
+  usedProviderNames `seq` pure ()
   encodingFingerprint <- mapFingerprintFailure
     LengthConcreteEncodingFingerprint
-    $ buildConcreteEncodingFingerprint session contract usedProviders
+    $ buildConcreteEncodingFingerprint session contract
+        (Map.elems usedProvidersByName)
         result condition
   candidateFingerprint <- mapFingerprintFailure LengthCandidateFingerprint
     $ buildCandidateFingerprint session graphFingerprint
@@ -851,13 +852,26 @@ data SemanticValue identity local
       [SemanticThunk identity local]
   | SemanticStep !Int [SemanticThunk identity local]
 
-data EvaluationState = EvaluationState
+data EvaluationState identity = EvaluationState
   { evaluationSteps :: !Int
-  , evaluationUsedProviders :: !(Set Name)
+    -- Exact checked summaries reached by lazy evaluation, keyed canonically so
+    -- the same authority supplies both the public name receipt and fingerprint.
+  , evaluationUsedProviders ::
+      !(Map Name (CheckedLengthProviderSummary (Variable identity)))
   }
 
-emptyEvaluationState :: EvaluationState
-emptyEvaluationState = EvaluationState 0 Set.empty
+emptyEvaluationState :: EvaluationState identity
+emptyEvaluationState = EvaluationState 0 Map.empty
+
+-- Build an independent, fully materialized ascending name list. A lazy
+-- 'Map.keys' tail could otherwise keep the checked summaries reachable from a
+-- candidate receipt which promises to expose names only.
+materializeProviderNames
+  :: Map Name (CheckedLengthProviderSummary variable)
+  -> [Name]
+materializeProviderNames = reverse . Map.foldlWithKey' retain []
+ where
+  retain names name _ = name : names
 
 data InterpretationContext identity local annotation = InterpretationContext
   { interpretationSession :: !(CheckedLengthSession identity annotation)
@@ -867,7 +881,7 @@ data InterpretationContext identity local annotation = InterpretationContext
   , interpretationInputCount :: !Int
   }
 
-type Evaluation failure identity local = StateT EvaluationState
+type Evaluation failure identity local = StateT (EvaluationState identity)
   (Either (LengthProblemError failure identity local))
 
 interpretCompleteCandidate
@@ -1071,7 +1085,7 @@ interpretProvider context owner provider arguments = do
         emptySyntaxUsage raw
   state <- get
   put state
-    { evaluationUsedProviders = Set.insert name
+    { evaluationUsedProviders = Map.insert name provider
         $ evaluationUsedProviders state
     }
   pure $ SemanticSpine normalized
@@ -1174,18 +1188,6 @@ substituteResultFormula result = goFormula
       (goExpression left) (goExpression right)
     LengthNot formula -> LengthNot $ goFormula formula
     LengthAll formulas -> LengthAll $ map goFormula formulas
-
-resolveUsedProviders
-  :: CheckedLengthProviderInventory variable
-  -> [Name]
-  -> Either
-      (LengthProblemError failure identity local)
-      [CheckedLengthProviderSummary variable]
-resolveUsedProviders providers = mapM retain
- where
-  retain name = case lookupCheckedLengthProviderSummary name providers of
-    Nothing -> Left $ LengthProblemUsedProviderMissing name
-    Just provider -> Right provider
 
 mapFingerprintFailure
   :: LengthProblemFingerprintPart

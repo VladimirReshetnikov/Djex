@@ -274,9 +274,12 @@ free flexible variables are treated as implicit source quantifiers only at the
 root boundary; the engine's corresponding selections must be distinct rigid
 variables. Every provider occurrence is then matched capture-safely against
 its exact closed inventory scheme, and any free selected variable must be one
-of those authorized root rigids. Closed impredicative selections remain
-admissible. Every graph, pattern, application-witness, and visible-application
-type is kind-checked again under the session's exact inventory assumptions.
+of those authorized root rigids. The interpreter carries that exact checked
+summary through provider use and into the canonical used-law set; it does not
+discard the authority to a name and recover it later. Closed impredicative
+selections remain admissible. Every graph, pattern, application-witness, and
+visible-application type is kind-checked again under the session's exact
+inventory assumptions.
 A visible selection is checked at the kind inferred for the leading binder,
 so closed higher-kinded and impredicative selections remain legal while free
 flexibles, non-root rigids, and types from a foreign inventory fail closed.

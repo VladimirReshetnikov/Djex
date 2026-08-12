@@ -5,10 +5,12 @@
 --
 -- This module owns one capability-probed worker only for the dynamic extent of
 -- 'withLengthSMTLibLiveSession'.  Public callers can submit sealed queries and
--- inspect status, heuristic strength, exact query association, and independently
--- replayed counterexample evidence.  They cannot inspect or retain a process
--- handle, cancellation token, executable or workspace path, barrier, ordinal,
--- transcript, decoded valuation, transport counter, or reversible run identity.
+-- inspect status and heuristic strength, then consume exact query association
+-- and independently replayed counterexample evidence only through
+-- 'replayLengthSMTLibLiveQueryObservation'.  They cannot inspect or retain a
+-- process handle, cancellation token, executable or workspace path, barrier,
+-- ordinal, transcript, decoded valuation, transport counter, or reversible run
+-- identity.
 --
 -- Solver status remains an observation.  In particular, @unsat@ is relative to
 -- the checked encoding and every status is restricted to
@@ -39,11 +41,9 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live
   , withLengthSMTLibLiveSession
   , runLengthSMTLibLiveQuery
   , replayLengthSMTLibLiveQueryObservation
-  , lengthSMTLibLiveQueryObservationQueryFingerprint
   , lengthSMTLibLiveQueryObservationSolverStatus
   , lengthSMTLibLiveQueryObservationResultStrength
   , lengthSMTLibLiveQueryObservationUse
-  , lengthSMTLibLiveQueryObservationCounterexampleEvidence
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -193,8 +193,10 @@ instance NFData LengthSMTLibLiveObservationReplayError where
     LengthSMTLibLiveObservationEvidenceProblemMismatch mismatch ->
       rnf mismatch
 
--- | Safe projection of one completed query.  It freshly copies only public
--- association and authority fields instead of wrapping the private run.
+-- | Safe projection of one completed query.  It freshly copies only bounded
+-- association and authority fields instead of wrapping the private run.  The
+-- query fingerprint and optional evidence have no public projection; the
+-- replay gate below is their only public semantic extraction edge.
 data LengthSMTLibLiveQueryObservation epoch identity local =
   LengthSMTLibLiveQueryObservation
     !(Fingerprint LengthSMTLibQueryFingerprintSubject)
@@ -285,6 +287,9 @@ replayLengthSMTLibLiveQueryObservation query observation
         $ LengthSMTLibLiveObservationEvidenceProblemMismatch mismatch
       Right receipt -> Right $ Just receipt
 
+-- Private association projection used only by the checked replay gate.  It is
+-- intentionally not exported: callers cannot inspect a query key without also
+-- passing through evidence-consumption precedence.
 lengthSMTLibLiveQueryObservationQueryFingerprint
   :: LengthSMTLibLiveQueryObservation epoch identity local
   -> Fingerprint LengthSMTLibQueryFingerprintSubject
@@ -310,6 +315,9 @@ lengthSMTLibLiveQueryObservationUse
   -> RawObservationUse
 lengthSMTLibLiveQueryObservationUse _ = HeuristicRankingOnly
 
+-- Private evidence projection used only after exact query association has
+-- succeeded.  Keeping this selector separate preserves the gate's established
+-- demand order without exposing detached evidence to public callers.
 lengthSMTLibLiveQueryObservationCounterexampleEvidence
   :: LengthSMTLibLiveQueryObservation epoch identity local
   -> Maybe

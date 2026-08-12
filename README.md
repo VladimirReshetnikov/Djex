@@ -458,17 +458,20 @@ The exact design and threat boundary are recorded in the
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` is the deliberately
 narrow public edge over that owner. It lends an opaque worker only through a
-rank-N scope and projects from each successful query only its exact query
-fingerprint, three-valued status, heuristic strength/use, and optional
-independently replayed counterexample evidence. Process handles, cancellation,
-paths, executable observations, barriers, ordinals, decoded valuations,
-transcripts, transport counters, and reversible run identities remain private.
-`replayLengthSMTLibLiveQueryObservation` checks the exact query fingerprint
-before inspecting optional evidence, then replays that evidence against the
-query's retained behavioral problem. A successful `Nothing` remains only an
-exactly associated heuristic status. Public session and query execution
-failures are mapped to byte-free classes plus a cleanup-incomplete bit; the
-pure replay gate returns its own closed byte-free association error.
+rank-N scope. Each successful query observation internally retains its exact
+query fingerprint, three-valued status, heuristic strength, and optional
+independently replayed counterexample evidence, but public selectors expose
+only status, strength, and heuristic use. The fingerprint and evidence have no
+detached projection: `replayLengthSMTLibLiveQueryObservation` is their only
+public consumer. It checks the exact query fingerprint before inspecting
+optional evidence, then replays that evidence against the query's retained
+behavioral problem. A successful `Nothing` remains only an exactly associated
+heuristic status. Process handles, cancellation, paths, executable
+observations, barriers, ordinals, decoded valuations, transcripts, transport
+counters, and reversible run identities remain private. Public session and
+query execution failures are mapped to byte-free classes plus a
+cleanup-incomplete bit; the pure replay gate returns its own closed byte-free
+association error.
 Child-controlled payloads and operating-system details never cross the facade.
 The private session opener and configured per-query deadlines remain separate
 budgets rather than a claimed hard deadline for a caller-defined batch.

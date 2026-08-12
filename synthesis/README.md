@@ -287,10 +287,13 @@ still not a solver result, proof, pruning authority, or general Z3 feature
 claim. The next layer must drive individual query plans through the scoped
 worker and independently replay any model before evidence exists.
 
-The public live facade copies only safe association and authority fields out
-of each private run. `replayLengthSMTLibLiveQueryObservation` is the checked
-consumer edge: it compares the complete collision-free query key before it
-inspects optional evidence, then replays any retained evidence against the
+The public live facade copies only bounded association and authority fields out
+of each private run. Public selectors expose status, heuristic strength, and
+use, but not the retained query key or optional evidence.
+`replayLengthSMTLibLiveQueryObservation` is the sole checked semantic
+extraction edge for
+those hidden fields: it compares the complete collision-free query key before
+it inspects optional evidence, then replays any retained evidence against the
 exact `BehavioralProblem` owned by that query. A mismatched query therefore
 cannot make receipt replay observable, while a successful result without a
 receipt remains only an exactly associated heuristic status. The gate exposes

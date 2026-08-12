@@ -1,6 +1,6 @@
 module Main (main) where
 
-import Control.Exception (evaluate)
+import Control.Exception (SomeException, displayException, evaluate, try)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import Data.List (intercalate, isInfixOf, nub, sort)
@@ -133,6 +133,8 @@ smtLibLiveFacadeTests = testGroup "public Length SMT-LIB live facade"
   [ testCase
       "replay sequential evidence and reject a stale exact query first"
       assertLiveFacadeSequentialEvidence
+  , testCase "project the expected query before forcing the observation"
+      assertLiveFacadeReplayDemandPrecedence
   , testCase "report satisfiable status-only without evidence"
       assertLiveFacadeStatusOnlySatisfiable
   , testGroup "terminal heuristic observations"
@@ -185,20 +187,12 @@ assertLiveFacadeEvidence
   -> SMTLibLive.LengthSMTLibLiveQueryObservation epoch identity local
   -> IO ()
 assertLiveFacadeEvidence query expectedInputs observation = do
-  SMTLibLive.lengthSMTLibLiveQueryObservationQueryFingerprint observation @?=
-    SMTLib.lengthSMTLibQueryFingerprint query
   SMTLibLive.lengthSMTLibLiveQueryObservationSolverStatus observation @?=
     Observation.SolverSatisfiable
   SMTLibLive.lengthSMTLibLiveQueryObservationResultStrength observation @?=
     SemanticProblem.RawSolverModelHint
   SMTLibLive.lengthSMTLibLiveQueryObservationUse observation @?=
     SemanticProblem.HeuristicRankingOnly
-  case
-      SMTLibLive.lengthSMTLibLiveQueryObservationCounterexampleEvidence
-        observation of
-    Nothing -> assertFailure
-      "satisfiable public facade observation omitted replay evidence"
-    Just _ -> pure ()
   receipt <- case SMTLibLive.replayLengthSMTLibLiveQueryObservation
       query observation of
     Left failure -> assertFailure
@@ -222,6 +216,26 @@ assertLiveFacadeQueryMismatch query observation = case
     SMTLibLive.LengthSMTLibLiveObservationQueryFingerprintMismatch
   Right _ -> assertFailure
     "stale live observation replay unexpectedly succeeded"
+
+assertLiveFacadeReplayDemandPrecedence :: IO ()
+assertLiveFacadeReplayDemandPrecedence = do
+  let query :: SMTLib.LengthSMTLibQuery () ()
+      query = error "expected-query-demand"
+      observation :: SMTLibLive.LengthSMTLibLiveQueryObservation () () ()
+      observation = error "observation-demand"
+  attempted <- try $ evaluate
+    $ SMTLibLive.replayLengthSMTLibLiveQueryObservation query observation
+  case attempted :: Either SomeException
+      (Either SMTLibLive.LengthSMTLibLiveObservationReplayError
+        (Maybe Evaluate.ValidatedLengthCounterexample)) of
+    Left failure -> do
+      let message = displayException failure
+      assertBool "live replay forced the observation before the query"
+        $ "expected-query-demand" `isInfixOf` message
+      assertBool "live replay also forced the opaque observation"
+        $ not $ "observation-demand" `isInfixOf` message
+    Right _ -> assertFailure
+      "poisoned live replay unexpectedly produced a result"
 
 assertLiveFacadeStatusOnlySatisfiable :: IO ()
 assertLiveFacadeStatusOnlySatisfiable = do
@@ -272,19 +286,12 @@ assertLiveFacadeStatusObservation
   -> IO ()
 assertLiveFacadeStatusObservation query expectedStatus expectedStrength
     observation = do
-  SMTLibLive.lengthSMTLibLiveQueryObservationQueryFingerprint observation @?=
-    SMTLib.lengthSMTLibQueryFingerprint query
   SMTLibLive.lengthSMTLibLiveQueryObservationSolverStatus observation @?=
     expectedStatus
   SMTLibLive.lengthSMTLibLiveQueryObservationResultStrength observation @?=
     expectedStrength
   SMTLibLive.lengthSMTLibLiveQueryObservationUse observation @?=
     SemanticProblem.HeuristicRankingOnly
-  case SMTLibLive.lengthSMTLibLiveQueryObservationCounterexampleEvidence
-      observation of
-    Nothing -> pure ()
-    Just _ -> assertFailure
-      "status-only public facade observation retained replay evidence"
   case SMTLibLive.replayLengthSMTLibLiveQueryObservation query observation of
     Left failure -> assertFailure
       $ "matching status-only observation replay failed: " ++ show failure

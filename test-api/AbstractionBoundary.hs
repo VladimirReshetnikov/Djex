@@ -116,19 +116,23 @@ import Language.Haskell.TH (lookupValueName)
 
 -- Importing an abstract type with the same spelling as its hidden constructor
 -- makes an ordinary deferred term probe a hard namespace error.  Ask the value
--- namespace directly instead: any hit means downstream code can name a
--- representation constructor and the API-test component must stop compiling.
+-- namespace directly instead.  The same check pins private observation
+-- projections whose public visibility would bypass the checked replay gate:
+-- any hit means downstream code can name a representation internal and the
+-- API-test component must stop compiling.
 $(do
-    let constructors =
+    let hiddenValues =
           [ "LengthSMTLibLiveSession"
           , "LengthSMTLibLiveQueryObservation"
           , "LengthSMTLibLiveSessionError"
           , "LengthSMTLibLiveQueryError"
+          , "lengthSMTLibLiveQueryObservationQueryFingerprint"
+          , "lengthSMTLibLiveQueryObservationCounterexampleEvidence"
           ]
-    resolved <- mapM lookupValueName constructors
-    case [name | (name, Just _) <- zip constructors resolved] of
+    resolved <- mapM lookupValueName hiddenValues
+    case [name | (name, Just _) <- zip hiddenValues resolved] of
       [] -> pure []
-      visible -> fail $ "public live representation constructors: " ++ show visible
+      visible -> fail $ "public live representation internals: " ++ show visible
  )
 
 data FingerprintProbe
@@ -1279,9 +1283,7 @@ selectorNamesInScope =
   lengthSMTLibLiveSessionCleanupIncomplete `seq`
   lengthSMTLibLiveQueryPrimaryFailure `seq`
   lengthSMTLibLiveQueryCleanupIncomplete `seq`
-  lengthSMTLibLiveQueryObservationQueryFingerprint `seq`
   lengthSMTLibLiveQueryObservationSolverStatus `seq`
   lengthSMTLibLiveQueryObservationResultStrength `seq`
   lengthSMTLibLiveQueryObservationUse `seq`
-  lengthSMTLibLiveQueryObservationCounterexampleEvidence `seq`
   ()

@@ -130,12 +130,6 @@ facadeTests = testGroup "public Djex facade"
             :: LengthSMTLibLiveQueryError
             -> Bool
           queryCleanupProjection = lengthSMTLibLiveQueryCleanupIncomplete
-          queryFingerprintProjection
-            :: LengthSMTLibLiveQueryObservation
-                FacadeLiveEpoch FacadeLiveIdentity FacadeLiveLocal
-            -> Fingerprint LengthSMTLibQueryFingerprintSubject
-          queryFingerprintProjection =
-            lengthSMTLibLiveQueryObservationQueryFingerprint
           solverStatusProjection
             :: LengthSMTLibLiveQueryObservation
                 FacadeLiveEpoch FacadeLiveIdentity FacadeLiveLocal
@@ -153,15 +147,6 @@ facadeTests = testGroup "public Djex facade"
                 FacadeLiveEpoch FacadeLiveIdentity FacadeLiveLocal
             -> RawObservationUse
           observationUseProjection = lengthSMTLibLiveQueryObservationUse
-          evidenceProjection
-            :: LengthSMTLibLiveQueryObservation
-                FacadeLiveEpoch FacadeLiveIdentity FacadeLiveLocal
-            -> Maybe
-                (BehavioralEvidence
-                  FiniteListSpineLengthV1
-                  ValidatedLengthCounterexample)
-          evidenceProjection =
-            lengthSMTLibLiveQueryObservationCounterexampleEvidence
           sessionErrorEq =
             ((==) :: LengthSMTLibLiveSessionError
               -> LengthSMTLibLiveSessionError -> Bool)
@@ -190,9 +175,9 @@ facadeTests = testGroup "public Djex facade"
         observationReplay `seq`
         sessionCleanupProjection `seq`
         queryFailureProjection `seq` queryCleanupProjection `seq`
-        queryFingerprintProjection `seq` solverStatusProjection `seq`
+        solverStatusProjection `seq`
         resultStrengthProjection `seq` observationUseProjection `seq`
-        evidenceProjection `seq` sessionErrorEq `seq` sessionErrorOrd `seq`
+        sessionErrorEq `seq` sessionErrorOrd `seq`
         sessionErrorShow `seq` queryErrorEq `seq` queryErrorOrd `seq`
         queryErrorShow `seq` replayErrorEq `seq` replayErrorOrd `seq`
         replayErrorShow `seq`

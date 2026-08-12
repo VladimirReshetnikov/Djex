@@ -61,8 +61,11 @@ A successful public query observation freshly copies only:
   ValidatedLengthCounterexample`.
 
 The observation has nominal epoch, identity, and local roles and supports
-`NFData` only. It has no equality, ordering, rendering, generic representation,
-or raw payload projection.
+`NFData` only. Public selectors expose status, strength, and heuristic use. The
+retained query fingerprint and optional evidence have no public projection and
+can be consumed only together through the replay gate. The observation has no
+equality, ordering, rendering, generic representation, or raw payload
+projection.
 
 Every solver status remains forgeable heuristic input. In particular, `unsat`
 is relative to this bounded encoding, not a solver certificate or proof, and it

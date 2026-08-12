@@ -295,13 +295,15 @@ bounds the normalized result and the counterexample condition
 `precondition && not postcondition[result := interpretedResult]`.
 
 A successful `CheckedLengthProblem` carries its source-ordered input arity,
-separate inventory, concrete encoding, candidate, and complete problem
-fingerprints, plus the generic `BehavioralProblem` envelope. The concrete
-encoding identifies the re-sealed contract, normalized result and
-counterexample condition, interpreter policy, and exactly the provider laws
-actually used. The candidate key wraps the fresh shared graph identity and
-explicitly describes candidate-only authority; it does not pretend to retain
-batch completion status.
+normalized replay formulas, interpreted candidate, and one generic
+`BehavioralProblem` envelope. That envelope is the sole field of the checked
+problem which retains the inventory, concrete encoding, and complete problem
+fingerprints; it also binds the candidate fingerprint retained by the
+interpreted candidate receipt. The concrete encoding identifies the re-sealed
+contract, normalized result and counterexample condition, interpreter policy,
+and exactly the provider laws actually used. The candidate key wraps the fresh
+shared graph identity and explicitly describes candidate-only authority; it
+does not pretend to retain batch completion status.
 
 Contract arguments and results must expose the context's outer modeled spine;
 their element types remain opaque and may themselves be impredicative. A

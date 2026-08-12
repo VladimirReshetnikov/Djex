@@ -131,6 +131,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Problem
   , CandidateFingerprintSubject
   , EncodingFingerprintSubject
   , ProblemFingerprintSubject
+  , behavioralProblemEncodingFingerprint
   , mkBehavioralProblem
   )
 import Language.Haskell.Synthesis.Inventory
@@ -324,17 +325,16 @@ data CheckedLengthProblem identity local = CheckedLengthProblem
   !(LengthFormula LengthContractVariable)
   !(LengthFormula LengthContractVariable)
   !(LengthFormula LengthContractVariable)
-  !(Fingerprint
-      (EncodingFingerprintSubject FiniteListSpineLengthV1))
   !(BehavioralProblem FiniteListSpineLengthV1)
 
 type role CheckedLengthProblem nominal nominal
 
 instance NFData (CheckedLengthProblem identity local) where
   rnf (CheckedLengthProblem candidate inputCount precondition postcondition
-      condition encoding problem) =
+      condition problem) =
     rnf candidate `seq` rnf inputCount `seq` rnf precondition `seq`
-    rnf postcondition `seq` rnf condition `seq` rnf encoding `seq` rnf problem
+    rnf postcondition `seq` rnf condition `seq`
+    rnf (behavioralProblemEncodingFingerprint problem) `seq` rnf problem
 
 -- | Normalized symbolic length computed for the candidate result.
 checkedLengthCandidateResult
@@ -368,7 +368,7 @@ checkedLengthProblemCandidate
   :: CheckedLengthProblem identity local
   -> CheckedLengthCandidate identity local
 checkedLengthProblemCandidate
-    (CheckedLengthProblem candidate _ _ _ _ _ _) = candidate
+    (CheckedLengthProblem candidate _ _ _ _ _) = candidate
 
 -- | Number of source-ordered natural inputs admitted by the sealed contract.
 --
@@ -379,7 +379,7 @@ checkedLengthProblemInputCount
   :: CheckedLengthProblem identity local
   -> Int
 checkedLengthProblemInputCount
-    (CheckedLengthProblem _ inputCount _ _ _ _ _) =
+    (CheckedLengthProblem _ inputCount _ _ _ _) =
   inputCount
 
 -- | Normalized contract precondition retained for ordered concrete replay.
@@ -387,7 +387,7 @@ checkedLengthProblemPrecondition
   :: CheckedLengthProblem identity local
   -> LengthFormula LengthContractVariable
 checkedLengthProblemPrecondition
-    (CheckedLengthProblem _ _ precondition _ _ _ _) = precondition
+    (CheckedLengthProblem _ _ precondition _ _ _) = precondition
 
 -- | Normalized contract postcondition before candidate-result substitution.
 -- Concrete replay evaluates this only after the precondition succeeds and
@@ -396,14 +396,14 @@ checkedLengthProblemPostcondition
   :: CheckedLengthProblem identity local
   -> LengthFormula LengthContractVariable
 checkedLengthProblemPostcondition
-    (CheckedLengthProblem _ _ _ postcondition _ _ _) = postcondition
+    (CheckedLengthProblem _ _ _ postcondition _ _) = postcondition
 
 -- | Solver-neutral bad-state formula: precondition and negated postcondition.
 checkedLengthProblemCounterexampleCondition
   :: CheckedLengthProblem identity local
   -> LengthFormula LengthContractVariable
 checkedLengthProblemCounterexampleCondition
-    (CheckedLengthProblem _ _ _ _ condition _ _) = condition
+    (CheckedLengthProblem _ _ _ _ condition _) = condition
 
 -- | Concrete identity of contract, policy, used laws, result, and bad state.
 checkedLengthProblemEncodingFingerprint
@@ -411,14 +411,15 @@ checkedLengthProblemEncodingFingerprint
   -> Fingerprint
       (EncodingFingerprintSubject FiniteListSpineLengthV1)
 checkedLengthProblemEncodingFingerprint
-    (CheckedLengthProblem _ _ _ _ _ encoding _) = encoding
+    (CheckedLengthProblem _ _ _ _ _ problem) =
+  behavioralProblemEncodingFingerprint problem
 
 -- | Generic domain/inventory/encoding/candidate/problem envelope.
 checkedLengthProblemBehavioralProblem
   :: CheckedLengthProblem identity local
   -> BehavioralProblem FiniteListSpineLengthV1
 checkedLengthProblemBehavioralProblem
-    (CheckedLengthProblem _ _ _ _ _ _ problem) = problem
+    (CheckedLengthProblem _ _ _ _ _ problem) = problem
 
 -- | Atomically retain, interpret, identify, and envelope one engine-owned
 -- typed candidate. The provider inventory is consumed directly from the
@@ -514,7 +515,7 @@ sealLengthTypedCandidateProblem problemLimits session suppliedContract typed = d
     (checkedLengthContractPrecondition contract)
     (checkedLengthContractPostcondition contract)
     condition
-    encodingFingerprint behavioralProblem
+    behavioralProblem
 
 revalidateContract
   :: Ord identity

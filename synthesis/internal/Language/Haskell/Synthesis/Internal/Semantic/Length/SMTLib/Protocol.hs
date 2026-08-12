@@ -490,12 +490,14 @@ instance NFData LengthSMTLibProtocolInputValues where
   rnf (LengthSMTLibProtocolInputValues frame bindings) =
     rnf frame `seq` rnf bindings
 
--- | Pure, syntactically decoded transcript outcome.  A satisfiable zero-input
--- query under the input-value policy carries a vacuous @Just []@ result without
--- fabricating a frame or emitting an empty @get-value@ command.  This type is
--- intentionally not named or represented as an execution observation.
+-- | Pure, syntactically decoded transcript outcome.  The completed outcome
+-- retains the exact sealed plan identity rather than the already-exercised
+-- plan itself.  A satisfiable zero-input query under the input-value policy
+-- carries a vacuous @Just []@ result without fabricating a frame or emitting
+-- an empty @get-value@ command.  This type is intentionally not named or
+-- represented as an execution observation.
 data LengthSMTLibProtocolDecoded identity local = LengthSMTLibProtocolDecoded
-  !(LengthSMTLibProtocolPlan identity local)
+  !(Fingerprint LengthSMTLibProtocolPlanFingerprintSubject)
   !SolverStatus
   [Word8]
   !(Maybe LengthSMTLibProtocolInputValues)
@@ -503,8 +505,8 @@ data LengthSMTLibProtocolDecoded identity local = LengthSMTLibProtocolDecoded
 type role LengthSMTLibProtocolDecoded nominal nominal
 
 instance NFData (LengthSMTLibProtocolDecoded identity local) where
-  rnf (LengthSMTLibProtocolDecoded plan status rawStatus values) =
-    rnf plan `seq` rnf status `seq` rnf rawStatus `seq` rnf values
+  rnf (LengthSMTLibProtocolDecoded planFingerprint status rawStatus values) =
+    rnf planFingerprint `seq` rnf status `seq` rnf rawStatus `seq` rnf values
 
 lengthSMTLibProtocolDecodedStatus
   :: LengthSMTLibProtocolDecoded identity local
@@ -538,8 +540,8 @@ lengthSMTLibProtocolDecodedPlanFingerprint
   :: LengthSMTLibProtocolDecoded identity local
   -> Fingerprint LengthSMTLibProtocolPlanFingerprintSubject
 lengthSMTLibProtocolDecodedPlanFingerprint
-    (LengthSMTLibProtocolDecoded plan _ _ _) =
-  lengthSMTLibProtocolPlanFingerprint plan
+    (LengthSMTLibProtocolDecoded fingerprint _ _ _) =
+  fingerprint
 
 handleFrame
   :: LengthSMTLibProtocolReceiver identity local
@@ -578,7 +580,8 @@ handleFrame receiver consumed frame tailBytes = case receiverPhase receiver of
         _ -> do
           _ <- consumePostBarrierWhitespace plan consumed tailBytes
           Right $ SMTLibCausalComplete
-            $ LengthSMTLibProtocolDecoded plan status rawStatus
+            $ LengthSMTLibProtocolDecoded
+                (lengthSMTLibProtocolPlanFingerprint plan) status rawStatus
             $ terminalInputValues plan status
       else Left $ LengthSMTLibProtocolBarrierMismatch
         LengthSMTLibProtocolCheckBarrier
@@ -601,7 +604,8 @@ handleFrame receiver consumed frame tailBytes = case receiverPhase receiver of
         | isExactSMTLibEchoSentinelResponse barrier frame -> do
             _ <- consumePostBarrierWhitespace plan consumed tailBytes
             Right $ SMTLibCausalComplete
-              $ LengthSMTLibProtocolDecoded plan status rawStatus
+              $ LengthSMTLibProtocolDecoded
+                  (lengthSMTLibProtocolPlanFingerprint plan) status rawStatus
               $ Just $ LengthSMTLibProtocolInputValues
                   (Just rawValues) bindings
       _ -> Left $ LengthSMTLibProtocolBarrierMismatch

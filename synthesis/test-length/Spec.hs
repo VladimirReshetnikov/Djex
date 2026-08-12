@@ -3302,6 +3302,8 @@ assertProtocolTerminalStatus plan marker (rawStatus, expectedStatus) = do
     asciiBytes rawStatus
   SMTLibProtocol.lengthSMTLibProtocolDecodedInputValueFrame decoded @?= Nothing
   SMTLibProtocol.lengthSMTLibProtocolDecodedInputValues decoded @?= Nothing
+  SMTLibProtocol.lengthSMTLibProtocolDecodedPlanFingerprint decoded @?=
+    SMTLibProtocol.lengthSMTLibProtocolPlanFingerprint plan
 
 constantZeroSMTLibCheck :: String
 constantZeroSMTLibCheck = unlines

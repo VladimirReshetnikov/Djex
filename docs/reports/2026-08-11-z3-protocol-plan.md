@@ -123,10 +123,11 @@ every protocol failure because no continuation is returned.
 
 `LengthSMTLibProtocolDecoded` means only that caller-fed bytes passed framing,
 shape decoding, and positional marker checks for this pure plan. It deliberately
-retains raw status/value frames privately and is not an execution observation.
-Even an `unsat` outcome remains heuristic. Decoded satisfiable values must still
-pass `validateLengthSMTLibCounterexample`, whose independent Length evaluator is
-the only route to model-relative behavioral evidence.
+retains the complete sealed plan key and raw status/value frames privately, not
+the already-exercised plan, and is not an execution observation. Even an
+`unsat` outcome remains heuristic. Decoded satisfiable values must still pass
+`validateLengthSMTLibCounterexample`, whose independent Length evaluator is the
+only route to model-relative behavioral evidence.
 
 ## Successor live layers
 

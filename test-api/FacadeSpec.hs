@@ -249,6 +249,7 @@ facadeTests = testGroup "public Djex facade"
                 (LengthSum [input, LengthLiteral 1])
                 (LengthMaximum input $ LengthLiteral 1)
             , LengthAtMost input (LengthScale 2 input)
+            , LengthAtMost (LengthModulo 3 input) input
             ]
           transfer = LengthIf condition
             (LengthMaximum

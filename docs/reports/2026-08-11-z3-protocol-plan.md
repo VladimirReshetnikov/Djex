@@ -83,6 +83,15 @@ checks prove only shape and within-plan distinction; the live session must
 generate fresh, session-wide distinct marker material and bind its generation
 and query ordinal into live identity.
 
+Positive-literal natural modulo is represented without the SMT-LIB `mod`
+operator, which is outside QF_LIA. Query sealing allocates deterministic private
+quotient/remainder witnesses and emits only nonnegativity, bounded-remainder,
+and `e = k*q + r` linear constraints. Witnesses are part of the typed plan and
+check bytes but never the input-only value request. The lowering-policy field is
+conditional, so a plan with no surviving modulo node retains its historical
+canonical bytes. The complete design is recorded in the
+[positive-literal modulo report](2026-08-13-positive-literal-natural-modulo.md).
+
 ## State machine
 
 The initial action writes one ordered group:

@@ -187,13 +187,23 @@ contains bounded check and input-only `get-value` commands; it neither starts a
 solver nor associates a raw solver status. Decoded input bindings can produce a
 counterexample receipt only through independent replay against the retained
 problem, while raw models and even `unsat` remain heuristic observations.
+Positive-literal natural modulo remains inside QF_LIA by using deterministic
+private quotient/remainder witnesses rather than the forbidden SMT-LIB `mod`
+operator: for `e mod k`, sealing asserts `e = k*q + r`, nonnegative `q` and
+`r`, and `r <= k-1`. Normalized-expression preorder fixes witness names and
+constraint order. Witnesses are declared and structurally fingerprinted but
+never requested from the solver; `get-value` remains input-only.
 The complete typed SMT plan remains transient through bounded rendering and
 structural fingerprinting. The sealed query retains only the checked problem,
 canonical check bytes, and complete fingerprint. Exact decoder-symbol order and
 optional `get-value` bytes are canonically rederived from the checked problem's
 sealed arity after query sealing has already bounded and structurally
-fingerprinted them; the unchanged structural plan field in that fingerprint
-keeps rendered bytes from becoming the semantic source of truth.
+fingerprinted them. A versioned plan tag records the lowering policy only when
+modulo witnesses occur, so no-modulo scripts and canonical keys stay exact.
+The structural plan keeps rendered bytes from becoming the semantic source of
+truth. See the
+[positive-literal modulo report](../docs/reports/2026-08-13-positive-literal-natural-modulo.md)
+for the exact admission, lowering, compatibility, and test boundary.
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` can associate
 such a bounded raw report with both the retained behavioral problem and the

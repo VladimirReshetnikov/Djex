@@ -314,8 +314,12 @@ leading-context-free: spine-observed arguments and the result must use that
 same modeled spine, while unobserved arguments may be non-spine or rank-N
 values. `Language.Haskell.Synthesis.Semantic.Length.Evaluate` supplies bounded,
 deterministic evaluation of one concrete assignment, assumed provider call, or
-sealed candidate problem, including exact natural-number monus and
-short-circuiting conditionals. Its three-way detached-contract result
+sealed candidate problem, including exact natural-number monus,
+positive-literal natural modulo, and short-circuiting conditionals. A raw
+modulo divisor is lazy, but semantic sealing rejects zero and applies the
+existing literal-bit bound before traversing its operand; normalization folds
+literal operands and every expression modulo one. Its three-way
+detached-contract result
 distinguishes a failed precondition, a satisfied postcondition, and a violated
 postcondition. Whole-problem replay accepts only source-ordered inputs, computes
 the candidate result itself, and produces an opaque counterexample receipt
@@ -339,6 +343,15 @@ decoded integer bindings only for that query's input symbols and independently
 replays them against the retained problem; raw model text and even `unsat`
 remain heuristic observations, never pruning permission or proof.
 
+SMT-LIB's QF_LIA logic excludes the built-in `mod` operator. Djex therefore
+lowers every remaining normalized modulo node to deterministic private
+quotient/remainder witnesses. For a positive literal divisor `k` and operand
+`e`, the script asserts `e = k*q + r`, `q >= 0`, `r >= 0`, and `r <= k-1`
+using only linear integer arithmetic. Witness names are allocated in normalized
+expression preorder, declared before assertions, and never enter `get-value`;
+only the original input symbols cross the model boundary. Both canonical
+rendering and structural fingerprinting cover the declarations and constraints.
+
 The typed SMT plan remains transient through canonical rendering and
 structural query fingerprinting. After that seal succeeds, the opaque query
 retains only the checked problem, bounded check bytes, and complete fingerprint
@@ -346,8 +359,12 @@ needed by execution, association, and independent replay. Exact ordered input
 symbols and optional canonical `get-value` bytes are rederived from the
 problem's sealed arity; query sealing still constructs, bounds, and
 structurally fingerprints both before discarding those parallel caches. The
-structural `typed-plan` fingerprint field remains unchanged; the rendered
-script is not promoted into the semantic source of truth.
+structural `typed-plan` field gains a versioned lowering-policy tag only when
+modulo witnesses exist. Queries without modulo retain their exact historical
+commands and canonical fingerprint bytes. The rendered script is not promoted
+into the semantic source of truth. The exact admission, lowering, identity, and
+test boundary is recorded in the
+[positive-literal modulo report](docs/reports/2026-08-13-positive-literal-natural-modulo.md).
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` closes the
 remaining raw-report identity gap. Its opaque association binds bounded

@@ -95,7 +95,9 @@ data LengthSMTLibQueryFingerprintSubject
 lengthSMTLibQuerySchemaTag :: [Word8]
 lengthSMTLibQuerySchemaTag = ascii "djex-length-z3-qf-lia-smtlib2/v2"
 
--- | The only logic emitted by this translator.
+-- | The only logic emitted by this translator.  Positive-literal natural
+-- modulo is lowered to existential quotient/remainder constraints containing
+-- only linear integer arithmetic; this translator never emits SMT-LIB @mod@.
 lengthSMTLibQueryLogic :: [Word8]
 lengthSMTLibQueryLogic = ascii "QF_LIA"
 
@@ -173,6 +175,7 @@ instance NFData LengthSMTLibCommandPart
 data LengthSMTLibNumeralSite
   = LengthSMTLibLiteralNumeral
   | LengthSMTLibScaleNumeral
+  | LengthSMTLibModuloDivisorNumeral
   deriving (Bounded, Enum, Eq, Ord, Show, Generic)
 
 instance NFData LengthSMTLibNumeralSite
@@ -181,6 +184,7 @@ instance NFData LengthSMTLibNumeralSite
 data LengthSMTLibQueryError
   = LengthSMTLibUnexpectedResultVariable
   | LengthSMTLibInputVariableOutOfRange !Natural !Int
+  | LengthSMTLibModuloDivisorZero
   | LengthSMTLibNumeralBitLimitExceeded
       !LengthSMTLibNumeralSite !Int !Int
   | LengthSMTLibCommandByteLimitExceeded
@@ -214,6 +218,23 @@ data SMTBooleanExpression
 
 instance NFData SMTBooleanExpression
 
+-- | One private existential lowering receipt for a normalized positive-
+-- literal natural modulo expression.  The quotient and remainder names are
+-- allocated in deterministic expression preorder.  Only the original input
+-- symbols are ever requested back from the solver.
+data SMTModuloWitness = SMTModuloWitness
+  !Natural
+  ![Word8]
+  ![Word8]
+  SMTIntegerExpression
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData SMTModuloWitness
+
+data SMTTranslationState = SMTTranslationState
+  !Natural
+  !(Map Natural SMTModuloWitness)
+
 data SMTBinaryHelper = SMTNaturalMonus | SMTIntegerMinimum | SMTIntegerMaximum
   deriving (Bounded, Enum, Eq, Ord, Show, Generic)
 
@@ -241,6 +262,7 @@ data LengthSMTLibPlan = LengthSMTLibPlan
   !SMTBooleanExpression
   ![SMTCommand]
   !(Maybe SMTCommand)
+  ![SMTModuloWitness]
 
 -- | Opaque association of one checked problem, bounded check commands, and
 -- collision-free structural translation identity.  Exact input symbols and
@@ -266,13 +288,19 @@ sealLengthSMTLibQuery limits problem = do
   let inputCount = checkedLengthProblemInputCount problem
       symbols = inputSymbolsForCount inputCount
       valueRequest = inputValueRequestForSymbols symbols
-  condition <- translateFormula limits inputCount
+  (condition, translation) <- translateFormula limits inputCount
+    emptySMTTranslationState
     $ checkedLengthProblemCounterexampleCondition problem
+  let witnesses = orderedModuloWitnesses translation
+      witnessSymbols = concatMap moduloWitnessSymbols witnesses
   let checkCommands = fixedPreamble
         ++ map SMTDeclareInteger symbols
+        ++ map SMTDeclareInteger witnessSymbols
         ++ map (SMTAssert . nonnegative . SMTIntegerSymbol) symbols
+        ++ concatMap moduloWitnessCommands witnesses
         ++ [SMTAssert condition, SMTCheckSatisfiable]
-      plan = LengthSMTLibPlan symbols condition checkCommands valueRequest
+      plan = LengthSMTLibPlan
+        symbols condition checkCommands valueRequest witnesses
   checkBytes <- retainCommand limits LengthSMTLibCheckCommand
     $ renderCommands checkCommands
   valueRequestBytes <- case valueRequest of
@@ -458,53 +486,150 @@ nonnegative expression = SMTIntegerAtMost (SMTNaturalNumeral 0) expression
 translateExpression
   :: LengthSMTLibLimits
   -> Int
+  -> SMTTranslationState
   -> LengthExpression LengthContractVariable
-  -> Either LengthSMTLibQueryError SMTIntegerExpression
-translateExpression limits inputCount source = case source of
+  -> Either
+      LengthSMTLibQueryError
+      (SMTIntegerExpression, SMTTranslationState)
+translateExpression limits inputCount state source = case source of
   LengthVariable variable -> case variable of
     LengthResult -> Left LengthSMTLibUnexpectedResultVariable
     LengthInput position
       | position < fromIntegral inputCount ->
-          Right $ SMTIntegerSymbol $ inputSymbolNatural position
+          Right (SMTIntegerSymbol $ inputSymbolNatural position, state)
       | otherwise -> Left $ LengthSMTLibInputVariableOutOfRange
           position inputCount
   LengthLiteral value -> do
     checkNumeral limits LengthSMTLibLiteralNumeral value
-    pure $ SMTNaturalNumeral value
-  LengthSum terms -> SMTIntegerSum
-    <$> mapM (translateExpression limits inputCount) terms
+    pure (SMTNaturalNumeral value, state)
+  LengthSum terms -> do
+    (translated, afterTerms) <- translateExpressions state terms
+    pure (SMTIntegerSum translated, afterTerms)
   LengthScale factor expression -> do
     checkNumeral limits LengthSMTLibScaleNumeral factor
-    SMTIntegerScale factor <$> translateExpression limits inputCount expression
-  LengthMonus left right -> binary SMTNaturalMonus left right
-  LengthMinimum left right -> binary SMTIntegerMinimum left right
-  LengthMaximum left right -> binary SMTIntegerMaximum left right
-  LengthIf condition whenTrue whenFalse -> SMTIntegerIf
-    <$> translateFormula limits inputCount condition
-    <*> translateExpression limits inputCount whenTrue
-    <*> translateExpression limits inputCount whenFalse
+    (translated, afterExpression) <- translateExpression
+      limits inputCount state expression
+    pure (SMTIntegerScale factor translated, afterExpression)
+  LengthModulo divisor expression -> do
+    if divisor == 0
+      then Left LengthSMTLibModuloDivisorZero
+      else pure ()
+    checkNumeral limits LengthSMTLibModuloDivisorNumeral divisor
+    let (ordinal, quotient, remainder, reserved) =
+          reserveModuloWitness state
+    (translated, afterExpression) <- translateExpression
+      limits inputCount reserved expression
+    let witness = SMTModuloWitness
+          divisor quotient remainder translated
+        completed = retainModuloWitness ordinal witness afterExpression
+    pure (SMTIntegerSymbol remainder, completed)
+  LengthMonus left right -> binary SMTNaturalMonus state left right
+  LengthMinimum left right -> binary SMTIntegerMinimum state left right
+  LengthMaximum left right -> binary SMTIntegerMaximum state left right
+  LengthIf condition whenTrue whenFalse -> do
+    (translatedCondition, afterCondition) <- translateFormula
+      limits inputCount state condition
+    (translatedTrue, afterTrue) <- translateExpression
+      limits inputCount afterCondition whenTrue
+    (translatedFalse, afterFalse) <- translateExpression
+      limits inputCount afterTrue whenFalse
+    pure
+      ( SMTIntegerIf translatedCondition translatedTrue translatedFalse
+      , afterFalse
+      )
  where
-  binary helper left right = SMTIntegerHelper helper
-    <$> translateExpression limits inputCount left
-    <*> translateExpression limits inputCount right
+  translateExpressions current terms = case terms of
+    [] -> Right ([], current)
+    term : remaining -> do
+      (translated, afterTerm) <- translateExpression
+        limits inputCount current term
+      (following, afterFollowing) <- translateExpressions afterTerm remaining
+      pure (translated : following, afterFollowing)
+
+  binary helper current left right = do
+    (translatedLeft, afterLeft) <- translateExpression
+      limits inputCount current left
+    (translatedRight, afterRight) <- translateExpression
+      limits inputCount afterLeft right
+    pure
+      (SMTIntegerHelper helper translatedLeft translatedRight, afterRight)
 
 translateFormula
   :: LengthSMTLibLimits
   -> Int
+  -> SMTTranslationState
   -> LengthFormula LengthContractVariable
-  -> Either LengthSMTLibQueryError SMTBooleanExpression
-translateFormula limits inputCount source = case source of
-  LengthTruth value -> Right $ SMTBooleanTruth value
-  LengthEqual left right -> SMTIntegerEqual
-    <$> translateExpression limits inputCount left
-    <*> translateExpression limits inputCount right
-  LengthAtMost left right -> SMTIntegerAtMost
-    <$> translateExpression limits inputCount left
-    <*> translateExpression limits inputCount right
-  LengthNot formula -> SMTBooleanNot
-    <$> translateFormula limits inputCount formula
-  LengthAll formulas -> SMTBooleanAll
-    <$> mapM (translateFormula limits inputCount) formulas
+  -> Either
+      LengthSMTLibQueryError
+      (SMTBooleanExpression, SMTTranslationState)
+translateFormula limits inputCount state source = case source of
+  LengthTruth value -> Right (SMTBooleanTruth value, state)
+  LengthEqual left right -> comparison SMTIntegerEqual left right
+  LengthAtMost left right -> comparison SMTIntegerAtMost left right
+  LengthNot formula -> do
+    (translated, afterFormula) <- translateFormula
+      limits inputCount state formula
+    pure (SMTBooleanNot translated, afterFormula)
+  LengthAll formulas -> do
+    (translated, afterFormulas) <- translateFormulas state formulas
+    pure (SMTBooleanAll translated, afterFormulas)
+ where
+  comparison constructor left right = do
+    (translatedLeft, afterLeft) <- translateExpression
+      limits inputCount state left
+    (translatedRight, afterRight) <- translateExpression
+      limits inputCount afterLeft right
+    pure (constructor translatedLeft translatedRight, afterRight)
+
+  translateFormulas current formulas = case formulas of
+    [] -> Right ([], current)
+    formula : remaining -> do
+      (translated, afterFormula) <- translateFormula
+        limits inputCount current formula
+      (following, afterFollowing) <- translateFormulas afterFormula remaining
+      pure (translated : following, afterFollowing)
+
+emptySMTTranslationState :: SMTTranslationState
+emptySMTTranslationState = SMTTranslationState 0 Map.empty
+
+reserveModuloWitness
+  :: SMTTranslationState
+  -> (Natural, [Word8], [Word8], SMTTranslationState)
+reserveModuloWitness (SMTTranslationState ordinal witnesses) =
+  ( ordinal
+  , moduloQuotientSymbol ordinal
+  , moduloRemainderSymbol ordinal
+  , SMTTranslationState (ordinal + 1) witnesses
+  )
+
+retainModuloWitness
+  :: Natural
+  -> SMTModuloWitness
+  -> SMTTranslationState
+  -> SMTTranslationState
+retainModuloWitness ordinal witness (SMTTranslationState next witnesses) =
+  SMTTranslationState next $ Map.insert ordinal witness witnesses
+
+orderedModuloWitnesses :: SMTTranslationState -> [SMTModuloWitness]
+orderedModuloWitnesses (SMTTranslationState _ witnesses) = Map.elems witnesses
+
+moduloWitnessSymbols :: SMTModuloWitness -> [[Word8]]
+moduloWitnessSymbols (SMTModuloWitness _ quotient remainder _) =
+  [quotient, remainder]
+
+moduloWitnessCommands :: SMTModuloWitness -> [SMTCommand]
+moduloWitnessCommands
+    (SMTModuloWitness divisor quotientSymbol remainderSymbol expression) =
+  [ SMTAssert $ nonnegative quotient
+  , SMTAssert $ nonnegative remainder
+  , SMTAssert $ SMTIntegerAtMost remainder
+      $ SMTNaturalNumeral $ divisor - 1
+  , SMTAssert $ SMTIntegerEqual expression $ SMTIntegerSum
+      [SMTIntegerScale divisor quotient, remainder]
+  ]
+ where
+  quotient = SMTIntegerSymbol quotientSymbol
+  remainder = SMTIntegerSymbol remainderSymbol
 
 checkNumeral
   :: LengthSMTLibLimits
@@ -591,15 +716,22 @@ buildQueryFingerprint limits problem plan checkBytes valueRequestBytes =
     }
 
 planField :: LengthSMTLibPlan -> FingerprintField
-planField (LengthSMTLibPlan symbols condition commands request) =
-  tagged "plan"
+planField (LengthSMTLibPlan symbols condition commands request witnesses) =
+  tagged "plan" $
     [ tagged "input-symbols" $ map FingerprintBytes symbols
     , tagged "condition" [booleanField condition]
     , tagged "check-commands" $ map commandField commands
     , tagged "value-request" [case request of
         Nothing -> tagged "absent" []
         Just command -> tagged "present" [commandField command]]
-    ]
+    ] ++ case witnesses of
+      [] -> []
+      _ ->
+        [ tagged "expression-lowering"
+            [ FingerprintBytes
+                positiveLiteralNaturalModuloWitnessSchemaTag
+            ]
+        ]
 
 commandField :: SMTCommand -> FingerprintField
 commandField command = case command of
@@ -738,6 +870,18 @@ inputSymbol = inputSymbolNatural . fromIntegral
 
 inputSymbolNatural :: Natural -> [Word8]
 inputSymbolNatural position = ascii "djex_length_input_" ++ ascii (show position)
+
+moduloQuotientSymbol :: Natural -> [Word8]
+moduloQuotientSymbol ordinal =
+  ascii "djex_length_modulo_quotient_" ++ ascii (show ordinal)
+
+moduloRemainderSymbol :: Natural -> [Word8]
+moduloRemainderSymbol ordinal =
+  ascii "djex_length_modulo_remainder_" ++ ascii (show ordinal)
+
+positiveLiteralNaturalModuloWitnessSchemaTag :: [Word8]
+positiveLiteralNaturalModuloWitnessSchemaTag = ascii
+  "djex-length-z3-qf-lia-positive-literal-modulo-witness/v1"
 
 parenthesized :: [[Word8]] -> [Word8]
 parenthesized fields = [openParen] ++ separated fields ++ [closeParen]

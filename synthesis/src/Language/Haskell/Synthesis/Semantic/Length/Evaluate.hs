@@ -201,6 +201,7 @@ data LengthEvaluationError
       !LengthEvaluationValueSite !Int !Int
   | LengthEvaluationInternalContractReference !LengthContractVariable
   | LengthEvaluationInternalProviderReference !LengthProviderVariable
+  | LengthEvaluationInternalModuloDivisorZero
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData LengthEvaluationError
@@ -440,6 +441,11 @@ evaluateExpression limits lookupVariable source = case source of
   LengthScale factor expression -> do
     value <- evaluateExpression limits lookupVariable expression
     checkIntermediate limits $ factor * value
+  LengthModulo divisor expression
+    | divisor == 0 -> Left LengthEvaluationInternalModuloDivisorZero
+    | otherwise -> do
+        value <- evaluateExpression limits lookupVariable expression
+        checkIntermediate limits $ value `mod` divisor
   LengthMonus left right -> do
     leftValue <- evaluateExpression limits lookupVariable left
     rightValue <- evaluateExpression limits lookupVariable right

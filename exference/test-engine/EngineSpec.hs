@@ -1057,7 +1057,7 @@ tests = testGroup "Exference private engine boundaries"
       unassigned <- observe Map.empty
       take 1 unassigned @?= ["plain"]
       unusable <- observe $ Map.singleton providerName [[]]
-      take 1 unusable @?= ["plain"]
+      unusable @?= unassigned
   , testCase "source constraints activate before a selected polytype suffix" $ do
       let className = name "C"
           providerName = name "polyContextual"

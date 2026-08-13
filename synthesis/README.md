@@ -383,6 +383,14 @@ workspace-cleanup authority remain with the enclosing scope.
 Once a plan is sealed, replay reads the exact query and artifact policy from
 that plan rather than pairing it with independent worker-wide fields. Response
 decoding likewise reads the limits retained by that exact plan.
+The terminal decoded value remains local through independent replay and the
+unchanged query-run identity builder. Before a successful run escapes, commit
+forces a narrower owner containing its ordinal, strict status, optional
+problem-bound evidence, reversible key, transcript digest, and accounting
+boundaries, but no parsed symbol/integer binding list. Evidence retains the
+normalized source-ordered counterexample inputs, and the private reversible
+key retains exact transcript bytes; the deletion narrows structured authority
+rather than scrubbing child output.
 
 The public live facade copies only bounded association and authority fields out
 of each private run. It retains status once and derives the corresponding

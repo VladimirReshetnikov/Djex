@@ -456,12 +456,8 @@ assertLiveSequentialUnaryQueries = do
           Evaluate.defaultLengthEvaluationLimits worker query
         SMTLibSession.lengthSMTLibQueryRunOrdinal first @?= 0
         SMTLibSession.lengthSMTLibQueryRunOrdinal second @?= 1
-        assertLiveValueQueryRun query
-          [smtIntegerBinding (asciiBytes "djex_length_input_0") 3]
-          [3] first
-        assertLiveValueQueryRun query
-          [smtIntegerBinding (asciiBytes "djex_length_input_0") 3]
-          [3] second
+        assertLiveValueQueryRun query [3] first
+        assertLiveValueQueryRun query [3] second
         assertBool "sequential query runs shared an identity"
           $ SMTLibSession.lengthSMTLibQueryRunIdentityFingerprint first /=
               SMTLibSession.lengthSMTLibQueryRunIdentityFingerprint second
@@ -527,7 +523,7 @@ assertLiveZeroInputQuery = do
     $ \executable worker -> do
         run <- expectRight =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
           Evaluate.defaultLengthEvaluationLimits worker query
-        assertLiveValueQueryRun query [] [] run
+        assertLiveValueQueryRun query [] run
         events <- SMTLibLiveSpec.readFakeZ3Events executable
         assertFakeZ3EventOrdinals "query-check" [0] events
         assertFakeZ3EventCount "query-get-value" 0 events
@@ -544,11 +540,7 @@ assertLiveBinaryQuery = do
     $ \executable worker -> do
         run <- expectRight =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
           Evaluate.defaultLengthEvaluationLimits worker query
-        assertLiveValueQueryRun query
-          [ smtIntegerBinding (asciiBytes "djex_length_input_0") 3
-          , smtIntegerBinding (asciiBytes "djex_length_input_1") 5
-          ]
-          [3, 5] run
+        assertLiveValueQueryRun query [3, 5] run
         events <- SMTLibLiveSpec.readFakeZ3Events executable
         assertFakeZ3EventOrdinals "query-get-value" [0] events
         case fakeZ3Events "query-get-value" events of
@@ -572,9 +564,7 @@ assertLiveQueryChunkModes = mapM_ runMode ["split-output", "drip-output"]
       $ \executable worker -> do
           run <- expectRight =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
             Evaluate.defaultLengthEvaluationLimits worker query
-          assertLiveValueQueryRun query
-            [smtIntegerBinding (asciiBytes "djex_length_input_0") 3]
-            [3] run
+          assertLiveValueQueryRun query [3] run
           events <- SMTLibLiveSpec.readFakeZ3Events executable
           assertFakeZ3EventOrdinals "query-check" [0] events
           assertFakeZ3EventOrdinals "query-get-value" [0] events
@@ -757,7 +747,6 @@ assertLiveStatusQueryRun
   -> IO ()
 assertLiveStatusQueryRun expectedStatus run = do
   SMTLibSession.lengthSMTLibQueryRunSolverStatus run @?= expectedStatus
-  SMTLibSession.lengthSMTLibQueryRunInputValues run @?= Nothing
   case SMTLibSession.lengthSMTLibQueryRunCounterexampleEvidence run of
     Nothing -> pure ()
     Just _ -> assertFailure "status-only run retained counterexample evidence"
@@ -765,15 +754,12 @@ assertLiveStatusQueryRun expectedStatus run = do
 
 assertLiveValueQueryRun
   :: SMTLib.LengthSMTLibQuery identity local
-  -> [SMTLib.LengthSMTLibIntegerBinding]
   -> [Natural]
   -> SMTLibSession.LengthSMTLibQueryRun epoch identity local
   -> IO ()
-assertLiveValueQueryRun query expectedBindings expectedInputs run = do
+assertLiveValueQueryRun query expectedInputs run = do
   SMTLibSession.lengthSMTLibQueryRunSolverStatus run @?=
     Observation.SolverSatisfiable
-  SMTLibSession.lengthSMTLibQueryRunInputValues run @?=
-    Just expectedBindings
   evidence <- case
       SMTLibSession.lengthSMTLibQueryRunCounterexampleEvidence run of
     Nothing -> assertFailure "satisfiable values run omitted replay evidence"

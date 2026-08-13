@@ -69,7 +69,6 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session
   , runLengthSMTLibReadyWorkerQuery
   , lengthSMTLibQueryRunOrdinal
   , lengthSMTLibQueryRunSolverStatus
-  , lengthSMTLibQueryRunInputValues
   , lengthSMTLibQueryRunCounterexampleEvidence
   , lengthSMTLibQueryRunIdentityFingerprint
   , lengthSMTLibQueryRunIdentityFingerprintField
@@ -269,8 +268,7 @@ import Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , lengthIntermediateValueBitLimit
   )
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib
-  ( LengthSMTLibIntegerBinding
-  , LengthSMTLibModelError
+  ( LengthSMTLibModelError
   , LengthSMTLibQuery
   , lengthSMTLibQueryInputValueRequestBytes
   , validateLengthSMTLibCounterexample
@@ -543,11 +541,16 @@ data QueryLeaseState = QueryLeaseState
 data LengthSMTLibQueryRunIdentitySubject
 
 -- | One successfully delimited live query and its independent Length replay.
--- The run remains a capability-probed pathname-snapshot observation, not an
--- executable-image attestation or a proof of solver soundness.
+-- Decoded bindings remain local through replay and complete run-identity
+-- construction, then the committed run retains only the decoded result's
+-- strict status and optional problem-bound evidence.  Its private reversible
+-- identity still contains the exact causal transcript, so this is
+-- structured-authority narrowing rather than byte scrubbing.  The run remains
+-- a capability-probed pathname-snapshot observation, not an executable-image
+-- attestation or a proof of solver soundness.
 data LengthSMTLibQueryRun epoch identity local = LengthSMTLibQueryRun
   !Natural
-  !(LengthSMTLibProtocolDecoded identity local)
+  !SolverStatus
   !(Maybe
       (BehavioralEvidence
         FiniteListSpineLengthV1
@@ -562,9 +565,9 @@ data LengthSMTLibQueryRun epoch identity local = LengthSMTLibQueryRun
 type role LengthSMTLibQueryRun nominal nominal nominal
 
 instance NFData (LengthSMTLibQueryRun epoch identity local) where
-  rnf (LengthSMTLibQueryRun ordinal decoded evidence identity digest
+  rnf (LengthSMTLibQueryRun ordinal status evidence identity digest
       stdoutStart stdoutEnd stderrStart stderrEnd) =
-    rnf ordinal `seq` rnf decoded `seq` rnf evidence `seq` rnf identity `seq`
+    rnf ordinal `seq` rnf status `seq` rnf evidence `seq` rnf identity `seq`
     rnf digest `seq` rnf stdoutStart `seq` rnf stdoutEnd `seq` rnf stderrStart
       `seq` rnf stderrEnd
 
@@ -686,15 +689,7 @@ lengthSMTLibQueryRunSolverStatus
   :: LengthSMTLibQueryRun epoch identity local
   -> SolverStatus
 lengthSMTLibQueryRunSolverStatus
-    (LengthSMTLibQueryRun _ decoded _ _ _ _ _ _ _) =
-  lengthSMTLibProtocolDecodedStatus decoded
-
-lengthSMTLibQueryRunInputValues
-  :: LengthSMTLibQueryRun epoch identity local
-  -> Maybe [LengthSMTLibIntegerBinding]
-lengthSMTLibQueryRunInputValues
-    (LengthSMTLibQueryRun _ decoded _ _ _ _ _ _ _) =
-  lengthSMTLibProtocolDecodedInputValues decoded
+    (LengthSMTLibQueryRun _ value _ _ _ _ _ _ _) = value
 
 lengthSMTLibQueryRunCounterexampleEvidence
   :: LengthSMTLibQueryRun epoch identity local
@@ -1144,7 +1139,9 @@ executeReservedLengthSMTLibQueryRun worker
                                   $ LengthSMTLibQueryStderrAccountingMismatch
                                       stderrStart stderrFinal
                               | otherwise -> Right $ LengthSMTLibQueryRun
-                                  ordinal decoded evidence identity
+                                  ordinal
+                                  (lengthSMTLibProtocolDecodedStatus decoded)
+                                  evidence identity
                                   transcriptDigest
                                   stdoutStart stdoutFinal
                                   stderrStart stderrFinal
@@ -1477,8 +1474,9 @@ queryDecodedOutcomeField decoded = tagged "decoded-branch"
  where
   -- The v1 protocol never emits @get-value@ for a zero-input query, while the
   -- query-aware decoder requires exact arity for every emitted nonempty
-  -- request.  The retained binding spine therefore preserves the former raw
-  -- frame distinction without retaining the frame itself.
+  -- request.  The decoded binding spine therefore preserves the former raw
+  -- frame distinction while sealing identity, before successful run
+  -- construction releases that parsed representation.
   valuesTag = case lengthSMTLibProtocolDecodedInputValues decoded of
     Nothing -> "absent"
     Just [] -> "vacuous-zero-input"

@@ -542,6 +542,13 @@ transcript, decoded branch, replay policy, and transport counters. `sat` under
 the input-value policy yields counterexample evidence only after independent
 Length replay under explicit evaluation limits. Status-only `sat`, `unsat`,
 and `unknown` remain heuristic observations and grant no pruning authority.
+After replay and identity sealing, the package-private run retains its ordinal,
+strict status, optional problem-bound evidence, reversible key, transcript
+digest, and accounting boundaries; it does not retain the terminal decoded
+value or its parsed symbol/integer binding list. Validated evidence still owns
+normalized source-ordered inputs, while the reversible run key still embeds
+the exact bounded transcript bytes. This is removal of a parallel structured
+authority, not byte scrubbing.
 The exact design and threat boundary are recorded in the
 [2026-08-11 ordinal-bound query-run report](docs/reports/2026-08-11-z3-query-runs.md).
 

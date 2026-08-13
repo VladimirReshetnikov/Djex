@@ -14,7 +14,8 @@ The implementation remains package-private in
 central operation accepts explicit independent evaluation limits, a scoped
 ready worker, and one sealed Length query. It returns either an ownership
 failure or an opaque nominal query run. No process handle, secret barrier seed,
-receiver, or raw transcript accessor is exposed.
+receiver, raw transcript accessor, or decoded-binding projection is exposed
+from a successful run.
 
 ## Shared causal driver
 
@@ -164,9 +165,19 @@ For satisfiable input-value policy, the exact decoded bindings—including the
 vacuous zero-input assignment—are independently passed through
 `validateLengthSMTLibCounterexample` under caller-supplied evaluation limits.
 A structural/model error or a replay result of `Nothing` spends the worker.
-Only `Just BehavioralEvidence` is retained by a successful query run. This is
-model-relative counterexample evidence, not solver-soundness evidence and not
-permission to treat an unsatisfiable result as proof.
+The full decoded value then contributes its status and absent, vacuous, or
+framed-value branch to the unchanged run identity. Only after replay and
+identity construction succeed does the final run copy the strict status and
+optional `BehavioralEvidence`; it does not retain the decoded symbol/integer
+binding list. This is model-relative counterexample evidence, not
+solver-soundness evidence and not permission to treat an unsatisfiable result
+as proof.
+
+The evidence receipt retains normalized source-ordered natural inputs and the
+result recomputed from the checked candidate. Separately, the private
+reversible run identity still embeds the exact bounded transcript bytes which
+carried the raw model. Removing the parsed binding representation is therefore
+single-owner authority narrowing, not byte scrubbing.
 
 The sealed protocol plan is also the sole replay source for its exact query and
 artifact policy, and response decoding consumes the limits retained by that
@@ -230,6 +241,12 @@ The Length suite has 183 passing tests. Thirteen live-query cases cover:
 - repeatable pre-reservation rejection under an undersized query-run identity
   cap; and
 - process-owned remaining-stdout-capacity rejection before any query write.
+
+The pure protocol cases continue to pin exact decoded binding order and the
+vacuous zero-input branch. The live unary, binary, zero-input, split, and drip
+cases consume only replayed evidence after success and assert its normalized
+inputs and recomputed result, so they no longer rely on a parallel run-level
+binding projection.
 
 ## Next checkpoint
 

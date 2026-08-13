@@ -7,10 +7,11 @@
 -- before embedding this identity in a problem or cache key.
 --
 -- The shared type checker has no constructor-family schema authority, so this
--- generic boundary also rejects constructor-pattern graphs.  A future
--- inventory-bound sealer may admit them only after checking their exact family
--- descriptor.  Certificate-bearing visible applications fail closed for the
--- same reason: allocation IDs alone are not semantic identities.
+-- generic boundary also rejects constructor-pattern graphs.  A package-private
+-- domain sealer may admit them only by freshly resealing against an exact
+-- inventory-owned family descriptor; that schema-parameterized entrance is
+-- intentionally absent here.  Certificate-bearing visible applications fail
+-- closed for the same reason: allocation IDs alone are not semantic identities.
 module Language.Haskell.Synthesis.TypedGenerated.Fingerprint
   ( TermGraphFingerprintSubject
   , defaultTermGraphFingerprintByteLimit

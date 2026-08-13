@@ -125,3 +125,19 @@ The public facade and negative abstraction suite additionally pin the closed
 role vocabulary, additive sealer signatures, contract role projection,
 representative role and demand errors, hidden constructors, nominal checked
 authorities, and absence of record-field construction access.
+
+## Exact-case foundation follow-up
+
+The later exact zero/step case foundation composes with these explicit target
+roles but does not weaken this checkpoint's ordinary-path guarantees. Its
+dedicated session and problem sealers select a distinct case policy; the
+legacy and role-aware entrances above continue to reject every case with their
+unchanged identity versions. The case-aware session still consumes the same
+bounded role vector, while the contract remains its sole complete structured
+owner.
+
+That foundation is currently reachable only from checked graph fixtures inside
+Djex. The shipped search adapters still do not retain nonempty typed case
+graphs, so this report's higher-order map path and all frontend behavior remain
+unchanged. See the
+[exact zero/step case foundation report](2026-08-13-exact-zero-step-length-cases.md).

@@ -582,6 +582,15 @@ facadeTests = testGroup "public Djex facade"
             -> Either (LengthSessionError Int)
                 (CheckedLengthSession Int ())
           roleAwareSessionSealer = sealRoleAwareLengthSession
+          exactCaseSessionSealer
+            :: LengthLimits
+            -> [LengthTargetArgumentRole]
+            -> Inventory (Variable Int) ()
+            -> LengthSpineModelSource
+            -> [LengthProviderSummarySource (Variable Int)]
+            -> Either (LengthSessionError Int)
+                (CheckedLengthSession Int ())
+          exactCaseSessionSealer = sealExactSpineCaseLengthSession
           roleAwareSealer
             :: LengthProblemLimits
             -> CheckedLengthSession Int ()
@@ -592,6 +601,20 @@ facadeTests = testGroup "public Djex facade"
                   ExferenceTermGraphAbsence Int ExferenceLocal)
                 (CheckedLengthProblem Int ExferenceLocal)
           roleAwareSealer = sealRoleAwareLengthTypedCandidateProblem
+          exactCaseSealer
+            :: LengthProblemLimits
+            -> CheckedLengthSession Int ()
+            -> CheckedLengthContract ExferenceTypeVariable
+            -> ExferenceTypedCandidate
+            -> Either
+                (LengthProblemError
+                  ExferenceTermGraphAbsence Int ExferenceLocal)
+                (CheckedLengthProblem Int ExferenceLocal)
+          exactCaseSealer = sealExactSpineCaseLengthTypedCandidateProblem
+          stepPayloadSite = LengthStepPayloadSpineDemand $ termNodeId 8
+          stepPayloadFailure = LengthProblemStepPayloadDemanded
+            (occurrenceId 9) stepPayloadSite
+            :: LengthProblemError () String Int
           candidateResultProjection
             :: CheckedLengthCandidate Int ExferenceLocal
             -> LengthExpression LengthContractVariable
@@ -728,7 +751,9 @@ facadeTests = testGroup "public Djex facade"
             :: LengthSMTLibExecutionConfig
             -> LengthSMTLibResponseLimits
           executionResponseProjection = lengthSMTLibExecutionResponseLimits
-      sealer `seq` roleAwareSessionSealer `seq` roleAwareSealer `seq`
+      sealer `seq` roleAwareSessionSealer `seq` exactCaseSessionSealer `seq`
+        roleAwareSealer `seq` exactCaseSealer `seq`
+        stepPayloadFailure `seq`
         candidateResultProjection `seq` problemProjection `seq`
         inputCountProjection `seq` preconditionProjection `seq`
         postconditionProjection `seq` basisProjection `seq`

@@ -114,7 +114,6 @@ import Language.Haskell.Synthesis.TypeSynonym
 import Language.Haskell.Synthesis.TypedCandidate
 import Language.Haskell.Synthesis.TypedGenerated (TermGraph)
 import Language.Haskell.Synthesis.TypedGenerated.Fingerprint
-  ( TermGraphFingerprintSubject )
 import Language.Haskell.TH (lookupValueName)
 
 -- Importing an abstract type with the same spelling as its hidden constructor
@@ -141,6 +140,8 @@ $(do
           , "LengthProblemProviderContextMismatch"
           , "LengthProblemUsedProviderMissing"
           , "checkedLengthCandidateTermGraphFingerprint"
+          , "checkedLengthSessionCasePolicy"
+          , "fingerprintTermGraphWithTypeStructure"
           ]
     resolved <- mapM lookupValueName hiddenValues
     case [name | (name, Just _) <- zip hiddenValues resolved] of

@@ -196,10 +196,13 @@ There is deliberately no beta, eta, let, or behavioral quotienting.
 Certificate allocation numbers are not identities. Until a checked certificate
 table can supply the corresponding substitution and obligation fingerprints,
 any certificate-bearing visible application is rejected. The shared checker
-also lacks constructor-family schemas, so constructor-pattern graphs fail
-closed until an inventory-bound sealer supplies that authority. Canonical
-construction has an explicit retained-byte bound (one MiB by default), while
-the preceding traversal is bounded separately by the supplied graph limits.
+also lacks constructor-family schemas, so the public fingerprint entrance
+always rejects constructor-pattern graphs. A package-private domain entrance
+can reuse the encoder only by atomically freshly resealing against a schema
+derived from its own opaque checked inventory; callers cannot attach a
+detachable schema to an existing graph. Canonical construction has an explicit
+retained-byte bound (one MiB by default), while the preceding traversal is
+bounded separately by the supplied graph limits.
 
 This fingerprint identifies only the checked shared graph. It does not resolve
 globals against an `Inventory`, prove that holes or residual obligations are
@@ -306,15 +309,31 @@ argument type nor that evaluating a real candidate is pure, total, or
 non-strict. It is only a solver-neutral non-observation policy for the checked
 symbolic interpreter.
 
-The interpreter supports
-locals, lambdas, application, certificate-free visible type application,
-tuples, lets, bind/wildcard/tuple/as patterns, the checked zero and step
-constructors, and checked provider transfers. Holes, cases, constructor
-patterns, residual constraints, unknown globals, unmodeled inventory globals,
-and certificate-bearing graphs fail closed. Explicit graph-byte and evaluation
-step limits bound candidate work; the existing Length syntax budget jointly
-bounds the normalized result and the counterexample condition
-`precondition && not postcondition[result := interpretedResult]`.
+The ordinary and role-aware interpreters support locals, lambdas,
+application, certificate-free visible type application, tuples, lets,
+bind/wildcard/tuple/as patterns, the checked zero and step constructors, and
+checked provider transfers. Their case and constructor-pattern boundary stays
+fail-closed with exact historical identities.
+
+The additive `sealExactSpineCaseLengthSession` and
+`sealExactSpineCaseLengthTypedCandidateProblem` entrances opt into one narrow
+case policy without inference. Every admitted case inspects and returns a
+modeled spine and contains exactly the checked zero and step alternatives,
+either source order. The problem sealer reconstructs the raw graph and freshly
+rechecks its direct constructor patterns against the session's opaque spine
+descriptor before fingerprinting or interpretation. The public shared graph
+fingerprint still rejects that graph.
+
+For symbolic scrutinee length `n`, analysis produces
+`if n == 0 then zeroResult else stepResult`; the recursive field receives
+`n monus 1`. The element payload is an opaque, non-inspectable token. Both
+branches are interpreted, so provider authority is their union even when
+normalization erases the conditional. This finite-spine model asserts nothing
+about source evaluation, strictness, inhabitance, totality, recursion, or
+effects. Holes, cases outside the exact policy, unsupported patterns, residual
+constraints, unknown globals, unmodeled inventory globals, and
+certificate-bearing graphs fail closed. Explicit graph-byte and evaluation
+step limits still bound candidate work.
 
 A successful `CheckedLengthProblem` carries its compact observed-spine input
 arity,
@@ -395,6 +414,9 @@ test boundary is recorded in the
 The independent role authority, compact model boundary, compatibility bytes,
 and higher-order map example are recorded in the
 [role-aware target-argument report](docs/reports/2026-08-13-role-aware-target-arguments.md).
+The internal schema authority, exact case policy, compatibility versions, and
+current frontend limitation are recorded in the
+[exact zero/step case foundation report](docs/reports/2026-08-13-exact-zero-step-length-cases.md).
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` closes the
 remaining raw-report identity gap. Its opaque association binds bounded

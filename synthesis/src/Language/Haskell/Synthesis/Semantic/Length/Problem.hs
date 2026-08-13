@@ -14,6 +14,7 @@ module Language.Haskell.Synthesis.Semantic.Length.Problem
   , CheckedLengthSession
   , sealLengthSession
   , sealRoleAwareLengthSession
+  , sealExactSpineCaseLengthSession
   , checkedLengthSessionContext
   , checkedLengthSessionProviderInventory
   , lengthSessionInventoryFingerprint
@@ -28,11 +29,13 @@ module Language.Haskell.Synthesis.Semantic.Length.Problem
   , LengthProblemFingerprintPart (..)
   , LengthRootOpeningError (..)
   , LengthUnobservedTargetDemandSite (..)
+  , LengthStepPayloadDemandSite (..)
   , LengthProblemError (..)
   , CheckedLengthCandidate
   , CheckedLengthProblem
   , sealLengthTypedCandidateProblem
   , sealRoleAwareLengthTypedCandidateProblem
+  , sealExactSpineCaseLengthTypedCandidateProblem
   , checkedLengthCandidateResult
   , checkedLengthCandidateUsedProviders
   , checkedLengthCandidateFingerprint

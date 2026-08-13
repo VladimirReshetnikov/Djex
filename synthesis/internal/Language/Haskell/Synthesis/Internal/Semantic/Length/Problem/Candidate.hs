@@ -18,11 +18,13 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.Problem.Candidate
   , LengthProblemFingerprintPart (..)
   , LengthRootOpeningError (..)
   , LengthUnobservedTargetDemandSite (..)
+  , LengthStepPayloadDemandSite (..)
   , LengthProblemError (..)
   , CheckedLengthCandidate
   , CheckedLengthProblem
   , sealLengthTypedCandidateProblem
   , sealRoleAwareLengthTypedCandidateProblem
+  , sealExactSpineCaseLengthTypedCandidateProblem
   , checkedLengthCandidateResult
   , checkedLengthCandidateUsedProviders
   , checkedLengthCandidateFingerprint
@@ -123,7 +125,9 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
   ( CheckedLengthSession
+  , LengthCasePolicy (..)
   , LengthTargetArgumentPolicy (..)
+  , checkedLengthSessionCasePolicy
   , checkedLengthSessionContext
   , checkedLengthSessionLimits
   , checkedLengthSessionProviderInventory
@@ -180,10 +184,12 @@ import Language.Haskell.Synthesis.TypedGenerated
   , TermNodeForm (..)
   , TermNodeId
   , TypeApplicationWitness (..)
+  , TypeStructure (..)
   , TypedPattern (..)
   , TypedPatternNode (..)
   , defaultTermGraphLimits
   , lookupTermNode
+  , sharedTypeStructure
   , termGraphNodes
   , termGraphRoot
   )
@@ -193,6 +199,8 @@ import Language.Haskell.Synthesis.TypedGenerated.Fingerprint
   , defaultTermGraphFingerprintByteLimit
   , fingerprintSharedTermGraph
   )
+import Language.Haskell.Synthesis.Internal.TypedGenerated.Fingerprint
+  ( fingerprintTermGraphWithTypeStructure )
 
 -- | Candidate-specific work bounds.  Graph limits are already checked by
 -- their own constructor; only the signed evaluation-step field can fail here.
@@ -277,12 +285,26 @@ data LengthUnobservedTargetDemandSite
 
 instance NFData LengthUnobservedTargetDemandSite
 
+-- | The first operation which tried to inspect an opaque element carried by
+-- one modeled step pattern.  The occurrence identifies the exact checked
+-- field pattern which introduced the token.  Binding, ignoring, reconstructing
+-- a step, or forwarding it through an unobserved provider argument is not a
+-- demand.
+data LengthStepPayloadDemandSite
+  = LengthStepPayloadCallableDemand !TermNodeId
+  | LengthStepPayloadSpineDemand !TermNodeId
+  | LengthStepPayloadTupleDemand !OccurrenceId
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthStepPayloadDemandSite
+
 -- | Fixed-precedence failure while sealing one complete typed candidate.
 data LengthProblemError failure identity local
   = LengthProblemContractResealRejected
       (LengthContractError (Variable identity))
   | LengthProblemContractContextMismatch
   | LengthProblemMixedTargetArgumentsRequireRoleAwareSealer
+  | LengthProblemCasePolicyMismatch
   | LengthProblemTargetArgumentPolicyMismatch
   | LengthProblemResidualConstraint
       (Constraint (Type (Variable identity)))
@@ -295,6 +317,14 @@ data LengthProblemError failure identity local
   | LengthProblemHole !TermNodeId local
   | LengthProblemUnsupportedCase !TermNodeId
   | LengthProblemUnsupportedConstructorPattern !OccurrenceId Name
+  | LengthProblemCaseResultIsNotModeledSpine
+      !TermNodeId (Type (Variable identity))
+  | LengthProblemCaseScrutineeIsNotModeledSpine
+      !TermNodeId (Type (Variable identity))
+  | LengthProblemCaseAlternativeCountMismatch !TermNodeId !Int
+  | LengthProblemCasePatternIsNotDirectConstructor !OccurrenceId
+  | LengthProblemCaseConstructorRepeated !TermNodeId Name
+  | LengthProblemCaseFieldPatternUnsupported !OccurrenceId
   | LengthProblemGraphKindRejected
       (KindInferenceError (Variable identity))
   | LengthProblemVisibleTypeSourceHasNoBinder !TermNodeId
@@ -309,6 +339,8 @@ data LengthProblemError failure identity local
   | LengthProblemExpectedTuple !OccurrenceId
   | LengthProblemUnobservedTargetArgumentDemanded
       !Natural !LengthUnobservedTargetDemandSite
+  | LengthProblemStepPayloadDemanded
+      !OccurrenceId !LengthStepPayloadDemandSite
   | LengthProblemTupleArityMismatch !OccurrenceId !Int !Int
   | LengthProblemEvaluationStepLimitExceeded !Int !Int
   | LengthProblemProviderTransferInvariant Name !Natural
@@ -478,9 +510,30 @@ sealRoleAwareLengthTypedCandidateProblem
 sealRoleAwareLengthTypedCandidateProblem = sealLengthTypedCandidateProblemWithMode
   LengthRoleAwareProblemSealer
 
+-- | Seal a candidate under an explicitly case-aware checked session.
+--
+-- Only exact complete zero/step splits over the session's modeled spine are
+-- admitted.  Target roles remain explicit and may be all observed or mixed;
+-- ordinary session and problem entrances continue to reject every case.
+sealExactSpineCaseLengthTypedCandidateProblem
+  :: (Ord identity, Ord local)
+  => LengthProblemLimits
+  -> CheckedLengthSession identity annotation
+  -> CheckedLengthContract (Variable identity)
+  -> TypedCandidate failure
+      (Type (Variable identity))
+      local
+      (Candidate (Type (Variable identity)) details output)
+  -> Either
+      (LengthProblemError failure identity local)
+      (CheckedLengthProblem identity local)
+sealExactSpineCaseLengthTypedCandidateProblem =
+  sealLengthTypedCandidateProblemWithMode LengthExactSpineCaseProblemSealer
+
 data LengthProblemSealer
   = LengthLegacyProblemSealer
   | LengthRoleAwareProblemSealer
+  | LengthExactSpineCaseProblemSealer
 
 sealLengthTypedCandidateProblemWithMode
   :: (Ord identity, Ord local)
@@ -506,6 +559,12 @@ sealLengthTypedCandidateProblemWithMode sealer problemLimits session
       | mixedContract -> Left
           LengthProblemMixedTargetArgumentsRequireRoleAwareSealer
     _ -> pure ()
+  let expectedCasePolicy = case sealer of
+        LengthExactSpineCaseProblemSealer -> LengthExactZeroStepCases
+        _ -> LengthCasesRejected
+  if checkedLengthSessionCasePolicy session == expectedCasePolicy
+    then pure ()
+    else Left LengthProblemCasePolicyMismatch
   if mixedContract == mixedSession
     then pure ()
     else Left LengthProblemTargetArgumentPolicyMismatch
@@ -518,23 +577,21 @@ sealLengthTypedCandidateProblemWithMode sealer problemLimits session
   graph <- first LengthProblemTypedGraphUnavailable
     $ typedCandidateTermGraph typed
   graphFingerprint <- first LengthProblemTermGraphFingerprintRejected
-    $ fingerprintSharedTermGraph
-        (lengthProblemTermGraphLimits problemLimits)
-        (lengthProblemGraphFingerprintByteLimit problemLimits)
-        graph
+    $ fingerprintLengthTermGraph session problemLimits graph
   rootNode <- case lookupTermNode (termGraphRoot graph) graph of
     Nothing -> Left $ LengthProblemRootNodeMissing $ termGraphRoot graph
     Just node -> Right node
   authorizedRigids <- matchRootOpening
     (checkedLengthContractTarget contract) $ termNodeType rootNode
-  globals <- preflightGraph session providers authorizedRigids graph
+  preflight <- preflightGraph session providers authorizedRigids graph
   (rawResult, evaluationState) <- runStateT
     (interpretCompleteCandidate
       InterpretationContext
         { interpretationSession = session
         , interpretationProblemLimits = problemLimits
         , interpretationGraph = graph
-        , interpretationGlobals = globals
+        , interpretationGlobals = preflightGlobals preflight
+        , interpretationCases = preflightCases preflight
         , interpretationTargetArgumentRoles =
             checkedLengthContractTargetArgumentRoles contract
         , interpretationInputCount = checkedLengthContractInputCount contract
@@ -663,6 +720,56 @@ data ModeledGlobal identity
   | ModeledProvider
       (CheckedLengthProviderSummary (Variable identity))
 
+-- | Canonical zero-before-step receipt produced only after the session-owned
+-- constructor schema has freshly re-sealed and fingerprinted the raw graph.
+data ExactSpineCase identity local = ExactSpineCase
+  !TermNodeId
+  !TermNodeId
+  !(TypedPattern (Type (Variable identity)) local)
+  !TermNodeId
+
+data PreflightGraph identity local = PreflightGraph
+  { preflightGlobals :: !(Map Name (ModeledGlobal identity))
+  , preflightCases :: !(Map TermNodeId (ExactSpineCase identity local))
+  }
+
+fingerprintLengthTermGraph
+  :: (Ord identity, Ord local)
+  => CheckedLengthSession identity annotation
+  -> LengthProblemLimits
+  -> TermGraph (Type (Variable identity)) local
+  -> Either
+      (TermGraphFingerprintError identity local)
+      (Fingerprint TermGraphFingerprintSubject)
+fingerprintLengthTermGraph session limits graph = case
+    checkedLengthSessionCasePolicy session of
+  LengthCasesRejected -> fingerprintSharedTermGraph graphLimits maximumBytes graph
+  LengthExactZeroStepCases -> fingerprintTermGraphWithTypeStructure
+    (lengthTermGraphTypeStructure model) graphLimits maximumBytes graph
+ where
+  graphLimits = lengthProblemTermGraphLimits limits
+  maximumBytes = lengthProblemGraphFingerprintByteLimit limits
+  model = lengthContextSpineModel $ checkedLengthSessionContext session
+
+lengthTermGraphTypeStructure
+  :: Ord identity
+  => CheckedLengthSpineModel (Variable identity)
+  -> TypeStructure (Type (Variable identity))
+lengthTermGraphTypeStructure model = sharedTypeStructure
+  { constructorPatternFieldTypes = fields
+  }
+ where
+  fields name patternType
+    | not $ isModeledSpine model patternType = Nothing
+    | name == checkedLengthSpineZeroConstructor model = Just []
+    | name == checkedLengthSpineStepConstructor model = do
+        payload <- spinePayload model patternType
+        case checkedLengthSpineRecursiveField model of
+          0 -> Just [patternType, payload]
+          1 -> Just [payload, patternType]
+          _ -> Nothing
+    | otherwise = Nothing
+
 preflightGraph
   :: Ord identity
   => CheckedLengthSession identity annotation
@@ -671,10 +778,10 @@ preflightGraph
   -> TermGraph (Type (Variable identity)) local
   -> Either
       (LengthProblemError failure identity local)
-      (Map Name (ModeledGlobal identity))
+      (PreflightGraph identity local)
 preflightGraph session providers authorized graph = do
   mapM_ rejectHole nodes
-  mapM_ rejectUnsupported nodes
+  cases <- foldM inspectCase Map.empty nodes
   selectedKindObligations <- fmap concat $ mapM selectedKindObligation nodes
   first LengthProblemGraphKindRejected
     $ checkTypesKinds (inventoryKindAssumptions inventory)
@@ -682,7 +789,8 @@ preflightGraph session providers authorized graph = do
           | annotation <- foldMap graphProperTypeAnnotations nodes]
             ++ selectedKindObligations
   mapM_ validateVisibleSelection nodes
-  foldM inspectGlobal Map.empty nodes
+  globals <- foldM inspectGlobal Map.empty nodes
+  pure $ PreflightGraph globals cases
  where
   nodes = List.sortOn fst $ termGraphNodes graph
   context = checkedLengthSessionContext session
@@ -693,11 +801,17 @@ preflightGraph session providers authorized graph = do
     TypedHole _ local -> Left $ LengthProblemHole nodeId local
     _ -> Right ()
 
-  rejectUnsupported (nodeId, TermNode _ form) = case form of
-    TypedCase{} -> Left $ LengthProblemUnsupportedCase nodeId
-    TypedLambda patterns _ -> validatePatterns patterns
-    TypedLet pattern _ _ -> validatePattern pattern
-    _ -> Right ()
+  casePolicy = checkedLengthSessionCasePolicy session
+
+  inspectCase cases (nodeId, TermNode resultType form) = case form of
+    TypedCase scrutinee alternatives -> case casePolicy of
+      LengthCasesRejected -> Left $ LengthProblemUnsupportedCase nodeId
+      LengthExactZeroStepCases -> do
+        checked <- validateExactCase nodeId resultType scrutinee alternatives
+        pure $ Map.insert nodeId checked cases
+    TypedLambda patterns _ -> validatePatterns patterns >> pure cases
+    TypedLet pattern _ _ -> validatePattern pattern >> pure cases
+    _ -> pure cases
 
   validateVisibleSelection (nodeId, TermNode _ form) = case form of
     TypedVisibleTypeApplication _ _ _ witness
@@ -746,6 +860,57 @@ preflightGraph session providers authorized graph = do
     TypedTuplePattern fields -> validatePatterns fields
     TypedAs _ nested -> validatePattern nested
     _ -> Right ()
+
+  validateExactCase nodeId resultType scrutinee alternatives = do
+    if isModeledSpine model resultType
+      then pure ()
+      else Left $ LengthProblemCaseResultIsNotModeledSpine nodeId resultType
+    scrutineeType <- case lookupTermNode scrutinee graph of
+      Nothing -> Left $ LengthProblemRootNodeMissing scrutinee
+      Just (TermNode ty _) -> Right ty
+    if isModeledSpine model scrutineeType
+      then pure ()
+      else Left $ LengthProblemCaseScrutineeIsNotModeledSpine
+        nodeId scrutineeType
+    case alternatives of
+      [firstAlternative, secondAlternative] -> classifyAlternatives
+        firstAlternative secondAlternative
+      _ -> Left $ LengthProblemCaseAlternativeCountMismatch
+        nodeId $ length alternatives
+   where
+    classifyAlternatives firstAlternative secondAlternative = do
+      firstClassified <- classifyAlternative firstAlternative
+      second <- classifyAlternative secondAlternative
+      case (firstClassified, second) of
+        (Left zero, Right step) -> assemble zero step
+        (Right step, Left zero) -> assemble zero step
+        (Left _, Left _) -> Left $ LengthProblemCaseConstructorRepeated
+          nodeId $ checkedLengthSpineZeroConstructor model
+        (Right _, Right _) -> Left $ LengthProblemCaseConstructorRepeated
+          nodeId $ checkedLengthSpineStepConstructor model
+
+    assemble (_, zeroBody) (stepPattern, stepBody) = pure
+      $ ExactSpineCase scrutinee zeroBody stepPattern stepBody
+
+    classifyAlternative alternative@(pattern, _) = case
+        typedPatternNode pattern of
+      TypedConstructor name fields
+        | name == checkedLengthSpineZeroConstructor model -> do
+            mapM_ validateCaseField fields
+            pure $ Left alternative
+        | name == checkedLengthSpineStepConstructor model -> do
+            mapM_ validateCaseField fields
+            pure $ Right alternative
+        | otherwise -> Left $ LengthProblemUnsupportedConstructorPattern
+            (typedPatternOccurrence pattern) name
+      _ -> Left $ LengthProblemCasePatternIsNotDirectConstructor
+        $ typedPatternOccurrence pattern
+
+    validateCaseField field = case typedPatternNode field of
+      TypedBind{} -> Right ()
+      TypedWildcard -> Right ()
+      _ -> Left $ LengthProblemCaseFieldPatternUnsupported
+        $ typedPatternOccurrence field
 
 graphProperTypeAnnotations
   :: (TermNodeId, TermNode (Type variable) local)
@@ -911,6 +1076,7 @@ data SemanticThunk identity local
 data SemanticValue identity local
   = SemanticSpine !(LengthExpression LengthContractVariable)
   | SemanticOpaqueTargetArgument !Natural
+  | SemanticOpaqueStepPayload !OccurrenceId
   | SemanticTuple [SemanticThunk identity local]
   | SemanticClosure
       [TypedPattern (Type (Variable identity)) local]
@@ -947,6 +1113,7 @@ data InterpretationContext identity local annotation = InterpretationContext
   , interpretationProblemLimits :: !LengthProblemLimits
   , interpretationGraph :: !(TermGraph (Type (Variable identity)) local)
   , interpretationGlobals :: !(Map Name (ModeledGlobal identity))
+  , interpretationCases :: !(Map TermNodeId (ExactSpineCase identity local))
   , interpretationTargetArgumentRoles :: ![LengthTargetArgumentRole]
   , interpretationInputCount :: !Int
   }
@@ -1035,7 +1202,46 @@ evaluateNode context environment nodeId = do
       extended <- bindPattern context pattern
         (DeferredThunk binding environment) environment
       evaluateNode context extended body
-    TypedCase{} -> lift $ Left $ LengthProblemUnsupportedCase nodeId
+    TypedCase{} -> case Map.lookup nodeId $ interpretationCases context of
+      Nothing -> lift $ Left $ LengthProblemUnsupportedCase nodeId
+      Just checked -> interpretExactSpineCase context environment nodeId checked
+
+interpretExactSpineCase
+  :: (Ord identity, Ord local)
+  => InterpretationContext identity local annotation
+  -> SemanticEnvironment identity local
+  -> TermNodeId
+  -> ExactSpineCase identity local
+  -> Evaluation failure identity local (SemanticValue identity local)
+interpretExactSpineCase context environment owner
+    (ExactSpineCase scrutinee zeroBody stepPattern stepBody) = do
+  scrutineeValue <- evaluateNode context environment scrutinee
+  scrutineeLength <- requireSpine owner scrutineeValue
+  spendEvaluation context
+  zeroValue <- evaluateNode context environment zeroBody
+  zeroLength <- requireSpine owner zeroValue
+  let model = lengthContextSpineModel $ checkedLengthSessionContext
+        $ interpretationSession context
+      recursiveIndex = checkedLengthSpineRecursiveField model
+      tailLength = LengthMonus scrutineeLength $ LengthLiteral 1
+      stepFields = case typedPatternNode stepPattern of
+        TypedConstructor _ fields -> fields
+        _ -> []
+      fieldThunk index field
+        | index == recursiveIndex = EvaluatedThunk $ SemanticSpine tailLength
+        | otherwise = EvaluatedThunk $ SemanticOpaqueStepPayload
+            $ typedPatternOccurrence field
+  spendEvaluation context
+  stepEnvironment <- foldM bindStepField environment
+    $ zip stepFields $ zipWith fieldThunk [0 ..] stepFields
+  stepValue <- evaluateNode context stepEnvironment stepBody
+  stepLength <- requireSpine owner stepValue
+  pure $ SemanticSpine $ LengthIf
+    (LengthEqual scrutineeLength $ LengthLiteral 0)
+    zeroLength stepLength
+ where
+  bindStepField current (field, thunk) =
+    bindPattern context field thunk current
 
 forceThunk
   :: (Ord identity, Ord local)
@@ -1057,6 +1263,9 @@ applySemantic context owner function argument = case function of
   SemanticOpaqueTargetArgument position -> lift $ Left
     $ LengthProblemUnobservedTargetArgumentDemanded position
     $ LengthUnobservedTargetCallableDemand owner
+  SemanticOpaqueStepPayload occurrence -> lift $ Left
+    $ LengthProblemStepPayloadDemanded occurrence
+    $ LengthStepPayloadCallableDemand owner
   SemanticClosure [] body environment -> do
     value <- evaluateNode context environment body
     applySemantic context owner value argument
@@ -1105,6 +1314,9 @@ bindPattern context pattern thunk environment = do
           $ LengthProblemUnobservedTargetArgumentDemanded position
           $ LengthUnobservedTargetTupleDemand
           $ typedPatternOccurrence pattern
+        SemanticOpaqueStepPayload occurrence -> lift $ Left
+          $ LengthProblemStepPayloadDemanded occurrence
+          $ LengthStepPayloadTupleDemand $ typedPatternOccurrence pattern
         SemanticTuple fields
           | length fields == length patterns -> foldM bindField environment
               $ zip patterns fields
@@ -1157,6 +1369,9 @@ requireSpine _ (SemanticSpine expression) = pure expression
 requireSpine owner (SemanticOpaqueTargetArgument position) = lift $ Left
   $ LengthProblemUnobservedTargetArgumentDemanded position
   $ LengthUnobservedTargetSpineDemand owner
+requireSpine owner (SemanticOpaqueStepPayload occurrence) = lift $ Left
+  $ LengthProblemStepPayloadDemanded occurrence
+  $ LengthStepPayloadSpineDemand owner
 requireSpine owner _ = lift $ Left $ LengthProblemExpectedSpine owner
 
 interpretProvider
@@ -1309,7 +1524,9 @@ buildConcreteEncodingFingerprint
         (EncodingFingerprintSubject FiniteListSpineLengthV1))
 buildConcreteEncodingFingerprint session contract usedProviders result condition =
   buildFingerprintWithin maximumBytes FingerprintBuilder
-    { fingerprintBuilderVersion = if mixedRoles then 2 else 1
+    { fingerprintBuilderVersion = case casePolicy of
+        LengthExactZeroStepCases -> 3
+        LengthCasesRejected -> if mixedRoles then 2 else 1
     , fingerprintBuilderRole = ascii
         "finite-list-spine-length/concrete-encoding"
     , fingerprintBuilderFields =
@@ -1327,7 +1544,7 @@ buildConcreteEncodingFingerprint session contract usedProviders result condition
             $ [ FingerprintBytes $ ascii "lazy-symbolic-interpreter/v1"
             , FingerprintBytes $ ascii "finite-total-spine/v1"
             , FingerprintBytes $ ascii "assumed-provider-laws/v1"
-            ] ++ mixedInterpreterPolicy
+            ] ++ mixedInterpreterPolicy ++ caseInterpreterPolicy
         , tagged "used-provider-laws"
             [FingerprintSequence $ map providerSummaryField usedProviders]
         , tagged "candidate-result"
@@ -1339,6 +1556,7 @@ buildConcreteEncodingFingerprint session contract usedProviders result condition
  where
   mixedRoles = LengthUnobservedTarget `elem`
     checkedLengthContractTargetArgumentRoles contract
+  casePolicy = checkedLengthSessionCasePolicy session
   mixedInterpreterPolicy
     | mixedRoles =
         [ FingerprintBytes $ ascii "source-ordered-target-roles/v1"
@@ -1347,6 +1565,15 @@ buildConcreteEncodingFingerprint session contract usedProviders result condition
         , FingerprintBytes $ ascii "explicit-opaque-demand-rejection/v1"
         ]
     | otherwise = []
+  caseInterpreterPolicy = case casePolicy of
+    LengthCasesRejected -> []
+    LengthExactZeroStepCases ->
+      [ FingerprintBytes $ ascii "exact-zero-step-spine-case/v1"
+      , FingerprintBytes $ ascii "symbolic-zero-test/v1"
+      , FingerprintBytes $ ascii "recursive-tail-natural-monus-one/v1"
+      , FingerprintBytes $ ascii "opaque-step-payload/v1"
+      , FingerprintBytes $ ascii "whole-case-provider-law-union/v1"
+      ]
   maximumBytes = fromIntegral $ lengthFingerprintByteLimit
     $ checkedLengthSessionLimits session
 

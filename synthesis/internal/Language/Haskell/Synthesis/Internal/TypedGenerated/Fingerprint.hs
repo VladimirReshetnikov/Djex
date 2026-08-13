@@ -12,6 +12,7 @@ module Language.Haskell.Synthesis.Internal.TypedGenerated.Fingerprint
   , defaultTermGraphFingerprintByteLimit
   , TermGraphFingerprintError (..)
   , fingerprintSharedTermGraph
+  , fingerprintTermGraphWithTypeStructure
   ) where
 
 import Control.DeepSeq (NFData)
@@ -55,6 +56,7 @@ import Language.Haskell.Synthesis.TypedGenerated
   , TermNodeForm (..)
   , TermNodeId
   , TypeApplicationWitness (..)
+  , TypeStructure
   , TypedPattern (..)
   , TypedPatternNode (..)
   , lookupTermNode
@@ -102,7 +104,8 @@ instance (NFData identity, NFData local)
 --
 -- 'sharedTypeStructure' deliberately has no constructor-family schema.  A
 -- graph containing a constructor pattern therefore fails during the fresh
--- reseal; an inventory-bound sealer must eventually establish that authority
+-- reseal.  An inventory-bound domain sealer must use the package-private
+-- schema-parameterized entrance below to establish that authority atomically
 -- before reusing this structural encoder for such a candidate.
 --
 -- This is a graph identity, not source-inventory or behavioral evidence.  A
@@ -118,8 +121,29 @@ fingerprintSharedTermGraph
       (TermGraphFingerprintError identity local)
       (Fingerprint TermGraphFingerprintSubject)
 fingerprintSharedTermGraph graphLimits maximumBytes original = do
+  fingerprintTermGraphWithTypeStructure
+    sharedTypeStructure graphLimits maximumBytes original
+
+-- | Package-private authority-parametric counterpart.
+--
+-- The supplied structure is consumed only by the atomic fresh reseal which
+-- immediately precedes canonical encoding.  This lets a domain whose opaque
+-- checked inventory owns constructor schemas admit those exact patterns
+-- without widening 'fingerprintSharedTermGraph' or retaining a detachable
+-- schema beside the resulting key.
+fingerprintTermGraphWithTypeStructure
+  :: (Ord identity, Ord local)
+  => TypeStructure (Type (Variable identity))
+  -> TermGraphLimits
+  -> Natural
+  -> TermGraph (Type (Variable identity)) local
+  -> Either
+      (TermGraphFingerprintError identity local)
+      (Fingerprint TermGraphFingerprintSubject)
+fingerprintTermGraphWithTypeStructure typeStructure graphLimits maximumBytes
+    original = do
   graph <- first TermGraphFingerprintSharedResealError $
-    sealTermGraph sharedTypeStructure graphLimits TermGraphSource
+    sealTermGraph typeStructure graphLimits TermGraphSource
       { termGraphSourceRoot = termGraphRoot original
       , termGraphSourceNodes = termGraphNodes original
       }

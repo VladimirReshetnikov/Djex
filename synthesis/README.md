@@ -132,7 +132,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Fingerprint` | Public inspection of opaque, nominal, collision-free canonical identities; construction and byte budgets remain package-private. |
 | `Language.Haskell.Synthesis.Semantic.Length` | Exact inventory-bound finite-spine contexts, normalized contracts, source-bound assumed provider laws, and model-aware fingerprints; additive target-role sealers retain the full ordered observed-spine/unobserved vector while legacy all-observed identities remain exact. |
 | `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked contracts, provider transfers, and exact candidate problems; only independently validated model-relative violations receive problem-bound evidence with an explicit provider-assumption basis. |
-| `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and typed-candidate behavioral problems: session-owned provider authority carried intact through interpretation, exact separately supplied contract resealing, residual rejection, rigid root/provider authorization, mixed-role opaque target application with compact observed-input numbering and explicit demand failures, normalized counterexample formulas, and separate inventory/encoding/candidate/problem identities; the candidate identity structurally binds the transient shared graph key without retaining a parallel graph field. |
+| `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and typed-candidate behavioral problems: session-owned provider authority, contract resealing, residual rejection, rigid root/provider authorization, mixed-role opaque targets, and an additive exact zero/step spine-case policy whose constructor schema is freshly rebound to the session before interpretation; normalized formulas and separate identities retain no parallel graph field. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation and exact input-symbol model replay for one checked Length problem, without launching or trusting a solver. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` | Pure validated Z3 launch, resource, artifact, and response-decoder policy with a package-private complete identity and a byte-free digest-expectation presence classifier; it performs no IO or attestation. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` | Rank-N scoped capability-probed Z3 ownership with byte-free failures, heuristic status/strength/use, and a query-first replay gate for independently validated counterexample evidence. |
@@ -158,7 +158,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Generated` | Scope-aware expressions, patterns, clauses, holes, mixed term/type application spines, bottom-up rewriting, simplification, alpha-equivalence, substitution, and Haskell rendering through the common qualification policy. |
 | `Language.Haskell.Synthesis.TypedCandidate` | Opaque engine-checked compatibility/graph associations, nominal authority domains, lazy per-candidate projections, and one evidence/progress/metadata-preserving `QueryResult` compatibility projection shared by both engines. |
 | `Language.Haskell.Synthesis.TypedGenerated` | Bounded typed candidate graphs with stable node, source-occurrence, and certificate identities; checked application and visible-specialization witnesses; a neutral sealing pass; nominal type/local authority even after graph projection; exact graph metrics; and one-way projection to `Generated`. |
-| `Language.Haskell.Synthesis.TypedGenerated.Fingerprint` | Bounded, allocation- and alpha-insensitive structural identities for shared typed graphs, after resealing with the shared type checker; certificate- and constructor-schema-dependent graphs fail closed until their semantic authorities exist. |
+| `Language.Haskell.Synthesis.TypedGenerated.Fingerprint` | Bounded, allocation- and alpha-insensitive structural identities after a fresh reseal; the public shared entrance rejects certificate- and constructor-schema-dependent graphs, while a package-private domain entrance can atomically consume an opaque checked schema without exporting it as graph authority. |
 | `Language.Haskell.Synthesis.Observability` | Opaque exact counters, stable cross-engine metric codes, deterministic aggregation, and deliberately non-strict snapshots that can be inspected independently of a lazy result. |
 
 Logical evidence is independent of operational progress. A truncated search can
@@ -196,6 +196,17 @@ session, and concrete-encoding identities; mixed vectors alone select the new
 versioned policies. The resulting SMT query and model replay expose only the
 compact observed inputs. See the
 [role-aware target-argument report](../docs/reports/2026-08-13-role-aware-target-arguments.md).
+
+Length also has an additive exact-case sealer pair. It accepts only complete
+zero/step splits over the checked spine model; ordinary and role-aware sessions
+retain their historical case rejection and bytes. The package-private graph
+identity entrance freshly reseals constructor patterns from the session-owned
+schema, while the public shared fingerprint continues to reject them. Analysis
+is canonical zero then step, maps the recursive field to `n monus 1`, keeps the
+payload opaque, and unions provider authority reached in both branches. The
+shipped search adapters do not yet retain typed nonempty case graphs, so this
+Djex foundation adds no frontend-generated case candidate by itself. See the
+[exact zero/step case foundation report](../docs/reports/2026-08-13-exact-zero-step-length-cases.md).
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib` provides a pure canonical
 QF_LIA boundary over an exact checked length problem. Its opaque nominal query

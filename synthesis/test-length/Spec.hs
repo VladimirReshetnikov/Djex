@@ -972,6 +972,10 @@ sessionTests = testGroup "checked length sessions"
         $ LengthProblem.sealRoleAwareLengthSession
             Length.defaultLengthLimits mixed inventory
             Length.BuiltinListSpine []
+      exactCaseSession <- expectRight
+        $ LengthProblem.sealExactSpineCaseLengthSession
+            Length.defaultLengthLimits observed inventory
+            Length.BuiltinListSpine []
       LengthProblem.lengthSessionInventoryFingerprint explicitObserved @?=
         LengthProblem.lengthSessionInventoryFingerprint legacy
       LengthProblem.lengthSessionEncodingPolicyFingerprint explicitObserved @?=
@@ -984,6 +988,11 @@ sessionTests = testGroup "checked length sessions"
       assertBool "mixed target semantics reused the legacy policy identity" $
         LengthProblem.lengthSessionEncodingPolicyFingerprint mixedSession /=
           LengthProblem.lengthSessionEncodingPolicyFingerprint legacy
+      LengthProblem.lengthSessionInventoryFingerprint exactCaseSession @?=
+        LengthProblem.lengthSessionInventoryFingerprint legacy
+      assertBool "exact case semantics reused an ordinary policy identity" $
+        LengthProblem.lengthSessionEncodingPolicyFingerprint exactCaseSession /=
+          LengthProblem.lengthSessionEncodingPolicyFingerprint legacy
   , testCase "bound target roles after existing session authority" $ do
       let inventory = sessionInventory () []
           limits = limitsWith $ \source -> source
@@ -991,6 +1000,11 @@ sessionTests = testGroup "checked length sessions"
       assertLeft
         (LengthProblem.LengthSessionTargetArgumentRoleLimitExceeded 1 2)
         $ LengthProblem.sealRoleAwareLengthSession limits
+            [Length.LengthObservedSpine, Length.LengthUnobservedTarget]
+            inventory Length.BuiltinListSpine []
+      assertLeft
+        (LengthProblem.LengthSessionTargetArgumentRoleLimitExceeded 1 2)
+        $ LengthProblem.sealExactSpineCaseLengthSession limits
             [Length.LengthObservedSpine, Length.LengthUnobservedTarget]
             inventory Length.BuiltinListSpine []
   , testCase
@@ -1010,6 +1024,14 @@ sessionTests = testGroup "checked length sessions"
         (LengthProblem.LengthSessionSpineModelRejected
           $ Length.LengthSpineTypeDeclarationMissing typeName)
         spineResult
+      exactSpineResult <- evaluateWithin
+        $ LengthProblem.sealExactSpineCaseLengthSession
+            Length.defaultLengthLimits poisonRoles inventory
+            (Length.DeclaredListSpine typeName zeroName stepName) []
+      assertLeft
+        (LengthProblem.LengthSessionSpineModelRejected
+          $ Length.LengthSpineTypeDeclarationMissing typeName)
+        exactSpineResult
       providerResult <- evaluateWithin
         $ LengthProblem.sealRoleAwareLengthSession
             Length.defaultLengthLimits poisonRoles inventory
@@ -1019,6 +1041,15 @@ sessionTests = testGroup "checked length sessions"
           $ Length.LengthProviderSummaryRejected 0 providerName
           $ Length.LengthProviderNotInSourceInventory providerName)
         providerResult
+      exactProviderResult <- evaluateWithin
+        $ LengthProblem.sealExactSpineCaseLengthSession
+            Length.defaultLengthLimits poisonRoles inventory
+            Length.BuiltinListSpine [provider]
+      assertLeft
+        (LengthProblem.LengthSessionProviderInventoryRejected
+          $ Length.LengthProviderSummaryRejected 0 providerName
+          $ Length.LengthProviderNotInSourceInventory providerName)
+        exactProviderResult
   , testCase "reject oversized target roles before identity construction" $ do
       let inventory = sessionInventory () []
       context <- expectRight $ Length.sealLengthContext
@@ -1198,6 +1229,162 @@ candidateProblemTests = testGroup "typed candidate behavioral problems"
       Djex.behavioralProblemEncodingFingerprint
           (LengthProblem.checkedLengthProblemBehavioralProblem problem) @?=
         LengthProblem.checkedLengthProblemEncodingFingerprint problem
+  , testCase
+      "admit only an explicitly sealed exact zero/step spine case" $ do
+      (exactSession, exactContract, graph) <- adversarialExactSpineCaseFixture
+        listName consName False
+      let candidate = adversarialTypedCandidate $ Right graph
+      problem <- expectRight
+        $ LengthProblem.sealExactSpineCaseLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            exactSession exactContract candidate
+      let input = Length.LengthVariable $ Length.LengthInput 0
+          expected = Length.LengthIf
+            (Length.LengthEqual input $ Length.LengthLiteral 0)
+            (Length.LengthLiteral 0)
+            (Length.LengthMonus input $ Length.LengthLiteral 1)
+          checked = LengthProblem.checkedLengthProblemCandidate problem
+      LengthProblem.checkedLengthProblemInputCount problem @?= 1
+      LengthProblem.checkedLengthCandidateResult checked @?= expected
+      LengthProblem.checkedLengthCandidateUsedProviders checked @?= []
+      evidence <- expectCounterexample
+        $ Evaluate.validateLengthProblemCounterexample
+            Evaluate.defaultLengthEvaluationLimits problem
+            $ Evaluate.LengthProblemAssignment [3]
+      receipt <- expectRight $ Djex.replayBehavioralEvidence
+        (LengthProblem.checkedLengthProblemBehavioralProblem problem) evidence
+      Evaluate.validatedLengthCounterexampleInputs receipt @?= [3]
+      Evaluate.validatedLengthCounterexampleResult receipt @?= 2
+  , testCase
+      "reject every detached case-policy pairing before graph demand" $ do
+      let roles = [Length.LengthObservedSpine]
+          target = FunctionType adversarialClosedList adversarialClosedList
+          poisonCandidate = adversarialTypedCandidate
+            $ error "case-policy mismatch demanded the graph"
+      ordinarySession <- adversarialRoleAwareLengthSession roles [] []
+      ordinaryContract <- adversarialRoleAwareLengthContract
+        ordinarySession roles target identityLengthContract
+      exactSession <- adversarialExactCaseLengthSession roles [] []
+      exactContract <- adversarialRoleAwareLengthContract
+        exactSession roles target identityLengthContract
+      ordinaryResult <- evaluateWithin
+        $ LengthProblem.sealExactSpineCaseLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            ordinarySession ordinaryContract poisonCandidate
+      assertLeft LengthProblem.LengthProblemCasePolicyMismatch ordinaryResult
+      exactResult <- evaluateWithin
+        $ LengthProblem.sealRoleAwareLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            exactSession exactContract poisonCandidate
+      assertLeft LengthProblem.LengthProblemCasePolicyMismatch exactResult
+      legacyResult <- evaluateWithin
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            exactSession exactContract poisonCandidate
+      assertLeft LengthProblem.LengthProblemCasePolicyMismatch legacyResult
+  , testCase
+      "freshly bind constructor-pattern schemas to the exact session" $ do
+      (session, contract, exactGraph) <- adversarialExactSpineCaseFixture
+        listName consName False
+      case Djex.fingerprintSharedTermGraph
+          Djex.defaultTermGraphLimits
+          Djex.defaultTermGraphFingerprintByteLimit exactGraph of
+        Left (Djex.TermGraphFingerprintSharedResealError
+            (Djex.UnknownConstructorPatternSchema occurrence name _)) -> do
+          occurrence @?= Djex.occurrenceId 2
+          name @?= listName
+        Left other -> assertFailure $ "unexpected public rejection: "
+          ++ show other
+        Right _ -> assertFailure
+          "the public shared fingerprint admitted constructor patterns"
+      (_, _, foreignGraph) <- adversarialExactSpineCaseFixtureWithSchema
+        listName consName False True
+      case LengthProblem.sealExactSpineCaseLengthTypedCandidateProblem
+          LengthProblem.defaultLengthProblemLimits session contract
+          (adversarialTypedCandidate $ Right foreignGraph) of
+        Left (LengthProblem.LengthProblemTermGraphFingerprintRejected
+            (Djex.TermGraphFingerprintSharedResealError
+              (Djex.ConstructorPatternFieldTypeMismatch
+                occurrence index expected actual))) -> do
+          occurrence @?= Djex.occurrenceId 4
+          index @?= 0
+          expected @?= TupleType Boxed []
+          actual @?= adversarialClosedList
+        Left other -> assertFailure $ "unexpected fresh-reseal rejection: "
+          ++ show other
+        Right _ -> assertFailure
+          "a graph sealed under detached constructor schemas was admitted"
+  , testCase
+      "canonicalize case analysis while retaining structural branch order" $ do
+      (session, contract, forwardGraph) <- adversarialExactSpineCaseFixture
+        listName consName False
+      (_, _, reversedGraph) <- adversarialExactSpineCaseFixture
+        listName consName True
+      forward <- expectRight
+        $ LengthProblem.sealExactSpineCaseLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session contract
+            $ adversarialTypedCandidate $ Right forwardGraph
+      reversed <- expectRight
+        $ LengthProblem.sealExactSpineCaseLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session contract
+            $ adversarialTypedCandidate $ Right reversedGraph
+      let first = LengthProblem.checkedLengthProblemCandidate forward
+          second = LengthProblem.checkedLengthProblemCandidate reversed
+      LengthProblem.checkedLengthCandidateResult first @?=
+        LengthProblem.checkedLengthCandidateResult second
+      LengthProblem.checkedLengthCandidateUsedProviders first @?=
+        LengthProblem.checkedLengthCandidateUsedProviders second
+      assertBool "source branch order disappeared from graph identity" $
+        LengthProblem.checkedLengthCandidateFingerprint first /=
+          LengthProblem.checkedLengthCandidateFingerprint second
+      LengthProblem.checkedLengthProblemEncodingFingerprint forward @?=
+        LengthProblem.checkedLengthProblemEncodingFingerprint reversed
+  , testCase
+      "reject inspection of the exact step payload" $ do
+      (session, contract, graph, payloadOccurrence, caseNode) <-
+        adversarialExactCasePayloadDemandFixture
+      assertLeft
+        (LengthProblem.LengthProblemStepPayloadDemanded payloadOccurrence
+          $ LengthProblem.LengthStepPayloadSpineDemand caseNode)
+        $ LengthProblem.sealExactSpineCaseLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session contract
+            $ adversarialTypedCandidate $ Right graph
+  , testCase
+      "retain provider-law authority reached by both exact case branches" $ do
+      (expectedProviders, session, contract, graph) <-
+        adversarialExactCaseProviderUnionFixture
+      problem <- expectRight
+        $ LengthProblem.sealExactSpineCaseLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session contract
+            $ adversarialTypedCandidate $ Right graph
+      let checked = LengthProblem.checkedLengthProblemCandidate problem
+      LengthProblem.checkedLengthCandidateResult checked @?=
+        Length.LengthLiteral 7
+      LengthProblem.checkedLengthCandidateUsedProviders checked @?=
+        expectedProviders
+      LengthProblem.checkedLengthProblemCounterexampleCondition problem @?=
+        Length.LengthTruth False
+  , testCase
+      "preserve ordinary case rejection at the public graph identity" $ do
+      let roles = [Length.LengthObservedSpine]
+          target = FunctionType adversarialClosedList adversarialClosedList
+      ordinarySession <- adversarialRoleAwareLengthSession roles [] []
+      ordinaryContract <- adversarialRoleAwareLengthContract
+        ordinarySession roles target identityLengthContract
+      (_, _, graph) <- adversarialExactSpineCaseFixture
+        listName consName False
+      case LengthProblem.sealRoleAwareLengthTypedCandidateProblem
+          LengthProblem.defaultLengthProblemLimits
+          ordinarySession ordinaryContract
+          (adversarialTypedCandidate $ Right graph) of
+        Left (LengthProblem.LengthProblemTermGraphFingerprintRejected
+            (Djex.TermGraphFingerprintSharedResealError
+              (Djex.UnknownConstructorPatternSchema occurrence name _))) -> do
+          occurrence @?= Djex.occurrenceId 2
+          name @?= listName
+        Left other -> assertFailure $ "unexpected ordinary rejection: "
+          ++ show other
+        Right _ -> assertFailure "an ordinary session admitted a case graph"
   , testCase
       "forward an opaque higher-order target into a checked map law" $ do
       (providerName, session, contract, candidate) <- roleAwareMapFixture
@@ -5811,6 +5998,20 @@ adversarialRoleAwareLengthSession roles declarations providers = expectRight
       Length.BuiltinListSpine
       providers
 
+adversarialExactCaseLengthSession
+  :: [Length.LengthTargetArgumentRole]
+  -> [Declaration (Variable AdversarialIdentity) () ()]
+  -> [Length.LengthProviderSummarySource
+        (Variable AdversarialIdentity)]
+  -> IO (LengthProblem.CheckedLengthSession AdversarialIdentity ())
+adversarialExactCaseLengthSession roles declarations providers = expectRight
+  $ LengthProblem.sealExactSpineCaseLengthSession
+      Length.defaultLengthLimits
+      roles
+      (sessionInventory () declarations)
+      Length.BuiltinListSpine
+      providers
+
 adversarialLengthContract
   :: LengthProblem.CheckedLengthSession AdversarialIdentity ()
   -> AdversarialType
@@ -5844,6 +6045,253 @@ adversarialListOf = TypeApplication $ TypeConstructor listName
 
 adversarialClosedList :: AdversarialType
 adversarialClosedList = adversarialListOf $ TupleType Boxed []
+
+-- The first seal deliberately uses fixture-owned constructor schemas.  The
+-- production exact-case sealer does not trust this structure: it freshly
+-- re-seals the raw graph from the checked Length session's opaque spine model.
+adversarialExactSpineCaseFixture
+  :: Name
+  -> Name
+  -> Bool
+  -> IO
+      ( LengthProblem.CheckedLengthSession AdversarialIdentity ()
+      , Length.CheckedLengthContract (Variable AdversarialIdentity)
+      , AdversarialGraph
+      )
+adversarialExactSpineCaseFixture zeroName stepName reversed = do
+  adversarialExactSpineCaseFixtureWithSchema
+    zeroName stepName reversed False
+
+adversarialExactSpineCaseFixtureWithSchema
+  :: Name
+  -> Name
+  -> Bool
+  -> Bool
+  -> IO
+      ( LengthProblem.CheckedLengthSession AdversarialIdentity ()
+      , Length.CheckedLengthContract (Variable AdversarialIdentity)
+      , AdversarialGraph
+      )
+adversarialExactSpineCaseFixtureWithSchema zeroName stepName reversed
+    recursiveFirst = do
+  let roles = [Length.LengthObservedSpine]
+      payload = TupleType Boxed []
+      spine = adversarialListOf payload
+      target = FunctionType spine spine
+      zeroPattern = Djex.TypedPattern (Djex.occurrenceId 2) spine
+        $ Djex.TypedConstructor zeroName []
+      stepPattern = Djex.TypedPattern (Djex.occurrenceId 4) spine
+        $ Djex.TypedConstructor stepName
+          $ if recursiveFirst
+            then [tailField, payloadField]
+            else [payloadField, tailField]
+      payloadField = Djex.TypedPattern (Djex.occurrenceId 5) payload
+        Djex.TypedWildcard
+      tailField = Djex.TypedPattern (Djex.occurrenceId 6) spine
+        $ Djex.TypedBind 1
+      alternatives
+        | reversed = [(stepPattern, Djex.termNodeId 2),
+            (zeroPattern, Djex.termNodeId 1)]
+        | otherwise = [(zeroPattern, Djex.termNodeId 1),
+            (stepPattern, Djex.termNodeId 2)]
+      source = Djex.TermGraphSource (Djex.termNodeId 4)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode spine
+              $ Djex.TypedLocal (Djex.occurrenceId 1) 0
+          )
+        , ( Djex.termNodeId 1
+          , Djex.TermNode spine
+              $ Djex.TypedGlobal (Djex.occurrenceId 3) zeroName
+          )
+        , ( Djex.termNodeId 2
+          , Djex.TermNode spine
+              $ Djex.TypedLocal (Djex.occurrenceId 7) 1
+          )
+        , ( Djex.termNodeId 3
+          , Djex.TermNode spine
+              $ Djex.TypedCase (Djex.termNodeId 0) alternatives
+          )
+        , ( Djex.termNodeId 4
+          , Djex.TermNode target
+              $ Djex.TypedLambda
+                  [ Djex.TypedPattern (Djex.occurrenceId 0) spine
+                      $ Djex.TypedBind 0
+                  ]
+                  (Djex.termNodeId 3)
+          )
+        ]
+      typeStructure = Djex.sharedTypeStructure
+        { Djex.constructorPatternFieldTypes = \name patternType ->
+            if patternType /= spine
+              then Nothing
+              else if name == zeroName
+                then Just []
+                else if name == stepName
+                  then Just $ if recursiveFirst
+                    then [spine, payload]
+                    else [payload, spine]
+                  else Nothing
+        }
+  session <- adversarialExactCaseLengthSession roles [] []
+  contract <- adversarialRoleAwareLengthContract
+    session roles target identityLengthContract
+  graph <- expectRight $ Djex.sealTermGraph
+    typeStructure Djex.defaultTermGraphLimits source
+  pure (session, contract, graph)
+
+adversarialExactCasePayloadDemandFixture
+  :: IO
+      ( LengthProblem.CheckedLengthSession AdversarialIdentity ()
+      , Length.CheckedLengthContract (Variable AdversarialIdentity)
+      , AdversarialGraph
+      , Djex.OccurrenceId
+      , Djex.TermNodeId
+      )
+adversarialExactCasePayloadDemandFixture = do
+  let roles = [Length.LengthObservedSpine]
+      payload = adversarialClosedList
+      spine = adversarialListOf payload
+      target = FunctionType spine payload
+      payloadOccurrence = Djex.occurrenceId 5
+      caseNode = Djex.termNodeId 3
+      zeroPattern = Djex.TypedPattern (Djex.occurrenceId 2) spine
+        $ Djex.TypedConstructor listName []
+      stepPattern = Djex.TypedPattern (Djex.occurrenceId 4) spine
+        $ Djex.TypedConstructor consName
+          [ Djex.TypedPattern payloadOccurrence payload $ Djex.TypedBind 1
+          , Djex.TypedPattern (Djex.occurrenceId 6) spine
+              Djex.TypedWildcard
+          ]
+      source = Djex.TermGraphSource (Djex.termNodeId 4)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode spine
+              $ Djex.TypedLocal (Djex.occurrenceId 1) 0
+          )
+        , ( Djex.termNodeId 1
+          , Djex.TermNode payload
+              $ Djex.TypedGlobal (Djex.occurrenceId 3) listName
+          )
+        , ( Djex.termNodeId 2
+          , Djex.TermNode payload
+              $ Djex.TypedLocal (Djex.occurrenceId 7) 1
+          )
+        , ( caseNode
+          , Djex.TermNode payload
+              $ Djex.TypedCase (Djex.termNodeId 0)
+                  [ (zeroPattern, Djex.termNodeId 1)
+                  , (stepPattern, Djex.termNodeId 2)
+                  ]
+          )
+        , ( Djex.termNodeId 4
+          , Djex.TermNode target
+              $ Djex.TypedLambda
+                  [ Djex.TypedPattern (Djex.occurrenceId 0) spine
+                      $ Djex.TypedBind 0
+                  ]
+                  caseNode
+          )
+        ]
+      typeStructure = Djex.sharedTypeStructure
+        { Djex.constructorPatternFieldTypes = \name patternType ->
+            if patternType /= spine
+              then Nothing
+              else if name == listName
+                then Just []
+                else if name == consName
+                  then Just [payload, spine]
+                  else Nothing
+        }
+  session <- adversarialExactCaseLengthSession roles [] []
+  contract <- adversarialRoleAwareLengthContract
+    session roles target trivialLengthContract
+  graph <- expectRight $ Djex.sealTermGraph
+    typeStructure Djex.defaultTermGraphLimits source
+  pure (session, contract, graph, payloadOccurrence, caseNode)
+
+adversarialExactCaseProviderUnionFixture
+  :: IO
+      ( [Name]
+      , LengthProblem.CheckedLengthSession AdversarialIdentity ()
+      , Length.CheckedLengthContract (Variable AdversarialIdentity)
+      , AdversarialGraph
+      )
+adversarialExactCaseProviderUnionFixture = do
+  firstName <- expectName "Fixture.caseZeroProvider"
+  secondName <- expectName "Fixture.caseStepProvider"
+  let roles = [Length.LengthObservedSpine]
+      payload = TupleType Boxed []
+      spine = adversarialListOf payload
+      target = FunctionType spine spine
+      provider name = Length.AssumedProviderSummary
+        { Length.lengthProviderName = name
+        , Length.lengthProviderScheme = spine
+        , Length.lengthProviderArgumentRoles = []
+        , Length.lengthProviderTransfer = Length.LengthLiteral 7
+        }
+      providers = [provider firstName, provider secondName]
+      declarations =
+        [ ValueDeclaration $ ValueSignature () name spine
+        | name <- [firstName, secondName]
+        ]
+      zeroPattern = Djex.TypedPattern (Djex.occurrenceId 2) spine
+        $ Djex.TypedConstructor listName []
+      stepPattern = Djex.TypedPattern (Djex.occurrenceId 4) spine
+        $ Djex.TypedConstructor consName
+          [ Djex.TypedPattern (Djex.occurrenceId 5) payload
+              Djex.TypedWildcard
+          , Djex.TypedPattern (Djex.occurrenceId 6) spine
+              Djex.TypedWildcard
+          ]
+      source = Djex.TermGraphSource (Djex.termNodeId 4)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode spine
+              $ Djex.TypedLocal (Djex.occurrenceId 1) 0
+          )
+        , ( Djex.termNodeId 1
+          , Djex.TermNode spine
+              $ Djex.TypedGlobal (Djex.occurrenceId 3) firstName
+          )
+        , ( Djex.termNodeId 2
+          , Djex.TermNode spine
+              $ Djex.TypedGlobal (Djex.occurrenceId 7) secondName
+          )
+        , ( Djex.termNodeId 3
+          , Djex.TermNode spine
+              $ Djex.TypedCase (Djex.termNodeId 0)
+                  [ (zeroPattern, Djex.termNodeId 1)
+                  , (stepPattern, Djex.termNodeId 2)
+                  ]
+          )
+        , ( Djex.termNodeId 4
+          , Djex.TermNode target
+              $ Djex.TypedLambda
+                  [ Djex.TypedPattern (Djex.occurrenceId 0) spine
+                      $ Djex.TypedBind 0
+                  ]
+                  (Djex.termNodeId 3)
+          )
+        ]
+      typeStructure = Djex.sharedTypeStructure
+        { Djex.constructorPatternFieldTypes = \name patternType ->
+            if patternType /= spine
+              then Nothing
+              else if name == listName
+                then Just []
+                else if name == consName
+                  then Just [payload, spine]
+                  else Nothing
+        }
+      contractSource = contractWith (Length.LengthTruth True)
+        $ Length.LengthEqual
+            (Length.LengthVariable Length.LengthResult)
+            $ Length.LengthLiteral 7
+  session <- adversarialExactCaseLengthSession
+    roles declarations providers
+  contract <- adversarialRoleAwareLengthContract
+    session roles target contractSource
+  graph <- expectRight $ Djex.sealTermGraph
+    typeStructure Djex.defaultTermGraphLimits source
+  pure (sort [firstName, secondName], session, contract, graph)
 
 adversarialVisibleProviderProblem
   :: Name

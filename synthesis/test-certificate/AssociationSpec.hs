@@ -1,4 +1,7 @@
-module AssociationSpec (tests) where
+module AssociationSpec
+  ( tests
+  , typedCandidateCertificateGraphFixture
+  ) where
 
 import Control.DeepSeq (force)
 import Control.Exception (evaluate)
@@ -43,6 +46,14 @@ import Test.Tasty.HUnit
 type TestVariable = Variable String
 type TestType = Type TestVariable
 type TestLocal = Int
+
+-- Kept behind the private certificate-suite module boundary so carrier tests
+-- exercise the same stamped graph atom as the association tests without
+-- duplicating its substantial sealing fixture.
+typedCandidateCertificateGraphFixture
+  :: IO (CheckedTypeApplicationCertificateGraph TestVariable TestLocal)
+typedCandidateCertificateGraphFixture =
+  expectRight $ sealGraph oneSlotGraph [oneSlotOrigin]
 
 tests :: TestTree
 tests = testGroup "atomic certificate graph occurrence associations"

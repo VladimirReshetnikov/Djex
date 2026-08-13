@@ -392,7 +392,7 @@ Test-Suite synthesis-tests
     djex
 
 Test-Suite synthesis-length-tests
-  import:           tasty-hunit-test, deepseq-dep, directory-dep
+  import:           tasty-hunit-test, deepseq-dep, directory-dep, transformers-dep
   Type:             exitcode-stdio-1.0
   Main-Is:          Spec.hs
   Hs-Source-Dirs:
@@ -401,6 +401,7 @@ Test-Suite synthesis-length-tests
   Other-Modules:
     SMTLibLiveSpec
     SMTLibQFLIASpec
+    Language.Haskell.Synthesis.Internal.Alpha
     Language.Haskell.Synthesis.Internal.Fingerprint
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
@@ -421,6 +422,8 @@ Test-Suite synthesis-length-tests
     Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
     Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process
     Language.Haskell.Synthesis.Internal.TypedCandidate
+    Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate
+    Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.Association
   Build-Depends:
     bytestring >= 0.11 && < 0.13,
     containers >= 0.6 && < 0.8,
@@ -455,20 +458,30 @@ Test-Suite synthesis-certificate-tests
     synthesis/internal
   Other-Modules:
     AssociationSpec
+    TypedCandidateSpec
     Language.Haskell.Synthesis.Collection
     Language.Haskell.Synthesis.Constraint
     Language.Haskell.Synthesis.Count
+    Language.Haskell.Synthesis.Declaration
+    Language.Haskell.Synthesis.Diagnostic
+    Language.Haskell.Synthesis.Environment
     Language.Haskell.Synthesis.Fresh
     Language.Haskell.Synthesis.Fingerprint
     Language.Haskell.Synthesis.Generated
     Language.Haskell.Synthesis.Internal.Alpha
     Language.Haskell.Synthesis.Internal.Fingerprint
     Language.Haskell.Synthesis.Internal.Fingerprint.Type
+    Language.Haskell.Synthesis.Internal.InstanceHead
+    Language.Haskell.Synthesis.Internal.TypedCandidate
     Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate
     Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.Association
     Language.Haskell.Synthesis.Internal.TypedGenerated.Fingerprint
+    Language.Haskell.Synthesis.Kind
+    Language.Haskell.Synthesis.KindInference
     Language.Haskell.Synthesis.Name
     Language.Haskell.Synthesis.Qualification
+    Language.Haskell.Synthesis.Query
+    Language.Haskell.Synthesis.Search
     Language.Haskell.Synthesis.Type
     Language.Haskell.Synthesis.TypeAtom
     Language.Haskell.Synthesis.TypeRender
@@ -635,7 +648,10 @@ Test-Suite exference-engine-tests
     Language.Haskell.Exference.Core.Internal.SourceNames
     Language.Haskell.Exference.Core.Internal.Testing
     Language.Haskell.Exference.Core.Internal.VariableSupply
+    Language.Haskell.Synthesis.Internal.Alpha
     Language.Haskell.Synthesis.Internal.TypedCandidate
+    Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate
+    Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.Association
     Language.Haskell.Exference.Core.Name
     Language.Haskell.Exference.Core.RigidInstantiation
     Language.Haskell.Exference.Core.Score

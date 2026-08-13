@@ -223,6 +223,27 @@ therefore continues to reject every certificate-bearing visible application;
 this checkpoint does not stamp Exference graphs or alter public bytes. See the
 [atomic certificate association report](docs/reports/2026-08-13-atomic-certificate-graph-associations.md).
 
+The package-private `TypedCandidate` representation can now retain that opaque
+atom without changing its public four-parameter type or either public
+projection. Its hidden graph state distinguishes unavailable, ordinary sealed
+graph, and certificate-associated graph. One lazy three-way constructor keeps
+the complete availability decision below compatibility projection, and one
+private eliminator gives each branch the compatibility candidate beside its
+carrier. Trusted engine adapters still own the obligation to pair the exact
+checked compatibility value; `TypedCandidate` itself is not a pairing proof.
+
+Public `Eq`, `Ord`, and `Show` intentionally retain their exact historical
+observation by erasing an associated atom to its bare graph. A plain and an
+associated candidate with the same compatibility value and graph therefore
+compare equal and render identically. Ranking and deduplication must finish
+before attaching association authority, and authority-bearing typed candidates
+must not use equality- or ordering-based containers as authority storage: such
+containers may keep the plain representative and discard the carrier. Deep
+`NFData` evaluation does force the full retained carrier, while public graph
+projection remains shallow and loses association authority. This checkpoint
+does not yet wire Exference stamping or change Length. See the
+[typed-candidate certificate-carrier report](docs/reports/2026-08-13-typed-candidate-certificate-carrier.md).
+
 The shared checker also lacks constructor-family schemas, so the public
 fingerprint entrance always rejects constructor-pattern graphs. A
 package-private domain entrance can reuse the encoder only by atomically

@@ -928,7 +928,7 @@ captureMetadata path = do
       permissions <- getPermissions path
       modified <- getModificationTime path
       let portable = PortableMetadata
-            (toInteger size)
+            size
             (readable permissions)
             (writable permissions)
             (executable permissions)

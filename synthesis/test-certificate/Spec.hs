@@ -3,6 +3,7 @@
 module Main (main) where
 
 import qualified AssociationSpec
+import qualified TypedCandidateSpec
 import Control.DeepSeq (force)
 import Control.Exception
   ( SomeException
@@ -43,6 +44,7 @@ main = defaultMain tests
 tests :: TestTree
 tests = testGroup "bounded type-application certificate plans"
   [ AssociationSpec.tests
+  , TypedCandidateSpec.tests
   , limitTests
   , tableShapeTests
   , replayTests

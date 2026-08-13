@@ -242,11 +242,11 @@ The Length suite has 183 passing tests. Thirteen live-query cases cover:
   cap; and
 - process-owned remaining-stdout-capacity rejection before any query write.
 
-The pure protocol cases continue to pin exact decoded binding order and the
-vacuous zero-input branch. The live unary, binary, zero-input, split, and drip
-cases consume only replayed evidence after success and assert its normalized
-inputs and recomputed result, so they no longer rely on a parallel run-level
-binding projection.
+The pure response/protocol cases continue to pin exact decoded binding order
+and the vacuous zero-input branch. The live unary, binary, zero-input, split,
+and drip cases consume only replayed evidence after success and assert its
+normalized inputs and recomputed result, so they no longer rely on a parallel
+run-level binding projection.
 
 ## Next checkpoint
 

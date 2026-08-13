@@ -58,11 +58,12 @@ queries cannot be coerced into association.
 
 ## Verification
 
-The pure protocol suite still asserts exact decoded status, raw binding order,
-and vacuous `Just []` behavior. Successful live-query cases now assert strict
-status, exact evidence replay, normalized input order, recomputed result, and
-transport accounting without consulting a raw binding projection. Unary,
-binary, zero-input, split-output, and drip-output paths all cross this boundary.
+The pure response/protocol suite still asserts exact decoded status, raw
+binding order, and vacuous `Just []` behavior. Successful live-query cases now
+assert strict status, exact evidence replay, normalized input order, recomputed
+result, and transport accounting without consulting a raw binding projection.
+Unary, binary, zero-input, split-output, and drip-output paths all cross this
+boundary.
 
 This checkpoint changes no public API, Cabal module list, solver command,
 response parser, wire byte, failure order, fingerprint byte, schema tag,

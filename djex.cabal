@@ -265,6 +265,7 @@ Library
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.StdoutChunk
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream
     Language.Haskell.Synthesis.Internal.SMTLib.Lexical
+    Language.Haskell.Synthesis.Internal.SMTLib.QFLIA
     Language.Haskell.Synthesis.Internal.SMTLib.Response
     Language.Haskell.Synthesis.Internal.SMTLib.Response.Standard
     Language.Haskell.Synthesis.Internal.SMTLib.Stream
@@ -397,6 +398,7 @@ Test-Suite synthesis-length-tests
     synthesis/internal
   Other-Modules:
     SMTLibLiveSpec
+    SMTLibQFLIASpec
     Language.Haskell.Synthesis.Internal.Fingerprint
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
@@ -410,6 +412,7 @@ Test-Suite synthesis-length-tests
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.StdoutChunk
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream
     Language.Haskell.Synthesis.Internal.SMTLib.Lexical
+    Language.Haskell.Synthesis.Internal.SMTLib.QFLIA
     Language.Haskell.Synthesis.Internal.SMTLib.Response
     Language.Haskell.Synthesis.Internal.SMTLib.Response.Standard
     Language.Haskell.Synthesis.Internal.SMTLib.Stream

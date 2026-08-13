@@ -431,8 +431,13 @@ witness enters `get-value`; only original input symbols cross the model
 boundary. Both canonical rendering and structural fingerprinting cover the
 declarations and constraints.
 
-The typed SMT plan remains transient through canonical rendering and
-structural query fingerprinting. After that seal succeeds, the opaque query
+The package-private `Language.Haskell.Synthesis.Internal.SMTLib.QFLIA` module
+now owns the reusable typed integer, Boolean, and command syntax together with
+its canonical renderer and structural fingerprint-field projection. It fixes
+the exact `QF_LIA` logic bytes once. Length still owns source translation,
+helper and generated-name policy, Euclidean witnesses, limits, query/domain
+identity, model validation, and replay. Its typed SMT plan remains transient
+through the two shared projections. After sealing succeeds, the opaque query
 retains only the checked problem, bounded check bytes, and complete fingerprint
 needed by execution, association, and independent replay. Exact ordered input
 symbols and optional canonical `get-value` bytes are rederived from the
@@ -442,9 +447,11 @@ structural `typed-plan` field gains operation-specific versioned
 lowering-policy tags only for witness projections that occur. Modulo-only
 queries retain their historical symbol names, command order, tag, canonical
 scripts, and fingerprint bytes exactly. Queries without either projection also
-retain their historical bytes. The rendered script is not promoted
-into the semantic source of truth. The exact admission, lowering, identity, and
-test boundary is recorded in the
+retain their historical bytes. The rendered script is not promoted into the
+semantic source of truth. The extraction boundary and byte-compatibility
+evidence are recorded in the
+[shared typed QF_LIA foundation report](docs/reports/2026-08-13-shared-typed-qf-lia-foundation.md).
+The exact admission, lowering, identity, and test boundary is recorded in the
 [positive-literal quotient report](docs/reports/2026-08-13-positive-literal-natural-quotient.md)
 and the earlier
 [positive-literal modulo report](docs/reports/2026-08-13-positive-literal-natural-modulo.md).

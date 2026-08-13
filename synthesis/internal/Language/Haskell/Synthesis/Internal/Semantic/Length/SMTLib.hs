@@ -56,6 +56,16 @@ import Language.Haskell.Synthesis.Internal.Fingerprint
   , buildFingerprintWithin
   , fingerprintCanonicalBytes
   )
+import Language.Haskell.Synthesis.Internal.SMTLib.QFLIA
+  ( QFLIABooleanExpression (..)
+  , QFLIACommand (..)
+  , QFLIAIntegerExpression (..)
+  , qfliaBooleanExpressionFingerprintField
+  , qfliaCommandFingerprintField
+  , qfliaLogicBytes
+  , renderQFLIACommand
+  , renderQFLIACommands
+  )
 import Language.Haskell.Synthesis.Semantic.Length
   ( FiniteListSpineLengthV1
   , LengthContractVariable (..)
@@ -100,7 +110,7 @@ lengthSMTLibQuerySchemaTag = ascii "djex-length-z3-qf-lia-smtlib2/v2"
 -- constraints containing only linear integer arithmetic; this translator
 -- never emits SMT-LIB @div@ or @mod@.
 lengthSMTLibQueryLogic :: [Word8]
-lengthSMTLibQueryLogic = ascii "QF_LIA"
+lengthSMTLibQueryLogic = qfliaLogicBytes
 
 -- | Raw independent bounds for one canonical query.  Natural-valued byte
 -- fields admit zero; only the signed bit limit requires validation.
@@ -197,30 +207,6 @@ data LengthSMTLibQueryError
 
 instance NFData LengthSMTLibQueryError
 
-data SMTIntegerExpression
-  = SMTIntegerSymbol [Word8]
-  | SMTNaturalNumeral !Natural
-  | SMTIntegerSum [SMTIntegerExpression]
-  | SMTIntegerScale !Natural SMTIntegerExpression
-  | SMTIntegerDifference SMTIntegerExpression SMTIntegerExpression
-  | SMTIntegerHelper
-      !SMTBinaryHelper SMTIntegerExpression SMTIntegerExpression
-  | SMTIntegerIf
-      SMTBooleanExpression SMTIntegerExpression SMTIntegerExpression
-  deriving (Eq, Ord, Show, Generic)
-
-instance NFData SMTIntegerExpression
-
-data SMTBooleanExpression
-  = SMTBooleanTruth !Bool
-  | SMTIntegerEqual SMTIntegerExpression SMTIntegerExpression
-  | SMTIntegerAtMost SMTIntegerExpression SMTIntegerExpression
-  | SMTBooleanNot SMTBooleanExpression
-  | SMTBooleanAll [SMTBooleanExpression]
-  deriving (Eq, Ord, Show, Generic)
-
-instance NFData SMTBooleanExpression
-
 -- | Which Euclidean witness component is the value of one normalized source
 -- expression.  The distinction also selects operation-specific private names
 -- and the conditional lowering-policy tag.
@@ -240,7 +226,7 @@ data SMTEuclideanWitness = SMTEuclideanWitness
   !Natural
   ![Word8]
   ![Word8]
-  SMTIntegerExpression
+  QFLIAIntegerExpression
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData SMTEuclideanWitness
@@ -254,28 +240,15 @@ data SMTBinaryHelper = SMTNaturalMonus | SMTIntegerMinimum | SMTIntegerMaximum
 
 instance NFData SMTBinaryHelper
 
-data SMTCommand
-  = SMTSetLogic [Word8]
-  | SMTSetOption [Word8] [Word8]
-  | SMTDefineBinaryInteger
-      [Word8] [Word8] [Word8] SMTIntegerExpression
-  | SMTDeclareInteger [Word8]
-  | SMTAssert SMTBooleanExpression
-  | SMTCheckSatisfiable
-  | SMTGetValues [SMTIntegerExpression]
-  deriving (Eq, Ord, Show, Generic)
-
-instance NFData SMTCommand
-
 -- The complete typed plan remains local through bounded rendering and
 -- structural fingerprinting.  Rendering therefore never becomes the semantic
 -- source of truth, while the sealed query can retain only the runtime/replay
 -- material which has a post-seal consumer.
 data LengthSMTLibPlan = LengthSMTLibPlan
   ![[Word8]]
-  !SMTBooleanExpression
-  ![SMTCommand]
-  !(Maybe SMTCommand)
+  !QFLIABooleanExpression
+  ![QFLIACommand]
+  !(Maybe QFLIACommand)
   ![SMTEuclideanWitness]
 
 -- | Opaque association of one checked problem, bounded check commands, and
@@ -308,19 +281,19 @@ sealLengthSMTLibQuery limits problem = do
   let witnesses = orderedEuclideanWitnesses translation
       witnessSymbols = concatMap euclideanWitnessSymbols witnesses
   let checkCommands = fixedPreamble
-        ++ map SMTDeclareInteger symbols
-        ++ map SMTDeclareInteger witnessSymbols
-        ++ map (SMTAssert . nonnegative . SMTIntegerSymbol) symbols
+        ++ map QFLIADeclareInteger symbols
+        ++ map QFLIADeclareInteger witnessSymbols
+        ++ map (QFLIAAssert . nonnegative . QFLIAIntegerSymbol) symbols
         ++ concatMap euclideanWitnessCommands witnesses
-        ++ [SMTAssert condition, SMTCheckSatisfiable]
+        ++ [QFLIAAssert condition, QFLIACheckSatisfiable]
       plan = LengthSMTLibPlan
         symbols condition checkCommands valueRequest witnesses
   checkBytes <- retainCommand limits LengthSMTLibCheckCommand
-    $ renderCommands checkCommands
+    $ renderQFLIACommands checkCommands
   valueRequestBytes <- case valueRequest of
     Nothing -> Right Nothing
     Just command -> Just <$> retainCommand limits
-      LengthSMTLibInputValueRequest (renderCommand command)
+      LengthSMTLibInputValueRequest (renderQFLIACommand command)
   fingerprint <- buildQueryFingerprint limits problem plan
     checkBytes valueRequestBytes
   pure $ LengthSMTLibQuery problem checkBytes fingerprint
@@ -347,7 +320,7 @@ lengthSMTLibQueryInputArtifacts
 lengthSMTLibQueryInputArtifacts (LengthSMTLibQuery problem _ _) =
   let symbols = inputSymbolsForCount
         $ checkedLengthProblemInputCount problem
-  in (symbols, fmap renderCommand $ inputValueRequestForSymbols symbols)
+  in (symbols, fmap renderQFLIACommand $ inputValueRequestForSymbols symbols)
 
 lengthSMTLibQueryFingerprint
   :: LengthSMTLibQuery identity local
@@ -466,36 +439,36 @@ retainModelSymbol bindingIndex maximumBytes = go maximumBytes
   go remaining (byte : bytes) =
     (byte :) <$> go (remaining - 1) bytes
 
-fixedPreamble :: [SMTCommand]
+fixedPreamble :: [QFLIACommand]
 fixedPreamble =
-  [ SMTSetOption (ascii ":produce-models") (ascii "true")
-  , SMTSetOption (ascii ":random-seed") (ascii "1")
-  , SMTSetLogic lengthSMTLibQueryLogic
+  [ QFLIASetOption (ascii ":produce-models") (ascii "true")
+  , QFLIASetOption (ascii ":random-seed") (ascii "1")
+  , QFLIASetLogic lengthSMTLibQueryLogic
   , helperDefinition SMTNaturalMonus
   , helperDefinition SMTIntegerMinimum
   , helperDefinition SMTIntegerMaximum
   ]
 
-helperDefinition :: SMTBinaryHelper -> SMTCommand
-helperDefinition helper = SMTDefineBinaryInteger
+helperDefinition :: SMTBinaryHelper -> QFLIACommand
+helperDefinition helper = QFLIADefineBinaryInteger
   (helperSymbol helper) x y body
  where
   x = ascii "x"
   y = ascii "y"
-  left = SMTIntegerSymbol x
-  right = SMTIntegerSymbol y
+  left = QFLIAIntegerSymbol x
+  right = QFLIAIntegerSymbol y
   body = case helper of
-    SMTNaturalMonus -> SMTIntegerIf
-      (SMTIntegerAtMost right left)
-      (SMTIntegerDifference left right)
-      (SMTNaturalNumeral 0)
-    SMTIntegerMinimum -> SMTIntegerIf
-      (SMTIntegerAtMost left right) left right
-    SMTIntegerMaximum -> SMTIntegerIf
-      (SMTIntegerAtMost left right) right left
+    SMTNaturalMonus -> QFLIAIntegerIf
+      (QFLIAIntegerAtMost right left)
+      (QFLIAIntegerDifference left right)
+      (QFLIANaturalNumeral 0)
+    SMTIntegerMinimum -> QFLIAIntegerIf
+      (QFLIAIntegerAtMost left right) left right
+    SMTIntegerMaximum -> QFLIAIntegerIf
+      (QFLIAIntegerAtMost left right) right left
 
-nonnegative :: SMTIntegerExpression -> SMTBooleanExpression
-nonnegative expression = SMTIntegerAtMost (SMTNaturalNumeral 0) expression
+nonnegative :: QFLIAIntegerExpression -> QFLIABooleanExpression
+nonnegative expression = QFLIAIntegerAtMost (QFLIANaturalNumeral 0) expression
 
 translateExpression
   :: LengthSMTLibLimits
@@ -504,26 +477,26 @@ translateExpression
   -> LengthExpression LengthContractVariable
   -> Either
       LengthSMTLibQueryError
-      (SMTIntegerExpression, SMTTranslationState)
+      (QFLIAIntegerExpression, SMTTranslationState)
 translateExpression limits inputCount state source = case source of
   LengthVariable variable -> case variable of
     LengthResult -> Left LengthSMTLibUnexpectedResultVariable
     LengthInput position
       | position < fromIntegral inputCount ->
-          Right (SMTIntegerSymbol $ inputSymbolNatural position, state)
+          Right (QFLIAIntegerSymbol $ inputSymbolNatural position, state)
       | otherwise -> Left $ LengthSMTLibInputVariableOutOfRange
           position inputCount
   LengthLiteral value -> do
     checkNumeral limits LengthSMTLibLiteralNumeral value
-    pure (SMTNaturalNumeral value, state)
+    pure (QFLIANaturalNumeral value, state)
   LengthSum terms -> do
     (translated, afterTerms) <- translateExpressions state terms
-    pure (SMTIntegerSum translated, afterTerms)
+    pure (QFLIAIntegerSum translated, afterTerms)
   LengthScale factor expression -> do
     checkNumeral limits LengthSMTLibScaleNumeral factor
     (translated, afterExpression) <- translateExpression
       limits inputCount state expression
-    pure (SMTIntegerScale factor translated, afterExpression)
+    pure (QFLIAIntegerScale factor translated, afterExpression)
   LengthQuotient divisor expression -> translateEuclideanProjection
     limits inputCount state
     SMTNaturalQuotientProjection
@@ -547,7 +520,7 @@ translateExpression limits inputCount state source = case source of
     (translatedFalse, afterFalse) <- translateExpression
       limits inputCount afterTrue whenFalse
     pure
-      ( SMTIntegerIf translatedCondition translatedTrue translatedFalse
+      ( QFLIAIntegerIf translatedCondition translatedTrue translatedFalse
       , afterFalse
       )
  where
@@ -565,7 +538,10 @@ translateExpression limits inputCount state source = case source of
     (translatedRight, afterRight) <- translateExpression
       limits inputCount afterLeft right
     pure
-      (SMTIntegerHelper helper translatedLeft translatedRight, afterRight)
+      ( QFLIAIntegerBinaryApplication
+          (helperSymbol helper) translatedLeft translatedRight
+      , afterRight
+      )
 
 translateFormula
   :: LengthSMTLibLimits
@@ -574,18 +550,18 @@ translateFormula
   -> LengthFormula LengthContractVariable
   -> Either
       LengthSMTLibQueryError
-      (SMTBooleanExpression, SMTTranslationState)
+      (QFLIABooleanExpression, SMTTranslationState)
 translateFormula limits inputCount state source = case source of
-  LengthTruth value -> Right (SMTBooleanTruth value, state)
-  LengthEqual left right -> comparison SMTIntegerEqual left right
-  LengthAtMost left right -> comparison SMTIntegerAtMost left right
+  LengthTruth value -> Right (QFLIABooleanTruth value, state)
+  LengthEqual left right -> comparison QFLIAIntegerEqual left right
+  LengthAtMost left right -> comparison QFLIAIntegerAtMost left right
   LengthNot formula -> do
     (translated, afterFormula) <- translateFormula
       limits inputCount state formula
-    pure (SMTBooleanNot translated, afterFormula)
+    pure (QFLIABooleanNot translated, afterFormula)
   LengthAll formulas -> do
     (translated, afterFormulas) <- translateFormulas state formulas
-    pure (SMTBooleanAll translated, afterFormulas)
+    pure (QFLIABooleanAll translated, afterFormulas)
  where
   comparison constructor left right = do
     (translatedLeft, afterLeft) <- translateExpression
@@ -616,7 +592,7 @@ translateEuclideanProjection
   -> LengthExpression LengthContractVariable
   -> Either
       LengthSMTLibQueryError
-      (SMTIntegerExpression, SMTTranslationState)
+      (QFLIAIntegerExpression, SMTTranslationState)
 translateEuclideanProjection limits inputCount state projection numeralSite
     zeroError divisor expression = do
   if divisor == 0
@@ -633,7 +609,7 @@ translateEuclideanProjection limits inputCount state projection numeralSite
       projected = case projection of
         SMTNaturalQuotientProjection -> quotient
         SMTNaturalModuloProjection -> remainder
-  pure (SMTIntegerSymbol projected, completed)
+  pure (QFLIAIntegerSymbol projected, completed)
 
 reserveEuclideanWitness
   :: SMTEuclideanProjection
@@ -664,19 +640,19 @@ euclideanWitnessSymbols
     (SMTEuclideanWitness _ _ quotient remainder _) =
   [quotient, remainder]
 
-euclideanWitnessCommands :: SMTEuclideanWitness -> [SMTCommand]
+euclideanWitnessCommands :: SMTEuclideanWitness -> [QFLIACommand]
 euclideanWitnessCommands
     (SMTEuclideanWitness _ divisor quotientSymbol remainderSymbol expression) =
-  [ SMTAssert $ nonnegative quotient
-  , SMTAssert $ nonnegative remainder
-  , SMTAssert $ SMTIntegerAtMost remainder
-      $ SMTNaturalNumeral $ divisor - 1
-  , SMTAssert $ SMTIntegerEqual expression $ SMTIntegerSum
-      [SMTIntegerScale divisor quotient, remainder]
+  [ QFLIAAssert $ nonnegative quotient
+  , QFLIAAssert $ nonnegative remainder
+  , QFLIAAssert $ QFLIAIntegerAtMost remainder
+      $ QFLIANaturalNumeral $ divisor - 1
+  , QFLIAAssert $ QFLIAIntegerEqual expression $ QFLIAIntegerSum
+      [QFLIAIntegerScale divisor quotient, remainder]
   ]
  where
-  quotient = SMTIntegerSymbol quotientSymbol
-  remainder = SMTIntegerSymbol remainderSymbol
+  quotient = QFLIAIntegerSymbol quotientSymbol
+  remainder = QFLIAIntegerSymbol remainderSymbol
 
 checkNumeral
   :: LengthSMTLibLimits
@@ -766,11 +742,12 @@ planField :: LengthSMTLibPlan -> FingerprintField
 planField (LengthSMTLibPlan symbols condition commands request witnesses) =
   tagged "plan" $
     [ tagged "input-symbols" $ map FingerprintBytes symbols
-    , tagged "condition" [booleanField condition]
-    , tagged "check-commands" $ map commandField commands
+    , tagged "condition" [qfliaBooleanExpressionFingerprintField condition]
+    , tagged "check-commands" $ map qfliaCommandFingerprintField commands
     , tagged "value-request" [case request of
         Nothing -> tagged "absent" []
-        Just command -> tagged "present" [commandField command]]
+        Just command -> tagged "present"
+          [qfliaCommandFingerprintField command]]
     ] ++ expressionLoweringFields witnesses
 
 expressionLoweringFields :: [SMTEuclideanWitness] -> [FingerprintField]
@@ -796,119 +773,8 @@ euclideanWitnessProjection :: SMTEuclideanWitness -> SMTEuclideanProjection
 euclideanWitnessProjection (SMTEuclideanWitness projection _ _ _ _) =
   projection
 
-commandField :: SMTCommand -> FingerprintField
-commandField command = case command of
-  SMTSetLogic logic -> tagged "set-logic" [FingerprintBytes logic]
-  SMTSetOption name value -> tagged "set-option"
-    [FingerprintBytes name, FingerprintBytes value]
-  SMTDefineBinaryInteger name left right body -> tagged "define-int2"
-    [ FingerprintBytes name
-    , FingerprintBytes left
-    , FingerprintBytes right
-    , integerField body
-    ]
-  SMTDeclareInteger symbol -> tagged "declare-int" [FingerprintBytes symbol]
-  SMTAssert formula -> tagged "assert" [booleanField formula]
-  SMTCheckSatisfiable -> tagged "check-sat" []
-  SMTGetValues terms -> tagged "get-value" $ map integerField terms
-
-integerField :: SMTIntegerExpression -> FingerprintField
-integerField expression = case expression of
-  SMTIntegerSymbol symbol -> tagged "symbol" [FingerprintBytes symbol]
-  SMTNaturalNumeral value -> tagged "natural" [FingerprintNatural value]
-  SMTIntegerSum terms -> tagged "sum" $ map integerField terms
-  SMTIntegerScale factor term -> tagged "scale"
-    [FingerprintNatural factor, integerField term]
-  SMTIntegerDifference left right -> tagged "difference"
-    [integerField left, integerField right]
-  SMTIntegerHelper helper left right -> tagged "helper"
-    [ helperField helper
-    , integerField left
-    , integerField right
-    ]
-  SMTIntegerIf condition whenTrue whenFalse -> tagged "ite"
-    [ booleanField condition
-    , integerField whenTrue
-    , integerField whenFalse
-    ]
-
-booleanField :: SMTBooleanExpression -> FingerprintField
-booleanField formula = case formula of
-  SMTBooleanTruth value -> tagged (if value then "true" else "false") []
-  SMTIntegerEqual left right -> tagged "equal"
-    [integerField left, integerField right]
-  SMTIntegerAtMost left right -> tagged "at-most"
-    [integerField left, integerField right]
-  SMTBooleanNot nested -> tagged "not" [booleanField nested]
-  SMTBooleanAll nested -> tagged "all" $ map booleanField nested
-
-helperField :: SMTBinaryHelper -> FingerprintField
-helperField helper = FingerprintBytes $ helperSymbol helper
-
 tagged :: String -> [FingerprintField] -> FingerprintField
 tagged name = FingerprintTag (ascii name)
-
-renderCommands :: [SMTCommand] -> [Word8]
-renderCommands = concatMap renderCommand
-
-renderCommand :: SMTCommand -> [Word8]
-renderCommand command = case command of
-  SMTSetLogic logic -> line $ parenthesized
-    [ascii "set-logic", logic]
-  SMTSetOption name value -> line $ parenthesized
-    [ascii "set-option", name, value]
-  SMTDefineBinaryInteger name left right body -> line $ parenthesized
-    [ ascii "define-fun"
-    , name
-    , parenthesized
-        [ parenthesized [left, ascii "Int"]
-        , parenthesized [right, ascii "Int"]
-        ]
-    , ascii "Int"
-    , renderInteger body
-    ]
-  SMTDeclareInteger symbol -> line $ parenthesized
-    [ascii "declare-const", symbol, ascii "Int"]
-  SMTAssert formula -> line $ parenthesized
-    [ascii "assert", renderBoolean formula]
-  SMTCheckSatisfiable -> line $ parenthesized [ascii "check-sat"]
-  SMTGetValues terms -> line $ parenthesized
-    [ascii "get-value", parenthesized $ map renderInteger terms]
-
-renderInteger :: SMTIntegerExpression -> [Word8]
-renderInteger expression = case expression of
-  SMTIntegerSymbol symbol -> symbol
-  SMTNaturalNumeral value -> ascii $ show value
-  SMTIntegerSum [] -> ascii "0"
-  SMTIntegerSum [term] -> renderInteger term
-  SMTIntegerSum terms -> parenthesized $ ascii "+" : map renderInteger terms
-  SMTIntegerScale factor term -> parenthesized
-    [ascii "*", ascii $ show factor, renderInteger term]
-  SMTIntegerDifference left right -> parenthesized
-    [ascii "-", renderInteger left, renderInteger right]
-  SMTIntegerHelper helper left right -> parenthesized
-    [helperSymbol helper, renderInteger left, renderInteger right]
-  SMTIntegerIf condition whenTrue whenFalse -> parenthesized
-    [ ascii "ite"
-    , renderBoolean condition
-    , renderInteger whenTrue
-    , renderInteger whenFalse
-    ]
-
-renderBoolean :: SMTBooleanExpression -> [Word8]
-renderBoolean formula = case formula of
-  SMTBooleanTruth True -> ascii "true"
-  SMTBooleanTruth False -> ascii "false"
-  SMTIntegerEqual left right -> parenthesized
-    [ascii "=", renderInteger left, renderInteger right]
-  SMTIntegerAtMost left right -> parenthesized
-    [ascii "<=", renderInteger left, renderInteger right]
-  SMTBooleanNot nested -> parenthesized
-    [ascii "not", renderBoolean nested]
-  SMTBooleanAll [] -> ascii "true"
-  SMTBooleanAll [nested] -> renderBoolean nested
-  SMTBooleanAll nested -> parenthesized
-    $ ascii "and" : map renderBoolean nested
 
 helperSymbol :: SMTBinaryHelper -> [Word8]
 helperSymbol helper = ascii $ case helper of
@@ -923,10 +789,10 @@ helperSymbol helper = ascii $ case helper of
 inputSymbolsForCount :: Int -> [[Word8]]
 inputSymbolsForCount inputCount = map inputSymbol [0 .. inputCount - 1]
 
-inputValueRequestForSymbols :: [[Word8]] -> Maybe SMTCommand
+inputValueRequestForSymbols :: [[Word8]] -> Maybe QFLIACommand
 inputValueRequestForSymbols symbols = case symbols of
   [] -> Nothing
-  _ -> Just $ SMTGetValues $ map SMTIntegerSymbol symbols
+  _ -> Just $ QFLIAGetValues $ map QFLIAIntegerSymbol symbols
 
 inputSymbol :: Int -> [Word8]
 inputSymbol = inputSymbolNatural . fromIntegral
@@ -968,24 +834,8 @@ positiveLiteralNaturalQuotientWitnessSchemaTag :: [Word8]
 positiveLiteralNaturalQuotientWitnessSchemaTag = ascii
   "djex-length-z3-qf-lia-positive-literal-natural-quotient-witness/v1"
 
-parenthesized :: [[Word8]] -> [Word8]
-parenthesized fields = [openParen] ++ separated fields ++ [closeParen]
- where
-  separated [] = []
-  separated [field] = field
-  separated (field : remaining) = field ++ [space] ++ separated remaining
-
-line :: [Word8] -> [Word8]
-line bytes = bytes ++ [newline]
-
 ascii :: String -> [Word8]
 ascii = map $ fromIntegral . fromEnum
-
-openParen, closeParen, space, newline :: Word8
-openParen = 40
-closeParen = 41
-space = 32
-newline = 10
 
 observedNaturalBits :: Int -> Natural -> Int
 observedNaturalBits maximumBits = go 0

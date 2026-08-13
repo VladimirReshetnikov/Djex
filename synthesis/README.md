@@ -147,6 +147,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream` | Domain-neutral cumulative framing policy and opaque zero-start cursor, completed-frame, and validated-boundary continuations; it prevents tails, offsets, and budgets from being detached across same-write frames or causal write boundaries. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver` | Domain-neutral causal transport algorithm and exact segmented transcript ownership, with write-before-feed, positional EOF precedence, and delayed-boundary-whitespace attribution. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Lexical` | Schema-free owner of the exact SMT-LIB whitespace predicate and canonical `[HT, LF, CR, SP]` fingerprint order shared by parsing, framing, causal accounting, boundary draining, and domain plans. |
+| `Language.Haskell.Synthesis.Internal.SMTLib.QFLIA` | Domain-neutral typed QF_LIA integer, Boolean, and command syntax with one exact logic spelling, canonical rendering, and matching structural fingerprint-field projections; it owns no domain translation, naming, limits, solver, or replay policy. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Response` | Domain-neutral bounded SMT-LIB response lexer and S-expression parser with productive total, depth, node, token, and numeral limits. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Response.Standard` | Canonical solver-status bytes, bounded standard check-response decoding, and shared `unsupported`/solver-error classification without process or semantic authority. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution` | Domain-neutral admitted Z3 launch profile, mechanical startup/reset facts, configured argv, and flat launch fingerprint-field slice without process or domain-schema authority. |
@@ -242,16 +243,22 @@ projects `q` for quotient or `r` for modulo. Normalized-expression preorder
 fixes operation-specific witness names and constraint order. Witnesses are
 declared and structurally fingerprinted but never requested from the solver;
 `get-value` remains input-only.
-The complete typed SMT plan remains transient through bounded rendering and
-structural fingerprinting. The sealed query retains only the checked problem,
-canonical check bytes, and complete fingerprint. Exact decoder-symbol order and
-optional `get-value` bytes are canonically rederived from the checked problem's
-sealed arity after query sealing has already bounded and structurally
-fingerprinted them. Operation-specific versioned plan tags record only the
-witness projections that occur. The internal refactor deliberately preserves
-every modulo-only symbol, command, tag, script, and canonical key byte.
-The structural plan keeps rendered bytes from becoming the semantic source of
-truth. See the
+The package-private `Internal.SMTLib.QFLIA` module owns the shared typed
+integer, Boolean, and command AST, the exact `QF_LIA` logic spelling, canonical
+rendering, and the matching structural fingerprint-field projection. Length
+retains all domain translation, helper and generated-name choices, Euclidean
+witnesses, limits, query identity, model validation, and replay. The complete
+typed SMT plan remains transient through the two shared projections. The
+sealed query retains only the checked problem, canonical check bytes, and
+complete fingerprint. Exact decoder-symbol order and optional `get-value`
+bytes are canonically rederived from the checked problem's sealed arity after
+query sealing has already bounded and structurally fingerprinted them.
+Operation-specific versioned plan tags record only the witness projections
+that occur. The extraction deliberately preserves every existing symbol,
+command, tag, script, and canonical key byte. The structural plan keeps
+rendered bytes from becoming the semantic source of truth. See the
+[shared typed QF_LIA foundation report](../docs/reports/2026-08-13-shared-typed-qf-lia-foundation.md),
+the
 [positive-literal quotient report](../docs/reports/2026-08-13-positive-literal-natural-quotient.md)
 and the earlier
 [positive-literal modulo report](../docs/reports/2026-08-13-positive-literal-natural-modulo.md)

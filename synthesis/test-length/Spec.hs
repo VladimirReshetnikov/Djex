@@ -13,6 +13,7 @@ import System.Timeout (timeout)
 import Unsafe.Coerce (unsafeCoerce)
 
 import qualified SMTLibLiveSpec
+import qualified SMTLibQFLIASpec
 import qualified Language.Haskell.Djex as Djex
 import Language.Haskell.Synthesis.Constraint (Constraint (..))
 import Language.Haskell.Synthesis.Declaration
@@ -101,6 +102,7 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , unifiedInterpretationPolicyTests
   , candidateProblemTests
   , problemReplayTests
+  , SMTLibQFLIASpec.smtLibQFLIATests
   , smtLibTests
   , smtLibProtocolTests
   , SMTLibLiveSpec.smtLibLiveTests

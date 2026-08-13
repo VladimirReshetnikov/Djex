@@ -193,16 +193,28 @@ and pattern types, term and shared-checkable pattern forms, application and visi
 witnesses, inferred-versus-specified type arguments, and case-branch order.
 There is deliberately no beta, eta, let, or behavioral quotienting.
 
-Certificate allocation numbers are not identities. Until a checked certificate
-table can supply the corresponding substitution and obligation fingerprints,
-any certificate-bearing visible application is rejected. The shared checker
-also lacks constructor-family schemas, so the public fingerprint entrance
-always rejects constructor-pattern graphs. A package-private domain entrance
-can reuse the encoder only by atomically freshly resealing against a schema
-derived from its own opaque checked inventory; callers cannot attach a
-detachable schema to an existing graph. Canonical construction has an explicit
-retained-byte bound (one MiB by default), while the preceding traversal is
-bounded separately by the supplied graph limits.
+Certificate allocation numbers are not identities. The package-private
+`Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate` foundation
+now seals a bounded table of complete leading-telescope selections and derives
+their capture-free intermediate types and ordered source-syntax obligations.
+It deliberately proves only structural replay: it proves no inventory or
+provider provenance, closure, binder kind, constraint resolution or discharge,
+or association with a particular graph occurrence. The public graph
+fingerprint therefore still rejects every certificate-bearing visible
+application. A later engine-owned entrance must associate the checker-retained
+source authority and exact occurrence atomically before semantic certificate
+fields can replace allocation coordinates in a key.
+
+The shared checker also lacks constructor-family schemas, so the public
+fingerprint entrance always rejects constructor-pattern graphs. A
+package-private domain entrance can reuse the encoder only by atomically
+freshly resealing against a schema derived from its own opaque checked
+inventory; callers cannot attach a detachable schema to an existing graph.
+Canonical construction has an explicit retained-byte bound (one MiB by
+default), while the preceding traversal is bounded separately by the supplied
+graph limits. The certificate plan's exact structural and trust boundary is
+recorded in the
+[bounded type-application certificate-plan report](docs/reports/2026-08-13-bounded-type-application-certificate-plans.md).
 
 This fingerprint identifies only the checked shared graph. It does not resolve
 globals against an `Inventory`, prove that holes or residual obligations are

@@ -272,6 +272,7 @@ Library
     Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
     Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process
     Language.Haskell.Synthesis.Internal.TypedCandidate
+    Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate
     Language.Haskell.Synthesis.Internal.TypedGenerated.Fingerprint
     Language.Haskell.Synthesis.Internal.TypeInstantiation
     Language.Haskell.Exference.Core.Internal.FlexibleIds
@@ -439,6 +440,35 @@ Test-Suite synthesis-term-graph-fingerprint-tests
   Main-Is:          Spec.hs
   Hs-Source-Dirs:   synthesis/test-term-graph-fingerprint
   Build-Depends:    djex
+
+-- Compile the package-private certificate-plan foundation as a home module.
+-- The checked plan intentionally exposes no public construction or fingerprint
+-- authority while source-provenance integration is developed separately.
+Test-Suite synthesis-certificate-tests
+  import:           tasty-hunit-test, deepseq-dep, containers-dep, transformers-dep
+  Type:             exitcode-stdio-1.0
+  Main-Is:          Spec.hs
+  Hs-Source-Dirs:
+    synthesis/test-certificate
+    synthesis/src
+    synthesis/internal
+  Other-Modules:
+    Language.Haskell.Synthesis.Collection
+    Language.Haskell.Synthesis.Constraint
+    Language.Haskell.Synthesis.Count
+    Language.Haskell.Synthesis.Fresh
+    Language.Haskell.Synthesis.Generated
+    Language.Haskell.Synthesis.Internal.Alpha
+    Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate
+    Language.Haskell.Synthesis.Name
+    Language.Haskell.Synthesis.Qualification
+    Language.Haskell.Synthesis.Type
+    Language.Haskell.Synthesis.TypeAtom
+    Language.Haskell.Synthesis.TypeRender
+    Language.Haskell.Synthesis.TypedGenerated
+  Build-Depends:
+    djex,
+    pretty >= 1.1 && < 1.2
 
 -- Compile the private fingerprint builder and behavioral problem sealer as
 -- home modules so their invariants can be tested without exposing construction.

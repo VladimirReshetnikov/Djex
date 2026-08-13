@@ -38,6 +38,7 @@ import Djinn.Internal.ProofEnv
 import GHC.Generics (Generic, Rep, from)
 import GHC.Records (HasField, getField)
 import qualified GHC.TypeLits as TypeLits
+import qualified Language.Haskell.Djex as PublicDjex
 import Language.Haskell.Djex.Djinn (DjinnRequest, DjinnSession)
 import Language.Haskell.Djex.Exference
   ( ExferenceEnvironment
@@ -114,7 +115,11 @@ import Language.Haskell.Synthesis.TypeSynonym
 import Language.Haskell.Synthesis.TypedCandidate
 import Language.Haskell.Synthesis.TypedGenerated (TermGraph)
 import Language.Haskell.Synthesis.TypedGenerated.Fingerprint
-import Language.Haskell.TH (lookupValueName)
+import Language.Haskell.TH (lookupTypeName, lookupValueName)
+
+-- Keep the qualified facade import visible to GHC as well as to the TH name
+-- lookup below; the latter deliberately probes only the curated public edge.
+type PublicFacadeBackendProbe = PublicDjex.Backend
 
 -- Importing an abstract type with the same spelling as its hidden constructor
 -- makes an ordinary deferred term probe a hard namespace error.  Ask the value
@@ -125,7 +130,12 @@ import Language.Haskell.TH (lookupValueName)
 -- downstream code can name an intentionally unavailable edge and the API-test
 -- component must stop compiling.
 $(do
-    let hiddenValues =
+    let hiddenTypes =
+          [ "PublicDjex.CheckedTypeApplicationCertificateTable"
+          , "PublicDjex.CheckedTypeApplicationCertificatePlan"
+          , "PublicDjex.CheckedTypeApplicationCertificateStep"
+          ]
+        hiddenValues =
           [ "LengthSMTLibLiveSession"
           , "LengthSMTLibLiveQueryObservation"
           , "LengthSMTLibLiveSessionError"
@@ -147,9 +157,24 @@ $(do
           , "checkedPolicyTargetArgumentPolicy"
           , "checkedPolicyCasePolicy"
           , "fingerprintTermGraphWithTypeStructure"
+          , "PublicDjex.sealTypeApplicationCertificateTable"
+          , "PublicDjex.checkedTypeApplicationCertificateCount"
+          , "PublicDjex.lookupCheckedTypeApplicationCertificatePlan"
+          , "PublicDjex.checkedTypeApplicationCertificateStepCount"
+          , "PublicDjex.checkedTypeApplicationCertificateSteps"
+          , "PublicDjex.checkedTypeApplicationCertificateStepSlot"
+          , "PublicDjex.checkedTypeApplicationCertificateStepSource"
+          , "PublicDjex.checkedTypeApplicationCertificateStepSelected"
+          , "PublicDjex.checkedTypeApplicationCertificateStepResult"
+          , "PublicDjex.checkedTypeApplicationCertificateStepObligations"
+          , "PublicDjex.checkedTypeApplicationCertificateStepObligationCount"
+          , "PublicDjex.checkedTypeApplicationCertificateObligationCount"
           ]
-    resolved <- mapM lookupValueName hiddenValues
-    case [name | (name, Just _) <- zip hiddenValues resolved] of
+    resolvedTypes <- mapM lookupTypeName hiddenTypes
+    resolvedValues <- mapM lookupValueName hiddenValues
+    case [name | (name, Just _) <-
+            zip (hiddenTypes ++ hiddenValues)
+              (resolvedTypes ++ resolvedValues)] of
       [] -> pure []
       visible -> fail $ "public representation internals: " ++ show visible
  )

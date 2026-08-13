@@ -159,6 +159,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Generated` | Scope-aware expressions, patterns, clauses, holes, mixed term/type application spines, bottom-up rewriting, simplification, alpha-equivalence, substitution, and Haskell rendering through the common qualification policy. |
 | `Language.Haskell.Synthesis.TypedCandidate` | Opaque engine-checked compatibility/graph associations, nominal authority domains, lazy per-candidate projections, and one evidence/progress/metadata-preserving `QueryResult` compatibility projection shared by both engines. |
 | `Language.Haskell.Synthesis.TypedGenerated` | Bounded typed candidate graphs with stable node, source-occurrence, and certificate identities; checked application and visible-specialization witnesses; a neutral sealing pass; nominal type/local authority even after graph projection; exact graph metrics; and one-way projection to `Generated`. |
+| `Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate` | Package-private bounded structural plans for complete leading-telescope selections: capture-free canonical substitution steps and derived ordered scheme-syntax obligations, without provenance, closure, kind, discharge, graph association, or fingerprint authority. |
 | `Language.Haskell.Synthesis.TypedGenerated.Fingerprint` | Bounded, allocation- and alpha-insensitive structural identities after a fresh reseal; the public shared entrance rejects certificate- and constructor-schema-dependent graphs, while a package-private domain entrance can atomically consume an opaque checked schema without exporting it as graph authority. |
 | `Language.Haskell.Synthesis.Observability` | Opaque exact counters, stable cross-engine metric codes, deterministic aggregation, and deliberately non-strict snapshots that can be inspected independently of a lazy result. |
 
@@ -565,6 +566,29 @@ candidate and query constructors remain unchanged while engines migrate, so a
 backend must report typed-view absence explicitly rather than inventing an
 annotation after erasure.
 
+The package-private `Internal.TypedGenerated.Certificate` module accepts a
+separately bounded table of raw certificate coordinates, exact source schemes,
+and complete ordered leading-telescope selections. It validates and
+canonicalizes every admitted type, assigns source and selection binders to
+disjoint positional namespaces, replays each substitution without caller-owned
+fresh names, and derives the ordered constraints that become unconditional.
+Binderless context-free foralls are erased before scope assignment; vacuous
+binders still consume semantic slots; contexts carried inside a selected type
+remain part of that selected type rather than becoming source obligations.
+Neither raw obligations nor intermediate results are accepted as caller claims.
+
+This checked table is intentionally not a certificate of origin. It does not
+prove that a source belongs to an inventory or provider, that source or
+selection types are closed, that a selection has the positional binder kind,
+that a constraint names a known class with the declared arity, is entailed, or
+is discharged, or that a row belongs to one graph occurrence. Its constructor
+and observations are package-private, and it has no fingerprint entrance. The
+existing public fingerprint failure is
+unchanged. Exference's independent checker must eventually retain the missing
+origin and occurrence association before the graph encoder may consume these
+structural plans. See the
+[bounded certificate-plan report](../docs/reports/2026-08-13-bounded-type-application-certificate-plans.md).
+
 `TypedGenerated.Fingerprint` reconstructs and reseals that graph with
 `sharedTypeStructure` before assigning its nominal v1 identity. Its rooted-tree
 encoding ignores table order and raw allocation numbers while preserving exact
@@ -572,9 +596,10 @@ binding structure, hole equality, flexible/rigid free-variable flavor, globals,
 normalized types, patterns, witnesses, visible arguments, and branch order. It
 performs no beta, eta, let, or behavioral quotienting. The retained encoding has
 a caller-supplied byte bound (one MiB by default), while graph limits separately
-bound its preceding traversal. A certificate reference is rejected until a
-checked certificate table can replace its allocation number with semantic
-substitution and obligation identities. Constructor patterns likewise require
+bound its preceding traversal. A certificate reference remains rejected until
+an engine-owned origin and occurrence association can replace its allocation
+number with the checked plan's semantic substitution and obligation identities.
+Constructor patterns likewise require
 an inventory-bound family schema which the generic shared checker does not
 possess. The result is only a
 structural graph key: it neither resolves an inventory nor establishes candidate

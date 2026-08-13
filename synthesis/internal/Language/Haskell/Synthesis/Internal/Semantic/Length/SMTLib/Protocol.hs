@@ -75,10 +75,10 @@ import Language.Haskell.Synthesis.Internal.Fingerprint
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   ( LengthSMTLibArtifactPolicy (..)
-  , LengthSMTLibExecutionConfig
-  , lengthSMTLibExecutionArtifactPolicy
-  , lengthSMTLibExecutionPolicyFingerprint
-  , lengthSMTLibExecutionResponseLimits
+  , LengthSMTLibPostLaunchExecutionPolicy
+  , lengthSMTLibPostLaunchArtifactPolicy
+  , lengthSMTLibPostLaunchExecutionPolicyFingerprint
+  , lengthSMTLibPostLaunchResponseLimits
   )
 import Language.Haskell.Synthesis.Internal.SMTLib.Causal
   ( SMTLibCausalAction (..) )
@@ -273,12 +273,14 @@ instance NFData LengthSMTLibProtocolPlanError
 
 -- | Opaque association of exact artifact/response policy, query, framing
 -- policy, barriers, and the complete identity of their deterministic writes.
--- The full structured execution configuration is consumed during sealing
--- rather than retained as runtime policy; its artifact/response projections
--- remain runtime fields, and its complete canonical key remains embedded in
--- the reversible plan fingerprint.  The writes are rendered transiently for
--- fingerprint admission and later derived on demand through the selectors
--- used at their causal action edges.
+-- Sealing accepts the associated post-launch policy rather than the full
+-- structured execution configuration; it consumes that policy's artifact,
+-- response, and original complete-key projections, while the deadline remains
+-- a worker concern.  The artifact/response projections remain runtime fields,
+-- and the complete canonical key remains embedded in the reversible plan
+-- fingerprint.  The writes are rendered transiently for fingerprint admission
+-- and later derived on demand through the selectors used at their causal
+-- action edges.
 data LengthSMTLibProtocolPlan identity local = LengthSMTLibProtocolPlan
   !LengthSMTLibArtifactPolicy
   !LengthSMTLibResponseLimits
@@ -304,7 +306,7 @@ data LengthSMTLibProtocolPlanFingerprintSubject
 -- values and the query has at least one input symbol.
 sealLengthSMTLibProtocolPlan
   :: LengthSMTLibProtocolLimits
-  -> LengthSMTLibExecutionConfig
+  -> LengthSMTLibPostLaunchExecutionPolicy
   -> LengthSMTLibQuery identity local
   -> [Word8]
   -> Maybe [Word8]
@@ -316,7 +318,7 @@ sealLengthSMTLibProtocolPlan limits execution query
   let symbols = lengthSMTLibQueryInputSymbols query
       valueRequest = lengthSMTLibQueryInputValueRequestBytes query
       requiresValues =
-        lengthSMTLibExecutionArtifactPolicy execution ==
+        lengthSMTLibPostLaunchArtifactPolicy execution ==
           LengthSMTLibInputValuesAfterSatisfiable &&
         isJust valueRequest
   validatePlanFraming limits execution symbols requiresValues
@@ -344,8 +346,8 @@ sealLengthSMTLibProtocolPlan limits execution query
   fingerprint <- buildPlanFingerprint limits execution query valueRequest
     checkBarrier valueBarrier initialWrite valueWrite
   pure $ LengthSMTLibProtocolPlan
-    (lengthSMTLibExecutionArtifactPolicy execution)
-    (lengthSMTLibExecutionResponseLimits execution)
+    (lengthSMTLibPostLaunchArtifactPolicy execution)
+    (lengthSMTLibPostLaunchResponseLimits execution)
     query
     (limitsStreamPolicy limits)
     checkBarrier valueBarrier fingerprint
@@ -761,7 +763,7 @@ planValueBarrier
 
 validatePlanFraming
   :: LengthSMTLibProtocolLimits
-  -> LengthSMTLibExecutionConfig
+  -> LengthSMTLibPostLaunchExecutionPolicy
   -> [[Word8]]
   -> Bool
   -> Either LengthSMTLibProtocolPlanError ()
@@ -788,7 +790,7 @@ validatePlanFraming limits execution symbols requiresValues = do
     else Right ()
  where
   stream = lengthSMTLibProtocolStreamLimits limits
-  responses = lengthSMTLibExecutionResponseLimits execution
+  responses = lengthSMTLibPostLaunchResponseLimits execution
   valueBytes = minimalInputValueFrameByteCount symbols
   valueNodes = 1 + 3 * genericLength
     symbols
@@ -860,7 +862,7 @@ minimalInputValueFrameByteCount symbols = genericLength $
 
 buildPlanFingerprint
   :: LengthSMTLibProtocolLimits
-  -> LengthSMTLibExecutionConfig
+  -> LengthSMTLibPostLaunchExecutionPolicy
   -> LengthSMTLibQuery identity local
   -> Maybe [Word8]
   -> SMTLibEchoSentinel
@@ -881,7 +883,7 @@ buildPlanFingerprint limits execution query valueRequest checkBarrier valueBarri
             [FingerprintBytes lengthSMTLibProtocolPlanSchemaTag]
         , tagged "execution-policy"
             [ FingerprintBytes $ fingerprintCanonicalBytes
-                $ lengthSMTLibExecutionPolicyFingerprint execution
+                $ lengthSMTLibPostLaunchExecutionPolicyFingerprint execution
             ]
         , tagged "query"
             [ FingerprintBytes $ PublicFingerprint.fingerprintCanonicalBytes
@@ -933,7 +935,7 @@ buildPlanFingerprint limits execution query valueRequest checkBarrier valueBarri
               , FingerprintBytes $ smtLibEchoSentinelResponseBytes barrier
               ]
             _
-              | lengthSMTLibExecutionArtifactPolicy execution ==
+              | lengthSMTLibPostLaunchArtifactPolicy execution ==
                   LengthSMTLibInputValuesAfterSatisfiable ->
                   tagged "vacuous-zero-input" []
               | otherwise -> tagged "absent" []]

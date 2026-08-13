@@ -374,11 +374,14 @@ and independently replays any model before evidence exists.
 
 The live worker does not retain the whole pre-readiness Session configuration.
 Its private strict query policy keeps only the query-count cap, query-run
-identity budget, protocol limits, and complete execution policy needed to
-derive each query deadline and seal future plans. Exact process limits are
-projected from the retained opaque
-runtime. Workspace-allocation, capability, and ready-identity admission work
-has completed before lending; the opener deadline and Session
+identity budget, protocol limits, and a post-launch execution policy containing
+only the host deadline, artifact policy, response limits, and original complete
+execution-policy key needed to derive each query deadline and seal future
+plans. It does not retain the structured Z3 launch profile, executable path or
+pin, solver controls, argv, environment, or working-directory policy as
+separately projectable fields. Exact process limits are projected from the
+retained opaque runtime. Workspace-allocation, capability, and ready-identity
+admission work has completed before lending; the opener deadline and Session
 workspace-cleanup authority remain with the enclosing scope.
 Once a plan is sealed, replay reads the exact query and artifact policy from
 that plan rather than pairing it with independent worker-wide fields. Response

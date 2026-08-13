@@ -81,9 +81,12 @@ alongside it. It owns no domain identity schema. The Length Process facade
 seals both associated field groups under the raw-process v2 root without
 accepting or embedding the complete Length execution policy.
 
-The live Session retains the complete Length wrapper. Its ready-worker v4
-identity binds the complete policy key once, immediately beside the raw
-process field. Artifact and response policy therefore first enter live
+The live Session accepts the complete Length wrapper before readiness. Its
+ready-worker v4 identity binds the complete policy key once, immediately beside
+the raw process field. Only after that admission does the lent worker retain a
+narrow post-launch owner containing the host deadline, artifact policy,
+response limits, and original complete key; the structured Z3 profile is no
+longer retained. Artifact and response policy therefore first enter live
 identity at the Session owner which actually needs the complete domain policy,
 not at the lower launch transport.
 

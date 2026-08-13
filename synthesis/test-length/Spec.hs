@@ -1994,6 +1994,22 @@ smtLibTests = testGroup
             InternalSMTLibExecution.defaultLengthSMTLibExecutionLimits
         $ InternalSMTLibExecution.defaultLengthSMTLibExecutionConfigSource
             "//djex/z3" $ Just [0 .. 31]
+      let postLaunch =
+            InternalSMTLibExecution.retainLengthSMTLibPostLaunchExecutionPolicy
+              config
+      InternalSMTLibExecution.lengthSMTLibPostLaunchHostDeadlineMilliseconds
+          postLaunch @?=
+        InternalSMTLibExecution.lengthSMTLibExecutionHostDeadlineMilliseconds
+          config
+      InternalSMTLibExecution.lengthSMTLibPostLaunchArtifactPolicy postLaunch
+        @?=
+          InternalSMTLibExecution.lengthSMTLibExecutionArtifactPolicy config
+      InternalSMTLibExecution.lengthSMTLibPostLaunchResponseLimits postLaunch
+        @?=
+          InternalSMTLibExecution.lengthSMTLibExecutionResponseLimits config
+      InternalSMTLibExecution.lengthSMTLibPostLaunchExecutionPolicyFingerprint
+          postLaunch @?=
+        InternalSMTLibExecution.lengthSMTLibExecutionPolicyFingerprint config
       -- This digest is only a regression snapshot of the collision-free
       -- canonical bytes. The complete reversible fingerprint remains the
       -- actual policy identity.
@@ -3327,13 +3343,16 @@ smtLibProtocolTests = testGroup
         SMTLib.defaultLengthSMTLibLimits binaryProblem
       execution <- protocolExecutionConfig
         InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
-      changedExecution <- expectRight
+      changedExecutionConfig <- expectRight
         $ InternalSMTLibExecution.mkLengthSMTLibExecutionConfig
             InternalSMTLibExecution.defaultLengthSMTLibExecutionLimits
         $ (InternalSMTLibExecution.defaultLengthSMTLibExecutionConfigSource
             absoluteFixtureExecutable Nothing)
             { InternalSMTLibExecution.lengthSMTLibExecutionConfigSourceSolverTimeoutMilliseconds =
                 1001 }
+      let changedExecution =
+            InternalSMTLibExecution.retainLengthSMTLibPostLaunchExecutionPolicy
+              changedExecutionConfig
       let defaults = SMTLibProtocol.defaultLengthSMTLibProtocolLimits
           source = SMTLibProtocol.defaultLengthSMTLibProtocolLimitSource
           alteredStream = SMTLibProtocol.mkLengthSMTLibProtocolLimits
@@ -3546,16 +3565,20 @@ protocolSentinel = expectRight . SMTLibStream.mkSMTLibEchoSentinel
 
 protocolExecutionConfig
   :: InternalSMTLibExecution.LengthSMTLibArtifactPolicy
-  -> IO InternalSMTLibExecution.LengthSMTLibExecutionConfig
-protocolExecutionConfig policy = expectRight
+  -> IO InternalSMTLibExecution.LengthSMTLibPostLaunchExecutionPolicy
+protocolExecutionConfig policy = fmap
+  InternalSMTLibExecution.retainLengthSMTLibPostLaunchExecutionPolicy
+  $ expectRight
   $ protocolExecutionConfigWithResponseEither policy
       SMTLibResponse.defaultLengthSMTLibResponseLimits
 
 protocolExecutionConfigWithResponse
   :: InternalSMTLibExecution.LengthSMTLibArtifactPolicy
   -> SMTLibResponse.LengthSMTLibResponseLimits
-  -> IO InternalSMTLibExecution.LengthSMTLibExecutionConfig
-protocolExecutionConfigWithResponse policy response = expectRight
+  -> IO InternalSMTLibExecution.LengthSMTLibPostLaunchExecutionPolicy
+protocolExecutionConfigWithResponse policy response = fmap
+  InternalSMTLibExecution.retainLengthSMTLibPostLaunchExecutionPolicy
+  $ expectRight
   $ protocolExecutionConfigWithResponseEither policy response
 
 protocolExecutionConfigWithResponseEither

@@ -228,14 +228,21 @@ not a solver answer.
 The identity remains complete, but the runtime worker no longer retains the
 whole pre-readiness `LengthSMTLibSessionConfig`. Its strict post-probe query
 policy contains only maximum queries, the query-run identity budget, protocol
-limits, and the complete execution policy needed to derive query deadlines and
-seal future query plans.
+limits, and a strict post-launch policy containing the host deadline, artifact
+policy, response limits, and original complete execution key needed to derive
+query deadlines and seal future query plans. The structured Z3 launch profile,
+including separately projectable path, pin, solver controls, argv, environment,
+and working-directory policy, does not cross ready-worker admission.
 The exact process limits remain associated with and are projected from the
 opaque process. Workspace-allocation attempts, capability limits, and the
 ready-identity admission budget have finished before lending; the opener
 deadline and Session workspace-cleanup authority remain in the enclosing rank-N
 scope. Process shutdown limits remain associated with the process. This storage
 consolidation changes no v4 identity field or canonical byte.
+
+The original complete key is intentionally reversible and remains embedded in
+the ready-worker and transitive query-run identities. This is removal of a
+parallel structured authority, not byte scrubbing.
 
 ## Verification
 

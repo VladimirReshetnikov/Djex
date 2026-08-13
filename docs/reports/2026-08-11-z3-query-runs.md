@@ -184,14 +184,21 @@ artifact policy, and response decoding consumes the limits retained by that
 same plan. Its complete key still binds the full execution policy, but the plan
 does not retain launch-only execution facts as separate structured runtime
 fields after sealing. Their canonical identity remains nested in the plan key.
-The worker retains the complete execution policy to derive each query deadline
-and seal future plans; it is not paired independently with a completed plan
-during replay.
+The worker retains only a strict post-launch policy containing the host
+deadline, artifact policy, response limits, and original complete execution key
+needed to derive each query deadline and seal future plans. The structured Z3
+launch profile does not cross the ready boundary, and the post-launch policy is
+not paired independently with a completed plan during replay.
 Query-count and query-run-identity caps come from the worker's strict post-probe
 query policy, while stdout/stderr capacity comes from limits associated with
 the exact retained process. Run-identity admission derives those limits from
 the worker internally, so callers cannot pair a plan with detached transport
 caps.
+
+The complete key remains reversible and continues to bind the original launch
+policy bytes inside plan, ready-worker, and run identities. Removing the
+structured launch profile from post-ready state is authority narrowing, not
+byte scrubbing.
 
 ## Reversible run identity
 

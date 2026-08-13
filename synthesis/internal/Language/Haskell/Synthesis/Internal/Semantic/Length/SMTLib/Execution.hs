@@ -47,6 +47,12 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   , lengthSMTLibExecutionResponseLimits
   , LengthSMTLibExecutionPolicyFingerprintSubject
   , lengthSMTLibExecutionPolicyFingerprint
+  , LengthSMTLibPostLaunchExecutionPolicy
+  , retainLengthSMTLibPostLaunchExecutionPolicy
+  , lengthSMTLibPostLaunchHostDeadlineMilliseconds
+  , lengthSMTLibPostLaunchArtifactPolicy
+  , lengthSMTLibPostLaunchResponseLimits
+  , lengthSMTLibPostLaunchExecutionPolicyFingerprint
   , lengthSMTLibExecutionZ3Profile
   ) where
 
@@ -413,6 +419,60 @@ lengthSMTLibExecutionPolicyFingerprint
   -> Fingerprint LengthSMTLibExecutionPolicyFingerprintSubject
 lengthSMTLibExecutionPolicyFingerprint
     (LengthSMTLibExecutionConfig _ _ _ value) = value
+
+-- | Strict post-launch authority intended to be retained only after a worker
+-- has passed capability and ready-identity admission.  The structured Z3
+-- launch profile is deliberately absent.  The original complete
+-- execution-policy key is retained verbatim so every downstream identity
+-- remains byte-for-byte compatible with the policy admitted before launch.
+data LengthSMTLibPostLaunchExecutionPolicy =
+  LengthSMTLibPostLaunchExecutionPolicy
+    !Int
+    !LengthSMTLibArtifactPolicy
+    !LengthSMTLibResponseLimits
+    !(Fingerprint LengthSMTLibExecutionPolicyFingerprintSubject)
+
+instance NFData LengthSMTLibPostLaunchExecutionPolicy where
+  rnf (LengthSMTLibPostLaunchExecutionPolicy
+      deadline artifacts responses fingerprint) =
+    rnf deadline `seq` rnf artifacts `seq` rnf responses `seq` rnf fingerprint
+
+-- | Narrow a complete execution policy after ready-identity admission.  This
+-- copies the already validated host deadline, artifact and response policy,
+-- and the original complete fingerprint object; it never rebuilds the key.
+retainLengthSMTLibPostLaunchExecutionPolicy
+  :: LengthSMTLibExecutionConfig
+  -> LengthSMTLibPostLaunchExecutionPolicy
+retainLengthSMTLibPostLaunchExecutionPolicy config =
+  LengthSMTLibPostLaunchExecutionPolicy
+    (lengthSMTLibExecutionHostDeadlineMilliseconds config)
+    (lengthSMTLibExecutionArtifactPolicy config)
+    (lengthSMTLibExecutionResponseLimits config)
+    (lengthSMTLibExecutionPolicyFingerprint config)
+
+lengthSMTLibPostLaunchHostDeadlineMilliseconds
+  :: LengthSMTLibPostLaunchExecutionPolicy
+  -> Int
+lengthSMTLibPostLaunchHostDeadlineMilliseconds
+    (LengthSMTLibPostLaunchExecutionPolicy value _ _ _) = value
+
+lengthSMTLibPostLaunchArtifactPolicy
+  :: LengthSMTLibPostLaunchExecutionPolicy
+  -> LengthSMTLibArtifactPolicy
+lengthSMTLibPostLaunchArtifactPolicy
+    (LengthSMTLibPostLaunchExecutionPolicy _ value _ _) = value
+
+lengthSMTLibPostLaunchResponseLimits
+  :: LengthSMTLibPostLaunchExecutionPolicy
+  -> LengthSMTLibResponseLimits
+lengthSMTLibPostLaunchResponseLimits
+    (LengthSMTLibPostLaunchExecutionPolicy _ _ value _) = value
+
+lengthSMTLibPostLaunchExecutionPolicyFingerprint
+  :: LengthSMTLibPostLaunchExecutionPolicy
+  -> Fingerprint LengthSMTLibExecutionPolicyFingerprintSubject
+lengthSMTLibPostLaunchExecutionPolicyFingerprint
+    (LengthSMTLibPostLaunchExecutionPolicy _ _ _ value) = value
 
 lengthSMTLibExecutionZ3Profile
   :: LengthSMTLibExecutionConfig

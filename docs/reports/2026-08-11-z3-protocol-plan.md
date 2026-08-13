@@ -58,16 +58,19 @@ path and digest expectation, solver controls, host deadline, environment and
 working-directory policy have served validation and fingerprint construction
 before the plan escapes. They are not retained as separate structured runtime
 fields; their canonical identity remains nested in the complete plan key. The
-worker separately retains the complete execution policy to derive each query
-deadline and seal later plans.
+worker separately retains a strict post-launch policy containing only the host
+deadline, artifact policy, response limits, and original complete execution key
+needed to derive each query deadline and seal later plans. The structured Z3
+launch profile does not cross the ready boundary.
 
 The concatenated write fragments are transient fingerprint inputs rather than
 parallel retained fields. The plan keeps the sealed query and positional
 markers which uniquely render them, and derives each exact write on demand
 through the selectors used at its causal action edge. Presence-only inspection
 of the optional write does not render request bytes. Sealing still renders and
-admits the identical bytes and complete execution-policy key into the unchanged
-plan key before the narrower plan can escape.
+admits the identical bytes and original complete execution-policy key into the
+unchanged plan key before the narrower plan can escape. That reversible key
+still contains the original policy bytes; no byte-scrubbing claim is made.
 
 The plan fingerprint is a reversible complete canonical key, not a digest, so
 neither it nor its canonical bytes are public. The fingerprint byte limit is

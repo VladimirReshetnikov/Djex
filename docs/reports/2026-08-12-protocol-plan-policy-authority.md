@@ -5,10 +5,11 @@ Date: 2026-08-12
 ## Outcome
 
 The package-private `LengthSMTLibProtocolPlan` no longer retains the complete
-`LengthSMTLibExecutionConfig`. Sealing still consumes that complete policy in
-the same order, renders the same writes, and constructs the same reversible
-plan fingerprint. After the fingerprint succeeds, the plan retains only the
-execution projections with later protocol consumers:
+`LengthSMTLibExecutionConfig`, and its sealer no longer accepts that structured
+pre-launch authority. Sealing receives the narrower strict post-launch policy,
+renders the same writes, and constructs the same reversible plan fingerprint
+from its original complete execution key. After the fingerprint succeeds, the
+plan retains only the execution projections with later protocol consumers:
 
 - the exact artifact policy which determines whether a satisfiable query has
   a value phase and whether a zero-input result is vacuous;
@@ -26,35 +27,42 @@ plan fingerprint.
 
 ## Identity and execution
 
-`buildPlanFingerprint` still receives the complete execution configuration and
-emits the identical execution-policy field in the identical position. The
-protocol schema, fingerprint version and role, exact writes, response parsing,
-phase transitions, and failure precedence are unchanged. Query-run identity
-continues to bind the unchanged complete plan key.
+`buildPlanFingerprint` now receives the opaque post-launch policy and projects
+the original complete execution fingerprint object. It emits the identical
+execution-policy field in the identical position. The protocol schema,
+fingerprint version and role, exact writes, response parsing, phase transitions,
+and failure precedence are unchanged. Query-run identity continues to bind the
+unchanged complete plan key.
 
-The worker remains the owner of the complete execution policy because it must
-derive each per-query host deadline and seal later plans. Once a plan exists,
-response decoding and replay consume only values retained by that same plan;
-neither operation pairs the plan with a detached worker-wide policy projection.
+The worker retains only the host deadline, artifact policy, response limits,
+and original complete key needed to derive each per-query deadline and seal
+later plans. It does not retain the structured Z3 launch profile. Once a plan
+exists, response decoding and replay consume only values retained by that same
+plan; neither operation pairs the plan with a detached worker-wide policy
+projection.
 
-The new two-field policy retention preserves the former weak-head boundary.
-The old execution configuration was a strict field whose artifact and response
-members were themselves strict; the replacement fields are strict and are
-projected only after successful policy validation and plan fingerprinting.
+The post-launch policy is a strict four-field data owner. It is constructed only
+after ready-worker identity admission from the already validated deadline,
+artifact policy, response limits, and original strict fingerprint. Protocol
+sealing still observes artifact policy before framing validation and performs
+fingerprint admission at the same point, so failure precedence is unchanged.
 
 ## Verification
 
 Focused protocol regressions pin:
 
 - the existing exact plan-fingerprint SHA-256 snapshot;
+- parity of all four post-launch projections with their admitted source;
 - fingerprint sensitivity to a launch-only execution field even though that
-  field is no longer retained as a structured runtime-plan field;
+  field is no longer retained as structured post-ready authority;
 - exact initial and optional value writes;
 - artifact-policy projection from the sealed plan;
 - nondefault response-token enforcement after sealing; and
 - the existing status, valuation, barrier, cumulative-budget, EOF, and failure
   precedence matrix.
 
-This checkpoint changes no public API, Cabal module list, SMT-LIB byte,
-fingerprint byte, schema tag, error vocabulary, process behavior, evidence
-rule, or Leant behavior.
+The complete key remains a reversible canonical value and still contains its
+original policy bytes; this is structured-authority removal, not byte
+scrubbing. This checkpoint changes no public API, Cabal module list, SMT-LIB
+byte, fingerprint byte, schema tag, error vocabulary, process behavior,
+evidence rule, or Leant behavior.

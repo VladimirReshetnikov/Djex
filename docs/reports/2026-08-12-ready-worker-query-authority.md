@@ -11,8 +11,15 @@ worker instead owns one private strict post-probe query policy containing only:
 - the maximum query count;
 - the query-run identity fingerprint budget;
 - the Length protocol limits used to seal future plans; and
-- the complete Length execution policy used to derive each query deadline and
-  required by those plans.
+- a strict post-launch execution policy containing the host-deadline
+  milliseconds, artifact policy, response limits, and the original complete
+  execution-policy fingerprint object.
+
+The post-launch policy has no structured Z3 profile and therefore no separate
+projection of the executable path or pin, solver timeout/resource controls,
+argv, environment, or working-directory policy. Those facts remain reversibly
+encoded in the original complete key so downstream identities stay exact; this
+checkpoint removes structured authority rather than scrubbing key bytes.
 
 This is a storage and association change only. The v4 ready-worker identity,
 v1 query-run identity, SMT-LIB writes, public facade, cleanup behavior, and
@@ -38,12 +45,15 @@ helper no longer accepts a separately pairable limits argument.
 A sealed `LengthSMTLibProtocolPlan` retains its exact nominal query, artifact
 policy, response limits, stream policy, positional barriers, and complete plan
 key. The complete key binds the full execution policy, but launch-only policy
-facts are consumed during sealing rather than retained as separate structured
-runtime fields; their canonical identity remains nested in the plan key.
+facts have completed their structured live role before post-ready narrowing and
+are not retained as separate runtime fields; their canonical identity remains
+nested in the plan key.
 Replay projects both the query and artifact policy from that plan, and decoding
-uses its response limits. The worker-wide execution policy remains necessary
-for deriving the next query deadline and sealing its plan; it is not a second
-replay authority for a plan which already exists.
+uses its response limits. Before a plan exists, the worker's post-launch policy
+supplies the next host deadline plus the artifact/response policy and original
+complete key needed to seal it. It is not a second replay authority for a plan
+which already exists, and the complete structured execution configuration no
+longer crosses the ready boundary.
 
 This preserves the existing order:
 
@@ -61,6 +71,8 @@ consumes no ordinal, and leaves the worker reusable.
 
 Focused regressions pin:
 
+- parity of all four post-launch projections with the admitted complete
+  execution configuration, including exact fingerprint-object equality;
 - process-owned limit projection against the exact limits used at open;
 - protocol-plan artifact-policy projection alongside its exact query;
 - post-seal response-limit enforcement from the exact protocol plan;
@@ -69,5 +81,7 @@ Focused regressions pin:
   any write; and
 - the existing nondefault two-query maximum and artifact-policy branches.
 
-The complete Djex build and test suite remain the compatibility boundary. No
-schema tag or fingerprint field changes in this checkpoint.
+The complete Djex build and test suite remain the compatibility boundary. The
+ready-worker identity still binds the original complete execution key before
+the narrower post-launch policy is constructed. No schema tag or fingerprint
+field changes in this checkpoint.

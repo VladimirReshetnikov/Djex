@@ -14,9 +14,11 @@
 -- reversible identity deliberately retains spent readiness barriers and their
 -- transcript; those values cannot derive the seed used by later query roles.
 -- After readiness, the worker retains only the query-count and run-identity
--- caps, protocol limits, and complete execution policy needed to derive each
--- query deadline and seal future plans.  Process limits remain owned by the
--- exact retained process; opener,
+-- caps, protocol limits, and a strict post-launch policy containing the host
+-- deadline, artifact/response policy, and original complete execution key
+-- needed to derive each query deadline and seal future plans.  The structured
+-- Z3 launch profile is not retained.  Process limits remain owned by the exact
+-- retained process; opener,
 -- workspace-allocation, capability, and ready-identity bounds stay outside the
 -- lent worker.  Replay projects its query and artifact policy from the exact
 -- sealed plan rather than pairing that plan with worker-wide copies.
@@ -165,10 +167,12 @@ import Language.Haskell.Synthesis.Internal.Fingerprint
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   ( LengthSMTLibArtifactPolicy (..)
   , LengthSMTLibExecutionConfig
-  , lengthSMTLibExecutionArtifactPolicy
-  , lengthSMTLibExecutionHostDeadlineMilliseconds
+  , LengthSMTLibPostLaunchExecutionPolicy
   , lengthSMTLibExecutionPolicyFingerprint
   , lengthSMTLibExecutionZ3Profile
+  , lengthSMTLibPostLaunchArtifactPolicy
+  , lengthSMTLibPostLaunchHostDeadlineMilliseconds
+  , retainLengthSMTLibPostLaunchExecutionPolicy
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   ( LengthSMTLibProtocolDecoded
@@ -577,22 +581,24 @@ data LengthSMTLibReadyWorkerIdentitySubject
 -- Workspace-allocation, capability, and ready-identity bounds have completed;
 -- the opener deadline and Session workspace-cleanup authority remain in the
 -- enclosing scope, while process limits remain associated with the process.
+-- The nested execution authority is already narrowed past its structured Z3
+-- launch profile before this query policy can be constructed.
 data LengthSMTLibReadyWorkerQueryPolicy = LengthSMTLibReadyWorkerQueryPolicy
   { readyQueryMaximumQueries :: !Natural
   , readyQueryRunIdentityFingerprintByteLimit :: !Natural
   , readyQueryProtocolLimits :: !LengthSMTLibProtocolLimits
-  , readyQueryExecution :: !LengthSMTLibExecutionConfig
+  , readyQueryPostLaunchExecution :: !LengthSMTLibPostLaunchExecutionPolicy
   }
 
 retainLengthSMTLibReadyWorkerQueryPolicy
   :: LengthSMTLibSessionLimits
   -> LengthSMTLibProtocolLimits
-  -> LengthSMTLibExecutionConfig
+  -> LengthSMTLibPostLaunchExecutionPolicy
   -> LengthSMTLibReadyWorkerQueryPolicy
 retainLengthSMTLibReadyWorkerQueryPolicy
     (LengthSMTLibSessionLimits _ _ maximumQueries _ runIdentityLimit)
-    protocolLimits execution = LengthSMTLibReadyWorkerQueryPolicy
-      maximumQueries runIdentityLimit protocolLimits execution
+    protocolLimits postLaunchExecution = LengthSMTLibReadyWorkerQueryPolicy
+      maximumQueries runIdentityLimit protocolLimits postLaunchExecution
 
 data LengthSMTLibReadyWorker epoch = LengthSMTLibReadyWorker
   { readyWorkerProcess :: !LengthSMTLibProcess
@@ -793,7 +799,7 @@ runLengthSMTLibReadyWorkerQuery
 runLengthSMTLibReadyWorkerQuery evaluationLimits worker query =
   mask $ \restore -> do
     deadlineResult <- lengthSMTLibProcessDeadlineAfterMilliseconds
-      $ lengthSMTLibExecutionHostDeadlineMilliseconds execution
+      $ lengthSMTLibPostLaunchHostDeadlineMilliseconds postLaunchExecution
     case deadlineResult of
       Left failure -> pure $ queryRunLeft
         $ LengthSMTLibQueryDeadlineFailure failure
@@ -809,7 +815,8 @@ runLengthSMTLibReadyWorkerQuery evaluationLimits worker query =
             (runWithGate restore deadline)
             (atomically $ putTMVar (readyWorkerQueryGate worker) ())
  where
-  execution = readyQueryExecution $ readyWorkerQueryPolicy worker
+  postLaunchExecution = readyQueryPostLaunchExecution
+    $ readyWorkerQueryPolicy worker
 
   runWithGate restore deadline = do
     prepared <- prepareLengthSMTLibQueryRun
@@ -944,7 +951,7 @@ prepareLengthSMTLibQueryRun evaluationLimits worker query deadline = do
   policy = readyWorkerQueryPolicy worker
   maximumQueries = readyQueryMaximumQueries policy
   protocolLimits = readyQueryProtocolLimits policy
-  execution = readyQueryExecution policy
+  postLaunchExecution = readyQueryPostLaunchExecution policy
   process = readyWorkerProcess worker
   processLimits = lengthSMTLibProcessLimits process
   transportMaximum = lengthSMTLibProcessStdoutByteLimit processLimits
@@ -956,13 +963,13 @@ prepareLengthSMTLibQueryRun evaluationLimits worker query deadline = do
         valueBarrier = deriveQueryBarrier
           (readyWorkerBarrierSeed worker) ordinalWord queryValueBarrierRole
         needsValueBarrier =
-          lengthSMTLibExecutionArtifactPolicy execution ==
+          lengthSMTLibPostLaunchArtifactPolicy postLaunchExecution ==
             LengthSMTLibInputValuesAfterSatisfiable &&
           isJust (lengthSMTLibQueryInputValueRequestBytes query)
         valueNonce
           | needsValueBarrier = Just $ BS.unpack valueBarrier
           | otherwise = Nothing
-    case sealLengthSMTLibProtocolPlan protocolLimits execution query
+    case sealLengthSMTLibProtocolPlan protocolLimits postLaunchExecution query
         (BS.unpack checkBarrier) valueNonce of
       Left failure -> pure $ Left
         (False, LengthSMTLibQueryProtocolPlanFailure failure)
@@ -1776,8 +1783,10 @@ withLengthSMTLibReadyWorker config use = mask $ \restore -> do
                 queryGate <- newTMVarIO ()
                 let transcriptDigest = SHA256.hash
                       $ causalTranscriptBytes transcript
+                    postLaunchExecution =
+                      retainLengthSMTLibPostLaunchExecutionPolicy execution
                     queryPolicy = retainLengthSMTLibReadyWorkerQueryPolicy
-                      sessionLimits protocolLimits execution
+                      sessionLimits protocolLimits postLaunchExecution
                     worker = LengthSMTLibReadyWorker
                       { readyWorkerProcess = process
                       , readyWorkerCancellation = cancellation

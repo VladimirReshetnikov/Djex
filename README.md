@@ -517,6 +517,11 @@ binds the complete Length execution policy once, the process launch
 observation method, exact segmented capability transcript, secret-seed
 commitment, workspace policy, and configured live-query limits. Readiness
 itself creates no solver observation or evidence.
+After this identity admission, the lent worker drops the structured Z3 launch
+profile and retains only a strict post-launch policy containing the query host
+deadline, artifact policy, response limits, and original complete execution
+key. The reversible key still contains the original policy bytes; this narrows
+structured authority without claiming byte scrubbing.
 The ownership and threat-model details are recorded in the
 [2026-08-11 scoped worker lease report](docs/reports/2026-08-11-z3-worker-lease.md).
 

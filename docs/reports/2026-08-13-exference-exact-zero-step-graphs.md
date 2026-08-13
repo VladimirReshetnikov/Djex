@@ -60,4 +60,9 @@ nominal-constructor absence.
 The downstream Length and Leant checkpoints remain responsible for explicitly
 selecting exact-case policy, resolving the concrete List family, verifying the
 accepted renderer variant, and replaying any solver evidence. This checkpoint
-alone does not grant behavioral meaning to a case graph.
+alone does not grant behavioral meaning to a case graph. A Djex integration
+regression now composes the public production surfaces end to end: it searches
+a declared unary spine with Exference, structurally selects the retained
+rebuild case, freshly seals exact Length authority from
+`exferenceSessionInventory`, emits the QF_LIA query, validates model input 3,
+and independently replays candidate result 3.

@@ -4408,6 +4408,124 @@ tests = testGroup "Djex facade"
           usedSuccessor @?= onSuccessor
           usedPredecessor @?= predecessor
         output -> fail $ "unexpected recursive candidate: " ++ show output
+  , testCase
+      "carry a production Exference spine case through QF_LIA replay" $ do
+      payloadName <- expectRight $ parseName "Fixture.Payload"
+      spineName <- expectRight $ parseName "Fixture.Spine"
+      zeroName <- expectRight $ parseName "Fixture.Zero"
+      stepName <- expectRight $ parseName "Fixture.Step"
+      targetName <- expectRight $ mkIdentifier "rebuildSpine"
+      target <- expectRight $ mkDefinitionName targetName
+      let element = FlexibleVariable 0
+          payload = TypeConstructor payloadName
+          spineOf value = TypeApplication (TypeConstructor spineName) value
+          polymorphicSpine = spineOf $ TypeVariable element
+          spine = spineOf payload
+          declaration = DataTypeDeclaration () spineName
+            [TypeParameter element Nothing]
+            [ DataConstructor () zeroName []
+            , DataConstructor () stepName
+                [TypeVariable element, polymorphicSpine]
+            ]
+          goal = FunctionType spine spine
+          roles = [LengthObservedSpine]
+          input = LengthVariable $ LengthInput 0
+          contractSource = LengthContractSource
+            { lengthContractPrecondition = LengthTruth True
+            , lengthContractPostcondition = LengthEqual
+                (LengthVariable LengthResult)
+                (LengthSum [input, LengthLiteral 1])
+            }
+          isRebuildCase candidate = case typedCandidateTermGraph candidate of
+            Right graph -> case eraseTermGraph graph of
+              Lambda [Bind inputBinder]
+                  (Case (Local scrutinee)
+                    [ (Constructor actualZero [], Global returnedZero)
+                    , ( Constructor actualStep
+                          [Bind payloadBinder, Bind spineTail]
+                      , Apply
+                          (Apply (Global returnedStep)
+                            (Local returnedPayload))
+                          (Local returnedTail)
+                      )
+                    ]) ->
+                inputBinder == scrutinee &&
+                  actualZero == zeroName &&
+                  returnedZero == zeroName &&
+                  actualStep == stepName &&
+                  returnedStep == stepName &&
+                  payloadBinder == returnedPayload &&
+                  spineTail == returnedTail
+              _ -> False
+            Left _ -> False
+      environment <- expectRight
+        (mkEnvironment
+          [ AbstractTypeDeclaration () payloadName ProperTypeKind
+          , declaration
+          ] :: Either
+            (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = goal
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            { exferenceMultiConstructorPatterns = True
+            , exferenceMaximumSteps = 1024
+            , exferenceMaximumQueueSize = Just 1024
+            }
+        }
+      results <- expectRight $ runExferenceTypedQuery session request
+      let candidates =
+            [ candidate
+            | result <- results
+            , candidate <- batchCandidates $ resultSearch result
+            ]
+      candidate <- maybe
+        (fail "production Exference search retained no rebuild-case graph")
+        pure
+        $ find isRebuildCase candidates
+      lengthSession <- expectRight $ sealExactSpineCaseLengthSession
+        defaultLengthLimits roles (exferenceSessionInventory session)
+        (DeclaredListSpine spineName zeroName stepName) []
+      contract <- expectRight $ sealRoleAwareLengthContractInContext
+        defaultLengthLimits (checkedLengthSessionContext lengthSession)
+        roles goal contractSource
+      problem <- expectRight $ sealExactSpineCaseLengthTypedCandidateProblem
+        defaultLengthProblemLimits lengthSession contract candidate
+      let expectedCandidateResult = LengthIf
+            (LengthEqual input $ LengthLiteral 0)
+            (LengthLiteral 0)
+            (LengthSum
+              [ LengthLiteral 1
+              , LengthMonus input $ LengthLiteral 1
+              ])
+      checkedLengthCandidateResult
+          (checkedLengthProblemCandidate problem) @?=
+        expectedCandidateResult
+      query <- expectRight $ sealLengthSMTLibQuery
+        defaultLengthSMTLibLimits problem
+      let ascii = map (fromIntegral . fromEnum)
+      lengthSMTLibQueryLogic @?= ascii "QF_LIA"
+      assertBool "the sealed query did not select QF_LIA"
+        $ ascii "(set-logic QF_LIA)\n" `isInfixOf`
+          lengthSMTLibQueryCheckBytes query
+      case lengthSMTLibQueryInputSymbols query of
+        [symbol] -> do
+          evidence <- case validateLengthSMTLibCounterexample
+              defaultLengthEvaluationLimits query
+              [LengthSMTLibIntegerBinding symbol 3] of
+            Left failure -> fail $ "counterexample validation failed: "
+              ++ show failure
+            Right Nothing -> fail
+              "binding 3 did not violate the sealed Length contract"
+            Right (Just value) -> pure value
+          receipt <- expectRight $ replayBehavioralEvidence
+            (checkedLengthProblemBehavioralProblem problem) evidence
+          validatedLengthCounterexampleInputs receipt @?= [3]
+          validatedLengthCounterexampleResult receipt @?= 3
+        symbols -> fail $ "unexpected exact-case input symbols: "
+          ++ show symbols
   , testCase "reject Exference contexts whose variables escape the goal" $ do
       target <- expectRight $ mkIdentifier "constrained"
       checkedTarget <- expectRight $ mkDefinitionName target

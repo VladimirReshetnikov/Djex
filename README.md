@@ -335,6 +335,12 @@ constraints, unknown globals, unmodeled inventory globals, and
 certificate-bearing graphs fail closed. Explicit graph-byte and evaluation
 step limits still bound candidate work.
 
+The integration suite exercises this foundation through the public production
+path: a real Exference search over a declared unary spine retains the exact
+zero/step rebuild graph, Length freshly re-seals it against the session
+inventory, and a canonical QF_LIA query accepts model input only after
+independent replay recovers the candidate result.
+
 A successful `CheckedLengthProblem` carries its compact observed-spine input
 arity,
 normalized replay formulas, interpreted candidate, and one generic
@@ -376,9 +382,9 @@ explicitly distinguishes provider-independent finite-spine results from those
 conditional on a listed set of fingerprinted provider assumptions; it does not
 establish those implementations or realize the abstract model in a source
 language with bottoms or effects. This is not universal behavioral evidence or
-permission to prune other candidates. A future Z3 adapter can rank or challenge
-candidates, but raw solver output is not trusted evidence without this
-independent replay.
+permission to prune other candidates. The Z3 execution facade can rank or
+challenge candidates, but raw solver output is not trusted evidence without
+this independent replay.
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib` is a pure Z3-facing
 translation boundary that seals an opaque nominal QF_LIA query from one exact

@@ -133,6 +133,10 @@ candidate, problem, and graph roles remain nominal.
 
 Focused pure regressions cover:
 
+- the public production path from a real Exference query over a declared unary
+  spine, through structural rebuild-case selection and exact session-owned
+  graph resealing, to QF_LIA model validation and independent replay of input
+  3 with candidate result 3;
 - the exact tail candidate `\xs -> case xs of [] -> []; _ : tail -> tail` and
   its normalized `if input0 == 0 then 0 else input0 monus 1` result;
 - independent replay of that result from one compact model input;

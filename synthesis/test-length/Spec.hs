@@ -53,7 +53,9 @@ import qualified Language.Haskell.Synthesis.Internal.TypedCandidate
   as InternalTypedCandidate
 import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
 import Language.Haskell.Synthesis.KindInference
-  ( KindInventoryPolicy (ClosedKindInventory) )
+  ( KindInferenceError (UnknownTypeConstructor)
+  , KindInventoryPolicy (ClosedKindInventory)
+  )
 import Language.Haskell.Synthesis.Name
   ( Boxity (Boxed)
   , Name
@@ -94,6 +96,7 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , contractTests
   , providerTests
   , sessionTests
+  , interpretationPolicyCharacterizationTests
   , candidateProblemTests
   , problemReplayTests
   , smtLibTests
@@ -1195,6 +1198,320 @@ sessionTests = testGroup "checked length sessions"
           zeroName)
         $ LengthProblem.sealLengthSession Length.defaultLengthLimits inventory
             (Length.DeclaredListSpine typeName zeroName stepName) [conflicting]
+  ]
+
+interpretationPolicyCharacterizationTests :: TestTree
+interpretationPolicyCharacterizationTests = testGroup
+  "Length interpretation policy characterization"
+  [ testCase "freeze five configurations and their four policy identities" $ do
+      let observed = Length.LengthObservedSpine
+          unobserved = Length.LengthUnobservedTarget
+          allObservedRoles = [observed, observed]
+          mixedRoles = [unobserved, observed]
+          target = adversarialBinaryConstantZeroTarget
+      graph <- adversarialBinaryConstantZeroGraph
+      let candidate = adversarialTypedCandidate $ Right graph
+
+      legacySession <- adversarialLengthSession [] []
+      legacyContract <- adversarialLengthContract
+        legacySession target trivialLengthContract
+      legacyProblem <- expectRight
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            legacySession legacyContract candidate
+
+      explicitSession <- adversarialRoleAwareLengthSession
+        allObservedRoles [] []
+      explicitContract <- adversarialRoleAwareLengthContract
+        explicitSession allObservedRoles target trivialLengthContract
+      explicitProblem <- expectRight
+        $ LengthProblem.sealRoleAwareLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            explicitSession explicitContract candidate
+
+      mixedSession <- adversarialRoleAwareLengthSession mixedRoles [] []
+      mixedContract <- adversarialRoleAwareLengthContract
+        mixedSession mixedRoles target trivialLengthContract
+      mixedProblem <- expectRight
+        $ LengthProblem.sealRoleAwareLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            mixedSession mixedContract candidate
+
+      exactObservedSession <- adversarialExactCaseLengthSession
+        allObservedRoles [] []
+      exactObservedContract <- adversarialRoleAwareLengthContract
+        exactObservedSession allObservedRoles target trivialLengthContract
+      exactObservedProblem <- expectRight
+        $ LengthProblem.sealExactSpineCaseLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            exactObservedSession exactObservedContract candidate
+
+      exactMixedSession <- adversarialExactCaseLengthSession mixedRoles [] []
+      exactMixedContract <- adversarialRoleAwareLengthContract
+        exactMixedSession mixedRoles target trivialLengthContract
+      exactMixedProblem <- expectRight
+        $ LengthProblem.sealExactSpineCaseLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            exactMixedSession exactMixedContract candidate
+
+      let snapshot name session contract problem =
+            ( name
+            , canonicalFingerprintSHA256
+                $ LengthProblem.lengthSessionEncodingPolicyFingerprint session
+            , canonicalFingerprintSHA256
+                $ Length.lengthContractFingerprint contract
+            , canonicalFingerprintSHA256
+                $ LengthProblem.checkedLengthProblemEncodingFingerprint problem
+            , canonicalFingerprintSHA256
+                $ Djex.behavioralProblemFingerprint
+                $ LengthProblem.checkedLengthProblemBehavioralProblem problem
+            )
+          snapshots =
+            [ snapshot "legacy"
+                legacySession legacyContract legacyProblem
+            , snapshot "explicit-all-observed"
+                explicitSession explicitContract explicitProblem
+            , snapshot "mixed-role-aware"
+                mixedSession mixedContract mixedProblem
+            , snapshot "exact-all-observed"
+                exactObservedSession exactObservedContract exactObservedProblem
+            , snapshot "exact-mixed"
+                exactMixedSession exactMixedContract exactMixedProblem
+            ]
+          legacySessionHash =
+            "0202ec7fb2e2b0127f19cc240eea8be6e7f1e8f641cb5d08f10106204ffde963"
+          legacyContractHash =
+            "7793c68d7a203e6e24a80bd45fcf0b3d81f9363fcf1c207e0ef55f4eceabfdd8"
+          legacyConcreteHash =
+            "e46421b7150666cfb3f15033e702205a4bc851975038355c8602adcbaed8eb68"
+          legacyProblemHash =
+            "591d155ce62b04696f76a6d393febe848d34693e3c2963900c4e470ad5fbba80"
+          mixedSessionHash =
+            "a68560cb34c58faa477f4ad346236c9d39eeec629b2832b2cbe2fcd8754426f4"
+          mixedContractHash =
+            "32e0d2b30421486c6d6fe04b42acd9075010ef79b9224c6ab309e28ea924dd4e"
+          mixedConcreteHash =
+            "d6997e9d629e6a836c9fef01b94d6e8eea587585f38325ac2f22832456336f45"
+          mixedProblemHash =
+            "a70ffa28b8a380c7ff61e43e5623c59e800d4728f021e43ade9b62f865915004"
+          exactObservedSessionHash =
+            "52f39423be72ecefca2a7ee08cc8798d35c53819eaa926889b6c6d7ccae6091f"
+          exactObservedConcreteHash =
+            "4ca9743dc2c87dae88b9915c20aee3e7c91df6e545df152d9e2deba4c70b60e7"
+          exactObservedProblemHash =
+            "985af5d8c16ba7ef19e69e1a88b4b032880c0148c9bee66a9f34ffd3dd104a90"
+          exactMixedSessionHash =
+            "68023ac5fab5b49cb0466ef5e915199f3341478864551a4a88b587ea8b445611"
+          exactMixedConcreteHash =
+            "c4185bb034dca54ed447db57bbabc55a73e3891ab362cf2dede562599be9f2f6"
+          exactMixedProblemHash =
+            "91026a73620cb720996a85e2c14e9aa0726d77f02bd64d4e23754dc8fa80ba3d"
+          expectedSnapshots =
+            [ ( "legacy"
+              , legacySessionHash
+              , legacyContractHash
+              , legacyConcreteHash
+              , legacyProblemHash
+              )
+            , ( "explicit-all-observed"
+              , legacySessionHash
+              , legacyContractHash
+              , legacyConcreteHash
+              , legacyProblemHash
+              )
+            , ( "mixed-role-aware"
+              , mixedSessionHash
+              , mixedContractHash
+              , mixedConcreteHash
+              , mixedProblemHash
+              )
+            , ( "exact-all-observed"
+              , exactObservedSessionHash
+              , legacyContractHash
+              , exactObservedConcreteHash
+              , exactObservedProblemHash
+              )
+            , ( "exact-mixed"
+              , exactMixedSessionHash
+              , mixedContractHash
+              , exactMixedConcreteHash
+              , exactMixedProblemHash
+              )
+            ]
+      -- These digests only snapshot the collision-free canonical bytes. They
+      -- are not production identity, semantic authority, or a hash-based
+      -- replacement for the reversible fingerprints themselves.
+      snapshots @?= expectedSnapshots
+
+      LengthProblem.lengthSessionInventoryFingerprint explicitSession @?=
+        LengthProblem.lengthSessionInventoryFingerprint legacySession
+      LengthProblem.lengthSessionEncodingPolicyFingerprint explicitSession @?=
+        LengthProblem.lengthSessionEncodingPolicyFingerprint legacySession
+      Length.lengthContractFingerprint explicitContract @?=
+        Length.lengthContractFingerprint legacyContract
+      LengthProblem.checkedLengthCandidateFingerprint
+          (LengthProblem.checkedLengthProblemCandidate explicitProblem) @?=
+        LengthProblem.checkedLengthCandidateFingerprint
+          (LengthProblem.checkedLengthProblemCandidate legacyProblem)
+      LengthProblem.checkedLengthProblemEncodingFingerprint explicitProblem @?=
+        LengthProblem.checkedLengthProblemEncodingFingerprint legacyProblem
+      Djex.behavioralProblemFingerprint
+          (LengthProblem.checkedLengthProblemBehavioralProblem explicitProblem)
+        @?= Djex.behavioralProblemFingerprint
+          (LengthProblem.checkedLengthProblemBehavioralProblem legacyProblem)
+  , testCase
+      "preserve wrapper policy failure precedence before graph demand" $ do
+      let mixedRoles =
+            [ Length.LengthUnobservedTarget
+            , Length.LengthObservedSpine
+            ]
+          poisonCandidate = adversarialTypedCandidate
+            $ error "policy precedence demanded the candidate graph"
+      typeName <- expectName "Fixture.PolicyPrecedenceSpine"
+      zeroName <- expectName "Fixture.PolicyPrecedenceZero"
+      stepName <- expectName "Fixture.PolicyPrecedenceStep"
+      let element = FlexibleVariable "policy-precedence-element"
+          spine = TypeApplication (TypeConstructor typeName)
+            $ TypeVariable element
+          declaration = DataTypeDeclaration () typeName
+            [TypeParameter element Nothing]
+            [ DataConstructor () zeroName []
+            , DataConstructor () stepName [TypeVariable element, spine]
+            ]
+          foreignInventory = sessionInventory () [declaration]
+          foreignTarget = FunctionType spine $ FunctionType spine spine
+      foreignContext <- expectRight $ Length.sealLengthContext
+        Length.defaultLengthLimits foreignInventory
+        $ Length.DeclaredListSpine typeName zeroName stepName
+      mixedContract <- expectRight $ Length.sealRoleAwareLengthContractInContext
+        Length.defaultLengthLimits foreignContext mixedRoles foreignTarget
+        trivialLengthContract
+      exactMixedSession <- adversarialExactCaseLengthSession mixedRoles [] []
+      ordinarySession <- adversarialLengthSession [] []
+
+      legacyResult <- evaluateWithin
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            exactMixedSession mixedContract poisonCandidate
+      assertLeft
+        LengthProblem.LengthProblemMixedTargetArgumentsRequireRoleAwareSealer
+        legacyResult
+
+      caseResult <- evaluateWithin
+        $ LengthProblem.sealExactSpineCaseLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            ordinarySession mixedContract poisonCandidate
+      assertLeft LengthProblem.LengthProblemCasePolicyMismatch caseResult
+
+      targetResult <- evaluateWithin
+        $ LengthProblem.sealRoleAwareLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            ordinarySession mixedContract poisonCandidate
+      assertLeft
+        LengthProblem.LengthProblemTargetArgumentPolicyMismatch targetResult
+
+      matchingPolicySession <- adversarialRoleAwareLengthSession
+        mixedRoles [] []
+      contextResult <- evaluateWithin
+        $ LengthProblem.sealRoleAwareLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            matchingPolicySession mixedContract poisonCandidate
+      assertLeft
+        (LengthProblem.LengthProblemContractResealRejected
+          $ Length.LengthContractTargetKindError
+          $ UnknownTypeConstructor typeName)
+        contextResult
+  , testCase
+      "accept role-vector order and arity drift when mixedness agrees" $ do
+      let firstRoles =
+            [ Length.LengthUnobservedTarget
+            , Length.LengthObservedSpine
+            ]
+          reversedRoles = reverse firstRoles
+          target = adversarialBinaryConstantZeroTarget
+      graph <- adversarialBinaryConstantZeroGraph
+      let candidate = adversarialTypedCandidate $ Right graph
+
+      ordinarySession <- adversarialRoleAwareLengthSession firstRoles [] []
+      reversedSession <- adversarialRoleAwareLengthSession reversedRoles [] []
+      ordinaryContract <- adversarialRoleAwareLengthContract
+        ordinarySession reversedRoles target trivialLengthContract
+      ordinaryProblem <- expectRight
+        $ LengthProblem.sealRoleAwareLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            ordinarySession ordinaryContract candidate
+
+      exactSession <- adversarialExactCaseLengthSession firstRoles [] []
+      exactReversedSession <- adversarialExactCaseLengthSession
+        reversedRoles [] []
+      exactContract <- adversarialRoleAwareLengthContract
+        exactSession reversedRoles target trivialLengthContract
+      exactProblem <- expectRight
+        $ LengthProblem.sealExactSpineCaseLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            exactSession exactContract candidate
+
+      Length.checkedLengthContractTargetArgumentRoles ordinaryContract @?=
+        reversedRoles
+      Length.checkedLengthContractTargetArgumentRoles exactContract @?=
+        reversedRoles
+      LengthProblem.lengthSessionEncodingPolicyFingerprint ordinarySession @?=
+        LengthProblem.lengthSessionEncodingPolicyFingerprint reversedSession
+      LengthProblem.lengthSessionEncodingPolicyFingerprint exactSession @?=
+        LengthProblem.lengthSessionEncodingPolicyFingerprint
+          exactReversedSession
+      firstContract <- adversarialRoleAwareLengthContract
+        ordinarySession firstRoles target trivialLengthContract
+      assertBool "distinct mixed role vectors shared a contract identity" $
+        Length.lengthContractFingerprint firstContract /=
+          Length.lengthContractFingerprint ordinaryContract
+      LengthProblem.checkedLengthProblemInputCount ordinaryProblem @?= 1
+      LengthProblem.checkedLengthProblemInputCount exactProblem @?= 1
+
+      allObservedSession <- adversarialRoleAwareLengthSession [] [] []
+      allObservedContract <- adversarialRoleAwareLengthContract
+        allObservedSession
+        [Length.LengthObservedSpine, Length.LengthObservedSpine]
+        target trivialLengthContract
+      _ <- expectRight $ LengthProblem.sealRoleAwareLengthTypedCandidateProblem
+        LengthProblem.defaultLengthProblemLimits
+        allObservedSession allObservedContract candidate
+
+      exactAllObservedSession <- adversarialExactCaseLengthSession [] [] []
+      exactAllObservedContract <- adversarialRoleAwareLengthContract
+        exactAllObservedSession
+        [Length.LengthObservedSpine, Length.LengthObservedSpine]
+        target trivialLengthContract
+      _ <- expectRight
+        $ LengthProblem.sealExactSpineCaseLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            exactAllObservedSession exactAllObservedContract candidate
+
+      shortMixedSession <- adversarialRoleAwareLengthSession
+        [Length.LengthUnobservedTarget] [] []
+      longMixedContract <- adversarialRoleAwareLengthContract
+        shortMixedSession
+        [ Length.LengthObservedSpine
+        , Length.LengthUnobservedTarget
+        ]
+        target trivialLengthContract
+      _ <- expectRight $ LengthProblem.sealRoleAwareLengthTypedCandidateProblem
+        LengthProblem.defaultLengthProblemLimits
+        shortMixedSession longMixedContract candidate
+
+      exactShortMixedSession <- adversarialExactCaseLengthSession
+        [Length.LengthUnobservedTarget] [] []
+      exactLongMixedContract <- adversarialRoleAwareLengthContract
+        exactShortMixedSession
+        [ Length.LengthObservedSpine
+        , Length.LengthUnobservedTarget
+        ]
+        target trivialLengthContract
+      _ <- expectRight
+        $ LengthProblem.sealExactSpineCaseLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            exactShortMixedSession exactLongMixedContract candidate
+      pure ()
   ]
 
 candidateProblemTests :: TestTree
@@ -6241,6 +6558,33 @@ adversarialListOf = TypeApplication $ TypeConstructor listName
 adversarialClosedList :: AdversarialType
 adversarialClosedList = adversarialListOf $ TupleType Boxed []
 
+adversarialBinaryConstantZeroTarget :: AdversarialType
+adversarialBinaryConstantZeroTarget = FunctionType adversarialClosedList
+  $ FunctionType adversarialClosedList adversarialClosedList
+
+adversarialBinaryConstantZeroGraph :: IO AdversarialGraph
+adversarialBinaryConstantZeroGraph = sealAdversarialGraph
+  $ Djex.TermGraphSource (Djex.termNodeId 1)
+      [ ( Djex.termNodeId 0
+        , Djex.TermNode adversarialClosedList
+            $ Djex.TypedGlobal (Djex.occurrenceId 2) listName
+        )
+      , ( Djex.termNodeId 1
+        , Djex.TermNode adversarialBinaryConstantZeroTarget
+            $ Djex.TypedLambda
+                [ Djex.TypedPattern
+                    (Djex.occurrenceId 0)
+                    adversarialClosedList
+                    Djex.TypedWildcard
+                , Djex.TypedPattern
+                    (Djex.occurrenceId 1)
+                    adversarialClosedList
+                    Djex.TypedWildcard
+                ]
+                (Djex.termNodeId 0)
+        )
+      ]
+
 -- The first seal deliberately uses fixture-owned constructor schemas.  The
 -- production exact-case sealer does not trust this structure: it freshly
 -- re-seals the raw graph from the checked Length session's opaque spine model.
@@ -6873,30 +7217,9 @@ adversarialBinaryConstantZeroProblem
         AdversarialIdentity AdversarialLocal)
 adversarialBinaryConstantZeroProblem contractSource = do
   session <- adversarialLengthSession [] []
-  let target = FunctionType adversarialClosedList
-        $ FunctionType adversarialClosedList adversarialClosedList
-      source = Djex.TermGraphSource (Djex.termNodeId 1)
-        [ ( Djex.termNodeId 0
-          , Djex.TermNode adversarialClosedList
-              $ Djex.TypedGlobal (Djex.occurrenceId 2) listName
-          )
-        , ( Djex.termNodeId 1
-          , Djex.TermNode target
-              $ Djex.TypedLambda
-                  [ Djex.TypedPattern
-                      (Djex.occurrenceId 0)
-                      adversarialClosedList
-                      Djex.TypedWildcard
-                  , Djex.TypedPattern
-                      (Djex.occurrenceId 1)
-                      adversarialClosedList
-                      Djex.TypedWildcard
-                  ]
-                  (Djex.termNodeId 0)
-          )
-        ]
-  contract <- adversarialLengthContract session target contractSource
-  graph <- sealAdversarialGraph source
+  contract <- adversarialLengthContract
+    session adversarialBinaryConstantZeroTarget contractSource
+  graph <- adversarialBinaryConstantZeroGraph
   expectRight $ LengthProblem.sealLengthTypedCandidateProblem
     LengthProblem.defaultLengthProblemLimits session contract
     $ adversarialTypedCandidate $ Right graph
@@ -7269,6 +7592,19 @@ expectRight :: Show error => Either error value -> IO value
 expectRight result = case result of
   Left failure -> assertFailure $ "unexpected rejection: " ++ show failure
   Right value -> pure value
+
+canonicalFingerprintSHA256
+  :: Fingerprint.Fingerprint subject
+  -> String
+canonicalFingerprintSHA256 = concatMap hexadecimalByte . BS.unpack
+  . SHA256.hash . BS.pack . Fingerprint.fingerprintCanonicalBytes
+
+hexadecimalByte :: Word8 -> String
+hexadecimalByte byte = [digit $ byte `quot` 16, digit $ byte `mod` 16]
+ where
+  digit value
+    | value < 10 = toEnum $ fromEnum '0' + fromIntegral value
+    | otherwise = toEnum $ fromEnum 'a' + fromIntegral value - 10
 
 expectNoCounterexample
   :: Show error

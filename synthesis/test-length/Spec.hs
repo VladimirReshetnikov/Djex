@@ -3295,6 +3295,42 @@ smtLibProtocolTests = testGroup
           show other
         Right _ -> assertFailure
           "a valuation buffered before its write capability was accepted"
+  , testCase "retain the exact admitted response policy after sealing" $ do
+      problem <- adversarialConstantZeroProblem identityLengthContract
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      responseLimits <- expectRight $ SMTLibResponse.mkLengthSMTLibResponseLimits
+        SMTLibResponse.defaultLengthSMTLibResponseLimitSource
+          { SMTLibResponse.lengthSMTLibResponseLimitSourceTokenBytes = 19 }
+      execution <- protocolExecutionConfigWithResponse
+        InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+        responseLimits
+      plan <- expectRight $ SMTLibProtocol.sealLengthSMTLibProtocolPlan
+        SMTLibProtocol.defaultLengthSMTLibProtocolLimits
+        execution query protocolCheckNonce $ Just protocolValueNonce
+      checkBarrier <- protocolSentinel protocolCheckNonce
+      initial <- expectProtocolWrite
+        SMTLibProtocol.LengthSMTLibProtocolInitialQueryWrite
+        (SMTLibProtocol.lengthSMTLibProtocolInitialWriteBytes plan)
+        $ SMTLibProtocol.startLengthSMTLibProtocol plan
+      valueAction <- expectRight $ SMTLibProtocol.feedLengthSMTLibProtocol
+        initial $ asciiBytes "sat\n" ++
+          SMTLibStream.smtLibEchoSentinelResponseBytes checkBarrier ++
+          asciiBytes "\n"
+      valueReceiver <- expectProtocolWrite
+        SMTLibProtocol.LengthSMTLibProtocolInputValueWrite
+        (maybe [] id $ SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes
+          plan)
+        valueAction
+      assertLeft
+        (SMTLibProtocol.LengthSMTLibProtocolResponseFailure
+          SMTLibProtocol.LengthSMTLibProtocolInputValuePhase
+          $ SMTLibResponse.LengthSMTLibResponseSyntaxError
+          $ SMTLibResponse.SMTLibTokenByteLimitExceeded
+              SMTLibResponse.SMTLibBareToken 19 20)
+        $ SMTLibProtocol.feedLengthSMTLibProtocol valueReceiver
+        $ asciiBytes
+            "((djex_length_input_0 12345678901234567890))\n"
   , testCase "bind semantic plan inputs but exclude fingerprint admission" $ do
       problem <- adversarialConstantZeroProblem identityLengthContract
       query <- expectRight $ SMTLib.sealLengthSMTLibQuery

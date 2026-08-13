@@ -39,8 +39,7 @@ could associate stale output with the current query.
 
 ## Sealed plan
 
-`LengthSMTLibProtocolPlan` retains the owners needed to rederive, and privately
-fingerprints:
+`LengthSMTLibProtocolPlan` privately fingerprints:
 
 - the complete pure execution-policy key;
 - the exact canonical query key;
@@ -52,13 +51,23 @@ fingerprints:
 - the exact reset/check/status-marker and optional input-value/value-marker
   writes together with their expected marker responses.
 
+The complete key still binds every execution-policy field, but the runtime
+plan retains only the two execution projections with post-seal consumers: the
+artifact policy and bounded response limits. The Z3 launch profile, executable
+path and digest expectation, solver controls, host deadline, environment and
+working-directory policy have served validation and fingerprint construction
+before the plan escapes. They are not retained as separate structured runtime
+fields; their canonical identity remains nested in the complete plan key. The
+worker separately retains the complete execution policy to derive each query
+deadline and seal later plans.
+
 The concatenated write fragments are transient fingerprint inputs rather than
 parallel retained fields. The plan keeps the sealed query and positional
 markers which uniquely render them, and derives each exact write on demand
 through the selectors used at its causal action edge. Presence-only inspection
 of the optional write does not render request bytes. Sealing still renders and
-admits the identical bytes into the unchanged complete key before the smaller
-plan can escape.
+admits the identical bytes and complete execution-policy key into the unchanged
+plan key before the narrower plan can escape.
 
 The plan fingerprint is a reversible complete canonical key, not a digest, so
 neither it nor its canonical bytes are public. The fingerprint byte limit is

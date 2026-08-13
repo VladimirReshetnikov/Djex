@@ -278,10 +278,16 @@ receipts do not claim FIFO origin, configured bounds, process association, or
 restoration: those remain concrete transport laws.
 
 `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` owns the
-next pure boundary. It seals the execution-policy key, exact query key, stream
-limits, cumulative stdout budget, phase schema, and caller-supplied check/value
-markers into one private protocol plan. The initial action writes reset,
-canonical check commands, and a status marker together. The machine then
+next pure boundary. It seals the complete execution-policy key, exact query
+key, stream limits, cumulative stdout budget, phase schema, and caller-supplied
+check/value markers into one private protocol-plan identity. The runtime plan
+then retains only the exact artifact policy, response limits, query, stream
+policy, positional markers, and that complete key; launch profile, digest,
+deadline, and other launch-only execution facts are not retained as separate
+runtime protocol fields. Their canonical identity remains nested in the
+complete plan key.
+The initial action writes reset, canonical check commands, and a status marker
+together. The machine then
 accepts exactly one decoded status followed by that exact marker. Only `sat`
 under an input-value policy for a query with inputs exposes the separate
 `get-value`/marker write; unsatisfiable, unknown, status-only, and zero-input
@@ -375,7 +381,8 @@ runtime. Workspace-allocation, capability, and ready-identity admission work
 has completed before lending; the opener deadline and Session
 workspace-cleanup authority remain with the enclosing scope.
 Once a plan is sealed, replay reads the exact query and artifact policy from
-that plan rather than pairing it with independent worker-wide fields.
+that plan rather than pairing it with independent worker-wide fields. Response
+decoding likewise reads the limits retained by that exact plan.
 
 The public live facade copies only bounded association and authority fields out
 of each private run. It retains status once and derives the corresponding

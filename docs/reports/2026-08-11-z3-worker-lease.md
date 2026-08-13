@@ -244,7 +244,7 @@ only its executable basename. It records argv, environment, cwd, initial cwd
 listing, commands, and output in a test-only sidecar outside the cwd, so the
 production empty-environment and empty-workspace policies remain observable.
 
-The current focused Length suite has 182 passing cases, including the query-run
+The current focused Length suite has 183 passing cases, including the query-run
 successor. Worker-lease cases cover:
 
 - healthy whole, split, singleton, empty-interleaved, and delayed-byte output;

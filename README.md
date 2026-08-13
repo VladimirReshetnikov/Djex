@@ -445,10 +445,13 @@ reads therefore cannot represent zero progress; FIFO origin, configured byte
 bounds, and process/deadline association remain concrete transport laws.
 
 `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` composes
-that cumulative cursor with the sealed execution policy and query. Its initial
+that cumulative cursor with an exact query and the artifact/response policy
+needed after sealing. Its reversible plan key still embeds the complete
+execution-policy key, but the structured launch profile, deadline, and other
+launch-only fields are not retained as runtime protocol authority. Its initial
 action is one exact reset/check/status-marker write. It decodes exactly one
-status and accepts the marker only in the following position; only `sat` under the
-input-value artifact policy may then expose a second value-request/marker
+status and accepts the marker only in the following position; only `sat` under
+the input-value artifact policy may then expose a second value-request/marker
 write. Status and value tails are recursively consumed only within the write
 which could have caused them. At the status-marker-to-value-write boundary,
 already-buffered bytes must be finitely bounded SMT-LIB whitespace, so a stale

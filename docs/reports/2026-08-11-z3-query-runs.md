@@ -169,9 +169,13 @@ model-relative counterexample evidence, not solver-soundness evidence and not
 permission to treat an unsatisfiable result as proof.
 
 The sealed protocol plan is also the sole replay source for its exact query and
-artifact policy. The worker retains the execution policy to derive each query
-deadline and seal future plans; it is not paired independently with a completed
-plan during replay.
+artifact policy, and response decoding consumes the limits retained by that
+same plan. Its complete key still binds the full execution policy, but the plan
+does not retain launch-only execution facts as separate structured runtime
+fields after sealing. Their canonical identity remains nested in the plan key.
+The worker retains the complete execution policy to derive each query deadline
+and seal future plans; it is not paired independently with a completed plan
+during replay.
 Query-count and query-run-identity caps come from the worker's strict post-probe
 query policy, while stdout/stderr capacity comes from limits associated with
 the exact retained process. Run-identity admission derives those limits from
@@ -212,7 +216,7 @@ The compiled fake worker now supports healthy ordered input models, `unsat`,
 the four-stage capability probe exact. Query events record zero-based ordinals
 and whether `get-value` was actually written.
 
-The Length suite has 182 passing tests. Thirteen live-query cases cover:
+The Length suite has 183 passing tests. Thirteen live-query cases cover:
 
 - exact admission of the `Word64` ordinal boundary and rejection at maximum
   plus one;

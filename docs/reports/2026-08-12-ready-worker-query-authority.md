@@ -35,10 +35,14 @@ helper no longer accepts a separately pairable limits argument.
 
 ## Plan-owned replay
 
-A sealed `LengthSMTLibProtocolPlan` already retains its exact nominal query and
-complete execution policy. Replay now projects both the query and artifact
-policy from that plan. The worker-wide execution policy remains necessary for
-deriving the next query deadline and sealing its plan; it is not a second
+A sealed `LengthSMTLibProtocolPlan` retains its exact nominal query, artifact
+policy, response limits, stream policy, positional barriers, and complete plan
+key. The complete key binds the full execution policy, but launch-only policy
+facts are consumed during sealing rather than retained as separate structured
+runtime fields; their canonical identity remains nested in the plan key.
+Replay projects both the query and artifact policy from that plan, and decoding
+uses its response limits. The worker-wide execution policy remains necessary
+for deriving the next query deadline and sealing its plan; it is not a second
 replay authority for a plan which already exists.
 
 This preserves the existing order:
@@ -59,6 +63,7 @@ Focused regressions pin:
 
 - process-owned limit projection against the exact limits used at open;
 - protocol-plan artifact-policy projection alongside its exact query;
+- post-seal response-limit enforcement from the exact protocol plan;
 - a one-byte query-run identity cap rejecting twice before any query write;
 - an exactly exhausted nondefault process stdout cap rejecting a query before
   any write; and

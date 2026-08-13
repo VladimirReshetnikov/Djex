@@ -131,6 +131,7 @@ import Language.Haskell.Synthesis.Semantic.Length.SMTLib
   )
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response
   ( LengthSMTLibResponseError
+  , LengthSMTLibResponseLimits
   , lengthSMTLibResponseByteLimit
   , lengthSMTLibResponseNestingDepthLimit
   , lengthSMTLibResponseNodeLimit
@@ -270,13 +271,17 @@ data LengthSMTLibProtocolPlanError
 
 instance NFData LengthSMTLibProtocolPlanError
 
--- | Opaque association of exact policy, query, framing policy, barriers, and
--- the complete identity of their deterministic writes.  The writes are
--- rendered transiently for fingerprint admission and later derived on demand
--- through the selectors used at their causal action edges; the private
--- fingerprint remains a reversible complete key, not a digest.
+-- | Opaque association of exact artifact/response policy, query, framing
+-- policy, barriers, and the complete identity of their deterministic writes.
+-- The full structured execution configuration is consumed during sealing
+-- rather than retained as runtime policy; its artifact/response projections
+-- remain runtime fields, and its complete canonical key remains embedded in
+-- the reversible plan fingerprint.  The writes are rendered transiently for
+-- fingerprint admission and later derived on demand through the selectors
+-- used at their causal action edges.
 data LengthSMTLibProtocolPlan identity local = LengthSMTLibProtocolPlan
-  !LengthSMTLibExecutionConfig
+  !LengthSMTLibArtifactPolicy
+  !LengthSMTLibResponseLimits
   !(LengthSMTLibQuery identity local)
   !SMTLibCausalStreamPolicy
   !SMTLibEchoSentinel
@@ -286,9 +291,10 @@ data LengthSMTLibProtocolPlan identity local = LengthSMTLibProtocolPlan
 type role LengthSMTLibProtocolPlan nominal nominal
 
 instance NFData (LengthSMTLibProtocolPlan identity local) where
-  rnf (LengthSMTLibProtocolPlan execution query streamPolicy
+  rnf (LengthSMTLibProtocolPlan artifact responses query streamPolicy
       checkBarrier valueBarrier fingerprint) =
-    rnf execution `seq` rnf query `seq` rnf streamPolicy `seq`
+    rnf artifact `seq` rnf responses `seq` rnf query `seq`
+    rnf streamPolicy `seq`
     rnf checkBarrier `seq` rnf valueBarrier `seq` rnf fingerprint
 
 data LengthSMTLibProtocolPlanFingerprintSubject
@@ -337,7 +343,10 @@ sealLengthSMTLibProtocolPlan limits execution query
       valueWrite = renderProtocolInputValueWrite valueRequest valueBarrier
   fingerprint <- buildPlanFingerprint limits execution query valueRequest
     checkBarrier valueBarrier initialWrite valueWrite
-  pure $ LengthSMTLibProtocolPlan execution query
+  pure $ LengthSMTLibProtocolPlan
+    (lengthSMTLibExecutionArtifactPolicy execution)
+    (lengthSMTLibExecutionResponseLimits execution)
+    query
     (limitsStreamPolicy limits)
     checkBarrier valueBarrier fingerprint
 
@@ -363,14 +372,14 @@ lengthSMTLibProtocolInitialWriteBytes
   :: LengthSMTLibProtocolPlan identity local
   -> [Word8]
 lengthSMTLibProtocolInitialWriteBytes
-    (LengthSMTLibProtocolPlan _ query _ checkBarrier _ _) =
+    (LengthSMTLibProtocolPlan _ _ query _ checkBarrier _ _) =
       renderProtocolInitialWrite query checkBarrier
 
 lengthSMTLibProtocolInputValueWriteBytes
   :: LengthSMTLibProtocolPlan identity local
   -> Maybe [Word8]
 lengthSMTLibProtocolInputValueWriteBytes
-    (LengthSMTLibProtocolPlan _ query _ _ valueBarrier _) =
+    (LengthSMTLibProtocolPlan _ _ query _ _ valueBarrier _) =
       renderProtocolInputValueWrite
         (lengthSMTLibQueryInputValueRequestBytes query) valueBarrier
 
@@ -378,7 +387,7 @@ lengthSMTLibProtocolPlanFingerprint
   :: LengthSMTLibProtocolPlan identity local
   -> Fingerprint LengthSMTLibProtocolPlanFingerprintSubject
 lengthSMTLibProtocolPlanFingerprint
-    (LengthSMTLibProtocolPlan _ _ _ _ _ value) = value
+    (LengthSMTLibProtocolPlan _ _ _ _ _ _ value) = value
 
 -- | Exact query retained by this sealed protocol plan.
 lengthSMTLibProtocolPlanQuery
@@ -390,8 +399,7 @@ lengthSMTLibProtocolPlanQuery = planQuery
 lengthSMTLibProtocolPlanArtifactPolicy
   :: LengthSMTLibProtocolPlan identity local
   -> LengthSMTLibArtifactPolicy
-lengthSMTLibProtocolPlanArtifactPolicy =
-  lengthSMTLibExecutionArtifactPolicy . planExecution
+lengthSMTLibProtocolPlanArtifactPolicy = planArtifactPolicy
 
 -- | Final causal transcript cap retained by this exact sealed plan.
 lengthSMTLibProtocolPlanCumulativeStdoutByteLimit
@@ -564,7 +572,7 @@ handleFrame
       (LengthSMTLibProtocolAction identity local)
 handleFrame plan phase completed = case phase of
   AwaitLengthSMTLibCheckStatus -> do
-    let limits = lengthSMTLibExecutionResponseLimits $ planExecution plan
+    let limits = planResponseLimits plan
     status <- first
       (LengthSMTLibProtocolResponseFailure
         LengthSMTLibProtocolCheckStatusPhase)
@@ -595,7 +603,7 @@ handleFrame plan phase completed = case phase of
       else Left $ LengthSMTLibProtocolBarrierMismatch
         LengthSMTLibProtocolCheckBarrier
   AwaitLengthSMTLibInputValues status -> do
-    let limits = lengthSMTLibExecutionResponseLimits $ planExecution plan
+    let limits = planResponseLimits plan
     bindings <- first
       (LengthSMTLibProtocolResponseFailure
         LengthSMTLibProtocolInputValuePhase)
@@ -636,7 +644,7 @@ terminalInputValues
   -> Maybe [LengthSMTLibIntegerBinding]
 terminalInputValues plan status
   | status == SolverSatisfiable
-  , lengthSMTLibExecutionArtifactPolicy (planExecution plan) ==
+  , planArtifactPolicy plan ==
       LengthSMTLibInputValuesAfterSatisfiable
   , not $ isJust $ lengthSMTLibQueryInputValueRequestBytes $ planQuery plan =
       Just []
@@ -714,20 +722,25 @@ phaseName phase = case phase of
   AwaitLengthSMTLibInputValueBarrier{} ->
     LengthSMTLibProtocolInputValueBarrierPhase
 
-planExecution
+planArtifactPolicy
   :: LengthSMTLibProtocolPlan identity local
-  -> LengthSMTLibExecutionConfig
-planExecution (LengthSMTLibProtocolPlan value _ _ _ _ _) = value
+  -> LengthSMTLibArtifactPolicy
+planArtifactPolicy (LengthSMTLibProtocolPlan value _ _ _ _ _ _) = value
+
+planResponseLimits
+  :: LengthSMTLibProtocolPlan identity local
+  -> LengthSMTLibResponseLimits
+planResponseLimits (LengthSMTLibProtocolPlan _ value _ _ _ _ _) = value
 
 planQuery
   :: LengthSMTLibProtocolPlan identity local
   -> LengthSMTLibQuery identity local
-planQuery (LengthSMTLibProtocolPlan _ value _ _ _ _) = value
+planQuery (LengthSMTLibProtocolPlan _ _ value _ _ _ _) = value
 
 planStreamPolicy
   :: LengthSMTLibProtocolPlan identity local
   -> SMTLibCausalStreamPolicy
-planStreamPolicy (LengthSMTLibProtocolPlan _ _ value _ _ _) = value
+planStreamPolicy (LengthSMTLibProtocolPlan _ _ _ value _ _ _) = value
 
 limitsStreamPolicy
   :: LengthSMTLibProtocolLimits
@@ -738,13 +751,13 @@ planCheckBarrier
   :: LengthSMTLibProtocolPlan identity local
   -> SMTLibEchoSentinel
 planCheckBarrier
-    (LengthSMTLibProtocolPlan _ _ _ value _ _) = value
+    (LengthSMTLibProtocolPlan _ _ _ _ value _ _) = value
 
 planValueBarrier
   :: LengthSMTLibProtocolPlan identity local
   -> Maybe SMTLibEchoSentinel
 planValueBarrier
-    (LengthSMTLibProtocolPlan _ _ _ _ value _) = value
+    (LengthSMTLibProtocolPlan _ _ _ _ _ value _) = value
 
 validatePlanFraming
   :: LengthSMTLibProtocolLimits

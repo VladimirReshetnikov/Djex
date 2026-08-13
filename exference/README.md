@@ -1010,18 +1010,26 @@ receives no choice, and neither a scoped value nor a sibling global consults
 the supplied map. The caller remains responsible for the source-language fact
 which justifies any assertion.
 
-All provider-evidence forms participate only in visible exact-global lookup;
-the ordinary implicit use remains first. The scalar runner preserves its established visible
-order: ground monomorphic instance-head choices, checked query-derived choices,
-then supplied candidates. Query-derived and supplied products keep separate
-32-combination caps, so a wide query pool cannot spend the scalar supplied
-route's allowance. With either exact assignment runner, the visible order is
-ground monomorphic instance-head choices, exact supplied vectors, then checked
-query-derived choices. The exact route performs no Cartesian product and does
-not require selected binders to be vacuous: because the caller supplied the
-complete vector, those binders may occur in the provider body. Both routes open
-at most six leading binders, and search plus the independent expression
-checker consume their applications through the same checked representation.
+All provider-evidence forms participate only in visible exact-global lookup.
+Without a productive exact assignment, the ordinary implicit use remains first
+and the scalar runner preserves its established visible order: ground
+monomorphic instance-head choices, checked query-derived choices, then supplied
+candidates. Query-derived and supplied products keep separate 32-combination
+caps, so a wide query pool cannot spend the scalar supplied route's allowance.
+A productive exact supplied vector instead receives one leading visible lane
+before ordinary implicit use; this prevents downstream exact-spelling
+deduplication from discarding the vector's checked association. The ordinary
+fallback stays available, followed by the historical ground, query-derived,
+and scalar-candidate visible lanes. The exact route performs no Cartesian
+product and does not require selected binders to be vacuous: because the caller
+supplied the complete vector, those binders may occur in the provider body.
+Both routes open at most six leading binders, and search plus the independent
+expression checker consume their applications through the same checked
+representation.
+See the
+[association-priority report](../docs/reports/2026-08-13-exact-assignment-association-priority.md)
+for the authority and candidate-order regression that requires the narrow
+leading exact-assignment lane.
 
 `runExferenceQuery` follows the exact empty-evidence path. Calling any explicit
 evidence runner with `[]` returns the same batches, candidate order, budget

@@ -2229,22 +2229,7 @@ stateStep allocators multiPM allowConstrs h
             modify $ \node -> node
               { nodeGoals = nodeGoals node <> Seq.fromList additionalGoals }
         ordinary = useGlobal [] provType constraints parameters
-        visible = do
-          source <- maybe mzero pure =<< gets
-            (M.lookup (functionName binding) . nodeFunctionSchemes)
-          candidates <- gets nodeVisibleTypeCandidates
-          suppliedCandidates <- gets
-            (M.findWithDefault [] (functionName binding)
-              . nodeProviderInstantiationCandidates)
-          suppliedAssignments <- gets
-            (M.findWithDefault [] (functionName binding)
-              . nodeProviderInstantiationAssignments)
-          let instantiations = L.nub $
-                groundProviderInstantiations contxt source ++
-                assignmentProviderInstantiations
-                  suppliedAssignments source ++
-                candidateProviderInstantiations candidates source ++
-                candidateProviderInstantiations suppliedCandidates source
+        useVisible instantiations = do
           instantiation <- lift $ chooseBranches instantiations
           typeArguments <- maybe mzero pure
             $ traverse
@@ -2258,7 +2243,41 @@ stateStep allocators multiPM allowConstrs h
             instantiatedResult
             (groundProviderConstraints instantiation)
             instantiatedParameters
-      ordinary <|> visible
+        remainingVisible = do
+          source <- maybe mzero pure =<< gets
+            (M.lookup (functionName binding) . nodeFunctionSchemes)
+          candidates <- gets nodeVisibleTypeCandidates
+          suppliedCandidates <- gets
+            (M.findWithDefault [] (functionName binding)
+              . nodeProviderInstantiationCandidates)
+          let instantiations = L.nub $
+                groundProviderInstantiations contxt source ++
+                candidateProviderInstantiations candidates source ++
+                candidateProviderInstantiations suppliedCandidates source
+          useVisible instantiations
+      -- A caller-supplied complete assignment is exact retained-provider
+      -- evidence.  Prefer its explicit visible application over the flattened
+      -- compatibility binding when both render the same specialization; a
+      -- downstream renderer may deduplicate those spellings, and retaining the
+      -- ordinary candidate first would discard the checked association.  Keep
+      -- inferred and candidate-derived visible applications after the ordinary
+      -- lane exactly as before; an absent or unusable raw assignment therefore
+      -- preserves the historical branch order.
+      suppliedAssignments <- gets
+        (M.findWithDefault [] (functionName binding)
+          . nodeProviderInstantiationAssignments)
+      case suppliedAssignments of
+        [] -> ordinary <|> remainingVisible
+        _ -> do
+          assignedInstantiations <- gets $ \node -> case
+              M.lookup (functionName binding) (nodeFunctionSchemes node) of
+            Nothing -> []
+            Just source -> L.nub $ assignmentProviderInstantiations
+              suppliedAssignments source
+          if null assignedInstantiations
+            then ordinary <|> remainingVisible
+            else useVisible assignedInstantiations
+              <|> ordinary <|> remainingVisible
 
     -- on code for byProvided and byFunctionSimple
     byGenericUnify

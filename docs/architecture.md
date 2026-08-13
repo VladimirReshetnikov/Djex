@@ -327,11 +327,12 @@ target-named specialization is available only to the self-reference diagnostic
 search.
 
 Exference instead keeps the checked relation in its query state and consults it
-only from exact retained-global lookup. Ordinary implicit use remains first.
-Within the visible branch, monomorphic Haskell instance-head choices come
-first. Exact assignment vectors, when supplied, follow and precede checked
-query-derived choices; the legacy scalar runner retains its historical order
-of query-derived choices followed by separately capped supplied choices. The
+only from exact retained-global lookup. A productive exact assignment vector
+receives one leading visible lane so exact-spelling deduplication cannot discard
+its checked association. Ordinary implicit use follows as a fallback, then the
+historical visible sequence of monomorphic Haskell instance heads, checked
+query-derived choices, and separately capped legacy scalar choices. Without a
+productive exact assignment, that ordinary-first sequence is unchanged. The
 exact route consumes a vector once and may instantiate non-vacuous leading
 binders, whereas the scalar pool route requires a completely vacuous prefix.
 Scoped values never consult either map. These are finite evidence-directed

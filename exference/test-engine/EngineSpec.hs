@@ -1026,32 +1026,38 @@ tests = testGroup "Exference private engine boundaries"
       target <- checkedIdentifierTarget "queryAssociatedResult"
       options <- expectRight $ E.checkExferenceOptions
         $ E.querySearchOptions $ legacyInputQuery input
-      results <- expectRight $
-        E.findTypedQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
-          (Map.singleton providerName [[integer]])
-          target
-          (emptyExferenceSourceTypeVariableHints token)
-          environment
-          (legacyInputQuery input)
-          options
-      let candidates = concatMap
-            (SharedSearch.batchCandidates . SharedQuery.resultSearch) results
-          observations =
-            [ TypedCandidate.foldTypedCandidateGraph
-                (\_ _ -> "unavailable")
-                (\_ _ -> "plain")
-                (\_ checked ->
-                  if null $ Association.foldCheckedTypeApplicationCertificateGraph
-                      (\rows _ _ _ _ _ receipts -> receipts : rows) [] checked
-                    then "associated-empty"
-                    else "associated")
-                candidate
-            | candidate <- candidates
-            ]
-      assertBool
-        ("scheme-backed query did not retain an associated carrier: "
-          ++ show observations)
-        $ "associated" `elem` observations
+      let observe assignments = do
+            results <- expectRight $
+              E.findTypedQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
+                assignments
+                target
+                (emptyExferenceSourceTypeVariableHints token)
+                environment
+                (legacyInputQuery input)
+                options
+            let candidates = concatMap
+                  (SharedSearch.batchCandidates . SharedQuery.resultSearch)
+                  results
+            pure
+              [ TypedCandidate.foldTypedCandidateGraph
+                  (\_ _ -> "unavailable")
+                  (\_ _ -> "plain")
+                  (\_ checked ->
+                    if null $
+                        Association.foldCheckedTypeApplicationCertificateGraph
+                          (\rows _ _ _ _ _ receipts -> receipts : rows)
+                          [] checked
+                      then "associated-empty"
+                      else "associated")
+                  candidate
+              | candidate <- candidates
+              ]
+      assigned <- observe $ Map.singleton providerName [[integer]]
+      take 2 assigned @?= ["associated", "plain"]
+      unassigned <- observe Map.empty
+      take 1 unassigned @?= ["plain"]
+      unusable <- observe $ Map.singleton providerName [[]]
+      take 1 unusable @?= ["plain"]
   , testCase "source constraints activate before a selected polytype suffix" $ do
       let className = name "C"
           providerName = name "polyContextual"

@@ -384,7 +384,7 @@ Nonempty evidence is additive, with engine- and payload-specific scheduling:
 | Engine | Independent candidate pool | Exact ordered assignments |
 | --- | --- | --- |
 | Djinn | The historical plain structural, nominal, and query-local-instantiation plans remain first. The positive-only provider family reconstructs bounded tuples: at most six binders, 512 attempts, sixteen specializations per scheme, and 32 direct provider premises. | The same positive-only provider-plan position receives one direct premise per retained vector and never uses the tuple-attempt or per-scheme Cartesian window. It still carries query-local and loaded instantiation axioms for mixed proofs and runs before evidence-free loaded tails. Each proof is checked before lowering restores the exact provider and visible arguments. |
-| Exference | Exact retained-global lookup alone receives the pool. After ordinary implicit use, its visible order is ground monomorphic instance heads, checked query-derived choices, then supplied scalar choices. Query-derived and supplied products retain separate 32-combination caps. Scoped values and sibling globals never consult the map. | Exact retained-global lookup consumes each vector once. After ordinary implicit use, its visible order is ground monomorphic instance heads, exact supplied assignments, then checked query-derived choices. No Cartesian product or vacuous-body restriction is used. Scoped values and sibling globals never consult the map. |
+| Exference | Exact retained-global lookup alone receives the pool. After ordinary implicit use, its visible order is ground monomorphic instance heads, checked query-derived choices, then supplied scalar choices. Query-derived and supplied products retain separate 32-combination caps. Scoped values and sibling globals never consult the map. | Exact retained-global lookup consumes each productive vector once in a leading visible lane, before the ordinary fallback and unchanged inferred/scalar visible sequence. This prevents exact-spelling deduplication from discarding checked association authority. An absent or unusable raw private assignment keeps the historical ordinary-first order. No Cartesian product or vacuous-body restriction is used. Scoped values and sibling globals never consult the map. |
 
 Both evidence models can make a visible choice such as
 `provider @(forall a. a -> a)` available when a richer frontend has already
@@ -657,7 +657,9 @@ candidate pool contains ground monotypes and complete closed context-free
 foralls observed below arrows or tuples. Search can therefore emit `provider @Int` or
 `provider @(forall a0_0. a0_0 -> a0_0)`. The query route retains at most six
 binders and 32 combinations; the instance-head route stays monotype-only. The
-ordinary implicit per-use branch remains available and retains priority.
+ordinary implicit per-use branch remains available and retains priority unless
+a productive exact supplied assignment receives its narrow leading
+association-preserving lane.
 
 The shared generated-term API represents this with
 `VisibleTypeApplication` and an abstract `VisibleTypeArgument`.

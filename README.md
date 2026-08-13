@@ -1028,8 +1028,15 @@ checked proper types already supplied below arrows or tuples in the query. Its
 residual body may mention ambient rigids opened from that same query. The
 candidates include complete closed context-free foralls, so search can emit
 `provider @(forall a0_0. a0_0 -> a0_0)`. The query route retains at most six
-binders and 32 combinations. Ordinary implicit instantiation remains first,
-and the instance-head route remains monotype-only.
+binders and 32 combinations. Without a productive exact supplied assignment,
+ordinary implicit instantiation remains first and the instance-head route
+remains monotype-only. A productive exact assignment receives one leading
+visible lane so downstream exact-spelling deduplication cannot discard its
+checked association; the ordinary fallback and established
+inferred/candidate-derived visible lanes remain available after it.
+The scheduling correction and its empty/unusable-assignment compatibility
+boundary are recorded in the
+[exact-assignment association-priority report](docs/reports/2026-08-13-exact-assignment-association-priority.md).
 A richer frontend may instead pass either backend one complete, correlated
 provider-assignment vector. The legacy `ProviderInstantiationAssignment`
 runners infer each positional ground kind from the exact provider body and

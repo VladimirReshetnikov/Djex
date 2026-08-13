@@ -210,8 +210,9 @@ global. Scoped values and other globals never consult an entry merely because
 their schemes compare equal. Normal target exclusion removes the requested
 definition from provider lookup.
 
-Ordinary implicit instantiation remains the first provider-use branch. Within
-the visible branch, either exact assignment runner tries:
+At this checkpoint ordinary implicit instantiation remained the first
+provider-use branch. Within the visible branch, either exact assignment runner
+tried:
 
 1. complete choices proved by ground monomorphic Haskell instance heads;
 2. caller-supplied exact assignment vectors; and
@@ -228,6 +229,13 @@ instance-head choices, query-derived candidates, and then supplied scalar
 candidates. Its query-derived and supplied products remain separately capped
 at 32. Adding the exact entrance therefore does not perturb clients which rely
 on the scalar prefix.
+
+The later certificate-association integration narrows this scheduling rule:
+one productive exact supplied vector now receives a leading visible lane before
+the ordinary fallback so a downstream exact-spelling deduplicator cannot retain
+the plain candidate while discarding checked association authority. With no
+productive exact vector, the historical ordinary and visible order remains
+unchanged.
 
 ## Empty compatibility and scope
 

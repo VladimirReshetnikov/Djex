@@ -63,13 +63,17 @@ source order.
 
 ## Exference specialization
 
-Exference's ordinary implicit provider use remains first. Its bounded visible
-branch now accepts five leading binders for both query-derived choices and
-caller-supplied exact vectors. Query-derived specialization still requires a
-closed, context-free candidate and obeys its existing vacuity and combination
-rules. An exact vector may specialize a non-vacuous provider body because the
-caller has supplied the complete correlation; the specialized body is still
-kind-checked and independently expression-checked.
+At this checkpoint Exference's ordinary implicit provider use remained first.
+Its bounded visible branch accepted five leading binders for both query-derived
+choices and caller-supplied exact vectors. The later certificate-association
+integration gives a productive exact supplied vector one leading visible lane
+before that ordinary fallback so exact-spelling deduplication retains its
+checked association; absent or unusable assignment input keeps the historical
+order. Query-derived specialization still requires a closed, context-free
+candidate and obeys its existing vacuity and combination rules. An exact vector
+may specialize a non-vacuous provider body because the caller has supplied the
+complete correlation; the specialized body is still kind-checked and
+independently expression-checked.
 
 Private-engine coverage demonstrates a five-binder query-derived
 specialization, five distinct closed quantified arguments retained by the

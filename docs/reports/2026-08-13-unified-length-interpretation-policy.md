@@ -80,29 +80,30 @@ session, detached contract, and valid candidate: the old wrapper succeeds and
 the unified entrance rejects the exact-vector drift. This makes the new API an
 additive association repair rather than an implicit compatibility break.
 
-## Identity preservation
+## Identity association and later version advance
 
 The session privately retains both `Maybe [LengthTargetArgumentRole]` and the
-historical target-policy and case-policy projections. Only the two historical
-projections enter the session encoding fingerprint. The newly retained vector
-was not added as a parallel inventory, session, concrete-encoding, candidate,
-or complete-problem field; the contract and downstream identities continue to
-use the same existing role-aware contract fingerprint.
+target-policy and case-policy projections. Only those projections, not the
+complete role vector, enter the session encoding fingerprint. The vector was
+not added as a parallel inventory, session, concrete-encoding, candidate, or
+complete-problem field; the contract and downstream identities continue to use
+the same existing role-aware contract fingerprint.
 
-Consequently the previously characterized identities remain unchanged:
+The later associated-provider certificate checkpoint deliberately advances
+the common candidate-policy identity even on ordinary candidates. Current
+session encoding versions are 5 for legacy/all-observed case rejection, 6 for
+mixed case rejection, and 7 for exact cases, superseding versions 2/3/4.
+Accordingly, the current repository does not preserve the historical session
+bytes or containing downstream keys described by this checkpoint's original
+snapshots. Callers must invalidate those cached identities.
 
-- legacy and explicit all-observed case-rejected policy are identical at the
-  session, contract, concrete encoding, and complete problem layers;
-- mixed case-rejected policy retains the existing mixed identities;
-- exact all-observed and exact mixed policy retain their existing versioned
-  exact-case identities; and
-- two distinct same-mixedness role vectors still share a session encoding
-  identity while their role-aware contract identities differ.
-
-All canonical-byte and SHA-256 snapshots for those four identity tuples pass
-unchanged. Unified-vs-wrapper tests also compare inventory, session encoding,
-contract, candidate, concrete encoding, and complete problem fingerprints for
-all five legacy/explicit, all-observed/mixed, ordinary/exact configurations.
+The structural equivalences remain: legacy and explicit all-observed policy
+share the same current session identity; same-mixedness role vectors still
+share a session identity while their role-aware contract identities differ;
+and unified-vs-wrapper tests continue to compare every layer for all five
+configurations. The public interpretation signatures and loose-wrapper versus
+strict-association behavior are unchanged. See the
+[associated provider-certificate report](2026-08-13-length-associated-provider-certificates.md).
 
 ## Demand and failure boundary
 
@@ -142,7 +143,8 @@ Focused regressions cover:
 
 - five representative valid policy sources;
 - unified output and fingerprint parity with every compatibility wrapper;
-- unchanged canonical fingerprint bytes and SHA-256 snapshots;
+- current canonical fingerprint bytes and SHA-256 snapshots, including the
+  later 5/6/7 session-policy version advance;
 - spine-before-policy demand and bounded role-limit failure;
 - productive sealing plus honest deep forcing of retained roles;
 - in-session contract error routing and target-check precedence;

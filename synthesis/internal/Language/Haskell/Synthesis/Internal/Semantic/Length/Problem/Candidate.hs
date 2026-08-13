@@ -146,6 +146,15 @@ import Language.Haskell.Synthesis.Internal.Semantic.Problem
   , behavioralProblemEncodingFingerprint
   , mkBehavioralProblem
   )
+import Language.Haskell.Synthesis.Internal.TypedCandidate
+  ( foldTypedCandidateGraph )
+import Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate
+  ( checkedTypeApplicationCertificateStepObligationCount )
+import Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.Association
+  ( CheckedTypeApplicationCertificateGraph
+  , checkedTypeApplicationCertificateGraph
+  , foldCheckedTypeApplicationCertificateGraph
+  )
 import Language.Haskell.Synthesis.Inventory
   ( Inventory
   , inventoryKindAssumptions
@@ -176,7 +185,6 @@ import Language.Haskell.Synthesis.TypeInstantiation
 import Language.Haskell.Synthesis.TypedCandidate
   ( TypedCandidate
   , typedCandidateCompatibility
-  , typedCandidateTermGraph
   )
 import Language.Haskell.Synthesis.TypedGenerated
   ( ApplicationWitness (..)
@@ -203,7 +211,9 @@ import Language.Haskell.Synthesis.TypedGenerated.Fingerprint
   , fingerprintSharedTermGraph
   )
 import Language.Haskell.Synthesis.Internal.TypedGenerated.Fingerprint
-  ( fingerprintTermGraphWithTypeStructure )
+  ( fingerprintCheckedTypeApplicationCertificateGraphWithTypeStructure
+  , fingerprintTermGraphWithTypeStructure
+  )
 
 -- | Candidate-specific work bounds.  Graph limits are already checked by
 -- their own constructor; only the signed evaluation-step field can fail here.
@@ -312,6 +322,30 @@ data LengthProblemError failure identity local
   | LengthProblemResidualConstraint
       (Constraint (Type (Variable identity)))
   | LengthProblemTypedGraphUnavailable failure
+  -- | The named row owner is absent from the exact source inventory.  The
+  -- 'Natural' is its canonical rooted-row ordinal; no certificate, node,
+  -- occurrence, or raw source-slot coordinate is exposed.
+  | LengthProblemAssociatedCertificateOwnerMissing !Name !Natural
+  -- | The carrier's complete owner scheme is not alpha-exactly the source
+  -- inventory scheme.  The 'Natural' is the canonical rooted-row ordinal;
+  -- no certificate, node, occurrence, or raw source-slot coordinate is
+  -- exposed.
+  | LengthProblemAssociatedCertificateSourceSchemeMismatch !Name !Natural
+  -- | The first source-order step with activated obligations.  The two
+  -- 'Natural' values are the canonical rooted-row and source-step ordinals;
+  -- the bounded 'Int' is the obligation count.  Raw certificate, slot, node,
+  -- occurrence, constraint, and type payloads remain private.
+  | LengthProblemAssociatedCertificateActivatedObligations
+      !Name !Natural !Natural !Int
+  -- | Certificate authority for a modeled zero or step constructor is outside
+  -- this provider-only checkpoint.  The 'Natural' is the canonical rooted-row
+  -- ordinal, never a raw certificate or graph coordinate.
+  | LengthProblemAssociatedCertificateModeledConstructorUnsupported
+      !Name !Natural
+  -- | The exact source owner has no checked Length provider summary.  The
+  -- 'Natural' is the canonical rooted-row ordinal; no raw certificate or graph
+  -- coordinate is exposed.
+  | LengthProblemAssociatedCertificateProviderSummaryMissing !Name !Natural
   | LengthProblemTermGraphFingerprintRejected
       (TermGraphFingerprintError identity local)
   | LengthProblemRootNodeMissing !TermNodeId
@@ -559,6 +593,13 @@ data LengthProblemSealer
   | LengthExactSpineCaseProblemSealer
   | LengthSessionPolicyProblemSealer
 
+-- This discriminator never escapes the candidate sealer.  Empty certificate
+-- carriers deliberately collapse to the legacy branch so their graph and
+-- candidate identities remain byte-for-byte equal to a plain candidate.
+data LengthCandidateAuthority
+  = LengthPlainCandidateAuthority
+  | LengthOpaqueAssociatedCertificateAuthority
+
 sealLengthTypedCandidateProblemWithMode
   :: (Ord identity, Ord local)
   => LengthProblemSealer
@@ -615,10 +656,8 @@ sealLengthTypedCandidateProblemWithMode sealer problemLimits session
   case candidateResidualConstraints compatibility of
     constraint : _ -> Left $ LengthProblemResidualConstraint constraint
     [] -> pure ()
-  graph <- first LengthProblemTypedGraphUnavailable
-    $ typedCandidateTermGraph typed
-  graphFingerprint <- first LengthProblemTermGraphFingerprintRejected
-    $ fingerprintLengthTermGraph session problemLimits graph
+  (graph, graphFingerprint, candidateAuthority) <-
+    retainLengthCandidateGraph session problemLimits typed
   rootNode <- case lookupTermNode (termGraphRoot graph) graph of
     Nothing -> Left $ LengthProblemRootNodeMissing $ termGraphRoot graph
     Just node -> Right node
@@ -662,7 +701,7 @@ sealLengthTypedCandidateProblemWithMode sealer problemLimits session
         (Map.elems usedProvidersByName)
         result condition
   candidateFingerprint <- mapFingerprintFailure LengthCandidateFingerprint
-    $ buildCandidateFingerprint session graphFingerprint
+    $ buildCandidateFingerprint session candidateAuthority graphFingerprint
   problemFingerprint <- mapFingerprintFailure LengthCompleteProblemFingerprint
     $ buildCompleteProblemFingerprint session encodingFingerprint
         candidateFingerprint
@@ -803,6 +842,104 @@ data PreflightGraph identity local = PreflightGraph
   , preflightCases :: !(Map TermNodeId (ExactSpineCase identity local))
   }
 
+-- Consume graph retention only after contract resealing and residual
+-- rejection.  The associated branch first spends the same fresh
+-- session-selected graph reseal/fingerprint boundary as every other graph,
+-- then authorizes every rooted semantic row against the exact session
+-- inventory, and projects the bare graph only after both have succeeded.
+retainLengthCandidateGraph
+  :: (Ord identity, Ord local)
+  => CheckedLengthSession identity annotation
+  -> LengthProblemLimits
+  -> TypedCandidate failure
+      (Type (Variable identity))
+      local
+      (Candidate (Type (Variable identity)) details output)
+  -> Either
+      (LengthProblemError failure identity local)
+      ( TermGraph (Type (Variable identity)) local
+      , Fingerprint TermGraphFingerprintSubject
+      , LengthCandidateAuthority
+      )
+retainLengthCandidateGraph session limits = foldTypedCandidateGraph
+  unavailable plain associated
+ where
+  unavailable _ failure = Left $ LengthProblemTypedGraphUnavailable failure
+
+  plain _ graph = do
+    fingerprint <- first LengthProblemTermGraphFingerprintRejected
+      $ fingerprintLengthTermGraph session limits graph
+    pure (graph, fingerprint, LengthPlainCandidateAuthority)
+
+  associated _ checked = do
+    fingerprint <- first LengthProblemTermGraphFingerprintRejected
+      $ fingerprintLengthAssociatedTermGraph session limits checked
+    authority <- authorizeAssociatedCertificateGraph session checked
+    let graph = checkedTypeApplicationCertificateGraph checked
+    pure (graph, fingerprint, authority)
+
+-- Require each carrier row, in rooted structural order, to name the exact
+-- session inventory scheme and an exact assumed provider law.  The checked
+-- structural plan may retain obligations for other future consumers; Length's
+-- current scalar interpreter admits only the explicitly empty case.
+authorizeAssociatedCertificateGraph
+  :: Ord identity
+  => CheckedLengthSession identity annotation
+  -> CheckedTypeApplicationCertificateGraph (Variable identity) local
+  -> Either
+      (LengthProblemError failure identity local)
+      LengthCandidateAuthority
+authorizeAssociatedCertificateGraph session checked = do
+  rowCount <- foldCheckedTypeApplicationCertificateGraph
+    authorizeRow (Right 0) checked
+  pure $ if rowCount == 0
+    then LengthPlainCandidateAuthority
+    else LengthOpaqueAssociatedCertificateAuthority
+ where
+  inventory = lengthContextInventory $ checkedLengthSessionContext session
+  providers = checkedLengthSessionProviderInventory session
+  model = lengthContextSpineModel $ checkedLengthSessionContext session
+
+  authorizeRow (Left failure) _ _ _ _ _ _ = Left failure
+  authorizeRow (Right rowOrdinal) _ owner scheme _ _ receipts = do
+    if owner == checkedLengthSpineZeroConstructor model
+        || owner == checkedLengthSpineStepConstructor model
+      then Left $
+        LengthProblemAssociatedCertificateModeledConstructorUnsupported
+          owner rowOrdinal
+      else pure ()
+    sourceScheme <- case inventoryTermScheme inventory owner of
+      Nothing -> Left $ LengthProblemAssociatedCertificateOwnerMissing
+        owner rowOrdinal
+      Just source -> Right source
+    if typesAlphaEqual sourceScheme scheme
+      then pure ()
+      else Left $ LengthProblemAssociatedCertificateSourceSchemeMismatch
+        owner rowOrdinal
+    case firstActivatedObligations receipts of
+      Nothing -> pure ()
+      Just (stepOrdinal, count) -> Left $
+        LengthProblemAssociatedCertificateActivatedObligations
+          owner rowOrdinal stepOrdinal count
+    -- The session co-seals each checked summary from its normalized exact
+    -- 'inventoryTermScheme'.  Once the row has matched that source scheme,
+    -- summary-scheme equality is an opaque session invariant; only the
+    -- provider-law presence remains a dynamic candidate authorization check.
+    _ <- case lookupCheckedLengthProviderSummary owner providers of
+      Nothing -> Left $
+        LengthProblemAssociatedCertificateProviderSummaryMissing
+          owner rowOrdinal
+      Just summary -> Right summary
+    pure $ rowOrdinal + 1
+
+  firstActivatedObligations = findStep 0
+  findStep _ [] = Nothing
+  findStep ordinal ((_, _, step) : remaining) =
+    let count = checkedTypeApplicationCertificateStepObligationCount step
+    in if count == 0
+      then findStep (ordinal + 1) remaining
+      else Just (ordinal, count)
+
 fingerprintLengthTermGraph
   :: (Ord identity, Ord local)
   => CheckedLengthSession identity annotation
@@ -819,6 +956,25 @@ fingerprintLengthTermGraph session limits graph = case
  where
   graphLimits = lengthProblemTermGraphLimits limits
   maximumBytes = lengthProblemGraphFingerprintByteLimit limits
+  model = lengthContextSpineModel $ checkedLengthSessionContext session
+
+fingerprintLengthAssociatedTermGraph
+  :: (Ord identity, Ord local)
+  => CheckedLengthSession identity annotation
+  -> LengthProblemLimits
+  -> CheckedTypeApplicationCertificateGraph (Variable identity) local
+  -> Either
+      (TermGraphFingerprintError identity local)
+      (Fingerprint TermGraphFingerprintSubject)
+fingerprintLengthAssociatedTermGraph session limits =
+  fingerprintCheckedTypeApplicationCertificateGraphWithTypeStructure
+    typeStructure graphLimits maximumBytes
+ where
+  graphLimits = lengthProblemTermGraphLimits limits
+  maximumBytes = lengthProblemGraphFingerprintByteLimit limits
+  typeStructure = case checkedLengthSessionCasePolicy session of
+    LengthCasesRejected -> sharedTypeStructure
+    LengthExactZeroStepCases -> lengthTermGraphTypeStructure model
   model = lengthContextSpineModel $ checkedLengthSessionContext session
 
 lengthTermGraphTypeStructure
@@ -1653,13 +1809,16 @@ buildConcreteEncodingFingerprint session contract usedProviders result condition
 
 buildCandidateFingerprint
   :: CheckedLengthSession identity annotation
+  -> LengthCandidateAuthority
   -> Fingerprint TermGraphFingerprintSubject
   -> Either FingerprintLimitError
       (Fingerprint
         (CandidateFingerprintSubject FiniteListSpineLengthV1))
-buildCandidateFingerprint session graph =
+buildCandidateFingerprint session authority graph =
   buildFingerprintWithin maximumBytes FingerprintBuilder
-    { fingerprintBuilderVersion = 1
+    { fingerprintBuilderVersion = case authority of
+        LengthPlainCandidateAuthority -> 1
+        LengthOpaqueAssociatedCertificateAuthority -> 2
     , fingerprintBuilderRole = ascii
         "finite-list-spine-length/typed-candidate"
     , fingerprintBuilderFields =
@@ -1667,14 +1826,20 @@ buildCandidateFingerprint session graph =
             [FingerprintBytes finiteListSpineLengthDomainTag]
         , tagged "shared-typed-term-graph"
             [FingerprintBytes $ fingerprintCanonicalBytes graph]
-        , tagged "candidate-authority"
+        , tagged "candidate-authority" $
             [ FingerprintBytes $ ascii "engine-owned-association/v1"
             , FingerprintBytes $ ascii "empty-residual-constraints/v1"
             , FingerprintBytes $ ascii "candidate-only-no-batch-status/v1"
-            ]
+            ] ++ associatedAuthority
         ]
     }
  where
+  associatedAuthority = case authority of
+    LengthPlainCandidateAuthority -> []
+    LengthOpaqueAssociatedCertificateAuthority ->
+      [ FingerprintBytes $ ascii "opaque-associated-certificate/v1"
+      , FingerprintBytes $ ascii "activated-obligations-empty/v1"
+      ]
   maximumBytes = fromIntegral $ lengthFingerprintByteLimit
     $ checkedLengthSessionLimits session
 

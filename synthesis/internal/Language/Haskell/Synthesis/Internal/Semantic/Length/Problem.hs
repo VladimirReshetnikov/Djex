@@ -146,10 +146,11 @@ instance NFData identity => NFData (LengthSessionError identity)
 
 -- | Interpreter policy selected by a sealed session.
 --
--- Compatibility fingerprints retain only the semantic distinction that
--- changes interpreter behavior.  The unified checked policy additionally
--- retains an optional exact role association without feeding it into those
--- historical identities.
+-- Compatibility behavior retains only the semantic distinction that changes
+-- interpretation.  The unified checked policy additionally retains an
+-- optional exact role association.  Session encoding-policy identities are
+-- deliberately versioned whenever this common candidate trust boundary
+-- changes, even when the public interpretation signatures stay compatible.
 data LengthTargetArgumentPolicy
   = LengthLegacyObservedTargetPolicy
   | LengthMixedTargetPolicy
@@ -185,9 +186,10 @@ instance NFData LengthInterpretationPolicySource
 -- | Checked interpretation authority retained by one exact session.
 --
 -- The constructor and all component projections stay private.  Fingerprints
--- continue to consume only the historical mixed-target and case projections;
--- the exact optional vector is association authority, not a new identity
--- input.
+-- consume only the mixed-target and case projections; the exact optional
+-- vector remains association authority rather than a distinct identity input.
+-- This checkpoint nevertheless advances every common policy version because
+-- the candidate trust boundary now admits one exact associated-provider case.
 data CheckedLengthInterpretationPolicy = CheckedLengthInterpretationPolicy
   !(Maybe [LengthTargetArgumentRole])
   !LengthTargetArgumentPolicy
@@ -246,9 +248,10 @@ sealLengthSession limits inventory modelSource providerSources =
 -- | Seal a session for one bounded target-role vector.
 --
 -- The checked policy retains the vector as strict association authority.  An
--- all-observed vector still canonicalizes to the exact legacy encoding
--- identity, and the compatibility problem wrapper keeps its historical loose
--- mixedness-only association behavior.
+-- all-observed vector still canonicalizes to the current legacy-policy
+-- identity (v5), and the compatibility problem wrapper keeps its historical
+-- loose mixedness-only association behavior.  This does not preserve obsolete
+-- v2 policy bytes.
 sealRoleAwareLengthSession
   :: Ord identity
   => LengthLimits
@@ -508,10 +511,10 @@ buildLengthEncodingFingerprint limits targetPolicy casePolicy context =
   buildFingerprintWithin (fromIntegral $ lengthFingerprintByteLimit limits)
     FingerprintBuilder
       { fingerprintBuilderVersion = case casePolicy of
-          LengthExactZeroStepCases -> 4
+          LengthExactZeroStepCases -> 7
           LengthCasesRejected -> case targetPolicy of
-            LengthLegacyObservedTargetPolicy -> 2
-            LengthMixedTargetPolicy -> 3
+            LengthLegacyObservedTargetPolicy -> 5
+            LengthMixedTargetPolicy -> 6
       , fingerprintBuilderRole = ascii
           "finite-list-spine-length/solver-neutral-encoding"
       , fingerprintBuilderFields =
@@ -542,7 +545,9 @@ buildLengthEncodingFingerprint limits targetPolicy casePolicy context =
               , FingerprintBytes $ ascii
                   "authorized-visible-selection/v1"
               , FingerprintBytes $ ascii
-                  "reject-certified-visible-application/v1"
+                  "reject-detached-certified-visible-application/v1"
+              , FingerprintBytes $ ascii
+                  "admit-exact-obligation-free-associated-provider-visible-application/v1"
               ] ++ caseCandidatePolicy ++
               [ FingerprintBytes $ ascii "reject-unknown-semantics/v1"
               ] ++ mixedCandidatePolicy

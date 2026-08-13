@@ -5,7 +5,10 @@
 -- policy.  Inventory identity remains distinct from the solver-neutral
 -- encoding policy.  The unified contract and problem entrances derive their
 -- authority from that opaque association; compatibility wrappers retain their
--- historical projected-association behavior and bytes.
+-- historical projected-association behavior and signatures.  Encoding-policy
+-- versions advance when their common candidate trust boundary changes, so
+-- callers must treat the collision-free bytes as versioned identities rather
+-- than as a permanently frozen wire format.
 module Language.Haskell.Synthesis.Semantic.Length.Problem
   ( LengthSemanticFingerprintPart (..)
   , LengthEncodingPolicyFingerprintSubject

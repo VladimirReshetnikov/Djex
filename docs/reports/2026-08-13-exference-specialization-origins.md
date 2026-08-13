@@ -17,9 +17,14 @@ step. The checker publishes these records only after its existing rigid-scope,
 constraint resolution, escaping-rigid, and residual-constraint gates all
 succeed. Search routes are neither retained nor treated as provenance.
 
-This checkpoint does not stamp certificates into a term graph. Every
-`TypeApplicationWitness` still has `Nothing` in its certificate field, public
-graph fingerprints behave exactly as before, and Length has no new authority.
+At this checkpoint no certificate was stamped into a term graph: every
+`TypeApplicationWitness` still had `Nothing` in its certificate field and
+Length had no new authority. The later Exference wiring and Length consumer
+supersede that staging statement without widening this report's origin
+eligibility. See the
+[Exference wiring report](2026-08-13-exference-certificate-association-wiring.md)
+and
+[Length consumption report](2026-08-13-length-associated-provider-certificates.md).
 
 ## Eligibility boundary
 
@@ -80,9 +85,11 @@ origin does not prove any of the following:
 
 The exact-scheme context proves structural agreement with the checker's flat
 binding and the successful checker proves participation in ordinary
-constraint resolution. A later Length integration must still match the owner
-and exact scheme against its own prepared provider inventory, build an atomic
-graph-occurrence association, and validate a structural certificate plan.
+constraint resolution. At this checkpoint a later Length integration still
+had to match the owner and exact scheme against its own prepared provider
+inventory, build an atomic graph-occurrence association, and validate a
+structural certificate plan. The linked follow-ups now perform that work for
+the bounded provider-only case.
 
 Both origin types and all observation functions remain absent from the public
 `Language.Haskell.Djex` facade. Negative Template Haskell probes pin that API
@@ -111,9 +118,11 @@ repository validation also passes.
 
 ## Next boundary
 
-The next checkpoint should construct one opaque Exference-owned association
+The next checkpoint constructed one opaque Exference-owned association
 which contains the checked graph, structural certificate table, global owner,
 base occurrence, and every visible node/occurrence/slot relation. It must seal
 the entire source-prefix chain atomically and reject gaps, duplicates, suffix
 inheritance, and detachable graph/table combinations. Only that associated
 value can safely become an input to a private certificate-aware fingerprint.
+Both that fingerprint and its first provider-only Length consumer are now
+implemented in the follow-up reports linked above.

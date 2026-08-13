@@ -66,8 +66,11 @@ zero/step alternatives are reordered for semantic analysis.
 
 Constructor patterns outside an admitted case remain rejected. Holes,
 residual constraints, unsupported field patterns, unknown semantics, and
-certificate-bearing type applications retain their existing fail-closed
-boundaries.
+detached certificate-bearing type applications retain their fail-closed
+boundaries. The later associated-provider checkpoint admits only an opaque,
+exact, obligation-free provider carrier; modeled zero/step constructors remain
+explicitly unsupported as certificate owners. See the
+[associated provider-certificate report](2026-08-13-length-associated-provider-certificates.md).
 
 ## Symbolic interpretation
 
@@ -97,18 +100,22 @@ recursive, effect-free, or behaviorally correct.
 
 ## Identity compatibility
 
-The feature uses conditional identity versions:
+The feature originally introduced conditional identity versions 2/3/4 for
+session policy. The later associated-provider trust-boundary change advances
+the current versions globally:
 
-- ordinary all-observed session encoding remains version 2;
-- ordinary mixed-role session encoding remains version 3;
-- exact-case session encoding uses version 4;
+- ordinary all-observed session encoding is now version 5;
+- ordinary mixed-role session encoding is now version 6;
+- exact-case session encoding is now version 7;
 - ordinary all-observed concrete encoding remains version 1;
 - ordinary mixed-role concrete encoding remains version 2; and
 - exact-case concrete encoding uses version 3.
 
-On ordinary paths, the existing roles, field order, policy tags, graph schema
-version, contract identity, generic behavioral-problem schema, SMT-LIB query
-schema, commands, response grammar, and evidence replay schema are unchanged.
+On ordinary paths, the existing roles, field order, case-interpreter tags,
+graph schema version, contract identity, generic behavioral-problem schema,
+SMT-LIB query schema, commands, response grammar, and evidence replay rules are
+unchanged. Keys containing the advanced session identity are not historical-byte
+compatible and must be invalidated.
 Exact-case policy tags bind the symbolic zero test, natural `monus 1` tail,
 opaque payload, and whole-case provider union only on the new versions. An
 all-observed explicit role vector remains contract-compatible with the legacy

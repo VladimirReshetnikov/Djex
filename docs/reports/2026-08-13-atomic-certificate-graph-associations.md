@@ -72,9 +72,16 @@ over verified observations. Projecting the graph produces a bare legacy graph;
 the stamped handles inside it confer no authority. Authority-bearing consumers
 must retain and use the opaque atom. Fold results may retain owner, plan, and
 receipt observations, but cannot reconstruct, detach, or recombine the checked
-table or association carrier. Future Length integration must re-match the
-exact owner and scheme against its own prepared inventory and consume this
-carrier atomically before any certificate-aware fingerprint can be designed.
+table or association carrier. At this checkpoint a later Length integration
+still had to re-match the exact owner and scheme against its own prepared
+inventory and consume this carrier atomically before any certificate-aware
+fingerprint could be designed.
+That later carrier-aware fingerprint and the provider-only Length consumer now
+exist; they preserve this structural layer's deliberately withheld authority.
+See the
+[carrier-aware fingerprint report](2026-08-13-carrier-aware-certificate-graph-fingerprints.md)
+and
+[Length consumption report](2026-08-13-length-associated-provider-certificates.md).
 
 ## Validation
 

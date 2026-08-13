@@ -358,8 +358,23 @@ constructor names from provider laws, avoiding an ambiguous semantic global.
 a detachable raw graph. It consumes an engine-owned `TypedCandidate`, uses the
 provider inventory already owned by the opaque checked session, re-seals the
 separately supplied contract through the retained context, rejects the first
-residual dictionary before inspecting graph availability, and freshly rechecks
-and fingerprints the graph. The contract's
+residual dictionary before inspecting graph availability, and folds the
+candidate's hidden graph carrier without first projecting it. A plain graph
+keeps its existing fresh-reseal and fingerprint path. For a nonempty
+certificate association, Length first freshly re-seals and fingerprints the
+whole carrier with the session-selected shared or exact-case `TypeStructure`,
+then authorizes every rooted association row, and only then projects its graph
+for interpretation. This preserves graph-limit, schema, and fingerprint-byte
+failure precedence before domain authorization.
+
+The associated path is deliberately provider-only. Each rooted row must name
+an exact inventory owner, retain a full source scheme alpha-equivalent to that
+inventory scheme, have no activated obligations, and resolve to a checked
+Length provider summary. Provider-summary scheme equality is already an opaque
+session co-sealing invariant after the exact inventory-source match; only its
+presence remains dynamic here. Modeled zero/step constructors are not admitted
+as certificate owners in this checkpoint. An empty association is exactly the
+plain v1 graph and candidate identity path. The contract's
 free flexible variables are treated as implicit source quantifiers only at the
 root boundary; the engine's corresponding selections must be distinct rigid
 variables. Every provider occurrence is then matched capture-safely against
@@ -376,14 +391,18 @@ flexibles, non-root rigids, and types from a foreign inventory fail closed.
 
 The first symbolic interpreter is deliberately narrow and lazy. The legacy
 sealers still treat every target argument as an observed list spine and retain
-their exact historical identities. The additive role-aware sealers instead
-retain one complete source-ordered `LengthTargetArgumentRole` vector in the
+their public interpretation behavior and signatures. The additive role-aware
+sealers instead retain one complete source-ordered
+`LengthTargetArgumentRole` vector in the
 checked contract. `LengthObservedSpine` positions receive compact
 `LengthInput` numbers in observed-role order; `LengthUnobservedTarget`
 positions receive opaque semantic tokens and no length variables. An
-all-observed explicit vector canonicalizes to the legacy contract, session,
-and concrete-encoding bytes. Only a mixed vector selects the versioned
-role-aware policies.
+all-observed explicit vector canonicalizes to the current legacy-policy
+contract, session, and concrete-encoding identities. Only a mixed vector
+selects the role-aware behavior. The common session encoding-policy versions
+are now 5 for legacy/all-observed, 6 for mixed roles, and 7 for exact cases;
+this deliberate global identity advance invalidates cached downstream keys
+which contain the prior session identity.
 
 The interpreter still applies every physical target argument. An opaque token
 may be ignored, forwarded to a provider argument sealed as unobserved, or
@@ -396,10 +415,13 @@ non-strict. It is only a solver-neutral non-observation policy for the checked
 symbolic interpreter.
 
 The ordinary and role-aware interpreters support locals, lambdas,
-application, certificate-free visible type application, tuples, lets,
-bind/wildcard/tuple/as patterns, the checked zero and step constructors, and
-checked provider transfers. Their case and constructor-pattern boundary stays
-fail-closed with exact historical identities.
+application, ordinary certificate-free visible type application, tuples,
+lets, bind/wildcard/tuple/as patterns, the checked zero and step constructors,
+and checked provider transfers. They additionally admit a nonempty opaque
+association only for an exact, obligation-free provider visible application.
+The stamped bare graph remains insufficient and is still rejected by the
+public graph fingerprint. Their case and constructor-pattern boundary stays
+fail-closed except through the separately selected exact-case policy.
 
 The additive `sealExactSpineCaseLengthSession` and
 `sealExactSpineCaseLengthTypedCandidateProblem` entrances opt into one narrow
@@ -422,14 +444,18 @@ contract resealing or candidate-graph demand. Exact-case authority therefore
 cannot exist without an explicit role vector.
 
 The earlier session and problem sealers remain compatibility wrappers. Their
-observable errors, demand precedence, and canonical identities stay unchanged,
-including the historical problem-wrapper acceptance of distinct role vectors
-when only their mixed/all-observed projection agrees. The new strict entrance
-is the opt-in association repair. The newly session-retained role vector is not
-added as another fingerprint field: session encoding still consumes only the
-old mixedness and case-policy projections, while contracts and downstream
-identities continue to consume the same existing contract role fingerprint.
-Explicit all-observed ordinary policy remains byte-identical to legacy policy.
+observable behavior, signatures, and role/policy failure precedence before
+carrier inspection stay unchanged, including the historical problem-wrapper
+acceptance of distinct role vectors when only their mixed/all-observed
+projection agrees. The associated branch adds new outcomes and sanitized
+errors after those gates. The new strict entrance is the opt-in association
+repair. The newly session-retained role vector is not added as another
+fingerprint field: session encoding still consumes only the old mixedness and
+case-policy projections, while contracts and downstream identities continue
+to consume the same existing contract role fingerprint.
+Explicit all-observed ordinary policy remains identical to the current legacy
+policy, but all three common session-policy modes deliberately advance from
+versions 2/3/4 to 5/6/7 for the provider-certificate trust-boundary change.
 Session construction also retains productive role traversal; because the exact
 vector is now stored, honest deep `NFData` evaluation additionally reaches its
 later role payloads.
@@ -442,8 +468,12 @@ normalization erases the conditional. This finite-spine model asserts nothing
 about source evaluation, strictness, inhabitance, totality, recursion, or
 effects. Holes, cases outside the exact policy, unsupported patterns, residual
 constraints, unknown globals, unmodeled inventory globals, and
-certificate-bearing graphs fail closed. Explicit graph-byte and evaluation
-step limits still bound candidate work.
+detached certificate-bearing graphs fail closed. Opaque associated graphs are
+accepted only for exact inventory-owned providers with empty activated
+obligations; modeled constructor owners remain unsupported. Empty obligations
+are a structural admission rule, not evidence of dictionary or Z3 discharge,
+and no instance/discharge identity is retained. Explicit graph-byte and
+evaluation step limits still bound candidate work.
 
 The integration suite exercises this foundation through the public production
 path: a real Exference search over a declared unary spine retains the exact
@@ -464,6 +494,14 @@ shared graph identity and explicitly describes candidate-only authority. The
 raw graph fingerprint is transient after those exact bytes enter that key, so
 the receipt retains no parallel graph-identity field. It does not pretend to
 retain batch completion status.
+
+For an authorized nonempty carrier the candidate key uses v2 and explicitly
+binds `opaque-associated-certificate/v1` and
+`activated-obligations-empty/v1`. Plain graphs and empty carriers retain the
+exact v1 candidate key. This changes neither solver replay nor behavioral
+evidence authority: Z3 output remains heuristic until the same independently
+sealed problem replays it. See the
+[associated provider-certificate Length report](docs/reports/2026-08-13-length-associated-provider-certificates.md).
 
 On the legacy path, every contract argument and result must expose the
 context's outer modeled spine; their element types remain opaque and may
@@ -532,9 +570,12 @@ structurally fingerprints both before discarding those parallel caches. The
 structural `typed-plan` field gains operation-specific versioned
 lowering-policy tags only for witness projections that occur. Modulo-only
 queries retain their historical symbol names, command order, tag, canonical
-scripts, and fingerprint bytes exactly. Queries without either projection also
-retain their historical bytes. The rendered script is not promoted into the
-semantic source of truth. The extraction boundary and byte-compatibility
+scripts, and operation-specific structural fields. The later Length session
+policy advance changes complete query keys which embed the checked problem,
+even though this lowering remains identical; queries without either projection
+are affected by that same containing-key change. The rendered script is not
+promoted into the semantic source of truth. The extraction boundary and
+byte-compatibility
 evidence are recorded in the
 [shared typed QF_LIA foundation report](docs/reports/2026-08-13-shared-typed-qf-lia-foundation.md).
 The exact admission, lowering, identity, and test boundary is recorded in the

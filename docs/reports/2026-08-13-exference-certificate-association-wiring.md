@@ -74,9 +74,12 @@ certificate-plan errors, and graph coordinates—remain package-private.
 Neither a handle, sanitized failure category, successful association, nor its
 bare graph projection proves declaration or inventory membership, argument
 kind correctness, instance/discharge identity, behavioral meaning, candidate
-completeness, or fingerprint authority. Future Length consumption must retain
-the opaque carrier and independently match the exact owner and scheme to its
-own checked inventory.
+completeness, or fingerprint authority. At this checkpoint a later Length
+consumer still had to retain the opaque carrier and independently match the
+exact owner and scheme to its own checked inventory. That follow-up is now implemented for the narrow exact,
+obligation-free provider-only case; modeled constructors and contextual
+obligations remain rejected. See the
+[Length consumption report](2026-08-13-length-associated-provider-certificates.md).
 
 ## Bounds and validation
 

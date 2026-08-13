@@ -362,6 +362,15 @@ facadeTests = testGroup "public Djex facade"
             0 demandSite
             :: LengthProblemError () String Int
       demandError @?= LengthProblemUnobservedTargetArgumentDemanded 0 demandSite
+      let rowError name =
+            [ LengthProblemAssociatedCertificateOwnerMissing name 0
+            , LengthProblemAssociatedCertificateSourceSchemeMismatch name 0
+            , LengthProblemAssociatedCertificateActivatedObligations name 0 1 2
+            , LengthProblemAssociatedCertificateModeledConstructorUnsupported
+                name 0
+            , LengthProblemAssociatedCertificateProviderSummaryMissing name 0
+            ] :: [LengthProblemError () String Int]
+      rowError providerName @?= rowError providerName
       (AssumedProviderLaw :: LengthProviderTrust) @?= minBound
       [BuiltinStructuralListSpine, DerivedFromListLikeDataDeclaration] @?=
         [minBound .. maxBound]

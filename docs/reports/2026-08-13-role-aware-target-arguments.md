@@ -13,9 +13,12 @@ new closed public role vocabulary is:
 
 The feature is additive. `sealLengthContract`, `sealLengthSession`, and
 `sealLengthTypedCandidateProblem` keep the all-observed behavior and exact
-historical fingerprint bytes. The corresponding `sealRoleAware...` entrances
-admit a bounded role vector and select new identity versions only when that
-vector actually contains an unobserved role.
+historical fingerprint bytes at this checkpoint. The later provider-certificate
+trust-boundary change preserves that behavior but globally advances session
+policy versions to 5/6/7, as documented below. At this checkpoint the
+corresponding `sealRoleAware...` entrances admitted a bounded role vector and
+selected new identity versions only when that vector contained an unobserved
+role.
 
 ## One role-vector authority
 
@@ -90,18 +93,21 @@ Three identity layers change conditionally:
 
 - mixed contracts use the existing contract role with builder version 3 and
   bind the complete ordered target-role vector plus compact observed count;
-- mixed sessions use the existing solver-neutral encoding role with builder
-  version 3 and bind the opaque-forward-only interpreter policy; and
+- mixed sessions use the existing solver-neutral encoding role and bind the
+  opaque-forward-only interpreter policy; and
 - mixed concrete encodings use the existing concrete-encoding role with
   builder version 2 and bind the role-aware interpreter policy.
 
-Explicit all-observed role-aware calls use the legacy contract version 2,
-session version 2, and concrete-encoding version 1 fields byte for byte. The
-tests compare both the typed fingerprint values and canonical bytes on those
-paths. Mixed role order changes contract identity even when compact observed
-arity is unchanged. The generic behavioral problem schema, candidate identity,
-QF_LIA query schema, wire commands, response grammar, and evidence replay
-schema do not change.
+Explicit all-observed role-aware calls use the legacy contract version 2 and
+concrete-encoding version 1 fields. They remain identical to the current
+legacy-policy path. The later associated-provider checkpoint deliberately
+advances common session versions from 2/3/4 to 5/6/7, however, so neither this
+report's historical session bytes nor containing downstream keys remain valid
+cache entries. Mixed role order still changes contract identity even when
+compact observed arity is unchanged. The generic behavioral problem schema,
+QF_LIA commands, response grammar, and evidence replay rules do not change.
+See the
+[associated provider-certificate report](2026-08-13-length-associated-provider-certificates.md).
 
 ## Validation
 
@@ -132,9 +138,10 @@ The later exact zero/step case foundation composes with these explicit target
 roles but does not weaken this checkpoint's ordinary-path guarantees. Its
 dedicated session and problem sealers select a distinct case policy; the
 legacy and role-aware entrances above continue to reject every case with their
-unchanged identity versions. The case-aware session still consumes the same
-bounded role vector, while the contract remains its sole complete structured
-owner.
+established interpretation behavior. Their current common session-policy
+versions are advanced as described above. The case-aware session still
+consumes the same bounded role vector, while the contract remains its sole
+complete structured owner.
 
 The later Exference follow-up makes only the independently checked recursive
 zero/step graph shape available to typed candidates. Djinn and every other

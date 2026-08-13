@@ -10,9 +10,16 @@ of three states: an explicit graph-unavailable failure, a plain sealed
 `CheckedTypeApplicationCertificateGraph` atom. This is a representation-only
 checkpoint. The public four-parameter type, nominal roles, constructor
 opacity, compatibility projection, graph projection, `QueryResult` projection,
-and ordinary `mkTypedCandidate` behavior remain unchanged. Exference does not
-yet stamp or attach the carrier, Length does not consume it, and no fingerprint
-or public API changes.
+and ordinary `mkTypedCandidate` behavior remain unchanged. At this checkpoint,
+Exference did not yet stamp or attach the carrier and Length did not consume
+it. Those future-tense limits are now superseded: Exference attaches the opaque
+association and Length consumes it for the exact obligation-free provider-only
+case. See the
+[Exference wiring report](2026-08-13-exference-certificate-association-wiring.md)
+and
+[Length consumption report](2026-08-13-length-associated-provider-certificates.md).
+The representation and public projection compatibility described here remain
+unchanged.
 
 ## Private construction and consumption
 

@@ -62,6 +62,10 @@ inventory membership, declaration provenance, kind witness, constraint
 resolution or discharge identity, behavioral interpretation, or candidate
 completeness. A domain consumer must retain the opaque carrier, establish its
 own authorities, and wrap these bytes in its own identity role where needed.
+Length now provides the first such consumer for exact inventory-owned,
+obligation-free provider rows. That follow-up does not broaden this key's
+authority; see the
+[Length consumption report](2026-08-13-length-associated-provider-certificates.md).
 
 ## Validation
 

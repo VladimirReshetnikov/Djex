@@ -203,10 +203,13 @@ retain their historical case rejection and bytes. The package-private graph
 identity entrance freshly reseals constructor patterns from the session-owned
 schema, while the public shared fingerprint continues to reject them. Analysis
 is canonical zero then step, maps the recursive field to `n monus 1`, keeps the
-payload opaque, and unions provider authority reached in both branches. The
-shipped search adapters do not yet retain typed nonempty case graphs, so this
-Djex foundation adds no frontend-generated case candidate by itself. See the
-[exact zero/step case foundation report](../docs/reports/2026-08-13-exact-zero-step-length-cases.md).
+payload opaque, and unions provider authority reached in both branches.
+Exference now retains that one checker-proved nonempty graph shape; Djinn and
+all other nonempty case shapes remain unavailable at the typed-candidate edge.
+The domain foundation itself remains independent of either frontend. See the
+[exact zero/step case foundation report](../docs/reports/2026-08-13-exact-zero-step-length-cases.md)
+and the additive
+[Exference graph report](../docs/reports/2026-08-13-exference-exact-zero-step-graphs.md).
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib` provides a pure canonical
 QF_LIA boundary over an exact checked length problem. Its opaque nominal query

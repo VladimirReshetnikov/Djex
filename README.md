@@ -414,9 +414,12 @@ test boundary is recorded in the
 The independent role authority, compact model boundary, compatibility bytes,
 and higher-order map example are recorded in the
 [role-aware target-argument report](docs/reports/2026-08-13-role-aware-target-arguments.md).
-The internal schema authority, exact case policy, compatibility versions, and
-current frontend limitation are recorded in the
+The internal schema authority, exact case policy, and compatibility versions
+are recorded in the
 [exact zero/step case foundation report](docs/reports/2026-08-13-exact-zero-step-length-cases.md).
+Exference's later checker-owned retention of that one closed nonempty graph
+shape is recorded in the
+[exact zero/step Exference graph report](docs/reports/2026-08-13-exference-exact-zero-step-graphs.md).
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` closes the
 remaining raw-report identity gap. Its opaque association binds bounded

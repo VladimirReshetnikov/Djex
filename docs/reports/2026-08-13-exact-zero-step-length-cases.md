@@ -16,11 +16,12 @@ problem sealer consumes it. Ordinary `sealLength...` and role-aware
 `sealRoleAwareLength...` paths continue to reject cases and constructor
 patterns with their previous demand order and canonical bytes.
 
-This checkpoint deliberately stops at the Djex foundation. The current Djinn
-and Exference adapters do not retain checked nonempty constructor-case graphs,
-so no shipped search result reaches the new entrance yet. A later frontend
-checkpoint must retain checker-derived constructor schemas and exact branch
-graphs; it must not reconstruct them from rendered source.
+This checkpoint deliberately stopped at the Djex foundation when it landed.
+The later Exference follow-up now retains one independently checked exact
+recursive zero/step graph shape and its checker-derived constructor schema;
+Djinn and every other nonempty case shape remain unavailable. No frontend may
+reconstruct graph or schema authority from rendered source. See the
+[Exference graph report](2026-08-13-exference-exact-zero-step-graphs.md).
 
 ## Schema-bound graph identity
 

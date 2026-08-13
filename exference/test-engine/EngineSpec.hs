@@ -17,6 +17,7 @@ import Language.Haskell.Exference.Core.Expression
 import Language.Haskell.Exference.Core.ExferenceStats (ExferenceStats (..))
 import Language.Haskell.Exference.Core.Internal.ExpressionCheck
   ( CheckedExpressionEvidence
+  , ExpressionCheckError (..)
   , ExferenceTermGraphAbsence (..)
   , ExferenceTermGraphAvailability (..)
   , ExferenceTermGraphConstructionLimit (..)
@@ -804,6 +805,146 @@ tests = testGroup "Exference private engine boundaries"
               $ Typed.termGraphRoot distinctGraph /= Typed.termGraphRoot graph
             ExferenceTermGraphUnavailable reason -> fail
               $ "changing only the candidate key lost the graph: " ++ show reason
+  , testCase "checker retains only exact recursive zero-step spine cases" $ do
+      let payload = TypeCons $ name "Payload"
+          spineName = name "Spine"
+          zeroName = name "SpineZero"
+          stepName = name "SpineStep"
+          spine = TypeApp (TypeCons spineName) payload
+          zero = FunctionBinding spine zeroName 0 [] []
+          step = FunctionBinding spine stepName 0 [] [payload, spine]
+          exactDeconstructor = DeconstructorBinding spine
+            [ ConstructorBinding zeroName []
+            , ConstructorBinding stepName [payload, spine]
+            ] True
+          ordinaryDeconstructor = exactDeconstructor
+            { deconstructorRecursive = False }
+          goal = TypeArrow spine spine
+          expression = ExpLambda 1 spine
+            $ ExpCaseMatch (ExpVar 1 spine)
+                [ (zeroName, [], ExpName zeroName)
+                , ( stepName
+                  , [(2, payload), (3, spine)]
+                  , ExpVar 3 spine
+                  )
+                ]
+          functions = [zero, step]
+      evidence <- checkedEvidence emptyStaticClassEnv functions
+        [exactDeconstructor] goal expression
+      case checkedExpressionTermGraph 29 evidence of
+        ExferenceTermGraphUnavailable reason -> fail
+          $ "exact zero-step spine case had no typed graph: " ++ show reason
+        ExferenceTermGraphAvailable graph -> do
+          Typed.eraseTermGraph graph @?=
+            Generated.discardUnusedPatternBindingsBy id
+              (toGeneratedExpression expression)
+          Typed.typedGraphCases (Typed.termGraphMetrics graph) @?= 1
+          case
+              [ alternatives
+              | (_, Typed.TermNode _ (Typed.TypedCase _ alternatives)) <-
+                  Typed.termGraphNodes graph
+              ] of
+            [[(_, _), (stepPattern, _)]] -> case
+                Typed.typedPatternNode stepPattern of
+              Typed.TypedConstructor retainedName [payloadPattern, tailPattern] -> do
+                retainedName @?= stepName
+                Typed.typedPatternNode payloadPattern @?= Typed.TypedWildcard
+                case Typed.typedPatternNode tailPattern of
+                  Typed.TypedBind{} -> pure ()
+                  actual -> fail $ "recursive field lost its binder: "
+                    ++ show actual
+              actual -> fail $ "unexpected retained step pattern: " ++ show actual
+            actual -> fail $ "unexpected retained case graph: " ++ show actual
+
+      ordinaryEvidence <- checkedEvidence emptyStaticClassEnv functions
+        [ordinaryDeconstructor] goal expression
+      expectUnavailable "nonrecursive zero-step case"
+        (== NominalConstructorPattern zeroName) ordinaryEvidence
+
+      -- Shared generated-expression validation forbids one local identity
+      -- from being rebound anywhere in a candidate. Keep that stronger raw
+      -- boundary explicit even though checked-term free-local collection is
+      -- independently lexical for lambda, let, and nested case scopes.
+      let duplicate = 2
+          duplicateError = Left $ InvalidCheckExpressionScope
+            $ Generated.DuplicatePatternBinder duplicate
+          stepFields = [(duplicate, payload), (3, spine)]
+          withStepBody body = ExpLambda 1 spine
+            $ ExpCaseMatch (ExpVar 1 spine)
+                [ (zeroName, [], ExpName zeroName)
+                , (stepName, stepFields, body)
+                ]
+          lambdaShadow = withStepBody
+            $ ExpLambda duplicate payload $ ExpName zeroName
+          letShadow = withStepBody
+            $ ExpLet duplicate spine (ExpName zeroName)
+                (ExpVar duplicate spine)
+          nestedCaseShadow = withStepBody
+            $ ExpCaseMatch (ExpVar 3 spine)
+                [ (zeroName, [], ExpName zeroName)
+                , (stepName, [(duplicate, payload), (4, spine)]
+                    , ExpVar 4 spine)
+                ]
+      mapM_ (\shadowed -> checkExpression
+          (mkQueryClassEnv emptyStaticClassEnv []) functions
+          [exactDeconstructor] goal [] shadowed @?= duplicateError)
+        [lambdaShadow, letShadow, nestedCaseShadow]
+
+  , testCase "strict production search retains an exact zero-step case graph" $ do
+      let payload = TypeCons $ name "Payload"
+          spineName = name "Spine"
+          zeroName = name "SpineZero"
+          stepName = name "SpineStep"
+          spine = TypeApp (TypeCons spineName) payload
+          functions =
+            [ FunctionBinding spine zeroName 0 [] []
+            , FunctionBinding spine stepName 0 [] [payload, spine]
+            ]
+          deconstructor = DeconstructorBinding spine
+            [ ConstructorBinding zeroName []
+            , ConstructorBinding stepName [payload, spine]
+            ] True
+          input = identityInput
+            { E.input_goalType = TypeArrow spine spine
+            , E.input_envFuncs = functions
+            , E.input_envDeconsS = [deconstructor]
+            , E.input_allowUnused = False
+            , E.input_multiPM = True
+            , E.input_maxSteps = 500
+            }
+          capacities = IdentifierCapacities 100 100 100 100
+          isRebuildCase (expression, _, availability) = case expression of
+            ExpLambda scrutinee _
+                (ExpCaseMatch (ExpVar matched _) alternatives)
+              | scrutinee == matched
+              , map (\(constructor, _, _) -> constructor) alternatives
+                  == [zeroName, stepName]
+              , [([], ExpName retainedZero),
+                  ([(payloadVariable, payloadType),
+                    (tailVariable, tailType)],
+                    ExpApply
+                      (ExpApply (ExpName retainedStep)
+                        (ExpVar returnedPayload returnedPayloadType))
+                      (ExpVar returnedTail returnedTailType))] <-
+                    [ (fields, body)
+                    | (_, fields, body) <- alternatives
+                    ]
+              , retainedZero == zeroName
+              , retainedStep == stepName
+              , payloadVariable == returnedPayload
+              , payloadType == payload
+              , returnedPayloadType == payload
+              , tailVariable == returnedTail
+              , tailType == spine
+              , returnedTailType == spine -> case availability of
+                  ExferenceTermGraphAvailable{} -> True
+                  ExferenceTermGraphUnavailable{} -> False
+            _ -> False
+      candidates <- expectRight
+        $ findTypedEngineCandidatesWithIdentifierCapacitiesEither
+            capacities input
+      assertBool "strict production search did not retain the rebuild-case graph"
+        $ any isRebuildCase candidates
   , testCase "final zonking seals a multi-binder inferred specialization" $ do
       let integer = TypeCons $ name "Int"
           boolean = TypeCons $ name "Bool"

@@ -905,6 +905,16 @@ any / the right solution. Some common current limitations are:
   unused, so the strict default rejects that candidate. Search and independent
   checking retain the complete typed constructor pattern; only the accepted
   stable generated candidate replaces the unused tail binder with `_`;
+- The independent typed-graph boundary now retains one closed nonempty case
+  shape: a recursive two-constructor spine with one zero-field constructor and
+  one two-field step constructor containing exactly one recursive field. A
+  complete two-alternative case which scrutinizes and returns that same spine
+  is sealed against the checker-derived constructor schema; unused fields are
+  projected to wildcards exactly as in the accepted generated expression.
+  Nominal one-constructor matches, nonrecursive or differently shaped cases,
+  incomplete alternatives, and all other nonempty constructor patterns retain
+  their existing explicit graph-absence results. Search behavior and the
+  multiple-constructor opt-in are unchanged;
 - See also the detailed feature description in the [exference.pdf](https://github.com/lspitzner/exference-paper/raw/master/exference.pdf) report.
 
 ### Constructorless declarations in curated directories

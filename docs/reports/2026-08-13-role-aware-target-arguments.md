@@ -136,8 +136,10 @@ unchanged identity versions. The case-aware session still consumes the same
 bounded role vector, while the contract remains its sole complete structured
 owner.
 
-That foundation is currently reachable only from checked graph fixtures inside
-Djex. The shipped search adapters still do not retain nonempty typed case
-graphs, so this report's higher-order map path and all frontend behavior remain
-unchanged. See the
-[exact zero/step case foundation report](2026-08-13-exact-zero-step-length-cases.md).
+The later Exference follow-up makes only the independently checked recursive
+zero/step graph shape available to typed candidates. Djinn and every other
+nonempty case shape remain unavailable, while this report's higher-order map
+path and ordinary frontend behavior remain unchanged. See the
+[exact zero/step case foundation report](2026-08-13-exact-zero-step-length-cases.md)
+and the
+[Exference graph report](2026-08-13-exference-exact-zero-step-graphs.md).

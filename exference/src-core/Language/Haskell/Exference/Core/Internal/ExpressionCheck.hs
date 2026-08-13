@@ -26,7 +26,7 @@ module Language.Haskell.Exference.Core.Internal.ExpressionCheck
 where
 
 import Control.DeepSeq (NFData)
-import Control.Monad (foldM, replicateM, unless, when, zipWithM_)
+import Control.Monad (foldM, forM, replicateM, unless, when, zipWithM_)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict
   ( StateT (..), gets, modify', runStateT )
@@ -162,6 +162,12 @@ data CheckedTermResult = CheckedTermResult
 
 data CheckedTerm = CheckedTerm HsType CheckedTermForm
 
+data CheckedCaseAlternative = CheckedCaseAlternative
+  QualifiedName
+  HsType
+  [(TVarId, HsType)]
+  CheckedTerm
+
 data CheckedTermForm
   = CheckedLocal TVarId
   | CheckedGlobal QualifiedName
@@ -172,6 +178,7 @@ data CheckedTermForm
   | CheckedTuple [CheckedTerm]
   | CheckedLet TVarId HsType CheckedTerm CheckedTerm
   | CheckedEmptyCase CheckedTerm
+  | CheckedExactZeroStepCase CheckedTerm [CheckedCaseAlternative]
 
 data CheckState = CheckState
   { checkFlexibleIds :: !FlexibleIdSupply
@@ -681,11 +688,17 @@ checkValidatedExpression provenCandidateRigids
         alternatives@((firstConstructor, _, _) : _)) = do
       checkedScrutinee <- infer variables scrutinee
       resultType <- freshTypeVariable
-      mapM_ (checkAlternative variables
+      checkedAlternatives <- mapM (checkAlternative variables
         (checkedResultType checkedScrutinee) resultType) alternatives
+      scrutineeType <- zonk $ checkedResultType checkedScrutinee
       result <- zonk resultType
-      pure $ unavailableCheckedTerm result
-        $ constructorPatternAbsence firstConstructor
+      normalizedAlternatives <- mapM normalizeAlternative checkedAlternatives
+      pure $ if exactZeroStepSpineCase
+          scrutineeType result normalizedAlternatives
+        then checkedExactCaseTerm result checkedScrutinee
+          normalizedAlternatives
+        else unavailableCheckedTerm result
+          $ constructorPatternAbsence firstConstructor
 
     addPatternVariable environment ((variable, annotation), inferredType) = do
       unifyTypes annotation inferredType
@@ -704,7 +717,72 @@ checkValidatedExpression provenCandidateRigids
         $ zip patternVariables fieldTypes
       checkedAlternative <- infer checkedVariables body
       unifyTypes resultType $ checkedResultType checkedAlternative
-      pure checkedAlternative
+      pure
+        ( constructor
+        , zipWith (\(variable, _) fieldType -> (variable, fieldType))
+            patternVariables fieldTypes
+        , checkedAlternative
+        )
+
+    normalizeAlternative (constructor, fields, checkedAlternative) = do
+      normalizedFields <- mapM
+        (\(variable, fieldType) -> do
+          normalized <- zonk fieldType
+          pure (variable, normalized))
+        fields
+      pure (constructor, normalizedFields, checkedAlternative)
+
+    -- Retain only one exact nonempty case shape. The independently checked
+    -- environment must describe a recursive two-constructor spine with one
+    -- zero-field constructor and one two-field constructor, exactly one of
+    -- whose fields is the recursive spine. The case must contain those two
+    -- direct alternatives and return the same spine it scrutinizes. Every
+    -- other nonempty case keeps the historical graph-absence result.
+    exactZeroStepSpineCase scrutineeType result alternatives =
+      result == scrutineeType && case exactSchemas of
+        [(zeroName, stepName)] ->
+          Set.fromList (map alternativeName alternatives)
+            == Set.fromList [zeroName, stepName]
+            && length alternatives == 2
+            && case [fields | (name, fields, _) <- alternatives
+                            , name == zeroName] of
+                [[]] -> case [fields | (name, fields, _) <- alternatives
+                                     , name == stepName] of
+                  [stepFields] -> length stepFields == 2
+                    && length
+                        [ ()
+                        | (_, fieldType) <- stepFields
+                        , fieldType == scrutineeType
+                        ] == 1
+                  _ -> False
+                _ -> False
+        _ -> False
+     where
+      alternativeName (name, _, _) = name
+      exactSchemas =
+        [ (constructorName zero, constructorName step)
+        | deconstructor <- deconstructors
+        , deconstructorRecursive deconstructor
+        , let constructors = deconstructorConstructors deconstructor
+        , [zero] <- [filter (null . constructorFields) constructors]
+        , [step] <- [filter ((== 2) . length . constructorFields) constructors]
+        , length constructors == 2
+        , Set.fromList [constructorName zero, constructorName step]
+            == Set.fromList (map alternativeName alternatives)
+        ]
+
+    checkedExactCaseTerm result checkedScrutinee alternatives =
+      CheckedTermResult result $ do
+        scrutineeTerm <- checkedTermDraft checkedScrutinee
+        checked <- traverse (checkedAlternativeTerm result) alternatives
+        pure $ CheckedTerm result
+          $ CheckedExactZeroStepCase scrutineeTerm checked
+
+    checkedAlternativeTerm patternType (constructor, fields, checkedBody) = do
+      body <- checkedTermDraft checkedBody
+      pure $ CheckedCaseAlternative constructor patternType fields body
+
+    checkedTermDraft (CheckedTermResult _ draft) = draft
 
     instantiateBinding name = case
         [binding | binding <- functions, functionName binding == name] of
@@ -1032,6 +1110,16 @@ normalizeCheckedTermResult substitutions rigidAlpha
         variable (normalize annotation)
         (normalizeTerm binding) (normalizeTerm body)
       CheckedEmptyCase scrutinee -> CheckedEmptyCase $ normalizeTerm scrutinee
+      CheckedExactZeroStepCase scrutinee alternatives ->
+        CheckedExactZeroStepCase
+          (normalizeTerm scrutinee)
+          (map normalizeAlternative alternatives)
+
+  normalizeAlternative
+      (CheckedCaseAlternative constructor patternType fields body) =
+    CheckedCaseAlternative constructor (normalize patternType)
+      [(variable, normalize fieldType) | (variable, fieldType) <- fields]
+      (normalizeTerm body)
 
 -- | Seal a checker-produced draft under a caller-owned deterministic candidate
 -- key. This work remains lazy when stored in 'ValidatedEngineCandidate'.
@@ -1048,7 +1136,7 @@ checkedExpressionTermGraph candidateKey
       case buildCheckedTermGraph candidateKey checkedTerm of
         Left reason -> ExferenceTermGraphUnavailable reason
         Right source -> case SharedTyped.sealTermGraph
-            SharedTyped.sharedTypeStructure
+            (checkedTermTypeStructure checkedTerm)
             SharedTyped.defaultTermGraphLimits
             source of
           Left failure -> ExferenceTermGraphUnavailable
@@ -1058,6 +1146,53 @@ checkedExpressionTermGraph candidateKey
                 ExferenceTermGraphAvailable graph
             | otherwise -> ExferenceTermGraphUnavailable
                 TermGraphProjectionMismatch
+
+-- Constructor-pattern authority is retained only inside the checker-owned
+-- draft which proved the exact zero/step case. Ordinary terms therefore use
+-- the unchanged shared structure, while a retained case admits exactly the
+-- constructor/type/field triples independently reconstructed above. The
+-- resulting schema is consumed atomically by sealing and is never exposed
+-- beside the graph.
+checkedTermTypeStructure :: CheckedTerm -> SharedTyped.TypeStructure HsType
+checkedTermTypeStructure checked = SharedTyped.sharedTypeStructure
+  { SharedTyped.constructorPatternFieldTypes = resolve
+  }
+ where
+  schemas = checkedTermConstructorSchemas checked
+  resolve name patternType = case
+      [fields | (schemaName, schemaType, fields) <- schemas
+              , schemaName == name
+              , schemaType == patternType] of
+    [] -> Nothing
+    fields : remaining
+      | all (== fields) remaining -> Just fields
+      | otherwise -> Nothing
+
+checkedTermConstructorSchemas
+  :: CheckedTerm
+  -> [(QualifiedName, HsType, [HsType])]
+checkedTermConstructorSchemas (CheckedTerm _ form) = case form of
+  CheckedLocal{} -> []
+  CheckedGlobal{} -> []
+  CheckedLambda _ _ body -> checkedTermConstructorSchemas body
+  CheckedApply function argument ->
+    checkedTermConstructorSchemas function
+      ++ checkedTermConstructorSchemas argument
+  CheckedVisibleTypeApplication _ _ _ function ->
+    checkedTermConstructorSchemas function
+  CheckedTuple elements -> concatMap checkedTermConstructorSchemas elements
+  CheckedLet _ _ binding body ->
+    checkedTermConstructorSchemas binding
+      ++ checkedTermConstructorSchemas body
+  CheckedEmptyCase scrutinee -> checkedTermConstructorSchemas scrutinee
+  CheckedExactZeroStepCase scrutinee alternatives ->
+    checkedTermConstructorSchemas scrutinee
+      ++ concatMap alternativeSchemas alternatives
+ where
+  alternativeSchemas
+      (CheckedCaseAlternative name patternType fields body) =
+    (name, patternType, map snd fields)
+      : checkedTermConstructorSchemas body
 
 data TermGraphBuildState = TermGraphBuildState
   { termGraphBuildCandidateKey :: !Natural
@@ -1156,12 +1291,63 @@ buildCheckedTerm (CheckedTerm ty checkedForm) = do
       reserveTermGraphEdges 1
       scrutineeId <- buildCheckedTerm scrutinee
       pure $ SharedTyped.TypedCase scrutineeId []
+    CheckedExactZeroStepCase scrutinee alternatives -> do
+      alternativeCount <- observeTermGraphCollection
+        (SharedTyped.CaseAlternativeList nodeId') alternatives
+      reserveTermGraphEdges $ 1 + alternativeCount
+      scrutineeId <- buildCheckedTerm scrutinee
+      checkedAlternatives <- mapM buildCheckedCaseAlternative alternatives
+      pure $ SharedTyped.TypedCase scrutineeId checkedAlternatives
   modify' $ \current -> current
     { termGraphBuildNodes =
         (nodeId', SharedTyped.TermNode ty form)
           : termGraphBuildNodes current
     }
   pure nodeId'
+
+buildCheckedCaseAlternative
+  :: CheckedCaseAlternative
+  -> TermGraphBuild
+      (SharedTyped.TypedPattern HsType TVarId, SharedTyped.TermNodeId)
+buildCheckedCaseAlternative
+    (CheckedCaseAlternative constructor patternType fields body) = do
+  occurrence <- allocateCheckedOccurrence
+  fieldCount <- observeTermGraphCollection
+    (SharedTyped.ConstructorPatternFieldList occurrence) fields
+  reserveTermGraphPatterns $ 1 + fieldCount
+  let used = checkedTermLocalUses body
+  checkedFields <- forM fields $ \(variable, fieldType) -> do
+    fieldOccurrence <- allocateCheckedOccurrence
+    pure $ SharedTyped.TypedPattern fieldOccurrence fieldType
+      $ if IntSet.member variable used
+          then SharedTyped.TypedBind variable
+          else SharedTyped.TypedWildcard
+  bodyId <- buildCheckedTerm body
+  pure
+    ( SharedTyped.TypedPattern occurrence patternType
+        $ SharedTyped.TypedConstructor constructor checkedFields
+    , bodyId
+    )
+
+checkedTermLocalUses :: CheckedTerm -> IntSet.IntSet
+checkedTermLocalUses (CheckedTerm _ form) = case form of
+  CheckedLocal variable -> IntSet.singleton variable
+  CheckedGlobal{} -> IntSet.empty
+  CheckedLambda variable _ body ->
+    IntSet.delete variable $ checkedTermLocalUses body
+  CheckedApply function argument ->
+    checkedTermLocalUses function `IntSet.union` checkedTermLocalUses argument
+  CheckedVisibleTypeApplication _ _ _ function -> checkedTermLocalUses function
+  CheckedTuple elements -> IntSet.unions $ map checkedTermLocalUses elements
+  CheckedLet variable _ binding body ->
+    checkedTermLocalUses binding `IntSet.union`
+      IntSet.delete variable (checkedTermLocalUses body)
+  CheckedEmptyCase scrutinee -> checkedTermLocalUses scrutinee
+  CheckedExactZeroStepCase scrutinee alternatives -> IntSet.unions
+    $ checkedTermLocalUses scrutinee
+    : [ foldr IntSet.delete (checkedTermLocalUses body)
+          $ map fst fields
+      | CheckedCaseAlternative _ _ fields body <- alternatives]
 
 allocateCheckedTermNode :: TermGraphBuild SharedTyped.TermNodeId
 allocateCheckedTermNode = do

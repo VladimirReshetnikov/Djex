@@ -35,10 +35,11 @@ into the worker. Process shutdown limits remain process-owned.
 
 The exact process limits already belong to the opaque retained process. A new
 package-private Length projection exposes those associated limits without
-reconstructing them from Session configuration or the cached raw-process
-fingerprint. Remaining stdout capacity and worst-case query-run identity sizing
-therefore consume the same process-owned limits. The private identity-admission
-helper no longer accepts a separately pairable limits argument.
+reconstructing them from Session configuration or the derived raw-process
+fingerprint field. The Length facade retains no parallel fingerprint root.
+Remaining stdout capacity and worst-case query-run identity sizing therefore
+consume the same process-owned limits. The private identity-admission helper no
+longer accepts a separately pairable limits argument.
 
 ## Plan-owned replay
 

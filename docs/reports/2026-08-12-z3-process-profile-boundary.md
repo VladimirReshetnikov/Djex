@@ -32,9 +32,10 @@ It does not own the Length artifact policy, response grammar or limits,
 protocol schema, complete execution fingerprint, capability plan, semantic
 query policy, or even the raw Length process identity root. The Length
 `...Session.Process` facade exhaustively maps the generic sanitized result and
-seals the associated observation and limits under the existing v2 root. The
-complete domain facts first meet that raw process field in the ready-worker
-identity owned by `...SMTLib.Session`.
+derives the existing v2 root from the associated observation and process-owned
+limits. It retains no second cached root. The complete domain facts first meet
+that raw process field in the ready-worker identity owned by
+`...SMTLib.Session`.
 
 ## Failure and demand order
 

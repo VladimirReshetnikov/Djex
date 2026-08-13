@@ -140,7 +140,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response` | Pure bounded SMT-LIB 2.x check-status and query-specific input-valuation decoding; syntax remains untrusted and only independent Length replay may create evidence. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` | Package-private incremental reset/check/value transaction planning with exact positional barriers, causal write boundaries, and bounded cumulative stdout; it performs no IO or attestation. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capability` | Package-private four-write readiness probe for print suppression, reset replay, exact `sat`, input valuation, contradictory `unsat`, and positional fresh barriers. |
-| `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process` | Length compatibility and identity facade which exhaustively maps the shared runtime's sanitized vocabulary and seals its associated observation and limits under the unchanged raw-process v2 root. |
+| `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process` | Length compatibility and identity facade which exhaustively maps the shared runtime's sanitized vocabulary and derives the unchanged raw-process v2 root from its exact associated observation and process-owned limits without caching a parallel root. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal` | Domain-neutral pure write/await/complete action algebra with nominal write-kind, receiver, and outcome associations. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal.BoundaryWhitespace` | Opaque content proof for finite strict SMT-LIB boundary whitespace, with lexical admission and safe FIFO-chunk concatenation but no transport-origin or schema authority. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal.StdoutChunk` | Opaque proof that one strict causal-transport stdout chunk is nonempty, without FIFO-origin, configured-bound, process-association, or schema authority. |
@@ -434,13 +434,18 @@ prefix; a process launcher must use
 arguments.
 
 The package-private shared Process opener consumes only this profile and owns
-no domain identity schema. The Length facade seals its exact associated
-observation, and ready-worker identity binds one occurrence of the complete
-Length execution key beside that raw process field rather than embedding a
-second occurrence inside it. Removing the former nested duplicate deliberately
+no domain identity schema. The Length facade retains only that exact process
+and derives its v2 field from the process-associated observation and limits;
+ready-worker identity binds one occurrence of the complete Length execution
+key beside that raw process field rather than embedding a second occurrence
+inside it. Removing the former nested complete-policy duplicate deliberately
 shortens private ready-worker and query-run keys. A custom identity-byte budget
 at the old boundary can therefore newly admit the same policy; no previously
 admitted policy becomes oversized.
+
+The raw runtime extraction and later facade cache deletion are recorded in the
+[shared raw Z3 process report](../docs/reports/2026-08-12-shared-z3-process-runtime.md)
+and [derived Length process identity report](../docs/reports/2026-08-12-length-process-derived-identity.md).
 
 Construction productively bounds and checks an absolute Unicode-scalar
 executable path, optionally records an exact 32-byte SHA-256 executable-file

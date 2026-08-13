@@ -298,9 +298,12 @@ lengthSMTLibExecutableSnapshotFingerprintField =
   Z3Process.z3SMTLibExecutableSnapshotFingerprintField
   . toZ3ExecutableSnapshot
 
+-- | Length ownership facade for one exact shared raw Z3 process. The generic
+-- process is the sole retained runtime and observation authority; the
+-- Length-specific v2 fingerprint field is derived from that associated
+-- observation and its process-owned limits.
 data LengthSMTLibProcess = LengthSMTLibProcess
   !Z3Process.Z3SMTLibProcess
-  !FingerprintField
 
 openLengthSMTLibProcess
   :: LengthSMTLibProcessLimits
@@ -322,8 +325,11 @@ openLengthSMTLibProcess limits cancellation deadline profile workingDirectory =
         in retained `seq` pure (Left retained)
       Right process ->
         let retained = LengthSMTLibProcess process
-              $ processFingerprintField process
-        in retained `seq` pure (Right retained)
+            -- Preserve the former strict cached-root demand at the successful
+            -- masked handoff. Only the outer FingerprintTag is demanded; its
+            -- ordered observation field list deliberately stays lazy.
+            transientFingerprint = processFingerprintField process
+        in retained `seq` transientFingerprint `seq` pure (Right retained)
 
 lengthSMTLibProcessSnapshot
   :: LengthSMTLibProcess
@@ -341,7 +347,7 @@ lengthSMTLibProcessLimits = LengthSMTLibProcessLimits
 lengthSMTLibProcessFingerprintField
   :: LengthSMTLibProcess
   -> FingerprintField
-lengthSMTLibProcessFingerprintField (LengthSMTLibProcess _ field) = field
+lengthSMTLibProcessFingerprintField = processFingerprintField . toZ3Process
 
 lengthSMTLibProcessObservedStdoutBytes
   :: LengthSMTLibProcess
@@ -506,7 +512,7 @@ toZ3ExecutableSnapshot
 toZ3ExecutableSnapshot (LengthSMTLibExecutableSnapshot snapshot) = snapshot
 
 toZ3Process :: LengthSMTLibProcess -> Z3Process.Z3SMTLibProcess
-toZ3Process (LengthSMTLibProcess process _) = process
+toZ3Process (LengthSMTLibProcess process) = process
 
 -- Finish the compatibility mapping while the delegating operation's outer
 -- mask is restored.  In particular, a successfully acquired process or

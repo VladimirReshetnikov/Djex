@@ -497,15 +497,18 @@ child exits.
 The raw process owner consumes only the admitted shared Z3 launch profile and
 retains a schema-free ordered observation. The existing Length
 `...Session.Process` facade maps the generic sanitized failures exhaustively
-and seals that associated observation and its exact limits under the unchanged
-v2 Length root. The resulting identity binds the path observation, pin result,
-argv, environment, working directory, deadline, process limits, and launch
-flags, but no artifact/response policy or duplicate complete Length execution
-key. The Session's v4 ready-worker identity contains one complete-key
-occurrence beside the raw process field, rather than another copy inside that
-field.
+and derives the unchanged v2 Length root from that exact associated observation
+and its process-owned limits whenever the identity is projected. The facade
+retains no parallel cached root. The resulting identity binds the path
+observation, pin result, argv, environment, working directory, deadline,
+process limits, and launch flags, but no artifact/response policy or duplicate
+complete Length execution key. The Session's v4 ready-worker identity contains
+one complete-key occurrence beside the derived raw process field, rather than
+another copy inside that field.
 The extraction is detailed in the
-[shared raw Z3 process report](docs/reports/2026-08-12-shared-z3-process-runtime.md).
+[shared raw Z3 process report](docs/reports/2026-08-12-shared-z3-process-runtime.md),
+and the facade ownership cleanup in the
+[derived Length process identity report](docs/reports/2026-08-12-length-process-derived-identity.md).
 
 Readiness requires four causally separated writes and fresh positional echo
 barriers. The probe checks startup print suppression; reset/replay with an
@@ -602,14 +605,15 @@ fixed prefix; launchers must use
 
 The shared raw Z3 Process boundary accepts only this profile and owns no
 domain schema, fingerprint root, or fingerprint budget. The Length Process
-facade seals its associated launch observation without rebuilding the IO
-runtime, and the scoped Session binds the complete Length policy once in its
+facade derives its unchanged v2 field from the retained runtime's associated
+launch observation and limits without rebuilding the IO runtime or caching a
+second root. The scoped Session binds the complete Length policy once in its
 ready-worker identity next to that raw process field. Removing the former
-nested duplicate changes and shortens the private ready-worker key and every
-query-run key which embeds it. This can make a tight custom identity-byte
-budget newly admit an otherwise unchanged worker or run; the versioned
-identity deliberately treats that as an authority/admission improvement rather
-than padding the removed duplicate.
+nested complete-policy duplicate changes and shortens the private ready-worker
+key and every query-run key which embeds it. This can make a tight custom
+identity-byte budget newly admit an otherwise unchanged worker or run; the
+versioned identity deliberately treats that as an authority/admission
+improvement rather than padding the removed duplicate.
 
 The package-private complete fingerprint binds the protocol schema, complete
 argv, exact startup and reset bytes, every retained execution field, the

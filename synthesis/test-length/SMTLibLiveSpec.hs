@@ -137,7 +137,7 @@ rawProcessTests = testGroup "raw bounded Process transport"
       assertRawProcessCancellationPrecedence
   , testCase "reject a relative cwd before demanding limits or launch profile"
       assertRawProcessWorkingDirectoryPrecedence
-  , testCase "publish a profile-only raw process identity"
+  , testCase "derive a repeated exact profile-only raw process identity"
       assertRawProcessProfileIdentity
   , testCase "stdout limit preserves prefix before terminal across read chunks"
       assertRawProcessStdoutLimitPrefix
@@ -185,11 +185,15 @@ assertRawProcessProfileIdentity = withFakeZ3Mode "healthy"
         (Execution.lengthSMTLibExecutionZ3Profile execution)
         workingDirectory
     (do
+      canonicalWorkingDirectory <- canonicalizePath workingDirectory
       Process.lengthSMTLibProcessSchemaTag @?=
         utf8Bytes "djex-length-z3-raw-process/v2"
       let rawIdentity = Process.lengthSMTLibProcessFingerprintField process
+          repeatedIdentity =
+            Process.lengthSMTLibProcessFingerprintField process
           completePolicy = Fingerprint.fingerprintCanonicalBytes
             $ Execution.lengthSMTLibExecutionPolicyFingerprint execution
+      repeatedIdentity @?= rawIdentity
       Process.lengthSMTLibProcessLimitsFingerprintField
           (Process.lengthSMTLibProcessLimits process) @?=
         Process.lengthSMTLibProcessLimitsFingerprintField limits
@@ -199,11 +203,15 @@ assertRawProcessProfileIdentity = withFakeZ3Mode "healthy"
           root @?= ascii "length-z3-launched-transport"
           length fields @?= 17
           case fields of
-            Fingerprint.FingerprintBytes schema : snapshot : remaining -> do
+            Fingerprint.FingerprintBytes schema
+                : snapshot : _cwd : _emptiness : pid : remaining -> do
               schema @?= BS.unpack Process.lengthSMTLibProcessSchemaTag
               snapshot @?=
                 Process.lengthSMTLibExecutableSnapshotFingerprintField
                   (Process.lengthSMTLibProcessSnapshot process)
+              assertRawProcessPidField pid
+              rawIdentity @?= expectedRawProcessFingerprintField
+                process canonicalWorkingDirectory deadline limits pid
               last remaining @?=
                 Process.lengthSMTLibProcessLimitsFingerprintField limits
             _ -> assertFailure "raw process identity lost its schema prefix"
@@ -215,6 +223,90 @@ assertRawProcessProfileIdentity = withFakeZ3Mode "healthy"
           Process.LengthSMTLibProcessCleanupIncomplete
     Process.lengthSMTLibProcessCleanupFailureCount cleanup @?= 0
     Process.lengthSMTLibProcessCleanupReadersStopped cleanup @?= True
+
+expectedRawProcessFingerprintField
+  :: Process.LengthSMTLibProcess
+  -> FilePath
+  -> Process.LengthSMTLibProcessDeadline
+  -> Process.LengthSMTLibProcessLimits
+  -> Fingerprint.FingerprintField
+  -> Fingerprint.FingerprintField
+expectedRawProcessFingerprintField
+    process workingDirectory deadline limits pid =
+  Fingerprint.FingerprintTag (ascii "length-z3-launched-transport")
+    [ Fingerprint.FingerprintBytes
+        $ BS.unpack Process.lengthSMTLibProcessSchemaTag
+    , Process.lengthSMTLibExecutableSnapshotFingerprintField
+        $ Process.lengthSMTLibProcessSnapshot process
+    , Fingerprint.FingerprintTag
+        (ascii "canonical-working-directory-observation")
+        [fingerprintTextField workingDirectory]
+    , rawProcessWorkingDirectoryEmptinessField
+    , pid
+    , Fingerprint.FingerprintTag (ascii "alive-at-open-snapshot") []
+    , Fingerprint.FingerprintTag (ascii "separate-binary-pipes") []
+    , Fingerprint.FingerprintTag
+        (ascii "stderr-first-byte-poisons-session") []
+    , Fingerprint.FingerprintTag
+        (ascii "stderr-post-poison-discard-count-capped-at-max-plus-one/v1")
+        []
+    , Fingerprint.FingerprintTag
+        (ascii "stdout-cumulative-charge-before-fifo-enqueue/v1") []
+    , Fingerprint.FingerprintTag
+        (ascii "stdout-chunks-before-terminal-fifo/v1") []
+    , Fingerprint.FingerprintTag
+        (ascii "writes-exact-bytes-then-flush/v1") []
+    , Fingerprint.FingerprintTag
+        (ascii "control-priority-cancel-deadline-poison-output/v1") []
+    , Fingerprint.FingerprintTag
+        (ascii "cleanup-leader-close-wait-term-wait-kill-wait/v1") []
+    , Fingerprint.FingerprintTag
+        (ascii
+          "descendant-cleanup-best-effort-no-post-reap-group-signal/v1")
+        []
+    , Fingerprint.FingerprintTag
+        (ascii "absolute-monotonic-deadline-nanoseconds")
+        [Fingerprint.FingerprintNatural $ rawProcessDeadlineNanoseconds deadline]
+    , Process.lengthSMTLibProcessLimitsFingerprintField limits
+    ]
+
+rawProcessDeadlineNanoseconds
+  :: Process.LengthSMTLibProcessDeadline
+  -> Natural
+rawProcessDeadlineNanoseconds deadline = case
+    Process.lengthSMTLibProcessDeadlineFingerprintField deadline of
+  Fingerprint.FingerprintTag method
+      [Fingerprint.FingerprintBytes clock, Fingerprint.FingerprintNatural value]
+    | method == ascii "absolute-monotonic-deadline"
+    , clock == ascii "clock_gettime-monotonic-nanoseconds/v1" -> value
+  other -> error $ "unexpected raw Process deadline field: " ++ show other
+
+rawProcessWorkingDirectoryEmptinessField :: Fingerprint.FingerprintField
+rawProcessWorkingDirectoryEmptinessField = Fingerprint.FingerprintTag
+  (ascii $ if SystemInfo.os == "mingw32"
+    then "working-directory-observed-empty-windows-list-fallback-no-read-bound/v1"
+    else "working-directory-observed-empty-posix-dir-stream-at-most-three-reads/v1")
+  []
+
+fingerprintTextField :: String -> Fingerprint.FingerprintField
+fingerprintTextField = Fingerprint.FingerprintSequence
+  . map (Fingerprint.FingerprintNatural . fromIntegral . ord)
+
+assertRawProcessPidField :: Fingerprint.FingerprintField -> IO ()
+assertRawProcessPidField field = case field of
+  Fingerprint.FingerprintTag tag []
+    | tag == ascii "pid-unavailable" -> pure ()
+  Fingerprint.FingerprintTag tag [Fingerprint.FingerprintSequence digits]
+    | tag == ascii "pid-observed"
+    , not $ null digits
+    , all decimalNatural digits -> pure ()
+  _ -> assertFailure $ "raw Process identity lost its PID observation: "
+    ++ show field
+ where
+  decimalNatural value = case value of
+    Fingerprint.FingerprintNatural byte ->
+      byte >= fromIntegral (ord '0') && byte <= fromIntegral (ord '9')
+    _ -> False
 
 assertRawProcessStdoutLimitPrefix :: IO ()
 assertRawProcessStdoutLimitPrefix = do

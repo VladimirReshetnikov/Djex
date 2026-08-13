@@ -53,12 +53,15 @@ The Length facade is the only owner of:
 - the `length-z3-launched-transport` fingerprint root; and
 - the `length-z3-process-limits/v1` nested wrapper.
 
-It seals the old root as the unchanged v2 schema field, followed by the exact
-associated generic observation, followed by the exact associated limit
-wrapper. No caller can supply a detached observation or limits value when the
-facade constructs a live process identity. Canonical raw-process,
-ready-worker, and query-run bytes therefore remain unchanged by this
-extraction, and no schema version advances.
+At extraction time it sealed the old root as the unchanged v2 schema field,
+followed by the exact associated generic observation and exact associated
+limit wrapper. A later ownership cleanup removed the facade's cached copy of
+that root: the opaque Length facade now retains only the strict generic process
+and derives the same root from its associated observation and limits on
+projection.
+No caller can supply a detached observation or limits value. Canonical
+raw-process, ready-worker, and query-run bytes remain unchanged, and no schema
+version advances.
 
 ## Compatibility and demand order
 
@@ -80,9 +83,9 @@ Wrapper projections are passed lazily into the shared opener. Consequently:
    and launch-profile demand;
 3. executable observation, hashing, pin comparison, pre-spawn control, spawn,
    and handle configuration retain their prior order; and
-4. the associated observation field list remains lazy behind a strict opaque
-   observation constructor, matching the former strict fingerprint-root / lazy
-   field-list boundary.
+4. successful facade handoff transiently constructs and forces the derived
+   outer root under the existing mask, preserving the former strict cached-root
+   demand point while its associated observation field list remains lazy.
 
 ## Verification
 
@@ -91,7 +94,8 @@ Focused regressions now pin:
 - cancelled open with bottom limits, profile, and cwd;
 - relative-cwd rejection with bottom limits and profile;
 - the exact Length fingerprint root, v2 schema prefix, snapshot position,
-  field count, and final v1 process-limit wrapper;
+  complete ordered field layout, repeated-projection equality, and final v1
+  process-limit wrapper;
 - absence of the complete Length execution key from the raw field and exactly
   one occurrence at the ready-worker boundary;
 - configured argv, empty environment, cwd, pin match and pre-spawn mismatch,

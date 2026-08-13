@@ -78,8 +78,9 @@ exact pin result, configured argv, empty environment, requested and canonical
 cwd, process flags, the absolute deadline, and process limits to one opaque
 runtime. Its schema-free observation slice excludes the strict limits retained
 alongside it. It owns no domain identity schema. The Length Process facade
-seals both associated field groups under the raw-process v2 root without
-accepting or embedding the complete Length execution policy.
+derives the raw-process v2 root from both associated field groups without
+accepting or embedding the complete Length execution policy or retaining a
+parallel cached root.
 
 The live Session accepts the complete Length wrapper before readiness. Its
 ready-worker v4 identity binds the complete policy key once, immediately beside

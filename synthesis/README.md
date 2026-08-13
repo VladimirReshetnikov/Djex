@@ -609,9 +609,20 @@ and fold order remain candidate-local coordinates; none may be treated as
 provenance or enter a semantic key on that basis. No inventory or declaration
 membership, binder kind, constraint discharge identity, behavioral
 interpretation, or fingerprint authority is established here. Public graph
-fingerprints therefore still reject stamped graphs. Exference does not yet
-stamp its retained origin annotations in this checkpoint. See the
+fingerprints therefore still reject stamped graphs. See the
 [atomic association report](../docs/reports/2026-08-13-atomic-certificate-graph-associations.md).
+
+Exference now consumes this private entrance for checker-owned, exact-scheme
+direct-global source-telescope prefixes. Its checked annotations alone are
+lowered to certificate handles and independent origin observations; a nonempty
+origin table must seal as one opaque association or graph availability fails
+closed. Certificate-free candidates retain the ordinary graph path. The
+associated atom is stored in the hidden `TypedCandidate` carrier, while its
+public graph projection is deliberately bare and remains rejected by the
+public fingerprint entrance. Neither the handles nor Exference's sanitized
+failure categories add inventory, kind, constraint-discharge, provenance,
+behavioral, or fingerprint authority. See the
+[Exference wiring report](../docs/reports/2026-08-13-exference-certificate-association-wiring.md).
 
 `TypedGenerated.Fingerprint` reconstructs and reseals that graph with
 `sharedTypeStructure` before assigning its nominal v1 identity. Its rooted-tree

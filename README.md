@@ -220,7 +220,8 @@ reconstruct or recombine the carrier or structural-table authority. It still
 proves no inventory membership, positional kind, discharge identity,
 behavioral meaning, or fingerprint permission. The public graph fingerprint
 therefore continues to reject every certificate-bearing visible application;
-this checkpoint does not stamp Exference graphs or alter public bytes. See the
+the generic association foundation alone does not stamp an engine graph or
+alter public bytes. See the
 [atomic certificate association report](docs/reports/2026-08-13-atomic-certificate-graph-associations.md).
 
 The package-private `TypedCandidate` representation can now retain that opaque
@@ -240,9 +241,27 @@ before attaching association authority, and authority-bearing typed candidates
 must not use equality- or ordering-based containers as authority storage: such
 containers may keep the plain representative and discard the carrier. Deep
 `NFData` evaluation does force the full retained carrier, while public graph
-projection remains shallow and loses association authority. This checkpoint
-does not yet wire Exference stamping or change Length. See the
+projection remains shallow and loses association authority. See the
 [typed-candidate certificate-carrier report](docs/reports/2026-08-13-typed-candidate-certificate-carrier.md).
+
+Exference now joins those two private foundations for the narrow origin class
+proved by its independent checker. Checker-owned direct-global source-prefix
+annotations become `(CertificateId, slot)` handles; any nonempty origin set
+must pass atomic table, graph, owner-scheme, and complete-occurrence-chain
+association or the graph fails closed. Untagged local, inferred, partial,
+fallback, oversized, and returned-polytype-suffix applications retain their
+legacy graph rules. The final typed-candidate projection uses the single lazy
+three-way carrier entrance, so reading compatibility does not inspect graph or
+association availability.
+
+The public bare-graph projection of a successful associated candidate now
+contains those handles, but it discards the opaque table and receipt carrier;
+public fingerprinting therefore rejects the stamped graph. Handles are
+candidate-local diagnostic coordinates; the sanitized association-failure
+summaries are diagnostics only. Neither grants inventory, kind, discharge,
+provenance, behavioral, or fingerprint authority.
+The additive public failure vocabulary is documented in the
+[Exference certificate-wiring report](docs/reports/2026-08-13-exference-certificate-association-wiring.md).
 
 The shared checker also lacks constructor-family schemas, so the public
 fingerprint entrance always rejects constructor-pattern graphs. A

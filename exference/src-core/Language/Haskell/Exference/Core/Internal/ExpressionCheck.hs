@@ -25,6 +25,7 @@ module Language.Haskell.Exference.Core.Internal.ExpressionCheck
   , checkedTypeApplicationOriginStepResult
   , checkedTypeApplicationOriginStepObligations
   , ExferenceTermGraphAbsence (..)
+  , ExferenceTermGraphCertificateAssociationFailure (..)
   , ExferenceTermGraphConstructionLimit (..)
   , ExferenceTermGraphAvailability (..)
   , checkedExpressionTermGraph
@@ -38,7 +39,7 @@ module Language.Haskell.Exference.Core.Internal.ExpressionCheck
   )
 where
 
-import Control.DeepSeq (NFData)
+import Control.DeepSeq (NFData (rnf))
 import Control.Monad (foldM, forM, replicateM, unless, when, zipWithM_)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict
@@ -85,6 +86,10 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
+import qualified Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate
+  as SharedCertificate
+import qualified Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.Association
+  as SharedAssociation
 import qualified Language.Haskell.Synthesis.TypedGenerated as SharedTyped
 
 data ExpressionCheckError
@@ -123,9 +128,9 @@ data ExpressionCheckError
   deriving (Eq, Show)
 
 -- | A successful independent check can still decline to claim a typed graph.
--- Each constructor names the exact boundary which is not yet representable by
--- the neutral graph, rather than silently fabricating evidence or dropping a
--- checked candidate.
+-- Each constructor names the exact typed-graph or certificate-association
+-- boundary which declined retention, rather than silently fabricating evidence
+-- or dropping a checked candidate.
 data ExferenceTermGraphAbsence
   = ImplicitLocalSpecialization TVarId HsType HsType
   | SubsumedLocalSpecialization TVarId HsType HsType
@@ -136,10 +141,24 @@ data ExferenceTermGraphAbsence
   | TermGraphEvidenceMismatch
   | TermGraphConstructionLimit ExferenceTermGraphConstructionLimit
   | TermGraphSealingFailure (SharedTyped.TermGraphError HsType TVarId)
+  | TermGraphCertificateAssociationFailure
+      ExferenceTermGraphCertificateAssociationFailure
   | TermGraphProjectionMismatch
   deriving (Eq, Show, Generic)
 
 instance NFData ExferenceTermGraphAbsence
+
+-- | Sanitized reason an origin-bearing graph failed the private atomic
+-- association gate.  Raw plan and association errors retain checker types,
+-- owner names, and graph coordinates; none of those payloads are a stable
+-- public diagnostic or authority channel.
+data ExferenceTermGraphCertificateAssociationFailure
+  = TermGraphCertificatePlanLimitFailure
+  | TermGraphCertificatePlanValidationFailure
+  | TermGraphCertificateOccurrenceAssociationFailure
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData ExferenceTermGraphCertificateAssociationFailure
 
 -- | Productive bounds applied while lowering a checker draft, before the raw
 -- graph exists for 'SharedTyped.sealTermGraph' to inspect.
@@ -154,15 +173,47 @@ data ExferenceTermGraphConstructionLimit
 
 instance NFData ExferenceTermGraphConstructionLimit
 
--- | Lazy engine payload for the first Exference typed-candidate checkpoint.
+-- | Lazy engine payload for Exference's typed-candidate graph boundary.
 -- Stable candidate facades do not expose it, and compatibility projections
 -- intentionally ignore the private candidate field which retains this value.
 data ExferenceTermGraphAvailability
   = ExferenceTermGraphAvailable (SharedTyped.TermGraph HsType TVarId)
+  | ExferenceTermGraphAssociated
+      (SharedAssociation.CheckedTypeApplicationCertificateGraph
+        SynthesisVariable TVarId)
   | ExferenceTermGraphUnavailable ExferenceTermGraphAbsence
-  deriving (Eq, Show, Generic)
 
-instance NFData ExferenceTermGraphAvailability
+instance Eq ExferenceTermGraphAvailability where
+  left == right = availabilityProjection left == availabilityProjection right
+
+instance Show ExferenceTermGraphAvailability where
+  showsPrec precedence availability = case availability of
+    ExferenceTermGraphAvailable graph ->
+      showUnary "ExferenceTermGraphAvailable" graph
+    ExferenceTermGraphAssociated checked ->
+      showUnary "ExferenceTermGraphAvailable"
+        $ SharedAssociation.checkedTypeApplicationCertificateGraph checked
+    ExferenceTermGraphUnavailable failure ->
+      showUnary "ExferenceTermGraphUnavailable" failure
+   where
+    showUnary constructor value = showParen (precedence > 10) $
+      showString constructor . showChar ' ' . showsPrec 11 value
+
+instance NFData ExferenceTermGraphAvailability where
+  rnf availability = case availability of
+    ExferenceTermGraphAvailable graph -> rnf graph
+    ExferenceTermGraphAssociated checked -> rnf checked
+    ExferenceTermGraphUnavailable failure -> rnf failure
+
+availabilityProjection
+  :: ExferenceTermGraphAvailability
+  -> Either ExferenceTermGraphAbsence
+      (SharedTyped.TermGraph HsType TVarId)
+availabilityProjection availability = case availability of
+  ExferenceTermGraphAvailable graph -> Right graph
+  ExferenceTermGraphAssociated checked -> Right $
+    SharedAssociation.checkedTypeApplicationCertificateGraph checked
+  ExferenceTermGraphUnavailable failure -> Left failure
 
 -- | Checker-owned proof draft. Its constructor stays hidden so only a complete
 -- validation run can request graph sealing.
@@ -1361,6 +1412,7 @@ normalizeCheckedTermResult substitutions rigidAlpha
     TermGraphEvidenceMismatch -> reason
     TermGraphConstructionLimit{} -> reason
     TermGraphSealingFailure{} -> reason
+    TermGraphCertificateAssociationFailure{} -> reason
     TermGraphProjectionMismatch -> reason
 
   normalizeTerm (CheckedTerm termType form) = CheckedTerm
@@ -1436,24 +1488,147 @@ checkedExpressionTermGraph
   -> CheckedExpressionEvidence
   -> ExferenceTermGraphAvailability
 checkedExpressionTermGraph candidateKey
-    (CheckedExpressionEvidence compatibility checkedResult _) =
+    (CheckedExpressionEvidence compatibility checkedResult origins) =
   case checkedResult of
     CheckedTermResult _ (Left reason) ->
       ExferenceTermGraphUnavailable reason
     CheckedTermResult _ (Right checkedTerm) ->
       case buildCheckedTermGraph candidateKey checkedTerm of
         Left reason -> ExferenceTermGraphUnavailable reason
-        Right source -> case SharedTyped.sealTermGraph
-            (checkedTermTypeStructure checkedTerm)
-            SharedTyped.defaultTermGraphLimits
-            source of
-          Left failure -> ExferenceTermGraphUnavailable
-            $ TermGraphSealingFailure failure
-          Right graph
-            | SharedTyped.eraseTermGraph graph == compatibility ->
-                ExferenceTermGraphAvailable graph
-            | otherwise -> ExferenceTermGraphUnavailable
-                TermGraphProjectionMismatch
+        Right source -> case origins of
+          [] -> case SharedTyped.sealTermGraph
+              (checkedTermTypeStructure checkedTerm)
+              SharedTyped.defaultTermGraphLimits
+              source of
+            Left failure -> ExferenceTermGraphUnavailable
+              $ TermGraphSealingFailure failure
+            Right graph -> retainPlain compatibility graph
+          _ -> case SharedAssociation.sealCheckedTypeApplicationCertificateGraph
+              SharedCertificate.defaultTypeApplicationCertificateLimits
+              (checkedTermTypeStructure checkedTerm)
+              SharedTyped.defaultTermGraphLimits
+              source
+              (map lowerTypeApplicationOrigin origins) of
+            Left failure -> ExferenceTermGraphUnavailable
+              $ associationAbsence failure
+            Right checked ->
+              let graph =
+                    SharedAssociation.checkedTypeApplicationCertificateGraph
+                      checked
+              in if SharedTyped.eraseTermGraph graph == compatibility
+                  then ExferenceTermGraphAssociated checked
+                  else ExferenceTermGraphUnavailable TermGraphProjectionMismatch
+
+retainPlain
+  :: SharedGenerated.Expression TVarId
+  -> SharedTyped.TermGraph HsType TVarId
+  -> ExferenceTermGraphAvailability
+retainPlain compatibility graph
+  | SharedTyped.eraseTermGraph graph == compatibility =
+      ExferenceTermGraphAvailable graph
+  | otherwise = ExferenceTermGraphUnavailable TermGraphProjectionMismatch
+
+lowerTypeApplicationOrigin
+  :: CheckedTypeApplicationOrigin
+  -> SharedAssociation.TypeApplicationCertificateOrigin SynthesisVariable
+lowerTypeApplicationOrigin
+    (CheckedTypeApplicationOrigin identifier owner source steps) =
+  SharedAssociation.TypeApplicationCertificateOrigin
+    (SharedTyped.certificateId identifier)
+    owner
+    source
+    (map lowerStep steps)
+ where
+  lowerStep (CheckedTypeApplicationOriginStep slot stepSource selected result
+      obligations) = SharedAssociation.TypeApplicationCertificateObservation
+    slot stepSource selected result obligations
+
+associationAbsence
+  :: SharedAssociation.TypeApplicationCertificateAssociationError
+      SynthesisVariable TVarId
+  -> ExferenceTermGraphAbsence
+associationAbsence failure = case failure of
+  SharedAssociation.TypeApplicationCertificateAssociationGraphError graph ->
+    TermGraphSealingFailure graph
+  SharedAssociation.TypeApplicationCertificateAssociationPlanError plan ->
+    TermGraphCertificateAssociationFailure $ planAssociationFailure plan
+  SharedAssociation.DuplicateGraphTypeApplicationCertificateUse{} ->
+    occurrenceFailure
+  SharedAssociation.UnexpectedGraphTypeApplicationCertificateUse{} ->
+    occurrenceFailure
+  SharedAssociation.MissingGraphTypeApplicationCertificateUse{} ->
+    occurrenceFailure
+  SharedAssociation.MissingAssociatedSealedTermNode{} -> occurrenceFailure
+  SharedAssociation.ExpectedTypeApplicationCertificateGlobalBase{} ->
+    occurrenceFailure
+  SharedAssociation.TypeApplicationCertificateGlobalOwnerMismatch{} ->
+    occurrenceFailure
+  SharedAssociation.TypeApplicationCertificateGlobalSchemeMismatch{} ->
+    occurrenceFailure
+  SharedAssociation.TypeApplicationCertificateChildChainMismatch{} ->
+    occurrenceFailure
+  SharedAssociation.TypeApplicationCertificateChildSourceMismatch{} ->
+    occurrenceFailure
+  SharedAssociation.TypeApplicationCertificateWitnessSourceMismatch{} ->
+    occurrenceFailure
+  SharedAssociation.TypeApplicationCertificateVisibleArgumentMismatch{} ->
+    occurrenceFailure
+  SharedAssociation.TypeApplicationCertificateWitnessSelectedMismatch{} ->
+    occurrenceFailure
+  SharedAssociation.TypeApplicationCertificateNodeResultMismatch{} ->
+    occurrenceFailure
+  SharedAssociation.TypeApplicationCertificateWitnessResultMismatch{} ->
+    occurrenceFailure
+  SharedAssociation.TypeApplicationCertificateInternalStepArityMismatch{} ->
+    occurrenceFailure
+ where
+  occurrenceFailure = TermGraphCertificateAssociationFailure
+    TermGraphCertificateOccurrenceAssociationFailure
+
+planAssociationFailure
+  :: SharedCertificate.TypeApplicationCertificateError SynthesisVariable
+  -> ExferenceTermGraphCertificateAssociationFailure
+planAssociationFailure failure = case failure of
+  SharedCertificate.TypeApplicationCertificateEntryLimitExceeded{} -> limited
+  SharedCertificate.TypeApplicationCertificateSelectionLimitExceeded{} ->
+    limited
+  SharedCertificate.TypeApplicationCertificateTypeNodeLimitExceeded{} -> limited
+  SharedCertificate.TypeApplicationCertificateTypeCollectionLimitExceeded{} ->
+    limited
+  SharedCertificate.TypeApplicationCertificateTelescopeLimitExceeded{} -> limited
+  SharedCertificate.TypeApplicationCertificateObligationLimitExceeded{} ->
+    limited
+  SharedCertificate.TypeApplicationCertificateObservationLimitExceeded{} ->
+    limited
+  SharedCertificate.TypeApplicationCertificateObservedObligationLimitExceeded{} ->
+    limited
+  SharedCertificate.DuplicateTypeApplicationCertificateId{} -> invalid
+  SharedCertificate.InvalidTypeApplicationCertificateType{} -> invalid
+  SharedCertificate.TypeApplicationCertificateHasNoLeadingBinder{} -> invalid
+  SharedCertificate.TypeApplicationCertificateSelectionArityMismatch{} -> invalid
+  SharedCertificate.TypeApplicationCertificateReplayEndedEarly{} -> invalid
+  SharedCertificate.TypeApplicationCertificateObservationArityMismatch{} ->
+    invalid
+  SharedCertificate.TypeApplicationCertificateObservationMissingPlan{} -> invalid
+  SharedCertificate.TypeApplicationCertificateObservationSlotMismatch{} ->
+    invalid
+  SharedCertificate.TypeApplicationCertificateObservationSourceMismatch{} ->
+    invalid
+  SharedCertificate.TypeApplicationCertificateObservationSelectedMismatch{} ->
+    invalid
+  SharedCertificate.TypeApplicationCertificateObservationResultMismatch{} ->
+    invalid
+  SharedCertificate.TypeApplicationCertificateObservedObligationCountMismatch{} ->
+    invalid
+  SharedCertificate.TypeApplicationCertificateObservedObligationClassMismatch{} ->
+    invalid
+  SharedCertificate.TypeApplicationCertificateObservedObligationArgumentCountMismatch{} ->
+    invalid
+  SharedCertificate.TypeApplicationCertificateObservedObligationArgumentMismatch{} ->
+    invalid
+ where
+  limited = TermGraphCertificatePlanLimitFailure
+  invalid = TermGraphCertificatePlanValidationFailure
 
 -- Constructor-pattern authority is retained only inside the checker-owned
 -- draft which proved the exact zero/step case. Ordinary terms therefore use
@@ -1561,23 +1736,29 @@ buildCheckedTerm (CheckedTerm ty checkedForm) = do
           $ SharedTyped.ApplicationWitness domain result
         _ -> lift $ Left TermGraphEvidenceMismatch
       pure $ SharedTyped.TypedApply functionId argumentId witness
-    CheckedVisibleTypeApplication argument selected contextualApplication _
-        function -> do
+    CheckedVisibleTypeApplication argument selected contextualApplication
+        annotation function -> do
       reserveTermGraphEdges 1
       occurrence <- allocateCheckedOccurrence
       functionId <- buildCheckedTerm function
       let source = case function of CheckedTerm functionType _ -> functionType
-      unless (SharedTypeAtom.isLeadingForallInstantiation source selected ty)
-        $ lift $ Left $ if contextualApplication
-            then UnsupportedContextualVisibleApplication source selected ty
-            else TermGraphEvidenceMismatch
+      case annotation of
+        Nothing ->
+          unless (SharedTypeAtom.isLeadingForallInstantiation source selected ty)
+            $ lift $ Left $ if contextualApplication
+                then UnsupportedContextualVisibleApplication source selected ty
+                else TermGraphEvidenceMismatch
+        Just _ -> pure ()
       pure $ SharedTyped.TypedVisibleTypeApplication
         occurrence functionId argument
         SharedTyped.TypeApplicationWitness
           { SharedTyped.typeApplicationSource = source
           , SharedTyped.typeApplicationSelected = selected
           , SharedTyped.typeApplicationResult = ty
-          , SharedTyped.typeApplicationCertificate = Nothing
+          , SharedTyped.typeApplicationCertificate = fmap
+              (\(identifier, slot) ->
+                (SharedTyped.certificateId identifier, slot))
+              annotation
           }
     CheckedTuple elements -> do
       elementCount <- observeTermGraphCollection

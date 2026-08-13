@@ -24,6 +24,21 @@ facadeTests :: TestTree
 facadeTests = testGroup "public Djex facade"
   [ testCase "enumerates both checked backends" $
       map backend availableBackends @?= [DjinnBackend, ExferenceBackend]
+  , testCase "exports sanitized Exference certificate association failures" $ do
+      let failures :: [ExferenceTermGraphCertificateAssociationFailure]
+          failures =
+            [ TermGraphCertificatePlanLimitFailure
+            , TermGraphCertificatePlanValidationFailure
+            , TermGraphCertificateOccurrenceAssociationFailure
+            ]
+          classify failure = case failure of
+            TermGraphCertificatePlanLimitFailure -> "limit"
+            TermGraphCertificatePlanValidationFailure -> "validation"
+            TermGraphCertificateOccurrenceAssociationFailure -> "occurrence"
+          nested :: [ExferenceTermGraphAbsence]
+          nested = map TermGraphCertificateAssociationFailure failures
+      map classify failures @?= ["limit", "validation", "occurrence"]
+      length nested @?= 3
   , testCase "exports the shared name vocabulary" $
       assertBool "qualified name was rejected" $
         isRight $ parseName "Data.Function.fix"

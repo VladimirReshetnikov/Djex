@@ -1043,12 +1043,13 @@ projectTypedQueryResult target typeHints =
   projectCandidate
       (ValidatedEngineCandidate candidateExpression constraints statistics
         availability) =
-    SharedTypedCandidate.mkTypedCandidate
+    SharedTypedCandidate.mkCertificateCapableTypedCandidate
       (projectValidatedCandidate
         target typeHints candidateExpression constraints statistics)
       (case availability of
-        ExferenceTermGraphAvailable graph -> Right graph
-        ExferenceTermGraphUnavailable absence -> Left absence)
+        ExferenceTermGraphUnavailable absence -> Left absence
+        ExferenceTermGraphAvailable graph -> Right $ Left graph
+        ExferenceTermGraphAssociated checked -> Right $ Right checked)
 
 -- | Project a typed query result without observing its graph result.  This is
 -- the sole canonical-to-legacy candidate edge.

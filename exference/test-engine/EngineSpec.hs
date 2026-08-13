@@ -1,5 +1,7 @@
 module Main (main) where
 
+import Control.DeepSeq (force)
+import Control.Exception (evaluate)
 import qualified Data.Map.Strict as Map
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -21,6 +23,7 @@ import Language.Haskell.Exference.Core.Internal.ExpressionCheck
   , ExpressionCheckError (..)
   , ExferenceTermGraphAbsence (..)
   , ExferenceTermGraphAvailability (..)
+  , ExferenceTermGraphCertificateAssociationFailure (..)
   , ExferenceTermGraphConstructionLimit (..)
   , checkedExpressionTermGraph
   , checkedExpressionTypeApplicationOriginReferences
@@ -83,15 +86,24 @@ import Language.Haskell.Exference.Core.RigidInstantiation
   ( mkRigidInstantiationContext, planRigidInstantiation )
 import Language.Haskell.Exference.Core.Types
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
+import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
+import qualified Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate
+  as Certificate
+import qualified Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.Association
+  as Association
+import qualified Language.Haskell.Synthesis.Internal.TypedCandidate
+  as TypedCandidate
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 import qualified Language.Haskell.Synthesis.TypedGenerated as Typed
+import qualified Language.Haskell.Synthesis.TypedGenerated.Fingerprint
+  as Fingerprint
 
 main :: IO ()
 main = defaultMain tests
@@ -826,8 +838,12 @@ tests = testGroup "Exference private engine boundaries"
             ExferenceTermGraphAvailable distinctGraph -> assertBool
               "different candidate keys reused one term-node identity"
               $ Typed.termGraphRoot distinctGraph /= Typed.termGraphRoot graph
+            ExferenceTermGraphAssociated _ -> fail
+              "local visible specialization gained global certificate authority"
             ExferenceTermGraphUnavailable reason -> fail
               $ "changing only the candidate key lost the graph: " ++ show reason
+        ExferenceTermGraphAssociated _ -> fail
+          "local visible specialization gained global certificate authority"
   , testCase "checker retains exact direct-global specialization origins" $ do
       let integer = TypeCons $ name "Int"
           boolean = TypeCons $ name "Bool"
@@ -875,7 +891,27 @@ tests = testGroup "Exference private engine boundaries"
       case checkedExpressionTermGraph 41 evidence of
         ExferenceTermGraphUnavailable reason -> fail
           $ "origin-bearing specialization lost its graph: " ++ show reason
-        ExferenceTermGraphAvailable graph -> do
+        ExferenceTermGraphAvailable _ -> fail
+          "origin-bearing specialization was downgraded to a plain graph"
+        ExferenceTermGraphAssociated checked -> do
+          let graph =
+                Association.checkedTypeApplicationCertificateGraph checked
+              associated = ExferenceTermGraphAssociated checked
+              plain = ExferenceTermGraphAvailable graph
+              legacyShow :: Int -> ShowS
+              legacyShow precedence = showParen (precedence > 10)
+                $ showString "ExferenceTermGraphAvailable" . showChar ' '
+                . showsPrec 11 graph
+          associated @?= plain
+          show associated @?= show plain
+          showsPrec 11 associated "" @?= showsPrec 11 plain ""
+          showsPrec 0 associated "" @?= legacyShow 0 ""
+          showsPrec 11 associated "" @?= legacyShow 11 ""
+          (ExferenceTermGraphUnavailable TermGraphEvidenceMismatch ==
+              ExferenceTermGraphAssociated
+                (error "availability equality forced associated payload"))
+            @?= False
+          _ <- evaluate $ force associated
           let witnesses =
                 [ witness
                 | (_, Typed.TermNode _
@@ -884,7 +920,42 @@ tests = testGroup "Exference private engine boundaries"
                 ]
           length witnesses @?= 2
           map Typed.typeApplicationCertificate witnesses @?=
-            [Nothing, Nothing]
+            [ Just (Typed.certificateId 0, 1)
+            , Just (Typed.certificateId 0, 0)
+            ]
+          let rows = Association.foldCheckedTypeApplicationCertificateGraph
+                (\retained certificate owner scheme baseNode baseOccurrence
+                    receipts -> retained ++
+                  [ ( certificate
+                    , owner
+                    , scheme
+                    , Typed.termNodeIdValue baseNode
+                    , Typed.occurrenceIdValue baseOccurrence
+                    , [ ( Certificate.checkedTypeApplicationCertificateStepSlot
+                            step
+                        , Typed.termNodeIdValue node
+                        , Typed.occurrenceIdValue occurrence
+                        )
+                      | (node, occurrence, step) <- receipts
+                      ]
+                    )
+                  ]) [] checked
+          rows @?=
+            [ ( Typed.certificateId 0
+              , providerName
+              , provider
+              , paired 41 2
+              , paired 41 2
+              , [ (0, paired 41 1, paired 41 1)
+                , (1, paired 41 0, paired 41 0)
+                ]
+              )
+            ]
+          Fingerprint.fingerprintSharedTermGraph
+              Typed.defaultTermGraphLimits
+              Fingerprint.defaultTermGraphFingerprintByteLimit graph @?=
+            Left (Fingerprint.TermGraphFingerprintUnsupportedCertificate
+              $ Typed.certificateId 0)
   , testCase "specialization origins retain activated source constraints" $ do
       let className = name "C"
           providerName = name "contextual"
@@ -912,15 +983,75 @@ tests = testGroup "Exference private engine boundaries"
           ++ show (length origins)
       checkedExpressionTypeApplicationOriginReferences evidence @?= [(0, 0)]
       case checkedExpressionTermGraph 42 evidence of
-        ExferenceTermGraphUnavailable
-            (UnsupportedContextualVisibleApplication source selected actual) -> do
-          source @?= provider
-          selected @?= integer
-          actual @?= token
         ExferenceTermGraphUnavailable reason -> fail
-          $ "contextual origin changed graph absence: " ++ show reason
+          $ "contextual origin lost its associated graph: " ++ show reason
         ExferenceTermGraphAvailable _ -> fail
-          "contextual origin unexpectedly made its graph available"
+          "contextual origin was downgraded to a plain graph"
+        ExferenceTermGraphAssociated checked -> do
+          let graph =
+                Association.checkedTypeApplicationCertificateGraph checked
+              obligations =
+                Association.foldCheckedTypeApplicationCertificateGraph
+                  (\retained _ _ _ _ _ receipts -> retained ++
+                    [ [ Certificate.checkedTypeApplicationCertificateStepObligations
+                          step
+                      | (_, _, step) <- receipts
+                      ]
+                    ]) [] checked
+          obligations @?=
+            [ [ [ SharedConstraint.Constraint className
+                    [fmap Certificate.TypeApplicationCertificateFree integer]
+                ]
+              ]
+            ]
+          let certificates =
+                [ Typed.typeApplicationCertificate witness
+                | (_, Typed.TermNode _
+                    (Typed.TypedVisibleTypeApplication _ _ _ witness)) <-
+                      Typed.termGraphNodes graph
+                ]
+          certificates @?= [Just (Typed.certificateId 0, 0)]
+  , testCase "scheme-backed query results retain the associated carrier" $ do
+      let integer = TypeCons $ name "Int"
+          token = TypeCons $ name "Token"
+          providerName = name "querySpecialize"
+          provider = TypeForall [0] [] token
+          input = identityInput
+            { E.input_goalType = token
+            , E.input_maxSteps = 20
+            }
+      (bindings, schemes) <- preparedValueEnvironment providerName provider
+      environment <- expectRight $ E.mkExferenceEnvironmentWithSchemes
+        (EnvDictionary bindings [] emptyStaticClassEnv) schemes
+      target <- checkedIdentifierTarget "queryAssociatedResult"
+      options <- expectRight $ E.checkExferenceOptions
+        $ E.querySearchOptions $ legacyInputQuery input
+      results <- expectRight $
+        E.findTypedQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
+          (Map.singleton providerName [[integer]])
+          target
+          (emptyExferenceSourceTypeVariableHints token)
+          environment
+          (legacyInputQuery input)
+          options
+      let candidates = concatMap
+            (SharedSearch.batchCandidates . SharedQuery.resultSearch) results
+          observations =
+            [ TypedCandidate.foldTypedCandidateGraph
+                (\_ _ -> "unavailable")
+                (\_ _ -> "plain")
+                (\_ checked ->
+                  if null $ Association.foldCheckedTypeApplicationCertificateGraph
+                      (\rows _ _ _ _ _ receipts -> receipts : rows) [] checked
+                    then "associated-empty"
+                    else "associated")
+                candidate
+            | candidate <- candidates
+            ]
+      assertBool
+        ("scheme-backed query did not retain an associated carrier: "
+          ++ show observations)
+        $ "associated" `elem` observations
   , testCase "source constraints activate before a selected polytype suffix" $ do
       let className = name "C"
           providerName = name "polyContextual"
@@ -960,14 +1091,53 @@ tests = testGroup "Exference private engine boundaries"
             ++ show (length steps)
         origins -> fail $ "returned-polytype origin count changed: "
           ++ show (length origins)
+      case checkedExpressionTermGraph 43 evidence of
+        ExferenceTermGraphAssociated checked -> do
+          let certificates =
+                [ Typed.typeApplicationCertificate witness
+                | (_, Typed.TermNode _
+                    (Typed.TypedVisibleTypeApplication _ _ _ witness)) <-
+                      Typed.termGraphNodes
+                        $ Association.checkedTypeApplicationCertificateGraph
+                            checked
+                ]
+              retained =
+                Association.foldCheckedTypeApplicationCertificateGraph
+                  (\rows _ _ _ _ _ receipts -> receipts : rows) [] checked
+          certificates @?= [Nothing, Just (Typed.certificateId 0, 0)]
+          case retained of
+            [[(_, _, step)]] -> do
+              Certificate.checkedTypeApplicationCertificateStepSlot step @?= 0
+              assertBool "associated suffix changed the selected polytype"
+                $ SharedTypeAtom.alphaEquivalentTypes
+                    (Certificate.checkedTypeApplicationCertificateStepSelected
+                      step)
+                    (fmap Certificate.TypeApplicationCertificateFree selected)
+              case Certificate.checkedTypeApplicationCertificateStepObligations
+                  step of
+                [SharedConstraint.Constraint retainedClass [retainedSelected]] -> do
+                  retainedClass @?= className
+                  assertBool "associated suffix changed the source obligation"
+                    $ SharedTypeAtom.alphaEquivalentTypes retainedSelected
+                        (fmap Certificate.TypeApplicationCertificateFree selected)
+                obligations -> fail $ "unexpected associated suffix obligations: "
+                  ++ show obligations
+            rows -> fail $ "returned suffix retained the wrong receipt chain: "
+              ++ show (map length rows)
+        ExferenceTermGraphAvailable _ -> fail
+          "returned-polymorphic origin was downgraded to a plain graph"
+        ExferenceTermGraphUnavailable reason -> fail
+          $ "returned-polymorphic origin lost association: " ++ show reason
 
       -- The same source step must activate before any suffix exists.  This
       -- pins the checker correction which decides continuation from the raw
       -- source body, never from a replacement-introduced forall.
       noSuffix <- checkedEvidenceWithSchemes classes bindings [] schemes
-        (TypeArrow integer selected)
-        (ExpLambda 20 integer
-          $ ExpTypeApply (ExpName providerName) selectedArgument)
+        (TypeTuple Boxed [selected, TypeTuple Boxed []])
+        (ExpTuple
+          [ ExpTypeApply (ExpName providerName) selectedArgument
+          , ExpTuple []
+          ])
       checkedExpressionTypeApplicationOriginReferences noSuffix @?= [(0, 0)]
       case checkedExpressionTypeApplicationOrigins noSuffix of
         [origin] -> case checkedTypeApplicationOriginSteps origin of
@@ -987,6 +1157,16 @@ tests = testGroup "Exference private engine boundaries"
             ++ show (length steps)
         origins -> fail $ "unexpected no-suffix origin count: "
           ++ show (length origins)
+      case checkedExpressionTermGraph 50 noSuffix of
+        ExferenceTermGraphAssociated checked ->
+          map (Certificate.checkedTypeApplicationCertificateStepSlot . third)
+            (concat $ Association.foldCheckedTypeApplicationCertificateGraph
+              (\rows _ _ _ _ _ receipts -> receipts : rows) [] checked)
+            @?= [0]
+        ExferenceTermGraphAvailable _ -> fail
+          "no-suffix source origin was downgraded to a plain graph"
+        ExferenceTermGraphUnavailable reason -> fail
+          $ "no-suffix source origin lost association: " ++ show reason
   , testCase "incomplete and compatibility visible spines stay origin-free" $ do
       let integer = TypeCons $ name "Int"
           boolean = TypeCons $ name "Bool"
@@ -1002,10 +1182,11 @@ tests = testGroup "Exference private engine boundaries"
           partialExpression = ExpTypeApply
             (ExpName providerName) integerArgument
       partial <- checkedEvidenceWithSchemes emptyStaticClassEnv bindings []
-        schemes (TypeArrow integer remaining)
-        (ExpLambda 20 integer partialExpression)
+        schemes (TypeTuple Boxed [remaining, TypeTuple Boxed []])
+        (ExpTuple [partialExpression, ExpTuple []])
       null (checkedExpressionTypeApplicationOrigins partial) @?= True
       checkedExpressionTypeApplicationOriginReferences partial @?= []
+      expectPlainGraph "partial source telescope" 44 partial
       inferred <- checkedEvidenceWithSchemes emptyStaticClassEnv bindings []
         schemes (TypeArrow integer boolean)
         (ExpTypeApply
@@ -1013,12 +1194,14 @@ tests = testGroup "Exference private engine boundaries"
             Generated.inferredVisibleTypeArgument)
           booleanArgument)
       null (checkedExpressionTypeApplicationOrigins inferred) @?= True
+      expectPlainGraph "inferred visible prefix" 45 inferred
       let fallbackName = name "compatibilityPolytype"
           fallbackScheme = TypeForall [0] [] $ TypeVar 0
           fallbackBinding = FunctionBinding fallbackScheme fallbackName 0 [] []
       compatibility <- checkedEvidence emptyStaticClassEnv [fallbackBinding] []
         integer (ExpTypeApply (ExpName fallbackName) integerArgument)
       null (checkedExpressionTypeApplicationOrigins compatibility) @?= True
+      expectPlainGraph "compatibility fallback" 46 compatibility
   , testCase "origin eligibility is closed bounded and post-constraint" $ do
       let integer = TypeCons $ name "Int"
           boolean = TypeCons $ name "Bool"
@@ -1041,6 +1224,26 @@ tests = testGroup "Exference private engine boundaries"
       length (checkedExpressionTypeApplicationOrigins sixEvidence) @?= 1
       checkedExpressionTypeApplicationOriginReferences sixEvidence @?=
         [(0, slot) | slot <- [0 .. 5]]
+      case checkedExpressionTermGraph 47 sixEvidence of
+        ExferenceTermGraphAssociated checked -> do
+          let graph =
+                Association.checkedTypeApplicationCertificateGraph checked
+              certificates =
+                [ Typed.typeApplicationCertificate witness
+                | (_, Typed.TermNode _
+                    (Typed.TypedVisibleTypeApplication _ _ _ witness)) <-
+                      Typed.termGraphNodes graph
+                ]
+          certificates @?=
+            [Just (Typed.certificateId 0, slot) | slot <- [5, 4 .. 0]]
+          map (Certificate.checkedTypeApplicationCertificateStepSlot . third)
+            (concat $ Association.foldCheckedTypeApplicationCertificateGraph
+              (\rows _ _ _ _ _ receipts -> receipts : rows) [] checked)
+            @?= [0 .. 5]
+        ExferenceTermGraphAvailable _ -> fail
+          "six-slot exact origin was downgraded to a plain graph"
+        ExferenceTermGraphUnavailable reason -> fail
+          $ "six-slot exact origin lost association: " ++ show reason
 
       let sevenName = name "sevenOrigin"
           sevenScheme = TypeForall [0 .. 6] [] token
@@ -1051,6 +1254,7 @@ tests = testGroup "Exference private engine boundaries"
         (foldl ExpTypeApply (ExpName sevenName) arguments)
       null (checkedExpressionTypeApplicationOrigins sevenEvidence) @?= True
       checkedExpressionTypeApplicationOriginReferences sevenEvidence @?= []
+      expectPlainGraph "seven-slot ineligible telescope" 48 sevenEvidence
 
       -- A deliberately open retained scheme can satisfy the structural
       -- sidecar check, but cannot own a closed specialization origin.
@@ -1087,6 +1291,23 @@ tests = testGroup "Exference private engine boundaries"
         Left failure -> failure @?=
           ConstraintMismatch [] [constraint boolean]
         Right _ -> fail "an unsatisfied origin escaped the constraint gate"
+  , testCase "association row limits fail closed without a plain downgrade" $ do
+      let token = TypeCons $ name "Token"
+          integer = TypeCons $ name "Int"
+          providerName = name "manyOrigins"
+          provider = TypeForall [0] [] token
+      (bindings, schemes) <- preparedValueEnvironment providerName provider
+      argument <- expectRight $ Generated.specifiedVisibleTypeArgument integer
+      let application = ExpTypeApply (ExpName providerName) argument
+          expression = ExpTuple $ replicate 33 application
+          goal = TypeTuple Boxed $ replicate 33 token
+      evidence <- checkedEvidenceWithSchemes emptyStaticClassEnv bindings []
+        schemes goal expression
+      length (checkedExpressionTypeApplicationOrigins evidence) @?= 33
+      checkedExpressionTermGraph 49 evidence @?=
+        ExferenceTermGraphUnavailable
+          (TermGraphCertificateAssociationFailure
+            TermGraphCertificatePlanLimitFailure)
   , testCase "failed preferred inference rolls origin state back" $ do
       let integer = TypeCons $ name "Int"
           providerName = name "transactionalOrigin"
@@ -1141,6 +1362,8 @@ tests = testGroup "Exference private engine boundaries"
       case checkedExpressionTermGraph 29 evidence of
         ExferenceTermGraphUnavailable reason -> fail
           $ "exact zero-step spine case had no typed graph: " ++ show reason
+        ExferenceTermGraphAssociated _ -> fail
+          "certificate-free exact case gained specialization authority"
         ExferenceTermGraphAvailable graph -> do
           Typed.eraseTermGraph graph @?=
             Generated.discardUnusedPatternBindingsBy id
@@ -1197,6 +1420,52 @@ tests = testGroup "Exference private engine boundaries"
           [exactDeconstructor] goal [] shadowed @?= duplicateError)
         [lambdaShadow, letShadow, nestedCaseShadow]
 
+  , testCase "certificate association preserves exact case schemas" $ do
+      let payload = TypeCons $ name "Payload"
+          token = TypeCons $ name "Token"
+          integer = TypeCons $ name "Int"
+          spineName = name "AssociatedSpine"
+          zeroName = name "AssociatedZero"
+          stepName = name "AssociatedStep"
+          providerName = name "associatedCaseProvider"
+          spine = TypeApp (TypeCons spineName) payload
+          zero = FunctionBinding spine zeroName 0 [] []
+          step = FunctionBinding spine stepName 0 [] [payload, spine]
+          deconstructor = DeconstructorBinding spine
+            [ ConstructorBinding zeroName []
+            , ConstructorBinding stepName [payload, spine]
+            ] True
+          provider = TypeForall [0] [] token
+          caseExpression = ExpLambda 1 spine
+            $ ExpCaseMatch (ExpVar 1 spine)
+                [ (zeroName, [], ExpName zeroName)
+                , (stepName, [(2, payload), (3, spine)], ExpVar 3 spine)
+                ]
+      (providerBindings, schemes) <- preparedValueEnvironment
+        providerName provider
+      argument <- expectRight $ Generated.specifiedVisibleTypeArgument integer
+      let expression = ExpTuple
+            [ caseExpression
+            , ExpTypeApply (ExpName providerName) argument
+            ]
+          goal = TypeTuple Boxed [TypeArrow spine spine, token]
+          functions = [zero, step] ++ providerBindings
+      evidence <- checkedEvidenceWithSchemes emptyStaticClassEnv functions
+        [deconstructor] schemes goal expression
+      case checkedExpressionTermGraph 51 evidence of
+        ExferenceTermGraphAssociated checked -> do
+          let graph =
+                Association.checkedTypeApplicationCertificateGraph checked
+          Typed.typedGraphCases (Typed.termGraphMetrics graph) @?= 1
+          map (Certificate.checkedTypeApplicationCertificateStepSlot . third)
+            (concat $ Association.foldCheckedTypeApplicationCertificateGraph
+              (\rows _ _ _ _ _ receipts -> receipts : rows) [] checked)
+            @?= [0]
+        ExferenceTermGraphAvailable _ -> fail
+          "mixed exact case and origin was downgraded to a plain graph"
+        ExferenceTermGraphUnavailable reason -> fail
+          $ "mixed exact case and origin failed association: " ++ show reason
+
   , testCase "strict production search retains an exact zero-step case graph" $ do
       let payload = TypeCons $ name "Payload"
           spineName = name "Spine"
@@ -1245,6 +1514,7 @@ tests = testGroup "Exference private engine boundaries"
               , tailType == spine
               , returnedTailType == spine -> case availability of
                   ExferenceTermGraphAvailable{} -> True
+                  ExferenceTermGraphAssociated{} -> False
                   ExferenceTermGraphUnavailable{} -> False
             _ -> False
       candidates <- expectRight
@@ -1275,6 +1545,8 @@ tests = testGroup "Exference private engine boundaries"
       case checkedExpressionTermGraph 31 evidence of
         ExferenceTermGraphUnavailable reason -> fail
           $ "multi-binder specialization had no typed graph: " ++ show reason
+        ExferenceTermGraphAssociated _ -> fail
+          "local inferred specialization gained global certificate authority"
         ExferenceTermGraphAvailable graph -> do
           let witnesses =
                 [ witness
@@ -1510,6 +1782,8 @@ tests = testGroup "Exference private engine boundaries"
           ++ show reason
         ExferenceTermGraphAvailable _ -> fail
           "layered contextual application unexpectedly produced a graph"
+        ExferenceTermGraphAssociated _ -> fail
+          "local contextual application gained global certificate authority"
   , testCase "typed evidence reports sealing and projection mismatches" $ do
       let integer = TypeCons $ name "Int"
           seedName = name "seed"
@@ -1702,6 +1976,37 @@ expectUnavailable label matches evidence =
       | otherwise -> fail $ label ++ ": wrong absence: " ++ show reason
     ExferenceTermGraphAvailable graph ->
       fail $ label ++ ": unexpectedly sealed: " ++ show graph
+    ExferenceTermGraphAssociated _ ->
+      fail $ label ++ ": unexpectedly associated"
+
+expectPlainGraph
+  :: String
+  -> Natural
+  -> CheckedExpressionEvidence
+  -> IO ()
+expectPlainGraph label key evidence =
+  case checkedExpressionTermGraph key evidence of
+    ExferenceTermGraphAvailable graph ->
+      [ Typed.typeApplicationCertificate witness
+      | (_, Typed.TermNode _
+          (Typed.TypedVisibleTypeApplication _ _ _ witness)) <-
+            Typed.termGraphNodes graph
+      ] @?= replicate
+        (fromIntegral $ Typed.typedGraphVisibleTypeApplications
+          $ Typed.termGraphMetrics graph)
+        Nothing
+    ExferenceTermGraphAssociated _ ->
+      fail $ label ++ ": unexpectedly retained certificate authority"
+    ExferenceTermGraphUnavailable reason ->
+      fail $ label ++ ": unexpectedly unavailable: " ++ show reason
+
+paired :: Natural -> Natural -> Natural
+paired left right = ((sum' * (sum' + 1)) `div` 2) + right
+ where
+  sum' = left + right
+
+third :: (first, second, value) -> value
+third (_, _, value) = value
 
 checkedIdentifierTarget :: String -> IO Generated.DefinitionName
 checkedIdentifierTarget spelling = do

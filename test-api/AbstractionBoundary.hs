@@ -141,6 +141,7 @@ $(do
           , "PublicDjex.TypeApplicationCertificateAssociationError"
           , "PublicDjex.CheckedTypeApplicationOrigin"
           , "PublicDjex.CheckedTypeApplicationOriginStep"
+          , "PublicDjex.ExferenceTermGraphAvailability"
           ]
         hiddenValues =
           [ "LengthSMTLibLiveSession"
@@ -210,6 +211,9 @@ $(do
           , "PublicDjex.checkedTypeApplicationOriginStepSelected"
           , "PublicDjex.checkedTypeApplicationOriginStepResult"
           , "PublicDjex.checkedTypeApplicationOriginStepObligations"
+          , "PublicDjex.ExferenceTermGraphAvailable"
+          , "PublicDjex.ExferenceTermGraphAssociated"
+          , "PublicDjex.ExferenceTermGraphUnavailable"
           ]
     resolvedTypes <- mapM lookupTypeName hiddenTypes
     resolvedValues <- mapM lookupValueName hiddenValues

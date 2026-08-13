@@ -50,6 +50,7 @@ module Language.Haskell.Djex.Exference
   , ExferenceTypedResult
   , ExferenceTypedCandidate
   , ExferenceTermGraphAbsence (..)
+  , ExferenceTermGraphCertificateAssociationFailure (..)
   , ExferenceTermGraphConstructionLimit (..)
   , ExferenceCandidateDetails
   , pattern ExferenceCandidateDetails
@@ -124,6 +125,7 @@ import Language.Haskell.Exference.Core.Internal.Candidate
   )
 import Language.Haskell.Exference.Core.Internal.ExpressionCheck
   ( ExferenceTermGraphAbsence (..)
+  , ExferenceTermGraphCertificateAssociationFailure (..)
   , ExferenceTermGraphConstructionLimit (..)
   )
 import Language.Haskell.Djex.Exference.Internal.Session
@@ -223,10 +225,15 @@ type ExferenceResult = Core.ExferenceResult
 
 -- | One independently checked compatibility candidate paired with either its
 -- sealed typed graph or the explicit reason typed retention was unavailable.
+-- A private branch can additionally retain the graph's complete checked
+-- type-application certificate association without changing this public type.
 -- Project an enclosing typed result with 'typedQueryResultCompatibility', and
 -- inspect this candidate directly with
 -- 'Language.Haskell.Synthesis.TypedCandidate.typedCandidateCompatibility' or
--- 'Language.Haskell.Synthesis.TypedCandidate.typedCandidateTermGraph'.
+-- 'Language.Haskell.Synthesis.TypedCandidate.typedCandidateTermGraph'. The
+-- latter returns only a bare graph: any stamped certificate handles remain
+-- non-authoritative coordinates, the opaque association is lost, and public
+-- graph fingerprinting rejects that projection.
 type ExferenceTypedCandidate =
   TypedCandidate ExferenceTermGraphAbsence
     ExferenceType ExferenceLocal ExferenceCandidate
@@ -582,7 +589,11 @@ safeBoundedHint source = unsafePerformIO $ do
 -- | Elaborate and lower a checked request, retaining the lazy typed graph
 -- result paired with every independently validated compatibility candidate.
 -- Query, option, and lowering failures are reported before the 'Right' trace
--- is exposed; graph availability remains lazy per candidate.
+-- is exposed; graph availability remains lazy per candidate. Eligible exact
+-- direct-global specializations privately retain their atomic certificate
+-- association. Public graph projection exposes only its stamped bare graph,
+-- which carries no association authority and is rejected by public graph
+-- fingerprinting.
 runExferenceTypedQuery
   :: ExferenceSession
   -> ExferenceRequest

@@ -178,8 +178,9 @@ data LengthExpression variable
   | LengthLiteral Natural
   | LengthSum [LengthExpression variable]
   | LengthScale Natural (LengthExpression variable)
-  -- The raw divisor is deliberately lazy.  Sealing validates that it is
-  -- positive and within the shared literal bound before traversing the child.
+  -- Both raw divisors are deliberately lazy.  Sealing validates that each is
+  -- positive and within the shared literal bound before traversing its child.
+  | LengthQuotient Natural (LengthExpression variable)
   | LengthModulo Natural (LengthExpression variable)
   | LengthMonus (LengthExpression variable) (LengthExpression variable)
   | LengthMinimum (LengthExpression variable) (LengthExpression variable)
@@ -609,6 +610,7 @@ data LengthSyntaxError
   | LengthSyntaxCollectionLimitExceeded
       LengthSyntaxCollectionSite Int Int
   | LengthLiteralBitLimitExceeded Int Int
+  | LengthQuotientDivisorZero
   | LengthModuloDivisorZero
   | LengthResultNotAvailableInPrecondition
   | LengthInputReferenceOutOfRange Natural Int
@@ -1244,6 +1246,17 @@ normalizeLengthExpression limits checkVariable usage source = do
         limits checkVariable afterNode expression
       normalized <- normalizeScale limits checkedFactor normalizedExpression
       pure (normalized, afterExpression)
+    LengthQuotient divisor expression -> do
+      if divisor == 0
+        then Left LengthQuotientDivisorZero
+        else pure ()
+      checkedDivisor <- validateLiteral limits divisor
+      (normalizedExpression, afterExpression) <- normalizeLengthExpression
+        limits checkVariable afterNode expression
+      pure
+        ( normalizeQuotient checkedDivisor normalizedExpression
+        , afterExpression
+        )
     LengthModulo divisor expression -> do
       if divisor == 0
         then Left LengthModuloDivisorZero
@@ -1412,6 +1425,19 @@ normalizeScale limits factor expression
         combined <- validateLiteral limits $ factor * nestedFactor
         normalizeScale limits combined nested
       _ -> Right $ LengthScale factor expression
+
+-- The divisor has already been checked positive and within the literal bound.
+-- Normalize the child before applying either reduction so quotient-by-one or
+-- a literal expression cannot hide an invalid variable or an over-budget tree.
+normalizeQuotient
+  :: Natural
+  -> LengthExpression variable
+  -> LengthExpression variable
+normalizeQuotient divisor expression = case expression of
+  LengthLiteral value -> LengthLiteral $ value `quot` divisor
+  _
+    | divisor == 1 -> expression
+    | otherwise -> LengthQuotient divisor expression
 
 -- The divisor has already been checked positive and within the literal bound.
 -- Normalize the child before applying either reduction so a modulo-by-one or
@@ -1655,6 +1681,11 @@ lengthExpressionField variableField source = case source of
     [FingerprintSequence $ map (lengthExpressionField variableField) terms]
   LengthScale factor expression -> tagged "scale"
     [ FingerprintNatural factor
+    , lengthExpressionField variableField expression
+    ]
+  LengthQuotient divisor expression -> tagged
+    "positive-literal-natural-quotient/v1"
+    [ FingerprintNatural divisor
     , lengthExpressionField variableField expression
     ]
   LengthModulo divisor expression -> tagged

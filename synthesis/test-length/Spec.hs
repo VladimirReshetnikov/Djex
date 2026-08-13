@@ -1667,6 +1667,14 @@ candidateProblemTests = testGroup "typed candidate behavioral problems"
           (LengthProblem.checkedLengthProblemCandidate problem) @?= modulo
       LengthProblem.checkedLengthProblemCounterexampleCondition problem @?=
         Length.LengthNot (Length.LengthEqual input modulo)
+  , testCase "substitute a checked quotient provider transfer into the problem" $ do
+      problem <- adversarialQuotientProviderProblem 3 identityLengthContract
+      let input = Length.LengthVariable $ Length.LengthInput 0
+          quotient = Length.LengthQuotient 3 input
+      LengthProblem.checkedLengthCandidateResult
+          (LengthProblem.checkedLengthProblemCandidate problem) @?= quotient
+      LengthProblem.checkedLengthProblemCounterexampleCondition problem @?=
+        Length.LengthNot (Length.LengthEqual input quotient)
   , testCase "retain used provider laws in canonical name order" $ do
       earlierName <- expectName "Fixture.alphaUsedProvider"
       laterName <- expectName "Fixture.omegaUsedProvider"
@@ -3002,6 +3010,10 @@ smtLibTests = testGroup
         Just (asciiBytes "(get-value (djex_length_input_0))\n")
       assertBool "modulo lowering schema was absent from query identity"
         $ loweringTag `isInfixOf` keyBytes
+      assertBool "modulo-only query gained the quotient lowering schema"
+        $ not $ asciiBytes
+            "djex-length-z3-qf-lia-positive-literal-natural-quotient-witness/v1"
+              `isInfixOf` keyBytes
       assertBool "normalized modulo node was absent from problem identity"
         $ expressionTag `isInfixOf` keyBytes
       -- Snapshot only the canonical reversible key bytes; the digest is not
@@ -3019,6 +3031,90 @@ smtLibTests = testGroup
       receipt <- expectRight $ Djex.replayBehavioralEvidence
         (LengthProblem.checkedLengthProblemBehavioralProblem problem) evidence
       Evaluate.validatedLengthCounterexampleInputs receipt @?= [8]
+      Evaluate.validatedLengthCounterexampleResult receipt @?= 0
+  , testCase
+      "lower nested mixed quotient/modulo with shared Euclidean witnesses" $ do
+      let input = Length.LengthVariable $ Length.LengthInput 0
+          result = Length.LengthVariable Length.LengthResult
+          mixed = Length.LengthIf
+            (Length.LengthAtMost input $ Length.LengthLiteral 10)
+            (Length.LengthQuotient 5 $ Length.LengthModulo 3 input)
+            (Length.LengthModulo 7 $ Length.LengthQuotient 2 input)
+          source = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result mixed
+      problem <- adversarialConstantZeroProblem source
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      let script = map (toEnum . fromIntegral)
+            $ SMTLib.lengthSMTLibQueryCheckBytes query
+          witnessBlock = concat
+            [ "(declare-const djex_length_quotient_quotient_0 Int)\n"
+            , "(declare-const djex_length_quotient_remainder_0 Int)\n"
+            , "(declare-const djex_length_modulo_quotient_1 Int)\n"
+            , "(declare-const djex_length_modulo_remainder_1 Int)\n"
+            , "(declare-const djex_length_modulo_quotient_2 Int)\n"
+            , "(declare-const djex_length_modulo_remainder_2 Int)\n"
+            , "(declare-const djex_length_quotient_quotient_3 Int)\n"
+            , "(declare-const djex_length_quotient_remainder_3 Int)\n"
+            , "(assert (<= 0 djex_length_input_0))\n"
+            , "(assert (<= 0 djex_length_quotient_quotient_0))\n"
+            , "(assert (<= 0 djex_length_quotient_remainder_0))\n"
+            , "(assert (<= djex_length_quotient_remainder_0 4))\n"
+            , "(assert (= djex_length_modulo_remainder_1 "
+            , "(+ (* 5 djex_length_quotient_quotient_0) "
+            , "djex_length_quotient_remainder_0)))\n"
+            , "(assert (<= 0 djex_length_modulo_quotient_1))\n"
+            , "(assert (<= 0 djex_length_modulo_remainder_1))\n"
+            , "(assert (<= djex_length_modulo_remainder_1 2))\n"
+            , "(assert (= djex_length_input_0 "
+            , "(+ (* 3 djex_length_modulo_quotient_1) "
+            , "djex_length_modulo_remainder_1)))\n"
+            , "(assert (<= 0 djex_length_modulo_quotient_2))\n"
+            , "(assert (<= 0 djex_length_modulo_remainder_2))\n"
+            , "(assert (<= djex_length_modulo_remainder_2 6))\n"
+            , "(assert (= djex_length_quotient_quotient_3 "
+            , "(+ (* 7 djex_length_modulo_quotient_2) "
+            , "djex_length_modulo_remainder_2)))\n"
+            , "(assert (<= 0 djex_length_quotient_quotient_3))\n"
+            , "(assert (<= 0 djex_length_quotient_remainder_3))\n"
+            , "(assert (<= djex_length_quotient_remainder_3 1))\n"
+            , "(assert (= djex_length_input_0 "
+            , "(+ (* 2 djex_length_quotient_quotient_3) "
+            , "djex_length_quotient_remainder_3)))\n"
+            ]
+          keyBytes = Fingerprint.fingerprintCanonicalBytes
+            $ SMTLib.lengthSMTLibQueryFingerprint query
+          moduloLoweringTag = asciiBytes
+            "djex-length-z3-qf-lia-positive-literal-modulo-witness/v1"
+          quotientLoweringTag = asciiBytes
+            "djex-length-z3-qf-lia-positive-literal-natural-quotient-witness/v1"
+      assertBool "mixed witnesses lost global expression-preorder allocation"
+        $ witnessBlock `isInfixOf` script
+      assertBool "the bad-state formula did not project q and r separately"
+        $ ("(assert (not (= 0 (ite (<= djex_length_input_0 10) " ++
+            "djex_length_quotient_quotient_0 " ++
+            "djex_length_modulo_remainder_2))))\n") `isInfixOf` script
+      assertBool "the QF_LIA query emitted the forbidden SMT-LIB div operator"
+        $ not $ "(div " `isInfixOf` script
+      assertBool "the QF_LIA query emitted the forbidden SMT-LIB mod operator"
+        $ not $ "(mod " `isInfixOf` script
+      assertBool "mixed query identity omitted modulo witness policy"
+        $ moduloLoweringTag `isInfixOf` keyBytes
+      assertBool "mixed query identity omitted quotient witness policy"
+        $ quotientLoweringTag `isInfixOf` keyBytes
+      assertBool "problem identity omitted normalized quotient syntax"
+        $ asciiBytes "positive-literal-natural-quotient/v1"
+            `isInfixOf` keyBytes
+      assertBool "problem identity omitted normalized modulo syntax"
+        $ asciiBytes "positive-literal-natural-modulo/v1"
+            `isInfixOf` keyBytes
+      evidence <- expectCounterexample
+        $ SMTLib.validateLengthSMTLibCounterexample
+            Evaluate.defaultLengthEvaluationLimits query
+            [smtIntegerBinding (asciiBytes "djex_length_input_0") 17]
+      receipt <- expectRight $ Djex.replayBehavioralEvidence
+        (LengthProblem.checkedLengthProblemBehavioralProblem problem) evidence
+      Evaluate.validatedLengthCounterexampleInputs receipt @?= [17]
       Evaluate.validatedLengthCounterexampleResult receipt @?= 0
   , testCase "translate every other normalized Length operator into QF_LIA" $ do
       let input = Length.LengthVariable $ Length.LengthInput 0
@@ -3536,6 +3632,12 @@ smtLibTests = testGroup
           SMTLib.defaultLengthSMTLibLimits @?= 262144
       SMTLib.lengthSMTLibNumeralBitLimit SMTLib.defaultLengthSMTLibLimits
         @?= 4096
+      [ minBound .. maxBound :: SMTLib.LengthSMTLibNumeralSite ] @?=
+        [ SMTLib.LengthSMTLibLiteralNumeral
+        , SMTLib.LengthSMTLibScaleNumeral
+        , SMTLib.LengthSMTLibModuloDivisorNumeral
+        , SMTLib.LengthSMTLibQuotientDivisorNumeral
+        ]
       assertLeft
         (SMTLib.NegativeLengthSMTLibLimit
           SMTLib.LengthSMTLibNumeralBits (-1))
@@ -3578,6 +3680,17 @@ smtLibTests = testGroup
         (SMTLib.LengthSMTLibNumeralBitLimitExceeded
           SMTLib.LengthSMTLibModuloDivisorNumeral 1 2)
         $ SMTLib.sealLengthSMTLibQuery oneBitNumerals moduloProblem
+
+      quotientProblem <- adversarialConstantZeroProblem $ contractWith
+        (Length.LengthTruth True)
+        (Length.LengthEqual
+          (Length.LengthVariable Length.LengthResult)
+          (Length.LengthQuotient 2
+            $ Length.LengthVariable $ Length.LengthInput 0))
+      assertLeft
+        (SMTLib.LengthSMTLibNumeralBitLimitExceeded
+          SMTLib.LengthSMTLibQuotientDivisorNumeral 1 2)
+        $ SMTLib.sealLengthSMTLibQuery oneBitNumerals quotientProblem
   ]
 
 smtLibProtocolTests :: TestTree
@@ -4805,6 +4918,85 @@ contractTests = testGroup "checked contracts"
         (Length.LengthContractPreconditionError
           $ Length.LengthSyntaxNodeLimitExceeded 3 4)
         cyclicResult
+  , testCase
+      "validate and normalize positive-literal natural quotient lazily" $ do
+      let target = FunctionType
+            (listOf closedPayloadType) (listOf closedPayloadType)
+          input = Length.LengthVariable $ Length.LengthInput 0
+          result = Length.LengthVariable Length.LengthResult
+          literalSource divisor value = contractWith
+            (Length.LengthTruth True)
+            $ Length.LengthEqual result
+                $ Length.LengthQuotient divisor $ Length.LengthLiteral value
+          directLiteral value = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result $ Length.LengthLiteral value
+          quotientOneSource = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result $ Length.LengthQuotient 1 input
+          zeroSource = contractWith
+            (Length.LengthEqual
+              (Length.LengthQuotient 0
+                $ error "zero-quotient-child-demand")
+              $ Length.LengthLiteral 0)
+            $ Length.LengthTruth True
+          literalLimits = limitsWith $ \source -> source
+            { Length.lengthLimitSourceLiteralBits = 3 }
+          oversizedSource = contractWith
+            (Length.LengthEqual
+              (Length.LengthQuotient 8
+                $ error "quotient-divisor-child-demand")
+              $ Length.LengthLiteral 0)
+            $ Length.LengthTruth True
+          oversizedOperandSource = contractWith
+            (Length.LengthEqual
+              (Length.LengthQuotient 3 $ Length.LengthLiteral 8)
+              $ Length.LengthLiteral 0)
+            $ Length.LengthTruth True
+      folded <- expectRight $ sealContract
+        Length.defaultLengthLimits target $ literalSource 3 8
+      directFolded <- expectRight $ sealContract
+        Length.defaultLengthLimits target $ directLiteral 2
+      quotientOne <- expectRight $ sealContract
+        Length.defaultLengthLimits target quotientOneSource
+      directInput <- expectRight $ sealContract
+        Length.defaultLengthLimits target identityLengthContract
+      Length.checkedLengthContractPostcondition folded @?=
+        Length.LengthEqual result (Length.LengthLiteral 2)
+      Length.checkedLengthContractPostcondition quotientOne @?=
+        Length.LengthEqual input result
+      Length.lengthContractFingerprint folded @?=
+        Length.lengthContractFingerprint directFolded
+      Length.lengthContractFingerprint quotientOne @?=
+        Length.lengthContractFingerprint directInput
+      zeroResult <- evaluateWithin
+        $ sealContract Length.defaultLengthLimits target zeroSource
+      assertLeft
+        (Length.LengthContractPreconditionError
+          Length.LengthQuotientDivisorZero)
+        zeroResult
+      oversizedResult <- evaluateWithin
+        $ sealContract literalLimits target oversizedSource
+      assertLeft
+        (Length.LengthContractPreconditionError
+          $ Length.LengthLiteralBitLimitExceeded 3 4)
+        oversizedResult
+      assertLeft
+        (Length.LengthContractPreconditionError
+          $ Length.LengthLiteralBitLimitExceeded 3 4)
+        $ sealContract literalLimits target oversizedOperandSource
+
+      let syntaxLimits = limitsWith $ \source -> source
+            { Length.lengthLimitSourceSyntaxNodes = 3 }
+          cyclic = Length.LengthScale 1 cyclic
+          quotientOneCyclic = contractWith
+            (Length.LengthEqual
+              (Length.LengthQuotient 1 cyclic) $ Length.LengthLiteral 0)
+            $ Length.LengthTruth True
+      cyclicResult <- evaluateWithin
+        $ sealContract syntaxLimits target quotientOneCyclic
+      assertLeft
+        (Length.LengthContractPreconditionError
+          $ Length.LengthSyntaxNodeLimitExceeded 3 4)
+        cyclicResult
   , testCase "bound target structure and type collections" $ do
       let nodeLimits = limitsWith $ \source -> source
             { Length.lengthLimitSourceTypeNodes = 0 }
@@ -5279,11 +5471,12 @@ evaluationTests = testGroup "solver-neutral concrete replay"
       replay
           [Evaluate.ObservedSpineLength 7, Evaluate.UnobservedLengthArgument]
         @?= Right 7
-  , testCase "evaluate natural operators without integer subtraction" $ do
+  , testCase "evaluate natural quotient and operators without integers" $ do
       providerName <- expectName "Fixture.operatorReplay"
       let input = Length.LengthVariable $ Length.LengthProviderArgument 0
           transfer = Length.LengthSum
             [ Length.LengthScale 2 input
+            , Length.LengthQuotient 3 input
             , Length.LengthModulo 3 input
             , Length.LengthMonus (Length.LengthLiteral 3)
                 (Length.LengthLiteral 5)
@@ -5297,8 +5490,8 @@ evaluationTests = testGroup "solver-neutral concrete replay"
       checked <- expectCheckedProvider provider
       Evaluate.evaluateLengthProviderApplication
           Evaluate.defaultLengthEvaluationLimits checked
-          [Evaluate.ObservedSpineLength 4] @?= Right 17
-  , testCase "agree with direct natural arithmetic across small inputs" $ do
+          [Evaluate.ObservedSpineLength 4] @?= Right 18
+  , testCase "agree with direct Natural quot across small inputs" $ do
       providerName <- expectName "Fixture.smallNaturalDifferential"
       let input = Length.LengthVariable $ Length.LengthProviderArgument 0
           condition = Length.LengthAll
@@ -5309,6 +5502,7 @@ evaluationTests = testGroup "solver-neutral concrete replay"
           transfer = Length.LengthIf condition
             (Length.LengthSum
               [ Length.LengthScale 2 input
+              , Length.LengthQuotient 3 input
               , Length.LengthModulo 3 input
               , Length.LengthMonus
                   (Length.LengthLiteral 5) input
@@ -5318,6 +5512,7 @@ evaluationTests = testGroup "solver-neutral concrete replay"
           expected value
             | value <= 4 && value /= 2 =
                 2 * value
+                  + value `quot` 3
                   + value `mod` 3
                   + (if value <= 5 then 5 - value else 0)
                   + min value 3
@@ -6802,6 +6997,16 @@ adversarialModuloProviderProblem
         AdversarialIdentity AdversarialLocal)
 adversarialModuloProviderProblem divisor = adversarialTransferredProviderProblem
   (Length.LengthModulo divisor
+    $ Length.LengthVariable $ Length.LengthProviderArgument 0)
+
+adversarialQuotientProviderProblem
+  :: Natural
+  -> Length.LengthContractSource
+  -> IO
+      (LengthProblem.CheckedLengthProblem
+        AdversarialIdentity AdversarialLocal)
+adversarialQuotientProviderProblem divisor = adversarialTransferredProviderProblem
+  (Length.LengthQuotient divisor
     $ Length.LengthVariable $ Length.LengthProviderArgument 0)
 
 adversarialTransferredProviderProblem

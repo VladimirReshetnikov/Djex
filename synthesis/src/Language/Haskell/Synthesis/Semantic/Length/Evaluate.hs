@@ -201,6 +201,7 @@ data LengthEvaluationError
       !LengthEvaluationValueSite !Int !Int
   | LengthEvaluationInternalContractReference !LengthContractVariable
   | LengthEvaluationInternalProviderReference !LengthProviderVariable
+  | LengthEvaluationInternalQuotientDivisorZero
   | LengthEvaluationInternalModuloDivisorZero
   deriving (Eq, Ord, Show, Generic)
 
@@ -441,6 +442,11 @@ evaluateExpression limits lookupVariable source = case source of
   LengthScale factor expression -> do
     value <- evaluateExpression limits lookupVariable expression
     checkIntermediate limits $ factor * value
+  LengthQuotient divisor expression
+    | divisor == 0 -> Left LengthEvaluationInternalQuotientDivisorZero
+    | otherwise -> do
+        value <- evaluateExpression limits lookupVariable expression
+        checkIntermediate limits $ value `quot` divisor
   LengthModulo divisor expression
     | divisor == 0 -> Left LengthEvaluationInternalModuloDivisorZero
     | otherwise -> do

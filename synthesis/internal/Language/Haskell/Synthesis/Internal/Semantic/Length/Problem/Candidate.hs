@@ -1424,6 +1424,8 @@ substituteProviderExpression replacements = go
     LengthLiteral value -> Right $ LengthLiteral value
     LengthSum terms -> LengthSum <$> mapM go terms
     LengthScale factor expression -> LengthScale factor <$> go expression
+    LengthQuotient divisor expression ->
+      LengthQuotient divisor <$> go expression
     LengthModulo divisor expression -> LengthModulo divisor <$> go expression
     LengthMonus left right -> LengthMonus <$> go left <*> go right
     LengthMinimum left right -> LengthMinimum <$> go left <*> go right
@@ -1481,6 +1483,8 @@ substituteResultFormula result = goFormula
     LengthLiteral value -> LengthLiteral value
     LengthSum terms -> LengthSum $ map goExpression terms
     LengthScale factor expression -> LengthScale factor $ goExpression expression
+    LengthQuotient divisor expression ->
+      LengthQuotient divisor $ goExpression expression
     LengthModulo divisor expression ->
       LengthModulo divisor $ goExpression expression
     LengthMonus left right -> LengthMonus

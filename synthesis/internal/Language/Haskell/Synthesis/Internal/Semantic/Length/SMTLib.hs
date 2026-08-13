@@ -96,8 +96,9 @@ lengthSMTLibQuerySchemaTag :: [Word8]
 lengthSMTLibQuerySchemaTag = ascii "djex-length-z3-qf-lia-smtlib2/v2"
 
 -- | The only logic emitted by this translator.  Positive-literal natural
--- modulo is lowered to existential quotient/remainder constraints containing
--- only linear integer arithmetic; this translator never emits SMT-LIB @mod@.
+-- quotient and modulo are lowered to existential quotient/remainder
+-- constraints containing only linear integer arithmetic; this translator
+-- never emits SMT-LIB @div@ or @mod@.
 lengthSMTLibQueryLogic :: [Word8]
 lengthSMTLibQueryLogic = ascii "QF_LIA"
 
@@ -176,6 +177,7 @@ data LengthSMTLibNumeralSite
   = LengthSMTLibLiteralNumeral
   | LengthSMTLibScaleNumeral
   | LengthSMTLibModuloDivisorNumeral
+  | LengthSMTLibQuotientDivisorNumeral
   deriving (Bounded, Enum, Eq, Ord, Show, Generic)
 
 instance NFData LengthSMTLibNumeralSite
@@ -184,6 +186,7 @@ instance NFData LengthSMTLibNumeralSite
 data LengthSMTLibQueryError
   = LengthSMTLibUnexpectedResultVariable
   | LengthSMTLibInputVariableOutOfRange !Natural !Int
+  | LengthSMTLibQuotientDivisorZero
   | LengthSMTLibModuloDivisorZero
   | LengthSMTLibNumeralBitLimitExceeded
       !LengthSMTLibNumeralSite !Int !Int
@@ -218,22 +221,33 @@ data SMTBooleanExpression
 
 instance NFData SMTBooleanExpression
 
--- | One private existential lowering receipt for a normalized positive-
--- literal natural modulo expression.  The quotient and remainder names are
--- allocated in deterministic expression preorder.  Only the original input
--- symbols are ever requested back from the solver.
-data SMTModuloWitness = SMTModuloWitness
+-- | Which Euclidean witness component is the value of one normalized source
+-- expression.  The distinction also selects operation-specific private names
+-- and the conditional lowering-policy tag.
+data SMTEuclideanProjection
+  = SMTNaturalQuotientProjection
+  | SMTNaturalModuloProjection
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData SMTEuclideanProjection
+
+-- | One private existential lowering receipt shared by positive-literal
+-- natural quotient and modulo.  Both projections use the unique Euclidean
+-- pair @e = k*q + r@ with @0 <= r < k@.  Names are allocated in deterministic
+-- expression preorder, and only original input symbols are requested back.
+data SMTEuclideanWitness = SMTEuclideanWitness
+  !SMTEuclideanProjection
   !Natural
   ![Word8]
   ![Word8]
   SMTIntegerExpression
   deriving (Eq, Ord, Show, Generic)
 
-instance NFData SMTModuloWitness
+instance NFData SMTEuclideanWitness
 
 data SMTTranslationState = SMTTranslationState
   !Natural
-  !(Map Natural SMTModuloWitness)
+  !(Map Natural SMTEuclideanWitness)
 
 data SMTBinaryHelper = SMTNaturalMonus | SMTIntegerMinimum | SMTIntegerMaximum
   deriving (Bounded, Enum, Eq, Ord, Show, Generic)
@@ -262,7 +276,7 @@ data LengthSMTLibPlan = LengthSMTLibPlan
   !SMTBooleanExpression
   ![SMTCommand]
   !(Maybe SMTCommand)
-  ![SMTModuloWitness]
+  ![SMTEuclideanWitness]
 
 -- | Opaque association of one checked problem, bounded check commands, and
 -- collision-free structural translation identity.  Exact input symbols and
@@ -291,13 +305,13 @@ sealLengthSMTLibQuery limits problem = do
   (condition, translation) <- translateFormula limits inputCount
     emptySMTTranslationState
     $ checkedLengthProblemCounterexampleCondition problem
-  let witnesses = orderedModuloWitnesses translation
-      witnessSymbols = concatMap moduloWitnessSymbols witnesses
+  let witnesses = orderedEuclideanWitnesses translation
+      witnessSymbols = concatMap euclideanWitnessSymbols witnesses
   let checkCommands = fixedPreamble
         ++ map SMTDeclareInteger symbols
         ++ map SMTDeclareInteger witnessSymbols
         ++ map (SMTAssert . nonnegative . SMTIntegerSymbol) symbols
-        ++ concatMap moduloWitnessCommands witnesses
+        ++ concatMap euclideanWitnessCommands witnesses
         ++ [SMTAssert condition, SMTCheckSatisfiable]
       plan = LengthSMTLibPlan
         symbols condition checkCommands valueRequest witnesses
@@ -510,19 +524,18 @@ translateExpression limits inputCount state source = case source of
     (translated, afterExpression) <- translateExpression
       limits inputCount state expression
     pure (SMTIntegerScale factor translated, afterExpression)
-  LengthModulo divisor expression -> do
-    if divisor == 0
-      then Left LengthSMTLibModuloDivisorZero
-      else pure ()
-    checkNumeral limits LengthSMTLibModuloDivisorNumeral divisor
-    let (ordinal, quotient, remainder, reserved) =
-          reserveModuloWitness state
-    (translated, afterExpression) <- translateExpression
-      limits inputCount reserved expression
-    let witness = SMTModuloWitness
-          divisor quotient remainder translated
-        completed = retainModuloWitness ordinal witness afterExpression
-    pure (SMTIntegerSymbol remainder, completed)
+  LengthQuotient divisor expression -> translateEuclideanProjection
+    limits inputCount state
+    SMTNaturalQuotientProjection
+    LengthSMTLibQuotientDivisorNumeral
+    LengthSMTLibQuotientDivisorZero
+    divisor expression
+  LengthModulo divisor expression -> translateEuclideanProjection
+    limits inputCount state
+    SMTNaturalModuloProjection
+    LengthSMTLibModuloDivisorNumeral
+    LengthSMTLibModuloDivisorZero
+    divisor expression
   LengthMonus left right -> binary SMTNaturalMonus state left right
   LengthMinimum left right -> binary SMTIntegerMinimum state left right
   LengthMaximum left right -> binary SMTIntegerMaximum state left right
@@ -592,34 +605,68 @@ translateFormula limits inputCount state source = case source of
 emptySMTTranslationState :: SMTTranslationState
 emptySMTTranslationState = SMTTranslationState 0 Map.empty
 
-reserveModuloWitness
-  :: SMTTranslationState
+translateEuclideanProjection
+  :: LengthSMTLibLimits
+  -> Int
+  -> SMTTranslationState
+  -> SMTEuclideanProjection
+  -> LengthSMTLibNumeralSite
+  -> LengthSMTLibQueryError
+  -> Natural
+  -> LengthExpression LengthContractVariable
+  -> Either
+      LengthSMTLibQueryError
+      (SMTIntegerExpression, SMTTranslationState)
+translateEuclideanProjection limits inputCount state projection numeralSite
+    zeroError divisor expression = do
+  if divisor == 0
+    then Left zeroError
+    else pure ()
+  checkNumeral limits numeralSite divisor
+  let (ordinal, quotient, remainder, reserved) =
+        reserveEuclideanWitness projection state
+  (translated, afterExpression) <- translateExpression
+    limits inputCount reserved expression
+  let witness = SMTEuclideanWitness
+        projection divisor quotient remainder translated
+      completed = retainEuclideanWitness ordinal witness afterExpression
+      projected = case projection of
+        SMTNaturalQuotientProjection -> quotient
+        SMTNaturalModuloProjection -> remainder
+  pure (SMTIntegerSymbol projected, completed)
+
+reserveEuclideanWitness
+  :: SMTEuclideanProjection
+  -> SMTTranslationState
   -> (Natural, [Word8], [Word8], SMTTranslationState)
-reserveModuloWitness (SMTTranslationState ordinal witnesses) =
+reserveEuclideanWitness projection
+    (SMTTranslationState ordinal witnesses) =
   ( ordinal
-  , moduloQuotientSymbol ordinal
-  , moduloRemainderSymbol ordinal
+  , euclideanQuotientSymbol projection ordinal
+  , euclideanRemainderSymbol projection ordinal
   , SMTTranslationState (ordinal + 1) witnesses
   )
 
-retainModuloWitness
+retainEuclideanWitness
   :: Natural
-  -> SMTModuloWitness
+  -> SMTEuclideanWitness
   -> SMTTranslationState
   -> SMTTranslationState
-retainModuloWitness ordinal witness (SMTTranslationState next witnesses) =
+retainEuclideanWitness ordinal witness (SMTTranslationState next witnesses) =
   SMTTranslationState next $ Map.insert ordinal witness witnesses
 
-orderedModuloWitnesses :: SMTTranslationState -> [SMTModuloWitness]
-orderedModuloWitnesses (SMTTranslationState _ witnesses) = Map.elems witnesses
+orderedEuclideanWitnesses :: SMTTranslationState -> [SMTEuclideanWitness]
+orderedEuclideanWitnesses (SMTTranslationState _ witnesses) =
+  Map.elems witnesses
 
-moduloWitnessSymbols :: SMTModuloWitness -> [[Word8]]
-moduloWitnessSymbols (SMTModuloWitness _ quotient remainder _) =
+euclideanWitnessSymbols :: SMTEuclideanWitness -> [[Word8]]
+euclideanWitnessSymbols
+    (SMTEuclideanWitness _ _ quotient remainder _) =
   [quotient, remainder]
 
-moduloWitnessCommands :: SMTModuloWitness -> [SMTCommand]
-moduloWitnessCommands
-    (SMTModuloWitness divisor quotientSymbol remainderSymbol expression) =
+euclideanWitnessCommands :: SMTEuclideanWitness -> [SMTCommand]
+euclideanWitnessCommands
+    (SMTEuclideanWitness _ divisor quotientSymbol remainderSymbol expression) =
   [ SMTAssert $ nonnegative quotient
   , SMTAssert $ nonnegative remainder
   , SMTAssert $ SMTIntegerAtMost remainder
@@ -724,14 +771,30 @@ planField (LengthSMTLibPlan symbols condition commands request witnesses) =
     , tagged "value-request" [case request of
         Nothing -> tagged "absent" []
         Just command -> tagged "present" [commandField command]]
-    ] ++ case witnesses of
-      [] -> []
-      _ ->
-        [ tagged "expression-lowering"
-            [ FingerprintBytes
-                positiveLiteralNaturalModuloWitnessSchemaTag
-            ]
+    ] ++ expressionLoweringFields witnesses
+
+expressionLoweringFields :: [SMTEuclideanWitness] -> [FingerprintField]
+expressionLoweringFields witnesses = case loweringTags of
+  [] -> []
+  _ -> [tagged "expression-lowering" $ map FingerprintBytes loweringTags]
+ where
+  projections = map euclideanWitnessProjection witnesses
+  loweringTags =
+    [ tag
+    | (projection, tag) <-
+        [ ( SMTNaturalModuloProjection
+          , positiveLiteralNaturalModuloWitnessSchemaTag
+          )
+        , ( SMTNaturalQuotientProjection
+          , positiveLiteralNaturalQuotientWitnessSchemaTag
+          )
         ]
+    , projection `elem` projections
+    ]
+
+euclideanWitnessProjection :: SMTEuclideanWitness -> SMTEuclideanProjection
+euclideanWitnessProjection (SMTEuclideanWitness projection _ _ _ _) =
+  projection
 
 commandField :: SMTCommand -> FingerprintField
 commandField command = case command of
@@ -879,9 +942,31 @@ moduloRemainderSymbol :: Natural -> [Word8]
 moduloRemainderSymbol ordinal =
   ascii "djex_length_modulo_remainder_" ++ ascii (show ordinal)
 
+quotientQuotientSymbol :: Natural -> [Word8]
+quotientQuotientSymbol ordinal =
+  ascii "djex_length_quotient_quotient_" ++ ascii (show ordinal)
+
+quotientRemainderSymbol :: Natural -> [Word8]
+quotientRemainderSymbol ordinal =
+  ascii "djex_length_quotient_remainder_" ++ ascii (show ordinal)
+
+euclideanQuotientSymbol :: SMTEuclideanProjection -> Natural -> [Word8]
+euclideanQuotientSymbol projection = case projection of
+  SMTNaturalQuotientProjection -> quotientQuotientSymbol
+  SMTNaturalModuloProjection -> moduloQuotientSymbol
+
+euclideanRemainderSymbol :: SMTEuclideanProjection -> Natural -> [Word8]
+euclideanRemainderSymbol projection = case projection of
+  SMTNaturalQuotientProjection -> quotientRemainderSymbol
+  SMTNaturalModuloProjection -> moduloRemainderSymbol
+
 positiveLiteralNaturalModuloWitnessSchemaTag :: [Word8]
 positiveLiteralNaturalModuloWitnessSchemaTag = ascii
   "djex-length-z3-qf-lia-positive-literal-modulo-witness/v1"
+
+positiveLiteralNaturalQuotientWitnessSchemaTag :: [Word8]
+positiveLiteralNaturalQuotientWitnessSchemaTag = ascii
+  "djex-length-z3-qf-lia-positive-literal-natural-quotient-witness/v1"
 
 parenthesized :: [[Word8]] -> [Word8]
 parenthesized fields = [openParen] ++ separated fields ++ [closeParen]

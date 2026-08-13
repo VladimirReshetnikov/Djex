@@ -217,21 +217,26 @@ contains bounded check and input-only `get-value` commands; it neither starts a
 solver nor associates a raw solver status. Decoded input bindings can produce a
 counterexample receipt only through independent replay against the retained
 problem, while raw models and even `unsat` remain heuristic observations.
-Positive-literal natural modulo remains inside QF_LIA by using deterministic
-private quotient/remainder witnesses rather than the forbidden SMT-LIB `mod`
-operator: for `e mod k`, sealing asserts `e = k*q + r`, nonnegative `q` and
-`r`, and `r <= k-1`. Normalized-expression preorder fixes witness names and
-constraint order. Witnesses are declared and structurally fingerprinted but
-never requested from the solver; `get-value` remains input-only.
+Positive-literal natural quotient and modulo remain inside QF_LIA by using one
+shared deterministic private Euclidean witness shape rather than the forbidden
+SMT-LIB `div` and `mod` operators: for operand `e` and positive literal `k`,
+sealing asserts `e = k*q + r`, nonnegative `q` and `r`, and `r <= k-1`, then
+projects `q` for quotient or `r` for modulo. Normalized-expression preorder
+fixes operation-specific witness names and constraint order. Witnesses are
+declared and structurally fingerprinted but never requested from the solver;
+`get-value` remains input-only.
 The complete typed SMT plan remains transient through bounded rendering and
 structural fingerprinting. The sealed query retains only the checked problem,
 canonical check bytes, and complete fingerprint. Exact decoder-symbol order and
 optional `get-value` bytes are canonically rederived from the checked problem's
 sealed arity after query sealing has already bounded and structurally
-fingerprinted them. A versioned plan tag records the lowering policy only when
-modulo witnesses occur, so no-modulo scripts and canonical keys stay exact.
+fingerprinted them. Operation-specific versioned plan tags record only the
+witness projections that occur. The internal refactor deliberately preserves
+every modulo-only symbol, command, tag, script, and canonical key byte.
 The structural plan keeps rendered bytes from becoming the semantic source of
 truth. See the
+[positive-literal quotient report](../docs/reports/2026-08-13-positive-literal-natural-quotient.md)
+and the earlier
 [positive-literal modulo report](../docs/reports/2026-08-13-positive-literal-natural-modulo.md)
 for the exact admission, lowering, compatibility, and test boundary.
 

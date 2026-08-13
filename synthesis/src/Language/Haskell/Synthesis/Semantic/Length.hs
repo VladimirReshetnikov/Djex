@@ -23,6 +23,7 @@ module Language.Haskell.Synthesis.Semantic.Length
   , LengthFormula (..)
   , LengthContractVariable (..)
   , LengthContractSource (..)
+  , LengthTargetArgumentRole (..)
   , LengthProviderArgumentRole (..)
   , LengthProviderVariable (..)
   , LengthProviderSummarySource (..)
@@ -66,7 +67,10 @@ module Language.Haskell.Synthesis.Semantic.Length
   , CheckedLengthContract
   , sealLengthContract
   , sealLengthContractInContext
+  , sealRoleAwareLengthContract
+  , sealRoleAwareLengthContractInContext
   , checkedLengthContractTarget
+  , checkedLengthContractTargetArgumentRoles
   , checkedLengthContractInputCount
   , checkedLengthContractPrecondition
   , checkedLengthContractPostcondition

@@ -12,13 +12,16 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
   ( LengthSemanticFingerprintPart (..)
   , LengthEncodingPolicyFingerprintSubject
   , LengthSessionError (..)
+  , LengthTargetArgumentPolicy (..)
   , CheckedLengthSession
   , sealLengthSession
+  , sealRoleAwareLengthSession
   , checkedLengthSessionContext
   , checkedLengthSessionProviderInventory
   , lengthSessionInventoryFingerprint
   , lengthSessionEncodingPolicyFingerprint
   , checkedLengthSessionLimits
+  , checkedLengthSessionTargetArgumentPolicy
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -29,6 +32,7 @@ import Data.Void (Void, absurd)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
+import Language.Haskell.Synthesis.Collection (observedListLength)
 import Language.Haskell.Synthesis.Constraint (Constraint (..))
 import Language.Haskell.Synthesis.Declaration
   ( DataConstructor (..)
@@ -58,6 +62,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , CheckedLengthProviderInventory
   , FiniteListSpineLengthV1
   , LengthLimits
+  , LengthTargetArgumentRole (..)
   , LengthProviderInventoryError
   , LengthProviderSummarySource
   , LengthSpineModelError
@@ -72,6 +77,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , lengthContextSpineModel
   , lengthContextInventory
   , lengthFingerprintByteLimit
+  , lengthContractInputLimit
   , providerSummaryField
   , sealLengthContext
   , sealLengthProviderInventoryInContext
@@ -117,16 +123,30 @@ data LengthSessionError identity
   | LengthSessionProviderInventoryRejected
       (LengthProviderInventoryError (Variable identity))
   | LengthSessionProviderConflictsWithSpineConstructor !Name
+  | LengthSessionTargetArgumentRoleLimitExceeded !Int !Int
   | LengthSessionFingerprintLimitExceeded
       !LengthSemanticFingerprintPart !Natural !Natural
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData identity => NFData (LengthSessionError identity)
 
+-- | Interpreter policy selected by a sealed session.
+--
+-- The complete ordered vector remains owned by the checked contract.  A
+-- session retains only the semantic distinction that changes interpreter
+-- behavior and its encoding identity.
+data LengthTargetArgumentPolicy
+  = LengthLegacyObservedTargetPolicy
+  | LengthMixedTargetPolicy
+  deriving (Bounded, Enum, Eq, Ord, Show, Generic)
+
+instance NFData LengthTargetArgumentPolicy
+
 -- | Exact neutral inventory, checked finite-spine model, and provider laws
 -- retained under distinct complete structural identities.
 data CheckedLengthSession identity annotation = CheckedLengthSession
   !LengthLimits
+  !LengthTargetArgumentPolicy
   !(CheckedLengthContext (Variable identity) annotation)
   !(CheckedLengthProviderInventory (Variable identity))
   !(Fingerprint
@@ -138,8 +158,9 @@ type role CheckedLengthSession nominal nominal
 
 instance (NFData identity, NFData annotation)
     => NFData (CheckedLengthSession identity annotation) where
-  rnf (CheckedLengthSession limits context providers inventory encoding) =
+  rnf (CheckedLengthSession limits policy context providers inventory encoding) =
     rnf limits `seq`
+    rnf policy `seq`
     rnf context `seq`
     rnf providers `seq`
     rnf inventory `seq`
@@ -148,10 +169,11 @@ instance (NFData identity, NFData annotation)
 -- | Seal all session authority from one raw source inventory.
 --
 -- Failure order is spine schema, provider summaries, a provider name reserved
--- by either modeled constructor, exact inventory identity, then solver-neutral
--- encoding-policy identity.  The provider sealer resolves every named scheme
--- from the context constructed immediately before it, so a successful value
--- cannot contain cross-inventory checked projections.
+-- by either modeled constructor, target-role admission on the role-aware path,
+-- exact inventory identity, then solver-neutral encoding-policy identity.  The
+-- provider sealer resolves every named scheme from the context constructed
+-- immediately before it, so a successful value cannot contain cross-inventory
+-- checked projections. The legacy path never receives or traverses roles.
 sealLengthSession
   :: Ord identity
   => LengthLimits
@@ -162,43 +184,88 @@ sealLengthSession
       (LengthSessionError identity)
       (CheckedLengthSession identity annotation)
 sealLengthSession limits inventory modelSource providerSources = do
+  sealLengthSessionWithRoles limits Nothing
+    inventory modelSource providerSources
+
+-- | Seal a session for one bounded target-role vector.
+--
+-- The role vector is consumed only to choose the semantic policy; the later
+-- checked contract is the sole retained owner of its exact order.  An
+-- all-observed vector canonicalizes to the exact legacy encoding identity.
+sealRoleAwareLengthSession
+  :: Ord identity
+  => LengthLimits
+  -> [LengthTargetArgumentRole]
+  -> Inventory (Variable identity) annotation
+  -> LengthSpineModelSource
+  -> [LengthProviderSummarySource (Variable identity)]
+  -> Either
+      (LengthSessionError identity)
+      (CheckedLengthSession identity annotation)
+sealRoleAwareLengthSession limits roles inventory modelSource providerSources =
+  sealLengthSessionWithRoles limits (Just roles)
+    inventory modelSource providerSources
+
+sealLengthSessionWithRoles
+  :: Ord identity
+  => LengthLimits
+  -> Maybe [LengthTargetArgumentRole]
+  -> Inventory (Variable identity) annotation
+  -> LengthSpineModelSource
+  -> [LengthProviderSummarySource (Variable identity)]
+  -> Either
+      (LengthSessionError identity)
+      (CheckedLengthSession identity annotation)
+sealLengthSessionWithRoles limits suppliedRoles inventory modelSource
+    providerSources = do
   context <- either (Left . LengthSessionSpineModelRejected) Right
     $ sealLengthContext limits inventory modelSource
   providers <- either
     (Left . LengthSessionProviderInventoryRejected) Right
     $ sealLengthProviderInventoryInContext limits context providerSources
   rejectSpineConstructorProviders context providers
+  policy <- case suppliedRoles of
+    Nothing -> Right LengthLegacyObservedTargetPolicy
+    Just roles -> do
+      let maximumRoles = lengthContractInputLimit limits
+          observedRoles = observedListLength maximumRoles roles
+      if observedRoles > maximumRoles
+        then Left $ LengthSessionTargetArgumentRoleLimitExceeded
+          maximumRoles observedRoles
+        else Right $ if LengthUnobservedTarget `elem` roles
+          then LengthMixedTargetPolicy
+          else LengthLegacyObservedTargetPolicy
   inventoryFingerprint <- mapFingerprintFailure
     LengthSemanticInventoryFingerprint
     $ buildLengthInventoryFingerprint limits context providers
   encodingFingerprint <- mapFingerprintFailure
     LengthSemanticEncodingPolicyFingerprint
-    $ buildLengthEncodingFingerprint limits context
+    $ buildLengthEncodingFingerprint limits policy context
   pure $ CheckedLengthSession
-    limits context providers inventoryFingerprint encodingFingerprint
+    limits policy context providers inventoryFingerprint encodingFingerprint
 
 checkedLengthSessionContext
   :: CheckedLengthSession identity annotation
   -> CheckedLengthContext (Variable identity) annotation
-checkedLengthSessionContext (CheckedLengthSession _ context _ _ _) = context
+checkedLengthSessionContext (CheckedLengthSession _ _ context _ _ _) = context
 
 checkedLengthSessionProviderInventory
   :: CheckedLengthSession identity annotation
   -> CheckedLengthProviderInventory (Variable identity)
 checkedLengthSessionProviderInventory
-    (CheckedLengthSession _ _ providers _ _) = providers
+    (CheckedLengthSession _ _ _ providers _ _) = providers
 
 lengthSessionInventoryFingerprint
   :: CheckedLengthSession identity annotation
   -> Fingerprint (InventoryFingerprintSubject FiniteListSpineLengthV1)
 lengthSessionInventoryFingerprint
-    (CheckedLengthSession _ _ _ inventory _) = inventory
+    (CheckedLengthSession _ _ _ _ inventory _) = inventory
 
 lengthSessionEncodingPolicyFingerprint
   :: CheckedLengthSession identity annotation
   -> Fingerprint LengthEncodingPolicyFingerprintSubject
 lengthSessionEncodingPolicyFingerprint
-    (CheckedLengthSession _ _ _ _ encoding) = encoding
+    (CheckedLengthSession _ _ _ _ _ encoding) = encoding
 
 -- | Original finite bounds used for every authority sealed into the session.
 -- Kept package-private so candidate construction can revalidate a detachable
@@ -207,7 +274,13 @@ lengthSessionEncodingPolicyFingerprint
 checkedLengthSessionLimits
   :: CheckedLengthSession identity annotation
   -> LengthLimits
-checkedLengthSessionLimits (CheckedLengthSession limits _ _ _ _) = limits
+checkedLengthSessionLimits (CheckedLengthSession limits _ _ _ _ _) = limits
+
+checkedLengthSessionTargetArgumentPolicy
+  :: CheckedLengthSession identity annotation
+  -> LengthTargetArgumentPolicy
+checkedLengthSessionTargetArgumentPolicy
+    (CheckedLengthSession _ policy _ _ _ _) = policy
 
 rejectSpineConstructorProviders
   :: CheckedLengthContext variable annotation
@@ -269,30 +342,33 @@ buildLengthInventoryFingerprint limits context providers =
 
 buildLengthEncodingFingerprint
   :: LengthLimits
+  -> LengthTargetArgumentPolicy
   -> CheckedLengthContext (Variable identity) annotation
   -> Either FingerprintLimitError
       (Fingerprint
         LengthEncodingPolicyFingerprintSubject)
-buildLengthEncodingFingerprint limits context =
+buildLengthEncodingFingerprint limits policy context =
   buildFingerprintWithin (fromIntegral $ lengthFingerprintByteLimit limits)
     FingerprintBuilder
-      { fingerprintBuilderVersion = 2
+      { fingerprintBuilderVersion = case policy of
+          LengthLegacyObservedTargetPolicy -> 2
+          LengthMixedTargetPolicy -> 3
       , fingerprintBuilderRole = ascii
           "finite-list-spine-length/solver-neutral-encoding"
       , fingerprintBuilderFields =
           [ tagged "dialect"
               [FingerprintBytes finiteListSpineLengthDomainTag]
-          , tagged "semantic-policy"
+          , tagged "semantic-policy" $
               [ FingerprintBytes $ ascii "finite-spine-total/v1"
               , FingerprintBytes $ ascii "opaque-payload/v1"
               , FingerprintBytes $ ascii "unbounded-natural/v1"
               , FingerprintBytes $ ascii "exact-truncated-monus/v1"
               , FingerprintBytes $ ascii "exact-conditional/v1"
               , FingerprintBytes $ ascii "assumed-provider-laws/v1"
-              ]
+              ] ++ mixedSemanticPolicy
           , tagged "normalization"
               [FingerprintBytes $ ascii "length-normalizer/v1"]
-          , tagged "candidate-policy"
+          , tagged "candidate-policy" $
               [ FingerprintBytes $ ascii "complete-typed-term-graph/v1"
               , FingerprintBytes $ ascii "lazy-symbolic-interpreter/v1"
               , FingerprintBytes $ ascii "rigid-target-opening/v1"
@@ -311,11 +387,25 @@ buildLengthEncodingFingerprint limits context =
               , FingerprintBytes $ ascii
                   "reject-case-and-constructor-pattern/v1"
               , FingerprintBytes $ ascii "reject-unknown-semantics/v1"
-              ]
+              ] ++ mixedCandidatePolicy
           , tagged "spine-model"
               [checkedLengthSpineModelField $ lengthContextSpineModel context]
           ]
       }
+ where
+  mixedSemanticPolicy = case policy of
+    LengthLegacyObservedTargetPolicy -> []
+    LengthMixedTargetPolicy ->
+      [ FingerprintBytes $ ascii "opaque-unobserved-target/v1"
+      , FingerprintBytes $ ascii "forward-only-unobserved-target/v1"
+      ]
+  mixedCandidatePolicy = case policy of
+    LengthLegacyObservedTargetPolicy -> []
+    LengthMixedTargetPolicy ->
+      [ FingerprintBytes $ ascii "source-ordered-target-roles/v1"
+      , FingerprintBytes $ ascii "compact-observed-input-numbering/v1"
+      , FingerprintBytes $ ascii "explicit-opaque-demand-rejection/v1"
+      ]
 
 contextInventory
   :: CheckedLengthContext variable annotation

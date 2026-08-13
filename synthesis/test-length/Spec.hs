@@ -954,6 +954,88 @@ sessionTests = testGroup "checked length sessions"
             $ LengthProblem.checkedLengthSessionProviderInventory session of
           Nothing -> False
           Just _ -> True
+  , testCase
+      "version only the mixed opaque-target interpreter policy" $ do
+      let inventory = sessionInventory () []
+          observed = [Length.LengthObservedSpine]
+          mixed =
+            [ Length.LengthUnobservedTarget
+            , Length.LengthObservedSpine
+            ]
+      legacy <- expectRight $ LengthProblem.sealLengthSession
+        Length.defaultLengthLimits inventory Length.BuiltinListSpine []
+      explicitObserved <- expectRight
+        $ LengthProblem.sealRoleAwareLengthSession
+            Length.defaultLengthLimits observed inventory
+            Length.BuiltinListSpine []
+      mixedSession <- expectRight
+        $ LengthProblem.sealRoleAwareLengthSession
+            Length.defaultLengthLimits mixed inventory
+            Length.BuiltinListSpine []
+      LengthProblem.lengthSessionInventoryFingerprint explicitObserved @?=
+        LengthProblem.lengthSessionInventoryFingerprint legacy
+      LengthProblem.lengthSessionEncodingPolicyFingerprint explicitObserved @?=
+        LengthProblem.lengthSessionEncodingPolicyFingerprint legacy
+      Fingerprint.fingerprintCanonicalBytes
+          (LengthProblem.lengthSessionEncodingPolicyFingerprint
+            explicitObserved) @?=
+        Fingerprint.fingerprintCanonicalBytes
+          (LengthProblem.lengthSessionEncodingPolicyFingerprint legacy)
+      assertBool "mixed target semantics reused the legacy policy identity" $
+        LengthProblem.lengthSessionEncodingPolicyFingerprint mixedSession /=
+          LengthProblem.lengthSessionEncodingPolicyFingerprint legacy
+  , testCase "bound target roles after existing session authority" $ do
+      let inventory = sessionInventory () []
+          limits = limitsWith $ \source -> source
+            { Length.lengthLimitSourceContractInputs = 1 }
+      assertLeft
+        (LengthProblem.LengthSessionTargetArgumentRoleLimitExceeded 1 2)
+        $ LengthProblem.sealRoleAwareLengthSession limits
+            [Length.LengthObservedSpine, Length.LengthUnobservedTarget]
+            inventory Length.BuiltinListSpine []
+  , testCase
+      "reject spine and provider authority before demanding target roles" $ do
+      typeName <- expectName "Fixture.MissingRoleSpine"
+      zeroName <- expectName "Fixture.missingRoleZero"
+      stepName <- expectName "Fixture.missingRoleStep"
+      providerName <- expectName "Fixture.missingRoleProvider"
+      let poisonRoles = error "session authority demanded target roles"
+          inventory = sessionInventory () []
+          provider = sessionUnaryProvider providerName "role-provider"
+      spineResult <- evaluateWithin
+        $ LengthProblem.sealRoleAwareLengthSession
+            Length.defaultLengthLimits poisonRoles inventory
+            (Length.DeclaredListSpine typeName zeroName stepName) []
+      assertLeft
+        (LengthProblem.LengthSessionSpineModelRejected
+          $ Length.LengthSpineTypeDeclarationMissing typeName)
+        spineResult
+      providerResult <- evaluateWithin
+        $ LengthProblem.sealRoleAwareLengthSession
+            Length.defaultLengthLimits poisonRoles inventory
+            Length.BuiltinListSpine [provider]
+      assertLeft
+        (LengthProblem.LengthSessionProviderInventoryRejected
+          $ Length.LengthProviderSummaryRejected 0 providerName
+          $ Length.LengthProviderNotInSourceInventory providerName)
+        providerResult
+  , testCase "reject oversized target roles before identity construction" $ do
+      let inventory = sessionInventory () []
+      context <- expectRight $ Length.sealLengthContext
+        Length.defaultLengthLimits inventory Length.BuiltinListSpine
+      providers <- expectRight $ Length.sealLengthProviderInventoryInContext
+        Length.defaultLengthLimits context []
+      let providerBytes = length $ Fingerprint.fingerprintCanonicalBytes
+            $ Length.lengthProviderInventoryFingerprint providers
+          limits = limitsWith $ \source -> source
+            { Length.lengthLimitSourceContractInputs = 1
+            , Length.lengthLimitSourceFingerprintBytes = providerBytes
+            }
+      assertLeft
+        (LengthProblem.LengthSessionTargetArgumentRoleLimitExceeded 1 2)
+        $ LengthProblem.sealRoleAwareLengthSession limits
+            [Length.LengthObservedSpine, Length.LengthUnobservedTarget]
+            inventory Length.BuiltinListSpine []
   , testCase "erase annotations but retain every neutral declaration" $ do
       providerName <- expectName "Fixture.annotationProvider"
       unusedName <- expectName "Fixture.unusedSessionValue"
@@ -1116,6 +1198,89 @@ candidateProblemTests = testGroup "typed candidate behavioral problems"
       Djex.behavioralProblemEncodingFingerprint
           (LengthProblem.checkedLengthProblemBehavioralProblem problem) @?=
         LengthProblem.checkedLengthProblemEncodingFingerprint problem
+  , testCase
+      "forward an opaque higher-order target into a checked map law" $ do
+      (providerName, session, contract, candidate) <- roleAwareMapFixture
+      assertLeft
+        LengthProblem.LengthProblemMixedTargetArgumentsRequireRoleAwareSealer
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            session contract candidate
+      problem <- expectRight
+        $ LengthProblem.sealRoleAwareLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            session contract candidate
+      Length.checkedLengthContractTargetArgumentRoles contract @?=
+        [ Length.LengthUnobservedTarget
+        , Length.LengthObservedSpine
+        ]
+      LengthProblem.checkedLengthProblemInputCount problem @?= 1
+      let checked = LengthProblem.checkedLengthProblemCandidate problem
+      LengthProblem.checkedLengthCandidateResult checked @?=
+        Length.LengthVariable (Length.LengthInput 0)
+      LengthProblem.checkedLengthCandidateUsedProviders checked @?=
+        [providerName]
+      LengthProblem.checkedLengthProblemCounterexampleCondition problem @?=
+        Length.LengthTruth False
+      mapM_ (\input -> expectNoCounterexample
+        $ Evaluate.validateLengthProblemCounterexample
+            Evaluate.defaultLengthEvaluationLimits problem
+            $ Evaluate.LengthProblemAssignment [input]) [0, 1, 8]
+  , testCase
+      "canonicalize all-observed candidate identities to the legacy path" $ do
+      let roles = [Length.LengthObservedSpine]
+          target = FunctionType adversarialClosedList adversarialClosedList
+      legacySession <- adversarialLengthSession [] []
+      explicitSession <- adversarialRoleAwareLengthSession roles [] []
+      legacyContract <- adversarialLengthContract
+        legacySession target identityLengthContract
+      explicitContract <- adversarialRoleAwareLengthContract
+        explicitSession roles target identityLengthContract
+      graph <- sealAdversarialGraph
+        $ adversarialIdentityGraphSource adversarialClosedList
+      let candidate = adversarialTypedCandidate $ Right graph
+      legacy <- expectRight
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            legacySession legacyContract candidate
+      explicit <- expectRight
+        $ LengthProblem.sealRoleAwareLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            explicitSession explicitContract candidate
+      LengthProblem.lengthSessionEncodingPolicyFingerprint explicitSession @?=
+        LengthProblem.lengthSessionEncodingPolicyFingerprint legacySession
+      Length.lengthContractFingerprint explicitContract @?=
+        Length.lengthContractFingerprint legacyContract
+      LengthProblem.checkedLengthProblemEncodingFingerprint explicit @?=
+        LengthProblem.checkedLengthProblemEncodingFingerprint legacy
+      Djex.behavioralProblemFingerprint
+          (LengthProblem.checkedLengthProblemBehavioralProblem explicit) @?=
+        Djex.behavioralProblemFingerprint
+          (LengthProblem.checkedLengthProblemBehavioralProblem legacy)
+  , testCase
+      "reject a mixed contract paired with a legacy session" $ do
+      legacySession <- adversarialLengthSession [] []
+      let roles = [Length.LengthUnobservedTarget]
+          target = FunctionType adversarialClosedList adversarialClosedList
+      contract <- adversarialRoleAwareLengthContract
+        legacySession roles target trivialLengthContract
+      graph <- sealAdversarialGraph
+        $ adversarialIdentityGraphSource adversarialClosedList
+      assertLeft LengthProblem.LengthProblemTargetArgumentPolicyMismatch
+        $ LengthProblem.sealRoleAwareLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits legacySession contract
+            $ adversarialTypedCandidate $ Right graph
+  , testCase
+      "reject callable, spine, and tuple demands on opaque targets" $ do
+      assertOpaqueTargetDemandFailures
+  , testCase
+      "forward an opaque target through an ignored list-step payload" $ do
+      problem <- roleAwareOpaqueStepPayloadProblem
+      let input = Length.LengthVariable $ Length.LengthInput 0
+      LengthProblem.checkedLengthProblemInputCount problem @?= 1
+      LengthProblem.checkedLengthCandidateResult
+          (LengthProblem.checkedLengthProblemCandidate problem) @?=
+        Length.LengthSum [input, Length.LengthLiteral 1]
   , testCase "separate contract identity from graph and candidate identity" $ do
       session <- adversarialLengthSession [] []
       let target = FunctionType adversarialClosedList adversarialClosedList
@@ -2496,6 +2661,38 @@ smtLibTests = testGroup
           (SMTLib.lengthSMTLibQueryBehavioralProblem query) @?=
         Djex.behavioralProblemFingerprint
           (LengthProblem.checkedLengthProblemBehavioralProblem problem)
+  , testCase
+      "request and replay only compact observed inputs for a mixed target" $ do
+      let input = Length.LengthVariable $ Length.LengthInput 0
+          result = Length.LengthVariable Length.LengthResult
+          violatingContract = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result
+            $ Length.LengthSum [input, Length.LengthLiteral 1]
+      (_, session, contract, candidate) <-
+        roleAwareMapFixtureWithContract violatingContract
+      problem <- expectRight
+        $ LengthProblem.sealRoleAwareLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            session contract candidate
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      SMTLib.lengthSMTLibQueryInputSymbols query @?=
+        [asciiBytes "djex_length_input_0"]
+      SMTLib.lengthSMTLibQueryInputValueRequestBytes query @?=
+        Just (asciiBytes "(get-value (djex_length_input_0))\n")
+      case SMTLib.lengthSMTLibQueryInputSymbols query of
+        [symbol] -> do
+          evidence <- expectCounterexample
+            $ SMTLib.validateLengthSMTLibCounterexample
+                Evaluate.defaultLengthEvaluationLimits query
+                [smtIntegerBinding symbol 3]
+          receipt <- expectRight $ Djex.replayBehavioralEvidence
+            (LengthProblem.checkedLengthProblemBehavioralProblem problem)
+            evidence
+          Evaluate.validatedLengthCounterexampleInputs receipt @?= [3]
+          Evaluate.validatedLengthCounterexampleResult receipt @?= 3
+        symbols -> assertFailure $ "unexpected mixed-role symbols: " ++
+          show symbols
   , testCase "rederive a widened exact symbol and request plan productively" $ do
       let inputCount = 32
           expectedSymbols =
@@ -4143,6 +4340,87 @@ contractTests = testGroup "checked contracts"
         Length.LengthEqual
           (Length.LengthVariable $ Length.LengthInput 0)
           (Length.LengthVariable Length.LengthResult)
+  , testCase
+      "admit one higher-order target argument without assigning it a length" $ do
+      let inputPayload = closedPayloadType
+          outputPayload = FunctionType closedPayloadType closedPayloadType
+          target = FunctionType
+            (FunctionType inputPayload outputPayload)
+            $ FunctionType (listOf inputPayload) (listOf outputPayload)
+          roles =
+            [ Length.LengthUnobservedTarget
+            , Length.LengthObservedSpine
+            ]
+      checked <- expectRight $ Length.sealRoleAwareLengthContract
+        Length.defaultLengthLimits fixtureInventory roles target
+        identityLengthContract
+      Length.checkedLengthContractTarget checked @?= target
+      Length.checkedLengthContractTargetArgumentRoles checked @?= roles
+      Length.checkedLengthContractInputCount checked @?= 1
+      case Length.sealLengthContract Length.defaultLengthLimits
+          fixtureInventory target identityLengthContract of
+        Left (Length.LengthContractInputIsNotList 0 rejected) ->
+          rejected @?= FunctionType inputPayload outputPayload
+        Left other -> assertFailure $ "unexpected legacy rejection: " ++ show other
+        Right _ -> assertFailure
+          "legacy all-observed sealing admitted a higher-order argument"
+  , testCase
+      "canonicalize explicit all-observed roles to the legacy contract" $ do
+      let target = FunctionType
+            (listOf closedPayloadType) (listOf closedPayloadType)
+          roles = [Length.LengthObservedSpine]
+      legacy <- expectRight $ sealContract
+        Length.defaultLengthLimits target identityLengthContract
+      explicit <- expectRight $ Length.sealRoleAwareLengthContract
+        Length.defaultLengthLimits fixtureInventory roles target
+        identityLengthContract
+      Length.checkedLengthContractTargetArgumentRoles legacy @?= roles
+      Length.checkedLengthContractTargetArgumentRoles explicit @?= roles
+      Length.lengthContractFingerprint explicit @?=
+        Length.lengthContractFingerprint legacy
+      Fingerprint.fingerprintCanonicalBytes
+          (Length.lengthContractFingerprint explicit) @?=
+        Fingerprint.fingerprintCanonicalBytes
+          (Length.lengthContractFingerprint legacy)
+  , testCase
+      "bound and match the complete target-role vector before formulas" $ do
+      let target = FunctionType
+            (listOf closedPayloadType)
+            $ FunctionType
+                (listOf closedPayloadType) (listOf closedPayloadType)
+          poisonFormula = error "target roles demanded a contract formula"
+          poisonContract = Length.LengthContractSource
+            poisonFormula poisonFormula
+          oneRole = [Length.LengthObservedSpine]
+          threeRoles =
+            [ Length.LengthObservedSpine
+            , Length.LengthUnobservedTarget
+            , Length.LengthObservedSpine
+            ]
+          twoRoleLimits = limitsWith $ \source -> source
+            { Length.lengthLimitSourceContractInputs = 2 }
+      assertLeft
+        (Length.LengthContractTargetArgumentRoleArityMismatch 2 1)
+        $ Length.sealRoleAwareLengthContract
+            Length.defaultLengthLimits fixtureInventory oneRole target
+            poisonContract
+      assertLeft
+        (Length.LengthContractTargetArgumentRoleLimitExceeded 2 3)
+        $ Length.sealRoleAwareLengthContract
+            twoRoleLimits fixtureInventory threeRoles target poisonContract
+      let compactOutOfRange = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual
+                (Length.LengthVariable $ Length.LengthInput 1)
+                (Length.LengthVariable Length.LengthResult)
+      assertLeft
+        (Length.LengthContractPostconditionError
+          $ Length.LengthInputReferenceOutOfRange 1 1)
+        $ Length.sealRoleAwareLengthContract
+            Length.defaultLengthLimits fixtureInventory
+            [ Length.LengthUnobservedTarget
+            , Length.LengthObservedSpine
+            ]
+            target compactOutOfRange
   , testCase "reject a direct higher-rank term input" $ do
       let rankNInput = polymorphicIdentityType
           target = FunctionType rankNInput (listOf rankNInput)
@@ -5060,6 +5338,23 @@ productiveBoundTests = testGroup "productive bounded traversal"
         (Length.LengthProviderSummaryRejected 0 providerName
           $ Length.LengthProviderArgumentLimitExceeded 16 17)
         observed
+  , testCase "stop on cyclic target roles at the contract bound" $ do
+      let roles = Length.LengthObservedSpine : roles
+          target = FunctionType
+            (listOf closedPayloadType) (listOf closedPayloadType)
+      observed <- evaluateWithin $ Length.sealRoleAwareLengthContract
+        Length.defaultLengthLimits fixtureInventory roles target
+        trivialLengthContract
+      assertLeft
+        (Length.LengthContractTargetArgumentRoleLimitExceeded 8 9)
+        observed
+      sessionObserved <- evaluateWithin
+        $ LengthProblem.sealRoleAwareLengthSession
+            Length.defaultLengthLimits roles
+            (sessionInventory () []) Length.BuiltinListSpine []
+      assertLeft
+        (LengthProblem.LengthSessionTargetArgumentRoleLimitExceeded 8 9)
+        sessionObserved
   , testCase "stop on a cyclic provider transfer at the syntax bound" $ do
       providerName <- expectName "Fixture.cyclicTransfer"
       let limits = limitsWith $ \source -> source
@@ -5138,6 +5433,26 @@ fingerprintTests = testGroup "identity sensitivity"
       assertBool "contract input arity was omitted from identity" $
         Length.lengthContractFingerprint nullary /=
           Length.lengthContractFingerprint unary
+  , testCase
+      "bind every mixed target role while compacting observed inputs" $ do
+      let spine = listOf closedPayloadType
+          target = FunctionType spine $ FunctionType spine spine
+          firstRoles =
+            [ Length.LengthUnobservedTarget
+            , Length.LengthObservedSpine
+            ]
+          secondRoles = reverse firstRoles
+      first <- expectRight $ Length.sealRoleAwareLengthContract
+        Length.defaultLengthLimits fixtureInventory firstRoles target
+        identityLengthContract
+      second <- expectRight $ Length.sealRoleAwareLengthContract
+        Length.defaultLengthLimits fixtureInventory secondRoles target
+        identityLengthContract
+      Length.checkedLengthContractInputCount first @?= 1
+      Length.checkedLengthContractInputCount second @?= 1
+      assertBool "target-role order was omitted from contract identity" $
+        Length.lengthContractFingerprint first /=
+          Length.lengthContractFingerprint second
   , testCase "exclude admission limits from contract and inventory identity" $ do
       providerName <- expectName "Fixture.limitIndependent"
       let tightLimits = limitsWith $ \source -> source
@@ -5482,6 +5797,20 @@ adversarialLengthSession declarations providers = expectRight
       Length.BuiltinListSpine
       providers
 
+adversarialRoleAwareLengthSession
+  :: [Length.LengthTargetArgumentRole]
+  -> [Declaration (Variable AdversarialIdentity) () ()]
+  -> [Length.LengthProviderSummarySource
+        (Variable AdversarialIdentity)]
+  -> IO (LengthProblem.CheckedLengthSession AdversarialIdentity ())
+adversarialRoleAwareLengthSession roles declarations providers = expectRight
+  $ LengthProblem.sealRoleAwareLengthSession
+      Length.defaultLengthLimits
+      roles
+      (sessionInventory () declarations)
+      Length.BuiltinListSpine
+      providers
+
 adversarialLengthContract
   :: LengthProblem.CheckedLengthSession AdversarialIdentity ()
   -> AdversarialType
@@ -5492,6 +5821,21 @@ adversarialLengthContract session target source = expectRight
   $ Length.sealLengthContractInContext
       Length.defaultLengthLimits
       (LengthProblem.checkedLengthSessionContext session)
+      target
+      source
+
+adversarialRoleAwareLengthContract
+  :: LengthProblem.CheckedLengthSession AdversarialIdentity ()
+  -> [Length.LengthTargetArgumentRole]
+  -> AdversarialType
+  -> Length.LengthContractSource
+  -> IO (Length.CheckedLengthContract
+      (Variable AdversarialIdentity))
+adversarialRoleAwareLengthContract session roles target source = expectRight
+  $ Length.sealRoleAwareLengthContractInContext
+      Length.defaultLengthLimits
+      (LengthProblem.checkedLengthSessionContext session)
+      roles
       target
       source
 
@@ -5564,6 +5908,270 @@ adversarialIdentityGraphSource spine = Djex.TermGraphSource
             (Djex.termNodeId 0)
     )
   ]
+
+roleAwareMapFixture
+  :: IO
+      ( Name
+      , LengthProblem.CheckedLengthSession AdversarialIdentity ()
+      , Length.CheckedLengthContract (Variable AdversarialIdentity)
+      , AdversarialCandidate
+      )
+roleAwareMapFixture = roleAwareMapFixtureWithContract identityLengthContract
+
+roleAwareMapFixtureWithContract
+  :: Length.LengthContractSource
+  -> IO
+      ( Name
+      , LengthProblem.CheckedLengthSession AdversarialIdentity ()
+      , Length.CheckedLengthContract (Variable AdversarialIdentity)
+      , AdversarialCandidate
+      )
+roleAwareMapFixtureWithContract contractSource = do
+  providerName <- expectName "Fixture.roleAwareMap"
+  let inputPayload = TupleType Boxed []
+      outputPayload = FunctionType inputPayload inputPayload
+      functionArgument = FunctionType inputPayload outputPayload
+      inputSpine = adversarialListOf inputPayload
+      outputSpine = adversarialListOf outputPayload
+      providerResult = FunctionType inputSpine outputSpine
+      target = FunctionType functionArgument providerResult
+      roles =
+        [ Length.LengthUnobservedTarget
+        , Length.LengthObservedSpine
+        ]
+      provider = Length.AssumedProviderSummary
+        { Length.lengthProviderName = providerName
+        , Length.lengthProviderScheme = target
+        , Length.lengthProviderArgumentRoles =
+            [ Length.LengthUnobservedArgument
+            , Length.LengthSpineArgument
+            ]
+        , Length.lengthProviderTransfer = Length.LengthVariable
+            $ Length.LengthProviderArgument 1
+        }
+      declaration = ValueDeclaration
+        $ ValueSignature () providerName target
+      source = Djex.TermGraphSource (Djex.termNodeId 5)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode target
+              $ Djex.TypedGlobal (Djex.occurrenceId 0) providerName
+          )
+        , ( Djex.termNodeId 1
+          , Djex.TermNode functionArgument
+              $ Djex.TypedLocal (Djex.occurrenceId 1) 0
+          )
+        , ( Djex.termNodeId 2
+          , Djex.TermNode providerResult
+              $ Djex.TypedApply
+                  (Djex.termNodeId 0)
+                  (Djex.termNodeId 1)
+                  (Djex.ApplicationWitness functionArgument providerResult)
+          )
+        , ( Djex.termNodeId 3
+          , Djex.TermNode inputSpine
+              $ Djex.TypedLocal (Djex.occurrenceId 2) 1
+          )
+        , ( Djex.termNodeId 4
+          , Djex.TermNode outputSpine
+              $ Djex.TypedApply
+                  (Djex.termNodeId 2)
+                  (Djex.termNodeId 3)
+                  (Djex.ApplicationWitness inputSpine outputSpine)
+          )
+        , ( Djex.termNodeId 5
+          , Djex.TermNode target
+              $ Djex.TypedLambda
+                  [ Djex.TypedPattern (Djex.occurrenceId 3)
+                      functionArgument (Djex.TypedBind 0)
+                  , Djex.TypedPattern (Djex.occurrenceId 4)
+                      inputSpine (Djex.TypedBind 1)
+                  ]
+                  (Djex.termNodeId 4)
+          )
+        ]
+  session <- adversarialRoleAwareLengthSession roles
+    [declaration] [provider]
+  contract <- adversarialRoleAwareLengthContract
+    session roles target contractSource
+  graph <- sealAdversarialGraph source
+  pure
+    ( providerName
+    , session
+    , contract
+    , adversarialTypedCandidate $ Right graph
+    )
+
+sealRoleAwareAdversarialProblem
+  :: [Length.LengthTargetArgumentRole]
+  -> AdversarialType
+  -> Length.LengthContractSource
+  -> Djex.TermGraphSource AdversarialType AdversarialLocal
+  -> IO
+      (Either
+        (LengthProblem.LengthProblemError
+          String AdversarialIdentity AdversarialLocal)
+        (LengthProblem.CheckedLengthProblem
+          AdversarialIdentity AdversarialLocal))
+sealRoleAwareAdversarialProblem roles target contractSource graphSource = do
+  session <- adversarialRoleAwareLengthSession roles [] []
+  contract <- adversarialRoleAwareLengthContract
+    session roles target contractSource
+  graph <- sealAdversarialGraph graphSource
+  pure $ LengthProblem.sealRoleAwareLengthTypedCandidateProblem
+    LengthProblem.defaultLengthProblemLimits session contract
+    $ adversarialTypedCandidate $ Right graph
+
+assertOpaqueTargetDemandFailures :: IO ()
+assertOpaqueTargetDemandFailures = do
+  let spine = adversarialClosedList
+      spineIdentityTarget = FunctionType spine spine
+  spineResult <- sealRoleAwareAdversarialProblem
+    [Length.LengthUnobservedTarget]
+    spineIdentityTarget
+    trivialLengthContract
+    $ adversarialIdentityGraphSource spine
+  assertLeft
+    (LengthProblem.LengthProblemUnobservedTargetArgumentDemanded 0
+      $ LengthProblem.LengthUnobservedTargetSpineDemand
+      $ Djex.termNodeId 1)
+    spineResult
+
+  let callable = FunctionType spine spine
+      callableTarget = FunctionType callable
+        $ FunctionType spine spine
+      callableSource = Djex.TermGraphSource (Djex.termNodeId 3)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode callable
+              $ Djex.TypedLocal (Djex.occurrenceId 0) 0
+          )
+        , ( Djex.termNodeId 1
+          , Djex.TermNode spine
+              $ Djex.TypedLocal (Djex.occurrenceId 1) 1
+          )
+        , ( Djex.termNodeId 2
+          , Djex.TermNode spine
+              $ Djex.TypedApply
+                  (Djex.termNodeId 0)
+                  (Djex.termNodeId 1)
+                  (Djex.ApplicationWitness spine spine)
+          )
+        , ( Djex.termNodeId 3
+          , Djex.TermNode callableTarget
+              $ Djex.TypedLambda
+                  [ Djex.TypedPattern (Djex.occurrenceId 2)
+                      callable (Djex.TypedBind 0)
+                  , Djex.TypedPattern (Djex.occurrenceId 3)
+                      spine (Djex.TypedBind 1)
+                  ]
+                  (Djex.termNodeId 2)
+          )
+        ]
+  callableResult <- sealRoleAwareAdversarialProblem
+    [ Length.LengthUnobservedTarget
+    , Length.LengthObservedSpine
+    ]
+    callableTarget
+    identityLengthContract
+    callableSource
+  assertLeft
+    (LengthProblem.LengthProblemUnobservedTargetArgumentDemanded 0
+      $ LengthProblem.LengthUnobservedTargetCallableDemand
+      $ Djex.termNodeId 2)
+    callableResult
+
+  let tuple = TupleType Boxed [spine, spine]
+      tupleTarget = FunctionType tuple spine
+      tupleOccurrence = Djex.occurrenceId 4
+      tupleSource = Djex.TermGraphSource (Djex.termNodeId 1)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode spine
+              $ Djex.TypedLocal (Djex.occurrenceId 5) 0
+          )
+        , ( Djex.termNodeId 1
+          , Djex.TermNode tupleTarget
+              $ Djex.TypedLambda
+                  [ Djex.TypedPattern tupleOccurrence tuple
+                      $ Djex.TypedTuplePattern
+                        [ Djex.TypedPattern (Djex.occurrenceId 6)
+                            spine (Djex.TypedBind 0)
+                        , Djex.TypedPattern (Djex.occurrenceId 7)
+                            spine Djex.TypedWildcard
+                        ]
+                  ]
+                  (Djex.termNodeId 0)
+          )
+        ]
+  tupleResult <- sealRoleAwareAdversarialProblem
+    [Length.LengthUnobservedTarget]
+    tupleTarget
+    trivialLengthContract
+    tupleSource
+  assertLeft
+    (LengthProblem.LengthProblemUnobservedTargetArgumentDemanded 0
+      $ LengthProblem.LengthUnobservedTargetTupleDemand tupleOccurrence)
+    tupleResult
+
+roleAwareOpaqueStepPayloadProblem
+  :: IO
+      (LengthProblem.CheckedLengthProblem
+        AdversarialIdentity AdversarialLocal)
+roleAwareOpaqueStepPayloadProblem = do
+  let payload = TupleType Boxed []
+      spine = adversarialListOf payload
+      stepResult = FunctionType spine spine
+      target = FunctionType payload stepResult
+      roles =
+        [ Length.LengthUnobservedTarget
+        , Length.LengthObservedSpine
+        ]
+      expected = Length.LengthSum
+        [ Length.LengthVariable $ Length.LengthInput 0
+        , Length.LengthLiteral 1
+        ]
+      contractSource = contractWith (Length.LengthTruth True)
+        $ Length.LengthEqual
+            (Length.LengthVariable Length.LengthResult) expected
+      source = Djex.TermGraphSource (Djex.termNodeId 5)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode target
+              $ Djex.TypedGlobal (Djex.occurrenceId 0) consName
+          )
+        , ( Djex.termNodeId 1
+          , Djex.TermNode payload
+              $ Djex.TypedLocal (Djex.occurrenceId 1) 0
+          )
+        , ( Djex.termNodeId 2
+          , Djex.TermNode stepResult
+              $ Djex.TypedApply
+                  (Djex.termNodeId 0)
+                  (Djex.termNodeId 1)
+                  (Djex.ApplicationWitness payload stepResult)
+          )
+        , ( Djex.termNodeId 3
+          , Djex.TermNode spine
+              $ Djex.TypedLocal (Djex.occurrenceId 2) 1
+          )
+        , ( Djex.termNodeId 4
+          , Djex.TermNode spine
+              $ Djex.TypedApply
+                  (Djex.termNodeId 2)
+                  (Djex.termNodeId 3)
+                  (Djex.ApplicationWitness spine spine)
+          )
+        , ( Djex.termNodeId 5
+          , Djex.TermNode target
+              $ Djex.TypedLambda
+                  [ Djex.TypedPattern (Djex.occurrenceId 3)
+                      payload (Djex.TypedBind 0)
+                  , Djex.TypedPattern (Djex.occurrenceId 4)
+                      spine (Djex.TypedBind 1)
+                  ]
+                  (Djex.termNodeId 4)
+          )
+        ]
+  result <- sealRoleAwareAdversarialProblem
+    roles target contractSource source
+  expectRight result
 
 adversarialConstantZeroProblem
   :: Length.LengthContractSource

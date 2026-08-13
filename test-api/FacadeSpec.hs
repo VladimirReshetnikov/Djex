@@ -285,6 +285,10 @@ facadeTests = testGroup "public Djex facade"
         defaultLengthLimits sourceInventory BuiltinListSpine
       checkedContract <- expectRight $ sealLengthContractInContext
         defaultLengthLimits checkedContext target contract
+      checkedRoleContract <- expectRight
+        $ sealRoleAwareLengthContractInContext
+            defaultLengthLimits checkedContext
+            [LengthObservedSpine] target contract
       checkedProviders <- expectRight $ sealLengthProviderInventoryInContext
         defaultLengthLimits checkedContext [provider]
       lengthContextInventory checkedContext @?= sourceInventory
@@ -298,7 +302,11 @@ facadeTests = testGroup "public Djex facade"
       lengthContractPrecondition contract @?= condition
       lengthContractPostcondition contract @?= LengthEqual result transfer
       checkedLengthContractTarget checkedContract @?= target
+      checkedLengthContractTargetArgumentRoles checkedContract @?=
+        [LengthObservedSpine]
       checkedLengthContractInputCount checkedContract @?= 1
+      lengthContractFingerprint checkedRoleContract @?=
+        lengthContractFingerprint checkedContract
       ( lengthProviderName provider
         , lengthProviderScheme provider
         , lengthProviderArgumentRoles provider
@@ -326,6 +334,18 @@ facadeTests = testGroup "public Djex facade"
           checkedContract (LengthContractAssignment [0] 3) @?=
         Right LengthPostconditionSatisfied
       [LengthSpineArgument, LengthUnobservedArgument] @?= [minBound .. maxBound]
+      [LengthObservedSpine, LengthUnobservedTarget] @?= [minBound .. maxBound]
+      (LengthContractTargetArgumentRoleArityMismatch 2 1
+          :: LengthContractError String) @?=
+        LengthContractTargetArgumentRoleArityMismatch 2 1
+      (LengthSessionTargetArgumentRoleLimitExceeded 1 2
+          :: LengthSessionError String) @?=
+        LengthSessionTargetArgumentRoleLimitExceeded 1 2
+      let demandSite = LengthUnobservedTargetSpineDemand $ termNodeId 7
+          demandError = LengthProblemUnobservedTargetArgumentDemanded
+            0 demandSite
+            :: LengthProblemError () String Int
+      demandError @?= LengthProblemUnobservedTargetArgumentDemanded 0 demandSite
       (AssumedProviderLaw :: LengthProviderTrust) @?= minBound
       [BuiltinStructuralListSpine, DerivedFromListLikeDataDeclaration] @?=
         [minBound .. maxBound]
@@ -553,6 +573,25 @@ facadeTests = testGroup "public Djex facade"
                   ExferenceTermGraphAbsence Int ExferenceLocal)
                 (CheckedLengthProblem Int ExferenceLocal)
           sealer = sealLengthTypedCandidateProblem
+          roleAwareSessionSealer
+            :: LengthLimits
+            -> [LengthTargetArgumentRole]
+            -> Inventory (Variable Int) ()
+            -> LengthSpineModelSource
+            -> [LengthProviderSummarySource (Variable Int)]
+            -> Either (LengthSessionError Int)
+                (CheckedLengthSession Int ())
+          roleAwareSessionSealer = sealRoleAwareLengthSession
+          roleAwareSealer
+            :: LengthProblemLimits
+            -> CheckedLengthSession Int ()
+            -> CheckedLengthContract ExferenceTypeVariable
+            -> ExferenceTypedCandidate
+            -> Either
+                (LengthProblemError
+                  ExferenceTermGraphAbsence Int ExferenceLocal)
+                (CheckedLengthProblem Int ExferenceLocal)
+          roleAwareSealer = sealRoleAwareLengthTypedCandidateProblem
           candidateResultProjection
             :: CheckedLengthCandidate Int ExferenceLocal
             -> LengthExpression LengthContractVariable
@@ -689,7 +728,8 @@ facadeTests = testGroup "public Djex facade"
             :: LengthSMTLibExecutionConfig
             -> LengthSMTLibResponseLimits
           executionResponseProjection = lengthSMTLibExecutionResponseLimits
-      sealer `seq` candidateResultProjection `seq` problemProjection `seq`
+      sealer `seq` roleAwareSessionSealer `seq` roleAwareSealer `seq`
+        candidateResultProjection `seq` problemProjection `seq`
         inputCountProjection `seq` preconditionProjection `seq`
         postconditionProjection `seq` basisProjection `seq`
         counterexampleValidator `seq` queryInputSymbolsProjection `seq`

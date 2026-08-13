@@ -130,9 +130,9 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Selection` | First, best, lookahead-best, all, and preferred-tier policies over lazy result batches. |
 | `Language.Haskell.Synthesis.Diagnostic` | Severity, stable code, checked source locations/spans, ordered context, and deterministic rendering. |
 | `Language.Haskell.Synthesis.Fingerprint` | Public inspection of opaque, nominal, collision-free canonical identities; construction and byte budgets remain package-private. |
-| `Language.Haskell.Synthesis.Semantic.Length` | Exact inventory-bound finite-spine contexts, normalized contracts, source-bound assumed provider laws, and model-aware fingerprints. |
+| `Language.Haskell.Synthesis.Semantic.Length` | Exact inventory-bound finite-spine contexts, normalized contracts, source-bound assumed provider laws, and model-aware fingerprints; additive target-role sealers retain the full ordered observed-spine/unobserved vector while legacy all-observed identities remain exact. |
 | `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked contracts, provider transfers, and exact candidate problems; only independently validated model-relative violations receive problem-bound evidence with an explicit provider-assumption basis. |
-| `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and typed-candidate behavioral problems: session-owned provider authority carried intact through interpretation, exact separately supplied contract resealing, residual rejection, rigid root/provider authorization, normalized counterexample formulas, and separate inventory/encoding/candidate/problem identities; the candidate identity structurally binds the transient shared graph key without retaining a parallel graph field. |
+| `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and typed-candidate behavioral problems: session-owned provider authority carried intact through interpretation, exact separately supplied contract resealing, residual rejection, rigid root/provider authorization, mixed-role opaque target application with compact observed-input numbering and explicit demand failures, normalized counterexample formulas, and separate inventory/encoding/candidate/problem identities; the candidate identity structurally binds the transient shared graph key without retaining a parallel graph field. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation and exact input-symbol model replay for one checked Length problem, without launching or trusting a solver. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` | Pure validated Z3 launch, resource, artifact, and response-decoder policy with a package-private complete identity and a byte-free digest-expectation presence classifier; it performs no IO or attestation. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` | Rank-N scoped capability-probed Z3 ownership with byte-free failures, heuristic status/strength/use, and a query-first replay gate for independently validated counterexample evidence. |
@@ -180,6 +180,22 @@ only relative to its encoding and grants `HeuristicRankingOnly`. The opaque
 Domain-owned checkers may bind independently replayed receipts to the same
 identities, and a public consumer can recover a receipt only through successful
 replay against the exact problem.
+
+The Length contract has two additive construction paths. Existing sealers
+continue to require every physical target argument to be a modeled list spine.
+Role-aware sealers accept a bounded closed `LengthTargetArgumentRole` vector,
+retained in full and in source order by the checked contract. Observed spine
+roles receive compact `LengthInput` indices; unobserved target roles receive
+opaque, non-inspectable interpreter tokens. Every physical argument is still
+applied. A token may be ignored or forwarded through an explicitly
+non-observing provider argument or list-step payload, but callable, spine, and
+tuple demands fail at an explicit site before arbitrary semantic evaluation.
+The role does not assert source-language inhabitance, purity, totality, or
+non-strictness. All-observed role vectors reuse the exact legacy contract,
+session, and concrete-encoding identities; mixed vectors alone select the new
+versioned policies. The resulting SMT query and model replay expose only the
+compact observed inputs. See the
+[role-aware target-argument report](../docs/reports/2026-08-13-role-aware-target-arguments.md).
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib` provides a pure canonical
 QF_LIA boundary over an exact checked length problem. Its opaque nominal query
@@ -405,9 +421,9 @@ forces a narrower owner containing its ordinal, one strict status-indexed
 observation, reversible key, transcript digest, and accounting boundaries,
 but no parsed symbol/integer binding list. Only the satisfiable observation
 branch can contain optional problem-bound evidence. Evidence retains the
-normalized source-ordered counterexample inputs, and the private reversible
-key retains exact transcript bytes; the deletion narrows structured authority
-rather than scrubbing child output.
+normalized compact source-ordered observed-spine counterexample inputs, and
+the private reversible key retains exact transcript bytes; the deletion
+narrows structured authority rather than scrubbing child output.
 
 The public live facade copies the whole status-indexed observation once along
 with the bounded query association, rather than re-pairing a status and an

@@ -17,10 +17,12 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.Problem.Candidate
   , lengthProblemEvaluationStepLimit
   , LengthProblemFingerprintPart (..)
   , LengthRootOpeningError (..)
+  , LengthUnobservedTargetDemandSite (..)
   , LengthProblemError (..)
   , CheckedLengthCandidate
   , CheckedLengthProblem
   , sealLengthTypedCandidateProblem
+  , sealRoleAwareLengthTypedCandidateProblem
   , checkedLengthCandidateResult
   , checkedLengthCandidateUsedProviders
   , checkedLengthCandidateFingerprint
@@ -82,6 +84,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , LengthExpression (..)
   , LengthFormula (..)
   , LengthProviderArgumentRole (..)
+  , LengthTargetArgumentRole (..)
   , LengthProviderVariable (..)
   , LengthSpineModelTrust (..)
   , LengthSyntaxError (..)
@@ -89,6 +92,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , checkedLengthContractPostcondition
   , checkedLengthContractPrecondition
   , checkedLengthContractTarget
+  , checkedLengthContractTargetArgumentRoles
   , checkedLengthContractInputCount
   , checkedLengthProviderArgumentRoles
   , checkedLengthProviderName
@@ -114,14 +118,16 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , normalizeLengthExpression
   , normalizeLengthFormula
   , providerSummaryField
-  , sealLengthContractInContext
+  , sealRoleAwareLengthContractInContext
   , tagged
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
   ( CheckedLengthSession
+  , LengthTargetArgumentPolicy (..)
   , checkedLengthSessionContext
   , checkedLengthSessionLimits
   , checkedLengthSessionProviderInventory
+  , checkedLengthSessionTargetArgumentPolicy
   , lengthSessionEncodingPolicyFingerprint
   , lengthSessionInventoryFingerprint
   )
@@ -260,11 +266,24 @@ data LengthRootOpeningError identity
 
 instance NFData identity => NFData (LengthRootOpeningError identity)
 
+-- | The first semantic operation which tried to inspect one opaque target
+-- argument.  Carrying, ignoring, or forwarding the token does not constitute
+-- a demand.
+data LengthUnobservedTargetDemandSite
+  = LengthUnobservedTargetCallableDemand !TermNodeId
+  | LengthUnobservedTargetSpineDemand !TermNodeId
+  | LengthUnobservedTargetTupleDemand !OccurrenceId
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthUnobservedTargetDemandSite
+
 -- | Fixed-precedence failure while sealing one complete typed candidate.
 data LengthProblemError failure identity local
   = LengthProblemContractResealRejected
       (LengthContractError (Variable identity))
   | LengthProblemContractContextMismatch
+  | LengthProblemMixedTargetArgumentsRequireRoleAwareSealer
+  | LengthProblemTargetArgumentPolicyMismatch
   | LengthProblemResidualConstraint
       (Constraint (Type (Variable identity)))
   | LengthProblemTypedGraphUnavailable failure
@@ -288,6 +307,8 @@ data LengthProblemError failure identity local
   | LengthProblemExpectedCallable !TermNodeId
   | LengthProblemExpectedSpine !TermNodeId
   | LengthProblemExpectedTuple !OccurrenceId
+  | LengthProblemUnobservedTargetArgumentDemanded
+      !Natural !LengthUnobservedTargetDemandSite
   | LengthProblemTupleArityMismatch !OccurrenceId !Int !Int
   | LengthProblemEvaluationStepLimitExceeded !Int !Int
   | LengthProblemProviderTransferInvariant Name !Natural
@@ -361,7 +382,8 @@ checkedLengthProblemCandidate
 checkedLengthProblemCandidate
     (CheckedLengthProblem candidate _ _ _ _ _) = candidate
 
--- | Number of source-ordered natural inputs admitted by the sealed contract.
+-- | Number of compact source-ordered observed-spine inputs admitted by the
+-- sealed contract.
 --
 -- This value is retained redundantly with the fingerprinted contract so a
 -- model decoder can reject missing or extra assignments without receiving a
@@ -435,7 +457,58 @@ sealLengthTypedCandidateProblem
   -> Either
       (LengthProblemError failure identity local)
       (CheckedLengthProblem identity local)
-sealLengthTypedCandidateProblem problemLimits session suppliedContract typed = do
+sealLengthTypedCandidateProblem = sealLengthTypedCandidateProblemWithMode
+  LengthLegacyProblemSealer
+
+-- | Seal a candidate under the role-aware interpreter.  An all-observed
+-- contract canonicalizes to legacy identities; a mixed contract requires a
+-- session sealed for mixed opaque-target semantics.
+sealRoleAwareLengthTypedCandidateProblem
+  :: (Ord identity, Ord local)
+  => LengthProblemLimits
+  -> CheckedLengthSession identity annotation
+  -> CheckedLengthContract (Variable identity)
+  -> TypedCandidate failure
+      (Type (Variable identity))
+      local
+      (Candidate (Type (Variable identity)) details output)
+  -> Either
+      (LengthProblemError failure identity local)
+      (CheckedLengthProblem identity local)
+sealRoleAwareLengthTypedCandidateProblem = sealLengthTypedCandidateProblemWithMode
+  LengthRoleAwareProblemSealer
+
+data LengthProblemSealer
+  = LengthLegacyProblemSealer
+  | LengthRoleAwareProblemSealer
+
+sealLengthTypedCandidateProblemWithMode
+  :: (Ord identity, Ord local)
+  => LengthProblemSealer
+  -> LengthProblemLimits
+  -> CheckedLengthSession identity annotation
+  -> CheckedLengthContract (Variable identity)
+  -> TypedCandidate failure
+      (Type (Variable identity))
+      local
+      (Candidate (Type (Variable identity)) details output)
+  -> Either
+      (LengthProblemError failure identity local)
+      (CheckedLengthProblem identity local)
+sealLengthTypedCandidateProblemWithMode sealer problemLimits session
+    suppliedContract typed = do
+  let suppliedRoles = checkedLengthContractTargetArgumentRoles suppliedContract
+      mixedContract = LengthUnobservedTarget `elem` suppliedRoles
+      mixedSession = checkedLengthSessionTargetArgumentPolicy session
+        == LengthMixedTargetPolicy
+  case sealer of
+    LengthLegacyProblemSealer
+      | mixedContract -> Left
+          LengthProblemMixedTargetArgumentsRequireRoleAwareSealer
+    _ -> pure ()
+  if mixedContract == mixedSession
+    then pure ()
+    else Left LengthProblemTargetArgumentPolicyMismatch
   let providers = checkedLengthSessionProviderInventory session
   contract <- revalidateContract session suppliedContract
   let compatibility = typedCandidateCompatibility typed
@@ -462,6 +535,8 @@ sealLengthTypedCandidateProblem problemLimits session suppliedContract typed = d
         , interpretationProblemLimits = problemLimits
         , interpretationGraph = graph
         , interpretationGlobals = globals
+        , interpretationTargetArgumentRoles =
+            checkedLengthContractTargetArgumentRoles contract
         , interpretationInputCount = checkedLengthContractInputCount contract
         }
       $ termGraphRoot graph)
@@ -517,9 +592,10 @@ revalidateContract
       (CheckedLengthContract (Variable identity))
 revalidateContract session original = do
   checked <- first LengthProblemContractResealRejected
-    $ sealLengthContractInContext
+    $ sealRoleAwareLengthContractInContext
         (checkedLengthSessionLimits session)
         (checkedLengthSessionContext session)
+        (checkedLengthContractTargetArgumentRoles original)
         (checkedLengthContractTarget original)
         LengthContractSource
           { lengthContractPrecondition =
@@ -834,6 +910,7 @@ data SemanticThunk identity local
 
 data SemanticValue identity local
   = SemanticSpine !(LengthExpression LengthContractVariable)
+  | SemanticOpaqueTargetArgument !Natural
   | SemanticTuple [SemanticThunk identity local]
   | SemanticClosure
       [TypedPattern (Type (Variable identity)) local]
@@ -870,6 +947,7 @@ data InterpretationContext identity local annotation = InterpretationContext
   , interpretationProblemLimits :: !LengthProblemLimits
   , interpretationGraph :: !(TermGraph (Type (Variable identity)) local)
   , interpretationGlobals :: !(Map Name (ModeledGlobal identity))
+  , interpretationTargetArgumentRoles :: ![LengthTargetArgumentRole]
   , interpretationInputCount :: !Int
   }
 
@@ -884,19 +962,33 @@ interpretCompleteCandidate
       (LengthExpression LengthContractVariable)
 interpretCompleteCandidate context root = do
   value <- evaluateNode context emptyEnvironment root
-  applied <- foldM (applyInput context root) value
-    $ take (interpretationInputCount context) [0 ..]
+  (applied, observedCount) <- foldM (applyTargetArgument context root)
+    (value, 0)
+    $ zip [0 ..] $ interpretationTargetArgumentRoles context
+  if observedCount == fromIntegral (interpretationInputCount context)
+    then pure ()
+    else lift $ Left $ LengthProblemTargetArgumentPolicyMismatch
   requireSpine root applied
 
-applyInput
+applyTargetArgument
   :: (Ord identity, Ord local)
   => InterpretationContext identity local annotation
   -> TermNodeId
-  -> SemanticValue identity local
-  -> Natural
-  -> Evaluation failure identity local (SemanticValue identity local)
-applyInput context owner function position = applySemantic context owner function
-  $ EvaluatedThunk $ SemanticSpine $ LengthVariable $ LengthInput position
+  -> (SemanticValue identity local, Natural)
+  -> (Natural, LengthTargetArgumentRole)
+  -> Evaluation failure identity local
+      (SemanticValue identity local, Natural)
+applyTargetArgument context owner (function, observedPosition)
+    (physicalPosition, role) = case role of
+  LengthObservedSpine -> do
+    value <- applySemantic context owner function
+      $ EvaluatedThunk $ SemanticSpine
+      $ LengthVariable $ LengthInput observedPosition
+    pure (value, observedPosition + 1)
+  LengthUnobservedTarget -> do
+    value <- applySemantic context owner function
+      $ EvaluatedThunk $ SemanticOpaqueTargetArgument physicalPosition
+    pure (value, observedPosition)
 
 emptyEnvironment :: SemanticEnvironment identity local
 emptyEnvironment = SemanticEnvironment Map.empty
@@ -962,6 +1054,9 @@ applySemantic
   -> SemanticThunk identity local
   -> Evaluation failure identity local (SemanticValue identity local)
 applySemantic context owner function argument = case function of
+  SemanticOpaqueTargetArgument position -> lift $ Left
+    $ LengthProblemUnobservedTargetArgumentDemanded position
+    $ LengthUnobservedTargetCallableDemand owner
   SemanticClosure [] body environment -> do
     value <- evaluateNode context environment body
     applySemantic context owner value argument
@@ -1006,6 +1101,10 @@ bindPattern context pattern thunk environment = do
     TypedTuplePattern patterns -> do
       value <- forceThunk context thunk
       case value of
+        SemanticOpaqueTargetArgument position -> lift $ Left
+          $ LengthProblemUnobservedTargetArgumentDemanded position
+          $ LengthUnobservedTargetTupleDemand
+          $ typedPatternOccurrence pattern
         SemanticTuple fields
           | length fields == length patterns -> foldM bindField environment
               $ zip patterns fields
@@ -1055,6 +1154,9 @@ requireSpine
   -> Evaluation failure identity local
       (LengthExpression LengthContractVariable)
 requireSpine _ (SemanticSpine expression) = pure expression
+requireSpine owner (SemanticOpaqueTargetArgument position) = lift $ Left
+  $ LengthProblemUnobservedTargetArgumentDemanded position
+  $ LengthUnobservedTargetSpineDemand owner
 requireSpine owner _ = lift $ Left $ LengthProblemExpectedSpine owner
 
 interpretProvider
@@ -1207,7 +1309,7 @@ buildConcreteEncodingFingerprint
         (EncodingFingerprintSubject FiniteListSpineLengthV1))
 buildConcreteEncodingFingerprint session contract usedProviders result condition =
   buildFingerprintWithin maximumBytes FingerprintBuilder
-    { fingerprintBuilderVersion = 1
+    { fingerprintBuilderVersion = if mixedRoles then 2 else 1
     , fingerprintBuilderRole = ascii
         "finite-list-spine-length/concrete-encoding"
     , fingerprintBuilderFields =
@@ -1222,10 +1324,10 @@ buildConcreteEncodingFingerprint session contract usedProviders result condition
                 $ lengthContractFingerprint contract
             ]
         , tagged "interpreter"
-            [ FingerprintBytes $ ascii "lazy-symbolic-interpreter/v1"
+            $ [ FingerprintBytes $ ascii "lazy-symbolic-interpreter/v1"
             , FingerprintBytes $ ascii "finite-total-spine/v1"
             , FingerprintBytes $ ascii "assumed-provider-laws/v1"
-            ]
+            ] ++ mixedInterpreterPolicy
         , tagged "used-provider-laws"
             [FingerprintSequence $ map providerSummaryField usedProviders]
         , tagged "candidate-result"
@@ -1235,6 +1337,16 @@ buildConcreteEncodingFingerprint session contract usedProviders result condition
         ]
     }
  where
+  mixedRoles = LengthUnobservedTarget `elem`
+    checkedLengthContractTargetArgumentRoles contract
+  mixedInterpreterPolicy
+    | mixedRoles =
+        [ FingerprintBytes $ ascii "source-ordered-target-roles/v1"
+        , FingerprintBytes $ ascii "opaque-unobserved-target/v1"
+        , FingerprintBytes $ ascii "compact-observed-input-numbering/v1"
+        , FingerprintBytes $ ascii "explicit-opaque-demand-rejection/v1"
+        ]
+    | otherwise = []
   maximumBytes = fromIntegral $ lengthFingerprintByteLimit
     $ checkedLengthSessionLimits session
 

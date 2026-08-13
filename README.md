@@ -245,7 +245,8 @@ even that the provider will not evaluate the argument.
 
 The identities deliberately remain split. Contract and provider-inventory
 fingerprints include the exact checked spine model. A contract fingerprint also
-identifies the normalized length relation and its ordered spine inputs, while
+identifies the normalized length relation and its ordered observed-spine
+inputs (plus the full target-role vector on the mixed path), while
 an inventory fingerprint identifies the exact normalized provider assumptions.
 Opaque element types and caller-selected resource caps are not part of the
 contract fingerprint. `Language.Haskell.Synthesis.Semantic.Length.Problem`
@@ -284,7 +285,28 @@ A visible selection is checked at the kind inferred for the leading binder,
 so closed higher-kinded and impredicative selections remain legal while free
 flexibles, non-root rigids, and types from a foreign inventory fail closed.
 
-The first symbolic interpreter is deliberately narrow and lazy. It supports
+The first symbolic interpreter is deliberately narrow and lazy. The legacy
+sealers still treat every target argument as an observed list spine and retain
+their exact historical identities. The additive role-aware sealers instead
+retain one complete source-ordered `LengthTargetArgumentRole` vector in the
+checked contract. `LengthObservedSpine` positions receive compact
+`LengthInput` numbers in observed-role order; `LengthUnobservedTarget`
+positions receive opaque semantic tokens and no length variables. An
+all-observed explicit vector canonicalizes to the legacy contract, session,
+and concrete-encoding bytes. Only a mixed vector selects the versioned
+role-aware policies.
+
+The interpreter still applies every physical target argument. An opaque token
+may be ignored, forwarded to a provider argument sealed as unobserved, or
+occupy the nonrecursive payload field of the checked list step constructor.
+Trying to use it as a callable, list spine, or tuple fails at an explicit
+demand site before any invented value can enter Length arithmetic or control.
+An unobserved target role asserts neither that a source value inhabits the
+argument type nor that evaluating a real candidate is pure, total, or
+non-strict. It is only a solver-neutral non-observation policy for the checked
+symbolic interpreter.
+
+The interpreter supports
 locals, lambdas, application, certificate-free visible type application,
 tuples, lets, bind/wildcard/tuple/as patterns, the checked zero and step
 constructors, and checked provider transfers. Holes, cases, constructor
@@ -294,7 +316,8 @@ step limits bound candidate work; the existing Length syntax budget jointly
 bounds the normalized result and the counterexample condition
 `precondition && not postcondition[result := interpretedResult]`.
 
-A successful `CheckedLengthProblem` carries its source-ordered input arity,
+A successful `CheckedLengthProblem` carries its compact observed-spine input
+arity,
 normalized replay formulas, interpreted candidate, and one generic
 `BehavioralProblem` envelope. That envelope is the sole field of the checked
 problem which retains the inventory, concrete encoding, and complete problem
@@ -307,12 +330,15 @@ raw graph fingerprint is transient after those exact bytes enter that key, so
 the receipt retains no parallel graph-identity field. It does not pretend to
 retain batch completion status.
 
-Contract arguments and results must expose the context's outer modeled spine;
-their element types remain opaque and may themselves be impredicative. A
-direct rank-N contract argument is rejected. Provider schemes are closed and
-leading-context-free: spine-observed arguments and the result must use that
-same modeled spine, while unobserved arguments may be non-spine or rank-N
-values. `Language.Haskell.Synthesis.Semantic.Length.Evaluate` supplies bounded,
+On the legacy path, every contract argument and result must expose the
+context's outer modeled spine; their element types remain opaque and may
+themselves be impredicative, while a direct rank-N contract argument is
+rejected. On the role-aware path only observed arguments and the result must
+expose that spine; unobserved target arguments may be higher-order, rank-N, or
+otherwise non-spine. Provider schemes are closed and leading-context-free:
+spine-observed provider arguments and the result must use that same modeled
+spine, while unobserved provider arguments may be non-spine or rank-N values.
+`Language.Haskell.Synthesis.Semantic.Length.Evaluate` supplies bounded,
 deterministic evaluation of one concrete assignment, assumed provider call, or
 sealed candidate problem, including exact natural-number monus,
 positive-literal natural modulo, and short-circuiting conditionals. A raw
@@ -321,7 +347,8 @@ existing literal-bit bound before traversing its operand; normalization folds
 literal operands and every expression modulo one. Its three-way
 detached-contract result
 distinguishes a failed precondition, a satisfied postcondition, and a violated
-postcondition. Whole-problem replay accepts only source-ordered inputs, computes
+postcondition. Whole-problem replay accepts only compact source-ordered
+observed-spine inputs, computes
 the candidate result itself, and produces an opaque counterexample receipt
 bound to the exact problem tuple only when the normalized bad-state formula is
 true. Replay evaluates the retained precondition before the candidate and
@@ -365,6 +392,9 @@ commands and canonical fingerprint bytes. The rendered script is not promoted
 into the semantic source of truth. The exact admission, lowering, identity, and
 test boundary is recorded in the
 [positive-literal modulo report](docs/reports/2026-08-13-positive-literal-natural-modulo.md).
+The independent role authority, compact model boundary, compatibility bytes,
+and higher-order map example are recorded in the
+[role-aware target-argument report](docs/reports/2026-08-13-role-aware-target-arguments.md).
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` closes the
 remaining raw-report identity gap. Its opaque association binds bounded
@@ -573,7 +603,8 @@ accounting boundaries. Only the satisfiable observation branch can carry
 optional problem-bound evidence; impossible `unsat`/`unknown` plus evidence
 pairs are unrepresentable. The run does not retain the terminal decoded value
 or its parsed symbol/integer binding list. Validated evidence still owns
-normalized source-ordered inputs, while the reversible run key still embeds
+normalized compact source-ordered observed-spine inputs, while the reversible
+run key still embeds
 the exact bounded transcript bytes. This is removal of a parallel structured
 authority, not byte scrubbing.
 The exact design and threat boundary are recorded in the

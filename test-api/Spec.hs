@@ -206,6 +206,9 @@ projectionSignatures =
     :: Length.LengthLimits -> Int) `seq`
   (Length.checkedLengthContractTarget
     :: Length.CheckedLengthContract Int -> Type Int) `seq`
+  (Length.checkedLengthContractTargetArgumentRoles
+    :: Length.CheckedLengthContract Int
+    -> [Length.LengthTargetArgumentRole]) `seq`
   (Length.checkedLengthContractInputCount
     :: Length.CheckedLengthContract Int -> Int) `seq`
   (Length.checkedLengthContractPrecondition

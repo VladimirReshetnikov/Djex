@@ -628,6 +628,11 @@ forbiddenConstructionAttempts =
       @(Type LengthVariableProbe)
       "CheckedLengthContract.checkedLengthContractTarget"
   , noField
+      @"checkedLengthContractTargetArgumentRoles"
+      @(CheckedLengthContract LengthVariableProbe)
+      @[LengthTargetArgumentRole]
+      "CheckedLengthContract.checkedLengthContractTargetArgumentRoles"
+  , noField
       @"lengthContextInventory"
       @(CheckedLengthContext LengthVariableProbe LengthAnnotationProbe)
       @(Inventory LengthVariableProbe LengthAnnotationProbe)

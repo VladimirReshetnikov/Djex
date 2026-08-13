@@ -13,6 +13,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length
   , LengthFormula (..)
   , LengthContractVariable (..)
   , LengthContractSource (..)
+  , LengthTargetArgumentRole (..)
   , LengthProviderArgumentRole (..)
   , LengthProviderVariable (..)
   , LengthProviderSummarySource (..)
@@ -56,7 +57,10 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length
   , CheckedLengthContract
   , sealLengthContract
   , sealLengthContractInContext
+  , sealRoleAwareLengthContract
+  , sealRoleAwareLengthContractInContext
   , checkedLengthContractTarget
+  , checkedLengthContractTargetArgumentRoles
   , checkedLengthContractInputCount
   , checkedLengthContractPrecondition
   , checkedLengthContractPostcondition
@@ -212,6 +216,19 @@ data LengthContractSource = LengthContractSource
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData LengthContractSource
+
+-- | How one source-ordered target argument participates in Length semantics.
+--
+-- Observed arguments must have the configured finite-spine type and receive
+-- compact 'LengthInput' indices in observed-role order.  Unobserved arguments
+-- remain opaque to Length semantics: the candidate interpreter may carry or
+-- forward them only along non-demanding paths.
+data LengthTargetArgumentRole
+  = LengthObservedSpine
+  | LengthUnobservedTarget
+  deriving (Bounded, Enum, Eq, Ord, Show, Generic)
+
+instance NFData LengthTargetArgumentRole
 
 -- | Whether the assumed transfer may reference an argument's list spine.
 --
@@ -607,6 +624,8 @@ data LengthContractError variable
   | LengthContractTargetKindError (KindInferenceError variable)
   | LengthContractConstrainedTarget
   | LengthContractInputLimitExceeded Int Int
+  | LengthContractTargetArgumentRoleLimitExceeded Int Int
+  | LengthContractTargetArgumentRoleArityMismatch Int Int
   | LengthContractInputIsNotList Int (Type variable)
   | LengthContractResultIsNotList (Type variable)
   | LengthContractPreconditionError LengthSyntaxError
@@ -653,6 +672,7 @@ instance NFData variable => NFData (LengthProviderInventoryError variable)
 -- bind its exact context and target identities before replay.
 data CheckedLengthContract variable = CheckedLengthContract
   !(Type variable)
+  ![LengthTargetArgumentRole]
   !Int
   !(LengthFormula LengthContractVariable)
   !(LengthFormula LengthContractVariable)
@@ -661,31 +681,40 @@ data CheckedLengthContract variable = CheckedLengthContract
 type role CheckedLengthContract nominal
 
 instance NFData variable => NFData (CheckedLengthContract variable) where
-  rnf (CheckedLengthContract target count precondition postcondition fingerprint) =
+  rnf (CheckedLengthContract target roles count precondition postcondition fingerprint) =
     rnf target `seq`
+    rnf roles `seq`
     rnf count `seq`
     rnf precondition `seq`
     rnf postcondition `seq`
     rnf fingerprint
 
 checkedLengthContractTarget :: CheckedLengthContract variable -> Type variable
-checkedLengthContractTarget (CheckedLengthContract target _ _ _ _) = target
+checkedLengthContractTarget (CheckedLengthContract target _ _ _ _ _) = target
+
+-- | Exact source-ordered argument-role authority retained by the contract.
+checkedLengthContractTargetArgumentRoles
+  :: CheckedLengthContract variable -> [LengthTargetArgumentRole]
+checkedLengthContractTargetArgumentRoles
+    (CheckedLengthContract _ roles _ _ _ _) = roles
 
 checkedLengthContractInputCount :: CheckedLengthContract variable -> Int
-checkedLengthContractInputCount (CheckedLengthContract _ count _ _ _) = count
+checkedLengthContractInputCount
+    (CheckedLengthContract _ _ count _ _ _) = count
 
 checkedLengthContractPrecondition
   :: CheckedLengthContract variable -> LengthFormula LengthContractVariable
-checkedLengthContractPrecondition (CheckedLengthContract _ _ pre _ _) = pre
+checkedLengthContractPrecondition (CheckedLengthContract _ _ _ pre _ _) = pre
 
 checkedLengthContractPostcondition
   :: CheckedLengthContract variable -> LengthFormula LengthContractVariable
-checkedLengthContractPostcondition (CheckedLengthContract _ _ _ post _) = post
+checkedLengthContractPostcondition (CheckedLengthContract _ _ _ _ post _) = post
 
 lengthContractFingerprint
   :: CheckedLengthContract variable
   -> Fingerprint LengthContractFingerprintSubject
-lengthContractFingerprint (CheckedLengthContract _ _ _ _ fingerprint) = fingerprint
+lengthContractFingerprint
+    (CheckedLengthContract _ _ _ _ _ fingerprint) = fingerprint
 
 -- | One closed, context-free, proper-kinded assumed provider law.
 data CheckedLengthProviderSummary variable = CheckedLengthProviderSummary
@@ -770,6 +799,22 @@ sealLengthContract
 sealLengthContract limits inventory = sealLengthContractInContext limits
   $ CheckedLengthContext inventory builtinListSpineModel
 
+-- | Role-aware compatibility entry point for Haskell's structural @[]@
+-- spine.  An all-observed role vector canonicalizes to the exact legacy
+-- contract identity; only a vector containing an unobserved target selects
+-- the role-aware identity policy.
+sealRoleAwareLengthContract
+  :: Ord variable
+  => LengthLimits
+  -> Inventory variable annotation
+  -> [LengthTargetArgumentRole]
+  -> Type variable
+  -> LengthContractSource
+  -> Either (LengthContractError variable) (CheckedLengthContract variable)
+sealRoleAwareLengthContract limits inventory roles =
+  sealRoleAwareLengthContractInContext limits
+    (CheckedLengthContext inventory builtinListSpineModel) roles
+
 -- | Seal a contract against the exact inventory and spine model retained by
 -- one checked context.  The productive structural bound is checked before
 -- ordinary type normalization and kind inference.
@@ -781,6 +826,37 @@ sealLengthContractInContext
   -> LengthContractSource
   -> Either (LengthContractError variable) (CheckedLengthContract variable)
 sealLengthContractInContext limits (CheckedLengthContext inventory model)
+    rawTarget source = sealLengthContractInContextWithRoles limits inventory
+      model Nothing rawTarget source
+
+-- | Seal a role-aware contract against one exact checked context.
+--
+-- The role vector is bounded and matched to the complete physical target
+-- argument spine.  Contract variables number only observed spine arguments,
+-- compactly and in source order.
+sealRoleAwareLengthContractInContext
+  :: Ord variable
+  => LengthLimits
+  -> CheckedLengthContext variable annotation
+  -> [LengthTargetArgumentRole]
+  -> Type variable
+  -> LengthContractSource
+  -> Either (LengthContractError variable) (CheckedLengthContract variable)
+sealRoleAwareLengthContractInContext limits
+    (CheckedLengthContext inventory model) roles rawTarget source =
+  sealLengthContractInContextWithRoles limits inventory model
+    (Just roles) rawTarget source
+
+sealLengthContractInContextWithRoles
+  :: Ord variable
+  => LengthLimits
+  -> Inventory variable annotation
+  -> CheckedLengthSpineModel variable
+  -> Maybe [LengthTargetArgumentRole]
+  -> Type variable
+  -> LengthContractSource
+  -> Either (LengthContractError variable) (CheckedLengthContract variable)
+sealLengthContractInContextWithRoles limits inventory model suppliedRoles
     rawTarget source = do
   _ <- first LengthContractTargetBoundError
     $ observeTypeWithin limits 0 rawTarget
@@ -799,11 +875,23 @@ sealLengthContractInContext limits (CheckedLengthContext inventory model)
     then Left $ LengthContractInputLimitExceeded
       maximumInputs observedInputs
     else pure ()
-  mapM_ requireInputList $ zip [0 ..] inputs
+  roles <- case suppliedRoles of
+    Nothing -> Right $ replicate (length inputs) LengthObservedSpine
+    Just rawRoles -> do
+      let observedRoles = observedListLength maximumInputs rawRoles
+      if observedRoles > maximumInputs
+        then Left $ LengthContractTargetArgumentRoleLimitExceeded
+          maximumInputs observedRoles
+        else pure ()
+      if observedRoles == length inputs
+        then Right rawRoles
+        else Left $ LengthContractTargetArgumentRoleArityMismatch
+          (length inputs) observedRoles
+  mapM_ requireObservedInput $ zip3 [0 ..] roles inputs
   if isModeledSpine model result
     then pure ()
     else Left $ LengthContractResultIsNotList result
-  let inputCount = length inputs
+  let inputCount = length $ filter (== LengthObservedSpine) roles
       contractReference phase variable = case variable of
         LengthResult
           | phase == ContractPrecondition ->
@@ -826,13 +914,15 @@ sealLengthContractInContext limits (CheckedLengthContext inventory model)
         $ lengthContractPostcondition source
   fingerprint <- first contractFingerprintError
     $ buildLengthContractFingerprint
-        limits model inputCount precondition postcondition
+        limits model roles inputCount precondition postcondition
   pure $ CheckedLengthContract
-    target inputCount precondition postcondition fingerprint
+    target roles inputCount precondition postcondition fingerprint
  where
-  requireInputList (index, input)
-    | isModeledSpine model input = Right ()
-    | otherwise = Left $ LengthContractInputIsNotList index input
+  requireObservedInput (index, role, input) = case role of
+    LengthUnobservedTarget -> Right ()
+    LengthObservedSpine
+      | isModeledSpine model input -> Right ()
+      | otherwise -> Left $ LengthContractInputIsNotList index input
 
   contractFingerprintError FingerprintLimitExceeded
       { fingerprintMaximumBytes = maximumBytes
@@ -1419,41 +1509,71 @@ normalizeAll limits source = do
 buildLengthContractFingerprint
   :: LengthLimits
   -> CheckedLengthSpineModel variable
+  -> [LengthTargetArgumentRole]
   -> Int
   -> LengthFormula LengthContractVariable
   -> LengthFormula LengthContractVariable
   -> Either
       FingerprintLimitError
       (Fingerprint LengthContractFingerprintSubject)
-buildLengthContractFingerprint limits model inputCount precondition postcondition =
+buildLengthContractFingerprint limits model roles inputCount
+    precondition postcondition =
   buildFingerprintWithin (fromIntegral $ lengthFingerprintByteLimit limits)
     FingerprintBuilder
-      { fingerprintBuilderVersion = 2
+      { fingerprintBuilderVersion = if mixedRoles then 3 else 2
       , fingerprintBuilderRole = ascii
           "finite-list-spine-length/contract"
-      , fingerprintBuilderFields =
+      , fingerprintBuilderFields = if mixedRoles
+          then roleAwareFields
+          else legacyFields
+      }
+ where
+  mixedRoles = LengthUnobservedTarget `elem` roles
+  sharedPolicy =
+    [ FingerprintBytes $ ascii "finite-spine-total/v1"
+    , FingerprintBytes $ ascii "unbounded-natural/v1"
+    , FingerprintBytes $ ascii "exact-truncated-monus/v1"
+    , FingerprintBytes $ ascii "exact-conditional/v1"
+    ]
+  prefixFields policy =
           [ tagged "dialect"
               [FingerprintBytes finiteListSpineLengthDomainTag]
           , tagged "semantic-policy"
-              [ FingerprintBytes $ ascii "finite-spine-total/v1"
-              , FingerprintBytes $ ascii "unbounded-natural/v1"
-              , FingerprintBytes $ ascii "exact-truncated-monus/v1"
-              , FingerprintBytes $ ascii "exact-conditional/v1"
-              ]
+              policy
           , tagged "normalizer"
               [FingerprintBytes $ ascii "length-normalizer/v1"]
           , tagged "spine-model" [checkedLengthSpineModelField model]
-          , tagged "ordered-spine-inputs"
-              [ FingerprintNatural $ fromIntegral inputCount
-              , FingerprintSequence $ replicate inputCount
-                  $ FingerprintBytes $ ascii "list-spine"
-              ]
-          , tagged "precondition"
-              [lengthFormulaField contractVariableField precondition]
-          , tagged "postcondition"
-              [lengthFormulaField contractVariableField postcondition]
           ]
-      }
+  suffixFields =
+    [ tagged "precondition"
+        [lengthFormulaField contractVariableField precondition]
+    , tagged "postcondition"
+        [lengthFormulaField contractVariableField postcondition]
+    ]
+  legacyFields = prefixFields sharedPolicy ++
+    [ tagged "ordered-spine-inputs"
+        [ FingerprintNatural $ fromIntegral inputCount
+        , FingerprintSequence $ replicate inputCount
+            $ FingerprintBytes $ ascii "list-spine"
+        ]
+    ] ++ suffixFields
+  roleAwareFields = prefixFields (sharedPolicy ++
+      [ FingerprintBytes $ ascii "role-aware-target-arguments/v1"
+      , FingerprintBytes $ ascii "opaque-unobserved-target/v1"
+      , FingerprintBytes $ ascii "compact-observed-input-numbering/v1"
+      ]) ++
+    [ tagged "ordered-target-arguments"
+        [ FingerprintNatural $ fromIntegral $ length roles
+        , FingerprintSequence $ map targetArgumentRoleField roles
+        ]
+    , tagged "observed-spine-input-count"
+        [FingerprintNatural $ fromIntegral inputCount]
+    ] ++ suffixFields
+
+targetArgumentRoleField :: LengthTargetArgumentRole -> FingerprintField
+targetArgumentRoleField role = FingerprintBytes $ ascii $ case role of
+  LengthObservedSpine -> "observed-spine"
+  LengthUnobservedTarget -> "unobserved-target"
 
 buildLengthProviderInventoryFingerprint
   :: LengthLimits

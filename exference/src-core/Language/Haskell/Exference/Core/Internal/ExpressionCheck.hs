@@ -11,6 +11,19 @@ module Language.Haskell.Exference.Core.Internal.ExpressionCheck
   , ExpressionCheckContext
   , NestedRigidProvenance
   , CheckedExpressionEvidence
+  , CheckedTypeApplicationOrigin
+  , CheckedTypeApplicationOriginStep
+  , checkedExpressionTypeApplicationOrigins
+  , checkedExpressionTypeApplicationOriginReferences
+  , checkedTypeApplicationOriginId
+  , checkedTypeApplicationOriginOwner
+  , checkedTypeApplicationOriginSource
+  , checkedTypeApplicationOriginSteps
+  , checkedTypeApplicationOriginStepSlot
+  , checkedTypeApplicationOriginStepSource
+  , checkedTypeApplicationOriginStepSelected
+  , checkedTypeApplicationOriginStepResult
+  , checkedTypeApplicationOriginStepObligations
   , ExferenceTermGraphAbsence (..)
   , ExferenceTermGraphConstructionLimit (..)
   , ExferenceTermGraphAvailability (..)
@@ -69,6 +82,7 @@ import Language.Haskell.Exference.Core.Unify (unifyShared)
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 import qualified Language.Haskell.Synthesis.TypedGenerated as SharedTyped
@@ -155,6 +169,145 @@ instance NFData ExferenceTermGraphAvailability
 data CheckedExpressionEvidence = CheckedExpressionEvidence
   (SharedGenerated.Expression TVarId)
   CheckedTermResult
+  [CheckedTypeApplicationOrigin]
+
+-- | Checker-owned identity for one exact global specialization.  The
+-- constructor remains private: these records are observations retained after
+-- a complete independent check, not caller-constructible certificates.  They
+-- carry no prepared-declaration provenance, kind proof, instance or discharge
+-- identity, graph occurrence, or fingerprint authority.  A later behavioral
+-- consumer must independently match the owner and exact scheme against its
+-- own prepared inventory before interpreting this observation.
+data CheckedTypeApplicationOrigin = CheckedTypeApplicationOrigin
+  !Natural
+  QualifiedName
+  HsType
+  [CheckedTypeApplicationOriginStep]
+
+-- | One source-telescope selection in structural source order.  Obligations
+-- are exactly the source contexts which became unconditional at this step;
+-- successful checking proves only that they participated in the ordinary
+-- resolver and residual gates, not which instance discharged them.
+data CheckedTypeApplicationOriginStep = CheckedTypeApplicationOriginStep
+  !Natural
+  HsType
+  HsType
+  HsType
+  [HsConstraint]
+
+checkedExpressionTypeApplicationOrigins
+  :: CheckedExpressionEvidence
+  -> [CheckedTypeApplicationOrigin]
+checkedExpressionTypeApplicationOrigins
+    (CheckedExpressionEvidence _ _ origins) = origins
+
+-- | Origin coordinates attached to checked visible applications, in source
+-- order.  Coordinates are lookup identities only; this projection grants no
+-- occurrence, graph, or fingerprint authority.  A result is emitted only
+-- when the retained global base carries the same origin and the annotated
+-- applications form its contiguous zero-based prefix.
+checkedExpressionTypeApplicationOriginReferences
+  :: CheckedExpressionEvidence
+  -> [(Natural, Natural)]
+checkedExpressionTypeApplicationOriginReferences
+    (CheckedExpressionEvidence _ checkedResult origins) =
+  case checkedResult of
+    CheckedTermResult _ (Right term) -> concatMap referencesForOrigin origins
+     where
+      referencesForOrigin origin = case matchingSpines origin term of
+        [slots]
+          | not $ null slots
+          , slots == map checkedTypeApplicationOriginStepSlot
+              (checkedTypeApplicationOriginSteps origin) ->
+              map (\slot -> (checkedTypeApplicationOriginId origin, slot))
+                slots
+        _ -> []
+    _ -> []
+ where
+  matchingSpines origin = collect
+   where
+    identifier = checkedTypeApplicationOriginId origin
+    owner = checkedTypeApplicationOriginOwner origin
+
+    collect current@(CheckedTerm _ form) = case originSpine [] current of
+      Just (baseOwner, baseOrigin, slots)
+        | baseOwner == owner
+        , baseOrigin == Just identifier -> [slots]
+      _ -> collectChildren form
+
+    collectChildren form = case form of
+      CheckedLocal{} -> []
+      CheckedGlobal{} -> []
+      CheckedLambda _ _ body -> collect body
+      CheckedApply function argument -> collect function ++ collect argument
+      CheckedVisibleTypeApplication _ _ _ _ function -> collect function
+      CheckedTuple elements -> concatMap collect elements
+      CheckedLet _ _ binding body -> collect binding ++ collect body
+      CheckedEmptyCase scrutinee -> collect scrutinee
+      CheckedExactZeroStepCase scrutinee alternatives ->
+        collect scrutinee
+          ++ concatMap (\(CheckedCaseAlternative _ _ _ body) -> collect body)
+              alternatives
+
+    originSpine slots (CheckedTerm _ form) = case form of
+      CheckedVisibleTypeApplication _ _ _ (Just (candidate, slot)) function
+        | candidate == identifier -> originSpine (slot : slots) function
+      CheckedVisibleTypeApplication _ _ _ Nothing function ->
+        if null slots then originSpine slots function else Nothing
+      CheckedGlobal name candidate -> Just (name, candidate, slots)
+      _ -> Nothing
+
+checkedTypeApplicationOriginId :: CheckedTypeApplicationOrigin -> Natural
+checkedTypeApplicationOriginId
+    (CheckedTypeApplicationOrigin identifier _ _ _) = identifier
+
+checkedTypeApplicationOriginOwner
+  :: CheckedTypeApplicationOrigin
+  -> QualifiedName
+checkedTypeApplicationOriginOwner
+    (CheckedTypeApplicationOrigin _ owner _ _) = owner
+
+checkedTypeApplicationOriginSource
+  :: CheckedTypeApplicationOrigin
+  -> HsType
+checkedTypeApplicationOriginSource
+    (CheckedTypeApplicationOrigin _ _ source _) = source
+
+checkedTypeApplicationOriginSteps
+  :: CheckedTypeApplicationOrigin
+  -> [CheckedTypeApplicationOriginStep]
+checkedTypeApplicationOriginSteps
+    (CheckedTypeApplicationOrigin _ _ _ steps) = steps
+
+checkedTypeApplicationOriginStepSlot
+  :: CheckedTypeApplicationOriginStep
+  -> Natural
+checkedTypeApplicationOriginStepSlot
+    (CheckedTypeApplicationOriginStep slot _ _ _ _) = slot
+
+checkedTypeApplicationOriginStepSource
+  :: CheckedTypeApplicationOriginStep
+  -> HsType
+checkedTypeApplicationOriginStepSource
+    (CheckedTypeApplicationOriginStep _ source _ _ _) = source
+
+checkedTypeApplicationOriginStepSelected
+  :: CheckedTypeApplicationOriginStep
+  -> HsType
+checkedTypeApplicationOriginStepSelected
+    (CheckedTypeApplicationOriginStep _ _ selected _ _) = selected
+
+checkedTypeApplicationOriginStepResult
+  :: CheckedTypeApplicationOriginStep
+  -> HsType
+checkedTypeApplicationOriginStepResult
+    (CheckedTypeApplicationOriginStep _ _ _ result _) = result
+
+checkedTypeApplicationOriginStepObligations
+  :: CheckedTypeApplicationOriginStep
+  -> [HsConstraint]
+checkedTypeApplicationOriginStepObligations
+    (CheckedTypeApplicationOriginStep _ _ _ _ obligations) = obligations
 
 data CheckedTermResult = CheckedTermResult
   HsType
@@ -170,11 +323,12 @@ data CheckedCaseAlternative = CheckedCaseAlternative
 
 data CheckedTermForm
   = CheckedLocal TVarId
-  | CheckedGlobal QualifiedName
+  | CheckedGlobal QualifiedName (Maybe Natural)
   | CheckedLambda TVarId HsType CheckedTerm
   | CheckedApply CheckedTerm CheckedTerm
   | CheckedVisibleTypeApplication
-      SharedGenerated.VisibleTypeArgument HsType Bool CheckedTerm
+      SharedGenerated.VisibleTypeArgument HsType Bool
+      (Maybe (Natural, Natural)) CheckedTerm
   | CheckedTuple [CheckedTerm]
   | CheckedLet TVarId HsType CheckedTerm CheckedTerm
   | CheckedEmptyCase CheckedTerm
@@ -192,6 +346,8 @@ data CheckState = CheckState
   , checkIntroducedRigidIds :: !IntSet.IntSet
   , checkRigidAlpha :: !(IntMap.IntMap TVarId)
   , checkRigidAlphaInverse :: !(IntMap.IntMap TVarId)
+  , checkNextTypeApplicationOrigin :: !Natural
+  , checkTypeApplicationOrigins :: [CheckedTypeApplicationOrigin]
   }
 
 -- | Fixed, independently validated inputs for checking many candidates from
@@ -428,6 +584,8 @@ checkValidatedExpression provenCandidateRigids
         , checkIntroducedRigidIds = IntSet.empty
         , checkRigidAlpha = IntMap.empty
         , checkRigidAlphaInverse = IntMap.empty
+        , checkNextTypeApplicationOrigin = 0
+        , checkTypeApplicationOrigins = []
         }
   (checkedResult, finalState) <- runStateT
     (checkAgainst IntMap.empty expression checkedGoal)
@@ -478,6 +636,9 @@ checkValidatedExpression provenCandidateRigids
     $ toGeneratedExpression expression
     )
     (normalizeCheckedTermResult substitutions rigidAlpha checkedResult)
+    ( map (normalizeCheckedTypeApplicationOrigin substitutions rigidAlpha)
+    $ reverse $ checkTypeApplicationOrigins finalState
+    )
   where
     -- Checking is deliberately bidirectional only where the expected type
     -- carries information which synthesis cannot recover. In particular, an
@@ -605,7 +766,7 @@ checkValidatedExpression provenCandidateRigids
           availableCheckedTerm <$> zonk declared' <*> pure (CheckedLocal variable)
     infer _ (ExpName name) = do
       instantiated <- instantiateBinding name
-      pure $ availableCheckedTerm instantiated $ CheckedGlobal name
+      pure $ availableCheckedTerm instantiated $ CheckedGlobal name Nothing
     infer variables (ExpLambda variable annotation body) = do
       recordAliveType annotation
       checkedBody <- infer (IntMap.insert variable annotation variables) body
@@ -632,24 +793,12 @@ checkValidatedExpression provenCandidateRigids
           result <- zonk resultType
           pure $ binaryCheckedTerm result CheckedApply
             checkedFunction checkedArgument
-    infer variables (ExpTypeApply function argument) = do
-      (functionType, checkedFunction) <- case function of
-        -- Ordinary global inference intentionally keeps using the flattened
-        -- binding.  A visible application, however, must start from the exact
-        -- specified scheme or it would try to apply a type argument to the
-        -- already-instantiated monotype.
-        ExpName name -> do
-          scheme <- visibleBindingScheme name >>= zonk
-          pure (scheme, availableCheckedTerm scheme $ CheckedGlobal name)
-        _ -> do
-          checked <- infer variables function
-          checkedType <- zonk $ checkedResultType checked
-          pure (checkedType, checked)
-      (selected, result, contextualApplication) <-
-        instantiateVisibleTypeArgument argument functionType
-      pure $ unaryCheckedTerm result
-        (CheckedVisibleTypeApplication argument selected contextualApplication)
-        checkedFunction
+    infer variables visibleExpression@(ExpTypeApply function argument) =
+      case collectVisibleTypeApplicationSpine visibleExpression of
+        (ExpName name, arguments) ->
+          inferDirectGlobalVisibleTypeApplication name arguments
+        _ -> inferVisibleTypeApplication variables function argument
+
     infer variables (ExpTuple elements) = do
       checkedElements <- mapM (infer variables) elements
       pure $ manyCheckedTerms
@@ -784,6 +933,111 @@ checkValidatedExpression provenCandidateRigids
 
     checkedTermDraft (CheckedTermResult _ draft) = draft
 
+    -- Preserve the historical one-step recursion for arbitrary functions.
+    -- Only a syntactically direct global spine can be associated with an
+    -- exact checker-context scheme; search routes and inferred function
+    -- values are deliberately not treated as provenance.
+    inferVisibleTypeApplication variables function argument = do
+      (functionType, checkedFunction) <- case function of
+        -- Ordinary global inference intentionally keeps using the flattened
+        -- binding.  A visible application, however, must start from the exact
+        -- specified scheme or it would try to apply a type argument to the
+        -- already-instantiated monotype.
+        ExpName name -> do
+          scheme <- visibleBindingScheme name >>= zonk
+          pure
+            ( scheme
+            , availableCheckedTerm scheme $ CheckedGlobal name Nothing
+            )
+        _ -> do
+          checked <- infer variables function
+          checkedType <- zonk $ checkedResultType checked
+          pure (checkedType, checked)
+      (selected, result, contextualApplication, _) <-
+        instantiateVisibleTypeArgument argument functionType
+      pure $ unaryCheckedTerm result
+        (CheckedVisibleTypeApplication argument selected
+          contextualApplication Nothing)
+        checkedFunction
+
+    -- Consume a maximal direct-global spine in source order.  An origin is
+    -- allocated only when the exact retained scheme is lexically closed and
+    -- the expression supplies a complete, bounded, specified source
+    -- telescope.  A returned polymorphic result may accept further visible
+    -- arguments, but those suffix applications never inherit this origin.
+    inferDirectGlobalVisibleTypeApplication name arguments = do
+      scheme <- visibleBindingScheme name >>= zonk
+      let eligibleArity = Map.lookup name functionSchemes
+            >>= (`eligibleTypeApplicationOriginArity` arguments)
+      origin <- case eligibleArity of
+        Nothing -> pure Nothing
+        Just arity -> do
+          identifier <- allocateTypeApplicationOrigin
+          pure $ Just (identifier, arity)
+      let globalOrigin = fmap fst origin
+          checkedGlobal = availableCheckedTerm scheme
+            $ CheckedGlobal name globalOrigin
+      (_, checked, reversedSteps) <- foldM
+        (applyDirectGlobalVisibleTypeArgument origin)
+        (0, checkedGlobal, []) arguments
+      case origin of
+        Nothing -> pure ()
+        Just (identifier, _) -> modify' $ \current -> current
+          { checkTypeApplicationOrigins = CheckedTypeApplicationOrigin
+              identifier name scheme (reverse reversedSteps)
+              : checkTypeApplicationOrigins current
+          }
+      pure checked
+
+    applyDirectGlobalVisibleTypeArgument origin
+        (slot, checkedFunction, steps) argument = do
+      source <- zonk $ checkedResultType checkedFunction
+      (selected, result, contextualApplication, activated) <-
+        instantiateVisibleTypeArgument argument source
+      let annotation = case origin of
+            Just (identifier, arity)
+              | slot < fromIntegral arity -> Just (identifier, slot)
+            _ -> Nothing
+          checked = unaryCheckedTerm result
+            (CheckedVisibleTypeApplication argument selected
+              contextualApplication annotation)
+            checkedFunction
+          retainedSteps = case annotation of
+            Nothing -> steps
+            Just _ -> CheckedTypeApplicationOriginStep
+              slot source selected result activated : steps
+      pure (slot + 1, checked, retainedSteps)
+
+    collectVisibleTypeApplicationSpine = collect []
+     where
+      collect arguments (ExpTypeApply function argument) =
+        collect (argument : arguments) function
+      collect arguments function = (function, arguments)
+
+    eligibleTypeApplicationOriginArity source arguments
+      | observedArity == 0 = Nothing
+      | observedArity > maximumArity = Nothing
+      | not $ specifiedPrefix observedArity arguments = Nothing
+      | not $ Set.null $ SharedType.freeVariables source = Nothing
+      | otherwise = Just observedArity
+     where
+      maximumArity = SharedQuery.maximumProviderInstantiationArguments
+      observedArity = SharedCollection.observedListLength maximumArity
+        $ SharedType.leadingForallVariables source
+
+    specifiedPrefix 0 _ = True
+    specifiedPrefix _ [] = False
+    specifiedPrefix remaining (argument : arguments) =
+      case SharedGenerated.visibleTypeArgumentClosedType argument of
+        Nothing -> False
+        Just _ -> specifiedPrefix (remaining - 1) arguments
+
+    allocateTypeApplicationOrigin = do
+      identifier <- gets checkNextTypeApplicationOrigin
+      modify' $ \current -> current
+        { checkNextTypeApplicationOrigin = identifier + 1 }
+      pure identifier
+
     instantiateBinding name = case
         [binding | binding <- functions, functionName binding == name] of
       [] -> throwCheck $ UnknownBinding name
@@ -863,9 +1117,14 @@ checkValidatedExpression provenCandidateRigids
             instantiatedBody = substitute body
         if null remainingBinders
           then do
-            (result, contextualApplication) <- finishLayer
-              outerContexts instantiatedContexts instantiatedBody
-            pure (replacement, result, contextualApplication)
+            (result, contextualApplication, activatedContexts) <- finishLayer
+              substitute outerContexts instantiatedContexts body
+            pure
+              ( replacement
+              , result
+              , contextualApplication
+              , activatedContexts
+              )
           else do
             let quantified = TypeForallNative remainingBinders
                   instantiatedContexts instantiatedBody
@@ -873,40 +1132,54 @@ checkValidatedExpression provenCandidateRigids
                   [] -> quantified
                   _ -> TypeForallNative [] outerContexts quantified
             recordAliveType remaining
-            pure (replacement, remaining, not $ null outerContexts)
+            pure
+              ( replacement
+              , remaining
+              , not $ null outerContexts
+              , []
+              )
       consume _ source =
         throwCheck $ VisibleTypeApplicationToMonotype source
 
       -- A binderless wrapper after the final binder belongs to the same
-      -- leading contextual chain. If another binder follows, retain every
-      -- accumulated context outside it for the next visible application. If
-      -- no binder follows, discharge the complete chain and return its body.
+      -- leading contextual chain. If another binder follows in the
+      -- unsubstituted source body, retain every accumulated context outside
+      -- it for the next visible application. If no source binder follows,
+      -- discharge the complete chain and only then substitute its result.
       -- Constraints attached to the binder's own forall layer remain directly
       -- representable; only separately wrapped contexts make the retained
       -- visible application contextual.
-      finishLayer outerContexts layerContexts body =
-        case peelBinderlessContexts [] body of
+      finishLayer substitute outerContexts layerContexts sourceBody =
+        case peelBinderlessContexts [] sourceBody of
           (trailingContexts, TypeForallNative (_ : _) _ _) -> do
             let retainedContexts = outerContexts ++ layerContexts
                 remaining = case retainedContexts of
-                  [] -> body
-                  _ -> TypeForallNative [] retainedContexts body
+                  [] -> substitute sourceBody
+                  _ -> TypeForallNative [] retainedContexts
+                      $ substitute sourceBody
             recordAliveType remaining
             pure
               ( remaining
               , not (null outerContexts && null trailingContexts)
+              , []
               )
-          (trailingContexts, monotype) -> do
+          (trailingContexts, sourceResult) -> do
             localGivens <- gets checkLocalGivens
             let dischargedContexts =
-                  outerContexts ++ layerContexts ++ trailingContexts
+                  outerContexts ++ layerContexts
+                    ++ map (fmap substitute) trailingContexts
+                result = substitute sourceResult
             modify' $ \current -> current
               { checkConstraints =
                   scopedConstraints localGivens dischargedContexts
                     ++ checkConstraints current
               }
-            recordAliveType monotype
-            pure (monotype, not $ null dischargedContexts)
+            recordAliveType result
+            pure
+              ( result
+              , not $ null dischargedContexts
+              , dischargedContexts
+              )
 
       peelBinderlessContexts contexts
           (TypeForallNative [] nestedContexts nestedBody) =
@@ -1066,14 +1339,10 @@ normalizeCheckedTermResult
   -> CheckedTermResult
 normalizeCheckedTermResult substitutions rigidAlpha
     (CheckedTermResult ty draft) = CheckedTermResult
-      (normalize ty)
+      (normalizeCheckedType substitutions rigidAlpha ty)
       (either (Left . normalizeAbsence) (Right . normalizeTerm) draft)
  where
-  normalize source =
-    let applied = snd $ applySubsts substitutions source
-        canonical = SharedType.canonicalizeType
-          $ applyRigidAlpha rigidAlpha applied
-    in if canonical == source then canonical else normalize canonical
+  normalize = normalizeCheckedType substitutions rigidAlpha
 
   normalizeAbsence reason = case reason of
     ImplicitLocalSpecialization variable declared selected ->
@@ -1103,8 +1372,9 @@ normalizeCheckedTermResult substitutions rigidAlpha
       CheckedApply function argument -> CheckedApply
         (normalizeTerm function) (normalizeTerm argument)
       CheckedVisibleTypeApplication argument selected contextualApplication
-          function -> CheckedVisibleTypeApplication argument
-            (normalize selected) contextualApplication (normalizeTerm function)
+          origin function -> CheckedVisibleTypeApplication argument
+            (normalize selected) contextualApplication origin
+            (normalizeTerm function)
       CheckedTuple elements -> CheckedTuple $ map normalizeTerm elements
       CheckedLet variable annotation binding body -> CheckedLet
         variable (normalize annotation)
@@ -1121,6 +1391,44 @@ normalizeCheckedTermResult substitutions rigidAlpha
       [(variable, normalize fieldType) | (variable, fieldType) <- fields]
       (normalizeTerm body)
 
+-- Origin annotations cross the same final substitution and rigid-alpha gate
+-- as the checked term.  Keeping normalization here, after constraint
+-- resolution and residual comparison, prevents a later association layer
+-- from observing provisional checker metavariables.
+normalizeCheckedTypeApplicationOrigin
+  :: Substs
+  -> IntMap.IntMap TVarId
+  -> CheckedTypeApplicationOrigin
+  -> CheckedTypeApplicationOrigin
+normalizeCheckedTypeApplicationOrigin substitutions rigidAlpha
+    (CheckedTypeApplicationOrigin identifier owner source steps) =
+  CheckedTypeApplicationOrigin identifier owner (normalize source)
+    $ map normalizeStep steps
+ where
+  normalize = normalizeCheckedType substitutions rigidAlpha
+
+  normalizeStep
+      (CheckedTypeApplicationOriginStep slot stepSource selected result
+        obligations) = CheckedTypeApplicationOriginStep
+      slot
+      (normalize stepSource)
+      (normalize selected)
+      (normalize result)
+      (map (fmap normalize) obligations)
+
+normalizeCheckedType
+  :: Substs
+  -> IntMap.IntMap TVarId
+  -> HsType
+  -> HsType
+normalizeCheckedType substitutions rigidAlpha = normalize
+ where
+  normalize source =
+    let applied = snd $ applySubsts substitutions source
+        canonical = SharedType.canonicalizeType
+          $ applyRigidAlpha rigidAlpha applied
+    in if canonical == source then canonical else normalize canonical
+
 -- | Seal a checker-produced draft under a caller-owned deterministic candidate
 -- key. This work remains lazy when stored in 'ValidatedEngineCandidate'.
 checkedExpressionTermGraph
@@ -1128,7 +1436,7 @@ checkedExpressionTermGraph
   -> CheckedExpressionEvidence
   -> ExferenceTermGraphAvailability
 checkedExpressionTermGraph candidateKey
-    (CheckedExpressionEvidence compatibility checkedResult) =
+    (CheckedExpressionEvidence compatibility checkedResult _) =
   case checkedResult of
     CheckedTermResult _ (Left reason) ->
       ExferenceTermGraphUnavailable reason
@@ -1178,7 +1486,7 @@ checkedTermConstructorSchemas (CheckedTerm _ form) = case form of
   CheckedApply function argument ->
     checkedTermConstructorSchemas function
       ++ checkedTermConstructorSchemas argument
-  CheckedVisibleTypeApplication _ _ _ function ->
+  CheckedVisibleTypeApplication _ _ _ _ function ->
     checkedTermConstructorSchemas function
   CheckedTuple elements -> concatMap checkedTermConstructorSchemas elements
   CheckedLet _ _ binding body ->
@@ -1232,7 +1540,7 @@ buildCheckedTerm (CheckedTerm ty checkedForm) = do
   form <- case checkedForm of
     CheckedLocal variable -> SharedTyped.TypedLocal
       <$> allocateCheckedOccurrence <*> pure variable
-    CheckedGlobal name -> SharedTyped.TypedGlobal
+    CheckedGlobal name _ -> SharedTyped.TypedGlobal
       <$> allocateCheckedOccurrence <*> pure name
     CheckedLambda variable annotation body -> do
       _ <- observeTermGraphCollection
@@ -1253,7 +1561,7 @@ buildCheckedTerm (CheckedTerm ty checkedForm) = do
           $ SharedTyped.ApplicationWitness domain result
         _ -> lift $ Left TermGraphEvidenceMismatch
       pure $ SharedTyped.TypedApply functionId argumentId witness
-    CheckedVisibleTypeApplication argument selected contextualApplication
+    CheckedVisibleTypeApplication argument selected contextualApplication _
         function -> do
       reserveTermGraphEdges 1
       occurrence <- allocateCheckedOccurrence
@@ -1337,7 +1645,8 @@ checkedTermLocalUses (CheckedTerm _ form) = case form of
     IntSet.delete variable $ checkedTermLocalUses body
   CheckedApply function argument ->
     checkedTermLocalUses function `IntSet.union` checkedTermLocalUses argument
-  CheckedVisibleTypeApplication _ _ _ function -> checkedTermLocalUses function
+  CheckedVisibleTypeApplication _ _ _ _ function ->
+    checkedTermLocalUses function
   CheckedTuple elements -> IntSet.unions $ map checkedTermLocalUses elements
   CheckedLet variable _ binding body ->
     checkedTermLocalUses binding `IntSet.union`

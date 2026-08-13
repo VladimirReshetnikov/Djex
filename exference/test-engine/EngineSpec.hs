@@ -5,6 +5,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.Set as Set
+import Data.Void (Void)
 import Numeric.Natural (Natural)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit ((@?=), assertBool, assertEqual, testCase)
@@ -22,15 +23,32 @@ import Language.Haskell.Exference.Core.Internal.ExpressionCheck
   , ExferenceTermGraphAvailability (..)
   , ExferenceTermGraphConstructionLimit (..)
   , checkedExpressionTermGraph
+  , checkedExpressionTypeApplicationOriginReferences
+  , checkedExpressionTypeApplicationOrigins
+  , checkedTypeApplicationOriginId
+  , checkedTypeApplicationOriginOwner
+  , checkedTypeApplicationOriginSource
+  , checkedTypeApplicationOriginStepObligations
+  , checkedTypeApplicationOriginStepResult
+  , checkedTypeApplicationOriginStepSelected
+  , checkedTypeApplicationOriginStepSlot
+  , checkedTypeApplicationOriginStepSource
+  , checkedTypeApplicationOriginSteps
   , checkExpression
   , checkExpressionInContextWithNestedRigidProvenanceEvidence
   , prepareExpressionCheckContext
+  , prepareExpressionCheckContextWithSchemes
   )
 import Language.Haskell.Exference.Core.FunctionBinding
   ( ConstructorBinding (..)
   , DeconstructorBinding (..)
   , EnvDictionary (..)
   , FunctionBinding (..)
+  )
+import Language.Haskell.Exference.Core.Declaration
+  ( prepareSynthesisInventory
+  , preparedSynthesisBackend
+  , preparedSynthesisSchemes
   )
 import qualified Language.Haskell.Exference.Core.Internal.Exference as E
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
@@ -65,7 +83,10 @@ import Language.Haskell.Exference.Core.RigidInstantiation
   ( mkRigidInstantiationContext, planRigidInstantiation )
 import Language.Haskell.Exference.Core.Types
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
+import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Generated as Generated
+import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
+import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
@@ -779,6 +800,8 @@ tests = testGroup "Exference private engine boundaries"
       let expression = ExpLambda 1 provider
             $ ExpTypeApply (ExpVar 1 provider) argument
       evidence <- checkedEvidence emptyStaticClassEnv [] [] goal expression
+      null (checkedExpressionTypeApplicationOrigins evidence) @?= True
+      checkedExpressionTypeApplicationOriginReferences evidence @?= []
       let availability = checkedExpressionTermGraph 23 evidence
       availability @?= checkedExpressionTermGraph 23 evidence
       case availability of
@@ -805,6 +828,290 @@ tests = testGroup "Exference private engine boundaries"
               $ Typed.termGraphRoot distinctGraph /= Typed.termGraphRoot graph
             ExferenceTermGraphUnavailable reason -> fail
               $ "changing only the candidate key lost the graph: " ++ show reason
+  , testCase "checker retains exact direct-global specialization origins" $ do
+      let integer = TypeCons $ name "Int"
+          boolean = TypeCons $ name "Bool"
+          providerName = name "specialize"
+          provider = TypeForall [0, 1] []
+            $ TypeArrow (TypeVar 0)
+            $ TypeArrow (TypeVar 1) (TypeVar 0)
+          firstResult = TypeForall [1] []
+            $ TypeArrow integer
+            $ TypeArrow (TypeVar 1) integer
+          result = TypeArrow integer $ TypeArrow boolean integer
+      (bindings, schemes) <- preparedValueEnvironment providerName provider
+      integerArgument <- expectRight
+        $ Generated.specifiedVisibleTypeArgument integer
+      booleanArgument <- expectRight
+        $ Generated.specifiedVisibleTypeArgument boolean
+      let expression = ExpTypeApply
+            (ExpTypeApply (ExpName providerName) integerArgument)
+            booleanArgument
+      evidence <- checkedEvidenceWithSchemes emptyStaticClassEnv
+        bindings [] schemes result expression
+      checkedExpressionTypeApplicationOriginReferences evidence @?=
+        [(0, 0), (0, 1)]
+      case checkedExpressionTypeApplicationOrigins evidence of
+        [origin] -> do
+          checkedTypeApplicationOriginId origin @?= 0
+          checkedTypeApplicationOriginOwner origin @?= providerName
+          checkedTypeApplicationOriginSource origin @?= provider
+          case checkedTypeApplicationOriginSteps origin of
+            [first, second] -> do
+              checkedTypeApplicationOriginStepSlot first @?= 0
+              checkedTypeApplicationOriginStepSource first @?= provider
+              checkedTypeApplicationOriginStepSelected first @?= integer
+              checkedTypeApplicationOriginStepResult first @?= firstResult
+              checkedTypeApplicationOriginStepObligations first @?= []
+              checkedTypeApplicationOriginStepSlot second @?= 1
+              checkedTypeApplicationOriginStepSource second @?= firstResult
+              checkedTypeApplicationOriginStepSelected second @?= boolean
+              checkedTypeApplicationOriginStepResult second @?= result
+              checkedTypeApplicationOriginStepObligations second @?= []
+            steps -> fail $ "unexpected retained specialization steps: "
+              ++ show (length steps)
+        origins -> fail $ "unexpected direct-global origin count: "
+          ++ show (length origins)
+      case checkedExpressionTermGraph 41 evidence of
+        ExferenceTermGraphUnavailable reason -> fail
+          $ "origin-bearing specialization lost its graph: " ++ show reason
+        ExferenceTermGraphAvailable graph -> do
+          let witnesses =
+                [ witness
+                | (_, Typed.TermNode _
+                    (Typed.TypedVisibleTypeApplication _ _ _ witness)) <-
+                      Typed.termGraphNodes graph
+                ]
+          length witnesses @?= 2
+          map Typed.typeApplicationCertificate witnesses @?=
+            [Nothing, Nothing]
+  , testCase "specialization origins retain activated source constraints" $ do
+      let className = name "C"
+          providerName = name "contextual"
+          integer = TypeCons $ name "Int"
+          token = TypeCons $ name "Token"
+          constraint ty = HsConstraint className [ty]
+          provider = TypeForall [0] [constraint $ TypeVar 0] token
+      (bindings, schemes) <- preparedValueEnvironment providerName provider
+      classes <- expectRight $ mkStaticClassEnv
+        [HsTypeClass className [0] []]
+        [HsInstance [] $ constraint integer]
+      argument <- expectRight
+        $ Generated.specifiedVisibleTypeArgument integer
+      let expression = ExpTypeApply (ExpName providerName) argument
+      evidence <- checkedEvidenceWithSchemes classes bindings [] schemes
+        token expression
+      case checkedExpressionTypeApplicationOrigins evidence of
+        [origin] -> case checkedTypeApplicationOriginSteps origin of
+          [step] ->
+            checkedTypeApplicationOriginStepObligations step @?=
+              [constraint integer]
+          steps -> fail $ "unexpected contextual step count: "
+            ++ show (length steps)
+        origins -> fail $ "unexpected contextual origin count: "
+          ++ show (length origins)
+      checkedExpressionTypeApplicationOriginReferences evidence @?= [(0, 0)]
+      case checkedExpressionTermGraph 42 evidence of
+        ExferenceTermGraphUnavailable
+            (UnsupportedContextualVisibleApplication source selected actual) -> do
+          source @?= provider
+          selected @?= integer
+          actual @?= token
+        ExferenceTermGraphUnavailable reason -> fail
+          $ "contextual origin changed graph absence: " ++ show reason
+        ExferenceTermGraphAvailable _ -> fail
+          "contextual origin unexpectedly made its graph available"
+  , testCase "source constraints activate before a selected polytype suffix" $ do
+      let className = name "C"
+          providerName = name "polyContextual"
+          integer = TypeCons $ name "Int"
+          selected = TypeForall [7] [] $ TypeVar 7
+          constraint ty = HsConstraint className [ty]
+          provider = TypeForall [0] [constraint $ TypeVar 0] $ TypeVar 0
+      (bindings, schemes) <- preparedValueEnvironment providerName provider
+      classes <- expectRight $ mkStaticClassEnv
+        [HsTypeClass className [0] []]
+        [HsInstance [] $ constraint selected]
+      selectedArgument <- expectRight
+        $ Generated.specifiedVisibleTypeArgument selected
+      integerArgument <- expectRight
+        $ Generated.specifiedVisibleTypeArgument integer
+      let expression = ExpTypeApply
+            (ExpTypeApply (ExpName providerName) selectedArgument)
+            integerArgument
+      evidence <- checkedEvidenceWithSchemes classes bindings [] schemes
+        integer expression
+      checkedExpressionTypeApplicationOriginReferences evidence @?= [(0, 0)]
+      case checkedExpressionTypeApplicationOrigins evidence of
+        [origin] -> case checkedTypeApplicationOriginSteps origin of
+          [step] -> do
+            assertBool "selected polytype result changed alpha-structure"
+              $ SharedTypeAtom.alphaEquivalentTypes
+                  (checkedTypeApplicationOriginStepResult step) selected
+            case checkedTypeApplicationOriginStepObligations step of
+              [HsConstraint retainedClass [retainedSelected]] -> do
+                retainedClass @?= className
+                assertBool "source obligation lost the selected polytype"
+                  $ SharedTypeAtom.alphaEquivalentTypes
+                      retainedSelected selected
+              obligations -> fail $ "unexpected selected-polytype obligations: "
+                ++ show obligations
+          steps -> fail $ "returned-polytype source step count changed: "
+            ++ show (length steps)
+        origins -> fail $ "returned-polytype origin count changed: "
+          ++ show (length origins)
+
+      -- The same source step must activate before any suffix exists.  This
+      -- pins the checker correction which decides continuation from the raw
+      -- source body, never from a replacement-introduced forall.
+      noSuffix <- checkedEvidenceWithSchemes classes bindings [] schemes
+        (TypeArrow integer selected)
+        (ExpLambda 20 integer
+          $ ExpTypeApply (ExpName providerName) selectedArgument)
+      checkedExpressionTypeApplicationOriginReferences noSuffix @?= [(0, 0)]
+      case checkedExpressionTypeApplicationOrigins noSuffix of
+        [origin] -> case checkedTypeApplicationOriginSteps origin of
+          [step] -> do
+            assertBool "no-suffix selected result changed alpha-structure"
+              $ SharedTypeAtom.alphaEquivalentTypes
+                  (checkedTypeApplicationOriginStepResult step) selected
+            case checkedTypeApplicationOriginStepObligations step of
+              [HsConstraint retainedClass [retainedSelected]] -> do
+                retainedClass @?= className
+                assertBool "no-suffix source obligation changed selection"
+                  $ SharedTypeAtom.alphaEquivalentTypes
+                      retainedSelected selected
+              obligations -> fail $ "unexpected no-suffix obligations: "
+                ++ show obligations
+          steps -> fail $ "unexpected no-suffix step count: "
+            ++ show (length steps)
+        origins -> fail $ "unexpected no-suffix origin count: "
+          ++ show (length origins)
+  , testCase "incomplete and compatibility visible spines stay origin-free" $ do
+      let integer = TypeCons $ name "Int"
+          boolean = TypeCons $ name "Bool"
+          providerName = name "boundedSpecialize"
+          provider = TypeForall [0, 1] []
+            $ TypeArrow (TypeVar 0) (TypeVar 1)
+      (bindings, schemes) <- preparedValueEnvironment providerName provider
+      integerArgument <- expectRight
+        $ Generated.specifiedVisibleTypeArgument integer
+      booleanArgument <- expectRight
+        $ Generated.specifiedVisibleTypeArgument boolean
+      let remaining = TypeForall [1] [] $ TypeArrow integer $ TypeVar 1
+          partialExpression = ExpTypeApply
+            (ExpName providerName) integerArgument
+      partial <- checkedEvidenceWithSchemes emptyStaticClassEnv bindings []
+        schemes (TypeArrow integer remaining)
+        (ExpLambda 20 integer partialExpression)
+      null (checkedExpressionTypeApplicationOrigins partial) @?= True
+      checkedExpressionTypeApplicationOriginReferences partial @?= []
+      inferred <- checkedEvidenceWithSchemes emptyStaticClassEnv bindings []
+        schemes (TypeArrow integer boolean)
+        (ExpTypeApply
+          (ExpTypeApply (ExpName providerName)
+            Generated.inferredVisibleTypeArgument)
+          booleanArgument)
+      null (checkedExpressionTypeApplicationOrigins inferred) @?= True
+      let fallbackName = name "compatibilityPolytype"
+          fallbackScheme = TypeForall [0] [] $ TypeVar 0
+          fallbackBinding = FunctionBinding fallbackScheme fallbackName 0 [] []
+      compatibility <- checkedEvidence emptyStaticClassEnv [fallbackBinding] []
+        integer (ExpTypeApply (ExpName fallbackName) integerArgument)
+      null (checkedExpressionTypeApplicationOrigins compatibility) @?= True
+  , testCase "origin eligibility is closed bounded and post-constraint" $ do
+      let integer = TypeCons $ name "Int"
+          boolean = TypeCons $ name "Bool"
+          token = TypeCons $ name "Token"
+          className = name "C"
+          constraint ty = HsConstraint className [ty]
+          specified ty = expectRight
+            $ Generated.specifiedVisibleTypeArgument ty
+      arguments <- mapM specified
+        [ TypeCons $ name ("T" ++ show index)
+        | index <- [0 :: Int .. 6]
+        ]
+
+      let sixName = name "sixOrigin"
+          sixScheme = TypeForall [0 .. 5] [] token
+      (sixBindings, sixSchemes) <- preparedValueEnvironment sixName sixScheme
+      sixEvidence <- checkedEvidenceWithSchemes emptyStaticClassEnv sixBindings []
+        sixSchemes token
+        (foldl ExpTypeApply (ExpName sixName) $ take 6 arguments)
+      length (checkedExpressionTypeApplicationOrigins sixEvidence) @?= 1
+      checkedExpressionTypeApplicationOriginReferences sixEvidence @?=
+        [(0, slot) | slot <- [0 .. 5]]
+
+      let sevenName = name "sevenOrigin"
+          sevenScheme = TypeForall [0 .. 6] [] token
+      (sevenBindings, sevenSchemes) <- preparedValueEnvironment
+        sevenName sevenScheme
+      sevenEvidence <- checkedEvidenceWithSchemes emptyStaticClassEnv
+        sevenBindings [] sevenSchemes token
+        (foldl ExpTypeApply (ExpName sevenName) arguments)
+      null (checkedExpressionTypeApplicationOrigins sevenEvidence) @?= True
+      checkedExpressionTypeApplicationOriginReferences sevenEvidence @?= []
+
+      -- A deliberately open retained scheme can satisfy the structural
+      -- sidecar check, but cannot own a closed specialization origin.
+      let openName = name "openOrigin"
+          openScheme = TypeForall [0] []
+            $ TypeArrow (TypeVar 0) (TypeVar 9)
+      (openBindings, openSchemes) <- preparedValueEnvironment
+        openName openScheme
+      integerArgument <- specified integer
+      openEvidence <- checkedEvidenceWithSchemes emptyStaticClassEnv
+        openBindings [] openSchemes (TypeArrow integer $ TypeVar 9)
+        (ExpTypeApply (ExpName openName) integerArgument)
+      null (checkedExpressionTypeApplicationOrigins openEvidence) @?= True
+
+      constrainedClasses <- expectRight $ mkStaticClassEnv
+        [HsTypeClass className [0] []]
+        [HsInstance [] $ constraint integer]
+      let constrainedName = name "constraintGate"
+          constrainedScheme = TypeForall [0]
+            [constraint $ TypeVar 0] token
+      (constrainedBindings, constrainedSchemes) <- preparedValueEnvironment
+        constrainedName constrainedScheme
+      booleanArgument <- specified boolean
+      plan <- expectRight $ planRigidInstantiation
+        (mkRigidInstantiationContext
+          $ EnvDictionary constrainedBindings [] constrainedClasses)
+        [] token
+      context <- expectRight $ prepareExpressionCheckContextWithSchemes plan
+        (mkQueryClassEnv constrainedClasses []) constrainedBindings []
+        constrainedSchemes token
+      case checkExpressionInContextWithNestedRigidProvenanceEvidence
+          context (nestedRigidProvenance emptyRigidScope) []
+          (ExpTypeApply (ExpName constrainedName) booleanArgument) of
+        Left failure -> failure @?=
+          ConstraintMismatch [] [constraint boolean]
+        Right _ -> fail "an unsatisfied origin escaped the constraint gate"
+  , testCase "failed preferred inference rolls origin state back" $ do
+      let integer = TypeCons $ name "Int"
+          providerName = name "transactionalOrigin"
+          provider = TypeForall [0] []
+            $ TypeArrow (TypeVar 0) (TypeVar 0)
+          selected = TypeArrow integer integer
+          nestedExpected = TypeForall [9] [] selected
+      (bindings, schemes) <- preparedValueEnvironment providerName provider
+      argument <- expectRight
+        $ Generated.specifiedVisibleTypeArgument integer
+      let visible = ExpTypeApply (ExpName providerName) argument
+          expression = ExpLambda 20 integer visible
+      evidence <- checkedEvidenceWithSchemes emptyStaticClassEnv bindings []
+        schemes (TypeArrow integer nestedExpected) expression
+      case checkedExpressionTypeApplicationOrigins evidence of
+        [origin] -> do
+          checkedTypeApplicationOriginId origin @?= 0
+          checkedTypeApplicationOriginOwner origin @?= providerName
+          map checkedTypeApplicationOriginStepSlot
+            (checkedTypeApplicationOriginSteps origin) @?= [0]
+        origins -> fail $ "transactional retry retained ghost origins: "
+          ++ show (length origins)
+      -- Forall introduction intentionally makes the graph draft unavailable,
+      -- so there is no retained checked-term chain for the reference observer.
+      checkedExpressionTypeApplicationOriginReferences evidence @?= []
   , testCase "checker retains only exact recursive zero-step spine cases" $ do
       let payload = TypeCons $ name "Payload"
           spineName = name "Spine"
@@ -1346,6 +1653,42 @@ checkedEvidence classes functions deconstructors goal expression = do
     (mkQueryClassEnv classes []) functions deconstructors goal
   expectRight $ checkExpressionInContextWithNestedRigidProvenanceEvidence
     context (nestedRigidProvenance emptyRigidScope) [] expression
+
+checkedEvidenceWithSchemes
+  :: StaticClassEnv
+  -> [FunctionBinding]
+  -> [DeconstructorBinding]
+  -> Map.Map QualifiedName HsType
+  -> HsType
+  -> Expression
+  -> IO CheckedExpressionEvidence
+checkedEvidenceWithSchemes classes functions deconstructors schemes goal
+    expression = do
+  plan <- expectRight $ planRigidInstantiation
+    (mkRigidInstantiationContext
+      $ EnvDictionary functions deconstructors classes)
+    [] goal
+  context <- expectRight $ prepareExpressionCheckContextWithSchemes plan
+    (mkQueryClassEnv classes []) functions deconstructors schemes goal
+  expectRight $ checkExpressionInContextWithNestedRigidProvenanceEvidence
+    context (nestedRigidProvenance emptyRigidScope) [] expression
+
+preparedValueEnvironment
+  :: QualifiedName
+  -> HsType
+  -> IO ([FunctionBinding], Map.Map QualifiedName HsType)
+preparedValueEnvironment valueName valueType = do
+  inventory <- expectRight $ SharedInventory.mkInventory
+    SharedKindInference.OpenKindInventory
+    ([ SharedDeclaration.ValueDeclaration
+       $ SharedDeclaration.ValueSignature () valueName valueType
+     ] :: [SharedDeclaration.Declaration SynthesisVariable Void ()])
+  prepared <- expectRight $ prepareSynthesisInventory inventory
+  let backend = preparedSynthesisBackend prepared
+  pure
+    ( environmentFunctions backend
+    , preparedSynthesisSchemes prepared
+    )
 
 expectUnavailable
   :: String

@@ -134,6 +134,8 @@ $(do
           [ "PublicDjex.CheckedTypeApplicationCertificateTable"
           , "PublicDjex.CheckedTypeApplicationCertificatePlan"
           , "PublicDjex.CheckedTypeApplicationCertificateStep"
+          , "PublicDjex.CheckedTypeApplicationOrigin"
+          , "PublicDjex.CheckedTypeApplicationOriginStep"
           ]
         hiddenValues =
           [ "LengthSMTLibLiveSession"
@@ -169,6 +171,17 @@ $(do
           , "PublicDjex.checkedTypeApplicationCertificateStepObligations"
           , "PublicDjex.checkedTypeApplicationCertificateStepObligationCount"
           , "PublicDjex.checkedTypeApplicationCertificateObligationCount"
+          , "PublicDjex.checkedExpressionTypeApplicationOrigins"
+          , "PublicDjex.checkedExpressionTypeApplicationOriginReferences"
+          , "PublicDjex.checkedTypeApplicationOriginId"
+          , "PublicDjex.checkedTypeApplicationOriginOwner"
+          , "PublicDjex.checkedTypeApplicationOriginSource"
+          , "PublicDjex.checkedTypeApplicationOriginSteps"
+          , "PublicDjex.checkedTypeApplicationOriginStepSlot"
+          , "PublicDjex.checkedTypeApplicationOriginStepSource"
+          , "PublicDjex.checkedTypeApplicationOriginStepSelected"
+          , "PublicDjex.checkedTypeApplicationOriginStepResult"
+          , "PublicDjex.checkedTypeApplicationOriginStepObligations"
           ]
     resolvedTypes <- mapM lookupTypeName hiddenTypes
     resolvedValues <- mapM lookupValueName hiddenValues

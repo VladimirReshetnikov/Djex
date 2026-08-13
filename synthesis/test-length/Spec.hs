@@ -1,6 +1,7 @@
 module Main (main) where
 
 import Control.Exception (SomeException, displayException, evaluate, try)
+import Control.DeepSeq (force)
 import qualified Crypto.Hash.SHA256 as SHA256
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
@@ -97,6 +98,7 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , providerTests
   , sessionTests
   , interpretationPolicyCharacterizationTests
+  , unifiedInterpretationPolicyTests
   , candidateProblemTests
   , problemReplayTests
   , smtLibTests
@@ -1512,6 +1514,324 @@ interpretationPolicyCharacterizationTests = testGroup
             LengthProblem.defaultLengthProblemLimits
             exactShortMixedSession exactLongMixedContract candidate
       pure ()
+  ]
+
+unifiedInterpretationPolicyTests :: TestTree
+unifiedInterpretationPolicyTests = testGroup
+  "unified checked Length interpretation policy"
+  [ testCase "seal all five public policy configurations" $ do
+      let observed = Length.LengthObservedSpine
+          unobserved = Length.LengthUnobservedTarget
+          sources =
+            [ LengthProblem.LengthLegacyCasesRejected
+            , LengthProblem.LengthExplicitTargetRolesCasesRejected
+                [observed, observed]
+            , LengthProblem.LengthExplicitTargetRolesCasesRejected
+                [unobserved, observed]
+            , LengthProblem.LengthExplicitTargetRolesExactZeroStepCases
+                [observed, observed]
+            , LengthProblem.LengthExplicitTargetRolesExactZeroStepCases
+                [unobserved, observed]
+            ]
+          inventory = sessionInventory () []
+      sessions <- mapM (expectRight . (\source ->
+        LengthProblem.sealLengthSessionWithInterpretationPolicy
+          Length.defaultLengthLimits source inventory
+          Length.BuiltinListSpine [])) sources
+      mapM_ (\session ->
+        LengthProblem.checkedLengthSessionInterpretationPolicy session
+          `seq` pure ()) sessions
+  , testCase "match every compatibility wrapper output and fingerprint" $ do
+      let observed = Length.LengthObservedSpine
+          unobserved = Length.LengthUnobservedTarget
+          allObserved = [observed, observed]
+          mixed = [unobserved, observed]
+          target = adversarialBinaryConstantZeroTarget
+          inventory = sessionInventory () []
+      graph <- adversarialBinaryConstantZeroGraph
+      let candidate = adversarialTypedCandidate $ Right graph
+          check source wrapperSession wrapperContract wrapperProblem = do
+            unifiedSession <- expectRight
+              $ LengthProblem.sealLengthSessionWithInterpretationPolicy
+                  Length.defaultLengthLimits source inventory
+                  Length.BuiltinListSpine []
+            unifiedContract <- expectRight
+              $ LengthProblem.sealLengthContractInSession
+                  unifiedSession target trivialLengthContract
+            unifiedProblem <- expectRight
+              $ LengthProblem.sealLengthTypedCandidateProblemInSession
+                  LengthProblem.defaultLengthProblemLimits
+                  unifiedSession unifiedContract candidate
+            LengthProblem.lengthSessionInventoryFingerprint unifiedSession @?=
+              LengthProblem.lengthSessionInventoryFingerprint wrapperSession
+            LengthProblem.lengthSessionEncodingPolicyFingerprint
+                unifiedSession @?=
+              LengthProblem.lengthSessionEncodingPolicyFingerprint
+                wrapperSession
+            Length.lengthContractFingerprint unifiedContract @?=
+              Length.lengthContractFingerprint wrapperContract
+            let unifiedCandidate =
+                  LengthProblem.checkedLengthProblemCandidate unifiedProblem
+                wrapperCandidate =
+                  LengthProblem.checkedLengthProblemCandidate wrapperProblem
+            LengthProblem.checkedLengthCandidateResult unifiedCandidate @?=
+              LengthProblem.checkedLengthCandidateResult wrapperCandidate
+            LengthProblem.checkedLengthCandidateUsedProviders
+                unifiedCandidate @?=
+              LengthProblem.checkedLengthCandidateUsedProviders
+                wrapperCandidate
+            LengthProblem.checkedLengthCandidateFingerprint unifiedCandidate @?=
+              LengthProblem.checkedLengthCandidateFingerprint wrapperCandidate
+            LengthProblem.checkedLengthProblemEncodingFingerprint
+                unifiedProblem @?=
+              LengthProblem.checkedLengthProblemEncodingFingerprint
+                wrapperProblem
+            Djex.behavioralProblemFingerprint
+                (LengthProblem.checkedLengthProblemBehavioralProblem
+                  unifiedProblem) @?=
+              Djex.behavioralProblemFingerprint
+                (LengthProblem.checkedLengthProblemBehavioralProblem
+                  wrapperProblem)
+
+      legacySession <- adversarialLengthSession [] []
+      legacyContract <- adversarialLengthContract
+        legacySession target trivialLengthContract
+      legacyProblem <- expectRight $ LengthProblem.sealLengthTypedCandidateProblem
+        LengthProblem.defaultLengthProblemLimits
+        legacySession legacyContract candidate
+      check LengthProblem.LengthLegacyCasesRejected
+        legacySession legacyContract legacyProblem
+
+      explicitSession <- adversarialRoleAwareLengthSession allObserved [] []
+      explicitContract <- adversarialRoleAwareLengthContract
+        explicitSession allObserved target trivialLengthContract
+      explicitProblem <- expectRight
+        $ LengthProblem.sealRoleAwareLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            explicitSession explicitContract candidate
+      check (LengthProblem.LengthExplicitTargetRolesCasesRejected allObserved)
+        explicitSession explicitContract explicitProblem
+
+      mixedSession <- adversarialRoleAwareLengthSession mixed [] []
+      mixedContract <- adversarialRoleAwareLengthContract
+        mixedSession mixed target trivialLengthContract
+      mixedProblem <- expectRight
+        $ LengthProblem.sealRoleAwareLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            mixedSession mixedContract candidate
+      check (LengthProblem.LengthExplicitTargetRolesCasesRejected mixed)
+        mixedSession mixedContract mixedProblem
+
+      exactObservedSession <- adversarialExactCaseLengthSession allObserved [] []
+      exactObservedContract <- adversarialRoleAwareLengthContract
+        exactObservedSession allObserved target trivialLengthContract
+      exactObservedProblem <- expectRight
+        $ LengthProblem.sealExactSpineCaseLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            exactObservedSession exactObservedContract candidate
+      check
+        (LengthProblem.LengthExplicitTargetRolesExactZeroStepCases allObserved)
+        exactObservedSession exactObservedContract exactObservedProblem
+
+      exactMixedSession <- adversarialExactCaseLengthSession mixed [] []
+      exactMixedContract <- adversarialRoleAwareLengthContract
+        exactMixedSession mixed target trivialLengthContract
+      exactMixedProblem <- expectRight
+        $ LengthProblem.sealExactSpineCaseLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            exactMixedSession exactMixedContract candidate
+      check (LengthProblem.LengthExplicitTargetRolesExactZeroStepCases mixed)
+        exactMixedSession exactMixedContract exactMixedProblem
+  , testCase "keep unified session failures and productive roles ordered" $ do
+      typeName <- expectName "Fixture.MissingUnifiedPolicySpine"
+      zeroName <- expectName "Fixture.MissingUnifiedPolicyZero"
+      stepName <- expectName "Fixture.MissingUnifiedPolicyStep"
+      let poisonSource =
+            LengthProblem.LengthExplicitTargetRolesCasesRejected
+              $ error "spine failure demanded unified policy roles"
+          inventory = sessionInventory () []
+      result <- evaluateWithin
+        $ LengthProblem.sealLengthSessionWithInterpretationPolicy
+            Length.defaultLengthLimits poisonSource inventory
+            (Length.DeclaredListSpine typeName zeroName stepName) []
+      assertLeft
+        (LengthProblem.LengthSessionSpineModelRejected
+          $ Length.LengthSpineTypeDeclarationMissing typeName)
+        result
+
+      let limit = limitsWith $ \source -> source
+            { Length.lengthLimitSourceContractInputs = 1 }
+          oversized = LengthProblem.LengthExplicitTargetRolesCasesRejected
+            [ Length.LengthObservedSpine
+            , error "role limit demanded the excess role"
+            ]
+      oversizedResult <- evaluateWithin
+        $ LengthProblem.sealLengthSessionWithInterpretationPolicy
+            limit oversized inventory Length.BuiltinListSpine []
+      assertLeft
+        (LengthProblem.LengthSessionTargetArgumentRoleLimitExceeded 1 2)
+        oversizedResult
+
+      let retained = LengthProblem.LengthExplicitTargetRolesCasesRejected
+            [ Length.LengthUnobservedTarget
+            , error "retained-later-role"
+            ]
+      lazySession <- expectRight
+        $ LengthProblem.sealLengthSessionWithInterpretationPolicy
+            Length.defaultLengthLimits retained inventory
+            Length.BuiltinListSpine []
+      forced <- try $ evaluate $ force lazySession
+      case forced of
+        Left failure -> assertBool "deep session force missed the retained role"
+          $ "retained-later-role" `isInfixOf` displayException
+              (failure :: SomeException)
+        Right _ -> assertFailure "deep session force left a retained role lazy"
+  , testCase "route contract checks through the retained policy" $ do
+      let observed = Length.LengthObservedSpine
+          roles = [observed, observed]
+          inventory = sessionInventory () []
+          poisonContract = Length.LengthContractSource
+            (error "role arity failure demanded the precondition")
+            (error "role arity failure demanded the postcondition")
+      session <- expectRight
+        $ LengthProblem.sealLengthSessionWithInterpretationPolicy
+            Length.defaultLengthLimits
+            (LengthProblem.LengthExplicitTargetRolesCasesRejected roles)
+            inventory Length.BuiltinListSpine []
+      arityResult <- evaluateWithin
+        $ LengthProblem.sealLengthContractInSession session
+            (FunctionType adversarialClosedList adversarialClosedList)
+            poisonContract
+      assertLeft
+        (Length.LengthContractTargetArgumentRoleArityMismatch 1 2)
+        arityResult
+
+      let illKindedTarget = adversarialListOf $ TypeConstructor listName
+      kindResult <- evaluateWithin
+        $ LengthProblem.sealLengthContractInSession session
+            illKindedTarget poisonContract
+      case kindResult of
+        Left Length.LengthContractTargetKindError{} -> pure ()
+        Left other -> assertFailure
+          $ "unexpected in-session contract rejection: " ++ show other
+        Right _ -> assertFailure
+          "in-session contract sealing admitted an ill-kinded target"
+  , testCase "reject exact role drift before contract reseal and graph demand" $ do
+      let observed = Length.LengthObservedSpine
+          unobserved = Length.LengthUnobservedTarget
+          expected = [unobserved, observed]
+          poisonCandidate = adversarialTypedCandidate
+            $ error "strict policy mismatch demanded the candidate graph"
+          inventory = sessionInventory () []
+      typeName <- expectName "Fixture.StrictPolicyForeignSpine"
+      zeroName <- expectName "Fixture.StrictPolicyForeignZero"
+      stepName <- expectName "Fixture.StrictPolicyForeignStep"
+      let element = FlexibleVariable "strict-policy-element"
+          spine = TypeApplication (TypeConstructor typeName)
+            $ TypeVariable element
+          declaration = DataTypeDeclaration () typeName
+            [TypeParameter element Nothing]
+            [ DataConstructor () zeroName []
+            , DataConstructor () stepName [TypeVariable element, spine]
+            ]
+          foreignInventory = sessionInventory () [declaration]
+          foreignTarget = FunctionType spine $ FunctionType spine spine
+      foreignContext <- expectRight $ Length.sealLengthContext
+        Length.defaultLengthLimits foreignInventory
+        $ Length.DeclaredListSpine typeName zeroName stepName
+      let reject source actualRoles = do
+            session <- expectRight
+              $ LengthProblem.sealLengthSessionWithInterpretationPolicy
+                  Length.defaultLengthLimits source inventory
+                  Length.BuiltinListSpine []
+            contract <- expectRight
+              $ Length.sealRoleAwareLengthContractInContext
+                  Length.defaultLengthLimits foreignContext actualRoles
+                  foreignTarget trivialLengthContract
+            result <- evaluateWithin
+              $ LengthProblem.sealLengthTypedCandidateProblemInSession
+                  LengthProblem.defaultLengthProblemLimits
+                  session contract poisonCandidate
+            assertLeft LengthProblem.LengthProblemTargetArgumentPolicyMismatch
+              result
+      reject (LengthProblem.LengthExplicitTargetRolesCasesRejected expected)
+        (reverse expected)
+      reject
+        (LengthProblem.LengthExplicitTargetRolesExactZeroStepCases expected)
+        (reverse expected)
+      reject
+        (LengthProblem.LengthExplicitTargetRolesCasesRejected [unobserved])
+        [observed, unobserved]
+      reject
+        (LengthProblem.LengthExplicitTargetRolesExactZeroStepCases [unobserved])
+        [observed, unobserved]
+
+      matchingSession <- expectRight
+        $ LengthProblem.sealLengthSessionWithInterpretationPolicy
+            Length.defaultLengthLimits
+            (LengthProblem.LengthExplicitTargetRolesCasesRejected expected)
+            inventory Length.BuiltinListSpine []
+      matchingContract <- expectRight
+        $ Length.sealRoleAwareLengthContractInContext
+            Length.defaultLengthLimits foreignContext expected foreignTarget
+            trivialLengthContract
+      matchingResult <- evaluateWithin
+        $ LengthProblem.sealLengthTypedCandidateProblemInSession
+            LengthProblem.defaultLengthProblemLimits
+            matchingSession matchingContract poisonCandidate
+      assertLeft
+        (LengthProblem.LengthProblemContractResealRejected
+          $ Length.LengthContractTargetKindError
+          $ UnknownTypeConstructor typeName)
+        matchingResult
+
+      legacySession <- expectRight
+        $ LengthProblem.sealLengthSessionWithInterpretationPolicy
+            Length.defaultLengthLimits LengthProblem.LengthLegacyCasesRejected
+            inventory Length.BuiltinListSpine []
+      mixedContract <- expectRight
+        $ Length.sealRoleAwareLengthContractInContext
+            Length.defaultLengthLimits foreignContext expected foreignTarget
+            trivialLengthContract
+      legacyResult <- evaluateWithin
+        $ LengthProblem.sealLengthTypedCandidateProblemInSession
+            LengthProblem.defaultLengthProblemLimits
+            legacySession mixedContract poisonCandidate
+      assertLeft
+        LengthProblem.LengthProblemMixedTargetArgumentsRequireRoleAwareSealer
+        legacyResult
+  , testCase "keep compatibility role drift beside strict association" $ do
+      let observed = Length.LengthObservedSpine
+          unobserved = Length.LengthUnobservedTarget
+          retainedRoles = [unobserved, observed]
+          detachedRoles = reverse retainedRoles
+          target = adversarialBinaryConstantZeroTarget
+      graph <- adversarialBinaryConstantZeroGraph
+      let candidate = adversarialTypedCandidate $ Right graph
+
+      ordinarySession <- adversarialRoleAwareLengthSession retainedRoles [] []
+      ordinaryContract <- adversarialRoleAwareLengthContract
+        ordinarySession detachedRoles target trivialLengthContract
+      _ <- expectRight
+        $ LengthProblem.sealRoleAwareLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            ordinarySession ordinaryContract candidate
+      assertLeft LengthProblem.LengthProblemTargetArgumentPolicyMismatch
+        $ LengthProblem.sealLengthTypedCandidateProblemInSession
+            LengthProblem.defaultLengthProblemLimits
+            ordinarySession ordinaryContract candidate
+
+      exactSession <- adversarialExactCaseLengthSession retainedRoles [] []
+      exactContract <- adversarialRoleAwareLengthContract
+        exactSession detachedRoles target trivialLengthContract
+      _ <- expectRight
+        $ LengthProblem.sealExactSpineCaseLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            exactSession exactContract candidate
+      assertLeft LengthProblem.LengthProblemTargetArgumentPolicyMismatch
+        $ LengthProblem.sealLengthTypedCandidateProblemInSession
+            LengthProblem.defaultLengthProblemLimits
+            exactSession exactContract candidate
   ]
 
 candidateProblemTests :: TestTree

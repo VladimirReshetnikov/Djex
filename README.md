@@ -324,6 +324,30 @@ rechecks its direct constructor patterns against the session's opaque spine
 descriptor before fingerprinting or interpretation. The public shared graph
 fingerprint still rejects that graph.
 
+New integrations can select those interpretation axes through one closed
+boundary. `LengthInterpretationPolicySource` offers legacy case rejection,
+explicit target roles with case rejection, or explicit target roles with exact
+zero/step cases. `sealLengthSessionWithInterpretationPolicy` checks and retains
+an opaque `CheckedLengthInterpretationPolicy` alongside the session;
+`sealLengthContractInSession` takes its roles from that authority, and
+`sealLengthTypedCandidateProblemInSession` requires a detached contract to
+match the complete retained role vector, including order and arity, before
+contract resealing or candidate-graph demand. Exact-case authority therefore
+cannot exist without an explicit role vector.
+
+The earlier session and problem sealers remain compatibility wrappers. Their
+observable errors, demand precedence, and canonical identities stay unchanged,
+including the historical problem-wrapper acceptance of distinct role vectors
+when only their mixed/all-observed projection agrees. The new strict entrance
+is the opt-in association repair. The newly session-retained role vector is not
+added as another fingerprint field: session encoding still consumes only the
+old mixedness and case-policy projections, while contracts and downstream
+identities continue to consume the same existing contract role fingerprint.
+Explicit all-observed ordinary policy remains byte-identical to legacy policy.
+Session construction also retains productive role traversal; because the exact
+vector is now stored, honest deep `NFData` evaluation additionally reaches its
+later role payloads.
+
 For symbolic scrutinee length `n`, analysis produces
 `if n == 0 then zeroResult else stepResult`; the recursive field receives
 `n monus 1`. The element payload is an opaque, non-inspectable token. Both
@@ -430,6 +454,9 @@ and higher-order map example are recorded in the
 The internal schema authority, exact case policy, and compatibility versions
 are recorded in the
 [exact zero/step case foundation report](docs/reports/2026-08-13-exact-zero-step-length-cases.md).
+The unified checked authority, strict association entrance, wrapper
+compatibility, identity preservation, and demand boundary are recorded in the
+[unified Length interpretation-policy report](docs/reports/2026-08-13-unified-length-interpretation-policy.md).
 Exference's later checker-owned retention of that one closed nonempty graph
 shape is recorded in the
 [exact zero/step Exference graph report](docs/reports/2026-08-13-exference-exact-zero-step-graphs.md).

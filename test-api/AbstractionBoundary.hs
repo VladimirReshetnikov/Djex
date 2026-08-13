@@ -130,6 +130,7 @@ $(do
           , "LengthSMTLibLiveQueryObservation"
           , "LengthSMTLibLiveSessionError"
           , "LengthSMTLibLiveQueryError"
+          , "CheckedLengthInterpretationPolicy"
           , "CheckedLengthSession"
           , "CheckedLengthProviderInventory"
           , "lengthSMTLibLiveQueryObservationQueryFingerprint"
@@ -141,6 +142,10 @@ $(do
           , "LengthProblemUsedProviderMissing"
           , "checkedLengthCandidateTermGraphFingerprint"
           , "checkedLengthSessionCasePolicy"
+          , "checkedLengthSessionExplicitTargetRoles"
+          , "checkedPolicyExplicitTargetRoles"
+          , "checkedPolicyTargetArgumentPolicy"
+          , "checkedPolicyCasePolicy"
           , "fingerprintTermGraphWithTypeStructure"
           ]
     resolved <- mapM lookupValueName hiddenValues
@@ -173,6 +178,7 @@ newtype LengthAnnotationProbe = LengthAnnotationProbe Int
 newtype OtherLengthAnnotationProbe = OtherLengthAnnotationProbe Int
 newtype LengthLocalProbe = LengthLocalProbe Int
 newtype OtherLengthLocalProbe = OtherLengthLocalProbe Int
+data OtherCheckedLengthInterpretationPolicy
 newtype LiveEpochProbe = LiveEpochProbe Int
 newtype OtherLiveEpochProbe = OtherLiveEpochProbe Int
 newtype LiveIdentityProbe = LiveIdentityProbe Int
@@ -268,6 +274,17 @@ forbiddenConstructionAttempts =
   , noGeneric @(CheckedLengthProviderInventory LengthVariableProbe)
       "CheckedLengthProviderInventory"
   , noGeneric @LengthProblemLimits "LengthProblemLimits"
+  , noGeneric @CheckedLengthInterpretationPolicy
+      "CheckedLengthInterpretationPolicy"
+  , noEq @CheckedLengthInterpretationPolicy
+      "CheckedLengthInterpretationPolicy"
+  , noOrd @CheckedLengthInterpretationPolicy
+      "CheckedLengthInterpretationPolicy"
+  , noShow @CheckedLengthInterpretationPolicy
+      "CheckedLengthInterpretationPolicy"
+  , ( "CheckedLengthInterpretationPolicy unexpectedly permits Coercible"
+    , forbiddenCheckedLengthInterpretationPolicyCoercion `seq` ()
+    )
   , noGeneric
       @(CheckedLengthSession LengthVariableProbe LengthAnnotationProbe)
       "CheckedLengthSession"
@@ -1024,6 +1041,11 @@ forbiddenCheckedLengthProviderInventoryCoercion
   :: CheckedLengthProviderInventory LengthVariableProbe
   -> CheckedLengthProviderInventory OtherLengthVariableProbe
 forbiddenCheckedLengthProviderInventoryCoercion = coerce
+
+forbiddenCheckedLengthInterpretationPolicyCoercion
+  :: CheckedLengthInterpretationPolicy
+  -> OtherCheckedLengthInterpretationPolicy
+forbiddenCheckedLengthInterpretationPolicyCoercion = coerce
 
 forbiddenCheckedLengthSessionIdentityCoercion
   :: CheckedLengthSession LengthVariableProbe LengthAnnotationProbe

@@ -25,6 +25,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.Problem.Candidate
   , sealLengthTypedCandidateProblem
   , sealRoleAwareLengthTypedCandidateProblem
   , sealExactSpineCaseLengthTypedCandidateProblem
+  , sealLengthTypedCandidateProblemInSession
   , checkedLengthCandidateResult
   , checkedLengthCandidateUsedProviders
   , checkedLengthCandidateFingerprint
@@ -132,8 +133,10 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
   , checkedLengthSessionLimits
   , checkedLengthSessionProviderInventory
   , checkedLengthSessionTargetArgumentPolicy
+  , checkedLengthSessionExplicitTargetRoles
   , lengthSessionEncodingPolicyFingerprint
   , lengthSessionInventoryFingerprint
+  , sealLengthContractInSession
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Problem
   ( BehavioralProblem
@@ -530,10 +533,31 @@ sealExactSpineCaseLengthTypedCandidateProblem
 sealExactSpineCaseLengthTypedCandidateProblem =
   sealLengthTypedCandidateProblemWithMode LengthExactSpineCaseProblemSealer
 
+-- | Seal under the exact interpretation authority retained by the session.
+--
+-- Unlike the compatibility wrappers, an explicitly associated policy must
+-- match the checked contract's complete role vector, including order and
+-- arity.  The check precedes contract resealing, residuals, and graph demand.
+sealLengthTypedCandidateProblemInSession
+  :: (Ord identity, Ord local)
+  => LengthProblemLimits
+  -> CheckedLengthSession identity annotation
+  -> CheckedLengthContract (Variable identity)
+  -> TypedCandidate failure
+      (Type (Variable identity))
+      local
+      (Candidate (Type (Variable identity)) details output)
+  -> Either
+      (LengthProblemError failure identity local)
+      (CheckedLengthProblem identity local)
+sealLengthTypedCandidateProblemInSession =
+  sealLengthTypedCandidateProblemWithMode LengthSessionPolicyProblemSealer
+
 data LengthProblemSealer
   = LengthLegacyProblemSealer
   | LengthRoleAwareProblemSealer
   | LengthExactSpineCaseProblemSealer
+  | LengthSessionPolicyProblemSealer
 
 sealLengthTypedCandidateProblemWithMode
   :: (Ord identity, Ord local)
@@ -558,9 +582,15 @@ sealLengthTypedCandidateProblemWithMode sealer problemLimits session
     LengthLegacyProblemSealer
       | mixedContract -> Left
           LengthProblemMixedTargetArgumentsRequireRoleAwareSealer
+    LengthSessionPolicyProblemSealer
+      | checkedLengthSessionExplicitTargetRoles session == Nothing
+      , mixedContract -> Left
+          LengthProblemMixedTargetArgumentsRequireRoleAwareSealer
     _ -> pure ()
   let expectedCasePolicy = case sealer of
         LengthExactSpineCaseProblemSealer -> LengthExactZeroStepCases
+        LengthSessionPolicyProblemSealer ->
+          checkedLengthSessionCasePolicy session
         _ -> LengthCasesRejected
   if checkedLengthSessionCasePolicy session == expectedCasePolicy
     then pure ()
@@ -568,8 +598,19 @@ sealLengthTypedCandidateProblemWithMode sealer problemLimits session
   if mixedContract == mixedSession
     then pure ()
     else Left LengthProblemTargetArgumentPolicyMismatch
+  case sealer of
+    LengthSessionPolicyProblemSealer -> case
+        checkedLengthSessionExplicitTargetRoles session of
+      Nothing -> pure ()
+      Just expectedRoles
+        | suppliedRoles == expectedRoles -> pure ()
+        | otherwise -> Left LengthProblemTargetArgumentPolicyMismatch
+    _ -> pure ()
   let providers = checkedLengthSessionProviderInventory session
-  contract <- revalidateContract session suppliedContract
+  contract <- case sealer of
+    LengthSessionPolicyProblemSealer ->
+      revalidateContractInSession session suppliedContract
+    _ -> revalidateContract session suppliedContract
   let compatibility = typedCandidateCompatibility typed
   case candidateResidualConstraints compatibility of
     constraint : _ -> Left $ LengthProblemResidualConstraint constraint
@@ -647,12 +688,41 @@ revalidateContract
   -> Either
       (LengthProblemError failure identity local)
       (CheckedLengthContract (Variable identity))
-revalidateContract session original = do
+revalidateContract session original = revalidateContractWith
+  (sealRoleAwareLengthContractInContext
+    (checkedLengthSessionLimits session)
+    (checkedLengthSessionContext session)
+    (checkedLengthContractTargetArgumentRoles original))
+  original
+
+-- The unified entrance replays the detached contract through the session's
+-- retained authority.  Compatibility entrances intentionally keep replaying
+-- with the detached contract's roles after their historical loose mixedness
+-- check, preserving the association behavior those wrappers exposed.
+revalidateContractInSession
+  :: Ord identity
+  => CheckedLengthSession identity annotation
+  -> CheckedLengthContract (Variable identity)
+  -> Either
+      (LengthProblemError failure identity local)
+      (CheckedLengthContract (Variable identity))
+revalidateContractInSession session = revalidateContractWith
+  $ sealLengthContractInSession session
+
+revalidateContractWith
+  :: ( Type (Variable identity)
+       -> LengthContractSource
+       -> Either
+            (LengthContractError (Variable identity))
+            (CheckedLengthContract (Variable identity))
+     )
+  -> CheckedLengthContract (Variable identity)
+  -> Either
+      (LengthProblemError failure identity local)
+      (CheckedLengthContract (Variable identity))
+revalidateContractWith sealer original = do
   checked <- first LengthProblemContractResealRejected
-    $ sealRoleAwareLengthContractInContext
-        (checkedLengthSessionLimits session)
-        (checkedLengthSessionContext session)
-        (checkedLengthContractTargetArgumentRoles original)
+    $ sealer
         (checkedLengthContractTarget original)
         LengthContractSource
           { lengthContractPrecondition =

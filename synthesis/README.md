@@ -197,6 +197,23 @@ versioned policies. The resulting SMT query and model replay expose only the
 compact observed inputs. See the
 [role-aware target-argument report](../docs/reports/2026-08-13-role-aware-target-arguments.md).
 
+New callers can choose the complete interpretation boundary once through
+`LengthInterpretationPolicySource` and
+`sealLengthSessionWithInterpretationPolicy`. The session retains an opaque
+checked policy; `sealLengthContractInSession` derives contract roles from it,
+and `sealLengthTypedCandidateProblemInSession` checks the detached contract's
+exact role order and arity before resealing or graph demand. Exact zero/step
+policy always carries an explicit role vector. Existing session and problem
+sealers remain wrappers with their historical failure order, bytes, and loose
+mixedness-only problem association—including accepted role order and arity
+drift. The strict entrance is additive. The session encoding still consumes
+only the old mixed/all-observed and case projections; contracts and downstream
+identities retain their existing contract-role field, so explicit all-observed
+ordinary policy remains identical to legacy policy. Productive construction is
+also preserved; deep `NFData` evaluation now honestly forces the newly
+retained role vector. See the
+[unified interpretation-policy report](../docs/reports/2026-08-13-unified-length-interpretation-policy.md).
+
 Length also has an additive exact-case sealer pair. It accepts only complete
 zero/step splits over the checked spine model; ordinary and role-aware sessions
 retain their historical case rejection and bytes. The package-private graph

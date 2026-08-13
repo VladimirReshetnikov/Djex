@@ -283,18 +283,23 @@ main = defaultMain $ testGroup "Djex downstream API"
                       ( "Ord" `isInfixOf` message &&
                         ( "LengthSMTLibExecutionConfig" `isInfixOf` message ||
                           "LengthSMTLibLiveSession" `isInfixOf` message ||
-                          "LengthSMTLibLiveQueryObservation" `isInfixOf` message
+                          "LengthSMTLibLiveQueryObservation" `isInfixOf` message ||
+                          "CheckedLengthInterpretationPolicy" `isInfixOf` message
                         )
                       ) ||
                       ( ("Eq" `isInfixOf` message || "Show" `isInfixOf` message) &&
                         ( "LengthSMTLibExecutionConfig" `isInfixOf` message ||
                           "LengthSMTLibLiveSession" `isInfixOf` message ||
-                          "LengthSMTLibLiveQueryObservation" `isInfixOf` message
+                          "LengthSMTLibLiveQueryObservation" `isInfixOf` message ||
+                          "CheckedLengthInterpretationPolicy" `isInfixOf` message
                         )
                       )
                     )
                   ) ||
-                  ( "Couldn't match type" `isInfixOf` message &&
+                  ( ( "Couldn't match type" `isInfixOf` message ||
+                      "Couldn't match representation of type" `isInfixOf`
+                        message
+                    ) &&
                     any (`isInfixOf` message)
                       [ "forbiddenFingerprintCoercion"
                       , "forbiddenTypedCandidateCoercion"
@@ -316,6 +321,7 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "forbiddenCheckedLengthSpineModelCoercion"
                       , "forbiddenCheckedLengthProviderSummaryCoercion"
                       , "forbiddenCheckedLengthProviderInventoryCoercion"
+                      , "forbiddenCheckedLengthInterpretationPolicyCoercion"
                       , "forbiddenCheckedLengthSessionIdentityCoercion"
                       , "forbiddenCheckedLengthSessionAnnotationCoercion"
                       , "forbiddenCheckedLengthCandidateIdentityCoercion"

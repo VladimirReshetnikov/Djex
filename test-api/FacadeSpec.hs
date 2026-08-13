@@ -592,6 +592,37 @@ facadeTests = testGroup "public Djex facade"
             -> Either (LengthSessionError Int)
                 (CheckedLengthSession Int ())
           exactCaseSessionSealer = sealExactSpineCaseLengthSession
+          interpretationPolicySources =
+            [ LengthLegacyCasesRejected
+            , LengthExplicitTargetRolesCasesRejected
+                [LengthObservedSpine, LengthObservedSpine]
+            , LengthExplicitTargetRolesCasesRejected
+                [LengthUnobservedTarget, LengthObservedSpine]
+            , LengthExplicitTargetRolesExactZeroStepCases
+                [LengthObservedSpine, LengthObservedSpine]
+            , LengthExplicitTargetRolesExactZeroStepCases
+                [LengthUnobservedTarget, LengthObservedSpine]
+            ]
+          unifiedSessionSealer
+            :: LengthLimits
+            -> LengthInterpretationPolicySource
+            -> Inventory (Variable Int) ()
+            -> LengthSpineModelSource
+            -> [LengthProviderSummarySource (Variable Int)]
+            -> Either (LengthSessionError Int)
+                (CheckedLengthSession Int ())
+          unifiedSessionSealer = sealLengthSessionWithInterpretationPolicy
+          checkedPolicyProjection
+            :: CheckedLengthSession Int ()
+            -> CheckedLengthInterpretationPolicy
+          checkedPolicyProjection = checkedLengthSessionInterpretationPolicy
+          inSessionContractSealer
+            :: CheckedLengthSession Int ()
+            -> Type ExferenceTypeVariable
+            -> LengthContractSource
+            -> Either (LengthContractError ExferenceTypeVariable)
+                (CheckedLengthContract ExferenceTypeVariable)
+          inSessionContractSealer = sealLengthContractInSession
           roleAwareSealer
             :: LengthProblemLimits
             -> CheckedLengthSession Int ()
@@ -612,6 +643,16 @@ facadeTests = testGroup "public Djex facade"
                   ExferenceTermGraphAbsence Int ExferenceLocal)
                 (CheckedLengthProblem Int ExferenceLocal)
           exactCaseSealer = sealExactSpineCaseLengthTypedCandidateProblem
+          inSessionSealer
+            :: LengthProblemLimits
+            -> CheckedLengthSession Int ()
+            -> CheckedLengthContract ExferenceTypeVariable
+            -> ExferenceTypedCandidate
+            -> Either
+                (LengthProblemError
+                  ExferenceTermGraphAbsence Int ExferenceLocal)
+                (CheckedLengthProblem Int ExferenceLocal)
+          inSessionSealer = sealLengthTypedCandidateProblemInSession
           stepPayloadSite = LengthStepPayloadSpineDemand $ termNodeId 8
           stepPayloadFailure = LengthProblemStepPayloadDemanded
             (occurrenceId 9) stepPayloadSite
@@ -753,7 +794,10 @@ facadeTests = testGroup "public Djex facade"
             -> LengthSMTLibResponseLimits
           executionResponseProjection = lengthSMTLibExecutionResponseLimits
       sealer `seq` roleAwareSessionSealer `seq` exactCaseSessionSealer `seq`
-        roleAwareSealer `seq` exactCaseSealer `seq`
+        interpretationPolicySources `seq` unifiedSessionSealer `seq`
+        checkedPolicyProjection `seq` inSessionContractSealer `seq`
+        roleAwareSealer `seq` exactCaseSealer `seq` inSessionSealer `seq`
+        (rnf :: CheckedLengthInterpretationPolicy -> ()) `seq`
         stepPayloadFailure `seq`
         candidateResultProjection `seq` problemProjection `seq`
         inputCountProjection `seq` preconditionProjection `seq`
@@ -772,6 +816,7 @@ facadeTests = testGroup "public Djex facade"
         executionArtifactProjection `seq` executionResponseProjection `seq`
         (rnf :: LengthSMTLibExecutableDigestExpectation -> ()) `seq`
         pure ()
+      length interpretationPolicySources @?= 5
       lengthProblemAssignmentInputs (LengthProblemAssignment [1, 2]) @?=
         [1, 2]
       (ProviderIndependentFiniteSpineModel :: LengthCounterexampleBasis) @?=

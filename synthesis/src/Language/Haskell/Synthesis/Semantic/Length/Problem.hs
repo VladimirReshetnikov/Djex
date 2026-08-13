@@ -1,20 +1,24 @@
 -- | Atomic sessions and behavioral problems for finite list-spine length.
 --
 -- The first checked layer binds one exact annotation-erased neutral inventory,
--- finite-spine model, and normalized provider-law table.  Inventory identity
--- remains distinct from the solver-neutral encoding policy.  Candidate and
--- complete problem sealing consume the provider inventory directly from this
--- opaque association and revalidate only the separately supplied contract;
--- callers cannot combine a context checked from one inventory with providers
--- checked from another.
+-- finite-spine model, normalized provider-law table, and closed interpretation
+-- policy.  Inventory identity remains distinct from the solver-neutral
+-- encoding policy.  The unified contract and problem entrances derive their
+-- authority from that opaque association; compatibility wrappers retain their
+-- historical projected-association behavior and bytes.
 module Language.Haskell.Synthesis.Semantic.Length.Problem
   ( LengthSemanticFingerprintPart (..)
   , LengthEncodingPolicyFingerprintSubject
   , LengthSessionError (..)
+  , LengthInterpretationPolicySource (..)
+  , CheckedLengthInterpretationPolicy
   , CheckedLengthSession
+  , sealLengthSessionWithInterpretationPolicy
   , sealLengthSession
   , sealRoleAwareLengthSession
   , sealExactSpineCaseLengthSession
+  , checkedLengthSessionInterpretationPolicy
+  , sealLengthContractInSession
   , checkedLengthSessionContext
   , checkedLengthSessionProviderInventory
   , lengthSessionInventoryFingerprint
@@ -36,6 +40,7 @@ module Language.Haskell.Synthesis.Semantic.Length.Problem
   , sealLengthTypedCandidateProblem
   , sealRoleAwareLengthTypedCandidateProblem
   , sealExactSpineCaseLengthTypedCandidateProblem
+  , sealLengthTypedCandidateProblemInSession
   , checkedLengthCandidateResult
   , checkedLengthCandidateUsedProviders
   , checkedLengthCandidateFingerprint

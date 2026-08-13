@@ -161,7 +161,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.TypedGenerated` | Bounded typed candidate graphs with stable node, source-occurrence, and certificate identities; checked application and visible-specialization witnesses; a neutral sealing pass; nominal type/local authority even after graph projection; exact graph metrics; and one-way projection to `Generated`. |
 | `Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate` | Package-private bounded structural plans for complete leading-telescope selections: capture-free canonical substitution steps and derived ordered scheme-syntax obligations, without provenance, closure, kind, discharge, graph association, or fingerprint authority. |
 | `Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.Association` | Package-private atomic raw-graph sealing plus exhaustive one-use association of independent checker observations, structural plans, exact global owner schemes, and derived base/visible occurrence chains; its projection and fold grant no detachable carrier, inventory, kind, discharge, behavioral, or fingerprint authority. |
-| `Language.Haskell.Synthesis.TypedGenerated.Fingerprint` | Bounded, allocation- and alpha-insensitive structural identities after a fresh reseal; the public shared entrance rejects certificate- and constructor-schema-dependent graphs, while a package-private domain entrance can atomically consume an opaque checked schema without exporting it as graph authority. |
+| `Language.Haskell.Synthesis.TypedGenerated.Fingerprint` | Bounded, allocation- and alpha-insensitive structural identities after a fresh reseal; the public shared entrance rejects certificate- and constructor-schema-dependent graphs, while package-private entrances can consume an opaque checked schema or certificate-association carrier without exporting either as graph authority. |
 | `Language.Haskell.Synthesis.Observability` | Opaque exact counters, stable cross-engine metric codes, deterministic aggregation, and deliberately non-strict snapshots that can be inspected independently of a lazy result. |
 
 Logical evidence is independent of operational progress. A truncated search can
@@ -631,15 +631,24 @@ binding structure, hole equality, flexible/rigid free-variable flavor, globals,
 normalized types, patterns, witnesses, visible arguments, and branch order. It
 performs no beta, eta, let, or behavioral quotienting. The retained encoding has
 a caller-supplied byte bound (one MiB by default), while graph limits separately
-bound its preceding traversal. A certificate reference remains rejected until
-an engine-owned origin and occurrence association can replace its allocation
-number with the checked plan's semantic substitution and obligation identities.
-Constructor patterns likewise require
-an inventory-bound family schema which the generic shared checker does not
-possess. The result is only a
-structural graph key: it neither resolves an inventory nor establishes candidate
-completeness, behavioral interpretation, or evidence. Domain-owned sealers must
-bind those authorities separately.
+bound its preceding traversal. The package-private carrier-aware entrance
+literally delegates an empty association to this v1 path. For a nonempty atom,
+it freshly reseals with the caller's exact `TypeStructure`, then builds v2 with
+one shared variable-slot state across the rooted graph and rooted association
+rows. Visible witnesses reference canonical row/step ordinals; rows encode the
+exact owner, normalized scheme, source-order source/selected/result plan, and
+ordered activated obligations. Certificate, node, occurrence, raw slot, and
+input-row coordinates are validation-only and never enter the key. The public
+entrance remains unchanged and rejects a projected stamped graph because graph
+projection has discarded the opaque association authority. Constructor
+patterns likewise require an inventory-bound family schema which the generic
+shared checker does not possess. The result is only a structural graph key: it
+establishes no inventory membership or provenance, kind correctness, constraint
+discharge, candidate completeness, or behavioral meaning. Domain-owned sealers
+must bind those authorities separately.
+
+The detailed encoding and trust boundary are recorded in the
+[carrier-aware certificate fingerprint report](../docs/reports/2026-08-13-carrier-aware-certificate-graph-fingerprints.md).
 
 `Observability` is orthogonal to logical evidence and search progress. Its
 `Natural` counts cannot wrap, zero-valued entries have one canonical absent

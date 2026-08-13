@@ -165,6 +165,7 @@ $(do
           , "checkedPolicyTargetArgumentPolicy"
           , "checkedPolicyCasePolicy"
           , "fingerprintTermGraphWithTypeStructure"
+          , "fingerprintCheckedTypeApplicationCertificateGraphWithTypeStructure"
           , "PublicDjex.sealTypeApplicationCertificateTable"
           , "PublicDjex.checkedTypeApplicationCertificateCount"
           , "PublicDjex.lookupCheckedTypeApplicationCertificatePlan"

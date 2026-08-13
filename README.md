@@ -263,6 +263,22 @@ provenance, behavioral, or fingerprint authority.
 The additive public failure vocabulary is documented in the
 [Exference certificate-wiring report](docs/reports/2026-08-13-exference-certificate-association-wiring.md).
 
+A new package-private carrier-aware fingerprint entrance can consume the
+opaque association atom directly. Empty atoms literally delegate to the
+existing v1 graph fingerprint, preserving its bytes, failures, and demand.
+Nonempty atoms are freshly resealed under a caller-owned `TypeStructure` and
+receive a v2 structural key: the rooted graph refers to canonical row/step
+ordinals, then each rooted row records the exact owner, normalized scheme,
+source-order substitution plan, and ordered activated constraints. One shared
+variable-slot state spans root then rows. Certificate, node, occurrence, raw
+slot, and caller row-order coordinates never enter the key. The public graph
+fingerprint remains unchanged and still rejects the projected stamped graph.
+The v2 key itself establishes no inventory membership or provenance, kind
+correctness, constraint discharge, candidate completeness, or behavioral
+meaning; domain-owned sealers must bind those authorities independently.
+See the
+[carrier-aware fingerprint report](docs/reports/2026-08-13-carrier-aware-certificate-graph-fingerprints.md).
+
 The shared checker also lacks constructor-family schemas, so the public
 fingerprint entrance always rejects constructor-pattern graphs. A
 package-private domain entrance can reuse the encoder only by atomically

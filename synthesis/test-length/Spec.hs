@@ -746,11 +746,26 @@ assertLiveStatusQueryRun
   -> SMTLibSession.LengthSMTLibQueryRun epoch identity local
   -> IO ()
 assertLiveStatusQueryRun expectedStatus run = do
-  SMTLibSession.lengthSMTLibQueryRunSolverStatus run @?= expectedStatus
-  case SMTLibSession.lengthSMTLibQueryRunCounterexampleEvidence run of
-    Nothing -> pure ()
-    Just _ -> assertFailure "status-only run retained counterexample evidence"
+  case (expectedStatus, SMTLibSession.lengthSMTLibQueryRunObservation run) of
+    ( Observation.SolverSatisfiable
+      , Observation.SatisfiableObservation Nothing
+      ) -> pure ()
+    ( Observation.SolverUnsatisfiable
+      , Observation.UnsatisfiableObservation ()
+      ) -> pure ()
+    ( Observation.SolverUnknown
+      , Observation.UnknownObservation ()
+      ) -> pure ()
+    _ -> assertFailure
+      "status-only run lost its status-indexed evidence absence"
+  assertLiveQueryRunIdentityBranch
+    expectedStatus "absent" replayTag run
   assertLiveQueryRunAccounting run
+ where
+  replayTag = case expectedStatus of
+    Observation.SolverSatisfiable -> "not-requested-policy"
+    Observation.SolverUnsatisfiable -> "not-applicable-status"
+    Observation.SolverUnknown -> "not-applicable-status"
 
 assertLiveValueQueryRun
   :: SMTLib.LengthSMTLibQuery identity local
@@ -758,17 +773,108 @@ assertLiveValueQueryRun
   -> SMTLibSession.LengthSMTLibQueryRun epoch identity local
   -> IO ()
 assertLiveValueQueryRun query expectedInputs run = do
-  SMTLibSession.lengthSMTLibQueryRunSolverStatus run @?=
-    Observation.SolverSatisfiable
-  evidence <- case
-      SMTLibSession.lengthSMTLibQueryRunCounterexampleEvidence run of
-    Nothing -> assertFailure "satisfiable values run omitted replay evidence"
-    Just value -> pure value
+  evidence <- case SMTLibSession.lengthSMTLibQueryRunObservation run of
+    Observation.SatisfiableObservation (Just value) -> pure value
+    _ -> assertFailure
+      "satisfiable values run lost its status-indexed replay evidence"
   receipt <- expectRight $ Djex.replayBehavioralEvidence
     (SMTLib.lengthSMTLibQueryBehavioralProblem query) evidence
   Evaluate.validatedLengthCounterexampleInputs receipt @?= expectedInputs
   Evaluate.validatedLengthCounterexampleResult receipt @?= 0
+  assertLiveQueryRunIdentityBranch
+    Observation.SolverSatisfiable
+    (if null expectedInputs
+      then "vacuous-zero-input"
+      else "framed-input-values")
+    "validated-counterexample"
+    run
   assertLiveQueryRunAccounting run
+
+assertLiveQueryRunIdentityBranch
+  :: Observation.SolverStatus
+  -> String
+  -> String
+  -> SMTLibSession.LengthSMTLibQueryRun epoch identity local
+  -> IO ()
+assertLiveQueryRunIdentityBranch status valuesTag replayTag run = do
+  assertIdentityFieldOccursOnce decodedField
+  assertIdentityFieldOccursOnce replayField
+ where
+  identityBytes = BS.pack $ InternalFingerprint.fingerprintCanonicalBytes
+    $ SMTLibSession.lengthSMTLibQueryRunIdentityFingerprint run
+  defaults = Evaluate.defaultLengthEvaluationLimits
+  decodedField = InternalFingerprint.FingerprintTag
+    (asciiBytes "decoded-branch")
+    [ InternalFingerprint.FingerprintBytes $ asciiBytes statusTag
+    , InternalFingerprint.FingerprintBytes $ asciiBytes valuesTag
+    ]
+  replayField = InternalFingerprint.FingerprintTag
+    (asciiBytes "independent-replay")
+    [ InternalFingerprint.FingerprintBytes
+        $ asciiBytes "finite-list-spine-length/counterexample-replay/v1"
+    , InternalFingerprint.FingerprintNatural $ fromIntegral
+        $ Evaluate.lengthAssignmentValueBitLimit defaults
+    , InternalFingerprint.FingerprintNatural $ fromIntegral
+        $ Evaluate.lengthIntermediateValueBitLimit defaults
+    , InternalFingerprint.FingerprintBytes $ asciiBytes replayTag
+    ]
+  statusTag = case status of
+    Observation.SolverSatisfiable -> "satisfiable"
+    Observation.SolverUnsatisfiable -> "unsatisfiable"
+    Observation.SolverUnknown -> "unknown"
+  assertIdentityFieldOccursOnce field =
+    countByteStringOccurrences
+        (BS.pack $ encodeFingerprintFieldForIdentityTest field)
+        identityBytes @?= 1
+
+-- Mirror the stable v1 field envelope only in this identity-schema
+-- regression.  The production encoder remains the sole fingerprint
+-- constructor; this independent spelling proves that the two outcome fields
+-- remain byte-for-byte present inside each completed run key.
+encodeFingerprintFieldForIdentityTest
+  :: InternalFingerprint.FingerprintField
+  -> [Word8]
+encodeFingerprintFieldForIdentityTest field = case field of
+  InternalFingerprint.FingerprintNatural value ->
+    sized 0x01 $ encodeNatural value
+  InternalFingerprint.FingerprintBytes bytes -> sized 0x02 bytes
+  InternalFingerprint.FingerprintSequence fields ->
+    sized 0x03 $ concatMap encodeFingerprintFieldForIdentityTest fields
+  InternalFingerprint.FingerprintTag tag fields -> sized 0x04 $
+    encodeFingerprintFieldForIdentityTest
+      (InternalFingerprint.FingerprintBytes tag) ++
+    encodeFingerprintFieldForIdentityTest
+      (InternalFingerprint.FingerprintSequence fields)
+  InternalFingerprint.FingerprintName _ ->
+    error "query-run branch fields never contain structural names"
+ where
+  sized :: Word8 -> [Word8] -> [Word8]
+  sized tag payload =
+    tag : encodeLength (fromIntegral $ length payload) ++ payload
+  encodeNatural :: Natural -> [Word8]
+  encodeNatural 0 = [0]
+  encodeNatural value = reverse $ go value
+   where
+    go :: Natural -> [Word8]
+    go 0 = []
+    go remaining =
+      let (quotient, remainder) = remaining `quotRem` 256
+      in fromIntegral remainder : go quotient
+  encodeLength :: Natural -> [Word8]
+  encodeLength remaining =
+    let (quotient, remainder) = remaining `quotRem` 128
+        byte = fromIntegral remainder
+    in if quotient == 0
+        then [byte]
+        else (byte + 0x80) : encodeLength quotient
+
+countByteStringOccurrences :: BS.ByteString -> BS.ByteString -> Int
+countByteStringOccurrences needle haystack
+  | BS.null needle = 0
+  | BS.null suffix = 0
+  | otherwise = 1 + countByteStringOccurrences needle (BS.tail suffix)
+ where
+  (_, suffix) = BS.breakSubstring needle haystack
 
 assertLiveQueryRunAccounting
   :: SMTLibSession.LengthSMTLibQueryRun epoch identity local
@@ -3052,10 +3158,9 @@ smtLibProtocolTests = testGroup
           SMTLibStream.smtLibEchoSentinelResponseBytes valueBarrier ++
           asciiBytes "\n"
       decoded <- expectProtocolComplete valueAction
-      SMTLibProtocol.lengthSMTLibProtocolDecodedStatus decoded @?=
-        Observation.SolverSatisfiable
-      SMTLibProtocol.lengthSMTLibProtocolDecodedInputValues decoded @?=
-        Just [smtIntegerBinding (asciiBytes "djex_length_input_0") 3]
+      SMTLibProtocol.lengthSMTLibProtocolDecodedObservation decoded @?=
+        Observation.SatisfiableObservation
+          (Just [smtIntegerBinding (asciiBytes "djex_length_input_0") 3])
   , testCase "publish schemas, validated defaults, and exact admission minima" $ do
       SMTLibProtocol.lengthSMTLibProtocolPlanSchemaTag @?=
         asciiBytes "djex-length-z3-smtlib2-protocol-plan/v1"
@@ -3193,10 +3298,8 @@ smtLibProtocolTests = testGroup
       zeroAction <- expectRight $ SMTLibProtocol.feedLengthSMTLibProtocol
         zeroReceiver $ asciiBytes "sat\n" ++ marker ++ asciiBytes "\n"
       zeroDecoded <- expectProtocolComplete zeroAction
-      SMTLibProtocol.lengthSMTLibProtocolDecodedStatus zeroDecoded @?=
-        Observation.SolverSatisfiable
-      SMTLibProtocol.lengthSMTLibProtocolDecodedInputValues zeroDecoded @?=
-        Just []
+      SMTLibProtocol.lengthSMTLibProtocolDecodedObservation zeroDecoded @?=
+        Observation.SatisfiableObservation (Just [])
       (_, zeroStatusOnly) <- protocolZeroInputPlan
         InternalSMTLibExecution.LengthSMTLibStatusOnly
       assertProtocolTerminalStatus zeroStatusOnly marker
@@ -3433,8 +3536,9 @@ smtLibProtocolTests = testGroup
         exactValueAction
       exactDecoded <- expectProtocolComplete =<< expectRight
         (SMTLibProtocol.feedLengthSMTLibProtocol exactValue valueTranscript)
-      SMTLibProtocol.lengthSMTLibProtocolDecodedInputValues exactDecoded @?=
-        Just [smtIntegerBinding (asciiBytes "djex_length_input_0") 0]
+      SMTLibProtocol.lengthSMTLibProtocolDecodedObservation exactDecoded @?=
+        Observation.SatisfiableObservation
+          (Just [smtIntegerBinding (asciiBytes "djex_length_input_0") 0])
 
       cappedInitial <- begin exactPlan
       cappedPending <- expectProtocolAwait =<< expectRight
@@ -3542,8 +3646,8 @@ smtLibProtocolTests = testGroup
           $ asciiBytes "unknown\n" ++
             SMTLibStream.smtLibEchoSentinelResponseBytes checkBarrier ++
             [9, 10, 13, 32])
-      SMTLibProtocol.lengthSMTLibProtocolDecodedStatus statusDecoded @?=
-        Observation.SolverUnknown
+      SMTLibProtocol.lengthSMTLibProtocolDecodedObservation statusDecoded @?=
+        Observation.UnknownObservation ()
       commentInitial <- begin statusOnly
       case SMTLibProtocol.feedLengthSMTLibProtocol commentInitial $
           asciiBytes "unknown\n" ++
@@ -3715,8 +3819,13 @@ assertProtocolTerminalStatus plan marker (rawStatus, expectedStatus) = do
   action <- expectRight $ SMTLibProtocol.feedLengthSMTLibProtocol receiver
     $ asciiBytes (rawStatus ++ "\n") ++ marker ++ asciiBytes "\n"
   decoded <- expectProtocolComplete action
-  SMTLibProtocol.lengthSMTLibProtocolDecodedStatus decoded @?= expectedStatus
-  SMTLibProtocol.lengthSMTLibProtocolDecodedInputValues decoded @?= Nothing
+  SMTLibProtocol.lengthSMTLibProtocolDecodedObservation decoded @?=
+    case expectedStatus of
+      Observation.SolverSatisfiable ->
+        Observation.SatisfiableObservation Nothing
+      Observation.SolverUnsatisfiable ->
+        Observation.UnsatisfiableObservation ()
+      Observation.SolverUnknown -> Observation.UnknownObservation ()
 
 constantZeroSMTLibCheck :: String
 constantZeroSMTLibCheck = unlines

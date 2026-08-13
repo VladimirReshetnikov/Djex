@@ -551,9 +551,11 @@ the input-value policy yields counterexample evidence only after independent
 Length replay under explicit evaluation limits. Status-only `sat`, `unsat`,
 and `unknown` remain heuristic observations and grant no pruning authority.
 After replay and identity sealing, the package-private run retains its ordinal,
-strict status, optional problem-bound evidence, reversible key, transcript
-digest, and accounting boundaries; it does not retain the terminal decoded
-value or its parsed symbol/integer binding list. Validated evidence still owns
+one strict status-indexed observation, reversible key, transcript digest, and
+accounting boundaries. Only the satisfiable observation branch can carry
+optional problem-bound evidence; impossible `unsat`/`unknown` plus evidence
+pairs are unrepresentable. The run does not retain the terminal decoded value
+or its parsed symbol/integer binding list. Validated evidence still owns
 normalized source-ordered inputs, while the reversible run key still embeds
 the exact bounded transcript bytes. This is removal of a parallel structured
 authority, not byte scrubbing.
@@ -563,13 +565,15 @@ The exact design and threat boundary are recorded in the
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` is the deliberately
 narrow public edge over that owner. It lends an opaque worker only through a
 rank-N scope. Each successful query observation internally retains its exact
-query fingerprint, three-valued status, and optional independently replayed
-counterexample evidence. Its heuristic strength is derived from the retained
-status rather than stored as a second fact; public selectors expose status,
-that derived strength, and heuristic use. The fingerprint and evidence have
-no detached projection: `replayLengthSMTLibLiveQueryObservation` is their only
-public consumer. It checks the exact query fingerprint before inspecting
-optional evidence, then replays that evidence against the query's retained
+query fingerprint and one strict status-indexed observation whose satisfiable
+branch alone may carry independently replayed counterexample evidence. Its
+heuristic strength is derived from that observation's status rather than
+stored as a second fact; public selectors expose status, that derived strength,
+and heuristic use. Neither the fingerprint, evidence, nor whole observation
+has a detached public projection:
+`replayLengthSMTLibLiveQueryObservation` is their only public semantic
+consumer. It checks the exact query fingerprint before inspecting the hidden
+observation, then replays any evidence against the query's retained
 behavioral problem. A successful `Nothing` remains only an exactly associated
 heuristic status. Process handles, cancellation, paths, executable
 observations, barriers, ordinals, decoded valuations, transcripts, transport

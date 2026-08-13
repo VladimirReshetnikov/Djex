@@ -172,7 +172,10 @@ every protocol failure because no continuation is returned.
 
 `LengthSMTLibProtocolDecoded` means only that caller-fed bytes passed framing,
 shape decoding, and positional marker checks for this pure plan. It deliberately
-retains only the closed status and optional decoded integer bindings. The
+retains one strict status-indexed observation. Its satisfiable payload
+distinguishes status-only `Nothing`, zero-input `Just []`, and a nonempty framed
+valuation; the `unsat` and `unknown` branches contain unit and therefore cannot
+be paired with decoded bindings. The
 caller retains the exact plan through driving and, in a live session, through
 run-identity construction; the terminal branch does not copy either that plan
 or its complete key. Raw status-frame and input-value-frame bytes likewise

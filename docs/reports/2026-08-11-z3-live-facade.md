@@ -61,8 +61,8 @@ diagnostic and capability-disclosure surface.
 A successful public query observation freshly retains only:
 
 - the exact public query fingerprint;
-- `SolverSatisfiable`, `SolverUnsatisfiable`, or `SolverUnknown`;
-- optional `BehavioralEvidence FiniteListSpineLengthV1
+- one strict status-indexed solver observation whose satisfiable branch alone
+  can contain optional `BehavioralEvidence FiniteListSpineLengthV1
   ValidatedLengthCounterexample`.
 
 The raw strength selector derives `RawSolverModelHint`,
@@ -73,10 +73,10 @@ could drift from that status. Its use selector similarly returns the constant
 
 The observation has nominal epoch, identity, and local roles and supports
 `NFData` only. Public selectors expose status, strength, and heuristic use. The
-retained query fingerprint and optional evidence have no public projection and
-can be consumed only together through the replay gate. The observation has no
-equality, ordering, rendering, generic representation, or raw payload
-projection.
+retained query fingerprint, whole solver observation, and optional evidence
+have no public projection and can be consumed only through the replay gate.
+The observation has no equality, ordering, rendering, generic representation,
+or raw payload projection.
 
 Every solver status remains forgeable heuristic input. In particular, `unsat`
 is relative to this bounded encoding, not a solver certificate or proof, and it
@@ -157,7 +157,7 @@ before live wiring is enabled.
 
 The 34-test downstream API suite pins the rank-N signatures, safe projections,
 fixed query maximum, error instances, hidden constructors, nominal roles, and
-absence of raw/internal projections. The 173-test Length suite exercises the
+absence of raw/internal projections. The 183-test Length suite exercises the
 same public surface against the compiled closed-mode fake worker, including
 healthy sequential association and evidence, neutral status branches,
 spent-worker faults, deadline cleanup, callback exceptions, and

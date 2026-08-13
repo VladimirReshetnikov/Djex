@@ -52,8 +52,8 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   , finishLengthSMTLibProtocol
   , LengthSMTLibProtocolError (..)
   , LengthSMTLibProtocolDecoded
-  , lengthSMTLibProtocolDecodedStatus
-  , lengthSMTLibProtocolDecodedInputValues
+  , LengthSMTLibProtocolObservation
+  , lengthSMTLibProtocolDecodedObservation
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -141,7 +141,9 @@ import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response
   , parseLengthSMTLibInputValueResponse
   )
 import Language.Haskell.Synthesis.Semantic.Observation
-  ( SolverStatus (..))
+  ( SolverObservation (..)
+  , SolverStatus (..)
+  )
 
 -- | Complete pure-plan schema.  This is distinct from a live session or run
 -- identity: no process has been opened, inspected, or observed here.
@@ -444,17 +446,15 @@ instance NFData LengthSMTLibProtocolWriteKind
 data LengthSMTLibProtocolPhaseState
   = AwaitLengthSMTLibCheckStatus
   | AwaitLengthSMTLibCheckBarrier !SolverStatus
-  | AwaitLengthSMTLibInputValues !SolverStatus
-  | AwaitLengthSMTLibInputValueBarrier
-      !SolverStatus [LengthSMTLibIntegerBinding]
+  | AwaitLengthSMTLibInputValues
+  | AwaitLengthSMTLibInputValueBarrier [LengthSMTLibIntegerBinding]
 
 instance NFData LengthSMTLibProtocolPhaseState where
   rnf state = case state of
     AwaitLengthSMTLibCheckStatus -> ()
     AwaitLengthSMTLibCheckBarrier status -> rnf status
-    AwaitLengthSMTLibInputValues status -> rnf status
-    AwaitLengthSMTLibInputValueBarrier status bindings ->
-      rnf status `seq` rnf bindings
+    AwaitLengthSMTLibInputValues -> ()
+    AwaitLengthSMTLibInputValueBarrier bindings -> rnf bindings
 
 -- | A continuation for bytes received only after the write which produced it
 -- has completed.  Constructors and raw framing state never leave the package.
@@ -535,35 +535,46 @@ data LengthSMTLibProtocolError
 
 instance NFData LengthSMTLibProtocolError
 
--- | Pure, syntactically decoded transcript outcome.  A satisfiable zero-input
--- query under the input-value policy carries a vacuous @Just []@ result
--- without fabricating a frame or emitting an empty @get-value@ command.  The
+-- | The one status-indexed value admitted by pure protocol completion.
+-- Satisfiable observations distinguish status-only @Nothing@, vacuous
+-- zero-input @Just []@, and framed @Just (_ : _)@ values. Unsatisfiable and
+-- unknown observations have no value-bearing constructor.
+type LengthSMTLibProtocolObservation =
+  SolverObservation (Maybe [LengthSMTLibIntegerBinding]) () ()
+
+-- | Pure, syntactically decoded transcript outcome. A satisfiable zero-input
+-- query under the input-value policy carries a vacuous @Just []@ artifact
+-- without fabricating a frame or emitting an empty @get-value@ command. The
 -- receiver owns the plan until completion, and the live Session carries that
 -- same plan separately as the exact run-identity input; it is not copied into
--- this terminal branch.  In a live run raw status and input-value frames
--- likewise remain in the process-owning causal transcript.  This type is
--- intentionally not named or represented as an execution observation.
+-- this terminal branch. In a live run raw status and input-value frames
+-- likewise remain in the process-owning causal transcript. This value remains
+-- a pure response/protocol result, not an execution observation.
 data LengthSMTLibProtocolDecoded identity local = LengthSMTLibProtocolDecoded
-  !SolverStatus
-  !(Maybe [LengthSMTLibIntegerBinding])
+  !LengthSMTLibProtocolObservation
 
 type role LengthSMTLibProtocolDecoded nominal nominal
 
 instance NFData (LengthSMTLibProtocolDecoded identity local) where
-  rnf (LengthSMTLibProtocolDecoded status values) =
-    rnf status `seq` rnf values
+  rnf (LengthSMTLibProtocolDecoded observation) = rnf observation
 
-lengthSMTLibProtocolDecodedStatus
+lengthSMTLibProtocolDecodedObservation
   :: LengthSMTLibProtocolDecoded identity local
-  -> SolverStatus
-lengthSMTLibProtocolDecodedStatus
-    (LengthSMTLibProtocolDecoded value _) = value
+  -> LengthSMTLibProtocolObservation
+lengthSMTLibProtocolDecodedObservation
+    (LengthSMTLibProtocolDecoded observation) = observation
 
-lengthSMTLibProtocolDecodedInputValues
-  :: LengthSMTLibProtocolDecoded identity local
-  -> Maybe [LengthSMTLibIntegerBinding]
-lengthSMTLibProtocolDecodedInputValues
-    (LengthSMTLibProtocolDecoded _ values) = values
+-- Generic 'SolverObservation' artifacts deliberately remain lazy. This
+-- trusted wrapper separately forces only the satisfiable 'Maybe' spine to
+-- preserve the former strict decoded-field demand without forcing bindings.
+retainLengthSMTLibProtocolDecoded
+  :: LengthSMTLibProtocolObservation
+  -> LengthSMTLibProtocolDecoded identity local
+retainLengthSMTLibProtocolDecoded observation = case observation of
+  SatisfiableObservation values -> values `seq`
+    LengthSMTLibProtocolDecoded observation
+  UnsatisfiableObservation () -> LengthSMTLibProtocolDecoded observation
+  UnknownObservation () -> LengthSMTLibProtocolDecoded observation
 
 handleFrame
   :: LengthSMTLibProtocolPlan identity local
@@ -594,35 +605,34 @@ handleFrame plan phase completed = case phase of
           Right $ SMTLibCausalWrite
             LengthSMTLibProtocolInputValueWrite valueWrite
             $ receiverAtBoundary plan
-                (AwaitLengthSMTLibInputValues status)
+                AwaitLengthSMTLibInputValues
                 boundary
         _ -> do
           _ <- consumeBoundary
             LengthSMTLibProtocolCheckBarrierPhase completed
           Right $ SMTLibCausalComplete
-            $ LengthSMTLibProtocolDecoded status
-            $ terminalInputValues plan status
+            $ retainLengthSMTLibProtocolDecoded
+            $ terminalObservation plan status
       else Left $ LengthSMTLibProtocolBarrierMismatch
         LengthSMTLibProtocolCheckBarrier
-  AwaitLengthSMTLibInputValues status -> do
+  AwaitLengthSMTLibInputValues -> do
     let limits = planResponseLimits plan
     bindings <- first
       (LengthSMTLibProtocolResponseFailure
         LengthSMTLibProtocolInputValuePhase)
       $ parseLengthSMTLibInputValueResponse limits (planQuery plan) frame
     continueWithinWrite plan
-      (AwaitLengthSMTLibInputValueBarrier
-        status bindings)
+      (AwaitLengthSMTLibInputValueBarrier bindings)
       completed
-  AwaitLengthSMTLibInputValueBarrier
-      status bindings -> do
+  AwaitLengthSMTLibInputValueBarrier bindings -> do
     case planValueBarrier plan of
       Just barrier
         | isExactSMTLibEchoSentinelResponse barrier frame -> do
             _ <- consumeBoundary
               LengthSMTLibProtocolInputValueBarrierPhase completed
             Right $ SMTLibCausalComplete
-              $ LengthSMTLibProtocolDecoded status $ Just bindings
+              $ retainLengthSMTLibProtocolDecoded
+              $ SatisfiableObservation $ Just bindings
       _ -> Left $ LengthSMTLibProtocolBarrierMismatch
         LengthSMTLibProtocolInputValueBarrier
  where
@@ -640,17 +650,20 @@ continueWithinWrite plan phase completed = do
     $ continueSMTLibCausalStreamCompletedFrame completed
   acceptStreamStep plan phase step
 
-terminalInputValues
+terminalObservation
   :: LengthSMTLibProtocolPlan identity local
   -> SolverStatus
-  -> Maybe [LengthSMTLibIntegerBinding]
-terminalInputValues plan status
-  | status == SolverSatisfiable
-  , planArtifactPolicy plan ==
-      LengthSMTLibInputValuesAfterSatisfiable
-  , not $ isJust $ lengthSMTLibQueryInputValueRequestBytes $ planQuery plan =
-      Just []
-  | otherwise = Nothing
+  -> LengthSMTLibProtocolObservation
+terminalObservation plan status = case status of
+  SolverSatisfiable -> SatisfiableObservation
+    $ if planArtifactPolicy plan ==
+          LengthSMTLibInputValuesAfterSatisfiable
+        && not (isJust
+          $ lengthSMTLibQueryInputValueRequestBytes $ planQuery plan)
+      then Just []
+      else Nothing
+  SolverUnsatisfiable -> UnsatisfiableObservation ()
+  SolverUnknown -> UnknownObservation ()
 
 startReceiver
   :: LengthSMTLibProtocolPlan identity local

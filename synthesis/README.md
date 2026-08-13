@@ -300,8 +300,11 @@ again on demand from the retained sealed query and positional markers through
 the selectors used at their causal write edges. Presence-only inspection of
 the optional write does not render request bytes.
 After response frames are bounded and decoded, the protocol phase state and
-terminal decoded branch retain only the closed status and optional integer
-bindings. The opaque receiver separately owns the still-driving plan and
+terminal decoded branch retain one strict status-indexed observation. Only its
+satisfiable branch can contain optional integer bindings: status-only `sat` is
+`Nothing`, zero-input value policy is `Just []`, and a framed valuation is a
+nonempty `Just`; the `unsat` and `unknown` branches contain only unit. The
+opaque receiver separately owns the still-driving plan and
 shared cumulative cursor; the live Session separately carries that plan
 through execution and binds its key directly into run identity instead of
 copying it into the decoded branch. Exact raw status-frame and
@@ -388,18 +391,19 @@ that plan rather than pairing it with independent worker-wide fields. Response
 decoding likewise reads the limits retained by that exact plan.
 The terminal decoded value remains local through independent replay and the
 unchanged query-run identity builder. Before a successful run escapes, commit
-forces a narrower owner containing its ordinal, strict status, optional
-problem-bound evidence, reversible key, transcript digest, and accounting
-boundaries, but no parsed symbol/integer binding list. Evidence retains the
+forces a narrower owner containing its ordinal, one strict status-indexed
+observation, reversible key, transcript digest, and accounting boundaries,
+but no parsed symbol/integer binding list. Only the satisfiable observation
+branch can contain optional problem-bound evidence. Evidence retains the
 normalized source-ordered counterexample inputs, and the private reversible
 key retains exact transcript bytes; the deletion narrows structured authority
 rather than scrubbing child output.
 
-The public live facade copies only bounded association and authority fields out
-of each private run. It retains status once and derives the corresponding
-heuristic strength rather than storing a duplicate fact. Public selectors
-expose status, derived strength, and use, but not the retained query key or
-optional evidence.
+The public live facade copies the whole status-indexed observation once along
+with the bounded query association, rather than re-pairing a status and an
+optional payload. It derives the corresponding heuristic strength from the
+observation's status. Public selectors expose status, derived strength, and
+use, but not the retained query key, whole observation, or optional evidence.
 `replayLengthSMTLibLiveQueryObservation` is the sole checked semantic
 extraction edge for
 those hidden fields: it compares the complete collision-free query key before

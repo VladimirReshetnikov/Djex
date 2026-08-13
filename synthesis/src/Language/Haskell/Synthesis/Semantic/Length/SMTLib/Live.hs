@@ -79,7 +79,10 @@ import Language.Haskell.Synthesis.Semantic.Length.SMTLib
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
   ( LengthSMTLibExecutionConfig )
 import Language.Haskell.Synthesis.Semantic.Observation
-  ( SolverStatus (..) )
+  ( SolverObservation (..)
+  , SolverStatus (..)
+  , solverObservationStatus
+  )
 import Language.Haskell.Synthesis.Semantic.Problem
   ( BehavioralEvidence
   , RawObservationUse (..)
@@ -200,18 +203,22 @@ instance NFData LengthSMTLibLiveObservationReplayError where
 data LengthSMTLibLiveQueryObservation epoch identity local =
   LengthSMTLibLiveQueryObservation
     !(Fingerprint LengthSMTLibQueryFingerprintSubject)
-    !SolverStatus
-    !(Maybe
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthCounterexample))
+    !LengthSMTLibLiveSolverObservation
+
+type LengthSMTLibLiveSolverObservation = SolverObservation
+  (Maybe
+    (BehavioralEvidence
+      FiniteListSpineLengthV1
+      ValidatedLengthCounterexample))
+  ()
+  ()
 
 type role LengthSMTLibLiveQueryObservation nominal nominal nominal
 
 instance NFData
     (LengthSMTLibLiveQueryObservation epoch identity local) where
-  rnf (LengthSMTLibLiveQueryObservation query status evidence) =
-    rnf query `seq` rnf status `seq` rnf evidence
+  rnf (LengthSMTLibLiveQueryObservation query observation) =
+    rnf query `seq` rnf observation
 
 -- | The fixed private session default.  A scope admits at most this many
 -- serial queries and rejects maximum-plus-one before writing it.
@@ -252,10 +259,9 @@ runLengthSMTLibLiveQuery evaluationLimits
     evaluationLimits worker query
   pure $ case result of
     Left failure -> Left $ sanitizeQueryError failure
-    Right run -> Right $ LengthSMTLibLiveQueryObservation
+    Right run -> Right $ retainLengthSMTLibLiveQueryObservation
       (lengthSMTLibQueryFingerprint query)
-      (Session.lengthSMTLibQueryRunSolverStatus run)
-      (Session.lengthSMTLibQueryRunCounterexampleEvidence run)
+      (Session.lengthSMTLibQueryRunObservation run)
 
 -- | Replay the safe semantic payload of one completed observation against the
 -- exact sealed query supplied by its consumer.
@@ -277,13 +283,15 @@ replayLengthSMTLibLiveQueryObservation query observation
       lengthSMTLibLiveQueryObservationQueryFingerprint observation =
         Left LengthSMTLibLiveObservationQueryFingerprintMismatch
   | otherwise = case
-      lengthSMTLibLiveQueryObservationCounterexampleEvidence observation of
-    Nothing -> Right Nothing
-    Just evidence -> case replayBehavioralEvidence
+      lengthSMTLibLiveQueryObservationSolverObservation observation of
+    SatisfiableObservation Nothing -> Right Nothing
+    SatisfiableObservation (Just evidence) -> case replayBehavioralEvidence
         (lengthSMTLibQueryBehavioralProblem query) evidence of
       Left mismatch -> Left
         $ LengthSMTLibLiveObservationEvidenceProblemMismatch mismatch
       Right receipt -> Right $ Just receipt
+    UnsatisfiableObservation () -> Right Nothing
+    UnknownObservation () -> Right Nothing
 
 -- Private association projection used only by the checked replay gate.  It is
 -- intentionally not exported: callers cannot inspect a query key without also
@@ -292,13 +300,13 @@ lengthSMTLibLiveQueryObservationQueryFingerprint
   :: LengthSMTLibLiveQueryObservation epoch identity local
   -> Fingerprint LengthSMTLibQueryFingerprintSubject
 lengthSMTLibLiveQueryObservationQueryFingerprint
-    (LengthSMTLibLiveQueryObservation query _ _) = query
+    (LengthSMTLibLiveQueryObservation query _) = query
 
 lengthSMTLibLiveQueryObservationSolverStatus
   :: LengthSMTLibLiveQueryObservation epoch identity local
   -> SolverStatus
-lengthSMTLibLiveQueryObservationSolverStatus
-    (LengthSMTLibLiveQueryObservation _ status _) = status
+lengthSMTLibLiveQueryObservationSolverStatus =
+  solverObservationStatus . lengthSMTLibLiveQueryObservationSolverObservation
 
 lengthSMTLibLiveQueryObservationResultStrength
   :: LengthSMTLibLiveQueryObservation epoch identity local
@@ -314,17 +322,27 @@ lengthSMTLibLiveQueryObservationUse
   -> RawObservationUse
 lengthSMTLibLiveQueryObservationUse _ = HeuristicRankingOnly
 
--- Private evidence projection used only after exact query association has
--- succeeded.  Keeping this selector separate preserves the gate's established
--- demand order without exposing detached evidence to public callers.
-lengthSMTLibLiveQueryObservationCounterexampleEvidence
+-- Private whole-outcome projection used only after exact query association has
+-- succeeded. Keeping this selector separate preserves the gate's established
+-- demand order without exposing detached status-specific evidence to callers.
+lengthSMTLibLiveQueryObservationSolverObservation
   :: LengthSMTLibLiveQueryObservation epoch identity local
-  -> Maybe
-      (BehavioralEvidence
-        FiniteListSpineLengthV1
-        ValidatedLengthCounterexample)
-lengthSMTLibLiveQueryObservationCounterexampleEvidence
-    (LengthSMTLibLiveQueryObservation _ _ evidence) = evidence
+  -> LengthSMTLibLiveSolverObservation
+lengthSMTLibLiveQueryObservationSolverObservation
+    (LengthSMTLibLiveQueryObservation _ observation) = observation
+
+-- Preserve the old strict optional-evidence spine at this public opaque owner
+-- without changing the deliberately lazy generic observation constructors.
+retainLengthSMTLibLiveQueryObservation
+  :: Fingerprint LengthSMTLibQueryFingerprintSubject
+  -> Session.LengthSMTLibQueryRunObservation
+  -> LengthSMTLibLiveQueryObservation epoch identity local
+retainLengthSMTLibLiveQueryObservation query observation = case observation of
+  SatisfiableObservation evidence -> evidence `seq`
+    LengthSMTLibLiveQueryObservation query observation
+  UnsatisfiableObservation () ->
+    LengthSMTLibLiveQueryObservation query observation
+  UnknownObservation () -> LengthSMTLibLiveQueryObservation query observation
 
 defaultLiveSessionConfig
   :: LengthSMTLibExecutionConfig

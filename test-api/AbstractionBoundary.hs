@@ -94,7 +94,10 @@ import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response
-import Language.Haskell.Synthesis.Semantic.Observation (SolverStatus)
+import Language.Haskell.Synthesis.Semantic.Observation
+  ( SolverObservation
+  , SolverStatus
+  )
 import Language.Haskell.Synthesis.Semantic.Problem
 import Language.Haskell.Synthesis.Search (SearchBatch)
 import Language.Haskell.Synthesis.Type (Type)
@@ -132,6 +135,7 @@ $(do
           , "CheckedLengthProviderInventory"
           , "lengthSMTLibLiveQueryObservationQueryFingerprint"
           , "lengthSMTLibLiveQueryObservationCounterexampleEvidence"
+          , "lengthSMTLibLiveQueryObservationSolverObservation"
           , "associatedSolverObservationStatus"
           , "LengthProblemProviderResealRejected"
           , "LengthProblemProviderContextMismatch"
@@ -353,6 +357,9 @@ forbiddenConstructionAttempts =
     )
   , ( "LengthSMTLibLiveQueryObservation exposed decoded input values"
     , forbiddenLengthSMTLibLiveObservationInputValuesProjection `seq` ()
+    )
+  , ( "LengthSMTLibLiveQueryObservation exposed its whole solver observation"
+    , forbiddenLengthSMTLibLiveObservationSolverObservationProjection `seq` ()
     )
   , ( "LengthSMTLibLiveQueryObservation exposed its reversible run identity"
     , forbiddenLengthSMTLibLiveObservationRunIdentityProjection `seq` ()
@@ -818,6 +825,18 @@ forbiddenConstructionAttempts =
           FiniteListSpineLengthV1
           ValidatedLengthCounterexample))
       "LengthSMTLibLiveQueryObservation.counterexampleEvidence"
+  , noField
+      @"lengthSMTLibLiveQueryObservationSolverObservation"
+      @(LengthSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      @(SolverObservation
+        (Maybe
+          (BehavioralEvidence
+            FiniteListSpineLengthV1
+            ValidatedLengthCounterexample))
+        ()
+        ())
+      "LengthSMTLibLiveQueryObservation.solverObservation"
   ]
 
 -- Positive controls prove that both dictionary-forcing helpers work and that
@@ -1176,6 +1195,13 @@ forbiddenLengthSMTLibLiveObservationInputValuesProjection
   -> ()
 forbiddenLengthSMTLibLiveObservationInputValuesProjection =
   lengthSMTLibLiveQueryObservationInputValues `seq` const ()
+
+forbiddenLengthSMTLibLiveObservationSolverObservationProjection
+  :: LengthSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> ()
+forbiddenLengthSMTLibLiveObservationSolverObservationProjection =
+  lengthSMTLibLiveQueryObservationSolverObservation `seq` const ()
 
 forbiddenLengthSMTLibLiveObservationRunIdentityProjection
   :: LengthSMTLibLiveQueryObservation

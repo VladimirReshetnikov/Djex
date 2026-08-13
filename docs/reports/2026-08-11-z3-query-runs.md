@@ -167,9 +167,11 @@ vacuous zero-input assignment—are independently passed through
 A structural/model error or a replay result of `Nothing` spends the worker.
 The full decoded value then contributes its status and absent, vacuous, or
 framed-value branch to the unchanged run identity. Only after replay and
-identity construction succeed does the final run copy the strict status and
-optional `BehavioralEvidence`; it does not retain the decoded symbol/integer
-binding list. This is model-relative counterexample evidence, not
+identity construction succeed does the final run retain one strict
+status-indexed observation. Only its satisfiable branch can contain optional
+`BehavioralEvidence`; `unsat` and `unknown` cannot be paired with it. The run
+does not retain the decoded symbol/integer binding list. This is model-relative
+counterexample evidence, not
 solver-soundness evidence and not permission to treat an unsatisfiable result
 as proof.
 
@@ -253,7 +255,8 @@ The pure response/protocol cases continue to pin exact decoded binding order
 and the vacuous zero-input branch. The live unary, binary, zero-input, split,
 and drip cases consume only replayed evidence after success and assert its
 normalized inputs and recomputed result, so they no longer rely on a parallel
-run-level binding projection.
+run-level binding projection. Branch regressions also pin the exact unchanged
+decoded-branch and replay fields embedded in completed run identities.
 
 ## Next checkpoint
 

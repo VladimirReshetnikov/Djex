@@ -70,8 +70,8 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session
   , LengthSMTLibQueryRunIdentitySubject
   , runLengthSMTLibReadyWorkerQuery
   , lengthSMTLibQueryRunOrdinal
-  , lengthSMTLibQueryRunSolverStatus
-  , lengthSMTLibQueryRunCounterexampleEvidence
+  , LengthSMTLibQueryRunObservation
+  , lengthSMTLibQueryRunObservation
   , lengthSMTLibQueryRunIdentityFingerprint
   , lengthSMTLibQueryRunIdentityFingerprintField
   , lengthSMTLibQueryRunTranscriptSHA256
@@ -184,8 +184,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   , feedLengthSMTLibProtocol
   , finishLengthSMTLibProtocol
   , lengthSMTLibProtocolCumulativeStdoutByteLimit
-  , lengthSMTLibProtocolDecodedInputValues
-  , lengthSMTLibProtocolDecodedStatus
+  , lengthSMTLibProtocolDecodedObservation
   , lengthSMTLibProtocolInputValueWriteBytes
   , lengthSMTLibProtocolPlanCumulativeStdoutByteLimit
   , lengthSMTLibProtocolPlanFingerprint
@@ -278,7 +277,9 @@ import Language.Haskell.Synthesis.Semantic.Length.SMTLib
   , validateLengthSMTLibCounterexample
   )
 import Language.Haskell.Synthesis.Semantic.Observation
-  ( SolverStatus (..) )
+  ( SolverObservation (..)
+  , SolverStatus (..)
+  )
 import Language.Haskell.Synthesis.Semantic.Problem
   ( BehavioralEvidence )
 
@@ -546,19 +547,24 @@ data LengthSMTLibQueryRunIdentitySubject
 
 -- | One successfully delimited live query and its independent Length replay.
 -- Decoded bindings remain local through replay and complete run-identity
--- construction, then the committed run retains only the decoded result's
--- strict status and optional problem-bound evidence.  Its private reversible
--- identity still contains the exact causal transcript, so this is
+-- construction, then the committed run retains one strict status-indexed
+-- observation: only its satisfiable branch can carry optional problem-bound
+-- evidence. Its private reversible identity still contains the exact causal
+-- transcript, so this is
 -- structured-authority narrowing rather than byte scrubbing.  The run remains
 -- a capability-probed pathname-snapshot observation, not an executable-image
 -- attestation or a proof of solver soundness.
+type LengthSMTLibQueryRunObservation = SolverObservation
+  (Maybe
+    (BehavioralEvidence
+      FiniteListSpineLengthV1
+      ValidatedLengthCounterexample))
+  ()
+  ()
+
 data LengthSMTLibQueryRun epoch identity local = LengthSMTLibQueryRun
   !Natural
-  !SolverStatus
-  !(Maybe
-      (BehavioralEvidence
-        FiniteListSpineLengthV1
-        ValidatedLengthCounterexample))
+  !LengthSMTLibQueryRunObservation
   !(Fingerprint LengthSMTLibQueryRunIdentitySubject)
   !ByteString
   !Natural
@@ -569,9 +575,9 @@ data LengthSMTLibQueryRun epoch identity local = LengthSMTLibQueryRun
 type role LengthSMTLibQueryRun nominal nominal nominal
 
 instance NFData (LengthSMTLibQueryRun epoch identity local) where
-  rnf (LengthSMTLibQueryRun ordinal status evidence identity digest
+  rnf (LengthSMTLibQueryRun ordinal observation identity digest
       stdoutStart stdoutEnd stderrStart stderrEnd) =
-    rnf ordinal `seq` rnf status `seq` rnf evidence `seq` rnf identity `seq`
+    rnf ordinal `seq` rnf observation `seq` rnf identity `seq`
     rnf digest `seq` rnf stdoutStart `seq` rnf stdoutEnd `seq` rnf stderrStart
       `seq` rnf stderrEnd
 
@@ -689,28 +695,19 @@ lengthSMTLibQueryRunOrdinal
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunOrdinal
-    (LengthSMTLibQueryRun value _ _ _ _ _ _ _ _) = value
+    (LengthSMTLibQueryRun value _ _ _ _ _ _ _) = value
 
-lengthSMTLibQueryRunSolverStatus
+lengthSMTLibQueryRunObservation
   :: LengthSMTLibQueryRun epoch identity local
-  -> SolverStatus
-lengthSMTLibQueryRunSolverStatus
-    (LengthSMTLibQueryRun _ value _ _ _ _ _ _ _) = value
-
-lengthSMTLibQueryRunCounterexampleEvidence
-  :: LengthSMTLibQueryRun epoch identity local
-  -> Maybe
-      (BehavioralEvidence
-        FiniteListSpineLengthV1
-        ValidatedLengthCounterexample)
-lengthSMTLibQueryRunCounterexampleEvidence
-    (LengthSMTLibQueryRun _ _ value _ _ _ _ _ _) = value
+  -> LengthSMTLibQueryRunObservation
+lengthSMTLibQueryRunObservation
+    (LengthSMTLibQueryRun _ observation _ _ _ _ _ _) = observation
 
 lengthSMTLibQueryRunIdentityFingerprint
   :: LengthSMTLibQueryRun epoch identity local
   -> Fingerprint LengthSMTLibQueryRunIdentitySubject
 lengthSMTLibQueryRunIdentityFingerprint
-    (LengthSMTLibQueryRun _ _ _ value _ _ _ _ _) = value
+    (LengthSMTLibQueryRun _ _ value _ _ _ _ _) = value
 
 lengthSMTLibQueryRunIdentityFingerprintField
   :: LengthSMTLibQueryRun epoch identity local
@@ -723,7 +720,7 @@ lengthSMTLibQueryRunTranscriptSHA256
   :: LengthSMTLibQueryRun epoch identity local
   -> ByteString
 lengthSMTLibQueryRunTranscriptSHA256
-    (LengthSMTLibQueryRun _ _ _ _ value _ _ _ _) = value
+    (LengthSMTLibQueryRun _ _ _ value _ _ _ _) = value
 
 lengthSMTLibQueryRunTranscriptByteCount
   :: LengthSMTLibQueryRun epoch identity local
@@ -732,32 +729,32 @@ lengthSMTLibQueryRunTranscriptByteCount
 -- proves that these immutable boundaries are ordered and their delta is the
 -- causal transcript count.
 lengthSMTLibQueryRunTranscriptByteCount
-    (LengthSMTLibQueryRun _ _ _ _ _ stdoutStart stdoutEnd _ _) =
+    (LengthSMTLibQueryRun _ _ _ _ stdoutStart stdoutEnd _ _) =
       stdoutEnd - stdoutStart
 
 lengthSMTLibQueryRunStdoutStart
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunStdoutStart
-    (LengthSMTLibQueryRun _ _ _ _ _ value _ _ _) = value
+    (LengthSMTLibQueryRun _ _ _ _ value _ _ _) = value
 
 lengthSMTLibQueryRunStdoutEnd
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunStdoutEnd
-    (LengthSMTLibQueryRun _ _ _ _ _ _ value _ _) = value
+    (LengthSMTLibQueryRun _ _ _ _ _ value _ _) = value
 
 lengthSMTLibQueryRunStderrStart
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunStderrStart
-    (LengthSMTLibQueryRun _ _ _ _ _ _ _ value _) = value
+    (LengthSMTLibQueryRun _ _ _ _ _ _ value _) = value
 
 lengthSMTLibQueryRunStderrEnd
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunStderrEnd
-    (LengthSMTLibQueryRun _ _ _ _ _ _ _ _ value) = value
+    (LengthSMTLibQueryRun _ _ _ _ _ _ _ value) = value
 
 data PreparedLengthSMTLibQueryRun epoch identity local =
   PreparedLengthSMTLibQueryRun
@@ -1111,7 +1108,7 @@ executeReservedLengthSMTLibQueryRun worker
                 evaluationLimits worker plan deadline decoded
               case replayed of
                 Left failure -> pure $ Left failure
-                Right evidence -> do
+                Right outcome -> do
                   committedBoundary <-
                     observeLengthSMTLibQueryBoundary worker deadline
                   case committedBoundary of
@@ -1126,7 +1123,7 @@ executeReservedLengthSMTLibQueryRun worker
                               stderrStart stderrCommitted
                       | otherwise -> case buildLengthSMTLibQueryRunIdentity
                           worker plan evaluationLimits ordinal deadline
-                          checkBarrier valueBarrier decoded evidence transcript
+                          checkBarrier valueBarrier outcome transcript
                           stdoutStart stdoutCommitted stderrStart stderrCommitted of
                         Left failure -> pure $ Left failure
                         Right identity -> do
@@ -1147,8 +1144,8 @@ executeReservedLengthSMTLibQueryRun worker
                                       stderrStart stderrFinal
                               | otherwise -> Right $ LengthSMTLibQueryRun
                                   ordinal
-                                  (lengthSMTLibProtocolDecodedStatus decoded)
-                                  evidence identity
+                                  (replayedLengthSMTLibQueryObservation outcome)
+                                  identity
                                   transcriptDigest
                                   stdoutStart stdoutFinal
                                   stderrStart stderrFinal
@@ -1232,15 +1229,12 @@ replayLengthSMTLibQuery
   -> IO
       (Either
         LengthSMTLibQueryRunFailure
-        (Maybe
-          (BehavioralEvidence
-            FiniteListSpineLengthV1
-            ValidatedLengthCounterexample)))
+        ReplayedLengthSMTLibQueryOutcome)
 replayLengthSMTLibQuery evaluationLimits worker plan deadline decoded =
-  case ( lengthSMTLibProtocolDecodedStatus decoded
-       , lengthSMTLibProtocolPlanArtifactPolicy plan
-       , lengthSMTLibProtocolDecodedInputValues decoded) of
-    (SolverSatisfiable, LengthSMTLibInputValuesAfterSatisfiable, Just values) -> do
+  case ( lengthSMTLibProtocolDecodedObservation decoded
+       , lengthSMTLibProtocolPlanArtifactPolicy plan) of
+    ( SatisfiableObservation (Just values)
+      , LengthSMTLibInputValuesAfterSatisfiable) -> do
       replayed <- runBeforeLengthSMTLibProcessDeadline
         (readyWorkerCancellation worker) deadline
         (evaluate $ force
@@ -1250,12 +1244,58 @@ replayLengthSMTLibQuery evaluationLimits worker plan deadline decoded =
         Left failure -> Left $ queryProcessFailure failure
         Right (Left failure) -> Left $ LengthSMTLibQueryModelFailure failure
         Right (Right Nothing) -> Left LengthSMTLibQueryModelNotCounterexample
-        Right (Right (Just evidence)) -> Right $ Just evidence
-    (SolverSatisfiable, LengthSMTLibInputValuesAfterSatisfiable, Nothing) ->
+        Right (Right (Just evidence)) -> Right $ case values of
+          [] -> ReplayedLengthSMTLibSatisfiableVacuous evidence
+          _ : _ -> ReplayedLengthSMTLibSatisfiableFramed evidence
+    ( SatisfiableObservation Nothing
+      , LengthSMTLibInputValuesAfterSatisfiable) ->
       pure $ Left LengthSMTLibQueryInternalFailure
-    _ -> pure $ Right Nothing
+    (SatisfiableObservation Nothing, LengthSMTLibStatusOnly) ->
+      pure $ Right ReplayedLengthSMTLibSatisfiableStatusOnly
+    (SatisfiableObservation (Just _), LengthSMTLibStatusOnly) ->
+      pure $ Left LengthSMTLibQueryInternalFailure
+    (UnsatisfiableObservation (), _) ->
+      pure $ Right ReplayedLengthSMTLibUnsatisfiable
+    (UnknownObservation (), _) ->
+      pure $ Right ReplayedLengthSMTLibUnknown
  where
   query = lengthSMTLibProtocolPlanQuery plan
+
+-- | The five successful identity branches after independent replay. This one
+-- transient owner prevents decoded status/value classification from being
+-- paired independently with replay evidence while the unchanged v1 identity
+-- fields are built.
+data ReplayedLengthSMTLibQueryOutcome
+  = ReplayedLengthSMTLibSatisfiableStatusOnly
+  | ReplayedLengthSMTLibSatisfiableVacuous
+      !(BehavioralEvidence
+        FiniteListSpineLengthV1
+        ValidatedLengthCounterexample)
+  | ReplayedLengthSMTLibSatisfiableFramed
+      !(BehavioralEvidence
+        FiniteListSpineLengthV1
+        ValidatedLengthCounterexample)
+  | ReplayedLengthSMTLibUnsatisfiable
+  | ReplayedLengthSMTLibUnknown
+
+-- Generic 'SolverObservation' artifacts remain lazy. Constructing the final
+-- strict run owner separately forces only the satisfiable 'Maybe' spine, as
+-- the former strict evidence field did, without adding a global payload bang.
+replayedLengthSMTLibQueryObservation
+  :: ReplayedLengthSMTLibQueryOutcome
+  -> LengthSMTLibQueryRunObservation
+replayedLengthSMTLibQueryObservation outcome = case outcome of
+  ReplayedLengthSMTLibSatisfiableStatusOnly ->
+    let evidence = Nothing
+    in evidence `seq` SatisfiableObservation evidence
+  ReplayedLengthSMTLibSatisfiableVacuous retained ->
+    let evidence = Just retained
+    in evidence `seq` SatisfiableObservation evidence
+  ReplayedLengthSMTLibSatisfiableFramed retained ->
+    let evidence = Just retained
+    in evidence `seq` SatisfiableObservation evidence
+  ReplayedLengthSMTLibUnsatisfiable -> UnsatisfiableObservation ()
+  ReplayedLengthSMTLibUnknown -> UnknownObservation ()
 
 (-|) :: Natural -> Natural -> Natural
 left -| right
@@ -1270,11 +1310,7 @@ buildLengthSMTLibQueryRunIdentity
   -> LengthSMTLibProcessDeadline
   -> ByteString
   -> ByteString
-  -> LengthSMTLibProtocolDecoded identity local
-  -> Maybe
-      (BehavioralEvidence
-        FiniteListSpineLengthV1
-        ValidatedLengthCounterexample)
+  -> ReplayedLengthSMTLibQueryOutcome
   -> SMTLibCausalTranscript LengthSMTLibProtocolWriteKind
   -> Natural
   -> Natural
@@ -1284,7 +1320,7 @@ buildLengthSMTLibQueryRunIdentity
       LengthSMTLibQueryRunFailure
       (Fingerprint LengthSMTLibQueryRunIdentitySubject)
 buildLengthSMTLibQueryRunIdentity worker plan evaluationLimits ordinal deadline
-    checkBarrier valueBarrier decoded evidence transcript
+    checkBarrier valueBarrier outcome transcript
     stdoutStart stdoutEnd stderrStart stderrEnd =
   case buildFingerprintWithin maximumBytes FingerprintBuilder
       { fingerprintBuilderVersion = 1
@@ -1293,7 +1329,7 @@ buildLengthSMTLibQueryRunIdentity worker plan evaluationLimits ordinal deadline
           queryRunIdentityPrefixFields worker plan ordinal deadline
             checkBarrier valueBarrier ++
           [queryRunTranscriptField transcript] ++
-          queryRunIdentitySuffixFields evaluationLimits decoded evidence
+          queryRunIdentitySuffixFields evaluationLimits outcome
             stdoutStart stdoutEnd stderrStart stderrEnd
             (smtLibCausalTranscriptByteCount transcript)
       } of
@@ -1421,21 +1457,17 @@ queryRunTranscriptEpochLayout epoch = tagged "write-epoch"
 
 queryRunIdentitySuffixFields
   :: LengthEvaluationLimits
-  -> LengthSMTLibProtocolDecoded identity local
-  -> Maybe
-      (BehavioralEvidence
-        FiniteListSpineLengthV1
-        ValidatedLengthCounterexample)
+  -> ReplayedLengthSMTLibQueryOutcome
   -> Natural
   -> Natural
   -> Natural
   -> Natural
   -> Natural
   -> [FingerprintField]
-queryRunIdentitySuffixFields evaluationLimits decoded evidence
+queryRunIdentitySuffixFields evaluationLimits outcome
     stdoutStart stdoutEnd stderrStart stderrEnd transcriptCount =
-  [ queryDecodedOutcomeField decoded
-  , queryReplayField evaluationLimits decoded evidence
+  [ queryDecodedOutcomeField outcome
+  , queryReplayField evaluationLimits outcome
   , queryTransportCommitField stdoutStart stdoutEnd stderrStart stderrEnd
       transcriptCount
   ]
@@ -1472,10 +1504,10 @@ queryRunIdentityMaximumSuffixFields evaluationLimits stdoutMaximum
   ]
 
 queryDecodedOutcomeField
-  :: LengthSMTLibProtocolDecoded identity local
+  :: ReplayedLengthSMTLibQueryOutcome
   -> FingerprintField
-queryDecodedOutcomeField decoded = tagged "decoded-branch"
-  [ solverStatusField $ lengthSMTLibProtocolDecodedStatus decoded
+queryDecodedOutcomeField outcome = tagged "decoded-branch"
+  [ solverStatusField $ replayedLengthSMTLibQueryStatus outcome
   , FingerprintBytes $ ascii valuesTag
   ]
  where
@@ -1484,17 +1516,18 @@ queryDecodedOutcomeField decoded = tagged "decoded-branch"
   -- request.  The decoded binding spine therefore preserves the former raw
   -- frame distinction while sealing identity, before successful run
   -- construction releases that parsed representation.
-  valuesTag = case lengthSMTLibProtocolDecodedInputValues decoded of
-    Nothing -> "absent"
-    Just [] -> "vacuous-zero-input"
-    Just (_ : _) -> "framed-input-values"
+  valuesTag = case outcome of
+    ReplayedLengthSMTLibSatisfiableStatusOnly -> "absent"
+    ReplayedLengthSMTLibSatisfiableVacuous{} -> "vacuous-zero-input"
+    ReplayedLengthSMTLibSatisfiableFramed{} -> "framed-input-values"
+    ReplayedLengthSMTLibUnsatisfiable -> "absent"
+    ReplayedLengthSMTLibUnknown -> "absent"
 
 queryReplayField
   :: LengthEvaluationLimits
-  -> LengthSMTLibProtocolDecoded identity local
-  -> Maybe evidence
+  -> ReplayedLengthSMTLibQueryOutcome
   -> FingerprintField
-queryReplayField evaluationLimits decoded evidence = tagged
+queryReplayField evaluationLimits outcome = tagged
   "independent-replay"
   [ FingerprintBytes $ ascii
       "finite-list-spine-length/counterexample-replay/v1"
@@ -1505,11 +1538,22 @@ queryReplayField evaluationLimits decoded evidence = tagged
   , FingerprintBytes $ ascii replayTag
   ]
  where
-  replayTag = case evidence of
-    Just _ -> "validated-counterexample"
-    Nothing -> case lengthSMTLibProtocolDecodedStatus decoded of
-      SolverSatisfiable -> "not-requested-policy"
-      _ -> "not-applicable-status"
+  replayTag = case outcome of
+    ReplayedLengthSMTLibSatisfiableStatusOnly -> "not-requested-policy"
+    ReplayedLengthSMTLibSatisfiableVacuous{} -> "validated-counterexample"
+    ReplayedLengthSMTLibSatisfiableFramed{} -> "validated-counterexample"
+    ReplayedLengthSMTLibUnsatisfiable -> "not-applicable-status"
+    ReplayedLengthSMTLibUnknown -> "not-applicable-status"
+
+replayedLengthSMTLibQueryStatus
+  :: ReplayedLengthSMTLibQueryOutcome
+  -> SolverStatus
+replayedLengthSMTLibQueryStatus outcome = case outcome of
+  ReplayedLengthSMTLibSatisfiableStatusOnly -> SolverSatisfiable
+  ReplayedLengthSMTLibSatisfiableVacuous{} -> SolverSatisfiable
+  ReplayedLengthSMTLibSatisfiableFramed{} -> SolverSatisfiable
+  ReplayedLengthSMTLibUnsatisfiable -> SolverUnsatisfiable
+  ReplayedLengthSMTLibUnknown -> SolverUnknown
 
 queryTransportCommitField
   :: Natural

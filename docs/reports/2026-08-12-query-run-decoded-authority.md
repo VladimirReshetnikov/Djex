@@ -6,19 +6,22 @@ Date: 2026-08-12
 
 The package-private `LengthSMTLibQueryRun` no longer retains the complete
 `LengthSMTLibProtocolDecoded` value after a successful live query. The decoded
-status and optional symbol/integer bindings remain available locally for every
-operation which depends on them:
+status-indexed observation remains available locally for every operation which
+depends on it:
 
 - independent Length counterexample replay against the exact sealed query;
 - classification of the absent, vacuous-zero-input, or framed-value branch;
 - construction of the unchanged reversible query-run identity; and
-- projection of the strict status into the final run.
+- construction of the final strict status-indexed evidence observation.
 
 Only after those operations and the final transport boundary succeed does the
-run retain its ordinal, strict `SolverStatus`, optional problem-associated
-`BehavioralEvidence`, complete run key, transcript SHA-256, and immutable
-stdout/stderr boundaries. The package-private
-`lengthSMTLibQueryRunInputValues` projection has been removed.
+run retain its ordinal, one strict `SolverObservation`, complete run key,
+transcript SHA-256, and immutable stdout/stderr boundaries. Only the
+satisfiable branch can contain optional problem-associated
+`BehavioralEvidence`; the `unsat` and `unknown` branches contain unit. The
+package-private `lengthSMTLibQueryRunInputValues` projection remains removed,
+and the former split status/evidence projections are now one package-private
+whole-observation projection.
 
 ## Authority and retention
 
@@ -40,15 +43,21 @@ payload.
 
 The successful lease commit projects the run ordinal and accounting anchors
 before returning it, forcing the run's strict fields. Consequently a successful
-result cannot defer the status projection in a thunk which retains the decoded
-binding value beyond the commit boundary. A failed commit exposes no run.
+result cannot defer the solver-observation constructor or its satisfiable
+`Maybe` spine in a thunk which retains the decoded binding value beyond the
+commit boundary. A failed commit exposes no run. Generic `SolverObservation`
+payloads remain deliberately lazy; the opaque Length owners force only the
+inner `Maybe` spine needed to preserve this former demand.
 
 ## Identity and type safety
 
-`buildLengthSMTLibQueryRunIdentity` still receives the exact protocol plan,
-decoded value, replay evidence, causal transcript, deadline, ordinal, markers,
-and transport boundaries in the same order. The version-1 role, field layout,
-canonical bytes, admission calculation, and schema tag are unchanged.
+`buildLengthSMTLibQueryRunIdentity` receives one private five-way replay outcome
+after validation: status-only satisfiable, validated vacuous satisfiable,
+validated framed satisfiable, unsatisfiable, or unknown. Both the decoded and
+replay fields pattern-match that single owner, while the exact protocol plan,
+causal transcript, deadline, ordinal, markers, and transport boundaries retain
+their order. The version-1 role, field layout, canonical bytes, admission
+calculation, and schema tag are unchanged.
 
 The `epoch`, `identity`, and `local` parameters remain explicitly nominal even
 though the final representation no longer structurally contains the decoded
@@ -58,12 +67,13 @@ queries cannot be coerced into association.
 
 ## Verification
 
-The pure response/protocol suite still asserts exact decoded status, raw
-binding order, and vacuous `Just []` behavior. Successful live-query cases now
-assert strict status, exact evidence replay, normalized input order, recomputed
-result, and transport accounting without consulting a raw binding projection.
-Unary, binary, zero-input, split-output, and drip-output paths all cross this
-boundary.
+The pure response/protocol suite asserts the whole decoded observation across
+status-only, raw-binding, and vacuous `Just []` branches. Successful live-query
+cases assert exact status-indexed evidence replay, normalized input order,
+recomputed result, and transport accounting without consulting a raw binding
+projection. Unary, binary, zero-input, split-output, and drip-output paths all
+cross this boundary, while identity regressions pin the exact version-1 branch
+fields.
 
 This checkpoint changes no public API, Cabal module list, solver command,
 response parser, wire byte, failure order, fingerprint byte, schema tag,

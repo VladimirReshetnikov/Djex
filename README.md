@@ -199,11 +199,29 @@ now seals a bounded table of complete leading-telescope selections and derives
 their capture-free intermediate types and ordered source-syntax obligations.
 It deliberately proves only structural replay: it proves no inventory or
 provider provenance, closure, binder kind, constraint resolution or discharge,
-or association with a particular graph occurrence. The public graph
-fingerprint therefore still rejects every certificate-bearing visible
-application. A later engine-owned entrance must associate the checker-retained
-source authority and exact occurrence atomically before semantic certificate
-fields can replace allocation coordinates in a key.
+or association with a particular graph occurrence.
+
+The package-private
+`Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.Association`
+entrance provides the next atomic foundation. It consumes a raw graph source,
+trusted caller-owned type structure and graph limits, and independent checker
+origin observations. In one seal it rebuilds the certificate table, matches
+every observed source, selected, result, and activated-obligation field, seals
+the graph, and derives the unique base global plus complete visible occurrence
+chain exclusively from stamped `(CertificateId, slot)` handles and child links.
+Missing, duplicate, out-of-range, noncontiguous, or unused rows fail closed.
+Certificate, node, and occurrence values remain candidate-local coordinates,
+not provenance.
+
+The opaque result co-owns graph, table, exact owner scheme, and occurrence
+receipts. Its bare graph projection loses that association authority; its
+package-private fold exposes retainable checked observations but cannot
+reconstruct or recombine the carrier or structural-table authority. It still
+proves no inventory membership, positional kind, discharge identity,
+behavioral meaning, or fingerprint permission. The public graph fingerprint
+therefore continues to reject every certificate-bearing visible application;
+this checkpoint does not stamp Exference graphs or alter public bytes. See the
+[atomic certificate association report](docs/reports/2026-08-13-atomic-certificate-graph-associations.md).
 
 The shared checker also lacks constructor-family schemas, so the public
 fingerprint entrance always rejects constructor-pattern graphs. A

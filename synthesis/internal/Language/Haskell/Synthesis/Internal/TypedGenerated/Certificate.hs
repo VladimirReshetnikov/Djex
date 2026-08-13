@@ -26,6 +26,7 @@ module Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate
   , maximumTypeApplicationCertificateTypeNodes
   , maximumTypeApplicationCertificateCollectionWidth
   , TypeApplicationCertificateSource (..)
+  , TypeApplicationCertificateObservation (..)
   , TypeApplicationCertificateTypeSite (..)
   , TypeApplicationCertificateError (..)
   , CheckedTypeApplicationCertificateTable
@@ -33,6 +34,7 @@ module Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate
   , CheckedTypeApplicationCertificateStep
   , TypeApplicationCertificatePlanVariable (..)
   , sealTypeApplicationCertificateTable
+  , matchCheckedTypeApplicationCertificateObservations
   , checkedTypeApplicationCertificateCount
   , lookupCheckedTypeApplicationCertificatePlan
   , checkedTypeApplicationCertificateStepCount
@@ -47,6 +49,7 @@ module Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate
   ) where
 
 import Control.DeepSeq (NFData (rnf))
+import Control.Monad (unless)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
@@ -54,20 +57,20 @@ import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Collection (observedListLength)
-import Language.Haskell.Synthesis.Constraint
-  ( Constraint (..)
-  )
+import Language.Haskell.Synthesis.Constraint (Constraint (..))
 import Language.Haskell.Synthesis.Internal.Alpha
   ( AlphaVariable (..)
   , BinderSlotPolicy (PositionalBinderSlots)
   , alphaNormalizeTypeWith
   )
+import Language.Haskell.Synthesis.Name (Name)
 import Language.Haskell.Synthesis.Type
   ( Type (..)
   , TypeError
   , canonicalizeType
   , normalizeType
   )
+import qualified Language.Haskell.Synthesis.TypeAtom as TypeAtom
 import Language.Haskell.Synthesis.TypedGenerated
   ( CertificateId
   , TypeStructure (observeTypeWithin)
@@ -168,12 +171,40 @@ data TypeApplicationCertificateSource variable =
 instance NFData variable =>
     NFData (TypeApplicationCertificateSource variable)
 
+-- | Independently checked observations for one source-telescope slot.
+--
+-- These values deliberately repeat the structural plan inputs and results.
+-- A later atomic association boundary compares every field with the plan it
+-- rebuilds from the exact scheme and ordered selected types; merely carrying
+-- this record grants no graph, inventory, kind, discharge, or fingerprint
+-- authority.
+data TypeApplicationCertificateObservation variable =
+  TypeApplicationCertificateObservation
+    { typeApplicationCertificateObservationSlot :: !Natural
+    , typeApplicationCertificateObservationSource :: Type variable
+    , typeApplicationCertificateObservationSelected :: Type variable
+    , typeApplicationCertificateObservationResult :: Type variable
+    , typeApplicationCertificateObservationObligations ::
+        [Constraint (Type variable)]
+    }
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData variable =>
+    NFData (TypeApplicationCertificateObservation variable)
+
 -- | Exact type payload being bounded or structurally validated.
 data TypeApplicationCertificateTypeSite
   = TypeApplicationCertificateSchemeType !CertificateId
   | TypeApplicationCertificateSelectionType !CertificateId !Natural
   | TypeApplicationCertificateDerivedResultType !CertificateId !Natural
   | TypeApplicationCertificateDerivedObligationType
+      !CertificateId !Natural !Natural !Natural
+  | TypeApplicationCertificateObservedSourceType !CertificateId !Natural
+  | TypeApplicationCertificateObservedSelectedType !CertificateId !Natural
+  | TypeApplicationCertificateObservedResultType !CertificateId !Natural
+  | TypeApplicationCertificateObservedObligationArguments
+      !CertificateId !Natural !Natural
+  | TypeApplicationCertificateObservedObligationType
       !CertificateId !Natural !Natural !Natural
   deriving (Eq, Ord, Show, Generic)
 
@@ -198,6 +229,29 @@ data TypeApplicationCertificateError variable
   | TypeApplicationCertificateReplayEndedEarly !CertificateId !Natural
   | TypeApplicationCertificateObligationLimitExceeded
       !CertificateId !Int !Int
+  | TypeApplicationCertificateObservationLimitExceeded
+      !CertificateId !Int !Int
+  | TypeApplicationCertificateObservationArityMismatch
+      !CertificateId !Int !Int
+  | TypeApplicationCertificateObservationMissingPlan !CertificateId
+  | TypeApplicationCertificateObservationSlotMismatch
+      !CertificateId !Natural !Natural
+  | TypeApplicationCertificateObservationSourceMismatch
+      !CertificateId !Natural
+  | TypeApplicationCertificateObservationSelectedMismatch
+      !CertificateId !Natural
+  | TypeApplicationCertificateObservationResultMismatch
+      !CertificateId !Natural
+  | TypeApplicationCertificateObservedObligationLimitExceeded
+      !CertificateId !Int !Int
+  | TypeApplicationCertificateObservedObligationCountMismatch
+      !CertificateId !Natural !Int !Int
+  | TypeApplicationCertificateObservedObligationClassMismatch
+      !CertificateId !Natural !Natural !Name !Name
+  | TypeApplicationCertificateObservedObligationArgumentCountMismatch
+      !CertificateId !Natural !Natural !Int !Int
+  | TypeApplicationCertificateObservedObligationArgumentMismatch
+      !CertificateId !Natural !Natural !Natural
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData variable => NFData (TypeApplicationCertificateError variable)
@@ -552,6 +606,132 @@ replaceVariable selected replacement source = case source of
     | otherwise -> ForallType binders
         (map (fmap $ replaceVariable selected replacement) constraints)
         (replaceVariable selected replacement body)
+
+-- | Match an independent checker's final observations against one structural
+-- replay.  The matcher performs its own bounded normalization of every
+-- repeated payload before comparing it with the private plan namespaces.
+-- Bound variables compare alpha-equivalently; genuinely free variables keep
+-- their exact nominal identity.
+matchCheckedTypeApplicationCertificateObservations
+  :: Ord variable
+  => TypeApplicationCertificateLimits
+  -> CertificateId
+  -> [TypeApplicationCertificateObservation variable]
+  -> CheckedTypeApplicationCertificateTable variable
+  -> Either
+      (TypeApplicationCertificateError variable)
+      (CheckedTypeApplicationCertificatePlan variable)
+matchCheckedTypeApplicationCertificateObservations limits certificate
+    observations table = do
+  plan <- case lookupCheckedTypeApplicationCertificatePlan certificate table of
+    Nothing -> Left $
+      TypeApplicationCertificateObservationMissingPlan certificate
+    Just matched -> Right matched
+  let maximumObservations =
+        maximumTypeApplicationCertificateSelections limits
+      observedObservations = observedListLength maximumObservations observations
+      expectedSteps = checkedTypeApplicationCertificateSteps plan
+      expectedCount = checkedTypeApplicationCertificateStepCount plan
+  unless (observedObservations <= maximumObservations) $ Left $
+    TypeApplicationCertificateObservationLimitExceeded certificate
+      maximumObservations observedObservations
+  unless (observedObservations == expectedCount) $ Left $
+    TypeApplicationCertificateObservationArityMismatch certificate
+      expectedCount observedObservations
+  _ <- matchSteps expectedCount observedObservations 0
+    observations expectedSteps
+  pure plan
+ where
+  matchSteps _ _ obligationCount [] [] = Right obligationCount
+  matchSteps expectedCount observedCount obligationCount
+      (observation : remainingObservations)
+      (expected : remainingExpected) = do
+    let expectedSlot = checkedTypeApplicationCertificateStepSlot expected
+        actualSlot = typeApplicationCertificateObservationSlot observation
+    unless (actualSlot == expectedSlot) $ Left $
+      TypeApplicationCertificateObservationSlotMismatch certificate
+        expectedSlot actualSlot
+    observedSource <- normalizeObserved
+      (TypeApplicationCertificateObservedSourceType certificate expectedSlot)
+      $ typeApplicationCertificateObservationSource observation
+    unless (matchesPlan observedSource $
+        checkedTypeApplicationCertificateStepSource expected) $ Left $
+      TypeApplicationCertificateObservationSourceMismatch
+        certificate expectedSlot
+    observedSelected <- normalizeObserved
+      (TypeApplicationCertificateObservedSelectedType certificate expectedSlot)
+      $ typeApplicationCertificateObservationSelected observation
+    unless (matchesPlan observedSelected $
+        checkedTypeApplicationCertificateStepSelected expected) $ Left $
+      TypeApplicationCertificateObservationSelectedMismatch
+        certificate expectedSlot
+    observedResult <- normalizeObserved
+      (TypeApplicationCertificateObservedResultType certificate expectedSlot)
+      $ typeApplicationCertificateObservationResult observation
+    unless (matchesPlan observedResult $
+        checkedTypeApplicationCertificateStepResult expected) $ Left $
+      TypeApplicationCertificateObservationResultMismatch
+        certificate expectedSlot
+    nextObligationCount <- matchObligations expectedSlot obligationCount
+      (typeApplicationCertificateObservationObligations observation)
+      (checkedTypeApplicationCertificateStepObligations expected)
+    matchSteps expectedCount observedCount nextObligationCount
+      remainingObservations remainingExpected
+  matchSteps expectedCount observedCount _ _ _ = Left $
+    TypeApplicationCertificateObservationArityMismatch certificate
+      expectedCount observedCount
+
+  matchObligations slot prior actual expected = do
+    let maximumObligations =
+          maximumTypeApplicationCertificateObligations limits
+        remainingCapacity = maximumObligations - prior
+        observedCount = observedListLength remainingCapacity actual
+        expectedCount = length expected
+    unless (observedCount <= remainingCapacity) $ Left $
+      TypeApplicationCertificateObservedObligationLimitExceeded certificate
+        maximumObligations $ maximumObligations + 1
+    unless (observedCount == expectedCount) $ Left $
+      TypeApplicationCertificateObservedObligationCountMismatch certificate
+        slot expectedCount observedCount
+    mapM_ (matchObligation slot) $ zip3 [0 ..] actual expected
+    pure $ prior + observedCount
+
+  matchObligation slot (ordinal, actual, expected) = do
+    let actualName = constraintClass actual
+        expectedName = constraintClass expected
+    unless (actualName == expectedName) $ Left $
+      TypeApplicationCertificateObservedObligationClassMismatch certificate
+        slot ordinal expectedName actualName
+    let actualArguments = constraintArguments actual
+        expectedArguments = constraintArguments expected
+        maximumWidth =
+          maximumTypeApplicationCertificateCollectionWidth limits
+        observedArguments = observedListLength maximumWidth actualArguments
+        expectedArgumentsCount = length expectedArguments
+    unless (observedArguments <= maximumWidth) $ Left $
+      TypeApplicationCertificateTypeCollectionLimitExceeded
+        (TypeApplicationCertificateObservedObligationArguments
+          certificate slot ordinal)
+        maximumWidth observedArguments
+    unless (observedArguments == expectedArgumentsCount) $ Left $
+      TypeApplicationCertificateObservedObligationArgumentCountMismatch
+        certificate slot ordinal expectedArgumentsCount observedArguments
+    mapM_ (matchArgument slot ordinal) $
+      zip3 [0 ..] actualArguments expectedArguments
+
+  matchArgument slot obligation (argument, actual, expected) = do
+    normalized <- normalizeObserved
+      (TypeApplicationCertificateObservedObligationType
+        certificate slot obligation argument)
+      actual
+    unless (matchesPlan normalized expected) $ Left $
+      TypeApplicationCertificateObservedObligationArgumentMismatch
+        certificate slot obligation argument
+
+  normalizeObserved = observeAndNormalizeInputType limits
+
+  matchesPlan actual expected = TypeAtom.alphaEquivalentTypes
+    (fmap TypeApplicationCertificateFree actual) expected
 
 checkedTypeApplicationCertificateCount
   :: CheckedTypeApplicationCertificateTable variable -> Int

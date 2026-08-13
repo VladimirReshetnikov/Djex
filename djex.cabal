@@ -273,6 +273,7 @@ Library
     Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process
     Language.Haskell.Synthesis.Internal.TypedCandidate
     Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate
+    Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.Association
     Language.Haskell.Synthesis.Internal.TypedGenerated.Fingerprint
     Language.Haskell.Synthesis.Internal.TypeInstantiation
     Language.Haskell.Exference.Core.Internal.FlexibleIds
@@ -453,19 +454,26 @@ Test-Suite synthesis-certificate-tests
     synthesis/src
     synthesis/internal
   Other-Modules:
+    AssociationSpec
     Language.Haskell.Synthesis.Collection
     Language.Haskell.Synthesis.Constraint
     Language.Haskell.Synthesis.Count
     Language.Haskell.Synthesis.Fresh
+    Language.Haskell.Synthesis.Fingerprint
     Language.Haskell.Synthesis.Generated
     Language.Haskell.Synthesis.Internal.Alpha
+    Language.Haskell.Synthesis.Internal.Fingerprint
+    Language.Haskell.Synthesis.Internal.Fingerprint.Type
     Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate
+    Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.Association
+    Language.Haskell.Synthesis.Internal.TypedGenerated.Fingerprint
     Language.Haskell.Synthesis.Name
     Language.Haskell.Synthesis.Qualification
     Language.Haskell.Synthesis.Type
     Language.Haskell.Synthesis.TypeAtom
     Language.Haskell.Synthesis.TypeRender
     Language.Haskell.Synthesis.TypedGenerated
+    Language.Haskell.Synthesis.TypedGenerated.Fingerprint
   Build-Depends:
     djex,
     pretty >= 1.1 && < 1.2

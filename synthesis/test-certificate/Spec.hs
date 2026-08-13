@@ -2,6 +2,7 @@
 
 module Main (main) where
 
+import qualified AssociationSpec
 import Control.DeepSeq (force)
 import Control.Exception
   ( SomeException
@@ -41,7 +42,8 @@ main = defaultMain tests
 
 tests :: TestTree
 tests = testGroup "bounded type-application certificate plans"
-  [ limitTests
+  [ AssociationSpec.tests
+  , limitTests
   , tableShapeTests
   , replayTests
   , contextualObligationTests

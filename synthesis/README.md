@@ -160,6 +160,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.TypedCandidate` | Opaque engine-checked compatibility/graph associations, nominal authority domains, lazy per-candidate projections, and one evidence/progress/metadata-preserving `QueryResult` compatibility projection shared by both engines. |
 | `Language.Haskell.Synthesis.TypedGenerated` | Bounded typed candidate graphs with stable node, source-occurrence, and certificate identities; checked application and visible-specialization witnesses; a neutral sealing pass; nominal type/local authority even after graph projection; exact graph metrics; and one-way projection to `Generated`. |
 | `Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate` | Package-private bounded structural plans for complete leading-telescope selections: capture-free canonical substitution steps and derived ordered scheme-syntax obligations, without provenance, closure, kind, discharge, graph association, or fingerprint authority. |
+| `Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.Association` | Package-private atomic raw-graph sealing plus exhaustive one-use association of independent checker observations, structural plans, exact global owner schemes, and derived base/visible occurrence chains; its projection and fold grant no detachable carrier, inventory, kind, discharge, behavioral, or fingerprint authority. |
 | `Language.Haskell.Synthesis.TypedGenerated.Fingerprint` | Bounded, allocation- and alpha-insensitive structural identities after a fresh reseal; the public shared entrance rejects certificate- and constructor-schema-dependent graphs, while a package-private domain entrance can atomically consume an opaque checked schema without exporting it as graph authority. |
 | `Language.Haskell.Synthesis.Observability` | Opaque exact counters, stable cross-engine metric codes, deterministic aggregation, and deliberately non-strict snapshots that can be inspected independently of a lazy result. |
 
@@ -583,11 +584,34 @@ selection types are closed, that a selection has the positional binder kind,
 that a constraint names a known class with the declared arity, is entailed, or
 is discharged, or that a row belongs to one graph occurrence. Its constructor
 and observations are package-private, and it has no fingerprint entrance. The
-existing public fingerprint failure is
-unchanged. Exference's independent checker must eventually retain the missing
-origin and occurrence association before the graph encoder may consume these
-structural plans. See the
+existing public fingerprint failure is unchanged. See the
 [bounded certificate-plan report](../docs/reports/2026-08-13-bounded-type-application-certificate-plans.md).
+
+`Internal.TypedGenerated.Certificate.Association` adds an opaque, atomic
+graph-occurrence foundation without widening that neutral table. Its single
+entrance takes an untrusted `TermGraphSource`, caller-owned trusted
+`TypeStructure`, graph limits, certificate limits, and independent origin rows.
+It builds and matches the table before sealing the graph. During that seal only
+certificate-bearing visible witnesses are admitted provisionally; every
+uncertified witness and every other type relationship still delegates to the
+trusted structure. Before a graph can escape, the association checks the exact
+owner scheme, base global, node/child/witness source and result types, specified
+argument and selection, complete zero-based child chain, and exhaustive
+one-origin-to-one-use coverage. All occurrence receipts are derived from the
+rooted graph rather than supplied as caller coordinates.
+
+The carrier co-owns its graph, structural table, normalized owner schemes, and
+complete occurrence receipts. Projecting its graph produces only a bare legacy
+observation and discards association authority. The narrow fold may hand
+retainable verified observations to a future consumer, but cannot detach or
+rebuild the checked table or carrier. Certificate IDs, term nodes, occurrences,
+and fold order remain candidate-local coordinates; none may be treated as
+provenance or enter a semantic key on that basis. No inventory or declaration
+membership, binder kind, constraint discharge identity, behavioral
+interpretation, or fingerprint authority is established here. Public graph
+fingerprints therefore still reject stamped graphs. Exference does not yet
+stamp its retained origin annotations in this checkpoint. See the
+[atomic association report](../docs/reports/2026-08-13-atomic-certificate-graph-associations.md).
 
 `TypedGenerated.Fingerprint` reconstructs and reseals that graph with
 `sharedTypeStructure` before assigning its nominal v1 identity. Its rooted-tree

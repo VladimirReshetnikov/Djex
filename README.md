@@ -275,7 +275,10 @@ slot, and caller row-order coordinates never enter the key. The public graph
 fingerprint remains unchanged and still rejects the projected stamped graph.
 The v2 key itself establishes no inventory membership or provenance, kind
 correctness, constraint discharge, candidate completeness, or behavioral
-meaning; domain-owned sealers must bind those authorities independently.
+meaning; domain-owned sealers must bind those authorities independently. The
+package-private class-resolution foundation described below can provide one
+such discharge receipt, but no certificate or fingerprint entrance consumes it
+in this checkpoint.
 See the
 [carrier-aware fingerprint report](docs/reports/2026-08-13-carrier-aware-certificate-graph-fingerprints.md).
 
@@ -306,6 +309,52 @@ variable exposed only inside a nested `forall`. Length and future behavioral
 domains can therefore apply their own rigid-opening or authorized-free-variable
 policy to an opaque, source-ordered match rather than reusing an engine-private
 unifier.
+
+## Checked ground class-resolution foundation
+
+The package-private
+`Language.Haskell.Synthesis.Internal.ClassResolution` module seals one exact,
+already-checked `Inventory` into a bounded declared-class resolver. It reads the
+raw, unexpanded inventory rather than a prepared synonym expansion: a synonym
+declaration may exist, but any resolution constraint that references one is
+rejected, as is every nested `ForallType`. The admitted language is normalized,
+alias-free, first-order and declared-class only. Queries must be ground and no
+given constraints participate.
+
+Each explicit instance is completed with the direct superclasses of its head
+class. Sealing rejects superclass cycles, duplicate or overlapping heads, and
+every groundable explicit or completed prerequisite which grows relative to
+its head under the Paterson-style node and binder-occurrence measure. The
+symmetric overlap unifier, directional runtime matcher, and termination measure
+share one canonical applicative kernel, so higher-kinded application and the
+structural/function/tuple spellings cannot be classified inconsistently.
+Resolution preserves instance and prerequisite source order, treats a
+current-path cycle or a prerequisite-only binder as absence of evidence, and
+never accepts a caller-supplied proof.
+
+The checked limits independently bound the declarations accepted for resolver
+retention, retained class and instance tables, retained type-constructor-kind
+assumptions, collection widths, type nodes, kind nodes, overlap comparisons,
+proof depth, and proof nodes. These are accepted structural-shape and proof
+exploration bounds, not a byte bound on names or variables or a claim that
+every normalization step is streaming. In particular, source order is
+recovered in full from an `Inventory` that has already passed environment and
+kind checking before the declaration limit is observed.
+
+A successful opaque receipt co-owns the exact retained checked resolver
+environment, canonical ground goal, and proof tree. Proof authority is exposed
+only by replay: a structurally equal retained environment, including its
+limits and source-ordered facts, is required before the replay goal is
+inspected, then that goal must validate and canonicalize to the retained goal.
+The projected goal and proof tree are diagnostics and cannot be recombined with
+different retained resolver authority.
+
+Nothing consumes this authority yet. Djinn and Exference keep their existing
+backend policies; certificate rows and graph fingerprints still establish no
+constraint discharge; and Length acceptance, fingerprints, and identity
+schemas are unchanged. Z3 observations remain behavioral heuristics and never
+supply dictionary evidence. See the
+[checked class-resolution foundation report](docs/reports/2026-08-13-checked-class-resolution-foundation.md).
 
 ## Finite list-spine length contracts
 
@@ -471,8 +520,10 @@ constraints, unknown globals, unmodeled inventory globals, and
 detached certificate-bearing graphs fail closed. Opaque associated graphs are
 accepted only for exact inventory-owned providers with empty activated
 obligations; modeled constructor owners remain unsupported. Empty obligations
-are a structural admission rule, not evidence of dictionary or Z3 discharge,
-and no instance/discharge identity is retained. Explicit graph-byte and
+are a structural admission rule, not evidence of dictionary or instance
+discharge. Length does not consume the new checked class-resolution receipt
+here, no instance/discharge identity is retained, and Z3 can never supply
+dictionary evidence. Explicit graph-byte and
 evaluation step limits still bound candidate work.
 
 The integration suite exercises this foundation through the public production
@@ -500,7 +551,8 @@ binds `opaque-associated-certificate/v1` and
 `activated-obligations-empty/v1`. Plain graphs and empty carriers retain the
 exact v1 candidate key. This changes neither solver replay nor behavioral
 evidence authority: Z3 output remains heuristic until the same independently
-sealed problem replays it. See the
+sealed problem replays it, and even successful behavioral replay is not
+dictionary evidence. See the
 [associated provider-certificate Length report](docs/reports/2026-08-13-length-associated-provider-certificates.md).
 
 On the legacy path, every contract argument and result must expose the

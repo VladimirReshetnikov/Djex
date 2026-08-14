@@ -48,6 +48,7 @@ import Test.Tasty.HUnit
   , (@?=)
   )
 import qualified Test.Tasty.QuickCheck as QC
+import ClassResolutionSpec (classResolutionTests)
 import SMTLibCausalBoundaryWhitespaceSpec
   ( smtLibCausalBoundaryWhitespaceTests )
 import SMTLibCausalDriverSpec (smtLibCausalDriverTests)
@@ -71,6 +72,7 @@ tests = testGroup "Djex synthesis foundation"
   , smtLibLexicalTests
   , smtLibStandardResponseTests
   , smtLibStreamTests
+  , classResolutionTests
   , classTests
   , collectionTests
   , freshTests

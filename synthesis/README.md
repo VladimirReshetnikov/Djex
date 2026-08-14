@@ -94,6 +94,7 @@ but cannot manufacture a successful match.
 | `Language.Haskell.Synthesis.Inventory` | Pairs one grounded `Environment` with the kind assumptions inferred from it. |
 | `Language.Haskell.Synthesis.TypeSynonym` | Prepares exact synonym tables, rejects repeated raw parameters when reached, checks saturation, expands capture-safely, performs pre/post-expansion kind checks, and offers the deliberately outer-head-lenient normalization used by `:kind!`. |
 | `Language.Haskell.Synthesis.Class` | Provides an opaque source-order view of declared classes, final parameter kinds, methods, and explicit instances from an `Inventory`. |
+| `Language.Haskell.Synthesis.Internal.ClassResolution` | Package-private bounded declared-class resolution over one exact checked `Inventory`, with alias-free first-order ground discharge, direct-superclass completion, overlap and termination admission, and environment-plus-goal replay receipts. |
 
 `PreparedInventory` is the long-lived session authority: it keeps an Inventory
 and its exact normalized synonym table inseparable. The transient
@@ -117,8 +118,42 @@ one inference scope, including generalized parameters, so repeated source
 variables cannot acquire incompatible kinds merely because they occur in
 different class arguments.
 
-Shared class values describe source facts. Djinn and Exference intentionally
-retain different resolution and search policies.
+Shared class values describe source facts. The package-private
+`Internal.ClassResolution` module now adds one executable policy without
+changing that neutral representation. It reads the raw, unexpanded declaration
+view from one already-checked `Inventory`, closes authority to classes declared
+there, and admits only normalized, alias-free, first-order constraints. Every
+referenced type synonym and every nested `ForallType` is rejected explicitly;
+queries must be ground, and there is no given-constraint context.
+
+Sealing completes each explicit instance with its owner's direct
+superclasses, rejects superclass cycles and overlapping instance heads, and
+checks non-expansion for every explicit or completed prerequisite that its head
+can ground. Symmetric overlap checking, directional runtime matching, and the
+Paterson-style size/occurrence measure share the same canonical applicative
+function/tuple kernel. Resolution is source ordered, tracks current-path
+cycles, and returns an opaque proof receipt only for a successful discharge.
+Replay first requires a structurally equal retained checked environment,
+including its limits and source-ordered facts, and then the same canonical
+goal; a detached proof tree is diagnostic, not transferable authority.
+
+Independent limits cover the recovered declarations accepted for retention,
+retained class and instance tables, retained type-constructor-kind table,
+declaration/type collection widths, type and kind nodes, overlap comparisons,
+proof depth, and proof nodes. They bound accepted structural shapes and proof
+exploration, not identifier bytes or every normalization step. Source order is
+recovered in full from an `Inventory` which has already been checked before the
+declaration cap is observed, so this is not a new streaming work bound for
+constructing or projecting an inventory from an unbounded raw declaration
+source.
+
+No Djinn, Exference, certificate, fingerprint, or Length entrance consumes
+this authority in this checkpoint, so backend resolution and acceptance remain
+unchanged. In particular, Z3 is never a source of dictionary evidence. Djinn
+and Exference therefore still retain their existing resolution and search
+policies until a later adapter explicitly binds this receipt to its own opaque
+candidate/session authority. The exact boundary is recorded in the
+[checked class-resolution report](../docs/reports/2026-08-13-checked-class-resolution-foundation.md).
 
 ### Query, search, and presentation
 
@@ -257,7 +292,9 @@ v2 which binds `opaque-associated-certificate/v1` and
 `activated-obligations-empty/v1`. Certificate, slot, node, and occurrence IDs
 remain nonsemantic coordinates and are absent from both keys. The stamped bare
 graph remains rejected by the public fingerprint and by the plain Length path.
-Empty obligations do not prove dictionary, instance, or Z3 discharge, and this
+Empty obligations do not prove dictionary or instance discharge. Length does
+not consume the package-private checked class-resolution receipt in this
+checkpoint, and no Z3 status or model can supply dictionary evidence. This
 admission adds no solver or replay authority. The new associated-row failures
 expose only the owner, canonical rooted-row/source-step ordinals, and bounded
 obligation count; raw association coordinates and types remain private. See the

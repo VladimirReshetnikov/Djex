@@ -142,6 +142,9 @@ $(do
           , "PublicDjex.CheckedTypeApplicationOrigin"
           , "PublicDjex.CheckedTypeApplicationOriginStep"
           , "PublicDjex.ExferenceTermGraphAvailability"
+          , "PublicDjex.CheckedClassResolutionEnvironment"
+          , "PublicDjex.ClassResolutionProof"
+          , "PublicDjex.CheckedConstraintDischarge"
           ]
         hiddenValues =
           [ "LengthSMTLibLiveSession"
@@ -215,6 +218,9 @@ $(do
           , "PublicDjex.ExferenceTermGraphAvailable"
           , "PublicDjex.ExferenceTermGraphAssociated"
           , "PublicDjex.ExferenceTermGraphUnavailable"
+          , "PublicDjex.sealClassResolutionEnvironment"
+          , "PublicDjex.dischargeGroundConstraint"
+          , "PublicDjex.replayCheckedConstraintDischarge"
           ]
     resolvedTypes <- mapM lookupTypeName hiddenTypes
     resolvedValues <- mapM lookupValueName hiddenValues

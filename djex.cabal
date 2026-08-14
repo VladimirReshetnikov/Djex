@@ -243,6 +243,7 @@ Library
     Language.Haskell.Djex.Exference.Internal.Request
     Language.Haskell.Djex.Exference.Internal.Session
     Language.Haskell.Synthesis.Internal.Alpha
+    Language.Haskell.Synthesis.Internal.ClassResolution
     Language.Haskell.Synthesis.Internal.Fingerprint
     Language.Haskell.Synthesis.Internal.Fingerprint.Type
     Language.Haskell.Synthesis.Internal.InstanceHead
@@ -371,6 +372,7 @@ Test-Suite synthesis-tests
     synthesis/test
     synthesis/internal
   Other-Modules:
+    ClassResolutionSpec
     SMTLibCausalBoundaryWhitespaceSpec
     SMTLibCausalDriverSpec
     SMTLibCausalStdoutChunkSpec
@@ -378,6 +380,7 @@ Test-Suite synthesis-tests
     SMTLibLexicalSpec
     SMTLibStandardResponseSpec
     SMTLibStreamSpec
+    Language.Haskell.Synthesis.Internal.ClassResolution
     Language.Haskell.Synthesis.Internal.SMTLib.Causal
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.BoundaryWhitespace
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver

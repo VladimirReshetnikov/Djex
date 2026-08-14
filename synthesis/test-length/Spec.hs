@@ -63,7 +63,7 @@ import Language.Haskell.Synthesis.KindInference
   , KindInventoryPolicy (ClosedKindInventory)
   )
 import Language.Haskell.Synthesis.Name
-  ( Boxity (Boxed)
+  ( Boxity (Boxed, Unboxed)
   , Name
   , consName
   , listName
@@ -100,11 +100,13 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   [ limitTests
   , contextTests
   , contractTests
+  , spinePairContractTests
   , providerTests
   , sessionTests
   , interpretationPolicyCharacterizationTests
   , unifiedInterpretationPolicyTests
   , candidateProblemTests
+  , spinePairProblemTests
   , associatedCertificateCandidateTests
   , problemReplayTests
   , inputBoxValidationTests
@@ -3792,6 +3794,287 @@ associatedCertificateCandidateTests = testGroup
                 adversarialCompatibility checked
   ]
 
+spinePairProblemTests :: TestTree
+spinePairProblemTests = testGroup
+  "binary product-of-spines candidate problems"
+  [ testCase
+      "interpret both tuple fields and replay a relational violation" $ do
+      let input = Length.LengthVariable $ Length.LengthSpinePairInput 0
+          firstResult = pairResultVariable Length.LengthSpinePairFirst
+          secondResult = pairResultVariable Length.LengthSpinePairSecond
+          relational = spinePairContractWith (Length.LengthTruth True)
+            $ Length.LengthAll
+                [ Length.LengthEqual firstResult input
+                , Length.LengthEqual secondResult input
+                ]
+      problem <- adversarialInputAndZeroSpinePairProblem relational
+      let checked = LengthProblem.checkedLengthSpinePairProblemCandidate problem
+          symbolic = LengthProblem.checkedLengthSpinePairCandidateResult checked
+      Length.lengthSpinePairFirst symbolic @?=
+        Length.LengthVariable (Length.LengthInput 0)
+      Length.lengthSpinePairSecond symbolic @?= Length.LengthLiteral 0
+      LengthProblem.checkedLengthSpinePairCandidateUsedProviders checked @?= []
+      LengthProblem.checkedLengthSpinePairProblemInputCount problem @?= 1
+      Djex.behavioralProblemDomain
+          (LengthProblem.checkedLengthSpinePairProblemBehavioralProblem problem)
+        @?= Length.finiteBinaryProductSpineLengthsDomainTag
+      force problem `seq` pure ()
+
+      expectNoCounterexample
+        $ Evaluate.validateLengthSpinePairProblemCounterexample
+            Evaluate.defaultLengthEvaluationLimits problem
+            $ Evaluate.LengthProblemAssignment [0]
+      evidence <- expectCounterexample
+        $ Evaluate.validateLengthSpinePairProblemCounterexample
+            Evaluate.defaultLengthEvaluationLimits problem
+            $ Evaluate.LengthProblemAssignment [3]
+      receipt <- expectRight $ Djex.replayBehavioralEvidence
+        (LengthProblem.checkedLengthSpinePairProblemBehavioralProblem problem)
+        evidence
+      Evaluate.validatedLengthSpinePairCounterexampleInputs receipt @?= [3]
+      Evaluate.validatedLengthSpinePairCounterexampleResult receipt @?=
+        Length.LengthSpinePair 3 0
+      Evaluate.validatedLengthSpinePairCounterexampleBasis receipt @?=
+        Evaluate.ProviderIndependentFiniteSpineModel
+      force receipt `seq` pure ()
+
+      stale <- adversarialInputAndZeroSpinePairProblem
+        trivialSpinePairContract
+      assertLeft Djex.ReplayEncodingFingerprintMismatch
+        $ Djex.replayBehavioralEvidence
+            (LengthProblem.checkedLengthSpinePairProblemBehavioralProblem stale)
+            evidence
+
+      scalar <- adversarialConstantZeroProblem identityLengthContract
+      let forgedScalarDomainEvidence = unsafeCoerce evidence
+            :: SemanticProblem.BehavioralEvidence
+                Length.FiniteListSpineLengthV1
+                Evaluate.ValidatedLengthSpinePairCounterexample
+      assertLeft Djex.ReplayDomainMismatch
+        $ Djex.replayBehavioralEvidence
+            (LengthProblem.checkedLengthProblemBehavioralProblem scalar)
+            forgedScalarDomainEvidence
+  , testCase
+      "union scalar providers while preserving left and right tuple results" $ do
+      (expectedProviders, problem) <- adversarialProviderSpinePairProblem
+      let checked = LengthProblem.checkedLengthSpinePairProblemCandidate problem
+          symbolic = LengthProblem.checkedLengthSpinePairCandidateResult checked
+      Length.lengthSpinePairFirst symbolic @?= Length.LengthLiteral 11
+      Length.lengthSpinePairSecond symbolic @?= Length.LengthLiteral 22
+      LengthProblem.checkedLengthSpinePairCandidateUsedProviders checked @?=
+        expectedProviders
+      evidence <- expectCounterexample
+        $ Evaluate.validateLengthSpinePairProblemCounterexample
+            Evaluate.defaultLengthEvaluationLimits problem
+            $ Evaluate.LengthProblemAssignment []
+      receipt <- expectRight $ Djex.replayBehavioralEvidence
+        (LengthProblem.checkedLengthSpinePairProblemBehavioralProblem problem)
+        evidence
+      Evaluate.validatedLengthSpinePairCounterexampleResult receipt @?=
+        Length.LengthSpinePair 11 22
+      Evaluate.validatedLengthSpinePairCounterexampleBasis receipt @?=
+        Evaluate.FiniteSpineModelUnderAssumedProviderLaws expectedProviders
+  , testCase "force the first tuple field before the second" $ do
+      result <- adversarialOpaqueComponentsSpinePairProblem
+      assertLeft
+        (LengthProblem.LengthSpinePairProblemUnobservedTargetArgumentDemanded
+          0 $ LengthProblem.LengthUnobservedTargetSpineDemand
+            $ Djex.termNodeId 3)
+        result
+  , testCase
+      "bound detached pair assignment results in source component order" $ do
+      let spine = listOf closedPayloadType
+          target = TupleType Boxed [spine, spine]
+      contract <- expectRight $ sealSpinePairContract
+        Length.defaultLengthLimits target trivialSpinePairContract
+      assertLeft
+        (Evaluate.LengthSpinePairEvaluationValueBitLimitExceeded
+          (Evaluate.LengthSpinePairContractResultValue
+            Length.LengthSpinePairFirst)
+          2 3)
+        $ Evaluate.evaluateLengthSpinePairContractAssignment
+            (evaluationLimitsWith 2 8) contract
+            $ Evaluate.LengthSpinePairContractAssignment []
+            $ Length.LengthSpinePair 4 8
+  , testCase
+      "bind complete finite-box evidence to the nominal product problem" $ do
+      Evaluate.lengthSpinePairInputBoxValidationSchemaTag @?=
+        asciiBytes
+          "finite-binary-product-spine-lengths/bounded-input-box-validation/v1"
+      assertBool "pair validation reused the scalar receipt schema" $
+        Evaluate.lengthSpinePairInputBoxValidationSchemaTag /=
+          Evaluate.lengthInputBoxValidationSchemaTag
+      let input = Length.LengthVariable $ Length.LengthSpinePairInput 0
+          safeSource = spinePairContractWith (Length.LengthTruth True)
+            $ Length.LengthAll
+                [ Length.LengthEqual
+                    (pairResultVariable Length.LengthSpinePairFirst) input
+                , Length.LengthEqual
+                    (pairResultVariable Length.LengthSpinePairSecond)
+                    $ Length.LengthLiteral 0
+                ]
+      safeProblem <- adversarialInputAndZeroSpinePairProblem safeSource
+      validation <- expectRight
+        $ Evaluate.validateLengthSpinePairProblemInputBox
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits safeProblem [2]
+      safeEvidence <- case validation of
+        Evaluate.LengthInputBoxValidated evidence -> pure evidence
+        Evaluate.LengthInputBoxCounterexample{} -> assertFailure
+          "the safe product box produced a counterexample" >> error "unreachable"
+      receipt <- expectRight $ Djex.replayBehavioralEvidence
+        (LengthProblem.checkedLengthSpinePairProblemBehavioralProblem
+          safeProblem)
+        safeEvidence
+      Evaluate.validatedLengthSpinePairInputBoxInclusiveMaximums receipt @?=
+        [2]
+      Evaluate.validatedLengthSpinePairInputBoxAssignmentCount receipt @?= 3
+      Evaluate.validatedLengthSpinePairInputBoxApplicableAssignmentCount
+          receipt @?= 3
+      Evaluate.validatedLengthSpinePairInputBoxBasis receipt @?=
+        Evaluate.ProviderIndependentFiniteSpineModel
+      force receipt `seq` pure ()
+
+      stale <- adversarialInputAndZeroSpinePairProblem
+        trivialSpinePairContract
+      assertLeft Djex.ReplayEncodingFingerprintMismatch
+        $ Djex.replayBehavioralEvidence
+            (LengthProblem.checkedLengthSpinePairProblemBehavioralProblem stale)
+            safeEvidence
+      scalar <- adversarialConstantZeroProblem trivialLengthContract
+      let forgedScalarDomainEvidence = unsafeCoerce safeEvidence
+            :: SemanticProblem.BehavioralEvidence
+                Length.FiniteListSpineLengthV1
+                Evaluate.ValidatedLengthSpinePairInputBox
+      assertLeft Djex.ReplayDomainMismatch
+        $ Djex.replayBehavioralEvidence
+            (LengthProblem.checkedLengthProblemBehavioralProblem scalar)
+            forgedScalarDomainEvidence
+  , testCase
+      "stop product-box traversal at its first relational violation" $ do
+      let input = Length.LengthVariable $ Length.LengthSpinePairInput 0
+          relational = spinePairContractWith (Length.LengthTruth True)
+            $ Length.LengthAll
+                [ Length.LengthEqual
+                    (pairResultVariable Length.LengthSpinePairFirst) input
+                , Length.LengthEqual
+                    (pairResultVariable Length.LengthSpinePairSecond) input
+                ]
+      problem <- adversarialInputAndZeroSpinePairProblem relational
+      validation <- expectRight
+        $ Evaluate.validateLengthSpinePairProblemInputBox
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits problem [2]
+      evidence <- case validation of
+        Evaluate.LengthInputBoxCounterexample value -> pure value
+        Evaluate.LengthInputBoxValidated{} -> assertFailure
+          "the violating product box returned positive evidence"
+            >> error "unreachable"
+      receipt <- expectRight $ Djex.replayBehavioralEvidence
+        (LengthProblem.checkedLengthSpinePairProblemBehavioralProblem problem)
+        evidence
+      Evaluate.validatedLengthSpinePairCounterexampleInputs receipt @?= [1]
+      Evaluate.validatedLengthSpinePairCounterexampleResult receipt @?=
+        Length.LengthSpinePair 1 0
+      assertLeft
+        (Evaluate.LengthSpinePairInputBoxMaximumValueRejected 0
+          $ Evaluate.LengthSpinePairEvaluationValueBitLimitExceeded
+              (Evaluate.LengthSpinePairProblemInputValue 0) 2 3)
+        $ Evaluate.validateLengthSpinePairProblemInputBox
+            (evaluationLimitsWith 2 8)
+            Evaluate.defaultLengthInputBoxLimits problem [4]
+  , testCase "reject pair sealer/case-policy mismatches before graph demand" $ do
+      let resultType = TupleType Boxed
+            [adversarialClosedList, adversarialClosedList]
+          poisonCandidate = adversarialTypedCandidate
+            $ error "pair case mismatch demanded the candidate graph"
+      ordinarySession <- adversarialLengthSession [] []
+      ordinaryContract <- adversarialLengthSpinePairContract
+        ordinarySession resultType trivialSpinePairContract
+      ordinaryResult <- evaluateWithin
+        $ LengthProblem.sealExactSpineCaseLengthSpinePairTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            ordinarySession ordinaryContract poisonCandidate
+      assertLeft LengthProblem.LengthSpinePairProblemCasePolicyMismatch
+        ordinaryResult
+
+      exactSession <- adversarialExactCaseLengthSession [] [] []
+      exactContract <- adversarialLengthSpinePairContract
+        exactSession resultType trivialSpinePairContract
+      exactResult <- evaluateWithin
+        $ LengthProblem.sealLengthSpinePairTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits
+            exactSession exactContract poisonCandidate
+      assertLeft LengthProblem.LengthSpinePairProblemCasePolicyMismatch
+        exactResult
+  , testCase "publish closed source-ordered result-shape diagnostics" $ do
+      let node = Djex.termNodeId 7
+          occurrence = Djex.occurrenceId 8
+          failures =
+            [ LengthProblem.LengthSpinePairProblemExpectedResultTuple node
+            , LengthProblem.LengthSpinePairProblemResultTupleArityMismatch
+                node 3
+            , LengthProblem.LengthSpinePairProblemResultComponentExpectedSpine
+                Length.LengthSpinePairFirst node
+            , LengthProblem.LengthSpinePairProblemResultTupleDemandedUnobservedTarget
+                0 node
+            , LengthProblem.LengthSpinePairProblemResultTupleDemandedStepPayload
+                occurrence node
+            ] :: [LengthProblem.LengthSpinePairProblemError String String Int]
+      length failures @?= 5
+      force failures `seq` pure ()
+  , testCase
+      "check pair assignment and finite-box shape before values or traversal" $ do
+      unary <- adversarialInputAndZeroSpinePairProblem
+        trivialSpinePairContract
+      let cyclicInputs = 0 : cyclicInputs
+      cyclic <- evaluateWithin
+        $ Evaluate.validateLengthSpinePairProblemCounterexample
+            Evaluate.defaultLengthEvaluationLimits unary
+            $ Evaluate.LengthProblemAssignment cyclicInputs
+      assertLeft
+        (Evaluate.LengthSpinePairProblemAssignmentArityMismatch 1 2)
+        cyclic
+
+      narrow <- inputBoxLimits 0 8
+      width <- evaluateWithin
+        $ Evaluate.validateLengthSpinePairProblemInputBox
+            (error "pair box width demanded evaluation limits")
+            narrow unary
+            (error "pair box width demanded raw maximums")
+      assertLeft
+        (Evaluate.LengthSpinePairInputBoxProblemInputLimitExceeded 0 1)
+        width
+      assertLeft
+        (Evaluate.LengthSpinePairInputBoxBoundsArityMismatch 1 0)
+        $ Evaluate.validateLengthSpinePairProblemInputBox
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits unary []
+      oneAssignment <- inputBoxLimits 1 1
+      assertLeft
+        (Evaluate.LengthSpinePairInputBoxAssignmentLimitExceeded 1 2)
+        $ Evaluate.validateLengthSpinePairProblemInputBox
+            Evaluate.defaultLengthEvaluationLimits oneAssignment unary [1]
+
+      nullary <- adversarialNullaryZeroSpinePairProblem
+        trivialSpinePairContract
+      nullaryValidation <- expectRight
+        $ Evaluate.validateLengthSpinePairProblemInputBox
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits nullary []
+      evidence <- case nullaryValidation of
+        Evaluate.LengthInputBoxValidated value -> pure value
+        Evaluate.LengthInputBoxCounterexample{} -> assertFailure
+          "the trivial nullary product box produced a counterexample"
+            >> error "unreachable"
+      receipt <- expectRight $ Djex.replayBehavioralEvidence
+        (LengthProblem.checkedLengthSpinePairProblemBehavioralProblem nullary)
+        evidence
+      Evaluate.validatedLengthSpinePairInputBoxAssignmentCount receipt @?= 1
+      Evaluate.validatedLengthSpinePairInputBoxApplicableAssignmentCount
+          receipt @?= 1
+  ]
+
 problemReplayTests :: TestTree
 problemReplayTests = testGroup "exact candidate problem replay"
   [ testCase "find no counterexample for one real Exference identity" $ do
@@ -7147,6 +7430,205 @@ contractTests = testGroup "checked contracts"
             (listOf closedPayloadType) trivialLengthContract
   ]
 
+spinePairContractTests :: TestTree
+spinePairContractTests = testGroup
+  "checked binary product-of-spines contracts"
+  [ testCase "publish one distinct nominal domain and ordered pair carrier" $ do
+      Length.finiteBinaryProductSpineLengthsDomainTag @?=
+        asciiBytes "finite-binary-product-spine-lengths/v1"
+      assertBool "the product domain reused the scalar runtime tag" $
+        Length.finiteBinaryProductSpineLengthsDomainTag /=
+          Length.finiteListSpineLengthDomainTag
+      let pair = Length.LengthSpinePair (3 :: Natural) 5
+      Length.lengthSpinePairFirst pair @?= 3
+      Length.lengthSpinePairSecond pair @?= 5
+      force pair `seq` pure ()
+      [ Length.LengthSpinePairFirst
+        , Length.LengthSpinePairSecond
+        ] @?= [minBound .. maxBound]
+  , testCase
+      "seal exactly two boxed modeled spines and retain both result laws" $ do
+      let firstPayload = closedPayloadType
+          secondPayload = polymorphicIdentityType
+          firstInput = listOf firstPayload
+          secondInput = listOf secondPayload
+          firstResultType = listOf secondPayload
+          secondResultType = listOf firstPayload
+          target = FunctionType firstInput $ FunctionType secondInput
+            $ TupleType Boxed [firstResultType, secondResultType]
+          first = Length.LengthVariable
+            $ Length.LengthSpinePairResult Length.LengthSpinePairFirst
+          second = Length.LengthVariable
+            $ Length.LengthSpinePairResult Length.LengthSpinePairSecond
+          input0 = Length.LengthVariable $ Length.LengthSpinePairInput 0
+          input1 = Length.LengthVariable $ Length.LengthSpinePairInput 1
+          postcondition = Length.LengthAll
+            [ Length.LengthEqual first input1
+            , Length.LengthEqual second $ Length.LengthSum [input0, input1]
+            ]
+          normalizedPostcondition = Length.LengthAll
+            [ Length.LengthEqual input1 first
+            , Length.LengthEqual second $ Length.LengthSum [input0, input1]
+            ]
+          source = spinePairContractWith
+            (Length.LengthAtMost input0 input1) postcondition
+      checked <- expectRight $ sealSpinePairContract
+        Length.defaultLengthLimits target source
+      Length.checkedLengthSpinePairContractTarget checked @?= target
+      Length.checkedLengthSpinePairContractTargetArgumentRoles checked @?=
+        [Length.LengthObservedSpine, Length.LengthObservedSpine]
+      Length.checkedLengthSpinePairContractInputCount checked @?= 2
+      Length.checkedLengthSpinePairContractPrecondition checked @?=
+        Length.LengthAtMost input0 input1
+      Length.checkedLengthSpinePairContractPostcondition checked @?=
+        normalizedPostcondition
+      force checked `seq` pure ()
+  , testCase
+      "reject nonboxed, nonbinary, and nonspine results in source order" $ do
+      let spine = listOf closedPayloadType
+          sealResult result = sealSpinePairContract
+            Length.defaultLengthLimits (FunctionType spine result)
+            trivialSpinePairContract
+      assertLeft
+        (Length.LengthSpinePairContractResultIsNotBoxedTuple spine)
+        $ sealResult spine
+      let unboxed = TupleType Unboxed [spine, spine]
+      assertLeft
+        (Length.LengthSpinePairContractResultIsNotBoxedTuple unboxed)
+        $ sealResult unboxed
+      assertLeft
+        (Length.LengthSpinePairContractResultTupleArityMismatch 0)
+        $ sealResult $ TupleType Boxed []
+      assertLeft
+        (Length.LengthSpinePairContractResultTupleArityMismatch 3)
+        $ sealResult $ TupleType Boxed [spine, spine, spine]
+      let notSpine = closedPayloadType
+      assertLeft
+        (Length.LengthSpinePairContractResultComponentIsNotList
+          Length.LengthSpinePairFirst notSpine)
+        $ sealResult $ TupleType Boxed [notSpine, notSpine]
+      assertLeft
+        (Length.LengthSpinePairContractResultComponentIsNotList
+          Length.LengthSpinePairSecond notSpine)
+        $ sealResult $ TupleType Boxed [spine, notSpine]
+  , testCase
+      "check inputs and pair shape before formulas, then precondition first" $ do
+      let spine = listOf closedPayloadType
+          pairResult = TupleType Boxed [spine, spine]
+          poison = error "pair contract demanded a formula too early"
+          poisonSource = Length.LengthSpinePairContractSource poison poison
+      assertLeft
+        (Length.LengthSpinePairContractInputIsNotList 0 closedPayloadType)
+        $ Length.sealLengthSpinePairContract Length.defaultLengthLimits
+            fixtureInventory
+            (FunctionType closedPayloadType spine)
+            poisonSource
+      assertLeft
+        (Length.LengthSpinePairContractResultIsNotBoxedTuple spine)
+        $ sealSpinePairContract Length.defaultLengthLimits spine poisonSource
+
+      let badPrecondition = Length.LengthEqual
+            (Length.LengthVariable
+              $ Length.LengthSpinePairResult Length.LengthSpinePairFirst)
+            $ Length.LengthLiteral 0
+          preconditionFirst = Length.LengthSpinePairContractSource
+            badPrecondition (error "pair postcondition won precedence")
+      result <- evaluateWithin $ sealSpinePairContract
+        Length.defaultLengthLimits pairResult preconditionFirst
+      assertLeft
+        (Length.LengthSpinePairContractPreconditionError
+          Length.LengthResultNotAvailableInPrecondition)
+        result
+  , testCase
+      "compact role-aware inputs and reject either result in preconditions" $ do
+      let spine = listOf closedPayloadType
+          opaque = FunctionType closedPayloadType closedPayloadType
+          target = FunctionType opaque $ FunctionType spine
+            $ TupleType Boxed [spine, spine]
+          roles =
+            [Length.LengthUnobservedTarget, Length.LengthObservedSpine]
+          compactInput = Length.LengthVariable
+            $ Length.LengthSpinePairInput 0
+          source = spinePairContractWith (Length.LengthTruth True)
+            $ Length.LengthAll
+                [ Length.LengthEqual
+                    (pairResultVariable Length.LengthSpinePairFirst)
+                    compactInput
+                , Length.LengthEqual
+                    (pairResultVariable Length.LengthSpinePairSecond)
+                    compactInput
+                ]
+      checked <- expectRight $ Length.sealRoleAwareLengthSpinePairContract
+        Length.defaultLengthLimits fixtureInventory roles target source
+      Length.checkedLengthSpinePairContractTargetArgumentRoles checked @?= roles
+      Length.checkedLengthSpinePairContractInputCount checked @?= 1
+      mapM_ (\component ->
+          assertLeft
+            (Length.LengthSpinePairContractPreconditionError
+              Length.LengthResultNotAvailableInPrecondition)
+            $ Length.sealRoleAwareLengthSpinePairContract
+                Length.defaultLengthLimits fixtureInventory roles target
+                $ spinePairContractWith
+                    (Length.LengthEqual
+                      (pairResultVariable component) $ Length.LengthLiteral 0)
+                    (Length.LengthTruth True))
+        [Length.LengthSpinePairFirst, Length.LengthSpinePairSecond]
+      assertLeft
+        (Length.LengthSpinePairContractPostconditionError
+          $ Length.LengthInputReferenceOutOfRange 1 1)
+        $ Length.sealRoleAwareLengthSpinePairContract
+            Length.defaultLengthLimits fixtureInventory roles target
+            $ spinePairContractWith (Length.LengthTruth True)
+            $ Length.LengthEqual
+                (Length.LengthVariable $ Length.LengthSpinePairInput 1)
+                (pairResultVariable Length.LengthSpinePairFirst)
+  , testCase
+      "give pair contracts independent identities without perturbing scalar parity" $ do
+      let spine = listOf closedPayloadType
+          pairTarget = FunctionType spine $ TupleType Boxed [spine, spine]
+          scalarTarget = FunctionType spine spine
+          input = Length.LengthVariable $ Length.LengthSpinePairInput 0
+          source component = spinePairContractWith (Length.LengthTruth True)
+            $ Length.LengthEqual (pairResultVariable component) input
+      first <- expectRight $ sealSpinePairContract
+        Length.defaultLengthLimits pairTarget
+        $ source Length.LengthSpinePairFirst
+      second <- expectRight $ sealSpinePairContract
+        Length.defaultLengthLimits pairTarget
+        $ source Length.LengthSpinePairSecond
+      assertBool "pair result component was omitted from contract identity" $
+        Length.lengthSpinePairContractFingerprint first /=
+          Length.lengthSpinePairContractFingerprint second
+
+      legacy <- expectRight $ sealContract
+        Length.defaultLengthLimits scalarTarget identityLengthContract
+      explicit <- expectRight $ Length.sealRoleAwareLengthContract
+        Length.defaultLengthLimits fixtureInventory
+        [Length.LengthObservedSpine] scalarTarget identityLengthContract
+      Length.lengthContractFingerprint legacy @?=
+        Length.lengthContractFingerprint explicit
+      assertBool "pair identity bytes alias the historical scalar contract" $
+        Fingerprint.fingerprintCanonicalBytes
+            (Length.lengthSpinePairContractFingerprint first) /=
+          Fingerprint.fingerprintCanonicalBytes
+            (Length.lengthContractFingerprint legacy)
+  , testCase "share syntax accounting across phases and bound pair identity" $ do
+      let spine = listOf closedPayloadType
+          target = TupleType Boxed [spine, spine]
+          oneNode = limitsWith $ \source -> source
+            { Length.lengthLimitSourceSyntaxNodes = 1 }
+          noFingerprint = limitsWith $ \source -> source
+            { Length.lengthLimitSourceFingerprintBytes = 0 }
+      assertLeft
+        (Length.LengthSpinePairContractPostconditionError
+          $ Length.LengthSyntaxNodeLimitExceeded 1 2)
+        $ sealSpinePairContract oneNode target trivialSpinePairContract
+      assertLeft
+        (Length.LengthSpinePairContractFingerprintLimitExceeded 0 1)
+        $ sealSpinePairContract noFingerprint target
+            trivialSpinePairContract
+  ]
+
 providerTests :: TestTree
 providerTests = testGroup "assumed provider inventory"
   [ testCase "retain closed schemes, roles, transfers, and assumed trust" $ do
@@ -8271,6 +8753,25 @@ contractWith precondition postcondition = Length.LengthContractSource
   , Length.lengthContractPostcondition = postcondition
   }
 
+trivialSpinePairContract :: Length.LengthSpinePairContractSource
+trivialSpinePairContract = spinePairContractWith
+  (Length.LengthTruth True) (Length.LengthTruth True)
+
+spinePairContractWith
+  :: Length.LengthFormula Length.LengthSpinePairContractVariable
+  -> Length.LengthFormula Length.LengthSpinePairContractVariable
+  -> Length.LengthSpinePairContractSource
+spinePairContractWith precondition postcondition =
+  Length.LengthSpinePairContractSource
+    { Length.lengthSpinePairContractPrecondition = precondition
+    , Length.lengthSpinePairContractPostcondition = postcondition
+    }
+
+pairResultVariable
+  :: Length.LengthSpinePairComponent
+  -> Length.LengthExpression Length.LengthSpinePairContractVariable
+pairResultVariable = Length.LengthVariable . Length.LengthSpinePairResult
+
 fixtureInventory :: Inventory String ()
 fixtureInventory = fixtureInventoryFromDeclarations []
 
@@ -8874,6 +9375,34 @@ adversarialRoleAwareLengthContract session roles target source = expectRight
       target
       source
 
+adversarialLengthSpinePairContract
+  :: LengthProblem.CheckedLengthSession AdversarialIdentity ()
+  -> AdversarialType
+  -> Length.LengthSpinePairContractSource
+  -> IO (Length.CheckedLengthSpinePairContract
+      (Variable AdversarialIdentity))
+adversarialLengthSpinePairContract session target source = expectRight
+  $ Length.sealLengthSpinePairContractInContext
+      Length.defaultLengthLimits
+      (LengthProblem.checkedLengthSessionContext session)
+      target
+      source
+
+adversarialRoleAwareLengthSpinePairContract
+  :: LengthProblem.CheckedLengthSession AdversarialIdentity ()
+  -> [Length.LengthTargetArgumentRole]
+  -> AdversarialType
+  -> Length.LengthSpinePairContractSource
+  -> IO (Length.CheckedLengthSpinePairContract
+      (Variable AdversarialIdentity))
+adversarialRoleAwareLengthSpinePairContract session roles target source =
+  expectRight $ Length.sealRoleAwareLengthSpinePairContractInContext
+    Length.defaultLengthLimits
+    (LengthProblem.checkedLengthSessionContext session)
+    roles
+    target
+    source
+
 adversarialListOf :: AdversarialType -> AdversarialType
 adversarialListOf = TypeApplication $ TypeConstructor listName
 
@@ -8904,6 +9433,39 @@ adversarialBinaryConstantZeroGraph = sealAdversarialGraph
                     Djex.TypedWildcard
                 ]
                 (Djex.termNodeId 0)
+        )
+      ]
+
+adversarialInputSpinePairTarget :: AdversarialType
+adversarialInputSpinePairTarget = FunctionType adversarialClosedList
+  $ TupleType Boxed [adversarialClosedList, adversarialClosedList]
+
+adversarialInputAndZeroSpinePairGraph :: IO AdversarialGraph
+adversarialInputAndZeroSpinePairGraph = sealAdversarialGraph
+  $ Djex.TermGraphSource (Djex.termNodeId 3)
+      [ ( Djex.termNodeId 0
+        , Djex.TermNode adversarialClosedList
+            $ Djex.TypedLocal (Djex.occurrenceId 1) 0
+        )
+      , ( Djex.termNodeId 1
+        , Djex.TermNode adversarialClosedList
+            $ Djex.TypedGlobal (Djex.occurrenceId 2) listName
+        )
+      , ( Djex.termNodeId 2
+        , Djex.TermNode
+            (TupleType Boxed
+              [adversarialClosedList, adversarialClosedList])
+            $ Djex.TypedTuple [Djex.termNodeId 0, Djex.termNodeId 1]
+        )
+      , ( Djex.termNodeId 3
+        , Djex.TermNode adversarialInputSpinePairTarget
+            $ Djex.TypedLambda
+                [ Djex.TypedPattern
+                    (Djex.occurrenceId 0)
+                    adversarialClosedList
+                    (Djex.TypedBind 0)
+                ]
+                (Djex.termNodeId 2)
         )
       ]
 
@@ -9546,6 +10108,149 @@ adversarialBinaryConstantZeroProblem contractSource = do
     LengthProblem.defaultLengthProblemLimits session contract
     $ adversarialTypedCandidate $ Right graph
 
+adversarialInputAndZeroSpinePairProblem
+  :: Length.LengthSpinePairContractSource
+  -> IO
+      (LengthProblem.CheckedLengthSpinePairProblem
+        AdversarialIdentity AdversarialLocal)
+adversarialInputAndZeroSpinePairProblem contractSource = do
+  session <- adversarialLengthSession [] []
+  contract <- adversarialLengthSpinePairContract
+    session adversarialInputSpinePairTarget contractSource
+  graph <- adversarialInputAndZeroSpinePairGraph
+  expectRight $ LengthProblem.sealLengthSpinePairTypedCandidateProblem
+    LengthProblem.defaultLengthProblemLimits session contract
+    $ adversarialTypedCandidate $ Right graph
+
+adversarialNullaryZeroSpinePairProblem
+  :: Length.LengthSpinePairContractSource
+  -> IO
+      (LengthProblem.CheckedLengthSpinePairProblem
+        AdversarialIdentity AdversarialLocal)
+adversarialNullaryZeroSpinePairProblem contractSource = do
+  let resultType = TupleType Boxed
+        [adversarialClosedList, adversarialClosedList]
+      source = Djex.TermGraphSource (Djex.termNodeId 2)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode adversarialClosedList
+              $ Djex.TypedGlobal (Djex.occurrenceId 0) listName
+          )
+        , ( Djex.termNodeId 1
+          , Djex.TermNode adversarialClosedList
+              $ Djex.TypedGlobal (Djex.occurrenceId 1) listName
+          )
+        , ( Djex.termNodeId 2
+          , Djex.TermNode resultType
+              $ Djex.TypedTuple [Djex.termNodeId 0, Djex.termNodeId 1]
+          )
+        ]
+  session <- adversarialLengthSession [] []
+  contract <- adversarialLengthSpinePairContract
+    session resultType contractSource
+  graph <- sealAdversarialGraph source
+  expectRight $ LengthProblem.sealLengthSpinePairTypedCandidateProblem
+    LengthProblem.defaultLengthProblemLimits session contract
+    $ adversarialTypedCandidate $ Right graph
+
+adversarialProviderSpinePairProblem
+  :: IO
+      ( [Name]
+      , LengthProblem.CheckedLengthSpinePairProblem
+          AdversarialIdentity AdversarialLocal
+      )
+adversarialProviderSpinePairProblem = do
+  firstName <- expectName "Fixture.spinePairFirstProvider"
+  secondName <- expectName "Fixture.spinePairSecondProvider"
+  let resultType = TupleType Boxed
+        [adversarialClosedList, adversarialClosedList]
+      provider name value = Length.AssumedProviderSummary
+        { Length.lengthProviderName = name
+        , Length.lengthProviderScheme = adversarialClosedList
+        , Length.lengthProviderArgumentRoles = []
+        , Length.lengthProviderTransfer = Length.LengthLiteral value
+        }
+      providers = [provider firstName 11, provider secondName 22]
+      declarations =
+        [ ValueDeclaration $ ValueSignature () name adversarialClosedList
+        | name <- [firstName, secondName]
+        ]
+      source = Djex.TermGraphSource (Djex.termNodeId 2)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode adversarialClosedList
+              $ Djex.TypedGlobal (Djex.occurrenceId 0) firstName
+          )
+        , ( Djex.termNodeId 1
+          , Djex.TermNode adversarialClosedList
+              $ Djex.TypedGlobal (Djex.occurrenceId 1) secondName
+          )
+        , ( Djex.termNodeId 2
+          , Djex.TermNode resultType
+              $ Djex.TypedTuple [Djex.termNodeId 0, Djex.termNodeId 1]
+          )
+        ]
+      firstResult = pairResultVariable Length.LengthSpinePairFirst
+      secondResult = pairResultVariable Length.LengthSpinePairSecond
+      contractSource = spinePairContractWith (Length.LengthTruth True)
+        $ Length.LengthAll
+            [ Length.LengthEqual firstResult $ Length.LengthLiteral 0
+            , Length.LengthEqual secondResult $ Length.LengthLiteral 0
+            ]
+  session <- adversarialLengthSession declarations providers
+  contract <- adversarialLengthSpinePairContract
+    session resultType contractSource
+  graph <- sealAdversarialGraph source
+  problem <- expectRight
+    $ LengthProblem.sealLengthSpinePairTypedCandidateProblem
+        LengthProblem.defaultLengthProblemLimits session contract
+        $ adversarialTypedCandidate $ Right graph
+  pure (sort [firstName, secondName], problem)
+
+adversarialOpaqueComponentsSpinePairProblem
+  :: IO
+      (Either
+        (LengthProblem.LengthSpinePairProblemError
+          String AdversarialIdentity AdversarialLocal)
+        (LengthProblem.CheckedLengthSpinePairProblem
+          AdversarialIdentity AdversarialLocal))
+adversarialOpaqueComponentsSpinePairProblem = do
+  let resultType = TupleType Boxed
+        [adversarialClosedList, adversarialClosedList]
+      target = FunctionType adversarialClosedList
+        $ FunctionType adversarialClosedList resultType
+      roles =
+        [Length.LengthUnobservedTarget, Length.LengthUnobservedTarget]
+      source = Djex.TermGraphSource (Djex.termNodeId 3)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode adversarialClosedList
+              $ Djex.TypedLocal (Djex.occurrenceId 2) 0
+          )
+        , ( Djex.termNodeId 1
+          , Djex.TermNode adversarialClosedList
+              $ Djex.TypedLocal (Djex.occurrenceId 3) 1
+          )
+        , ( Djex.termNodeId 2
+          , Djex.TermNode resultType
+              $ Djex.TypedTuple [Djex.termNodeId 0, Djex.termNodeId 1]
+          )
+        , ( Djex.termNodeId 3
+          , Djex.TermNode target
+              $ Djex.TypedLambda
+                  [ Djex.TypedPattern (Djex.occurrenceId 0)
+                      adversarialClosedList $ Djex.TypedBind 0
+                  , Djex.TypedPattern (Djex.occurrenceId 1)
+                      adversarialClosedList $ Djex.TypedBind 1
+                  ]
+                  (Djex.termNodeId 2)
+          )
+        ]
+  session <- adversarialRoleAwareLengthSession roles [] []
+  contract <- adversarialRoleAwareLengthSpinePairContract
+    session roles target trivialSpinePairContract
+  graph <- sealAdversarialGraph source
+  pure $ LengthProblem.sealRoleAwareLengthSpinePairTypedCandidateProblem
+    LengthProblem.defaultLengthProblemLimits session contract
+    $ adversarialTypedCandidate $ Right graph
+
 adversarialWideConstantZeroProblem
   :: Int
   -> IO
@@ -9819,6 +10524,16 @@ sealContract
       (Length.LengthContractError String)
       (Length.CheckedLengthContract String)
 sealContract limits = Length.sealLengthContract limits fixtureInventory
+
+sealSpinePairContract
+  :: Length.LengthLimits
+  -> Type String
+  -> Length.LengthSpinePairContractSource
+  -> Either
+      (Length.LengthSpinePairContractError String)
+      (Length.CheckedLengthSpinePairContract String)
+sealSpinePairContract limits =
+  Length.sealLengthSpinePairContract limits fixtureInventory
 
 sealProviderInventory
   :: Length.LengthLimits

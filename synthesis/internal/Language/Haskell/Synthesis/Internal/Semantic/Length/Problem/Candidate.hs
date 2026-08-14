@@ -16,6 +16,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.Problem.Candidate
   , lengthProblemGraphFingerprintByteLimit
   , lengthProblemEvaluationStepLimit
   , LengthProblemFingerprintPart (..)
+  , LengthSpinePairProblemFingerprintPart (..)
   , LengthRootOpeningError (..)
   , LengthUnobservedTargetDemandSite (..)
   , LengthStepPayloadDemandSite (..)
@@ -23,6 +24,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.Problem.Candidate
   , LengthAssociatedProviderChainSite (..)
   , LengthAssociatedProviderChainReason (..)
   , LengthProblemError (..)
+  , LengthSpinePairProblemError (..)
   , CheckedLengthCandidate
   , CheckedLengthProblem
   , sealLengthTypedCandidateProblem
@@ -39,6 +41,22 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.Problem.Candidate
   , checkedLengthProblemCounterexampleCondition
   , checkedLengthProblemEncodingFingerprint
   , checkedLengthProblemBehavioralProblem
+  , CheckedLengthSpinePairCandidate
+  , CheckedLengthSpinePairProblem
+  , sealLengthSpinePairTypedCandidateProblem
+  , sealRoleAwareLengthSpinePairTypedCandidateProblem
+  , sealExactSpineCaseLengthSpinePairTypedCandidateProblem
+  , sealLengthSpinePairTypedCandidateProblemInSession
+  , checkedLengthSpinePairCandidateResult
+  , checkedLengthSpinePairCandidateUsedProviders
+  , checkedLengthSpinePairCandidateFingerprint
+  , checkedLengthSpinePairProblemCandidate
+  , checkedLengthSpinePairProblemInputCount
+  , checkedLengthSpinePairProblemPrecondition
+  , checkedLengthSpinePairProblemPostcondition
+  , checkedLengthSpinePairProblemCounterexampleCondition
+  , checkedLengthSpinePairProblemEncodingFingerprint
+  , checkedLengthSpinePairProblemBehavioralProblem
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -89,12 +107,19 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , CheckedLengthProviderInventory
   , CheckedLengthProviderSummary
   , CheckedLengthSpineModel
+  , CheckedLengthSpinePairContract
+  , FiniteBinaryProductSpineLengthsV1
   , FiniteListSpineLengthV1
   , LengthContractError
   , LengthContractSource (..)
   , LengthContractVariable (..)
   , LengthExpression (..)
   , LengthFormula (..)
+  , LengthSpinePair (..)
+  , LengthSpinePairComponent (..)
+  , LengthSpinePairContractError
+  , LengthSpinePairContractSource (..)
+  , LengthSpinePairContractVariable (..)
   , LengthProviderArgumentRole (..)
   , LengthProviderTrust (..)
   , LengthTargetArgumentRole (..)
@@ -107,6 +132,11 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , checkedLengthContractTarget
   , checkedLengthContractTargetArgumentRoles
   , checkedLengthContractInputCount
+  , checkedLengthSpinePairContractPostcondition
+  , checkedLengthSpinePairContractPrecondition
+  , checkedLengthSpinePairContractTarget
+  , checkedLengthSpinePairContractTargetArgumentRoles
+  , checkedLengthSpinePairContractInputCount
   , checkedLengthProviderArgumentRoles
   , checkedLengthProviderName
   , checkedLengthProviderScheme
@@ -121,9 +151,11 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , contractVariableField
   , emptySyntaxUsage
   , finiteListSpineLengthDomainTag
+  , finiteBinaryProductSpineLengthsDomainTag
   , inventoryTermScheme
   , isModeledSpine
   , lengthContractFingerprint
+  , lengthSpinePairContractFingerprint
   , lengthContextInventory
   , lengthContextSpineModel
   , lengthExpressionField
@@ -134,6 +166,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , normalizeLengthFormula
   , providerSummaryField
   , sealRoleAwareLengthContractInContext
+  , sealRoleAwareLengthSpinePairContractInContext
   , tagged
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
@@ -147,14 +180,17 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
   , checkedLengthSessionProviderInventory
   , checkedLengthSessionTargetArgumentPolicy
   , checkedLengthSessionExplicitTargetRoles
+  , buildFiniteBinaryProductSpineLengthsInventoryFingerprint
   , lengthSessionEncodingPolicyFingerprint
   , lengthSessionInventoryFingerprint
   , sealLengthContractInSession
+  , sealLengthSpinePairContractInSession
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Problem
   ( BehavioralProblem
   , CandidateFingerprintSubject
   , EncodingFingerprintSubject
+  , InventoryFingerprintSubject
   , ProblemFingerprintSubject
   , behavioralProblemEncodingFingerprint
   , mkBehavioralProblem
@@ -290,6 +326,16 @@ data LengthProblemFingerprintPart
   deriving (Bounded, Enum, Eq, Ord, Show, Generic)
 
 instance NFData LengthProblemFingerprintPart
+
+-- | Product-domain identity whose bounded canonical construction failed.
+data LengthSpinePairProblemFingerprintPart
+  = LengthSpinePairInventoryFingerprint
+  | LengthSpinePairConcreteEncodingFingerprint
+  | LengthSpinePairCandidateFingerprint
+  | LengthSpinePairCompleteProblemFingerprint
+  deriving (Bounded, Enum, Eq, Ord, Show, Generic)
+
+instance NFData LengthSpinePairProblemFingerprintPart
 
 -- | Why a contract's quantified root cannot authorize the graph root.
 data LengthRootOpeningError identity
@@ -459,6 +505,90 @@ instance
     (NFData failure, NFData identity, NFData local) =>
     NFData (LengthProblemError failure identity local)
 
+-- | Closed, product-domain counterpart of 'LengthProblemError'.  Shared
+-- interpreter failures are translated into these constructors before they
+-- cross the public boundary; scalar contract errors never escape through it.
+data LengthSpinePairProblemError failure identity local
+  = LengthSpinePairProblemContractResealRejected
+      (LengthSpinePairContractError (Variable identity))
+  | LengthSpinePairProblemContractContextMismatch
+  | LengthSpinePairProblemMixedTargetArgumentsRequireRoleAwareSealer
+  | LengthSpinePairProblemCasePolicyMismatch
+  | LengthSpinePairProblemTargetArgumentPolicyMismatch
+  | LengthSpinePairProblemResidualConstraint
+      (Constraint (Type (Variable identity)))
+  | LengthSpinePairProblemTypedGraphUnavailable failure
+  | LengthSpinePairProblemAssociatedCertificateOwnerMissing !Name !Natural
+  | LengthSpinePairProblemAssociatedCertificateSourceSchemeMismatch
+      !Name !Natural
+  | LengthSpinePairProblemAssociatedCertificateActivatedObligations
+      !Name !Natural !Natural !Int
+  | LengthSpinePairProblemAssociatedCertificateModeledConstructorUnsupported
+      !Name !Natural
+  | LengthSpinePairProblemAssociatedCertificateProviderSummaryMissing
+      !Name !Natural
+  | LengthSpinePairProblemAssociatedCertificateConditionalObligationsMissing
+      !Name !Natural
+  | LengthSpinePairProblemAssociatedCertificateConstraintDischargeRejected
+      !Name !Natural !Natural !Natural
+      !LengthAssociatedConstraintDischargeReason
+  | LengthSpinePairProblemAssociatedCertificateProtectedChainRejected
+      !Name !Natural !LengthAssociatedProviderChainSite
+      !LengthAssociatedProviderChainReason
+  | LengthSpinePairProblemConditionalProviderRequiresDischarge !TermNodeId !Name
+  | LengthSpinePairProblemTermGraphFingerprintRejected
+      (TermGraphFingerprintError identity local)
+  | LengthSpinePairProblemRootNodeMissing !TermNodeId
+  | LengthSpinePairProblemRootOpeningRejected
+      (LengthRootOpeningError identity)
+  | LengthSpinePairProblemHole !TermNodeId local
+  | LengthSpinePairProblemUnsupportedCase !TermNodeId
+  | LengthSpinePairProblemUnsupportedConstructorPattern !OccurrenceId Name
+  | LengthSpinePairProblemCaseResultIsNotModeledSpine
+      !TermNodeId (Type (Variable identity))
+  | LengthSpinePairProblemCaseScrutineeIsNotModeledSpine
+      !TermNodeId (Type (Variable identity))
+  | LengthSpinePairProblemCaseAlternativeCountMismatch !TermNodeId !Int
+  | LengthSpinePairProblemCasePatternIsNotDirectConstructor !OccurrenceId
+  | LengthSpinePairProblemCaseConstructorRepeated !TermNodeId Name
+  | LengthSpinePairProblemCaseFieldPatternUnsupported !OccurrenceId
+  | LengthSpinePairProblemGraphKindRejected
+      (KindInferenceError (Variable identity))
+  | LengthSpinePairProblemVisibleTypeSourceHasNoBinder !TermNodeId
+  | LengthSpinePairProblemVisibleTypeSelectionRejected
+      !TermNodeId (Type (Variable identity))
+  | LengthSpinePairProblemGlobalNotInSourceInventory !TermNodeId Name
+  | LengthSpinePairProblemGlobalHasNoLengthSummary !TermNodeId Name
+  | LengthSpinePairProblemGlobalInstantiationRejected !TermNodeId Name
+  | LengthSpinePairProblemSemanticLocalMissing !TermNodeId local
+  | LengthSpinePairProblemExpectedCallable !TermNodeId
+  | LengthSpinePairProblemExpectedSpine !TermNodeId
+  | LengthSpinePairProblemExpectedTuple !OccurrenceId
+  | LengthSpinePairProblemUnobservedTargetArgumentDemanded
+      !Natural !LengthUnobservedTargetDemandSite
+  | LengthSpinePairProblemStepPayloadDemanded
+      !OccurrenceId !LengthStepPayloadDemandSite
+  | LengthSpinePairProblemTupleArityMismatch !OccurrenceId !Int !Int
+  | LengthSpinePairProblemExpectedResultTuple !TermNodeId
+  | LengthSpinePairProblemResultTupleArityMismatch !TermNodeId !Int
+  | LengthSpinePairProblemResultComponentExpectedSpine
+      !LengthSpinePairComponent !TermNodeId
+  | LengthSpinePairProblemResultTupleDemandedUnobservedTarget
+      !Natural !TermNodeId
+  | LengthSpinePairProblemResultTupleDemandedStepPayload
+      !OccurrenceId !TermNodeId
+  | LengthSpinePairProblemEvaluationStepLimitExceeded !Int !Int
+  | LengthSpinePairProblemProviderTransferInvariant Name !Natural
+  | LengthSpinePairProblemSyntaxRejected LengthSyntaxError
+  | LengthSpinePairProblemFingerprintLimitExceeded
+      !LengthSpinePairProblemFingerprintPart !Natural !Natural
+  | LengthSpinePairProblemInternalSharedFailure
+  deriving (Eq, Ord, Show, Generic)
+
+instance
+    (NFData failure, NFData identity, NFData local) =>
+    NFData (LengthSpinePairProblemError failure identity local)
+
 -- | Opaque interpreted result and identity for one engine-owned candidate.
 --
 -- This receipt is candidate-local: it deliberately carries no search-batch
@@ -572,6 +702,101 @@ checkedLengthProblemBehavioralProblem
 checkedLengthProblemBehavioralProblem
     (CheckedLengthProblem _ _ _ _ _ problem) = problem
 
+-- | Opaque symbolic binary spine result for one engine-owned candidate.
+data CheckedLengthSpinePairCandidate identity local =
+  CheckedLengthSpinePairCandidate
+    !(LengthSpinePair (LengthExpression LengthContractVariable))
+    ![Name]
+    !(Fingerprint
+        (CandidateFingerprintSubject FiniteBinaryProductSpineLengthsV1))
+
+type role CheckedLengthSpinePairCandidate nominal nominal
+
+instance NFData (CheckedLengthSpinePairCandidate identity local) where
+  rnf (CheckedLengthSpinePairCandidate result providers candidate) =
+    rnf result `seq` rnf providers `seq` rnf candidate
+
+-- | Opaque complete counterexample problem for a boxed binary product of
+-- modeled finite spines.
+data CheckedLengthSpinePairProblem identity local =
+  CheckedLengthSpinePairProblem
+    !(CheckedLengthSpinePairCandidate identity local)
+    !Int
+    !(LengthFormula LengthSpinePairContractVariable)
+    !(LengthFormula LengthSpinePairContractVariable)
+    !(LengthFormula LengthContractVariable)
+    !(BehavioralProblem FiniteBinaryProductSpineLengthsV1)
+
+type role CheckedLengthSpinePairProblem nominal nominal
+
+instance NFData (CheckedLengthSpinePairProblem identity local) where
+  rnf (CheckedLengthSpinePairProblem candidate inputCount precondition
+      postcondition condition problem) =
+    rnf candidate `seq` rnf inputCount `seq` rnf precondition `seq`
+    rnf postcondition `seq` rnf condition `seq`
+    rnf (behavioralProblemEncodingFingerprint problem) `seq` rnf problem
+
+checkedLengthSpinePairCandidateResult
+  :: CheckedLengthSpinePairCandidate identity local
+  -> LengthSpinePair (LengthExpression LengthContractVariable)
+checkedLengthSpinePairCandidateResult
+    (CheckedLengthSpinePairCandidate result _ _) = result
+
+checkedLengthSpinePairCandidateUsedProviders
+  :: CheckedLengthSpinePairCandidate identity local -> [Name]
+checkedLengthSpinePairCandidateUsedProviders
+    (CheckedLengthSpinePairCandidate _ providers _) = providers
+
+checkedLengthSpinePairCandidateFingerprint
+  :: CheckedLengthSpinePairCandidate identity local
+  -> Fingerprint
+      (CandidateFingerprintSubject FiniteBinaryProductSpineLengthsV1)
+checkedLengthSpinePairCandidateFingerprint
+    (CheckedLengthSpinePairCandidate _ _ candidate) = candidate
+
+checkedLengthSpinePairProblemCandidate
+  :: CheckedLengthSpinePairProblem identity local
+  -> CheckedLengthSpinePairCandidate identity local
+checkedLengthSpinePairProblemCandidate
+    (CheckedLengthSpinePairProblem candidate _ _ _ _ _) = candidate
+
+checkedLengthSpinePairProblemInputCount
+  :: CheckedLengthSpinePairProblem identity local -> Int
+checkedLengthSpinePairProblemInputCount
+    (CheckedLengthSpinePairProblem _ inputCount _ _ _ _) = inputCount
+
+checkedLengthSpinePairProblemPrecondition
+  :: CheckedLengthSpinePairProblem identity local
+  -> LengthFormula LengthSpinePairContractVariable
+checkedLengthSpinePairProblemPrecondition
+    (CheckedLengthSpinePairProblem _ _ precondition _ _ _) = precondition
+
+checkedLengthSpinePairProblemPostcondition
+  :: CheckedLengthSpinePairProblem identity local
+  -> LengthFormula LengthSpinePairContractVariable
+checkedLengthSpinePairProblemPostcondition
+    (CheckedLengthSpinePairProblem _ _ _ postcondition _ _) = postcondition
+
+checkedLengthSpinePairProblemCounterexampleCondition
+  :: CheckedLengthSpinePairProblem identity local
+  -> LengthFormula LengthContractVariable
+checkedLengthSpinePairProblemCounterexampleCondition
+    (CheckedLengthSpinePairProblem _ _ _ _ condition _) = condition
+
+checkedLengthSpinePairProblemEncodingFingerprint
+  :: CheckedLengthSpinePairProblem identity local
+  -> Fingerprint
+      (EncodingFingerprintSubject FiniteBinaryProductSpineLengthsV1)
+checkedLengthSpinePairProblemEncodingFingerprint
+    (CheckedLengthSpinePairProblem _ _ _ _ _ problem) =
+  behavioralProblemEncodingFingerprint problem
+
+checkedLengthSpinePairProblemBehavioralProblem
+  :: CheckedLengthSpinePairProblem identity local
+  -> BehavioralProblem FiniteBinaryProductSpineLengthsV1
+checkedLengthSpinePairProblemBehavioralProblem
+    (CheckedLengthSpinePairProblem _ _ _ _ _ problem) = problem
+
 -- | Atomically retain, interpret, identify, and envelope one engine-owned
 -- typed candidate. The provider inventory is consumed directly from the
 -- opaque checked session; only the separately supplied contract is revalidated
@@ -655,6 +880,68 @@ sealLengthTypedCandidateProblemInSession
       (CheckedLengthProblem identity local)
 sealLengthTypedCandidateProblemInSession =
   sealLengthTypedCandidateProblemWithMode LengthSessionPolicyProblemSealer
+
+sealLengthSpinePairTypedCandidateProblem
+  :: (Ord identity, Ord local)
+  => LengthProblemLimits
+  -> CheckedLengthSession identity annotation
+  -> CheckedLengthSpinePairContract (Variable identity)
+  -> TypedCandidate failure
+      (Type (Variable identity))
+      local
+      (Candidate (Type (Variable identity)) details output)
+  -> Either
+      (LengthSpinePairProblemError failure identity local)
+      (CheckedLengthSpinePairProblem identity local)
+sealLengthSpinePairTypedCandidateProblem =
+  sealLengthSpinePairTypedCandidateProblemWithMode LengthLegacyProblemSealer
+
+sealRoleAwareLengthSpinePairTypedCandidateProblem
+  :: (Ord identity, Ord local)
+  => LengthProblemLimits
+  -> CheckedLengthSession identity annotation
+  -> CheckedLengthSpinePairContract (Variable identity)
+  -> TypedCandidate failure
+      (Type (Variable identity))
+      local
+      (Candidate (Type (Variable identity)) details output)
+  -> Either
+      (LengthSpinePairProblemError failure identity local)
+      (CheckedLengthSpinePairProblem identity local)
+sealRoleAwareLengthSpinePairTypedCandidateProblem =
+  sealLengthSpinePairTypedCandidateProblemWithMode LengthRoleAwareProblemSealer
+
+sealExactSpineCaseLengthSpinePairTypedCandidateProblem
+  :: (Ord identity, Ord local)
+  => LengthProblemLimits
+  -> CheckedLengthSession identity annotation
+  -> CheckedLengthSpinePairContract (Variable identity)
+  -> TypedCandidate failure
+      (Type (Variable identity))
+      local
+      (Candidate (Type (Variable identity)) details output)
+  -> Either
+      (LengthSpinePairProblemError failure identity local)
+      (CheckedLengthSpinePairProblem identity local)
+sealExactSpineCaseLengthSpinePairTypedCandidateProblem =
+  sealLengthSpinePairTypedCandidateProblemWithMode
+    LengthExactSpineCaseProblemSealer
+
+sealLengthSpinePairTypedCandidateProblemInSession
+  :: (Ord identity, Ord local)
+  => LengthProblemLimits
+  -> CheckedLengthSession identity annotation
+  -> CheckedLengthSpinePairContract (Variable identity)
+  -> TypedCandidate failure
+      (Type (Variable identity))
+      local
+      (Candidate (Type (Variable identity)) details output)
+  -> Either
+      (LengthSpinePairProblemError failure identity local)
+      (CheckedLengthSpinePairProblem identity local)
+sealLengthSpinePairTypedCandidateProblemInSession =
+  sealLengthSpinePairTypedCandidateProblemWithMode
+    LengthSessionPolicyProblemSealer
 
 data LengthProblemSealer
   = LengthLegacyProblemSealer
@@ -857,6 +1144,148 @@ sealLengthTypedCandidateProblemWithMode sealer problemLimits session
     condition
     behavioralProblem
 
+sealLengthSpinePairTypedCandidateProblemWithMode
+  :: (Ord identity, Ord local)
+  => LengthProblemSealer
+  -> LengthProblemLimits
+  -> CheckedLengthSession identity annotation
+  -> CheckedLengthSpinePairContract (Variable identity)
+  -> TypedCandidate failure
+      (Type (Variable identity))
+      local
+      (Candidate (Type (Variable identity)) details output)
+  -> Either
+      (LengthSpinePairProblemError failure identity local)
+      (CheckedLengthSpinePairProblem identity local)
+sealLengthSpinePairTypedCandidateProblemWithMode sealer problemLimits session
+    suppliedContract typed = do
+  let suppliedRoles =
+        checkedLengthSpinePairContractTargetArgumentRoles suppliedContract
+      mixedContract = LengthUnobservedTarget `elem` suppliedRoles
+      mixedSession = checkedLengthSessionTargetArgumentPolicy session
+        == LengthMixedTargetPolicy
+  case sealer of
+    LengthLegacyProblemSealer
+      | mixedContract -> Left
+          LengthSpinePairProblemMixedTargetArgumentsRequireRoleAwareSealer
+    LengthSessionPolicyProblemSealer
+      | checkedLengthSessionExplicitTargetRoles session == Nothing
+      , mixedContract -> Left
+          LengthSpinePairProblemMixedTargetArgumentsRequireRoleAwareSealer
+    _ -> pure ()
+  let expectedCasePolicy = case sealer of
+        LengthExactSpineCaseProblemSealer -> LengthExactZeroStepCases
+        LengthSessionPolicyProblemSealer ->
+          checkedLengthSessionCasePolicy session
+        _ -> LengthCasesRejected
+  if checkedLengthSessionCasePolicy session == expectedCasePolicy
+    then pure ()
+    else Left LengthSpinePairProblemCasePolicyMismatch
+  if mixedContract == mixedSession
+    then pure ()
+    else Left LengthSpinePairProblemTargetArgumentPolicyMismatch
+  case sealer of
+    LengthSessionPolicyProblemSealer -> case
+        checkedLengthSessionExplicitTargetRoles session of
+      Nothing -> pure ()
+      Just expectedRoles
+        | suppliedRoles == expectedRoles -> pure ()
+        | otherwise -> Left
+            LengthSpinePairProblemTargetArgumentPolicyMismatch
+    _ -> pure ()
+  let providers = checkedLengthSessionProviderInventory session
+  contract <- case sealer of
+    LengthSessionPolicyProblemSealer ->
+      revalidateSpinePairContractInSession session suppliedContract
+    _ -> revalidateSpinePairContract session suppliedContract
+  let compatibility = typedCandidateCompatibility typed
+  case candidateResidualConstraints compatibility of
+    constraint : _ -> Left
+      $ LengthSpinePairProblemResidualConstraint constraint
+    [] -> pure ()
+  (graph, graphFingerprint, candidateAuthorization) <- mapSharedFailure
+    $ retainLengthCandidateGraph session problemLimits typed
+  rootNode <- case lookupTermNode (termGraphRoot graph) graph of
+    Nothing -> Left $ LengthSpinePairProblemRootNodeMissing
+      $ termGraphRoot graph
+    Just node -> Right node
+  authorizedRigids <- mapSharedFailure $ matchRootOpening
+    (checkedLengthSpinePairContractTarget contract) $ termNodeType rootNode
+  preflight <- mapSharedFailure
+    $ preflightGraph session providers candidateAuthorization
+        authorizedRigids graph
+  (rawResultOr, evaluationState) <- mapSharedFailure $ runStateT
+    (interpretCompleteSpinePairCandidate
+      InterpretationContext
+        { interpretationSession = session
+        , interpretationProblemLimits = problemLimits
+        , interpretationGraph = graph
+        , interpretationGlobals = preflightGlobals preflight
+        , interpretationCases = preflightCases preflight
+        , interpretationConditionalProviderFinals =
+            preflightConditionalProviderFinals preflight
+        , interpretationTargetArgumentRoles =
+            checkedLengthSpinePairContractTargetArgumentRoles contract
+        , interpretationInputCount =
+            checkedLengthSpinePairContractInputCount contract
+        }
+      $ termGraphRoot graph)
+    emptyEvaluationState
+  rawResult <- first mapSpinePairResultShapeError rawResultOr
+  let limits = checkedLengthSessionLimits session
+      checkCandidateVariable = validateCandidateVariable
+        $ checkedLengthSpinePairContractInputCount contract
+  (firstResult, afterFirst) <- first LengthSpinePairProblemSyntaxRejected
+    $ normalizeLengthExpression limits checkCandidateVariable
+        emptySyntaxUsage $ lengthSpinePairFirst rawResult
+  (secondResult, usage) <- first LengthSpinePairProblemSyntaxRejected
+    $ normalizeLengthExpression limits checkCandidateVariable
+        afterFirst $ lengthSpinePairSecond rawResult
+  let result = LengthSpinePair firstResult secondResult
+      rawCondition = LengthAll
+        [ substituteSpinePairResultFormula result
+            $ checkedLengthSpinePairContractPrecondition contract
+        , LengthNot $ substituteSpinePairResultFormula result
+            $ checkedLengthSpinePairContractPostcondition contract
+        ]
+  (condition, _) <- first LengthSpinePairProblemSyntaxRejected
+    $ normalizeLengthFormula limits checkCandidateVariable usage rawCondition
+  let usedProvidersByName = evaluationUsedProviders evaluationState
+      usedProviderNames = materializeProviderNames usedProvidersByName
+  usedProviderNames `seq` pure ()
+  productInventory <- mapSpinePairFingerprintFailure
+    LengthSpinePairInventoryFingerprint
+    $ buildFiniteBinaryProductSpineLengthsInventoryFingerprint session
+  encodingFingerprint <- mapSpinePairFingerprintFailure
+    LengthSpinePairConcreteEncodingFingerprint
+    $ buildSpinePairConcreteEncodingFingerprint session contract
+        (Map.elems usedProvidersByName) result condition
+  candidateFingerprint <- mapSpinePairFingerprintFailure
+    LengthSpinePairCandidateFingerprint
+    $ buildSpinePairCandidateFingerprint session
+        (candidateAuthorizationIdentity candidateAuthorization)
+        graphFingerprint
+  problemFingerprint <- mapSpinePairFingerprintFailure
+    LengthSpinePairCompleteProblemFingerprint
+    $ buildSpinePairCompleteProblemFingerprint session productInventory
+        encodingFingerprint candidateFingerprint
+  let checkedCandidate = CheckedLengthSpinePairCandidate
+        result usedProviderNames candidateFingerprint
+      behavioralProblem = mkBehavioralProblem
+        finiteBinaryProductSpineLengthsDomainTag
+        productInventory
+        encodingFingerprint
+        candidateFingerprint
+        problemFingerprint
+  pure $ CheckedLengthSpinePairProblem checkedCandidate
+    (checkedLengthSpinePairContractInputCount contract)
+    (checkedLengthSpinePairContractPrecondition contract)
+    (checkedLengthSpinePairContractPostcondition contract)
+    condition
+    behavioralProblem
+ where
+  mapSharedFailure = first lengthProblemErrorToSpinePairProblemError
+
 revalidateContract
   :: Ord identity
   => CheckedLengthSession identity annotation
@@ -909,6 +1338,180 @@ revalidateContractWith sealer original = do
   if lengthContractFingerprint checked == lengthContractFingerprint original
     then Right checked
     else Left LengthProblemContractContextMismatch
+
+revalidateSpinePairContract
+  :: Ord identity
+  => CheckedLengthSession identity annotation
+  -> CheckedLengthSpinePairContract (Variable identity)
+  -> Either
+      (LengthSpinePairProblemError failure identity local)
+      (CheckedLengthSpinePairContract (Variable identity))
+revalidateSpinePairContract session original =
+  revalidateSpinePairContractWith
+    (sealRoleAwareLengthSpinePairContractInContext
+      (checkedLengthSessionLimits session)
+      (checkedLengthSessionContext session)
+      (checkedLengthSpinePairContractTargetArgumentRoles original))
+    original
+
+revalidateSpinePairContractInSession
+  :: Ord identity
+  => CheckedLengthSession identity annotation
+  -> CheckedLengthSpinePairContract (Variable identity)
+  -> Either
+      (LengthSpinePairProblemError failure identity local)
+      (CheckedLengthSpinePairContract (Variable identity))
+revalidateSpinePairContractInSession session =
+  revalidateSpinePairContractWith
+    $ sealLengthSpinePairContractInSession session
+
+revalidateSpinePairContractWith
+  :: ( Type (Variable identity)
+       -> LengthSpinePairContractSource
+       -> Either
+            (LengthSpinePairContractError (Variable identity))
+            (CheckedLengthSpinePairContract (Variable identity))
+     )
+  -> CheckedLengthSpinePairContract (Variable identity)
+  -> Either
+      (LengthSpinePairProblemError failure identity local)
+      (CheckedLengthSpinePairContract (Variable identity))
+revalidateSpinePairContractWith sealer original = do
+  checked <- first LengthSpinePairProblemContractResealRejected
+    $ sealer
+        (checkedLengthSpinePairContractTarget original)
+        LengthSpinePairContractSource
+          { lengthSpinePairContractPrecondition =
+              checkedLengthSpinePairContractPrecondition original
+          , lengthSpinePairContractPostcondition =
+              checkedLengthSpinePairContractPostcondition original
+          }
+  if lengthSpinePairContractFingerprint checked ==
+      lengthSpinePairContractFingerprint original
+    then Right checked
+    else Left LengthSpinePairProblemContractContextMismatch
+
+mapSpinePairResultShapeError
+  :: LengthSpinePairResultShapeError
+  -> LengthSpinePairProblemError failure identity local
+mapSpinePairResultShapeError failure = case failure of
+  LengthSpinePairExpectedResultTuple owner ->
+    LengthSpinePairProblemExpectedResultTuple owner
+  LengthSpinePairResultTupleArityMismatch owner observed ->
+    LengthSpinePairProblemResultTupleArityMismatch owner observed
+  LengthSpinePairResultComponentExpectedSpine component owner ->
+    LengthSpinePairProblemResultComponentExpectedSpine component owner
+  LengthSpinePairResultTupleDemandedUnobservedTarget position owner ->
+    LengthSpinePairProblemResultTupleDemandedUnobservedTarget position owner
+  LengthSpinePairResultTupleDemandedStepPayload occurrence owner ->
+    LengthSpinePairProblemResultTupleDemandedStepPayload occurrence owner
+
+lengthProblemErrorToSpinePairProblemError
+  :: LengthProblemError failure identity local
+  -> LengthSpinePairProblemError failure identity local
+lengthProblemErrorToSpinePairProblemError failure = case failure of
+  LengthProblemContractResealRejected{} ->
+    LengthSpinePairProblemInternalSharedFailure
+  LengthProblemContractContextMismatch ->
+    LengthSpinePairProblemInternalSharedFailure
+  LengthProblemMixedTargetArgumentsRequireRoleAwareSealer ->
+    LengthSpinePairProblemMixedTargetArgumentsRequireRoleAwareSealer
+  LengthProblemCasePolicyMismatch ->
+    LengthSpinePairProblemCasePolicyMismatch
+  LengthProblemTargetArgumentPolicyMismatch ->
+    LengthSpinePairProblemTargetArgumentPolicyMismatch
+  LengthProblemResidualConstraint constraint ->
+    LengthSpinePairProblemResidualConstraint constraint
+  LengthProblemTypedGraphUnavailable graphFailure ->
+    LengthSpinePairProblemTypedGraphUnavailable graphFailure
+  LengthProblemAssociatedCertificateOwnerMissing name row ->
+    LengthSpinePairProblemAssociatedCertificateOwnerMissing name row
+  LengthProblemAssociatedCertificateSourceSchemeMismatch name row ->
+    LengthSpinePairProblemAssociatedCertificateSourceSchemeMismatch name row
+  LengthProblemAssociatedCertificateActivatedObligations name row step count ->
+    LengthSpinePairProblemAssociatedCertificateActivatedObligations
+      name row step count
+  LengthProblemAssociatedCertificateModeledConstructorUnsupported name row ->
+    LengthSpinePairProblemAssociatedCertificateModeledConstructorUnsupported
+      name row
+  LengthProblemAssociatedCertificateProviderSummaryMissing name row ->
+    LengthSpinePairProblemAssociatedCertificateProviderSummaryMissing name row
+  LengthProblemAssociatedCertificateConditionalObligationsMissing name row ->
+    LengthSpinePairProblemAssociatedCertificateConditionalObligationsMissing
+      name row
+  LengthProblemAssociatedCertificateConstraintDischargeRejected
+      name row step obligation reason ->
+    LengthSpinePairProblemAssociatedCertificateConstraintDischargeRejected
+      name row step obligation reason
+  LengthProblemAssociatedCertificateProtectedChainRejected
+      name row site reason ->
+    LengthSpinePairProblemAssociatedCertificateProtectedChainRejected
+      name row site reason
+  LengthProblemConditionalProviderRequiresDischarge node name ->
+    LengthSpinePairProblemConditionalProviderRequiresDischarge node name
+  LengthProblemTermGraphFingerprintRejected graphFailure ->
+    LengthSpinePairProblemTermGraphFingerprintRejected graphFailure
+  LengthProblemRootNodeMissing node ->
+    LengthSpinePairProblemRootNodeMissing node
+  LengthProblemRootOpeningRejected reason ->
+    LengthSpinePairProblemRootOpeningRejected reason
+  LengthProblemHole node local -> LengthSpinePairProblemHole node local
+  LengthProblemUnsupportedCase node ->
+    LengthSpinePairProblemUnsupportedCase node
+  LengthProblemUnsupportedConstructorPattern occurrence name ->
+    LengthSpinePairProblemUnsupportedConstructorPattern occurrence name
+  LengthProblemCaseResultIsNotModeledSpine node resultType ->
+    LengthSpinePairProblemCaseResultIsNotModeledSpine node resultType
+  LengthProblemCaseScrutineeIsNotModeledSpine node scrutineeType ->
+    LengthSpinePairProblemCaseScrutineeIsNotModeledSpine node scrutineeType
+  LengthProblemCaseAlternativeCountMismatch node observed ->
+    LengthSpinePairProblemCaseAlternativeCountMismatch node observed
+  LengthProblemCasePatternIsNotDirectConstructor occurrence ->
+    LengthSpinePairProblemCasePatternIsNotDirectConstructor occurrence
+  LengthProblemCaseConstructorRepeated node name ->
+    LengthSpinePairProblemCaseConstructorRepeated node name
+  LengthProblemCaseFieldPatternUnsupported occurrence ->
+    LengthSpinePairProblemCaseFieldPatternUnsupported occurrence
+  LengthProblemGraphKindRejected reason ->
+    LengthSpinePairProblemGraphKindRejected reason
+  LengthProblemVisibleTypeSourceHasNoBinder node ->
+    LengthSpinePairProblemVisibleTypeSourceHasNoBinder node
+  LengthProblemVisibleTypeSelectionRejected node selected ->
+    LengthSpinePairProblemVisibleTypeSelectionRejected node selected
+  LengthProblemGlobalNotInSourceInventory node name ->
+    LengthSpinePairProblemGlobalNotInSourceInventory node name
+  LengthProblemGlobalHasNoLengthSummary node name ->
+    LengthSpinePairProblemGlobalHasNoLengthSummary node name
+  LengthProblemGlobalInstantiationRejected node name ->
+    LengthSpinePairProblemGlobalInstantiationRejected node name
+  LengthProblemSemanticLocalMissing node local ->
+    LengthSpinePairProblemSemanticLocalMissing node local
+  LengthProblemExpectedCallable node ->
+    LengthSpinePairProblemExpectedCallable node
+  LengthProblemExpectedSpine node -> LengthSpinePairProblemExpectedSpine node
+  LengthProblemExpectedTuple occurrence ->
+    LengthSpinePairProblemExpectedTuple occurrence
+  LengthProblemUnobservedTargetArgumentDemanded position site ->
+    LengthSpinePairProblemUnobservedTargetArgumentDemanded position site
+  LengthProblemStepPayloadDemanded occurrence site ->
+    LengthSpinePairProblemStepPayloadDemanded occurrence site
+  LengthProblemTupleArityMismatch occurrence expected observed ->
+    LengthSpinePairProblemTupleArityMismatch occurrence expected observed
+  LengthProblemEvaluationStepLimitExceeded maximumSteps observed ->
+    LengthSpinePairProblemEvaluationStepLimitExceeded maximumSteps observed
+  LengthProblemProviderTransferInvariant name position ->
+    LengthSpinePairProblemProviderTransferInvariant name position
+  LengthProblemSyntaxRejected reason ->
+    LengthSpinePairProblemSyntaxRejected reason
+  LengthProblemFingerprintLimitExceeded part maximumBytes observed ->
+    LengthSpinePairProblemFingerprintLimitExceeded
+      (mapFingerprintPart part) maximumBytes observed
+ where
+  mapFingerprintPart part = case part of
+    LengthConcreteEncodingFingerprint ->
+      LengthSpinePairConcreteEncodingFingerprint
+    LengthCandidateFingerprint -> LengthSpinePairCandidateFingerprint
+    LengthCompleteProblemFingerprint -> LengthSpinePairCompleteProblemFingerprint
 
 matchRootOpening
   :: Ord identity
@@ -1687,6 +2290,15 @@ interpretCompleteCandidate
   -> Evaluation failure identity local
       (LengthExpression LengthContractVariable)
 interpretCompleteCandidate context root = do
+  applied <- interpretAppliedCandidate context root
+  requireSpine root applied
+
+interpretAppliedCandidate
+  :: (Ord identity, Ord local)
+  => InterpretationContext identity local annotation
+  -> TermNodeId
+  -> Evaluation failure identity local (SemanticValue identity local)
+interpretAppliedCandidate context root = do
   value <- evaluateNode context emptyEnvironment root
   (applied, observedCount) <- foldM (applyTargetArgument context root)
     (value, 0)
@@ -1694,7 +2306,69 @@ interpretCompleteCandidate context root = do
   if observedCount == fromIntegral (interpretationInputCount context)
     then pure ()
     else lift $ Left $ LengthProblemTargetArgumentPolicyMismatch
-  requireSpine root applied
+  pure applied
+
+data LengthSpinePairResultShapeError
+  = LengthSpinePairExpectedResultTuple !TermNodeId
+  | LengthSpinePairResultTupleArityMismatch !TermNodeId !Int
+  | LengthSpinePairResultComponentExpectedSpine
+      !LengthSpinePairComponent !TermNodeId
+  | LengthSpinePairResultTupleDemandedUnobservedTarget
+      !Natural !TermNodeId
+  | LengthSpinePairResultTupleDemandedStepPayload
+      !OccurrenceId !TermNodeId
+
+interpretCompleteSpinePairCandidate
+  :: (Ord identity, Ord local)
+  => InterpretationContext identity local annotation
+  -> TermNodeId
+  -> Evaluation failure identity local
+      (Either
+        LengthSpinePairResultShapeError
+        (LengthSpinePair (LengthExpression LengthContractVariable)))
+interpretCompleteSpinePairCandidate context root = do
+  applied <- interpretAppliedCandidate context root
+  case applied of
+    SemanticTuple fields -> case fields of
+      [firstThunk, secondThunk] -> do
+        firstOr <- forceSpinePairComponent
+          LengthSpinePairFirst context root firstThunk
+        case firstOr of
+          Left failure -> pure $ Left failure
+          Right firstResult -> do
+            secondOr <- forceSpinePairComponent
+              LengthSpinePairSecond context root secondThunk
+            pure $ LengthSpinePair firstResult <$> secondOr
+      _ -> pure $ Left $ LengthSpinePairResultTupleArityMismatch
+        root $ length fields
+    SemanticOpaqueTargetArgument position -> pure $ Left
+      $ LengthSpinePairResultTupleDemandedUnobservedTarget position root
+    SemanticOpaqueStepPayload occurrence -> pure $ Left
+      $ LengthSpinePairResultTupleDemandedStepPayload occurrence root
+    _ -> pure $ Left $ LengthSpinePairExpectedResultTuple root
+
+forceSpinePairComponent
+  :: (Ord identity, Ord local)
+  => LengthSpinePairComponent
+  -> InterpretationContext identity local annotation
+  -> TermNodeId
+  -> SemanticThunk identity local
+  -> Evaluation failure identity local
+      (Either
+        LengthSpinePairResultShapeError
+        (LengthExpression LengthContractVariable))
+forceSpinePairComponent component context owner thunk = do
+  value <- forceThunk context thunk
+  case value of
+    SemanticSpine expression -> pure $ Right expression
+    SemanticOpaqueTargetArgument position -> lift $ Left
+      $ LengthProblemUnobservedTargetArgumentDemanded position
+      $ LengthUnobservedTargetSpineDemand owner
+    SemanticOpaqueStepPayload occurrence -> lift $ Left
+      $ LengthProblemStepPayloadDemanded occurrence
+      $ LengthStepPayloadSpineDemand owner
+    _ -> pure $ Left
+      $ LengthSpinePairResultComponentExpectedSpine component owner
 
 applyTargetArgument
   :: (Ord identity, Ord local)
@@ -2082,6 +2756,43 @@ substituteResultFormula result = goFormula
     LengthNot formula -> LengthNot $ goFormula formula
     LengthAll formulas -> LengthAll $ map goFormula formulas
 
+substituteSpinePairResultFormula
+  :: LengthSpinePair (LengthExpression LengthContractVariable)
+  -> LengthFormula LengthSpinePairContractVariable
+  -> LengthFormula LengthContractVariable
+substituteSpinePairResultFormula result = goFormula
+ where
+  goExpression source = case source of
+    LengthVariable variable -> case variable of
+      LengthSpinePairInput position -> LengthVariable $ LengthInput position
+      LengthSpinePairResult component -> case component of
+        LengthSpinePairFirst -> lengthSpinePairFirst result
+        LengthSpinePairSecond -> lengthSpinePairSecond result
+    LengthLiteral value -> LengthLiteral value
+    LengthSum terms -> LengthSum $ map goExpression terms
+    LengthScale factor expression -> LengthScale factor $ goExpression expression
+    LengthQuotient divisor expression ->
+      LengthQuotient divisor $ goExpression expression
+    LengthModulo divisor expression ->
+      LengthModulo divisor $ goExpression expression
+    LengthMonus left right -> LengthMonus
+      (goExpression left) (goExpression right)
+    LengthMinimum left right -> LengthMinimum
+      (goExpression left) (goExpression right)
+    LengthMaximum left right -> LengthMaximum
+      (goExpression left) (goExpression right)
+    LengthIf condition trueBranch falseBranch -> LengthIf
+      (goFormula condition) (goExpression trueBranch) (goExpression falseBranch)
+
+  goFormula source = case source of
+    LengthTruth value -> LengthTruth value
+    LengthEqual left right -> LengthEqual
+      (goExpression left) (goExpression right)
+    LengthAtMost left right -> LengthAtMost
+      (goExpression left) (goExpression right)
+    LengthNot formula -> LengthNot $ goFormula formula
+    LengthAll formulas -> LengthAll $ map goFormula formulas
+
 mapFingerprintFailure
   :: LengthProblemFingerprintPart
   -> Either FingerprintLimitError value
@@ -2092,6 +2803,18 @@ mapFingerprintFailure part = either reject Right
       { fingerprintMaximumBytes = maximumBytes
       , fingerprintObservedBytesAtLeast = observedBytes
       } = Left $ LengthProblemFingerprintLimitExceeded
+        part maximumBytes observedBytes
+
+mapSpinePairFingerprintFailure
+  :: LengthSpinePairProblemFingerprintPart
+  -> Either FingerprintLimitError value
+  -> Either (LengthSpinePairProblemError failure identity local) value
+mapSpinePairFingerprintFailure part = either reject Right
+ where
+  reject FingerprintLimitExceeded
+      { fingerprintMaximumBytes = maximumBytes
+      , fingerprintObservedBytesAtLeast = observedBytes
+      } = Left $ LengthSpinePairProblemFingerprintLimitExceeded
         part maximumBytes observedBytes
 
 buildConcreteEncodingFingerprint
@@ -2170,6 +2893,99 @@ buildConcreteEncodingFingerprint session contract usedProviders result condition
   maximumBytes = fromIntegral $ lengthFingerprintByteLimit
     $ checkedLengthSessionLimits session
 
+buildSpinePairConcreteEncodingFingerprint
+  :: CheckedLengthSession identity annotation
+  -> CheckedLengthSpinePairContract (Variable identity)
+  -> [CheckedLengthProviderSummary (Variable identity)]
+  -> LengthSpinePair (LengthExpression LengthContractVariable)
+  -> LengthFormula LengthContractVariable
+  -> Either FingerprintLimitError
+      (Fingerprint
+        (EncodingFingerprintSubject FiniteBinaryProductSpineLengthsV1))
+buildSpinePairConcreteEncodingFingerprint session contract usedProviders
+    result condition =
+  buildFingerprintWithin maximumBytes FingerprintBuilder
+    { fingerprintBuilderVersion =
+        (if conditionalCapable then 3 else 0) + case casePolicy of
+          LengthExactZeroStepCases -> 3
+          LengthCasesRejected -> if mixedRoles then 2 else 1
+    , fingerprintBuilderRole = ascii
+        "finite-binary-product-spine-lengths/concrete-encoding"
+    , fingerprintBuilderFields =
+        [ tagged "dialect"
+            [FingerprintBytes finiteBinaryProductSpineLengthsDomainTag]
+        , tagged "shared-session-policy"
+            [ FingerprintBytes $ fingerprintCanonicalBytes
+                $ lengthSessionEncodingPolicyFingerprint session
+            ]
+        , tagged "contract"
+            [ FingerprintBytes $ fingerprintCanonicalBytes
+                $ lengthSpinePairContractFingerprint contract
+            ]
+        , tagged "interpreter" $
+            [ FingerprintBytes $ ascii "lazy-symbolic-interpreter/v1"
+            , FingerprintBytes $ ascii "finite-total-spine/v1"
+            , FingerprintBytes $ ascii "assumed-provider-laws/v1"
+            , FingerprintBytes $ ascii "boxed-binary-spine-pair-root/v1"
+            , FingerprintBytes $ ascii
+                "source-ordered-left-then-right-extraction/v1"
+            , FingerprintBytes $ ascii
+                "scalar-provider-law-union-across-pair-components/v1"
+            , FingerprintBytes $ ascii
+                "pair-result-substitution-before-smt/v1"
+            ] ++ conditionalInterpreterPolicy ++ mixedInterpreterPolicy ++
+              caseInterpreterPolicy
+        , tagged "used-provider-laws"
+            [FingerprintSequence $ map providerSummaryField usedProviders]
+        , tagged "candidate-result"
+            [ tagged "first"
+                [ lengthExpressionField contractVariableField
+                    $ lengthSpinePairFirst result
+                ]
+            , tagged "second"
+                [ lengthExpressionField contractVariableField
+                    $ lengthSpinePairSecond result
+                ]
+            ]
+        , tagged "counterexample-condition"
+            [lengthFormulaField contractVariableField condition]
+        ]
+    }
+ where
+  conditionalCapable = any ((==
+      AssumedProviderLawConditionalOnConstraintDischarge) .
+        checkedLengthProviderTrust)
+    $ checkedLengthProviderSummaries
+    $ checkedLengthSessionProviderInventory session
+  mixedRoles = LengthUnobservedTarget `elem`
+    checkedLengthSpinePairContractTargetArgumentRoles contract
+  casePolicy = checkedLengthSessionCasePolicy session
+  conditionalInterpreterPolicy
+    | conditionalCapable =
+        [FingerprintBytes $ ascii
+          "constraint-conditional-provider-after-ground-discharge/v1"]
+    | otherwise = []
+  mixedInterpreterPolicy
+    | mixedRoles =
+        [ FingerprintBytes $ ascii "source-ordered-target-roles/v1"
+        , FingerprintBytes $ ascii "opaque-unobserved-target/v1"
+        , FingerprintBytes $ ascii "compact-observed-input-numbering/v1"
+        , FingerprintBytes $ ascii "explicit-opaque-demand-rejection/v1"
+        ]
+    | otherwise = []
+  caseInterpreterPolicy = case casePolicy of
+    LengthCasesRejected -> []
+    LengthExactZeroStepCases ->
+      [ FingerprintBytes $ ascii "exact-zero-step-spine-case/v1"
+      , FingerprintBytes $ ascii "symbolic-zero-test/v1"
+      , FingerprintBytes $ ascii "recursive-tail-natural-monus-one/v1"
+      , FingerprintBytes $ ascii "opaque-step-payload/v1"
+      , FingerprintBytes $ ascii "whole-case-provider-law-union/v1"
+      , FingerprintBytes $ ascii "product-valued-case-results-rejected/v1"
+      ]
+  maximumBytes = fromIntegral $ lengthFingerprintByteLimit
+    $ checkedLengthSessionLimits session
+
 buildCandidateFingerprint
   :: CheckedLengthSession identity annotation
   -> LengthCandidateAuthority
@@ -2188,6 +3004,54 @@ buildCandidateFingerprint session authority graph =
     , fingerprintBuilderFields =
         [ tagged "dialect"
             [FingerprintBytes finiteListSpineLengthDomainTag]
+        , tagged "shared-typed-term-graph"
+            [FingerprintBytes $ fingerprintCanonicalBytes graph]
+        , tagged "candidate-authority" $
+            [ FingerprintBytes $ ascii "engine-owned-association/v1"
+            , FingerprintBytes $ ascii "empty-residual-constraints/v1"
+            , FingerprintBytes $ ascii "candidate-only-no-batch-status/v1"
+            ] ++ associatedAuthority
+        ]
+    }
+ where
+  associatedAuthority = case authority of
+    LengthPlainCandidateAuthority -> []
+    LengthOpaqueAssociatedCertificateAuthority ->
+      [ FingerprintBytes $ ascii "opaque-associated-certificate/v1"
+      , FingerprintBytes $ ascii "activated-obligations-empty/v1"
+      ]
+    LengthGroundDischargedAssociatedCertificateAuthority ->
+      [ FingerprintBytes $ ascii "opaque-associated-certificate/v1"
+      , FingerprintBytes $ ascii "independent-ground-class-discharge/v1"
+      , FingerprintBytes $ ascii "inventory-bound-discharge-receipts/v1"
+      , FingerprintBytes $ ascii
+          "provider-law-uniform-over-dictionary-evidence/v1"
+      , FingerprintBytes $ ascii "occurrence-specific-final-provider/v1"
+      , FingerprintBytes $ ascii "protected-certified-function-prefix/v1"
+      , FingerprintBytes $ ascii
+          "static-discharge-without-givens-or-z3/v1"
+      ]
+  maximumBytes = fromIntegral $ lengthFingerprintByteLimit
+    $ checkedLengthSessionLimits session
+
+buildSpinePairCandidateFingerprint
+  :: CheckedLengthSession identity annotation
+  -> LengthCandidateAuthority
+  -> Fingerprint TermGraphFingerprintSubject
+  -> Either FingerprintLimitError
+      (Fingerprint
+        (CandidateFingerprintSubject FiniteBinaryProductSpineLengthsV1))
+buildSpinePairCandidateFingerprint session authority graph =
+  buildFingerprintWithin maximumBytes FingerprintBuilder
+    { fingerprintBuilderVersion = case authority of
+        LengthPlainCandidateAuthority -> 1
+        LengthOpaqueAssociatedCertificateAuthority -> 2
+        LengthGroundDischargedAssociatedCertificateAuthority -> 3
+    , fingerprintBuilderRole = ascii
+        "finite-binary-product-spine-lengths/typed-candidate"
+    , fingerprintBuilderFields =
+        [ tagged "dialect"
+            [FingerprintBytes finiteBinaryProductSpineLengthsDomainTag]
         , tagged "shared-typed-term-graph"
             [FingerprintBytes $ fingerprintCanonicalBytes graph]
         , tagged "candidate-authority" $
@@ -2239,6 +3103,37 @@ buildCompleteProblemFingerprint session encoding candidate =
             [ FingerprintBytes $ fingerprintCanonicalBytes
                 $ lengthSessionInventoryFingerprint session
             ]
+        , tagged "encoding"
+            [FingerprintBytes $ fingerprintCanonicalBytes encoding]
+        , tagged "candidate"
+            [FingerprintBytes $ fingerprintCanonicalBytes candidate]
+        ]
+    }
+ where
+  maximumBytes = fromIntegral $ lengthFingerprintByteLimit
+    $ checkedLengthSessionLimits session
+
+buildSpinePairCompleteProblemFingerprint
+  :: CheckedLengthSession identity annotation
+  -> Fingerprint
+      (InventoryFingerprintSubject FiniteBinaryProductSpineLengthsV1)
+  -> Fingerprint
+      (EncodingFingerprintSubject FiniteBinaryProductSpineLengthsV1)
+  -> Fingerprint
+      (CandidateFingerprintSubject FiniteBinaryProductSpineLengthsV1)
+  -> Either FingerprintLimitError
+      (Fingerprint
+        (ProblemFingerprintSubject FiniteBinaryProductSpineLengthsV1))
+buildSpinePairCompleteProblemFingerprint session inventory encoding candidate =
+  buildFingerprintWithin maximumBytes FingerprintBuilder
+    { fingerprintBuilderVersion = 1
+    , fingerprintBuilderRole = ascii
+        "finite-binary-product-spine-lengths/behavioral-problem"
+    , fingerprintBuilderFields =
+        [ tagged "dialect"
+            [FingerprintBytes finiteBinaryProductSpineLengthsDomainTag]
+        , tagged "inventory"
+            [FingerprintBytes $ fingerprintCanonicalBytes inventory]
         , tagged "encoding"
             [FingerprintBytes $ fingerprintCanonicalBytes encoding]
         , tagged "candidate"

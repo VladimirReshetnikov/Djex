@@ -24,6 +24,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
   , checkedLengthSessionInterpretationPolicy
   , checkedLengthSessionExplicitTargetRoles
   , sealLengthContractInSession
+  , sealLengthSpinePairContractInSession
   , checkedLengthSessionContext
   , checkedLengthSessionProviderInventory
   , checkedLengthSessionClassResolutionEnvironment
@@ -32,6 +33,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
   , checkedLengthSessionLimits
   , checkedLengthSessionTargetArgumentPolicy
   , checkedLengthSessionCasePolicy
+  , buildFiniteBinaryProductSpineLengthsInventoryFingerprint
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -53,7 +55,10 @@ import Language.Haskell.Synthesis.Declaration
   , declarationTypeVariables
   )
 import Language.Haskell.Synthesis.Environment (environmentDeclarations)
-import Language.Haskell.Synthesis.Fingerprint (Fingerprint)
+import Language.Haskell.Synthesis.Fingerprint
+  ( Fingerprint
+  , fingerprintCanonicalBytes
+  )
 import Language.Haskell.Synthesis.Internal.Alpha
   ( AlphaVariable (..)
   , BinderSlotPolicy (PositionalBinderSlots)
@@ -86,9 +91,13 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   ( CheckedLengthContract
   , CheckedLengthContext
   , CheckedLengthProviderInventory
+  , CheckedLengthSpinePairContract
+  , FiniteBinaryProductSpineLengthsV1
   , FiniteListSpineLengthV1
   , LengthContractError
   , LengthContractSource
+  , LengthSpinePairContractError
+  , LengthSpinePairContractSource
   , LengthLimits
   , LengthProviderTrust (..)
   , LengthTargetArgumentRole (..)
@@ -104,6 +113,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , checkedLengthSpineZeroConstructor
   , checkedLengthProviderSummaries
   , finiteListSpineLengthDomainTag
+  , finiteBinaryProductSpineLengthsDomainTag
   , lengthContextSpineModel
   , lengthContextInventory
   , lengthFingerprintByteLimit
@@ -113,6 +123,8 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , sealLengthContractInContext
   , sealLengthProviderInventoryInContext
   , sealRoleAwareLengthContractInContext
+  , sealLengthSpinePairContractInContext
+  , sealRoleAwareLengthSpinePairContractInContext
   , tagged
   )
 import Language.Haskell.Synthesis.Inventory
@@ -445,6 +457,58 @@ sealLengthContractInSession session = case
  where
   limits = checkedLengthSessionLimits session
   context = checkedLengthSessionContext session
+
+-- | Seal a binary product-of-spines contract under the exact shared
+-- interpretation authority retained by one scalar Length session.  The
+-- resulting contract belongs to the distinct product evidence domain.
+sealLengthSpinePairContractInSession
+  :: Ord identity
+  => CheckedLengthSession identity annotation
+  -> Type (Variable identity)
+  -> LengthSpinePairContractSource
+  -> Either
+      (LengthSpinePairContractError (Variable identity))
+      (CheckedLengthSpinePairContract (Variable identity))
+sealLengthSpinePairContractInSession session = case
+    checkedLengthSessionExplicitTargetRoles session of
+  Nothing -> sealLengthSpinePairContractInContext limits context
+  Just roles -> sealRoleAwareLengthSpinePairContractInContext
+    limits context roles
+ where
+  limits = checkedLengthSessionLimits session
+  context = checkedLengthSessionContext session
+
+-- | Build the product domain's inventory identity structurally from the exact
+-- scalar-session inventory bytes.  This wrapper is intentionally not a
+-- representational coercion: scalar and product evidence cannot associate.
+buildFiniteBinaryProductSpineLengthsInventoryFingerprint
+  :: CheckedLengthSession identity annotation
+  -> Either FingerprintLimitError
+      (Fingerprint
+        (InventoryFingerprintSubject FiniteBinaryProductSpineLengthsV1))
+buildFiniteBinaryProductSpineLengthsInventoryFingerprint session =
+  buildFingerprintWithin maximumBytes FingerprintBuilder
+    { fingerprintBuilderVersion = 1
+    , fingerprintBuilderRole = ascii
+        "finite-binary-product-spine-lengths/semantic-inventory"
+    , fingerprintBuilderFields =
+        [ tagged "dialect"
+            [FingerprintBytes finiteBinaryProductSpineLengthsDomainTag]
+        , tagged "shared-scalar-length-session-inventory"
+            [ FingerprintBytes $ fingerprintCanonicalBytes
+                $ lengthSessionInventoryFingerprint session
+            ]
+        , tagged "authority-derivation"
+            [ FingerprintBytes $ ascii
+                "structural-wrapper-not-representational-coercion/v1"
+            , FingerprintBytes $ ascii
+                "same-checked-spine-model-and-provider-laws/v1"
+            ]
+        ]
+    }
+ where
+  maximumBytes = fromIntegral $ lengthFingerprintByteLimit
+    $ checkedLengthSessionLimits session
 
 -- | Original finite bounds used for every authority sealed into the session.
 -- Kept package-private so candidate construction can revalidate a detachable

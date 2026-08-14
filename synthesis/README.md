@@ -177,9 +177,9 @@ and the
 | `Language.Haskell.Synthesis.Selection` | First, best, lookahead-best, all, and preferred-tier policies over lazy result batches. |
 | `Language.Haskell.Synthesis.Diagnostic` | Severity, stable code, checked source locations/spans, ordered context, and deterministic rendering. |
 | `Language.Haskell.Synthesis.Fingerprint` | Public inspection of opaque, nominal, collision-free canonical identities; construction and byte budgets remain package-private. |
-| `Language.Haskell.Synthesis.Semantic.Length` | Exact inventory-bound finite-spine contexts, normalized contracts, source-bound assumed provider laws, and model-aware fingerprints; an additive trust class retains exact nonempty constrained schemes under a dictionary-uniform conditional-law assumption, while legacy summary bytes stay exact. |
-| `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked contracts, detached context-free provider transfers, exact candidate problems, and finite Cartesian input boxes; detached constraint-conditional provider evaluation fails before argument inspection, while whole-problem replay may consume a candidate already authorized at its occurrence-specific ground-discharge boundary. |
-| `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and typed-candidate behavioral problems: session-owned provider and restricted resolver authority, contract resealing, residual rejection, rigid root/provider authorization, mixed-role opaque targets, exact zero/step cases, and provider-only consumption of opaque certificate carriers for either obligation-free legacy laws or final-node conditional laws with independently discharged ground obligations. |
+| `Language.Haskell.Synthesis.Semantic.Length` | Exact inventory-bound finite-spine contexts, normalized scalar and exact boxed binary-product contracts, source-bound assumed provider laws, and model-aware nominal fingerprints; an additive trust class retains exact nonempty constrained schemes under a dictionary-uniform conditional-law assumption, while every scalar byte stays exact. |
+| `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked scalar and binary-spine-product contracts, exact candidate problems, and finite Cartesian input boxes, with nominally separate counterexample and positive bounded receipts; detached conditional-provider evaluation still fails before argument inspection. |
+| `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and nominally distinct scalar/product typed-candidate behavioral problems: session-owned provider and restricted resolver authority, contract resealing, residual rejection, rigid root/provider authorization, mixed-role opaque targets, exact scalar zero/step cases inside product fields, and provider-only consumption of independently authorized certificate carriers. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation, exact input-symbol model replay, query-owned source-ordered natural-input replay, and exact-query association of solver-independent finite-box validation for one checked Length problem, without launching or trusting a solver. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` | Pure validated Z3 launch, resource, artifact, and response-decoder policy with a package-private complete identity and a byte-free digest-expectation presence classifier; it performs no IO or attestation. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` | Rank-N scoped capability-probed Z3 ownership with byte-free failures, heuristic status/strength/use, and a query-first replay gate for independently validated counterexample evidence. |
@@ -429,6 +429,45 @@ candidate, concrete-encoding, complete-problem, SMT-query, response, protocol,
 execution, process, worker, or live-observation version or canonical bytes
 change. The new v1 tag belongs only to the opaque bounded receipt. See the
 [bounded input-box validation report](../docs/reports/2026-08-14-bounded-length-input-box-validation.md).
+
+`FiniteBinaryProductSpineLengthsV1` adds a distinct checked domain for an exact
+boxed binary product whose two source-ordered fields are modeled finite
+spines. `LengthSpinePairContractVariable` retains the scalar domain's compact
+observed inputs and makes `LengthSpinePairFirst` and
+`LengthSpinePairSecond` available only as result components in the
+postcondition. This supports relational output laws while rejecting result
+references in preconditions, nonbinary or unboxed tuples, nested products, and
+nonspine result fields.
+
+The product boundary reuses one `CheckedLengthSession`'s checked spine model,
+role vector, provider laws, conditional-discharge authority, and case policy.
+Its nominal behavioral inventory is nevertheless built by structurally
+wrapping the complete scalar semantic-inventory bytes and a versioned
+authority-derivation policy; it is not a coercion between evidence domains.
+Product contracts, candidates, encodings, complete problems,
+counterexamples, and bounded receipts all have sibling opaque identities and
+cannot associate with scalar evidence.
+
+Candidate interpretation applies the existing target roles, requires the
+final semantic value to be exactly a two-field tuple, forces its first field
+before its second, and normalizes both modeled-spine expressions under one
+joint left-to-right syntax budget. A field may use the scalar provider and
+exact zero/step case mechanisms already authorized by the session. Providers
+still return only scalar spines, and case analysis still has only scalar-spine
+result and scrutinee authority; there is no product provider or product case
+rule.
+
+`validateLengthSpinePairProblemCounterexample` recomputes result components
+from the checked candidate as the postcondition demands and materializes both
+lengths for a violation, using only caller-supplied compact natural inputs.
+`validateLengthSpinePairProblemInputBox` enumerates the same input space and
+releases only an exact `ValidatedLengthSpinePairCounterexample` or positive
+`ValidatedLengthSpinePairInputBox` evidence. It does not consume a solver
+observation. This stage intentionally has no product SMT-LIB query, response,
+execution, protocol, worker, or live-Z3 layer. Every historical scalar public
+signature and canonical identity byte remains exact.
+See the
+[finite binary product spine-length foundation report](../docs/reports/2026-08-14-finite-binary-product-spine-length-foundation.md).
 
 Positive-literal natural quotient and modulo remain inside QF_LIA by using one
 shared deterministic private Euclidean witness shape rather than the forbidden

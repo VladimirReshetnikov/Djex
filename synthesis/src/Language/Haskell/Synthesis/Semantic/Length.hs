@@ -1,7 +1,15 @@
--- | Checked contracts for the @finite-list-spine-length/v1@ semantic dialect.
+-- | Checked contracts for the @finite-list-spine-length/v1@ dialect and its
+-- distinct @finite-binary-product-spine-lengths/v1@ sibling.
 --
 -- This module describes only total finite list-spine lengths over unbounded
--- natural numbers.  List payloads remain opaque.  Provider summaries are
+-- natural numbers.  The sibling domain admits an exact boxed binary product
+-- whose two source-ordered result fields are modeled spines; its
+-- postcondition can relate either result component to the compact modeled
+-- inputs.  The pair carrier and syntax grant no evidence authority by
+-- themselves, and scalar contracts, identities, and public APIs remain
+-- unchanged.
+--
+-- List payloads remain opaque.  Provider summaries are
 -- explicit assumptions for search guidance; they are not behavioral evidence.
 -- The historical context-free source remains directly usable under that
 -- assumption.  The additive conditional source retains one exact closed
@@ -24,15 +32,25 @@
 -- context. The atomic session therefore owns the checked provider
 -- inventory directly, while a later problem boundary must revalidate any
 -- separately supplied contract through that session's context.
+-- Product contracts reuse that exact checked spine, target-role, and provider
+-- authority through a structurally wrapped product-inventory identity rather
+-- than a representational cast from scalar evidence.
 module Language.Haskell.Synthesis.Semantic.Length
   ( FiniteListSpineLengthV1
+  , FiniteBinaryProductSpineLengthsV1
   , LengthContractFingerprintSubject
+  , LengthSpinePairContractFingerprintSubject
   , LengthProviderInventoryFingerprintSubject
   , finiteListSpineLengthDomainTag
+  , finiteBinaryProductSpineLengthsDomainTag
   , LengthExpression (..)
   , LengthFormula (..)
   , LengthContractVariable (..)
   , LengthContractSource (..)
+  , LengthSpinePair (..)
+  , LengthSpinePairComponent (..)
+  , LengthSpinePairContractVariable (..)
+  , LengthSpinePairContractSource (..)
   , LengthTargetArgumentRole (..)
   , LengthProviderArgumentRole (..)
   , LengthProviderVariable (..)
@@ -72,6 +90,7 @@ module Language.Haskell.Synthesis.Semantic.Length
   , LengthSyntaxCollectionSite (..)
   , LengthSyntaxError (..)
   , LengthContractError (..)
+  , LengthSpinePairContractError (..)
   , LengthProviderSummaryError (..)
   , LengthProviderInventoryError (..)
   , CheckedLengthContract
@@ -85,6 +104,17 @@ module Language.Haskell.Synthesis.Semantic.Length
   , checkedLengthContractPrecondition
   , checkedLengthContractPostcondition
   , lengthContractFingerprint
+  , CheckedLengthSpinePairContract
+  , sealLengthSpinePairContract
+  , sealLengthSpinePairContractInContext
+  , sealRoleAwareLengthSpinePairContract
+  , sealRoleAwareLengthSpinePairContractInContext
+  , checkedLengthSpinePairContractTarget
+  , checkedLengthSpinePairContractTargetArgumentRoles
+  , checkedLengthSpinePairContractInputCount
+  , checkedLengthSpinePairContractPrecondition
+  , checkedLengthSpinePairContractPostcondition
+  , lengthSpinePairContractFingerprint
   , CheckedLengthProviderSummary
   , checkedLengthProviderName
   , checkedLengthProviderScheme

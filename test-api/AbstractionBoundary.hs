@@ -156,6 +156,11 @@ $(do
           , "LengthSMTLibLiveSessionError"
           , "LengthSMTLibLiveQueryError"
           , "PublicDjex.LengthInputBoxLimits"
+          , "CheckedLengthSpinePairContract"
+          , "CheckedLengthSpinePairCandidate"
+          , "CheckedLengthSpinePairProblem"
+          , "ValidatedLengthSpinePairCounterexampleReceipt"
+          , "ValidatedLengthSpinePairInputBoxReceipt"
           , "CheckedLengthInterpretationPolicy"
           , "CheckedLengthSession"
           , "CheckedLengthProviderInventory"
@@ -341,6 +346,8 @@ forbiddenConstructionAttempts =
     )
   , noGeneric @(CheckedLengthContract LengthVariableProbe)
       "CheckedLengthContract"
+  , noGeneric @(CheckedLengthSpinePairContract LengthVariableProbe)
+      "CheckedLengthSpinePairContract"
   , noGeneric
       @(CheckedLengthContext LengthVariableProbe LengthAnnotationProbe)
       "CheckedLengthContext"
@@ -354,9 +361,19 @@ forbiddenConstructionAttempts =
   , ( "ValidatedLengthCounterexample constructor became public"
     , forbiddenValidatedLengthCounterexampleConstruction `seq` ()
     )
+  , noGeneric @ValidatedLengthSpinePairCounterexample
+      "ValidatedLengthSpinePairCounterexample"
+  , ( "ValidatedLengthSpinePairCounterexample constructor became public"
+    , forbiddenValidatedLengthSpinePairCounterexampleConstruction `seq` ()
+    )
   , noGeneric @ValidatedLengthInputBox "ValidatedLengthInputBox"
   , ( "ValidatedLengthInputBox constructor became public"
     , forbiddenValidatedLengthInputBoxConstruction `seq` ()
+    )
+  , noGeneric @ValidatedLengthSpinePairInputBox
+      "ValidatedLengthSpinePairInputBox"
+  , ( "ValidatedLengthSpinePairInputBox constructor became public"
+    , forbiddenValidatedLengthSpinePairInputBoxConstruction `seq` ()
     )
   , noGeneric @(CheckedLengthProviderSummary LengthVariableProbe)
       "CheckedLengthProviderSummary"
@@ -383,6 +400,12 @@ forbiddenConstructionAttempts =
   , noGeneric
       @(CheckedLengthProblem LengthVariableProbe LengthLocalProbe)
       "CheckedLengthProblem"
+  , noGeneric
+      @(CheckedLengthSpinePairCandidate LengthVariableProbe LengthLocalProbe)
+      "CheckedLengthSpinePairCandidate"
+  , noGeneric
+      @(CheckedLengthSpinePairProblem LengthVariableProbe LengthLocalProbe)
+      "CheckedLengthSpinePairProblem"
   , noGeneric @LengthSMTLibLimits "LengthSMTLibLimits"
   , noGeneric
       @(LengthSMTLibQuery LengthVariableProbe LengthLocalProbe)
@@ -504,6 +527,9 @@ forbiddenConstructionAttempts =
   , ( "CheckedLengthContract variable unexpectedly permits Coercible"
     , forbiddenCheckedLengthContractCoercion `seq` ()
     )
+  , ( "CheckedLengthSpinePairContract variable unexpectedly permits Coercible"
+    , forbiddenCheckedLengthSpinePairContractCoercion `seq` ()
+    )
   , ( "CheckedLengthContext variable unexpectedly permits Coercible"
     , forbiddenCheckedLengthContextVariableCoercion `seq` ()
     )
@@ -536,6 +562,18 @@ forbiddenConstructionAttempts =
     )
   , ( "CheckedLengthProblem local unexpectedly permits Coercible"
     , forbiddenCheckedLengthProblemLocalCoercion `seq` ()
+    )
+  , ( "CheckedLengthSpinePairCandidate identity unexpectedly permits Coercible"
+    , forbiddenCheckedLengthSpinePairCandidateIdentityCoercion `seq` ()
+    )
+  , ( "CheckedLengthSpinePairCandidate local unexpectedly permits Coercible"
+    , forbiddenCheckedLengthSpinePairCandidateLocalCoercion `seq` ()
+    )
+  , ( "CheckedLengthSpinePairProblem identity unexpectedly permits Coercible"
+    , forbiddenCheckedLengthSpinePairProblemIdentityCoercion `seq` ()
+    )
+  , ( "CheckedLengthSpinePairProblem local unexpectedly permits Coercible"
+    , forbiddenCheckedLengthSpinePairProblemLocalCoercion `seq` ()
     )
   , ( "LengthSMTLibQuery identity unexpectedly permits Coercible"
     , forbiddenLengthSMTLibQueryIdentityCoercion `seq` ()
@@ -850,6 +888,36 @@ forbiddenConstructionAttempts =
       @(Fingerprint LengthContractFingerprintSubject)
       "CheckedLengthContract.lengthContractFingerprint"
   , noField
+      @"checkedLengthSpinePairContractTarget"
+      @(CheckedLengthSpinePairContract LengthVariableProbe)
+      @(Type LengthVariableProbe)
+      "CheckedLengthSpinePairContract.checkedLengthSpinePairContractTarget"
+  , noField
+      @"checkedLengthSpinePairContractTargetArgumentRoles"
+      @(CheckedLengthSpinePairContract LengthVariableProbe)
+      @[LengthTargetArgumentRole]
+      "CheckedLengthSpinePairContract.targetArgumentRoles"
+  , noField
+      @"checkedLengthSpinePairContractInputCount"
+      @(CheckedLengthSpinePairContract LengthVariableProbe)
+      @Int
+      "CheckedLengthSpinePairContract.inputCount"
+  , noField
+      @"checkedLengthSpinePairContractPrecondition"
+      @(CheckedLengthSpinePairContract LengthVariableProbe)
+      @(LengthFormula LengthSpinePairContractVariable)
+      "CheckedLengthSpinePairContract.precondition"
+  , noField
+      @"checkedLengthSpinePairContractPostcondition"
+      @(CheckedLengthSpinePairContract LengthVariableProbe)
+      @(LengthFormula LengthSpinePairContractVariable)
+      "CheckedLengthSpinePairContract.postcondition"
+  , noField
+      @"lengthSpinePairContractFingerprint"
+      @(CheckedLengthSpinePairContract LengthVariableProbe)
+      @(Fingerprint LengthSpinePairContractFingerprintSubject)
+      "CheckedLengthSpinePairContract.fingerprint"
+  , noField
       @"checkedLengthProviderName"
       @(CheckedLengthProviderSummary LengthVariableProbe)
       @Name
@@ -1096,9 +1164,21 @@ forbiddenValidatedLengthCounterexampleConstruction =
   ValidatedLengthCounterexampleReceipt
     [] 0 ProviderIndependentFiniteSpineModel
 
+forbiddenValidatedLengthSpinePairCounterexampleConstruction
+  :: ValidatedLengthSpinePairCounterexample
+forbiddenValidatedLengthSpinePairCounterexampleConstruction =
+  ValidatedLengthSpinePairCounterexampleReceipt
+    [] (LengthSpinePair 0 0) ProviderIndependentFiniteSpineModel
+
 forbiddenValidatedLengthInputBoxConstruction :: ValidatedLengthInputBox
 forbiddenValidatedLengthInputBoxConstruction =
   ValidatedLengthInputBoxReceipt
+    [] [] 0 0 ProviderIndependentFiniteSpineModel
+
+forbiddenValidatedLengthSpinePairInputBoxConstruction
+  :: ValidatedLengthSpinePairInputBox
+forbiddenValidatedLengthSpinePairInputBoxConstruction =
+  ValidatedLengthSpinePairInputBoxReceipt
     [] [] 0 0 ProviderIndependentFiniteSpineModel
 
 forbiddenBoundedRawArtifactCoercion
@@ -1110,6 +1190,11 @@ forbiddenCheckedLengthContractCoercion
   :: CheckedLengthContract LengthVariableProbe
   -> CheckedLengthContract OtherLengthVariableProbe
 forbiddenCheckedLengthContractCoercion = coerce
+
+forbiddenCheckedLengthSpinePairContractCoercion
+  :: CheckedLengthSpinePairContract LengthVariableProbe
+  -> CheckedLengthSpinePairContract OtherLengthVariableProbe
+forbiddenCheckedLengthSpinePairContractCoercion = coerce
 
 forbiddenCheckedLengthContextVariableCoercion
   :: CheckedLengthContext LengthVariableProbe LengthAnnotationProbe
@@ -1170,6 +1255,26 @@ forbiddenCheckedLengthProblemLocalCoercion
   :: CheckedLengthProblem LengthVariableProbe LengthLocalProbe
   -> CheckedLengthProblem LengthVariableProbe OtherLengthLocalProbe
 forbiddenCheckedLengthProblemLocalCoercion = coerce
+
+forbiddenCheckedLengthSpinePairCandidateIdentityCoercion
+  :: CheckedLengthSpinePairCandidate LengthVariableProbe LengthLocalProbe
+  -> CheckedLengthSpinePairCandidate OtherLengthVariableProbe LengthLocalProbe
+forbiddenCheckedLengthSpinePairCandidateIdentityCoercion = coerce
+
+forbiddenCheckedLengthSpinePairCandidateLocalCoercion
+  :: CheckedLengthSpinePairCandidate LengthVariableProbe LengthLocalProbe
+  -> CheckedLengthSpinePairCandidate LengthVariableProbe OtherLengthLocalProbe
+forbiddenCheckedLengthSpinePairCandidateLocalCoercion = coerce
+
+forbiddenCheckedLengthSpinePairProblemIdentityCoercion
+  :: CheckedLengthSpinePairProblem LengthVariableProbe LengthLocalProbe
+  -> CheckedLengthSpinePairProblem OtherLengthVariableProbe LengthLocalProbe
+forbiddenCheckedLengthSpinePairProblemIdentityCoercion = coerce
+
+forbiddenCheckedLengthSpinePairProblemLocalCoercion
+  :: CheckedLengthSpinePairProblem LengthVariableProbe LengthLocalProbe
+  -> CheckedLengthSpinePairProblem LengthVariableProbe OtherLengthLocalProbe
+forbiddenCheckedLengthSpinePairProblemLocalCoercion = coerce
 
 forbiddenLengthSMTLibQueryIdentityCoercion
   :: LengthSMTLibQuery LengthVariableProbe LengthLocalProbe

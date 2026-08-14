@@ -1,4 +1,5 @@
--- | Atomic sessions and behavioral problems for finite list-spine length.
+-- | Atomic sessions and nominally separate scalar and binary-product
+-- behavioral problems for finite list-spine length.
 --
 -- The first checked layer binds one exact annotation-erased neutral inventory,
 -- finite-spine model, normalized provider-law table, and closed interpretation
@@ -22,6 +23,14 @@
 -- canonical row/step/obligation positions and sanitized reasons; resolver
 -- receipts, constraint/type payloads, and protected graph coordinates remain
 -- private.  No query givens or Z3 evidence participate.
+--
+-- The additive product entrances accept only a final boxed two-field tuple and
+-- force its modeled-spine fields in source order.  They reuse the session's
+-- scalar provider and exact spine-case mechanisms inside those fields, but
+-- grant no product-valued provider or case authority.  Product inventory,
+-- contract, candidate, encoding, and complete-problem identities are distinct;
+-- the product inventory structurally wraps the exact scalar session inventory
+-- rather than coercing its nominal evidence.
 module Language.Haskell.Synthesis.Semantic.Length.Problem
   ( LengthSemanticFingerprintPart (..)
   , LengthEncodingPolicyFingerprintSubject
@@ -35,6 +44,7 @@ module Language.Haskell.Synthesis.Semantic.Length.Problem
   , sealExactSpineCaseLengthSession
   , checkedLengthSessionInterpretationPolicy
   , sealLengthContractInSession
+  , sealLengthSpinePairContractInSession
   , checkedLengthSessionContext
   , checkedLengthSessionProviderInventory
   , lengthSessionInventoryFingerprint
@@ -47,6 +57,7 @@ module Language.Haskell.Synthesis.Semantic.Length.Problem
   , lengthProblemGraphFingerprintByteLimit
   , lengthProblemEvaluationStepLimit
   , LengthProblemFingerprintPart (..)
+  , LengthSpinePairProblemFingerprintPart (..)
   , LengthRootOpeningError (..)
   , LengthUnobservedTargetDemandSite (..)
   , LengthStepPayloadDemandSite (..)
@@ -54,6 +65,7 @@ module Language.Haskell.Synthesis.Semantic.Length.Problem
   , LengthAssociatedProviderChainSite (..)
   , LengthAssociatedProviderChainReason (..)
   , LengthProblemError (..)
+  , LengthSpinePairProblemError (..)
   , CheckedLengthCandidate
   , CheckedLengthProblem
   , sealLengthTypedCandidateProblem
@@ -70,6 +82,22 @@ module Language.Haskell.Synthesis.Semantic.Length.Problem
   , checkedLengthProblemCounterexampleCondition
   , checkedLengthProblemEncodingFingerprint
   , checkedLengthProblemBehavioralProblem
+  , CheckedLengthSpinePairCandidate
+  , CheckedLengthSpinePairProblem
+  , sealLengthSpinePairTypedCandidateProblem
+  , sealRoleAwareLengthSpinePairTypedCandidateProblem
+  , sealExactSpineCaseLengthSpinePairTypedCandidateProblem
+  , sealLengthSpinePairTypedCandidateProblemInSession
+  , checkedLengthSpinePairCandidateResult
+  , checkedLengthSpinePairCandidateUsedProviders
+  , checkedLengthSpinePairCandidateFingerprint
+  , checkedLengthSpinePairProblemCandidate
+  , checkedLengthSpinePairProblemInputCount
+  , checkedLengthSpinePairProblemPrecondition
+  , checkedLengthSpinePairProblemPostcondition
+  , checkedLengthSpinePairProblemCounterexampleCondition
+  , checkedLengthSpinePairProblemEncodingFingerprint
+  , checkedLengthSpinePairProblemBehavioralProblem
   ) where
 
 import Language.Haskell.Synthesis.Internal.Semantic.Length.Problem

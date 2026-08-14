@@ -725,6 +725,55 @@ identity or canonical bytes. Its v1 tag belongs to the newly opaque receipt,
 not to an existing semantic or solver envelope. See the
 [bounded Length input-box validation report](docs/reports/2026-08-14-bounded-length-input-box-validation.md).
 
+### Finite binary product spine-length foundation
+
+`FiniteBinaryProductSpineLengthsV1` is an additive behavioral domain for one
+exact boxed binary product whose two source-ordered result fields expose the
+same checked finite-spine model as scalar Length. It is deliberately not a
+general tuple or nested-product language. `LengthSpinePairContractVariable`
+keeps compact observed inputs and gives the postcondition separate
+`LengthSpinePairFirst` and `LengthSpinePairSecond` result components, so a
+contract can express relational laws across both outputs. As in the scalar
+domain, result references are rejected in preconditions and all admitted
+syntax is bounded and normalized before identity construction.
+
+The product domain shares one `CheckedLengthSession`'s exact spine schema,
+target-role policy, provider summaries, conditional-discharge authority, and
+case policy. That reuse is explicit rather than nominally porous: the product
+behavioral problem has its own domain, contract, candidate, encoding, complete
+problem, counterexample, and bounded-validation types. Its inventory
+fingerprint structurally wraps the scalar session's complete semantic-inventory
+bytes together with a versioned derivation policy; scalar evidence therefore
+cannot replay against a product problem, even though both were checked from
+the same inventory and model.
+
+Candidate sealing applies every physical target argument under the existing
+role policy, then requires the final semantic value to be exactly a two-field
+tuple. It forces the first field and then the second, requires each to be a
+modeled spine, and normalizes their symbolic length expressions under one
+left-to-right syntax budget before substituting both into the relational
+postcondition. The compatibility, role-aware, exact-case, and unified entrances
+are the `sealLengthSpinePairTypedCandidateProblem` family. Scalar spine
+providers and exact zero/step spine cases may occur inside either field when
+the session already authorizes them. There is no provider law returning a
+product and no product-valued case rule.
+
+`validateLengthSpinePairProblemCounterexample` independently recomputes result
+components from the checked candidate as the postcondition demands and, for a
+violation, materializes both lengths into the receipt; callers supply only the
+compact source-ordered natural inputs. `validateLengthSpinePairProblemInputBox`
+enumerates those same inputs and can return either the first exact product
+counterexample or `ValidatedLengthSpinePairInputBox` positive evidence after
+complete traversal. Provider-relative receipts retain the same explicit
+assumed-law basis. This first foundation has no SMT-LIB translation, response
+decoder, query, or live-Z3 path, so no solver observation can create or
+strengthen its evidence.
+
+All historical `FiniteListSpineLengthV1` constructors, signatures, nominal
+types, tags, fingerprint fields, canonical bytes, replay behavior, and Z3 APIs
+remain unchanged. See the
+[finite binary product spine-length foundation report](docs/reports/2026-08-14-finite-binary-product-spine-length-foundation.md).
+
 SMT-LIB's QF_LIA logic excludes the built-in `div` and `mod` operators. Djex
 therefore lowers every remaining normalized quotient or modulo node to one
 shared private Euclidean witness shape. For a positive literal divisor `k` and

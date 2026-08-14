@@ -1,8 +1,8 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
 
--- | Bounded, solver-independent evaluation for checked length contracts,
--- provider summaries, and sealed candidate problems.
+-- | Bounded, solver-independent evaluation for checked scalar and binary
+-- product length contracts, provider summaries, and sealed candidate problems.
 --
 -- This is the replay authority for concrete natural-number assignments.  It
 -- deliberately consumes only opaque checked values: evaluating a caller-built
@@ -21,6 +21,13 @@
 -- versioned verifier, exact box, total and precondition-applicable assignment
 -- counts, and provider/model basis.  It remains bounded/model-relative and does
 -- not strengthen a solver's @unsat@ report into universal evidence.
+--
+-- Binary-product replay has a closed sibling error vocabulary and nominally
+-- distinct counterexample and positive-box receipts.  It evaluates result
+-- components from an opaque checked candidate as the postcondition demands,
+-- then materializes first and second for a violation; a caller still supplies
+-- only compact source-ordered natural inputs.  This module has no product
+-- SMT-LIB or live-solver boundary.
 module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   ( LengthEvaluationLimitSource (..)
   , LengthEvaluationLimits
@@ -32,16 +39,23 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , lengthAssignmentValueBitLimit
   , lengthIntermediateValueBitLimit
   , LengthContractAssignment (..)
+  , LengthSpinePairContractAssignment (..)
   , LengthProblemAssignment (..)
   , LengthProviderArgumentValue (..)
   , LengthEvaluationValueSite (..)
   , LengthEvaluationError (..)
+  , LengthSpinePairEvaluationValueSite (..)
+  , LengthSpinePairEvaluationError (..)
   , LengthContractEvaluation (..)
   , LengthCounterexampleBasis (..)
   , ValidatedLengthCounterexample
   , validatedLengthCounterexampleInputs
   , validatedLengthCounterexampleResult
   , validatedLengthCounterexampleBasis
+  , ValidatedLengthSpinePairCounterexample
+  , validatedLengthSpinePairCounterexampleInputs
+  , validatedLengthSpinePairCounterexampleResult
+  , validatedLengthSpinePairCounterexampleBasis
   , LengthInputBoxLimitSource (..)
   , LengthInputBoxLimits
   , LengthInputBoxLimitField (..)
@@ -59,10 +73,20 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validatedLengthInputBoxAssignmentCount
   , validatedLengthInputBoxApplicableAssignmentCount
   , validatedLengthInputBoxBasis
+  , lengthSpinePairInputBoxValidationSchemaTag
+  , LengthSpinePairInputBoxValidationError (..)
+  , ValidatedLengthSpinePairInputBox
+  , validatedLengthSpinePairInputBoxInclusiveMaximums
+  , validatedLengthSpinePairInputBoxAssignmentCount
+  , validatedLengthSpinePairInputBoxApplicableAssignmentCount
+  , validatedLengthSpinePairInputBoxBasis
   , evaluateLengthContractAssignment
+  , evaluateLengthSpinePairContractAssignment
   , evaluateLengthProviderApplication
   , validateLengthProblemCounterexample
+  , validateLengthSpinePairProblemCounterexample
   , validateLengthProblemInputBox
+  , validateLengthSpinePairProblemInputBox
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -77,22 +101,31 @@ import Language.Haskell.Synthesis.Name (Name)
 import Language.Haskell.Synthesis.Semantic.Length
   ( CheckedLengthContract
   , CheckedLengthProviderSummary
+  , CheckedLengthSpinePairContract
+  , FiniteBinaryProductSpineLengthsV1
   , FiniteListSpineLengthV1
   , LengthContractVariable (..)
   , LengthExpression (..)
   , LengthFormula (..)
+  , LengthSpinePair (..)
+  , LengthSpinePairComponent (..)
+  , LengthSpinePairContractVariable (..)
   , LengthProviderArgumentRole (..)
   , LengthProviderTrust (..)
   , LengthProviderVariable (..)
   , checkedLengthContractInputCount
   , checkedLengthContractPostcondition
   , checkedLengthContractPrecondition
+  , checkedLengthSpinePairContractInputCount
+  , checkedLengthSpinePairContractPostcondition
+  , checkedLengthSpinePairContractPrecondition
   , checkedLengthProviderArgumentRoles
   , checkedLengthProviderTrust
   , checkedLengthProviderTransfer
   )
 import Language.Haskell.Synthesis.Semantic.Length.Problem
   ( CheckedLengthProblem
+  , CheckedLengthSpinePairProblem
   , checkedLengthCandidateResult
   , checkedLengthCandidateUsedProviders
   , checkedLengthProblemBehavioralProblem
@@ -100,6 +133,13 @@ import Language.Haskell.Synthesis.Semantic.Length.Problem
   , checkedLengthProblemInputCount
   , checkedLengthProblemPostcondition
   , checkedLengthProblemPrecondition
+  , checkedLengthSpinePairCandidateResult
+  , checkedLengthSpinePairCandidateUsedProviders
+  , checkedLengthSpinePairProblemBehavioralProblem
+  , checkedLengthSpinePairProblemCandidate
+  , checkedLengthSpinePairProblemInputCount
+  , checkedLengthSpinePairProblemPostcondition
+  , checkedLengthSpinePairProblemPrecondition
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Problem
   ( BehavioralEvidence
@@ -188,6 +228,16 @@ data LengthContractAssignment = LengthContractAssignment
 
 instance NFData LengthContractAssignment
 
+-- | Concrete inputs and exact source-ordered results for one detached binary
+-- product-of-spines contract classification.
+data LengthSpinePairContractAssignment = LengthSpinePairContractAssignment
+  { lengthSpinePairContractAssignmentInputs :: [Natural]
+  , lengthSpinePairContractAssignmentResult :: LengthSpinePair Natural
+  }
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSpinePairContractAssignment
+
 -- | Source-ordered natural inputs decoded for one exact candidate problem.
 --
 -- There is deliberately no caller-supplied result.  The validator computes
@@ -240,6 +290,34 @@ data LengthEvaluationError
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData LengthEvaluationError
+
+-- | Exact bounded value site in binary product replay.
+data LengthSpinePairEvaluationValueSite
+  = LengthSpinePairContractInputValue !Int
+  | LengthSpinePairContractResultValue !LengthSpinePairComponent
+  | LengthSpinePairProblemInputValue !Int
+  | LengthSpinePairIntermediateValue
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSpinePairEvaluationValueSite
+
+-- | Closed deterministic failure surface for binary product replay.  It is
+-- distinct from 'LengthEvaluationError' so adding the product domain does not
+-- widen exhaustive matches over the scalar API.
+data LengthSpinePairEvaluationError
+  = LengthSpinePairContractAssignmentArityMismatch !Int !Int
+  | LengthSpinePairProblemAssignmentArityMismatch !Int !Int
+  | LengthSpinePairEvaluationValueBitLimitExceeded
+      !LengthSpinePairEvaluationValueSite !Int !Int
+  | LengthSpinePairEvaluationInternalContractReference
+      !LengthSpinePairContractVariable
+  | LengthSpinePairEvaluationInternalCandidateReference
+      !LengthContractVariable
+  | LengthSpinePairEvaluationInternalQuotientDivisorZero
+  | LengthSpinePairEvaluationInternalModuloDivisorZero
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSpinePairEvaluationError
 
 -- | Complete classification of one concrete contract assignment.
 data LengthContractEvaluation
@@ -307,6 +385,38 @@ validatedLengthCounterexampleBasis
   -> LengthCounterexampleBasis
 validatedLengthCounterexampleBasis
     (ValidatedLengthCounterexampleReceipt _ _ basis) = basis
+
+-- | Independently replayed model-relative violation for one exact binary
+-- product problem.  Both results are recomputed from the checked candidate;
+-- the caller supplies inputs only.
+data ValidatedLengthSpinePairCounterexample =
+  ValidatedLengthSpinePairCounterexampleReceipt
+    ![Natural]
+    !(LengthSpinePair Natural)
+    !LengthCounterexampleBasis
+  deriving (Eq, Ord, Show)
+
+instance NFData ValidatedLengthSpinePairCounterexample where
+  rnf (ValidatedLengthSpinePairCounterexampleReceipt inputs result basis) =
+    rnf inputs `seq` rnf result `seq` rnf basis
+
+-- | Compact source-ordered inputs which violate the exact product problem.
+validatedLengthSpinePairCounterexampleInputs
+  :: ValidatedLengthSpinePairCounterexample -> [Natural]
+validatedLengthSpinePairCounterexampleInputs
+    (ValidatedLengthSpinePairCounterexampleReceipt inputs _ _) = inputs
+
+-- | Both source-ordered result lengths recomputed from the checked candidate.
+validatedLengthSpinePairCounterexampleResult
+  :: ValidatedLengthSpinePairCounterexample -> LengthSpinePair Natural
+validatedLengthSpinePairCounterexampleResult
+    (ValidatedLengthSpinePairCounterexampleReceipt _ result _) = result
+
+-- | Provider-independent or assumed-provider-relative semantic basis.
+validatedLengthSpinePairCounterexampleBasis
+  :: ValidatedLengthSpinePairCounterexample -> LengthCounterexampleBasis
+validatedLengthSpinePairCounterexampleBasis
+    (ValidatedLengthSpinePairCounterexampleReceipt _ _ basis) = basis
 
 -- | Raw independent bounds for one finite-box traversal.  Input width uses a
 -- signed source so configuration mistakes can be rejected explicitly;
@@ -467,6 +577,67 @@ validatedLengthInputBoxBasis
 validatedLengthInputBoxBasis
     (ValidatedLengthInputBoxReceipt _ _ _ _ basis) = basis
 
+-- | Versioned deterministic verifier semantics for the nominal binary
+-- product domain.
+lengthSpinePairInputBoxValidationSchemaTag :: [Word8]
+lengthSpinePairInputBoxValidationSchemaTag =
+  ascii "finite-binary-product-spine-lengths/bounded-input-box-validation/v1"
+
+-- | Fixed-precedence finite-box failures carrying the closed product replay
+-- error vocabulary.  Bounds remain source ordered and inclusive.
+data LengthSpinePairInputBoxValidationError
+  = LengthSpinePairInputBoxProblemInputLimitExceeded !Int !Int
+  | LengthSpinePairInputBoxBoundsArityMismatch !Int !Int
+  | LengthSpinePairInputBoxMaximumValueRejected
+      !Int !LengthSpinePairEvaluationError
+  | LengthSpinePairInputBoxAssignmentLimitExceeded !Natural !Natural
+  | LengthSpinePairInputBoxAssignmentEvaluationRejected
+      !Natural !LengthSpinePairEvaluationError
+  | LengthSpinePairInputBoxInternalEnumerationInvariant
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSpinePairInputBoxValidationError
+
+-- | Positive bounded-validation receipt for one exact product problem.
+data ValidatedLengthSpinePairInputBox =
+  ValidatedLengthSpinePairInputBoxReceipt
+    ![Word8]
+    ![Natural]
+    !Natural
+    !Natural
+    !LengthCounterexampleBasis
+  deriving (Eq, Ord, Show)
+
+instance NFData ValidatedLengthSpinePairInputBox where
+  rnf (ValidatedLengthSpinePairInputBoxReceipt schema maximums assignments
+      applicable basis) =
+    rnf schema `seq` rnf maximums `seq` rnf assignments `seq`
+    rnf applicable `seq` rnf basis
+
+-- | Inclusive source-ordered maximum for every compact modeled input.
+validatedLengthSpinePairInputBoxInclusiveMaximums
+  :: ValidatedLengthSpinePairInputBox -> [Natural]
+validatedLengthSpinePairInputBoxInclusiveMaximums
+    (ValidatedLengthSpinePairInputBoxReceipt _ maximums _ _ _) = maximums
+
+-- | Exact cardinality of the completely checked Cartesian product.
+validatedLengthSpinePairInputBoxAssignmentCount
+  :: ValidatedLengthSpinePairInputBox -> Natural
+validatedLengthSpinePairInputBoxAssignmentCount
+    (ValidatedLengthSpinePairInputBoxReceipt _ _ assignments _ _) = assignments
+
+-- | Number of checked assignments for which the precondition held.
+validatedLengthSpinePairInputBoxApplicableAssignmentCount
+  :: ValidatedLengthSpinePairInputBox -> Natural
+validatedLengthSpinePairInputBoxApplicableAssignmentCount
+    (ValidatedLengthSpinePairInputBoxReceipt _ _ _ applicable _) = applicable
+
+-- | Provider-independent or assumed-provider-relative semantic basis.
+validatedLengthSpinePairInputBoxBasis
+  :: ValidatedLengthSpinePairInputBox -> LengthCounterexampleBasis
+validatedLengthSpinePairInputBoxBasis
+    (ValidatedLengthSpinePairInputBoxReceipt _ _ _ _ basis) = basis
+
 -- | Classify one concrete contract assignment.  Arity is checked before any
 -- value, inputs are bounded left-to-right before the result, and a false
 -- precondition does not evaluate the postcondition.
@@ -496,6 +667,48 @@ evaluateLengthContractAssignment limits contract assignment = do
     else do
       postcondition <- evaluateFormula limits lookupVariable
         $ checkedLengthContractPostcondition contract
+      pure $ if postcondition
+        then LengthPostconditionSatisfied
+        else LengthPostconditionViolated
+
+-- | Classify one detached binary product assignment.  Arity precedes all
+-- values; inputs are bounded left-to-right, then the first and second result,
+-- before precondition and postcondition evaluation.
+evaluateLengthSpinePairContractAssignment
+  :: LengthEvaluationLimits
+  -> CheckedLengthSpinePairContract variable
+  -> LengthSpinePairContractAssignment
+  -> Either LengthSpinePairEvaluationError LengthContractEvaluation
+evaluateLengthSpinePairContractAssignment limits contract assignment = do
+  inputs <- exactSpinePairAssignment
+    LengthSpinePairContractAssignmentArityMismatch
+    (checkedLengthSpinePairContractInputCount contract)
+    $ lengthSpinePairContractAssignmentInputs assignment
+  mapM_ (uncurry $ checkSpinePairAssignedValue limits .
+      LengthSpinePairContractInputValue)
+    $ zip [0 ..] inputs
+  let result = lengthSpinePairContractAssignmentResult assignment
+  checkSpinePairAssignedValue limits
+    (LengthSpinePairContractResultValue LengthSpinePairFirst)
+    $ lengthSpinePairFirst result
+  checkSpinePairAssignedValue limits
+    (LengthSpinePairContractResultValue LengthSpinePairSecond)
+    $ lengthSpinePairSecond result
+  let lookupVariable variable = case variable of
+        LengthSpinePairInput position -> case indexNatural position inputs of
+          Just value -> Right value
+          Nothing -> Left
+            $ LengthSpinePairEvaluationInternalContractReference variable
+        LengthSpinePairResult component -> Right $ case component of
+          LengthSpinePairFirst -> lengthSpinePairFirst result
+          LengthSpinePairSecond -> lengthSpinePairSecond result
+  precondition <- evaluateSpinePairFormula limits lookupVariable
+    $ checkedLengthSpinePairContractPrecondition contract
+  if not precondition
+    then Right LengthPreconditionNotMet
+    else do
+      postcondition <- evaluateSpinePairFormula limits lookupVariable
+        $ checkedLengthSpinePairContractPostcondition contract
       pure $ if postcondition
         then LengthPostconditionSatisfied
         else LengthPostconditionViolated
@@ -564,6 +777,27 @@ validateLengthProblemCounterexample limits problem assignment = do
     LengthProblemPostconditionViolated receipt -> Just
       $ mkBehavioralEvidence
           (checkedLengthProblemBehavioralProblem problem) receipt
+
+-- | Independently replay source-ordered inputs against one exact checked
+-- binary product problem.  Product evidence is nominally disjoint from scalar
+-- Length evidence even though both derive authority from the same session.
+validateLengthSpinePairProblemCounterexample
+  :: LengthEvaluationLimits
+  -> CheckedLengthSpinePairProblem identity local
+  -> LengthProblemAssignment
+  -> Either LengthSpinePairEvaluationError
+      (Maybe
+        (BehavioralEvidence
+          FiniteBinaryProductSpineLengthsV1
+          ValidatedLengthSpinePairCounterexample))
+validateLengthSpinePairProblemCounterexample limits problem assignment = do
+  replay <- replayLengthSpinePairProblemAssignment limits problem assignment
+  pure $ case replay of
+    LengthSpinePairProblemPreconditionNotMet -> Nothing
+    LengthSpinePairProblemPostconditionSatisfied -> Nothing
+    LengthSpinePairProblemPostconditionViolated receipt -> Just
+      $ mkBehavioralEvidence
+          (checkedLengthSpinePairProblemBehavioralProblem problem) receipt
 
 -- | Exhaustively check the Cartesian product described by source-ordered,
 -- inclusive input maximums.  Enumeration is lexicographic with the last input
@@ -639,6 +873,77 @@ validateLengthProblemInputBox evaluationLimits inputBoxLimits problem
               $ mkBehavioralEvidence
                   (checkedLengthProblemBehavioralProblem problem) receipt
 
+-- | Exhaustively validate one finite Cartesian input box in the nominal
+-- binary product domain.  Enumeration and failure precedence mirror the
+-- scalar verifier, but both positive and counterexample receipts remain
+-- product-domain evidence.
+validateLengthSpinePairProblemInputBox
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> CheckedLengthSpinePairProblem identity local
+  -> [Natural]
+  -> Either LengthSpinePairInputBoxValidationError
+      (LengthInputBoxValidation
+        (BehavioralEvidence
+          FiniteBinaryProductSpineLengthsV1
+          ValidatedLengthSpinePairCounterexample)
+        (BehavioralEvidence
+          FiniteBinaryProductSpineLengthsV1
+          ValidatedLengthSpinePairInputBox))
+validateLengthSpinePairProblemInputBox evaluationLimits inputBoxLimits problem
+    rawMaximums = do
+  let inputCount = checkedLengthSpinePairProblemInputCount problem
+      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
+  if inputCount <= maximumInputs
+    then pure ()
+    else Left $ LengthSpinePairInputBoxProblemInputLimitExceeded
+      maximumInputs inputCount
+  maximums <- exactSpinePairInputBoxBounds inputCount rawMaximums
+  mapM_ checkMaximum $ zip [0 ..] maximums
+  assignmentCount <- spinePairInputBoxAssignmentCount
+    inputBoxLimits maximums
+  enumerate maximums assignmentCount 0 0 $ replicate (length maximums) 0
+ where
+  checkMaximum (index, value) = either
+    (Left . LengthSpinePairInputBoxMaximumValueRejected index)
+    Right
+    $ checkSpinePairAssignedValue evaluationLimits
+        (LengthSpinePairProblemInputValue index) value
+
+  enumerate maximums assignmentCount !ordinal !applicable inputs = do
+    replay <- either
+      (Left . LengthSpinePairInputBoxAssignmentEvaluationRejected ordinal)
+      Right
+      $ replayLengthSpinePairProblemAssignment evaluationLimits problem
+          $ LengthProblemAssignment inputs
+    case replay of
+      LengthSpinePairProblemPostconditionViolated receipt -> Right
+        $ LengthInputBoxCounterexample
+        $ mkBehavioralEvidence
+            (checkedLengthSpinePairProblemBehavioralProblem problem) receipt
+      LengthSpinePairProblemPreconditionNotMet ->
+        continue maximums assignmentCount ordinal applicable inputs
+      LengthSpinePairProblemPostconditionSatisfied ->
+        continue maximums assignmentCount ordinal (applicable + 1) inputs
+
+  continue maximums assignmentCount !ordinal !applicable inputs =
+    case nextSpinePairInputBoxAssignment maximums inputs of
+      Left failure -> Left failure
+      Right (Just following) -> enumerate maximums assignmentCount
+        (ordinal + 1) applicable following
+      Right Nothing
+        | ordinal + 1 /= assignmentCount ->
+            Left LengthSpinePairInputBoxInternalEnumerationInvariant
+        | otherwise ->
+            let receipt = ValidatedLengthSpinePairInputBoxReceipt
+                  lengthSpinePairInputBoxValidationSchemaTag
+                  maximums assignmentCount applicable
+                  $ spinePairProblemBasis problem
+            in Right $ LengthInputBoxValidated
+              $ mkBehavioralEvidence
+                  (checkedLengthSpinePairProblemBehavioralProblem problem)
+                  receipt
+
 -- | Private replay classification shared by one-assignment counterexample
 -- validation and complete input-box traversal.  Keeping one implementation
 -- preserves their arity, value, precondition, candidate-result, and
@@ -698,6 +1003,82 @@ problemBasis problem = case checkedLengthCandidateUsedProviders
   [] -> ProviderIndependentFiniteSpineModel
   names -> FiniteSpineModelUnderAssumedProviderLaws names
 
+data LengthSpinePairProblemAssignmentReplay
+  = LengthSpinePairProblemPreconditionNotMet
+  | LengthSpinePairProblemPostconditionSatisfied
+  | LengthSpinePairProblemPostconditionViolated
+      ValidatedLengthSpinePairCounterexample
+
+replayLengthSpinePairProblemAssignment
+  :: LengthEvaluationLimits
+  -> CheckedLengthSpinePairProblem identity local
+  -> LengthProblemAssignment
+  -> Either
+      LengthSpinePairEvaluationError
+      LengthSpinePairProblemAssignmentReplay
+replayLengthSpinePairProblemAssignment limits problem assignment = do
+  inputs <- exactSpinePairAssignment
+    LengthSpinePairProblemAssignmentArityMismatch
+    (checkedLengthSpinePairProblemInputCount problem)
+    $ lengthProblemAssignmentInputs assignment
+  mapM_ (uncurry $ checkSpinePairAssignedValue limits .
+      LengthSpinePairProblemInputValue)
+    $ zip [0 ..] inputs
+  let lookupContractInput variable = case variable of
+        LengthSpinePairInput position -> case indexNatural position inputs of
+          Just value -> Right value
+          Nothing -> Left
+            $ LengthSpinePairEvaluationInternalContractReference variable
+        LengthSpinePairResult _ -> Left
+          $ LengthSpinePairEvaluationInternalContractReference variable
+  precondition <- evaluateSpinePairFormula limits lookupContractInput
+    $ checkedLengthSpinePairProblemPrecondition problem
+  if not precondition
+    then Right LengthSpinePairProblemPreconditionNotMet
+    else do
+      let candidateResult = checkedLengthSpinePairCandidateResult
+            $ checkedLengthSpinePairProblemCandidate problem
+          lookupCandidateInput variable = case variable of
+            LengthInput position -> case indexNatural position inputs of
+              Just value -> Right value
+              Nothing -> Left
+                $ LengthSpinePairEvaluationInternalCandidateReference variable
+            LengthResult -> Left
+              $ LengthSpinePairEvaluationInternalCandidateReference variable
+          firstOr = evaluateSpinePairExpression limits lookupCandidateInput
+            $ lengthSpinePairFirst candidateResult
+          secondOr = evaluateSpinePairExpression limits lookupCandidateInput
+            $ lengthSpinePairSecond candidateResult
+          lookupResult variable = case variable of
+            LengthSpinePairInput position -> case indexNatural position inputs of
+              Just value -> Right value
+              Nothing -> Left
+                $ LengthSpinePairEvaluationInternalContractReference variable
+            LengthSpinePairResult component -> case component of
+              LengthSpinePairFirst -> firstOr
+              LengthSpinePairSecond -> secondOr
+      postcondition <- evaluateSpinePairFormula limits lookupResult
+        $ checkedLengthSpinePairProblemPostcondition problem
+      if postcondition
+        then Right LengthSpinePairProblemPostconditionSatisfied
+        else do
+          firstResult <- firstOr
+          secondResult <- secondOr
+          pure $ LengthSpinePairProblemPostconditionViolated
+            $ ValidatedLengthSpinePairCounterexampleReceipt
+                inputs
+                (LengthSpinePair firstResult secondResult)
+                $ spinePairProblemBasis problem
+
+spinePairProblemBasis
+  :: CheckedLengthSpinePairProblem identity local
+  -> LengthCounterexampleBasis
+spinePairProblemBasis problem = case
+    checkedLengthSpinePairCandidateUsedProviders
+      $ checkedLengthSpinePairProblemCandidate problem of
+  [] -> ProviderIndependentFiniteSpineModel
+  names -> FiniteSpineModelUnderAssumedProviderLaws names
+
 exactInputBoxBounds
   :: Int
   -> [Natural]
@@ -751,6 +1132,58 @@ nextInputBoxAssignment maximums values =
   -- an impossible truncation as successful completion.
   advance _ _ = Left LengthInputBoxInternalEnumerationInvariant
 
+exactSpinePairInputBoxBounds
+  :: Int
+  -> [Natural]
+  -> Either LengthSpinePairInputBoxValidationError [Natural]
+exactSpinePairInputBoxBounds expected maximums =
+  let observed = observedListLength expected maximums
+  in if observed == expected
+      then Right maximums
+      else Left $ LengthSpinePairInputBoxBoundsArityMismatch expected observed
+
+spinePairInputBoxAssignmentCount
+  :: LengthInputBoxLimits
+  -> [Natural]
+  -> Either LengthSpinePairInputBoxValidationError Natural
+spinePairInputBoxAssignmentCount limits = go 1
+ where
+  maximumAssignments = lengthInputBoxAssignmentLimit limits
+  exceeded = maximumAssignments + 1
+
+  go !total []
+    | total <= maximumAssignments = Right total
+    | otherwise = Left $ LengthSpinePairInputBoxAssignmentLimitExceeded
+        maximumAssignments exceeded
+  go !total (maximumValue : remaining)
+    | total > maximumAssignments = Left
+        $ LengthSpinePairInputBoxAssignmentLimitExceeded
+            maximumAssignments exceeded
+    | factor > 0 && total > maximumAssignments `quot` factor = Left
+        $ LengthSpinePairInputBoxAssignmentLimitExceeded
+            maximumAssignments exceeded
+    | otherwise = go (total * factor) remaining
+   where
+    factor = maximumValue + 1
+
+nextSpinePairInputBoxAssignment
+  :: [Natural]
+  -> [Natural]
+  -> Either
+      LengthSpinePairInputBoxValidationError
+      (Maybe [Natural])
+nextSpinePairInputBoxAssignment maximums values =
+  fmap (fmap reverse) $ advance (reverse maximums) (reverse values)
+ where
+  advance [] [] = Right Nothing
+  advance (maximumValue : remainingMaximums)
+      (value : remainingValues)
+    | value < maximumValue = Right $ Just $ value + 1 : remainingValues
+    | otherwise = do
+        following <- advance remainingMaximums remainingValues
+        pure $ fmap (0 :) following
+  advance _ _ = Left LengthSpinePairInputBoxInternalEnumerationInvariant
+
 exactAssignment
   :: (Int -> Int -> LengthEvaluationError)
   -> Int
@@ -761,6 +1194,111 @@ exactAssignment mismatch expected values =
   in if observed == expected
       then Right values
       else Left $ mismatch expected observed
+
+exactSpinePairAssignment
+  :: (Int -> Int -> LengthSpinePairEvaluationError)
+  -> Int
+  -> [value]
+  -> Either LengthSpinePairEvaluationError [value]
+exactSpinePairAssignment mismatch expected values =
+  let observed = observedListLength expected values
+  in if observed == expected
+      then Right values
+      else Left $ mismatch expected observed
+
+checkSpinePairAssignedValue
+  :: LengthEvaluationLimits
+  -> LengthSpinePairEvaluationValueSite
+  -> Natural
+  -> Either LengthSpinePairEvaluationError ()
+checkSpinePairAssignedValue limits site value =
+  checkSpinePairValueWithin site
+    (lengthAssignmentValueBitLimit limits) value
+
+checkSpinePairIntermediate
+  :: LengthEvaluationLimits
+  -> Natural
+  -> Either LengthSpinePairEvaluationError Natural
+checkSpinePairIntermediate limits value = value <$ checkSpinePairValueWithin
+  LengthSpinePairIntermediateValue
+  (lengthIntermediateValueBitLimit limits) value
+
+checkSpinePairValueWithin
+  :: LengthSpinePairEvaluationValueSite
+  -> Int
+  -> Natural
+  -> Either LengthSpinePairEvaluationError ()
+checkSpinePairValueWithin site maximumBits value =
+  let observedBits = observedNaturalBits maximumBits value
+  in unless (observedBits <= maximumBits) $ Left
+      $ LengthSpinePairEvaluationValueBitLimitExceeded
+          site maximumBits observedBits
+
+evaluateSpinePairExpression
+  :: LengthEvaluationLimits
+  -> (variable -> Either LengthSpinePairEvaluationError Natural)
+  -> LengthExpression variable
+  -> Either LengthSpinePairEvaluationError Natural
+evaluateSpinePairExpression limits lookupVariable source = case source of
+  LengthVariable variable -> lookupVariable variable
+  LengthLiteral value -> checkSpinePairIntermediate limits value
+  LengthSum terms -> foldM add 0 terms
+  LengthScale factor expression -> do
+    value <- evaluateSpinePairExpression limits lookupVariable expression
+    checkSpinePairIntermediate limits $ factor * value
+  LengthQuotient divisor expression
+    | divisor == 0 -> Left
+        LengthSpinePairEvaluationInternalQuotientDivisorZero
+    | otherwise -> do
+        value <- evaluateSpinePairExpression limits lookupVariable expression
+        checkSpinePairIntermediate limits $ value `quot` divisor
+  LengthModulo divisor expression
+    | divisor == 0 -> Left LengthSpinePairEvaluationInternalModuloDivisorZero
+    | otherwise -> do
+        value <- evaluateSpinePairExpression limits lookupVariable expression
+        checkSpinePairIntermediate limits $ value `mod` divisor
+  LengthMonus left right -> do
+    leftValue <- evaluateSpinePairExpression limits lookupVariable left
+    rightValue <- evaluateSpinePairExpression limits lookupVariable right
+    checkSpinePairIntermediate limits $ leftValue `monus` rightValue
+  LengthMinimum left right -> binary min left right
+  LengthMaximum left right -> binary max left right
+  LengthIf condition whenTrue whenFalse -> do
+    selected <- evaluateSpinePairFormula limits lookupVariable condition
+    evaluateSpinePairExpression limits lookupVariable
+      $ if selected then whenTrue else whenFalse
+ where
+  add total term = do
+    value <- evaluateSpinePairExpression limits lookupVariable term
+    checkSpinePairIntermediate limits $ total + value
+
+  binary operation left right = do
+    leftValue <- evaluateSpinePairExpression limits lookupVariable left
+    rightValue <- evaluateSpinePairExpression limits lookupVariable right
+    checkSpinePairIntermediate limits $ operation leftValue rightValue
+
+evaluateSpinePairFormula
+  :: LengthEvaluationLimits
+  -> (variable -> Either LengthSpinePairEvaluationError Natural)
+  -> LengthFormula variable
+  -> Either LengthSpinePairEvaluationError Bool
+evaluateSpinePairFormula limits lookupVariable source = case source of
+  LengthTruth value -> Right value
+  LengthEqual left right -> compareWith (==) left right
+  LengthAtMost left right -> compareWith (<=) left right
+  LengthNot formula -> not <$>
+    evaluateSpinePairFormula limits lookupVariable formula
+  LengthAll formulas -> allM formulas
+ where
+  compareWith relation left right = do
+    leftValue <- evaluateSpinePairExpression limits lookupVariable left
+    rightValue <- evaluateSpinePairExpression limits lookupVariable right
+    pure $ relation leftValue rightValue
+
+  allM [] = Right True
+  allM (formula : remaining) = do
+    value <- evaluateSpinePairFormula limits lookupVariable formula
+    if value then allM remaining else Right False
 
 checkAssignedValue
   :: LengthEvaluationLimits

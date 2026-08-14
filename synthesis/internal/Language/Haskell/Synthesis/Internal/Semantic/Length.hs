@@ -6,13 +6,20 @@
 -- | Private representation and construction edge for list-length contracts.
 module Language.Haskell.Synthesis.Internal.Semantic.Length
   ( FiniteListSpineLengthV1
+  , FiniteBinaryProductSpineLengthsV1
   , LengthContractFingerprintSubject
+  , LengthSpinePairContractFingerprintSubject
   , LengthProviderInventoryFingerprintSubject
   , finiteListSpineLengthDomainTag
+  , finiteBinaryProductSpineLengthsDomainTag
   , LengthExpression (..)
   , LengthFormula (..)
   , LengthContractVariable (..)
   , LengthContractSource (..)
+  , LengthSpinePair (..)
+  , LengthSpinePairComponent (..)
+  , LengthSpinePairContractVariable (..)
+  , LengthSpinePairContractSource (..)
   , LengthTargetArgumentRole (..)
   , LengthProviderArgumentRole (..)
   , LengthProviderVariable (..)
@@ -52,6 +59,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length
   , LengthSyntaxCollectionSite (..)
   , LengthSyntaxError (..)
   , LengthContractError (..)
+  , LengthSpinePairContractError (..)
   , LengthProviderSummaryError (..)
   , LengthProviderInventoryError (..)
   , CheckedLengthContract
@@ -65,6 +73,17 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length
   , checkedLengthContractPrecondition
   , checkedLengthContractPostcondition
   , lengthContractFingerprint
+  , CheckedLengthSpinePairContract
+  , sealLengthSpinePairContract
+  , sealLengthSpinePairContractInContext
+  , sealRoleAwareLengthSpinePairContract
+  , sealRoleAwareLengthSpinePairContractInContext
+  , checkedLengthSpinePairContractTarget
+  , checkedLengthSpinePairContractTargetArgumentRoles
+  , checkedLengthSpinePairContractInputCount
+  , checkedLengthSpinePairContractPrecondition
+  , checkedLengthSpinePairContractPostcondition
+  , lengthSpinePairContractFingerprint
   , CheckedLengthProviderSummary
   , checkedLengthProviderName
   , checkedLengthProviderScheme
@@ -80,6 +99,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length
   , checkedLengthSpineModelField
   , providerSummaryField
   , contractVariableField
+  , lengthSpinePairContractVariableField
   , lengthExpressionField
   , lengthFormulaField
   , tagged
@@ -143,7 +163,8 @@ import Language.Haskell.Synthesis.KindInference
   , checkTypesKinds
   )
 import Language.Haskell.Synthesis.Name
-  ( Name
+  ( Boxity (Boxed)
+  , Name
   , consName
   , listName
   )
@@ -159,8 +180,18 @@ import Language.Haskell.Synthesis.Type
 -- | Nominal marker for the exact semantic dialect.
 data FiniteListSpineLengthV1
 
+-- | Nominal marker for exact binary products whose two components are total
+-- finite spine lengths.  Inventory and interpretation authority are derived
+-- from a checked scalar Length session, but behavioral evidence never crosses
+-- the scalar domain boundary.
+data FiniteBinaryProductSpineLengthsV1
+
 -- | Contract identity is deliberately not an encoding identity.
 data LengthContractFingerprintSubject
+
+-- | Binary spine-product contract identity is deliberately distinct from the
+-- historical scalar contract identity.
+data LengthSpinePairContractFingerprintSubject
 
 -- | Identity of the assumed length summaries only.
 --
@@ -172,6 +203,11 @@ data LengthProviderInventoryFingerprintSubject
 -- | Exact finite runtime tag compared before every generic problem identity.
 finiteListSpineLengthDomainTag :: [Word8]
 finiteListSpineLengthDomainTag = ascii "finite-list-spine-length/v1"
+
+-- | Exact runtime domain tag compared before every product problem identity.
+finiteBinaryProductSpineLengthsDomainTag :: [Word8]
+finiteBinaryProductSpineLengthsDomainTag =
+  ascii "finite-binary-product-spine-lengths/v1"
 
 data LengthExpression variable
   = LengthVariable variable
@@ -217,6 +253,45 @@ data LengthContractSource = LengthContractSource
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData LengthContractSource
+
+-- | A source-ordered binary product.  This carrier is shared by symbolic
+-- candidate results and independently replayed concrete results; it grants no
+-- checked authority by itself.
+data LengthSpinePair value = LengthSpinePair
+  { lengthSpinePairFirst :: !value
+  , lengthSpinePairSecond :: !value
+  }
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData value => NFData (LengthSpinePair value)
+
+-- | Stable source-order identity for one component of a binary spine result.
+data LengthSpinePairComponent
+  = LengthSpinePairFirst
+  | LengthSpinePairSecond
+  deriving (Bounded, Enum, Eq, Ord, Show, Generic)
+
+instance NFData LengthSpinePairComponent
+
+-- | Variables admitted by a binary spine-product contract.  Inputs retain
+-- the scalar domain's compact observed-argument numbering; each result
+-- component is independently addressable only in the postcondition.
+data LengthSpinePairContractVariable
+  = LengthSpinePairInput !Natural
+  | LengthSpinePairResult !LengthSpinePairComponent
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSpinePairContractVariable
+
+data LengthSpinePairContractSource = LengthSpinePairContractSource
+  { lengthSpinePairContractPrecondition
+      :: LengthFormula LengthSpinePairContractVariable
+  , lengthSpinePairContractPostcondition
+      :: LengthFormula LengthSpinePairContractVariable
+  }
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSpinePairContractSource
 
 -- | How one source-ordered target argument participates in Length semantics.
 --
@@ -659,6 +734,29 @@ data LengthContractError variable
 
 instance NFData variable => NFData (LengthContractError variable)
 
+-- | Fixed-precedence rejection while sealing a binary product-of-spines
+-- contract.  This is an additive sibling of 'LengthContractError'; keeping a
+-- closed product error type avoids widening the historical scalar API.
+data LengthSpinePairContractError variable
+  = LengthSpinePairContractTargetBoundError LengthTypeBoundError
+  | LengthSpinePairContractTargetTypeError (TypeError variable)
+  | LengthSpinePairContractTargetKindError (KindInferenceError variable)
+  | LengthSpinePairContractConstrainedTarget
+  | LengthSpinePairContractInputLimitExceeded !Int !Int
+  | LengthSpinePairContractTargetArgumentRoleLimitExceeded !Int !Int
+  | LengthSpinePairContractTargetArgumentRoleArityMismatch !Int !Int
+  | LengthSpinePairContractInputIsNotList !Int (Type variable)
+  | LengthSpinePairContractResultIsNotBoxedTuple (Type variable)
+  | LengthSpinePairContractResultTupleArityMismatch !Int
+  | LengthSpinePairContractResultComponentIsNotList
+      !LengthSpinePairComponent (Type variable)
+  | LengthSpinePairContractPreconditionError LengthSyntaxError
+  | LengthSpinePairContractPostconditionError LengthSyntaxError
+  | LengthSpinePairContractFingerprintLimitExceeded !Natural !Natural
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData variable => NFData (LengthSpinePairContractError variable)
+
 data LengthProviderSummaryError variable
   = LengthProviderNotInSourceInventory Name
   | LengthProviderSourceSchemeBoundError LengthTypeBoundError
@@ -742,6 +840,62 @@ lengthContractFingerprint
   -> Fingerprint LengthContractFingerprintSubject
 lengthContractFingerprint
     (CheckedLengthContract _ _ _ _ _ fingerprint) = fingerprint
+
+-- | A bounded normalized contract for one exact boxed binary product of the
+-- session's modeled finite spine.  The inventory remains owned by the checked
+-- context/session and is rebound at problem construction.
+data CheckedLengthSpinePairContract variable = CheckedLengthSpinePairContract
+  !(Type variable)
+  ![LengthTargetArgumentRole]
+  !Int
+  !(LengthFormula LengthSpinePairContractVariable)
+  !(LengthFormula LengthSpinePairContractVariable)
+  !(Fingerprint LengthSpinePairContractFingerprintSubject)
+
+type role CheckedLengthSpinePairContract nominal
+
+instance NFData variable => NFData (CheckedLengthSpinePairContract variable) where
+  rnf (CheckedLengthSpinePairContract target roles count precondition
+      postcondition fingerprint) =
+    rnf target `seq`
+    rnf roles `seq`
+    rnf count `seq`
+    rnf precondition `seq`
+    rnf postcondition `seq`
+    rnf fingerprint
+
+checkedLengthSpinePairContractTarget
+  :: CheckedLengthSpinePairContract variable -> Type variable
+checkedLengthSpinePairContractTarget
+    (CheckedLengthSpinePairContract target _ _ _ _ _) = target
+
+checkedLengthSpinePairContractTargetArgumentRoles
+  :: CheckedLengthSpinePairContract variable -> [LengthTargetArgumentRole]
+checkedLengthSpinePairContractTargetArgumentRoles
+    (CheckedLengthSpinePairContract _ roles _ _ _ _) = roles
+
+checkedLengthSpinePairContractInputCount
+  :: CheckedLengthSpinePairContract variable -> Int
+checkedLengthSpinePairContractInputCount
+    (CheckedLengthSpinePairContract _ _ count _ _ _) = count
+
+checkedLengthSpinePairContractPrecondition
+  :: CheckedLengthSpinePairContract variable
+  -> LengthFormula LengthSpinePairContractVariable
+checkedLengthSpinePairContractPrecondition
+    (CheckedLengthSpinePairContract _ _ _ precondition _ _) = precondition
+
+checkedLengthSpinePairContractPostcondition
+  :: CheckedLengthSpinePairContract variable
+  -> LengthFormula LengthSpinePairContractVariable
+checkedLengthSpinePairContractPostcondition
+    (CheckedLengthSpinePairContract _ _ _ _ postcondition _) = postcondition
+
+lengthSpinePairContractFingerprint
+  :: CheckedLengthSpinePairContract variable
+  -> Fingerprint LengthSpinePairContractFingerprintSubject
+lengthSpinePairContractFingerprint
+    (CheckedLengthSpinePairContract _ _ _ _ _ fingerprint) = fingerprint
 
 -- | One closed, proper-kinded assumed provider law.  Its retained trust
 -- classifier distinguishes the historical context-free law from a constrained
@@ -962,6 +1116,170 @@ sealLengthContractInContextWithRoles limits inventory model suppliedRoles
       { fingerprintMaximumBytes = maximumBytes
       , fingerprintObservedBytesAtLeast = observedBytes
       } = LengthContractFingerprintLimitExceeded maximumBytes observedBytes
+
+-- | Compatibility entry point for a boxed binary product of Haskell's
+-- structural @[]@ spine.
+sealLengthSpinePairContract
+  :: Ord variable
+  => LengthLimits
+  -> Inventory variable annotation
+  -> Type variable
+  -> LengthSpinePairContractSource
+  -> Either
+      (LengthSpinePairContractError variable)
+      (CheckedLengthSpinePairContract variable)
+sealLengthSpinePairContract limits inventory =
+  sealLengthSpinePairContractInContext limits
+    $ CheckedLengthContext inventory builtinListSpineModel
+
+-- | Role-aware compatibility entry point for a boxed binary product of
+-- Haskell's structural @[]@ spine.
+sealRoleAwareLengthSpinePairContract
+  :: Ord variable
+  => LengthLimits
+  -> Inventory variable annotation
+  -> [LengthTargetArgumentRole]
+  -> Type variable
+  -> LengthSpinePairContractSource
+  -> Either
+      (LengthSpinePairContractError variable)
+      (CheckedLengthSpinePairContract variable)
+sealRoleAwareLengthSpinePairContract limits inventory roles =
+  sealRoleAwareLengthSpinePairContractInContext limits
+    (CheckedLengthContext inventory builtinListSpineModel) roles
+
+-- | Seal a binary product-of-spines contract against one exact checked
+-- context.  Target validation retains the scalar contract's precedence up to
+-- the result, then checks boxed tuple shape, exact arity, and components in
+-- source order.
+sealLengthSpinePairContractInContext
+  :: Ord variable
+  => LengthLimits
+  -> CheckedLengthContext variable annotation
+  -> Type variable
+  -> LengthSpinePairContractSource
+  -> Either
+      (LengthSpinePairContractError variable)
+      (CheckedLengthSpinePairContract variable)
+sealLengthSpinePairContractInContext limits
+    (CheckedLengthContext inventory model) rawTarget source =
+  sealLengthSpinePairContractInContextWithRoles limits inventory model
+    Nothing rawTarget source
+
+sealRoleAwareLengthSpinePairContractInContext
+  :: Ord variable
+  => LengthLimits
+  -> CheckedLengthContext variable annotation
+  -> [LengthTargetArgumentRole]
+  -> Type variable
+  -> LengthSpinePairContractSource
+  -> Either
+      (LengthSpinePairContractError variable)
+      (CheckedLengthSpinePairContract variable)
+sealRoleAwareLengthSpinePairContractInContext limits
+    (CheckedLengthContext inventory model) roles rawTarget source =
+  sealLengthSpinePairContractInContextWithRoles limits inventory model
+    (Just roles) rawTarget source
+
+sealLengthSpinePairContractInContextWithRoles
+  :: Ord variable
+  => LengthLimits
+  -> Inventory variable annotation
+  -> CheckedLengthSpineModel variable
+  -> Maybe [LengthTargetArgumentRole]
+  -> Type variable
+  -> LengthSpinePairContractSource
+  -> Either
+      (LengthSpinePairContractError variable)
+      (CheckedLengthSpinePairContract variable)
+sealLengthSpinePairContractInContextWithRoles limits inventory model
+    suppliedRoles rawTarget source = do
+  _ <- first LengthSpinePairContractTargetBoundError
+    $ observeTypeWithin limits 0 rawTarget
+  target <- first LengthSpinePairContractTargetTypeError
+    $ normalizeType rawTarget
+  first LengthSpinePairContractTargetKindError
+    $ checkTypesKinds (inventoryKindAssumptions inventory)
+        [(ProperTypeKind, target)]
+  let (_, constraints, body) = splitLeadingForalls target
+  case constraints of
+    [] -> pure ()
+    _ -> Left LengthSpinePairContractConstrainedTarget
+  let (inputs, result) = functionSpine body
+      maximumInputs = lengthContractInputLimit limits
+      observedInputs = observedListLength maximumInputs inputs
+  if observedInputs > maximumInputs
+    then Left $ LengthSpinePairContractInputLimitExceeded
+      maximumInputs observedInputs
+    else pure ()
+  roles <- case suppliedRoles of
+    Nothing -> Right $ replicate (length inputs) LengthObservedSpine
+    Just rawRoles -> do
+      let observedRoles = observedListLength maximumInputs rawRoles
+      if observedRoles > maximumInputs
+        then Left $ LengthSpinePairContractTargetArgumentRoleLimitExceeded
+          maximumInputs observedRoles
+        else pure ()
+      if observedRoles == length inputs
+        then Right rawRoles
+        else Left $ LengthSpinePairContractTargetArgumentRoleArityMismatch
+          (length inputs) observedRoles
+  mapM_ requireObservedInput $ zip3 [0 ..] roles inputs
+  components <- case result of
+    TupleType Boxed fields -> case fields of
+      [firstComponent, secondComponent] ->
+        Right $ LengthSpinePair firstComponent secondComponent
+      _ -> Left $ LengthSpinePairContractResultTupleArityMismatch
+        $ length fields
+    _ -> Left $ LengthSpinePairContractResultIsNotBoxedTuple result
+  requireResultComponent LengthSpinePairFirst
+    $ lengthSpinePairFirst components
+  requireResultComponent LengthSpinePairSecond
+    $ lengthSpinePairSecond components
+  let inputCount = length $ filter (== LengthObservedSpine) roles
+      contractReference phase variable = case variable of
+        LengthSpinePairResult _
+          | phase == ContractPrecondition ->
+              Left LengthResultNotAvailableInPrecondition
+          | otherwise -> Right ()
+        LengthSpinePairInput position
+          | position < fromIntegral inputCount -> Right ()
+          | otherwise -> Left
+              $ LengthInputReferenceOutOfRange position inputCount
+  (precondition, afterPrecondition) <- first
+    LengthSpinePairContractPreconditionError
+    $ normalizeLengthFormula limits
+        (contractReference ContractPrecondition)
+        emptySyntaxUsage
+        $ lengthSpinePairContractPrecondition source
+  (postcondition, _) <- first LengthSpinePairContractPostconditionError
+    $ normalizeLengthFormula limits
+        (contractReference ContractPostcondition)
+        afterPrecondition
+        $ lengthSpinePairContractPostcondition source
+  fingerprint <- first contractFingerprintError
+    $ buildLengthSpinePairContractFingerprint
+        limits model roles inputCount precondition postcondition
+  pure $ CheckedLengthSpinePairContract
+    target roles inputCount precondition postcondition fingerprint
+ where
+  requireObservedInput (index, role, input) = case role of
+    LengthUnobservedTarget -> Right ()
+    LengthObservedSpine
+      | isModeledSpine model input -> Right ()
+      | otherwise -> Left
+          $ LengthSpinePairContractInputIsNotList index input
+
+  requireResultComponent component result
+    | isModeledSpine model result = Right ()
+    | otherwise = Left
+        $ LengthSpinePairContractResultComponentIsNotList component result
+
+  contractFingerprintError FingerprintLimitExceeded
+      { fingerprintMaximumBytes = maximumBytes
+      , fingerprintObservedBytesAtLeast = observedBytes
+      } = LengthSpinePairContractFingerprintLimitExceeded
+        maximumBytes observedBytes
 
 -- | Compatibility entry point for Haskell's structural @[]@ spine.
 sealLengthProviderInventory
@@ -1639,6 +1957,80 @@ buildLengthContractFingerprint limits model roles inputCount
         [FingerprintNatural $ fromIntegral inputCount]
     ] ++ suffixFields
 
+buildLengthSpinePairContractFingerprint
+  :: LengthLimits
+  -> CheckedLengthSpineModel variable
+  -> [LengthTargetArgumentRole]
+  -> Int
+  -> LengthFormula LengthSpinePairContractVariable
+  -> LengthFormula LengthSpinePairContractVariable
+  -> Either
+      FingerprintLimitError
+      (Fingerprint LengthSpinePairContractFingerprintSubject)
+buildLengthSpinePairContractFingerprint limits model roles inputCount
+    precondition postcondition =
+  buildFingerprintWithin (fromIntegral $ lengthFingerprintByteLimit limits)
+    FingerprintBuilder
+      { fingerprintBuilderVersion = if mixedRoles then 2 else 1
+      , fingerprintBuilderRole = ascii
+          "finite-binary-product-spine-lengths/contract"
+      , fingerprintBuilderFields = prefixFields ++ argumentFields ++
+          [ tagged "result-shape"
+              [ FingerprintBytes $ ascii "boxed-binary-product/v1"
+              , FingerprintBytes $ ascii "first-finite-spine-length/v1"
+              , FingerprintBytes $ ascii "second-finite-spine-length/v1"
+              , FingerprintBytes $ ascii "source-ordered-components/v1"
+              ]
+          , tagged "precondition"
+              [ lengthFormulaField lengthSpinePairContractVariableField
+                  precondition
+              ]
+          , tagged "postcondition"
+              [ lengthFormulaField lengthSpinePairContractVariableField
+                  postcondition
+              ]
+          ]
+      }
+ where
+  mixedRoles = LengthUnobservedTarget `elem` roles
+  prefixFields =
+    [ tagged "dialect"
+        [FingerprintBytes finiteBinaryProductSpineLengthsDomainTag]
+    , tagged "semantic-policy" $
+        [ FingerprintBytes $ ascii "finite-spine-total/v1"
+        , FingerprintBytes $ ascii "unbounded-natural/v1"
+        , FingerprintBytes $ ascii "exact-truncated-monus/v1"
+        , FingerprintBytes $ ascii "exact-conditional/v1"
+        , FingerprintBytes $ ascii "boxed-binary-product-of-spines/v1"
+        ] ++ if mixedRoles
+          then
+            [ FingerprintBytes $ ascii "role-aware-target-arguments/v1"
+            , FingerprintBytes $ ascii "opaque-unobserved-target/v1"
+            , FingerprintBytes $ ascii
+                "compact-observed-input-numbering/v1"
+            ]
+          else []
+    , tagged "normalizer"
+        [FingerprintBytes $ ascii "length-normalizer/v1"]
+    , tagged "spine-model" [checkedLengthSpineModelField model]
+    ]
+  argumentFields
+    | mixedRoles =
+        [ tagged "ordered-target-arguments"
+            [ FingerprintNatural $ fromIntegral $ length roles
+            , FingerprintSequence $ map targetArgumentRoleField roles
+            ]
+        , tagged "observed-spine-input-count"
+            [FingerprintNatural $ fromIntegral inputCount]
+        ]
+    | otherwise =
+        [ tagged "ordered-spine-inputs"
+            [ FingerprintNatural $ fromIntegral inputCount
+            , FingerprintSequence $ replicate inputCount
+                $ FingerprintBytes $ ascii "list-spine"
+            ]
+        ]
+
 targetArgumentRoleField :: LengthTargetArgumentRole -> FingerprintField
 targetArgumentRoleField role = FingerprintBytes $ ascii $ case role of
   LengthObservedSpine -> "observed-spine"
@@ -1726,6 +2118,16 @@ contractVariableField :: LengthContractVariable -> FingerprintField
 contractVariableField variable = case variable of
   LengthInput position -> tagged "input" [FingerprintNatural position]
   LengthResult -> tagged "result" []
+
+lengthSpinePairContractVariableField
+  :: LengthSpinePairContractVariable -> FingerprintField
+lengthSpinePairContractVariableField variable = case variable of
+  LengthSpinePairInput position ->
+    tagged "input" [FingerprintNatural position]
+  LengthSpinePairResult component -> tagged "result"
+    [FingerprintBytes $ ascii $ case component of
+      LengthSpinePairFirst -> "first"
+      LengthSpinePairSecond -> "second"]
 
 providerVariableField :: LengthProviderVariable -> FingerprintField
 providerVariableField (LengthProviderArgument position) =

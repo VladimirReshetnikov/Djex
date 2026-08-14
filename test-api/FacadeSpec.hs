@@ -473,6 +473,51 @@ facadeTests = testGroup "public Djex facade"
         ] @?= ([minBound .. maxBound] :: [LengthProviderTrust])
       [BuiltinStructuralListSpine, DerivedFromListLikeDataDeclaration] @?=
         [minBound .. maxBound]
+  , testCase "exports nominal binary product-of-spines contracts" $ do
+      finiteBinaryProductSpineLengthsDomainTag @?=
+        map (fromIntegral . fromEnum)
+          "finite-binary-product-spine-lengths/v1"
+      assertBool "product domain aliased the scalar Length domain" $
+        finiteBinaryProductSpineLengthsDomainTag /=
+          finiteListSpineLengthDomainTag
+      let payload = TupleType Boxed [] :: Type String
+          spine = TypeApplication (TypeConstructor listName) payload
+          target = FunctionType spine $ TupleType Boxed [spine, spine]
+          input = LengthVariable $ LengthSpinePairInput 0
+          firstResult = LengthVariable
+            $ LengthSpinePairResult LengthSpinePairFirst
+          secondResult = LengthVariable
+            $ LengthSpinePairResult LengthSpinePairSecond
+          source = LengthSpinePairContractSource
+            { lengthSpinePairContractPrecondition = LengthTruth True
+            , lengthSpinePairContractPostcondition = LengthAll
+                [ LengthEqual firstResult input
+                , LengthEqual secondResult $ LengthLiteral 0
+                ]
+            }
+          pair = LengthSpinePair (3 :: Natural) 5
+      inventory <- expectRight
+        (mkInventory ClosedKindInventory [] :: Either
+          (InventoryError String Void) (Inventory String ()))
+      checked <- expectRight $ sealLengthSpinePairContract
+        defaultLengthLimits inventory target source
+      checkedRoleAware <- expectRight
+        $ sealRoleAwareLengthSpinePairContract defaultLengthLimits inventory
+            [LengthObservedSpine] target source
+      lengthSpinePairFirst pair @?= 3
+      lengthSpinePairSecond pair @?= 5
+      [LengthSpinePairFirst, LengthSpinePairSecond] @?= [minBound .. maxBound]
+      checkedLengthSpinePairContractTarget checked @?= target
+      checkedLengthSpinePairContractTargetArgumentRoles checked @?=
+        [LengthObservedSpine]
+      checkedLengthSpinePairContractInputCount checked @?= 1
+      checkedLengthSpinePairContractPrecondition checked @?= LengthTruth True
+      lengthSpinePairContractFingerprint checkedRoleAware @?=
+        lengthSpinePairContractFingerprint checked
+      let shapeFailure = LengthSpinePairContractResultTupleArityMismatch 3
+            :: LengthSpinePairContractError String
+      shapeFailure @?= LengthSpinePairContractResultTupleArityMismatch 3
+      rnf pair `seq` rnf checked `seq` rnf shapeFailure `seq` pure ()
   , testCase "exports the prepared class authority" $ do
       className <- expectRight $ mkIdentifier "Class"
       missingName <- expectRight $ mkIdentifier "Missing"
@@ -1066,6 +1111,200 @@ facadeTests = testGroup "public Djex facade"
           ("(set-option :print-success false)\n" :: String)
       lengthSMTLibExecutionEnvironmentPolicyTag @?=
         map (fromIntegral . fromEnum) ("empty-environment/v1" :: String)
+  , testCase "exports the binary product problem and replay facade" $ do
+      let contractInSession
+            :: CheckedLengthSession Int ()
+            -> Type ExferenceTypeVariable
+            -> LengthSpinePairContractSource
+            -> Either
+                (LengthSpinePairContractError ExferenceTypeVariable)
+                (CheckedLengthSpinePairContract ExferenceTypeVariable)
+          contractInSession = sealLengthSpinePairContractInSession
+          sealer
+            :: LengthProblemLimits
+            -> CheckedLengthSession Int ()
+            -> CheckedLengthSpinePairContract ExferenceTypeVariable
+            -> ExferenceTypedCandidate
+            -> Either
+                (LengthSpinePairProblemError
+                  ExferenceTermGraphAbsence Int ExferenceLocal)
+                (CheckedLengthSpinePairProblem Int ExferenceLocal)
+          sealer = sealLengthSpinePairTypedCandidateProblem
+          roleAwareSealer
+            :: LengthProblemLimits
+            -> CheckedLengthSession Int ()
+            -> CheckedLengthSpinePairContract ExferenceTypeVariable
+            -> ExferenceTypedCandidate
+            -> Either
+                (LengthSpinePairProblemError
+                  ExferenceTermGraphAbsence Int ExferenceLocal)
+                (CheckedLengthSpinePairProblem Int ExferenceLocal)
+          roleAwareSealer = sealRoleAwareLengthSpinePairTypedCandidateProblem
+          exactCaseSealer
+            :: LengthProblemLimits
+            -> CheckedLengthSession Int ()
+            -> CheckedLengthSpinePairContract ExferenceTypeVariable
+            -> ExferenceTypedCandidate
+            -> Either
+                (LengthSpinePairProblemError
+                  ExferenceTermGraphAbsence Int ExferenceLocal)
+                (CheckedLengthSpinePairProblem Int ExferenceLocal)
+          exactCaseSealer =
+            sealExactSpineCaseLengthSpinePairTypedCandidateProblem
+          inSessionSealer
+            :: LengthProblemLimits
+            -> CheckedLengthSession Int ()
+            -> CheckedLengthSpinePairContract ExferenceTypeVariable
+            -> ExferenceTypedCandidate
+            -> Either
+                (LengthSpinePairProblemError
+                  ExferenceTermGraphAbsence Int ExferenceLocal)
+                (CheckedLengthSpinePairProblem Int ExferenceLocal)
+          inSessionSealer = sealLengthSpinePairTypedCandidateProblemInSession
+          candidateResultProjection
+            :: CheckedLengthSpinePairCandidate Int ExferenceLocal
+            -> LengthSpinePair (LengthExpression LengthContractVariable)
+          candidateResultProjection = checkedLengthSpinePairCandidateResult
+          candidateProviderProjection
+            :: CheckedLengthSpinePairCandidate Int ExferenceLocal
+            -> [Name]
+          candidateProviderProjection =
+            checkedLengthSpinePairCandidateUsedProviders
+          candidateFingerprintProjection
+            :: CheckedLengthSpinePairCandidate Int ExferenceLocal
+            -> Fingerprint
+                (CandidateFingerprintSubject
+                  FiniteBinaryProductSpineLengthsV1)
+          candidateFingerprintProjection =
+            checkedLengthSpinePairCandidateFingerprint
+          problemCandidateProjection
+            :: CheckedLengthSpinePairProblem Int ExferenceLocal
+            -> CheckedLengthSpinePairCandidate Int ExferenceLocal
+          problemCandidateProjection = checkedLengthSpinePairProblemCandidate
+          problemInputProjection
+            :: CheckedLengthSpinePairProblem Int ExferenceLocal -> Int
+          problemInputProjection = checkedLengthSpinePairProblemInputCount
+          problemPreconditionProjection
+            :: CheckedLengthSpinePairProblem Int ExferenceLocal
+            -> LengthFormula LengthSpinePairContractVariable
+          problemPreconditionProjection =
+            checkedLengthSpinePairProblemPrecondition
+          problemPostconditionProjection
+            :: CheckedLengthSpinePairProblem Int ExferenceLocal
+            -> LengthFormula LengthSpinePairContractVariable
+          problemPostconditionProjection =
+            checkedLengthSpinePairProblemPostcondition
+          problemConditionProjection
+            :: CheckedLengthSpinePairProblem Int ExferenceLocal
+            -> LengthFormula LengthContractVariable
+          problemConditionProjection =
+            checkedLengthSpinePairProblemCounterexampleCondition
+          problemEncodingProjection
+            :: CheckedLengthSpinePairProblem Int ExferenceLocal
+            -> Fingerprint
+                (EncodingFingerprintSubject
+                  FiniteBinaryProductSpineLengthsV1)
+          problemEncodingProjection =
+            checkedLengthSpinePairProblemEncodingFingerprint
+          problemProjection
+            :: CheckedLengthSpinePairProblem Int ExferenceLocal
+            -> BehavioralProblem FiniteBinaryProductSpineLengthsV1
+          problemProjection = checkedLengthSpinePairProblemBehavioralProblem
+          contractEvaluator
+            :: LengthEvaluationLimits
+            -> CheckedLengthSpinePairContract ExferenceTypeVariable
+            -> LengthSpinePairContractAssignment
+            -> Either LengthSpinePairEvaluationError LengthContractEvaluation
+          contractEvaluator = evaluateLengthSpinePairContractAssignment
+          counterexampleValidator
+            :: LengthEvaluationLimits
+            -> CheckedLengthSpinePairProblem Int ExferenceLocal
+            -> LengthProblemAssignment
+            -> Either LengthSpinePairEvaluationError
+                (Maybe
+                  (BehavioralEvidence
+                    FiniteBinaryProductSpineLengthsV1
+                    ValidatedLengthSpinePairCounterexample))
+          counterexampleValidator =
+            validateLengthSpinePairProblemCounterexample
+          boxValidator
+            :: LengthEvaluationLimits
+            -> LengthInputBoxLimits
+            -> CheckedLengthSpinePairProblem Int ExferenceLocal
+            -> [Natural]
+            -> Either LengthSpinePairInputBoxValidationError
+                (LengthInputBoxValidation
+                  (BehavioralEvidence
+                    FiniteBinaryProductSpineLengthsV1
+                    ValidatedLengthSpinePairCounterexample)
+                  (BehavioralEvidence
+                    FiniteBinaryProductSpineLengthsV1
+                    ValidatedLengthSpinePairInputBox))
+          boxValidator = validateLengthSpinePairProblemInputBox
+          counterexampleInputsProjection
+            :: ValidatedLengthSpinePairCounterexample -> [Natural]
+          counterexampleInputsProjection =
+            validatedLengthSpinePairCounterexampleInputs
+          counterexampleResultProjection
+            :: ValidatedLengthSpinePairCounterexample
+            -> LengthSpinePair Natural
+          counterexampleResultProjection =
+            validatedLengthSpinePairCounterexampleResult
+          counterexampleBasisProjection
+            :: ValidatedLengthSpinePairCounterexample
+            -> LengthCounterexampleBasis
+          counterexampleBasisProjection =
+            validatedLengthSpinePairCounterexampleBasis
+          boxMaximumsProjection
+            :: ValidatedLengthSpinePairInputBox -> [Natural]
+          boxMaximumsProjection =
+            validatedLengthSpinePairInputBoxInclusiveMaximums
+          boxAssignmentProjection
+            :: ValidatedLengthSpinePairInputBox -> Natural
+          boxAssignmentProjection =
+            validatedLengthSpinePairInputBoxAssignmentCount
+          boxApplicableProjection
+            :: ValidatedLengthSpinePairInputBox -> Natural
+          boxApplicableProjection =
+            validatedLengthSpinePairInputBoxApplicableAssignmentCount
+          boxBasisProjection
+            :: ValidatedLengthSpinePairInputBox -> LengthCounterexampleBasis
+          boxBasisProjection = validatedLengthSpinePairInputBoxBasis
+      contractInSession `seq` sealer `seq` roleAwareSealer `seq`
+        exactCaseSealer `seq` inSessionSealer `seq`
+        candidateResultProjection `seq` candidateProviderProjection `seq`
+        candidateFingerprintProjection `seq`
+        problemCandidateProjection `seq` problemInputProjection `seq`
+        problemPreconditionProjection `seq` problemPostconditionProjection `seq`
+        problemConditionProjection `seq` problemEncodingProjection `seq`
+        problemProjection `seq` contractEvaluator `seq`
+        counterexampleValidator `seq` boxValidator `seq`
+        counterexampleInputsProjection `seq` counterexampleResultProjection `seq`
+        counterexampleBasisProjection `seq` boxMaximumsProjection `seq`
+        boxAssignmentProjection `seq` boxApplicableProjection `seq`
+        boxBasisProjection `seq`
+        (rnf :: CheckedLengthSpinePairCandidate Int ExferenceLocal -> ()) `seq`
+        (rnf :: CheckedLengthSpinePairProblem Int ExferenceLocal -> ()) `seq`
+        (rnf :: ValidatedLengthSpinePairCounterexample -> ()) `seq`
+        (rnf :: ValidatedLengthSpinePairInputBox -> ()) `seq`
+        pure ()
+      let assignment = LengthSpinePairContractAssignment [1]
+            $ LengthSpinePair 2 3
+      lengthSpinePairContractAssignmentInputs assignment @?= [1]
+      lengthSpinePairContractAssignmentResult assignment @?=
+        LengthSpinePair 2 3
+      lengthSpinePairInputBoxValidationSchemaTag @?=
+        map (fromIntegral . fromEnum)
+          ("finite-binary-product-spine-lengths/\
+            \bounded-input-box-validation/v1" :: String)
+      let shapeError = LengthSpinePairProblemResultComponentExpectedSpine
+            LengthSpinePairSecond (termNodeId 4)
+            :: LengthSpinePairProblemError () String Int
+      shapeError @?= LengthSpinePairProblemResultComponentExpectedSpine
+        LengthSpinePairSecond (termNodeId 4)
+      let boxError = LengthSpinePairInputBoxBoundsArityMismatch 2 1
+      boxError @?= LengthSpinePairInputBoxBoundsArityMismatch 2 1
+      rnf shapeError `seq` rnf boxError `seq` pure ()
   , testCase "rejects residual constraints at the Djinn render boundary" $ do
       target <- expectRight $ mkIdentifier "identity"
       checkedTarget <- expectRight $ mkDefinitionName target

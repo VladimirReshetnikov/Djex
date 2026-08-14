@@ -1,5 +1,5 @@
--- | Canonical QF_LIA queries and independently replayed input models for the
--- checked finite-list-spine Length domain.
+-- | Canonical QF_LIA queries and independently replayed input assignments for
+-- the checked finite-list-spine Length domain.
 --
 -- A query can be built only from one opaque 'CheckedLengthProblem'.  It
 -- structurally fingerprints a typed, versioned translation before retaining
@@ -15,8 +15,15 @@
 -- Model bindings contain inputs only.  'validateLengthSMTLibCounterexample'
 -- reorders an exact symbol set, rejects negative integers, recomputes the
 -- candidate result from the retained problem, and delegates to independent
--- concrete replay.  Any resulting evidence remains finite-spine/model-relative
--- and explicitly conditional on the provider laws recorded by its receipt.
+-- concrete replay. Callers which already hold source-ordered natural inputs
+-- can instead pass only those values to
+-- 'replayLengthSMTLibCounterexampleInputs'; the sealed query owns their checked
+-- problem and symbol association. Every call evaluates afresh and returns a
+-- fresh receipt after exact same-query/problem association or 'Nothing', never
+-- a cached verdict. Any
+-- resulting evidence remains finite-spine/model-relative and explicitly
+-- conditional on the provider laws recorded by its receipt. Neither replay
+-- entrance gives authority to a raw solver status, including @unsat@.
 module Language.Haskell.Synthesis.Semantic.Length.SMTLib
   ( LengthSMTLibQueryFingerprintSubject
   , lengthSMTLibQuerySchemaTag
@@ -44,6 +51,8 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib
   , LengthSMTLibIntegerBinding (..)
   , LengthSMTLibModelError (..)
   , validateLengthSMTLibCounterexample
+  , LengthSMTLibInputReplayError (..)
+  , replayLengthSMTLibCounterexampleInputs
   ) where
 
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib

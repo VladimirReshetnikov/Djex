@@ -4489,6 +4489,124 @@ smtLibTests = testGroup
       SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes plan @?=
         fmap (++ SMTLibStream.smtLibEchoSentinelCommandBytes valueBarrier)
           expectedRequest
+  , testGroup "query-owned input replay"
+      [ testCase "match the decoded-binding replay receipt exactly" $ do
+          problem <- adversarialConstantZeroProblem identityLengthContract
+          query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+            SMTLib.defaultLengthSMTLibLimits problem
+          case SMTLib.lengthSMTLibQueryInputSymbols query of
+            [symbol] -> do
+              evidence <- expectCounterexample
+                $ SMTLib.validateLengthSMTLibCounterexample
+                    Evaluate.defaultLengthEvaluationLimits query
+                    [smtIntegerBinding symbol 3]
+              decodedReceipt <- expectRight $ Djex.replayBehavioralEvidence
+                (SMTLib.lengthSMTLibQueryBehavioralProblem query) evidence
+              inputReceipt <- expectCounterexample
+                $ SMTLib.replayLengthSMTLibCounterexampleInputs
+                    Evaluate.defaultLengthEvaluationLimits query [3]
+              inputReceipt @?= decodedReceipt
+            symbols -> assertFailure $ "unexpected input symbols: " ++
+              show symbols
+      , testCase
+          "recompute each exact query result and provider-law basis" $ do
+          independentProblem <- adversarialConstantZeroProblem
+            identityLengthContract
+          providerProblem <- adversarialConstantProviderProblem
+            7 identityLengthContract
+          independentQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+            SMTLib.defaultLengthSMTLibLimits independentProblem
+          providerQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+            SMTLib.defaultLengthSMTLibLimits providerProblem
+          assertBool "distinct replay problems shared one query identity" $
+            SMTLib.lengthSMTLibQueryFingerprint independentQuery /=
+              SMTLib.lengthSMTLibQueryFingerprint providerQuery
+          independentReceipt <- expectCounterexample
+            $ SMTLib.replayLengthSMTLibCounterexampleInputs
+                Evaluate.defaultLengthEvaluationLimits independentQuery [3]
+          providerReceipt <- expectCounterexample
+            $ SMTLib.replayLengthSMTLibCounterexampleInputs
+                Evaluate.defaultLengthEvaluationLimits providerQuery [3]
+          providerName <- expectName "Fixture.problemReplayConstant"
+          map Evaluate.validatedLengthCounterexampleInputs
+              [independentReceipt, providerReceipt] @?= [[3], [3]]
+          map Evaluate.validatedLengthCounterexampleResult
+              [independentReceipt, providerReceipt] @?= [0, 7]
+          map Evaluate.validatedLengthCounterexampleBasis
+              [independentReceipt, providerReceipt] @?=
+            [ Evaluate.ProviderIndependentFiniteSpineModel
+            , Evaluate.FiniteSpineModelUnderAssumedProviderLaws [providerName]
+            ]
+      , testCase "enforce exact zero, unary, and binary input arities" $ do
+          let result = Length.LengthVariable Length.LengthResult
+              zeroSource = contractWith (Length.LengthTruth True)
+                $ Length.LengthEqual result $ Length.LengthLiteral 1
+          zeroProblem <- adversarialZeroInputProblem zeroSource
+          unaryProblem <- adversarialConstantZeroProblem identityLengthContract
+          binaryProblem <- adversarialBinaryConstantZeroProblem
+            identityLengthContract
+          zeroQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+            SMTLib.defaultLengthSMTLibLimits zeroProblem
+          unaryQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+            SMTLib.defaultLengthSMTLibLimits unaryProblem
+          binaryQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+            SMTLib.defaultLengthSMTLibLimits binaryProblem
+          zeroReceipt <- expectCounterexample
+            $ SMTLib.replayLengthSMTLibCounterexampleInputs
+                Evaluate.defaultLengthEvaluationLimits zeroQuery []
+          unaryReceipt <- expectCounterexample
+            $ SMTLib.replayLengthSMTLibCounterexampleInputs
+                Evaluate.defaultLengthEvaluationLimits unaryQuery [3]
+          binaryReceipt <- expectCounterexample
+            $ SMTLib.replayLengthSMTLibCounterexampleInputs
+                Evaluate.defaultLengthEvaluationLimits binaryQuery [3, 7]
+          map Evaluate.validatedLengthCounterexampleInputs
+              [zeroReceipt, unaryReceipt, binaryReceipt] @?=
+            [[], [3], [3, 7]]
+          let arityFailure expected observed =
+                SMTLib.LengthSMTLibInputReplayEvaluationRejected
+                  $ Evaluate.LengthProblemAssignmentArityMismatch
+                      expected observed
+              replay query = SMTLib.replayLengthSMTLibCounterexampleInputs
+                Evaluate.defaultLengthEvaluationLimits query
+          assertLeft (arityFailure 0 1) $ replay zeroQuery [0]
+          assertLeft (arityFailure 1 0) $ replay unaryQuery []
+          assertLeft (arityFailure 2 1) $ replay binaryQuery [0]
+          assertLeft (arityFailure 2 3) $ replay binaryQuery [0, 0, 0]
+      , testCase
+          "reject maximum-plus-one and cyclic tails before input values" $ do
+          problem <- adversarialConstantZeroProblem identityLengthContract
+          query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+            SMTLib.defaultLengthSMTLibLimits problem
+          let replay = SMTLib.replayLengthSMTLibCounterexampleInputs
+                Evaluate.defaultLengthEvaluationLimits query
+              expected = SMTLib.LengthSMTLibInputReplayEvaluationRejected
+                $ Evaluate.LengthProblemAssignmentArityMismatch 1 2
+              poisonedInputs =
+                [ error "query input replay demanded the first over-arity value"
+                , error "query input replay demanded the extra over-arity value"
+                ]
+              cyclicInputs = 0 : cyclicInputs
+          poisonedResult <- evaluateWithin $ replay poisonedInputs
+          assertLeft expected poisonedResult
+          cyclicResult <- evaluateWithin $ replay cyclicInputs
+          assertLeft expected cyclicResult
+      , testCase
+          "wrap evaluation rejection and preserve a valid non-counterexample" $
+          do
+            problem <- adversarialConstantZeroProblem identityLengthContract
+            query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+              SMTLib.defaultLengthSMTLibLimits problem
+            assertLeft
+              (SMTLib.LengthSMTLibInputReplayEvaluationRejected
+                $ Evaluate.LengthEvaluationValueBitLimitExceeded
+                    (Evaluate.LengthProblemInputValue 0) 2 3)
+              $ SMTLib.replayLengthSMTLibCounterexampleInputs
+                  (evaluationLimitsWith 2 8) query [4]
+            expectNoCounterexample
+              $ SMTLib.replayLengthSMTLibCounterexampleInputs
+                  Evaluate.defaultLengthEvaluationLimits query [0]
+      ]
   , testCase "decode input symbols order independently and replay the model" $ do
       problem <- adversarialBinaryConstantZeroProblem identityLengthContract
       query <- expectRight $ SMTLib.sealLengthSMTLibQuery

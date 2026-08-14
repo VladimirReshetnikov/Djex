@@ -814,6 +814,14 @@ facadeTests = testGroup "public Djex facade"
                     FiniteListSpineLengthV1
                     ValidatedLengthCounterexample))
           counterexampleValidator = validateLengthProblemCounterexample
+          queryInputReplayer
+            :: LengthEvaluationLimits
+            -> LengthSMTLibQuery Int ExferenceLocal
+            -> [Natural]
+            -> Either
+                LengthSMTLibInputReplayError
+                (Maybe ValidatedLengthCounterexample)
+          queryInputReplayer = replayLengthSMTLibCounterexampleInputs
           queryInputSymbolsProjection
             :: LengthSMTLibQuery Int ExferenceLocal
             -> [[Word8]]
@@ -925,7 +933,8 @@ facadeTests = testGroup "public Djex facade"
         candidateResultProjection `seq` problemProjection `seq`
         inputCountProjection `seq` preconditionProjection `seq`
         postconditionProjection `seq` basisProjection `seq`
-        counterexampleValidator `seq` queryInputSymbolsProjection `seq`
+        counterexampleValidator `seq` queryInputReplayer `seq`
+        queryInputSymbolsProjection `seq`
         queryInputValueRequestProjection `seq` queryObservationAssociator `seq`
         queryObservationReplayer `seq` checkResponseParser `seq`
         inputValueResponseParser `seq` responseByteLimitProjection `seq`
@@ -937,6 +946,7 @@ facadeTests = testGroup "public Djex facade"
         executionTimeoutProjection `seq`
         executionResourceProjection `seq` executionDeadlineProjection `seq`
         executionArtifactProjection `seq` executionResponseProjection `seq`
+        (rnf :: LengthSMTLibInputReplayError -> ()) `seq`
         (rnf :: LengthSMTLibExecutableDigestExpectation -> ()) `seq`
         pure ()
       length interpretationPolicySources @?= 5
@@ -954,6 +964,10 @@ facadeTests = testGroup "public Djex facade"
       ( LengthSMTLibObservationQueryFingerprintMismatch
           :: LengthSMTLibObservationReplayError
         ) @?= LengthSMTLibObservationQueryFingerprintMismatch
+      ( LengthSMTLibInputReplayAssociationRejected ReplayDomainMismatch
+          :: LengthSMTLibInputReplayError
+        ) @?=
+          LengthSMTLibInputReplayAssociationRejected ReplayDomainMismatch
       mkLengthSMTLibResponseLimits
           defaultLengthSMTLibResponseLimitSource @?=
         Right defaultLengthSMTLibResponseLimits

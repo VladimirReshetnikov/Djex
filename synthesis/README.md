@@ -180,7 +180,7 @@ and the
 | `Language.Haskell.Synthesis.Semantic.Length` | Exact inventory-bound finite-spine contexts, normalized contracts, source-bound assumed provider laws, and model-aware fingerprints; an additive trust class retains exact nonempty constrained schemes under a dictionary-uniform conditional-law assumption, while legacy summary bytes stay exact. |
 | `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked contracts, detached context-free provider transfers, and exact candidate problems; detached constraint-conditional provider evaluation fails before argument inspection, while whole-problem replay may consume a candidate already authorized at its occurrence-specific ground-discharge boundary. |
 | `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and typed-candidate behavioral problems: session-owned provider and restricted resolver authority, contract resealing, residual rejection, rigid root/provider authorization, mixed-role opaque targets, exact zero/step cases, and provider-only consumption of opaque certificate carriers for either obligation-free legacy laws or final-node conditional laws with independently discharged ground obligations. |
-| `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation and exact input-symbol model replay for one checked Length problem, without launching or trusting a solver. |
+| `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation, exact input-symbol model replay, and query-owned source-ordered natural-input replay for one checked Length problem, without launching or trusting a solver. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` | Pure validated Z3 launch, resource, artifact, and response-decoder policy with a package-private complete identity and a byte-free digest-expectation presence classifier; it performs no IO or attestation. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` | Rank-N scoped capability-probed Z3 ownership with byte-free failures, heuristic status/strength/use, and a query-first replay gate for independently validated counterexample evidence. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` | Opaque query-specific association of bounded raw solver reports, with heuristic-only safe projections and exact problem-plus-query replay before payload access. |
@@ -371,6 +371,16 @@ contains bounded check and input-only `get-value` commands; it neither starts a
 solver nor associates a raw solver status. Decoded input bindings can produce a
 counterexample receipt only through independent replay against the retained
 problem, while raw models and even `unsat` remain heuristic observations.
+`replayLengthSMTLibCounterexampleInputs` accepts only source-ordered
+`[Natural]`; the opaque query, rather than its caller, owns the checked problem,
+input-symbol association, and exact behavioral-problem identity. Each call
+performs a new bounded concrete evaluation and returns either a fresh
+counterexample receipt after exact same-query/problem association or `Nothing`
+for a non-counterexample. It retains no cached verdict, consumes no solver
+observation, and gives `unsat` no authority. The additive entrance changes no
+SMT translation, checked-problem, query, execution, response, or protocol
+identity/schema version. See the
+[query-owned raw-input replay report](../docs/reports/2026-08-14-query-owned-length-input-replay.md).
 Positive-literal natural quotient and modulo remain inside QF_LIA by using one
 shared deterministic private Euclidean witness shape rather than the forbidden
 SMT-LIB `div` and `mod` operators: for operand `e` and positive literal `k`,
@@ -610,13 +620,15 @@ optional payload. It derives the corresponding heuristic strength from the
 observation's status. Public selectors expose status, derived strength, and
 use, but not the retained query key, whole observation, or optional evidence.
 `replayLengthSMTLibLiveQueryObservation` is the sole checked semantic
-extraction edge for
-those hidden fields: it compares the complete collision-free query key before
-it inspects optional evidence, then replays any retained evidence against the
+extraction edge from those live-observation hidden fields: it compares the
+complete collision-free query key before it inspects optional evidence, then
+replays any retained evidence against the
 exact `BehavioralProblem` owned by that query. A mismatched query therefore
 cannot make receipt replay observable, while a successful result without a
 receipt remains only an exactly associated heuristic status. The gate exposes
-no process, transcript, decoded valuation, or stronger use for `unsat`.
+no process, transcript, decoded valuation, or stronger use for `unsat`. Direct
+raw-input replay instead evaluates caller-supplied naturals afresh and does not
+extract any hidden live-observation field.
 
 `Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution` seals the shared
 pure launch profile below domain protocols. It owns path/pin admission,

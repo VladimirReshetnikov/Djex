@@ -666,6 +666,18 @@ decoded integer bindings only for that query's input symbols and independently
 replays them against the retained problem; raw model text and even `unsat`
 remain heuristic observations, never pruning permission or proof.
 
+`replayLengthSMTLibCounterexampleInputs` is the query-owned entrance for a
+caller that already has source-ordered natural inputs. The caller supplies only
+`[Natural]`: the sealed query owns the checked problem, modeled-input arity,
+generated symbols, and exact behavioral-problem association. Every call runs a
+new bounded concrete evaluation. It returns a fresh counterexample receipt only
+after re-associating newly constructed evidence with that exact query problem,
+or `Nothing` when the inputs are not a counterexample. It is neither a cached
+verdict nor a raw-solver shortcut, and it gives `unsat` no authority. Adding
+this entrance changes no SMT translation, checked-problem, query, execution,
+response, or protocol identity/schema version. See the
+[query-owned raw-input replay report](docs/reports/2026-08-14-query-owned-length-input-replay.md).
+
 SMT-LIB's QF_LIA logic excludes the built-in `div` and `mod` operators. Djex
 therefore lowers every remaining normalized quotient or modulo node to one
 shared private Euclidean witness shape. For a positive literal divisor `k` and
@@ -940,14 +952,17 @@ heuristic strength is derived from that observation's status rather than
 stored as a second fact; public selectors expose status, that derived strength,
 and heuristic use. Neither the fingerprint, evidence, nor whole observation
 has a detached public projection:
-`replayLengthSMTLibLiveQueryObservation` is their only public semantic
-consumer. It checks the exact query fingerprint before inspecting the hidden
-observation, then replays any evidence against the query's retained
-behavioral problem. A successful `Nothing` remains only an exactly associated
-heuristic status. Process handles, cancellation, paths, executable
-observations, barriers, ordinals, decoded valuations, transcripts, transport
-counters, and reversible run identities remain private. Public session and
-query execution failures are mapped to byte-free classes plus a
+`replayLengthSMTLibLiveQueryObservation` is the only public semantic extraction
+edge from those live-observation fields. It checks the exact query fingerprint
+before inspecting the hidden observation, then replays any evidence against
+the query's retained behavioral problem. The separate raw-input replay
+entrance constructs new evidence from caller-supplied naturals; it does not
+extract anything from a live observation. A successful `Nothing` from the live
+gate remains only an exactly associated heuristic status. Process handles,
+cancellation, paths, executable observations, barriers, ordinals, decoded
+valuations, transcripts, transport counters, and reversible run identities
+remain private. Public session and query execution failures are mapped to
+byte-free classes plus a
 cleanup-incomplete bit; the pure replay gate returns its own closed byte-free
 association error.
 Child-controlled payloads and operating-system details never cross the facade.

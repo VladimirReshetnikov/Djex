@@ -5,8 +5,9 @@
 --
 -- This module owns one capability-probed worker only for the dynamic extent of
 -- 'withLengthSMTLibLiveSession'.  Public callers can submit sealed queries and
--- inspect status and heuristic strength, then consume exact query association
--- and independently replayed counterexample evidence only through
+-- inspect status and heuristic strength, then consume a completed live
+-- observation's exact query association and independently replayed
+-- counterexample evidence only through
 -- 'replayLengthSMTLibLiveQueryObservation'.  They cannot inspect or retain a
 -- process handle, cancellation token, executable or workspace path, barrier,
 -- ordinal, transcript, decoded valuation, transport counter, or reversible run
@@ -199,7 +200,8 @@ instance NFData LengthSMTLibLiveObservationReplayError where
 -- | Safe projection of one completed query.  It freshly copies only bounded
 -- association and authority fields instead of wrapping the private run.  The
 -- query fingerprint and optional evidence have no public projection; the
--- replay gate below is their only public semantic extraction edge.
+-- replay gate below is their only public semantic extraction edge from this
+-- live observation.
 data LengthSMTLibLiveQueryObservation epoch identity local =
   LengthSMTLibLiveQueryObservation
     !(Fingerprint LengthSMTLibQueryFingerprintSubject)

@@ -37,6 +37,8 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   , LengthSMTLibIntegerBinding (..)
   , LengthSMTLibModelError (..)
   , validateLengthSMTLibCounterexample
+  , LengthSMTLibInputReplayError (..)
+  , replayLengthSMTLibCounterexampleInputs
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -88,11 +90,13 @@ import Language.Haskell.Synthesis.Semantic.Length.Problem
 import Language.Haskell.Synthesis.Semantic.Problem
   ( BehavioralEvidence
   , BehavioralProblem
+  , ReplayMismatch
   , behavioralProblemCandidateFingerprint
   , behavioralProblemDomain
   , behavioralProblemEncodingFingerprint
   , behavioralProblemFingerprint
   , behavioralProblemInventoryFingerprint
+  , replayBehavioralEvidence
   )
 
 -- | Identity of the fixed translator, typed plan, exact problem, and rendered
@@ -393,6 +397,41 @@ validateLengthSMTLibCounterexample evaluationLimits query rawBindings = do
     $ validateLengthProblemCounterexample evaluationLimits
         (queryProblem query)
         $ LengthProblemAssignment ordered
+
+-- | Why direct input replay against a sealed query was rejected.  Evaluation
+-- failures describe only bounded concrete replay; association failures expose
+-- only the sanitized mismatch class from the generic evidence boundary.
+data LengthSMTLibInputReplayError
+  = LengthSMTLibInputReplayEvaluationRejected !LengthEvaluationError
+  | LengthSMTLibInputReplayAssociationRejected !ReplayMismatch
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSMTLibInputReplayError
+
+-- | Replay source-ordered natural inputs against the checked problem retained
+-- by this exact query.  Input arity is observed productively by the Length
+-- evaluator before any value is inspected.  A counterexample receipt is
+-- released only after the freshly constructed evidence is associated back to
+-- the same behavioral problem; @Nothing@ remains an ordinary non-counterexample.
+replayLengthSMTLibCounterexampleInputs
+  :: LengthEvaluationLimits
+  -> LengthSMTLibQuery identity local
+  -> [Natural]
+  -> Either LengthSMTLibInputReplayError
+      (Maybe ValidatedLengthCounterexample)
+replayLengthSMTLibCounterexampleInputs evaluationLimits query inputs = do
+  evidence <- either
+    (Left . LengthSMTLibInputReplayEvaluationRejected)
+    Right
+    $ validateLengthProblemCounterexample evaluationLimits
+        (queryProblem query)
+        $ LengthProblemAssignment inputs
+  traverse replay evidence
+ where
+  replay = either
+    (Left . LengthSMTLibInputReplayAssociationRejected)
+    Right
+    . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
 
 queryProblem
   :: LengthSMTLibQuery identity local

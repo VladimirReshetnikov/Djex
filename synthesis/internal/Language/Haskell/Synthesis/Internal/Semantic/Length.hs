@@ -251,8 +251,9 @@ instance NFData LengthProviderVariable
 
 -- | An explicitly assumed provider law over one exact closed inventory
 -- scheme.  The legacy constructor remains context-free.  The conditional
--- constructor retains a nonempty leading context but grants no behavioral-use
--- authority until a candidate-local discharge boundary is added.
+-- constructor retains a nonempty leading context and grants behavioral-use
+-- authority only when the Length problem boundary associates independent
+-- ground discharge with one complete certified occurrence.
 data LengthProviderSummarySource variable
   = AssumedProviderSummary
       { lengthProviderName :: Name
@@ -269,8 +270,9 @@ data LengthProviderSummarySource variable
       , lengthProviderTransfer :: LengthExpression LengthProviderVariable
       }
     -- ^ Retain an exact closed scheme with a nonempty leading context.  This
-    -- asserts only a law conditional on independent candidate-local discharge;
-    -- it does not itself provide dictionary or behavioral authority.
+    -- asserts a law uniform over independently admitted dictionary evidence
+    -- and conditional on candidate-local discharge; it does not itself provide
+    -- dictionary or behavioral authority.
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData variable => NFData (LengthProviderSummarySource variable)
@@ -279,8 +281,9 @@ data LengthProviderTrust
   = AssumedProviderLaw
     -- ^ Context-free assumed law, directly usable by the Length interpreter.
   | AssumedProviderLawConditionalOnConstraintDischarge
-    -- ^ Retained constrained law which remains unusable until an independent
-    -- candidate-local discharge authority is associated.
+    -- ^ Retained constrained law assumed uniform over admitted dictionary
+    -- evidence and unusable until an independent candidate-local discharge
+    -- authority is associated.
   deriving (Bounded, Enum, Eq, Ord, Show, Generic)
 
 instance NFData LengthProviderTrust

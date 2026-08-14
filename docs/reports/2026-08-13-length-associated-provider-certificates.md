@@ -2,6 +2,13 @@
 
 Date: 2026-08-13
 
+Status: Extended by the
+[Length occurrence-specific ground constraint-discharge report](2026-08-13-length-ground-constraint-discharge.md).
+The obligation-free v2 path and compatibility claims below remain exact. Its
+statements that contextual rows are categorically rejected describe this
+earlier checkpoint; conditional rows now have the separate v3 boundary in the
+linked report.
+
 ## Outcome and scope
 
 Djex Length now consumes the opaque certificate-association branch retained by

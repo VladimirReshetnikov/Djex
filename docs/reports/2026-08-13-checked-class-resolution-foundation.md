@@ -10,10 +10,15 @@ already-checked `Inventory` into an opaque environment, resolves an admitted
 ground constraint, and returns a successful discharge only as an opaque receipt
 which retains that environment, the canonical goal, and its proof.
 
-This is a standalone foundation. No Djinn, Exference, certificate,
-fingerprint, Length, SMT-LIB, or Z3 entrance consumes it yet. It changes no
-backend acceptance rule or identity schema. Z3 reports remain behavioral
-heuristics and can never provide dictionary evidence.
+The resolver remains package-private and standalone from Djinn, Exference, the
+generic certificate/fingerprint layers, SMT-LIB, and Z3. Length now has one
+narrow domain consumer: a conditional-capable session attempts to co-seal the
+environment from its exact inventory, and its problem boundary can retain
+successful receipts only for the final occurrence in the same associated
+certificate row. This does not change either frontend's resolution or search
+policy. Z3 reports remain behavioral heuristics and can never provide
+dictionary evidence. The consuming boundary is specified in the
+[Length ground constraint-discharge report](2026-08-13-length-ground-constraint-discharge.md).
 
 ## Admitted constraint language
 
@@ -152,12 +157,15 @@ prove declaration provenance for a certificate row, candidate completeness,
 expression inhabitation, behavioral correctness, or a solver result.
 Conversely, empty certificate obligations do not imply that this resolver ran.
 
-A later consumer must atomically bind the receipt to its own inventory,
-candidate occurrence, activated obligation, and domain identity as applicable.
-Length does not perform that binding in this checkpoint, so its existing
-requirement for empty activated obligations remains a structural admission rule
-only. Neither `sat`, `unsat`, a Z3 model, nor successful independent Length
-counterexample replay can act as a Haskell dictionary.
+A consumer must atomically bind the receipt to its own inventory, candidate
+occurrence, activated obligation, and domain identity as applicable. Length now
+does so only for an exact conditional associated row: it admits alias-free,
+forall-free, first-order ground queries without givens, audits the protected
+base/intermediate chain across the complete graph, retains every receipt, and
+authorizes only that row's final visible-application node. Legacy associated
+rows still require empty activated obligations. Neither `sat`, `unsat`, a Z3
+model, nor successful independent Length counterexample replay can act as a
+Haskell dictionary.
 
 ## Validation surface
 
@@ -173,6 +181,8 @@ environment/goal replay mismatch, environment-before-goal replay demand, and
 deep evaluation without retaining source annotations.
 
 The public abstraction probe keeps the environment, proof, receipt, sealer,
-discharger, and replay operation out of the curated Djex facade. This report
-records the intended boundary; it does not claim backend integration or a new
-public compatibility guarantee.
+discharger, replay operation, and Length session resolver projection out of the
+curated Djex facade. This report records the resolver foundation; the separate
+Length report owns the domain-specific occurrence association and public
+sanitized diagnostics. Neither report grants a general backend integration or
+public resolver compatibility guarantee.

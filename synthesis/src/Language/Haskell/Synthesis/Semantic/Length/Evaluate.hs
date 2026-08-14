@@ -9,9 +9,10 @@
 -- raw syntax tree here could diverge before the length sealer's structural
 -- bounds were established.  Detached contract and provider results classify
 -- one assignment without evidence authority.  A constraint-conditional
--- provider summary is retained for a later candidate-local discharge boundary
--- and is rejected here before its arguments are inspected.  Whole-problem
--- replay can bind
+-- provider summary is rejected here before its arguments are inspected;
+-- occurrence-specific static discharge belongs to candidate sealing, not this
+-- detached evaluator.  Whole-problem replay can consume a problem whose
+-- candidate already passed that boundary and bind
 -- an exact model-relative counterexample receipt to the sealed problem
 -- identities; it still supplies neither universal evidence nor permission to
 -- prune other candidates.
@@ -229,7 +230,10 @@ instance NFData LengthContractEvaluation
 -- Even the provider-independent case is a result in the versioned total
 -- finite-spine model, not automatically a realized counterexample in a source
 -- language with bottoms or effects.  Provider-backed results additionally
--- depend on every named assumed law in the retained list.
+-- depend on every named assumed law in the retained list.  For a conditional
+-- provider, that includes the fingerprinted assumption that the law is uniform
+-- over independently admitted dictionary evidence; the basis does not expose
+-- or recreate a class-resolution receipt.
 data LengthCounterexampleBasis
   = ProviderIndependentFiniteSpineModel
   | FiniteSpineModelUnderAssumedProviderLaws [Name]
@@ -314,7 +318,9 @@ evaluateLengthContractAssignment limits contract assignment = do
 -- assumed law.  The result remains conditional on that explicit assumption
 -- and carries no behavioral-evidence authority.  A retained
 -- constraint-conditional summary fails before assignment arity, roles, or
--- values are inspected; this evaluator cannot discharge its context.
+-- values are inspected.  This evaluator cannot discharge its context even
+-- though an exact associated candidate occurrence may have done so while its
+-- complete Length problem was sealed.
 evaluateLengthProviderApplication
   :: LengthEvaluationLimits
   -> CheckedLengthProviderSummary variable

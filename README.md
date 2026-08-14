@@ -356,11 +356,15 @@ structurally retype the variable-free constraint for proof search in the
 checked environment. It never coerces or invents an environment identity; the
 resulting receipt has the same replay association as an ordinary discharge.
 
-Nothing consumes this resolver authority yet. Djinn and Exference keep their
-existing backend policies, while Length can retain a constrained provider
-scheme only as unusable conditional authority; certificate rows and graph
-fingerprints still establish no constraint discharge. Z3 observations remain
-behavioral heuristics and never supply dictionary evidence. See the
+Djinn and Exference do not consume this resolver directly and keep their
+existing backend policies. A Length session with conditional provider laws now
+attempts to co-seal it from the exact inventory, then the problem boundary
+binds successful ground-discharge receipts only to the final occurrence of the
+same associated certificate row. If the restricted resolver is unavailable,
+the session remains constructible but candidate use fails closed with a
+sanitized reason. A graph fingerprint or certificate row alone still
+establishes no discharge. Z3 observations remain behavioral heuristics and
+never supply dictionary evidence. See the
 [checked class-resolution foundation report](docs/reports/2026-08-13-checked-class-resolution-foundation.md).
 
 ## Finite list-spine length contracts
@@ -386,14 +390,19 @@ context-free scheme, with its constructor behavior and exact fingerprint bytes
 unchanged. The additive
 `AssumedConstraintConditionalProviderSummary` instead requires and retains a
 closed scheme with a nonempty leading constraint context and records
-`AssumedProviderLawConditionalOnConstraintDischarge`. It is retention for a
-later candidate-local discharge boundary, not permission to apply the law:
-standalone evaluation and every current candidate interpreter reject it. Both
-forms are search assumptions rather than behavioral evidence. A spine role says
-that the law may reference that argument's list length; it does not require the
-normalized transfer to mention it. An unobserved role does not assert purity,
-totality, strictness, absence of effects or type reflection, or even that the
-provider will not evaluate the argument.
+`AssumedProviderLawConditionalOnConstraintDischarge`. This explicitly assumes
+that the provider law is uniform over independently admitted dictionary
+evidence as well as admitted closed instantiations. That assumption is necessary
+because Exference's certificate records the activated obligations, not the
+particular given or instance its checker used. Standalone provider evaluation
+still rejects the conditional law. Candidate interpretation may use it only at
+the final visible-application node of its own exact associated row after every
+obligation has passed static ground discharge. Both forms remain assumed laws,
+not behavioral evidence. A spine role says that the law may reference that
+argument's list length; it does not require the normalized transfer to mention
+it. An unobserved role does not assert purity, totality, strictness, absence of
+effects or type reflection, or even that the provider will not evaluate the
+argument.
 
 The identities deliberately remain split. Contract and provider-inventory
 fingerprints include the exact checked spine model. A contract fingerprint also
@@ -414,12 +423,14 @@ bind a re-sealed contract and normalized interpreted candidate formula.
 Inventories containing only legacy provider summaries retain the exact
 provider-inventory v2 and semantic-inventory v1 bytes. Presence of any
 constraint-conditional summary advances only those envelopes to provider
-inventory v3 and semantic inventory v2; the latter also binds the explicit
-retention-only constraint policy. No encoding, candidate, complete-problem, or
-query identity schema or version changes in this checkpoint. Enclosing
-identities still bind the semantic inventory in the usual way, so a session
-which actually contains conditional authority remains distinguishable through
-that existing composition.
+inventory v3 and semantic inventory v2; those retention identities remain
+byte-for-byte identical to the preceding retention-only checkpoint. Behavioral
+use is bound later: conditional sessions use encoding-policy versions 8, 9,
+and 10 for legacy/all-observed, mixed-role, and exact-case interpretation,
+while sessions without conditional summaries retain exact versions 5, 6, and
+7. The explicit dictionary-uniform-law marker lives in those new session
+policies and in ground-discharged candidate v3, not in provider inventory v3 or
+semantic inventory v2.
 
 The smaller provider-inventory fingerprint still does not identify provider
 implementations or the complete source inventory. The atomic session does, and
@@ -442,16 +453,19 @@ failure precedence before domain authorization.
 
 The associated path is deliberately provider-only. Each rooted row must name
 an exact inventory owner, retain a full source scheme alpha-equivalent to that
-inventory scheme, have no activated obligations, and resolve to a checked
-Length provider summary. Provider-summary scheme equality is already an opaque
-session co-sealing invariant after the exact inventory-source match; only its
-presence remains dynamic here. Modeled zero/step constructors are not admitted
-as certificate owners in this checkpoint. Activated obligations still fail at
-the existing row-authorization gate. Complete specialization of a constrained
-source activates its nonempty context and therefore fails there. An
-obligation-free association for another provider cannot authorize a separate
-constraint-conditional occurrence: provider interpretation returns a distinct
-discharge-required failure. An empty association is exactly the
+inventory scheme, and resolve to a checked Length provider summary.
+Provider-summary scheme equality is already an opaque session co-sealing
+invariant after the exact inventory-source match; only its presence remains
+dynamic here. Modeled zero/step constructors are not admitted as certificate
+owners. A legacy context-free provider row still requires every activated
+obligation list to be empty. A conditional row instead requires a nonempty
+activated context and discharges every obligation in canonical
+row/step/obligation order through the available resolver which the session
+attempted to co-seal from its exact inventory. Queries are alias-free,
+forall-free, first-order, ground, and have no givens; absence, rejected queries
+or derived constraints, proof exhaustion, and an unavailable resolver become
+sanitized public reasons without exposing the constraint or receipt. An empty
+association is exactly the
 plain v1 graph and candidate identity path. The contract's
 free flexible variables are treated as implicit source quantifiers only at the
 root boundary; the engine's corresponding selections must be distinct rigid
@@ -467,6 +481,17 @@ A visible selection is checked at the kind inferred for the leading binder,
 so closed higher-kinded and impredicative selections remain legal while free
 flexibles, non-root rigids, and types from a foreign inventory fail closed.
 
+Discharge alone does not authorize the provider name globally. Before proof
+search, Length audits the complete graph, including dead nodes, so the
+conditional row's base and every intermediate visible-application node have
+exactly their certified incoming function edges and are not the root. The base
+is retained as a sentinel which fails if evaluated directly. Only the row's
+final receipt-bearing visible-application node can invoke the conditional law;
+direct, partial, shared-prefix, or otherwise unassociated occurrences still fail
+with discharge-required or protected-chain diagnostics. This is why the
+authority is occurrence-specific rather than a dictionary table keyed only by
+provider name or constraint.
+
 The first symbolic interpreter is deliberately narrow and lazy. The legacy
 sealers still treat every target argument as an observed list spine and retain
 their public interpretation behavior and signatures. The additive role-aware
@@ -475,12 +500,13 @@ sealers instead retain one complete source-ordered
 checked contract. `LengthObservedSpine` positions receive compact
 `LengthInput` numbers in observed-role order; `LengthUnobservedTarget`
 positions receive opaque semantic tokens and no length variables. An
-all-observed explicit vector canonicalizes to the current legacy-policy
-contract, session, and concrete-encoding identities. Only a mixed vector
-selects the role-aware behavior. The common session encoding-policy versions
-are now 5 for legacy/all-observed, 6 for mixed roles, and 7 for exact cases;
-this deliberate global identity advance invalidates cached downstream keys
-which contain the prior session identity.
+all-observed explicit vector canonicalizes to the corresponding ordinary or
+conditional session policy. Only a mixed vector selects the role-aware
+behavior. Sessions without conditional laws retain policy versions 5, 6, and
+7 for legacy/all-observed, mixed roles, and exact cases. Conditional-capable
+sessions use versions 8, 9, and 10 respectively and bind the exact resolver
+policy, default resolver limits, dictionary-uniform provider-law assumption,
+final-node authority, and protected-prefix rejection.
 
 The interpreter still applies every physical target argument. An opaque token
 may be ignored, forwarded to a provider argument sealed as unobserved, or
@@ -496,9 +522,9 @@ The ordinary and role-aware interpreters support locals, lambdas,
 application, ordinary certificate-free visible type application, tuples,
 lets, bind/wildcard/tuple/as patterns, the checked zero and step constructors,
 and checked provider transfers. They additionally admit a nonempty opaque
-association only for an exact, obligation-free provider visible application.
-Only a legacy context-free provider law can pass interpretation; a retained
-constraint-conditional law fails closed before its transfer is used.
+association for an exact obligation-free legacy provider application or for an
+exact conditional application whose own ground obligations and protected
+prefix passed the boundary above.
 The stamped bare graph remains insufficient and is still rejected by the
 public graph fingerprint. Their case and constructor-pattern boundary stays
 fail-closed except through the separately selected exact-case policy.
@@ -534,8 +560,9 @@ fingerprint field: session encoding still consumes only the old mixedness and
 case-policy projections, while contracts and downstream identities continue
 to consume the same existing contract role fingerprint.
 Explicit all-observed ordinary policy remains identical to the current legacy
-policy, but all three common session-policy modes deliberately advance from
-versions 2/3/4 to 5/6/7 for the provider-certificate trust-boundary change.
+policy. The prior provider-certificate change advanced its three policy modes
+from versions 2/3/4 to 5/6/7; this checkpoint preserves those bytes and selects
+8/9/10 only when a conditional provider summary is present.
 Session construction also retains productive role traversal; because the exact
 vector is now stored, honest deep `NFData` evaluation additionally reaches its
 later role payloads.
@@ -549,12 +576,10 @@ about source evaluation, strictness, inhabitance, totality, recursion, or
 effects. Holes, cases outside the exact policy, unsupported patterns, residual
 constraints, unknown globals, unmodeled inventory globals, and
 detached certificate-bearing graphs fail closed. Opaque associated graphs are
-accepted only for exact inventory-owned providers with empty activated
-obligations; modeled constructor owners remain unsupported. Empty obligations
-are a structural admission rule, not evidence of dictionary or instance
-discharge. A conditional summary's retained context does not relax this rule.
-Length does not consume the checked class-resolution receipt here, no
-instance/discharge identity is retained, and Z3 can never supply dictionary
+accepted only for exact inventory-owned provider rows. Ordinary laws still
+require empty activated obligations; conditional laws require nonempty ground
+obligations, retained resolver receipts, and an isolated final-node occurrence.
+Modeled constructor owners remain unsupported. Z3 can never supply dictionary
 evidence. Explicit graph-byte and
 evaluation step limits still bound candidate work.
 
@@ -572,31 +597,37 @@ problem which retains the inventory, concrete encoding, and complete problem
 fingerprints; it also binds the candidate fingerprint retained by the
 interpreted candidate receipt. The concrete encoding identifies the re-sealed
 contract, normalized result and counterexample condition, interpreter policy,
-and exactly the provider laws actually used. The candidate key wraps the fresh
+and exactly the provider laws actually used. Its ordinary legacy/all-observed,
+mixed-role, and exact-case versions remain 1/2/3; a conditional-capable session
+uses 4/5/6. The candidate key wraps the fresh
 shared graph identity and explicitly describes candidate-only authority. The
 raw graph fingerprint is transient after those exact bytes enter that key, so
 the receipt retains no parallel graph-identity field. It does not pretend to
 retain batch completion status.
 
-For an authorized nonempty carrier the candidate key uses v2 and explicitly
-binds `opaque-associated-certificate/v1` and
-`activated-obligations-empty/v1`. Plain graphs and empty carriers retain the
-exact v1 candidate key. This changes neither solver replay nor behavioral
-evidence authority: Z3 output remains heuristic until the same independently
-sealed problem replays it, and even successful behavioral replay is not
-dictionary evidence. See the
+For an authorized obligation-free carrier the candidate key uses v2 and binds
+`opaque-associated-certificate/v1` plus
+`activated-obligations-empty/v1`. A carrier which authorizes a conditional law
+after ground discharge uses candidate v3 and binds the inventory-bound receipt
+requirement, dictionary-uniform law assumption, occurrence-specific final node,
+and protected prefix policy. Plain graphs and empty carriers retain exact v1. The
+carrier-aware graph remains v2; raw coordinates do not enter these semantic
+keys. This changes neither solver replay nor behavioral evidence authority: Z3
+output remains heuristic until the same independently sealed problem replays
+it, and even successful behavioral replay is not dictionary evidence. See the
 [associated provider-certificate Length report](docs/reports/2026-08-13-length-associated-provider-certificates.md)
 and the
-[conditional provider-summary retention report](docs/reports/2026-08-13-length-conditional-provider-summary-retention.md).
+[ground constraint-discharge report](docs/reports/2026-08-13-length-ground-constraint-discharge.md).
 
 On the legacy path, every contract argument and result must expose the
 context's outer modeled spine; their element types remain opaque and may
 themselves be impredicative, while a direct rank-N contract argument is
 rejected. On the role-aware path only observed arguments and the result must
 expose that spine; unobserved target arguments may be higher-order, rank-N, or
-otherwise non-spine. Legacy usable provider schemes are closed and
-leading-context-free. Conditional summaries may retain an exact nonempty
-leading context, but no current evaluator or candidate path may use them.
+otherwise non-spine. Legacy directly usable provider schemes are closed and
+leading-context-free. Conditional summaries retain an exact nonempty leading
+context; a candidate path can use one only through the occurrence-specific
+ground-discharge boundary, while detached evaluation continues to reject it.
 For either retained form, spine-observed provider arguments and the result must
 use that same modeled spine, while unobserved provider arguments may be
 non-spine or rank-N values.

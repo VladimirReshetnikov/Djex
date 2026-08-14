@@ -146,6 +146,9 @@ $(do
           , "PublicDjex.ClassResolutionProof"
           , "PublicDjex.CheckedConstraintDischarge"
           , "PublicDjex.HeterogeneousClassResolutionQueryError"
+          , "PublicDjex.LengthCandidateAuthority"
+          , "PublicDjex.ConditionalProviderAuthorization"
+          , "PublicDjex.LengthCandidateAuthorization"
           ]
         hiddenValues =
           [ "LengthSMTLibLiveSession"
@@ -165,6 +168,7 @@ $(do
           , "checkedLengthCandidateTermGraphFingerprint"
           , "checkedLengthSessionCasePolicy"
           , "checkedLengthSessionExplicitTargetRoles"
+          , "PublicDjex.checkedLengthSessionClassResolutionEnvironment"
           , "checkedPolicyExplicitTargetRoles"
           , "checkedPolicyTargetArgumentPolicy"
           , "checkedPolicyCasePolicy"

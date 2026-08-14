@@ -21,8 +21,10 @@
 -- resolver environment.  Its proof can be recovered only by replaying the
 -- receipt against that environment and the same canonical goal; a genuine
 -- receipt cannot consequently be paired with unrelated class authority.
--- This module is not exported by the public Djex facade, and neither Length
--- nor Z3 consumes it yet.
+-- This module is not exported by the public Djex facade.  The Length problem
+-- boundary can consume receipts only through an exact session inventory and
+-- occurrence-specific certificate association; the standalone resolver stays
+-- package-private, and Z3 never supplies dictionary evidence.
 module Language.Haskell.Synthesis.Internal.ClassResolution
   ( ClassResolutionLimitField (..)
   , ClassResolutionLimitError (..)

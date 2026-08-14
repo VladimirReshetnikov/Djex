@@ -26,6 +26,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
   , sealLengthContractInSession
   , checkedLengthSessionContext
   , checkedLengthSessionProviderInventory
+  , checkedLengthSessionClassResolutionEnvironment
   , lengthSessionInventoryFingerprint
   , lengthSessionEncodingPolicyFingerprint
   , checkedLengthSessionLimits
@@ -57,6 +58,21 @@ import Language.Haskell.Synthesis.Internal.Alpha
   ( AlphaVariable (..)
   , BinderSlotPolicy (PositionalBinderSlots)
   , alphaNormalizeTypeWith
+  )
+import Language.Haskell.Synthesis.Internal.ClassResolution
+  ( CheckedClassResolutionEnvironment
+  , defaultClassResolutionLimits
+  , maximumClassResolutionClasses
+  , maximumClassResolutionCollectionWidth
+  , maximumClassResolutionDeclarations
+  , maximumClassResolutionInstances
+  , maximumClassResolutionKindNodes
+  , maximumClassResolutionOverlapComparisons
+  , maximumClassResolutionProofDepth
+  , maximumClassResolutionProofNodes
+  , maximumClassResolutionTypeConstructorKinds
+  , maximumClassResolutionTypeNodes
+  , sealClassResolutionEnvironment
   )
 import Language.Haskell.Synthesis.Internal.Fingerprint
   ( FingerprintBuilder (..)
@@ -191,7 +207,8 @@ instance NFData LengthInterpretationPolicySource
 -- consume only the mixed-target and case projections; the exact optional
 -- vector remains association authority rather than a distinct identity input.
 -- This checkpoint nevertheless advances every common policy version because
--- the candidate trust boundary now admits one exact associated-provider case.
+-- the candidate trust boundary now admits exact associated-provider cases,
+-- including occurrence-bound static ground-constraint discharge.
 data CheckedLengthInterpretationPolicy = CheckedLengthInterpretationPolicy
   !(Maybe [LengthTargetArgumentRole])
   !LengthTargetArgumentPolicy
@@ -208,6 +225,7 @@ data CheckedLengthSession identity annotation = CheckedLengthSession
   !CheckedLengthInterpretationPolicy
   !(CheckedLengthContext (Variable identity) annotation)
   !(CheckedLengthProviderInventory (Variable identity))
+  !(Maybe (CheckedClassResolutionEnvironment (Variable identity)))
   !(Fingerprint
       (InventoryFingerprintSubject FiniteListSpineLengthV1))
   !(Fingerprint
@@ -217,12 +235,13 @@ type role CheckedLengthSession nominal nominal
 
 instance (NFData identity, NFData annotation)
     => NFData (CheckedLengthSession identity annotation) where
-  rnf (CheckedLengthSession limits policy context providers
+  rnf (CheckedLengthSession limits policy context providers resolver
       inventory encoding) =
     rnf limits `seq`
     rnf policy `seq`
     rnf context `seq`
     rnf providers `seq`
+    rnf resolver `seq`
     rnf inventory `seq`
     rnf encoding
 
@@ -250,10 +269,11 @@ sealLengthSession limits inventory modelSource providerSources =
 -- | Seal a session for one bounded target-role vector.
 --
 -- The checked policy retains the vector as strict association authority.  An
--- all-observed vector still canonicalizes to the current legacy-policy
--- identity (v5), and the compatibility problem wrapper keeps its historical
--- loose mixedness-only association behavior.  This does not preserve obsolete
--- v2 policy bytes.
+-- all-observed vector still canonicalizes to the current legacy-provider
+-- policy identity (v5; v8 when conditional providers require the private
+-- resolver), and the compatibility problem wrapper keeps its historical loose
+-- mixedness-only association behavior.  This does not preserve obsolete v2
+-- policy bytes.
 sealRoleAwareLengthSession
   :: Ord identity
   => LengthLimits
@@ -323,14 +343,23 @@ sealLengthSessionWithInterpretationPolicy limits policySource inventory modelSou
       checkExplicitPolicy roles LengthExactZeroStepCases
   let targetPolicy = checkedPolicyTargetArgumentPolicy policy
       casePolicy = checkedPolicyCasePolicy policy
+      conditional = hasConditionalProvider providers
   inventoryFingerprint <- mapFingerprintFailure
     LengthSemanticInventoryFingerprint
     $ buildLengthInventoryFingerprint limits context providers
   encodingFingerprint <- mapFingerprintFailure
     LengthSemanticEncodingPolicyFingerprint
-    $ buildLengthEncodingFingerprint limits targetPolicy casePolicy context
+    $ buildLengthEncodingFingerprint
+        limits targetPolicy casePolicy conditional context
+  let resolver
+        | conditional = either (const Nothing) Just
+            $ sealClassResolutionEnvironment
+                defaultClassResolutionLimits
+                $ lengthContextInventory context
+        | otherwise = Nothing
   pure $ CheckedLengthSession
-    limits policy context providers inventoryFingerprint encodingFingerprint
+    limits policy context providers resolver
+      inventoryFingerprint encodingFingerprint
  where
   checkExplicitPolicy roles casePolicy = do
       let maximumRoles = lengthContractInputLimit limits
@@ -348,32 +377,45 @@ sealLengthSessionWithInterpretationPolicy limits policySource inventory modelSou
 checkedLengthSessionContext
   :: CheckedLengthSession identity annotation
   -> CheckedLengthContext (Variable identity) annotation
-checkedLengthSessionContext (CheckedLengthSession _ _ context _ _ _) = context
+checkedLengthSessionContext
+    (CheckedLengthSession _ _ context _ _ _ _) = context
 
 checkedLengthSessionProviderInventory
   :: CheckedLengthSession identity annotation
   -> CheckedLengthProviderInventory (Variable identity)
 checkedLengthSessionProviderInventory
-    (CheckedLengthSession _ _ _ providers _ _) = providers
+    (CheckedLengthSession _ _ _ providers _ _ _) = providers
+
+-- Package-private resolver authority co-sealed from the exact session
+-- inventory whenever at least one retained provider law is conditional on
+-- independent constraint discharge.  'Nothing' means either that no retained
+-- provider needs it or that this deliberately restricted resolver could not
+-- seal the inventory; candidate admission distinguishes those cases from the
+-- provider row and fails closed.
+checkedLengthSessionClassResolutionEnvironment
+  :: CheckedLengthSession identity annotation
+  -> Maybe (CheckedClassResolutionEnvironment (Variable identity))
+checkedLengthSessionClassResolutionEnvironment
+    (CheckedLengthSession _ _ _ _ resolver _ _) = resolver
 
 lengthSessionInventoryFingerprint
   :: CheckedLengthSession identity annotation
   -> Fingerprint (InventoryFingerprintSubject FiniteListSpineLengthV1)
 lengthSessionInventoryFingerprint
-    (CheckedLengthSession _ _ _ _ inventory _) = inventory
+    (CheckedLengthSession _ _ _ _ _ inventory _) = inventory
 
 lengthSessionEncodingPolicyFingerprint
   :: CheckedLengthSession identity annotation
   -> Fingerprint LengthEncodingPolicyFingerprintSubject
 lengthSessionEncodingPolicyFingerprint
-    (CheckedLengthSession _ _ _ _ _ encoding) = encoding
+    (CheckedLengthSession _ _ _ _ _ _ encoding) = encoding
 
 -- | Opaque checked interpretation authority retained by this session.
 checkedLengthSessionInterpretationPolicy
   :: CheckedLengthSession identity annotation
   -> CheckedLengthInterpretationPolicy
 checkedLengthSessionInterpretationPolicy
-    (CheckedLengthSession _ policy _ _ _ _) = policy
+    (CheckedLengthSession _ policy _ _ _ _ _) = policy
 
 -- Package-private exact association authority.  'Nothing' is the legacy
 -- implicit-all-observed entrance; every explicit source retains 'Just', even
@@ -411,7 +453,8 @@ sealLengthContractInSession session = case
 checkedLengthSessionLimits
   :: CheckedLengthSession identity annotation
   -> LengthLimits
-checkedLengthSessionLimits (CheckedLengthSession limits _ _ _ _ _) = limits
+checkedLengthSessionLimits
+    (CheckedLengthSession limits _ _ _ _ _ _) = limits
 
 checkedLengthSessionTargetArgumentPolicy
   :: CheckedLengthSession identity annotation
@@ -501,10 +544,7 @@ buildLengthInventoryFingerprint limits context providers =
           ] ++ conditionalPolicy
       }
  where
-  conditional = any ((==
-      AssumedProviderLawConditionalOnConstraintDischarge) .
-      checkedLengthProviderTrust)
-    $ checkedLengthProviderSummaries providers
+  conditional = hasConditionalProvider providers
   conditionalPolicy
     | conditional =
         [ tagged "provider-constraint-policy"
@@ -518,18 +558,16 @@ buildLengthEncodingFingerprint
   :: LengthLimits
   -> LengthTargetArgumentPolicy
   -> LengthCasePolicy
+  -> Bool
   -> CheckedLengthContext (Variable identity) annotation
   -> Either FingerprintLimitError
       (Fingerprint
         LengthEncodingPolicyFingerprintSubject)
-buildLengthEncodingFingerprint limits targetPolicy casePolicy context =
+buildLengthEncodingFingerprint limits targetPolicy casePolicy conditional
+    context =
   buildFingerprintWithin (fromIntegral $ lengthFingerprintByteLimit limits)
     FingerprintBuilder
-      { fingerprintBuilderVersion = case casePolicy of
-          LengthExactZeroStepCases -> 7
-          LengthCasesRejected -> case targetPolicy of
-            LengthLegacyObservedTargetPolicy -> 5
-            LengthMixedTargetPolicy -> 6
+      { fingerprintBuilderVersion = encodingVersion
       , fingerprintBuilderRole = ascii
           "finite-list-spine-length/solver-neutral-encoding"
       , fingerprintBuilderFields =
@@ -542,7 +580,8 @@ buildLengthEncodingFingerprint limits targetPolicy casePolicy context =
               , FingerprintBytes $ ascii "exact-truncated-monus/v1"
               , FingerprintBytes $ ascii "exact-conditional/v1"
               , FingerprintBytes $ ascii "assumed-provider-laws/v1"
-              ] ++ mixedSemanticPolicy ++ caseSemanticPolicy
+              ] ++ mixedSemanticPolicy ++ caseSemanticPolicy ++
+                conditionalSemanticPolicy
           , tagged "normalization"
               [FingerprintBytes $ ascii "length-normalizer/v1"]
           , tagged "candidate-policy" $
@@ -563,7 +602,7 @@ buildLengthEncodingFingerprint limits targetPolicy casePolicy context =
                   "reject-detached-certified-visible-application/v1"
               , FingerprintBytes $ ascii
                   "admit-exact-obligation-free-associated-provider-visible-application/v1"
-              ] ++ caseCandidatePolicy ++
+              ] ++ caseCandidatePolicy ++ conditionalCandidatePolicy ++
               [ FingerprintBytes $ ascii "reject-unknown-semantics/v1"
               ] ++ mixedCandidatePolicy
           , tagged "spine-model"
@@ -571,6 +610,17 @@ buildLengthEncodingFingerprint limits targetPolicy casePolicy context =
           ]
       }
  where
+  encodingVersion
+    | conditional = case casePolicy of
+        LengthExactZeroStepCases -> 10
+        LengthCasesRejected -> case targetPolicy of
+          LengthLegacyObservedTargetPolicy -> 8
+          LengthMixedTargetPolicy -> 9
+    | otherwise = case casePolicy of
+        LengthExactZeroStepCases -> 7
+        LengthCasesRejected -> case targetPolicy of
+          LengthLegacyObservedTargetPolicy -> 5
+          LengthMixedTargetPolicy -> 6
   mixedSemanticPolicy = case targetPolicy of
     LengthLegacyObservedTargetPolicy -> []
     LengthMixedTargetPolicy ->
@@ -600,6 +650,59 @@ buildLengthEncodingFingerprint limits targetPolicy casePolicy context =
       [ FingerprintBytes $ ascii "exact-modeled-zero-step-patterns/v1"
       , FingerprintBytes $ ascii "canonical-zero-then-step-analysis/v1"
       ]
+  conditionalSemanticPolicy
+    | conditional =
+        [ FingerprintBytes $ ascii
+            "exact-inventory-owned-class-resolution/v1"
+        , FingerprintBytes $ ascii
+            "alias-free-first-order-ground-resolution/v1"
+        , FingerprintBytes $ ascii
+            "no-query-givens-or-z3-dictionary-authority/v1"
+        , FingerprintBytes $ ascii
+            "provider-law-uniform-over-dictionary-evidence/v1"
+        , FingerprintBytes $ ascii
+            "checked-class-resolution-default-limits/v1"
+        , classResolutionLimitsField
+        ]
+    | otherwise = []
+  conditionalCandidatePolicy
+    | conditional =
+        [ FingerprintBytes $ ascii
+            "admit-exact-ground-discharged-associated-provider-visible-application/v1"
+        , FingerprintBytes $ ascii
+            "final-certificate-receipt-node-authority/v1"
+        , FingerprintBytes $ ascii
+            "reject-certified-prefix-node-reuse/v1"
+        ]
+    | otherwise = []
+
+classResolutionLimitsField :: FingerprintField
+classResolutionLimitsField = tagged "class-resolution-limits"
+  [ limit "declarations" maximumClassResolutionDeclarations
+  , limit "classes" maximumClassResolutionClasses
+  , limit "instances" maximumClassResolutionInstances
+  , limit "type-constructor-kinds"
+      maximumClassResolutionTypeConstructorKinds
+  , limit "collection-width" maximumClassResolutionCollectionWidth
+  , limit "type-nodes" maximumClassResolutionTypeNodes
+  , limit "kind-nodes" maximumClassResolutionKindNodes
+  , limit "overlap-comparisons"
+      maximumClassResolutionOverlapComparisons
+  , limit "proof-depth" maximumClassResolutionProofDepth
+  , limit "proof-nodes" maximumClassResolutionProofNodes
+  ]
+ where
+  limit name projection = tagged name
+    [ FingerprintNatural $ fromIntegral
+        $ projection defaultClassResolutionLimits
+    ]
+
+hasConditionalProvider
+  :: CheckedLengthProviderInventory variable
+  -> Bool
+hasConditionalProvider = any ((==
+    AssumedProviderLawConditionalOnConstraintDischarge) .
+    checkedLengthProviderTrust) . checkedLengthProviderSummaries
 
 contextInventory
   :: CheckedLengthContext variable annotation

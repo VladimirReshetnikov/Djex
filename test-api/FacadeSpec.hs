@@ -424,6 +424,50 @@ facadeTests = testGroup "public Djex facade"
       conditionalProblemError @?=
         LengthProblemConditionalProviderRequiresDischarge
           (termNodeId 8) conditionalProviderName
+      let dischargeReasons =
+            [ LengthAssociatedClassResolverUnavailable
+            , LengthAssociatedConstraintNotGround
+            , LengthAssociatedConstraintQueryRejected
+            , LengthAssociatedConstraintEvidenceMissing
+            , LengthAssociatedDerivedConstraintRejected
+            , LengthAssociatedConstraintProofLimitExceeded
+            ]
+          dischargeErrors =
+            [ LengthProblemAssociatedCertificateConstraintDischargeRejected
+                conditionalProviderName 1 2 3 reason
+            | reason <- dischargeReasons
+            ] :: [LengthProblemError () String Int]
+          chainSites =
+            [ LengthAssociatedProviderBase
+            , LengthAssociatedProviderIntermediate 4
+            ]
+          chainReasons =
+            [ LengthAssociatedProtectedNodeIsRoot
+            , LengthAssociatedProtectedNodeHasUnexpectedIncomingEdge
+            ]
+          chainErrors =
+            [ LengthProblemAssociatedCertificateProtectedChainRejected
+                conditionalProviderName 1 site reason
+            | (site, reason) <- zip chainSites chainReasons
+            ] :: [LengthProblemError () String Int]
+          conditionalRowError =
+            LengthProblemAssociatedCertificateConditionalObligationsMissing
+              conditionalProviderName 1
+            :: LengthProblemError () String Int
+      dischargeReasons @?=
+        ([minBound .. maxBound]
+          :: [LengthAssociatedConstraintDischargeReason])
+      chainSites @?=
+        [ LengthAssociatedProviderBase
+        , LengthAssociatedProviderIntermediate 4
+        ]
+      chainReasons @?=
+        ([minBound .. maxBound] :: [LengthAssociatedProviderChainReason])
+      length dischargeErrors @?= 6
+      length chainErrors @?= 2
+      conditionalRowError @?=
+        LengthProblemAssociatedCertificateConditionalObligationsMissing
+          conditionalProviderName 1
       [ AssumedProviderLaw
         , AssumedProviderLawConditionalOnConstraintDischarge
         ] @?= ([minBound .. maxBound] :: [LengthProviderTrust])

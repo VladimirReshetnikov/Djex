@@ -19,6 +19,9 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.Problem.Candidate
   , LengthRootOpeningError (..)
   , LengthUnobservedTargetDemandSite (..)
   , LengthStepPayloadDemandSite (..)
+  , LengthAssociatedConstraintDischargeReason (..)
+  , LengthAssociatedProviderChainSite (..)
+  , LengthAssociatedProviderChainReason (..)
   , LengthProblemError (..)
   , CheckedLengthCandidate
   , CheckedLengthProblem
@@ -69,6 +72,12 @@ import Language.Haskell.Synthesis.Internal.Alpha
   ( BinderSlotPolicy (PositionalBinderSlots)
   , alphaNormalizeTypeWith
   )
+import Language.Haskell.Synthesis.Internal.ClassResolution
+  ( CheckedConstraintDischarge
+  , ClassResolutionQueryError (..)
+  , HeterogeneousClassResolutionQueryError (..)
+  , dischargeHeterogeneousGroundConstraint
+  )
 import Language.Haskell.Synthesis.Internal.Fingerprint
   ( FingerprintBuilder (..)
   , FingerprintField (..)
@@ -101,6 +110,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , checkedLengthProviderArgumentRoles
   , checkedLengthProviderName
   , checkedLengthProviderScheme
+  , checkedLengthProviderSummaries
   , checkedLengthProviderTrust
   , checkedLengthProviderTransfer
   , checkedLengthSpineModelTrust
@@ -131,6 +141,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
   , LengthCasePolicy (..)
   , LengthTargetArgumentPolicy (..)
   , checkedLengthSessionCasePolicy
+  , checkedLengthSessionClassResolutionEnvironment
   , checkedLengthSessionContext
   , checkedLengthSessionLimits
   , checkedLengthSessionProviderInventory
@@ -151,7 +162,10 @@ import Language.Haskell.Synthesis.Internal.Semantic.Problem
 import Language.Haskell.Synthesis.Internal.TypedCandidate
   ( foldTypedCandidateGraph )
 import Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate
-  ( checkedTypeApplicationCertificateStepObligationCount )
+  ( CheckedTypeApplicationCertificateStep
+  , checkedTypeApplicationCertificateStepObligationCount
+  , checkedTypeApplicationCertificateStepObligations
+  )
 import Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.Association
   ( CheckedTypeApplicationCertificateGraph
   , checkedTypeApplicationCertificateGraph
@@ -313,6 +327,38 @@ data LengthStepPayloadDemandSite
 
 instance NFData LengthStepPayloadDemandSite
 
+-- | Sanitized reason why one canonical certificate obligation could not
+-- establish inventory-bound class evidence.  Raw resolver diagnostics and
+-- constraint/type payloads never cross the public problem boundary.
+data LengthAssociatedConstraintDischargeReason
+  = LengthAssociatedClassResolverUnavailable
+  | LengthAssociatedConstraintNotGround
+  | LengthAssociatedConstraintQueryRejected
+  | LengthAssociatedConstraintEvidenceMissing
+  | LengthAssociatedDerivedConstraintRejected
+  | LengthAssociatedConstraintProofLimitExceeded
+  deriving (Bounded, Enum, Eq, Ord, Show, Generic)
+
+instance NFData LengthAssociatedConstraintDischargeReason
+
+-- | Canonical position protected inside one discharged provider chain.
+data LengthAssociatedProviderChainSite
+  = LengthAssociatedProviderBase
+  | LengthAssociatedProviderIntermediate !Natural
+    -- ^ Source-step ordinal whose result is the protected intermediate.
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthAssociatedProviderChainSite
+
+-- | Sanitized structural reason why a protected certified chain was not an
+-- occurrence-private path to its authorized final provider node.
+data LengthAssociatedProviderChainReason
+  = LengthAssociatedProtectedNodeIsRoot
+  | LengthAssociatedProtectedNodeHasUnexpectedIncomingEdge
+  deriving (Bounded, Enum, Eq, Ord, Show, Generic)
+
+instance NFData LengthAssociatedProviderChainReason
+
 -- | Fixed-precedence failure while sealing one complete typed candidate.
 data LengthProblemError failure identity local
   = LengthProblemContractResealRejected
@@ -348,10 +394,26 @@ data LengthProblemError failure identity local
   -- 'Natural' is the canonical rooted-row ordinal; no raw certificate or graph
   -- coordinate is exposed.
   | LengthProblemAssociatedCertificateProviderSummaryMissing !Name !Natural
-  -- | A constrained provider summary is retained for a later discharge-aware
-  -- candidate boundary, but this candidate has no such authority.  The node
-  -- is the exact provider occurrence; no constraint or dictionary payload is
-  -- exposed.
+  -- | A conditional provider row unexpectedly activated no constraint.  The
+  -- owner and canonical rooted-row ordinal identify the policy site without
+  -- exposing a graph or certificate coordinate.
+  | LengthProblemAssociatedCertificateConditionalObligationsMissing
+      !Name !Natural
+  -- | Independent class discharge failed for one source-ordered obligation.
+  -- Coordinates are canonical rooted-row, source-step, and obligation
+  -- ordinals; the reason deliberately sanitizes the resolver's raw payload.
+  | LengthProblemAssociatedCertificateConstraintDischargeRejected
+      !Name !Natural !Natural !Natural
+      !LengthAssociatedConstraintDischargeReason
+  -- | A base or intermediate node in a discharged row was reachable outside
+  -- its exact certified function edge, or was itself the graph root.  No raw
+  -- node, occurrence, certificate, or slot identity is exposed.
+  | LengthProblemAssociatedCertificateProtectedChainRejected
+      !Name !Natural !LengthAssociatedProviderChainSite
+      !LengthAssociatedProviderChainReason
+  -- | This exact direct, base, or partial conditional-provider occurrence is
+  -- not the associated row's authorized final visible-application node.  No
+  -- constraint, resolver receipt, or dictionary payload is exposed.
   | LengthProblemConditionalProviderRequiresDischarge !TermNodeId !Name
   | LengthProblemTermGraphFingerprintRejected
       (TermGraphFingerprintError identity local)
@@ -606,6 +668,69 @@ data LengthProblemSealer
 data LengthCandidateAuthority
   = LengthPlainCandidateAuthority
   | LengthOpaqueAssociatedCertificateAuthority
+  | LengthGroundDischargedAssociatedCertificateAuthority
+
+-- Exact occurrence-local authority for one conditional provider row.  The
+-- retained class receipts remain bound to the session's checked environment;
+-- only the provider summary itself is projected during interpretation.
+data ConditionalProviderAuthorization identity =
+  ConditionalProviderAuthorization
+    !(CheckedLengthProviderSummary (Variable identity))
+    ![CheckedConstraintDischarge (Variable identity)]
+
+data LengthCandidateAuthorization identity = LengthCandidateAuthorization
+  !LengthCandidateAuthority
+  !(Map TermNodeId (ConditionalProviderAuthorization identity))
+    -- ^ Exact conditional base-global nodes, retained as sentinels only.
+  !(Map TermNodeId (ConditionalProviderAuthorization identity))
+    -- ^ Exact final visible-application nodes authorized for provider use.
+
+candidateAuthorizationIdentity
+  :: LengthCandidateAuthorization identity
+  -> LengthCandidateAuthority
+candidateAuthorizationIdentity
+    (LengthCandidateAuthorization authority _ _) = authority
+
+candidateAuthorizationBases
+  :: LengthCandidateAuthorization identity
+  -> Map TermNodeId (ConditionalProviderAuthorization identity)
+candidateAuthorizationBases
+    (LengthCandidateAuthorization _ bases _) = bases
+
+candidateAuthorizationFinals
+  :: LengthCandidateAuthorization identity
+  -> Map TermNodeId (ConditionalProviderAuthorization identity)
+candidateAuthorizationFinals
+    (LengthCandidateAuthorization _ _ finals) = finals
+
+emptyCandidateAuthorization
+  :: LengthCandidateAuthority
+  -> LengthCandidateAuthorization identity
+emptyCandidateAuthorization authority = LengthCandidateAuthorization
+  authority Map.empty Map.empty
+
+data ConditionalAssociatedProviderRow identity =
+  ConditionalAssociatedProviderRow
+    !Name
+    !Natural
+    !TermNodeId
+    ![(TermNodeId, CheckedTypeApplicationCertificateStep (Variable identity))]
+    !(CheckedLengthProviderSummary (Variable identity))
+
+data AssociatedProviderClassification identity =
+  AssociatedProviderClassification
+    !Natural
+    ![ConditionalAssociatedProviderRow identity]
+
+data ProtectedConditionalProviderNode = ProtectedConditionalProviderNode
+  !Name !Natural !LengthAssociatedProviderChainSite
+
+data ConditionalProviderChainAudit = ConditionalProviderChainAudit
+  !(Map TermNodeId (Set TermNodeId))
+    -- ^ Protected child to complete union of certified function parents.
+  !(Map TermNodeId ProtectedConditionalProviderNode)
+  ![TermNodeId]
+    -- ^ First canonical row/site occurrence for deterministic diagnostics.
 
 sealLengthTypedCandidateProblemWithMode
   :: (Ord identity, Ord local)
@@ -663,14 +788,15 @@ sealLengthTypedCandidateProblemWithMode sealer problemLimits session
   case candidateResidualConstraints compatibility of
     constraint : _ -> Left $ LengthProblemResidualConstraint constraint
     [] -> pure ()
-  (graph, graphFingerprint, candidateAuthority) <-
+  (graph, graphFingerprint, candidateAuthorization) <-
     retainLengthCandidateGraph session problemLimits typed
   rootNode <- case lookupTermNode (termGraphRoot graph) graph of
     Nothing -> Left $ LengthProblemRootNodeMissing $ termGraphRoot graph
     Just node -> Right node
   authorizedRigids <- matchRootOpening
     (checkedLengthContractTarget contract) $ termNodeType rootNode
-  preflight <- preflightGraph session providers authorizedRigids graph
+  preflight <- preflightGraph session providers candidateAuthorization
+    authorizedRigids graph
   (rawResult, evaluationState) <- runStateT
     (interpretCompleteCandidate
       InterpretationContext
@@ -679,6 +805,8 @@ sealLengthTypedCandidateProblemWithMode sealer problemLimits session
         , interpretationGraph = graph
         , interpretationGlobals = preflightGlobals preflight
         , interpretationCases = preflightCases preflight
+        , interpretationConditionalProviderFinals =
+            preflightConditionalProviderFinals preflight
         , interpretationTargetArgumentRoles =
             checkedLengthContractTargetArgumentRoles contract
         , interpretationInputCount = checkedLengthContractInputCount contract
@@ -708,7 +836,9 @@ sealLengthTypedCandidateProblemWithMode sealer problemLimits session
         (Map.elems usedProvidersByName)
         result condition
   candidateFingerprint <- mapFingerprintFailure LengthCandidateFingerprint
-    $ buildCandidateFingerprint session candidateAuthority graphFingerprint
+    $ buildCandidateFingerprint session
+        (candidateAuthorizationIdentity candidateAuthorization)
+        graphFingerprint
   problemFingerprint <- mapFingerprintFailure LengthCompleteProblemFingerprint
     $ buildCompleteProblemFingerprint session encodingFingerprint
         candidateFingerprint
@@ -835,6 +965,8 @@ data ModeledGlobal identity
   | ModeledStep !Int
   | ModeledProvider
       (CheckedLengthProviderSummary (Variable identity))
+  | ModeledConditionalProviderBase
+      (ConditionalProviderAuthorization identity)
 
 -- | Canonical zero-before-step receipt produced only after the session-owned
 -- constructor schema has freshly re-sealed and fingerprinted the raw graph.
@@ -845,8 +977,10 @@ data ExactSpineCase identity local = ExactSpineCase
   !TermNodeId
 
 data PreflightGraph identity local = PreflightGraph
-  { preflightGlobals :: !(Map Name (ModeledGlobal identity))
+  { preflightGlobals :: !(Map TermNodeId (ModeledGlobal identity))
   , preflightCases :: !(Map TermNodeId (ExactSpineCase identity local))
+  , preflightConditionalProviderFinals ::
+      !(Map TermNodeId (ConditionalProviderAuthorization identity))
   }
 
 -- Consume graph retention only after contract resealing and residual
@@ -866,7 +1000,7 @@ retainLengthCandidateGraph
       (LengthProblemError failure identity local)
       ( TermGraph (Type (Variable identity)) local
       , Fingerprint TermGraphFingerprintSubject
-      , LengthCandidateAuthority
+      , LengthCandidateAuthorization identity
       )
 retainLengthCandidateGraph session limits = foldTypedCandidateGraph
   unavailable plain associated
@@ -876,39 +1010,56 @@ retainLengthCandidateGraph session limits = foldTypedCandidateGraph
   plain _ graph = do
     fingerprint <- first LengthProblemTermGraphFingerprintRejected
       $ fingerprintLengthTermGraph session limits graph
-    pure (graph, fingerprint, LengthPlainCandidateAuthority)
+    pure (graph, fingerprint
+      , emptyCandidateAuthorization LengthPlainCandidateAuthority)
 
   associated _ checked = do
     fingerprint <- first LengthProblemTermGraphFingerprintRejected
       $ fingerprintLengthAssociatedTermGraph session limits checked
-    authority <- authorizeAssociatedCertificateGraph session checked
+    authorization <- authorizeAssociatedCertificateGraph session checked
     let graph = checkedTypeApplicationCertificateGraph checked
-    pure (graph, fingerprint, authority)
+    pure (graph, fingerprint, authorization)
 
 -- Require each carrier row, in rooted structural order, to name the exact
--- session inventory scheme and an exact assumed provider law.  The checked
--- structural plan may retain obligations for other future consumers; Length's
--- current scalar interpreter admits only the explicitly empty case.
+-- session inventory scheme and checked provider law.  Legacy obligation-free
+-- rows retain their v2 behavior.  Conditional rows are first classified as a
+-- complete set, their protected chain edges are audited across every live or
+-- dead graph node, and only then are their ground obligations discharged in
+-- canonical row/step/obligation order.
 authorizeAssociatedCertificateGraph
   :: Ord identity
   => CheckedLengthSession identity annotation
   -> CheckedTypeApplicationCertificateGraph (Variable identity) local
   -> Either
       (LengthProblemError failure identity local)
-      LengthCandidateAuthority
+      (LengthCandidateAuthorization identity)
 authorizeAssociatedCertificateGraph session checked = do
-  rowCount <- foldCheckedTypeApplicationCertificateGraph
-    authorizeRow (Right 0) checked
-  pure $ if rowCount == 0
-    then LengthPlainCandidateAuthority
-    else LengthOpaqueAssociatedCertificateAuthority
+  AssociatedProviderClassification rowCount reversedConditionalRows <-
+    foldCheckedTypeApplicationCertificateGraph classifyRow
+      (Right $ AssociatedProviderClassification 0 []) checked
+  let conditionalRows = reverse reversedConditionalRows
+      graph = checkedTypeApplicationCertificateGraph checked
+      chainAudit = buildConditionalProviderChainAudit conditionalRows
+  auditConditionalProviderChains graph chainAudit
+  (bases, finals) <- foldM dischargeConditionalRow
+    (Map.empty, Map.empty) conditionalRows
+  let authority
+        | rowCount == 0 = LengthPlainCandidateAuthority
+        | null conditionalRows =
+            LengthOpaqueAssociatedCertificateAuthority
+        | otherwise =
+            LengthGroundDischargedAssociatedCertificateAuthority
+  pure $ LengthCandidateAuthorization authority bases finals
  where
   inventory = lengthContextInventory $ checkedLengthSessionContext session
   providers = checkedLengthSessionProviderInventory session
   model = lengthContextSpineModel $ checkedLengthSessionContext session
+  resolver = checkedLengthSessionClassResolutionEnvironment session
 
-  authorizeRow (Left failure) _ _ _ _ _ _ = Left failure
-  authorizeRow (Right rowOrdinal) _ owner scheme _ _ receipts = do
+  classifyRow (Left failure) _ _ _ _ _ _ = Left failure
+  classifyRow
+      (Right (AssociatedProviderClassification rowOrdinal conditionalRows))
+      _ owner scheme baseNode _ receipts = do
     if owner == checkedLengthSpineZeroConstructor model
         || owner == checkedLengthSpineStepConstructor model
       then Left $
@@ -923,21 +1074,40 @@ authorizeAssociatedCertificateGraph session checked = do
       then pure ()
       else Left $ LengthProblemAssociatedCertificateSourceSchemeMismatch
         owner rowOrdinal
-    case firstActivatedObligations receipts of
-      Nothing -> pure ()
-      Just (stepOrdinal, count) -> Left $
-        LengthProblemAssociatedCertificateActivatedObligations
-          owner rowOrdinal stepOrdinal count
     -- The session co-seals each checked summary from its normalized exact
     -- 'inventoryTermScheme'.  Once the row has matched that source scheme,
     -- summary-scheme equality is an opaque session invariant; only the
     -- provider-law presence remains a dynamic candidate authorization check.
-    _ <- case lookupCheckedLengthProviderSummary owner providers of
-      Nothing -> Left $
-        LengthProblemAssociatedCertificateProviderSummaryMissing
-          owner rowOrdinal
-      Just summary -> Right summary
-    pure $ rowOrdinal + 1
+    summary <- case lookupCheckedLengthProviderSummary owner providers of
+      Nothing -> case firstActivatedObligations receipts of
+        Just (stepOrdinal, count) -> Left $
+          LengthProblemAssociatedCertificateActivatedObligations
+            owner rowOrdinal stepOrdinal count
+        Nothing -> Left $
+          LengthProblemAssociatedCertificateProviderSummaryMissing
+            owner rowOrdinal
+      Just checkedSummary -> Right checkedSummary
+    case checkedLengthProviderTrust summary of
+      AssumedProviderLaw -> do
+        case firstActivatedObligations receipts of
+          Nothing -> pure ()
+          Just (stepOrdinal, count) -> Left $
+            LengthProblemAssociatedCertificateActivatedObligations
+              owner rowOrdinal stepOrdinal count
+        pure $ AssociatedProviderClassification
+          (rowOrdinal + 1) conditionalRows
+      AssumedProviderLawConditionalOnConstraintDischarge -> do
+        case firstActivatedObligations receipts of
+          Nothing -> Left $
+            LengthProblemAssociatedCertificateConditionalObligationsMissing
+              owner rowOrdinal
+          Just _ -> pure ()
+        let retainedReceipts =
+              [(node, step) | (node, _, step) <- receipts]
+            row = ConditionalAssociatedProviderRow owner rowOrdinal
+              baseNode retainedReceipts summary
+        pure $ AssociatedProviderClassification
+          (rowOrdinal + 1) (row : conditionalRows)
 
   firstActivatedObligations = findStep 0
   findStep _ [] = Nothing
@@ -946,6 +1116,144 @@ authorizeAssociatedCertificateGraph session checked = do
     in if count == 0
       then findStep (ordinal + 1) remaining
       else Just (ordinal, count)
+
+  dischargeConditionalRow (bases, finals)
+      (ConditionalAssociatedProviderRow owner rowOrdinal baseNode receipts
+        summary) = do
+    discharges <- dischargeSteps owner rowOrdinal 0 receipts
+    finalNode <- case reverse receipts of
+      (node, _) : _ -> Right node
+      [] -> Left $
+        LengthProblemAssociatedCertificateConditionalObligationsMissing
+          owner rowOrdinal
+    let authorization = ConditionalProviderAuthorization summary discharges
+    pure
+      ( Map.insert baseNode authorization bases
+      , Map.insert finalNode authorization finals
+      )
+
+  dischargeSteps _ _ _ [] = Right []
+  dischargeSteps owner rowOrdinal stepOrdinal ((_, step) : remaining) = do
+    current <- dischargeObligations owner rowOrdinal stepOrdinal 0
+      $ checkedTypeApplicationCertificateStepObligations step
+    later <- dischargeSteps owner rowOrdinal (stepOrdinal + 1) remaining
+    pure $ current ++ later
+
+  dischargeObligations _ _ _ _ [] = Right []
+  dischargeObligations owner rowOrdinal stepOrdinal obligationOrdinal
+      (obligation : remaining) = do
+    receipt <- dischargeObligation owner rowOrdinal stepOrdinal
+      obligationOrdinal obligation
+    later <- dischargeObligations owner rowOrdinal stepOrdinal
+      (obligationOrdinal + 1) remaining
+    pure $ receipt : later
+
+  dischargeObligation owner rowOrdinal stepOrdinal obligationOrdinal
+      obligation = case resolver of
+    Nothing -> rejected LengthAssociatedClassResolverUnavailable
+    Just environment -> case dischargeHeterogeneousGroundConstraint
+        environment obligation of
+      Left (HeterogeneousClassResolutionGroundQueryError failure) ->
+        rejected $ sanitizeClassResolutionFailure failure
+      Left (HeterogeneousClassResolutionProofSearchError failure) ->
+        rejected $ sanitizeClassResolutionFailure failure
+      Right Nothing -> rejected LengthAssociatedConstraintEvidenceMissing
+      Right (Just receipt) -> Right receipt
+   where
+    rejected reason = Left $
+      LengthProblemAssociatedCertificateConstraintDischargeRejected
+        owner rowOrdinal stepOrdinal obligationOrdinal reason
+
+buildConditionalProviderChainAudit
+  :: [ConditionalAssociatedProviderRow identity]
+  -> ConditionalProviderChainAudit
+buildConditionalProviderChainAudit = List.foldl' addRow
+  $ ConditionalProviderChainAudit Map.empty Map.empty []
+ where
+  addRow audit (ConditionalAssociatedProviderRow owner rowOrdinal baseNode
+      receipts _) = case receipts of
+    [] -> audit
+    (firstNode, _) : _ ->
+      List.foldl' addIntermediate
+        (addProtected firstNode baseNode
+          (ProtectedConditionalProviderNode owner rowOrdinal
+            LengthAssociatedProviderBase) audit)
+        $ zip3 [0 ..] receipts $ drop 1 receipts
+   where
+    addIntermediate current (stepOrdinal, (node, _), (parent, _)) =
+      addProtected parent node
+        (ProtectedConditionalProviderNode owner rowOrdinal
+          $ LengthAssociatedProviderIntermediate stepOrdinal)
+        current
+
+  addProtected parent child site
+      (ConditionalProviderChainAudit allowed protected reversedOrder) =
+    let alreadyProtected = Map.member child protected
+        updatedAllowed = Map.insertWith Set.union child
+          (Set.singleton parent) allowed
+        updatedProtected = Map.insertWith (\_ previous -> previous)
+          child site protected
+        updatedOrder = if alreadyProtected
+          then reversedOrder else child : reversedOrder
+    in ConditionalProviderChainAudit
+        updatedAllowed updatedProtected updatedOrder
+
+auditConditionalProviderChains
+  :: TermGraph ty local
+  -> ConditionalProviderChainAudit
+  -> Either (LengthProblemError failure identity local) ()
+auditConditionalProviderChains graph
+    (ConditionalProviderChainAudit allowed protected reversedOrder) =
+  mapM_ inspect $ reverse reversedOrder
+ where
+  incoming = List.foldl' collectIncoming Map.empty
+    $ termGraphNodes graph
+
+  collectIncoming current (parent, TermNode _ form) =
+    List.foldl' (\edges child -> Map.insertWith Set.union child
+      (Set.singleton parent) edges) current $ termNodeReferences form
+
+  inspect node = case Map.lookup node protected of
+    Nothing -> Right ()
+    Just (ProtectedConditionalProviderNode owner rowOrdinal site)
+      | node == termGraphRoot graph -> rejected owner rowOrdinal site
+          LengthAssociatedProtectedNodeIsRoot
+      | Map.findWithDefault Set.empty node incoming
+          /= Map.findWithDefault Set.empty node allowed ->
+          rejected owner rowOrdinal site
+            LengthAssociatedProtectedNodeHasUnexpectedIncomingEdge
+      | otherwise -> Right ()
+
+  rejected owner rowOrdinal site reason = Left $
+    LengthProblemAssociatedCertificateProtectedChainRejected
+      owner rowOrdinal site reason
+
+termNodeReferences :: TermNodeForm ty local -> [TermNodeId]
+termNodeReferences form = case form of
+  TypedLocal{} -> []
+  TypedGlobal{} -> []
+  TypedLambda _ body -> [body]
+  TypedApply function argument _ -> [function, argument]
+  TypedVisibleTypeApplication _ function _ _ -> [function]
+  TypedTuple fields -> fields
+  TypedHole{} -> []
+  TypedLet _ binding body -> [binding, body]
+  TypedCase scrutinee alternatives -> scrutinee : map snd alternatives
+
+sanitizeClassResolutionFailure
+  :: ClassResolutionQueryError variable
+  -> LengthAssociatedConstraintDischargeReason
+sanitizeClassResolutionFailure failure = case failure of
+  InvalidClassResolutionGroundConstraint{} ->
+    LengthAssociatedConstraintQueryRejected
+  InvalidClassResolutionDerivedConstraint{} ->
+    LengthAssociatedDerivedConstraintRejected
+  ClassResolutionGroundConstraintHasFreeVariables{} ->
+    LengthAssociatedConstraintNotGround
+  ClassResolutionProofDepthLimitExceeded{} ->
+    LengthAssociatedConstraintProofLimitExceeded
+  ClassResolutionProofNodeLimitExceeded{} ->
+    LengthAssociatedConstraintProofLimitExceeded
 
 fingerprintLengthTermGraph
   :: (Ord identity, Ord local)
@@ -1007,12 +1315,13 @@ preflightGraph
   :: Ord identity
   => CheckedLengthSession identity annotation
   -> CheckedLengthProviderInventory (Variable identity)
+  -> LengthCandidateAuthorization identity
   -> Set identity
   -> TermGraph (Type (Variable identity)) local
   -> Either
       (LengthProblemError failure identity local)
       (PreflightGraph identity local)
-preflightGraph session providers authorized graph = do
+preflightGraph session providers candidateAuthorization authorized graph = do
   mapM_ rejectHole nodes
   cases <- foldM inspectCase Map.empty nodes
   selectedKindObligations <- fmap concat $ mapM selectedKindObligation nodes
@@ -1024,6 +1333,7 @@ preflightGraph session providers authorized graph = do
   mapM_ validateVisibleSelection nodes
   globals <- foldM inspectGlobal Map.empty nodes
   pure $ PreflightGraph globals cases
+    $ candidateAuthorizationFinals candidateAuthorization
  where
   nodes = List.sortOn fst $ termGraphNodes graph
   context = checkedLengthSessionContext session
@@ -1079,9 +1389,10 @@ preflightGraph session providers authorized graph = do
 
   inspectGlobal globals (nodeId, TermNode nodeType form) = case form of
     TypedGlobal _ name -> do
-      semantic <- resolveGlobal inventory model providers authorized
+      semantic <- resolveGlobal inventory model providers
+        (candidateAuthorizationBases candidateAuthorization) authorized
         nodeId name nodeType
-      Right $ Map.insert name semantic globals
+      Right $ Map.insert nodeId semantic globals
     _ -> Right globals
 
   validatePatterns = mapM_ validatePattern
@@ -1179,6 +1490,7 @@ resolveGlobal
   => Inventory (Variable identity) annotation
   -> CheckedLengthSpineModel (Variable identity)
   -> CheckedLengthProviderInventory (Variable identity)
+  -> Map TermNodeId (ConditionalProviderAuthorization identity)
   -> Set identity
   -> TermNodeId
   -> Name
@@ -1186,7 +1498,8 @@ resolveGlobal
   -> Either
       (LengthProblemError failure identity local)
       (ModeledGlobal identity)
-resolveGlobal inventory model providers authorized nodeId name actual
+resolveGlobal inventory model providers conditionalBases authorized
+    nodeId name actual
   | name == checkedLengthSpineZeroConstructor model =
       ModeledZero <$ validateConstructor False
   | name == checkedLengthSpineStepConstructor model =
@@ -1194,8 +1507,14 @@ resolveGlobal inventory model providers authorized nodeId name actual
         <$ validateConstructor True
   | Just provider <- lookupCheckedLengthProviderSummary name providers =
       case checkedLengthProviderTrust provider of
-        AssumedProviderLawConditionalOnConstraintDischarge -> Left
-          $ LengthProblemConditionalProviderRequiresDischarge nodeId name
+        AssumedProviderLawConditionalOnConstraintDischarge -> case
+            Map.lookup nodeId conditionalBases of
+          Just authorization@(ConditionalProviderAuthorization
+              authorizedProvider _)
+            | checkedLengthProviderName authorizedProvider == name ->
+                Right $ ModeledConditionalProviderBase authorization
+          _ -> Left
+            $ LengthProblemConditionalProviderRequiresDischarge nodeId name
         AssumedProviderLaw ->
           if schemeAdmits authorized
               (checkedLengthProviderScheme provider) actual
@@ -1350,8 +1669,10 @@ data InterpretationContext identity local annotation = InterpretationContext
   { interpretationSession :: !(CheckedLengthSession identity annotation)
   , interpretationProblemLimits :: !LengthProblemLimits
   , interpretationGraph :: !(TermGraph (Type (Variable identity)) local)
-  , interpretationGlobals :: !(Map Name (ModeledGlobal identity))
+  , interpretationGlobals :: !(Map TermNodeId (ModeledGlobal identity))
   , interpretationCases :: !(Map TermNodeId (ExactSpineCase identity local))
+  , interpretationConditionalProviderFinals ::
+      !(Map TermNodeId (ConditionalProviderAuthorization identity))
   , interpretationTargetArgumentRoles :: ![LengthTargetArgumentRole]
   , interpretationInputCount :: !Int
   }
@@ -1413,7 +1734,8 @@ evaluateNode context environment nodeId = do
     TypedLocal _ local -> case lookupSemanticLocal local environment of
       Nothing -> lift $ Left $ LengthProblemSemanticLocalMissing nodeId local
       Just thunk -> forceThunk context thunk
-    TypedGlobal _ name -> case Map.lookup name $ interpretationGlobals context of
+    TypedGlobal _ name -> case Map.lookup nodeId
+        $ interpretationGlobals context of
       Just ModeledZero -> pure $ SemanticSpine $ LengthLiteral 0
       Just (ModeledStep recursiveIndex) ->
         pure $ SemanticStep recursiveIndex []
@@ -1421,6 +1743,8 @@ evaluateNode context environment nodeId = do
         | null $ checkedLengthProviderArgumentRoles provider ->
             interpretProvider context nodeId provider []
         | otherwise -> pure $ SemanticProvider provider []
+      Just ModeledConditionalProviderBase{} -> lift $ Left
+        $ LengthProblemConditionalProviderRequiresDischarge nodeId name
       Nothing -> lift $ Left
         $ LengthProblemGlobalHasNoLengthSummary nodeId name
     TypedLambda [] body -> evaluateNode context environment body
@@ -1431,8 +1755,11 @@ evaluateNode context environment nodeId = do
       spendEvaluation context
       applySemantic context nodeId callable
         $ DeferredThunk argument environment
-    TypedVisibleTypeApplication _ function _ _ ->
-      evaluateNode context environment function
+    TypedVisibleTypeApplication _ function _ _ -> case Map.lookup nodeId
+        $ interpretationConditionalProviderFinals context of
+      Just authorization -> interpretAuthorizedConditionalProvider
+        context nodeId authorization
+      Nothing -> evaluateNode context environment function
     TypedTuple fields -> pure $ SemanticTuple
       [DeferredThunk field environment | field <- fields]
     TypedHole _ local -> lift $ Left $ LengthProblemHole nodeId local
@@ -1443,6 +1770,18 @@ evaluateNode context environment nodeId = do
     TypedCase{} -> case Map.lookup nodeId $ interpretationCases context of
       Nothing -> lift $ Left $ LengthProblemUnsupportedCase nodeId
       Just checked -> interpretExactSpineCase context environment nodeId checked
+
+interpretAuthorizedConditionalProvider
+  :: (Ord identity, Ord local)
+  => InterpretationContext identity local annotation
+  -> TermNodeId
+  -> ConditionalProviderAuthorization identity
+  -> Evaluation failure identity local (SemanticValue identity local)
+interpretAuthorizedConditionalProvider context owner
+    (ConditionalProviderAuthorization provider _) =
+  if null $ checkedLengthProviderArgumentRoles provider
+    then interpretProvider context owner provider []
+    else pure $ SemanticProvider provider []
 
 interpretExactSpineCase
   :: (Ord identity, Ord local)
@@ -1766,9 +2105,10 @@ buildConcreteEncodingFingerprint
         (EncodingFingerprintSubject FiniteListSpineLengthV1))
 buildConcreteEncodingFingerprint session contract usedProviders result condition =
   buildFingerprintWithin maximumBytes FingerprintBuilder
-    { fingerprintBuilderVersion = case casePolicy of
-        LengthExactZeroStepCases -> 3
-        LengthCasesRejected -> if mixedRoles then 2 else 1
+    { fingerprintBuilderVersion =
+        (if conditionalCapable then 3 else 0) + case casePolicy of
+          LengthExactZeroStepCases -> 3
+          LengthCasesRejected -> if mixedRoles then 2 else 1
     , fingerprintBuilderRole = ascii
         "finite-list-spine-length/concrete-encoding"
     , fingerprintBuilderFields =
@@ -1786,7 +2126,8 @@ buildConcreteEncodingFingerprint session contract usedProviders result condition
             $ [ FingerprintBytes $ ascii "lazy-symbolic-interpreter/v1"
             , FingerprintBytes $ ascii "finite-total-spine/v1"
             , FingerprintBytes $ ascii "assumed-provider-laws/v1"
-            ] ++ mixedInterpreterPolicy ++ caseInterpreterPolicy
+            ] ++ conditionalInterpreterPolicy
+              ++ mixedInterpreterPolicy ++ caseInterpreterPolicy
         , tagged "used-provider-laws"
             [FingerprintSequence $ map providerSummaryField usedProviders]
         , tagged "candidate-result"
@@ -1796,9 +2137,19 @@ buildConcreteEncodingFingerprint session contract usedProviders result condition
         ]
     }
  where
+  conditionalCapable = any ((==
+      AssumedProviderLawConditionalOnConstraintDischarge) .
+        checkedLengthProviderTrust)
+    $ checkedLengthProviderSummaries
+    $ checkedLengthSessionProviderInventory session
   mixedRoles = LengthUnobservedTarget `elem`
     checkedLengthContractTargetArgumentRoles contract
   casePolicy = checkedLengthSessionCasePolicy session
+  conditionalInterpreterPolicy
+    | conditionalCapable =
+        [FingerprintBytes $ ascii
+          "constraint-conditional-provider-after-ground-discharge/v1"]
+    | otherwise = []
   mixedInterpreterPolicy
     | mixedRoles =
         [ FingerprintBytes $ ascii "source-ordered-target-roles/v1"
@@ -1831,6 +2182,7 @@ buildCandidateFingerprint session authority graph =
     { fingerprintBuilderVersion = case authority of
         LengthPlainCandidateAuthority -> 1
         LengthOpaqueAssociatedCertificateAuthority -> 2
+        LengthGroundDischargedAssociatedCertificateAuthority -> 3
     , fingerprintBuilderRole = ascii
         "finite-list-spine-length/typed-candidate"
     , fingerprintBuilderFields =
@@ -1851,6 +2203,17 @@ buildCandidateFingerprint session authority graph =
     LengthOpaqueAssociatedCertificateAuthority ->
       [ FingerprintBytes $ ascii "opaque-associated-certificate/v1"
       , FingerprintBytes $ ascii "activated-obligations-empty/v1"
+      ]
+    LengthGroundDischargedAssociatedCertificateAuthority ->
+      [ FingerprintBytes $ ascii "opaque-associated-certificate/v1"
+      , FingerprintBytes $ ascii "independent-ground-class-discharge/v1"
+      , FingerprintBytes $ ascii "inventory-bound-discharge-receipts/v1"
+      , FingerprintBytes $ ascii
+          "provider-law-uniform-over-dictionary-evidence/v1"
+      , FingerprintBytes $ ascii "occurrence-specific-final-provider/v1"
+      , FingerprintBytes $ ascii "protected-certified-function-prefix/v1"
+      , FingerprintBytes $ ascii
+          "static-discharge-without-givens-or-z3/v1"
       ]
   maximumBytes = fromIntegral $ lengthFingerprintByteLimit
     $ checkedLengthSessionLimits session

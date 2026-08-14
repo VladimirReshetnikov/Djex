@@ -153,15 +153,19 @@ declaration cap is observed, so this is not a new streaming work bound for
 constructing or projecting an inventory from an unbounded raw declaration
 source.
 
-No Djinn, Exference, certificate, or Length entrance consumes this resolver
-authority, so backend resolution and acceptance remain unchanged. Length may
-retain a constrained provider scheme under a conditional trust classifier, but
-it cannot discharge or use that law. In particular, Z3 is never a source of
-dictionary evidence. Djinn and Exference therefore still retain their existing
-resolution and search policies until a later adapter explicitly binds this
-receipt to its own opaque candidate/session authority. The exact boundary is
-recorded in the
-[checked class-resolution report](../docs/reports/2026-08-13-checked-class-resolution-foundation.md).
+Djinn and Exference do not consume this resolver directly, so their backend
+resolution and search policies remain unchanged.  A Length session containing
+a conditional provider law instead attempts to co-seal the resolver from its
+exact inventory.  Its candidate boundary may bind successful static ground
+discharge receipts only to the final occurrence in the same associated
+certificate row; a graph fingerprint or certificate alone grants no discharge
+authority.  A compatibility session may retain an unavailable resolver and
+then fails closed with a sanitized candidate diagnostic when discharge is
+needed.  Z3 is never a source of dictionary evidence.  The foundation and its
+narrow Length consumer are recorded in the
+[checked class-resolution report](../docs/reports/2026-08-13-checked-class-resolution-foundation.md)
+and the
+[ground constraint-discharge report](../docs/reports/2026-08-13-length-ground-constraint-discharge.md).
 
 ### Query, search, and presentation
 
@@ -173,9 +177,9 @@ recorded in the
 | `Language.Haskell.Synthesis.Selection` | First, best, lookahead-best, all, and preferred-tier policies over lazy result batches. |
 | `Language.Haskell.Synthesis.Diagnostic` | Severity, stable code, checked source locations/spans, ordered context, and deterministic rendering. |
 | `Language.Haskell.Synthesis.Fingerprint` | Public inspection of opaque, nominal, collision-free canonical identities; construction and byte budgets remain package-private. |
-| `Language.Haskell.Synthesis.Semantic.Length` | Exact inventory-bound finite-spine contexts, normalized contracts, source-bound assumed provider laws, and model-aware fingerprints; an additive trust class retains exact nonempty constrained schemes for later discharge without making them usable, while legacy summary bytes stay exact. |
-| `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked contracts, context-free provider transfers, and exact candidate problems; constraint-conditional providers fail before argument inspection, and only independently validated model-relative violations receive problem-bound evidence. |
-| `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and typed-candidate behavioral problems: session-owned provider authority, contract resealing, residual rejection, rigid root/provider authorization, mixed-role opaque targets, an additive exact zero/step spine-case policy, and provider-only consumption of opaque obligation-free certificate carriers; retained conditional laws still fail without discharge. |
+| `Language.Haskell.Synthesis.Semantic.Length` | Exact inventory-bound finite-spine contexts, normalized contracts, source-bound assumed provider laws, and model-aware fingerprints; an additive trust class retains exact nonempty constrained schemes under a dictionary-uniform conditional-law assumption, while legacy summary bytes stay exact. |
+| `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked contracts, detached context-free provider transfers, and exact candidate problems; detached constraint-conditional provider evaluation fails before argument inspection, while whole-problem replay may consume a candidate already authorized at its occurrence-specific ground-discharge boundary. |
+| `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and typed-candidate behavioral problems: session-owned provider and restricted resolver authority, contract resealing, residual rejection, rigid root/provider authorization, mixed-role opaque targets, exact zero/step cases, and provider-only consumption of opaque certificate carriers for either obligation-free legacy laws or final-node conditional laws with independently discharged ground obligations. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation and exact input-symbol model replay for one checked Length problem, without launching or trusting a solver. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` | Pure validated Z3 launch, resource, artifact, and response-decoder policy with a package-private complete identity and a byte-free digest-expectation presence classifier; it performs no IO or attestation. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` | Rank-N scoped capability-probed Z3 ownership with byte-free failures, heuristic status/strength/use, and a query-first replay gate for independently validated counterexample evidence. |
@@ -257,10 +261,12 @@ success and sanitized authority failures are additive after those gates. The
 strict entrance is additive. The session encoding still consumes
 only the mixed/all-observed and case projections; contracts and downstream
 identities retain their existing contract-role field, so explicit all-observed
-ordinary policy remains identical to the current legacy policy. The common
-candidate trust-boundary change deliberately advances all session-policy
-versions from 2/3/4 to 5/6/7, however, so session and containing downstream
-keys are not historical-byte compatible and caches must be invalidated.
+ordinary policy remains identical to the corresponding legacy policy. The
+provider-certificate trust-boundary change advanced the ordinary session-policy
+versions from 2/3/4 to 5/6/7, however, so those session and containing
+downstream keys are not historical-byte compatible and caches must be
+invalidated. Conditional-capable sessions use the later 8/9/10 family described
+below.
 Productive construction is also preserved; deep `NFData` evaluation now
 honestly forces the newly retained role vector. See the
 [unified interpretation-policy report](../docs/reports/2026-08-13-unified-length-interpretation-policy.md).
@@ -268,8 +274,9 @@ honestly forces the newly retained role vector. See the
 Length also has an additive exact-case sealer pair. It accepts only complete
 zero/step splits over the checked spine model; ordinary and role-aware sessions
 retain their case-rejection behavior, signatures, and current-policy
-equivalence. Their historical session bytes are superseded by the global
-5/6/7 policy advance above. The package-private graph
+equivalence. Their historical session bytes are superseded by the ordinary
+5/6/7 policy advance above, or by 8/9/10 when conditional provider authority is
+present. The package-private graph
 identity entrance freshly reseals constructor patterns from the session-owned
 schema, while the public shared fingerprint continues to reject them. Analysis
 is canonical zero then step, maps the recursive field to `n monus 1`, keeps the
@@ -288,53 +295,75 @@ freshly re-seals and fingerprints the graph and semantic rows with the
 session-selected shared or exact-case `TypeStructure`; graph limits, schema
 errors, and the fingerprint byte limit therefore precede Length-specific row
 authorization. It then visits every row in rooted structural order and admits
-only exact inventory-owned provider schemes with a checked provider summary
-and no activated obligations. The summary's exact scheme is transitively
-co-sealed from the same inventory source; after the row's alpha-exact source
-match, only summary presence remains dynamic. Modeled zero/step constructor
-owners deliberately remain unsupported in this provider-only checkpoint.
+only exact inventory-owned provider schemes with a checked provider summary.
+The summary's exact scheme is transitively co-sealed from the same inventory
+source; after the row's alpha-exact source match, only summary presence remains
+dynamic. Modeled zero/step constructor owners deliberately remain unsupported
+in this provider-only boundary.
 
 An empty carrier literally follows the plain graph/candidate v1 identity path.
-A nonempty authorized carrier uses the carrier-aware graph v2 and a candidate
-v2 which binds `opaque-associated-certificate/v1` and
+A nonempty obligation-free legacy carrier uses carrier-aware graph v2 and
+candidate v2, binding `opaque-associated-certificate/v1` and
 `activated-obligations-empty/v1`. Certificate, slot, node, and occurrence IDs
 remain nonsemantic coordinates and are absent from both keys. The stamped bare
 graph remains rejected by the public fingerprint and by the plain Length path.
-Empty obligations do not prove dictionary or instance discharge. Length does
-not consume the package-private checked class-resolution receipt in this
-checkpoint, and no Z3 status or model can supply dictionary evidence. This
-admission adds no solver or replay authority. The new associated-row failures
-expose only the owner, canonical rooted-row/source-step ordinals, and bounded
-obligation count; raw association coordinates and types remain private. See the
+Empty obligations do not prove dictionary or instance discharge. See the
 [Length associated-provider report](../docs/reports/2026-08-13-length-associated-provider-certificates.md).
 
-Length now has a retention-only source form for constrained provider laws.
 `AssumedConstraintConditionalProviderSummary` must resolve to the same exact
 closed source-inventory scheme as its claim and that scheme must have a
 nonempty leading constraint context. The checked summary retains the full
 source scheme, roles, transfer, and the distinct
-`AssumedProviderLawConditionalOnConstraintDischarge` classifier. The legacy
-`AssumedProviderSummary` continues to require a leading-context-free scheme;
-its sealing behavior and fingerprint bytes are unchanged.
-
-Retention is deliberately separate from use. The standalone provider evaluator
+`AssumedProviderLawConditionalOnConstraintDischarge` classifier. That trust
+contract assumes the law is uniform over all independently admitted dictionary
+evidence: Exference retained the activated obligations, but not the particular
+given or instance chosen by its checker. The legacy `AssumedProviderSummary`
+continues to require a leading-context-free scheme; its constructor behavior
+and fingerprint bytes are unchanged. Detached provider evaluation still
 rejects conditional trust before inspecting argument arity, roles, or values.
-Every candidate interpreter rejects the exact provider occurrence before using
-its transfer. Associated certificate rows still reject nonempty activated
-obligations at the existing authorization gate; an empty row does not imply
-that the retained scheme context was solved. Length does not call the checked
-class resolver, retain a discharge receipt or instance identity, or delegate
-dictionary evidence to Z3.
 
-Only identities which describe the retained assumptions advance. An
-all-legacy provider inventory keeps exact v2 bytes and its semantic inventory
-keeps exact v1 bytes. Presence of a conditional summary selects provider
-inventory v3 and semantic inventory v2, including an explicit
-retention-only-policy field. Encoding, candidate, complete-problem, and query
-identity schemas and versions are unchanged. Their existing composition still
-binds the semantic inventory, so containing keys naturally distinguish a
-session that actually retains conditional authority. See the
-[conditional provider-summary retention report](../docs/reports/2026-08-13-length-conditional-provider-summary-retention.md).
+At session sealing, Length conditionally attempts to construct the restricted
+class-resolution environment from that exact inventory and the default bounded
+limits. A compatibility session can succeed with this authority unavailable;
+a conditional candidate then fails closed with
+`LengthAssociatedClassResolverUnavailable`. Every conditional associated row
+must have a nonempty activated context. Length discharges its obligations in
+canonical row/step/obligation order using static exact-inventory queries which
+are alias-free, forall-free, first-order, and ground, with no query givens.
+This independent proof search does not reproduce Exference's checker path; it
+is sound for the provider law only under the retained assumption that the law
+is uniform over dictionary evidence. Rejected shapes, missing evidence,
+derived constraints,
+and proof limits become closed sanitized reasons rather than public constraint,
+type, instance, or receipt payloads. Z3 never participates in this discharge.
+
+Proof receipts do not authorize a provider name globally. Before any discharge,
+Length audits the complete graph, including dead nodes. A conditional row's
+base and each intermediate visible-application prefix must not be the root and
+must have exactly the certified incoming function edge. The base is retained
+as a sentinel and still fails if evaluated directly. Only that row's final
+receipt-bearing visible-application node can invoke the law; a direct, partial,
+shared-prefix, or otherwise unassociated occurrence remains unauthorized. The
+new discharge and chain failures expose only the provider owner and canonical
+row/step/obligation or base/intermediate positions plus closed reasons.
+
+The retention identities remain exact: all-legacy inventories keep provider
+inventory v2 and semantic inventory v1, while conditional inventories keep the
+preceding provider inventory v3 and semantic inventory v2 bytes. The
+dictionary-uniform behavioral marker is deliberately absent from those
+retention envelopes. Sessions without conditional summaries keep policy
+versions 5/6/7; conditional-capable sessions use 8/9/10 and bind the exact
+static resolver policy, default limits, no-givens/Z3 boundary,
+dictionary-uniform law assumption, final occurrence, and prefix audit. Ordinary
+concrete encodings remain 1/2/3, while conditional-capable encodings use 4/5/6.
+Plain candidates remain v1, obligation-free associated candidates remain v2,
+and ground-discharged conditional candidates use v3, where
+`provider-law-uniform-over-dictionary-evidence/v1` and
+`static-discharge-without-givens-or-z3/v1` first describe behavioral use. The
+carrier graph remains v2. Complete-problem and SMT-query schemas and versions
+are unchanged, although their existing composition transitively binds the new
+session, concrete-encoding, and candidate identities. See the
+[ground constraint-discharge report](../docs/reports/2026-08-13-length-ground-constraint-discharge.md).
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib` provides a pure canonical
 QF_LIA boundary over an exact checked length problem. Its opaque nominal query
@@ -750,9 +779,11 @@ patterns likewise require an inventory-bound family schema which the generic
 shared checker does not possess. The result is only a structural graph key: it
 establishes no inventory membership or provenance, kind correctness, constraint
 discharge, candidate completeness, or behavioral meaning. Domain-owned sealers
-must bind those authorities separately. Length now does so for the narrow
-exact, obligation-free provider case described above; it does not broaden the
-structural carrier's own claims.
+must bind those authorities separately. Length now does so for the narrow exact
+provider cases described above: either an obligation-free legacy row or one
+conditional row whose own ground obligations, protected prefix, and final
+occurrence have been authorized. It does not broaden the structural carrier's
+own claims.
 
 The detailed encoding and trust boundary are recorded in the
 [carrier-aware certificate fingerprint report](../docs/reports/2026-08-13-carrier-aware-certificate-graph-fingerprints.md).

@@ -107,6 +107,7 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , unifiedInterpretationPolicyTests
   , candidateProblemTests
   , spinePairProblemTests
+  , spinePairSMTLibTests
   , associatedCertificateCandidateTests
   , problemReplayTests
   , inputBoxValidationTests
@@ -4075,6 +4076,346 @@ spinePairProblemTests = testGroup
           receipt @?= 1
   ]
 
+spinePairSMTLibTests :: TestTree
+spinePairSMTLibTests = testGroup
+  "binary product-of-spines QF_LIA queries and replay"
+  [ testCase
+      "freeze the product stack and distinguish equal scalar query bytes" $ do
+      let input = Length.LengthVariable $ Length.LengthSpinePairInput 0
+          source = spinePairContractWith (Length.LengthTruth True)
+            $ Length.LengthEqual
+                (pairResultVariable Length.LengthSpinePairSecond) input
+      session <- adversarialLengthSession [] []
+      contract <- adversarialLengthSpinePairContract
+        session adversarialInputSpinePairTarget source
+      graph <- adversarialInputAndZeroSpinePairGraph
+      problem <- expectRight
+        $ LengthProblem.sealLengthSpinePairTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session contract
+        $ adversarialTypedCandidate $ Right graph
+      query <- expectRight $ SMTLib.sealLengthSpinePairSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      scalarProblem <- adversarialConstantZeroProblem identityLengthContract
+      scalarQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits scalarProblem
+
+      SMTLib.lengthSpinePairSMTLibQuerySchemaTag @?=
+        asciiBytes "djex-length-spine-pair-z3-qf-lia-smtlib2/v1"
+      SMTLib.lengthSpinePairSMTLibQueryLogic @?= asciiBytes "QF_LIA"
+      SMTLib.lengthSpinePairSMTLibQueryInputSymbols query @?=
+        [asciiBytes "djex_length_input_0"]
+      SMTLib.lengthSpinePairSMTLibQueryCheckBytes query @?=
+        asciiBytes constantZeroSMTLibCheck
+      SMTLib.lengthSpinePairSMTLibQueryCheckBytes query @?=
+        SMTLib.lengthSMTLibQueryCheckBytes scalarQuery
+      SMTLib.lengthSpinePairSMTLibQueryInputValueRequestBytes query @?=
+        Just (asciiBytes "(get-value (djex_length_input_0))\n")
+      Djex.behavioralProblemDomain
+          (SMTLib.lengthSpinePairSMTLibQueryBehavioralProblem query) @?=
+        Length.finiteBinaryProductSpineLengthsDomainTag
+
+      let scalarKey = Fingerprint.fingerprintCanonicalBytes
+            $ SMTLib.lengthSMTLibQueryFingerprint scalarQuery
+          productKey = Fingerprint.fingerprintCanonicalBytes
+            $ SMTLib.lengthSpinePairSMTLibQueryFingerprint query
+      assertBool "the nominal product query reused scalar query identity"
+        $ productKey /= scalarKey
+      take 10 productKey @?= fingerprintVersionPrefix 1
+      assertBool "the product query role was absent from identity"
+        $ asciiBytes
+            "finite-binary-product-spine-lengths/z3-qf-lia-query"
+              `isInfixOf` productKey
+      assertBool "the product query schema was absent from identity"
+        $ SMTLib.lengthSpinePairSMTLibQuerySchemaTag `isInfixOf` productKey
+
+      let candidate =
+            LengthProblem.checkedLengthSpinePairProblemCandidate problem
+          snapshots =
+            [ canonicalFingerprintSHA256
+                $ Length.lengthSpinePairContractFingerprint contract
+            , canonicalFingerprintSHA256
+                $ LengthProblem.checkedLengthSpinePairCandidateFingerprint
+                    candidate
+            , canonicalFingerprintSHA256
+                $ LengthProblem.checkedLengthSpinePairProblemEncodingFingerprint
+                    problem
+            , canonicalFingerprintSHA256
+                $ Djex.behavioralProblemFingerprint
+                $ LengthProblem.checkedLengthSpinePairProblemBehavioralProblem
+                    problem
+            , canonicalFingerprintSHA256
+                $ SMTLib.lengthSpinePairSMTLibQueryFingerprint query
+            ]
+      snapshots @?=
+        [ "cb618f6bafba54ec2a74e424f75bdf6c292d4e659c33376163d93d48196050a3"
+        , "208fd12c5eb2dd4f303937cc306d001e2ed07f996c1b29cdf51ca3a428e4a880"
+        , "a253873a60982052609096e00e84ef8fdf94808b6831fcdce36f30fe0faccf18"
+        , "00ee1f5688909a57af53078023fe1ea733c9b3dc0792182cfc70eb04d85e3d94"
+        , "f6a0c66de9b0406719b5f97a448e26cd2d87b5ecdb12ba8a48d65baed7e64763"
+        ]
+  , testCase
+      "lower both ordered result relations but request only compact inputs" $ do
+      let input = Length.LengthVariable $ Length.LengthSpinePairInput 0
+          source = spinePairContractWith (Length.LengthTruth True)
+            $ Length.LengthAll
+                [ Length.LengthEqual
+                    (pairResultVariable Length.LengthSpinePairFirst)
+                    $ Length.LengthSum [input, Length.LengthLiteral 1]
+                , Length.LengthEqual
+                    (pairResultVariable Length.LengthSpinePairSecond) input
+                ]
+      problem <- adversarialInputAndZeroSpinePairProblem source
+      query <- expectRight $ SMTLib.sealLengthSpinePairSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      SMTLib.lengthSpinePairSMTLibQueryCheckBytes query @?=
+        asciiBytes spinePairRelationalSMTLibCheck
+      SMTLib.lengthSpinePairSMTLibQueryInputSymbols query @?=
+        [asciiBytes "djex_length_input_0"]
+      SMTLib.lengthSpinePairSMTLibQueryInputValueRequestBytes query @?=
+        Just (asciiBytes "(get-value (djex_length_input_0))\n")
+      let script = SMTLib.lengthSpinePairSMTLibQueryCheckBytes query
+      assertBool "a modeled result component escaped into the query"
+        $ not $ asciiBytes "result" `isInfixOf` script
+      case SMTLib.lengthSpinePairSMTLibQueryInputSymbols query of
+        [symbol] -> do
+          evidence <- expectCounterexample
+            $ SMTLib.validateLengthSpinePairSMTLibCounterexample
+                Evaluate.defaultLengthEvaluationLimits query
+                [smtIntegerBinding symbol 3]
+          receipt <- expectRight $ Djex.replayBehavioralEvidence
+            (SMTLib.lengthSpinePairSMTLibQueryBehavioralProblem query)
+            evidence
+          Evaluate.validatedLengthSpinePairCounterexampleInputs receipt @?=
+            [3]
+          Evaluate.validatedLengthSpinePairCounterexampleResult receipt @?=
+            Length.LengthSpinePair 3 0
+          Evaluate.validatedLengthSpinePairCounterexampleBasis receipt @?=
+            Evaluate.ProviderIndependentFiniteSpineModel
+        symbols -> assertFailure $ "unexpected product input symbols: " ++
+          show symbols
+  , testCase
+      "make decoded, direct, and origin replay agree without stale authority" $
+      do
+        let input = Length.LengthVariable $ Length.LengthSpinePairInput 0
+            source = spinePairContractWith (Length.LengthTruth True)
+              $ Length.LengthAll
+                  [ Length.LengthEqual
+                      (pairResultVariable Length.LengthSpinePairFirst) input
+                  , Length.LengthEqual
+                      (pairResultVariable Length.LengthSpinePairSecond)
+                      $ Length.LengthLiteral 1
+                  ]
+        problem <- adversarialInputAndZeroSpinePairProblem source
+        query <- expectRight $ SMTLib.sealLengthSpinePairSMTLibQuery
+          SMTLib.defaultLengthSMTLibLimits problem
+        evidence <- case SMTLib.lengthSpinePairSMTLibQueryInputSymbols query of
+          [symbol] -> expectCounterexample
+            $ SMTLib.validateLengthSpinePairSMTLibCounterexample
+                Evaluate.defaultLengthEvaluationLimits query
+                [smtIntegerBinding symbol 0]
+          symbols -> assertFailure
+            ("unexpected product input symbols: " ++ show symbols)
+              >> error "unreachable"
+        decoded <- expectRight $ Djex.replayBehavioralEvidence
+          (SMTLib.lengthSpinePairSMTLibQueryBehavioralProblem query) evidence
+        direct <- expectCounterexample
+          $ SMTLib.replayLengthSpinePairSMTLibCounterexampleInputs
+              Evaluate.defaultLengthEvaluationLimits query [0]
+        origin <- expectCounterexample
+          $ SMTLib.probeLengthSpinePairSMTLibCounterexampleAtOrigin
+              Evaluate.defaultLengthEvaluationLimits query
+        decoded @?= direct
+        direct @?= origin
+
+        stale <- adversarialInputAndZeroSpinePairProblem
+          trivialSpinePairContract
+        assertLeft Djex.ReplayEncodingFingerprintMismatch
+          $ Djex.replayBehavioralEvidence
+              (LengthProblem.checkedLengthSpinePairProblemBehavioralProblem
+                stale)
+              evidence
+        scalar <- adversarialConstantZeroProblem trivialLengthContract
+        let forgedScalarEvidence = unsafeCoerce evidence
+              :: SemanticProblem.BehavioralEvidence
+                  Length.FiniteListSpineLengthV1
+                  Evaluate.ValidatedLengthSpinePairCounterexample
+        assertLeft Djex.ReplayDomainMismatch
+          $ Djex.replayBehavioralEvidence
+              (LengthProblem.checkedLengthProblemBehavioralProblem scalar)
+              forgedScalarEvidence
+  , testCase
+      "associate positive and counterexample boxes through the exact query" $
+      do
+        let input = Length.LengthVariable $ Length.LengthSpinePairInput 0
+            safeSource = spinePairContractWith (Length.LengthTruth True)
+              $ Length.LengthAll
+                  [ Length.LengthEqual
+                      (pairResultVariable Length.LengthSpinePairFirst) input
+                  , Length.LengthEqual
+                      (pairResultVariable Length.LengthSpinePairSecond)
+                      $ Length.LengthLiteral 0
+                  ]
+            violatingSource = spinePairContractWith (Length.LengthTruth True)
+              $ Length.LengthAll
+                  [ Length.LengthEqual
+                      (pairResultVariable Length.LengthSpinePairFirst) input
+                  , Length.LengthEqual
+                      (pairResultVariable Length.LengthSpinePairSecond) input
+                  ]
+        safeProblem <- adversarialInputAndZeroSpinePairProblem safeSource
+        safeQuery <- expectRight $ SMTLib.sealLengthSpinePairSMTLibQuery
+          SMTLib.defaultLengthSMTLibLimits safeProblem
+        safe <- expectRight
+          $ SMTLib.validateLengthSpinePairSMTLibQueryInputBox
+              Evaluate.defaultLengthEvaluationLimits
+              Evaluate.defaultLengthInputBoxLimits safeQuery [2]
+        safeReceipt <- case safe of
+          Evaluate.LengthInputBoxValidated receipt -> pure receipt
+          Evaluate.LengthInputBoxCounterexample{} -> assertFailure
+            "the safe product query box produced a counterexample"
+              >> error "unreachable"
+        Evaluate.validatedLengthSpinePairInputBoxInclusiveMaximums
+            safeReceipt @?= [2]
+        Evaluate.validatedLengthSpinePairInputBoxAssignmentCount safeReceipt
+          @?= 3
+        Evaluate.validatedLengthSpinePairInputBoxApplicableAssignmentCount
+            safeReceipt @?= 3
+
+        violatingProblem <- adversarialInputAndZeroSpinePairProblem
+          violatingSource
+        violatingQuery <- expectRight $ SMTLib.sealLengthSpinePairSMTLibQuery
+          SMTLib.defaultLengthSMTLibLimits violatingProblem
+        violating <- expectRight
+          $ SMTLib.validateLengthSpinePairSMTLibQueryInputBox
+              Evaluate.defaultLengthEvaluationLimits
+              Evaluate.defaultLengthInputBoxLimits violatingQuery [2]
+        counterexample <- case violating of
+          Evaluate.LengthInputBoxCounterexample receipt -> pure receipt
+          Evaluate.LengthInputBoxValidated{} -> assertFailure
+            "the violating product query box produced positive evidence"
+              >> error "unreachable"
+        Evaluate.validatedLengthSpinePairCounterexampleInputs counterexample
+          @?= [1]
+        Evaluate.validatedLengthSpinePairCounterexampleResult counterexample
+          @?= Length.LengthSpinePair 1 0
+  , testCase
+      "retain the unioned provider-law basis in a nullary decoded model" $ do
+      (providers, problem) <- adversarialProviderSpinePairProblem
+      query <- expectRight $ SMTLib.sealLengthSpinePairSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      SMTLib.lengthSpinePairSMTLibQueryInputSymbols query @?= []
+      SMTLib.lengthSpinePairSMTLibQueryInputValueRequestBytes query @?= Nothing
+      evidence <- expectCounterexample
+        $ SMTLib.validateLengthSpinePairSMTLibCounterexample
+            Evaluate.defaultLengthEvaluationLimits query []
+      decoded <- expectRight $ Djex.replayBehavioralEvidence
+        (SMTLib.lengthSpinePairSMTLibQueryBehavioralProblem query) evidence
+      origin <- expectCounterexample
+        $ SMTLib.probeLengthSpinePairSMTLibCounterexampleAtOrigin
+            Evaluate.defaultLengthEvaluationLimits query
+      decoded @?= origin
+      Evaluate.validatedLengthSpinePairCounterexampleInputs origin @?= []
+      Evaluate.validatedLengthSpinePairCounterexampleResult origin @?=
+        Length.LengthSpinePair 11 22
+      Evaluate.validatedLengthSpinePairCounterexampleBasis origin @?=
+        Evaluate.FiniteSpineModelUnderAssumedProviderLaws providers
+  , testCase
+      "reject malformed models before pair replay and over-arity values" $ do
+      problem <- adversarialInputAndZeroSpinePairProblem
+        $ spinePairContractWith (Length.LengthTruth True)
+        $ Length.LengthEqual
+            (pairResultVariable Length.LengthSpinePairSecond)
+            (Length.LengthVariable $ Length.LengthSpinePairInput 0)
+      query <- expectRight $ SMTLib.sealLengthSpinePairSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      case SMTLib.lengthSpinePairSMTLibQueryInputSymbols query of
+        [symbol] -> do
+          let validate = SMTLib.validateLengthSpinePairSMTLibCounterexample
+                Evaluate.defaultLengthEvaluationLimits query
+              unknown = asciiBytes "djex_length_input_9"
+          assertLeft
+            (SMTLib.LengthSpinePairSMTLibBindingArityMismatch 1 0)
+            $ validate []
+          assertLeft
+            (SMTLib.LengthSpinePairSMTLibUnknownInputSymbol 0 unknown)
+            $ validate [smtIntegerBinding unknown 1]
+          assertLeft
+            (SMTLib.LengthSpinePairSMTLibNegativeInputValue 0 symbol (-1))
+            $ validate [smtIntegerBinding symbol (-1)]
+          expectNoCounterexample $ validate [smtIntegerBinding symbol 0]
+          assertLeft
+            (SMTLib.LengthSpinePairSMTLibCounterexampleReplayRejected
+              $ Evaluate.LengthSpinePairEvaluationValueBitLimitExceeded
+                  (Evaluate.LengthSpinePairProblemInputValue 0) 2 3)
+            $ SMTLib.validateLengthSpinePairSMTLibCounterexample
+                (evaluationLimitsWith 2 8) query
+                [smtIntegerBinding symbol 4]
+
+          let cyclicBindings = smtIntegerBinding symbol 0 : cyclicBindings
+          cyclicBindingResult <- evaluateWithin $ validate cyclicBindings
+          assertLeft
+            (SMTLib.LengthSpinePairSMTLibBindingArityMismatch 1 2)
+            cyclicBindingResult
+          let cyclicSymbol = fromIntegral (fromEnum 'x') : cyclicSymbol
+              symbolLimit = fromIntegral $ length symbol
+          cyclicSymbolResult <- evaluateWithin
+            $ validate [smtIntegerBinding cyclicSymbol 0]
+          assertLeft
+            (SMTLib.LengthSpinePairSMTLibBindingSymbolByteLimitExceeded
+              0 symbolLimit (symbolLimit + 1))
+            cyclicSymbolResult
+          let poisonedInputs =
+                [ error "pair query replay demanded the first over-arity value"
+                , error "pair query replay demanded the extra over-arity value"
+                ]
+          poisonedResult <- evaluateWithin
+            $ SMTLib.replayLengthSpinePairSMTLibCounterexampleInputs
+                Evaluate.defaultLengthEvaluationLimits query poisonedInputs
+          assertLeft
+            (SMTLib.LengthSpinePairSMTLibInputReplayEvaluationRejected
+              $ Evaluate.LengthSpinePairProblemAssignmentArityMismatch 1 2)
+            poisonedResult
+        symbols -> assertFailure $ "unexpected product input symbols: " ++
+          show symbols
+  , testCase
+      "preserve query resource precedence and pair-specific failures" $ do
+      let input = Length.LengthVariable $ Length.LengthSpinePairInput 0
+          literalSource = spinePairContractWith (Length.LengthTruth True)
+            $ Length.LengthEqual
+                (pairResultVariable Length.LengthSpinePairSecond)
+                $ Length.LengthSum [input, Length.LengthLiteral 4]
+      problem <- adversarialInputAndZeroSpinePairProblem literalSource
+      let makeLimits change = expectRight $ SMTLib.mkLengthSMTLibLimits
+            $ change SMTLib.defaultLengthSMTLibLimitSource
+      noCommands <- makeLimits $ \source -> source
+        { SMTLib.lengthSMTLibLimitSourceCommandBytes = 0
+        , SMTLib.lengthSMTLibLimitSourceFingerprintBytes = 0
+        }
+      assertLeft
+        (SMTLib.LengthSpinePairSMTLibCommandByteLimitExceeded
+          SMTLib.LengthSMTLibCheckCommand 0 1)
+        $ SMTLib.sealLengthSpinePairSMTLibQuery noCommands problem
+
+      noNumerals <- makeLimits $ \source -> source
+        { SMTLib.lengthSMTLibLimitSourceNumeralBits = 2 }
+      assertLeft
+        (SMTLib.LengthSpinePairSMTLibNumeralBitLimitExceeded
+          SMTLib.LengthSMTLibLiteralNumeral 2 3)
+        $ SMTLib.sealLengthSpinePairSMTLibQuery noNumerals problem
+
+      baseline <- expectRight $ SMTLib.sealLengthSpinePairSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      let commandBytes = fromIntegral $ length
+            $ SMTLib.lengthSpinePairSMTLibQueryCheckBytes baseline
+      noFingerprint <- makeLimits $ \source -> source
+        { SMTLib.lengthSMTLibLimitSourceCommandBytes = commandBytes
+        , SMTLib.lengthSMTLibLimitSourceFingerprintBytes = 0
+        }
+      assertLeft
+        (SMTLib.LengthSpinePairSMTLibFingerprintByteLimitExceeded 0 1)
+        $ SMTLib.sealLengthSpinePairSMTLibQuery noFingerprint problem
+  ]
+
 problemReplayTests :: TestTree
 problemReplayTests = testGroup "exact candidate problem replay"
   [ testCase "find no counterexample for one real Exference identity" $ do
@@ -6850,6 +7191,20 @@ constantZeroSMTLibCheck = unlines
   , "(declare-const djex_length_input_0 Int)"
   , "(assert (<= 0 djex_length_input_0))"
   , "(assert (not (= djex_length_input_0 0)))"
+  , "(check-sat)"
+  ]
+
+spinePairRelationalSMTLibCheck :: String
+spinePairRelationalSMTLibCheck = unlines
+  [ "(set-option :produce-models true)"
+  , "(set-option :random-seed 1)"
+  , "(set-logic QF_LIA)"
+  , "(define-fun djex_nat_monus ((x Int) (y Int)) Int (ite (<= y x) (- x y) 0))"
+  , "(define-fun djex_nat_min ((x Int) (y Int)) Int (ite (<= x y) x y))"
+  , "(define-fun djex_nat_max ((x Int) (y Int)) Int (ite (<= x y) y x))"
+  , "(declare-const djex_length_input_0 Int)"
+  , "(assert (<= 0 djex_length_input_0))"
+  , "(assert (not (and (= djex_length_input_0 0) (= djex_length_input_0 (+ djex_length_input_0 1)))))"
   , "(check-sat)"
   ]
 

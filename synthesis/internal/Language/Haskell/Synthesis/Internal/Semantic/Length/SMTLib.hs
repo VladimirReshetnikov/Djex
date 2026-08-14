@@ -3,13 +3,15 @@
 {-# LANGUAGE EmptyDataDecls #-}
 {-# LANGUAGE RoleAnnotations #-}
 
--- | Private construction of canonical SMT-LIB queries for checked Length
--- problems.
+-- | Private construction of canonical SMT-LIB queries for checked scalar and
+-- binary-product Length problems.
 --
 -- The typed query plan is constructed transiently beside its rendering and
 -- bound structurally into the sealed fingerprint.  Raw solver statuses do not
 -- enter this module: a decoded input assignment can acquire evidence only by
--- passing the independent concrete replay boundary.
+-- passing the independent concrete replay boundary. Product queries share the
+-- input-only QF_LIA lowering and untrusted binding representation, but retain
+-- distinct schemas, fingerprints, errors, checked problems, and evidence.
 module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   ( LengthSMTLibQueryFingerprintSubject
   , lengthSMTLibQuerySchemaTag
@@ -42,6 +44,24 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   , probeLengthSMTLibCounterexampleAtOrigin
   , LengthSMTLibInputBoxValidationError (..)
   , validateLengthSMTLibQueryInputBox
+  , LengthSpinePairSMTLibQueryFingerprintSubject
+  , lengthSpinePairSMTLibQuerySchemaTag
+  , lengthSpinePairSMTLibQueryLogic
+  , LengthSpinePairSMTLibQueryError (..)
+  , LengthSpinePairSMTLibQuery
+  , sealLengthSpinePairSMTLibQuery
+  , lengthSpinePairSMTLibQueryInputSymbols
+  , lengthSpinePairSMTLibQueryCheckBytes
+  , lengthSpinePairSMTLibQueryInputValueRequestBytes
+  , lengthSpinePairSMTLibQueryFingerprint
+  , lengthSpinePairSMTLibQueryBehavioralProblem
+  , LengthSpinePairSMTLibModelError (..)
+  , validateLengthSpinePairSMTLibCounterexample
+  , LengthSpinePairSMTLibInputReplayError (..)
+  , replayLengthSpinePairSMTLibCounterexampleInputs
+  , probeLengthSpinePairSMTLibCounterexampleAtOrigin
+  , LengthSpinePairSMTLibInputBoxValidationError (..)
+  , validateLengthSpinePairSMTLibQueryInputBox
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -72,7 +92,8 @@ import Language.Haskell.Synthesis.Internal.SMTLib.QFLIA
   , renderQFLIACommands
   )
 import Language.Haskell.Synthesis.Semantic.Length
-  ( FiniteListSpineLengthV1
+  ( FiniteBinaryProductSpineLengthsV1
+  , FiniteListSpineLengthV1
   , LengthContractVariable (..)
   , LengthExpression (..)
   , LengthFormula (..)
@@ -86,14 +107,24 @@ import Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , LengthProblemAssignment (..)
   , ValidatedLengthCounterexample
   , ValidatedLengthInputBox
+  , LengthSpinePairEvaluationError
+  , LengthSpinePairInputBoxValidationError
+  , ValidatedLengthSpinePairCounterexample
+  , ValidatedLengthSpinePairInputBox
   , validateLengthProblemInputBox
   , validateLengthProblemCounterexample
+  , validateLengthSpinePairProblemInputBox
+  , validateLengthSpinePairProblemCounterexample
   )
 import Language.Haskell.Synthesis.Semantic.Length.Problem
   ( CheckedLengthProblem
+  , CheckedLengthSpinePairProblem
   , checkedLengthProblemBehavioralProblem
   , checkedLengthProblemCounterexampleCondition
   , checkedLengthProblemInputCount
+  , checkedLengthSpinePairProblemBehavioralProblem
+  , checkedLengthSpinePairProblemCounterexampleCondition
+  , checkedLengthSpinePairProblemInputCount
   )
 import Language.Haskell.Synthesis.Semantic.Problem
   ( BehavioralEvidence
@@ -112,10 +143,23 @@ import Language.Haskell.Synthesis.Semantic.Problem
 -- build, executable, process protocol, resource limits, and runtime options.
 data LengthSMTLibQueryFingerprintSubject
 
+-- | Nominally separate identity for translating one exact binary-product
+-- spine problem.  The rendered input-only QF_LIA program may coincide with a
+-- scalar query, but its domain, problem envelope, schema, and complete query
+-- fingerprint never do.
+data LengthSpinePairSMTLibQueryFingerprintSubject
+
 -- | Stable translator schema.  This is deliberately distinct from the
 -- solver-neutral Length encoding fingerprint.
 lengthSMTLibQuerySchemaTag :: [Word8]
 lengthSMTLibQuerySchemaTag = ascii "djex-length-z3-qf-lia-smtlib2/v2"
+
+-- | Stable translator schema for the finite binary-product spine domain.
+-- This is distinct from the scalar schema even though both use the same
+-- checked input-only lowering kernel.
+lengthSpinePairSMTLibQuerySchemaTag :: [Word8]
+lengthSpinePairSMTLibQuerySchemaTag =
+  ascii "djex-length-spine-pair-z3-qf-lia-smtlib2/v1"
 
 -- | The only logic emitted by this translator.  Positive-literal natural
 -- quotient and modulo are lowered to existential quotient/remainder
@@ -123,6 +167,12 @@ lengthSMTLibQuerySchemaTag = ascii "djex-length-z3-qf-lia-smtlib2/v2"
 -- never emits SMT-LIB @div@ or @mod@.
 lengthSMTLibQueryLogic :: [Word8]
 lengthSMTLibQueryLogic = qfliaLogicBytes
+
+-- | The product translator emits the same QF_LIA logic as the scalar
+-- translator.  This projection is named separately so callers never need a
+-- scalar query value to inspect product-query policy.
+lengthSpinePairSMTLibQueryLogic :: [Word8]
+lengthSpinePairSMTLibQueryLogic = qfliaLogicBytes
 
 -- | Raw independent bounds for one canonical query.  Natural-valued byte
 -- fields admit zero; only the signed bit limit requires validation.
@@ -219,6 +269,23 @@ data LengthSMTLibQueryError
 
 instance NFData LengthSMTLibQueryError
 
+-- | Fixed-precedence product-query failure.  Shared resource-policy enums are
+-- reused, but the error itself is nominally disjoint from the scalar query so
+-- no scalar construction failure can be mistaken for product authority.
+data LengthSpinePairSMTLibQueryError
+  = LengthSpinePairSMTLibUnexpectedResultVariable
+  | LengthSpinePairSMTLibInputVariableOutOfRange !Natural !Int
+  | LengthSpinePairSMTLibQuotientDivisorZero
+  | LengthSpinePairSMTLibModuloDivisorZero
+  | LengthSpinePairSMTLibNumeralBitLimitExceeded
+      !LengthSMTLibNumeralSite !Int !Int
+  | LengthSpinePairSMTLibCommandByteLimitExceeded
+      !LengthSMTLibCommandPart !Natural !Natural
+  | LengthSpinePairSMTLibFingerprintByteLimitExceeded !Natural !Natural
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSpinePairSMTLibQueryError
+
 -- | Which Euclidean witness component is the value of one normalized source
 -- expression.  The distinction also selects operation-specific private names
 -- and the conditional lowering-policy tag.
@@ -275,6 +342,21 @@ type role LengthSMTLibQuery nominal nominal
 
 instance NFData (LengthSMTLibQuery identity local) where
   rnf (LengthSMTLibQuery problem check fingerprint) =
+    rnf problem `seq` rnf check `seq` rnf fingerprint
+
+-- | Opaque association of one checked binary-product problem, its bounded
+-- canonical check commands, and the structurally complete product-query
+-- identity.  Phantom roles remain nominal just as they do for scalar queries.
+data LengthSpinePairSMTLibQuery identity local =
+  LengthSpinePairSMTLibQuery
+    !(CheckedLengthSpinePairProblem identity local)
+    ![Word8]
+    !(Fingerprint LengthSpinePairSMTLibQueryFingerprintSubject)
+
+type role LengthSpinePairSMTLibQuery nominal nominal
+
+instance NFData (LengthSpinePairSMTLibQuery identity local) where
+  rnf (LengthSpinePairSMTLibQuery problem check fingerprint) =
     rnf problem `seq` rnf check `seq` rnf fingerprint
 
 -- | Translate and seal one exact checked problem.  The combined bad-state
@@ -345,6 +427,85 @@ lengthSMTLibQueryBehavioralProblem
   -> BehavioralProblem FiniteListSpineLengthV1
 lengthSMTLibQueryBehavioralProblem (LengthSMTLibQuery problem _ _) =
   checkedLengthProblemBehavioralProblem problem
+
+-- | Translate and seal the solver-neutral bad state retained by one exact
+-- checked binary-product problem.  Its substituted formula already contains
+-- only compact input variables, so the canonical program requests inputs and
+-- never exposes either modeled result component as a solver binding.
+sealLengthSpinePairSMTLibQuery
+  :: LengthSMTLibLimits
+  -> CheckedLengthSpinePairProblem identity local
+  -> Either
+      LengthSpinePairSMTLibQueryError
+      (LengthSpinePairSMTLibQuery identity local)
+sealLengthSpinePairSMTLibQuery limits problem = do
+  let inputCount = checkedLengthSpinePairProblemInputCount problem
+      symbols = inputSymbolsForCount inputCount
+      valueRequest = inputValueRequestForSymbols symbols
+  (condition, translation) <- mapSpinePairQueryFailure
+    $ translateFormula limits inputCount emptySMTTranslationState
+    $ checkedLengthSpinePairProblemCounterexampleCondition problem
+  let witnesses = orderedEuclideanWitnesses translation
+      witnessSymbols = concatMap euclideanWitnessSymbols witnesses
+      checkCommands = fixedPreamble
+        ++ map QFLIADeclareInteger symbols
+        ++ map QFLIADeclareInteger witnessSymbols
+        ++ map (QFLIAAssert . nonnegative . QFLIAIntegerSymbol) symbols
+        ++ concatMap euclideanWitnessCommands witnesses
+        ++ [QFLIAAssert condition, QFLIACheckSatisfiable]
+      plan = LengthSMTLibPlan
+        symbols condition checkCommands valueRequest witnesses
+  checkBytes <- mapSpinePairQueryFailure
+    $ retainCommand limits LengthSMTLibCheckCommand
+    $ renderQFLIACommands checkCommands
+  valueRequestBytes <- case valueRequest of
+    Nothing -> Right Nothing
+    Just command -> Just <$> mapSpinePairQueryFailure
+      (retainCommand limits LengthSMTLibInputValueRequest
+        $ renderQFLIACommand command)
+  fingerprint <- buildSpinePairQueryFingerprint limits problem plan
+    checkBytes valueRequestBytes
+  pure $ LengthSpinePairSMTLibQuery problem checkBytes fingerprint
+
+lengthSpinePairSMTLibQueryInputSymbols
+  :: LengthSpinePairSMTLibQuery identity local
+  -> [[Word8]]
+lengthSpinePairSMTLibQueryInputSymbols =
+  fst . lengthSpinePairSMTLibQueryInputArtifacts
+
+lengthSpinePairSMTLibQueryCheckBytes
+  :: LengthSpinePairSMTLibQuery identity local
+  -> [Word8]
+lengthSpinePairSMTLibQueryCheckBytes
+    (LengthSpinePairSMTLibQuery _ bytes _) = bytes
+
+lengthSpinePairSMTLibQueryInputValueRequestBytes
+  :: LengthSpinePairSMTLibQuery identity local
+  -> Maybe [Word8]
+lengthSpinePairSMTLibQueryInputValueRequestBytes =
+  snd . lengthSpinePairSMTLibQueryInputArtifacts
+
+lengthSpinePairSMTLibQueryInputArtifacts
+  :: LengthSpinePairSMTLibQuery identity local
+  -> ([[Word8]], Maybe [Word8])
+lengthSpinePairSMTLibQueryInputArtifacts
+    (LengthSpinePairSMTLibQuery problem _ _) =
+  let symbols = inputSymbolsForCount
+        $ checkedLengthSpinePairProblemInputCount problem
+  in (symbols, fmap renderQFLIACommand $ inputValueRequestForSymbols symbols)
+
+lengthSpinePairSMTLibQueryFingerprint
+  :: LengthSpinePairSMTLibQuery identity local
+  -> Fingerprint LengthSpinePairSMTLibQueryFingerprintSubject
+lengthSpinePairSMTLibQueryFingerprint
+    (LengthSpinePairSMTLibQuery _ _ fingerprint) = fingerprint
+
+lengthSpinePairSMTLibQueryBehavioralProblem
+  :: LengthSpinePairSMTLibQuery identity local
+  -> BehavioralProblem FiniteBinaryProductSpineLengthsV1
+lengthSpinePairSMTLibQueryBehavioralProblem
+    (LengthSpinePairSMTLibQuery problem _ _) =
+  checkedLengthSpinePairProblemBehavioralProblem problem
 
 -- | One parser-decoded integer associated with its exact returned symbol.
 -- Construction is intentionally public: this value is untrusted input and
@@ -506,10 +667,159 @@ validateLengthSMTLibQueryInputBox evaluationLimits inputBoxLimits query
     Right
     . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
 
+-- | Structural model rejection or independent product replay failure.
+-- Parser-decoded bindings remain the shared, authority-free input type, while
+-- every rejection and released receipt is product-domain specific.
+data LengthSpinePairSMTLibModelError
+  = LengthSpinePairSMTLibBindingArityMismatch !Int !Int
+  | LengthSpinePairSMTLibBindingSymbolByteLimitExceeded
+      !Int !Natural !Natural
+  | LengthSpinePairSMTLibUnknownInputSymbol !Int [Word8]
+  | LengthSpinePairSMTLibDuplicateInputSymbol !Int [Word8]
+  | LengthSpinePairSMTLibNegativeInputValue !Int [Word8] !Integer
+  | LengthSpinePairSMTLibMissingInputSymbol [Word8]
+  | LengthSpinePairSMTLibCounterexampleReplayRejected
+      !LengthSpinePairEvaluationError
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSpinePairSMTLibModelError
+
+-- | Decode exactly the product query's tracked input symbols, restore source
+-- order, and independently recompute both modeled result components before a
+-- counterexample can become product-domain behavioral evidence.
+validateLengthSpinePairSMTLibCounterexample
+  :: LengthEvaluationLimits
+  -> LengthSpinePairSMTLibQuery identity local
+  -> [LengthSMTLibIntegerBinding]
+  -> Either LengthSpinePairSMTLibModelError
+      (Maybe
+        (BehavioralEvidence
+          FiniteBinaryProductSpineLengthsV1
+          ValidatedLengthSpinePairCounterexample))
+validateLengthSpinePairSMTLibCounterexample evaluationLimits query
+    rawBindings = do
+  let symbols = lengthSpinePairSMTLibQueryInputSymbols query
+      expected = length symbols
+      observed = observedListLength expected rawBindings
+  if observed == expected
+    then pure ()
+    else Left $ LengthSpinePairSMTLibBindingArityMismatch expected observed
+  let maximumSymbolBytes = fromIntegral $ maximum
+        $ 0 : map length symbols
+      expectedSymbols = Map.fromList $ zip symbols [0 :: Int ..]
+  decoded <- foldM
+    (decodeSpinePairBinding maximumSymbolBytes expectedSymbols)
+    Map.empty
+    $ zip [0 :: Int ..] rawBindings
+  ordered <- mapM (lookupSpinePairDecoded decoded) symbols
+  either
+    (Left . LengthSpinePairSMTLibCounterexampleReplayRejected)
+    Right
+    $ validateLengthSpinePairProblemCounterexample evaluationLimits
+        (spinePairQueryProblem query)
+        $ LengthProblemAssignment ordered
+
+-- | Why query-owned direct input replay was rejected for the product domain.
+data LengthSpinePairSMTLibInputReplayError
+  = LengthSpinePairSMTLibInputReplayEvaluationRejected
+      !LengthSpinePairEvaluationError
+  | LengthSpinePairSMTLibInputReplayAssociationRejected !ReplayMismatch
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSpinePairSMTLibInputReplayError
+
+-- | Replay source-ordered natural inputs through the exact checked product
+-- problem retained by this query, then associate freshly constructed evidence
+-- back to that same nominal product problem.
+replayLengthSpinePairSMTLibCounterexampleInputs
+  :: LengthEvaluationLimits
+  -> LengthSpinePairSMTLibQuery identity local
+  -> [Natural]
+  -> Either LengthSpinePairSMTLibInputReplayError
+      (Maybe ValidatedLengthSpinePairCounterexample)
+replayLengthSpinePairSMTLibCounterexampleInputs evaluationLimits query
+    inputs = do
+  evidence <- either
+    (Left . LengthSpinePairSMTLibInputReplayEvaluationRejected)
+    Right
+    $ validateLengthSpinePairProblemCounterexample evaluationLimits
+        (spinePairQueryProblem query)
+        $ LengthProblemAssignment inputs
+  traverse replay evidence
+ where
+  replay = either
+    (Left . LengthSpinePairSMTLibInputReplayAssociationRejected)
+    Right
+    . replayBehavioralEvidence
+        (lengthSpinePairSMTLibQueryBehavioralProblem query)
+
+-- | Query-owned all-zero probe for the product problem's compact modeled
+-- inputs.  A miss is ordinary @Nothing@ and supplies no positive evidence.
+probeLengthSpinePairSMTLibCounterexampleAtOrigin
+  :: LengthEvaluationLimits
+  -> LengthSpinePairSMTLibQuery identity local
+  -> Either LengthSpinePairSMTLibInputReplayError
+      (Maybe ValidatedLengthSpinePairCounterexample)
+probeLengthSpinePairSMTLibCounterexampleAtOrigin evaluationLimits query =
+  replayLengthSpinePairSMTLibCounterexampleInputs evaluationLimits query
+    $ replicate
+        (checkedLengthSpinePairProblemInputCount
+          $ spinePairQueryProblem query)
+        0
+
+-- | Why exhaustive finite-box validation through a product query failed.
+data LengthSpinePairSMTLibInputBoxValidationError
+  = LengthSpinePairSMTLibInputBoxValidationRejected
+      !LengthSpinePairInputBoxValidationError
+  | LengthSpinePairSMTLibInputBoxValidationAssociationRejected
+      !ReplayMismatch
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSpinePairSMTLibInputBoxValidationError
+
+-- | Exhaustively validate an explicitly finite input box through the exact
+-- product problem retained by this query.  The query contributes association
+-- authority only; no raw solver status participates.
+validateLengthSpinePairSMTLibQueryInputBox
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> LengthSpinePairSMTLibQuery identity local
+  -> [Natural]
+  -> Either LengthSpinePairSMTLibInputBoxValidationError
+      (LengthInputBoxValidation
+        ValidatedLengthSpinePairCounterexample
+        ValidatedLengthSpinePairInputBox)
+validateLengthSpinePairSMTLibQueryInputBox evaluationLimits inputBoxLimits
+    query maximums = do
+  validation <- either
+    (Left . LengthSpinePairSMTLibInputBoxValidationRejected)
+    Right
+    $ validateLengthSpinePairProblemInputBox evaluationLimits inputBoxLimits
+        (spinePairQueryProblem query) maximums
+  case validation of
+    LengthInputBoxCounterexample evidence ->
+      LengthInputBoxCounterexample <$> replay evidence
+    LengthInputBoxValidated evidence ->
+      LengthInputBoxValidated <$> replay evidence
+ where
+  replay
+    :: BehavioralEvidence FiniteBinaryProductSpineLengthsV1 receipt
+    -> Either LengthSpinePairSMTLibInputBoxValidationError receipt
+  replay = either
+    (Left . LengthSpinePairSMTLibInputBoxValidationAssociationRejected)
+    Right
+    . replayBehavioralEvidence
+        (lengthSpinePairSMTLibQueryBehavioralProblem query)
+
 queryProblem
   :: LengthSMTLibQuery identity local
   -> CheckedLengthProblem identity local
 queryProblem (LengthSMTLibQuery problem _ _) = problem
+
+spinePairQueryProblem
+  :: LengthSpinePairSMTLibQuery identity local
+  -> CheckedLengthSpinePairProblem identity local
+spinePairQueryProblem (LengthSpinePairSMTLibQuery problem _ _) = problem
 
 decodeBinding
   :: Natural
@@ -548,6 +858,52 @@ retainModelSymbol bindingIndex maximumBytes = go maximumBytes
   go _ [] = Right []
   go 0 (_ : _) = Left $ LengthSMTLibBindingSymbolByteLimitExceeded
     bindingIndex maximumBytes (maximumBytes + 1)
+  go remaining (byte : bytes) =
+    (byte :) <$> go (remaining - 1) bytes
+
+decodeSpinePairBinding
+  :: Natural
+  -> Map [Word8] Int
+  -> Map [Word8] Natural
+  -> (Int, LengthSMTLibIntegerBinding)
+  -> Either
+      LengthSpinePairSMTLibModelError
+      (Map [Word8] Natural)
+decodeSpinePairBinding maximumBytes expected decoded
+    (bindingIndex, LengthSMTLibIntegerBinding rawSymbol rawValue) = do
+  symbol <- retainSpinePairModelSymbol bindingIndex maximumBytes rawSymbol
+  case Map.lookup symbol expected of
+    Nothing -> Left $ LengthSpinePairSMTLibUnknownInputSymbol
+      bindingIndex symbol
+    Just _ -> pure ()
+  if Map.member symbol decoded
+    then Left $ LengthSpinePairSMTLibDuplicateInputSymbol
+      bindingIndex symbol
+    else pure ()
+  if rawValue < 0
+    then Left $ LengthSpinePairSMTLibNegativeInputValue
+      bindingIndex symbol rawValue
+    else pure $ Map.insert symbol (fromInteger rawValue) decoded
+
+lookupSpinePairDecoded
+  :: Map [Word8] Natural
+  -> [Word8]
+  -> Either LengthSpinePairSMTLibModelError Natural
+lookupSpinePairDecoded decoded symbol = case Map.lookup symbol decoded of
+  Nothing -> Left $ LengthSpinePairSMTLibMissingInputSymbol symbol
+  Just value -> Right value
+
+retainSpinePairModelSymbol
+  :: Int
+  -> Natural
+  -> [Word8]
+  -> Either LengthSpinePairSMTLibModelError [Word8]
+retainSpinePairModelSymbol bindingIndex maximumBytes = go maximumBytes
+ where
+  go _ [] = Right []
+  go 0 (_ : _) = Left
+    $ LengthSpinePairSMTLibBindingSymbolByteLimitExceeded
+        bindingIndex maximumBytes (maximumBytes + 1)
   go remaining (byte : bytes) =
     (byte :) <$> go (remaining - 1) bytes
 
@@ -794,6 +1150,30 @@ retainCommand limits part = go maximumBytes
   go remaining (byte : bytes) =
     (byte :) <$> go (remaining - 1) bytes
 
+mapSpinePairQueryFailure
+  :: Either LengthSMTLibQueryError value
+  -> Either LengthSpinePairSMTLibQueryError value
+mapSpinePairQueryFailure = either (Left . go) Right
+ where
+  go failure = case failure of
+    LengthSMTLibUnexpectedResultVariable ->
+      LengthSpinePairSMTLibUnexpectedResultVariable
+    LengthSMTLibInputVariableOutOfRange position inputCount ->
+      LengthSpinePairSMTLibInputVariableOutOfRange position inputCount
+    LengthSMTLibQuotientDivisorZero ->
+      LengthSpinePairSMTLibQuotientDivisorZero
+    LengthSMTLibModuloDivisorZero ->
+      LengthSpinePairSMTLibModuloDivisorZero
+    LengthSMTLibNumeralBitLimitExceeded site maximumLimit observed ->
+      LengthSpinePairSMTLibNumeralBitLimitExceeded
+        site maximumLimit observed
+    LengthSMTLibCommandByteLimitExceeded part maximumLimit observed ->
+      LengthSpinePairSMTLibCommandByteLimitExceeded
+        part maximumLimit observed
+    LengthSMTLibFingerprintByteLimitExceeded maximumLimit observed ->
+      LengthSpinePairSMTLibFingerprintByteLimitExceeded
+        maximumLimit observed
+
 buildQueryFingerprint
   :: LengthSMTLibLimits
   -> CheckedLengthProblem identity local
@@ -820,6 +1200,64 @@ buildQueryFingerprint limits problem plan checkBytes valueRequestBytes =
     , fingerprintBuilderFields =
         [ tagged "schema" [FingerprintBytes lengthSMTLibQuerySchemaTag]
         , tagged "logic" [FingerprintBytes lengthSMTLibQueryLogic]
+        , tagged "fixed-options"
+            [ FingerprintBytes $ ascii ":produce-models=true"
+            , FingerprintBytes $ ascii ":random-seed=1"
+            ]
+        , tagged "problem-domain"
+            [FingerprintBytes $ behavioralProblemDomain behavioral]
+        , tagged "problem-inventory"
+            [ FingerprintBytes $ fingerprintCanonicalBytes
+                $ behavioralProblemInventoryFingerprint behavioral
+            ]
+        , tagged "problem-encoding"
+            [ FingerprintBytes $ fingerprintCanonicalBytes
+                $ behavioralProblemEncodingFingerprint behavioral
+            ]
+        , tagged "problem-candidate"
+            [ FingerprintBytes $ fingerprintCanonicalBytes
+                $ behavioralProblemCandidateFingerprint behavioral
+            ]
+        , tagged "complete-problem"
+            [ FingerprintBytes $ fingerprintCanonicalBytes
+                $ behavioralProblemFingerprint behavioral
+            ]
+        , tagged "typed-plan" [planField plan]
+        , tagged "check-command" [FingerprintBytes checkBytes]
+        , tagged "input-value-request" [case valueRequestBytes of
+            Nothing -> tagged "absent" []
+            Just bytes -> tagged "present" [FingerprintBytes bytes]]
+        ]
+    }
+
+buildSpinePairQueryFingerprint
+  :: LengthSMTLibLimits
+  -> CheckedLengthSpinePairProblem identity local
+  -> LengthSMTLibPlan
+  -> [Word8]
+  -> Maybe [Word8]
+  -> Either LengthSpinePairSMTLibQueryError
+      (Fingerprint LengthSpinePairSMTLibQueryFingerprintSubject)
+buildSpinePairQueryFingerprint limits problem plan checkBytes
+    valueRequestBytes =
+  case buildFingerprintWithin
+      (lengthSMTLibFingerprintByteLimit limits) builder of
+    Left FingerprintLimitExceeded
+        { fingerprintMaximumBytes = maximumBytes
+        , fingerprintObservedBytesAtLeast = observedBytes
+        } -> Left $ LengthSpinePairSMTLibFingerprintByteLimitExceeded
+          maximumBytes observedBytes
+    Right fingerprint -> Right fingerprint
+ where
+  behavioral = checkedLengthSpinePairProblemBehavioralProblem problem
+  builder = FingerprintBuilder
+    { fingerprintBuilderVersion = 1
+    , fingerprintBuilderRole = ascii
+        "finite-binary-product-spine-lengths/z3-qf-lia-query"
+    , fingerprintBuilderFields =
+        [ tagged "schema"
+            [FingerprintBytes lengthSpinePairSMTLibQuerySchemaTag]
+        , tagged "logic" [FingerprintBytes lengthSpinePairSMTLibQueryLogic]
         , tagged "fixed-options"
             [ FingerprintBytes $ ascii ":produce-models=true"
             , FingerprintBytes $ ascii ":random-seed=1"

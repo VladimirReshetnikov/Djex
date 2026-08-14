@@ -159,6 +159,7 @@ $(do
           , "CheckedLengthSpinePairContract"
           , "CheckedLengthSpinePairCandidate"
           , "CheckedLengthSpinePairProblem"
+          , "LengthSpinePairSMTLibQuery"
           , "ValidatedLengthSpinePairCounterexampleReceipt"
           , "ValidatedLengthSpinePairInputBoxReceipt"
           , "CheckedLengthInterpretationPolicy"
@@ -411,6 +412,9 @@ forbiddenConstructionAttempts =
       @(LengthSMTLibQuery LengthVariableProbe LengthLocalProbe)
       "LengthSMTLibQuery"
   , noGeneric
+      @(LengthSpinePairSMTLibQuery LengthVariableProbe LengthLocalProbe)
+      "LengthSpinePairSMTLibQuery"
+  , noGeneric
       @(AssociatedLengthSMTLibSolverObservation
           LengthVariableProbe LengthLocalProbe
           ArtifactKindProbe ArtifactKindProbe ArtifactKindProbe)
@@ -580,6 +584,12 @@ forbiddenConstructionAttempts =
     )
   , ( "LengthSMTLibQuery local unexpectedly permits Coercible"
     , forbiddenLengthSMTLibQueryLocalCoercion `seq` ()
+    )
+  , ( "LengthSpinePairSMTLibQuery identity unexpectedly permits Coercible"
+    , forbiddenLengthSpinePairSMTLibQueryIdentityCoercion `seq` ()
+    )
+  , ( "LengthSpinePairSMTLibQuery local unexpectedly permits Coercible"
+    , forbiddenLengthSpinePairSMTLibQueryLocalCoercion `seq` ()
     )
   , ( "AssociatedLengthSMTLibSolverObservation identity unexpectedly permits Coercible"
     , forbiddenAssociatedLengthSMTLibIdentityCoercion `seq` ()
@@ -1285,6 +1295,16 @@ forbiddenLengthSMTLibQueryLocalCoercion
   :: LengthSMTLibQuery LengthVariableProbe LengthLocalProbe
   -> LengthSMTLibQuery LengthVariableProbe OtherLengthLocalProbe
 forbiddenLengthSMTLibQueryLocalCoercion = coerce
+
+forbiddenLengthSpinePairSMTLibQueryIdentityCoercion
+  :: LengthSpinePairSMTLibQuery LengthVariableProbe LengthLocalProbe
+  -> LengthSpinePairSMTLibQuery OtherLengthVariableProbe LengthLocalProbe
+forbiddenLengthSpinePairSMTLibQueryIdentityCoercion = coerce
+
+forbiddenLengthSpinePairSMTLibQueryLocalCoercion
+  :: LengthSpinePairSMTLibQuery LengthVariableProbe LengthLocalProbe
+  -> LengthSpinePairSMTLibQuery LengthVariableProbe OtherLengthLocalProbe
+forbiddenLengthSpinePairSMTLibQueryLocalCoercion = coerce
 
 forbiddenAssociatedLengthSMTLibIdentityCoercion
   :: AssociatedLengthSMTLibSolverObservation

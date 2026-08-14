@@ -725,7 +725,7 @@ identity or canonical bytes. Its v1 tag belongs to the newly opaque receipt,
 not to an existing semantic or solver envelope. See the
 [bounded Length input-box validation report](docs/reports/2026-08-14-bounded-length-input-box-validation.md).
 
-### Finite binary product spine-length foundation
+### Finite binary product spine lengths and offline SMT replay
 
 `FiniteBinaryProductSpineLengthsV1` is an additive behavioral domain for one
 exact boxed binary product whose two source-ordered result fields expose the
@@ -765,14 +765,91 @@ compact source-ordered natural inputs. `validateLengthSpinePairProblemInputBox`
 enumerates those same inputs and can return either the first exact product
 counterexample or `ValidatedLengthSpinePairInputBox` positive evidence after
 complete traversal. Provider-relative receipts retain the same explicit
-assumed-law basis. This first foundation has no SMT-LIB translation, response
-decoder, query, or live-Z3 path, so no solver observation can create or
-strengthen its evidence.
+assumed-law basis.
+
+`sealLengthSpinePairSMTLibQuery` now adds the pure offline Z3-facing stage. It
+seals an opaque `LengthSpinePairSMTLibQuery` from the exact checked product
+problem, emits bounded canonical `QF_LIA` check bytes, and requests only the
+compact input symbols. Both modeled result expressions were already
+substituted into the bad-state formula, so neither result component crosses the
+SMT model boundary. The product schema
+`djex-length-spine-pair-z3-qf-lia-smtlib2/v1`, fingerprint subject, query role,
+errors, behavioral problem, and evidence remain nominally distinct from the
+scalar query even when the rendered bytes are identical.
+
+For example, this source contract states that the two result lengths conserve
+the first compact input length. Given a checked session, exact product target,
+typed candidate, and parser-decoded input bindings, the same flow seals the
+contract, candidate problem, and offline query before replay:
+
+```haskell
+let input0 = LengthVariable (LengthSpinePairInput 0)
+    firstResult =
+      LengthVariable (LengthSpinePairResult LengthSpinePairFirst)
+    secondResult =
+      LengthVariable (LengthSpinePairResult LengthSpinePairSecond)
+    conservation = LengthSpinePairContractSource
+      { lengthSpinePairContractPrecondition = LengthTruth True
+      , lengthSpinePairContractPostcondition =
+          LengthEqual (LengthSum [firstResult, secondResult]) input0
+      }
+
+pairContract <- either (fail . show) pure $
+  sealLengthSpinePairContractInSession
+    checkedLengthSession exactPairTarget conservation
+
+checkedPairProblem <- either (fail . show) pure $
+  sealLengthSpinePairTypedCandidateProblem
+    defaultLengthProblemLimits
+    checkedLengthSession
+    pairContract
+    typedCandidate
+
+pairQuery <- either (fail . show) pure $
+  sealLengthSpinePairSMTLibQuery
+    defaultLengthSMTLibLimits checkedPairProblem
+
+let checkProgram = lengthSpinePairSMTLibQueryCheckBytes pairQuery
+    inputRequest =
+      lengthSpinePairSMTLibQueryInputValueRequestBytes pairQuery
+
+decodedCounterexample <- either (fail . show) pure $
+  validateLengthSpinePairSMTLibCounterexample
+    defaultLengthEvaluationLimits pairQuery decodedInputBindings
+
+originCounterexample <- either (fail . show) pure $
+  probeLengthSpinePairSMTLibCounterexampleAtOrigin
+    defaultLengthEvaluationLimits pairQuery
+
+boundedResult <- either (fail . show) pure $
+  validateLengthSpinePairSMTLibQueryInputBox
+    defaultLengthEvaluationLimits
+    defaultLengthInputBoxLimits
+    pairQuery
+    [8, 8] -- inclusive maximum for each compact input
+```
+
+`validateLengthSpinePairSMTLibCounterexample` accepts only the exact generated
+input-symbol set, rejects malformed or negative bindings, restores source
+order, and independently recomputes both candidate results before releasing
+product-domain evidence. Callers that already hold source-ordered naturals use
+`replayLengthSpinePairSMTLibCounterexampleInputs`; the origin and input-box
+entrances are query-owned specializations of the same exact association
+boundary. A box success is positive only for that finite box and recorded
+provider basis. A replay miss is only `Nothing`.
+
+This checkpoint deliberately has no product response, execution, protocol,
+process, worker, or live-Z3 facade. The check and value-request bytes are data
+for an external/offline driver; `sat`, `unsat`, and `unknown` are never
+evidence. Only independent decoded-input replay or complete domain-owned box
+traversal can create a receipt.
 
 All historical `FiniteListSpineLengthV1` constructors, signatures, nominal
 types, tags, fingerprint fields, canonical bytes, replay behavior, and Z3 APIs
-remain unchanged. See the
-[finite binary product spine-length foundation report](docs/reports/2026-08-14-finite-binary-product-spine-length-foundation.md).
+remain unchanged. See the stage-one
+[finite binary product spine-length foundation report](docs/reports/2026-08-14-finite-binary-product-spine-length-foundation.md)
+and the subsequent
+[offline product SMT and replay report](docs/reports/2026-08-14-finite-binary-product-spine-smt-replay.md).
 
 SMT-LIB's QF_LIA logic excludes the built-in `div` and `mod` operators. Djex
 therefore lowers every remaining normalized quotient or modulo node to one

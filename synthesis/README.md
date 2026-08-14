@@ -463,11 +463,38 @@ lengths for a violation, using only caller-supplied compact natural inputs.
 `validateLengthSpinePairProblemInputBox` enumerates the same input space and
 releases only an exact `ValidatedLengthSpinePairCounterexample` or positive
 `ValidatedLengthSpinePairInputBox` evidence. It does not consume a solver
-observation. This stage intentionally has no product SMT-LIB query, response,
-execution, protocol, worker, or live-Z3 layer. Every historical scalar public
-signature and canonical identity byte remains exact.
-See the
-[finite binary product spine-length foundation report](../docs/reports/2026-08-14-finite-binary-product-spine-length-foundation.md).
+observation.
+
+`Language.Haskell.Synthesis.Semantic.Length.SMTLib` now provides the pure
+offline product-query sibling. `sealLengthSpinePairSMTLibQuery` accepts only an
+opaque `CheckedLengthSpinePairProblem` and produces an opaque
+`LengthSpinePairSMTLibQuery` under the distinct
+`djex-length-spine-pair-z3-qf-lia-smtlib2/v1` schema. Its canonical `QF_LIA`
+check program and optional `get-value` request mention compact input symbols
+only: candidate interpretation has already substituted both ordered result
+expressions into the scalar-variable bad-state formula. The product query has
+its own fingerprint subject, role, schema, error families, problem domain, and
+evidence association even when its rendered bytes coincide with a scalar
+query.
+
+`validateLengthSpinePairSMTLibCounterexample` treats the shared
+`LengthSMTLibIntegerBinding` carrier as untrusted, verifies the exact input
+symbol set, restores source order, rejects negative values, and independently
+recomputes both candidate results. Direct natural-input replay, the all-zero
+probe, and exact finite-box association are exposed by
+`replayLengthSpinePairSMTLibCounterexampleInputs`,
+`probeLengthSpinePairSMTLibCounterexampleAtOrigin`, and
+`validateLengthSpinePairSMTLibQueryInputBox`. Every entrance evaluates afresh;
+a miss is not positive evidence, and box success remains finite/model-relative
+under its explicit provider basis.
+
+This checkpoint adds no product response, execution, protocol, process,
+worker, or live-Z3 layer. It never interprets a raw `sat`, `unsat`, or
+`unknown` status as evidence. Every historical scalar public signature,
+canonical query byte, and identity remains exact. See the stage-one
+[finite binary product spine-length foundation report](../docs/reports/2026-08-14-finite-binary-product-spine-length-foundation.md)
+and the
+[offline product SMT and replay report](../docs/reports/2026-08-14-finite-binary-product-spine-smt-replay.md).
 
 Positive-literal natural quotient and modulo remain inside QF_LIA by using one
 shared deterministic private Euclidean witness shape rather than the forbidden

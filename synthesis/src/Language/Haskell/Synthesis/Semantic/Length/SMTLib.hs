@@ -1,13 +1,15 @@
 -- | Canonical QF_LIA queries and independently replayed input assignments for
--- the checked finite-list-spine Length domain.
+-- the checked scalar and binary-product finite-list-spine Length domains.
 --
--- A query can be built only from one opaque 'CheckedLengthProblem'.  It
--- structurally fingerprints a typed, versioned translation before retaining
--- only the checked problem, bounded canonical check bytes, and complete
--- fingerprint needed by execution and replay. Exact input symbols and the
--- optional canonical @get-value@ bytes are rederived from the problem's sealed
--- arity; both were already bounded and structurally fingerprinted during the
--- seal. It does not launch Z3 or assign authority to raw @sat@, @unsat@, or
+-- A scalar query can be built only from one opaque 'CheckedLengthProblem'; its
+-- binary-product sibling requires one opaque 'CheckedLengthSpinePairProblem'.
+-- Each structurally fingerprints a typed, versioned translation before
+-- retaining only its checked problem, bounded canonical check bytes, and
+-- complete fingerprint needed by execution and replay. Exact input symbols
+-- and the optional canonical @get-value@ bytes are rederived from the
+-- problem's sealed arity; both were already bounded and structurally
+-- fingerprinted during the seal. It does not launch Z3 or assign authority to
+-- raw @sat@, @unsat@, or
 -- @unknown@ reports.
 -- Solver build and protocol identity belong to the separate live execution
 -- envelope layered over the query fingerprint.
@@ -20,7 +22,9 @@
 -- 'replayLengthSMTLibCounterexampleInputs'; the sealed query owns their checked
 -- problem and symbol association. Every call evaluates afresh and returns a
 -- fresh receipt after exact same-query/problem association or 'Nothing', never
--- a cached verdict. 'probeLengthSMTLibCounterexampleAtOrigin' is the canonical
+-- a cached verdict. The @LengthSpinePairSMTLib@ entrances provide the same
+-- boundaries while producing only nominal product-domain evidence.
+-- 'probeLengthSMTLibCounterexampleAtOrigin' is the canonical
 -- query-owned specialization for the all-zero vector: the caller supplies no
 -- arity, symbols, or assignment. 'validateLengthSMTLibQueryInputBox' similarly
 -- uses the query only as exact association authority while the
@@ -63,6 +67,24 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib
   , probeLengthSMTLibCounterexampleAtOrigin
   , LengthSMTLibInputBoxValidationError (..)
   , validateLengthSMTLibQueryInputBox
+  , LengthSpinePairSMTLibQueryFingerprintSubject
+  , lengthSpinePairSMTLibQuerySchemaTag
+  , lengthSpinePairSMTLibQueryLogic
+  , LengthSpinePairSMTLibQueryError (..)
+  , LengthSpinePairSMTLibQuery
+  , sealLengthSpinePairSMTLibQuery
+  , lengthSpinePairSMTLibQueryInputSymbols
+  , lengthSpinePairSMTLibQueryCheckBytes
+  , lengthSpinePairSMTLibQueryInputValueRequestBytes
+  , lengthSpinePairSMTLibQueryFingerprint
+  , lengthSpinePairSMTLibQueryBehavioralProblem
+  , LengthSpinePairSMTLibModelError (..)
+  , validateLengthSpinePairSMTLibCounterexample
+  , LengthSpinePairSMTLibInputReplayError (..)
+  , replayLengthSpinePairSMTLibCounterexampleInputs
+  , probeLengthSpinePairSMTLibCounterexampleAtOrigin
+  , LengthSpinePairSMTLibInputBoxValidationError (..)
+  , validateLengthSpinePairSMTLibQueryInputBox
   ) where
 
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib

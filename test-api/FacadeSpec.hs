@@ -1270,6 +1270,70 @@ facadeTests = testGroup "public Djex facade"
           boxBasisProjection
             :: ValidatedLengthSpinePairInputBox -> LengthCounterexampleBasis
           boxBasisProjection = validatedLengthSpinePairInputBoxBasis
+          querySealer
+            :: LengthSMTLibLimits
+            -> CheckedLengthSpinePairProblem Int ExferenceLocal
+            -> Either LengthSpinePairSMTLibQueryError
+                (LengthSpinePairSMTLibQuery Int ExferenceLocal)
+          querySealer = sealLengthSpinePairSMTLibQuery
+          queryInputSymbolsProjection
+            :: LengthSpinePairSMTLibQuery Int ExferenceLocal
+            -> [[Word8]]
+          queryInputSymbolsProjection =
+            lengthSpinePairSMTLibQueryInputSymbols
+          queryCheckProjection
+            :: LengthSpinePairSMTLibQuery Int ExferenceLocal
+            -> [Word8]
+          queryCheckProjection = lengthSpinePairSMTLibQueryCheckBytes
+          queryInputValueRequestProjection
+            :: LengthSpinePairSMTLibQuery Int ExferenceLocal
+            -> Maybe [Word8]
+          queryInputValueRequestProjection =
+            lengthSpinePairSMTLibQueryInputValueRequestBytes
+          queryFingerprintProjection
+            :: LengthSpinePairSMTLibQuery Int ExferenceLocal
+            -> Fingerprint LengthSpinePairSMTLibQueryFingerprintSubject
+          queryFingerprintProjection = lengthSpinePairSMTLibQueryFingerprint
+          queryProblemProjection
+            :: LengthSpinePairSMTLibQuery Int ExferenceLocal
+            -> BehavioralProblem FiniteBinaryProductSpineLengthsV1
+          queryProblemProjection =
+            lengthSpinePairSMTLibQueryBehavioralProblem
+          queryModelValidator
+            :: LengthEvaluationLimits
+            -> LengthSpinePairSMTLibQuery Int ExferenceLocal
+            -> [LengthSMTLibIntegerBinding]
+            -> Either LengthSpinePairSMTLibModelError
+                (Maybe
+                  (BehavioralEvidence
+                    FiniteBinaryProductSpineLengthsV1
+                    ValidatedLengthSpinePairCounterexample))
+          queryModelValidator = validateLengthSpinePairSMTLibCounterexample
+          queryInputReplayer
+            :: LengthEvaluationLimits
+            -> LengthSpinePairSMTLibQuery Int ExferenceLocal
+            -> [Natural]
+            -> Either LengthSpinePairSMTLibInputReplayError
+                (Maybe ValidatedLengthSpinePairCounterexample)
+          queryInputReplayer =
+            replayLengthSpinePairSMTLibCounterexampleInputs
+          queryOriginProber
+            :: LengthEvaluationLimits
+            -> LengthSpinePairSMTLibQuery Int ExferenceLocal
+            -> Either LengthSpinePairSMTLibInputReplayError
+                (Maybe ValidatedLengthSpinePairCounterexample)
+          queryOriginProber =
+            probeLengthSpinePairSMTLibCounterexampleAtOrigin
+          queryBoxValidator
+            :: LengthEvaluationLimits
+            -> LengthInputBoxLimits
+            -> LengthSpinePairSMTLibQuery Int ExferenceLocal
+            -> [Natural]
+            -> Either LengthSpinePairSMTLibInputBoxValidationError
+                (LengthInputBoxValidation
+                  ValidatedLengthSpinePairCounterexample
+                  ValidatedLengthSpinePairInputBox)
+          queryBoxValidator = validateLengthSpinePairSMTLibQueryInputBox
       contractInSession `seq` sealer `seq` roleAwareSealer `seq`
         exactCaseSealer `seq` inSessionSealer `seq`
         candidateResultProjection `seq` candidateProviderProjection `seq`
@@ -1282,11 +1346,21 @@ facadeTests = testGroup "public Djex facade"
         counterexampleInputsProjection `seq` counterexampleResultProjection `seq`
         counterexampleBasisProjection `seq` boxMaximumsProjection `seq`
         boxAssignmentProjection `seq` boxApplicableProjection `seq`
-        boxBasisProjection `seq`
+        boxBasisProjection `seq` querySealer `seq`
+        queryInputSymbolsProjection `seq` queryCheckProjection `seq`
+        queryInputValueRequestProjection `seq` queryFingerprintProjection `seq`
+        queryProblemProjection `seq` queryModelValidator `seq`
+        queryInputReplayer `seq` queryOriginProber `seq`
+        queryBoxValidator `seq`
         (rnf :: CheckedLengthSpinePairCandidate Int ExferenceLocal -> ()) `seq`
         (rnf :: CheckedLengthSpinePairProblem Int ExferenceLocal -> ()) `seq`
         (rnf :: ValidatedLengthSpinePairCounterexample -> ()) `seq`
         (rnf :: ValidatedLengthSpinePairInputBox -> ()) `seq`
+        (rnf :: LengthSpinePairSMTLibQuery Int ExferenceLocal -> ()) `seq`
+        (rnf :: LengthSpinePairSMTLibQueryError -> ()) `seq`
+        (rnf :: LengthSpinePairSMTLibModelError -> ()) `seq`
+        (rnf :: LengthSpinePairSMTLibInputReplayError -> ()) `seq`
+        (rnf :: LengthSpinePairSMTLibInputBoxValidationError -> ()) `seq`
         pure ()
       let assignment = LengthSpinePairContractAssignment [1]
             $ LengthSpinePair 2 3
@@ -1297,6 +1371,11 @@ facadeTests = testGroup "public Djex facade"
         map (fromIntegral . fromEnum)
           ("finite-binary-product-spine-lengths/\
             \bounded-input-box-validation/v1" :: String)
+      lengthSpinePairSMTLibQuerySchemaTag @?=
+        map (fromIntegral . fromEnum)
+          ("djex-length-spine-pair-z3-qf-lia-smtlib2/v1" :: String)
+      lengthSpinePairSMTLibQueryLogic @?=
+        map (fromIntegral . fromEnum) ("QF_LIA" :: String)
       let shapeError = LengthSpinePairProblemResultComponentExpectedSpine
             LengthSpinePairSecond (termNodeId 4)
             :: LengthSpinePairProblemError () String Int
@@ -1304,7 +1383,25 @@ facadeTests = testGroup "public Djex facade"
         LengthSpinePairSecond (termNodeId 4)
       let boxError = LengthSpinePairInputBoxBoundsArityMismatch 2 1
       boxError @?= LengthSpinePairInputBoxBoundsArityMismatch 2 1
-      rnf shapeError `seq` rnf boxError `seq` pure ()
+      let queryError = LengthSpinePairSMTLibCommandByteLimitExceeded
+            LengthSMTLibCheckCommand 3 4
+          modelError = LengthSpinePairSMTLibBindingArityMismatch 1 2
+          replayError = LengthSpinePairSMTLibInputReplayAssociationRejected
+            ReplayDomainMismatch
+          queryBoxError =
+            LengthSpinePairSMTLibInputBoxValidationAssociationRejected
+              ReplayEncodingFingerprintMismatch
+      queryError @?= LengthSpinePairSMTLibCommandByteLimitExceeded
+        LengthSMTLibCheckCommand 3 4
+      modelError @?= LengthSpinePairSMTLibBindingArityMismatch 1 2
+      replayError @?= LengthSpinePairSMTLibInputReplayAssociationRejected
+        ReplayDomainMismatch
+      queryBoxError @?=
+        LengthSpinePairSMTLibInputBoxValidationAssociationRejected
+          ReplayEncodingFingerprintMismatch
+      rnf shapeError `seq` rnf boxError `seq` rnf queryError `seq`
+        rnf modelError `seq` rnf replayError `seq` rnf queryBoxError `seq`
+        pure ()
   , testCase "rejects residual constraints at the Djinn render boundary" $ do
       target <- expectRight $ mkIdentifier "identity"
       checkedTarget <- expectRight $ mkDefinitionName target

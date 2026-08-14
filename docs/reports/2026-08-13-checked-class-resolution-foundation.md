@@ -133,6 +133,17 @@ deterministic views of the retained ordered classes and instances. No public
 constructor, facade export, serialization format, or caller-provided evidence
 seam was added.
 
+The package-private
+`dischargeHeterogeneousGroundConstraint` entrance additionally supports a
+caller whose type variables inhabit a different nominal domain from the
+checked environment. Structural, alias, forall, free-variable, kind, and
+resource checks all run before the namespace changes. Only an already
+variable-free canonical constraint is traversed into the environment domain;
+no coercion or fabricated identity is possible. Preflight errors therefore
+retain the caller's variable type, while derived-proof and proof-budget errors
+retain the environment's type, and a successful receipt has the ordinary exact
+environment/replay association.
+
 ## Trust boundary
 
 This receipt proves only discharge under this exact closed-world

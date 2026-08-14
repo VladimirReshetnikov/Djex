@@ -137,6 +137,12 @@ Replay first requires a structurally equal retained checked environment,
 including its limits and source-ordered facts, and then the same canonical
 goal; a detached proof tree is diagnostic, not transferable authority.
 
+The package-private heterogeneous query entrance performs that same bounded
+validation before changing namespaces. It rejects every free variable and
+nested `ForallType` in the caller's domain, then structurally retypes only the
+variable-free constraint into the checked environment's domain. No coercion,
+sentinel identity, given, or external proof participates.
+
 Independent limits cover the recovered declarations accepted for retention,
 retained class and instance tables, retained type-constructor-kind table,
 declaration/type collection widths, type and kind nodes, overlap comparisons,

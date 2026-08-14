@@ -15,6 +15,13 @@ import qualified Language.Haskell.Synthesis.Type as Type
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
+-- Deliberately unrelated to the environment's 'String' identity domain.  The
+-- Length integration instantiates the same generic entrance with the private
+-- certificate-plan namespace; this local type keeps the foundation suite from
+-- home-compiling that otherwise unrelated module closure.
+data ForeignResolutionVariable = ForeignResolutionVariable String
+  deriving (Eq, Ord, Show)
+
 classResolutionTests :: TestTree
 classResolutionTests = testGroup "checked class resolution"
   [ testCase "retain exact proof order behind replay" $ do
@@ -32,6 +39,86 @@ classResolutionTests = testGroup "checked class resolution"
         [leftInteger, rightInteger, baseInteger]
       map classResolutionProofInstanceHead prerequisites @?=
         [leftInteger, rightInteger, baseInteger]
+  , testCase "discharge certificate-plan ground queries with legacy proofs" $ do
+      environment <- sealDeclarations defaultClassResolutionLimits
+        $ successDeclarations ()
+      legacyReceipt <- expectDischarge
+        $ dischargeGroundConstraint environment derivedInteger
+      foreignReceipt <- expectHeterogeneousDischarge
+        $ dischargeHeterogeneousGroundConstraint environment
+            foreignDerivedInteger
+      checkedConstraintDischargeGoal foreignReceipt @?= derivedInteger
+      legacyProof <- expectReplay $ replayCheckedConstraintDischarge
+        environment derivedInteger legacyReceipt
+      foreignProof <- expectReplay $ replayCheckedConstraintDischarge
+        environment derivedInteger foreignReceipt
+      proofGoalsPreorder foreignProof @?= proofGoalsPreorder legacyProof
+      map classResolutionProofInstanceHead
+        (classResolutionProofPrerequisites foreignProof) @?=
+          [leftInteger, rightInteger, baseInteger]
+      otherEnvironment <- sealDeclarations defaultClassResolutionLimits
+        $ successDeclarations () ++ [classOne () extraClassName []]
+      expectReplayMismatch ClassResolutionReplayEnvironmentMismatch
+        $ replayCheckedConstraintDischarge
+            otherEnvironment derivedInteger foreignReceipt
+  , testCase "validate foreign queries before changing namespaces" $ do
+      environment <- sealDeclarations defaultClassResolutionLimits
+        $ queryDeclarations ()
+      expectHeterogeneousGroundError
+        (InvalidClassResolutionGroundConstraint
+          $ UnknownClassResolutionClass missingClassName)
+        $ dischargeHeterogeneousGroundConstraint environment
+        $ Constraint missingClassName [Type.TypeVariable (13 :: Int)]
+      expectHeterogeneousGroundError
+        (ClassResolutionGroundConstraintHasFreeVariables [3, 9])
+        $ dischargeHeterogeneousGroundConstraint environment
+        $ Constraint queryClassName
+            [Type.TypeApplication (Type.TypeVariable (9 :: Int))
+              (Type.TypeVariable 3)]
+      expectHeterogeneousGroundError
+        (InvalidClassResolutionGroundConstraint
+          $ ClassResolutionConstraintContainsTypeSynonym 0 aliasTypeName)
+        $ dischargeHeterogeneousGroundConstraint environment
+        $ Constraint queryClassName
+            [Type.TypeApplication (Type.TypeConstructor aliasTypeName)
+              (Type.TypeVariable (17 :: Int))]
+      expectHeterogeneousGroundError
+        (InvalidClassResolutionGroundConstraint
+          $ ClassResolutionConstraintForallUnsupported 0)
+        $ dischargeHeterogeneousGroundConstraint environment
+        $ Constraint queryClassName
+            [Type.ForallType [19 :: Int] [] $ Type.TypeVariable 19]
+      expectHeterogeneousGroundError
+        (InvalidClassResolutionGroundConstraint
+          $ IllKindedClassResolutionConstraint
+          $ KindInference.UnknownTypeConstructor unknownTypeName)
+        $ dischargeHeterogeneousGroundConstraint environment
+        $ Constraint queryClassName
+            [Type.TypeConstructor unknownTypeName :: Type.Type Int]
+      simpleInventory <- inventoryFrom $ simpleDeclarations ()
+      smallTypes <- expectRight
+        $ mkClassResolutionLimits 3 1 1 8 4 2 4 16 2 2
+      smallTypeEnvironment <- expectRight
+        $ sealClassResolutionEnvironment smallTypes simpleInventory
+      expectHeterogeneousGroundError
+        (InvalidClassResolutionGroundConstraint
+          $ ClassResolutionConstraintTypeNodeLimitExceeded 0 2 3)
+        $ dischargeHeterogeneousGroundConstraint smallTypeEnvironment
+        $ Constraint recursiveClassName
+            [ Type.TypeApplication (Type.TypeConstructor listName)
+                (Type.TypeConstructor integerTypeName)
+                :: Type.Type Int
+            ]
+  , testCase "retain environment-typed proof failures after foreign preflight" $ do
+      recursiveInventory <- inventoryFrom $ recursiveDeclarations ()
+      shallow <- expectRight
+        $ mkClassResolutionLimits 4 1 2 8 4 8 4 16 2 3
+      environment <- expectRight
+        $ sealClassResolutionEnvironment shallow recursiveInventory
+      expectHeterogeneousProofError
+        (ClassResolutionProofDepthLimitExceeded 2 3)
+        $ dischargeHeterogeneousGroundConstraint environment
+            foreignRecursiveNestedInteger
   , testCase "resolve shrinking instances and stop current-path cycles" $ do
       environment <- sealDeclarations defaultClassResolutionLimits
         $ recursiveDeclarations ()
@@ -649,6 +736,11 @@ baseInteger = Constraint baseClassName [integerType]
 derivedInteger = Constraint derivedClassName [integerType]
 derivedBoolean = Constraint derivedClassName [booleanType]
 
+foreignDerivedInteger
+  :: Constraint (Type.Type ForeignResolutionVariable)
+foreignDerivedInteger = Constraint derivedClassName
+  [Type.TypeConstructor integerTypeName]
+
 derivedVariable :: Constraint (Type.Type String)
 derivedVariable = Constraint derivedClassName [typeVariable "a"]
 
@@ -658,6 +750,15 @@ recursiveInteger = Constraint recursiveClassName [integerType]
 recursiveListInteger = Constraint recursiveClassName [listType integerType]
 recursiveNestedInteger = Constraint recursiveClassName
   [listType $ listType integerType]
+
+foreignRecursiveNestedInteger
+  :: Constraint (Type.Type ForeignResolutionVariable)
+foreignRecursiveNestedInteger = Constraint recursiveClassName
+  [ foreignListType $ foreignListType
+      $ Type.TypeConstructor integerTypeName
+  ]
+ where
+  foreignListType = Type.TypeApplication $ Type.TypeConstructor listName
 
 sameRepeatedHead, sameIntegerInteger, sameIntegerBoolean
   :: Constraint (Type.Type String)
@@ -841,6 +942,52 @@ expectNoDischarge result = case result of
   Left failure -> assertFailure $ show failure
   Right Nothing -> pure ()
   Right Just{} -> assertFailure "unexpected class evidence"
+
+expectHeterogeneousDischarge
+  :: (Show queryVariable, Show environmentVariable)
+  => Either
+      (HeterogeneousClassResolutionQueryError
+        queryVariable environmentVariable)
+      (Maybe (CheckedConstraintDischarge environmentVariable))
+  -> IO (CheckedConstraintDischarge environmentVariable)
+expectHeterogeneousDischarge result = case result of
+  Left failure -> assertFailure (show failure) >> error "unreachable"
+  Right Nothing -> assertFailure "expected class evidence" >> error "unreachable"
+  Right (Just receipt) -> pure receipt
+
+expectHeterogeneousGroundError
+  :: ( Eq queryVariable
+     , Show queryVariable
+     , Show environmentVariable
+     )
+  => ClassResolutionQueryError queryVariable
+  -> Either
+      (HeterogeneousClassResolutionQueryError
+        queryVariable environmentVariable)
+      (Maybe (CheckedConstraintDischarge environmentVariable))
+  -> IO ()
+expectHeterogeneousGroundError expected result = case result of
+  Left (HeterogeneousClassResolutionGroundQueryError actual) ->
+    actual @?= expected
+  Left failure -> assertFailure $ show failure
+  Right _ -> assertFailure "expected heterogeneous ground-query rejection"
+
+expectHeterogeneousProofError
+  :: ( Eq environmentVariable
+     , Show queryVariable
+     , Show environmentVariable
+     )
+  => ClassResolutionQueryError environmentVariable
+  -> Either
+      (HeterogeneousClassResolutionQueryError
+        queryVariable environmentVariable)
+      (Maybe (CheckedConstraintDischarge environmentVariable))
+  -> IO ()
+expectHeterogeneousProofError expected result = case result of
+  Left (HeterogeneousClassResolutionProofSearchError actual) ->
+    actual @?= expected
+  Left failure -> assertFailure $ show failure
+  Right _ -> assertFailure "expected heterogeneous proof-search rejection"
 
 expectEnvironmentError
   :: (Eq variable, Show variable)

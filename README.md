@@ -349,6 +349,13 @@ inspected, then that goal must validate and canonicalize to the retained goal.
 The projected goal and proof tree are diagnostics and cannot be recombined with
 different retained resolver authority.
 
+The package-private heterogeneous ground entrance applies that same bounded
+preflight while a query still inhabits its caller-owned variable namespace.
+Only after free variables and nested quantification have been rejected does it
+structurally retype the variable-free constraint for proof search in the
+checked environment. It never coerces or invents an environment identity; the
+resulting receipt has the same replay association as an ordinary discharge.
+
 Nothing consumes this resolver authority yet. Djinn and Exference keep their
 existing backend policies, while Length can retain a constrained provider
 scheme only as unusable conditional authority; certificate rows and graph

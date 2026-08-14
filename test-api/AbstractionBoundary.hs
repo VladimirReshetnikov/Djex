@@ -145,6 +145,7 @@ $(do
           , "PublicDjex.CheckedClassResolutionEnvironment"
           , "PublicDjex.ClassResolutionProof"
           , "PublicDjex.CheckedConstraintDischarge"
+          , "PublicDjex.HeterogeneousClassResolutionQueryError"
           ]
         hiddenValues =
           [ "LengthSMTLibLiveSession"
@@ -220,6 +221,7 @@ $(do
           , "PublicDjex.ExferenceTermGraphUnavailable"
           , "PublicDjex.sealClassResolutionEnvironment"
           , "PublicDjex.dischargeGroundConstraint"
+          , "PublicDjex.dischargeHeterogeneousGroundConstraint"
           , "PublicDjex.replayCheckedConstraintDischarge"
           ]
     resolvedTypes <- mapM lookupTypeName hiddenTypes

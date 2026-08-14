@@ -54,6 +54,8 @@ module Language.Haskell.Synthesis.Internal.ClassResolution
   , CheckedConstraintDischarge
   , checkedConstraintDischargeGoal
   , dischargeGroundConstraint
+  , HeterogeneousClassResolutionQueryError (..)
+  , dischargeHeterogeneousGroundConstraint
   , ClassResolutionReplayMismatch (..)
   , replayCheckedConstraintDischarge
   ) where
@@ -647,6 +649,72 @@ dischargeGroundConstraint environment rawGoal = do
   (proof, _) <- resolveConstraint environment Set.empty 0 0 goal
   pure $ CheckedConstraintDischarge environment goal <$> proof
 
+-- | Failure before or after a ground query crosses from a caller-owned
+-- variable namespace into the checked environment's variable namespace.
+-- Keeping the two existing error types distinct avoids inventing an identity
+-- in either namespace merely to report a failure.
+data HeterogeneousClassResolutionQueryError queryVariable environmentVariable
+  = HeterogeneousClassResolutionGroundQueryError
+      !(ClassResolutionQueryError queryVariable)
+    -- ^ Structural, nominal, free-variable, or kind rejection while the
+    -- query still inhabits the caller's namespace.
+  | HeterogeneousClassResolutionProofSearchError
+      !(ClassResolutionQueryError environmentVariable)
+    -- ^ Derived-obligation validation or proof-budget exhaustion after the
+    -- ground query has entered the checked environment's namespace.
+  deriving (Eq, Ord, Show)
+
+instance
+  (NFData queryVariable, NFData environmentVariable) =>
+  NFData
+    (HeterogeneousClassResolutionQueryError
+      queryVariable environmentVariable) where
+  rnf failure = case failure of
+    HeterogeneousClassResolutionGroundQueryError cause -> rnf cause
+    HeterogeneousClassResolutionProofSearchError cause -> rnf cause
+
+-- | Resolve a ground constraint supplied in a variable namespace unrelated
+-- to the checked environment.  The raw query first passes the same bounded
+-- normalization, alias, forall, free-variable, and kind checks as
+-- 'dischargeGroundConstraint'.  Only then is its variable-free syntax
+-- traversed into the environment namespace; this rewrite cannot forge or
+-- choose an environment identity.
+--
+-- A successful receipt is consequently bound to the exact checked
+-- environment and remains replayable through
+-- 'replayCheckedConstraintDischarge'.  No givens or external solver evidence
+-- participate in this operation.
+dischargeHeterogeneousGroundConstraint
+  :: (Ord queryVariable, Ord environmentVariable)
+  => CheckedClassResolutionEnvironment environmentVariable
+  -> Constraint (Type queryVariable)
+  -> Either
+      (HeterogeneousClassResolutionQueryError
+        queryVariable environmentVariable)
+      (Maybe (CheckedConstraintDischarge environmentVariable))
+dischargeHeterogeneousGroundConstraint environment rawGoal = do
+  queryGoal <- either
+    (Left . HeterogeneousClassResolutionGroundQueryError) Right
+    $ prepareGroundQuery environment rawGoal
+  goal <- either
+    (Left . HeterogeneousClassResolutionGroundQueryError) Right
+    $ retypeGroundConstraint queryGoal
+  (proof, _) <- either
+    (Left . HeterogeneousClassResolutionProofSearchError) Right
+    $ resolveConstraint environment Set.empty 0 0 goal
+  pure $ CheckedConstraintDischarge environment goal <$> proof
+
+-- The preceding preflight has already rejected every free variable.  Keep
+-- this traversal total nevertheless: if that invariant ever regresses, the
+-- original caller identity is reported instead of being coerced or replaced
+-- by a sentinel from the environment namespace.
+retypeGroundConstraint
+  :: Constraint (Type queryVariable)
+  -> Either (ClassResolutionQueryError queryVariable)
+      (Constraint (Type environmentVariable))
+retypeGroundConstraint = traverse $ traverse $ \variable ->
+  Left $ ClassResolutionGroundConstraintHasFreeVariables [variable]
+
 data ClassResolutionReplayMismatch variable
   = ClassResolutionReplayEnvironmentMismatch
   | ClassResolutionReplayGoalRejected
@@ -701,11 +769,11 @@ prepareEnvironmentConstraint limits assumptions aliases lookupArity site source 
     pure canonical
 
 prepareGroundQuery
-  :: Ord variable
-  => CheckedClassResolutionEnvironment variable
-  -> Constraint (Type variable)
-  -> Either (ClassResolutionQueryError variable)
-      (Constraint (Type variable))
+  :: Ord queryVariable
+  => CheckedClassResolutionEnvironment environmentVariable
+  -> Constraint (Type queryVariable)
+  -> Either (ClassResolutionQueryError queryVariable)
+      (Constraint (Type queryVariable))
 prepareGroundQuery
     (CheckedClassResolutionEnvironment limits assumptions aliases _ classes
       _ _) source = do

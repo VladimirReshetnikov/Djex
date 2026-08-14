@@ -382,6 +382,16 @@ SMT translation, checked-problem, query, execution, response, or protocol
 identity/schema version. See the
 [query-owned raw-input replay report](../docs/reports/2026-08-14-query-owned-length-input-replay.md).
 
+`probeLengthSMTLibCounterexampleAtOrigin` specializes that exact boundary to
+the canonical all-zero assignment. It derives the compact input count only
+from the checked problem privately retained by the query, constructs no symbol
+or contract projection, and then delegates to ordinary query-owned replay.
+Consequently a hit is a fresh ordinary counterexample receipt, a miss has no
+positive authority, and replay rejection retains the established evaluation or
+association error. The pure probe issues no SMT-LIB, consumes no observation,
+and changes no identity bytes or schema. See the
+[query-owned origin-probe report](../docs/reports/2026-08-14-query-owned-length-origin-probe.md).
+
 `validateLengthProblemInputBox` independently exhausts a finite Cartesian box
 of compact modeled inputs. `LengthInputBoxLimitSource` seals a nonnegative
 maximum input width together with a natural assignment-count cap; defaults are

@@ -4852,6 +4852,94 @@ smtLibTests = testGroup
             symbols -> assertFailure $ "unexpected input symbols: " ++
               show symbols
       , testCase
+          "derive exact nullary, unary, and binary origin receipts" $ do
+          let result = Length.LengthVariable Length.LengthResult
+              originViolation = contractWith (Length.LengthTruth True)
+                $ Length.LengthEqual result $ Length.LengthLiteral 1
+          zeroProblem <- adversarialZeroInputProblem originViolation
+          unaryProblem <- adversarialConstantZeroProblem originViolation
+          binaryProblem <- adversarialBinaryConstantZeroProblem
+            originViolation
+          zeroQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+            SMTLib.defaultLengthSMTLibLimits zeroProblem
+          unaryQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+            SMTLib.defaultLengthSMTLibLimits unaryProblem
+          binaryQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+            SMTLib.defaultLengthSMTLibLimits binaryProblem
+          zeroReceipt <- expectCounterexample
+            $ SMTLib.probeLengthSMTLibCounterexampleAtOrigin
+                Evaluate.defaultLengthEvaluationLimits zeroQuery
+          unaryReceipt <- expectCounterexample
+            $ SMTLib.probeLengthSMTLibCounterexampleAtOrigin
+                Evaluate.defaultLengthEvaluationLimits unaryQuery
+          binaryReceipt <- expectCounterexample
+            $ SMTLib.probeLengthSMTLibCounterexampleAtOrigin
+                Evaluate.defaultLengthEvaluationLimits binaryQuery
+          map Evaluate.validatedLengthCounterexampleInputs
+              [zeroReceipt, unaryReceipt, binaryReceipt] @?=
+            [[], [0], [0, 0]]
+          map Evaluate.validatedLengthCounterexampleResult
+              [zeroReceipt, unaryReceipt, binaryReceipt] @?= [0, 0, 0]
+          map Evaluate.validatedLengthCounterexampleBasis
+              [zeroReceipt, unaryReceipt, binaryReceipt] @?=
+            replicate 3 Evaluate.ProviderIndependentFiniteSpineModel
+          directBinary <- expectCounterexample
+            $ SMTLib.replayLengthSMTLibCounterexampleInputs
+                Evaluate.defaultLengthEvaluationLimits binaryQuery [0, 0]
+          binaryReceipt @?= directBinary
+
+          providerProblem <- adversarialConstantProviderProblem
+            7 identityLengthContract
+          providerQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+            SMTLib.defaultLengthSMTLibLimits providerProblem
+          providerReceipt <- expectCounterexample
+            $ SMTLib.probeLengthSMTLibCounterexampleAtOrigin
+                Evaluate.defaultLengthEvaluationLimits providerQuery
+          providerName <- expectName "Fixture.problemReplayConstant"
+          Evaluate.validatedLengthCounterexampleInputs providerReceipt @?= [0]
+          Evaluate.validatedLengthCounterexampleResult providerReceipt @?= 7
+          Evaluate.validatedLengthCounterexampleBasis providerReceipt @?=
+            Evaluate.FiniteSpineModelUnderAssumedProviderLaws [providerName]
+      , testCase
+          "preserve origin misses, demand order, and evaluation rejection" $ do
+          safeProblem <- adversarialConstantZeroProblem identityLengthContract
+          safeQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+            SMTLib.defaultLengthSMTLibLimits safeProblem
+          expectNoCounterexample
+            $ SMTLib.probeLengthSMTLibCounterexampleAtOrigin
+                Evaluate.defaultLengthEvaluationLimits safeQuery
+
+          let result = Length.LengthVariable Length.LengthResult
+              vacuousSource = contractWith (Length.LengthTruth False)
+                $ Length.LengthEqual result $ Length.LengthLiteral 1
+          vacuousProblem <- adversarialConstantProviderProblem 7 vacuousSource
+          vacuousQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+            SMTLib.defaultLengthSMTLibLimits vacuousProblem
+          expectNoCounterexample
+            $ SMTLib.probeLengthSMTLibCounterexampleAtOrigin
+                (evaluationLimitsWith 0 0) vacuousQuery
+
+          demandingProblem <- adversarialConstantZeroProblem
+            $ contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result $ Length.LengthLiteral 1
+          demandingQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+            SMTLib.defaultLengthSMTLibLimits demandingProblem
+          assertLeft
+            (SMTLib.LengthSMTLibInputReplayEvaluationRejected
+              $ Evaluate.LengthEvaluationValueBitLimitExceeded
+                  Evaluate.LengthIntermediateValue 0 1)
+            $ SMTLib.probeLengthSMTLibCounterexampleAtOrigin
+                (evaluationLimitsWith 0 0) demandingQuery
+      , testCase "derive a widened origin without caller arity data" $ do
+          let inputCount = 32
+          problem <- adversarialWideConstantZeroProblem inputCount
+          query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+            SMTLib.defaultLengthSMTLibLimits problem
+          origin <- evaluateWithin
+            $ SMTLib.probeLengthSMTLibCounterexampleAtOrigin
+                Evaluate.defaultLengthEvaluationLimits query
+          expectNoCounterexample origin
+      , testCase
           "recompute each exact query result and provider-law basis" $ do
           independentProblem <- adversarialConstantZeroProblem
             identityLengthContract

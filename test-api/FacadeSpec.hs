@@ -859,6 +859,13 @@ facadeTests = testGroup "public Djex facade"
                 LengthSMTLibInputReplayError
                 (Maybe ValidatedLengthCounterexample)
           queryInputReplayer = replayLengthSMTLibCounterexampleInputs
+          queryOriginProber
+            :: LengthEvaluationLimits
+            -> LengthSMTLibQuery Int ExferenceLocal
+            -> Either
+                LengthSMTLibInputReplayError
+                (Maybe ValidatedLengthCounterexample)
+          queryOriginProber = probeLengthSMTLibCounterexampleAtOrigin
           queryInputBoxValidator
             :: LengthEvaluationLimits
             -> LengthInputBoxLimits
@@ -984,7 +991,8 @@ facadeTests = testGroup "public Djex facade"
         inputBoxValidator `seq` inputBoxMaximumsProjection `seq`
         inputBoxAssignmentCountProjection `seq`
         inputBoxApplicableCountProjection `seq` inputBoxBasisProjection `seq`
-        queryInputReplayer `seq` queryInputBoxValidator `seq`
+        queryInputReplayer `seq` queryOriginProber `seq`
+        queryInputBoxValidator `seq`
         queryInputSymbolsProjection `seq`
         queryInputValueRequestProjection `seq` queryObservationAssociator `seq`
         queryObservationReplayer `seq` checkResponseParser `seq`

@@ -678,6 +678,18 @@ this entrance changes no SMT translation, checked-problem, query, execution,
 response, or protocol identity/schema version. See the
 [query-owned raw-input replay report](docs/reports/2026-08-14-query-owned-length-input-replay.md).
 
+`probeLengthSMTLibCounterexampleAtOrigin` is the narrower canonical cold-start
+probe. The caller supplies only evaluation limits and the sealed query; Djex
+derives one zero for every compact modeled input from the query's private
+checked problem and delegates to the same fresh replay and association gate.
+A hit is the ordinary `ValidatedLengthCounterexample`, including its exact
+provider/model basis. `Nothing` says only that this one assignment did not
+violate the contract, and an evaluation or association rejection remains the
+existing `LengthSMTLibInputReplayError`. The probe emits no command, consumes
+no solver status, exposes no arity or contract projection, and creates no new
+receipt or identity schema. See the
+[query-owned Length origin-probe report](docs/reports/2026-08-14-query-owned-length-origin-probe.md).
+
 `validateLengthProblemInputBox` adds solver-independent positive bounded
 validation without turning a solver report into evidence. The caller supplies
 one inclusive maximum for each compact modeled input. A sealed

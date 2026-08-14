@@ -39,6 +39,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   , validateLengthSMTLibCounterexample
   , LengthSMTLibInputReplayError (..)
   , replayLengthSMTLibCounterexampleInputs
+  , probeLengthSMTLibCounterexampleAtOrigin
   , LengthSMTLibInputBoxValidationError (..)
   , validateLengthSMTLibQueryInputBox
   ) where
@@ -439,6 +440,20 @@ replayLengthSMTLibCounterexampleInputs evaluationLimits query inputs = do
     (Left . LengthSMTLibInputReplayAssociationRejected)
     Right
     . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
+
+-- | Probe the canonical all-zero assignment for the compact modeled inputs
+-- privately retained by this exact query.  The caller supplies neither arity,
+-- symbols, nor values: those zeros are derived from the sealed checked
+-- problem, then pass through the ordinary query-owned replay and association
+-- gate above.  @Nothing@ is only a probe miss and carries no positive evidence.
+probeLengthSMTLibCounterexampleAtOrigin
+  :: LengthEvaluationLimits
+  -> LengthSMTLibQuery identity local
+  -> Either LengthSMTLibInputReplayError
+      (Maybe ValidatedLengthCounterexample)
+probeLengthSMTLibCounterexampleAtOrigin evaluationLimits query =
+  replayLengthSMTLibCounterexampleInputs evaluationLimits query
+    $ replicate (checkedLengthProblemInputCount $ queryProblem query) 0
 
 -- | Why exhaustive finite-box validation through a sealed query failed.
 -- Validation failures come only from the solver-independent Length verifier;

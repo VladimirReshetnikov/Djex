@@ -678,6 +678,41 @@ this entrance changes no SMT translation, checked-problem, query, execution,
 response, or protocol identity/schema version. See the
 [query-owned raw-input replay report](docs/reports/2026-08-14-query-owned-length-input-replay.md).
 
+`validateLengthProblemInputBox` adds solver-independent positive bounded
+validation without turning a solver report into evidence. The caller supplies
+one inclusive maximum for each compact modeled input. A sealed
+`LengthInputBoxLimits` independently caps input width and total Cartesian
+assignments; its defaults are eight inputs and 65,536 assignments. Existing
+`LengthEvaluationLimits` still cap every maximum/input value and every
+intermediate arithmetic value. Validation checks the problem input count before
+demanding raw maxima, then checks exact maxima arity, maxima left-to-right, and
+the saturating assignment product before evaluation. It enumerates
+lexicographically with the last input varying fastest. The first evaluation
+failure or counterexample stops traversal; a nullary box contains exactly the
+single assignment `[]`.
+
+The result is either ordinary exact-problem counterexample evidence or positive
+bounded evidence created only after the complete box succeeds. Its opaque
+`ValidatedLengthInputBox` receipt retains the additive
+`finite-list-spine-length/bounded-input-box-validation/v1` verifier tag, exact
+checked inclusive maxima, total assignment count, precondition-applicable
+assignment count, and provider/model basis. The applicable count makes a
+vacuous box explicit. Provider-backed validation remains conditional on the
+same named assumed laws, and every receipt remains relative to the total finite
+spine model rather than source-language bottoms, effects, or totality.
+`validateLengthSMTLibQueryInputBox` is only a query-owned association wrapper:
+it emits no SMT-LIB, reads no solver observation, and releases either receipt
+only after replay against the query's exact behavioral problem. In particular,
+bounded success is not universal establishment or pruning authority, and it
+does not strengthen `unsat`, `sat`, or `unknown`.
+
+This additive verifier changes no contract, provider-inventory, semantic
+inventory, session-policy, candidate, concrete-encoding, complete-problem,
+SMT-query, response, protocol, execution, process, worker, or live-observation
+identity or canonical bytes. Its v1 tag belongs to the newly opaque receipt,
+not to an existing semantic or solver envelope. See the
+[bounded Length input-box validation report](docs/reports/2026-08-14-bounded-length-input-box-validation.md).
+
 SMT-LIB's QF_LIA logic excludes the built-in `div` and `mod` operators. Djex
 therefore lowers every remaining normalized quotient or modulo node to one
 shared private Euclidean witness shape. For a positive literal divisor `k` and

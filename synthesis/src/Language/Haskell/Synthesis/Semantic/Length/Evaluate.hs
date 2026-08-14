@@ -15,7 +15,12 @@
 -- candidate already passed that boundary and bind
 -- an exact model-relative counterexample receipt to the sealed problem
 -- identities; it still supplies neither universal evidence nor permission to
--- prune other candidates.
+-- prune other candidates.  The same replay kernel can exhaust an explicitly
+-- finite Cartesian input box under independent width and assignment-count
+-- limits plus the existing value bounds.  A positive receipt records the
+-- versioned verifier, exact box, total and precondition-applicable assignment
+-- counts, and provider/model basis.  It remains bounded/model-relative and does
+-- not strengthen a solver's @unsat@ report into universal evidence.
 module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   ( LengthEvaluationLimitSource (..)
   , LengthEvaluationLimits
@@ -37,17 +42,37 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validatedLengthCounterexampleInputs
   , validatedLengthCounterexampleResult
   , validatedLengthCounterexampleBasis
+  , LengthInputBoxLimitSource (..)
+  , LengthInputBoxLimits
+  , LengthInputBoxLimitField (..)
+  , LengthInputBoxLimitError (..)
+  , mkLengthInputBoxLimits
+  , defaultLengthInputBoxLimitSource
+  , defaultLengthInputBoxLimits
+  , lengthInputBoxInputLimit
+  , lengthInputBoxAssignmentLimit
+  , lengthInputBoxValidationSchemaTag
+  , LengthInputBoxValidationError (..)
+  , LengthInputBoxValidation (..)
+  , ValidatedLengthInputBox
+  , validatedLengthInputBoxInclusiveMaximums
+  , validatedLengthInputBoxAssignmentCount
+  , validatedLengthInputBoxApplicableAssignmentCount
+  , validatedLengthInputBoxBasis
   , evaluateLengthContractAssignment
   , evaluateLengthProviderApplication
   , validateLengthProblemCounterexample
+  , validateLengthProblemInputBox
   ) where
 
 import Control.DeepSeq (NFData (rnf))
 import Control.Monad (foldM, unless)
+import Data.Word (Word8)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Collection (observedListLength)
+import Language.Haskell.Synthesis.Internal.Semantic.Length (ascii)
 import Language.Haskell.Synthesis.Name (Name)
 import Language.Haskell.Synthesis.Semantic.Length
   ( CheckedLengthContract
@@ -225,7 +250,7 @@ data LengthContractEvaluation
 
 instance NFData LengthContractEvaluation
 
--- | Explicit semantic basis of a replayed Length counterexample.
+-- | Explicit semantic basis of an independently replayed Length result.
 --
 -- Even the provider-independent case is a result in the versioned total
 -- finite-spine model, not automatically a realized counterexample in a source
@@ -233,7 +258,9 @@ instance NFData LengthContractEvaluation
 -- depend on every named assumed law in the retained list.  For a conditional
 -- provider, that includes the fingerprinted assumption that the law is uniform
 -- over independently admitted dictionary evidence; the basis does not expose
--- or recreate a class-resolution receipt.
+-- or recreate a class-resolution receipt.  The historical type name remains
+-- counterexample-specific for API compatibility, but bounded positive receipts
+-- reuse the same exact model/provider distinction.
 data LengthCounterexampleBasis
   = ProviderIndependentFiniteSpineModel
   | FiniteSpineModelUnderAssumedProviderLaws [Name]
@@ -280,6 +307,165 @@ validatedLengthCounterexampleBasis
   -> LengthCounterexampleBasis
 validatedLengthCounterexampleBasis
     (ValidatedLengthCounterexampleReceipt _ _ basis) = basis
+
+-- | Raw independent bounds for one finite-box traversal.  Input width uses a
+-- signed source so configuration mistakes can be rejected explicitly;
+-- assignment count is naturally nonnegative.
+data LengthInputBoxLimitSource = LengthInputBoxLimitSource
+  { lengthInputBoxLimitSourceMaximumInputs :: Int
+  , lengthInputBoxLimitSourceMaximumAssignments :: Natural
+  }
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthInputBoxLimitSource
+
+-- | Validated traversal bounds.  The constructor stays private so neither a
+-- very wide checked problem nor a large Cartesian product can reach allocation
+-- or enumeration without explicit caller authority.
+data LengthInputBoxLimits = LengthInputBoxLimits !Int !Natural
+  deriving (Eq, Ord, Show)
+
+instance NFData LengthInputBoxLimits where
+  rnf (LengthInputBoxLimits inputs assignments) =
+    rnf inputs `seq` rnf assignments
+
+data LengthInputBoxLimitField = LengthInputBoxMaximumInputs
+  deriving (Bounded, Enum, Eq, Ord, Show, Generic)
+
+instance NFData LengthInputBoxLimitField
+
+data LengthInputBoxLimitError = NegativeLengthInputBoxLimit
+  !LengthInputBoxLimitField !Int
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthInputBoxLimitError
+
+-- | Seal width before retaining the naturally nonnegative assignment cap.
+-- Zero inputs is meaningful and admits only nullary problems.  Zero
+-- assignments then rejects even a nullary box, which contains one assignment.
+mkLengthInputBoxLimits
+  :: LengthInputBoxLimitSource
+  -> Either LengthInputBoxLimitError LengthInputBoxLimits
+mkLengthInputBoxLimits source
+  | maximumInputs < 0 = Left $ NegativeLengthInputBoxLimit
+      LengthInputBoxMaximumInputs maximumInputs
+  | otherwise = Right $ LengthInputBoxLimits maximumInputs
+      (lengthInputBoxLimitSourceMaximumAssignments source)
+ where
+  maximumInputs = lengthInputBoxLimitSourceMaximumInputs source
+
+defaultLengthInputBoxLimitSource :: LengthInputBoxLimitSource
+defaultLengthInputBoxLimitSource = LengthInputBoxLimitSource
+  { lengthInputBoxLimitSourceMaximumInputs = 8
+  , lengthInputBoxLimitSourceMaximumAssignments = 65536
+  }
+
+-- | Conservative default for independently checking one finite input box.
+defaultLengthInputBoxLimits :: LengthInputBoxLimits
+defaultLengthInputBoxLimits = LengthInputBoxLimits 8 65536
+
+-- | Maximum compact modeled-input arity admitted before bounds are demanded.
+lengthInputBoxInputLimit :: LengthInputBoxLimits -> Int
+lengthInputBoxInputLimit (LengthInputBoxLimits inputs _) = inputs
+
+-- | Maximum number of assignments which may be enumerated.
+lengthInputBoxAssignmentLimit :: LengthInputBoxLimits -> Natural
+lengthInputBoxAssignmentLimit (LengthInputBoxLimits _ assignments) = assignments
+
+-- | Versioned semantics of the deterministic bounded verifier.
+--
+-- This tag is receipt metadata, not a Length problem, SMT query, protocol, or
+-- execution identity.  Input-box validation changes none of those existing
+-- canonical bytes.
+lengthInputBoxValidationSchemaTag :: [Word8]
+lengthInputBoxValidationSchemaTag =
+  ascii "finite-list-spine-length/bounded-input-box-validation/v1"
+
+-- | Fixed-precedence failure while validating one finite input box.
+--
+-- Bounds are source ordered and inclusive.  The sealed problem's compact input
+-- count is checked against the width cap before the raw bounds are demanded;
+-- bounds arity is then observed productively before any bound value, bound
+-- values are checked left-to-right against the existing assignment-value
+-- limit, and the Cartesian-product size is checked before the first assignment
+-- is evaluated.  Evaluation failures identify the zero-based lexicographic
+-- assignment ordinal without retaining another copy of its values.
+data LengthInputBoxValidationError
+  = LengthInputBoxProblemInputLimitExceeded !Int !Int
+  | LengthInputBoxBoundsArityMismatch !Int !Int
+  | LengthInputBoxMaximumValueRejected !Int !LengthEvaluationError
+  | LengthInputBoxAssignmentLimitExceeded !Natural !Natural
+  | LengthInputBoxAssignmentEvaluationRejected
+      !Natural !LengthEvaluationError
+  | LengthInputBoxInternalEnumerationInvariant
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthInputBoxValidationError
+
+-- | Complete result of one finite input-box validation.
+--
+-- This sum carries authority only through its payloads.  Its public
+-- constructors are classification conveniences: callers still cannot forge a
+-- 'BehavioralEvidence', 'ValidatedLengthCounterexample', or
+-- 'ValidatedLengthInputBox'.
+data LengthInputBoxValidation counterexample validated
+  = LengthInputBoxCounterexample counterexample
+  | LengthInputBoxValidated validated
+  deriving (Eq, Ord, Show, Generic)
+
+instance (NFData counterexample, NFData validated) =>
+    NFData (LengthInputBoxValidation counterexample validated)
+
+-- | Independent finite-domain validation of one exact sealed Length problem.
+--
+-- The receipt retains the fixed verifier schema, the inclusive source-ordered
+-- box, the complete number of assignments checked, and how many satisfied the
+-- contract precondition.  A zero applicable count is therefore visible rather
+-- than masquerading as a non-vacuous result.  The semantic basis remains
+-- explicit because validation may still be relative to assumed provider laws
+-- and always remains relative to the total finite-spine model; it is neither
+-- universal behavior nor a source-language totality claim.
+data ValidatedLengthInputBox = ValidatedLengthInputBoxReceipt
+  ![Word8]
+  ![Natural]
+  !Natural
+  !Natural
+  !LengthCounterexampleBasis
+  deriving (Eq, Ord, Show)
+
+instance NFData ValidatedLengthInputBox where
+  rnf (ValidatedLengthInputBoxReceipt schema maximums assignments applicable
+      basis) =
+    rnf schema `seq` rnf maximums `seq` rnf assignments `seq`
+    rnf applicable `seq` rnf basis
+
+-- | Inclusive source-ordered maximum for every modeled input.
+validatedLengthInputBoxInclusiveMaximums
+  :: ValidatedLengthInputBox
+  -> [Natural]
+validatedLengthInputBoxInclusiveMaximums
+    (ValidatedLengthInputBoxReceipt _ maximums _ _ _) = maximums
+
+-- | Exact cardinality of the completely checked Cartesian product.
+validatedLengthInputBoxAssignmentCount
+  :: ValidatedLengthInputBox
+  -> Natural
+validatedLengthInputBoxAssignmentCount
+    (ValidatedLengthInputBoxReceipt _ _ assignments _ _) = assignments
+
+-- | Number of checked assignments for which the precondition held.
+validatedLengthInputBoxApplicableAssignmentCount
+  :: ValidatedLengthInputBox
+  -> Natural
+validatedLengthInputBoxApplicableAssignmentCount
+    (ValidatedLengthInputBoxReceipt _ _ _ applicable _) = applicable
+
+-- | Provider-independent or assumed-provider-relative semantic basis.
+validatedLengthInputBoxBasis
+  :: ValidatedLengthInputBox
+  -> LengthCounterexampleBasis
+validatedLengthInputBoxBasis
+    (ValidatedLengthInputBoxReceipt _ _ _ _ basis) = basis
 
 -- | Classify one concrete contract assignment.  Arity is checked before any
 -- value, inputs are bounded left-to-right before the result, and a false
@@ -371,6 +557,103 @@ validateLengthProblemCounterexample
           FiniteListSpineLengthV1
           ValidatedLengthCounterexample))
 validateLengthProblemCounterexample limits problem assignment = do
+  replay <- replayLengthProblemAssignment limits problem assignment
+  pure $ case replay of
+    LengthProblemPreconditionNotMet -> Nothing
+    LengthProblemPostconditionSatisfied -> Nothing
+    LengthProblemPostconditionViolated receipt -> Just
+      $ mkBehavioralEvidence
+          (checkedLengthProblemBehavioralProblem problem) receipt
+
+-- | Exhaustively check the Cartesian product described by source-ordered,
+-- inclusive input maximums.  Enumeration is lexicographic with the last input
+-- varying fastest.  The first violation stops the traversal and is returned as
+-- ordinary exact-problem evidence; a positive receipt is constructed only
+-- after every assignment has completed without a violation.
+--
+-- This verifier consumes no solver observation.  In particular it does not
+-- strengthen an @unsat@ result: callers may run it after any external report,
+-- but the only authority returned here comes from independent concrete replay
+-- of the explicitly finite box.
+validateLengthProblemInputBox
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> CheckedLengthProblem identity local
+  -> [Natural]
+  -> Either LengthInputBoxValidationError
+      (LengthInputBoxValidation
+        (BehavioralEvidence
+          FiniteListSpineLengthV1
+          ValidatedLengthCounterexample)
+        (BehavioralEvidence
+          FiniteListSpineLengthV1
+          ValidatedLengthInputBox))
+validateLengthProblemInputBox evaluationLimits inputBoxLimits problem
+    rawMaximums = do
+  let inputCount = checkedLengthProblemInputCount problem
+      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
+  if inputCount <= maximumInputs
+    then pure ()
+    else Left $ LengthInputBoxProblemInputLimitExceeded
+      maximumInputs inputCount
+  maximums <- exactInputBoxBounds inputCount rawMaximums
+  mapM_ checkMaximum $ zip [0 ..] maximums
+  assignmentCount <- inputBoxAssignmentCount inputBoxLimits maximums
+  enumerate maximums assignmentCount 0 0 $ replicate (length maximums) 0
+ where
+  checkMaximum (index, value) = either
+    (Left . LengthInputBoxMaximumValueRejected index)
+    Right
+    $ checkAssignedValue evaluationLimits
+        (LengthProblemInputValue index) value
+
+  enumerate maximums assignmentCount !ordinal !applicable inputs = do
+    replay <- either
+      (Left . LengthInputBoxAssignmentEvaluationRejected ordinal)
+      Right
+      $ replayLengthProblemAssignment evaluationLimits problem
+          $ LengthProblemAssignment inputs
+    case replay of
+      LengthProblemPostconditionViolated receipt -> Right
+        $ LengthInputBoxCounterexample
+        $ mkBehavioralEvidence
+            (checkedLengthProblemBehavioralProblem problem) receipt
+      LengthProblemPreconditionNotMet -> continue maximums assignmentCount
+        ordinal applicable inputs
+      LengthProblemPostconditionSatisfied -> continue maximums assignmentCount
+        ordinal (applicable + 1) inputs
+
+  continue maximums assignmentCount !ordinal !applicable inputs =
+    case nextInputBoxAssignment maximums inputs of
+      Left failure -> Left failure
+      Right (Just following) -> enumerate maximums assignmentCount
+        (ordinal + 1) applicable following
+      Right Nothing
+        | ordinal + 1 /= assignmentCount ->
+            Left LengthInputBoxInternalEnumerationInvariant
+        | otherwise ->
+            let receipt = ValidatedLengthInputBoxReceipt
+                  lengthInputBoxValidationSchemaTag maximums assignmentCount
+                  applicable $ problemBasis problem
+            in Right $ LengthInputBoxValidated
+              $ mkBehavioralEvidence
+                  (checkedLengthProblemBehavioralProblem problem) receipt
+
+-- | Private replay classification shared by one-assignment counterexample
+-- validation and complete input-box traversal.  Keeping one implementation
+-- preserves their arity, value, precondition, candidate-result, and
+-- postcondition demand order exactly.
+data LengthProblemAssignmentReplay
+  = LengthProblemPreconditionNotMet
+  | LengthProblemPostconditionSatisfied
+  | LengthProblemPostconditionViolated ValidatedLengthCounterexample
+
+replayLengthProblemAssignment
+  :: LengthEvaluationLimits
+  -> CheckedLengthProblem identity local
+  -> LengthProblemAssignment
+  -> Either LengthEvaluationError LengthProblemAssignmentReplay
+replayLengthProblemAssignment limits problem assignment = do
   inputs <- exactAssignment
     LengthProblemAssignmentArityMismatch
     (checkedLengthProblemInputCount problem)
@@ -386,7 +669,7 @@ validateLengthProblemCounterexample limits problem assignment = do
   precondition <- evaluateFormula limits lookupInput
     $ checkedLengthProblemPrecondition problem
   if not precondition
-    then Right Nothing
+    then Right LengthProblemPreconditionNotMet
     else do
       let resultOr = evaluateExpression limits lookupInput
             $ checkedLengthCandidateResult
@@ -400,18 +683,73 @@ validateLengthProblemCounterexample limits problem assignment = do
       postcondition <- evaluateFormula limits lookupResult
         $ checkedLengthProblemPostcondition problem
       if postcondition
-        then Right Nothing
+        then Right LengthProblemPostconditionSatisfied
         else do
           result <- resultOr
-          let usedProviders = checkedLengthCandidateUsedProviders
-                $ checkedLengthProblemCandidate problem
-              basis = case usedProviders of
-                [] -> ProviderIndependentFiniteSpineModel
-                names -> FiniteSpineModelUnderAssumedProviderLaws names
-              receipt = ValidatedLengthCounterexampleReceipt
-                inputs result basis
-          pure $ Just $ mkBehavioralEvidence
-            (checkedLengthProblemBehavioralProblem problem) receipt
+          pure $ LengthProblemPostconditionViolated
+            $ ValidatedLengthCounterexampleReceipt
+                inputs result $ problemBasis problem
+
+problemBasis
+  :: CheckedLengthProblem identity local
+  -> LengthCounterexampleBasis
+problemBasis problem = case checkedLengthCandidateUsedProviders
+    $ checkedLengthProblemCandidate problem of
+  [] -> ProviderIndependentFiniteSpineModel
+  names -> FiniteSpineModelUnderAssumedProviderLaws names
+
+exactInputBoxBounds
+  :: Int
+  -> [Natural]
+  -> Either LengthInputBoxValidationError [Natural]
+exactInputBoxBounds expected maximums =
+  let observed = observedListLength expected maximums
+  in if observed == expected
+      then Right maximums
+      else Left $ LengthInputBoxBoundsArityMismatch expected observed
+
+inputBoxAssignmentCount
+  :: LengthInputBoxLimits
+  -> [Natural]
+  -> Either LengthInputBoxValidationError Natural
+inputBoxAssignmentCount limits = go 1
+ where
+  maximumAssignments = lengthInputBoxAssignmentLimit limits
+  exceeded = maximumAssignments + 1
+
+  go !total []
+    | total <= maximumAssignments = Right total
+    | otherwise = Left $ LengthInputBoxAssignmentLimitExceeded
+        maximumAssignments exceeded
+  go !total (maximumValue : remaining)
+    | total > maximumAssignments = Left
+        $ LengthInputBoxAssignmentLimitExceeded maximumAssignments exceeded
+    | factor > 0 && total > maximumAssignments `quot` factor = Left
+        $ LengthInputBoxAssignmentLimitExceeded maximumAssignments exceeded
+    | otherwise = go (total * factor) remaining
+   where
+    factor = maximumValue + 1
+
+-- | Advance a source-ordered mixed-radix vector.  Reversing makes the final
+-- source input the least-significant digit, hence the fastest-varying one.
+nextInputBoxAssignment
+  :: [Natural]
+  -> [Natural]
+  -> Either LengthInputBoxValidationError (Maybe [Natural])
+nextInputBoxAssignment maximums values =
+  fmap (fmap reverse) $ advance (reverse maximums) (reverse values)
+ where
+  advance [] [] = Right Nothing
+  advance (maximumValue : remainingMaximums)
+      (value : remainingValues)
+    | value < maximumValue = Right $ Just $ value + 1 : remainingValues
+    | otherwise = do
+        following <- advance remainingMaximums remainingValues
+        pure $ fmap (0 :) following
+  -- Both lists are exact-arity values constructed at checked boundaries.  The
+  -- defensive mismatch branch nevertheless fails closed rather than treating
+  -- an impossible truncation as successful completion.
+  advance _ _ = Left LengthInputBoxInternalEnumerationInvariant
 
 exactAssignment
   :: (Int -> Int -> LengthEvaluationError)

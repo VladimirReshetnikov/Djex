@@ -372,6 +372,7 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "LengthSMTLibProcess"
                       , "mkBehavioralEvidence"
                       , "ValidatedLengthCounterexampleReceipt"
+                      , "ValidatedLengthInputBoxReceipt"
                       ]
                   )
             assertBool

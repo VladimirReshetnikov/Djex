@@ -814,6 +814,43 @@ facadeTests = testGroup "public Djex facade"
                     FiniteListSpineLengthV1
                     ValidatedLengthCounterexample))
           counterexampleValidator = validateLengthProblemCounterexample
+          inputBoxLimitsBuilder
+            :: LengthInputBoxLimitSource
+            -> Either LengthInputBoxLimitError LengthInputBoxLimits
+          inputBoxLimitsBuilder = mkLengthInputBoxLimits
+          inputBoxValidator
+            :: LengthEvaluationLimits
+            -> LengthInputBoxLimits
+            -> CheckedLengthProblem Int ExferenceLocal
+            -> [Natural]
+            -> Either LengthInputBoxValidationError
+                (LengthInputBoxValidation
+                  (BehavioralEvidence
+                    FiniteListSpineLengthV1
+                    ValidatedLengthCounterexample)
+                  (BehavioralEvidence
+                    FiniteListSpineLengthV1
+                    ValidatedLengthInputBox))
+          inputBoxValidator = validateLengthProblemInputBox
+          inputBoxMaximumsProjection
+            :: ValidatedLengthInputBox
+            -> [Natural]
+          inputBoxMaximumsProjection =
+            validatedLengthInputBoxInclusiveMaximums
+          inputBoxAssignmentCountProjection
+            :: ValidatedLengthInputBox
+            -> Natural
+          inputBoxAssignmentCountProjection =
+            validatedLengthInputBoxAssignmentCount
+          inputBoxApplicableCountProjection
+            :: ValidatedLengthInputBox
+            -> Natural
+          inputBoxApplicableCountProjection =
+            validatedLengthInputBoxApplicableAssignmentCount
+          inputBoxBasisProjection
+            :: ValidatedLengthInputBox
+            -> LengthCounterexampleBasis
+          inputBoxBasisProjection = validatedLengthInputBoxBasis
           queryInputReplayer
             :: LengthEvaluationLimits
             -> LengthSMTLibQuery Int ExferenceLocal
@@ -822,6 +859,16 @@ facadeTests = testGroup "public Djex facade"
                 LengthSMTLibInputReplayError
                 (Maybe ValidatedLengthCounterexample)
           queryInputReplayer = replayLengthSMTLibCounterexampleInputs
+          queryInputBoxValidator
+            :: LengthEvaluationLimits
+            -> LengthInputBoxLimits
+            -> LengthSMTLibQuery Int ExferenceLocal
+            -> [Natural]
+            -> Either LengthSMTLibInputBoxValidationError
+                (LengthInputBoxValidation
+                  ValidatedLengthCounterexample
+                  ValidatedLengthInputBox)
+          queryInputBoxValidator = validateLengthSMTLibQueryInputBox
           queryInputSymbolsProjection
             :: LengthSMTLibQuery Int ExferenceLocal
             -> [[Word8]]
@@ -933,7 +980,11 @@ facadeTests = testGroup "public Djex facade"
         candidateResultProjection `seq` problemProjection `seq`
         inputCountProjection `seq` preconditionProjection `seq`
         postconditionProjection `seq` basisProjection `seq`
-        counterexampleValidator `seq` queryInputReplayer `seq`
+        counterexampleValidator `seq` inputBoxLimitsBuilder `seq`
+        inputBoxValidator `seq` inputBoxMaximumsProjection `seq`
+        inputBoxAssignmentCountProjection `seq`
+        inputBoxApplicableCountProjection `seq` inputBoxBasisProjection `seq`
+        queryInputReplayer `seq` queryInputBoxValidator `seq`
         queryInputSymbolsProjection `seq`
         queryInputValueRequestProjection `seq` queryObservationAssociator `seq`
         queryObservationReplayer `seq` checkResponseParser `seq`
@@ -946,7 +997,13 @@ facadeTests = testGroup "public Djex facade"
         executionTimeoutProjection `seq`
         executionResourceProjection `seq` executionDeadlineProjection `seq`
         executionArtifactProjection `seq` executionResponseProjection `seq`
+        (rnf :: LengthInputBoxLimitSource -> ()) `seq`
+        (rnf :: LengthInputBoxLimitError -> ()) `seq`
+        (rnf :: LengthInputBoxValidationError -> ()) `seq`
+        (rnf :: LengthInputBoxValidation () () -> ()) `seq`
+        (rnf :: ValidatedLengthInputBox -> ()) `seq`
         (rnf :: LengthSMTLibInputReplayError -> ()) `seq`
+        (rnf :: LengthSMTLibInputBoxValidationError -> ()) `seq`
         (rnf :: LengthSMTLibExecutableDigestExpectation -> ()) `seq`
         pure ()
       length interpretationPolicySources @?= 5
@@ -954,6 +1011,23 @@ facadeTests = testGroup "public Djex facade"
         [1, 2]
       (ProviderIndependentFiniteSpineModel :: LengthCounterexampleBasis) @?=
         ProviderIndependentFiniteSpineModel
+      mkLengthInputBoxLimits defaultLengthInputBoxLimitSource @?=
+        Right defaultLengthInputBoxLimits
+      lengthInputBoxInputLimit defaultLengthInputBoxLimits @?= 8
+      lengthInputBoxAssignmentLimit defaultLengthInputBoxLimits @?= 65536
+      lengthInputBoxValidationSchemaTag @?=
+        map (fromIntegral . fromEnum)
+          ("finite-list-spine-length/bounded-input-box-validation/v1" :: String)
+      (LengthInputBoxCounterexample () :: LengthInputBoxValidation () ()) @?=
+        LengthInputBoxCounterexample ()
+      (LengthInputBoxValidated () :: LengthInputBoxValidation () ()) @?=
+        LengthInputBoxValidated ()
+      ( LengthSMTLibInputBoxValidationAssociationRejected
+          ReplayDomainMismatch
+          :: LengthSMTLibInputBoxValidationError
+        ) @?=
+          LengthSMTLibInputBoxValidationAssociationRejected
+            ReplayDomainMismatch
       lengthProblemTermGraphLimits defaultLengthProblemLimits @?=
         defaultTermGraphLimits
       lengthProblemGraphFingerprintByteLimit defaultLengthProblemLimits @?=

@@ -155,6 +155,7 @@ $(do
           , "LengthSMTLibLiveQueryObservation"
           , "LengthSMTLibLiveSessionError"
           , "LengthSMTLibLiveQueryError"
+          , "PublicDjex.LengthInputBoxLimits"
           , "CheckedLengthInterpretationPolicy"
           , "CheckedLengthSession"
           , "CheckedLengthProviderInventory"
@@ -347,10 +348,15 @@ forbiddenConstructionAttempts =
       "CheckedLengthSpineModel"
   , noGeneric @LengthLimits "LengthLimits"
   , noGeneric @LengthEvaluationLimits "LengthEvaluationLimits"
+  , noGeneric @LengthInputBoxLimits "LengthInputBoxLimits"
   , noGeneric @ValidatedLengthCounterexample
       "ValidatedLengthCounterexample"
   , ( "ValidatedLengthCounterexample constructor became public"
     , forbiddenValidatedLengthCounterexampleConstruction `seq` ()
+    )
+  , noGeneric @ValidatedLengthInputBox "ValidatedLengthInputBox"
+  , ( "ValidatedLengthInputBox constructor became public"
+    , forbiddenValidatedLengthInputBoxConstruction `seq` ()
     )
   , noGeneric @(CheckedLengthProviderSummary LengthVariableProbe)
       "CheckedLengthProviderSummary"
@@ -1089,6 +1095,11 @@ forbiddenValidatedLengthCounterexampleConstruction
 forbiddenValidatedLengthCounterexampleConstruction =
   ValidatedLengthCounterexampleReceipt
     [] 0 ProviderIndependentFiniteSpineModel
+
+forbiddenValidatedLengthInputBoxConstruction :: ValidatedLengthInputBox
+forbiddenValidatedLengthInputBoxConstruction =
+  ValidatedLengthInputBoxReceipt
+    [] [] 0 0 ProviderIndependentFiniteSpineModel
 
 forbiddenBoundedRawArtifactCoercion
   :: BoundedRawArtifact ArtifactKindProbe

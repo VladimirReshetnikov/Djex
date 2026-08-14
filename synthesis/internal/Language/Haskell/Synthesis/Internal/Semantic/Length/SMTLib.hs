@@ -39,6 +39,8 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   , validateLengthSMTLibCounterexample
   , LengthSMTLibInputReplayError (..)
   , replayLengthSMTLibCounterexampleInputs
+  , LengthSMTLibInputBoxValidationError (..)
+  , validateLengthSMTLibQueryInputBox
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -77,8 +79,13 @@ import Language.Haskell.Synthesis.Semantic.Length
 import Language.Haskell.Synthesis.Semantic.Length.Evaluate
   ( LengthEvaluationError
   , LengthEvaluationLimits
+  , LengthInputBoxLimits
+  , LengthInputBoxValidation (..)
+  , LengthInputBoxValidationError
   , LengthProblemAssignment (..)
   , ValidatedLengthCounterexample
+  , ValidatedLengthInputBox
+  , validateLengthProblemInputBox
   , validateLengthProblemCounterexample
   )
 import Language.Haskell.Synthesis.Semantic.Length.Problem
@@ -430,6 +437,57 @@ replayLengthSMTLibCounterexampleInputs evaluationLimits query inputs = do
  where
   replay = either
     (Left . LengthSMTLibInputReplayAssociationRejected)
+    Right
+    . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
+
+-- | Why exhaustive finite-box validation through a sealed query failed.
+-- Validation failures come only from the solver-independent Length verifier;
+-- association failures expose the same sanitized exact-problem mismatch class
+-- as one-assignment query-owned replay.
+data LengthSMTLibInputBoxValidationError
+  = LengthSMTLibInputBoxValidationRejected
+      !LengthInputBoxValidationError
+  | LengthSMTLibInputBoxValidationAssociationRejected !ReplayMismatch
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSMTLibInputBoxValidationError
+
+-- | Exhaustively validate an explicitly finite, source-ordered input box
+-- against the checked problem privately retained by this exact query.
+--
+-- Inclusive maximums are interpreted by the solver-independent Length
+-- verifier.  The query supplies association authority only: this function
+-- emits no SMT-LIB, consumes no live observation, and gives no authority to
+-- @sat@, @unsat@, or @unknown@.  The first counterexample or the completed
+-- bounded-validation receipt is released only after replay against the same
+-- behavioral problem succeeds.
+validateLengthSMTLibQueryInputBox
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> LengthSMTLibQuery identity local
+  -> [Natural]
+  -> Either LengthSMTLibInputBoxValidationError
+      (LengthInputBoxValidation
+        ValidatedLengthCounterexample
+        ValidatedLengthInputBox)
+validateLengthSMTLibQueryInputBox evaluationLimits inputBoxLimits query
+    maximums = do
+  validation <- either
+    (Left . LengthSMTLibInputBoxValidationRejected)
+    Right
+    $ validateLengthProblemInputBox evaluationLimits inputBoxLimits
+        (queryProblem query) maximums
+  case validation of
+    LengthInputBoxCounterexample evidence ->
+      LengthInputBoxCounterexample <$> replay evidence
+    LengthInputBoxValidated evidence ->
+      LengthInputBoxValidated <$> replay evidence
+ where
+  replay
+    :: BehavioralEvidence FiniteListSpineLengthV1 receipt
+    -> Either LengthSMTLibInputBoxValidationError receipt
+  replay = either
+    (Left . LengthSMTLibInputBoxValidationAssociationRejected)
     Right
     . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
 

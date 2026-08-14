@@ -178,9 +178,9 @@ and the
 | `Language.Haskell.Synthesis.Diagnostic` | Severity, stable code, checked source locations/spans, ordered context, and deterministic rendering. |
 | `Language.Haskell.Synthesis.Fingerprint` | Public inspection of opaque, nominal, collision-free canonical identities; construction and byte budgets remain package-private. |
 | `Language.Haskell.Synthesis.Semantic.Length` | Exact inventory-bound finite-spine contexts, normalized contracts, source-bound assumed provider laws, and model-aware fingerprints; an additive trust class retains exact nonempty constrained schemes under a dictionary-uniform conditional-law assumption, while legacy summary bytes stay exact. |
-| `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked contracts, detached context-free provider transfers, and exact candidate problems; detached constraint-conditional provider evaluation fails before argument inspection, while whole-problem replay may consume a candidate already authorized at its occurrence-specific ground-discharge boundary. |
+| `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked contracts, detached context-free provider transfers, exact candidate problems, and finite Cartesian input boxes; detached constraint-conditional provider evaluation fails before argument inspection, while whole-problem replay may consume a candidate already authorized at its occurrence-specific ground-discharge boundary. |
 | `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and typed-candidate behavioral problems: session-owned provider and restricted resolver authority, contract resealing, residual rejection, rigid root/provider authorization, mixed-role opaque targets, exact zero/step cases, and provider-only consumption of opaque certificate carriers for either obligation-free legacy laws or final-node conditional laws with independently discharged ground obligations. |
-| `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation, exact input-symbol model replay, and query-owned source-ordered natural-input replay for one checked Length problem, without launching or trusting a solver. |
+| `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation, exact input-symbol model replay, query-owned source-ordered natural-input replay, and exact-query association of solver-independent finite-box validation for one checked Length problem, without launching or trusting a solver. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` | Pure validated Z3 launch, resource, artifact, and response-decoder policy with a package-private complete identity and a byte-free digest-expectation presence classifier; it performs no IO or attestation. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` | Rank-N scoped capability-probed Z3 ownership with byte-free failures, heuristic status/strength/use, and a query-first replay gate for independently validated counterexample evidence. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` | Opaque query-specific association of bounded raw solver reports, with heuristic-only safe projections and exact problem-plus-query replay before payload access. |
@@ -381,6 +381,45 @@ observation, and gives `unsat` no authority. The additive entrance changes no
 SMT translation, checked-problem, query, execution, response, or protocol
 identity/schema version. See the
 [query-owned raw-input replay report](../docs/reports/2026-08-14-query-owned-length-input-replay.md).
+
+`validateLengthProblemInputBox` independently exhausts a finite Cartesian box
+of compact modeled inputs. `LengthInputBoxLimitSource` seals a nonnegative
+maximum input width together with a natural assignment-count cap; defaults are
+eight inputs and 65,536 assignments. The checked problem's input count is
+rejected against that width before the raw maxima list is demanded. The
+verifier then observes exact source-ordered maxima arity productively, checks
+each inclusive maximum left-to-right under the existing assignment-value bit
+limit, and computes the Cartesian product with a saturating cap before
+allocating the initial assignment. Existing intermediate-value limits continue
+to bound each concrete replay. A nullary problem has the one assignment `[]`;
+an assignment cap of zero rejects it before evaluation.
+
+Enumeration is lexicographic with the last input varying fastest. The first
+bounded evaluation error records its zero-based assignment ordinal, and the
+first violation returns the ordinary exact-problem counterexample evidence.
+Only complete traversal constructs positive bounded `BehavioralEvidence`. Its
+opaque `ValidatedLengthInputBox` receipt privately retains the fixed
+`finite-list-spine-length/bounded-input-box-validation/v1` tag, checked
+inclusive maxima, exact total assignment count, count whose precondition held,
+and the provider/model basis. The applicable count exposes vacuous validation;
+provider-backed success remains conditional on the same canonical named
+assumed laws.
+
+`validateLengthSMTLibQueryInputBox` delegates all traversal to that
+solver-independent verifier and uses the opaque query only to replay either
+fresh evidence payload against the same behavioral problem. It sends no
+command, consumes no raw or live observation, and cannot promote `unsat` (or
+any other status). Bounded success establishes only the checked finite box in
+the versioned total-spine model. It is not universal proof, exact-pruning
+authority, dictionary evidence, provider-implementation validation, or a claim
+about source-language inhabitance, bottoms, effects, or totality.
+
+No existing contract, provider-inventory, semantic-inventory, session-policy,
+candidate, concrete-encoding, complete-problem, SMT-query, response, protocol,
+execution, process, worker, or live-observation version or canonical bytes
+change. The new v1 tag belongs only to the opaque bounded receipt. See the
+[bounded input-box validation report](../docs/reports/2026-08-14-bounded-length-input-box-validation.md).
+
 Positive-literal natural quotient and modulo remain inside QF_LIA by using one
 shared deterministic private Euclidean witness shape rather than the forbidden
 SMT-LIB `div` and `mod` operators: for operand `e` and positive literal `k`,

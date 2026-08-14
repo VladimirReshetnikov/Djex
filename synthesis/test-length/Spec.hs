@@ -107,6 +107,7 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , candidateProblemTests
   , associatedCertificateCandidateTests
   , problemReplayTests
+  , inputBoxValidationTests
   , SMTLibQFLIASpec.smtLibQFLIATests
   , smtLibTests
   , smtLibProtocolTests
@@ -3919,6 +3920,348 @@ problemReplayTests = testGroup "exact candidate problem replay"
             (evaluationLimitsWith 1 1) scaledResult
             $ Evaluate.LengthProblemAssignment [1]
   ]
+
+inputBoxValidationTests :: TestTree
+inputBoxValidationTests = testGroup "bounded exhaustive input-box validation"
+  [ testCase "seal fixed limits and validate the one nullary assignment" $ do
+      Evaluate.mkLengthInputBoxLimits
+          Evaluate.defaultLengthInputBoxLimitSource @?=
+        Right Evaluate.defaultLengthInputBoxLimits
+      Evaluate.lengthInputBoxInputLimit
+          Evaluate.defaultLengthInputBoxLimits @?= 8
+      Evaluate.lengthInputBoxAssignmentLimit
+          Evaluate.defaultLengthInputBoxLimits @?= 65536
+      Evaluate.lengthInputBoxValidationSchemaTag @?=
+        asciiBytes
+          "finite-list-spine-length/bounded-input-box-validation/v1"
+      Evaluate.mkLengthInputBoxLimits
+          (Evaluate.defaultLengthInputBoxLimitSource
+            { Evaluate.lengthInputBoxLimitSourceMaximumInputs = -1
+            }) @?=
+        Left (Evaluate.NegativeLengthInputBoxLimit
+          Evaluate.LengthInputBoxMaximumInputs (-1))
+
+      let result = Length.LengthVariable Length.LengthResult
+          source expected = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result $ Length.LengthLiteral expected
+      safeProblem <- adversarialZeroInputProblem $ source 0
+      safeReceipt <- expectValidatedLengthInputBox safeProblem
+        $ Evaluate.validateLengthProblemInputBox
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits safeProblem []
+      assertValidatedLengthInputBox safeReceipt [] 1 1
+        Evaluate.ProviderIndependentFiniteSpineModel
+
+      violatingProblem <- adversarialZeroInputProblem $ source 1
+      counterexample <- expectLengthInputBoxCounterexample violatingProblem
+        $ Evaluate.validateLengthProblemInputBox
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits violatingProblem []
+      Evaluate.validatedLengthCounterexampleInputs counterexample @?= []
+      Evaluate.validatedLengthCounterexampleResult counterexample @?= 0
+
+      noAssignments <- inputBoxLimits 0 0
+      assertLeft (Evaluate.LengthInputBoxAssignmentLimitExceeded 0 1)
+        $ Evaluate.validateLengthProblemInputBox
+            Evaluate.defaultLengthEvaluationLimits noAssignments safeProblem []
+  , testCase
+      "return the first unary and source-lexicographic binary violation" $ do
+      unary <- adversarialConstantZeroProblem identityLengthContract
+      unaryCounterexample <- expectLengthInputBoxCounterexample unary
+        $ Evaluate.validateLengthProblemInputBox
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits unary [2]
+      Evaluate.validatedLengthCounterexampleInputs unaryCounterexample @?= [1]
+      Evaluate.validatedLengthCounterexampleResult unaryCounterexample @?= 0
+
+      let first = Length.LengthVariable $ Length.LengthInput 0
+          second = Length.LengthVariable $ Length.LengthInput 1
+          result = Length.LengthVariable Length.LengthResult
+          sumSource = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result $ Length.LengthSum [first, second]
+      binary <- adversarialBinaryConstantZeroProblem sumSource
+      binaryCounterexample <- expectLengthInputBoxCounterexample binary
+        $ Evaluate.validateLengthProblemInputBox
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits binary [1, 1]
+      -- Both [0,1] and [1,0] violate.  This result distinguishes the promised
+      -- source-lexicographic order with the leftmost input varying slowest.
+      Evaluate.validatedLengthCounterexampleInputs binaryCounterexample @?=
+        [0, 1]
+      Evaluate.validatedLengthCounterexampleResult binaryCounterexample @?= 0
+  , testCase "retain complete safe boxes and applicable-assignment counts" $ do
+      let result = Length.LengthVariable Length.LengthResult
+          zeroSource = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result $ Length.LengthLiteral 0
+      unary <- adversarialConstantZeroProblem zeroSource
+      unaryReceipt <- expectValidatedLengthInputBox unary
+        $ Evaluate.validateLengthProblemInputBox
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits unary [2]
+      assertValidatedLengthInputBox unaryReceipt [2] 3 3
+        Evaluate.ProviderIndependentFiniteSpineModel
+
+      binary <- adversarialBinaryConstantZeroProblem trivialLengthContract
+      binaryReceipt <- expectValidatedLengthInputBox binary
+        $ Evaluate.validateLengthProblemInputBox
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits binary [1, 2]
+      assertValidatedLengthInputBox binaryReceipt [1, 2] 6 6
+        Evaluate.ProviderIndependentFiniteSpineModel
+
+      let input = Length.LengthVariable $ Length.LengthInput 0
+          providerContractSource = contractWith
+            (Length.LengthAtMost input $ Length.LengthLiteral 1)
+            $ Length.LengthEqual result $ Length.LengthLiteral 7
+      providerProblem <- adversarialConstantProviderProblem
+        7 providerContractSource
+      providerReceipt <- expectValidatedLengthInputBox providerProblem
+        $ Evaluate.validateLengthProblemInputBox
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits providerProblem [2]
+      providerName <- expectName "Fixture.problemReplayConstant"
+      assertValidatedLengthInputBox providerReceipt [2] 3 2
+        $ Evaluate.FiniteSpineModelUnderAssumedProviderLaws [providerName]
+
+      let vacuousSource = contractWith (Length.LengthTruth False)
+            $ Length.LengthEqual result $ Length.LengthLiteral 7
+      vacuousProblem <- adversarialConstantProviderProblem 7 vacuousSource
+      vacuousReceipt <- expectValidatedLengthInputBox vacuousProblem
+        $ Evaluate.validateLengthProblemInputBox
+            (evaluationLimitsWith 1 0)
+            Evaluate.defaultLengthInputBoxLimits vacuousProblem [1]
+      -- A false precondition must avoid both the result and postcondition
+      -- literals under the zero-bit intermediate cap, while the receipt still
+      -- records its conservative assumed-provider basis.
+      assertValidatedLengthInputBox vacuousReceipt [1] 2 0
+        $ Evaluate.FiniteSpineModelUnderAssumedProviderLaws [providerName]
+  , testCase "enforce width, shape, value, and assignment caps in order" $ do
+      binary <- adversarialBinaryConstantZeroProblem trivialLengthContract
+      narrow <- inputBoxLimits 1 16
+      widthResult <- evaluateWithin
+        $ Evaluate.validateLengthProblemInputBox
+            (error "input width rejection demanded evaluation limits")
+            narrow binary
+            (error "input width rejection demanded raw maximums")
+      assertLeft (Evaluate.LengthInputBoxProblemInputLimitExceeded 1 2)
+        widthResult
+
+      unary <- adversarialConstantZeroProblem identityLengthContract
+      let poisonedMaximums =
+            [ error "box arity demanded its first maximum"
+            , error "box arity demanded its excess maximum"
+            ]
+          cyclicMaximums = 0 : cyclicMaximums
+          validate maximums = Evaluate.validateLengthProblemInputBox
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits unary maximums
+      poisonedResult <- evaluateWithin $ validate poisonedMaximums
+      assertLeft (Evaluate.LengthInputBoxBoundsArityMismatch 1 2)
+        poisonedResult
+      cyclicResult <- evaluateWithin $ validate cyclicMaximums
+      assertLeft (Evaluate.LengthInputBoxBoundsArityMismatch 1 2) cyclicResult
+
+      maximumResult <- evaluateWithin
+        $ Evaluate.validateLengthProblemInputBox
+            (evaluationLimitsWith 2 8)
+            Evaluate.defaultLengthInputBoxLimits binary
+            [4, error "maximum checking demanded a later value"]
+      assertLeft
+        (Evaluate.LengthInputBoxMaximumValueRejected 0
+          $ Evaluate.LengthEvaluationValueBitLimitExceeded
+              (Evaluate.LengthProblemInputValue 0) 2 3)
+        maximumResult
+
+      let result = Length.LengthVariable Length.LengthResult
+          demandingSource = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result $ Length.LengthLiteral 1
+      demanding <- adversarialBinaryConstantZeroProblem demandingSource
+      threeAssignments <- inputBoxLimits 2 3
+      -- The two-bit box has four assignments.  Its product cap must win
+      -- before the zero-bit intermediate evaluator reaches literal one.
+      assertLeft (Evaluate.LengthInputBoxAssignmentLimitExceeded 3 4)
+        $ Evaluate.validateLengthProblemInputBox
+            (evaluationLimitsWith 1 0) threeAssignments demanding [1, 1]
+  , testCase "stop at the first violation or evaluation error ordinal" $ do
+      let input = Length.LengthVariable $ Length.LengthInput 0
+          result = Length.LengthVariable Length.LengthResult
+          isZero = Length.LengthEqual input $ Length.LengthLiteral 0
+          source whenZero whenNonzero = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result
+            $ Length.LengthIf isZero
+                (Length.LengthLiteral whenZero)
+                (Length.LengthLiteral whenNonzero)
+          validate problem = Evaluate.validateLengthProblemInputBox
+            (evaluationLimitsWith 1 1)
+            Evaluate.defaultLengthInputBoxLimits problem [1]
+          overflow = Evaluate.LengthEvaluationValueBitLimitExceeded
+            Evaluate.LengthIntermediateValue 1 2
+
+      violationFirst <- adversarialConstantZeroProblem $ source 1 2
+      counterexample <- expectLengthInputBoxCounterexample violationFirst
+        $ validate violationFirst
+      Evaluate.validatedLengthCounterexampleInputs counterexample @?= [0]
+
+      errorFirst <- adversarialConstantZeroProblem $ source 2 1
+      assertLeft
+        (Evaluate.LengthInputBoxAssignmentEvaluationRejected 0 overflow)
+        $ validate errorFirst
+
+      errorSecond <- adversarialConstantZeroProblem $ source 0 2
+      assertLeft
+        (Evaluate.LengthInputBoxAssignmentEvaluationRejected 1 overflow)
+        $ validate errorSecond
+  , testCase "associate both evidence arms and reject stale problems" $ do
+      let result = Length.LengthVariable Length.LengthResult
+          safeSource = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result $ Length.LengthLiteral 0
+      safeProblem <- adversarialConstantZeroProblem safeSource
+      safeValidation <- expectRight
+        $ Evaluate.validateLengthProblemInputBox
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits safeProblem [1]
+      safeEvidence <- case safeValidation of
+        Evaluate.LengthInputBoxValidated evidence -> pure evidence
+        Evaluate.LengthInputBoxCounterexample{} -> assertFailure
+          "the safe box produced counterexample evidence" >> error "unreachable"
+      staleSafe <- adversarialConstantZeroProblem identityLengthContract
+      assertLeft SemanticProblem.ReplayEncodingFingerprintMismatch
+        $ SemanticProblem.replayBehavioralEvidence
+            (LengthProblem.checkedLengthProblemBehavioralProblem staleSafe)
+            safeEvidence
+
+      counterexampleProblem <- adversarialConstantZeroProblem
+        identityLengthContract
+      counterexampleValidation <- expectRight
+        $ Evaluate.validateLengthProblemInputBox
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits counterexampleProblem [1]
+      counterexampleEvidence <- case counterexampleValidation of
+        Evaluate.LengthInputBoxCounterexample evidence -> pure evidence
+        Evaluate.LengthInputBoxValidated{} -> assertFailure
+          "the violating box produced positive evidence" >> error "unreachable"
+      staleCounterexample <- adversarialConstantZeroProblem
+        trivialLengthContract
+      assertLeft SemanticProblem.ReplayEncodingFingerprintMismatch
+        $ SemanticProblem.replayBehavioralEvidence
+            (LengthProblem.checkedLengthProblemBehavioralProblem
+              staleCounterexample)
+            counterexampleEvidence
+  , testCase "make the query-owned wrapper exactly match independent replay" $ do
+      let result = Length.LengthVariable Length.LengthResult
+          providerContractSource = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result $ Length.LengthLiteral 7
+      safeProblem <- adversarialConstantProviderProblem
+        7 providerContractSource
+      safeQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits safeProblem
+      directSafe <- expectValidatedLengthInputBox safeProblem
+        $ Evaluate.validateLengthProblemInputBox
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits safeProblem [2]
+      querySafe <- expectRight
+        $ SMTLib.validateLengthSMTLibQueryInputBox
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits safeQuery [2]
+      case querySafe of
+        Evaluate.LengthInputBoxValidated receipt -> receipt @?= directSafe
+        Evaluate.LengthInputBoxCounterexample{} -> assertFailure
+          "query-owned safe validation returned a counterexample"
+
+      let first = Length.LengthVariable $ Length.LengthInput 0
+          second = Length.LengthVariable $ Length.LengthInput 1
+          sumSource = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result $ Length.LengthSum [first, second]
+      violatingProblem <- adversarialBinaryConstantZeroProblem sumSource
+      violatingQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits violatingProblem
+      directCounterexample <- expectLengthInputBoxCounterexample
+        violatingProblem
+        $ Evaluate.validateLengthProblemInputBox
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits violatingProblem [1, 1]
+      queryCounterexample <- expectRight
+        $ SMTLib.validateLengthSMTLibQueryInputBox
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits violatingQuery [1, 1]
+      case queryCounterexample of
+        Evaluate.LengthInputBoxCounterexample receipt ->
+          receipt @?= directCounterexample
+        Evaluate.LengthInputBoxValidated{} -> assertFailure
+          "query-owned violating validation returned a positive receipt"
+
+      unary <- adversarialConstantZeroProblem identityLengthContract
+      unaryQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits unary
+      assertLeft
+        (SMTLib.LengthSMTLibInputBoxValidationRejected
+          $ Evaluate.LengthInputBoxMaximumValueRejected 0
+          $ Evaluate.LengthEvaluationValueBitLimitExceeded
+              (Evaluate.LengthProblemInputValue 0) 2 3)
+        $ SMTLib.validateLengthSMTLibQueryInputBox
+            (evaluationLimitsWith 2 8)
+            Evaluate.defaultLengthInputBoxLimits unaryQuery [4]
+  ]
+
+type AdversarialLengthInputBoxValidation =
+  Either Evaluate.LengthInputBoxValidationError
+    (Evaluate.LengthInputBoxValidation
+      (SemanticProblem.BehavioralEvidence
+        Length.FiniteListSpineLengthV1
+        Evaluate.ValidatedLengthCounterexample)
+      (SemanticProblem.BehavioralEvidence
+        Length.FiniteListSpineLengthV1
+        Evaluate.ValidatedLengthInputBox))
+
+inputBoxLimits :: Int -> Natural -> IO Evaluate.LengthInputBoxLimits
+inputBoxLimits maximumInputs maximumAssignments = expectRight
+  $ Evaluate.mkLengthInputBoxLimits Evaluate.LengthInputBoxLimitSource
+      { Evaluate.lengthInputBoxLimitSourceMaximumInputs = maximumInputs
+      , Evaluate.lengthInputBoxLimitSourceMaximumAssignments =
+          maximumAssignments
+      }
+
+expectValidatedLengthInputBox
+  :: LengthProblem.CheckedLengthProblem
+      AdversarialIdentity AdversarialLocal
+  -> AdversarialLengthInputBoxValidation
+  -> IO Evaluate.ValidatedLengthInputBox
+expectValidatedLengthInputBox problem validation = case validation of
+  Left failure -> assertFailure
+    ("unexpected input-box rejection: " ++ show failure) >> error "unreachable"
+  Right (Evaluate.LengthInputBoxCounterexample _) -> assertFailure
+    "the input box unexpectedly contained a counterexample" >> error "unreachable"
+  Right (Evaluate.LengthInputBoxValidated evidence) -> expectRight
+    $ SemanticProblem.replayBehavioralEvidence
+        (LengthProblem.checkedLengthProblemBehavioralProblem problem) evidence
+
+expectLengthInputBoxCounterexample
+  :: LengthProblem.CheckedLengthProblem
+      AdversarialIdentity AdversarialLocal
+  -> AdversarialLengthInputBoxValidation
+  -> IO Evaluate.ValidatedLengthCounterexample
+expectLengthInputBoxCounterexample problem validation = case validation of
+  Left failure -> assertFailure
+    ("unexpected input-box rejection: " ++ show failure) >> error "unreachable"
+  Right (Evaluate.LengthInputBoxValidated _) -> assertFailure
+    "the violating input box produced a positive receipt" >> error "unreachable"
+  Right (Evaluate.LengthInputBoxCounterexample evidence) -> expectRight
+    $ SemanticProblem.replayBehavioralEvidence
+        (LengthProblem.checkedLengthProblemBehavioralProblem problem) evidence
+
+assertValidatedLengthInputBox
+  :: Evaluate.ValidatedLengthInputBox
+  -> [Natural]
+  -> Natural
+  -> Natural
+  -> Evaluate.LengthCounterexampleBasis
+  -> IO ()
+assertValidatedLengthInputBox receipt maximums assignments applicable basis = do
+  Evaluate.validatedLengthInputBoxInclusiveMaximums receipt @?= maximums
+  Evaluate.validatedLengthInputBoxAssignmentCount receipt @?= assignments
+  Evaluate.validatedLengthInputBoxApplicableAssignmentCount receipt @?=
+    applicable
+  Evaluate.validatedLengthInputBoxBasis receipt @?= basis
 
 smtLibTests :: TestTree
 smtLibTests = testGroup

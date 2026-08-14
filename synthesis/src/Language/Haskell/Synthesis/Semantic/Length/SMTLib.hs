@@ -20,10 +20,15 @@
 -- 'replayLengthSMTLibCounterexampleInputs'; the sealed query owns their checked
 -- problem and symbol association. Every call evaluates afresh and returns a
 -- fresh receipt after exact same-query/problem association or 'Nothing', never
--- a cached verdict. Any
+-- a cached verdict. 'validateLengthSMTLibQueryInputBox' similarly uses the
+-- query only as exact association authority while the solver-independent
+-- evaluator exhausts an explicitly finite Cartesian box.  It returns either
+-- the first independently replayed counterexample or a bounded positive
+-- receipt and never upgrades an external @unsat@ result. Any
 -- resulting evidence remains finite-spine/model-relative and explicitly
--- conditional on the provider laws recorded by its receipt. Neither replay
--- entrance gives authority to a raw solver status, including @unsat@.
+-- conditional on the provider laws recorded by its receipt. None of these
+-- validation or replay entrances gives authority to a raw solver status,
+-- including @unsat@.
 module Language.Haskell.Synthesis.Semantic.Length.SMTLib
   ( LengthSMTLibQueryFingerprintSubject
   , lengthSMTLibQuerySchemaTag
@@ -53,6 +58,8 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib
   , validateLengthSMTLibCounterexample
   , LengthSMTLibInputReplayError (..)
   , replayLengthSMTLibCounterexampleInputs
+  , LengthSMTLibInputBoxValidationError (..)
+  , validateLengthSMTLibQueryInputBox
   ) where
 
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib

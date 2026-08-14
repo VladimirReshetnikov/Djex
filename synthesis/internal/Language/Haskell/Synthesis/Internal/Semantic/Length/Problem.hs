@@ -74,6 +74,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , LengthContractError
   , LengthContractSource
   , LengthLimits
+  , LengthProviderTrust (..)
   , LengthTargetArgumentRole (..)
   , LengthProviderInventoryError
   , LengthProviderSummarySource
@@ -81,6 +82,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , LengthSpineModelSource
   , ascii
   , checkedLengthProviderName
+  , checkedLengthProviderTrust
   , checkedLengthSpineModelField
   , checkedLengthSpineStepConstructor
   , checkedLengthSpineZeroConstructor
@@ -480,7 +482,7 @@ buildLengthInventoryFingerprint
 buildLengthInventoryFingerprint limits context providers =
   buildFingerprintWithin (fromIntegral $ lengthFingerprintByteLimit limits)
     FingerprintBuilder
-      { fingerprintBuilderVersion = 1
+      { fingerprintBuilderVersion = if conditional then 2 else 1
       , fingerprintBuilderRole = ascii
           "finite-list-spine-length/semantic-inventory"
       , fingerprintBuilderFields =
@@ -496,8 +498,21 @@ buildLengthInventoryFingerprint limits context providers =
               [ FingerprintSequence $ map providerSummaryField
                   $ checkedLengthProviderSummaries providers
               ]
-          ]
+          ] ++ conditionalPolicy
       }
+ where
+  conditional = any ((==
+      AssumedProviderLawConditionalOnConstraintDischarge) .
+      checkedLengthProviderTrust)
+    $ checkedLengthProviderSummaries providers
+  conditionalPolicy
+    | conditional =
+        [ tagged "provider-constraint-policy"
+            [ FingerprintBytes $ ascii
+                "retain-constraint-conditional-provider-laws/v1"
+            ]
+        ]
+    | otherwise = []
 
 buildLengthEncodingFingerprint
   :: LengthLimits

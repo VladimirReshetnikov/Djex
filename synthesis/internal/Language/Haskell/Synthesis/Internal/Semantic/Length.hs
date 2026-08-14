@@ -249,19 +249,38 @@ newtype LengthProviderVariable = LengthProviderArgument Natural
 
 instance NFData LengthProviderVariable
 
--- | An explicitly assumed provider law, uniform over all admitted instances
--- of the exact closed scheme retained in the checked inventory.
-data LengthProviderSummarySource variable = AssumedProviderSummary
-  { lengthProviderName :: Name
-  , lengthProviderScheme :: Type variable
-  , lengthProviderArgumentRoles :: [LengthProviderArgumentRole]
-  , lengthProviderTransfer :: LengthExpression LengthProviderVariable
-  }
+-- | An explicitly assumed provider law over one exact closed inventory
+-- scheme.  The legacy constructor remains context-free.  The conditional
+-- constructor retains a nonempty leading context but grants no behavioral-use
+-- authority until a candidate-local discharge boundary is added.
+data LengthProviderSummarySource variable
+  = AssumedProviderSummary
+      { lengthProviderName :: Name
+      , lengthProviderScheme :: Type variable
+      , lengthProviderArgumentRoles :: [LengthProviderArgumentRole]
+      , lengthProviderTransfer :: LengthExpression LengthProviderVariable
+      }
+    -- ^ Historical context-free provider assumption.  A nonempty leading
+    -- context is rejected with 'LengthProviderConstrainedScheme'.
+  | AssumedConstraintConditionalProviderSummary
+      { lengthProviderName :: Name
+      , lengthProviderScheme :: Type variable
+      , lengthProviderArgumentRoles :: [LengthProviderArgumentRole]
+      , lengthProviderTransfer :: LengthExpression LengthProviderVariable
+      }
+    -- ^ Retain an exact closed scheme with a nonempty leading context.  This
+    -- asserts only a law conditional on independent candidate-local discharge;
+    -- it does not itself provide dictionary or behavioral authority.
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData variable => NFData (LengthProviderSummarySource variable)
 
-data LengthProviderTrust = AssumedProviderLaw
+data LengthProviderTrust
+  = AssumedProviderLaw
+    -- ^ Context-free assumed law, directly usable by the Length interpreter.
+  | AssumedProviderLawConditionalOnConstraintDischarge
+    -- ^ Retained constrained law which remains unusable until an independent
+    -- candidate-local discharge authority is associated.
   deriving (Bounded, Enum, Eq, Ord, Show, Generic)
 
 instance NFData LengthProviderTrust
@@ -647,6 +666,9 @@ data LengthProviderSummaryError variable
   | LengthProviderSchemeTypeError (TypeError variable)
   | LengthProviderSchemeKindError (KindInferenceError variable)
   | LengthProviderConstrainedScheme
+    -- ^ The historical source constructor was given a constrained scheme.
+  | LengthProviderConditionalSchemeHasNoConstraints
+    -- ^ The conditional source constructor was given no leading constraints.
   | LengthProviderOpenScheme [variable]
   | LengthProviderArgumentLimitExceeded Int Int
   | LengthProviderRoleArityMismatch Int Int
@@ -718,45 +740,52 @@ lengthContractFingerprint
 lengthContractFingerprint
     (CheckedLengthContract _ _ _ _ _ fingerprint) = fingerprint
 
--- | One closed, context-free, proper-kinded assumed provider law.
+-- | One closed, proper-kinded assumed provider law.  Its retained trust
+-- classifier distinguishes the historical context-free law from a constrained
+-- law which remains unusable without candidate-local discharge authority.
 data CheckedLengthProviderSummary variable = CheckedLengthProviderSummary
   !Name
   !(Type variable)
   ![LengthProviderArgumentRole]
   !(LengthExpression LengthProviderVariable)
+  !LengthProviderTrust
   !FingerprintField
 
 type role CheckedLengthProviderSummary nominal
 
 instance NFData variable => NFData (CheckedLengthProviderSummary variable) where
-  rnf (CheckedLengthProviderSummary name scheme roles transfer schemeField) =
+  rnf (CheckedLengthProviderSummary name scheme roles transfer trust
+      schemeField) =
     rnf name `seq`
     rnf scheme `seq`
     rnf roles `seq`
     rnf transfer `seq`
+    rnf trust `seq`
     rnfFingerprintField schemeField
 
 checkedLengthProviderName :: CheckedLengthProviderSummary variable -> Name
-checkedLengthProviderName (CheckedLengthProviderSummary name _ _ _ _) = name
+checkedLengthProviderName (CheckedLengthProviderSummary name _ _ _ _ _) = name
 
 checkedLengthProviderScheme
   :: CheckedLengthProviderSummary variable -> Type variable
-checkedLengthProviderScheme (CheckedLengthProviderSummary _ scheme _ _ _) = scheme
+checkedLengthProviderScheme
+    (CheckedLengthProviderSummary _ scheme _ _ _ _) = scheme
 
 checkedLengthProviderArgumentRoles
   :: CheckedLengthProviderSummary variable -> [LengthProviderArgumentRole]
 checkedLengthProviderArgumentRoles
-    (CheckedLengthProviderSummary _ _ roles _ _) = roles
+    (CheckedLengthProviderSummary _ _ roles _ _ _) = roles
 
 checkedLengthProviderTransfer
   :: CheckedLengthProviderSummary variable
   -> LengthExpression LengthProviderVariable
 checkedLengthProviderTransfer
-    (CheckedLengthProviderSummary _ _ _ transfer _) = transfer
+    (CheckedLengthProviderSummary _ _ _ transfer _ _) = transfer
 
 checkedLengthProviderTrust
   :: CheckedLengthProviderSummary variable -> LengthProviderTrust
-checkedLengthProviderTrust _ = AssumedProviderLaw
+checkedLengthProviderTrust
+    (CheckedLengthProviderSummary _ _ _ _ trust _) = trust
 
 -- | A deterministic finite index of assumed provider laws checked against one
 -- source inventory.  Its fingerprint identifies the assumptions, not the
@@ -1035,9 +1064,13 @@ sealLengthProviderSummary limits inventory model
     $ checkTypesKinds (inventoryKindAssumptions inventory)
         [(ProperTypeKind, scheme)]
   let (_, constraints, body) = splitLeadingForalls scheme
-  case constraints of
-    [] -> pure ()
-    _ -> Left LengthProviderConstrainedScheme
+      trust = providerSummarySourceTrust source
+  case (trust, constraints) of
+    (AssumedProviderLaw, []) -> pure ()
+    (AssumedProviderLaw, _ : _) -> Left LengthProviderConstrainedScheme
+    (AssumedProviderLawConditionalOnConstraintDischarge, []) ->
+      Left LengthProviderConditionalSchemeHasNoConstraints
+    (AssumedProviderLawConditionalOnConstraintDischarge, _ : _) -> pure ()
   case Set.toAscList $ freeVariables scheme of
     [] -> pure ()
     variables -> Left $ LengthProviderOpenScheme variables
@@ -1065,7 +1098,7 @@ sealLengthProviderSummary limits inventory model
   let schemeField = closedProviderSchemeField
         $ alphaNormalizeTypeWith PositionalBinderSlots scheme
       checked = CheckedLengthProviderSummary
-        (lengthProviderName source) scheme roles transfer schemeField
+        (lengthProviderName source) scheme roles transfer trust schemeField
   pure (checked, afterTypeNodes, afterSyntaxUsage)
  where
   requireSpineList (index, role, argument) = case role of
@@ -1074,6 +1107,13 @@ sealLengthProviderSummary limits inventory model
       | isModeledSpine model argument -> Right ()
       | otherwise -> Left
           $ LengthProviderSpineArgumentIsNotList index argument
+
+providerSummarySourceTrust
+  :: LengthProviderSummarySource variable -> LengthProviderTrust
+providerSummarySourceTrust source = case source of
+  AssumedProviderSummary{} -> AssumedProviderLaw
+  AssumedConstraintConditionalProviderSummary{} ->
+    AssumedProviderLawConditionalOnConstraintDischarge
 
 -- | Resolve only the requested term scheme. The environment's already sealed
 -- indexes reject a missing name without scanning declarations; a present name
@@ -1611,7 +1651,8 @@ buildLengthProviderInventoryFingerprint
 buildLengthProviderInventoryFingerprint limits model summaries =
   buildFingerprintWithin (fromIntegral $ lengthFingerprintByteLimit limits)
     FingerprintBuilder
-      { fingerprintBuilderVersion = 2
+      { fingerprintBuilderVersion =
+          if any isConditional $ Map.elems summaries then 3 else 2
       , fingerprintBuilderRole = ascii
           "finite-list-spine-length/provider-inventory"
       , fingerprintBuilderFields =
@@ -1639,7 +1680,7 @@ providerSummaryField
   :: CheckedLengthProviderSummary variable
   -> FingerprintField
 providerSummaryField
-    (CheckedLengthProviderSummary name _ roles transfer schemeField) =
+    (CheckedLengthProviderSummary name _ roles transfer trust schemeField) =
   tagged "assumed-provider-summary"
     [ FingerprintName name
     , tagged "closed-alpha-normal-scheme" [schemeField]
@@ -1647,14 +1688,31 @@ providerSummaryField
         [FingerprintSequence $ map providerRoleField roles]
     , tagged "length-transfer"
         [lengthExpressionField providerVariableField transfer]
-    , tagged "trust"
-        [ FingerprintBytes $ ascii "assumed-provider-law/v1"
-        , FingerprintBytes $ ascii
-            "uniform-over-admitted-closed-instantiations/v1"
-        , FingerprintBytes $ ascii
-            "unobserved-means-no-length-read-only/v1"
-        ]
+    , tagged "trust" $ providerTrustFields trust
     ]
+
+providerTrustFields :: LengthProviderTrust -> [FingerprintField]
+providerTrustFields trust = case trust of
+  AssumedProviderLaw ->
+    [ FingerprintBytes $ ascii "assumed-provider-law/v1"
+    , FingerprintBytes $ ascii
+        "uniform-over-admitted-closed-instantiations/v1"
+    , FingerprintBytes $ ascii
+        "unobserved-means-no-length-read-only/v1"
+    ]
+  AssumedProviderLawConditionalOnConstraintDischarge ->
+    [ FingerprintBytes $ ascii "assumed-provider-law/v1"
+    , FingerprintBytes $ ascii
+        "uniform-over-admitted-closed-instantiations/v1"
+    , FingerprintBytes $ ascii
+        "conditional-on-independent-ground-constraint-discharge/v1"
+    , FingerprintBytes $ ascii
+        "unobserved-means-no-length-read-only/v1"
+    ]
+
+isConditional :: CheckedLengthProviderSummary variable -> Bool
+isConditional summary = checkedLengthProviderTrust summary ==
+  AssumedProviderLawConditionalOnConstraintDischarge
 
 providerRoleField :: LengthProviderArgumentRole -> FingerprintField
 providerRoleField role = FingerprintBytes $ ascii $ case role of

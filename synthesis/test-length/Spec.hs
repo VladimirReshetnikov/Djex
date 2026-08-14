@@ -1005,6 +1005,128 @@ sessionTests = testGroup "checked length sessions"
       assertBool "exact case semantics reused an ordinary policy identity" $
         LengthProblem.lengthSessionEncodingPolicyFingerprint exactCaseSession /=
           LengthProblem.lengthSessionEncodingPolicyFingerprint legacy
+  , testCase
+      "separate conditional provider authority from the encoding policy" $ do
+      className <- expectName "Fixture.SessionConditionalConstraint"
+      legacyProviderName <- expectName "Fixture.sessionLegacyProvider"
+      conditionalProviderName <- expectName
+        "Fixture.sessionConditionalProvider"
+      let binder = FlexibleVariable "session-conditional-element"
+          classBinder = FlexibleVariable "session-conditional-class-element"
+          body = FunctionType
+            (sessionListOf $ TypeVariable binder)
+            (sessionListOf $ TypeVariable binder)
+          legacyScheme = ForallType [binder] [] body
+          conditionalScheme = ForallType [binder]
+            [Constraint className [TypeVariable binder]] body
+          roles = [Length.LengthSpineArgument]
+          transfer = Length.LengthVariable $ Length.LengthProviderArgument 0
+          legacy = Length.AssumedProviderSummary
+            { Length.lengthProviderName = legacyProviderName
+            , Length.lengthProviderScheme = legacyScheme
+            , Length.lengthProviderArgumentRoles = roles
+            , Length.lengthProviderTransfer = transfer
+            }
+          conditional = Length.AssumedConstraintConditionalProviderSummary
+            { Length.lengthProviderName = conditionalProviderName
+            , Length.lengthProviderScheme = conditionalScheme
+            , Length.lengthProviderArgumentRoles = roles
+            , Length.lengthProviderTransfer = transfer
+            }
+          classDeclaration = ClassDeclaration () className
+            [TypeParameter classBinder (Just ProperTypeKind)] [] []
+          inventory = sessionInventory ()
+            [ classDeclaration
+            , ValueDeclaration
+                $ ValueSignature () legacyProviderName legacyScheme
+            , ValueDeclaration
+                $ ValueSignature () conditionalProviderName conditionalScheme
+            ]
+      legacySession <- expectRight $ LengthProblem.sealLengthSession
+        Length.defaultLengthLimits inventory
+        Length.BuiltinListSpine [legacy]
+      conditionalSession <- expectRight $ LengthProblem.sealLengthSession
+        Length.defaultLengthLimits inventory
+        Length.BuiltinListSpine [conditional]
+      mixedSession <- expectRight $ LengthProblem.sealLengthSession
+        Length.defaultLengthLimits inventory
+        Length.BuiltinListSpine [legacy, conditional]
+      legacyMixedRoleSession <- expectRight
+        $ LengthProblem.sealRoleAwareLengthSession
+            Length.defaultLengthLimits
+            [ Length.LengthUnobservedTarget
+            , Length.LengthObservedSpine
+            ]
+            inventory Length.BuiltinListSpine [legacy]
+      conditionalMixedRoleSession <- expectRight
+        $ LengthProblem.sealRoleAwareLengthSession
+            Length.defaultLengthLimits
+            [ Length.LengthUnobservedTarget
+            , Length.LengthObservedSpine
+            ]
+            inventory Length.BuiltinListSpine [legacy, conditional]
+      legacyExactCaseSession <- expectRight
+        $ LengthProblem.sealExactSpineCaseLengthSession
+            Length.defaultLengthLimits [Length.LengthObservedSpine]
+            inventory Length.BuiltinListSpine [legacy]
+      conditionalExactCaseSession <- expectRight
+        $ LengthProblem.sealExactSpineCaseLengthSession
+            Length.defaultLengthLimits [Length.LengthObservedSpine]
+            inventory Length.BuiltinListSpine [legacy, conditional]
+      let providerFingerprint = Length.lengthProviderInventoryFingerprint
+            . LengthProblem.checkedLengthSessionProviderInventory
+          canonical = Fingerprint.fingerprintCanonicalBytes
+          providerBytes = canonical . providerFingerprint
+          inventoryBytes = canonical
+            . LengthProblem.lengthSessionInventoryFingerprint
+          policyBytes = canonical
+            . LengthProblem.lengthSessionEncodingPolicyFingerprint
+          versionPrefix version =
+            [ 0x44, 0x4a, 0x45, 0x58, 0x46, 0x50
+            , 0x01, 0x01, 0x01, version
+            ]
+          conditionalTrustTag = asciiBytes
+            "conditional-on-independent-ground-constraint-discharge/v1"
+          retentionPolicyTag = asciiBytes
+            "retain-constraint-conditional-provider-laws/v1"
+      take 10 (providerBytes legacySession) @?= versionPrefix 2
+      take 10 (providerBytes conditionalSession) @?= versionPrefix 3
+      take 10 (providerBytes mixedSession) @?= versionPrefix 3
+      take 10 (inventoryBytes legacySession) @?= versionPrefix 1
+      take 10 (inventoryBytes conditionalSession) @?= versionPrefix 2
+      take 10 (inventoryBytes mixedSession) @?= versionPrefix 2
+      assertBool "conditional trust was omitted from provider identity" $
+        conditionalTrustTag `isInfixOf` providerBytes conditionalSession
+      assertBool "mixed provider identity omitted conditional trust" $
+        conditionalTrustTag `isInfixOf` providerBytes mixedSession
+      assertBool "legacy provider identity gained conditional trust" $
+        not $ conditionalTrustTag `isInfixOf` providerBytes legacySession
+      assertBool "conditional semantic inventory omitted retention policy" $
+        retentionPolicyTag `isInfixOf` inventoryBytes conditionalSession
+      assertBool "mixed semantic inventory omitted retention policy" $
+        retentionPolicyTag `isInfixOf` inventoryBytes mixedSession
+      assertBool "legacy semantic inventory gained retention policy" $
+        not $ retentionPolicyTag `isInfixOf` inventoryBytes legacySession
+      take 10 (policyBytes conditionalSession) @?= versionPrefix 5
+      take 10 (policyBytes conditionalMixedRoleSession) @?= versionPrefix 6
+      take 10 (policyBytes conditionalExactCaseSession) @?= versionPrefix 7
+      LengthProblem.lengthSessionEncodingPolicyFingerprint conditionalSession
+        @?= LengthProblem.lengthSessionEncodingPolicyFingerprint legacySession
+      LengthProblem.lengthSessionEncodingPolicyFingerprint
+          conditionalMixedRoleSession @?=
+        LengthProblem.lengthSessionEncodingPolicyFingerprint
+          legacyMixedRoleSession
+      LengthProblem.lengthSessionEncodingPolicyFingerprint
+          conditionalExactCaseSession @?=
+        LengthProblem.lengthSessionEncodingPolicyFingerprint
+          legacyExactCaseSession
+      ( canonicalFingerprintSHA256 $ providerFingerprint legacySession
+        , canonicalFingerprintSHA256
+            $ LengthProblem.lengthSessionInventoryFingerprint legacySession
+        ) @?=
+        ( "7c2ccf1a7cbd05cf2ce3fb7f66626495c199491fafc35651582b17243aaf0119"
+        , "a73933cfe915ff842b928532aa3b6d10f1e78d6d8a1b9da327a54abf1439b9b1"
+        )
   , testCase "bound target roles after existing session authority" $ do
       let inventory = sessionInventory () []
           limits = limitsWith $ \source -> source
@@ -2303,6 +2425,38 @@ candidateProblemTests = testGroup "typed candidate behavioral problems"
           (Length.LengthVariable $ Length.LengthInput 0)
       LengthProblem.checkedLengthCandidateUsedProviders checkedCandidate @?=
         [providerName]
+  , testCase
+      "require discharge before interpreting a direct conditional provider" $ do
+      className <- expectName "Fixture.DirectConditionalConstraint"
+      providerName <- expectName "Fixture.directConditionalProvider"
+      let scheme = ForallType [] [Constraint className []]
+            adversarialClosedList
+          classDeclaration = ClassDeclaration () className [] [] []
+          declaration = ValueDeclaration
+            $ ValueSignature () providerName scheme
+          provider = Length.AssumedConstraintConditionalProviderSummary
+            { Length.lengthProviderName = providerName
+            , Length.lengthProviderScheme = scheme
+            , Length.lengthProviderArgumentRoles = []
+            , Length.lengthProviderTransfer = Length.LengthLiteral 0
+            }
+          source = Djex.TermGraphSource (Djex.termNodeId 0)
+            [ ( Djex.termNodeId 0
+              , Djex.TermNode adversarialClosedList
+                  $ Djex.TypedGlobal (Djex.occurrenceId 0) providerName
+              )
+            ]
+      session <- adversarialLengthSession
+        [classDeclaration, declaration] [provider]
+      contract <- adversarialLengthContract
+        session adversarialClosedList trivialLengthContract
+      graph <- sealAdversarialGraph source
+      assertLeft
+        (LengthProblem.LengthProblemConditionalProviderRequiresDischarge
+          (Djex.termNodeId 0) providerName)
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session contract
+            $ adversarialTypedCandidate $ Right graph
   , testCase "substitute a checked modulo provider transfer into the problem" $ do
       problem <- adversarialModuloProviderProblem 3 identityLengthContract
       let input = Length.LengthVariable $ Length.LengthInput 0
@@ -3133,7 +3287,8 @@ associatedCertificateCandidateTests = testGroup
             noSummarySession noSummaryContract
             $ associatedAdversarialTypedCandidate
                 adversarialCompatibility checked
-  , testCase "reject the first activated obligation without raw coordinates" $ do
+  , testCase
+      "reject activated obligations before conditional provider discharge" $ do
       providerName <- expectName "Fixture.contextualAssociatedProvider"
       className <- expectName "Fixture.AssociatedConstraint"
       let binder = FlexibleVariable "contextual-associated-element"
@@ -3148,14 +3303,60 @@ associatedCertificateCandidateTests = testGroup
           classDeclaration = ClassDeclaration () className
             [TypeParameter classBinder (Just ProperTypeKind)] [] []
           obligations = [Constraint className [selected]]
+          provider = Length.AssumedConstraintConditionalProviderSummary
+            { Length.lengthProviderName = providerName
+            , Length.lengthProviderScheme = scheme
+            , Length.lengthProviderArgumentRoles = []
+            , Length.lengthProviderTransfer = Length.LengthLiteral 0
+            }
       checked <- associatedProviderCertificateGraph
         providerName scheme selected result obligations 7 0 1 10 11
       session <- adversarialLengthSession
-        [classDeclaration, declaration] []
+        [classDeclaration, declaration] [provider]
       contract <- adversarialLengthContract session result trivialLengthContract
       assertLeft
         (LengthProblem.LengthProblemAssociatedCertificateActivatedObligations
           providerName 0 0 1)
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session contract
+            $ associatedAdversarialTypedCandidate
+                adversarialCompatibility checked
+  , testCase
+      "reject a direct conditional occurrence after associated authority" $ do
+      associatedName <- expectName "Fixture.associatedLegacyProvider"
+      conditionalName <- expectName "Fixture.associatedConditionalProvider"
+      className <- expectName "Fixture.AssociatedConditionalConstraint"
+      let associatedScheme = associatedProviderScheme
+            "associated-legacy-element"
+          selected = TupleType Boxed []
+          result = adversarialListOf selected
+          conditionalScheme = ForallType [] [Constraint className []] result
+          declarations =
+            [ ClassDeclaration () className [] [] []
+            , ValueDeclaration
+                $ ValueSignature () associatedName associatedScheme
+            , ValueDeclaration
+                $ ValueSignature () conditionalName conditionalScheme
+            ]
+          associatedProvider = associatedProviderSummary
+            associatedName associatedScheme
+          conditionalProvider =
+            Length.AssumedConstraintConditionalProviderSummary
+            { Length.lengthProviderName = conditionalName
+            , Length.lengthProviderScheme = conditionalScheme
+            , Length.lengthProviderArgumentRoles = []
+            , Length.lengthProviderTransfer = Length.LengthLiteral 0
+            }
+      checked <- associatedGraphWithDirectConditionalProvider
+        associatedName associatedScheme selected result
+        conditionalName conditionalScheme
+      session <- adversarialLengthSession
+        declarations [associatedProvider, conditionalProvider]
+      contract <- adversarialLengthContract
+        session result trivialLengthContract
+      assertLeft
+        (LengthProblem.LengthProblemConditionalProviderRequiresDischarge
+          (Djex.termNodeId 2) conditionalName)
         $ LengthProblem.sealLengthTypedCandidateProblem
             LengthProblem.defaultLengthProblemLimits session contract
             $ associatedAdversarialTypedCandidate
@@ -6201,6 +6402,58 @@ providerTests = testGroup "assumed provider inventory"
           Length.LengthProviderConstrainedScheme)
         $ Length.sealLengthProviderInventory
             Length.defaultLengthLimits inventory [source]
+  , testCase "require constraints on an explicitly conditional provider" $ do
+      providerName <- expectName "Fixture.emptyConditionalContext"
+      let scheme = ForallType ["element"] [] $ FunctionType
+            (listOf $ TypeVariable "element")
+            (listOf $ TypeVariable "element")
+          source = conditionalProviderSource providerName scheme
+            [Length.LengthSpineArgument]
+            (Length.LengthVariable $ Length.LengthProviderArgument 0)
+      assertLeft
+        (Length.LengthProviderSummaryRejected 0 providerName
+          Length.LengthProviderConditionalSchemeHasNoConstraints)
+        $ sealProviderInventory Length.defaultLengthLimits [source]
+  , testCase
+      "retain conditional source schemes, roles, transfers, and trust" $ do
+      className <- expectName "Fixture.ConditionalProviderConstraint"
+      providerName <- expectName "Fixture.conditionalProvider"
+      let sourceBinder = "source-element"
+          claimedBinder = "claimed-element"
+          classBinder = "class-element"
+          classDeclaration :: Declaration String () ()
+          classDeclaration = ClassDeclaration () className
+            [TypeParameter classBinder (Just ProperTypeKind)] [] []
+          sourceScheme = ForallType [sourceBinder]
+            [Constraint className [TypeVariable sourceBinder]]
+            $ FunctionType
+                (listOf $ TypeVariable sourceBinder)
+                (listOf $ TypeVariable sourceBinder)
+          claimedScheme = ForallType [claimedBinder]
+            [Constraint className [TypeVariable claimedBinder]]
+            $ FunctionType
+                (listOf $ TypeVariable claimedBinder)
+                (listOf $ TypeVariable claimedBinder)
+          roles = [Length.LengthSpineArgument]
+          transfer = Length.LengthVariable $ Length.LengthProviderArgument 0
+          source = conditionalProviderSource providerName claimedScheme
+            roles transfer
+      inventory <- expectRight $ mkInventory ClosedKindInventory
+        [ classDeclaration
+        , ValueDeclaration $ ValueSignature () providerName sourceScheme
+        ]
+      checkedInventory <- expectRight $ Length.sealLengthProviderInventory
+        Length.defaultLengthLimits inventory [source]
+      checked <- case Length.lookupCheckedLengthProviderSummary
+          providerName checkedInventory of
+        Nothing -> assertFailure "conditional provider disappeared"
+        Just summary -> pure summary
+      Length.checkedLengthProviderName checked @?= providerName
+      Length.checkedLengthProviderScheme checked @?= sourceScheme
+      Length.checkedLengthProviderArgumentRoles checked @?= roles
+      Length.checkedLengthProviderTransfer checked @?= transfer
+      Length.checkedLengthProviderTrust checked @?=
+        Length.AssumedProviderLawConditionalOnConstraintDischarge
   , testCase "reject direct rank-N spines and observed non-list arguments" $ do
       rankNName <- expectName "Fixture.rankN"
       nonListName <- expectName "Fixture.nonList"
@@ -6398,6 +6651,33 @@ evaluationTests = testGroup "solver-neutral concrete replay"
         (Evaluate.LengthContractAssignmentArityMismatch 1 2)
       providerResult @?= Left
         (Evaluate.LengthProviderAssignmentArityMismatch 1 2)
+  , testCase
+      "require conditional discharge before demanding provider arguments" $ do
+      className <- expectName "Fixture.EvaluationConditionalConstraint"
+      providerName <- expectName "Fixture.evaluationConditionalProvider"
+      let scheme = ForallType [] [Constraint className []] $ FunctionType
+            (listOf closedPayloadType) (listOf closedPayloadType)
+          source = conditionalProviderSource providerName scheme
+            [Length.LengthSpineArgument]
+            (Length.LengthVariable $ Length.LengthProviderArgument 0)
+          classDeclaration :: Declaration String () ()
+          classDeclaration = ClassDeclaration () className [] [] []
+          poisonArguments :: [Evaluate.LengthProviderArgumentValue]
+          poisonArguments = error "conditional replay demanded arguments"
+      inventory <- expectRight $ mkInventory ClosedKindInventory
+        [ classDeclaration
+        , ValueDeclaration $ ValueSignature () providerName scheme
+        ]
+      checkedInventory <- expectRight $ Length.sealLengthProviderInventory
+        Length.defaultLengthLimits inventory [source]
+      checked <- case Length.lookupCheckedLengthProviderSummary
+          providerName checkedInventory of
+        Nothing -> assertFailure "conditional replay provider disappeared"
+        Just summary -> pure summary
+      observed <- evaluateWithin $ Evaluate.evaluateLengthProviderApplication
+        Evaluate.defaultLengthEvaluationLimits checked poisonArguments
+      assertLeft
+        Evaluate.LengthEvaluationConditionalProviderRequiresDischarge observed
   , testCase "enforce assignment and intermediate bit bounds by site" $ do
       let target = FunctionType
             (listOf closedPayloadType) (listOf closedPayloadType)
@@ -7238,6 +7518,55 @@ associatedProviderCertificateGraph owner scheme selected result obligations
           [ InternalCertificate.TypeApplicationCertificateObservation
               0 scheme selected result obligations
           ]
+  expectRight $
+    InternalCertificateAssociation.sealCheckedTypeApplicationCertificateGraph
+      InternalCertificate.defaultTypeApplicationCertificateLimits
+      Djex.sharedTypeStructure Djex.defaultTermGraphLimits source [origin]
+
+associatedGraphWithDirectConditionalProvider
+  :: Name
+  -> AdversarialType
+  -> AdversarialType
+  -> AdversarialType
+  -> Name
+  -> AdversarialType
+  -> IO AdversarialCertificateGraph
+associatedGraphWithDirectConditionalProvider owner scheme selected result
+    conditionalOwner conditionalScheme = do
+  argument <- expectRight $ Djex.specifiedVisibleTypeArgument selected
+  let certificate = Djex.certificateId 7
+      source = Djex.TermGraphSource (Djex.termNodeId 3)
+        [ ( Djex.termNodeId 0
+          , Djex.TermNode scheme
+              $ Djex.TypedGlobal (Djex.occurrenceId 0) owner
+          )
+        , ( Djex.termNodeId 1
+          , Djex.TermNode result
+              $ Djex.TypedVisibleTypeApplication
+                  (Djex.occurrenceId 1)
+                  (Djex.termNodeId 0)
+                  argument
+                  (Djex.TypeApplicationWitness
+                    scheme selected result $ Just (certificate, 0))
+          )
+        , ( Djex.termNodeId 2
+          , Djex.TermNode conditionalScheme
+              $ Djex.TypedGlobal (Djex.occurrenceId 2) conditionalOwner
+          )
+        , ( Djex.termNodeId 3
+          , Djex.TermNode result
+              $ Djex.TypedLet
+                  (Djex.TypedPattern
+                    (Djex.occurrenceId 3) conditionalScheme Djex.TypedWildcard)
+                  (Djex.termNodeId 2)
+                  (Djex.termNodeId 1)
+          )
+        ]
+      origin = InternalCertificateAssociation.TypeApplicationCertificateOrigin
+        certificate owner scheme
+        [ InternalCertificate.TypeApplicationCertificateObservation
+            0 scheme selected result []
+        ]
   expectRight $
     InternalCertificateAssociation.sealCheckedTypeApplicationCertificateGraph
       InternalCertificate.defaultTypeApplicationCertificateLimits
@@ -8437,6 +8766,20 @@ providerSource
   -> Length.LengthProviderSummarySource String
 providerSource providerName scheme roles transfer =
   Length.AssumedProviderSummary
+    { Length.lengthProviderName = providerName
+    , Length.lengthProviderScheme = scheme
+    , Length.lengthProviderArgumentRoles = roles
+    , Length.lengthProviderTransfer = transfer
+    }
+
+conditionalProviderSource
+  :: Name
+  -> Type String
+  -> [Length.LengthProviderArgumentRole]
+  -> Length.LengthExpression Length.LengthProviderVariable
+  -> Length.LengthProviderSummarySource String
+conditionalProviderSource providerName scheme roles transfer =
+  Length.AssumedConstraintConditionalProviderSummary
     { Length.lengthProviderName = providerName
     , Length.lengthProviderScheme = scheme
     , Length.lengthProviderArgumentRoles = roles

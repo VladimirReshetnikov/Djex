@@ -8,7 +8,10 @@
 -- deliberately consumes only opaque checked values: evaluating a caller-built
 -- raw syntax tree here could diverge before the length sealer's structural
 -- bounds were established.  Detached contract and provider results classify
--- one assignment without evidence authority.  Whole-problem replay can bind
+-- one assignment without evidence authority.  A constraint-conditional
+-- provider summary is retained for a later candidate-local discharge boundary
+-- and is rejected here before its arguments are inspected.  Whole-problem
+-- replay can bind
 -- an exact model-relative counterexample receipt to the sealed problem
 -- identities; it still supplies neither universal evidence nor permission to
 -- prune other candidates.
@@ -53,11 +56,13 @@ import Language.Haskell.Synthesis.Semantic.Length
   , LengthExpression (..)
   , LengthFormula (..)
   , LengthProviderArgumentRole (..)
+  , LengthProviderTrust (..)
   , LengthProviderVariable (..)
   , checkedLengthContractInputCount
   , checkedLengthContractPostcondition
   , checkedLengthContractPrecondition
   , checkedLengthProviderArgumentRoles
+  , checkedLengthProviderTrust
   , checkedLengthProviderTransfer
   )
 import Language.Haskell.Synthesis.Semantic.Length.Problem
@@ -197,6 +202,9 @@ data LengthEvaluationError
   | LengthProviderAssignmentArityMismatch !Int !Int
   | LengthProviderArgumentRoleMismatch
       !Int !LengthProviderArgumentRole !LengthProviderArgumentValue
+  -- | The checked summary retains a nonempty constraint context, but this
+  -- standalone evaluator has no candidate-local dictionary authority.
+  | LengthEvaluationConditionalProviderRequiresDischarge
   | LengthEvaluationValueBitLimitExceeded
       !LengthEvaluationValueSite !Int !Int
   | LengthEvaluationInternalContractReference !LengthContractVariable
@@ -302,15 +310,21 @@ evaluateLengthContractAssignment limits contract assignment = do
         then LengthPostconditionSatisfied
         else LengthPostconditionViolated
 
--- | Evaluate one exact provider application under its checked assumed law.
--- The result remains conditional on that explicit assumption and carries no
--- behavioral-evidence authority.
+-- | Evaluate one exact context-free provider application under its checked
+-- assumed law.  The result remains conditional on that explicit assumption
+-- and carries no behavioral-evidence authority.  A retained
+-- constraint-conditional summary fails before assignment arity, roles, or
+-- values are inspected; this evaluator cannot discharge its context.
 evaluateLengthProviderApplication
   :: LengthEvaluationLimits
   -> CheckedLengthProviderSummary variable
   -> [LengthProviderArgumentValue]
   -> Either LengthEvaluationError Natural
 evaluateLengthProviderApplication limits summary rawArguments = do
+  case checkedLengthProviderTrust summary of
+    AssumedProviderLaw -> pure ()
+    AssumedProviderLawConditionalOnConstraintDischarge ->
+      Left LengthEvaluationConditionalProviderRequiresDischarge
   let roles = checkedLengthProviderArgumentRoles summary
   arguments <- exactAssignment LengthProviderAssignmentArityMismatch
     (length roles) rawArguments

@@ -3,11 +3,19 @@
 -- This module describes only total finite list-spine lengths over unbounded
 -- natural numbers.  List payloads remain opaque.  Provider summaries are
 -- explicit assumptions for search guidance; they are not behavioral evidence.
+-- The historical context-free source remains directly usable under that
+-- assumption.  The additive conditional source retains one exact closed
+-- scheme with a nonempty leading constraint context, but neither candidate
+-- interpretation nor standalone provider evaluation may use it until a later
+-- candidate-local discharge authority is added.  Length does not consume or
+-- associate checked class-resolution receipts here; Z3 is never dictionary
+-- authority.
 -- A checked context retains the exact opaque @Inventory@ that supplies kind
 -- and declaration authority together with either the versioned built-in list
 -- spine or an exactly named, structurally validated unary datatype spine.
--- Provider schemes are resolved from that inventory rather than trusted from
--- caller input.  A later behavioral-problem constructor must still bind this
+-- Provider schemes, including retained contexts, are resolved from that
+-- inventory rather than trusted from caller input.  A later
+-- behavioral-problem constructor must still bind this
 -- context to its exact typed target/candidate and encoding identities before
 -- any observation may be replayed as evidence. The smaller checked contract
 -- and provider-inventory values retain fingerprints rather than the complete

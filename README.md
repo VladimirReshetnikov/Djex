@@ -349,11 +349,11 @@ inspected, then that goal must validate and canonicalize to the retained goal.
 The projected goal and proof tree are diagnostics and cannot be recombined with
 different retained resolver authority.
 
-Nothing consumes this authority yet. Djinn and Exference keep their existing
-backend policies; certificate rows and graph fingerprints still establish no
-constraint discharge; and Length acceptance, fingerprints, and identity
-schemas are unchanged. Z3 observations remain behavioral heuristics and never
-supply dictionary evidence. See the
+Nothing consumes this resolver authority yet. Djinn and Exference keep their
+existing backend policies, while Length can retain a constrained provider
+scheme only as unusable conditional authority; certificate rows and graph
+fingerprints still establish no constraint discharge. Z3 observations remain
+behavioral heuristics and never supply dictionary evidence. See the
 [checked class-resolution foundation report](docs/reports/2026-08-13-checked-class-resolution-foundation.md).
 
 ## Finite list-spine length contracts
@@ -373,13 +373,20 @@ sealed through that context remain opaque values available from the curated
 Provider summaries are an explicit trust boundary. A provider name must resolve
 in the retained source inventory, and the caller's claimed scheme must be
 alpha-equivalent to the closed scheme derived from that exact declaration. The
-checked value stores the source-derived scheme, never the caller's copy. Each
-summary is still only an assumed law, uniform over the instances of its closed,
-context-free scheme; it is search guidance, not behavioral evidence. A spine
-role says that the law may reference that argument's list length; it does not
-require the normalized transfer to mention it. An unobserved role does not
-assert purity, totality, strictness, absence of effects or type reflection, or
-even that the provider will not evaluate the argument.
+checked value stores the source-derived scheme, never the caller's copy. The
+legacy `AssumedProviderSummary` remains an assumed law over a closed,
+context-free scheme, with its constructor behavior and exact fingerprint bytes
+unchanged. The additive
+`AssumedConstraintConditionalProviderSummary` instead requires and retains a
+closed scheme with a nonempty leading constraint context and records
+`AssumedProviderLawConditionalOnConstraintDischarge`. It is retention for a
+later candidate-local discharge boundary, not permission to apply the law:
+standalone evaluation and every current candidate interpreter reject it. Both
+forms are search assumptions rather than behavioral evidence. A spine role says
+that the law may reference that argument's list length; it does not require the
+normalized transfer to mention it. An unobserved role does not assert purity,
+totality, strictness, absence of effects or type reflection, or even that the
+provider will not evaluate the argument.
 
 The identities deliberately remain split. Contract and provider-inventory
 fingerprints include the exact checked spine model. A contract fingerprint also
@@ -396,6 +403,16 @@ encoding-policy fingerprint identifies only the solver-neutral arithmetic,
 normalization, and fail-closed candidate policy. It deliberately does not claim
 the generic behavioral encoding role: a concrete encoding must additionally
 bind a re-sealed contract and normalized interpreted candidate formula.
+
+Inventories containing only legacy provider summaries retain the exact
+provider-inventory v2 and semantic-inventory v1 bytes. Presence of any
+constraint-conditional summary advances only those envelopes to provider
+inventory v3 and semantic inventory v2; the latter also binds the explicit
+retention-only constraint policy. No encoding, candidate, complete-problem, or
+query identity schema or version changes in this checkpoint. Enclosing
+identities still bind the semantic inventory in the usual way, so a session
+which actually contains conditional authority remains distinguishable through
+that existing composition.
 
 The smaller provider-inventory fingerprint still does not identify provider
 implementations or the complete source inventory. The atomic session does, and
@@ -422,7 +439,12 @@ inventory scheme, have no activated obligations, and resolve to a checked
 Length provider summary. Provider-summary scheme equality is already an opaque
 session co-sealing invariant after the exact inventory-source match; only its
 presence remains dynamic here. Modeled zero/step constructors are not admitted
-as certificate owners in this checkpoint. An empty association is exactly the
+as certificate owners in this checkpoint. Activated obligations still fail at
+the existing row-authorization gate. Complete specialization of a constrained
+source activates its nonempty context and therefore fails there. An
+obligation-free association for another provider cannot authorize a separate
+constraint-conditional occurrence: provider interpretation returns a distinct
+discharge-required failure. An empty association is exactly the
 plain v1 graph and candidate identity path. The contract's
 free flexible variables are treated as implicit source quantifiers only at the
 root boundary; the engine's corresponding selections must be distinct rigid
@@ -468,6 +490,8 @@ application, ordinary certificate-free visible type application, tuples,
 lets, bind/wildcard/tuple/as patterns, the checked zero and step constructors,
 and checked provider transfers. They additionally admit a nonempty opaque
 association only for an exact, obligation-free provider visible application.
+Only a legacy context-free provider law can pass interpretation; a retained
+constraint-conditional law fails closed before its transfer is used.
 The stamped bare graph remains insufficient and is still rejected by the
 public graph fingerprint. Their case and constructor-pattern boundary stays
 fail-closed except through the separately selected exact-case policy.
@@ -521,9 +545,10 @@ detached certificate-bearing graphs fail closed. Opaque associated graphs are
 accepted only for exact inventory-owned providers with empty activated
 obligations; modeled constructor owners remain unsupported. Empty obligations
 are a structural admission rule, not evidence of dictionary or instance
-discharge. Length does not consume the new checked class-resolution receipt
-here, no instance/discharge identity is retained, and Z3 can never supply
-dictionary evidence. Explicit graph-byte and
+discharge. A conditional summary's retained context does not relax this rule.
+Length does not consume the checked class-resolution receipt here, no
+instance/discharge identity is retained, and Z3 can never supply dictionary
+evidence. Explicit graph-byte and
 evaluation step limits still bound candidate work.
 
 The integration suite exercises this foundation through the public production
@@ -553,16 +578,21 @@ exact v1 candidate key. This changes neither solver replay nor behavioral
 evidence authority: Z3 output remains heuristic until the same independently
 sealed problem replays it, and even successful behavioral replay is not
 dictionary evidence. See the
-[associated provider-certificate Length report](docs/reports/2026-08-13-length-associated-provider-certificates.md).
+[associated provider-certificate Length report](docs/reports/2026-08-13-length-associated-provider-certificates.md)
+and the
+[conditional provider-summary retention report](docs/reports/2026-08-13-length-conditional-provider-summary-retention.md).
 
 On the legacy path, every contract argument and result must expose the
 context's outer modeled spine; their element types remain opaque and may
 themselves be impredicative, while a direct rank-N contract argument is
 rejected. On the role-aware path only observed arguments and the result must
 expose that spine; unobserved target arguments may be higher-order, rank-N, or
-otherwise non-spine. Provider schemes are closed and leading-context-free:
-spine-observed provider arguments and the result must use that same modeled
-spine, while unobserved provider arguments may be non-spine or rank-N values.
+otherwise non-spine. Legacy usable provider schemes are closed and
+leading-context-free. Conditional summaries may retain an exact nonempty
+leading context, but no current evaluator or candidate path may use them.
+For either retained form, spine-observed provider arguments and the result must
+use that same modeled spine, while unobserved provider arguments may be
+non-spine or rank-N values.
 `Language.Haskell.Synthesis.Semantic.Length.Evaluate` supplies bounded,
 deterministic evaluation of one concrete assignment, assumed provider call, or
 sealed candidate problem, including exact natural-number monus,
@@ -573,7 +603,9 @@ operand; normalization folds literal operands, removes quotient by one, and
 reduces every expression modulo one to zero. Its three-way
 detached-contract result
 distinguishes a failed precondition, a satisfied postcondition, and a violated
-postcondition. Whole-problem replay accepts only compact source-ordered
+postcondition. Standalone provider replay accepts only the context-free trust
+class and rejects a conditional summary before inspecting assignment arity,
+roles, or values. Whole-problem replay accepts only compact source-ordered
 observed-spine inputs, computes
 the candidate result itself, and produces an opaque counterexample receipt
 bound to the exact problem tuple only when the normalized bad-state formula is

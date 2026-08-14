@@ -371,7 +371,62 @@ facadeTests = testGroup "public Djex facade"
             , LengthProblemAssociatedCertificateProviderSummaryMissing name 0
             ] :: [LengthProblemError () String Int]
       rowError providerName @?= rowError providerName
-      (AssumedProviderLaw :: LengthProviderTrust) @?= minBound
+      conditionalClassName <- expectRight
+        $ mkIdentifier "ConditionalProviderClass"
+      conditionalProviderName <- expectRight
+        $ mkIdentifier "conditionalLengthProvider"
+      let conditionalScheme = ForallType []
+            [Constraint conditionalClassName []]
+            $ FunctionType listType listType
+          conditionalProvider :: LengthProviderSummarySource String
+          conditionalProvider = AssumedConstraintConditionalProviderSummary
+            conditionalProviderName
+            conditionalScheme
+            [LengthSpineArgument]
+            (LengthVariable $ LengthProviderArgument 0)
+      conditionalInventory <- expectRight
+        (mkInventory ClosedKindInventory
+          [ ClassDeclaration () conditionalClassName [] [] []
+          , ValueDeclaration
+              $ ValueSignature () conditionalProviderName conditionalScheme
+          ] :: Either
+              (InventoryError String Void)
+              (Inventory String ()))
+      conditionalContext <- expectRight $ sealLengthContext
+        defaultLengthLimits conditionalInventory BuiltinListSpine
+      checkedConditionalProviders <- expectRight
+        $ sealLengthProviderInventoryInContext defaultLengthLimits
+            conditionalContext [conditionalProvider]
+      case checkedLengthProviderSummaries checkedConditionalProviders of
+        [summary] -> do
+          checkedLengthProviderScheme summary @?= conditionalScheme
+          checkedLengthProviderTrust summary @?=
+            AssumedProviderLawConditionalOnConstraintDischarge
+          evaluateLengthProviderApplication defaultLengthEvaluationLimits
+              summary [ObservedSpineLength 7] @?=
+            Left LengthEvaluationConditionalProviderRequiresDischarge
+        summaries -> fail $ "unexpected checked conditional provider count: "
+          ++ show (length summaries)
+      case sealLengthProviderInventoryInContext
+          defaultLengthLimits checkedContext
+          [ AssumedConstraintConditionalProviderSummary
+              providerName providerScheme [LengthSpineArgument]
+              (LengthVariable $ LengthProviderArgument 0)
+          ] of
+        Left failure -> failure @?=
+          LengthProviderSummaryRejected 0 providerName
+            LengthProviderConditionalSchemeHasNoConstraints
+        Right _ -> fail "context-free conditional provider was admitted"
+      let conditionalProblemError =
+            LengthProblemConditionalProviderRequiresDischarge
+              (termNodeId 8) conditionalProviderName
+            :: LengthProblemError () String Int
+      conditionalProblemError @?=
+        LengthProblemConditionalProviderRequiresDischarge
+          (termNodeId 8) conditionalProviderName
+      [ AssumedProviderLaw
+        , AssumedProviderLawConditionalOnConstraintDischarge
+        ] @?= ([minBound .. maxBound] :: [LengthProviderTrust])
       [BuiltinStructuralListSpine, DerivedFromListLikeDataDeclaration] @?=
         [minBound .. maxBound]
   , testCase "exports the prepared class authority" $ do

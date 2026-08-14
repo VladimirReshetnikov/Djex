@@ -87,6 +87,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , LengthExpression (..)
   , LengthFormula (..)
   , LengthProviderArgumentRole (..)
+  , LengthProviderTrust (..)
   , LengthTargetArgumentRole (..)
   , LengthProviderVariable (..)
   , LengthSpineModelTrust (..)
@@ -100,6 +101,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , checkedLengthProviderArgumentRoles
   , checkedLengthProviderName
   , checkedLengthProviderScheme
+  , checkedLengthProviderTrust
   , checkedLengthProviderTransfer
   , checkedLengthSpineModelTrust
   , checkedLengthSpineRecursiveField
@@ -346,6 +348,11 @@ data LengthProblemError failure identity local
   -- 'Natural' is the canonical rooted-row ordinal; no raw certificate or graph
   -- coordinate is exposed.
   | LengthProblemAssociatedCertificateProviderSummaryMissing !Name !Natural
+  -- | A constrained provider summary is retained for a later discharge-aware
+  -- candidate boundary, but this candidate has no such authority.  The node
+  -- is the exact provider occurrence; no constraint or dictionary payload is
+  -- exposed.
+  | LengthProblemConditionalProviderRequiresDischarge !TermNodeId !Name
   | LengthProblemTermGraphFingerprintRejected
       (TermGraphFingerprintError identity local)
   | LengthProblemRootNodeMissing !TermNodeId
@@ -1186,9 +1193,14 @@ resolveGlobal inventory model providers authorized nodeId name actual
       ModeledStep (checkedLengthSpineRecursiveField model)
         <$ validateConstructor True
   | Just provider <- lookupCheckedLengthProviderSummary name providers =
-      if schemeAdmits authorized (checkedLengthProviderScheme provider) actual
-        then Right $ ModeledProvider provider
-        else rejectedInstantiation
+      case checkedLengthProviderTrust provider of
+        AssumedProviderLawConditionalOnConstraintDischarge -> Left
+          $ LengthProblemConditionalProviderRequiresDischarge nodeId name
+        AssumedProviderLaw ->
+          if schemeAdmits authorized
+              (checkedLengthProviderScheme provider) actual
+            then Right $ ModeledProvider provider
+            else rejectedInstantiation
   | otherwise = case inventoryTermScheme inventory name of
       Nothing -> Left $ LengthProblemGlobalNotInSourceInventory nodeId name
       Just _ -> Left $ LengthProblemGlobalHasNoLengthSummary nodeId name

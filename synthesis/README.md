@@ -178,9 +178,9 @@ and the
 | `Language.Haskell.Synthesis.Diagnostic` | Severity, stable code, checked source locations/spans, ordered context, and deterministic rendering. |
 | `Language.Haskell.Synthesis.Fingerprint` | Public inspection of opaque, nominal, collision-free canonical identities; construction and byte budgets remain package-private. |
 | `Language.Haskell.Synthesis.Semantic.Length` | Exact inventory-bound finite-spine contexts, normalized scalar and exact boxed binary-product contracts, source-bound assumed provider laws, and model-aware nominal fingerprints; an additive trust class retains exact nonempty constrained schemes under a dictionary-uniform conditional-law assumption, while every scalar byte stays exact. |
-| `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked scalar and binary-spine-product contracts, exact candidate problems, finite Cartesian input boxes, and direct, literal-ceiling positive-affine, relational positive-affine, strict relational positive-affine, root-quotient, cumulative root-extrema, or cumulative root-monus applicable domains, with nominally separate counterexample and positive bounded receipts; detached conditional-provider evaluation still fails before argument inspection. |
+| `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked scalar and binary-spine-product contracts, exact candidate problems, finite Cartesian input boxes, and direct, affine-consequence, or bounded Boolean-DNF finite-union applicable domains, with nominally separate counterexample and positive bounded receipts; detached conditional-provider evaluation still fails before argument inspection. |
 | `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and nominally distinct scalar/product typed-candidate behavioral problems: session-owned provider and restricted resolver authority, contract resealing, residual rejection, rigid root/provider authorization, mixed-role opaque targets, exact scalar zero/step cases inside product fields, and provider-only consumption of independently authorized certificate carriers. |
-| `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation plus exact input-symbol, natural-input, origin, finite-box, and direct, literal-ceiling positive-affine, relational positive-affine, strict relational positive-affine, root-quotient, cumulative root-extrema, or cumulative root-monus applicable-domain replay for nominally distinct checked scalar and binary-product Length problems, without launching or trusting a solver. |
+| `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation plus exact input-symbol, natural-input, origin, finite-box, single-box consequence, and Boolean-DNF finite-union applicable-domain replay for nominally distinct checked scalar and binary-product Length problems, without launching or trusting a solver. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` | Pure validated Z3 launch, resource, artifact, and response-decoder policy with a package-private complete identity and a byte-free digest-expectation presence classifier; it performs no IO or attestation. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` | Rank-N scoped capability-probed Z3 ownership for scalar and exact binary-product queries, with one shared 64-query lease budget, retained runtime-unscoped v1 usable-work tokens, recommended owner-thread-affine dynamically scoped v2 deadlines and cooperative checkpoints, nominal byte-free failures and observations, heuristic status/strength/use, and domain-specific query-first replay gates. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` | Opaque query-specific association of bounded raw solver reports, with heuristic-only safe projections and exact problem-plus-query replay before payload access. |
@@ -701,11 +701,10 @@ validation emits no command and consumes no solver observation.
 
 Only their scalar and product receipt tags add bytes. All predecessor APIs,
 receipts, and contract-through-live identities remain exact, including sealed
-query commands and fingerprints. Root extrema and root monus are the
-cumulative successors below. Bounded Boolean finite unions remain a separate
-authority and work-cap design. A future finite-union validator must replay
-explicit branch boxes rather than widening them to one componentwise-maximum
-rectangle.
+query commands and fingerprints. Root extrema, root monus, and bounded Boolean
+finite unions are the cumulative successors below. The finite-union entrance
+has its own receipt and work caps and replays explicit branch boxes rather than
+widening them to one componentwise-maximum rectangle.
 See the
 [strict relational positive-affine quotient applicable-domain report](../docs/reports/2026-08-15-strict-relational-positive-affine-quotient-length-applicable-domain.md).
 
@@ -894,10 +893,128 @@ fingerprints, protocols, executions, workers, runs, and observations remain
 literal. Query validation emits no command and consumes no solver result.
 Establishment remains bounded finite-spine/model-relative evidence, not
 universal proof, source-language totality, provider validation, or pruning
-authority. General may-zero and Boolean disjunctions require a separately
-capped explicit finite-union receipt and replay order; they must not be widened
-to one componentwise-maximum box. See the
+authority. The cumulative Boolean finite-union entrance below handles exact
+bounded formula-level alternatives without changing this single-box receipt.
+See the
 [root-monus applicable-domain report](../docs/reports/2026-08-15-root-monus-length-applicable-domain.md).
+
+The Boolean finite-union policy expands the complete normalized precondition
+under an exact signed DNF. Its problem entrances are
+`validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain`
+and
+`validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain`;
+its query-owned entrances use the same full suffix under the scalar and
+`SpinePair` SMT-LIB prefixes:
+
+```haskell
+scalarValidation =
+  validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    defaultLengthEvaluationLimits
+    defaultLengthInputBoxLimits
+    defaultLengthBooleanFiniteUnionLimits
+    scalarQuery
+
+pairValidation =
+  validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    defaultLengthEvaluationLimits
+    defaultLengthInputBoxLimits
+    defaultLengthBooleanFiniteUnionLimits
+    pairQuery
+```
+
+Positive truth and negative false produce one empty conjunction; their
+opposites produce no branches. Negation flips polarity. Positive `LengthAll`
+takes the Cartesian conjunction of child DNFs, while negative `LengthAll`
+takes their union. At-most is a positive or strict leaf. Positive equality is
+one leaf; negative equality splits exactly into `not(A<=B)` or `not(B<=A)`.
+The traversal opens no Boolean syntax inside `LengthIf` and delegates every
+signed leaf to the unchanged root-monus clause scanner.
+
+The raw complete-branch cap runs before canonicalization. Within the admitted
+DNF, literals and branches deduplicate, an exact literal/complement branch is
+dropped, and a strict literal-set superset is removed by absorption. Remaining
+branches use canonical `Set` order. Each has an independent rule cap and
+closure-inspection cap. Closure keeps the predecessor's seed partition,
+immutable-snapshot passes, ordered eligible-rule-once firing, and `min`
+merging. Contradiction drops one branch. After every branch closes, the first
+source input unbounded in any live branch returns ordinary inapplicability.
+
+Live branch maxima form zero-origin boxes. Equal boxes deduplicate and a
+componentwise-contained box is removed. Incomparable maxima remain a
+lexicographically ordered antichain; they are never replaced by their
+componentwise hull. Alternatives `[1,3]` and `[3,1]` therefore retain two
+boxes, 16 raw visits, and 12 unique assignments. Hull `[3,3]` would add four
+cross-corner assignments outside both alternatives and has no authority here.
+
+Raw visits sum each retained box's Cartesian cardinality, including overlap.
+After the new visit cap succeeds, last-input-fastest enumeration inserts each
+assignment into `Set [Natural]` under the existing unique-assignment cap.
+Original-formula replay consumes `Set.toAscList`, so evaluation errors and
+counterexamples follow one global lexicographic order rather than box order.
+Ignored clauses still decide applicability during that replay.
+
+Empty union retains no boxes and records zero visits, unique assignments, and
+applicable assignments without concrete candidate-result evaluation. Nullary true
+instead retains `[[]]`, admits one visit and unique assignment, and replays
+`[]`; nullary false is empty. A nonnullary true formula is missing its first
+compact input. These rules do not change predecessor contradiction or nullary
+behavior.
+
+The opaque `LengthBooleanFiniteUnionLimits` is built with
+`mkLengthBooleanFiniteUnionLimits`. Its five default projections are:
+
+```text
+lengthBooleanFiniteUnionGeneratedBranchLimit                 = 256
+lengthBooleanFiniteUnionRuleLimitPerBranch                   = 64
+lengthBooleanFiniteUnionClosureInspectionLimitPerBranch      = 4096
+lengthBooleanFiniteUnionRetainedBoxLimit                     = 256
+lengthBooleanFiniteUnionAssignmentVisitLimit                 = 262144
+```
+
+`LengthBooleanFiniteUnionLimitSource` exposes the corresponding signed
+`MaximumGeneratedBranches`, `MaximumRulesPerBranch`,
+`MaximumClosureInspectionsPerBranch`, `MaximumRetainedBoxes`, and
+`MaximumAssignmentVisits` fields. Negative fields fail in declaration order
+through `LengthBooleanFiniteUnionLimitError`. Existing input-box limits still
+own compact width and unique union cardinality; evaluation limits still own
+assigned and intermediate values.
+
+Failure order is width; raw branches; branch complement/dedup/subsumption;
+canonical branch rule and closure caps; contradiction drop; first missing
+input; box dedup/containment and retained-box cap; box/input values; raw
+visits; unique assignments; global replay; first evaluation failure or
+counterexample; receipt; query association. Direct failures use
+`LengthBooleanFiniteUnionApplicableDomainValidationError` or the nominal
+`LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError`. Query
+wrappers use the correspondingly nominal scalar/product SMT-LIB Boolean
+finite-union error types.
+
+The opaque receipts are
+`ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain`
+and
+`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain`.
+Their six projections expose inclusive maximum boxes, box count, raw visit
+count, unique assignment count, applicable count, and basis. Their exact tags
+are:
+
+```text
+finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-precondition-domain-establishment/v1
+finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-precondition-domain-establishment/v1
+```
+
+All predecessor scanners, receipts, errors, tags, normalized problem/query
+bytes, and runtime identities remain literal. Query validation emits no
+command and consumes no solver result. Establishment is bounded evidence for
+the complete applicable domain in the exact checked finite-spine model and
+retained provider-law basis; it is not source-language totality, provider
+validation, solver authority, universal proof, or pruning authority.
+
+Disjunctions hidden inside an atomic extrema or may-zero monus relation remain
+excluded. They require a separately named and tagged branch-producing atomic
+successor with all-or-nothing summaries, frozen branch accounting, the same
+explicit antichains, and the same global replay. It must never silently widen
+to a componentwise hull. See the
+[Boolean finite-union applicable-domain report](../docs/reports/2026-08-15-boolean-finite-union-length-applicable-domain.md).
 
 `FiniteBinaryProductSpineLengthsV1` adds a distinct checked domain for an exact
 boxed binary product whose two source-ordered fields are modeled finite

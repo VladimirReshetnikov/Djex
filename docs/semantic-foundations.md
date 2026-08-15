@@ -64,6 +64,7 @@ was reached.
   - [Strict relational positive-affine quotient applicable-domain validation](#strict-relational-positive-affine-quotient-applicable-domain-validation)
   - [Root-extrema applicable-domain validation](#root-extrema-applicable-domain-validation)
   - [Root-monus applicable-domain validation](#root-monus-applicable-domain-validation)
+  - [Boolean finite-union applicable-domain validation](#boolean-finite-union-applicable-domain-validation)
   - [Finite binary product spine lengths, offline and live SMT replay](#finite-binary-product-spine-lengths-offline-and-live-smt-replay)
     - [Offline product SMT queries and replay](#offline-product-smt-queries-and-replay)
     - [Live product queries](#live-product-queries)
@@ -1225,10 +1226,11 @@ finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-p
 Every predecessor API and receipt remains literal. Existing contracts,
 inventories, sessions, candidates, encodings, problems, query commands,
 symbols, value requests, fingerprints, protocols, processes, workers, runs,
-and observations retain their identities and bytes. Root extrema and root
-monus are the cumulative successors specified below. Bounded Boolean finite
-unions remain a separate authority and work-cap design. Such a design must not
-replace explicit branch boxes with a componentwise-maximum rectangle. See the
+and observations retain their identities and bytes. Root extrema, root monus,
+and bounded Boolean finite unions are the cumulative successors specified
+below. The finite-union receipt has separate work caps and retains explicit
+branch boxes rather than replacing them with a componentwise-maximum
+rectangle. See the
 [strict relational positive-affine quotient applicable-domain report](reports/2026-08-15-strict-relational-positive-affine-quotient-length-applicable-domain.md).
 
 ### Root-extrema applicable-domain validation
@@ -1476,13 +1478,123 @@ finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-r
 Establishment proves complete bounded replay only in the derived rectangle,
 under the checked finite-spine model and retained assumed-provider basis. It
 is not universal proof, source-language totality, provider implementation
-validation, solver authority, or permission to prune candidates. General
-may-zero monus, disjunctive extrema orientations, and nested Boolean coverage
-would require a new explicit finite-union receipt, canonical branch and replay
-orders, and separate branch/work/assignment caps. Such a design must replay
-the admitted union boxes directly; componentwise-maximum widening would add
-assignments outside every branch. See the
+validation, solver authority, or permission to prune candidates. The additive
+Boolean finite-union successor below handles bounded formula-level alternatives
+without changing this single-box receipt. See the
 [root-monus applicable-domain report](reports/2026-08-15-root-monus-length-applicable-domain.md).
+
+### Boolean finite-union applicable-domain validation
+
+The cumulative Boolean successor keeps every root-monus leaf rule literal and
+adds an exact bounded DNF over the normalized formula. Its scalar problem and
+query entrances are
+`validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain`
+and
+`validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain`.
+Both take `LengthEvaluationLimits`, `LengthInputBoxLimits`, and the new opaque
+`LengthBooleanFiniteUnionLimits` before the problem or query.
+
+The signed expansion has one fixed grammar:
+
+```text
++true / -false       -> one empty branch
++false / -true       -> no branches
++not F / -not F      -> expand -F / +F
++all [F_i]           -> Cartesian conjunction of +F_i branches
+-all [F_i]           -> union of -F_i branches
++(A<=B) / -(A<=B)    -> positive / strict at-most leaf
++(A=B)               -> one equality leaf
+-(A=B)               -> not(A<=B) or not(B<=A)
+```
+
+The final split is exact natural disequality. Expansion never descends into
+an expression-level `LengthIf`, and it does not expose a disjunction hidden
+inside one extrema or monus relation. Every signed leaf delegates to the
+existing root-monus clause scanner.
+
+The raw complete-branch cap runs before cleanup. Each admitted branch then
+becomes a sorted literal set: duplicate literals disappear, an exact
+literal/complement pair drops the branch, equal branches deduplicate, and a
+strict literal-set superset is removed by Boolean absorption. Remaining
+branches are ordered canonically. Each branch independently enforces its rule
+cap and closure-inspection cap. Closure retains constant-right seeding,
+immutable-snapshot passes, canonical inspection order, `min` merging, and
+eligible-rule-once removal. A contradiction drops that branch. All branches
+finish bounded closure before the first source input missing from any live
+branch returns ordinary inapplicability.
+
+Every fully bounded branch yields one zero-origin maximum box. Equal boxes
+deduplicate and a componentwise-contained box is removed; the remaining
+componentwise-maximal antichain is lexicographically ordered. Incomparable
+boxes are never widened to their componentwise hull. Thus `[1,3]` and `[3,1]`
+remain two boxes: their raw visit count is 16 and their exact union count is
+12, whereas hull `[3,3]` would add four cross-corner assignments outside both
+alternatives.
+
+The new raw visit count is the sum of retained box cardinalities, including
+overlap visits. After that cap succeeds, last-input-fastest traversal inserts
+assignments into `Set [Natural]`; the existing input-box assignment limit caps
+new unique values. Original-problem replay uses `Set.toAscList`, so indexed
+evaluation failures and counterexamples follow one global lexicographic order,
+not box order. The original checked precondition remains authoritative on
+every replayed value.
+
+Empty union is a positive explicit result: it retains no boxes and records
+zero visits, unique assignments, and applicable assignments without concrete
+replay. Nullary true instead retains `[[]]`, consumes one visit and unique
+assignment, and replays `[]`; nullary false is empty union. A nonnullary true
+branch is ordinarily missing input zero. These semantics are additive and do
+not change the predecessor's all-zero contradiction carrier or nullary path.
+
+`LengthBooleanFiniteUnionLimitSource` declares, and
+`mkLengthBooleanFiniteUnionLimits` validates in order, maximum generated
+branches, rules per branch, closure inspections per branch, retained boxes,
+and assignment visits. Their defaults are respectively 256, 64, 4096, 256,
+and 262144. The five public projections begin
+`lengthBooleanFiniteUnion` and end `GeneratedBranchLimit`,
+`RuleLimitPerBranch`, `ClosureInspectionLimitPerBranch`, `RetainedBoxLimit`,
+and `AssignmentVisitLimit`. The source fields are signed `Int` values;
+negative construction fails through `LengthBooleanFiniteUnionLimitError`.
+
+Failure precedence is width; raw branch cap; branch complement/dedup/
+subsumption; canonical per-branch rule and closure caps; contradiction drop;
+first missing input; box dedup/containment and retained-box cap; box/input value
+checks; raw visits; unique assignment cap; global replay; first evaluation
+failure or counterexample; receipt; final query association. Scalar direct
+errors inhabit `LengthBooleanFiniteUnionApplicableDomainValidationError`.
+Product direct errors inhabit the nominal
+`LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError`; query
+wrappers use the correspondingly nominal
+`LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError` and
+`LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationError`.
+
+Complete traversal returns opaque, nominally disjoint
+`ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain`
+or
+`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain`.
+Their six projections expose canonical inclusive maximum boxes, box count, raw
+visit count, unique assignment count, applicable count, and the exact
+finite-spine/provider-law basis. Their tags are:
+
+```text
+finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-precondition-domain-establishment/v1
+finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-precondition-domain-establishment/v1
+```
+
+No DNF, rule, box, assignment set, or operational limit enters SMT-LIB or a
+problem/query identity. Every predecessor API, receipt, scanner, tag, and
+contract-through-live byte sequence remains literal. The query wrapper emits
+no command and consumes no status; it supplies only exact evidence/problem
+association. Establishment is complete only for the checked finite-spine model
+and retained provider-law basis. It is not source-language realization,
+provider validation, solver authority, universal proof, or pruning authority.
+
+Disjunctive extrema orientations and may-zero monus laws remain atomic-leaf
+gaps. Supporting them requires a separately named and tagged successor whose
+atomic scanner emits exact ordered branches all-or-nothing under a frozen cap.
+It must reuse explicit branch/box antichains and global union replay, never
+silently modify this v1 or introduce a componentwise hull. See the
+[Boolean finite-union applicable-domain report](reports/2026-08-15-boolean-finite-union-length-applicable-domain.md).
 
 ### Finite binary product spine lengths, offline and live SMT replay
 

@@ -177,6 +177,8 @@ descriptorBoundProcessTests = testGroup
       assertDescriptorBoundDigestMismatch
   , testCase "reject open, symlink, nonregular, and nonexecutable sources"
       assertDescriptorBoundSourceFailures
+  , testCase "enforce the staged source byte cap at exact and maximum plus one"
+      assertDescriptorBoundExecutableByteCap
   , testCase "classify a staged-image exec failure and reap its child"
       assertDescriptorBoundExecFailure
   , testCase "cancel a blocked post-seal hook without allocating a child"
@@ -351,6 +353,54 @@ assertDescriptorBoundSourceFailures =
             Process.LengthSMTLibProcessSnapshotPhase expectedClass Nothing opened
           reached <- readIORef hookReached
           assertBool (label ++ " reached the post-seal hook") $ not reached
+
+assertDescriptorBoundExecutableByteCap :: IO ()
+assertDescriptorBoundExecutableByteCap = withFakeZ3Mode "healthy"
+  $ \executable image -> withDescriptorWorkingDirectory
+  $ \workingDirectory workingDescriptor -> do
+    let imageBytes = byteStringLength image
+        withMaximum maximumBytes source = source
+          { Process.lengthSMTLibProcessLimitSourceExecutableBytes =
+              maximumBytes }
+    assertBool "fake executable unexpectedly had at most one byte"
+      $ imageBytes > 1
+    profile <- descriptorBoundProfile executable Nothing
+    exactLimits <- expectRight $ Process.mkLengthSMTLibProcessLimits
+      $ withMaximum imageBytes Process.defaultLengthSMTLibProcessLimitSource
+    exactCancellation <- Process.newLengthSMTLibProcessCancellation
+    exactDeadline <- expectRight =<<
+      Process.lengthSMTLibProcessDeadlineAfterMilliseconds 3000
+    exact <- Process.openLengthSMTLibDescriptorBoundProcess exactLimits
+      exactCancellation exactDeadline profile workingDirectory workingDescriptor
+    exactProcess <- expectRight exact
+    Process.lengthSMTLibExecutableSnapshotByteCount
+        (Process.lengthSMTLibProcessSnapshot exactProcess) @?= imageBytes
+    exactCleanup <- Process.closeLengthSMTLibProcess exactProcess
+    assertCompleteZ3Cleanup "descriptor exact executable cap" exactCleanup
+
+    overflowLimits <- expectRight $ Process.mkLengthSMTLibProcessLimits
+      $ withMaximum (imageBytes - 1)
+          Process.defaultLengthSMTLibProcessLimitSource
+    overflowCancellation <- Process.newLengthSMTLibProcessCancellation
+    overflowDeadline <- expectRight =<<
+      Process.lengthSMTLibProcessDeadlineAfterMilliseconds 3000
+    hookReached <- newIORef False
+    overflow <- Process.openLengthSMTLibProcessWithPreDescriptorExecHook
+      overflowLimits overflowCancellation overflowDeadline profile
+      workingDirectory workingDescriptor $ writeIORef hookReached True
+    case overflow of
+      Left failure -> do
+        Process.lengthSMTLibProcessErrorPhase failure @?=
+          Process.LengthSMTLibProcessSnapshotPhase
+        Process.lengthSMTLibProcessErrorClass failure @?=
+          Process.LengthSMTLibProcessExecutableByteLimitExceeded
+        Process.lengthSMTLibProcessErrorObservedAtLeast failure @?=
+          Just imageBytes
+        Process.lengthSMTLibProcessErrorCleanupStatus failure @?= Nothing
+      Right process -> do
+        _ <- Process.closeLengthSMTLibProcess process
+        assertFailure "descriptor maximum-plus-one source unexpectedly opened"
+    readIORef hookReached >>= (@?= False)
 
 assertDescriptorBoundExecFailure :: IO ()
 assertDescriptorBoundExecFailure =

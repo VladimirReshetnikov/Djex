@@ -1150,6 +1150,7 @@ djex[djinn]> :{
 djex| (a, b)
 djex|   -> (b, a)
 djex| :}
+djexResult (a, b) = (b, a)
 ```
 
 The collected text is parsed as one logical input. Haskell `--` line comments

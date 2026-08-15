@@ -2,7 +2,9 @@
 
 This guide uses the checked Djex APIs. Historical Djinn and Exference modules
 remain importable for compatibility, but new integrations should build around a
-sealed session, a checked request, and the shared result envelope.
+sealed session, a checked request, and the shared result envelope — plus, for
+behavioral verification, the semantic stratum described in
+[its own section below](#the-semantic-stratum).
 
 ## Build and install
 
@@ -11,10 +13,13 @@ Djex currently supports GHC 9.12.4. From the repository root:
 ```console
 cabal build all
 cabal test all -j1 --test-show-details=direct
+cabal check
 ```
 
 The complete run is serial because its CLI suites invoke freshly linked Djex
-executables as subprocesses. Focused library-only suites may run concurrently.
+executables as subprocesses (including the two private test-fixture
+executables, `djex-fake-cabal` and `djex-fake-z3`, that stand in for the real
+tools). Focused library-only suites may run concurrently.
 
 Run without installing:
 
@@ -402,6 +407,8 @@ for the two trust boundaries and their regression coverage.
 
 ## Djinn example
 
+<!-- Maintainers: the bounded rank-N/impredicative rule families are rendered in three places - README.md, docs/repl.md (Rank-N and impredicative types), and docs/library-api.md (Djinn example) - and their numeric bounds also appear in the codebase walkthrough. A rule or bound change must be applied everywhere. -->
+
 This function uses the standard Djinn environment, parses the contextual Djinn
 type grammar, runs one checked query, and renders every returned candidate:
 
@@ -765,7 +772,10 @@ exferenceDefinitions = do
 `runExferenceQuery` returns a lazy sequence of result batches. Selection is a
 separate presentation policy, so a caller can take the first candidate, retain
 all globally best candidates, use bounded lookahead, or stream every admissible
-candidate without changing search semantics.
+candidate without changing search semantics.  `selectPreferredQueryResults`
+adds a preferred tier on top of the same policies: candidates satisfying a
+caller predicate (typically constraint-free candidates) outrank the rest
+without discarding them.
 
 Exference first discharges an exact local given, including a variable-bearing
 given such as `C a`, before deciding whether an obligation must be deferred. It
@@ -1047,6 +1057,13 @@ A truncated batch can still contain useful validated candidates. Conversely, a
 finished Exference batch with no candidates is not a proof of non-inhabitation.
 Frontends should preserve both dimensions.
 
+The semantic stratum adds a third, independent dimension: behavioral
+association. A raw solver or behavioral report — including `unsat` — is
+exposed only as `HeuristicRankingOnly`; it never strengthens or weakens
+`QueryEvidence`, and only independent replay against the exact checked
+problem can produce `BehavioralEvidence`. Frontends must keep all three
+axes separate.
+
 ## Rendering and residual constraints
 
 The backend render helpers accept `Unqualified`, `QualifyIdentifiers`, or
@@ -1095,6 +1112,65 @@ and its monadic `rewriteExpressionBottomUpM` variant visit expression children
 left-to-right before their parent; patterns and checked visible type arguments
 are retained, and callback-produced nodes are not traversed again.
 
+## The semantic stratum
+
+Half of the curated facade is a backend-neutral verification layer that never
+runs a search. It lets an integration state a *behavioral* law about
+candidates the engines already produced, ask Z3 about it, and trust only what
+it can replay itself.
+
+The first checked dialect is finite list-spine lengths. Its lifecycle mirrors
+the synthesis lifecycle — seal, then use the sealed value — and every stage is
+resource-bounded and fail-closed:
+
+1. `sealLengthSession` (or a policy-aware variant) checks one inventory,
+   spine model, and provider-summary list into an opaque
+   `CheckedLengthSession`. Provider summaries are *assumed laws*, never
+   evidence.
+2. `sealLengthContractInSession` checks a length law — precondition and
+   postcondition over compact observed inputs and the result — into a
+   `CheckedLengthContract`.
+3. `sealLengthTypedCandidateProblem` associates one engine-owned
+   `TypedCandidate` with that contract, symbolically interpreting the
+   candidate's sealed term graph into a `CheckedLengthProblem`.
+4. `sealLengthSMTLibQuery` renders the problem into a bounded canonical
+   `QF_LIA` query. Nothing has executed yet; the query is pure bytes plus a
+   complete fingerprint.
+5. `withLengthSMTLibLiveSession` opens the library's only external-process
+   boundary: one capability-probed Z3 worker, lent through a rank-N scope,
+   serving at most 64 scalar-plus-product query transactions in total.
+   Process handles, paths, transcripts, and decoded valuations never cross
+   the facade; failures arrive as sanitized byte-free classes.
+6. Raw statuses are heuristics. `replayLengthSMTLibLiveQueryObservation` (and
+   the raw-input entrances such as `replayLengthSMTLibCounterexampleInputs`)
+   re-evaluate candidate behavior independently; only that replay can mint a
+   `ValidatedLengthCounterexample` or bounded-positive receipt, and even
+   `unsat` never becomes proof or pruning authority.
+
+A nominally distinct binary-product sibling
+(`sealLengthSpinePairContractInSession` and the `LengthSpinePair*` family)
+covers results that are one boxed pair of spines; its evidence cannot be
+presented as scalar evidence or vice versa.
+
+Supporting vocabulary, all re-exported by the facade:
+
+- `Language.Haskell.Synthesis.TypedGenerated` — sealed, typed term graphs
+  (`sealTermGraph`, `TermGraph`, `TermNode`, graph limits and metrics) with
+  stable node, occurrence, and certificate identities.
+- `Language.Haskell.Synthesis.Fingerprint` — `Fingerprint` is a complete
+  versioned canonical encoding of an identity, not a lossy hash; canonical
+  bytes are the association currency of the whole stratum.
+- `Language.Haskell.Synthesis.Semantic.Observation` and `Semantic.Problem` —
+  the status vocabulary and the generic behavioral-problem envelope that
+  binds inventory, encoding, candidate, and problem identities.
+- `Language.Haskell.Synthesis.Observability` — exact `Natural` metric
+  counters (`ObservationCounts`, `observationSnapshot`) for reproducible
+  reporting.
+
+The [synthesis foundation map](../synthesis/README.md) documents these
+modules individually, and the dated reports indexed at
+[docs/reports/README.md](reports/README.md) record each design boundary.
+
 ## Import guidance
 
 - Start with `Language.Haskell.Djex` for a compact application or an API tour.
@@ -1111,5 +1187,8 @@ facade. Import `Djinn.Core` only when a compatibility integration deliberately
 needs its historical representation and operations.
 
 See [the architecture guide](architecture.md) for the stability tiers,
-[the shared REPL guide](repl.md) for interactive use, and
-[the synthesis API map](../synthesis/README.md) for the neutral modules.
+[the shared REPL guide](repl.md) for interactive use,
+[the synthesis API map](../synthesis/README.md) for the neutral modules,
+[the reports index](reports/README.md) for the dated design records, and
+[docs/examples](examples/README.md) for a worked rank-N/impredicative
+example workspace.

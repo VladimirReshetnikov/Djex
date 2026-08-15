@@ -521,6 +521,8 @@ mkLengthInputBoxLimits source
  where
   maximumInputs = lengthInputBoxLimitSourceMaximumInputs source
 
+-- | The documented default box bounds: eight inputs and 65,536 total
+-- assignments.
 defaultLengthInputBoxLimitSource :: LengthInputBoxLimitSource
 defaultLengthInputBoxLimitSource = LengthInputBoxLimitSource
   { lengthInputBoxLimitSourceMaximumInputs = 8

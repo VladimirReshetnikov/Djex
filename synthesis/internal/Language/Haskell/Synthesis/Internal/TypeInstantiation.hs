@@ -27,6 +27,10 @@ import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Constraint (Constraint (..))
+import Language.Haskell.Synthesis.Internal.InstanceHead
+  ( constraintListEquations
+  , zipExactly
+  )
 import Language.Haskell.Synthesis.Internal.Alpha
   ( AlphaVariable (..)
   , BinderSlotPolicy (PositionalBinderSlots)
@@ -298,25 +302,6 @@ pairBinders next (patternBinder : patternRest)
     , finalNext
     )
 pairBinders _ _ _ = Nothing
-
-constraintListEquations
-  :: [Constraint (Type variable)]
-  -> [Constraint (Type variable)]
-  -> Maybe [(Type variable, Type variable)]
-constraintListEquations [] [] = Just []
-constraintListEquations (Constraint patternClass patternArguments : patternRest)
-    (Constraint actualClass actualArguments : actualRest)
-  | patternClass == actualClass = do
-      current <- zipExactly patternArguments actualArguments
-      remaining <- constraintListEquations patternRest actualRest
-      pure $ current ++ remaining
-constraintListEquations _ _ = Nothing
-
-zipExactly :: [left] -> [right] -> Maybe [(left, right)]
-zipExactly [] [] = Just []
-zipExactly (left : leftRest) (right : rightRest) =
-  ((left, right) :) <$> zipExactly leftRest rightRest
-zipExactly _ _ = Nothing
 
 renameType
   :: Ord variable

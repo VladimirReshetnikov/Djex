@@ -80,7 +80,7 @@
 \newcommand{\filepath}[1]{\nolinkurl{#1}}
 \newcommand{\commitid}[1]{{\ttfamily\footnotesize #1}}
 \newcommand{\RepoDjex}{\href{https://github.com/VladimirReshetnikov/Djex}{Djex}}
-\def\DjexBase{https://github.com/VladimirReshetnikov/Djex/blob/f50b5eac86726c7530d95e48c27101b7c0fa25c9/}
+\def\DjexBase{https://github.com/VladimirReshetnikov/Djex/blob/d3d9662598460316bdcd177ce6768c521e764aa8/}
 \newcommand{\dpath}[1]{\href{\DjexBase#1}{\nolinkurl{#1}}}
 \newcommand{\dsym}[2]{\code{#2} in \dpath{#1}}
 \newcommand{\Haskell}{Haskell}
@@ -169,9 +169,9 @@ Exference typed-hole search, frontends, and maintenance practice\par}
 \small
 \begin{tabularx}{\textwidth}{@{}L{0.18\textwidth}Y@{}}
 \textbf{Repository} & \RepoDjex \\
-\textbf{Snapshot} & \commitid{f50b5eac86726c7530d95e48c27101b7c0fa25c9} \\
-\textbf{Prepared} & August 10, 2026 \\
-\textbf{Scope} & Shared synthesis foundation, Djinn, Exference, unified facade, source frontends, REPL, tests, and benchmarks. \\
+\textbf{Snapshot} & \commitid{d3d9662598460316bdcd177ce6768c521e764aa8} \\
+\textbf{Prepared} & August 10, 2026; revised August 14, 2026 \\
+\textbf{Scope} & Shared synthesis foundation, semantic/behavioral layer (Length contracts, SMT-LIB/Z3, typed candidates and certificates), Djinn, Exference, unified facade, source frontends, REPL, tests, and benchmarks. \\
 \end{tabularx}
 \end{tcolorbox}
 \vfill
@@ -216,10 +216,11 @@ Source paths are hyperlinks to the pinned commit. A path in monospace is usually
 
 \section{What Djex is---and is not}
 
-Djex is best understood as a checked semantic perimeter around two synthesis engines. The package contains four large strata:
+Djex is best understood as a checked semantic perimeter around two synthesis engines. The package contains five large strata:
 
 \begin{enumerate}
   \item the backend-neutral \code{Language.Haskell.Synthesis.*} foundation;
+  \item the backend-neutral semantic/behavioral layer: Length behavioral contracts, the SMT-LIB/Z3 live stack, and typed candidates, certificates, and fingerprints, re-exported from the facade (Section~\ref{sec:semantic-stratum});
   \item the Djinn core, adapter, compatibility API, and frontend;
   \item the Exference core, adapter, compatibility API, and Haskell-source frontend;
   \item the unified \code{Language.Haskell.Djex} facade, command layer, package/workspace support, and REPL.
@@ -305,6 +306,8 @@ Djex deliberately models two questions separately:
 
 A search may return validated candidates and still be truncated. Djinn may exhaust an incomplete formula plan and therefore have no sound negative claim. Exference may empty its queue after exploring every retained node but still supply only \code{NoEvidence}. Conversely, a complete unbudgeted Djinn search may return \code{ProvedUninhabitable} together with ordinary \code{Finished} progress.
 
+The semantic stratum adds a third independent axis: \emph{behavioral association}. \dpath{synthesis/src/Language/Haskell/Synthesis/Semantic/Problem.hs} binds a raw solver or behavioral observation to exact inventory, encoding, candidate, and problem fingerprints, and its design rule is explicit: ``Association is not certification. Every raw solver or behavioral result, including \code{unsat}, is exposed as \code{HeuristicRankingOnly}.'' An associated solver verdict may rank candidates, but it becomes \code{BehavioralEvidence} only through independent domain replay against the exact query problem. This is the same discipline as the existing rule that a finished heuristic search is not a refutation, extended to external solvers.
+
 \begin{center}
 \begin{tabularx}{0.94\textwidth}{@{}L{0.26\textwidth}L{0.28\textwidth}Y@{}}
 \toprule
@@ -315,9 +318,22 @@ A search may return validated candidates and still be truncated. Djinn may exhau
 \code{RequiresTargetReference} & The only proof found after diagnostic reintroduction uses the target being defined. & General recursion is silently acceptable. \\
 \code{NoEvidence} with \code{Finished} & The configured exploration ended without a logical claim. & The type is uninhabited. \\
 \code{Truncated reasons} & Unexplored work may remain for the listed operational reasons. & Already returned candidates are invalid. \\
+\code{HeuristicRankingOnly} & A solver or behavioral observation, including \code{unsat}, was associated with an exact fingerprinted problem. & The observation certifies anything; only independent replay creates \code{BehavioralEvidence}. \\
 \bottomrule
 \end{tabularx}
 \end{center}
+
+\section{The semantic stratum}\label{sec:semantic-stratum}
+
+The newest stratum gives candidates a checked \emph{behavioral} story alongside their typing story. It is backend-neutral, lives in \filepath{synthesis/src} with package-private internals in \filepath{synthesis/internal}, and is re-exported from the facade.
+
+\textbf{Length contracts.} \dpath{synthesis/src/Language/Haskell/Synthesis/Semantic/Length.hs} defines the \code{finite-list-spine-length/v1} dialect---total finite list-spine lengths over unbounded naturals with opaque payloads---and its distinct \code{finite-binary-product-spine-lengths/v1} sibling, whose exact boxed binary product relates either result component to the modeled inputs. Provider summaries are explicit assumed laws for search guidance, never behavioral evidence.
+
+\textbf{The SMT-LIB/Z3 live stack.} \dpath{synthesis/src/Language/Haskell/Synthesis/Semantic/Length/SMTLib/Live.hs} owns one capability-probed Z3 worker for the dynamic extent of a lexical scope; one scope admits 64 scalar-plus-product transactions in total, not 64 of each. Failures are sanitized: callers can observe status and heuristic strength, but no process handle, executable or workspace path, transcript, or run identity crosses the facade. Solver status remains an observation---\code{unsat} is relative to the checked encoding and is restricted to \code{HeuristicRankingOnly}. The pure framing and phase control shared by both query shapes is one protocol machine in \dpath{synthesis/internal/Language/Haskell/Synthesis/Internal/Semantic/Length/SMTLib/Protocol.hs}, parameterized by a \code{LengthSMTLibProtocolIdentity} record carrying schema tags, fingerprint roles, and query projections; \code{Protocol.SpinePair} is a thin wrapper contributing only what distinguishes the product domain.
+
+\textbf{Typed candidates, certificates, and fingerprints.} A \code{Fingerprint} is the complete versioned canonical encoding of an identity, not a lossy hash, with package-private construction. \code{TypedCandidate} and \code{TypedGenerated} retain a bounded typed term graph beside the historical candidate syntax, and the package-private certificate table proves bounded capture-avoiding replay of one complete leading forall telescope; graph association is atomic against exact inventory, encoding, candidate, and problem fingerprints. Throughout the stratum only independent replay creates evidence---association, solver output, and certificates alone certify nothing.
+
+For the chronological engineering record behind this stratum, see \dpath{docs/reports/README.md}; the module Haddock carries the per-boundary detail.
 
 \section{Backend contrast}
 
@@ -495,8 +511,10 @@ The top-level \dpath{djex.cabal} describes one package that deliberately preserv
 \textbf{Root} & \textbf{Responsibility} \\
 \midrule
 \endhead
-\filepath{synthesis/src} & Shared synthesis vocabulary and validation: names, kinds, types, type atoms, constraints, declarations, environments, inventories, kind inference, queries, search progress, candidates, generated terms, diagnostics, selection, and rendering helpers. \\
+\filepath{synthesis/src} & Shared synthesis vocabulary and validation: names, kinds, types, type atoms, constraints, declarations, environments, inventories, kind inference, queries, search progress, candidates, generated terms, diagnostics, selection, and rendering helpers. Also the public semantic surface: Length contracts, the SMT-LIB/Z3 boundary, typed candidates, and fingerprints. \\
+\filepath{synthesis/internal} & Package-private home modules behind the semantic surface: fingerprint representation, type-application certificates, class resolution, and the Length/SMT-LIB/Z3 protocol, session, and execution internals. Compiled into the library but exposed to no public importer. \\
 \filepath{djinn/src-core} & Djinn's checked adapter, session/request internals, type-to-formula compiler, LJT proof search, proof checker, instantiation machinery, and proof-to-generated lowering. \\
+\filepath{djinn/src-internal} & Package-private Djinn support modules: \code{CheckedCandidate}, \code{GeneratedDeduplication}, \code{InstantiationEvidence}, and \code{ProofCheck.Evidence}. \\
 \filepath{djinn/src-frontend} & Historical Djinn-compatible API and REPL facade. It is important for compatibility, but it should not own shared invariants. \\
 \filepath{exference/src-core} & Exference's checked adapter and its engine: unification, class constraints, typed expression, typed holes, scopes, queue scheduler, scoring, rigid instantiation, independent expression checker, and diagnostics. \\
 \filepath{exference/src-frontend} & Historical Exference source parser, environment loader, Haskell conversion layer, and CLI. \\
@@ -504,7 +522,9 @@ The top-level \dpath{djex.cabal} describes one package that deliberately preserv
 \bottomrule
 \end{longtable}
 
-The Cabal file also exposes historical \code{djinn} and \code{exference} executables alongside \code{djex}. This is not merely packaging clutter. It lets the project maintain compatibility tests while moving semantic ownership into shared modules.
+The library compiles exactly these eight source roots; \filepath{synthesis/internal} and \filepath{djinn/src-internal} carry only package-private home modules. A ninth directory, \filepath{test-support/}, is not part of the library: it holds the shared \code{CLIAssertions} test module and the two private fixture executables described below.
+
+The Cabal file also exposes historical \code{djinn} and \code{exference} executables alongside \code{djex}, and builds two private test fixtures, \code{djex-fake-cabal} and \code{djex-fake-z3}. This is not merely packaging clutter. It lets the project maintain compatibility tests while moving semantic ownership into shared modules, and it lets process-launching behavior be tested against controlled stand-ins.
 
 \begin{figure}[htbp]
 \centering
@@ -1160,7 +1180,7 @@ The conversion boundary erases search-only annotations only after scope and typi
 
 \section{The independent expression checker}\label{sec:exference-checker}
 
-\dpath{exference/src-core/Language/Haskell/Exference/Core/ExpressionCheck.hs} is the key trust boundary. It does not accept the search node's accumulated typing story as a derivation. It reconstructs the expression bidirectionally against an opaque prepared checker context.
+\dpath{exference/src-core/Language/Haskell/Exference/Core/Internal/ExpressionCheck.hs} is the key trust boundary; the historical module \dpath{exference/src-core/Language/Haskell/Exference/Core/ExpressionCheck.hs} is now a small re-export shim that preserves the original surface over that internal implementation. The checker does not accept the search node's accumulated typing story as a derivation. It reconstructs the expression bidirectionally against an opaque prepared checker context.
 
 The checker validates:
 
@@ -1242,7 +1262,7 @@ Typical failure question & ``Was translation/search complete?'' & ``Which policy
 \end{longtable}
 
 \begin{sourcebox}
-The shortest Exference source trail is: \dpath{exference/src-core/Language/Haskell/Djex/Exference.hs} $\rightarrow$ \dpath{exference/src-core/Language/Haskell/Djex/Exference/Internal/Request.hs} $\rightarrow$ \dpath{exference/src-core/Language/Haskell/Exference/Core/Internal/ExferenceNodeBuilder.hs} $\rightarrow$ \dpath{exference/src-core/Language/Haskell/Exference/Core/Internal/Exference.hs} $\rightarrow$ \dpath{exference/src-core/Language/Haskell/Exference/Core/Unify.hs} $\rightarrow$ \dpath{exference/src-core/Language/Haskell/Exference/Core/ExpressionCheck.hs}.
+The shortest Exference source trail is: \dpath{exference/src-core/Language/Haskell/Djex/Exference.hs} $\rightarrow$ \dpath{exference/src-core/Language/Haskell/Djex/Exference/Internal/Request.hs} $\rightarrow$ \dpath{exference/src-core/Language/Haskell/Exference/Core/Internal/ExferenceNodeBuilder.hs} $\rightarrow$ \dpath{exference/src-core/Language/Haskell/Exference/Core/Internal/Exference.hs} $\rightarrow$ \dpath{exference/src-core/Language/Haskell/Exference/Core/Unify.hs} $\rightarrow$ \dpath{exference/src-core/Language/Haskell/Exference/Core/Internal/ExpressionCheck.hs} (reached historically through the \code{Core.ExpressionCheck} re-export shim).
 \end{sourcebox}
 
 \chapter{The unified facade, source frontends, and REPL}\label{ch:djex-facade}
@@ -1252,6 +1272,8 @@ The shortest Exference source trail is: \dpath{exference/src-core/Language/Haske
 \dpath{src/Language/Haskell/Djex.hs} is the preferred programmatic entry surface. It defines the backend selection, common session/query operations, and an explicit capability vocabulary. Capabilities include deciding inhabitation, heuristic search, prenex polymorphism, rank-N introduction and elimination, opaque rank-N transport, impredicative support, ranked candidates, and type-class constraints.
 
 The capability matrix is executable documentation. A client can choose Djinn when a complete structural negative result matters, Exference when ranking or elimination matters, or both when it can merge candidates while respecting asymmetric evidence.
+
+The public surface is now larger than backend selection, sessions, and capabilities. Beyond the original shared vocabulary, the facade re-exports sixteen further modules: \code{Fingerprint}, \code{Observability}, \code{TypeInstantiation}, \code{TypedCandidate}, \code{TypedGenerated} and \code{TypedGenerated.Fingerprint}, and ten \code{Semantic.*} modules covering the Length domain, its SMT-LIB encoding and live Z3 boundary, and the generic behavioral-problem envelope (Section~\ref{sec:semantic-stratum}).
 
 \begin{invariantbox}
 A facade may normalize calling conventions, but it may not normalize away semantic differences. ``No candidates'' has backend-specific meaning and remains so after dispatch.
@@ -1269,7 +1291,7 @@ These frontends are useful compatibility layers, but new semantic changes should
 
 \dpath{src/Language/Haskell/Djex/Package.hs} and \dpath{src/Language/Haskell/Djex/REPL/Workspace.hs} manage packages and workspaces. A workspace is not merely a list of files. It must resolve module identities, dependencies, declaration order, loaded environments, and command-line tool interaction. \dpath{src/Language/Haskell/Djex/Internal/DependencyGraph.hs} supplies dependency ordering and cycle handling.
 
-Package discovery can invoke Cabal-facing tooling. Test support includes a fake Cabal executable so CLI behavior can be tested without making unit tests depend on a user's machine configuration.
+Package discovery can invoke Cabal-facing tooling. Test support includes a fake Cabal executable (\code{djex-fake-cabal}) so CLI behavior can be tested without making unit tests depend on a user's machine configuration, and a fake Z3 executable (\code{djex-fake-z3}, \dpath{test-support/fake-z3/Main.hs}) that stands in for a live solver worker under closed fault modes and keeps the empty-child-environment and fresh-working-directory launch policies observable in tests.
 
 \section{The unified REPL}
 
@@ -1297,7 +1319,7 @@ The top-level REPL maintains both source-facing state and backend sessions. A de
 
 \dpath{src/Language/Haskell/Djex/Command.hs} defines shared command structures, while \dpath{src/Language/Haskell/Djex/CLI.hs} handles process arguments, modes, files, and startup behavior. \dpath{src/Language/Haskell/Djex/Text.hs} centralizes bounded text helpers and presentation details.
 
-The three executables are intentionally thin at their \filepath{app/Main.hs} entry points. Substantive process behavior lives in library modules, which is why CLI tests can call command logic without forking for every assertion while still retaining end-to-end executable tests.
+The package builds five executables. The three installable ones---\code{djex}, \code{djinn}, and \code{exference}---are intentionally thin at their \filepath{app/Main.hs} entry points. Substantive process behavior lives in library modules, which is why CLI tests can call command logic without forking for every assertion while still retaining end-to-end executable tests. The two private test fixtures are different in kind: \code{djex-fake-cabal} is a small Cabal stand-in, while \code{djex-fake-z3} (\dpath{test-support/fake-z3/Main.hs}, 538 lines) is a deliberately substantial closed-fault-mode Z3 stand-in whose behavior is selected only by its copied executable name, never by a sibling file, inherited environment variable, or working-directory entry.
 
 \section{Extension discipline}
 
@@ -1320,14 +1342,18 @@ Starting at the REPL and working downward usually creates a period in which text
 
 \section{Concentric test layers}
 
-The repository's test organization mirrors its trust boundaries.
+The repository's test organization mirrors its trust boundaries. The package now declares sixteen test suites; the table lists the boundary each layer protects.
 
 \begin{longtable}{@{}L{0.28\textwidth}L{0.64\textwidth}@{}}
 \toprule
 \textbf{Suite} & \textbf{What it protects} \\
 \midrule
 \endhead
-\dpath{synthesis/test/Spec.hs} & Shared names, types, substitution, alpha equivalence, environments, kind inference, queries, generated syntax, inventories, finite-width guards, and diagnostics. \\
+\dpath{synthesis/test/Spec.hs} & Shared names, types, substitution, alpha equivalence, environments, kind inference, queries, generated syntax, inventories, finite-width guards, and diagnostics. The suite also compiles \code{ClassResolutionSpec} and seven SMT-LIB spec modules with their \filepath{synthesis/internal} subjects as home modules, so package-private code is tested without becoming public. \\
+\dpath{synthesis/test-length/Spec.hs} & The Length/SMT-LIB/Z3 semantic stack, including the live-worker specs. At roughly 12{,}500 lines this is the largest file in the repository. \\
+\dpath{synthesis/test-certificate/Spec.hs} & Type-application certificate plans and typed-candidate association. \\
+\dpath{synthesis/test-fingerprint/Spec.hs} & Canonical fingerprint encoding and behavioral-problem identity. \\
+\dpath{synthesis/test-term-graph-fingerprint/Spec.hs} & Typed term-graph fingerprint identity at the public entrance. \\
 \dpath{djinn/test-unit/Spec.hs} & Formula translation, LJT rules, normalization, instantiation plans, proof checking, lowering, evidence, budgets, and regressions. \\
 \dpath{djinn/test-property/PropertySpec.hs} & Property-level relationships such as checker acceptance, normalization, and generated-term invariants over broad inputs. \\
 \dpath{exference/test-unit/Spec.hs} & Unification, rigid scopes, class closure, node expansion, scoring, provider assignments, expression checking, pruning, and regressions. \\
@@ -1635,6 +1661,13 @@ This appendix names the files that own contracts or control flow. Compatibility 
 \dpath{synthesis/src/Language/Haskell/Synthesis/Generated.hs} & Common generated AST, scope/syntax validation, rewriting, simplification, alpha-equivalence, and rendering. \\
 \dpath{synthesis/src/Language/Haskell/Synthesis/Selection.hs} & Lazy bounded observation and selection policies. \\
 \dpath{synthesis/src/Language/Haskell/Synthesis/Diagnostic.hs} & Structured diagnostics, source locations, codes, severity, and deterministic rendering. \\
+\dpath{synthesis/src/Language/Haskell/Synthesis/Fingerprint.hs} & Opaque structural fingerprints: complete versioned canonical encodings, not lossy hashes, with package-private construction. \\
+\dpath{synthesis/src/Language/Haskell/Synthesis/Observability.hs} & Exact deterministic work counters shared across synthesis layers. \\
+\dpath{synthesis/src/Language/Haskell/Synthesis/TypeInstantiation.hs} & Capture-safe matching of context-free leading forall schemes, including whole impredicative selections. \\
+\dpath{synthesis/src/Language/Haskell/Synthesis/TypedCandidate.hs} & Opaque associations between compatibility candidates and typed term graphs. \\
+\dpath{synthesis/src/Language/Haskell/Synthesis/TypedGenerated.hs} & Bounded typed candidate graphs beside the compatibility generated AST; \code{TypedGenerated.Fingerprint} supplies their canonical structural identity. \\
+\filepath{synthesis/src/Language/Haskell/Synthesis/Semantic} & The Length behavioral domain and its SMT-LIB boundary: contracts, evaluation, problems, encoding, execution policy, live Z3 sessions, observations, and the generic behavioral-problem envelope (Section~\ref{sec:semantic-stratum}). \\
+\filepath{synthesis/internal} & Thirty-five package-private home modules behind the semantic surface: fingerprint representation, certificates, class resolution, and the Length/SMT-LIB/Z3 protocol, session, and worker internals. They appear only in \code{Other-Modules}; consult the module Haddock for detail. \\
 \bottomrule
 \end{longtable}
 
@@ -1655,6 +1688,8 @@ This appendix names the files that own contracts or control flow. Compatibility 
 \dpath{djinn/src-core/Djinn/Internal/ProofCheck.hs} & Independent proof reconstruction. \\
 \dpath{djinn/src-core/Djinn/Internal/ProofToGenerated.hs} & Checked proof lowering to shared generated syntax. \\
 \dpath{djinn/src-core/Djinn/Internal/Instantiation.hs} & Closed candidates, exact assignments, axioms, visible applications, and evidence erasure. \\
+\dpath{djinn/src-core/Djinn/Internal/Environment.hs} & The Djinn-side declaration/premise environment (1{,}643 lines): transactional validation of editable Djinn declarations and the authoritative lowering from the neutral environment into proof-search indexes. \\
+\filepath{djinn/src-internal} & Package-private support root: \code{Djinn.Internal.CheckedCandidate}, \code{GeneratedDeduplication}, \code{InstantiationEvidence}, and \code{ProofCheck.Evidence}. \\
 \bottomrule
 \end{longtable}
 
@@ -1674,7 +1709,7 @@ This appendix names the files that own contracts or control flow. Compatibility 
 \dpath{exference/src-core/Language/Haskell/Exference/Core/Internal/ExferenceNodeBuilder.hs} & Scope-safe node mutation, fresh allocation, substitution, and rigid validation. \\
 \dpath{exference/src-core/Language/Haskell/Exference/Core/Internal/Exference.hs} & Input preparation, scheduler, expansion, pruning, progress, and lazy result trace. \\
 \dpath{exference/src-core/Language/Haskell/Exference/Core/Expression.hs} & Annotated view of the shared generated expression tree. \\
-\dpath{exference/src-core/Language/Haskell/Exference/Core/ExpressionCheck.hs} & Independent bidirectional reconstruction, exact schemes, constraints, and rigid scope. \\
+\dpath{exference/src-core/Language/Haskell/Exference/Core/Internal/ExpressionCheck.hs} & Independent bidirectional reconstruction, exact schemes, constraints, and rigid scope. \code{Core.ExpressionCheck} is a re-export shim preserving the historical surface. \\
 \dpath{exference/src-core/Language/Haskell/Exference/Core/Score.hs} & Penalty arithmetic, finite checks, and priority conversion. \\
 \bottomrule
 \end{longtable}
@@ -1705,10 +1740,14 @@ This appendix names the files that own contracts or control flow. Compatibility 
 \textbf{Path} & \textbf{Primary role} \\
 \midrule
 \endhead
-\dpath{synthesis/test/Spec.hs} & Shared foundation invariants, lazy-width defenses, alpha/substitution behavior, generated syntax, and selection. \\
+\dpath{synthesis/test/Spec.hs} & Shared foundation invariants, lazy-width defenses, alpha/substitution behavior, generated syntax, and selection; also class resolution and SMT-LIB specs compiled with \filepath{synthesis/internal} home modules. \\
+\dpath{synthesis/test-length/Spec.hs} & Length contracts, SMT-LIB encoding, protocol, session, execution, and live Z3 worker behavior; the largest file in the repository. \\
+\dpath{synthesis/test-certificate/Spec.hs} & Certificate plans and typed-candidate association. \\
+\dpath{synthesis/test-fingerprint/Spec.hs} & Fingerprint canonical encodings and behavioral-problem identity. \\
+\dpath{synthesis/test-term-graph-fingerprint/Spec.hs} & Typed term-graph fingerprints. \\
 \dpath{djinn/test-unit/Spec.hs} & Djinn environment, formula, proof, rank-N, evidence, and compatibility behavior. \\
 \dpath{exference/test-unit/Spec.hs} & Exference types, unification, classes, search, checker, rank-N, and adapter behavior. \\
-\dpath{test-api/Spec.hs} and \dpath{test-api/AbstractionBoundary.hs} & Public facade surface, compatibility imports, and hidden-constructor boundaries. \\
+\dpath{test-api/Spec.hs} (Other-Modules \code{AbstractionBoundary}, \code{ExferencePatternImports}, \code{FacadeSpec}) & Public facade surface, compatibility imports, and hidden-constructor boundaries. \\
 \dpath{test-integration/Spec.hs} & Cross-backend sessions, shared query semantics, source loading, and end-to-end candidate behavior. \\
 \dpath{test-cli/Spec.hs} & Unified command and REPL behavior. \\
 \dpath{djinn/bench/Bench.hs} and \dpath{exference/bench/Bench.hs} & Search and regression corpora for performance-sensitive changes. \\
@@ -1877,11 +1916,13 @@ A bound or ordering change is observable semantics whenever it affects first-can
 \section{Repository root}
 
 \begin{itemize}
-  \item Pinned tree: \href{https://github.com/VladimirReshetnikov/Djex/tree/f50b5eac86726c7530d95e48c27101b7c0fa25c9}{\nolinkurl{github.com/VladimirReshetnikov/Djex/tree/f50b5eac...}}
+  \item Pinned tree: \href{https://github.com/VladimirReshetnikov/Djex/tree/d3d9662598460316bdcd177ce6768c521e764aa8}{\nolinkurl{github.com/VladimirReshetnikov/Djex/tree/d3d9662...}}
   \item Package manifest and component boundaries: \dpath{djex.cabal}
   \item Architecture guide: \dpath{docs/architecture.md}
   \item Library API guide: \dpath{docs/library-api.md}
   \item Unified REPL guide: \dpath{docs/repl.md}
+  \item Dated engineering reports, oldest first: \dpath{docs/reports/README.md}
+  \item Worked example (B\"ohm--Berarducci/Church encodings): \dpath{docs/examples/README.md}
 \end{itemize}
 
 \section{Fastest review routes}

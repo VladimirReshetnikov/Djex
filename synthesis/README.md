@@ -178,9 +178,9 @@ and the
 | `Language.Haskell.Synthesis.Diagnostic` | Severity, stable code, checked source locations/spans, ordered context, and deterministic rendering. |
 | `Language.Haskell.Synthesis.Fingerprint` | Public inspection of opaque, nominal, collision-free canonical identities; construction and byte budgets remain package-private. |
 | `Language.Haskell.Synthesis.Semantic.Length` | Exact inventory-bound finite-spine contexts, normalized scalar and exact boxed binary-product contracts, source-bound assumed provider laws, and model-aware nominal fingerprints; an additive trust class retains exact nonempty constrained schemes under a dictionary-uniform conditional-law assumption, while every scalar byte stays exact. |
-| `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked scalar and binary-spine-product contracts, exact candidate problems, finite Cartesian input boxes, and direct, literal-ceiling positive-affine, or relational positive-affine applicable domains, with nominally separate counterexample and positive bounded receipts; detached conditional-provider evaluation still fails before argument inspection. |
+| `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked scalar and binary-spine-product contracts, exact candidate problems, finite Cartesian input boxes, and direct, literal-ceiling positive-affine, relational positive-affine, or strict relational positive-affine applicable domains, with nominally separate counterexample and positive bounded receipts; detached conditional-provider evaluation still fails before argument inspection. |
 | `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and nominally distinct scalar/product typed-candidate behavioral problems: session-owned provider and restricted resolver authority, contract resealing, residual rejection, rigid root/provider authorization, mixed-role opaque targets, exact scalar zero/step cases inside product fields, and provider-only consumption of independently authorized certificate carriers. |
-| `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation plus exact input-symbol, natural-input, origin, finite-box, and direct, literal-ceiling positive-affine, or relational positive-affine applicable-domain replay for nominally distinct checked scalar and binary-product Length problems, without launching or trusting a solver. |
+| `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation plus exact input-symbol, natural-input, origin, finite-box, and direct, literal-ceiling positive-affine, relational positive-affine, or strict relational positive-affine applicable-domain replay for nominally distinct checked scalar and binary-product Length problems, without launching or trusting a solver. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` | Pure validated Z3 launch, resource, artifact, and response-decoder policy with a package-private complete identity and a byte-free digest-expectation presence classifier; it performs no IO or attestation. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` | Rank-N scoped capability-probed Z3 ownership for scalar and exact binary-product queries, with one shared 64-query lease budget, retained runtime-unscoped v1 usable-work tokens, recommended owner-thread-affine dynamically scoped v2 deadlines and cooperative checkpoints, nominal byte-free failures and observations, heuristic status/strength/use, and domain-specific query-first replay gates. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` | Opaque query-specific association of bounded raw solver reports, with heuristic-only safe projections and exact problem-plus-query replay before payload access. |
@@ -563,6 +563,82 @@ the checked total finite-spine model and retained assumed provider laws; it is
 not source-language totality, provider-implementation validation, universal
 proof, or pruning authority. See the
 [relational positive-affine applicable-domain report](../docs/reports/2026-08-15-relational-positive-affine-length-applicable-domain.md).
+
+The fourth explicit coverage rule adds exact strict natural inequalities without
+changing the relational rule above. Its checked-problem entrances are
+`validateLengthProblemStrictRelationalPositiveAffineApplicableDomain` and
+`validateLengthSpinePairProblemStrictRelationalPositiveAffineApplicableDomain`;
+the query-owned entrances are:
+
+```haskell
+scalarValidation =
+  validateLengthSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
+    defaultLengthEvaluationLimits defaultLengthInputBoxLimits scalarQuery
+
+pairValidation =
+  validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
+    defaultLengthEvaluationLimits defaultLengthInputBoxLimits pairQuery
+```
+
+The strict scanner delegates every ordinary `LengthAtMost`, `LengthEqual`, and
+`LengthTruth False` clause to the unchanged relational scanner. In addition,
+one immediate top-level normalized clause whose exact shape is
+`LengthNot (LengthAtMost left right)` contributes this proof rule over
+naturals:
+
+```text
+not (left <= right)  ==>  right + 1 <= left
+```
+
+Both sides must use only compact inputs, natural literals, `LengthSum`, and
+positive-literal `LengthScale`. The successor increments the exact
+arbitrary-precision affine summary of the original right side before the
+ordinary relational cancellation pass. It creates no checked expression and
+therefore spends no syntax or literal budget and changes no checked contract
+or query bytes.
+
+For a scalar chain, `not (5 <= x)` yields `x <= 4`; a second clause
+`not (x <= y)` yields `y + 1 <= x`, so the first maximum propagates to
+`y <= 3`. Query-owned complete traversal therefore reports maxima `[4, 3]`,
+total count 20, and applicable count 10 for `y < x < 5`. For a one-input
+product problem, `not (x + 3 <= 2*x)` becomes
+`2*x + 1 <= x + 3`; exact common-coefficient cancellation gives `x <= 2`,
+so the product box has maximum `[2]` and three applicable assignments.
+
+The strict rule retains the relational closure's exact sequencing. Constant-
+right rules seed bounds; later rules retry against immutable pass snapshots,
+fire at most once, and merge after the pass. It is still not a general solver
+or a numeric least-fixed-point computation. A negated equality, nested
+logical formula, or negated comparison containing monus, minimum, maximum,
+quotient, modulo, a conditional, a result reference, or another non-affine
+subtree contributes no rule and no partial coverage. Unsupported clauses still
+participate in ordinary precondition replay if other clauses bound the box.
+
+Input-width rejection precedes precondition extraction. Nullary problems
+delegate `[]` directly to the finite-box verifier. For nonnullary problems,
+syntactic or closure contradiction wins over otherwise missing coverage and
+selects the all-zero carrier; absent contradiction, the first source-ordered
+missing bound is ordinary `LengthApplicableDomainInapplicable`. Derived values,
+Cartesian cardinality, indexed evaluation, first counterexample, and exact
+query-association failures retain the existing finite-box order.
+
+The opaque receipts are
+`ValidatedLengthStrictRelationalPositiveAffineApplicableDomain` and
+`ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain`.
+They retain exact maxima, total/applicable counts, and model/provider basis,
+but remain nominally disjoint. Query-owned validation emits no SMT-LIB and
+consumes no solver observation; it only replays authoritative evidence against
+the query's exact behavioral problem. Establishment is model-relative and
+does not establish source-language behavior, validate providers, supply
+universal proof, or authorize pruning.
+
+Only the two new strict-relational receipt tags add bytes. All older explicit-
+box, direct, positive-affine, relational, counterexample, raw-input, origin,
+simplification, and live validators retain their exact surfaces, behavior,
+receipt tags, authority, and identities. Every existing contract, inventory,
+session, candidate, encoding, problem, query, response, protocol, runtime, and
+live-observation identity is unchanged. See the
+[strict relational positive-affine applicable-domain report](../docs/reports/2026-08-15-strict-relational-positive-affine-length-applicable-domain.md).
 
 `FiniteBinaryProductSpineLengthsV1` adds a distinct checked domain for an exact
 boxed binary product whose two source-ordered fields are modeled finite

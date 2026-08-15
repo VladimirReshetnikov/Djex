@@ -47,6 +47,7 @@ these tiers explicitly.
   - [Directly bounded applicable-domain validation](#directly-bounded-applicable-domain-validation)
   - [Positive-affine applicable-domain validation](#positive-affine-applicable-domain-validation)
   - [Relational positive-affine applicable-domain validation](#relational-positive-affine-applicable-domain-validation)
+  - [Strict relational positive-affine applicable-domain validation](#strict-relational-positive-affine-applicable-domain-validation)
   - [Finite binary product spine lengths, offline and live SMT replay](#finite-binary-product-spine-lengths-offline-and-live-smt-replay)
     - [Shared live usable-work budget](#shared-live-usable-work-budget)
 - [Building](#building)
@@ -1079,6 +1080,129 @@ responses, protocols, processes, workers, runs, live observations, and the
 older direct and positive-affine receipts retain their identities and bytes.
 See the
 [relational positive-affine applicable-domain report](docs/reports/2026-08-15-relational-positive-affine-length-applicable-domain.md).
+
+### Strict relational positive-affine applicable-domain validation
+
+The direct, literal-ceiling positive-affine, and relational positive-affine
+validators retain their exact behavior and receipt families. The additive
+strict entrance is
+`validateLengthProblemStrictRelationalPositiveAffineApplicableDomain`, with
+query-owned
+`validateLengthSMTLibQueryStrictRelationalPositiveAffineApplicableDomain`.
+It accepts every ordinary top-level relation recognized by the relational
+rule and adds exactly one normalized clause shape:
+
+```text
+not (L <= R)  ==>  R + 1 <= L
+```
+
+This equivalence is exact over the modeled natural lengths. Both `L` and `R`
+must be positive-affine expressions over compact inputs, natural literals,
+`LengthSum`, and positive-literal `LengthScale`. The proof-only successor is
+added to the exact arbitrary-precision summary of `R` before ordinary constant
+and coefficient cancellation; it does not construct checked syntax, consume
+the contract's literal budget, or change contract or query identity.
+
+For example, two strict scalar clauses form a bounded chain:
+
+```haskell
+input0 = LengthVariable (LengthInput 0)
+input1 = LengthVariable (LengthInput 1)
+
+precondition = LengthAll
+  [ LengthNot
+      (LengthAtMost (LengthLiteral 5) input0)
+  , LengthNot
+      (LengthAtMost input0 input1)
+  ]
+
+validation =
+  validateLengthSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
+    defaultLengthEvaluationLimits
+    defaultLengthInputBoxLimits
+    checkedQuery
+
+case validation of
+  Right (LengthApplicableDomainEstablished receipt) ->
+    ( validatedLengthStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
+        receipt
+    , validatedLengthStrictRelationalPositiveAffineApplicableDomainAssignmentCount
+        receipt
+    , validatedLengthStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
+        receipt
+    ) == ([4, 3], 20, 10)
+  _ -> False
+```
+
+The first clause is `not (5 <= input0)`, hence `input0 + 1 <= 5` and
+`input0 <= 4`. The second is `not (input0 <= input1)`, hence
+`input1 + 1 <= input0`; the existing relational closure then derives
+`input1 <= 3`. The finite-box verifier traverses 20 assignments, exactly ten
+of which satisfy `input1 < input0 < 5`.
+
+The nominal binary-product query entrance applies the same proof rule while
+keeping product evidence separate. This example combines successor insertion
+with exact coefficient cancellation:
+
+```haskell
+input = LengthVariable (LengthSpinePairInput 0)
+
+precondition = LengthNot $ LengthAtMost
+  (LengthSum [input, LengthLiteral 3])
+  (LengthScale 2 input)
+
+pairValidation =
+  validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
+    defaultLengthEvaluationLimits
+    defaultLengthInputBoxLimits
+    checkedPairQuery
+
+case pairValidation of
+  Right (LengthApplicableDomainEstablished receipt) ->
+    ( validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
+        receipt
+    , validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainAssignmentCount
+        receipt
+    , validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
+        receipt
+    ) == ([2], 3, 3)
+  _ -> False
+```
+
+Here `not (input + 3 <= 2*input)` becomes
+`2*input + 1 <= input + 3`; cancellation leaves `input <= 2`.
+
+Negated equality, nested logical structure, and a negated comparison with
+monus, minimum, maximum, quotient, modulo, a conditional, a result reference,
+or any other non-affine subtree grant no rule and no partial bound. Such a
+clause remains part of actual precondition replay if other clauses establish a
+finite box. This is neither a general Boolean complement pass nor an SMT
+inference step.
+
+Width rejection precedes precondition demand. A nullary problem bypasses
+extraction and validates `[]`. For a nonnullary problem, syntactic or
+propagated contradiction wins over missing-bound inapplicability and selects
+the existing all-zero carrier; otherwise the first source-ordered unbounded
+input produces ordinary `LengthApplicableDomainInapplicable`. Derived maxima,
+Cartesian cardinality, assignment evaluation, first counterexample, and final
+query association retain the established finite-box precedence.
+
+Successful traversal yields opaque
+`ValidatedLengthStrictRelationalPositiveAffineApplicableDomain` or the
+nominally distinct
+`ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain`.
+Query wrappers emit no SMT-LIB and consume no solver status; the query supplies
+only exact behavioral-problem association. Receipts retain maxima,
+total/applicable counts, and the exact finite-spine/provider-law basis. Their
+authority remains model-relative and grants no source-language realization,
+provider-implementation validation, universal proof, or pruning authority.
+
+Only the two strict-relational receipt tags add canonical bytes. Every older
+explicit-box, direct, positive-affine, relational, counterexample, replay,
+origin, simplification, and live validator retains its API, behavior,
+authority, identity, and bytes, as do all existing contract-through-live
+artifacts. See the
+[strict relational positive-affine applicable-domain report](docs/reports/2026-08-15-strict-relational-positive-affine-length-applicable-domain.md).
 
 ### Finite binary product spine lengths, offline and live SMT replay
 

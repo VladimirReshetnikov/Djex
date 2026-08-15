@@ -168,6 +168,8 @@ $(do
           , "ValidatedLengthSpinePairInputBoxReceipt"
           , "ValidatedLengthApplicableDomainReceipt"
           , "ValidatedLengthSpinePairApplicableDomainReceipt"
+          , "ValidatedLengthPositiveAffineApplicableDomainReceipt"
+          , "ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt"
           , "CheckedLengthInterpretationPolicy"
           , "CheckedLengthSession"
           , "CheckedLengthProviderInventory"
@@ -411,6 +413,21 @@ forbiddenConstructionAttempts =
     )
   , ( "Applicable-domain scalar and product receipts unexpectedly permit Coercible"
     , forbiddenValidatedLengthApplicableDomainCoercion `seq` ()
+    )
+  , noGeneric @ValidatedLengthPositiveAffineApplicableDomain
+      "ValidatedLengthPositiveAffineApplicableDomain"
+  , ( "ValidatedLengthPositiveAffineApplicableDomain constructor became public"
+    , forbiddenValidatedLengthPositiveAffineApplicableDomainConstruction
+        `seq` ()
+    )
+  , noGeneric @ValidatedLengthSpinePairPositiveAffineApplicableDomain
+      "ValidatedLengthSpinePairPositiveAffineApplicableDomain"
+  , ( "ValidatedLengthSpinePairPositiveAffineApplicableDomain constructor became public"
+    , forbiddenValidatedLengthSpinePairPositiveAffineApplicableDomainConstruction
+        `seq` ()
+    )
+  , ( "Positive-affine scalar and product receipts unexpectedly permit Coercible"
+    , forbiddenValidatedLengthPositiveAffineApplicableDomainCoercion `seq` ()
     )
   , noGeneric @(CheckedLengthProviderSummary LengthVariableProbe)
       "CheckedLengthProviderSummary"
@@ -1377,6 +1394,23 @@ forbiddenValidatedLengthApplicableDomainCoercion
   :: ValidatedLengthApplicableDomain
   -> ValidatedLengthSpinePairApplicableDomain
 forbiddenValidatedLengthApplicableDomainCoercion = coerce
+
+forbiddenValidatedLengthPositiveAffineApplicableDomainConstruction
+  :: ValidatedLengthPositiveAffineApplicableDomain
+forbiddenValidatedLengthPositiveAffineApplicableDomainConstruction =
+  ValidatedLengthPositiveAffineApplicableDomainReceipt
+    [] forbiddenValidatedLengthInputBoxConstruction
+
+forbiddenValidatedLengthSpinePairPositiveAffineApplicableDomainConstruction
+  :: ValidatedLengthSpinePairPositiveAffineApplicableDomain
+forbiddenValidatedLengthSpinePairPositiveAffineApplicableDomainConstruction =
+  ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt
+    [] forbiddenValidatedLengthSpinePairInputBoxConstruction
+
+forbiddenValidatedLengthPositiveAffineApplicableDomainCoercion
+  :: ValidatedLengthPositiveAffineApplicableDomain
+  -> ValidatedLengthSpinePairPositiveAffineApplicableDomain
+forbiddenValidatedLengthPositiveAffineApplicableDomainCoercion = coerce
 
 forbiddenBoundedRawArtifactCoercion
   :: BoundedRawArtifact ArtifactKindProbe

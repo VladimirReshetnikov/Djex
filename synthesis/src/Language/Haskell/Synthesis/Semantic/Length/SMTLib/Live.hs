@@ -938,6 +938,18 @@ sessionProcessFailure failure = case Process.lengthSMTLibProcessErrorClass failu
     LengthSMTLibLiveSessionLaunchFailed
   Process.LengthSMTLibProcessEffectiveIDExecutableAccessCheckFailed ->
     LengthSMTLibLiveSessionLaunchFailed
+  Process.LengthSMTLibProcessSourceExecveCheckDenied ->
+    LengthSMTLibLiveSessionExecutableRejected
+  Process.LengthSMTLibProcessSourceExecveCheckUnavailable ->
+    LengthSMTLibLiveSessionLaunchFailed
+  Process.LengthSMTLibProcessSourceExecveCheckFailed ->
+    LengthSMTLibLiveSessionLaunchFailed
+  Process.LengthSMTLibProcessStagedExecveCheckDenied ->
+    LengthSMTLibLiveSessionExecutableRejected
+  Process.LengthSMTLibProcessStagedExecveCheckUnavailable ->
+    LengthSMTLibLiveSessionLaunchFailed
+  Process.LengthSMTLibProcessStagedExecveCheckFailed ->
+    LengthSMTLibLiveSessionLaunchFailed
   Process.LengthSMTLibProcessDescriptorBoundLaunchUnavailable ->
     LengthSMTLibLiveSessionLaunchFailed
   Process.LengthSMTLibProcessDescriptorBoundStagingFailed ->

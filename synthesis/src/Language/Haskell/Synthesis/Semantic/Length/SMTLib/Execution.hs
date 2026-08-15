@@ -61,6 +61,7 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
   , mkLengthSMTLibExecutionConfig
   , mkLengthSMTLibDescriptorBoundExecutionConfig
   , mkLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessExecutionConfig
+  , mkLengthSMTLibDescriptorBoundExecveCheckExecutableAccessExecutionConfig
   , lengthSMTLibExecutionExecutableLaunchStrategy
   , lengthSMTLibExecutionSolverTimeoutMilliseconds
   , lengthSMTLibExecutionSolverResourceLimit

@@ -283,6 +283,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Proces
   , lengthSMTLibExecutableSnapshotStrengthTag
   , lengthSMTLibDescriptorBoundExecutableLaunchStrengthTag
   , lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchStrengthTag
+  , lengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunchStrengthTag
   , lengthSMTLibProcessDeadlineAfterMilliseconds
   , lengthSMTLibProcessDeadlineFingerprintField
   , lengthSMTLibProcessFingerprintField
@@ -294,6 +295,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Proces
   , lengthSMTLibProcessSnapshot
   , lengthSMTLibProcessUsesDescriptorBoundExecutableLaunch
   , lengthSMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch
+  , lengthSMTLibProcessUsesDescriptorBoundExecveCheckExecutableAccessLaunch
   , mkLengthSMTLibWorkingDirectoryDescriptor
   , newLengthSMTLibProcessCancellation
   , compareLengthSMTLibProcessDeadline
@@ -301,6 +303,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Proces
   , openLengthSMTLibProcess
   , openLengthSMTLibDescriptorBoundProcess
   , openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
+  , openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcess
   , runBeforeLengthSMTLibProcessDeadline
   , waitLengthSMTLibProcessControl
   )
@@ -383,6 +386,14 @@ lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessReadyWorkerSchemaTag =
     , "sealed-main-image-ready-worker/v1"
     ]
 
+lengthSMTLibDescriptorBoundExecveCheckExecutableAccessReadyWorkerSchemaTag
+  :: [Word8]
+lengthSMTLibDescriptorBoundExecveCheckExecutableAccessReadyWorkerSchemaTag =
+  ascii $ concat
+    [ "djex-length-z3-capability-probed-execve-check-executable-access-"
+    , "sealed-main-image-ready-worker/v1"
+    ]
+
 -- | Each exclusive workspace attempt samples independent secret and public
 -- 256-bit halves.  The public half names the directory; readiness barriers are
 -- SHA-256-domain-separated and query barriers use HMAC-SHA256 over fixed-width
@@ -460,6 +471,31 @@ lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessScopedBudgetedQueryRunSche
     , "scoped-shared-usable-work-deadline/v1"
     ]
 
+lengthSMTLibDescriptorBoundExecveCheckExecutableAccessQueryRunSchemaTag
+  :: [Word8]
+lengthSMTLibDescriptorBoundExecveCheckExecutableAccessQueryRunSchemaTag =
+  ascii $ concat
+    [ "djex-length-z3-capability-probed-execve-check-executable-access-"
+    , "sealed-main-image-worker-query-run/v1"
+    ]
+
+lengthSMTLibDescriptorBoundExecveCheckExecutableAccessBudgetedQueryRunSchemaTag
+  :: [Word8]
+lengthSMTLibDescriptorBoundExecveCheckExecutableAccessBudgetedQueryRunSchemaTag =
+  ascii $ concat
+    [ "djex-length-z3-capability-probed-execve-check-executable-access-"
+    , "sealed-main-image-worker-query-run/shared-usable-work-deadline/v1"
+    ]
+
+lengthSMTLibDescriptorBoundExecveCheckExecutableAccessScopedBudgetedQueryRunSchemaTag
+  :: [Word8]
+lengthSMTLibDescriptorBoundExecveCheckExecutableAccessScopedBudgetedQueryRunSchemaTag =
+  ascii $ concat
+    [ "djex-length-z3-capability-probed-execve-check-executable-access-"
+    , "sealed-main-image-worker-query-run/"
+    , "scoped-shared-usable-work-deadline/v1"
+    ]
+
 -- | Nominal product-domain run envelope.  The shared ready-worker capability
 -- is embedded only as an exact QF_LIA/input-value transport observation; it
 -- contributes no scalar behavioral authority to this product run.
@@ -524,6 +560,32 @@ lengthSpinePairSMTLibDescriptorBoundEffectiveIDExecutableAccessScopedBudgetedQue
 lengthSpinePairSMTLibDescriptorBoundEffectiveIDExecutableAccessScopedBudgetedQueryRunSchemaTag =
   ascii $ concat
     [ "djex-length-spine-pair-z3-capability-probed-effective-id-executable-"
+    , "access-sealed-main-image-worker-query-run/"
+    , "scoped-shared-usable-work-deadline/v1"
+    ]
+
+lengthSpinePairSMTLibDescriptorBoundExecveCheckExecutableAccessQueryRunSchemaTag
+  :: [Word8]
+lengthSpinePairSMTLibDescriptorBoundExecveCheckExecutableAccessQueryRunSchemaTag =
+  ascii $ concat
+    [ "djex-length-spine-pair-z3-capability-probed-execve-check-executable-"
+    , "access-sealed-main-image-worker-query-run/v1"
+    ]
+
+lengthSpinePairSMTLibDescriptorBoundExecveCheckExecutableAccessBudgetedQueryRunSchemaTag
+  :: [Word8]
+lengthSpinePairSMTLibDescriptorBoundExecveCheckExecutableAccessBudgetedQueryRunSchemaTag =
+  ascii $ concat
+    [ "djex-length-spine-pair-z3-capability-probed-execve-check-executable-"
+    , "access-sealed-main-image-worker-query-run/"
+    , "shared-usable-work-deadline/v1"
+    ]
+
+lengthSpinePairSMTLibDescriptorBoundExecveCheckExecutableAccessScopedBudgetedQueryRunSchemaTag
+  :: [Word8]
+lengthSpinePairSMTLibDescriptorBoundExecveCheckExecutableAccessScopedBudgetedQueryRunSchemaTag =
+  ascii $ concat
+    [ "djex-length-spine-pair-z3-capability-probed-execve-check-executable-"
     , "access-sealed-main-image-worker-query-run/"
     , "scoped-shared-usable-work-deadline/v1"
     ]
@@ -1219,6 +1281,9 @@ lengthSMTLibReadyWorkerExecutableSnapshotStrengthTag
   :: LengthSMTLibReadyWorker epoch
   -> ByteString
 lengthSMTLibReadyWorkerExecutableSnapshotStrengthTag worker
+  | lengthSMTLibProcessUsesDescriptorBoundExecveCheckExecutableAccessLaunch
+      $ readyWorkerProcess worker =
+      lengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunchStrengthTag
   | lengthSMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch
       $ readyWorkerProcess worker =
       lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchStrengthTag
@@ -2025,7 +2090,24 @@ queryRunFingerprintRoleForWorker
   :: LengthSMTLibReadyWorker epoch
   -> [Word8]
 queryRunFingerprintRoleForWorker worker =
-  if workerUsesDescriptorBoundEffectiveIDExecutableAccessLaunch worker
+  if workerUsesDescriptorBoundExecveCheckExecutableAccessLaunch worker
+    then ascii $ case readyQueryUsableWorkDeadlinePolicy
+        $ readyWorkerQueryPolicy worker of
+      LengthSMTLibFreshPerQueryDeadline -> concat
+        [ "finite-list-spine-length/z3-live-query-run/"
+        , "execve-check-executable-access-sealed-main-image/v1"
+        ]
+      LengthSMTLibSharedUsableWorkDeadline {} -> concat
+        [ "finite-list-spine-length/z3-live-query-run/"
+        , "execve-check-executable-access-sealed-main-image/"
+        , "shared-usable-work-deadline/v1"
+        ]
+      LengthSMTLibScopedSharedUsableWorkDeadline {} -> concat
+        [ "finite-list-spine-length/z3-live-query-run/"
+        , "execve-check-executable-access-sealed-main-image/"
+        , "scoped-shared-usable-work-deadline/v1"
+        ]
+  else if workerUsesDescriptorBoundEffectiveIDExecutableAccessLaunch worker
     then ascii $ case readyQueryUsableWorkDeadlinePolicy
         $ readyWorkerQueryPolicy worker of
       LengthSMTLibFreshPerQueryDeadline -> concat
@@ -2067,7 +2149,16 @@ queryRunSchemaTagForWorker
   :: LengthSMTLibReadyWorker epoch
   -> [Word8]
 queryRunSchemaTagForWorker worker =
-  if workerUsesDescriptorBoundEffectiveIDExecutableAccessLaunch worker
+  if workerUsesDescriptorBoundExecveCheckExecutableAccessLaunch worker
+    then case readyQueryUsableWorkDeadlinePolicy
+        $ readyWorkerQueryPolicy worker of
+      LengthSMTLibFreshPerQueryDeadline ->
+        lengthSMTLibDescriptorBoundExecveCheckExecutableAccessQueryRunSchemaTag
+      LengthSMTLibSharedUsableWorkDeadline {} ->
+        lengthSMTLibDescriptorBoundExecveCheckExecutableAccessBudgetedQueryRunSchemaTag
+      LengthSMTLibScopedSharedUsableWorkDeadline {} ->
+        lengthSMTLibDescriptorBoundExecveCheckExecutableAccessScopedBudgetedQueryRunSchemaTag
+  else if workerUsesDescriptorBoundEffectiveIDExecutableAccessLaunch worker
     then case readyQueryUsableWorkDeadlinePolicy
         $ readyWorkerQueryPolicy worker of
       LengthSMTLibFreshPerQueryDeadline ->
@@ -2107,11 +2198,31 @@ workerUsesDescriptorBoundEffectiveIDExecutableAccessLaunch =
   lengthSMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch
   . readyWorkerProcess
 
+workerUsesDescriptorBoundExecveCheckExecutableAccessLaunch
+  :: LengthSMTLibReadyWorker epoch
+  -> Bool
+workerUsesDescriptorBoundExecveCheckExecutableAccessLaunch =
+  lengthSMTLibProcessUsesDescriptorBoundExecveCheckExecutableAccessLaunch
+  . readyWorkerProcess
+
 queryExecutableAuthorityField
   :: LengthSMTLibReadyWorker epoch
   -> FingerprintField
 queryExecutableAuthorityField worker = FingerprintBytes $ ascii $
-  if workerUsesDescriptorBoundEffectiveIDExecutableAccessLaunch worker
+  if workerUsesDescriptorBoundExecveCheckExecutableAccessLaunch worker
+    then concat
+      [ "live-syntactic-process-observation/"
+      , "independent-counterexample-replay/"
+      , "two-point-source-effective-id-vfs-and-execve-check-executable-"
+      , "access-admitted/"
+      , "sealed-mfd-exec-fixed-0500-f-seal-exec-staged-execve-check-main-"
+      , "image-bytes-bound/"
+      , "point-in-time-format-and-interpreter-dependencies-ignored/"
+      , "no-source-authorization-transfer-binfmt-bprm-check-credential-"
+      , "transition-interpreter-loader-library-or-solver-soundness-"
+      , "authority/v1"
+      ]
+  else if workerUsesDescriptorBoundEffectiveIDExecutableAccessLaunch worker
     then concat
       [ "live-syntactic-process-observation/"
       , "independent-counterexample-replay/"
@@ -3059,7 +3170,24 @@ spinePairQueryRunFingerprintRoleForWorker
   :: LengthSMTLibReadyWorker epoch
   -> [Word8]
 spinePairQueryRunFingerprintRoleForWorker worker =
-  if workerUsesDescriptorBoundEffectiveIDExecutableAccessLaunch worker
+  if workerUsesDescriptorBoundExecveCheckExecutableAccessLaunch worker
+    then ascii $ case readyQueryUsableWorkDeadlinePolicy
+        $ readyWorkerQueryPolicy worker of
+      LengthSMTLibFreshPerQueryDeadline -> concat
+        [ "finite-binary-product-spine-lengths/z3-live-query-run/"
+        , "execve-check-executable-access-sealed-main-image/v1"
+        ]
+      LengthSMTLibSharedUsableWorkDeadline {} -> concat
+        [ "finite-binary-product-spine-lengths/z3-live-query-run/"
+        , "execve-check-executable-access-sealed-main-image/"
+        , "shared-usable-work-deadline/v1"
+        ]
+      LengthSMTLibScopedSharedUsableWorkDeadline {} -> concat
+        [ "finite-binary-product-spine-lengths/z3-live-query-run/"
+        , "execve-check-executable-access-sealed-main-image/"
+        , "scoped-shared-usable-work-deadline/v1"
+        ]
+  else if workerUsesDescriptorBoundEffectiveIDExecutableAccessLaunch worker
     then ascii $ case readyQueryUsableWorkDeadlinePolicy
         $ readyWorkerQueryPolicy worker of
       LengthSMTLibFreshPerQueryDeadline -> concat
@@ -3103,7 +3231,16 @@ spinePairQueryRunSchemaTagForWorker
   :: LengthSMTLibReadyWorker epoch
   -> [Word8]
 spinePairQueryRunSchemaTagForWorker worker =
-  if workerUsesDescriptorBoundEffectiveIDExecutableAccessLaunch worker
+  if workerUsesDescriptorBoundExecveCheckExecutableAccessLaunch worker
+    then case readyQueryUsableWorkDeadlinePolicy
+        $ readyWorkerQueryPolicy worker of
+      LengthSMTLibFreshPerQueryDeadline ->
+        lengthSpinePairSMTLibDescriptorBoundExecveCheckExecutableAccessQueryRunSchemaTag
+      LengthSMTLibSharedUsableWorkDeadline {} ->
+        lengthSpinePairSMTLibDescriptorBoundExecveCheckExecutableAccessBudgetedQueryRunSchemaTag
+      LengthSMTLibScopedSharedUsableWorkDeadline {} ->
+        lengthSpinePairSMTLibDescriptorBoundExecveCheckExecutableAccessScopedBudgetedQueryRunSchemaTag
+  else if workerUsesDescriptorBoundEffectiveIDExecutableAccessLaunch worker
     then case readyQueryUsableWorkDeadlinePolicy
         $ readyWorkerQueryPolicy worker of
       LengthSMTLibFreshPerQueryDeadline ->
@@ -3511,6 +3648,26 @@ openConfiguredLengthSMTLibProcess limits cancellation deadline execution
             _ -> pure $ Left workspaceDescriptorFailure
 #else
       openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
+        limits cancellation deadline
+        (lengthSMTLibExecutionZ3Profile execution) path
+        $ mkLengthSMTLibWorkingDirectoryDescriptor (-1)
+#endif
+    LengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunch ->
+#ifndef mingw32_HOST_OS
+      withMVar _workspaceGate $ \state -> case state of
+        WorkspaceFinished _ -> pure $ Left workspaceDescriptorFailure
+        WorkspaceLive identity@(PosixWorkspaceIdentity descriptor _ _ _ _) -> do
+          verified <- tryIOError $ verifyWorkspaceIdentity path identity
+          case verified of
+            Right True ->
+              openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcess
+                limits cancellation deadline
+                (lengthSMTLibExecutionZ3Profile execution) path
+                $ mkLengthSMTLibWorkingDirectoryDescriptor
+                    $ fromIntegral descriptor
+            _ -> pure $ Left workspaceDescriptorFailure
+#else
+      openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcess
         limits cancellation deadline
         (lengthSMTLibExecutionZ3Profile execution) path
         $ mkLengthSMTLibWorkingDirectoryDescriptor (-1)
@@ -4299,6 +4456,7 @@ data ReadyWorkerExecutableLaunchIdentity
   = ReadyWorkerPathSnapshotLaunchIdentity
   | ReadyWorkerDescriptorBoundLaunchIdentity
   | ReadyWorkerDescriptorBoundEffectiveIDExecutableAccessLaunchIdentity
+  | ReadyWorkerDescriptorBoundExecveCheckExecutableAccessLaunchIdentity
 
 buildReadyWorkerIdentityForDeadlinePolicy
   :: LengthSMTLibUsableWorkDeadlinePolicy
@@ -4355,6 +4513,12 @@ buildBudgetedReadyWorkerIdentity
               , "ready-worker/effective-id-executable-access-sealed-main-"
               , "image/v1"
               ]
+          ReadyWorkerDescriptorBoundExecveCheckExecutableAccessLaunchIdentity ->
+            concat
+              [ "finite-list-spine-length/z3-budgeted-capability-probed-"
+              , "ready-worker/execve-check-executable-access-sealed-main-"
+              , "image/v1"
+              ]
       , fingerprintBuilderFields =
           [ FingerprintBytes $ ascii $ case launchIdentity of
               ReadyWorkerPathSnapshotLaunchIdentity ->
@@ -4368,13 +4532,20 @@ buildBudgetedReadyWorkerIdentity
                   [ "djex-length-z3-effective-id-executable-access-sealed-"
                   , "main-image-ready-worker/shared-usable-work-deadline/v1"
                   ]
+              ReadyWorkerDescriptorBoundExecveCheckExecutableAccessLaunchIdentity ->
+                concat
+                  [ "djex-length-z3-execve-check-executable-access-sealed-"
+                  , "main-image-ready-worker/shared-usable-work-deadline/v1"
+                  ]
           , tagged (case launchIdentity of
                 ReadyWorkerPathSnapshotLaunchIdentity ->
                   "legacy-ready-worker-identity"
                 ReadyWorkerDescriptorBoundLaunchIdentity ->
                   "descriptor-bound-ready-worker-identity"
                 ReadyWorkerDescriptorBoundEffectiveIDExecutableAccessLaunchIdentity ->
-                  "descriptor-bound-effective-id-executable-access-ready-worker-identity")
+                  "descriptor-bound-effective-id-executable-access-ready-worker-identity"
+                ReadyWorkerDescriptorBoundExecveCheckExecutableAccessLaunchIdentity ->
+                  "descriptor-bound-execve-check-executable-access-ready-worker-identity")
               [FingerprintBytes $ fingerprintCanonicalBytes legacy]
           , tagged "shared-usable-work-budget"
               [ FingerprintNatural $ fromIntegral milliseconds
@@ -4428,6 +4599,12 @@ buildScopedBudgetedReadyWorkerIdentity
               , "effective-id-executable-access-sealed-main-image/"
               , "scoped-shared-usable-work-deadline/v1"
               ]
+          ReadyWorkerDescriptorBoundExecveCheckExecutableAccessLaunchIdentity ->
+            concat
+              [ "finite-list-spine-length/z3-capability-probed-ready-worker/"
+              , "execve-check-executable-access-sealed-main-image/"
+              , "scoped-shared-usable-work-deadline/v1"
+              ]
       , fingerprintBuilderFields =
           [ FingerprintBytes $ ascii $ case launchIdentity of
               ReadyWorkerPathSnapshotLaunchIdentity ->
@@ -4442,13 +4619,21 @@ buildScopedBudgetedReadyWorkerIdentity
                   , "main-image-ready-worker/"
                   , "scoped-shared-usable-work-deadline/v1"
                   ]
+              ReadyWorkerDescriptorBoundExecveCheckExecutableAccessLaunchIdentity ->
+                concat
+                  [ "djex-length-z3-execve-check-executable-access-sealed-"
+                  , "main-image-ready-worker/"
+                  , "scoped-shared-usable-work-deadline/v1"
+                  ]
           , tagged (case launchIdentity of
                 ReadyWorkerPathSnapshotLaunchIdentity ->
                   "legacy-ready-worker-identity"
                 ReadyWorkerDescriptorBoundLaunchIdentity ->
                   "descriptor-bound-ready-worker-identity"
                 ReadyWorkerDescriptorBoundEffectiveIDExecutableAccessLaunchIdentity ->
-                  "descriptor-bound-effective-id-executable-access-ready-worker-identity")
+                  "descriptor-bound-effective-id-executable-access-ready-worker-identity"
+                ReadyWorkerDescriptorBoundExecveCheckExecutableAccessLaunchIdentity ->
+                  "descriptor-bound-execve-check-executable-access-ready-worker-identity")
               [FingerprintBytes $ fingerprintCanonicalBytes legacy]
           , tagged "scoped-shared-usable-work-budget"
               [ FingerprintNatural $ fromIntegral milliseconds
@@ -4522,6 +4707,11 @@ buildReadyWorkerIdentity
               [ "finite-list-spine-length/z3-capability-probed-ready-worker/"
               , "effective-id-executable-access-sealed-main-image/v1"
               ]
+          ReadyWorkerDescriptorBoundExecveCheckExecutableAccessLaunchIdentity ->
+            concat
+              [ "finite-list-spine-length/z3-capability-probed-ready-worker/"
+              , "execve-check-executable-access-sealed-main-image/v1"
+              ]
       , fingerprintBuilderFields =
           [ FingerprintBytes lengthSMTLibSessionSchemaTag
           , FingerprintBytes $ case launchIdentity of
@@ -4531,6 +4721,8 @@ buildReadyWorkerIdentity
                 lengthSMTLibDescriptorBoundReadyWorkerSchemaTag
               ReadyWorkerDescriptorBoundEffectiveIDExecutableAccessLaunchIdentity ->
                 lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessReadyWorkerSchemaTag
+              ReadyWorkerDescriptorBoundExecveCheckExecutableAccessLaunchIdentity ->
+                lengthSMTLibDescriptorBoundExecveCheckExecutableAccessReadyWorkerSchemaTag
           , tagged "execution-policy"
               [FingerprintBytes $ fingerprintCanonicalBytes
                 $ lengthSMTLibExecutionPolicyFingerprint execution]
@@ -4543,7 +4735,9 @@ buildReadyWorkerIdentity
                     ReadyWorkerDescriptorBoundLaunchIdentity ->
                       lengthSMTLibDescriptorBoundExecutableLaunchStrengthTag
                     ReadyWorkerDescriptorBoundEffectiveIDExecutableAccessLaunchIdentity ->
-                      lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchStrengthTag]
+                      lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchStrengthTag
+                    ReadyWorkerDescriptorBoundExecveCheckExecutableAccessLaunchIdentity ->
+                      lengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunchStrengthTag]
           , tagged "capability-outcome"
               [FingerprintBytes $ fingerprintCanonicalBytes
                 $ lengthSMTLibCapabilityOutcomePlanFingerprint outcome]
@@ -4593,6 +4787,9 @@ readyWorkerExecutableLaunchIdentity
   :: LengthSMTLibProcess
   -> ReadyWorkerExecutableLaunchIdentity
 readyWorkerExecutableLaunchIdentity process
+  | lengthSMTLibProcessUsesDescriptorBoundExecveCheckExecutableAccessLaunch
+      process =
+      ReadyWorkerDescriptorBoundExecveCheckExecutableAccessLaunchIdentity
   | lengthSMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch
       process =
       ReadyWorkerDescriptorBoundEffectiveIDExecutableAccessLaunchIdentity

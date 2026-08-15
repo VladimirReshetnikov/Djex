@@ -43,6 +43,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   , mkLengthSMTLibExecutionConfig
   , mkLengthSMTLibDescriptorBoundExecutionConfig
   , mkLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessExecutionConfig
+  , mkLengthSMTLibDescriptorBoundExecveCheckExecutableAccessExecutionConfig
   , lengthSMTLibExecutionExecutableLaunchStrategy
   , lengthSMTLibExecutionSolverTimeoutMilliseconds
   , lengthSMTLibExecutionSolverResourceLimit
@@ -303,6 +304,7 @@ data LengthSMTLibExecutableLaunchStrategy
   = LengthSMTLibPathSnapshotThenDirectSpawn
   | LengthSMTLibDescriptorBoundExecutableLaunch
   | LengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunch
+  | LengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunch
   deriving (Bounded, Enum, Eq, Ord, Show, Generic)
 
 instance NFData LengthSMTLibExecutableLaunchStrategy
@@ -407,6 +409,21 @@ mkLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessExecutionConfig
     LengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunch
     limits source
 
+-- | Seal the additive Linux 6.14 descriptor-bound launch policy which adds
+-- two source and one staged @AT_EXECVE_CHECK@ observations to the effective-
+-- ID access and sealed-image authority.  Pure admission remains platform-
+-- independent; a live opener fails closed when any required primitive is
+-- unavailable.
+mkLengthSMTLibDescriptorBoundExecveCheckExecutableAccessExecutionConfig
+  :: LengthSMTLibExecutionLimits
+  -> LengthSMTLibExecutionConfigSource
+  -> Either LengthSMTLibExecutionConfigError LengthSMTLibExecutionConfig
+mkLengthSMTLibDescriptorBoundExecveCheckExecutableAccessExecutionConfig
+    limits source =
+  buildExecutionConfig
+    LengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunch
+    limits source
+
 buildExecutionConfig
   :: LengthSMTLibExecutableLaunchStrategy
   -> LengthSMTLibExecutionLimits
@@ -436,6 +453,9 @@ buildExecutionConfig strategy limits source = do
       buildDescriptorBoundPolicyFingerprint limits z3 artifacts responses
     LengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunch ->
       buildDescriptorBoundEffectiveIDExecutableAccessPolicyFingerprint
+        limits z3 artifacts responses
+    LengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunch ->
+      buildDescriptorBoundExecveCheckExecutableAccessPolicyFingerprint
         limits z3 artifacts responses
   pure $ LengthSMTLibExecutionConfig
     z3 strategy artifacts responses fingerprint
@@ -719,6 +739,68 @@ buildDescriptorBoundEffectiveIDExecutableAccessPolicyFingerprint
                   "sealed-staged-main-image-bytes-only/v1"
               , FingerprintBytes $ ascii
                   "no-setuid-file-capability-loader-library-interpreter-or-solver-authority/v1"
+              ]
+          ] ++ Z3.z3SMTLibExecutionFingerprintFields z3 ++
+          [ artifactPolicyField artifacts
+          , FingerprintBytes lengthSMTLibResponseSchemaTag
+          , FingerprintNatural $ lengthSMTLibResponseByteLimit responses
+          , FingerprintNatural $ fromIntegral
+              $ lengthSMTLibResponseNestingDepthLimit responses
+          , FingerprintNatural $ lengthSMTLibResponseNodeLimit responses
+          , FingerprintNatural $ lengthSMTLibResponseTokenByteLimit responses
+          , FingerprintNatural $ fromIntegral
+              $ lengthSMTLibResponseIntegerBitLimit responses
+          ]
+      } of
+    Left FingerprintLimitExceeded
+        { fingerprintMaximumBytes = maximumBytesObserved
+        , fingerprintObservedBytesAtLeast = observed
+        } -> Left $ LengthSMTLibExecutionPolicyFingerprintByteLimitExceeded
+          maximumBytesObserved observed
+    Right fingerprint -> Right fingerprint
+ where
+ maximumBytes = lengthSMTLibExecutionPolicyFingerprintByteLimit limits
+
+buildDescriptorBoundExecveCheckExecutableAccessPolicyFingerprint
+  :: LengthSMTLibExecutionLimits
+  -> Z3.Z3SMTLibExecutionProfile
+  -> LengthSMTLibArtifactPolicy
+  -> LengthSMTLibResponseLimits
+  -> Either
+      LengthSMTLibExecutionConfigError
+      (Fingerprint LengthSMTLibExecutionPolicyFingerprintSubject)
+buildDescriptorBoundExecveCheckExecutableAccessPolicyFingerprint
+    limits z3 artifacts responses =
+  case buildFingerprintWithin maximumBytes FingerprintBuilder
+      { fingerprintBuilderVersion = 1
+      , fingerprintBuilderRole = ascii
+          "length-z3-descriptor-bound-execve-check-executable-access-execution-policy"
+      , fingerprintBuilderFields =
+          [ FingerprintBytes $ ascii
+              "djex-length-z3-smtlib2-execution-policy/descriptor-bound-execve-check-executable-access/v1"
+          , FingerprintBytes lengthSMTLibExecutionProtocolSchemaTag
+          , FingerprintTag (ascii "executable-launch-strategy")
+              [ FingerprintBytes $ ascii $ concat
+                  [ "opened-source-two-point-faccessat2-x-ok-at-empty-path-at-"
+                  , "eaccess-plus-execveat-at-empty-path-at-execve-check-hash-"
+                  , "copy-mfd-exec-fixed-0500-f-seal-exec-sealed-memfd-"
+                  , "staged-execve-check-then-execveat/point-in-time-source-"
+                  , "and-staged-kernel-executable-access-and-main-image-"
+                  , "bytes/v1"
+                  ]
+              , FingerprintBytes $ ascii $ concat
+                  [ "two-point-source-faccessat2-and-execve-check-plus-one-"
+                  , "sealed-staged-image-execve-check-point-in-time-only/v1"
+                  ]
+              , FingerprintBytes $ ascii $ concat
+                  [ "mfd-exec-fixed-0500-seal-write-grow-shrink-future-write-"
+                  , "exec-seal-main-image-bytes-only/v1"
+                  ]
+              , FingerprintBytes $ ascii $ concat
+                  [ "no-source-authorization-transfer-format-binfmt-bprm-"
+                  , "check-credential-transition-interpreter-loader-library-"
+                  , "solver-or-result-authority/v1"
+                  ]
               ]
           ] ++ Z3.z3SMTLibExecutionFingerprintFields z3 ++
           [ artifactPolicyField artifacts

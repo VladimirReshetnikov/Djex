@@ -10,9 +10,12 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Proces
   , lengthSMTLibDescriptorBoundExecutableLaunchSupported
   , lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchStrengthTag
   , lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchSupported
+  , lengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunchStrengthTag
+  , lengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunchSupported
   , lengthSMTLibProcessSchemaTag
   , lengthSMTLibDescriptorBoundProcessSchemaTag
   , lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessSchemaTag
+  , lengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessSchemaTag
   , LengthSMTLibProcessLimitSource (..)
   , defaultLengthSMTLibProcessLimitSource
   , LengthSMTLibProcessLimits
@@ -58,6 +61,13 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Proces
   , openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
   , openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
   , lengthSMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch
+  , LengthSMTLibExecveCheckResult (..)
+  , LengthSMTLibExecveCheckStagedImageInspection (..)
+  , inspectLengthSMTLibExecveCheckStagedImage
+  , openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcess
+  , openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithHooks
+  , openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithTestHooks
+  , lengthSMTLibProcessUsesDescriptorBoundExecveCheckExecutableAccessLaunch
   , lengthSMTLibProcessLimits
   , lengthSMTLibProcessSnapshot
   , lengthSMTLibProcessFingerprintField
@@ -75,7 +85,8 @@ import Control.Exception (mask, mask_)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Char (ord)
-import Data.Word (Word8, Word64)
+import Data.Int (Int64)
+import Data.Word (Word8, Word32, Word64)
 import Foreign.C.Types (CInt)
 import Numeric.Natural (Natural)
 import System.Exit (ExitCode)
@@ -112,6 +123,15 @@ lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchSupported :: Bool
 lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchSupported =
   Z3Process.z3SMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchSupported
 
+lengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunchStrengthTag
+  :: ByteString
+lengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunchStrengthTag =
+  Z3Process.z3SMTLibDescriptorBoundExecveCheckExecutableAccessLaunchStrengthTag
+
+lengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunchSupported :: Bool
+lengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunchSupported =
+  Z3Process.z3SMTLibDescriptorBoundExecveCheckExecutableAccessLaunchSupported
+
 lengthSMTLibProcessSchemaTag :: ByteString
 lengthSMTLibProcessSchemaTag = asciiBytes
   "djex-length-z3-raw-process/v2"
@@ -125,6 +145,14 @@ lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessSchemaTag
 lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessSchemaTag =
   asciiBytes $ concat
     [ "djex-length-z3-descriptor-bound-effective-id-executable-access-"
+    , "sealed-main-image-process/v1"
+    ]
+
+lengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessSchemaTag
+  :: ByteString
+lengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessSchemaTag =
+  asciiBytes $ concat
+    [ "djex-length-z3-descriptor-bound-execve-check-executable-access-"
     , "sealed-main-image-process/v1"
     ]
 
@@ -253,6 +281,12 @@ data LengthSMTLibProcessFailureClass
   | LengthSMTLibProcessEffectiveIDExecutableAccessDenied
   | LengthSMTLibProcessEffectiveIDExecutableAccessCheckUnavailable
   | LengthSMTLibProcessEffectiveIDExecutableAccessCheckFailed
+  | LengthSMTLibProcessSourceExecveCheckDenied
+  | LengthSMTLibProcessSourceExecveCheckUnavailable
+  | LengthSMTLibProcessSourceExecveCheckFailed
+  | LengthSMTLibProcessStagedExecveCheckDenied
+  | LengthSMTLibProcessStagedExecveCheckUnavailable
+  | LengthSMTLibProcessStagedExecveCheckFailed
   deriving (Bounded, Enum, Eq, Ord, Show)
 
 data LengthSMTLibProcessCleanupEscalation
@@ -560,6 +594,145 @@ toZ3EffectiveIDExecutableAccessCheckResult result = case result of
   LengthSMTLibEffectiveIDExecutableAccessCheckFailed ->
     Z3Process.Z3SMTLibEffectiveIDExecutableAccessCheckFailed
 
+data LengthSMTLibExecveCheckResult
+  = LengthSMTLibExecveCheckAdmitted
+  | LengthSMTLibExecveCheckDenied
+  | LengthSMTLibExecveCheckUnavailable
+  | LengthSMTLibExecveCheckFailed
+  deriving (Bounded, Enum, Eq, Ord, Show)
+
+data LengthSMTLibExecveCheckStagedImageInspection =
+  LengthSMTLibExecveCheckStagedImageInspection
+    { lengthSMTLibExecveCheckStagedImageRequestedCreationFlags :: !Word32
+    , lengthSMTLibExecveCheckStagedImageRegularFile :: !Bool
+    , lengthSMTLibExecveCheckStagedImageMode :: !Word32
+    , lengthSMTLibExecveCheckStagedImageByteCount :: !Int64
+    , lengthSMTLibExecveCheckStagedImageSeals :: !Word32
+    }
+  deriving (Eq, Ord, Show)
+
+-- | Inspect a borrowed staged descriptor without retaining or closing it.
+-- Requested creation flags name the production creator policy; an injected
+-- test descriptor does not acquire MFD_EXEC authority from that field.
+inspectLengthSMTLibExecveCheckStagedImage
+  :: CInt
+  -> IO (Maybe LengthSMTLibExecveCheckStagedImageInspection)
+inspectLengthSMTLibExecveCheckStagedImage descriptor = do
+  inspected <- Z3Process.inspectZ3SMTLibExecveCheckStagedImage descriptor
+  pure $ fmap fromZ3ExecveCheckStagedImageInspection inspected
+
+openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcess
+  :: LengthSMTLibProcessLimits
+  -> LengthSMTLibProcessCancellation
+  -> LengthSMTLibProcessDeadline
+  -> Z3Execution.Z3SMTLibExecutionProfile
+  -> FilePath
+  -> LengthSMTLibWorkingDirectoryDescriptor
+  -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
+openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcess
+    limits cancellation deadline profile workingDirectory
+    (LengthSMTLibWorkingDirectoryDescriptor descriptor) =
+  mask $ \restore -> do
+    opened <- restore
+      $ Z3Process.openZ3SMTLibDescriptorBoundExecveCheckExecutableAccessProcess
+          (toZ3ProcessLimits limits)
+          (toZ3ProcessCancellation cancellation)
+          (toZ3ProcessDeadline deadline)
+          profile workingDirectory descriptor
+    retainOpenedProcess opened
+
+openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithHooks
+  :: LengthSMTLibProcessLimits
+  -> LengthSMTLibProcessCancellation
+  -> LengthSMTLibProcessDeadline
+  -> Z3Execution.Z3SMTLibExecutionProfile
+  -> FilePath
+  -> LengthSMTLibWorkingDirectoryDescriptor
+  -> (CInt -> IO LengthSMTLibEffectiveIDExecutableAccessCheckResult)
+  -> (CInt -> IO LengthSMTLibExecveCheckResult)
+  -> IO ()
+  -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
+openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithHooks
+    limits cancellation deadline profile workingDirectory
+    (LengthSMTLibWorkingDirectoryDescriptor descriptor) accessCheck
+    execveCheck hook =
+  mask $ \restore -> do
+    opened <- restore
+      $ Z3Process.openZ3SMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithHooks
+          (toZ3ProcessLimits limits)
+          (toZ3ProcessCancellation cancellation)
+          (toZ3ProcessDeadline deadline)
+          profile workingDirectory descriptor
+          (fmap toZ3EffectiveIDExecutableAccessCheckResult . accessCheck)
+          (fmap toZ3ExecveCheckResult . execveCheck)
+          hook
+    retainOpenedProcess opened
+
+openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithTestHooks
+  :: LengthSMTLibProcessLimits
+  -> LengthSMTLibProcessCancellation
+  -> LengthSMTLibProcessDeadline
+  -> Z3Execution.Z3SMTLibExecutionProfile
+  -> FilePath
+  -> LengthSMTLibWorkingDirectoryDescriptor
+  -> (CInt -> IO LengthSMTLibEffectiveIDExecutableAccessCheckResult)
+  -> (CInt -> IO LengthSMTLibExecveCheckResult)
+  -> IO CInt
+  -> (CInt -> Int64 -> IO CInt)
+  -> (CInt -> IO ())
+  -> IO ()
+  -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
+openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithTestHooks
+    limits cancellation deadline profile workingDirectory
+    (LengthSMTLibWorkingDirectoryDescriptor descriptor) accessCheck
+    execveCheck creator sealer inspectionHook hook =
+  mask $ \restore -> do
+    opened <- restore
+      $ Z3Process.openZ3SMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithTestHooks
+          (toZ3ProcessLimits limits)
+          (toZ3ProcessCancellation cancellation)
+          (toZ3ProcessDeadline deadline)
+          profile workingDirectory descriptor
+          (fmap toZ3EffectiveIDExecutableAccessCheckResult . accessCheck)
+          (fmap toZ3ExecveCheckResult . execveCheck)
+          creator sealer inspectionHook hook
+    retainOpenedProcess opened
+
+lengthSMTLibProcessUsesDescriptorBoundExecveCheckExecutableAccessLaunch
+  :: LengthSMTLibProcess
+  -> Bool
+lengthSMTLibProcessUsesDescriptorBoundExecveCheckExecutableAccessLaunch =
+  Z3Process.z3SMTLibProcessUsesDescriptorBoundExecveCheckExecutableAccessLaunch
+    . toZ3Process
+
+toZ3ExecveCheckResult
+  :: LengthSMTLibExecveCheckResult
+  -> Z3Process.Z3SMTLibExecveCheckResult
+toZ3ExecveCheckResult result = case result of
+  LengthSMTLibExecveCheckAdmitted -> Z3Process.Z3SMTLibExecveCheckAdmitted
+  LengthSMTLibExecveCheckDenied -> Z3Process.Z3SMTLibExecveCheckDenied
+  LengthSMTLibExecveCheckUnavailable ->
+    Z3Process.Z3SMTLibExecveCheckUnavailable
+  LengthSMTLibExecveCheckFailed -> Z3Process.Z3SMTLibExecveCheckFailed
+
+fromZ3ExecveCheckStagedImageInspection
+  :: Z3Process.Z3SMTLibExecveCheckStagedImageInspection
+  -> LengthSMTLibExecveCheckStagedImageInspection
+fromZ3ExecveCheckStagedImageInspection inspection =
+  LengthSMTLibExecveCheckStagedImageInspection
+    { lengthSMTLibExecveCheckStagedImageRequestedCreationFlags =
+        Z3Process.z3SMTLibExecveCheckStagedImageRequestedCreationFlags
+          inspection
+    , lengthSMTLibExecveCheckStagedImageRegularFile =
+        Z3Process.z3SMTLibExecveCheckStagedImageRegularFile inspection
+    , lengthSMTLibExecveCheckStagedImageMode =
+        Z3Process.z3SMTLibExecveCheckStagedImageMode inspection
+    , lengthSMTLibExecveCheckStagedImageByteCount =
+        Z3Process.z3SMTLibExecveCheckStagedImageByteCount inspection
+    , lengthSMTLibExecveCheckStagedImageSeals =
+        Z3Process.z3SMTLibExecveCheckStagedImageSeals inspection
+    }
+
 lengthSMTLibProcessSnapshot
   :: LengthSMTLibProcess
   -> LengthSMTLibExecutableSnapshot
@@ -683,7 +856,15 @@ processFingerprintField process = FingerprintTag role
   effectiveIDAccess =
     Z3Process.z3SMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch
       process
-  role = ascii $ if effectiveIDAccess
+  execveCheckAccess =
+    Z3Process.z3SMTLibProcessUsesDescriptorBoundExecveCheckExecutableAccessLaunch
+      process
+  role = ascii $ if execveCheckAccess
+    then concat
+      [ "length-z3-descriptor-bound-execve-check-executable-access-"
+      , "launched-transport"
+      ]
+    else if effectiveIDAccess
     then concat
       [ "length-z3-descriptor-bound-effective-id-executable-access-"
       , "launched-transport"
@@ -692,6 +873,8 @@ processFingerprintField process = FingerprintTag role
       then "length-z3-descriptor-bound-launched-transport"
       else "length-z3-launched-transport"
   schema
+    | execveCheckAccess =
+        lengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessSchemaTag
     | effectiveIDAccess =
         lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessSchemaTag
     | descriptorBound = lengthSMTLibDescriptorBoundProcessSchemaTag
@@ -875,6 +1058,18 @@ fromZ3ProcessFailureClass failure = case failure of
     LengthSMTLibProcessEffectiveIDExecutableAccessCheckUnavailable
   Z3Process.Z3SMTLibProcessEffectiveIDExecutableAccessCheckFailed ->
     LengthSMTLibProcessEffectiveIDExecutableAccessCheckFailed
+  Z3Process.Z3SMTLibProcessSourceExecveCheckDenied ->
+    LengthSMTLibProcessSourceExecveCheckDenied
+  Z3Process.Z3SMTLibProcessSourceExecveCheckUnavailable ->
+    LengthSMTLibProcessSourceExecveCheckUnavailable
+  Z3Process.Z3SMTLibProcessSourceExecveCheckFailed ->
+    LengthSMTLibProcessSourceExecveCheckFailed
+  Z3Process.Z3SMTLibProcessStagedExecveCheckDenied ->
+    LengthSMTLibProcessStagedExecveCheckDenied
+  Z3Process.Z3SMTLibProcessStagedExecveCheckUnavailable ->
+    LengthSMTLibProcessStagedExecveCheckUnavailable
+  Z3Process.Z3SMTLibProcessStagedExecveCheckFailed ->
+    LengthSMTLibProcessStagedExecveCheckFailed
   Z3Process.Z3SMTLibProcessDescriptorBoundLaunchUnavailable ->
     LengthSMTLibProcessDescriptorBoundLaunchUnavailable
   Z3Process.Z3SMTLibProcessDescriptorBoundStagingFailed ->

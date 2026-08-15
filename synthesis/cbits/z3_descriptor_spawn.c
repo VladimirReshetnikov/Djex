@@ -22,11 +22,50 @@
 #define AT_EACCESS 0x200
 #endif
 
+#ifndef AT_EXECVE_CHECK
+#define AT_EXECVE_CHECK 0x10000
+#endif
+
+#if AT_EXECVE_CHECK != 0x10000
+#error "unexpected Linux AT_EXECVE_CHECK value"
+#endif
+
+#ifndef MFD_EXEC
+#define MFD_EXEC 0x0010U
+#endif
+
+#if MFD_EXEC != 0x0010U
+#error "unexpected Linux MFD_EXEC value"
+#endif
+
+#ifndef F_SEAL_FUTURE_WRITE
+#define F_SEAL_FUTURE_WRITE 0x0010
+#endif
+
+#if F_SEAL_FUTURE_WRITE != 0x0010
+#error "unexpected Linux F_SEAL_FUTURE_WRITE value"
+#endif
+
+#ifndef F_SEAL_EXEC
+#define F_SEAL_EXEC 0x0020
+#endif
+
+#if F_SEAL_EXEC != 0x0020
+#error "unexpected Linux F_SEAL_EXEC value"
+#endif
+
 enum {
   DJEX_EFFECTIVE_ID_EXECUTABLE_ACCESS_ADMITTED = 0,
   DJEX_EFFECTIVE_ID_EXECUTABLE_ACCESS_DENIED = 1,
   DJEX_EFFECTIVE_ID_EXECUTABLE_ACCESS_UNAVAILABLE = 2,
   DJEX_EFFECTIVE_ID_EXECUTABLE_ACCESS_FAILED = 3
+};
+
+enum {
+  DJEX_EXECVE_CHECK_ADMITTED = 0,
+  DJEX_EXECVE_CHECK_DENIED = 1,
+  DJEX_EXECVE_CHECK_UNAVAILABLE = 2,
+  DJEX_EXECVE_CHECK_FAILED = 3
 };
 
 enum {
@@ -162,9 +201,73 @@ int djex_z3_check_effective_id_executable_access(int descriptor) {
 #endif
 }
 
+int djex_z3_check_execve_executable_access(int descriptor) {
+#ifdef SYS_execveat
+  char sanitized_argv_zero[] = "djex-z3-execve-check";
+  char *const sanitized_argv[] = {sanitized_argv_zero, NULL};
+  char *const empty_envp[] = {NULL};
+
+  if (syscall(
+          SYS_execveat,
+          descriptor,
+          "",
+          sanitized_argv,
+          empty_envp,
+          AT_EMPTY_PATH | AT_EXECVE_CHECK) == 0) {
+    return DJEX_EXECVE_CHECK_ADMITTED;
+  }
+  if (errno == EACCES || errno == EPERM || errno == ETXTBSY) {
+    return DJEX_EXECVE_CHECK_DENIED;
+  }
+  if (errno == ENOSYS || errno == EINVAL) {
+    return DJEX_EXECVE_CHECK_UNAVAILABLE;
+  }
+  return DJEX_EXECVE_CHECK_FAILED;
+#else
+  (void) descriptor;
+  return DJEX_EXECVE_CHECK_UNAVAILABLE;
+#endif
+}
+
 int djex_z3_create_staged_executable(void) {
   unsigned int flags = MFD_CLOEXEC | MFD_ALLOW_SEALING;
   return (int) syscall(SYS_memfd_create, "djex-z3-main-image", flags);
+}
+
+static unsigned int djex_execve_check_staged_creation_flags(void) {
+  return MFD_CLOEXEC | MFD_ALLOW_SEALING | MFD_EXEC;
+}
+
+int djex_z3_create_execve_check_staged_executable(void) {
+  return (int) syscall(
+      SYS_memfd_create,
+      "djex-z3-execve-check-main-image",
+      djex_execve_check_staged_creation_flags());
+}
+
+int djex_z3_inspect_execve_check_staged_executable(
+    int descriptor,
+    unsigned int *creation_flags,
+    int *regular_file,
+    unsigned int *mode,
+    int64_t *size,
+    int *seals) {
+  struct stat status;
+  int observed_seals;
+
+  if (fstat(descriptor, &status) < 0) {
+    return -1;
+  }
+  observed_seals = fcntl(descriptor, F_GET_SEALS);
+  if (observed_seals < 0) {
+    return -1;
+  }
+  *creation_flags = djex_execve_check_staged_creation_flags();
+  *regular_file = S_ISREG(status.st_mode) ? 1 : 0;
+  *mode = (unsigned int) (status.st_mode & 07777U);
+  *size = (int64_t) status.st_size;
+  *seals = observed_seals;
+  return 0;
 }
 
 int djex_z3_seal_staged_executable(
@@ -207,6 +310,40 @@ int djex_z3_seal_effective_id_access_staged_executable(
   /* The memfd belongs to the launcher, not to the source-file owner.  Its
    * fixed owner read/execute bits are staging transport, never copied source
    * authorization or metadata. */
+  if (fchmod(descriptor, (mode_t) 0500U) < 0) {
+    return -1;
+  }
+  if (fcntl(descriptor, F_ADD_SEALS, required_seals) < 0) {
+    return -1;
+  }
+  observed_seals = fcntl(descriptor, F_GET_SEALS);
+  if (observed_seals < 0 ||
+      (observed_seals & required_seals) != required_seals) {
+    errno = EPERM;
+    return -1;
+  }
+  if (fstat(descriptor, &status) < 0 ||
+      !S_ISREG(status.st_mode) ||
+      status.st_size != expected_size ||
+      (status.st_mode & 07777U) != 0500U) {
+    errno = EIO;
+    return -1;
+  }
+  return 0;
+}
+
+int djex_z3_seal_execve_check_staged_executable(
+    int descriptor,
+    int64_t expected_size) {
+  static const int required_seals =
+      F_SEAL_WRITE | F_SEAL_GROW | F_SEAL_SHRINK |
+      F_SEAL_FUTURE_WRITE | F_SEAL_EXEC | F_SEAL_SEAL;
+  struct stat status;
+  int observed_seals;
+
+  /* MFD_EXEC grants staging executability at creation.  The fixed mode and
+   * complete verified seal set are launcher-owned transport properties, not
+   * transferred source-file authorization or metadata. */
   if (fchmod(descriptor, (mode_t) 0500U) < 0) {
     return -1;
   }

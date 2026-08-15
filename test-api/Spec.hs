@@ -48,6 +48,8 @@ import Language.Haskell.Synthesis.Query
 import qualified Language.Haskell.Synthesis.Query as Query
 import qualified Language.Haskell.Synthesis.Search as Search
 import qualified Language.Haskell.Synthesis.Semantic.Length as Length
+import qualified Language.Haskell.Synthesis.Semantic.Length.Evaluate
+  as LengthEvaluate
 import qualified Language.Haskell.Synthesis.TypedGenerated as TypedGenerated
 import qualified Language.Haskell.Synthesis.TypedGenerated.Fingerprint
   as TypedGeneratedFingerprint
@@ -248,6 +250,30 @@ projectionSignatures =
     :: Length.CheckedLengthProviderInventory Int
     -> Fingerprint.Fingerprint
         Length.LengthProviderInventoryFingerprintSubject) `seq`
+  (LengthEvaluate.validatedLengthApplicableDomainInclusiveMaximums
+    :: LengthEvaluate.ValidatedLengthApplicableDomain
+    -> [Natural]) `seq`
+  (LengthEvaluate.validatedLengthApplicableDomainAssignmentCount
+    :: LengthEvaluate.ValidatedLengthApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthApplicableDomainApplicableAssignmentCount
+    :: LengthEvaluate.ValidatedLengthApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthApplicableDomainBasis
+    :: LengthEvaluate.ValidatedLengthApplicableDomain
+    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
+  (LengthEvaluate.validatedLengthSpinePairApplicableDomainInclusiveMaximums
+    :: LengthEvaluate.ValidatedLengthSpinePairApplicableDomain
+    -> [Natural]) `seq`
+  (LengthEvaluate.validatedLengthSpinePairApplicableDomainAssignmentCount
+    :: LengthEvaluate.ValidatedLengthSpinePairApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthSpinePairApplicableDomainApplicableAssignmentCount
+    :: LengthEvaluate.ValidatedLengthSpinePairApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthSpinePairApplicableDomainBasis
+    :: LengthEvaluate.ValidatedLengthSpinePairApplicableDomain
+    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
   ()
 
 main :: IO ()
@@ -317,6 +343,7 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "forbiddenBehavioralEvidenceDomainCoercion"
                       , "forbiddenBehavioralEvidenceReceiptCoercion"
                       , "forbiddenBoundedRawArtifactCoercion"
+                      , "forbiddenValidatedLengthApplicableDomainCoercion"
                       , "forbiddenCheckedLengthContractCoercion"
                       , "forbiddenCheckedLengthSpinePairContractCoercion"
                       , "forbiddenCheckedLengthContextVariableCoercion"
@@ -400,6 +427,8 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "ValidatedLengthSpinePairCounterexampleReceipt"
                       , "ValidatedLengthInputBoxReceipt"
                       , "ValidatedLengthSpinePairInputBoxReceipt"
+                      , "ValidatedLengthApplicableDomainReceipt"
+                      , "ValidatedLengthSpinePairApplicableDomainReceipt"
                       ]
                   )
             assertBool

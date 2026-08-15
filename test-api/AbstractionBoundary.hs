@@ -164,6 +164,8 @@ $(do
           , "LengthSpinePairSMTLibQuery"
           , "ValidatedLengthSpinePairCounterexampleReceipt"
           , "ValidatedLengthSpinePairInputBoxReceipt"
+          , "ValidatedLengthApplicableDomainReceipt"
+          , "ValidatedLengthSpinePairApplicableDomainReceipt"
           , "CheckedLengthInterpretationPolicy"
           , "CheckedLengthSession"
           , "CheckedLengthProviderInventory"
@@ -380,6 +382,19 @@ forbiddenConstructionAttempts =
       "ValidatedLengthSpinePairInputBox"
   , ( "ValidatedLengthSpinePairInputBox constructor became public"
     , forbiddenValidatedLengthSpinePairInputBoxConstruction `seq` ()
+    )
+  , noGeneric @ValidatedLengthApplicableDomain
+      "ValidatedLengthApplicableDomain"
+  , ( "ValidatedLengthApplicableDomain constructor became public"
+    , forbiddenValidatedLengthApplicableDomainConstruction `seq` ()
+    )
+  , noGeneric @ValidatedLengthSpinePairApplicableDomain
+      "ValidatedLengthSpinePairApplicableDomain"
+  , ( "ValidatedLengthSpinePairApplicableDomain constructor became public"
+    , forbiddenValidatedLengthSpinePairApplicableDomainConstruction `seq` ()
+    )
+  , ( "Applicable-domain scalar and product receipts unexpectedly permit Coercible"
+    , forbiddenValidatedLengthApplicableDomainCoercion `seq` ()
     )
   , noGeneric @(CheckedLengthProviderSummary LengthVariableProbe)
       "CheckedLengthProviderSummary"
@@ -1312,6 +1327,23 @@ forbiddenValidatedLengthSpinePairInputBoxConstruction
 forbiddenValidatedLengthSpinePairInputBoxConstruction =
   ValidatedLengthSpinePairInputBoxReceipt
     [] [] 0 0 ProviderIndependentFiniteSpineModel
+
+forbiddenValidatedLengthApplicableDomainConstruction
+  :: ValidatedLengthApplicableDomain
+forbiddenValidatedLengthApplicableDomainConstruction =
+  ValidatedLengthApplicableDomainReceipt
+    [] forbiddenValidatedLengthInputBoxConstruction
+
+forbiddenValidatedLengthSpinePairApplicableDomainConstruction
+  :: ValidatedLengthSpinePairApplicableDomain
+forbiddenValidatedLengthSpinePairApplicableDomainConstruction =
+  ValidatedLengthSpinePairApplicableDomainReceipt
+    [] forbiddenValidatedLengthSpinePairInputBoxConstruction
+
+forbiddenValidatedLengthApplicableDomainCoercion
+  :: ValidatedLengthApplicableDomain
+  -> ValidatedLengthSpinePairApplicableDomain
+forbiddenValidatedLengthApplicableDomainCoercion = coerce
 
 forbiddenBoundedRawArtifactCoercion
   :: BoundedRawArtifact ArtifactKindProbe

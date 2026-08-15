@@ -113,6 +113,7 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , associatedCertificateCandidateTests
   , problemReplayTests
   , inputBoxValidationTests
+  , applicableDomainValidationTests
   , SMTLibQFLIASpec.smtLibQFLIATests
   , smtLibTests
   , smtLibProtocolTests
@@ -5282,6 +5283,415 @@ inputBoxValidationTests = testGroup "bounded exhaustive input-box validation"
             (evaluationLimitsWith 2 8)
             Evaluate.defaultLengthInputBoxLimits unaryQuery [4]
   ]
+
+applicableDomainValidationTests :: TestTree
+applicableDomainValidationTests = testGroup
+  "complete direct-precondition applicable-domain validation"
+  [ testCase
+      "extract exact direct bounds, choose duplicate minima, and retain basis" $
+      do
+        Evaluate.lengthApplicableDomainValidationSchemaTag @?=
+          asciiBytes
+            "finite-list-spine-length/finite-precondition-domain-establishment/v1"
+        let input = Length.LengthVariable $ Length.LengthInput 0
+            result = Length.LengthVariable Length.LengthResult
+            precondition = Length.LengthAll
+              [ Length.LengthAtMost input $ Length.LengthLiteral 4
+              , Length.LengthAtMost input $ Length.LengthLiteral 2
+              -- An unrelated lower clause remains part of applicability but
+              -- grants no finite-domain authority to the direct scanner.
+              , Length.LengthAtMost (Length.LengthLiteral 0) input
+              ]
+            source = contractWith precondition
+              $ Length.LengthEqual result $ Length.LengthLiteral 7
+        problem <- adversarialConstantProviderProblem 7 source
+        validation <- expectRight
+          $ Evaluate.validateLengthProblemApplicableDomain
+              Evaluate.defaultLengthEvaluationLimits
+              Evaluate.defaultLengthInputBoxLimits problem
+        (evidence, receipt) <- case validation of
+          Evaluate.LengthApplicableDomainEstablished established -> do
+            replayed <- expectRight $ SemanticProblem.replayBehavioralEvidence
+              (LengthProblem.checkedLengthProblemBehavioralProblem problem)
+              established
+            pure (established, replayed)
+          Evaluate.LengthApplicableDomainInapplicable reason -> assertFailure
+            ("direct bounds were treated as inapplicable: " ++ show reason)
+              >> error "unreachable"
+          Evaluate.LengthApplicableDomainCounterexample{} -> assertFailure
+            "the safe applicable domain produced a counterexample"
+              >> error "unreachable"
+        providerName <- expectName "Fixture.problemReplayConstant"
+        assertValidatedLengthApplicableDomain receipt [2] 3 3
+          $ Evaluate.FiniteSpineModelUnderAssumedProviderLaws [providerName]
+        force receipt `seq` pure ()
+
+        stale <- adversarialConstantProviderProblem 7
+          $ contractWith
+              (Length.LengthAtMost input $ Length.LengthLiteral 1)
+              (Length.LengthEqual result $ Length.LengthLiteral 7)
+        assertLeft SemanticProblem.ReplayEncodingFingerprintMismatch
+          $ SemanticProblem.replayBehavioralEvidence
+              (LengthProblem.checkedLengthProblemBehavioralProblem stale)
+              evidence
+  , testCase "report the first compact input without a direct upper bound" $ do
+      let first = Length.LengthVariable $ Length.LengthInput 0
+          second = Length.LengthVariable $ Length.LengthInput 1
+          source precondition = contractWith precondition
+            $ Length.LengthTruth True
+          validate problem = Evaluate.validateLengthProblemApplicableDomain
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits problem
+
+      missingFirst <- adversarialBinaryConstantZeroProblem $ source
+        $ Length.LengthAtMost second $ Length.LengthLiteral 2
+      missingFirstReason <-
+        expectLengthApplicableDomainInapplicability $ validate missingFirst
+      missingFirstReason @?=
+        Evaluate.LengthApplicableDomainInputUpperBoundMissing 0
+      missingFirstQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits missingFirst
+      missingFirstQueryValidation <- expectRight
+        $ SMTLib.validateLengthSMTLibQueryApplicableDomain
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits missingFirstQuery
+      case missingFirstQueryValidation of
+        Evaluate.LengthApplicableDomainInapplicable reason ->
+          reason @?= missingFirstReason
+        Evaluate.LengthApplicableDomainCounterexample{} -> assertFailure
+          "an inapplicable query-owned domain produced a counterexample"
+        Evaluate.LengthApplicableDomainEstablished{} -> assertFailure
+          "an inapplicable query-owned domain produced positive evidence"
+
+      missingSecond <- adversarialBinaryConstantZeroProblem $ source
+        $ Length.LengthAtMost first $ Length.LengthLiteral 2
+      missingSecondReason <-
+        expectLengthApplicableDomainInapplicability $ validate missingSecond
+      missingSecondReason @?=
+        Evaluate.LengthApplicableDomainInputUpperBoundMissing 1
+  , testCase
+      "conservatively ignore equality and derived arithmetic bounds" $ do
+      let input = Length.LengthVariable $ Length.LengthInput 0
+          source precondition = contractWith precondition
+            $ Length.LengthTruth True
+          validate problem = Evaluate.validateLengthProblemApplicableDomain
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits problem
+          missing = Evaluate.LengthApplicableDomainInputUpperBoundMissing 0
+
+      equalityProblem <- adversarialConstantZeroProblem $ source
+        $ Length.LengthEqual input $ Length.LengthLiteral 2
+      equalityReason <- expectLengthApplicableDomainInapplicability
+        $ validate equalityProblem
+      equalityReason @?= missing
+
+      derivedProblem <- adversarialConstantZeroProblem $ source
+        $ Length.LengthAtMost
+            (Length.LengthScale 2 input)
+            (Length.LengthLiteral 4)
+      derivedReason <- expectLengthApplicableDomainInapplicability
+        $ validate derivedProblem
+      derivedReason @?= missing
+  , testCase "establish the singleton nullary applicable domain" $ do
+      let result = Length.LengthVariable Length.LengthResult
+          source = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result $ Length.LengthLiteral 0
+      problem <- adversarialZeroInputProblem source
+      receipt <- expectValidatedLengthApplicableDomain problem
+        $ Evaluate.validateLengthProblemApplicableDomain
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits problem
+      assertValidatedLengthApplicableDomain receipt [] 1 1
+        Evaluate.ProviderIndependentFiniteSpineModel
+  , testCase
+      "enforce width, derived-value, and assignment-product caps in order" $ do
+      binaryWithoutBounds <- adversarialBinaryConstantZeroProblem
+        trivialLengthContract
+      narrow <- inputBoxLimits 1 16
+      widthResult <- evaluateWithin
+        $ Evaluate.validateLengthProblemApplicableDomain
+            (error "width rejection demanded evaluation limits")
+            narrow binaryWithoutBounds
+      assertLeft
+        (Evaluate.LengthApplicableDomainInputBoxValidationRejected
+          $ Evaluate.LengthInputBoxProblemInputLimitExceeded 1 2)
+        widthResult
+
+      let input = Length.LengthVariable $ Length.LengthInput 0
+          bounded maximumValue = contractWith
+            (Length.LengthAtMost input $ Length.LengthLiteral maximumValue)
+            (Length.LengthTruth True)
+      unary <- adversarialConstantZeroProblem $ bounded 4
+      let valueFailure =
+            Evaluate.LengthApplicableDomainInputBoxValidationRejected
+              $ Evaluate.LengthInputBoxMaximumValueRejected 0
+              $ Evaluate.LengthEvaluationValueBitLimitExceeded
+                  (Evaluate.LengthProblemInputValue 0) 2 3
+      assertLeft valueFailure
+        $ Evaluate.validateLengthProblemApplicableDomain
+            (evaluationLimitsWith 2 8)
+            Evaluate.defaultLengthInputBoxLimits unary
+      unaryQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits unary
+      assertLeft
+        (SMTLib.LengthSMTLibApplicableDomainValidationRejected valueFailure)
+        $ SMTLib.validateLengthSMTLibQueryApplicableDomain
+            (evaluationLimitsWith 2 8)
+            Evaluate.defaultLengthInputBoxLimits unaryQuery
+
+      let first = Length.LengthVariable $ Length.LengthInput 0
+          second = Length.LengthVariable $ Length.LengthInput 1
+          twoBitBox = contractWith
+            (Length.LengthAll
+              [ Length.LengthAtMost first $ Length.LengthLiteral 1
+              , Length.LengthAtMost second $ Length.LengthLiteral 1
+              ])
+            (Length.LengthTruth True)
+      binary <- adversarialBinaryConstantZeroProblem twoBitBox
+      threeAssignments <- inputBoxLimits 2 3
+      assertLeft
+        (Evaluate.LengthApplicableDomainInputBoxValidationRejected
+          $ Evaluate.LengthInputBoxAssignmentLimitExceeded 3 4)
+        $ Evaluate.validateLengthProblemApplicableDomain
+            (evaluationLimitsWith 1 0) threeAssignments binary
+  , testCase "return the first source-lexicographic domain violation" $ do
+      let first = Length.LengthVariable $ Length.LengthInput 0
+          second = Length.LengthVariable $ Length.LengthInput 1
+          result = Length.LengthVariable Length.LengthResult
+          source = contractWith
+            (Length.LengthAll
+              [ Length.LengthAtMost first $ Length.LengthLiteral 1
+              , Length.LengthAtMost second $ Length.LengthLiteral 1
+              ])
+            $ Length.LengthEqual result $ Length.LengthSum [first, second]
+      problem <- adversarialBinaryConstantZeroProblem source
+      counterexample <- expectLengthApplicableDomainCounterexample problem
+        $ Evaluate.validateLengthProblemApplicableDomain
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits problem
+      -- Both [0,1] and [1,0] violate; the leftmost input varies slowest.
+      Evaluate.validatedLengthCounterexampleInputs counterexample @?= [0, 1]
+      Evaluate.validatedLengthCounterexampleResult counterexample @?= 0
+      query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+        SMTLib.defaultLengthSMTLibLimits problem
+      queryValidation <- expectRight
+        $ SMTLib.validateLengthSMTLibQueryApplicableDomain
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits query
+      case queryValidation of
+        Evaluate.LengthApplicableDomainCounterexample queryCounterexample ->
+          queryCounterexample @?= counterexample
+        Evaluate.LengthApplicableDomainInapplicable reason -> assertFailure
+          ("the query-owned violating domain was inapplicable: " ++ show reason)
+        Evaluate.LengthApplicableDomainEstablished{} -> assertFailure
+          "the query-owned violating domain produced positive evidence"
+  , testCase
+      "associate scalar establishment with its query without changing identity" $
+      do
+        let input = Length.LengthVariable $ Length.LengthInput 0
+            result = Length.LengthVariable Length.LengthResult
+            source = contractWith
+              (Length.LengthAtMost input $ Length.LengthLiteral 2)
+              $ Length.LengthEqual result $ Length.LengthLiteral 7
+        problem <- adversarialConstantProviderProblem 7 source
+        directReceipt <- expectValidatedLengthApplicableDomain problem
+          $ Evaluate.validateLengthProblemApplicableDomain
+              Evaluate.defaultLengthEvaluationLimits
+              Evaluate.defaultLengthInputBoxLimits problem
+        query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+          SMTLib.defaultLengthSMTLibLimits problem
+        let fingerprintBefore = SMTLib.lengthSMTLibQueryFingerprint query
+            checkBytesBefore = SMTLib.lengthSMTLibQueryCheckBytes query
+            symbolsBefore = SMTLib.lengthSMTLibQueryInputSymbols query
+            valueRequestBefore =
+              SMTLib.lengthSMTLibQueryInputValueRequestBytes query
+        queryValidation <- expectRight
+          $ SMTLib.validateLengthSMTLibQueryApplicableDomain
+              Evaluate.defaultLengthEvaluationLimits
+              Evaluate.defaultLengthInputBoxLimits query
+        case queryValidation of
+          Evaluate.LengthApplicableDomainEstablished receipt ->
+            receipt @?= directReceipt
+          Evaluate.LengthApplicableDomainInapplicable reason -> assertFailure
+            ("query-owned direct domain was inapplicable: " ++ show reason)
+          Evaluate.LengthApplicableDomainCounterexample{} -> assertFailure
+            "query-owned safe domain produced a counterexample"
+        SMTLib.lengthSMTLibQueryFingerprint query @?= fingerprintBefore
+        SMTLib.lengthSMTLibQueryCheckBytes query @?= checkBytesBefore
+        SMTLib.lengthSMTLibQueryInputSymbols query @?= symbolsBefore
+        SMTLib.lengthSMTLibQueryInputValueRequestBytes query @?=
+          valueRequestBefore
+  , testCase
+      "establish the nominal product domain and preserve its query identity" $
+      do
+        Evaluate.lengthSpinePairApplicableDomainValidationSchemaTag @?=
+          asciiBytes
+            "finite-binary-product-spine-lengths/finite-precondition-domain-establishment/v1"
+        assertBool "product applicable-domain validation reused scalar schema" $
+          Evaluate.lengthSpinePairApplicableDomainValidationSchemaTag /=
+            Evaluate.lengthApplicableDomainValidationSchemaTag
+        let input = Length.LengthVariable $ Length.LengthSpinePairInput 0
+            source = spinePairContractWith
+              (Length.LengthAtMost input $ Length.LengthLiteral 2)
+              $ Length.LengthAll
+                  [ Length.LengthEqual
+                      (pairResultVariable Length.LengthSpinePairFirst) input
+                  , Length.LengthEqual
+                      (pairResultVariable Length.LengthSpinePairSecond)
+                      $ Length.LengthLiteral 0
+                  ]
+        problem <- adversarialInputAndZeroSpinePairProblem source
+        validation <- expectRight
+          $ Evaluate.validateLengthSpinePairProblemApplicableDomain
+              Evaluate.defaultLengthEvaluationLimits
+              Evaluate.defaultLengthInputBoxLimits problem
+        (evidence, receipt) <- case validation of
+          Evaluate.LengthApplicableDomainEstablished established -> do
+            replayed <- expectRight $ SemanticProblem.replayBehavioralEvidence
+              (LengthProblem.checkedLengthSpinePairProblemBehavioralProblem
+                problem)
+              established
+            pure (established, replayed)
+          Evaluate.LengthApplicableDomainInapplicable reason -> assertFailure
+            ("direct product bound was inapplicable: " ++ show reason)
+              >> error "unreachable"
+          Evaluate.LengthApplicableDomainCounterexample{} -> assertFailure
+            "the safe product domain produced a counterexample"
+              >> error "unreachable"
+        assertValidatedLengthSpinePairApplicableDomain receipt [2] 3 3
+          Evaluate.ProviderIndependentFiniteSpineModel
+        force receipt `seq` pure ()
+
+        scalar <- adversarialConstantZeroProblem trivialLengthContract
+        let forgedScalarDomainEvidence = unsafeCoerce evidence
+              :: SemanticProblem.BehavioralEvidence
+                  Length.FiniteListSpineLengthV1
+                  Evaluate.ValidatedLengthSpinePairApplicableDomain
+        assertLeft SemanticProblem.ReplayDomainMismatch
+          $ SemanticProblem.replayBehavioralEvidence
+              (LengthProblem.checkedLengthProblemBehavioralProblem scalar)
+              forgedScalarDomainEvidence
+
+        query <- expectRight $ SMTLib.sealLengthSpinePairSMTLibQuery
+          SMTLib.defaultLengthSMTLibLimits problem
+        let fingerprintBefore =
+              SMTLib.lengthSpinePairSMTLibQueryFingerprint query
+            checkBytesBefore =
+              SMTLib.lengthSpinePairSMTLibQueryCheckBytes query
+            symbolsBefore = SMTLib.lengthSpinePairSMTLibQueryInputSymbols query
+            valueRequestBefore =
+              SMTLib.lengthSpinePairSMTLibQueryInputValueRequestBytes query
+        queryValidation <- expectRight
+          $ SMTLib.validateLengthSpinePairSMTLibQueryApplicableDomain
+              Evaluate.defaultLengthEvaluationLimits
+              Evaluate.defaultLengthInputBoxLimits query
+        case queryValidation of
+          Evaluate.LengthApplicableDomainEstablished queryReceipt ->
+            queryReceipt @?= receipt
+          Evaluate.LengthApplicableDomainInapplicable reason -> assertFailure
+            ("query-owned product domain was inapplicable: " ++ show reason)
+          Evaluate.LengthApplicableDomainCounterexample{} -> assertFailure
+            "query-owned safe product domain produced a counterexample"
+        SMTLib.lengthSpinePairSMTLibQueryFingerprint query @?=
+          fingerprintBefore
+        SMTLib.lengthSpinePairSMTLibQueryCheckBytes query @?= checkBytesBefore
+        SMTLib.lengthSpinePairSMTLibQueryInputSymbols query @?= symbolsBefore
+        SMTLib.lengthSpinePairSMTLibQueryInputValueRequestBytes query @?=
+          valueRequestBefore
+  ]
+
+type AdversarialLengthApplicableDomainValidation =
+  Either Evaluate.LengthApplicableDomainValidationError
+    (Evaluate.LengthApplicableDomainValidation
+      (SemanticProblem.BehavioralEvidence
+        Length.FiniteListSpineLengthV1
+        Evaluate.ValidatedLengthCounterexample)
+      (SemanticProblem.BehavioralEvidence
+        Length.FiniteListSpineLengthV1
+        Evaluate.ValidatedLengthApplicableDomain))
+
+expectLengthApplicableDomainInapplicability
+  :: AdversarialLengthApplicableDomainValidation
+  -> IO Evaluate.LengthApplicableDomainInapplicability
+expectLengthApplicableDomainInapplicability validation = case validation of
+  Left failure -> assertFailure
+    ("unexpected applicable-domain rejection: " ++ show failure)
+      >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainInapplicable reason) -> pure reason
+  Right (Evaluate.LengthApplicableDomainCounterexample _) -> assertFailure
+    "an inapplicable domain produced a counterexample" >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainEstablished _) -> assertFailure
+    "an inapplicable domain produced positive evidence" >> error "unreachable"
+
+expectValidatedLengthApplicableDomain
+  :: LengthProblem.CheckedLengthProblem
+      AdversarialIdentity AdversarialLocal
+  -> AdversarialLengthApplicableDomainValidation
+  -> IO Evaluate.ValidatedLengthApplicableDomain
+expectValidatedLengthApplicableDomain problem validation = case validation of
+  Left failure -> assertFailure
+    ("unexpected applicable-domain rejection: " ++ show failure)
+      >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainInapplicable reason) -> assertFailure
+    ("the applicable domain was not directly bounded: " ++ show reason)
+      >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainCounterexample _) -> assertFailure
+    "the applicable domain unexpectedly contained a counterexample"
+      >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainEstablished evidence) -> expectRight
+    $ SemanticProblem.replayBehavioralEvidence
+        (LengthProblem.checkedLengthProblemBehavioralProblem problem) evidence
+
+expectLengthApplicableDomainCounterexample
+  :: LengthProblem.CheckedLengthProblem
+      AdversarialIdentity AdversarialLocal
+  -> AdversarialLengthApplicableDomainValidation
+  -> IO Evaluate.ValidatedLengthCounterexample
+expectLengthApplicableDomainCounterexample problem validation = case validation of
+  Left failure -> assertFailure
+    ("unexpected applicable-domain rejection: " ++ show failure)
+      >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainInapplicable reason) -> assertFailure
+    ("the violating domain was not directly bounded: " ++ show reason)
+      >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainEstablished _) -> assertFailure
+    "the violating applicable domain produced positive evidence"
+      >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainCounterexample evidence) -> expectRight
+    $ SemanticProblem.replayBehavioralEvidence
+        (LengthProblem.checkedLengthProblemBehavioralProblem problem) evidence
+
+assertValidatedLengthApplicableDomain
+  :: Evaluate.ValidatedLengthApplicableDomain
+  -> [Natural]
+  -> Natural
+  -> Natural
+  -> Evaluate.LengthCounterexampleBasis
+  -> IO ()
+assertValidatedLengthApplicableDomain receipt maximums assignments applicable
+    basis = do
+  Evaluate.validatedLengthApplicableDomainInclusiveMaximums receipt @?= maximums
+  Evaluate.validatedLengthApplicableDomainAssignmentCount receipt @?= assignments
+  Evaluate.validatedLengthApplicableDomainApplicableAssignmentCount receipt @?=
+    applicable
+  Evaluate.validatedLengthApplicableDomainBasis receipt @?= basis
+
+assertValidatedLengthSpinePairApplicableDomain
+  :: Evaluate.ValidatedLengthSpinePairApplicableDomain
+  -> [Natural]
+  -> Natural
+  -> Natural
+  -> Evaluate.LengthCounterexampleBasis
+  -> IO ()
+assertValidatedLengthSpinePairApplicableDomain receipt maximums assignments
+    applicable basis = do
+  Evaluate.validatedLengthSpinePairApplicableDomainInclusiveMaximums receipt @?=
+    maximums
+  Evaluate.validatedLengthSpinePairApplicableDomainAssignmentCount receipt @?=
+    assignments
+  Evaluate.validatedLengthSpinePairApplicableDomainApplicableAssignmentCount
+      receipt @?= applicable
+  Evaluate.validatedLengthSpinePairApplicableDomainBasis receipt @?= basis
 
 type AdversarialLengthInputBoxValidation =
   Either Evaluate.LengthInputBoxValidationError

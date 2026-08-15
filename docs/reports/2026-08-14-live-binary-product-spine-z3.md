@@ -2,6 +2,11 @@
 
 Date: 2026-08-14
 
+> **Later 2026-08-14 follow-up.** Leant now consumes this facade through its
+> exact canonical-`Prod` handoff, nominal product ranking and presentation, and
+> startup configuration versions 4 and 6. The statement below that integration
+> remained future work records only this checkpoint's original boundary.
+
 ## Outcome and boundary
 
 Djex can now execute a sealed `LengthSpinePairSMTLibQuery` through the scoped

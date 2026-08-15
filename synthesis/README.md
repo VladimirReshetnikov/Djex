@@ -431,6 +431,36 @@ execution, process, worker, or live-observation version or canonical bytes
 change. The new v1 tag belongs only to the opaque bounded receipt. See the
 [bounded input-box validation report](../docs/reports/2026-08-14-bounded-length-input-box-validation.md).
 
+`validateLengthProblemApplicableDomain` builds on that verifier with one
+deliberately narrow finite-coverage rule over the checked normalized
+precondition. It recognizes only direct top-level
+`LengthAtMost (LengthVariable (LengthInput i)) (LengthLiteral maximum)`
+clauses, retains the tightest maximum for duplicate input clauses, and requires
+one for every compact modeled input. It performs no implication, equality,
+arithmetic, nested-formula, or solver reasoning. Missing coverage and the
+nonnullary problem's first unbounded input produce the ordinary
+`LengthApplicableDomainInapplicable` result. A nullary problem instead derives
+maxima `[]` and validates the single assignment `[]`.
+
+When coverage succeeds, the derived source-ordered maxima form one tight
+solver-independent Cartesian box. The established box limits and evaluation
+limits still gate width, cardinality, values, and intermediate arithmetic. A
+violation releases the ordinary `ValidatedLengthCounterexample`; complete
+traversal releases a nominal opaque `ValidatedLengthApplicableDomain` which
+retains the derived maxima, total/applicable counts, and exact model/provider
+basis. `validateLengthSMTLibQueryApplicableDomain` adds only same-problem
+association and never emits a command or consumes a solver status.
+
+The product-domain siblings are
+`validateLengthSpinePairProblemApplicableDomain`,
+`validateLengthSpinePairSMTLibQueryApplicableDomain`, and
+`ValidatedLengthSpinePairApplicableDomain`. Their result classification is
+shared but their behavioral evidence remains nominally separate. Neither
+receipt establishes source-language totality, validates concrete provider
+implementations, authorizes pruning, or upgrades `sat`, `unsat`, or `unknown`.
+See the
+[directly bounded applicable-domain report](../docs/reports/2026-08-14-directly-bounded-length-applicable-domain.md).
+
 `FiniteBinaryProductSpineLengthsV1` adds a distinct checked domain for an exact
 boxed binary product whose two source-ordered fields are modeled finite
 spines. `LengthSpinePairContractVariable` retains the scalar domain's compact
@@ -517,8 +547,10 @@ and the
 [offline product SMT and replay report](../docs/reports/2026-08-14-finite-binary-product-spine-smt-replay.md),
 followed by the
 [live binary-product Length/Z3 report](../docs/reports/2026-08-14-live-binary-product-spine-z3.md).
-Leant product-result ranking is not part of this Djex checkpoint and remains
-the next engine-integration step.
+Leant now consumes the product facade through its exact canonical-`Prod`
+handoff, nominal pair ranking and presentation, and startup configuration
+versions 4 and 6. That downstream integration does not convert pair evidence
+to scalar authority.
 
 Positive-literal natural quotient and modulo remain inside QF_LIA by using one
 shared deterministic private Euclidean witness shape rather than the forbidden

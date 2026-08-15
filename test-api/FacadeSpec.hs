@@ -990,6 +990,39 @@ facadeTests = testGroup "public Djex facade"
             :: ValidatedLengthInputBox
             -> LengthCounterexampleBasis
           inputBoxBasisProjection = validatedLengthInputBoxBasis
+          applicableDomainValidator
+            :: LengthEvaluationLimits
+            -> LengthInputBoxLimits
+            -> CheckedLengthProblem Int ExferenceLocal
+            -> Either LengthApplicableDomainValidationError
+                (LengthApplicableDomainValidation
+                  (BehavioralEvidence
+                    FiniteListSpineLengthV1
+                    ValidatedLengthCounterexample)
+                  (BehavioralEvidence
+                    FiniteListSpineLengthV1
+                    ValidatedLengthApplicableDomain))
+          applicableDomainValidator = validateLengthProblemApplicableDomain
+          applicableDomainMaximumsProjection
+            :: ValidatedLengthApplicableDomain
+            -> [Natural]
+          applicableDomainMaximumsProjection =
+            validatedLengthApplicableDomainInclusiveMaximums
+          applicableDomainAssignmentProjection
+            :: ValidatedLengthApplicableDomain
+            -> Natural
+          applicableDomainAssignmentProjection =
+            validatedLengthApplicableDomainAssignmentCount
+          applicableDomainApplicableProjection
+            :: ValidatedLengthApplicableDomain
+            -> Natural
+          applicableDomainApplicableProjection =
+            validatedLengthApplicableDomainApplicableAssignmentCount
+          applicableDomainBasisProjection
+            :: ValidatedLengthApplicableDomain
+            -> LengthCounterexampleBasis
+          applicableDomainBasisProjection =
+            validatedLengthApplicableDomainBasis
           queryInputReplayer
             :: LengthEvaluationLimits
             -> LengthSMTLibQuery Int ExferenceLocal
@@ -1015,6 +1048,16 @@ facadeTests = testGroup "public Djex facade"
                   ValidatedLengthCounterexample
                   ValidatedLengthInputBox)
           queryInputBoxValidator = validateLengthSMTLibQueryInputBox
+          queryApplicableDomainValidator
+            :: LengthEvaluationLimits
+            -> LengthInputBoxLimits
+            -> LengthSMTLibQuery Int ExferenceLocal
+            -> Either LengthSMTLibApplicableDomainValidationError
+                (LengthApplicableDomainValidation
+                  ValidatedLengthCounterexample
+                  ValidatedLengthApplicableDomain)
+          queryApplicableDomainValidator =
+            validateLengthSMTLibQueryApplicableDomain
           queryInputSymbolsProjection
             :: LengthSMTLibQuery Int ExferenceLocal
             -> [[Word8]]
@@ -1139,8 +1182,13 @@ facadeTests = testGroup "public Djex facade"
         inputBoxValidator `seq` inputBoxMaximumsProjection `seq`
         inputBoxAssignmentCountProjection `seq`
         inputBoxApplicableCountProjection `seq` inputBoxBasisProjection `seq`
+        applicableDomainValidator `seq`
+        applicableDomainMaximumsProjection `seq`
+        applicableDomainAssignmentProjection `seq`
+        applicableDomainApplicableProjection `seq`
+        applicableDomainBasisProjection `seq`
         queryInputReplayer `seq` queryOriginProber `seq`
-        queryInputBoxValidator `seq`
+        queryInputBoxValidator `seq` queryApplicableDomainValidator `seq`
         queryInputSymbolsProjection `seq`
         queryInputValueRequestProjection `seq` queryObservationAssociator `seq`
         queryObservationReplayer `seq` checkResponseParser `seq`
@@ -1160,8 +1208,13 @@ facadeTests = testGroup "public Djex facade"
         (rnf :: LengthInputBoxValidationError -> ()) `seq`
         (rnf :: LengthInputBoxValidation () () -> ()) `seq`
         (rnf :: ValidatedLengthInputBox -> ()) `seq`
+        (rnf :: LengthApplicableDomainInapplicability -> ()) `seq`
+        (rnf :: LengthApplicableDomainValidation () () -> ()) `seq`
+        (rnf :: LengthApplicableDomainValidationError -> ()) `seq`
+        (rnf :: ValidatedLengthApplicableDomain -> ()) `seq`
         (rnf :: LengthSMTLibInputReplayError -> ()) `seq`
         (rnf :: LengthSMTLibInputBoxValidationError -> ()) `seq`
+        (rnf :: LengthSMTLibApplicableDomainValidationError -> ()) `seq`
         (rnf :: LengthSMTLibExecutableDigestExpectation -> ()) `seq`
         pure ()
       length interpretationPolicySources @?= 5
@@ -1176,16 +1229,43 @@ facadeTests = testGroup "public Djex facade"
       lengthInputBoxValidationSchemaTag @?=
         map (fromIntegral . fromEnum)
           ("finite-list-spine-length/bounded-input-box-validation/v1" :: String)
+      lengthApplicableDomainValidationSchemaTag @?=
+        map (fromIntegral . fromEnum)
+          ("finite-list-spine-length/\
+            \finite-precondition-domain-establishment/v1" :: String)
       (LengthInputBoxCounterexample () :: LengthInputBoxValidation () ()) @?=
         LengthInputBoxCounterexample ()
       (LengthInputBoxValidated () :: LengthInputBoxValidation () ()) @?=
         LengthInputBoxValidated ()
+      let missing = LengthApplicableDomainInputUpperBoundMissing 2
+      missing @?= LengthApplicableDomainInputUpperBoundMissing 2
+      ( LengthApplicableDomainInapplicable missing
+          :: LengthApplicableDomainValidation () ()
+        ) @?= LengthApplicableDomainInapplicable missing
+      ( LengthApplicableDomainCounterexample ()
+          :: LengthApplicableDomainValidation () ()
+        ) @?= LengthApplicableDomainCounterexample ()
+      ( LengthApplicableDomainEstablished ()
+          :: LengthApplicableDomainValidation () ()
+        ) @?= LengthApplicableDomainEstablished ()
+      let applicableDomainError =
+            LengthApplicableDomainInputBoxValidationRejected
+              $ LengthInputBoxBoundsArityMismatch 1 2
+      applicableDomainError @?=
+        LengthApplicableDomainInputBoxValidationRejected
+          (LengthInputBoxBoundsArityMismatch 1 2)
       ( LengthSMTLibInputBoxValidationAssociationRejected
           ReplayDomainMismatch
           :: LengthSMTLibInputBoxValidationError
         ) @?=
           LengthSMTLibInputBoxValidationAssociationRejected
             ReplayDomainMismatch
+      ( LengthSMTLibApplicableDomainValidationAssociationRejected
+          ReplayEncodingFingerprintMismatch
+          :: LengthSMTLibApplicableDomainValidationError
+        ) @?=
+          LengthSMTLibApplicableDomainValidationAssociationRejected
+            ReplayEncodingFingerprintMismatch
       lengthProblemTermGraphLimits defaultLengthProblemLimits @?=
         defaultTermGraphLimits
       lengthProblemGraphFingerprintByteLimit defaultLengthProblemLimits @?=
@@ -1375,6 +1455,40 @@ facadeTests = testGroup "public Djex facade"
           boxBasisProjection
             :: ValidatedLengthSpinePairInputBox -> LengthCounterexampleBasis
           boxBasisProjection = validatedLengthSpinePairInputBoxBasis
+          applicableDomainValidator
+            :: LengthEvaluationLimits
+            -> LengthInputBoxLimits
+            -> CheckedLengthSpinePairProblem Int ExferenceLocal
+            -> Either LengthSpinePairApplicableDomainValidationError
+                (LengthApplicableDomainValidation
+                  (BehavioralEvidence
+                    FiniteBinaryProductSpineLengthsV1
+                    ValidatedLengthSpinePairCounterexample)
+                  (BehavioralEvidence
+                    FiniteBinaryProductSpineLengthsV1
+                    ValidatedLengthSpinePairApplicableDomain))
+          applicableDomainValidator =
+            validateLengthSpinePairProblemApplicableDomain
+          applicableDomainMaximumsProjection
+            :: ValidatedLengthSpinePairApplicableDomain
+            -> [Natural]
+          applicableDomainMaximumsProjection =
+            validatedLengthSpinePairApplicableDomainInclusiveMaximums
+          applicableDomainAssignmentProjection
+            :: ValidatedLengthSpinePairApplicableDomain
+            -> Natural
+          applicableDomainAssignmentProjection =
+            validatedLengthSpinePairApplicableDomainAssignmentCount
+          applicableDomainApplicableProjection
+            :: ValidatedLengthSpinePairApplicableDomain
+            -> Natural
+          applicableDomainApplicableProjection =
+            validatedLengthSpinePairApplicableDomainApplicableAssignmentCount
+          applicableDomainBasisProjection
+            :: ValidatedLengthSpinePairApplicableDomain
+            -> LengthCounterexampleBasis
+          applicableDomainBasisProjection =
+            validatedLengthSpinePairApplicableDomainBasis
           querySealer
             :: LengthSMTLibLimits
             -> CheckedLengthSpinePairProblem Int ExferenceLocal
@@ -1439,6 +1553,16 @@ facadeTests = testGroup "public Djex facade"
                   ValidatedLengthSpinePairCounterexample
                   ValidatedLengthSpinePairInputBox)
           queryBoxValidator = validateLengthSpinePairSMTLibQueryInputBox
+          queryApplicableDomainValidator
+            :: LengthEvaluationLimits
+            -> LengthInputBoxLimits
+            -> LengthSpinePairSMTLibQuery Int ExferenceLocal
+            -> Either LengthSpinePairSMTLibApplicableDomainValidationError
+                (LengthApplicableDomainValidation
+                  ValidatedLengthSpinePairCounterexample
+                  ValidatedLengthSpinePairApplicableDomain)
+          queryApplicableDomainValidator =
+            validateLengthSpinePairSMTLibQueryApplicableDomain
       contractInSession `seq` sealer `seq` roleAwareSealer `seq`
         exactCaseSealer `seq` inSessionSealer `seq`
         candidateResultProjection `seq` candidateProviderProjection `seq`
@@ -1451,21 +1575,30 @@ facadeTests = testGroup "public Djex facade"
         counterexampleInputsProjection `seq` counterexampleResultProjection `seq`
         counterexampleBasisProjection `seq` boxMaximumsProjection `seq`
         boxAssignmentProjection `seq` boxApplicableProjection `seq`
-        boxBasisProjection `seq` querySealer `seq`
+        boxBasisProjection `seq` applicableDomainValidator `seq`
+        applicableDomainMaximumsProjection `seq`
+        applicableDomainAssignmentProjection `seq`
+        applicableDomainApplicableProjection `seq`
+        applicableDomainBasisProjection `seq` querySealer `seq`
         queryInputSymbolsProjection `seq` queryCheckProjection `seq`
         queryInputValueRequestProjection `seq` queryFingerprintProjection `seq`
         queryProblemProjection `seq` queryModelValidator `seq`
         queryInputReplayer `seq` queryOriginProber `seq`
-        queryBoxValidator `seq`
+        queryBoxValidator `seq` queryApplicableDomainValidator `seq`
         (rnf :: CheckedLengthSpinePairCandidate Int ExferenceLocal -> ()) `seq`
         (rnf :: CheckedLengthSpinePairProblem Int ExferenceLocal -> ()) `seq`
         (rnf :: ValidatedLengthSpinePairCounterexample -> ()) `seq`
         (rnf :: ValidatedLengthSpinePairInputBox -> ()) `seq`
+        (rnf :: LengthSpinePairApplicableDomainValidationError -> ()) `seq`
+        (rnf :: ValidatedLengthSpinePairApplicableDomain -> ()) `seq`
         (rnf :: LengthSpinePairSMTLibQuery Int ExferenceLocal -> ()) `seq`
         (rnf :: LengthSpinePairSMTLibQueryError -> ()) `seq`
         (rnf :: LengthSpinePairSMTLibModelError -> ()) `seq`
         (rnf :: LengthSpinePairSMTLibInputReplayError -> ()) `seq`
         (rnf :: LengthSpinePairSMTLibInputBoxValidationError -> ()) `seq`
+        (rnf
+          :: LengthSpinePairSMTLibApplicableDomainValidationError
+          -> ()) `seq`
         pure ()
       let assignment = LengthSpinePairContractAssignment [1]
             $ LengthSpinePair 2 3
@@ -1476,6 +1609,10 @@ facadeTests = testGroup "public Djex facade"
         map (fromIntegral . fromEnum)
           ("finite-binary-product-spine-lengths/\
             \bounded-input-box-validation/v1" :: String)
+      lengthSpinePairApplicableDomainValidationSchemaTag @?=
+        map (fromIntegral . fromEnum)
+          ("finite-binary-product-spine-lengths/\
+            \finite-precondition-domain-establishment/v1" :: String)
       lengthSpinePairSMTLibQuerySchemaTag @?=
         map (fromIntegral . fromEnum)
           ("djex-length-spine-pair-z3-qf-lia-smtlib2/v1" :: String)
@@ -1496,6 +1633,12 @@ facadeTests = testGroup "public Djex facade"
           queryBoxError =
             LengthSpinePairSMTLibInputBoxValidationAssociationRejected
               ReplayEncodingFingerprintMismatch
+          applicableDomainError =
+            LengthSpinePairApplicableDomainInputBoxValidationRejected
+              $ LengthSpinePairInputBoxBoundsArityMismatch 2 1
+          queryApplicableDomainError =
+            LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected
+              ReplayDomainMismatch
       queryError @?= LengthSpinePairSMTLibCommandByteLimitExceeded
         LengthSMTLibCheckCommand 3 4
       modelError @?= LengthSpinePairSMTLibBindingArityMismatch 1 2
@@ -1504,8 +1647,15 @@ facadeTests = testGroup "public Djex facade"
       queryBoxError @?=
         LengthSpinePairSMTLibInputBoxValidationAssociationRejected
           ReplayEncodingFingerprintMismatch
+      applicableDomainError @?=
+        LengthSpinePairApplicableDomainInputBoxValidationRejected
+          (LengthSpinePairInputBoxBoundsArityMismatch 2 1)
+      queryApplicableDomainError @?=
+        LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected
+          ReplayDomainMismatch
       rnf shapeError `seq` rnf boxError `seq` rnf queryError `seq`
         rnf modelError `seq` rnf replayError `seq` rnf queryBoxError `seq`
+        rnf applicableDomainError `seq` rnf queryApplicableDomainError `seq`
         pure ()
   , testCase "rejects residual constraints at the Djinn render boundary" $ do
       target <- expectRight $ mkIdentifier "identity"

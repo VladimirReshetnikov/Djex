@@ -44,6 +44,7 @@ these tiers explicitly.
 - [Canonical typed candidate identities](#canonical-typed-candidate-identities)
 - [Checked ground class-resolution foundation](#checked-ground-class-resolution-foundation)
 - [Finite list-spine length contracts](#finite-list-spine-length-contracts)
+  - [Directly bounded applicable-domain validation](#directly-bounded-applicable-domain-validation)
   - [Finite binary product spine lengths, offline and live SMT replay](#finite-binary-product-spine-lengths-offline-and-live-smt-replay)
 - [Building](#building)
 - [Unified command](#unified-command)
@@ -750,6 +751,69 @@ identity or canonical bytes. Its v1 tag belongs to the newly opaque receipt,
 not to an existing semantic or solver envelope. See the
 [bounded Length input-box validation report](docs/reports/2026-08-14-bounded-length-input-box-validation.md).
 
+### Directly bounded applicable-domain validation
+
+`validateLengthProblemApplicableDomain` can now derive the exact finite box
+on which a checked scalar problem may apply when its normalized precondition
+contains a direct top-level upper bound for every compact modeled input. The
+version-one rule deliberately recognizes only clauses of the form
+`input <= literal`; it does not infer bounds from equality, arithmetic,
+negation, conditionals, implications, or a source program. When more than one
+direct clause bounds the same input, Djex uses the tightest literal. Every
+compact input of a nonnullary problem must be covered; a missing bound is the
+ordinary `LengthApplicableDomainInapplicable` result rather than a failed
+verification. A nullary problem derives maxima `[]` and validates its one
+assignment `[]`.
+
+For example, the relevant scalar precondition and query-owned validation call
+can be written as follows once `checkedQuery` has been sealed from that
+contract and exact candidate:
+
+```haskell
+-- Direct bounds for compact inputs 0 and 1.  The duplicate bound for input 0
+-- is tightened from 7 to 3, so the derived inclusive box is [3, 2].
+precondition = LengthAll
+  [ LengthAtMost
+      (LengthVariable (LengthInput 0)) (LengthLiteral 7)
+  , LengthAtMost
+      (LengthVariable (LengthInput 0)) (LengthLiteral 3)
+  , LengthAtMost
+      (LengthVariable (LengthInput 1)) (LengthLiteral 2)
+  ]
+
+validation = validateLengthSMTLibQueryApplicableDomain
+  defaultLengthEvaluationLimits
+  defaultLengthInputBoxLimits
+  checkedQuery
+
+case validation of
+  Right (LengthApplicableDomainEstablished receipt) ->
+    validatedLengthApplicableDomainInclusiveMaximums receipt == [3, 2]
+  Right (LengthApplicableDomainCounterexample _) -> False
+  Right (LengthApplicableDomainInapplicable _) -> False
+  Left _ -> False
+```
+
+After deriving `[3, 2]`, Djex delegates to the existing solver-independent
+finite-box verifier. The first violation is therefore the ordinary exact-
+problem counterexample evidence. Complete traversal instead yields the opaque
+`ValidatedLengthApplicableDomain` receipt, which retains the derived maxima,
+total and precondition-applicable assignment counts, and exact model/provider
+basis. Query owners can call
+`validateLengthSMTLibQueryApplicableDomain`; the query contributes only exact
+problem association and emits no SMT-LIB command. Raw or live `sat`, `unsat`,
+and `unknown` statuses have no role.
+
+The nominal binary-product sibling is
+`validateLengthSpinePairProblemApplicableDomain`, with the query-owned
+`validateLengthSpinePairSMTLibQueryApplicableDomain` and opaque
+`ValidatedLengthSpinePairApplicableDomain` receipt. Both domains remain
+relative to their checked finite-spine model and any named assumed provider
+laws. Establishment is neither source-language totality, universal proof,
+provider-implementation validation, nor permission to prune candidates. See
+the
+[directly bounded applicable-domain report](docs/reports/2026-08-14-directly-bounded-length-applicable-domain.md).
+
 ### Finite binary product spine lengths, offline and live SMT replay
 
 `FiniteBinaryProductSpineLengthsV1` is an additive behavioral domain for one
@@ -912,9 +976,10 @@ and the subsequent
 [offline product SMT and replay report](docs/reports/2026-08-14-finite-binary-product-spine-smt-replay.md),
 then the
 [live binary-product Length/Z3 report](docs/reports/2026-08-14-live-binary-product-spine-z3.md).
-Djex exposes the product observation for an integration to rank, but Leant does
-not yet consume it in candidate ranking; that engine integration is the next
-checkpoint.
+Leant now consumes this product observation through its nominal canonical-
+`Prod` handoff, product-specific ranking and presentation path, and startup
+configuration versions 4 and 6. Scalar and product behavioral authority remain
+separate across that downstream integration.
 
 SMT-LIB's QF_LIA logic excludes the built-in `div` and `mod` operators. Djex
 therefore lowers every remaining normalized quotient or modulo node to one

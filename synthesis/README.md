@@ -1153,6 +1153,28 @@ run identity, cache authority, or semantic evidence; all eventual statuses
 remain heuristic until the existing independent Length replay validates a
 concrete counterexample.
 
+`mkLengthSMTLibDescriptorBoundExecutionConfig` is an additive selector over
+the same admitted source. On Linux its later process branch opens the final
+source component with no-follow discipline, streams each bounded chunk once
+through SHA-256 and into a private anonymous image, compares the optional pin,
+then makes that image executable and seals writes, growth, shrinkage, and
+further seal changes. Only the verified sealed descriptor reaches
+`execveat(AT_EMPTY_PATH)`. A pathname swap or in-place source rewrite after
+staging cannot alter the bytes installed as the child main image, and every
+native failure is fail-closed with no pathname retry. Pure construction remains
+IO-free; `lengthSMTLibExecutionExecutableLaunchStrategy` exposes only the
+closed strategy classifier.
+
+This stronger branch deliberately drops source set-id and file-capability
+metadata and does not bind an interpreter, dynamic loader, shared library,
+solver implementation, or status. Its execution-policy, process observation,
+ready-worker, and scalar/product run selections are additive; the established
+constructor and all of its canonical bytes stay literal. Platforms without
+the sealed Linux mechanism may construct the opaque policy but reject a live
+open. The precise acquisition, cancellation, cleanup, identity, and adversarial
+replacement contract is recorded in the
+[descriptor-bound Z3 main-image launch report](../docs/reports/2026-08-15-descriptor-bound-z3-main-image-launch.md).
+
 `Generated` separates backend-local identity from structural global `Name`s.
 Its checked `DefinitionName` narrows top-level output names once, and its scope
 checker and renderer prevent free locals, binder reuse, capture, and ambiguous

@@ -93,3 +93,4 @@ Reports are listed oldest first.
 - 2026-08-15 — [Strict relational positive-affine Length applicable-domain validation](2026-08-15-strict-relational-positive-affine-length-applicable-domain.md)
 - 2026-08-15 — [Shared live usable-work budget for Length/Z3](2026-08-15-shared-live-usable-work-budget.md)
 - 2026-08-15 — [Dynamically scoped live usable-work deadline](2026-08-15-dynamically-scoped-live-usable-work-deadline.md)
+- 2026-08-15 — [Descriptor-bound Z3 main-image launch](2026-08-15-descriptor-bound-z3-main-image-launch.md)

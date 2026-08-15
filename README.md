@@ -50,6 +50,7 @@ these tiers explicitly.
   - [Strict relational positive-affine applicable-domain validation](#strict-relational-positive-affine-applicable-domain-validation)
   - [Finite binary product spine lengths, offline and live SMT replay](#finite-binary-product-spine-lengths-offline-and-live-smt-replay)
     - [Shared live usable-work budget](#shared-live-usable-work-budget)
+    - [Descriptor-bound Z3 executable launch](#descriptor-bound-z3-executable-launch)
 - [Building](#building)
 - [Unified command](#unified-command)
 - [Query boundary](#query-boundary)
@@ -1688,6 +1689,54 @@ This is not executed-image attestation: pathname hashing plus portable direct
 spawn has a same-UID namespace race, and neither the loader nor shared
 libraries are measured. Descendant cleanup is best effort after the direct
 child exits.
+
+#### Descriptor-bound Z3 executable launch
+
+`mkLengthSMTLibDescriptorBoundExecutionConfig` is the additive Linux launch
+policy for callers that need the executable-file pin to name the main image
+which is actually installed. Its pure source and all solver, response, and
+artifact limits are the same as the legacy constructor:
+
+```haskell
+let source =
+      defaultLengthSMTLibExecutionConfigSource
+        "/usr/bin/z3"
+        (Just expectedZ3SHA256)
+in case mkLengthSMTLibDescriptorBoundExecutionConfig
+    defaultLengthSMTLibExecutionLimits source of
+  Left rejected -> Left rejected
+  Right execution ->
+    Right
+      ( lengthSMTLibExecutionExecutableLaunchStrategy execution
+      , execution
+      )
+```
+
+Successful construction is still pure and performs no filesystem or process
+IO. At the later live boundary, Linux opens the final source component with
+no-follow discipline, requires a regular executable file, and streams each
+bounded chunk once into both SHA-256 and a private anonymous image. The image
+is made executable, sealed against writes and size changes, checked, rewound,
+and passed to `execveat` with `AT_EMPTY_PATH`. The optional pin is compared
+before any child is forked. A pathname replacement or in-place source rewrite
+after sealing therefore cannot change the staged bytes which the kernel loads.
+Any unavailable primitive, admission failure, pin mismatch, seal failure, or
+descriptor-exec failure closes the owned resources and fails without retrying
+the pathname launcher.
+
+The guarantee is deliberately narrow. It binds the staged main-image bytes,
+not the configured pathname after opening, an ELF interpreter, dynamic loader,
+shared library, file capability, set-id metadata, Z3 semantics, or a reported
+solver status. The sealed image intentionally does not carry source privilege
+metadata. The established `mkLengthSMTLibExecutionConfig` entrance and all of
+its policy, process, ready-worker, and query-run identities remain literal;
+descriptor launch uses additive identities and is never selected implicitly.
+Non-Linux builds admit the pure policy but fail closed when a live opener would
+need the unavailable native mechanism.
+
+The mechanism, rollback boundary, compatibility identities, and adversarial
+replacement characterization are recorded in the
+[descriptor-bound Z3 main-image launch report](docs/reports/2026-08-15-descriptor-bound-z3-main-image-launch.md).
 
 The raw process owner consumes only the admitted shared Z3 launch profile and
 retains a schema-free ordered observation. The existing Length

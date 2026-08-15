@@ -716,6 +716,59 @@ no solver status, exposes no arity or contract projection, and creates no new
 receipt or identity schema. See the
 [query-owned Length origin-probe report](docs/reports/2026-08-14-query-owned-length-origin-probe.md).
 
+### Query-owned bounded counterexample simplification
+
+`simplifyLengthSMTLibQueryCounterexample` can turn an already validated scalar
+counterexample into a deterministic, componentwise no-larger witness without
+asking Z3 another question.  It treats the anchor inputs as inclusive maxima,
+admits the complete box under `LengthInputBoxLimits`, revalidates the anchor
+against the query's retained problem, and searches `[0..anchor_i]`
+lexicographically with the last input varying fastest.  The binary-product
+sibling is `simplifyLengthSpinePairSMTLibQueryCounterexample`.
+
+For example, an anchor at `[3, 2]` can be simplified as follows:
+
+```haskell
+anchor <- case replayLengthSMTLibCounterexampleInputs
+    defaultLengthEvaluationLimits checkedQuery [3, 2] of
+  Left failure -> fail (show failure)
+  Right Nothing -> fail "the anchor is not a counterexample"
+  Right (Just receipt) -> pure receipt
+
+simplified <- case simplifyLengthSMTLibQueryCounterexample
+    defaultLengthEvaluationLimits
+    defaultLengthInputBoxLimits
+    checkedQuery
+    anchor of
+  Left failure -> fail (show failure)
+  Right outcome -> pure outcome
+
+case simplified of
+  Nothing -> putStrLn "unavailable or already lexicographically first"
+  Just receipt -> print
+    ( validatedLengthCounterexampleSimplificationOriginalInputs receipt
+    , validatedLengthCounterexampleSimplificationInputs receipt
+    , validatedLengthCounterexampleSimplificationInspectedAssignmentCount
+        receipt
+    )
+```
+
+`Just` is returned only for a strict input-vector change.  Its opaque
+`ValidatedLengthCounterexampleSimplification` receipt retains the original
+inputs, exact number of search assignments inspected through the hit, and a
+fresh ordinary `ValidatedLengthCounterexample`.  `Right Nothing` deliberately
+makes no claim: the width or Cartesian product may exceed the supplied limits,
+or the anchor may already be the first violation.  Arity/value rejection, an
+invalid anchor, an admitted evaluation failure, an internal invariant, or an
+exact-query association mismatch remains a closed failure.
+
+This is bounded componentwise lexicographic simplification, not global
+minimality, a proof, source-language evidence, or solver authority.  It emits
+no SMT-LIB and changes no problem, query, protocol, process, or live-run
+identity.  Scalar and binary-product receipts and schema tags remain nominally
+distinct.  See the
+[bounded counterexample simplification report](docs/reports/2026-08-14-bounded-length-counterexample-simplification.md).
+
 `validateLengthProblemInputBox` adds solver-independent positive bounded
 validation without turning a solver report into evidence. The caller supplies
 one inclusive maximum for each compact modeled input. A sealed

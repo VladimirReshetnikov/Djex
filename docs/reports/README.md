@@ -87,3 +87,4 @@ Reports are listed oldest first.
 - 2026-08-14 — [Query-owned Length raw-input replay](2026-08-14-query-owned-length-input-replay.md)
 - 2026-08-14 — [Query-owned Length origin probe](2026-08-14-query-owned-length-origin-probe.md)
 - 2026-08-14 — [Directly bounded Length applicable-domain validation](2026-08-14-directly-bounded-length-applicable-domain.md)
+- 2026-08-14 — [Bounded Length counterexample simplification](2026-08-14-bounded-length-counterexample-simplification.md)

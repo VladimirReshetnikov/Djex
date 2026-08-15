@@ -46,6 +46,7 @@ these tiers explicitly.
 - [Finite list-spine length contracts](#finite-list-spine-length-contracts)
   - [Directly bounded applicable-domain validation](#directly-bounded-applicable-domain-validation)
   - [Positive-affine applicable-domain validation](#positive-affine-applicable-domain-validation)
+  - [Relational positive-affine applicable-domain validation](#relational-positive-affine-applicable-domain-validation)
   - [Finite binary product spine lengths, offline and live SMT replay](#finite-binary-product-spine-lengths-offline-and-live-smt-replay)
 - [Building](#building)
 - [Unified command](#unified-command)
@@ -967,6 +968,116 @@ protocol, process, worker, run, and live-observation identity and canonical byte
 sequence is unchanged; the direct v1 receipts and functions are also unchanged.
 See the
 [positive-affine applicable-domain report](docs/reports/2026-08-14-positive-affine-length-applicable-domain.md).
+
+### Relational positive-affine applicable-domain validation
+
+The direct and literal-ceiling positive-affine validators above retain their
+exact behavior, receipt tags, and authority. Callers that need bounds to flow
+between compact inputs explicitly select
+`validateLengthProblemRelationalPositiveAffineApplicableDomain` or its
+query-owned sibling,
+`validateLengthSMTLibQueryRelationalPositiveAffineApplicableDomain`.
+
+This rule summarizes both sides of a top-level `LengthAtMost` or `LengthEqual`
+as exact positive-affine expressions over compact inputs, natural literals,
+`LengthSum`, and positive-literal `LengthScale`. It cancels common constants
+and per-input coefficients before retaining a directed inequality. Equality
+contributes the normalized left-to-right rule followed by its reverse.
+Unsupported clauses contribute no rule and no partial authority.
+
+For example, equality can transfer a literal bound between two scalar inputs:
+
+```haskell
+input0 = LengthVariable (LengthInput 0)
+input1 = LengthVariable (LengthInput 1)
+
+precondition = LengthAll
+  [ LengthEqual input0 input1
+  , LengthAtMost input1 (LengthLiteral 5)
+  ]
+
+validation =
+  validateLengthSMTLibQueryRelationalPositiveAffineApplicableDomain
+    defaultLengthEvaluationLimits
+    defaultLengthInputBoxLimits
+    checkedQuery
+
+case validation of
+  Right (LengthApplicableDomainEstablished receipt) ->
+    ( validatedLengthRelationalPositiveAffineApplicableDomainInclusiveMaximums
+        receipt
+    , validatedLengthRelationalPositiveAffineApplicableDomainAssignmentCount
+        receipt
+    , validatedLengthRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
+        receipt
+    ) == ([5, 5], 36, 6)
+  _ -> False
+```
+
+Propagation is intentionally synchronous and rule-once. Rules with a constant
+residual right side seed the initial bounds. Each later pass tests every
+pending rule against one immutable bounds snapshot; all eligible rules fire,
+their derived bounds are merged with `min` only after the pass, and those rules
+are permanently removed. Ineligible rules retry in canonical stored order.
+Processing stops when no pending rule fires, so a numeric tightening cycle is
+not iterated to a least fixed point. For example, the stored clauses
+`x <= y`, `y <= 10`, `y <= z`, and `z <= 2` derive the sound, deliberately
+nonleast maxima `[10, 2, 2]`: `x <= y` fires from the same snapshot in which
+`y <= z` tightens `y`, and it is not fired again.
+
+The nominal binary-product entrance applies the same rule to its compact input
+variables while retaining product-specific evidence:
+
+```haskell
+input = LengthVariable (LengthSpinePairInput 0)
+
+precondition = LengthAtMost
+  (LengthScale 2 input)
+  (LengthSum [input, LengthLiteral 1])
+
+pairValidation =
+  validateLengthSpinePairSMTLibQueryRelationalPositiveAffineApplicableDomain
+    defaultLengthEvaluationLimits
+    defaultLengthInputBoxLimits
+    checkedPairQuery
+
+case pairValidation of
+  Right (LengthApplicableDomainEstablished receipt) ->
+    ( validatedLengthSpinePairRelationalPositiveAffineApplicableDomainInclusiveMaximums
+        receipt
+    , validatedLengthSpinePairRelationalPositiveAffineApplicableDomainAssignmentCount
+        receipt
+    , validatedLengthSpinePairRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
+        receipt
+    ) == ([1], 2, 2)
+  _ -> False
+```
+
+Here exact cancellation reduces `2*input <= input + 1` to `input <= 1`.
+Multi-hop rules similarly retry until every rule that can fire has fired once.
+If a fired rule's residual left constant already exceeds the maximum of its
+bounded right side, or the normalized conjunction is `LengthTruth False`, the
+precondition is contradictory and the existing verifier checks an all-zero
+coverage carrier. Otherwise the first compact input still lacking a bound
+produces ordinary `LengthApplicableDomainInapplicable`.
+
+Successful traversal yields opaque
+`ValidatedLengthRelationalPositiveAffineApplicableDomain` or the nominally
+separate
+`ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain`. Their
+projections expose maxima, total/applicable counts, and the exact
+finite-spine/provider-law basis. Query wrappers emit no SMT-LIB and consume no
+solver status; they contribute only exact behavioral-problem association.
+Establishment remains model-relative and does not prove source-language
+realization or totality, validate provider implementations, establish
+universal behavior, or authorize pruning.
+
+Only the two new relational receipt tags add canonical bytes. Existing
+contracts, inventories, sessions, candidates, encodings, problems, queries,
+responses, protocols, processes, workers, runs, live observations, and the
+older direct and positive-affine receipts retain their identities and bytes.
+See the
+[relational positive-affine applicable-domain report](docs/reports/2026-08-15-relational-positive-affine-length-applicable-domain.md).
 
 ### Finite binary product spine lengths, offline and live SMT replay
 

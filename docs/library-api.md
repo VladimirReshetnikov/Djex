@@ -407,6 +407,8 @@ for the two trust boundaries and their regression coverage.
 
 ## Djinn example
 
+<!-- Maintainers: the bounded rank-N/impredicative rule families are rendered in three places - README.md, docs/repl.md (Rank-N and impredicative types), and docs/library-api.md (Djinn example) - and their numeric bounds also appear in the codebase walkthrough. A rule or bound change must be applied everywhere. -->
+
 This function uses the standard Djinn environment, parses the contextual Djinn
 type grammar, runs one checked query, and renders every returned candidate:
 

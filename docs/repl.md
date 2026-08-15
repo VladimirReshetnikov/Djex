@@ -133,6 +133,8 @@ silently discarded.
 
 ### Rank-N and impredicative types
 
+<!-- Maintainers: the bounded rank-N/impredicative rule families are rendered in three places - README.md, docs/repl.md (Rank-N and impredicative types), and docs/library-api.md (Djinn example) - and their numeric bounds also appear in the codebase walkthrough. A rule or bound change must be applied everywhere. -->
+
 The shared parser enables `RankNTypes` and `ImpredicativeTypes`. Quantification
 may therefore occur below arrows and type constructors, including a list of
 Church booleans:

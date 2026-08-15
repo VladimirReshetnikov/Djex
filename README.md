@@ -1469,6 +1469,7 @@ deliberately still a requested result type, not a Haskell expression; the
 explicit `:eval` command is the separate boundary that compiles and executes
 an expression with real GHC.
 
+<!-- Maintainers: the bounded rank-N/impredicative rule families are rendered in three places - README.md, docs/repl.md (Rank-N and impredicative types), and docs/library-api.md (Djinn example) - and their numeric bounds also appear in the codebase walkthrough. A rule or bound change must be applied everywhere. -->
 Rank-N support now uses deliberately bounded, backend-specific rule families.
 Djinn can introduce a `forall`, including one with an already validated class
 context, in a positive position: arrow results, products, and datatype fields

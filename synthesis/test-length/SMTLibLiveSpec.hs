@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE EmptyDataDecls #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
@@ -9,6 +10,8 @@ module SMTLibLiveSpec
   , fakeZ3FieldValues
   , readFakeZ3Events
   , withFakeZ3Mode
+  , withDescriptorBoundLiveFacadeSession
+  , withDescriptorBoundLiveQueryWorker
   , withLiveFacadeSession
   , withLiveQueryWorker
   , withLiveQueryWorkerLimits
@@ -43,6 +46,7 @@ import System.Directory
   ( canonicalizePath
   , copyFile
   , createDirectory
+  , createFileLink
   , createDirectoryLink
   , doesDirectoryExist
   , doesFileExist
@@ -56,6 +60,7 @@ import System.Directory
   , removeFile
   , removePathForcibly
   , renameDirectory
+  , renameFile
   , setOwnerExecutable
   , setPermissions
   )
@@ -64,6 +69,18 @@ import qualified System.Info as SystemInfo
 import System.IO (hClose, openTempFile)
 import System.IO.Error (tryIOError)
 import System.Timeout (timeout)
+
+#ifndef mingw32_HOST_OS
+import System.Posix.IO
+  ( FdOption (CloseOnExec)
+  , OpenMode (ReadOnly)
+  , closeFd
+  , defaultFileFlags
+  , openFd
+  , setFdOption
+  )
+import System.Posix.Types (Fd (..))
+#endif
 
 import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   as Execution
@@ -83,6 +100,8 @@ import qualified Language.Haskell.Synthesis.Internal.SMTLib.Causal.StdoutChunk
   as SMTLibStdoutChunk
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Stream
   as SMTLibStream
+import qualified Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
+  as Z3Execution
 import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
   as PublicExecution
 import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live
@@ -142,7 +161,339 @@ rawProcessTests = testGroup "raw bounded Process transport"
       assertRawProcessProfileIdentity
   , testCase "stdout limit preserves prefix before terminal across read chunks"
       assertRawProcessStdoutLimitPrefix
+  , descriptorBoundProcessTests
   ]
+
+descriptorBoundProcessTests :: TestTree
+descriptorBoundProcessTests = testGroup
+  "sealed descriptor-bound executable launch"
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+  [ testCase "publish exact legacy and sealed-image strengths"
+      assertDescriptorBoundStrengths
+  , testCase
+      "execute the sealed bytes after replacing the path and source inode"
+      assertDescriptorBoundSealedImage
+  , testCase "reject a digest mismatch before the hook or child"
+      assertDescriptorBoundDigestMismatch
+  , testCase "reject open, symlink, nonregular, and nonexecutable sources"
+      assertDescriptorBoundSourceFailures
+  , testCase "classify a staged-image exec failure and reap its child"
+      assertDescriptorBoundExecFailure
+  , testCase "cancel a blocked post-seal hook without allocating a child"
+      assertDescriptorBoundHookCancellation
+  , testCase "expire a blocked post-seal hook without allocating a child"
+      assertDescriptorBoundHookDeadline
+  ]
+#else
+  [ testCase "fail closed before demanding unsupported-platform inputs"
+      assertDescriptorBoundUnsupported
+  ]
+#endif
+
+#ifndef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+assertDescriptorBoundUnsupported :: IO ()
+assertDescriptorBoundUnsupported = do
+  Process.lengthSMTLibDescriptorBoundExecutableLaunchSupported @?= False
+  opened <- Process.openLengthSMTLibDescriptorBoundProcess
+    (error "unsupported launch demanded limits")
+    (error "unsupported launch demanded cancellation")
+    (error "unsupported launch demanded deadline")
+    (error "unsupported launch demanded profile")
+    (error "unsupported launch demanded workspace path")
+    (error "unsupported launch demanded workspace descriptor")
+  assertZ3DescriptorOpenFailure
+    Process.LengthSMTLibProcessSpawnPhase
+    Process.LengthSMTLibProcessDescriptorBoundLaunchUnavailable
+    Nothing opened
+#endif
+
+assertZ3DescriptorOpenFailure
+  :: Process.LengthSMTLibProcessPhase
+  -> Process.LengthSMTLibProcessFailureClass
+  -> Maybe Process.LengthSMTLibProcessCleanupStatus
+  -> Either Process.LengthSMTLibProcessError Process.LengthSMTLibProcess
+  -> IO ()
+assertZ3DescriptorOpenFailure phase failureClass cleanup opened = case opened of
+  Left failure -> do
+    Process.lengthSMTLibProcessErrorPhase failure @?= phase
+    Process.lengthSMTLibProcessErrorClass failure @?= failureClass
+    Process.lengthSMTLibProcessErrorObservedAtLeast failure @?= Nothing
+    Process.lengthSMTLibProcessErrorCleanupStatus failure @?= cleanup
+  Right process -> do
+    _ <- Process.closeLengthSMTLibProcess process
+    assertFailure $ "expected descriptor launch failure: " ++ show failureClass
+
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+assertDescriptorBoundStrengths :: IO ()
+assertDescriptorBoundStrengths = do
+  Process.lengthSMTLibDescriptorBoundExecutableLaunchSupported @?= True
+  Process.lengthSMTLibExecutableSnapshotStrengthTag @?=
+    "path-snapshot-then-direct-spawn/stable-namespace-assumption/v1"
+  Process.lengthSMTLibDescriptorBoundExecutableLaunchStrengthTag @?=
+    "opened-source-hash-copy-sealed-memfd-execveat/main-image-bytes/v1"
+  Process.lengthSMTLibProcessSchemaTag @?=
+    "djex-length-z3-raw-process/v2"
+  Process.lengthSMTLibDescriptorBoundProcessSchemaTag @?=
+    "djex-length-z3-descriptor-bound-sealed-main-image-process/v1"
+
+assertDescriptorBoundSealedImage :: IO ()
+assertDescriptorBoundSealedImage = withFakeZ3Mode "healthy"
+  $ \executable image -> withDescriptorWorkingDirectory
+  $ \workingDirectory workingDescriptor -> do
+    let retired = executable ++ ".retired-source"
+        sentinelPath = executable ++ ".unrelated-parent-descriptor"
+        invalidImage = "descriptor-bound-path-fallback-must-fail"
+    BS.writeFile sentinelPath "unrelated-parent-authority"
+    bracket
+      (openReadOnlyDescriptor sentinelPath)
+      closeFd
+      $ \sentinelDescriptor -> do
+          setFdOption sentinelDescriptor CloseOnExec False
+          profile <- descriptorBoundProfile executable Nothing
+          limits <- descriptorBoundLimits
+          cancellation <- Process.newLengthSMTLibProcessCancellation
+          deadline <- expectRight =<<
+            Process.lengthSMTLibProcessDeadlineAfterMilliseconds 3000
+          opened <- Process.openLengthSMTLibProcessWithPreDescriptorExecHook
+            limits cancellation deadline profile workingDirectory
+            workingDescriptor $ do
+              renameFile executable retired
+              -- Retire the exact opened source inode as well as replacing its
+              -- configured pathname.  Only the already sealed copy remains a
+              -- healthy executable after this point.
+              BS.writeFile retired invalidImage
+              BS.writeFile executable invalidImage
+          process <- expectRight opened
+          Process.lengthSMTLibProcessUsesDescriptorBoundExecutableLaunch process
+            @?= True
+          Process.lengthSMTLibExecutableSnapshotSHA256
+              (Process.lengthSMTLibProcessSnapshot process) @?=
+            SHA256.hash image
+          Process.lengthSMTLibExecutableSnapshotByteCount
+              (Process.lengthSMTLibProcessSnapshot process) @?=
+            byteStringLength image
+          current <- BS.readFile executable
+          retiredBytes <- BS.readFile retired
+          current @?= invalidImage
+          retiredBytes @?= invalidImage
+          events <- readFakeZ3Events executable
+          start <- expectFakeZ3Event "start" events
+          assertSingleFakeField "mode" "healthy" start
+          assertSingleFakeField "executable-basename"
+            (utf8Bytes $ takeFileName executable) start
+          assertBool "descriptor launcher leaked an unrelated parent fd"
+            $ utf8Bytes sentinelPath `notElem`
+                fakeZ3FieldValues "open-descriptor-target" start
+          cleanup <- Process.closeLengthSMTLibProcess process
+          assertCompleteZ3Cleanup "sealed-image success" cleanup
+
+assertDescriptorBoundDigestMismatch :: IO ()
+assertDescriptorBoundDigestMismatch = withFakeZ3Mode "healthy"
+  $ \executable image -> withDescriptorWorkingDirectory
+  $ \workingDirectory workingDescriptor -> do
+    hookReached <- newIORef False
+    profile <- descriptorBoundProfile executable
+      $ Just $ alterDigest $ SHA256.hash image
+    limits <- descriptorBoundLimits
+    cancellation <- Process.newLengthSMTLibProcessCancellation
+    deadline <- expectRight =<<
+      Process.lengthSMTLibProcessDeadlineAfterMilliseconds 3000
+    opened <- Process.openLengthSMTLibProcessWithPreDescriptorExecHook
+      limits cancellation deadline profile workingDirectory workingDescriptor
+      $ writeIORef hookReached True
+    assertZ3DescriptorOpenFailure
+      Process.LengthSMTLibProcessSnapshotPhase
+      Process.LengthSMTLibProcessExecutableDigestMismatch
+      Nothing opened
+    readIORef hookReached >>= (@?= False)
+    spawned <- doesPathExist $ fakeZ3EventPath executable
+    assertBool "digest mismatch allocated the fake child" $ not spawned
+
+assertDescriptorBoundSourceFailures :: IO ()
+assertDescriptorBoundSourceFailures =
+  withFreshTestDirectory $ \sourceRoot ->
+  withDescriptorWorkingDirectory $ \workingDirectory workingDescriptor -> do
+    let missing = sourceRoot </> "missing-z3"
+        directory = sourceRoot </> "directory-z3"
+        nonExecutable = sourceRoot </> "nonexecutable-z3"
+        link = sourceRoot </> "symlink-z3"
+    createDirectory directory
+    BS.writeFile nonExecutable "not executable"
+    createFileLink nonExecutable link
+    forM_
+      [ ( "missing source"
+        , missing
+        , Process.LengthSMTLibProcessExecutableUnavailable
+        )
+      , ( "final symlink"
+        , link
+        , Process.LengthSMTLibProcessExecutableUnavailable
+        )
+      , ( "nonregular source"
+        , directory
+        , Process.LengthSMTLibProcessExecutableNotRegular
+        )
+      , ( "nonexecutable source"
+        , nonExecutable
+        , Process.LengthSMTLibProcessExecutableNotExecutable
+        )
+      ] $ \(label, executable, expectedClass) -> do
+          hookReached <- newIORef False
+          profile <- descriptorBoundProfile executable Nothing
+          limits <- descriptorBoundLimits
+          cancellation <- Process.newLengthSMTLibProcessCancellation
+          deadline <- expectRight =<<
+            Process.lengthSMTLibProcessDeadlineAfterMilliseconds 3000
+          opened <- Process.openLengthSMTLibProcessWithPreDescriptorExecHook
+            limits cancellation deadline profile workingDirectory
+            workingDescriptor $ writeIORef hookReached True
+          assertZ3DescriptorOpenFailure
+            Process.LengthSMTLibProcessSnapshotPhase expectedClass Nothing opened
+          reached <- readIORef hookReached
+          assertBool (label ++ " reached the post-seal hook") $ not reached
+
+assertDescriptorBoundExecFailure :: IO ()
+assertDescriptorBoundExecFailure =
+  withFreshTestDirectory $ \sourceRoot ->
+  withDescriptorWorkingDirectory $ \workingDirectory workingDescriptor -> do
+    let executable = sourceRoot </> "executable-garbage"
+    BS.writeFile executable "not-an-elf-or-script"
+    permissions <- getPermissions executable
+    setPermissions executable $ setOwnerExecutable True permissions
+    hookReached <- newIORef False
+    profile <- descriptorBoundProfile executable Nothing
+    limits <- descriptorBoundLimits
+    cancellation <- Process.newLengthSMTLibProcessCancellation
+    deadline <- expectRight =<<
+      Process.lengthSMTLibProcessDeadlineAfterMilliseconds 3000
+    opened <- Process.openLengthSMTLibProcessWithPreDescriptorExecHook
+      limits cancellation deadline profile workingDirectory workingDescriptor
+      $ writeIORef hookReached True
+    cleanup <- case opened of
+      Left failure -> do
+        Process.lengthSMTLibProcessErrorPhase failure @?=
+          Process.LengthSMTLibProcessSpawnPhase
+        Process.lengthSMTLibProcessErrorClass failure @?=
+          Process.LengthSMTLibProcessDescriptorBoundExecFailed
+        Process.lengthSMTLibProcessErrorObservedAtLeast failure @?= Nothing
+        maybe
+          (assertFailure "descriptor exec failure omitted child cleanup")
+          pure
+          $ Process.lengthSMTLibProcessErrorCleanupStatus failure
+      Right process -> do
+        _ <- Process.closeLengthSMTLibProcess process
+        assertFailure "invalid sealed image unexpectedly executed"
+    readIORef hookReached >>= (@?= True)
+    assertCompleteZ3Cleanup "descriptor exec failure" cleanup
+
+assertDescriptorBoundHookCancellation :: IO ()
+assertDescriptorBoundHookCancellation = withFakeZ3Mode "healthy"
+  $ \executable _ -> withDescriptorWorkingDirectory
+  $ \workingDirectory workingDescriptor -> do
+    profile <- descriptorBoundProfile executable Nothing
+    limits <- descriptorBoundLimits
+    cancellation <- Process.newLengthSMTLibProcessCancellation
+    deadline <- expectRight =<<
+      Process.lengthSMTLibProcessDeadlineAfterMilliseconds 3000
+    hookEntered <- newEmptyMVar
+    hookRelease <- newEmptyMVar
+    outcome <- newEmptyMVar
+    _ <- forkIO $ do
+      result <- Process.openLengthSMTLibProcessWithPreDescriptorExecHook
+        limits cancellation deadline profile workingDirectory workingDescriptor
+        $ putMVar hookEntered () >> takeMVar hookRelease
+      putMVar outcome result
+    _ <- expectWithin "cancelled descriptor hook entrance" 3000000
+      $ takeMVar hookEntered
+    Process.cancelLengthSMTLibProcess cancellation
+    opened <- expectWithin "cancelled descriptor hook" 3000000
+      $ takeMVar outcome
+    putMVar hookRelease ()
+    assertZ3DescriptorOpenFailure
+      Process.LengthSMTLibProcessDeadlinePhase
+      Process.LengthSMTLibProcessCancelled Nothing opened
+    spawned <- doesPathExist $ fakeZ3EventPath executable
+    assertBool "cancelled post-seal hook allocated a child" $ not spawned
+
+assertDescriptorBoundHookDeadline :: IO ()
+assertDescriptorBoundHookDeadline = withFakeZ3Mode "healthy"
+  $ \executable _ -> withDescriptorWorkingDirectory
+  $ \workingDirectory workingDescriptor -> do
+    profile <- descriptorBoundProfile executable Nothing
+    limits <- descriptorBoundLimits
+    cancellation <- Process.newLengthSMTLibProcessCancellation
+    deadline <- expectRight =<<
+      Process.lengthSMTLibProcessDeadlineAfterMilliseconds 300
+    hookEntered <- newEmptyMVar
+    hookRelease <- newEmptyMVar
+    outcome <- newEmptyMVar
+    _ <- forkIO $ do
+      result <- Process.openLengthSMTLibProcessWithPreDescriptorExecHook
+        limits cancellation deadline profile workingDirectory workingDescriptor
+        $ putMVar hookEntered () >> takeMVar hookRelease
+      putMVar outcome result
+    _ <- expectWithin "expiring descriptor hook entrance" 3000000
+      $ takeMVar hookEntered
+    opened <- expectWithin "expired descriptor hook" 3000000
+      $ takeMVar outcome
+    putMVar hookRelease ()
+    assertZ3DescriptorOpenFailure
+      Process.LengthSMTLibProcessDeadlinePhase
+      Process.LengthSMTLibProcessDeadlineExceeded Nothing opened
+    spawned <- doesPathExist $ fakeZ3EventPath executable
+    assertBool "expired post-seal hook allocated a child" $ not spawned
+
+descriptorBoundProfile
+  :: FilePath
+  -> Maybe ByteString
+  -> IO Z3Execution.Z3SMTLibExecutionProfile
+descriptorBoundProfile executable expectedDigest = do
+  execution <- descriptorBoundLiveExecutionConfig executable expectedDigest
+  pure $ Execution.lengthSMTLibExecutionZ3Profile execution
+
+descriptorBoundLimits :: IO Process.LengthSMTLibProcessLimits
+descriptorBoundLimits = expectRight $ Process.mkLengthSMTLibProcessLimits
+  Process.defaultLengthSMTLibProcessLimitSource
+
+withDescriptorWorkingDirectory
+  :: (FilePath -> Process.LengthSMTLibWorkingDirectoryDescriptor -> IO result)
+  -> IO result
+withDescriptorWorkingDirectory use = withFreshTestDirectory
+  $ \workingDirectory -> bracket
+      (openReadOnlyDescriptor workingDirectory)
+      closeFd
+      $ \descriptor -> use workingDirectory
+      $ Process.mkLengthSMTLibWorkingDirectoryDescriptor
+      $ descriptorNumber descriptor
+
+openReadOnlyDescriptor :: FilePath -> IO Fd
+#if MIN_VERSION_unix(2,8,0)
+openReadOnlyDescriptor path = openFd path ReadOnly defaultFileFlags
+#else
+openReadOnlyDescriptor path = openFd path ReadOnly Nothing defaultFileFlags
+#endif
+
+descriptorNumber :: Fd -> Int
+descriptorNumber (Fd raw) = fromIntegral raw
+
+assertCompleteZ3Cleanup
+  :: String
+  -> Process.LengthSMTLibProcessCleanupStatus
+  -> IO ()
+assertCompleteZ3Cleanup label cleanup = do
+  assertBool (label ++ " remained incomplete")
+    $ Process.lengthSMTLibProcessCleanupEscalation cleanup /=
+        Process.LengthSMTLibProcessCleanupIncomplete
+  Process.lengthSMTLibProcessCleanupFailureCount cleanup @?= 0
+  Process.lengthSMTLibProcessCleanupReadersStopped cleanup @?= True
+
+expectWithin :: String -> Int -> IO value -> IO value
+expectWithin label microseconds action = do
+  bounded <- timeout microseconds action
+  case bounded of
+    Nothing -> assertFailure $ label ++ " exceeded its outer bound"
+    Just value -> pure value
+#endif
 
 assertRawProcessCancellationPrecedence :: IO ()
 assertRawProcessCancellationPrecedence = do
@@ -380,6 +731,7 @@ liveSessionTests :: TestTree
 liveSessionTests = testGroup "live Session integration"
   [ testCase "open healthy worker with exact launch isolation and cleanup"
       assertLiveHealthyIsolation
+  , descriptorBoundLiveSessionTests
   , testCase "accept matching executable digest pin"
       assertLiveMatchingDigest
   , testCase "complete capability probe with split and drip output"
@@ -401,6 +753,102 @@ liveSessionTests = testGroup "live Session integration"
   , posixWorkspaceReplacementTest
   , callbackExceptionTests
   ]
+
+descriptorBoundLiveSessionTests :: TestTree
+descriptorBoundLiveSessionTests
+  | Process.lengthSMTLibDescriptorBoundExecutableLaunchSupported = testGroup
+      "descriptor-bound Session routing"
+      [ testCase "open a sealed-image worker and bind its exact strength"
+          assertLiveDescriptorBoundHealthy
+      , testCase "reject a pinned mismatch without a child and remove workspace"
+          assertLiveDescriptorBoundDigestMismatch
+      , testCase "apply the ordinary opener deadline and durable cleanup"
+          assertLiveDescriptorBoundDeadline
+      ]
+  | otherwise = testCase
+      "fail a descriptor policy closed without pathname fallback"
+      assertLiveDescriptorBoundUnsupported
+
+assertLiveDescriptorBoundHealthy :: IO ()
+assertLiveDescriptorBoundHealthy = withFakeZ3Mode "healthy"
+  $ \executable image -> do
+    config <- descriptorBoundLiveSessionConfig executable Nothing id id
+    scoped <- runReadyWorkerBounded 6000000 config $ \worker -> do
+      Session.lengthSMTLibReadyWorkerExecutableSnapshotStrengthTag worker @?=
+        Process.lengthSMTLibDescriptorBoundExecutableLaunchStrengthTag
+      Session.lengthSMTLibReadyWorkerExecutableSHA256 worker @?=
+        SHA256.hash image
+      Session.lengthSMTLibReadyWorkerExecutableByteCount worker @?=
+        byteStringLength image
+      let readyIdentity = BS.pack $ Fingerprint.fingerprintCanonicalBytes
+            $ Session.lengthSMTLibReadyWorkerIdentityFingerprint worker
+      assertBool "descriptor ready identity omitted its sealed-image schema"
+        $ "djex-length-z3-capability-probed-sealed-main-image-ready-worker/v1"
+            `BS.isInfixOf` readyIdentity
+      assertBool "descriptor ready identity omitted its exact strength"
+        $ Process.lengthSMTLibDescriptorBoundExecutableLaunchStrengthTag
+            `BS.isInfixOf` readyIdentity
+      assertBool "descriptor ready identity acquired the legacy ready schema"
+        $ not $ BS.pack Session.lengthSMTLibReadyWorkerSchemaTag
+            `BS.isInfixOf` readyIdentity
+      events <- readFakeZ3Events executable
+      start <- expectFakeZ3Event "start" events
+      assertSingleFakeField "mode" "healthy" start
+      fakeZ3FieldValues "argv" start @?= map utf8Bytes liveArgumentVector
+      assertSingleFakeField "environment-count" "0" start
+      pure $ Session.lengthSMTLibReadyWorkerWorkingDirectory worker
+    workspace <- expectRight scoped
+    retained <- doesPathExist workspace
+    assertBool "descriptor Session retained its workspace" $ not retained
+
+assertLiveDescriptorBoundDigestMismatch :: IO ()
+assertLiveDescriptorBoundDigestMismatch = withFakeZ3Mode "healthy"
+  $ \executable image -> do
+    config <- descriptorBoundLiveSessionConfig executable
+      (Just $ alterDigest $ SHA256.hash image) id id
+    scoped <- runReadyWorkerBounded 6000000 config $ \_ ->
+      assertFailure "descriptor digest mismatch reached the worker callback"
+    cleanup <- expectProcessScopeFailure
+      Process.LengthSMTLibProcessSnapshotPhase
+      Process.LengthSMTLibProcessExecutableDigestMismatch
+      Nothing scoped
+    spawned <- doesPathExist $ fakeZ3EventPath executable
+    assertBool "descriptor digest mismatch spawned the fake worker" $ not spawned
+    Session.lengthSMTLibSessionProcessCleanupStatus cleanup @?= Nothing
+    Session.lengthSMTLibSessionWorkspaceCleanupStatus cleanup @?=
+      Session.LengthSMTLibSessionWorkspaceRemoved 0
+
+assertLiveDescriptorBoundDeadline :: IO ()
+assertLiveDescriptorBoundDeadline = withFakeZ3Mode "hang"
+  $ \executable _ -> do
+    config <- descriptorBoundLiveSessionConfig executable Nothing id $ \source ->
+      source
+        { Session.lengthSMTLibSessionLimitSourceOpenerDeadlineMilliseconds =
+            1000 }
+    scoped <- runReadyWorkerBounded 5000000 config $ \_ ->
+      assertFailure "hung descriptor worker reached the callback"
+    cleanup <- expectDeadlineScopeFailure scoped
+    assertWorkspaceWasRemoved "descriptor hang" cleanup
+    case Session.lengthSMTLibSessionProcessCleanupStatus cleanup of
+      Nothing -> assertFailure "descriptor deadline omitted child cleanup"
+      Just processCleanup -> assertBool
+        "descriptor deadline left child cleanup incomplete"
+        $ Process.lengthSMTLibProcessCleanupEscalation processCleanup /=
+            Process.LengthSMTLibProcessCleanupIncomplete
+
+assertLiveDescriptorBoundUnsupported :: IO ()
+assertLiveDescriptorBoundUnsupported =
+  withFreshTestDirectory $ \sourceRoot -> do
+    let executable = sourceRoot </> "unavailable-descriptor-z3"
+    config <- descriptorBoundLiveSessionConfig executable Nothing id id
+    scoped <- runReadyWorkerBounded 3000000 config $ \_ ->
+      assertFailure "unsupported descriptor policy used a pathname fallback"
+    cleanup <- expectProcessScopeFailure
+      Process.LengthSMTLibProcessSpawnPhase
+      Process.LengthSMTLibProcessDescriptorBoundLaunchUnavailable
+      Nothing scoped
+    Session.lengthSMTLibSessionProcessCleanupStatus cleanup @?= Nothing
+    assertWorkspaceWasRemoved "unsupported descriptor launch" cleanup
 
 assertLiveHealthyIsolation :: IO ()
 assertLiveHealthyIsolation = withFakeZ3Mode "healthy" $ \executable image -> do
@@ -887,6 +1335,29 @@ liveSessionConfig
   -> IO Session.LengthSMTLibSessionConfig
 liveSessionConfig executable expectedDigest changeProcess changeSession = do
   execution <- liveExecutionConfig executable expectedDigest
+  liveSessionConfigWithExecution execution changeProcess changeSession
+
+descriptorBoundLiveSessionConfig
+  :: FilePath
+  -> Maybe ByteString
+  -> (Process.LengthSMTLibProcessLimitSource
+      -> Process.LengthSMTLibProcessLimitSource)
+  -> (Session.LengthSMTLibSessionLimitSource
+      -> Session.LengthSMTLibSessionLimitSource)
+  -> IO Session.LengthSMTLibSessionConfig
+descriptorBoundLiveSessionConfig executable expectedDigest
+    changeProcess changeSession = do
+  execution <- descriptorBoundLiveExecutionConfig executable expectedDigest
+  liveSessionConfigWithExecution execution changeProcess changeSession
+
+liveSessionConfigWithExecution
+  :: Execution.LengthSMTLibExecutionConfig
+  -> (Process.LengthSMTLibProcessLimitSource
+      -> Process.LengthSMTLibProcessLimitSource)
+  -> (Session.LengthSMTLibSessionLimitSource
+      -> Session.LengthSMTLibSessionLimitSource)
+  -> IO Session.LengthSMTLibSessionConfig
+liveSessionConfigWithExecution execution changeProcess changeSession = do
   process <- expectRight $ Process.mkLengthSMTLibProcessLimits
     $ changeProcess Process.defaultLengthSMTLibProcessLimitSource
   session <- expectRight $ Session.mkLengthSMTLibSessionLimits
@@ -915,14 +1386,56 @@ withLiveFacadeSession mode artifactPolicy use =
     execution <- liveFacadeExecutionConfig executable artifactPolicy
     runLiveFacadeSessionBounded 8000000 execution $ use executable
 
+-- | Descriptor-bound twin of 'withLiveFacadeSession'.  Every response,
+-- timeout, resource, artifact, and query policy remains identical; only the
+-- sealed launch strategy differs.
+withDescriptorBoundLiveFacadeSession
+  :: String
+  -> PublicExecution.LengthSMTLibArtifactPolicy
+  -> (forall epoch.
+      FilePath
+      -> Live.LengthSMTLibLiveSession epoch
+      -> IO result)
+  -> IO (Either Live.LengthSMTLibLiveSessionError result)
+withDescriptorBoundLiveFacadeSession mode artifactPolicy use =
+  withFakeZ3Mode mode $ \executable _ -> do
+    execution <- descriptorBoundLiveFacadeExecutionConfig
+      executable artifactPolicy
+    runLiveFacadeSessionBounded 8000000 execution $ use executable
+
 liveFacadeExecutionConfig
   :: FilePath
   -> PublicExecution.LengthSMTLibArtifactPolicy
   -> IO PublicExecution.LengthSMTLibExecutionConfig
 liveFacadeExecutionConfig executable artifactPolicy = expectRight
-  $ PublicExecution.mkLengthSMTLibExecutionConfig
+  $ liveFacadeExecutionConfigWith
+      PublicExecution.mkLengthSMTLibExecutionConfig
+      executable artifactPolicy
+
+descriptorBoundLiveFacadeExecutionConfig
+  :: FilePath
+  -> PublicExecution.LengthSMTLibArtifactPolicy
+  -> IO PublicExecution.LengthSMTLibExecutionConfig
+descriptorBoundLiveFacadeExecutionConfig executable artifactPolicy =
+  expectRight $ liveFacadeExecutionConfigWith
+    PublicExecution.mkLengthSMTLibDescriptorBoundExecutionConfig
+    executable artifactPolicy
+
+liveFacadeExecutionConfigWith
+  :: (PublicExecution.LengthSMTLibExecutionLimits
+      -> PublicExecution.LengthSMTLibExecutionConfigSource
+      -> Either
+          PublicExecution.LengthSMTLibExecutionConfigError
+          PublicExecution.LengthSMTLibExecutionConfig)
+  -> FilePath
+  -> PublicExecution.LengthSMTLibArtifactPolicy
+  -> Either
+      PublicExecution.LengthSMTLibExecutionConfigError
+      PublicExecution.LengthSMTLibExecutionConfig
+liveFacadeExecutionConfigWith seal executable artifactPolicy =
+  seal
       PublicExecution.defaultLengthSMTLibExecutionLimits
-  $ (PublicExecution.defaultLengthSMTLibExecutionConfigSource
+    $ (PublicExecution.defaultLengthSMTLibExecutionConfigSource
       executable Nothing)
     { PublicExecution.lengthSMTLibExecutionConfigSourceSolverTimeoutMilliseconds =
         liveSolverTimeoutMilliseconds
@@ -996,12 +1509,53 @@ withLiveQueryWorkerLimits mode artifactPolicy changeProcess changeSession use =
       Protocol.defaultLengthSMTLibProtocolLimits execution
     runReadyWorkerBounded 8000000 config $ use executable
 
+-- | Descriptor-bound twin of 'withLiveQueryWorker'.  The helper deliberately
+-- duplicates the legacy fixture shape so query identities and wire bytes can
+-- be compared with only the launch authority changed.
+withDescriptorBoundLiveQueryWorker
+  :: String
+  -> Execution.LengthSMTLibArtifactPolicy
+  -> (Session.LengthSMTLibSessionLimitSource
+      -> Session.LengthSMTLibSessionLimitSource)
+  -> (forall epoch.
+      FilePath
+      -> Session.LengthSMTLibReadyWorker epoch
+      -> IO result)
+  -> IO (Either Session.LengthSMTLibSessionScopeError result)
+withDescriptorBoundLiveQueryWorker mode artifactPolicy changeSession use =
+  withFakeZ3Mode mode $ \executable _ -> do
+    execution <- descriptorBoundLiveExecutionConfigWith executable Nothing
+      $ \source -> source
+          { Execution.lengthSMTLibExecutionConfigSourceArtifactPolicy =
+              artifactPolicy
+          , Execution.lengthSMTLibExecutionConfigSourceHostDeadlineMilliseconds =
+              liveQueryHostDeadlineMilliseconds
+          }
+    process <- expectRight $ Process.mkLengthSMTLibProcessLimits
+      Process.defaultLengthSMTLibProcessLimitSource
+    session <- expectRight $ Session.mkLengthSMTLibSessionLimits
+      $ changeSession
+      $ Session.defaultLengthSMTLibSessionLimitSource
+          { Session.lengthSMTLibSessionLimitSourceOpenerDeadlineMilliseconds =
+              3000 }
+    config <- expectRight $ Session.sealLengthSMTLibSessionConfig
+      session process Capability.defaultLengthSMTLibCapabilityLimits
+      Protocol.defaultLengthSMTLibProtocolLimits execution
+    runReadyWorkerBounded 8000000 config $ use executable
+
 liveExecutionConfig
   :: FilePath
   -> Maybe ByteString
   -> IO Execution.LengthSMTLibExecutionConfig
 liveExecutionConfig executable expectedDigest =
   liveExecutionConfigWith executable expectedDigest id
+
+descriptorBoundLiveExecutionConfig
+  :: FilePath
+  -> Maybe ByteString
+  -> IO Execution.LengthSMTLibExecutionConfig
+descriptorBoundLiveExecutionConfig executable expectedDigest =
+  descriptorBoundLiveExecutionConfigWith executable expectedDigest id
 
 liveExecutionConfigWith
   :: FilePath
@@ -1010,7 +1564,33 @@ liveExecutionConfigWith
       -> Execution.LengthSMTLibExecutionConfigSource)
   -> IO Execution.LengthSMTLibExecutionConfig
 liveExecutionConfigWith executable expectedDigest changeSource =
-  expectRight $ Execution.mkLengthSMTLibExecutionConfig
+  liveExecutionConfigWithSealer Execution.mkLengthSMTLibExecutionConfig
+    executable expectedDigest changeSource
+
+descriptorBoundLiveExecutionConfigWith
+  :: FilePath
+  -> Maybe ByteString
+  -> (Execution.LengthSMTLibExecutionConfigSource
+      -> Execution.LengthSMTLibExecutionConfigSource)
+  -> IO Execution.LengthSMTLibExecutionConfig
+descriptorBoundLiveExecutionConfigWith executable expectedDigest changeSource =
+  liveExecutionConfigWithSealer
+    Execution.mkLengthSMTLibDescriptorBoundExecutionConfig
+    executable expectedDigest changeSource
+
+liveExecutionConfigWithSealer
+  :: (Execution.LengthSMTLibExecutionLimits
+      -> Execution.LengthSMTLibExecutionConfigSource
+      -> Either
+          Execution.LengthSMTLibExecutionConfigError
+          Execution.LengthSMTLibExecutionConfig)
+  -> FilePath
+  -> Maybe ByteString
+  -> (Execution.LengthSMTLibExecutionConfigSource
+      -> Execution.LengthSMTLibExecutionConfigSource)
+  -> IO Execution.LengthSMTLibExecutionConfig
+liveExecutionConfigWithSealer seal executable expectedDigest changeSource =
+  expectRight $ seal
     Execution.defaultLengthSMTLibExecutionLimits
     $ changeSource
     $ (Execution.defaultLengthSMTLibExecutionConfigSource executable

@@ -197,6 +197,9 @@ usableWorkBudgetTests = testGroup "shared live usable-work budget"
   , testCase
       "separate v2 ready, scalar, and pair identity from byte-exact v1 tags"
       assertLiveScopedUsableWorkIdentitySchemas
+  , testCase
+      "bind sealed-launch scalar and pair identities under scoped authority"
+      assertDescriptorBoundScopedIdentitySchemas
   , testCase "exclude fresh finalization from the scoped convenience entrance"
       assertLiveScopedUsableWorkConvenienceCleanupExclusion
   ]
@@ -774,6 +777,64 @@ assertLiveScopedUsableWorkIdentitySchemas = do
   _ <- expectRight =<< expectRight scoped
   pure ()
 
+assertDescriptorBoundScopedIdentitySchemas :: IO ()
+assertDescriptorBoundScopedIdentitySchemas = do
+  (scalarQuery, pairQuery) <- liveWireTwinQueries
+  scoped <- withInternalDescriptorBoundScopedBudgetedWorker
+    "healthy" 2000 3000 $ \_ worker -> do
+      scalar <- expectRight
+        =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
+              Evaluate.defaultLengthEvaluationLimits worker scalarQuery
+      pair <- expectRight
+        =<< SMTLibSession.runLengthSpinePairSMTLibReadyWorkerQuery
+              Evaluate.defaultLengthEvaluationLimits worker pairQuery
+      let readyIdentity = BS.pack $ InternalFingerprint.fingerprintCanonicalBytes
+            $ SMTLibSession.lengthSMTLibReadyWorkerIdentityFingerprint worker
+          scalarIdentity = BS.pack
+            $ InternalFingerprint.fingerprintCanonicalBytes
+            $ SMTLibSession.lengthSMTLibQueryRunIdentityFingerprint scalar
+          pairIdentity = BS.pack
+            $ InternalFingerprint.fingerprintCanonicalBytes
+            $ SMTLibSession.lengthSpinePairSMTLibQueryRunIdentityFingerprint pair
+          descriptorReady = BSC.pack
+            "djex-length-z3-capability-probed-sealed-main-image-ready-worker/v1"
+          descriptorScalar = BSC.pack $ concat
+            [ "djex-length-z3-capability-probed-sealed-main-image-worker-"
+            , "query-run/scoped-shared-usable-work-deadline/v1"
+            ]
+          descriptorPair = BSC.pack $ concat
+            [ "djex-length-spine-pair-z3-capability-probed-sealed-main-image-"
+            , "worker-query-run/scoped-shared-usable-work-deadline/v1"
+            ]
+          legacyScalar = BS.pack
+            SMTLibSession.lengthSMTLibScopedBudgetedQueryRunSchemaTag
+          legacyPair = BS.pack
+            SMTLibSession.lengthSpinePairSMTLibScopedBudgetedQueryRunSchemaTag
+          strength =
+            SMTLibProcess.lengthSMTLibDescriptorBoundExecutableLaunchStrengthTag
+      assertBool "scoped descriptor ready identity omitted its launch schema"
+        $ descriptorReady `BS.isInfixOf` readyIdentity
+      assertBool "scoped descriptor scalar identity omitted its run schema"
+        $ descriptorScalar `BS.isInfixOf` scalarIdentity
+      assertBool "scoped descriptor pair identity omitted its run schema"
+        $ descriptorPair `BS.isInfixOf` pairIdentity
+      assertBool "scoped descriptor scalar identity reused the legacy schema"
+        $ not $ legacyScalar `BS.isInfixOf` scalarIdentity
+      assertBool "scoped descriptor pair identity reused the legacy schema"
+        $ not $ legacyPair `BS.isInfixOf` pairIdentity
+      assertBool "scoped descriptor scalar and pair identities were equal"
+        $ scalarIdentity /= pairIdentity
+      mapM_ (\identity -> assertBool
+          "scoped descriptor identity omitted its exact launch strength"
+          $ strength `BS.isInfixOf` identity)
+        [readyIdentity, scalarIdentity, pairIdentity]
+      assertEffectiveDeadlineCause
+        "scoped-shared-usable-work-deadline" $ BS.unpack scalarIdentity
+      assertEffectiveDeadlineCause
+        "scoped-shared-usable-work-deadline" $ BS.unpack pairIdentity
+  _ <- expectRight =<< expectRight scoped
+  pure ()
+
 assertLiveScopedUsableWorkConvenienceCleanupExclusion :: IO ()
 assertLiveScopedUsableWorkConvenienceCleanupExclusion =
   SMTLibLiveSpec.withFakeZ3Mode "stubborn-eof" $ \executable _ -> do
@@ -859,13 +920,58 @@ withInternalScopedBudgetedWorker mode budgetMilliseconds hostDeadline use =
         SMTLibSession.withLengthSMTLibReadyWorkerUnderScopedDeadline
           deadline config $ use executable
 
+withInternalDescriptorBoundScopedBudgetedWorker
+  :: String
+  -> Int
+  -> Int
+  -> (forall epoch.
+      FilePath
+      -> SMTLibSession.LengthSMTLibReadyWorker epoch
+      -> IO result)
+  -> IO
+      (Either
+        SMTLibSession.LengthSMTLibSessionError
+        (Either SMTLibSession.LengthSMTLibSessionScopeError result))
+withInternalDescriptorBoundScopedBudgetedWorker
+    mode budgetMilliseconds hostDeadline use =
+  SMTLibLiveSpec.withFakeZ3Mode mode $ \executable _ -> do
+    config <- mkInternalDescriptorBoundBudgetSessionConfig
+      executable hostDeadline
+    SMTLibSession.withLengthSMTLibSessionScopedUsableWorkDeadlineForBudgetedSession
+      budgetMilliseconds $ \deadline ->
+        SMTLibSession.withLengthSMTLibReadyWorkerUnderScopedDeadline
+          deadline config $ use executable
+
 mkInternalBudgetSessionConfig
   :: FilePath
   -> Int
   -> IO SMTLibSession.LengthSMTLibSessionConfig
 mkInternalBudgetSessionConfig executable hostDeadline = do
+  mkInternalBudgetSessionConfigWith
+    InternalSMTLibExecution.mkLengthSMTLibExecutionConfig
+    executable hostDeadline
+
+mkInternalDescriptorBoundBudgetSessionConfig
+  :: FilePath
+  -> Int
+  -> IO SMTLibSession.LengthSMTLibSessionConfig
+mkInternalDescriptorBoundBudgetSessionConfig executable hostDeadline =
+  mkInternalBudgetSessionConfigWith
+    InternalSMTLibExecution.mkLengthSMTLibDescriptorBoundExecutionConfig
+    executable hostDeadline
+
+mkInternalBudgetSessionConfigWith
+  :: (InternalSMTLibExecution.LengthSMTLibExecutionLimits
+      -> InternalSMTLibExecution.LengthSMTLibExecutionConfigSource
+      -> Either
+          InternalSMTLibExecution.LengthSMTLibExecutionConfigError
+          InternalSMTLibExecution.LengthSMTLibExecutionConfig)
+  -> FilePath
+  -> Int
+  -> IO SMTLibSession.LengthSMTLibSessionConfig
+mkInternalBudgetSessionConfigWith seal executable hostDeadline = do
   execution <- expectRight
-    $ InternalSMTLibExecution.mkLengthSMTLibExecutionConfig
+    $ seal
         InternalSMTLibExecution.defaultLengthSMTLibExecutionLimits
     $ (InternalSMTLibExecution.defaultLengthSMTLibExecutionConfigSource
         executable Nothing)
@@ -1030,6 +1136,9 @@ smtLibLiveQueryTests :: TestTree
 smtLibLiveQueryTests = testGroup "Length SMT-LIB live queries"
   [ testCase "admit the exact Word64 ordinal boundary"
       assertLiveQueryOrdinalBoundary
+  , testCase
+      "preserve scalar/pair wire bytes and statuses under sealed launch"
+      assertDescriptorBoundLiveQueryParity
   , testCase "run sequential unary values with ordinals, identity, and replay"
       assertLiveSequentialUnaryQueries
   , testGroup "status and artifact branches"
@@ -1062,6 +1171,117 @@ smtLibLiveQueryTests = testGroup "Length SMT-LIB live queries"
   , testCase "source remaining stdout capacity from the retained process"
       assertLiveQueryProcessCapacity
   ]
+
+data LiveLaunchParityObservation = LiveLaunchParityObservation
+  { liveLaunchParityStableInputBytes :: [BS.ByteString]
+  , liveLaunchParityReportedStatuses :: [BS.ByteString]
+  , liveLaunchParityDecodedStatuses :: [Observation.SolverStatus]
+  , liveLaunchParityReadyIdentity :: BS.ByteString
+  , liveLaunchParityScalarIdentity :: BS.ByteString
+  , liveLaunchParityPairIdentity :: BS.ByteString
+  }
+  deriving (Eq, Show)
+
+assertDescriptorBoundLiveQueryParity :: IO ()
+assertDescriptorBoundLiveQueryParity = do
+  (scalarQuery, pairQuery) <- liveWireTwinQueries
+  legacy <- expectRight =<< SMTLibLiveSpec.withLiveQueryWorker "healthy"
+    InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable id
+    (captureLiveLaunchParity scalarQuery pairQuery)
+  descriptorBound <- expectRight =<<
+    SMTLibLiveSpec.withDescriptorBoundLiveQueryWorker "healthy"
+      InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable id
+      (captureLiveLaunchParity scalarQuery pairQuery)
+  liveLaunchParityStableInputBytes descriptorBound @?=
+    liveLaunchParityStableInputBytes legacy
+  liveLaunchParityReportedStatuses descriptorBound @?=
+    liveLaunchParityReportedStatuses legacy
+  liveLaunchParityDecodedStatuses descriptorBound @?=
+    liveLaunchParityDecodedStatuses legacy
+  liveLaunchParityDecodedStatuses descriptorBound @?=
+    [Observation.SolverSatisfiable, Observation.SolverSatisfiable]
+  assertBool "launch strategies shared a ready-worker identity"
+    $ liveLaunchParityReadyIdentity descriptorBound /=
+        liveLaunchParityReadyIdentity legacy
+  assertBool "launch strategies shared a scalar run identity"
+    $ liveLaunchParityScalarIdentity descriptorBound /=
+        liveLaunchParityScalarIdentity legacy
+  assertBool "launch strategies shared a pair run identity"
+    $ liveLaunchParityPairIdentity descriptorBound /=
+        liveLaunchParityPairIdentity legacy
+  assertBool "descriptor scalar and pair runs shared nominal identity"
+    $ liveLaunchParityScalarIdentity descriptorBound /=
+        liveLaunchParityPairIdentity descriptorBound
+  assertIdentityContains
+    "descriptor ready identity omitted its launch schema"
+    (BSC.pack
+      "djex-length-z3-capability-probed-sealed-main-image-ready-worker/v1")
+    $ liveLaunchParityReadyIdentity descriptorBound
+  assertIdentityContains
+    "descriptor scalar identity omitted its launch schema"
+    (BSC.pack
+      "djex-length-z3-capability-probed-sealed-main-image-worker-query-run/v1")
+    $ liveLaunchParityScalarIdentity descriptorBound
+  assertIdentityContains
+    "descriptor pair identity omitted its launch schema"
+    (BSC.pack $ concat
+      [ "djex-length-spine-pair-z3-capability-probed-sealed-main-image-"
+      , "worker-query-run/v1"
+      ])
+    $ liveLaunchParityPairIdentity descriptorBound
+  mapM_ (assertIdentityContains
+      "descriptor live identity omitted its exact sealed-image strength"
+      SMTLibProcess.lengthSMTLibDescriptorBoundExecutableLaunchStrengthTag)
+    [ liveLaunchParityReadyIdentity descriptorBound
+    , liveLaunchParityScalarIdentity descriptorBound
+    , liveLaunchParityPairIdentity descriptorBound
+    ]
+ where
+  assertIdentityContains label bytes identity =
+    assertBool label $ bytes `BS.isInfixOf` identity
+
+captureLiveLaunchParity
+  :: SMTLib.LengthSMTLibQuery AdversarialIdentity AdversarialLocal
+  -> SMTLib.LengthSpinePairSMTLibQuery
+      AdversarialIdentity AdversarialLocal
+  -> FilePath
+  -> SMTLibSession.LengthSMTLibReadyWorker epoch
+  -> IO LiveLaunchParityObservation
+captureLiveLaunchParity scalarQuery pairQuery executable worker = do
+  scalar <- expectRight =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
+    Evaluate.defaultLengthEvaluationLimits worker scalarQuery
+  pair <- expectRight =<< SMTLibSession.runLengthSpinePairSMTLibReadyWorkerQuery
+    Evaluate.defaultLengthEvaluationLimits worker pairQuery
+  assertLiveValueQueryRun scalarQuery [3] scalar
+  assertLiveSpinePairValueQueryRun
+    pairQuery [3] (Length.LengthSpinePair 3 0) pair
+  events <- SMTLibLiveSpec.readFakeZ3Events executable
+  let inputBytes = concatMap
+        (SMTLibLiveSpec.fakeZ3FieldValues $ liveTestBytes "bytes")
+        $ fakeZ3Events "stdin" events
+      stableInput = filter
+        (not . BSC.isPrefixOf (liveTestBytes "(echo \"")) inputBytes
+      reportedStatuses = concatMap
+        (SMTLibLiveSpec.fakeZ3FieldValues $ liveTestBytes "status")
+        $ fakeZ3Events "query-check" events
+      scalarStatus = Observation.solverObservationStatus
+        $ SMTLibSession.lengthSMTLibQueryRunObservation scalar
+      pairStatus = Observation.solverObservationStatus
+        $ SMTLibSession.lengthSpinePairSMTLibQueryRunObservation pair
+  pure LiveLaunchParityObservation
+    { liveLaunchParityStableInputBytes = stableInput
+    , liveLaunchParityReportedStatuses = reportedStatuses
+    , liveLaunchParityDecodedStatuses = [scalarStatus, pairStatus]
+    , liveLaunchParityReadyIdentity = BS.pack
+        $ InternalFingerprint.fingerprintCanonicalBytes
+        $ SMTLibSession.lengthSMTLibReadyWorkerIdentityFingerprint worker
+    , liveLaunchParityScalarIdentity = BS.pack
+        $ InternalFingerprint.fingerprintCanonicalBytes
+        $ SMTLibSession.lengthSMTLibQueryRunIdentityFingerprint scalar
+    , liveLaunchParityPairIdentity = BS.pack
+        $ InternalFingerprint.fingerprintCanonicalBytes
+        $ SMTLibSession.lengthSpinePairSMTLibQueryRunIdentityFingerprint pair
+    }
 
 assertLiveQueryOrdinalBoundary :: IO ()
 assertLiveQueryOrdinalBoundary = do
@@ -2138,6 +2358,19 @@ assertLiveSpinePairValueQueryRun query expectedInputs expectedResult run = do
   let presentSchemas = filter (`isInfixOf` identityBytes)
         [ SMTLibSession.lengthSpinePairSMTLibQueryRunSchemaTag
         , SMTLibSession.lengthSpinePairSMTLibBudgetedQueryRunSchemaTag
+        , SMTLibSession.lengthSpinePairSMTLibScopedBudgetedQueryRunSchemaTag
+        , asciiBytes $ concat
+            [ "djex-length-spine-pair-z3-capability-probed-sealed-main-image-"
+            , "worker-query-run/v1"
+            ]
+        , asciiBytes $ concat
+            [ "djex-length-spine-pair-z3-capability-probed-sealed-main-image-"
+            , "worker-query-run/shared-usable-work-deadline/v1"
+            ]
+        , asciiBytes $ concat
+            [ "djex-length-spine-pair-z3-capability-probed-sealed-main-image-"
+            , "worker-query-run/scoped-shared-usable-work-deadline/v1"
+            ]
         ]
   assertBool "the product run lacked one exact live-policy schema"
     $ length presentSchemas == 1
@@ -8945,6 +9178,8 @@ smtLibTests = testGroup
         SMTLibExecution.defaultLengthSMTLibExecutionLimits
         $ SMTLibExecution.defaultLengthSMTLibExecutionConfigSource
             absoluteFixtureExecutable Nothing
+      SMTLibExecution.lengthSMTLibExecutionExecutableLaunchStrategy config @?=
+        SMTLibExecution.LengthSMTLibPathSnapshotThenDirectSpawn
       SMTLibExecution.lengthSMTLibExecutionSolverTimeoutMilliseconds config
         @?= 1000
       SMTLibExecution.lengthSMTLibExecutionSolverResourceLimit config
@@ -9063,6 +9298,101 @@ smtLibTests = testGroup
           , 119, 204, 67, 169, 246, 79, 102, 234
           , 34, 15, 131, 202, 152, 1, 148, 128
           ]
+  , testCase "distinguish descriptor-bound launch without changing policy facts" $ do
+      let source = InternalSMTLibExecution.defaultLengthSMTLibExecutionConfigSource
+            absoluteFixtureExecutable $ Just $ replicate 32 7
+          limits = InternalSMTLibExecution.defaultLengthSMTLibExecutionLimits
+      legacy <- expectRight
+        $ InternalSMTLibExecution.mkLengthSMTLibExecutionConfig limits source
+      descriptorBound <- expectRight
+        $ InternalSMTLibExecution.mkLengthSMTLibDescriptorBoundExecutionConfig
+            limits source
+      InternalSMTLibExecution.lengthSMTLibExecutionExecutableLaunchStrategy
+          legacy @?=
+        InternalSMTLibExecution.LengthSMTLibPathSnapshotThenDirectSpawn
+      InternalSMTLibExecution.lengthSMTLibExecutionExecutableLaunchStrategy
+          descriptorBound @?=
+        InternalSMTLibExecution.LengthSMTLibDescriptorBoundExecutableLaunch
+      assertBool "launch strategies shared one sealed execution identity"
+        $ legacy /= descriptorBound
+      InternalSMTLibExecution.lengthSMTLibExecutionConfiguredArgumentVector
+          descriptorBound @?=
+        InternalSMTLibExecution.lengthSMTLibExecutionConfiguredArgumentVector
+          legacy
+      InternalSMTLibExecution.lengthSMTLibExecutionExecutableDigestExpectation
+          descriptorBound @?=
+        InternalSMTLibExecution.lengthSMTLibExecutionExecutableDigestExpectation
+          legacy
+      InternalSMTLibExecution.lengthSMTLibExecutionSolverTimeoutMilliseconds
+          descriptorBound @?=
+        InternalSMTLibExecution.lengthSMTLibExecutionSolverTimeoutMilliseconds
+          legacy
+      InternalSMTLibExecution.lengthSMTLibExecutionSolverResourceLimit
+          descriptorBound @?=
+        InternalSMTLibExecution.lengthSMTLibExecutionSolverResourceLimit legacy
+      InternalSMTLibExecution.lengthSMTLibExecutionHostDeadlineMilliseconds
+          descriptorBound @?=
+        InternalSMTLibExecution.lengthSMTLibExecutionHostDeadlineMilliseconds
+          legacy
+      InternalSMTLibExecution.lengthSMTLibExecutionArtifactPolicy
+          descriptorBound @?=
+        InternalSMTLibExecution.lengthSMTLibExecutionArtifactPolicy legacy
+      InternalSMTLibExecution.lengthSMTLibExecutionResponseLimits
+          descriptorBound @?=
+        InternalSMTLibExecution.lengthSMTLibExecutionResponseLimits legacy
+      let legacyIdentity = InternalFingerprint.fingerprintCanonicalBytes
+            $ InternalSMTLibExecution.lengthSMTLibExecutionPolicyFingerprint legacy
+          descriptorIdentity = InternalFingerprint.fingerprintCanonicalBytes
+            $ InternalSMTLibExecution.lengthSMTLibExecutionPolicyFingerprint
+                descriptorBound
+          descriptorPostLaunch =
+            InternalSMTLibExecution.retainLengthSMTLibPostLaunchExecutionPolicy
+              descriptorBound
+      assertBool "descriptor-bound launch was absent from private identity"
+        $ legacyIdentity /= descriptorIdentity
+      assertBool "descriptor-bound identity omitted its strategy schema"
+        $ asciiBytes
+            "djex-length-z3-smtlib2-execution-policy/descriptor-bound-main-image/v1"
+              `isInfixOf` descriptorIdentity
+      assertBool "descriptor-bound identity omitted sealed-image mechanism"
+        $ asciiBytes
+            "opened-source-hash-copy-sealed-memfd-execveat/main-image-bytes/v1"
+              `isInfixOf` descriptorIdentity
+      assertBool "descriptor-bound identity omitted sealed-image scope"
+        $ asciiBytes "sealed-staged-main-image-bytes-only/v1"
+              `isInfixOf` descriptorIdentity
+      assertBool "descriptor-bound identity omitted its authority exclusion"
+        $ asciiBytes (concat
+            [ "no-setuid-file-capability-loader-library-interpreter-or-solver-"
+            , "authority/v1"
+            ]) `isInfixOf` descriptorIdentity
+      assertBool "legacy identity acquired descriptor-bound semantics"
+        $ not $ asciiBytes
+            "opened-source-hash-copy-sealed-memfd-execveat/main-image-bytes/v1"
+              `isInfixOf` legacyIdentity
+      InternalSMTLibExecution.lengthSMTLibPostLaunchExecutableLaunchStrategy
+          descriptorPostLaunch @?=
+        InternalSMTLibExecution.LengthSMTLibDescriptorBoundExecutableLaunch
+      InternalSMTLibExecution.lengthSMTLibPostLaunchExecutionPolicyFingerprint
+          descriptorPostLaunch @?=
+        InternalSMTLibExecution.lengthSMTLibExecutionPolicyFingerprint
+          descriptorBound
+      [ InternalSMTLibExecution.LengthSMTLibPathSnapshotThenDirectSpawn
+        , InternalSMTLibExecution.LengthSMTLibDescriptorBoundExecutableLaunch
+        ] @?= [minBound .. maxBound]
+      let invalid = source
+            { InternalSMTLibExecution.lengthSMTLibExecutionConfigSourceExecutablePath =
+                "relative-z3"
+            }
+      case
+          ( InternalSMTLibExecution.mkLengthSMTLibDescriptorBoundExecutionConfig
+              limits invalid
+          , InternalSMTLibExecution.mkLengthSMTLibExecutionConfig limits invalid
+          ) of
+        (Left descriptorFailure, Left legacyFailure) ->
+          descriptorFailure @?= legacyFailure
+        _ -> assertFailure
+          "relative executable path did not fail identically across strategies"
   , testCase "classify only sealed executable digest expectation presence" $ do
       let seal expectedDigest = expectRight
             $ SMTLibExecution.mkLengthSMTLibExecutionConfig

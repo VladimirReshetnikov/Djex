@@ -151,7 +151,8 @@ $(do
           , "PublicDjex.LengthCandidateAuthorization"
           ]
         hiddenValues =
-          [ "LengthSMTLibLiveSession"
+          [ "LengthSMTLibExecutionConfig"
+          , "LengthSMTLibLiveSession"
           , "LengthSMTLibLiveUsableWorkBudget"
           , "LengthSMTLibLiveUsableWorkDeadline"
           , "LengthSMTLibLiveScopedUsableWorkDeadline"

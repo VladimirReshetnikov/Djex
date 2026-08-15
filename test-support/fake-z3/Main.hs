@@ -3,9 +3,11 @@
 -- | Test-only stand-in for a live Z3 worker.
 --
 -- Tests copy this executable under one of the closed names in 'modeFromName'.
--- The live opener may then snapshot those exact executable bytes while
--- preserving the basename.  No sibling file, inherited environment variable,
--- or working-directory entry controls behavior.
+-- The live opener supplies that exact absolute spelling as @argv[0]@.  This is
+-- also stable when Linux installs a sealed anonymous copy whose
+-- 'getExecutablePath' no longer names the source file.  No sibling file,
+-- inherited environment variable, or working-directory entry controls
+-- behavior.
 --
 -- Every observed or emitted byte string is written to the output-only
 -- @<executable>.events@ sidecar using a length-delimited record format.  In
@@ -14,19 +16,25 @@
 module Main (main) where
 
 import Control.Concurrent (threadDelay)
-import Control.Monad (forM_, forever)
+import Control.Monad (forM, forM_, forever)
 import Data.Bits ((.&.), shiftR)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import Data.Char (ord, toLower)
 import Data.List (sort)
+import Data.Maybe (catMaybes)
 import Data.Word (Word8)
 import Numeric.Natural (Natural)
-import System.Directory (getCurrentDirectory, listDirectory)
+import System.Directory
+  ( getCurrentDirectory
+  , getSymbolicLinkTarget
+  , listDirectory
+  )
 import System.Environment (getArgs, getEnvironment, getExecutablePath)
 import System.Exit (ExitCode (ExitFailure), exitSuccess, exitWith)
-import System.FilePath (dropExtension, takeExtension, takeFileName)
+import System.FilePath ((</>), dropExtension, takeExtension, takeFileName)
+import qualified System.Info as SystemInfo
 import System.IO
   ( BufferMode (NoBuffering)
   , Handle
@@ -40,6 +48,7 @@ import System.IO
   , stdout
   , withBinaryFile
   )
+import System.IO.Error (tryIOError)
 
 data Mode
   = Healthy
@@ -84,9 +93,11 @@ main = do
 
   arguments <- getArgs
   environment <- getEnvironment
-  executablePath <- getExecutablePath
+  runtimeExecutablePath <- getExecutablePath
+  executablePath <- configuredLaunchPath runtimeExecutablePath
   workingDirectory <- getCurrentDirectory
   initialEntries <- sort <$> listDirectory workingDirectory
+  descriptorTargets <- inheritedDescriptorTargets
   let executableName = takeFileName executablePath
       mode = modeFromName executableName
       eventPath = executablePath ++ ".events"
@@ -111,7 +122,50 @@ main = do
          , field "initial-listing-count" $ decimal $ length initialEntries
          ]
       ++ map (field "initial-listing-entry" . utf8) initialEntries
+      ++ [ field "open-descriptor-target-count"
+            $ decimal $ length descriptorTargets
+         ]
+      ++ map (field "open-descriptor-target" . utf8) descriptorTargets
     runMode trace mode
+
+-- @base@ does not expose @argv[0]@.  Linux does so through the immutable
+-- process command-line snapshot.  A descriptor-bound exec deliberately makes
+-- @/proc/self/exe@ name the anonymous staged image, while production retains
+-- the configured source spelling as @argv[0]@.  Direct-spawn and non-Linux
+-- fixtures safely fall back to the runtime executable path.
+configuredLaunchPath :: FilePath -> IO FilePath
+configuredLaunchPath fallback
+  | SystemInfo.os /= "linux" = pure fallback
+  | otherwise = do
+      observed <- tryIOError $ BS.readFile "/proc/self/cmdline"
+      pure $ case observed of
+        Right bytes ->
+          let first = BS.takeWhile (/= 0) bytes
+          in if BS.null first then fallback else BSC.unpack first
+        _ -> fallback
+
+-- Linux exposes each descriptor target without requiring the test executable
+-- to depend on @unix@.  Failed reads are expected for the transient descriptor
+-- used by 'listDirectory' itself.  The launcher tests assert only the absence
+-- of a uniquely named parent sentinel; they deliberately make no claim about
+-- runtime-owned descriptors.
+inheritedDescriptorTargets :: IO [FilePath]
+inheritedDescriptorTargets
+  | SystemInfo.os /= "linux" = pure []
+  | otherwise = do
+      listed <- tryIOError $ listDirectory descriptorRoot
+      case listed of
+        Left _ -> pure []
+        Right names -> do
+          targets <- forM names $ \name -> do
+            target <- tryIOError
+              $ getSymbolicLinkTarget $ descriptorRoot </> name
+            pure $ case target of
+              Left _ -> Nothing
+              Right value -> Just value
+          pure $ sort $ catMaybes targets
+ where
+  descriptorRoot = "/proc/self/fd"
 
 runMode :: Handle -> Mode -> IO ()
 runMode trace mode = case mode of

@@ -1415,6 +1415,19 @@ facadeTests = testGroup "public Djex facade"
                 LengthSMTLibExecutionConfigError
                 LengthSMTLibExecutionConfig
           executionConfigSealer = mkLengthSMTLibExecutionConfig
+          descriptorBoundExecutionConfigSealer
+            :: LengthSMTLibExecutionLimits
+            -> LengthSMTLibExecutionConfigSource
+            -> Either
+                LengthSMTLibExecutionConfigError
+                LengthSMTLibExecutionConfig
+          descriptorBoundExecutionConfigSealer =
+            mkLengthSMTLibDescriptorBoundExecutionConfig
+          executionLaunchStrategyProjection
+            :: LengthSMTLibExecutionConfig
+            -> LengthSMTLibExecutableLaunchStrategy
+          executionLaunchStrategyProjection =
+            lengthSMTLibExecutionExecutableLaunchStrategy
           executionDigestExpectationProjection
             :: LengthSMTLibExecutionConfig
             -> LengthSMTLibExecutableDigestExpectation
@@ -1496,6 +1509,8 @@ facadeTests = testGroup "public Djex facade"
         responseNodeLimitProjection `seq` responseTokenByteLimitProjection `seq`
         responseIntegerBitLimitProjection `seq` executionLimitsBuilder `seq`
         executionConfigSealer `seq`
+        descriptorBoundExecutionConfigSealer `seq`
+        executionLaunchStrategyProjection `seq`
         executionDigestExpectationProjection `seq`
         executionTimeoutProjection `seq`
         executionResourceProjection `seq` executionDeadlineProjection `seq`
@@ -1521,6 +1536,7 @@ facadeTests = testGroup "public Djex facade"
         (rnf :: LengthSMTLibCounterexampleSimplificationError -> ()) `seq`
         (rnf :: LengthSMTLibApplicableDomainValidationError -> ()) `seq`
         (rnf :: LengthSMTLibExecutableDigestExpectation -> ()) `seq`
+        (rnf :: LengthSMTLibExecutableLaunchStrategy -> ()) `seq`
         pure ()
       length interpretationPolicySources @?= 5
       lengthProblemAssignmentInputs (LengthProblemAssignment [1, 2]) @?=
@@ -1531,6 +1547,9 @@ facadeTests = testGroup "public Djex facade"
         Right defaultLengthInputBoxLimits
       lengthInputBoxInputLimit defaultLengthInputBoxLimits @?= 8
       lengthInputBoxAssignmentLimit defaultLengthInputBoxLimits @?= 65536
+      [ LengthSMTLibPathSnapshotThenDirectSpawn
+        , LengthSMTLibDescriptorBoundExecutableLaunch
+        ] @?= [minBound .. maxBound]
       lengthInputBoxValidationSchemaTag @?=
         map (fromIntegral . fromEnum)
           ("finite-list-spine-length/bounded-input-box-validation/v1" :: String)

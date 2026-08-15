@@ -128,6 +128,18 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validatedLengthSpinePairPositiveAffineApplicableDomainAssignmentCount
   , validatedLengthSpinePairPositiveAffineApplicableDomainApplicableAssignmentCount
   , validatedLengthSpinePairPositiveAffineApplicableDomainBasis
+  , ValidatedLengthRelationalPositiveAffineApplicableDomain
+  , lengthRelationalPositiveAffineApplicableDomainValidationSchemaTag
+  , validatedLengthRelationalPositiveAffineApplicableDomainInclusiveMaximums
+  , validatedLengthRelationalPositiveAffineApplicableDomainAssignmentCount
+  , validatedLengthRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
+  , validatedLengthRelationalPositiveAffineApplicableDomainBasis
+  , ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
+  , lengthSpinePairRelationalPositiveAffineApplicableDomainValidationSchemaTag
+  , validatedLengthSpinePairRelationalPositiveAffineApplicableDomainInclusiveMaximums
+  , validatedLengthSpinePairRelationalPositiveAffineApplicableDomainAssignmentCount
+  , validatedLengthSpinePairRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
+  , validatedLengthSpinePairRelationalPositiveAffineApplicableDomainBasis
   , evaluateLengthContractAssignment
   , evaluateLengthSpinePairContractAssignment
   , evaluateLengthProviderApplication
@@ -141,6 +153,8 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validateLengthSpinePairProblemApplicableDomain
   , validateLengthProblemPositiveAffineApplicableDomain
   , validateLengthSpinePairProblemPositiveAffineApplicableDomain
+  , validateLengthProblemRelationalPositiveAffineApplicableDomain
+  , validateLengthSpinePairProblemRelationalPositiveAffineApplicableDomain
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -938,6 +952,108 @@ validatedLengthSpinePairPositiveAffineApplicableDomainBasis
   -> LengthCounterexampleBasis
 validatedLengthSpinePairPositiveAffineApplicableDomainBasis
     (ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt
+      _ inputBox) = validatedLengthSpinePairInputBoxBasis inputBox
+
+-- | Versioned relational positive-affine coverage semantics for the scalar
+-- applicable domain.  This additive receipt is nominally separate from both
+-- the literal-direct and literal-ceiling positive-affine rules.
+lengthRelationalPositiveAffineApplicableDomainValidationSchemaTag :: [Word8]
+lengthRelationalPositiveAffineApplicableDomainValidationSchemaTag = ascii
+  "finite-list-spine-length/relational-positive-affine-precondition-domain-establishment/v1"
+
+-- | Complete scalar applicable-domain validation under the relational
+-- positive-affine coverage rule.  The private constructor retains the exact
+-- completed scalar input-box receipt beside the rule's fixed schema tag.
+data ValidatedLengthRelationalPositiveAffineApplicableDomain =
+  ValidatedLengthRelationalPositiveAffineApplicableDomainReceipt
+    ![Word8]
+    !ValidatedLengthInputBox
+  deriving (Eq, Ord, Show)
+
+instance NFData ValidatedLengthRelationalPositiveAffineApplicableDomain where
+  rnf
+      (ValidatedLengthRelationalPositiveAffineApplicableDomainReceipt
+        schema inputBox) = rnf schema `seq` rnf inputBox
+
+validatedLengthRelationalPositiveAffineApplicableDomainInclusiveMaximums
+  :: ValidatedLengthRelationalPositiveAffineApplicableDomain
+  -> [Natural]
+validatedLengthRelationalPositiveAffineApplicableDomainInclusiveMaximums
+    (ValidatedLengthRelationalPositiveAffineApplicableDomainReceipt
+      _ inputBox) = validatedLengthInputBoxInclusiveMaximums inputBox
+
+validatedLengthRelationalPositiveAffineApplicableDomainAssignmentCount
+  :: ValidatedLengthRelationalPositiveAffineApplicableDomain
+  -> Natural
+validatedLengthRelationalPositiveAffineApplicableDomainAssignmentCount
+    (ValidatedLengthRelationalPositiveAffineApplicableDomainReceipt
+      _ inputBox) = validatedLengthInputBoxAssignmentCount inputBox
+
+validatedLengthRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
+  :: ValidatedLengthRelationalPositiveAffineApplicableDomain
+  -> Natural
+validatedLengthRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
+    (ValidatedLengthRelationalPositiveAffineApplicableDomainReceipt
+      _ inputBox) = validatedLengthInputBoxApplicableAssignmentCount inputBox
+
+validatedLengthRelationalPositiveAffineApplicableDomainBasis
+  :: ValidatedLengthRelationalPositiveAffineApplicableDomain
+  -> LengthCounterexampleBasis
+validatedLengthRelationalPositiveAffineApplicableDomainBasis
+    (ValidatedLengthRelationalPositiveAffineApplicableDomainReceipt
+      _ inputBox) = validatedLengthInputBoxBasis inputBox
+
+-- | Nominal binary-product sibling of
+-- 'lengthRelationalPositiveAffineApplicableDomainValidationSchemaTag'.
+lengthSpinePairRelationalPositiveAffineApplicableDomainValidationSchemaTag
+  :: [Word8]
+lengthSpinePairRelationalPositiveAffineApplicableDomainValidationSchemaTag =
+  ascii
+    "finite-binary-product-spine-lengths/relational-positive-affine-precondition-domain-establishment/v1"
+
+-- | Complete product applicable-domain validation under the relational
+-- positive-affine coverage rule.  Scalar and product evidence cannot be
+-- interchanged even though their private extraction kernel is shared.
+data ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain =
+  ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt
+    ![Word8]
+    !ValidatedLengthSpinePairInputBox
+  deriving (Eq, Ord, Show)
+
+instance NFData
+    ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain where
+  rnf
+      (ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt
+        schema inputBox) = rnf schema `seq` rnf inputBox
+
+validatedLengthSpinePairRelationalPositiveAffineApplicableDomainInclusiveMaximums
+  :: ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
+  -> [Natural]
+validatedLengthSpinePairRelationalPositiveAffineApplicableDomainInclusiveMaximums
+    (ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt
+      _ inputBox) =
+        validatedLengthSpinePairInputBoxInclusiveMaximums inputBox
+
+validatedLengthSpinePairRelationalPositiveAffineApplicableDomainAssignmentCount
+  :: ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
+  -> Natural
+validatedLengthSpinePairRelationalPositiveAffineApplicableDomainAssignmentCount
+    (ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt
+      _ inputBox) = validatedLengthSpinePairInputBoxAssignmentCount inputBox
+
+validatedLengthSpinePairRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
+  :: ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
+  -> Natural
+validatedLengthSpinePairRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
+    (ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt
+      _ inputBox) =
+        validatedLengthSpinePairInputBoxApplicableAssignmentCount inputBox
+
+validatedLengthSpinePairRelationalPositiveAffineApplicableDomainBasis
+  :: ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
+  -> LengthCounterexampleBasis
+validatedLengthSpinePairRelationalPositiveAffineApplicableDomainBasis
+    (ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt
       _ inputBox) = validatedLengthSpinePairInputBoxBasis inputBox
 
 -- | Fail-closed scalar simplification failure after the caller supplied one
@@ -1863,6 +1979,103 @@ validateLengthSpinePairProblemPositiveAffineApplicableDomain
     LengthSpinePairInput position -> Just position
     LengthSpinePairResult _ -> Nothing
 
+-- | Establish the complete applicable domain of one exact scalar problem
+-- when top-level positive-affine relations jointly imply a finite upper bound
+-- for every compact input.  This solver-free entrance is additive: neither of
+-- the established applicable-domain rules changes meaning.
+validateLengthProblemRelationalPositiveAffineApplicableDomain
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> CheckedLengthProblem identity local
+  -> Either LengthApplicableDomainValidationError
+      (LengthApplicableDomainValidation
+        (BehavioralEvidence
+          FiniteListSpineLengthV1
+          ValidatedLengthCounterexample)
+        (BehavioralEvidence
+          FiniteListSpineLengthV1
+          ValidatedLengthRelationalPositiveAffineApplicableDomain))
+validateLengthProblemRelationalPositiveAffineApplicableDomain
+    evaluationLimits inputBoxLimits problem = do
+  let inputCount = checkedLengthProblemInputCount problem
+      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
+  if inputCount <= maximumInputs
+    then pure ()
+    else Left $ LengthApplicableDomainInputBoxValidationRejected
+      $ LengthInputBoxProblemInputLimitExceeded maximumInputs inputCount
+  case relationalPositiveAffineApplicableDomainMaximums
+      inputCount scalarInputPosition
+      $ checkedLengthProblemPrecondition problem of
+    Left inapplicability -> Right
+      $ LengthApplicableDomainInapplicable inapplicability
+    Right maximums -> do
+      validation <- either
+        (Left . LengthApplicableDomainInputBoxValidationRejected)
+        Right
+        $ validateLengthProblemInputBox evaluationLimits inputBoxLimits
+            problem maximums
+      pure $ case validation of
+        LengthInputBoxCounterexample evidence ->
+          LengthApplicableDomainCounterexample evidence
+        LengthInputBoxValidated evidence ->
+          LengthApplicableDomainEstablished
+            $ mapBehavioralEvidenceReceipt
+                (ValidatedLengthRelationalPositiveAffineApplicableDomainReceipt
+                  lengthRelationalPositiveAffineApplicableDomainValidationSchemaTag)
+                evidence
+ where
+  scalarInputPosition variable = case variable of
+    LengthInput position -> Just position
+    LengthResult -> Nothing
+
+-- | Nominal binary-product sibling of
+-- 'validateLengthProblemRelationalPositiveAffineApplicableDomain'.
+validateLengthSpinePairProblemRelationalPositiveAffineApplicableDomain
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> CheckedLengthSpinePairProblem identity local
+  -> Either LengthSpinePairApplicableDomainValidationError
+      (LengthApplicableDomainValidation
+        (BehavioralEvidence
+          FiniteBinaryProductSpineLengthsV1
+          ValidatedLengthSpinePairCounterexample)
+        (BehavioralEvidence
+          FiniteBinaryProductSpineLengthsV1
+          ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain))
+validateLengthSpinePairProblemRelationalPositiveAffineApplicableDomain
+    evaluationLimits inputBoxLimits problem = do
+  let inputCount = checkedLengthSpinePairProblemInputCount problem
+      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
+  if inputCount <= maximumInputs
+    then pure ()
+    else Left $ LengthSpinePairApplicableDomainInputBoxValidationRejected
+      $ LengthSpinePairInputBoxProblemInputLimitExceeded
+          maximumInputs inputCount
+  case relationalPositiveAffineApplicableDomainMaximums
+      inputCount spinePairInputPosition
+      $ checkedLengthSpinePairProblemPrecondition problem of
+    Left inapplicability -> Right
+      $ LengthApplicableDomainInapplicable inapplicability
+    Right maximums -> do
+      validation <- either
+        (Left . LengthSpinePairApplicableDomainInputBoxValidationRejected)
+        Right
+        $ validateLengthSpinePairProblemInputBox
+            evaluationLimits inputBoxLimits problem maximums
+      pure $ case validation of
+        LengthInputBoxCounterexample evidence ->
+          LengthApplicableDomainCounterexample evidence
+        LengthInputBoxValidated evidence ->
+          LengthApplicableDomainEstablished
+            $ mapBehavioralEvidenceReceipt
+                (ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt
+                  lengthSpinePairRelationalPositiveAffineApplicableDomainValidationSchemaTag)
+                evidence
+ where
+  spinePairInputPosition variable = case variable of
+    LengthSpinePairInput position -> Just position
+    LengthSpinePairResult _ -> Nothing
+
 data PositiveAffineCoverage
   = PositiveAffineCoverageBounds !(Map.Map Natural Natural)
   | PositiveAffineCoverageContradiction
@@ -1983,6 +2196,260 @@ saturatingNaturalAdd cap left right = min cap $ left + right
 
 saturatingNaturalMultiply :: Natural -> Natural -> Natural -> Natural
 saturatingNaturalMultiply cap left right = min cap $ left * right
+
+data RelationalPositiveAffineRuleCollection
+  = RelationalPositiveAffineRuleCollection
+      ![RelationalPositiveAffineRule]
+  | RelationalPositiveAffineRuleCollectionContradiction
+
+data RelationalPositiveAffineClauseCoverage
+  = RelationalPositiveAffineClauseIgnored
+  | RelationalPositiveAffineClauseRules
+      ![RelationalPositiveAffineRule]
+  | RelationalPositiveAffineClauseContradiction
+
+data RelationalPositiveAffineClosure
+  = RelationalPositiveAffineClosureBounds !(Map.Map Natural Natural)
+  | RelationalPositiveAffineClosureContradiction
+
+data RelationalPositiveAffineRulePass
+  = RelationalPositiveAffineRulePassComplete
+      !(Map.Map Natural Natural)
+      ![RelationalPositiveAffineRule]
+      !Bool
+  | RelationalPositiveAffineRulePassContradiction
+
+data RelationalPositiveAffineSummary = RelationalPositiveAffineSummary
+  !Natural
+  !(Map.Map Natural Natural)
+
+-- Both sides have already been summarized and algebraically canceled.  This
+-- subtraction is ordinary equality-preserving cancellation over naturals; it
+-- is unrelated to the object language's saturating 'LengthMonus'.
+data RelationalPositiveAffineRule = RelationalPositiveAffineRule
+  !Natural
+  !(Map.Map Natural Natural)
+  !Natural
+  !(Map.Map Natural Natural)
+
+-- The checked precondition is bounded and normalized.  Nullary validation
+-- deliberately bypasses extraction and delegates its singleton assignment to
+-- the existing box verifier.  For nonnullary problems, exact affine summaries
+-- are collected from both sides of top-level relations.  Equality contributes
+-- both directed inequalities.
+relationalPositiveAffineApplicableDomainMaximums
+  :: Int
+  -> (variable -> Maybe Natural)
+  -> LengthFormula variable
+  -> Either LengthApplicableDomainInapplicability [Natural]
+relationalPositiveAffineApplicableDomainMaximums
+    inputCount inputPosition precondition
+  | inputCount == 0 = Right []
+  | otherwise = case collect [] clauses of
+      RelationalPositiveAffineRuleCollectionContradiction ->
+        Right $ replicate inputCount 0
+      RelationalPositiveAffineRuleCollection reversedRules ->
+        case closeRelationalPositiveAffineRules $ reverse reversedRules of
+          RelationalPositiveAffineClosureContradiction ->
+            Right $ replicate inputCount 0
+          RelationalPositiveAffineClosureBounds bounds ->
+            mapM (maximumFor bounds) [0 .. inputCount - 1]
+ where
+  clauses = case precondition of
+    LengthAll formulas -> formulas
+    formula -> [formula]
+
+  collect !retained [] = RelationalPositiveAffineRuleCollection retained
+  collect !retained (formula : remaining) =
+    case relationalPositiveAffineClauseCoverage
+        inputCount inputPosition formula of
+      RelationalPositiveAffineClauseIgnored -> collect retained remaining
+      RelationalPositiveAffineClauseRules rules ->
+        collect (prependRulesInReverse retained rules) remaining
+      RelationalPositiveAffineClauseContradiction ->
+        RelationalPositiveAffineRuleCollectionContradiction
+
+  prependRulesInReverse !retained [] = retained
+  prependRulesInReverse !retained (rule : remaining) =
+    prependRulesInReverse (rule : retained) remaining
+
+  maximumFor bounds index = case Map.lookup (fromIntegral index) bounds of
+    Just maximumValue -> Right maximumValue
+    Nothing -> Left $ LengthApplicableDomainInputUpperBoundMissing index
+
+relationalPositiveAffineClauseCoverage
+  :: Int
+  -> (variable -> Maybe Natural)
+  -> LengthFormula variable
+  -> RelationalPositiveAffineClauseCoverage
+relationalPositiveAffineClauseCoverage
+    inputCount inputPosition formula = case formula of
+  LengthTruth False -> RelationalPositiveAffineClauseContradiction
+  LengthAtMost left right -> case summarizeBoth left right of
+    Nothing -> RelationalPositiveAffineClauseIgnored
+    Just (leftSummary, rightSummary) ->
+      RelationalPositiveAffineClauseRules
+        [relationalPositiveAffineRule leftSummary rightSummary]
+  LengthEqual left right -> case summarizeBoth left right of
+    Nothing -> RelationalPositiveAffineClauseIgnored
+    Just (leftSummary, rightSummary) ->
+      RelationalPositiveAffineClauseRules
+        [ relationalPositiveAffineRule leftSummary rightSummary
+        , relationalPositiveAffineRule rightSummary leftSummary
+        ]
+  _ -> RelationalPositiveAffineClauseIgnored
+ where
+  summarizeBoth left right = do
+    leftSummary <- summarizeRelationalPositiveAffineExpression
+      inputCount inputPosition left
+    rightSummary <- summarizeRelationalPositiveAffineExpression
+      inputCount inputPosition right
+    pure (leftSummary, rightSummary)
+
+-- Unlike the literal-ceiling rule above, relational cancellation requires
+-- exact constants and coefficients on both sides.  Checked syntax bounds the
+-- tree; arbitrary-precision naturals retain exactness without a lossy cap.
+summarizeRelationalPositiveAffineExpression
+  :: Int
+  -> (variable -> Maybe Natural)
+  -> LengthExpression variable
+  -> Maybe RelationalPositiveAffineSummary
+summarizeRelationalPositiveAffineExpression inputCount inputPosition = go
+ where
+  go expression = case expression of
+    LengthVariable variable -> do
+      position <- inputPosition variable
+      if position < fromIntegral inputCount
+        then Just $ RelationalPositiveAffineSummary 0
+          $ Map.singleton position 1
+        else Nothing
+    LengthLiteral value ->
+      Just $ RelationalPositiveAffineSummary value Map.empty
+    LengthSum terms ->
+      foldM add (RelationalPositiveAffineSummary 0 Map.empty) terms
+    LengthScale factor nested
+      | factor == 0 -> Nothing
+      | otherwise -> scale factor <$> go nested
+    _ -> Nothing
+
+  add (RelationalPositiveAffineSummary leftConstant leftCoefficients) term = do
+    RelationalPositiveAffineSummary rightConstant rightCoefficients <- go term
+    pure $ RelationalPositiveAffineSummary
+      (leftConstant + rightConstant)
+      (Map.unionWith (+) leftCoefficients rightCoefficients)
+
+  scale factor (RelationalPositiveAffineSummary constant coefficients) =
+    RelationalPositiveAffineSummary
+      (factor * constant)
+      (Map.map (factor *) coefficients)
+
+relationalPositiveAffineRule
+  :: RelationalPositiveAffineSummary
+  -> RelationalPositiveAffineSummary
+  -> RelationalPositiveAffineRule
+relationalPositiveAffineRule
+    (RelationalPositiveAffineSummary leftConstant leftCoefficients)
+    (RelationalPositiveAffineSummary rightConstant rightCoefficients) =
+  let (residualLeftConstant, residualRightConstant)
+        | leftConstant >= rightConstant =
+            (leftConstant - rightConstant, 0)
+        | otherwise = (0, rightConstant - leftConstant)
+  in RelationalPositiveAffineRule
+      residualLeftConstant
+      (positiveCoefficientDifference leftCoefficients rightCoefficients)
+      residualRightConstant
+      (positiveCoefficientDifference rightCoefficients leftCoefficients)
+
+positiveCoefficientDifference
+  :: Map.Map Natural Natural
+  -> Map.Map Natural Natural
+  -> Map.Map Natural Natural
+positiveCoefficientDifference minuend subtrahend =
+  Map.foldlWithKey' retain Map.empty minuend
+ where
+  retain !difference position coefficient =
+    let opposing = Map.findWithDefault 0 position subtrahend
+    in if coefficient > opposing
+        then Map.insert position (coefficient - opposing) difference
+        else difference
+
+-- Seed every rule whose residual right side is constant.  Remaining rules are
+-- retried in canonical order.  A pass observes one immutable bounds snapshot;
+-- all rules which become eligible in that pass fire once and are then removed.
+-- Consequently even a numeric tightening cycle cannot iterate toward a least
+-- fixed point: successful progress consumes at least one still-pending rule.
+closeRelationalPositiveAffineRules
+  :: [RelationalPositiveAffineRule]
+  -> RelationalPositiveAffineClosure
+closeRelationalPositiveAffineRules rules =
+  let (seedRules, pendingRules) =
+        partitionRelationalPositiveAffineRules rules
+  in case relationalPositiveAffineRulePass Map.empty seedRules of
+    RelationalPositiveAffineRulePassContradiction ->
+      RelationalPositiveAffineClosureContradiction
+    RelationalPositiveAffineRulePassComplete seedBounds retainedSeeds _ ->
+      close seedBounds $ retainedSeeds ++ pendingRules
+ where
+  close !bounds [] = RelationalPositiveAffineClosureBounds bounds
+  close !bounds pending = case
+      relationalPositiveAffineRulePass bounds pending of
+    RelationalPositiveAffineRulePassContradiction ->
+      RelationalPositiveAffineClosureContradiction
+    RelationalPositiveAffineRulePassComplete nextBounds retained fired
+      | fired -> close nextBounds retained
+      | otherwise -> RelationalPositiveAffineClosureBounds nextBounds
+
+partitionRelationalPositiveAffineRules
+  :: [RelationalPositiveAffineRule]
+  -> ([RelationalPositiveAffineRule], [RelationalPositiveAffineRule])
+partitionRelationalPositiveAffineRules = go [] []
+ where
+  go !seeds !pending [] = (reverse seeds, reverse pending)
+  go !seeds !pending (rule : remaining) = case rule of
+    RelationalPositiveAffineRule _ _ _ rightCoefficients
+      | Map.null rightCoefficients -> go (rule : seeds) pending remaining
+      | otherwise -> go seeds (rule : pending) remaining
+
+relationalPositiveAffineRulePass
+  :: Map.Map Natural Natural
+  -> [RelationalPositiveAffineRule]
+  -> RelationalPositiveAffineRulePass
+relationalPositiveAffineRulePass bounds = go Map.empty [] False
+ where
+  go !derived !retained !fired [] =
+    RelationalPositiveAffineRulePassComplete
+      (Map.unionWith min bounds derived)
+      (reverse retained)
+      fired
+  go !derived !retained !fired (rule : remaining) = case rule of
+    RelationalPositiveAffineRule leftConstant leftCoefficients
+        rightConstant rightCoefficients ->
+      case relationalPositiveAffineRightMaximum
+          bounds rightConstant rightCoefficients of
+        Nothing -> go derived (rule : retained) fired remaining
+        Just rightMaximum
+          | leftConstant > rightMaximum ->
+              RelationalPositiveAffineRulePassContradiction
+          | otherwise ->
+              let numerator = rightMaximum - leftConstant
+                  ruleBounds = Map.map (numerator `quot`) leftCoefficients
+                  nextDerived = Map.unionWith min derived ruleBounds
+              in go nextDerived retained True remaining
+
+relationalPositiveAffineRightMaximum
+  :: Map.Map Natural Natural
+  -> Natural
+  -> Map.Map Natural Natural
+  -> Maybe Natural
+relationalPositiveAffineRightMaximum bounds rightConstant coefficients =
+  go rightConstant $ Map.toAscList coefficients
+ where
+  go !total remainingCoefficients = case remainingCoefficients of
+    [] -> Just total
+    (position, coefficient) : remaining -> do
+      maximumValue <- Map.lookup position bounds
+      let !next = total + coefficient * maximumValue
+      go next remaining
 
 -- | Private replay classification shared by one-assignment counterexample
 -- validation and complete input-box traversal.  Keeping one implementation

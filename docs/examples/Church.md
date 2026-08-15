@@ -9,11 +9,11 @@
 
 | | |
 |---|---|
-| **Source file** | [`src/Church.hs`](../src/Church.hs) (≈1,864 lines; Part I documents its foundations, sections 0–7) |
+| **Source file** | [`src/Church.hs`](Church.hs) (≈1,864 lines; Part I documents its foundations, sections 0–7) |
 | **Part II** | [below](#part-ii--dictionaries-sorting-selection-search-and-numeric-scans) — sections 8–24 of the same file: dictionaries, four sorts, selection, `subsequences`/`permutations`, and the `<algorithm>`/`<map>`/`<numeric>` ports |
-| **Tests** | [`test/Spec.hs`](../test/Spec.hs) — the Bool/Pair/List/Maybe/Either foundation cases |
+| **Tests** | [`test/Spec.hs`](Spec.hs) — the Bool/Pair/List/Maybe/Either foundation cases |
 | **Toolchain** | Cabal project, single GHC **9.12.4** (`cabal build`/`cabal test`); the pre-golf sources were observed to type-check on 9.8.1 / 9.10.3 / 9.12.4 with no flags — only 9.12.4 is validated for the current source (see [Appendix A](#appendix-a--ghc-compatibility-why-it-broke-after-98-and-the-fixes)) |
-| **Status** | `cabal build` compiles clean; full suite **403/403 PASS** via `cabal test` on 9.12.4; see the workspace [`API-PARITY.md`](../../API-PARITY.md) for the Typelevel crosswalk |
+| **Status** | in its [home repository](https://github.com/VladimirReshetnikov/Haskell/blob/main/church-encoding) the module compiles clean and its full suite is **403/403 PASS** via `cabal test` on 9.12.4 (here the pair ships as example sources beside this guide, not as a Cabal component); see the workspace [`API-PARITY.md`](https://github.com/VladimirReshetnikov/Haskell/blob/main/API-PARITY.md) for the Typelevel crosswalk |
 | **Key extension** | `ImpredicativeTypes` — lets the `∀` live *inside* the type synonyms |
 
 ---
@@ -2685,7 +2685,7 @@ Every top-level function in sections 0–7 of `Church.hs` — the foundations co
 # Part II — Dictionaries, Sorting, Selection, Search, and Numeric Scans
 
 > The algorithms half of the library — sections 8–24 of the same
-> [`src/Church.hs`](../src/Church.hs). Where
+> [`src/Church.hs`](Church.hs). Where
 > [Part I](#the-one-idea) builds the five core types and the `Data.List`/`Maybe`/`Either`
 > toolkit, this Part builds the *algorithms*: association-list **dictionaries**, **four
 > comparison sorts** (merge, quick, heap, intro), two **selection** algorithms (nth-element /
@@ -2696,9 +2696,9 @@ Every top-level function in sections 0–7 of `Church.hs` — the foundations co
 
 | | |
 |---|---|
-| **Source** | sections 8–24 of [`src/Church.hs`](../src/Church.hs) (Part I documents sections 0–7) |
+| **Source** | sections 8–24 of [`src/Church.hs`](Church.hs) (Part I documents sections 0–7) |
 | **Builds on** | the encoding foundations of [Part I](#the-one-idea) — same file, same toolchain and suite status as Part I's header table |
-| **Tests** | [`test/Spec.hs`](../test/Spec.hs) — the dict/sort/selection/subsequence/`<algorithm>` cases; [`API-PARITY.md`](../../API-PARITY.md) for the cross-project audit |
+| **Tests** | [`test/Spec.hs`](Spec.hs) — the dict/sort/selection/subsequence/`<algorithm>` cases; [`API-PARITY.md`](https://github.com/VladimirReshetnikov/Haskell/blob/main/API-PARITY.md) for the cross-project audit |
 | **GHC-compat patches** | a few definitions here were patched for GHC 9.12; the full story is in [Appendix A](#appendix-a--ghc-compatibility-why-it-broke-after-98-and-the-fixes) |
 
 ---
@@ -4031,7 +4031,7 @@ After the automated sweep, the module carries explicit `TypeApplications` only w
 
 ## 13. C++ `<algorithm>` equivalents
 
-Sections 13-19 of `Church.hs` port the Haskell-meaningful functions of the C++ standard header `<algorithm>` into the Bohm-Berarducci encoding: non-modifying searches, modifying operations, partitioning/sorting predicates, binary search, merge and set operations on sorted ranges, min/max and comparison, and permutations. The C++ originals are catalogued in [`docs/reference/cpp/algorithm.md`](reference/cpp/algorithm.md). As everywhere in the module, ordering/equality relations are passed explicitly (no type classes), branching is a Church `Bool` applied to two arms (never `if`), and `Int` is the only concrete type. Every example below is pinned by the `algorithmTests` group in [`test/Spec.hs`](../test/Spec.hs) (73 HUnit cases; full suite 403/403 via `cabal test` on GHC 9.12.4).
+Sections 13-19 of `Church.hs` port the Haskell-meaningful functions of the C++ standard header `<algorithm>` into the Bohm-Berarducci encoding: non-modifying searches, modifying operations, partitioning/sorting predicates, binary search, merge and set operations on sorted ranges, min/max and comparison, and permutations. The C++ originals are catalogued in [`docs/reference/cpp/algorithm.md`](https://github.com/VladimirReshetnikov/Haskell/blob/main/church-encoding/docs/reference/cpp/algorithm.md). As everywhere in the module, ordering/equality relations are passed explicitly (no type classes), branching is a Church `Bool` applied to two arms (never `if`), and `Int` is the only concrete type. Every example below is pinned by the `algorithmTests` group in [`test/Spec.hs`](Spec.hs) (73 HUnit cases; full suite 403/403 via `cabal test` on GHC 9.12.4).
 
 **What is deliberately *not* ported, and why.** A number of `<algorithm>` operations have no
 distinct meaning in a pure, immutable, list-shaped setting and are intentionally omitted: the
@@ -4049,12 +4049,12 @@ level, by `Sort`/`SortBy`.
 
 ### Non-modifying searches
 
-This chapter documents **section 13** of `Church.hs` — Böhm–Berarducci renderings of the *non-modifying sequence operations* from C++ `<algorithm>` ([cppreference](https://en.cppreference.com/cpp/algorithm), see [`docs/reference/cpp/algorithm.md`](reference/cpp/algorithm.md)). As everywhere in this module there are no ADTs, no `if`-`then`-`else`, and no `case`: every decision is a Church `Bool = ∀e. e -> e -> e` or a Church `Maybe = ∀r. r -> (a -> r) -> r` *applied directly to its branches*. Two idioms from earlier chapters recur and are worth re-stating, because the whole section is built from them:
+This chapter documents **section 13** of `Church.hs` — Böhm–Berarducci renderings of the *non-modifying sequence operations* from C++ `<algorithm>` ([cppreference](https://en.cppreference.com/cpp/algorithm), see [`docs/reference/cpp/algorithm.md`](https://github.com/VladimirReshetnikov/Haskell/blob/main/church-encoding/docs/reference/cpp/algorithm.md)). As everywhere in this module there are no ADTs, no `if`-`then`-`else`, and no `case`: every decision is a Church `Bool = ∀e. e -> e -> e` or a Church `Maybe = ∀r. r -> (a -> r) -> r` *applied directly to its branches*. Two idioms from earlier chapters recur and are worth re-stating, because the whole section is built from them:
 
 - **Relations are passed in and heterogeneous.** Where the STL takes a default `operator==` or a `BinaryPred`, every search here takes an explicit relation `eq :: a -> b -> Bool` (the encoding has no type classes). Generalizing to `a -> b -> Bool` rather than `a -> a -> Bool` lets the needle and haystack carry different element types; `find`/`count`/`mismatch`/`search`/`findEnd`/`findFirstOf`/`searchN` all exploit this.
 - **`Maybe` *is* its own eliminator, `Bool` *is* its own conditional.** A predicate result `p x` is applied as `p x thenArm elseArm`; a `Maybe` result `m` is applied as `m nothingArm justArm`. There is nothing to pattern-match on — the constructor *is* the dispatcher. Most of these functions are therefore short *pipelines* of the chapter-3 vocabulary — `filter`, `listToMaybe`, `zip`, `tails`, `reverse`, `length` — with the per-element `Bool` consumed inside a fold several delegations down.
 
-Throughout, `nothing`, `just`, `true`, `false`, `not`, `and`, `any`, `filter`, `zip`, `tails`, `listToMaybe`, `pair`, and `isPrefixOf` are the primitives of Part I and the earlier Part II chapters (see [Part I](#the-one-idea)); `Int` is the one concrete type the module admits, with `+`, `leInt` (`≤` on `Int`) used by the index-returning searches. All worked values below are the exact `assertEqual` expectations in the `algorithmTests` group of [`test/Spec.hs`](../test/Spec.hs) (lines 632–648).
+Throughout, `nothing`, `just`, `true`, `false`, `not`, `and`, `any`, `filter`, `zip`, `tails`, `listToMaybe`, `pair`, and `isPrefixOf` are the primitives of Part I and the earlier Part II chapters (see [Part I](#the-one-idea)); `Int` is the one concrete type the module admits, with `+`, `leInt` (`≤` on `Int`) used by the index-returning searches. All worked values below are the exact `assertEqual` expectations in the `algorithmTests` group of [`test/Spec.hs`](Spec.hs) (lines 632–648).
 
 #### `none` — `std::none_of`
 
@@ -4206,7 +4206,7 @@ The start index of the first run of `n` consecutive elements all equal (under `e
 
 These twelve functions are the `<algorithm>` modifying-sequence operations (sections 14–15 of `Church.hs`) — the index/structure transforms (`take`, `drop`, `rotate`), the predicate/equality *erasures* (`removeIf`, `remove`, `replaceIf`, `replace`, `uniqueBy`), and the two *partition/sort predicates* (`isPartitioned`/`partitionPoint`, `isSorted`/`isSortedUntil`). As everywhere in this module, order/equality come in as explicit `LE a`/`(a -> a -> Bool)` arguments (no type classes), every branch is a Church `Bool` applied to two continuations rather than `if`, and the only constructors are `cons`/`nil`/`pair`/`just`/`nothing` from `Church.hs`. The `Int`-valued arithmetic helper `leInt` (and `length` for the index-returning ones) is the lone non-Church machinery, and it too *returns* Church `Bool`s that select a branch.
 
-All expected values below are pinned by the `algorithmTests` group in [`test/Spec.hs`](../test/Spec.hs) (lines 649–662), evaluated with `le x y = x <= y` and `eq x y = x == y` on `Int`.
+All expected values below are pinned by the `algorithmTests` group in [`test/Spec.hs`](Spec.hs) (lines 649–662), evaluated with `le x y = x <= y` and `eq x y = x == y` on `Int`.
 
 ##### `take` / `drop` — prefix and suffix by count
 
@@ -4398,13 +4398,13 @@ setSymmetricDifference le = setOp le true true false true
 
 `setSymmetricDifference` (`std::set_symmetric_difference`) is `true true false true` — it emits an element exactly when it appears in *one* input but not the other, so it keeps both strict arms and drops only the equivalence arm. Its base cases match `setUnion`'s (both leftovers survive), because elements with no counterpart pass through untouched. With both heads: `x ≡ y` cancels (emit nothing, advance both); `x < y` emits `x` and advances `xs`; `x > y` emits `y` and advances `ys`. Example: `setSymmetricDifference le [1,2,3] [2,3,4]` ⇒ **`[1,4]`** (`1`<`2`→keep `1`; `2`≡`2`→cancel; `3`≡`3`→cancel; `xs` empty → leftovers `[4]`).
 
-All ten functions are exercised by the `algorithmTests` group in [`test/Spec.hs`](../test/Spec.hs); the boldfaced values above are the exact `assertEqual` expectations there.
+All ten functions are exercised by the `algorithmTests` group in [`test/Spec.hs`](Spec.hs); the boldfaced values above are the exact `assertEqual` expectations there.
 
 ---
 
 ### Min/max, comparison and permutation operations
 
-These are the Church-encoded analogues of the `<algorithm>` minimum/maximum group (`max`, `min`, `minmax`, `clamp`, `minmax_element`), the comparison group (`equal`, `lexicographical_compare`, `lexicographical_compare_three_way`), and the permutation group (`is_permutation`, `next_permutation`, `prev_permutation`). They live in **§18–§19** of the source. The unifying mechanic is the one that runs through the whole module: an order relation `le :: LE a = a -> a -> Bool` (or a heterogeneous equality `eq :: a -> b -> Bool`) returns a *Church `Bool`*, i.e. `∀e. e -> e -> e`, so `le x y t f` **is** the branch — `true = const`, `false = const id` pick `t` or `f`. There is no `if`, no `case`, no ADT; every decision is a `Bool`/`Maybe` applied to its arms, and every two-valued result (a `(min,max)` pair, an `Either`-free ordering) is a Church `Pair` or a bare `Int`. All expected values below are pinned by the `algorithmTests` group in [`test/Spec.hs`](../test/Spec.hs) (lines 675–699).
+These are the Church-encoded analogues of the `<algorithm>` minimum/maximum group (`max`, `min`, `minmax`, `clamp`, `minmax_element`), the comparison group (`equal`, `lexicographical_compare`, `lexicographical_compare_three_way`), and the permutation group (`is_permutation`, `next_permutation`, `prev_permutation`). They live in **§18–§19** of the source. The unifying mechanic is the one that runs through the whole module: an order relation `le :: LE a = a -> a -> Bool` (or a heterogeneous equality `eq :: a -> b -> Bool`) returns a *Church `Bool`*, i.e. `∀e. e -> e -> e`, so `le x y t f` **is** the branch — `true = const`, `false = const id` pick `t` or `f`. There is no `if`, no `case`, no ADT; every decision is a `Bool`/`Maybe` applied to its arms, and every two-valued result (a `(min,max)` pair, an `Either`-free ordering) is a Church `Pair` or a bare `Int`. All expected values below are pinned by the `algorithmTests` group in [`test/Spec.hs`](Spec.hs) (lines 675–699).
 
 #### `maxBy` / `minBy` — `std::max` / `std::min` as pure `Bool`-selection
 
@@ -4529,7 +4529,7 @@ A one-liner: the previous permutation under `le` is the *next* permutation under
 
 ## 14. `<map>`-style dictionary operations
 
-Sections 20-22 of `Church.hs` extend the association-list dictionary of [chapter 8](#8-dictionary-operations) with the *relation* surface of C++ `std::map` / `std::unordered_map` and Haskell's `Data.Map`: queries, construction, keyed update, filtering, two-dictionary combinators, and folds. A `Dict k v = List (k `Pair` v)` is an unordered association list with unique keys under a passed `Equal k`. The container/hash machinery (buckets, node handles, key-ordered iteration) has no analogue on a linearly-scanned list and is intentionally absent. Every example is pinned by the `dictAlgoTests` group in [`test/Spec.hs`](../test/Spec.hs) (59 HUnit cases; full suite 403/403 via `cabal test` on GHC 9.12.4).
+Sections 20-22 of `Church.hs` extend the association-list dictionary of [chapter 8](#8-dictionary-operations) with the *relation* surface of C++ `std::map` / `std::unordered_map` and Haskell's `Data.Map`: queries, construction, keyed update, filtering, two-dictionary combinators, and folds. A `Dict k v = List (k `Pair` v)` is an unordered association list with unique keys under a passed `Equal k`. The container/hash machinery (buckets, node handles, key-ordered iteration) has no analogue on a linearly-scanned list and is intentionally absent. Every example is pinned by the `dictAlgoTests` group in [`test/Spec.hs`](Spec.hs) (59 HUnit cases; full suite 403/403 via `cabal test` on GHC 9.12.4).
 
 ---
 
@@ -4773,7 +4773,7 @@ Two structural shapes recur, both seen already in §8:
 - **Direct `caseList` recursion preserving uniqueness.** `insertWith` walks the list with `caseList` + `Pair` elimination, and on a key hit *stops recursing* — the unique-key invariant guarantees at most one match. (`insert` does no recursion of its own; it is `insertWith (flip const)`, the keep-the-old-value instance.)
 - **A fold or map rebuild.** `fromList`/`fromListWith` fold the input through `insertWith`; `adjust` and `mapWithKey` rebuild by mapping over the entries. `alter` is the odd one out: a single `lookup` whose `Maybe` result is fed to a user function `f`, then dispatched to delete-or-set.
 
-Every worked value below is the exact `assertEqual`/`toAL` expectation in the `dictAlgoTests` group of [`test/Spec.hs`](../test/Spec.hs) (lines 782–793). Note `toAL` **sorts the result by key** before comparison, so the bracketed expected lists are key-sorted; the traces show the unsorted list the function actually returns. The shared fixture is `d12 = [(1,10),(2,20)]`.
+Every worked value below is the exact `assertEqual`/`toAL` expectation in the `dictAlgoTests` group of [`test/Spec.hs`](Spec.hs) (lines 782–793). Note `toAL` **sorts the result by key** before comparison, so the bracketed expected lists are key-sorted; the traces show the unsorted list the function actually returns. The shared fixture is `d12 = [(1,10),(2,20)]`.
 
 #### `insert` — insert-if-absent (`std::map::insert` / `try_emplace`)
 
@@ -5429,6 +5429,6 @@ existed only in `Typelevel`: finite `range`/`iterateN`/`cycleN`, `factorial`,
 one-shot `removeOnce`/`replaceOnce`, numeric aggregates, and conventional
 unsuffixed spellings for list, comparison, and association operations. Equality
 and ordering remain explicit Church-Boolean arguments. See the workspace
-[`API-PARITY.md`](../../API-PARITY.md) for the full semantic crosswalk and the
+[`API-PARITY.md`](https://github.com/VladimirReshetnikov/Haskell/blob/main/API-PARITY.md) for the full semantic crosswalk and the
 small set of representation-specific exceptions.
 

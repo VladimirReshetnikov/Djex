@@ -26,11 +26,13 @@ Copyright:
 Extra-Doc-Files:
   README.md
   docs/*.md
+  docs/examples/*.md
   synthesis/README.md
   djinn/README.md
   exference/README.md
 
 Extra-Source-Files:
+  docs/examples/*.hs
   docs/reports/*.md
   djinn/docs/reports/*.md
   exference/docs/reports/*.md

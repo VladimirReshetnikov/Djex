@@ -1615,7 +1615,9 @@ The nominal parametric-datatype plans obey the same caps and add no negative
 evidence. An incomplete primary premise also makes negative evidence
 conservative for the whole query. The examples use the same
 Church Boolean and Church List shapes as the
-[church-encoding reference](https://github.com/VladimirReshetnikov/Haskell/blob/main/church-encoding/src/Church.hs).
+[church-encoding reference](https://github.com/VladimirReshetnikov/Haskell/blob/main/church-encoding/src/Church.hs);
+a copy of that module, its test suite, and an annotated guide ship in
+[docs/examples](docs/examples/README.md).
 
 `:type EXPRESSION` (or `:t EXPRESSION`) is a separate, non-evaluating
 inspection command. It infers against term signatures in the current loaded

@@ -93,7 +93,17 @@ library deliberately trades Haskeline/HSE dependency
 isolation for one dependency and version contract; parser-independent module
 boundaries remain visible in the source graph. Integration, backend,
 property, CLI, API, and benchmark suites preserve differential testing while
-the two engines continue converging. Exference's finite recursive-pattern rule
+the two engines continue converging.
+
+### Where each invariant is recorded
+
+Every rule mentioned in this README has a dated report recording its exact
+design and trust boundary; the passage below cites the ones behind the
+components above, and the complete chronological list is the
+[reports index](docs/reports/README.md). Readers who only want to use Djex
+can skip ahead to [Building](#building).
+
+Exference's finite recursive-pattern rule
 is recorded in the
 [2026-07-31 bounded recursive elimination report](docs/reports/2026-07-31-bounded-recursive-elimination.md).
 Its impredicative-field follow-up and checked wildcard projection are recorded

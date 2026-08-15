@@ -1469,12 +1469,70 @@ all-pure deferred batch still performs zero executable/access/process IO.
 
 The effective-ID sibling uses fresh process, ready-worker, and fresh/shared/
 scoped scalar and product identities. It changes no query, protocol,
-behavioral receipt, or evidence schema. Linux 6.14's distinct
-`AT_EXECVE_CHECK` is left to a separately versioned future policy rather than
-being selected opportunistically under this v1 identity. See the
+behavioral receipt, or evidence schema. See the
 [effective-ID descriptor-bound Z3 launch report](../docs/reports/2026-08-15-effective-id-descriptor-bound-z3-launch.md)
 for the exact lifecycle, failure mapping, kernel references, characterization,
 and authority exclusions.
+
+`mkLengthSMTLibDescriptorBoundExecveCheckExecutableAccessExecutionConfig` is
+the fourth mutually exclusive pure selector. Its closed public classifier is
+`LengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunch`; the public
+`lengthSMTLibExecutionExecutableLaunchStrategy` projection cannot recover a
+path, digest, descriptor, access result, or process identity. The policy role
+and schema are exactly
+`length-z3-descriptor-bound-execve-check-executable-access-execution-policy`
+and
+`djex-length-z3-smtlib2-execution-policy/descriptor-bound-execve-check-executable-access/v1`.
+Its launch-strength tag is:
+
+```text
+opened-source-two-point-faccessat2-x-ok-at-empty-path-at-eaccess-plus-execveat-at-empty-path-at-execve-check-hash-copy-mfd-exec-fixed-0500-f-seal-exec-sealed-memfd-staged-execve-check-then-execveat/point-in-time-source-and-staged-kernel-executable-access-and-main-image-bytes/v1
+```
+
+The Linux opener performs the predecessor's effective-credential
+`faccessat2` source check and a descriptor-bound `AT_EXECVE_CHECK` source
+check before copying. It creates the anonymous image with
+`MFD_CLOEXEC | MFD_ALLOW_SEALING | MFD_EXEC`, hashes and pins the copied
+bytes, assigns fixed mode `0500`, and adds and verifies
+`F_SEAL_WRITE | F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_FUTURE_WRITE |
+F_SEAL_EXEC | F_SEAL_SEAL`. After the deterministic post-seal hook it repeats
+the source `faccessat2` and source exec check, checks the sealed staged image
+once, and only then may allocate a child. The raw check calls carry the fixed
+sanitized `argv[0]` `djex-z3-execve-check` and an empty environment; the real
+child retains the configured executable pathname as its exact `argv[0]` while
+executing only the staged descriptor.
+
+Every new primitive is fail-closed. There is no pathname, emulation,
+non-`MFD_EXEC`, reduced-seal, older-maker, or unchecked-spawn fallback. On a
+stock Linux 5.15 kernel, the first source exec check returns unavailable before
+memfd creation or child allocation. Upstream Linux 6.14 introduced the needed
+exec-check interface, but runtime primitive support—not a version comparison—
+is necessary and still not sufficient for admission. The package-private
+`lengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunchSupported`
+classifier reports only that the Linux descriptor backend was compiled, so it
+remains `True` on that 5.15 build. Pure construction and an all-pure deferred
+batch still perform zero executable, access, staging, or worker IO.
+
+Source or staged exec-check denial maps publicly to executable rejection;
+checker unavailability or failure maps to launch failure. All six internal
+source/staged failure constructors are append-only snapshot failures. The
+policy, raw process, ready-worker, and fresh/shared/scoped scalar and product
+identity families are new and domain-separated, while all three predecessor
+constructors, ordinals, canonical bytes, query bytes, wire protocol, receipts,
+and replay authority remain literal.
+
+The checks are point-in-time kernel observations, not reservations or
+authorization transfers. `AT_EXECVE_CHECK` deliberately ignores executable
+format and interpreter dependencies; Djex claims neither every later `bprm`
+decision nor credential transition, source metadata, loader, interpreter,
+library, solver, result, proof, or pruning authority. The package-private test
+opener may inject an older staged descriptor to exercise ordering and routing
+on Linux 5.15, but its sanitized *requested* creation flags are not observable
+descriptor provenance and do not give the injected descriptor an `MFD_EXEC`
+claim. The complete lifecycle, exact identity strings, kernel sources,
+failure table, authority boundary, and test-seam limitation are recorded in
+the
+[execve-check descriptor-bound Z3 launch report](../docs/reports/2026-08-15-execve-check-descriptor-bound-z3-launch.md).
 
 `Generated` separates backend-local identity from structural global `Name`s.
 Its checked `DefinitionName` narrows top-level output names once, and its scope

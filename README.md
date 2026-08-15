@@ -180,7 +180,10 @@ governing rule is that solver output is never trusted directly — only
 independent replay of a candidate against the exact checked problem produces
 evidence, and raw solver status has no proof or pruning authority. The
 complete specification is
-[docs/semantic-foundations.md](docs/semantic-foundations.md).
+[docs/semantic-foundations.md](docs/semantic-foundations.md). The strongest of
+four closed live Z3 launch profiles adds descriptor-bound Linux 6.14
+executable checks; its narrow authority is recorded in the
+[execve-check descriptor-bound launch report](docs/reports/2026-08-15-execve-check-descriptor-bound-z3-launch.md).
 
 
 ## Building

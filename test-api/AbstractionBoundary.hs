@@ -175,6 +175,8 @@ $(do
           , "ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt"
           , "ValidatedLengthRelationalPositiveAffineApplicableDomainReceipt"
           , "ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt"
+          , "ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt"
+          , "ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt"
           , "CheckedLengthInterpretationPolicy"
           , "CheckedLengthSession"
           , "CheckedLengthProviderInventory"
@@ -450,6 +452,22 @@ forbiddenConstructionAttempts =
     )
   , ( "Relational-positive-affine scalar and product receipts unexpectedly permit Coercible"
     , forbiddenValidatedLengthRelationalPositiveAffineApplicableDomainCoercion
+        `seq` ()
+    )
+  , noGeneric @ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
+      "ValidatedLengthStrictRelationalPositiveAffineApplicableDomain"
+  , ( "ValidatedLengthStrictRelationalPositiveAffineApplicableDomain constructor became public"
+    , forbiddenValidatedLengthStrictRelationalPositiveAffineApplicableDomainConstruction
+        `seq` ()
+    )
+  , noGeneric @ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
+      "ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain"
+  , ( "ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain constructor became public"
+    , forbiddenValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainConstruction
+        `seq` ()
+    )
+  , ( "Strict-relational-positive-affine scalar and product receipts unexpectedly permit Coercible"
+    , forbiddenValidatedLengthStrictRelationalPositiveAffineApplicableDomainCoercion
         `seq` ()
     )
   , noGeneric @(CheckedLengthProviderSummary LengthVariableProbe)
@@ -1488,6 +1506,24 @@ forbiddenValidatedLengthRelationalPositiveAffineApplicableDomainCoercion
   :: ValidatedLengthRelationalPositiveAffineApplicableDomain
   -> ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
 forbiddenValidatedLengthRelationalPositiveAffineApplicableDomainCoercion =
+  coerce
+
+forbiddenValidatedLengthStrictRelationalPositiveAffineApplicableDomainConstruction
+  :: ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
+forbiddenValidatedLengthStrictRelationalPositiveAffineApplicableDomainConstruction =
+  ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt
+    [] forbiddenValidatedLengthInputBoxConstruction
+
+forbiddenValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainConstruction
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
+forbiddenValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainConstruction =
+  ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt
+    [] forbiddenValidatedLengthSpinePairInputBoxConstruction
+
+forbiddenValidatedLengthStrictRelationalPositiveAffineApplicableDomainCoercion
+  :: ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
+  -> ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
+forbiddenValidatedLengthStrictRelationalPositiveAffineApplicableDomainCoercion =
   coerce
 
 forbiddenBoundedRawArtifactCoercion

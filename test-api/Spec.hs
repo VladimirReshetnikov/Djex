@@ -286,6 +286,18 @@ projectionSignatures =
   (LengthEvaluate.validatedLengthRelationalPositiveAffineApplicableDomainBasis
     :: LengthEvaluate.ValidatedLengthRelationalPositiveAffineApplicableDomain
     -> LengthEvaluate.LengthCounterexampleBasis) `seq`
+  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
+    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
+    -> [Natural]) `seq`
+  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineApplicableDomainAssignmentCount
+    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
+    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineApplicableDomainBasis
+    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
+    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
   (LengthEvaluate.validatedLengthCounterexampleSimplificationOriginalInputs
     :: LengthEvaluate.ValidatedLengthCounterexampleSimplification
     -> [Natural]) `seq`
@@ -342,6 +354,18 @@ projectionSignatures =
     -> Natural) `seq`
   (LengthEvaluate.validatedLengthSpinePairRelationalPositiveAffineApplicableDomainBasis
     :: LengthEvaluate.ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
+    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
+  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
+    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
+    -> [Natural]) `seq`
+  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainAssignmentCount
+    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
+    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainBasis
+    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
     -> LengthEvaluate.LengthCounterexampleBasis) `seq`
   (LengthEvaluate.validatedLengthSpinePairCounterexampleSimplificationOriginalInputs
     :: LengthEvaluate.ValidatedLengthSpinePairCounterexampleSimplification
@@ -442,6 +466,7 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "forbiddenValidatedLengthApplicableDomainCoercion"
                       , "forbiddenValidatedLengthPositiveAffineApplicableDomainCoercion"
                       , "forbiddenValidatedLengthRelationalPositiveAffineApplicableDomainCoercion"
+                      , "forbiddenValidatedLengthStrictRelationalPositiveAffineApplicableDomainCoercion"
                       , "forbiddenCheckedLengthContractCoercion"
                       , "forbiddenCheckedLengthSpinePairContractCoercion"
                       , "forbiddenCheckedLengthContextVariableCoercion"
@@ -539,6 +564,8 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt"
                       , "ValidatedLengthRelationalPositiveAffineApplicableDomainReceipt"
                       , "ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt"
+                      , "ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt"
+                      , "ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt"
                       ]
                   )
             assertBool

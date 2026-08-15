@@ -1460,801 +1460,806 @@ searchPreparedFormula
 searchPreparedFormula options prepared providerCandidates providerAssignments
         target elaboratedGoal parametricDataRelevant formulaPlans
         nominalFormulaPlans = do
-    let (premises, premiseTranslationIncomplete, premiseSpellings) =
-            preparedEnvironmentPolarizedFunctionPremises prepared
-        (nominalPremises, _, nominalPremiseSpellings) =
-            preparedEnvironmentNominalPolarizedFunctionPremises prepared
-        ( loadedSchemePremises
-          , nominalLoadedSchemePremises
-          , environmentClosedCandidates
-          ) = preparedEnvironmentLoadedFunctionInstantiation prepared
-        targetSymbol = Symbol $ SharedGenerated.definitionSpelling target
-        activePremises = filter ((/= targetSymbol) . fst) premises
-        targetPremises = filter ((== targetSymbol) . fst) premises
-        activeNominalPremises =
-            filter ((/= targetSymbol) . fst) nominalPremises
-        targetNominalPremises =
-            filter ((== targetSymbol) . fst) nominalPremises
-        activeLoadedSchemePremises = filter
-            ((/= targetSymbol) . fst) loadedSchemePremises
-        targetLoadedSchemePremises = filter
-            ((== targetSymbol) . fst) loadedSchemePremises
-        activeNominalLoadedSchemePremises = filter
-            ((/= targetSymbol) . fst) nominalLoadedSchemePremises
-        targetNominalLoadedSchemePremises = filter
-            ((== targetSymbol) . fst) nominalLoadedSchemePremises
-        goalVariables =
-            SharedType.freeVariablesInFirstOccurrenceOrder elaboratedGoal
-        queryClosedCandidates =
-            SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey $
-                closedMonotypeSubtrees elaboratedGoal
-        closedCandidates =
-            SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey $
-                queryClosedCandidates ++
-                    environmentClosedCandidates
-        checkedTranslator translator source = do
-            checkPreparedSynthesisTypesKinds prepared [(KStar, source)]
-            translator source
-        visibleArgument source = case
-                checkPreparedSynthesisTypesKinds prepared [(KStar, source)] of
-            Left _ -> Nothing
-            Right () -> Just $ either
-                (const SharedGenerated.inferredVisibleTypeArgument)
-                id
-                $ SharedGenerated.specifiedVisibleTypeArgument source
-        structuralTranslator = checkedTranslator $
-            preparedEnvironmentSynthesisFormulaTranslator prepared
-        nominalTranslator = checkedTranslator $
-            preparedEnvironmentNominalSynthesisFormulaTranslator prepared
-        collectAcrossPlans =
-            optionAlternatives options || optionSorted options
-        primary = primaryFormulaPlan formulaPlans
-        primaryTranslationSound = not $
-            translationIncomplete primary || premiseTranslationIncomplete
-        primarySound = primaryTranslationSound &&
-            null activeLoadedSchemePremises
-        alternativeForms
-            | primaryTranslationSound = []
-            | otherwise =
-                exactOpaqueFormulaPlan formulaPlans :
-                map translatedFormula
-                    (singleOpaqueFormulaPlans formulaPlans) ++
-                map translatedFormula
-                    (singleOpenFormulaPlans formulaPlans) ++
-                map translatedFormula
-                    (pairOpaqueFormulaPlans formulaPlans) ++
-                map translatedFormula
-                    (pairOpenFormulaPlans formulaPlans) ++
-                map translatedFormula
-                    (tripleOpaqueFormulaPlans formulaPlans) ++
-                map translatedFormula
-                    (tripleOpenFormulaPlans formulaPlans) ++
-                map translatedFormula
-                    (quadrupleOpaqueFormulaPlans formulaPlans) ++
-                map translatedFormula
-                    (quadrupleOpenFormulaPlans formulaPlans) ++
-                map translatedFormula
-                    (quintupleOpaqueFormulaPlans formulaPlans) ++
-                map translatedFormula
-                    (quintupleOpenFormulaPlans formulaPlans)
-        rawPlans =
-            (translatedFormula primary, primarySound) :
-            [ (formula, False)
-            | formula <- alternativeForms
-            ]
-        plans = SharedCollection.distinctOn fst rawPlans
-        nominalPlans = SharedCollection.distinctOn fst
-            [ (formula, False)
-            | formula <- formulaFamilyForms nominalFormulaPlans
-            ]
-        nominalProjectionDistinct =
-            map fst nominalPlans /= map fst plans ||
-                nominalPremises /= premises
-        useNominalProjection =
-            parametricDataRelevant &&
-                not primaryTranslationSound && nominalProjectionDistinct
-        -- The candidate spellings are source-level facts: the goal's free
-        -- variables, every opened-forall skolem of the goal plans, and the
-        -- sealed premise scopes. No rendered atom text is parsed back.
-        activeAxioms = instantiationAxioms
-            (preparedEnvironmentSynthesisFormulaTranslator prepared)
-            visibleArgument
-            (goalVariables ++
-                polarizedFormulaPlanSkolems formulaPlans ++
-                premiseSpellings)
-            (map fst plans)
-            (map snd activePremises)
-        activeAxiomSymbols = instantiationAxiomSymbols activeAxioms
-        activeAxiomPremises = instantiationAxiomPremises activeAxioms
-        activeVisibleApplications =
-            instantiationVisibleApplications activeAxioms
-        targetAxioms = instantiationAxioms
-            (preparedEnvironmentSynthesisFormulaTranslator prepared)
-            visibleArgument
-            (goalVariables ++
-                polarizedFormulaPlanSkolems formulaPlans ++
-                premiseSpellings)
-            (map fst plans)
-            (map snd targetPremises)
-        targetAxiomPremises = instantiationAxiomPremises targetAxioms
-        activeNominalAxioms = instantiationAxioms
-            (preparedEnvironmentNominalSynthesisFormulaTranslator prepared)
-            visibleArgument
-            (goalVariables ++
-                polarizedFormulaPlanSkolems nominalFormulaPlans ++
-                nominalPremiseSpellings)
-            (map fst nominalPlans)
-            (map snd activeNominalPremises)
-        activeNominalAxiomSymbols =
-            instantiationAxiomSymbols activeNominalAxioms
-        activeNominalAxiomPremises =
-            instantiationAxiomPremises activeNominalAxioms
-        activeNominalVisibleApplications =
-            instantiationVisibleApplications activeNominalAxioms
-        targetNominalAxioms = instantiationAxioms
-            (preparedEnvironmentNominalSynthesisFormulaTranslator prepared)
-            visibleArgument
-            (goalVariables ++
-                polarizedFormulaPlanSkolems nominalFormulaPlans ++
-                nominalPremiseSpellings)
-            (map fst nominalPlans)
-            (map snd targetNominalPremises)
-        targetNominalAxiomPremises =
-            instantiationAxiomPremises targetNominalAxioms
-        queryCorrelatedAxioms = queryCorrelatedInstantiationAxioms
-            structuralTranslator
-            visibleArgument
-            activeAxioms
-            (goalVariables ++
-                polarizedFormulaPlanSkolems formulaPlans ++
-                premiseSpellings)
-            elaboratedGoal
-            (map fst plans)
-            (map snd premises)
-        queryCorrelatedAxiomSymbols =
-            instantiationAxiomSymbols queryCorrelatedAxioms
-        queryCorrelatedAxiomPremises =
-            instantiationAxiomPremises queryCorrelatedAxioms
-        queryCorrelatedVisibleApplications =
-            instantiationVisibleApplications queryCorrelatedAxioms
-        nominalQueryCorrelatedAxioms =
-            queryCorrelatedInstantiationAxioms
-                nominalTranslator
-                visibleArgument
-                activeNominalAxioms
-                (goalVariables ++
-                    polarizedFormulaPlanSkolems nominalFormulaPlans ++
-                    nominalPremiseSpellings)
-                elaboratedGoal
-                (map fst nominalPlans)
-                (map snd nominalPremises)
-        nominalQueryCorrelatedAxiomSymbols =
-            instantiationAxiomSymbols nominalQueryCorrelatedAxioms
-        nominalQueryCorrelatedAxiomPremises =
-            instantiationAxiomPremises nominalQueryCorrelatedAxioms
-        nominalQueryCorrelatedVisibleApplications =
-            instantiationVisibleApplications nominalQueryCorrelatedAxioms
-        queryClosedAxioms = queryClosedInstantiationAxioms
-            structuralTranslator
-            visibleArgument
-            (goalVariables ++
-                polarizedFormulaPlanSkolems formulaPlans ++
-                premiseSpellings)
-            queryClosedCandidates
-            (map fst plans)
-            (map snd premises)
-        queryClosedAxiomSymbols =
-            instantiationAxiomSymbols queryClosedAxioms
-        queryClosedAxiomPremises =
-            instantiationAxiomPremises queryClosedAxioms
-        queryClosedVisibleApplications =
-            instantiationVisibleApplications queryClosedAxioms
-        nominalQueryClosedAxioms = queryClosedInstantiationAxioms
-            nominalTranslator
-            visibleArgument
-            (goalVariables ++
-                polarizedFormulaPlanSkolems nominalFormulaPlans ++
-                nominalPremiseSpellings)
-            queryClosedCandidates
-            (map fst nominalPlans)
-            (map snd nominalPremises)
-        nominalQueryClosedAxiomSymbols =
-            instantiationAxiomSymbols nominalQueryClosedAxioms
-        nominalQueryClosedAxiomPremises =
-            instantiationAxiomPremises nominalQueryClosedAxioms
-        nominalQueryClosedVisibleApplications =
-            instantiationVisibleApplications nominalQueryClosedAxioms
-        activeLoadedAxioms = loadedInstantiationAxioms
-            structuralTranslator
-            visibleArgument
-            (goalVariables ++
-                polarizedFormulaPlanSkolems formulaPlans ++
-                premiseSpellings)
-            closedCandidates
-            (map fst plans)
-            (map snd premises)
-            (map snd activeLoadedSchemePremises)
-        activeLoadedAxiomSymbols =
-            instantiationAxiomSymbols activeLoadedAxioms
-        activeLoadedAxiomPremises =
-            instantiationAxiomPremises activeLoadedAxioms
-        activeLoadedVisibleApplications =
-            instantiationVisibleApplications activeLoadedAxioms
-        targetLoadedAxioms = loadedInstantiationAxioms
-            structuralTranslator
-            visibleArgument
-            (goalVariables ++
-                polarizedFormulaPlanSkolems formulaPlans ++
-                premiseSpellings)
-            closedCandidates
-            (map fst plans)
-            (map snd premises)
-            (map snd targetLoadedSchemePremises)
-        targetLoadedAxiomPremises =
-            instantiationAxiomPremises targetLoadedAxioms
-        activeNominalLoadedAxioms = loadedInstantiationAxioms
-            nominalTranslator
-            visibleArgument
-            (goalVariables ++
-                polarizedFormulaPlanSkolems nominalFormulaPlans ++
-                nominalPremiseSpellings)
-            closedCandidates
-            (map fst nominalPlans)
-            (map snd nominalPremises)
-            (map snd activeNominalLoadedSchemePremises)
-        activeNominalLoadedAxiomSymbols =
-            instantiationAxiomSymbols activeNominalLoadedAxioms
-        activeNominalLoadedAxiomPremises =
-            instantiationAxiomPremises activeNominalLoadedAxioms
-        activeNominalLoadedVisibleApplications =
-            instantiationVisibleApplications activeNominalLoadedAxioms
-        targetNominalLoadedAxioms = loadedInstantiationAxioms
-            nominalTranslator
-            visibleArgument
-            (goalVariables ++
-                polarizedFormulaPlanSkolems nominalFormulaPlans ++
-                nominalPremiseSpellings)
-            closedCandidates
-            (map fst nominalPlans)
-            (map snd nominalPremises)
-            (map snd targetNominalLoadedSchemePremises)
-        targetNominalLoadedAxiomPremises =
-            instantiationAxiomPremises targetNominalLoadedAxioms
-        activeProviderInstantiations = providerInstantiationPremises
-            "$djinn$provider-instantiation$active$"
-            structuralTranslator
-            (Just $
-                preparedEnvironmentStructuralAssignmentFidelity prepared)
-            activeLoadedSchemePremises
-            providerCandidates
-        activeProviderPremises = providerInstantiationPremiseBindings
-            activeProviderInstantiations
-        activeProviderApplications = providerInstantiationApplications
-            activeProviderInstantiations
-        activeProviderAssignmentInstantiations =
-            providerInstantiationAssignmentPremises
-                "$djinn$provider-assignment$active$"
-                structuralTranslator
-                (Just $
-                    preparedEnvironmentStructuralAssignmentFidelity prepared)
-                activeLoadedSchemePremises
-                providerAssignments
-        activeProviderAssignmentPremises =
-            providerInstantiationPremiseBindings
-                activeProviderAssignmentInstantiations
-        activeProviderAssignmentApplications =
-            providerInstantiationApplications
-                activeProviderAssignmentInstantiations
-        activeAllProviderPremises =
-            activeProviderPremises ++ activeProviderAssignmentPremises
-        activeAllProviderApplications =
-            activeProviderApplications `Map.union`
-                activeProviderAssignmentApplications
-        activeAllProviderSymbols = Map.keysSet activeAllProviderApplications
-        activeAllProviderVisibleApplications =
-            Map.map snd activeAllProviderApplications
-        activeProviderAssignmentSymbols =
-            Map.keysSet activeProviderAssignmentApplications
-        activeProviderAssignmentVisibleApplications =
-            Map.map snd activeProviderAssignmentApplications
-        activeProviderAssignmentNames = Set.fromList $
-            map fst $ Map.elems activeProviderAssignmentApplications
-        targetProviderInstantiations = providerInstantiationPremises
-            "$djinn$provider-instantiation$target$"
-            structuralTranslator
-            (Just $
-                preparedEnvironmentStructuralAssignmentFidelity prepared)
-            targetLoadedSchemePremises
-            providerCandidates
-        targetProviderPremises = providerInstantiationPremiseBindings
-            targetProviderInstantiations
-        targetProviderAssignmentInstantiations =
-            providerInstantiationAssignmentPremises
-                "$djinn$provider-assignment$target$"
-                structuralTranslator
-                (Just $
-                    preparedEnvironmentStructuralAssignmentFidelity prepared)
-                targetLoadedSchemePremises
-                providerAssignments
-        targetProviderAssignmentPremises =
-            providerInstantiationPremiseBindings
-                targetProviderAssignmentInstantiations
-        targetAllProviderPremises =
-            targetProviderPremises ++ targetProviderAssignmentPremises
-        activeNominalProviderInstantiations = providerInstantiationPremises
-            "$djinn$nominal-provider-instantiation$active$"
-            nominalTranslator
-            Nothing
-            activeNominalLoadedSchemePremises
-            providerCandidates
-        activeNominalProviderPremises = providerInstantiationPremiseBindings
-            activeNominalProviderInstantiations
-        activeNominalProviderApplications = providerInstantiationApplications
-            activeNominalProviderInstantiations
-        activeNominalProviderAssignmentInstantiations =
-            providerInstantiationAssignmentPremises
-                "$djinn$nominal-provider-assignment$active$"
-                nominalTranslator
-                Nothing
-                activeNominalLoadedSchemePremises
-                providerAssignments
-        activeNominalProviderAssignmentPremises =
-            providerInstantiationPremiseBindings
-                activeNominalProviderAssignmentInstantiations
-        activeNominalProviderAssignmentApplications =
-            providerInstantiationApplications
-                activeNominalProviderAssignmentInstantiations
-        activeAllNominalProviderPremises =
-            activeNominalProviderPremises ++
-                activeNominalProviderAssignmentPremises
-        activeAllNominalProviderApplications =
-            activeNominalProviderApplications `Map.union`
-                activeNominalProviderAssignmentApplications
-        activeAllNominalProviderSymbols =
-            Map.keysSet activeAllNominalProviderApplications
-        activeAllNominalProviderVisibleApplications =
-            Map.map snd activeAllNominalProviderApplications
-        activeNominalProviderAssignmentSymbols =
-            Map.keysSet activeNominalProviderAssignmentApplications
-        activeNominalProviderAssignmentVisibleApplications =
-            Map.map snd activeNominalProviderAssignmentApplications
-        activeNominalProviderAssignmentNames = Set.fromList $
-            map fst $ Map.elems activeNominalProviderAssignmentApplications
-        targetNominalProviderInstantiations = providerInstantiationPremises
-            "$djinn$nominal-provider-instantiation$target$"
-            nominalTranslator
-            Nothing
-            targetNominalLoadedSchemePremises
-            providerCandidates
-        targetNominalProviderPremises = providerInstantiationPremiseBindings
-            targetNominalProviderInstantiations
-        targetNominalProviderAssignmentInstantiations =
-            providerInstantiationAssignmentPremises
-                "$djinn$nominal-provider-assignment$target$"
-                nominalTranslator
-                Nothing
-                targetNominalLoadedSchemePremises
-                providerAssignments
-        targetNominalProviderAssignmentPremises =
-            providerInstantiationPremiseBindings
-                targetNominalProviderAssignmentInstantiations
-        targetAllNominalProviderPremises =
-            targetNominalProviderPremises ++
-                targetNominalProviderAssignmentPremises
-        useNominalLoadedProjection =
-            parametricDataRelevant &&
-                ( useNominalProjection ||
-                    activeNominalLoadedSchemePremises /=
-                        activeLoadedSchemePremises ||
-                    activeNominalLoadedAxiomPremises /=
-                        activeLoadedAxiomPremises
-                )
-        useNominalProviderProjection =
-            parametricDataRelevant &&
-                ( nominalProjectionDistinct ||
-                    activeAllNominalProviderPremises /=
-                        activeAllProviderPremises ||
-                    targetAllNominalProviderPremises /=
-                        targetAllProviderPremises
-                )
-        useNominalQueryCorrelatedProjection =
-            parametricDataRelevant &&
-                ( nominalProjectionDistinct ||
-                    nominalQueryCorrelatedAxiomPremises /=
-                        queryCorrelatedAxiomPremises
-                )
-        useNominalQueryClosedProjection =
-            parametricDataRelevant &&
-                ( nominalProjectionDistinct ||
-                    nominalQueryClosedAxiomPremises /=
-                        queryClosedAxiomPremises
-                )
-        useNominalQueryCorrelatedClosedProjection =
-            parametricDataRelevant &&
-                ( nominalProjectionDistinct ||
-                    nominalQueryCorrelatedAxiomPremises /=
-                        queryCorrelatedAxiomPremises ||
-                    nominalQueryClosedAxiomPremises /=
-                        queryClosedAxiomPremises
-                )
-        -- Preserve the complete historical structural/no-axiom prefix. This
-        -- keeps first-result behavior, frontier ordering, and finite-budget
-        -- observations stable; the nominal family shares only the cutoff and
-        -- fuel left by that prefix and still precedes the structural axiom
-        -- phase which previously formed the appended transport tail.
-        structuralSearchPlans =
-            [ ( premises, [], Set.empty, Map.empty, Map.empty
-              , form, sound
-              )
-            | (form, sound) <- plans
-            ]
-        structuralAxiomSearchPlans =
-            [ ( premises ++ activeAxiomPremises
-              , targetAxiomPremises
-              , activeAxiomSymbols
-              , activeVisibleApplications
-              , Map.empty
-              , form
-              , sound && null activeAxiomPremises
-              )
-            | not (null activeAxiomPremises) ||
-                not (null targetAxiomPremises)
-            , (form, sound) <- plans
-            ]
-        loadedStructuralSearchPlans =
-            [ ( premises ++ loadedSchemePremises ++ activeAxiomPremises ++
-                    activeLoadedAxiomPremises
-              , targetAxiomPremises ++ targetLoadedAxiomPremises
-              , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
-              , activeVisibleApplications `Map.union`
-                    activeLoadedVisibleApplications
-              , Map.empty
-              , form
-              , sound && null activeAxiomPremises &&
-                    null activeLoadedSchemePremises
-              )
-            | not (null loadedSchemePremises)
-            , (form, sound) <- plans
-            ]
-        -- The nominal-data family is a complementary proof-producing
-        -- approximation, never a refutation. Its premise views and erased
-        -- instantiation axioms are compiled independently with the matching
-        -- nominal translator, so structural candidate caps and ordering are
-        -- unchanged. Pair each plain nominal form with its guarded transport
-        -- form before moving to the next frontier; policy remains part of the
-        -- search plan even when a formula happens to equal a structural view.
-        nominalSearchPlans
-            | not useNominalProjection = []
-            | otherwise = concatMap nominalFormSearchPlans nominalPlans
-        nominalFormSearchPlans (form, _) =
-            ( nominalPremises, [], Set.empty, Map.empty, Map.empty
-            , form, False
-            ) :
-            [ ( nominalPremises ++ activeNominalAxiomPremises
-              , targetNominalAxiomPremises
-              , activeNominalAxiomSymbols
-              , activeNominalVisibleApplications
-              , Map.empty
-              , form
-              , False
-              )
-            | not (null activeNominalAxiomPremises) ||
-                not (null targetNominalAxiomPremises)
-            ]
-        loadedNominalSearchPlans
-            | not useNominalLoadedProjection = []
-            | otherwise =
-                [ ( nominalPremises ++ nominalLoadedSchemePremises ++
-                        activeNominalAxiomPremises ++
-                        activeNominalLoadedAxiomPremises
-                  , targetNominalAxiomPremises ++
-                        targetNominalLoadedAxiomPremises
-                  , activeNominalAxiomSymbols `Set.union`
-                        activeNominalLoadedAxiomSymbols
-                  , activeNominalVisibleApplications `Map.union`
-                        activeNominalLoadedVisibleApplications
-                  , Map.empty
-                  , form
-                  , False
-                  )
-                | not (null nominalLoadedSchemePremises)
-                , (form, _) <- nominalPlans
-                ]
-        -- Fairly correlated guarded-impredicative tuples form a separate
-        -- positive-only tail.  Its axioms are exact instances whose complete
-        -- result already occurs in the checked query.  The plan is appended
-        -- after the formerly final query-closed family, preserving every
-        -- established plan and candidate prefix while allowing the new local
-        -- instance to compose with historical, provider, and loaded premises.
-        queryCorrelatedStructuralSearchPlans =
-            [ ( premises ++ loadedSchemePremises ++ activeAxiomPremises ++
-                    activeLoadedAxiomPremises ++ activeAllProviderPremises ++
-                    queryCorrelatedAxiomPremises
-              , targetAxiomPremises ++ targetLoadedAxiomPremises ++
-                    targetAllProviderPremises
-              , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
-                    `Set.union` activeAllProviderSymbols
-                    `Set.union` queryCorrelatedAxiomSymbols
-              , activeVisibleApplications `Map.union`
-                    activeLoadedVisibleApplications `Map.union`
-                    activeAllProviderVisibleApplications `Map.union`
-                    queryCorrelatedVisibleApplications
-              , activeAllProviderApplications
-              , form
-              , False
-              )
-            | not (null queryCorrelatedAxiomPremises)
-            , (form, _) <- plans
-            ]
-        queryCorrelatedNominalSearchPlans
-            | not useNominalQueryCorrelatedProjection = []
-            | otherwise =
-                [ ( nominalPremises ++ nominalLoadedSchemePremises ++
-                        activeNominalAxiomPremises ++
-                        activeNominalLoadedAxiomPremises ++
-                        activeAllNominalProviderPremises ++
-                        nominalQueryCorrelatedAxiomPremises
-                  , targetNominalAxiomPremises ++
-                        targetNominalLoadedAxiomPremises ++
-                        targetAllNominalProviderPremises
-                  , activeNominalAxiomSymbols `Set.union`
-                        activeNominalLoadedAxiomSymbols `Set.union`
-                        activeAllNominalProviderSymbols `Set.union`
-                        nominalQueryCorrelatedAxiomSymbols
-                  , activeNominalVisibleApplications `Map.union`
-                        activeNominalLoadedVisibleApplications `Map.union`
-                        activeAllNominalProviderVisibleApplications `Map.union`
-                        nominalQueryCorrelatedVisibleApplications
-                  , activeAllNominalProviderApplications
-                  , form
-                  , False
-                  )
-                | not (null nominalQueryCorrelatedAxiomPremises)
-                , (form, _) <- nominalPlans
-                ]
-        -- Closed monotypes which occur in the checked query extend local
-        -- hypothesis instantiation in the historically final family. Keeping
-        -- this established positive-only superset unchanged after the loaded
-        -- and provider families preserves every earlier plan and candidate
-        -- prefix while still allowing one
-        -- proof to mix an old variable/quantified axiom with a newly admitted
-        -- closed instance. This established plan is also a superset of loaded
-        -- and caller-supplied provider evidence, so the new local
-        -- specialization can compose with either capability without moving or
-        -- modifying their earlier priority plans.
-        queryClosedStructuralSearchPlans =
-            [ ( premises ++ loadedSchemePremises ++ activeAxiomPremises ++
-                    activeLoadedAxiomPremises ++ activeAllProviderPremises ++
-                    queryClosedAxiomPremises
-              , targetAxiomPremises ++ targetLoadedAxiomPremises ++
-                    targetAllProviderPremises
-              , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
-                    `Set.union` activeAllProviderSymbols
-                    `Set.union` queryClosedAxiomSymbols
-              , activeVisibleApplications `Map.union`
-                    activeLoadedVisibleApplications `Map.union`
-                    activeAllProviderVisibleApplications `Map.union`
-                    queryClosedVisibleApplications
-              , activeAllProviderApplications
-              , form
-              , False
-              )
-            | not (null queryClosedAxiomPremises)
-            , (form, _) <- plans
-            ]
-        queryClosedNominalSearchPlans
-            | not useNominalQueryClosedProjection = []
-            | otherwise =
-                [ ( nominalPremises ++ nominalLoadedSchemePremises ++
-                        activeNominalAxiomPremises ++
-                        activeNominalLoadedAxiomPremises ++
-                        activeAllNominalProviderPremises ++
-                        nominalQueryClosedAxiomPremises
-                  , targetNominalAxiomPremises ++
-                        targetNominalLoadedAxiomPremises ++
-                        targetAllNominalProviderPremises
-                  , activeNominalAxiomSymbols `Set.union`
-                        activeNominalLoadedAxiomSymbols `Set.union`
-                        activeAllNominalProviderSymbols `Set.union`
-                        nominalQueryClosedAxiomSymbols
-                  , activeNominalVisibleApplications `Map.union`
-                        activeNominalLoadedVisibleApplications `Map.union`
-                        activeAllNominalProviderVisibleApplications `Map.union`
-                        nominalQueryClosedVisibleApplications
-                  , activeAllNominalProviderApplications
-                  , form
-                  , False
-                  )
-                | not (null nominalQueryClosedAxiomPremises)
-                , (form, _) <- nominalPlans
-                ]
-        -- A final additive superset permits one proof to compose the new
-        -- correlated instance with the established query-closed family.  It
-        -- is present only when both families contribute premises, so neither
-        -- single-family tail is duplicated, and it follows both independent
-        -- plans so their prefixes remain stable.
-        queryCorrelatedClosedStructuralSearchPlans =
-            [ ( premises ++ loadedSchemePremises ++ activeAxiomPremises ++
-                    activeLoadedAxiomPremises ++ activeAllProviderPremises ++
-                    queryCorrelatedAxiomPremises ++
-                    queryClosedAxiomPremises
-              , targetAxiomPremises ++ targetLoadedAxiomPremises ++
-                    targetAllProviderPremises
-              , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
-                    `Set.union` activeAllProviderSymbols
-                    `Set.union` queryCorrelatedAxiomSymbols
-                    `Set.union` queryClosedAxiomSymbols
-              , activeVisibleApplications `Map.union`
-                    activeLoadedVisibleApplications `Map.union`
-                    activeAllProviderVisibleApplications `Map.union`
-                    queryCorrelatedVisibleApplications `Map.union`
-                    queryClosedVisibleApplications
-              , activeAllProviderApplications
-              , form
-              , False
-              )
-            | not (null queryCorrelatedAxiomPremises)
-            , not (null queryClosedAxiomPremises)
-            , (form, _) <- plans
-            ]
-        queryCorrelatedClosedNominalSearchPlans
-            | not useNominalQueryCorrelatedClosedProjection = []
-            | otherwise =
-                [ ( nominalPremises ++ nominalLoadedSchemePremises ++
-                        activeNominalAxiomPremises ++
-                        activeNominalLoadedAxiomPremises ++
-                        activeAllNominalProviderPremises ++
-                        nominalQueryCorrelatedAxiomPremises ++
-                        nominalQueryClosedAxiomPremises
-                  , targetNominalAxiomPremises ++
-                        targetNominalLoadedAxiomPremises ++
-                        targetAllNominalProviderPremises
-                  , activeNominalAxiomSymbols `Set.union`
-                        activeNominalLoadedAxiomSymbols `Set.union`
-                        activeAllNominalProviderSymbols `Set.union`
-                        nominalQueryCorrelatedAxiomSymbols `Set.union`
-                        nominalQueryClosedAxiomSymbols
-                  , activeNominalVisibleApplications `Map.union`
-                        activeNominalLoadedVisibleApplications `Map.union`
-                        activeAllNominalProviderVisibleApplications `Map.union`
-                        nominalQueryCorrelatedVisibleApplications `Map.union`
-                        nominalQueryClosedVisibleApplications
-                  , activeAllNominalProviderApplications
-                  , form
-                  , False
-                  )
-                | not (null nominalQueryCorrelatedAxiomPremises)
-                , not (null nominalQueryClosedAxiomPremises)
-                , (form, _) <- nominalPlans
-                ]
-        -- Exact ordered assignments receive one positive-only priority plan.
-        -- Replace the ordinary views of each assigned provider in this plan,
-        -- then put its exact premise at the tail. LJT introduces folded
-        -- environment arrows from left to right: a nominal empty premise
-        -- encountered before later arrows is eliminated, while the tail
-        -- premise reaches the final matching goal by direct identity and
-        -- therefore preserves its visible type application. The unfiltered
-        -- provider superset below remains available for proofs which compose
-        -- an exact assignment with an ordinary use of that same provider.
-        providerAssignmentPriorityStructuralSearchPlans =
-            [ ( withoutProviders activeProviderAssignmentNames premises ++
-                    withoutProviders activeProviderAssignmentNames
-                        loadedSchemePremises ++
-                    activeAxiomPremises ++ activeLoadedAxiomPremises ++
-                    activeProviderAssignmentPremises
-              , []
-              , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
-                    `Set.union` activeProviderAssignmentSymbols
-              , activeVisibleApplications `Map.union`
-                    activeLoadedVisibleApplications `Map.union`
-                    activeProviderAssignmentVisibleApplications
-              , activeProviderAssignmentApplications
-              , form
-              , False
-              )
-            | not (null activeProviderAssignmentPremises)
-            , (form, _) <- plans
-            ]
-        providerAssignmentPriorityNominalSearchPlans
-            | not useNominalProviderProjection = []
-            | otherwise =
-                [ ( withoutProviders activeNominalProviderAssignmentNames
-                        nominalPremises ++
-                        withoutProviders activeNominalProviderAssignmentNames
-                            nominalLoadedSchemePremises ++
-                        activeNominalAxiomPremises ++
-                        activeNominalLoadedAxiomPremises ++
-                        activeNominalProviderAssignmentPremises
-                  , []
-                  , activeNominalAxiomSymbols `Set.union`
-                        activeNominalLoadedAxiomSymbols `Set.union`
-                        activeNominalProviderAssignmentSymbols
-                  , activeNominalVisibleApplications `Map.union`
-                        activeNominalLoadedVisibleApplications `Map.union`
-                        activeNominalProviderAssignmentVisibleApplications
-                  , activeNominalProviderAssignmentApplications
-                  , form
-                  , False
-                  )
-                | not (null activeNominalProviderAssignmentPremises)
-                , (form, _) <- nominalPlans
-                ]
-        -- The historical combined scalar-candidate and exact-assignment plan
-        -- remains an unfiltered additive superset at its established position.
-        -- This preserves legacy candidate ordering and allows one proof to use
-        -- the same provider through both exact and ordinary instantiation.
-        providerStructuralSearchPlans =
-            [ ( premises ++ loadedSchemePremises ++
-                    activeAxiomPremises ++ activeLoadedAxiomPremises ++
-                    activeAllProviderPremises
-              , targetAxiomPremises ++ targetLoadedAxiomPremises ++
-                    targetAllProviderPremises
-              , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
-                    `Set.union` activeAllProviderSymbols
-              , activeVisibleApplications `Map.union`
-                    activeLoadedVisibleApplications `Map.union`
-                    activeAllProviderVisibleApplications
-              , activeAllProviderApplications
-              , form
-              , False
-              )
-            | not (null activeAllProviderPremises) ||
-                not (null targetAllProviderPremises)
-            , (form, _) <- plans
-            ]
-        providerNominalSearchPlans
-            | not useNominalProviderProjection = []
-            | otherwise =
-                [ ( nominalPremises ++ nominalLoadedSchemePremises ++
-                        activeNominalAxiomPremises ++
-                        activeNominalLoadedAxiomPremises ++
-                        activeAllNominalProviderPremises
-                  , targetNominalAxiomPremises ++
-                        targetNominalLoadedAxiomPremises ++
-                        targetAllNominalProviderPremises
-                  , activeNominalAxiomSymbols `Set.union`
-                        activeNominalLoadedAxiomSymbols `Set.union`
-                        activeAllNominalProviderSymbols
-                  , activeNominalVisibleApplications `Map.union`
-                        activeNominalLoadedVisibleApplications `Map.union`
-                        activeAllNominalProviderVisibleApplications
-                  , activeAllNominalProviderApplications
-                  , form
-                  , False
-                  )
-                | not (null activeAllNominalProviderPremises) ||
-                    not (null targetAllNominalProviderPremises)
-                , (form, _) <- nominalPlans
-                ]
-        searchPlans =
-            -- Exact assignment priority is absent for both the scalar-only
-            -- and empty-evidence entrances, so their historical plan order is
-            -- unchanged byte for byte.
-            providerAssignmentPriorityStructuralSearchPlans ++
-            providerAssignmentPriorityNominalSearchPlans ++
-            structuralSearchPlans ++
-            nominalSearchPlans ++
-            structuralAxiomSearchPlans ++
-            -- A productive historical loaded proof stream can consume the
-            -- global candidate cutoff without finishing.  Run its strict
-            -- provider-evidence superset first when that optional family
-            -- exists; the empty-evidence plan list remains exactly historical.
-            providerStructuralSearchPlans ++
-            providerNominalSearchPlans ++
-            loadedStructuralSearchPlans ++
-            loadedNominalSearchPlans ++
-            queryClosedStructuralSearchPlans ++
-            queryClosedNominalSearchPlans ++
-            queryCorrelatedStructuralSearchPlans ++
-            queryCorrelatedNominalSearchPlans ++
-            queryCorrelatedClosedStructuralSearchPlans ++
-            queryCorrelatedClosedNominalSearchPlans
-        withoutProviders providerNames =
-            filter ((`Set.notMember` providerNames) . fst)
     results <- runPlans collectAcrossPlans
         options (optionCutoff options) [] searchPlans
     mergeFormulaPlanResults options results
   where
+    -- Premise partitioning and the complete deterministic plan-family
+    -- schedule.  Everything below is a pure derivation from the prepared
+    -- environment and the caller-checked evidence; the search itself is
+    -- runPlans' fold over the finished searchPlans list.
+    (premises, premiseTranslationIncomplete, premiseSpellings) =
+        preparedEnvironmentPolarizedFunctionPremises prepared
+    (nominalPremises, _, nominalPremiseSpellings) =
+        preparedEnvironmentNominalPolarizedFunctionPremises prepared
+    ( loadedSchemePremises
+      , nominalLoadedSchemePremises
+      , environmentClosedCandidates
+      ) = preparedEnvironmentLoadedFunctionInstantiation prepared
+    targetSymbol = Symbol $ SharedGenerated.definitionSpelling target
+    activePremises = filter ((/= targetSymbol) . fst) premises
+    targetPremises = filter ((== targetSymbol) . fst) premises
+    activeNominalPremises =
+        filter ((/= targetSymbol) . fst) nominalPremises
+    targetNominalPremises =
+        filter ((== targetSymbol) . fst) nominalPremises
+    activeLoadedSchemePremises = filter
+        ((/= targetSymbol) . fst) loadedSchemePremises
+    targetLoadedSchemePremises = filter
+        ((== targetSymbol) . fst) loadedSchemePremises
+    activeNominalLoadedSchemePremises = filter
+        ((/= targetSymbol) . fst) nominalLoadedSchemePremises
+    targetNominalLoadedSchemePremises = filter
+        ((== targetSymbol) . fst) nominalLoadedSchemePremises
+    goalVariables =
+        SharedType.freeVariablesInFirstOccurrenceOrder elaboratedGoal
+    queryClosedCandidates =
+        SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey $
+            closedMonotypeSubtrees elaboratedGoal
+    closedCandidates =
+        SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey $
+            queryClosedCandidates ++
+                environmentClosedCandidates
+    checkedTranslator translator source = do
+        checkPreparedSynthesisTypesKinds prepared [(KStar, source)]
+        translator source
+    visibleArgument source = case
+            checkPreparedSynthesisTypesKinds prepared [(KStar, source)] of
+        Left _ -> Nothing
+        Right () -> Just $ either
+            (const SharedGenerated.inferredVisibleTypeArgument)
+            id
+            $ SharedGenerated.specifiedVisibleTypeArgument source
+    structuralTranslator = checkedTranslator $
+        preparedEnvironmentSynthesisFormulaTranslator prepared
+    nominalTranslator = checkedTranslator $
+        preparedEnvironmentNominalSynthesisFormulaTranslator prepared
+    collectAcrossPlans =
+        optionAlternatives options || optionSorted options
+    primary = primaryFormulaPlan formulaPlans
+    primaryTranslationSound = not $
+        translationIncomplete primary || premiseTranslationIncomplete
+    primarySound = primaryTranslationSound &&
+        null activeLoadedSchemePremises
+    alternativeForms
+        | primaryTranslationSound = []
+        | otherwise =
+            exactOpaqueFormulaPlan formulaPlans :
+            map translatedFormula
+                (singleOpaqueFormulaPlans formulaPlans) ++
+            map translatedFormula
+                (singleOpenFormulaPlans formulaPlans) ++
+            map translatedFormula
+                (pairOpaqueFormulaPlans formulaPlans) ++
+            map translatedFormula
+                (pairOpenFormulaPlans formulaPlans) ++
+            map translatedFormula
+                (tripleOpaqueFormulaPlans formulaPlans) ++
+            map translatedFormula
+                (tripleOpenFormulaPlans formulaPlans) ++
+            map translatedFormula
+                (quadrupleOpaqueFormulaPlans formulaPlans) ++
+            map translatedFormula
+                (quadrupleOpenFormulaPlans formulaPlans) ++
+            map translatedFormula
+                (quintupleOpaqueFormulaPlans formulaPlans) ++
+            map translatedFormula
+                (quintupleOpenFormulaPlans formulaPlans)
+    rawPlans =
+        (translatedFormula primary, primarySound) :
+        [ (formula, False)
+        | formula <- alternativeForms
+        ]
+    plans = SharedCollection.distinctOn fst rawPlans
+    nominalPlans = SharedCollection.distinctOn fst
+        [ (formula, False)
+        | formula <- formulaFamilyForms nominalFormulaPlans
+        ]
+    nominalProjectionDistinct =
+        map fst nominalPlans /= map fst plans ||
+            nominalPremises /= premises
+    useNominalProjection =
+        parametricDataRelevant &&
+            not primaryTranslationSound && nominalProjectionDistinct
+    -- The candidate spellings are source-level facts: the goal's free
+    -- variables, every opened-forall skolem of the goal plans, and the
+    -- sealed premise scopes. No rendered atom text is parsed back.
+    activeAxioms = instantiationAxioms
+        (preparedEnvironmentSynthesisFormulaTranslator prepared)
+        visibleArgument
+        (goalVariables ++
+            polarizedFormulaPlanSkolems formulaPlans ++
+            premiseSpellings)
+        (map fst plans)
+        (map snd activePremises)
+    activeAxiomSymbols = instantiationAxiomSymbols activeAxioms
+    activeAxiomPremises = instantiationAxiomPremises activeAxioms
+    activeVisibleApplications =
+        instantiationVisibleApplications activeAxioms
+    targetAxioms = instantiationAxioms
+        (preparedEnvironmentSynthesisFormulaTranslator prepared)
+        visibleArgument
+        (goalVariables ++
+            polarizedFormulaPlanSkolems formulaPlans ++
+            premiseSpellings)
+        (map fst plans)
+        (map snd targetPremises)
+    targetAxiomPremises = instantiationAxiomPremises targetAxioms
+    activeNominalAxioms = instantiationAxioms
+        (preparedEnvironmentNominalSynthesisFormulaTranslator prepared)
+        visibleArgument
+        (goalVariables ++
+            polarizedFormulaPlanSkolems nominalFormulaPlans ++
+            nominalPremiseSpellings)
+        (map fst nominalPlans)
+        (map snd activeNominalPremises)
+    activeNominalAxiomSymbols =
+        instantiationAxiomSymbols activeNominalAxioms
+    activeNominalAxiomPremises =
+        instantiationAxiomPremises activeNominalAxioms
+    activeNominalVisibleApplications =
+        instantiationVisibleApplications activeNominalAxioms
+    targetNominalAxioms = instantiationAxioms
+        (preparedEnvironmentNominalSynthesisFormulaTranslator prepared)
+        visibleArgument
+        (goalVariables ++
+            polarizedFormulaPlanSkolems nominalFormulaPlans ++
+            nominalPremiseSpellings)
+        (map fst nominalPlans)
+        (map snd targetNominalPremises)
+    targetNominalAxiomPremises =
+        instantiationAxiomPremises targetNominalAxioms
+    queryCorrelatedAxioms = queryCorrelatedInstantiationAxioms
+        structuralTranslator
+        visibleArgument
+        activeAxioms
+        (goalVariables ++
+            polarizedFormulaPlanSkolems formulaPlans ++
+            premiseSpellings)
+        elaboratedGoal
+        (map fst plans)
+        (map snd premises)
+    queryCorrelatedAxiomSymbols =
+        instantiationAxiomSymbols queryCorrelatedAxioms
+    queryCorrelatedAxiomPremises =
+        instantiationAxiomPremises queryCorrelatedAxioms
+    queryCorrelatedVisibleApplications =
+        instantiationVisibleApplications queryCorrelatedAxioms
+    nominalQueryCorrelatedAxioms =
+        queryCorrelatedInstantiationAxioms
+            nominalTranslator
+            visibleArgument
+            activeNominalAxioms
+            (goalVariables ++
+                polarizedFormulaPlanSkolems nominalFormulaPlans ++
+                nominalPremiseSpellings)
+            elaboratedGoal
+            (map fst nominalPlans)
+            (map snd nominalPremises)
+    nominalQueryCorrelatedAxiomSymbols =
+        instantiationAxiomSymbols nominalQueryCorrelatedAxioms
+    nominalQueryCorrelatedAxiomPremises =
+        instantiationAxiomPremises nominalQueryCorrelatedAxioms
+    nominalQueryCorrelatedVisibleApplications =
+        instantiationVisibleApplications nominalQueryCorrelatedAxioms
+    queryClosedAxioms = queryClosedInstantiationAxioms
+        structuralTranslator
+        visibleArgument
+        (goalVariables ++
+            polarizedFormulaPlanSkolems formulaPlans ++
+            premiseSpellings)
+        queryClosedCandidates
+        (map fst plans)
+        (map snd premises)
+    queryClosedAxiomSymbols =
+        instantiationAxiomSymbols queryClosedAxioms
+    queryClosedAxiomPremises =
+        instantiationAxiomPremises queryClosedAxioms
+    queryClosedVisibleApplications =
+        instantiationVisibleApplications queryClosedAxioms
+    nominalQueryClosedAxioms = queryClosedInstantiationAxioms
+        nominalTranslator
+        visibleArgument
+        (goalVariables ++
+            polarizedFormulaPlanSkolems nominalFormulaPlans ++
+            nominalPremiseSpellings)
+        queryClosedCandidates
+        (map fst nominalPlans)
+        (map snd nominalPremises)
+    nominalQueryClosedAxiomSymbols =
+        instantiationAxiomSymbols nominalQueryClosedAxioms
+    nominalQueryClosedAxiomPremises =
+        instantiationAxiomPremises nominalQueryClosedAxioms
+    nominalQueryClosedVisibleApplications =
+        instantiationVisibleApplications nominalQueryClosedAxioms
+    activeLoadedAxioms = loadedInstantiationAxioms
+        structuralTranslator
+        visibleArgument
+        (goalVariables ++
+            polarizedFormulaPlanSkolems formulaPlans ++
+            premiseSpellings)
+        closedCandidates
+        (map fst plans)
+        (map snd premises)
+        (map snd activeLoadedSchemePremises)
+    activeLoadedAxiomSymbols =
+        instantiationAxiomSymbols activeLoadedAxioms
+    activeLoadedAxiomPremises =
+        instantiationAxiomPremises activeLoadedAxioms
+    activeLoadedVisibleApplications =
+        instantiationVisibleApplications activeLoadedAxioms
+    targetLoadedAxioms = loadedInstantiationAxioms
+        structuralTranslator
+        visibleArgument
+        (goalVariables ++
+            polarizedFormulaPlanSkolems formulaPlans ++
+            premiseSpellings)
+        closedCandidates
+        (map fst plans)
+        (map snd premises)
+        (map snd targetLoadedSchemePremises)
+    targetLoadedAxiomPremises =
+        instantiationAxiomPremises targetLoadedAxioms
+    activeNominalLoadedAxioms = loadedInstantiationAxioms
+        nominalTranslator
+        visibleArgument
+        (goalVariables ++
+            polarizedFormulaPlanSkolems nominalFormulaPlans ++
+            nominalPremiseSpellings)
+        closedCandidates
+        (map fst nominalPlans)
+        (map snd nominalPremises)
+        (map snd activeNominalLoadedSchemePremises)
+    activeNominalLoadedAxiomSymbols =
+        instantiationAxiomSymbols activeNominalLoadedAxioms
+    activeNominalLoadedAxiomPremises =
+        instantiationAxiomPremises activeNominalLoadedAxioms
+    activeNominalLoadedVisibleApplications =
+        instantiationVisibleApplications activeNominalLoadedAxioms
+    targetNominalLoadedAxioms = loadedInstantiationAxioms
+        nominalTranslator
+        visibleArgument
+        (goalVariables ++
+            polarizedFormulaPlanSkolems nominalFormulaPlans ++
+            nominalPremiseSpellings)
+        closedCandidates
+        (map fst nominalPlans)
+        (map snd nominalPremises)
+        (map snd targetNominalLoadedSchemePremises)
+    targetNominalLoadedAxiomPremises =
+        instantiationAxiomPremises targetNominalLoadedAxioms
+    activeProviderInstantiations = providerInstantiationPremises
+        "$djinn$provider-instantiation$active$"
+        structuralTranslator
+        (Just $
+            preparedEnvironmentStructuralAssignmentFidelity prepared)
+        activeLoadedSchemePremises
+        providerCandidates
+    activeProviderPremises = providerInstantiationPremiseBindings
+        activeProviderInstantiations
+    activeProviderApplications = providerInstantiationApplications
+        activeProviderInstantiations
+    activeProviderAssignmentInstantiations =
+        providerInstantiationAssignmentPremises
+            "$djinn$provider-assignment$active$"
+            structuralTranslator
+            (Just $
+                preparedEnvironmentStructuralAssignmentFidelity prepared)
+            activeLoadedSchemePremises
+            providerAssignments
+    activeProviderAssignmentPremises =
+        providerInstantiationPremiseBindings
+            activeProviderAssignmentInstantiations
+    activeProviderAssignmentApplications =
+        providerInstantiationApplications
+            activeProviderAssignmentInstantiations
+    activeAllProviderPremises =
+        activeProviderPremises ++ activeProviderAssignmentPremises
+    activeAllProviderApplications =
+        activeProviderApplications `Map.union`
+            activeProviderAssignmentApplications
+    activeAllProviderSymbols = Map.keysSet activeAllProviderApplications
+    activeAllProviderVisibleApplications =
+        Map.map snd activeAllProviderApplications
+    activeProviderAssignmentSymbols =
+        Map.keysSet activeProviderAssignmentApplications
+    activeProviderAssignmentVisibleApplications =
+        Map.map snd activeProviderAssignmentApplications
+    activeProviderAssignmentNames = Set.fromList $
+        map fst $ Map.elems activeProviderAssignmentApplications
+    targetProviderInstantiations = providerInstantiationPremises
+        "$djinn$provider-instantiation$target$"
+        structuralTranslator
+        (Just $
+            preparedEnvironmentStructuralAssignmentFidelity prepared)
+        targetLoadedSchemePremises
+        providerCandidates
+    targetProviderPremises = providerInstantiationPremiseBindings
+        targetProviderInstantiations
+    targetProviderAssignmentInstantiations =
+        providerInstantiationAssignmentPremises
+            "$djinn$provider-assignment$target$"
+            structuralTranslator
+            (Just $
+                preparedEnvironmentStructuralAssignmentFidelity prepared)
+            targetLoadedSchemePremises
+            providerAssignments
+    targetProviderAssignmentPremises =
+        providerInstantiationPremiseBindings
+            targetProviderAssignmentInstantiations
+    targetAllProviderPremises =
+        targetProviderPremises ++ targetProviderAssignmentPremises
+    activeNominalProviderInstantiations = providerInstantiationPremises
+        "$djinn$nominal-provider-instantiation$active$"
+        nominalTranslator
+        Nothing
+        activeNominalLoadedSchemePremises
+        providerCandidates
+    activeNominalProviderPremises = providerInstantiationPremiseBindings
+        activeNominalProviderInstantiations
+    activeNominalProviderApplications = providerInstantiationApplications
+        activeNominalProviderInstantiations
+    activeNominalProviderAssignmentInstantiations =
+        providerInstantiationAssignmentPremises
+            "$djinn$nominal-provider-assignment$active$"
+            nominalTranslator
+            Nothing
+            activeNominalLoadedSchemePremises
+            providerAssignments
+    activeNominalProviderAssignmentPremises =
+        providerInstantiationPremiseBindings
+            activeNominalProviderAssignmentInstantiations
+    activeNominalProviderAssignmentApplications =
+        providerInstantiationApplications
+            activeNominalProviderAssignmentInstantiations
+    activeAllNominalProviderPremises =
+        activeNominalProviderPremises ++
+            activeNominalProviderAssignmentPremises
+    activeAllNominalProviderApplications =
+        activeNominalProviderApplications `Map.union`
+            activeNominalProviderAssignmentApplications
+    activeAllNominalProviderSymbols =
+        Map.keysSet activeAllNominalProviderApplications
+    activeAllNominalProviderVisibleApplications =
+        Map.map snd activeAllNominalProviderApplications
+    activeNominalProviderAssignmentSymbols =
+        Map.keysSet activeNominalProviderAssignmentApplications
+    activeNominalProviderAssignmentVisibleApplications =
+        Map.map snd activeNominalProviderAssignmentApplications
+    activeNominalProviderAssignmentNames = Set.fromList $
+        map fst $ Map.elems activeNominalProviderAssignmentApplications
+    targetNominalProviderInstantiations = providerInstantiationPremises
+        "$djinn$nominal-provider-instantiation$target$"
+        nominalTranslator
+        Nothing
+        targetNominalLoadedSchemePremises
+        providerCandidates
+    targetNominalProviderPremises = providerInstantiationPremiseBindings
+        targetNominalProviderInstantiations
+    targetNominalProviderAssignmentInstantiations =
+        providerInstantiationAssignmentPremises
+            "$djinn$nominal-provider-assignment$target$"
+            nominalTranslator
+            Nothing
+            targetNominalLoadedSchemePremises
+            providerAssignments
+    targetNominalProviderAssignmentPremises =
+        providerInstantiationPremiseBindings
+            targetNominalProviderAssignmentInstantiations
+    targetAllNominalProviderPremises =
+        targetNominalProviderPremises ++
+            targetNominalProviderAssignmentPremises
+    useNominalLoadedProjection =
+        parametricDataRelevant &&
+            ( useNominalProjection ||
+                activeNominalLoadedSchemePremises /=
+                    activeLoadedSchemePremises ||
+                activeNominalLoadedAxiomPremises /=
+                    activeLoadedAxiomPremises
+            )
+    useNominalProviderProjection =
+        parametricDataRelevant &&
+            ( nominalProjectionDistinct ||
+                activeAllNominalProviderPremises /=
+                    activeAllProviderPremises ||
+                targetAllNominalProviderPremises /=
+                    targetAllProviderPremises
+            )
+    useNominalQueryCorrelatedProjection =
+        parametricDataRelevant &&
+            ( nominalProjectionDistinct ||
+                nominalQueryCorrelatedAxiomPremises /=
+                    queryCorrelatedAxiomPremises
+            )
+    useNominalQueryClosedProjection =
+        parametricDataRelevant &&
+            ( nominalProjectionDistinct ||
+                nominalQueryClosedAxiomPremises /=
+                    queryClosedAxiomPremises
+            )
+    useNominalQueryCorrelatedClosedProjection =
+        parametricDataRelevant &&
+            ( nominalProjectionDistinct ||
+                nominalQueryCorrelatedAxiomPremises /=
+                    queryCorrelatedAxiomPremises ||
+                nominalQueryClosedAxiomPremises /=
+                    queryClosedAxiomPremises
+            )
+    -- Preserve the complete historical structural/no-axiom prefix. This
+    -- keeps first-result behavior, frontier ordering, and finite-budget
+    -- observations stable; the nominal family shares only the cutoff and
+    -- fuel left by that prefix and still precedes the structural axiom
+    -- phase which previously formed the appended transport tail.
+    structuralSearchPlans =
+        [ ( premises, [], Set.empty, Map.empty, Map.empty
+          , form, sound
+          )
+        | (form, sound) <- plans
+        ]
+    structuralAxiomSearchPlans =
+        [ ( premises ++ activeAxiomPremises
+          , targetAxiomPremises
+          , activeAxiomSymbols
+          , activeVisibleApplications
+          , Map.empty
+          , form
+          , sound && null activeAxiomPremises
+          )
+        | not (null activeAxiomPremises) ||
+            not (null targetAxiomPremises)
+        , (form, sound) <- plans
+        ]
+    loadedStructuralSearchPlans =
+        [ ( premises ++ loadedSchemePremises ++ activeAxiomPremises ++
+                activeLoadedAxiomPremises
+          , targetAxiomPremises ++ targetLoadedAxiomPremises
+          , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
+          , activeVisibleApplications `Map.union`
+                activeLoadedVisibleApplications
+          , Map.empty
+          , form
+          , sound && null activeAxiomPremises &&
+                null activeLoadedSchemePremises
+          )
+        | not (null loadedSchemePremises)
+        , (form, sound) <- plans
+        ]
+    -- The nominal-data family is a complementary proof-producing
+    -- approximation, never a refutation. Its premise views and erased
+    -- instantiation axioms are compiled independently with the matching
+    -- nominal translator, so structural candidate caps and ordering are
+    -- unchanged. Pair each plain nominal form with its guarded transport
+    -- form before moving to the next frontier; policy remains part of the
+    -- search plan even when a formula happens to equal a structural view.
+    nominalSearchPlans
+        | not useNominalProjection = []
+        | otherwise = concatMap nominalFormSearchPlans nominalPlans
+    nominalFormSearchPlans (form, _) =
+        ( nominalPremises, [], Set.empty, Map.empty, Map.empty
+        , form, False
+        ) :
+        [ ( nominalPremises ++ activeNominalAxiomPremises
+          , targetNominalAxiomPremises
+          , activeNominalAxiomSymbols
+          , activeNominalVisibleApplications
+          , Map.empty
+          , form
+          , False
+          )
+        | not (null activeNominalAxiomPremises) ||
+            not (null targetNominalAxiomPremises)
+        ]
+    loadedNominalSearchPlans
+        | not useNominalLoadedProjection = []
+        | otherwise =
+            [ ( nominalPremises ++ nominalLoadedSchemePremises ++
+                    activeNominalAxiomPremises ++
+                    activeNominalLoadedAxiomPremises
+              , targetNominalAxiomPremises ++
+                    targetNominalLoadedAxiomPremises
+              , activeNominalAxiomSymbols `Set.union`
+                    activeNominalLoadedAxiomSymbols
+              , activeNominalVisibleApplications `Map.union`
+                    activeNominalLoadedVisibleApplications
+              , Map.empty
+              , form
+              , False
+              )
+            | not (null nominalLoadedSchemePremises)
+            , (form, _) <- nominalPlans
+            ]
+    -- Fairly correlated guarded-impredicative tuples form a separate
+    -- positive-only tail.  Its axioms are exact instances whose complete
+    -- result already occurs in the checked query.  The plan is appended
+    -- after the formerly final query-closed family, preserving every
+    -- established plan and candidate prefix while allowing the new local
+    -- instance to compose with historical, provider, and loaded premises.
+    queryCorrelatedStructuralSearchPlans =
+        [ ( premises ++ loadedSchemePremises ++ activeAxiomPremises ++
+                activeLoadedAxiomPremises ++ activeAllProviderPremises ++
+                queryCorrelatedAxiomPremises
+          , targetAxiomPremises ++ targetLoadedAxiomPremises ++
+                targetAllProviderPremises
+          , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
+                `Set.union` activeAllProviderSymbols
+                `Set.union` queryCorrelatedAxiomSymbols
+          , activeVisibleApplications `Map.union`
+                activeLoadedVisibleApplications `Map.union`
+                activeAllProviderVisibleApplications `Map.union`
+                queryCorrelatedVisibleApplications
+          , activeAllProviderApplications
+          , form
+          , False
+          )
+        | not (null queryCorrelatedAxiomPremises)
+        , (form, _) <- plans
+        ]
+    queryCorrelatedNominalSearchPlans
+        | not useNominalQueryCorrelatedProjection = []
+        | otherwise =
+            [ ( nominalPremises ++ nominalLoadedSchemePremises ++
+                    activeNominalAxiomPremises ++
+                    activeNominalLoadedAxiomPremises ++
+                    activeAllNominalProviderPremises ++
+                    nominalQueryCorrelatedAxiomPremises
+              , targetNominalAxiomPremises ++
+                    targetNominalLoadedAxiomPremises ++
+                    targetAllNominalProviderPremises
+              , activeNominalAxiomSymbols `Set.union`
+                    activeNominalLoadedAxiomSymbols `Set.union`
+                    activeAllNominalProviderSymbols `Set.union`
+                    nominalQueryCorrelatedAxiomSymbols
+              , activeNominalVisibleApplications `Map.union`
+                    activeNominalLoadedVisibleApplications `Map.union`
+                    activeAllNominalProviderVisibleApplications `Map.union`
+                    nominalQueryCorrelatedVisibleApplications
+              , activeAllNominalProviderApplications
+              , form
+              , False
+              )
+            | not (null nominalQueryCorrelatedAxiomPremises)
+            , (form, _) <- nominalPlans
+            ]
+    -- Closed monotypes which occur in the checked query extend local
+    -- hypothesis instantiation in the historically final family. Keeping
+    -- this established positive-only superset unchanged after the loaded
+    -- and provider families preserves every earlier plan and candidate
+    -- prefix while still allowing one
+    -- proof to mix an old variable/quantified axiom with a newly admitted
+    -- closed instance. This established plan is also a superset of loaded
+    -- and caller-supplied provider evidence, so the new local
+    -- specialization can compose with either capability without moving or
+    -- modifying their earlier priority plans.
+    queryClosedStructuralSearchPlans =
+        [ ( premises ++ loadedSchemePremises ++ activeAxiomPremises ++
+                activeLoadedAxiomPremises ++ activeAllProviderPremises ++
+                queryClosedAxiomPremises
+          , targetAxiomPremises ++ targetLoadedAxiomPremises ++
+                targetAllProviderPremises
+          , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
+                `Set.union` activeAllProviderSymbols
+                `Set.union` queryClosedAxiomSymbols
+          , activeVisibleApplications `Map.union`
+                activeLoadedVisibleApplications `Map.union`
+                activeAllProviderVisibleApplications `Map.union`
+                queryClosedVisibleApplications
+          , activeAllProviderApplications
+          , form
+          , False
+          )
+        | not (null queryClosedAxiomPremises)
+        , (form, _) <- plans
+        ]
+    queryClosedNominalSearchPlans
+        | not useNominalQueryClosedProjection = []
+        | otherwise =
+            [ ( nominalPremises ++ nominalLoadedSchemePremises ++
+                    activeNominalAxiomPremises ++
+                    activeNominalLoadedAxiomPremises ++
+                    activeAllNominalProviderPremises ++
+                    nominalQueryClosedAxiomPremises
+              , targetNominalAxiomPremises ++
+                    targetNominalLoadedAxiomPremises ++
+                    targetAllNominalProviderPremises
+              , activeNominalAxiomSymbols `Set.union`
+                    activeNominalLoadedAxiomSymbols `Set.union`
+                    activeAllNominalProviderSymbols `Set.union`
+                    nominalQueryClosedAxiomSymbols
+              , activeNominalVisibleApplications `Map.union`
+                    activeNominalLoadedVisibleApplications `Map.union`
+                    activeAllNominalProviderVisibleApplications `Map.union`
+                    nominalQueryClosedVisibleApplications
+              , activeAllNominalProviderApplications
+              , form
+              , False
+              )
+            | not (null nominalQueryClosedAxiomPremises)
+            , (form, _) <- nominalPlans
+            ]
+    -- A final additive superset permits one proof to compose the new
+    -- correlated instance with the established query-closed family.  It
+    -- is present only when both families contribute premises, so neither
+    -- single-family tail is duplicated, and it follows both independent
+    -- plans so their prefixes remain stable.
+    queryCorrelatedClosedStructuralSearchPlans =
+        [ ( premises ++ loadedSchemePremises ++ activeAxiomPremises ++
+                activeLoadedAxiomPremises ++ activeAllProviderPremises ++
+                queryCorrelatedAxiomPremises ++
+                queryClosedAxiomPremises
+          , targetAxiomPremises ++ targetLoadedAxiomPremises ++
+                targetAllProviderPremises
+          , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
+                `Set.union` activeAllProviderSymbols
+                `Set.union` queryCorrelatedAxiomSymbols
+                `Set.union` queryClosedAxiomSymbols
+          , activeVisibleApplications `Map.union`
+                activeLoadedVisibleApplications `Map.union`
+                activeAllProviderVisibleApplications `Map.union`
+                queryCorrelatedVisibleApplications `Map.union`
+                queryClosedVisibleApplications
+          , activeAllProviderApplications
+          , form
+          , False
+          )
+        | not (null queryCorrelatedAxiomPremises)
+        , not (null queryClosedAxiomPremises)
+        , (form, _) <- plans
+        ]
+    queryCorrelatedClosedNominalSearchPlans
+        | not useNominalQueryCorrelatedClosedProjection = []
+        | otherwise =
+            [ ( nominalPremises ++ nominalLoadedSchemePremises ++
+                    activeNominalAxiomPremises ++
+                    activeNominalLoadedAxiomPremises ++
+                    activeAllNominalProviderPremises ++
+                    nominalQueryCorrelatedAxiomPremises ++
+                    nominalQueryClosedAxiomPremises
+              , targetNominalAxiomPremises ++
+                    targetNominalLoadedAxiomPremises ++
+                    targetAllNominalProviderPremises
+              , activeNominalAxiomSymbols `Set.union`
+                    activeNominalLoadedAxiomSymbols `Set.union`
+                    activeAllNominalProviderSymbols `Set.union`
+                    nominalQueryCorrelatedAxiomSymbols `Set.union`
+                    nominalQueryClosedAxiomSymbols
+              , activeNominalVisibleApplications `Map.union`
+                    activeNominalLoadedVisibleApplications `Map.union`
+                    activeAllNominalProviderVisibleApplications `Map.union`
+                    nominalQueryCorrelatedVisibleApplications `Map.union`
+                    nominalQueryClosedVisibleApplications
+              , activeAllNominalProviderApplications
+              , form
+              , False
+              )
+            | not (null nominalQueryCorrelatedAxiomPremises)
+            , not (null nominalQueryClosedAxiomPremises)
+            , (form, _) <- nominalPlans
+            ]
+    -- Exact ordered assignments receive one positive-only priority plan.
+    -- Replace the ordinary views of each assigned provider in this plan,
+    -- then put its exact premise at the tail. LJT introduces folded
+    -- environment arrows from left to right: a nominal empty premise
+    -- encountered before later arrows is eliminated, while the tail
+    -- premise reaches the final matching goal by direct identity and
+    -- therefore preserves its visible type application. The unfiltered
+    -- provider superset below remains available for proofs which compose
+    -- an exact assignment with an ordinary use of that same provider.
+    providerAssignmentPriorityStructuralSearchPlans =
+        [ ( withoutProviders activeProviderAssignmentNames premises ++
+                withoutProviders activeProviderAssignmentNames
+                    loadedSchemePremises ++
+                activeAxiomPremises ++ activeLoadedAxiomPremises ++
+                activeProviderAssignmentPremises
+          , []
+          , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
+                `Set.union` activeProviderAssignmentSymbols
+          , activeVisibleApplications `Map.union`
+                activeLoadedVisibleApplications `Map.union`
+                activeProviderAssignmentVisibleApplications
+          , activeProviderAssignmentApplications
+          , form
+          , False
+          )
+        | not (null activeProviderAssignmentPremises)
+        , (form, _) <- plans
+        ]
+    providerAssignmentPriorityNominalSearchPlans
+        | not useNominalProviderProjection = []
+        | otherwise =
+            [ ( withoutProviders activeNominalProviderAssignmentNames
+                    nominalPremises ++
+                    withoutProviders activeNominalProviderAssignmentNames
+                        nominalLoadedSchemePremises ++
+                    activeNominalAxiomPremises ++
+                    activeNominalLoadedAxiomPremises ++
+                    activeNominalProviderAssignmentPremises
+              , []
+              , activeNominalAxiomSymbols `Set.union`
+                    activeNominalLoadedAxiomSymbols `Set.union`
+                    activeNominalProviderAssignmentSymbols
+              , activeNominalVisibleApplications `Map.union`
+                    activeNominalLoadedVisibleApplications `Map.union`
+                    activeNominalProviderAssignmentVisibleApplications
+              , activeNominalProviderAssignmentApplications
+              , form
+              , False
+              )
+            | not (null activeNominalProviderAssignmentPremises)
+            , (form, _) <- nominalPlans
+            ]
+    -- The historical combined scalar-candidate and exact-assignment plan
+    -- remains an unfiltered additive superset at its established position.
+    -- This preserves legacy candidate ordering and allows one proof to use
+    -- the same provider through both exact and ordinary instantiation.
+    providerStructuralSearchPlans =
+        [ ( premises ++ loadedSchemePremises ++
+                activeAxiomPremises ++ activeLoadedAxiomPremises ++
+                activeAllProviderPremises
+          , targetAxiomPremises ++ targetLoadedAxiomPremises ++
+                targetAllProviderPremises
+          , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
+                `Set.union` activeAllProviderSymbols
+          , activeVisibleApplications `Map.union`
+                activeLoadedVisibleApplications `Map.union`
+                activeAllProviderVisibleApplications
+          , activeAllProviderApplications
+          , form
+          , False
+          )
+        | not (null activeAllProviderPremises) ||
+            not (null targetAllProviderPremises)
+        , (form, _) <- plans
+        ]
+    providerNominalSearchPlans
+        | not useNominalProviderProjection = []
+        | otherwise =
+            [ ( nominalPremises ++ nominalLoadedSchemePremises ++
+                    activeNominalAxiomPremises ++
+                    activeNominalLoadedAxiomPremises ++
+                    activeAllNominalProviderPremises
+              , targetNominalAxiomPremises ++
+                    targetNominalLoadedAxiomPremises ++
+                    targetAllNominalProviderPremises
+              , activeNominalAxiomSymbols `Set.union`
+                    activeNominalLoadedAxiomSymbols `Set.union`
+                    activeAllNominalProviderSymbols
+              , activeNominalVisibleApplications `Map.union`
+                    activeNominalLoadedVisibleApplications `Map.union`
+                    activeAllNominalProviderVisibleApplications
+              , activeAllNominalProviderApplications
+              , form
+              , False
+              )
+            | not (null activeAllNominalProviderPremises) ||
+                not (null targetAllNominalProviderPremises)
+            , (form, _) <- nominalPlans
+            ]
+    searchPlans =
+        -- Exact assignment priority is absent for both the scalar-only
+        -- and empty-evidence entrances, so their historical plan order is
+        -- unchanged byte for byte.
+        providerAssignmentPriorityStructuralSearchPlans ++
+        providerAssignmentPriorityNominalSearchPlans ++
+        structuralSearchPlans ++
+        nominalSearchPlans ++
+        structuralAxiomSearchPlans ++
+        -- A productive historical loaded proof stream can consume the
+        -- global candidate cutoff without finishing.  Run its strict
+        -- provider-evidence superset first when that optional family
+        -- exists; the empty-evidence plan list remains exactly historical.
+        providerStructuralSearchPlans ++
+        providerNominalSearchPlans ++
+        loadedStructuralSearchPlans ++
+        loadedNominalSearchPlans ++
+        queryClosedStructuralSearchPlans ++
+        queryClosedNominalSearchPlans ++
+        queryCorrelatedStructuralSearchPlans ++
+        queryCorrelatedNominalSearchPlans ++
+        queryCorrelatedClosedStructuralSearchPlans ++
+        queryCorrelatedClosedNominalSearchPlans
+    withoutProviders providerNames =
+        filter ((`Set.notMember` providerNames) . fst)
+
     runPlans _ _ _ completed [] = Right $ reverse completed
     runPlans collect currentOptions candidateLimit completed
             (( planPremises

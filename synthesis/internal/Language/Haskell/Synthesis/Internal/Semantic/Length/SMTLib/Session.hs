@@ -3515,6 +3515,7 @@ openConfiguredLengthSMTLibProcess limits cancellation deadline execution
         (lengthSMTLibExecutionZ3Profile execution) path
         $ mkLengthSMTLibWorkingDirectoryDescriptor (-1)
 #endif
+#ifndef mingw32_HOST_OS
  where
   workspaceDescriptorFailure = LengthSMTLibProcessError
     { lengthSMTLibProcessErrorPhase =
@@ -3524,6 +3525,7 @@ openConfiguredLengthSMTLibProcess limits cancellation deadline execution
     , lengthSMTLibProcessErrorObservedAtLeast = Nothing
     , lengthSMTLibProcessErrorCleanupStatus = Nothing
     }
+#endif
 
 -- | Open, probe, lend, and close exactly one worker.  Callback exceptions are
 -- rethrown after durable cleanup has been started.  Opener/session failures

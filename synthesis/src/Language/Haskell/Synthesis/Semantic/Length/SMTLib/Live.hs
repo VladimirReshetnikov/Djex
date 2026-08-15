@@ -153,6 +153,7 @@ instance NFData LengthSMTLibLiveSessionError where
   rnf (LengthSMTLibLiveSessionError failure incomplete) =
     rnf failure `seq` rnf incomplete
 
+-- | The sanitized failure class that ended the session.
 lengthSMTLibLiveSessionPrimaryFailure
   :: LengthSMTLibLiveSessionError
   -> LengthSMTLibLiveSessionFailure
@@ -196,6 +197,7 @@ instance NFData LengthSMTLibLiveQueryError where
   rnf (LengthSMTLibLiveQueryError failure incomplete) =
     rnf failure `seq` rnf incomplete
 
+-- | The sanitized failure class that spent this query transaction.
 lengthSMTLibLiveQueryPrimaryFailure
   :: LengthSMTLibLiveQueryError
   -> LengthSMTLibLiveQueryFailure
@@ -242,12 +244,15 @@ instance NFData LengthSpinePairSMTLibLiveQueryError where
   rnf (LengthSpinePairSMTLibLiveQueryError failure incomplete) =
     rnf failure `seq` rnf incomplete
 
+-- | The sanitized failure class that spent this product query transaction.
 lengthSpinePairSMTLibLiveQueryPrimaryFailure
   :: LengthSpinePairSMTLibLiveQueryError
   -> LengthSpinePairSMTLibLiveQueryFailure
 lengthSpinePairSMTLibLiveQueryPrimaryFailure
     (LengthSpinePairSMTLibLiveQueryError failure _) = failure
 
+-- | Whether teardown following this query reported incomplete process
+-- cleanup.
 lengthSpinePairSMTLibLiveQueryCleanupIncomplete
   :: LengthSpinePairSMTLibLiveQueryError
   -> Bool
@@ -417,12 +422,15 @@ lengthSMTLibLiveQueryObservationQueryFingerprint
 lengthSMTLibLiveQueryObservationQueryFingerprint
     (LengthSMTLibLiveQueryObservation query _) = query
 
+-- | The raw solver status of this observation.  A status is a heuristic
+-- report, never proof or pruning authority.
 lengthSMTLibLiveQueryObservationSolverStatus
   :: LengthSMTLibLiveQueryObservation epoch identity local
   -> SolverStatus
 lengthSMTLibLiveQueryObservationSolverStatus =
   solverObservationStatus . lengthSMTLibLiveQueryObservationSolverObservation
 
+-- | The conservative strength derived from the status alone.
 lengthSMTLibLiveQueryObservationResultStrength
   :: LengthSMTLibLiveQueryObservation epoch identity local
   -> RawResultStrength

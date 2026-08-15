@@ -92,6 +92,7 @@ newtype TermNodeId = TermNodeId Natural
 --
 -- Identity uniqueness is a graph invariant checked by 'sealTermGraph', not a
 -- property of one number in isolation.
+-- | Wrap a raw allocation number as a node identity.
 termNodeId :: Natural -> TermNodeId
 termNodeId = TermNodeId
 
@@ -107,9 +108,11 @@ termNodeIdValue (TermNodeId value) = value
 newtype OccurrenceId = OccurrenceId Natural
   deriving (Eq, Ord, Show, NFData)
 
+-- | Wrap a raw allocation number as an occurrence identity.
 occurrenceId :: Natural -> OccurrenceId
 occurrenceId = OccurrenceId
 
+-- | Inspect the allocation number without deriving semantic meaning from it.
 occurrenceIdValue :: OccurrenceId -> Natural
 occurrenceIdValue (OccurrenceId value) = value
 
@@ -121,9 +124,11 @@ occurrenceIdValue (OccurrenceId value) = value
 newtype CertificateId = CertificateId Natural
   deriving (Eq, Ord, Show, NFData)
 
+-- | Wrap a raw allocation number as a certificate handle.
 certificateId :: Natural -> CertificateId
 certificateId = CertificateId
 
+-- | Inspect the allocation number without deriving semantic meaning from it.
 certificateIdValue :: CertificateId -> Natural
 certificateIdValue (CertificateId value) = value
 
@@ -532,18 +537,23 @@ instance (NFData ty, NFData local) => NFData (TermGraph ty local) where
           rnf expression `seq`
             rnf metrics
 
+-- | The node at which evaluation of the sealed term begins.
 termGraphRoot :: TermGraph ty local -> TermNodeId
 termGraphRoot (TermGraph root _ _ _ _) = root
 
+-- | Every sealed node in allocation order, dead nodes included.
 termGraphNodes :: TermGraph ty local -> [(TermNodeId, TermNode ty local)]
 termGraphNodes (TermGraph _ nodes _ _ _) = nodes
 
+-- | Resolve one node identity within this graph; 'Nothing' for a foreign or
+-- out-of-range identity.
 lookupTermNode
   :: TermNodeId
   -> TermGraph ty local
   -> Maybe (TermNode ty local)
 lookupTermNode nodeId' (TermGraph _ _ nodes _ _) = Map.lookup nodeId' nodes
 
+-- | The size and shape observations recorded while the graph was sealed.
 termGraphMetrics :: TermGraph ty local -> TypedGraphMetrics
 termGraphMetrics (TermGraph _ _ _ _ metrics) = metrics
 

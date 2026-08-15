@@ -49,6 +49,8 @@ instance
     UnsatisfiableObservation artifact -> rnf artifact
     UnknownObservation reason -> rnf reason
 
+-- | Classify an observation by its constructor without inspecting the
+-- artifact payload.
 solverObservationStatus
   :: SolverObservation satisfiable unsatisfiable unknown
   -> SolverStatus
@@ -96,6 +98,8 @@ instance
     BehaviorBoundedObservation bounds -> rnf bounds
     BehaviorUnknownObservation reason -> rnf reason
 
+-- | Classify a report by its constructor without inspecting the artifact
+-- payload.
 behavioralObservationStatus
   :: BehavioralObservation established counterexample bounded unknown
   -> BehavioralStatus

@@ -9905,6 +9905,12 @@ strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidation
               Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasis
                 predecessor)
           [ Length.LengthAtMost input $ literal 2
+          , Length.LengthAtMost input
+              $ Length.LengthMonus (literal 5) $ literal 2
+          , Length.LengthAtMost
+              (Length.LengthMonus input $ literal 0) $ literal 2
+          , Length.LengthAtMost input
+              $ Length.LengthMonus input input
           , Length.LengthAtMost
               (Length.LengthQuotient 3 input) $ literal 1
           , Length.LengthAtMost

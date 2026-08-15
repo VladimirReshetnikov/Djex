@@ -234,6 +234,22 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentCount
   , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainApplicableAssignmentCount
   , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBasis
+  , ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+  , lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag
+  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainInclusiveMaximumBoxes
+  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCount
+  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentVisitCount
+  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentCount
+  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableAssignmentCount
+  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasis
+  , ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+  , lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag
+  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainInclusiveMaximumBoxes
+  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCount
+  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentVisitCount
+  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentCount
+  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableAssignmentCount
+  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasis
   , evaluateLengthContractAssignment
   , evaluateLengthSpinePairContractAssignment
   , evaluateLengthProviderApplication
@@ -261,6 +277,8 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
   , validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
   , validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
+  , validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+  , validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -2024,6 +2042,146 @@ validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBo
   -> LengthCounterexampleBasis
 validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBasis
     (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
+      _ _ _ _ _ basis) = basis
+
+-- | Versioned scalar authority for the recursive piecewise-affine successor.
+-- It retains every exact atomic-branching result and opens only otherwise
+-- ignored relational atoms whose admitted expressions contain nested extrema
+-- or monus operations.
+lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag
+  :: [Word8]
+lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag =
+  ascii
+    "finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-recursive-extrema-monus-piecewise-affine-branching-precondition-domain-establishment/v1"
+
+-- | Fresh opaque scalar receipt for recursive piecewise-affine branching.
+-- The exact schema tag is embedded directly; predecessor evidence is neither
+-- coerced nor wrapped.
+data ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain =
+  ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+    ![Word8]
+    ![[Natural]]
+    !Natural
+    !Natural
+    !Natural
+    !LengthCounterexampleBasis
+  deriving (Eq, Ord, Show)
+
+instance NFData
+    ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain where
+  rnf
+      (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+        schema boxes visits assignments applicable basis) =
+    rnf schema `seq` rnf boxes `seq` rnf visits `seq` rnf assignments `seq`
+    rnf applicable `seq` rnf basis
+
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainInclusiveMaximumBoxes
+  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+  -> [[Natural]]
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainInclusiveMaximumBoxes
+    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+      _ boxes _ _ _ _) = boxes
+
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCount
+  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+  -> Natural
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCount
+    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+      _ boxes _ _ _ _) = fromIntegral $ length boxes
+
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentVisitCount
+  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+  -> Natural
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentVisitCount
+    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+      _ _ visits _ _ _) = visits
+
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentCount
+  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+  -> Natural
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentCount
+    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+      _ _ _ assignments _ _) = assignments
+
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableAssignmentCount
+  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+  -> Natural
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableAssignmentCount
+    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+      _ _ _ _ applicable _) = applicable
+
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasis
+  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+  -> LengthCounterexampleBasis
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasis
+    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+      _ _ _ _ _ basis) = basis
+
+-- | Nominal binary-product tag for the recursive piecewise-affine algorithm.
+lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag
+  :: [Word8]
+lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag =
+  ascii
+    "finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-recursive-extrema-monus-piecewise-affine-branching-precondition-domain-establishment/v1"
+
+data ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain =
+  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+    ![Word8]
+    ![[Natural]]
+    !Natural
+    !Natural
+    !Natural
+    !LengthCounterexampleBasis
+  deriving (Eq, Ord, Show)
+
+instance NFData
+    ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain where
+  rnf
+      (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+        schema boxes visits assignments applicable basis) =
+    rnf schema `seq` rnf boxes `seq` rnf visits `seq` rnf assignments `seq`
+    rnf applicable `seq` rnf basis
+
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainInclusiveMaximumBoxes
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+  -> [[Natural]]
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainInclusiveMaximumBoxes
+    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+      _ boxes _ _ _ _) = boxes
+
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCount
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+  -> Natural
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCount
+    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+      _ boxes _ _ _ _) = fromIntegral $ length boxes
+
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentVisitCount
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+  -> Natural
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentVisitCount
+    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+      _ _ visits _ _ _) = visits
+
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentCount
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+  -> Natural
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentCount
+    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+      _ _ _ assignments _ _) = assignments
+
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableAssignmentCount
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+  -> Natural
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableAssignmentCount
+    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+      _ _ _ _ applicable _) = applicable
+
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasis
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+  -> LengthCounterexampleBasis
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasis
+    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
       _ _ _ _ _ basis) = basis
 
 -- | Fail-closed scalar simplification failure after the caller supplied one
@@ -3876,6 +4034,226 @@ validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaM
             replay boxes visits assignmentCount (ordinal + 1) (applicable + 1)
               remaining
 
+-- | Cumulative scalar successor which retains every atomic-branching result
+-- and applies recursive piecewise-affine branching only to exactly ignored
+-- relational atoms.  The original checked formula remains the sole replay
+-- authority over the global deduplicated assignment union.
+validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> LengthBooleanFiniteUnionLimits
+  -> CheckedLengthProblem identity local
+  -> Either LengthBooleanFiniteUnionApplicableDomainValidationError
+      (LengthApplicableDomainValidation
+        (BehavioralEvidence
+          FiniteListSpineLengthV1
+          ValidatedLengthCounterexample)
+        (BehavioralEvidence
+          FiniteListSpineLengthV1
+          ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain))
+validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+    evaluationLimits inputBoxLimits unionLimits problem = do
+  let inputCount = checkedLengthProblemInputCount problem
+      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
+  if inputCount <= maximumInputs
+    then pure ()
+    else Left $ LengthBooleanFiniteUnionProblemInputLimitExceeded
+      maximumInputs inputCount
+  coverage <- either (Left . preparationError) Right
+    $ booleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainMaximumBoxes
+        unionLimits inputCount scalarInputPosition
+        $ checkedLengthProblemPrecondition problem
+  case coverage of
+    Left inapplicability -> Right
+      $ LengthApplicableDomainInapplicable inapplicability
+    Right boxes -> do
+      mapM_ checkBox $ zip [0 ..] boxes
+      visits <- either (Left . enumerationError) Right
+        $ booleanFiniteUnionAssignmentVisitCount unionLimits boxes
+      (assignmentCount, assignments) <- either
+        (Left . enumerationError) Right
+        $ enumerateBooleanFiniteUnionAssignments inputBoxLimits boxes
+      replay boxes visits assignmentCount 0 0 $ Set.toAscList assignments
+ where
+  scalarInputPosition variable = case variable of
+    LengthInput position -> Just position
+    LengthResult -> Nothing
+
+  preparationError failure = case failure of
+    BooleanFiniteUnionGeneratedBranchLimitExceeded limit observed ->
+      LengthBooleanFiniteUnionGeneratedBranchLimitExceeded limit observed
+    BooleanFiniteUnionRuleLimitExceeded branch limit observed ->
+      LengthBooleanFiniteUnionRuleLimitExceeded branch limit observed
+    BooleanFiniteUnionClosureInspectionLimitExceeded branch limit observed ->
+      LengthBooleanFiniteUnionClosureInspectionLimitExceeded
+        branch limit observed
+    BooleanFiniteUnionRetainedBoxLimitExceeded limit observed ->
+      LengthBooleanFiniteUnionRetainedBoxLimitExceeded limit observed
+
+  enumerationError failure = case failure of
+    BooleanFiniteUnionAssignmentVisitLimitExceeded limit observed ->
+      LengthBooleanFiniteUnionAssignmentVisitLimitExceeded limit observed
+    BooleanFiniteUnionAssignmentLimitExceeded limit observed ->
+      LengthBooleanFiniteUnionAssignmentLimitExceeded limit observed
+    BooleanFiniteUnionInternalEnumerationInvariant ->
+      LengthBooleanFiniteUnionInternalEnumerationInvariant
+
+  checkBox (boxIndex, maximums) =
+    mapM_ (checkMaximum boxIndex) $ zip [0 ..] maximums
+
+  checkMaximum boxIndex (inputIndex, maximumValue) = either
+    (Left . LengthBooleanFiniteUnionMaximumValueRejected
+      boxIndex inputIndex)
+    Right
+    $ checkAssignedValue evaluationLimits
+        (LengthProblemInputValue inputIndex) maximumValue
+
+  replay boxes visits assignmentCount !ordinal !applicable assignments =
+    case assignments of
+      []
+        | ordinal /= assignmentCount ->
+            Left LengthBooleanFiniteUnionInternalEnumerationInvariant
+        | otherwise ->
+            let receipt =
+                  ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+                    lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag
+                    boxes visits assignmentCount applicable
+                    $ problemBasis problem
+            in Right $ LengthApplicableDomainEstablished
+              $ mkBehavioralEvidence
+                  (checkedLengthProblemBehavioralProblem problem) receipt
+      inputs : remaining -> do
+        assignmentReplay <- either
+          (Left . LengthBooleanFiniteUnionAssignmentEvaluationRejected ordinal)
+          Right
+          $ replayLengthProblemAssignment evaluationLimits problem
+          $ LengthProblemAssignment inputs
+        case assignmentReplay of
+          LengthProblemPostconditionViolated receipt -> Right
+            $ LengthApplicableDomainCounterexample
+            $ mkBehavioralEvidence
+                (checkedLengthProblemBehavioralProblem problem) receipt
+          LengthProblemPreconditionNotMet ->
+            replay boxes visits assignmentCount (ordinal + 1) applicable
+              remaining
+          LengthProblemPostconditionSatisfied ->
+            replay boxes visits assignmentCount (ordinal + 1)
+              (applicable + 1) remaining
+
+-- | Nominal binary-product sibling of recursive piecewise-affine finite-union
+-- validation.  It shares all operational caps and precedence while producing
+-- only fresh product-domain evidence.
+validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> LengthBooleanFiniteUnionLimits
+  -> CheckedLengthSpinePairProblem identity local
+  -> Either
+      LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError
+      (LengthApplicableDomainValidation
+        (BehavioralEvidence
+          FiniteBinaryProductSpineLengthsV1
+          ValidatedLengthSpinePairCounterexample)
+        (BehavioralEvidence
+          FiniteBinaryProductSpineLengthsV1
+          ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain))
+validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+    evaluationLimits inputBoxLimits unionLimits problem = do
+  let inputCount = checkedLengthSpinePairProblemInputCount problem
+      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
+  if inputCount <= maximumInputs
+    then pure ()
+    else Left $ LengthSpinePairBooleanFiniteUnionProblemInputLimitExceeded
+      maximumInputs inputCount
+  coverage <- either (Left . preparationError) Right
+    $ booleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainMaximumBoxes
+        unionLimits inputCount spinePairInputPosition
+        $ checkedLengthSpinePairProblemPrecondition problem
+  case coverage of
+    Left inapplicability -> Right
+      $ LengthApplicableDomainInapplicable inapplicability
+    Right boxes -> do
+      mapM_ checkBox $ zip [0 ..] boxes
+      visits <- either (Left . enumerationError) Right
+        $ booleanFiniteUnionAssignmentVisitCount unionLimits boxes
+      (assignmentCount, assignments) <- either
+        (Left . enumerationError) Right
+        $ enumerateBooleanFiniteUnionAssignments inputBoxLimits boxes
+      replay boxes visits assignmentCount 0 0 $ Set.toAscList assignments
+ where
+  spinePairInputPosition variable = case variable of
+    LengthSpinePairInput position -> Just position
+    LengthSpinePairResult _ -> Nothing
+
+  preparationError failure = case failure of
+    BooleanFiniteUnionGeneratedBranchLimitExceeded limit observed ->
+      LengthSpinePairBooleanFiniteUnionGeneratedBranchLimitExceeded
+        limit observed
+    BooleanFiniteUnionRuleLimitExceeded branch limit observed ->
+      LengthSpinePairBooleanFiniteUnionRuleLimitExceeded
+        branch limit observed
+    BooleanFiniteUnionClosureInspectionLimitExceeded branch limit observed ->
+      LengthSpinePairBooleanFiniteUnionClosureInspectionLimitExceeded
+        branch limit observed
+    BooleanFiniteUnionRetainedBoxLimitExceeded limit observed ->
+      LengthSpinePairBooleanFiniteUnionRetainedBoxLimitExceeded
+        limit observed
+
+  enumerationError failure = case failure of
+    BooleanFiniteUnionAssignmentVisitLimitExceeded limit observed ->
+      LengthSpinePairBooleanFiniteUnionAssignmentVisitLimitExceeded
+        limit observed
+    BooleanFiniteUnionAssignmentLimitExceeded limit observed ->
+      LengthSpinePairBooleanFiniteUnionAssignmentLimitExceeded limit observed
+    BooleanFiniteUnionInternalEnumerationInvariant ->
+      LengthSpinePairBooleanFiniteUnionInternalEnumerationInvariant
+
+  checkBox (boxIndex, maximums) =
+    mapM_ (checkMaximum boxIndex) $ zip [0 ..] maximums
+
+  checkMaximum boxIndex (inputIndex, maximumValue) = either
+    (Left . LengthSpinePairBooleanFiniteUnionMaximumValueRejected
+      boxIndex inputIndex)
+    Right
+    $ checkSpinePairAssignedValue evaluationLimits
+        (LengthSpinePairProblemInputValue inputIndex) maximumValue
+
+  replay boxes visits assignmentCount !ordinal !applicable assignments =
+    case assignments of
+      []
+        | ordinal /= assignmentCount -> Left
+            LengthSpinePairBooleanFiniteUnionInternalEnumerationInvariant
+        | otherwise ->
+            let receipt =
+                  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+                    lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag
+                    boxes visits assignmentCount applicable
+                    $ spinePairProblemBasis problem
+            in Right $ LengthApplicableDomainEstablished
+              $ mkBehavioralEvidence
+                  (checkedLengthSpinePairProblemBehavioralProblem problem)
+                  receipt
+      inputs : remaining -> do
+        assignmentReplay <- either
+          (Left .
+            LengthSpinePairBooleanFiniteUnionAssignmentEvaluationRejected
+              ordinal)
+          Right
+          $ replayLengthSpinePairProblemAssignment evaluationLimits problem
+          $ LengthProblemAssignment inputs
+        case assignmentReplay of
+          LengthSpinePairProblemPostconditionViolated receipt -> Right
+            $ LengthApplicableDomainCounterexample
+            $ mkBehavioralEvidence
+                (checkedLengthSpinePairProblemBehavioralProblem problem)
+                receipt
+          LengthSpinePairProblemPreconditionNotMet ->
+            replay boxes visits assignmentCount (ordinal + 1) applicable
+              remaining
+          LengthSpinePairProblemPostconditionSatisfied ->
+            replay boxes visits assignmentCount (ordinal + 1) (applicable + 1)
+              remaining
+
 data BooleanFiniteUnionPolarity
   = BooleanFiniteUnionPositive
   | BooleanFiniteUnionNegative
@@ -4030,6 +4408,126 @@ booleanFiniteUnionAtomicBranchingApplicableDomainMaximumBoxes
     Right _ -> pure ()
   let branches = concatMap
         (expandBooleanFiniteUnionAtomicBranchingBranch
+          inputCount inputPosition)
+        $ canonicalBooleanFiniteUnionBranches rawFormulaBranches
+  closed <- mapM closeBranch $ zip [0 ..] branches
+  let liveBounds = [bounds | Just bounds <- closed]
+  case firstMissingInput liveBounds of
+    Just missing -> pure $ Left
+      $ LengthApplicableDomainInputUpperBoundMissing missing
+    Nothing -> do
+      let boxes = canonicalBooleanFiniteUnionBoxes inputCount liveBounds
+          boxLimit = lengthBooleanFiniteUnionRetainedBoxLimit limits
+      case observeBooleanFiniteUnionListLength boxLimit boxes of
+        Left observed -> Left $ BooleanFiniteUnionRetainedBoxLimitExceeded
+          boxLimit observed
+        Right _ -> pure $ Right boxes
+ where
+  closeBranch (branchIndex, branch) = do
+    collected <- collectBranchRules branchIndex branch
+    case collected of
+      Nothing -> pure Nothing
+      Just rules -> case closeRelationalPositiveAffineRulesWithin
+          (lengthBooleanFiniteUnionClosureInspectionLimitPerBranch limits)
+          rules of
+        Left observed -> Left
+          $ BooleanFiniteUnionClosureInspectionLimitExceeded
+              branchIndex
+              (lengthBooleanFiniteUnionClosureInspectionLimitPerBranch limits)
+              observed
+        Right RelationalPositiveAffineClosureContradiction -> pure Nothing
+        Right (RelationalPositiveAffineClosureBounds bounds) ->
+          pure $ Just bounds
+
+  collectBranchRules branchIndex = go 0 []
+   where
+    ruleLimit = lengthBooleanFiniteUnionRuleLimitPerBranch limits
+
+    go !_ retained [] = Right $ Just retained
+    go !count retained (coverage : remaining) = case coverage of
+      RelationalPositiveAffineClauseIgnored -> go count retained remaining
+      RelationalPositiveAffineClauseContradiction -> Right Nothing
+      RelationalPositiveAffineClauseRules rules ->
+        let newRuleCount = length rules
+        in if newRuleCount > ruleLimit - count
+            then Left $ BooleanFiniteUnionRuleLimitExceeded
+              branchIndex ruleLimit $ saturatedSuccessor ruleLimit
+            else go (count + newRuleCount) (retained ++ rules) remaining
+
+  firstMissingInput liveBounds = firstMissing 0
+   where
+    firstMissing index
+      | index >= inputCount = Nothing
+      | any (Map.notMember $ fromIntegral index) liveBounds = Just index
+      | otherwise = firstMissing $ index + 1
+
+-- Formula-level Boolean expansion and complete atomic-or-recursive proof
+-- expansion form one lazy witness stream.  The public generated-branch cap
+-- therefore observes the full Cartesian product before any complement,
+-- duplicate, absorption, guard-contradiction, or rule cleanup.
+booleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineRawBranchWitnesses
+  :: Int
+  -> (variable -> Maybe Natural)
+  -> LengthFormula variable
+  -> [()]
+booleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineRawBranchWitnesses
+    inputCount inputPosition precondition =
+  concatMap expandBranch $ booleanFiniteUnionRawBranches precondition
+ where
+  expandBranch [] = [()]
+  expandBranch (literal : remaining) =
+    [ ()
+    | _ <-
+        strictRelationalPositiveAffineQuotientRootExtremaMonusAtomicBranchingRecursivePiecewiseAffineClauseBranches
+          inputCount inputPosition literal
+    , _ <- expandBranch remaining
+    ]
+
+-- Once raw accounting succeeds, canonicalize the original formula branches
+-- exactly as the predecessor does and re-expand their Set-ordered literals.
+-- Coverage alternatives retain their original rule and guard order.
+expandBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineBranch
+  :: Int
+  -> (variable -> Maybe Natural)
+  -> Set.Set (LengthFormula variable)
+  -> [[RelationalPositiveAffineClauseCoverage]]
+expandBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineBranch
+    inputCount inputPosition = expand . Set.toAscList
+ where
+  expand [] = [[]]
+  expand (literal : remaining) =
+    [ coverage : rest
+    | coverage <-
+        strictRelationalPositiveAffineQuotientRootExtremaMonusAtomicBranchingRecursivePiecewiseAffineClauseBranches
+          inputCount inputPosition literal
+    , rest <- expand remaining
+    ]
+
+-- Recursive piecewise-affine sibling of the atomic-branching finite-union
+-- preparation pipeline.  Every downstream cap, closure, missing-input, and
+-- antichain edge is intentionally inherited without a new limit vocabulary.
+booleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainMaximumBoxes
+  :: Ord variable
+  => LengthBooleanFiniteUnionLimits
+  -> Int
+  -> (variable -> Maybe Natural)
+  -> LengthFormula variable
+  -> Either
+      BooleanFiniteUnionPreparationError
+      (Either LengthApplicableDomainInapplicability [[Natural]])
+booleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainMaximumBoxes
+    limits inputCount inputPosition precondition = do
+  let rawFormulaBranches = booleanFiniteUnionRawBranches precondition
+      rawBranchWitnesses =
+        booleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineRawBranchWitnesses
+          inputCount inputPosition precondition
+      branchLimit = lengthBooleanFiniteUnionGeneratedBranchLimit limits
+  case observeBooleanFiniteUnionListLength branchLimit rawBranchWitnesses of
+    Left observed -> Left $ BooleanFiniteUnionGeneratedBranchLimitExceeded
+      branchLimit observed
+    Right _ -> pure ()
+  let branches = concatMap
+        (expandBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineBranch
           inputCount inputPosition)
         $ canonicalBooleanFiniteUnionBranches rawFormulaBranches
   closed <- mapM closeBranch $ zip [0 ..] branches
@@ -5314,6 +5812,262 @@ strictRelationalPositiveAffineQuotientRootExtremaMonusAtomicBranchingClauseBranc
       | not $ hasRootMonus opposite ->
           monusMayZeroEqualityBranches first second opposite
     _ -> Nothing
+
+-- Signed affine values are private proof intermediates.  Negative constants
+-- and coefficients arise only by selecting the positive branch of monus; they
+-- are moved across each generated inequality before entering the existing
+-- positive-sided closure engine.
+data RecursivePiecewiseAffineSummary = RecursivePiecewiseAffineSummary
+  !Integer
+  !(Map.Map Natural Integer)
+
+data RecursivePiecewiseAffineBranch = RecursivePiecewiseAffineBranch
+  ![RelationalPositiveAffineRule]
+  !RecursivePiecewiseAffineSummary
+
+-- Atomic branching remains the first authority.  Recursive interpretation is
+-- attempted only for its exact singleton-Ignored result and only for a
+-- relational atom which retains an extrema or monus constructor.  Any
+-- unsupported child rejects that whole fallback atom.
+strictRelationalPositiveAffineQuotientRootExtremaMonusAtomicBranchingRecursivePiecewiseAffineClauseBranches
+  :: Int
+  -> (variable -> Maybe Natural)
+  -> LengthFormula variable
+  -> [RelationalPositiveAffineClauseCoverage]
+strictRelationalPositiveAffineQuotientRootExtremaMonusAtomicBranchingRecursivePiecewiseAffineClauseBranches
+    inputCount inputPosition formula =
+  case predecessorBranches of
+    [RelationalPositiveAffineClauseIgnored]
+      | hasRecursivePiecewiseAffineOperation formula ->
+          case recursiveFormulaBranches formula of
+            Just branches -> map RelationalPositiveAffineClauseRules branches
+            Nothing -> predecessorBranches
+    _ -> predecessorBranches
+ where
+  predecessorBranches =
+    strictRelationalPositiveAffineQuotientRootExtremaMonusAtomicBranchingClauseBranches
+      inputCount inputPosition formula
+
+  recursiveFormulaBranches source = case source of
+    LengthAtMost left right -> relationBranches atMostRule left right
+    LengthNot (LengthAtMost left right) ->
+      relationBranches strictRule left right
+    LengthEqual left right -> relationBranches equalityRules left right
+    _ -> Nothing
+
+  relationBranches appendRelation left right = do
+    leftBranches <- expressionBranches left
+    rightBranches <- expressionBranches right
+    pure
+      [ leftGuards ++ rightGuards ++ appendRelation leftValue rightValue
+      | RecursivePiecewiseAffineBranch leftGuards leftValue <- leftBranches
+      , RecursivePiecewiseAffineBranch rightGuards rightValue <- rightBranches
+      ]
+
+  atMostRule left right = [recursivePiecewiseAffineRule left right]
+
+  strictRule left right =
+    [ recursivePiecewiseAffineRule
+        (incrementRecursivePiecewiseAffineSummary right)
+        left
+    ]
+
+  equalityRules left right =
+    [ recursivePiecewiseAffineRule left right
+    , recursivePiecewiseAffineRule right left
+    ]
+
+  expressionBranches expression = case expression of
+    LengthVariable variable -> do
+      position <- inputPosition variable
+      if position < fromIntegral inputCount
+        then Just
+          [ RecursivePiecewiseAffineBranch []
+            $ RecursivePiecewiseAffineSummary 0
+            $ Map.singleton position 1
+          ]
+        else Nothing
+    LengthLiteral value -> Just
+      [ RecursivePiecewiseAffineBranch []
+        $ RecursivePiecewiseAffineSummary (toInteger value) Map.empty
+      ]
+    LengthSum terms -> foldM appendTerm [zeroBranch] terms
+    LengthScale factor nested
+      | factor == 0 -> Nothing
+      | otherwise -> map (scaleBranch factor) <$> expressionBranches nested
+    LengthMinimum left right ->
+      selectBinary minimumSelections left right
+    LengthMaximum left right ->
+      selectBinary maximumSelections left right
+    LengthMonus left right ->
+      selectBinary monusSelections left right
+    LengthQuotient _ _ -> Nothing
+    LengthModulo _ _ -> Nothing
+    LengthIf _ _ _ -> Nothing
+
+  zeroBranch = RecursivePiecewiseAffineBranch []
+    $ RecursivePiecewiseAffineSummary 0 Map.empty
+
+  appendTerm accumulated term = do
+    termBranches <- expressionBranches term
+    pure
+      [ RecursivePiecewiseAffineBranch
+          (leftGuards ++ rightGuards)
+          (addRecursivePiecewiseAffineSummaries leftValue rightValue)
+      | RecursivePiecewiseAffineBranch leftGuards leftValue <- accumulated
+      , RecursivePiecewiseAffineBranch rightGuards rightValue <- termBranches
+      ]
+
+  scaleBranch factor
+      (RecursivePiecewiseAffineBranch guards value) =
+    RecursivePiecewiseAffineBranch guards
+      $ scaleRecursivePiecewiseAffineSummary factor value
+
+  selectBinary selections left right = do
+    leftBranches <- expressionBranches left
+    rightBranches <- expressionBranches right
+    pure $ concat
+      [ map (prependDescendantGuards leftGuards rightGuards)
+          $ selections leftValue rightValue
+      | RecursivePiecewiseAffineBranch leftGuards leftValue <- leftBranches
+      , RecursivePiecewiseAffineBranch rightGuards rightValue <- rightBranches
+      ]
+
+  prependDescendantGuards leftGuards rightGuards
+      (RecursivePiecewiseAffineBranch selectorGuards value) =
+    RecursivePiecewiseAffineBranch
+      (leftGuards ++ rightGuards ++ selectorGuards) value
+
+  minimumSelections left right =
+    [ RecursivePiecewiseAffineBranch
+        [recursivePiecewiseAffineRule left right] left
+    , RecursivePiecewiseAffineBranch
+        [ recursivePiecewiseAffineRule
+            (incrementRecursivePiecewiseAffineSummary right)
+            left
+        ]
+        right
+    ]
+
+  maximumSelections left right =
+    [ RecursivePiecewiseAffineBranch
+        [recursivePiecewiseAffineRule right left] left
+    , RecursivePiecewiseAffineBranch
+        [ recursivePiecewiseAffineRule
+            (incrementRecursivePiecewiseAffineSummary left)
+            right
+        ]
+        right
+    ]
+
+  monusSelections left right =
+    [ RecursivePiecewiseAffineBranch
+        [recursivePiecewiseAffineRule left right]
+        $ RecursivePiecewiseAffineSummary 0 Map.empty
+    , RecursivePiecewiseAffineBranch
+        [ recursivePiecewiseAffineRule
+            (incrementRecursivePiecewiseAffineSummary right)
+            left
+        ]
+        $ subtractRecursivePiecewiseAffineSummaries left right
+    ]
+
+  hasRecursivePiecewiseAffineOperation source = case source of
+    LengthAtMost left right -> inExpression left || inExpression right
+    LengthNot (LengthAtMost left right) ->
+      inExpression left || inExpression right
+    LengthEqual left right -> inExpression left || inExpression right
+    _ -> False
+
+  inExpression expression = case expression of
+    LengthVariable _ -> False
+    LengthLiteral _ -> False
+    LengthSum terms -> any inExpression terms
+    LengthScale _ nested -> inExpression nested
+    LengthQuotient _ nested -> inExpression nested
+    LengthModulo _ nested -> inExpression nested
+    LengthMonus _ _ -> True
+    LengthMinimum _ _ -> True
+    LengthMaximum _ _ -> True
+    LengthIf _ consequent alternate ->
+      inExpression consequent || inExpression alternate
+
+addRecursivePiecewiseAffineSummaries
+  :: RecursivePiecewiseAffineSummary
+  -> RecursivePiecewiseAffineSummary
+  -> RecursivePiecewiseAffineSummary
+addRecursivePiecewiseAffineSummaries
+    (RecursivePiecewiseAffineSummary leftConstant leftCoefficients)
+    (RecursivePiecewiseAffineSummary rightConstant rightCoefficients) =
+  RecursivePiecewiseAffineSummary
+    (leftConstant + rightConstant)
+    (Map.unionWith (+) leftCoefficients rightCoefficients)
+
+subtractRecursivePiecewiseAffineSummaries
+  :: RecursivePiecewiseAffineSummary
+  -> RecursivePiecewiseAffineSummary
+  -> RecursivePiecewiseAffineSummary
+subtractRecursivePiecewiseAffineSummaries
+    (RecursivePiecewiseAffineSummary leftConstant leftCoefficients)
+    (RecursivePiecewiseAffineSummary rightConstant rightCoefficients) =
+  RecursivePiecewiseAffineSummary
+    (leftConstant - rightConstant)
+    (Map.unionWith (+) leftCoefficients $ Map.map negate rightCoefficients)
+
+scaleRecursivePiecewiseAffineSummary
+  :: Natural
+  -> RecursivePiecewiseAffineSummary
+  -> RecursivePiecewiseAffineSummary
+scaleRecursivePiecewiseAffineSummary factor
+    (RecursivePiecewiseAffineSummary constant coefficients) =
+  let integerFactor = toInteger factor
+  in RecursivePiecewiseAffineSummary
+      (integerFactor * constant)
+      (Map.map (integerFactor *) coefficients)
+
+incrementRecursivePiecewiseAffineSummary
+  :: RecursivePiecewiseAffineSummary
+  -> RecursivePiecewiseAffineSummary
+incrementRecursivePiecewiseAffineSummary
+    (RecursivePiecewiseAffineSummary constant coefficients) =
+  RecursivePiecewiseAffineSummary (constant + 1) coefficients
+
+recursivePiecewiseAffineRule
+  :: RecursivePiecewiseAffineSummary
+  -> RecursivePiecewiseAffineSummary
+  -> RelationalPositiveAffineRule
+recursivePiecewiseAffineRule
+    (RecursivePiecewiseAffineSummary leftConstant leftCoefficients)
+    (RecursivePiecewiseAffineSummary rightConstant rightCoefficients) =
+  relationalPositiveAffineRule
+    (RelationalPositiveAffineSummary
+      (positiveInteger leftConstant + negativeInteger rightConstant)
+      (Map.unionWith (+)
+        (positiveIntegerCoefficients leftCoefficients)
+        (negativeIntegerCoefficients rightCoefficients)))
+    (RelationalPositiveAffineSummary
+      (positiveInteger rightConstant + negativeInteger leftConstant)
+      (Map.unionWith (+)
+        (positiveIntegerCoefficients rightCoefficients)
+        (negativeIntegerCoefficients leftCoefficients)))
+ where
+  positiveInteger value
+    | value > 0 = fromInteger value
+    | otherwise = 0
+
+  negativeInteger value
+    | value < 0 = fromInteger $ negate value
+    | otherwise = 0
+
+  positiveIntegerCoefficients = Map.mapMaybe retainPositive
+  retainPositive coefficient
+    | coefficient > 0 = Just $ fromInteger coefficient
+    | otherwise = Nothing
+
+  negativeIntegerCoefficients = Map.mapMaybe retainNegative
+  retainNegative coefficient
+    | coefficient < 0 = Just $ fromInteger $ negate coefficient
+    | otherwise = Nothing
 
 addRelationalPositiveAffineSummaries
   :: RelationalPositiveAffineSummary

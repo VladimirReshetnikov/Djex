@@ -1043,6 +1043,12 @@ facadeTests = testGroup "public Djex facade"
             :: LengthInputBoxLimitSource
             -> Either LengthInputBoxLimitError LengthInputBoxLimits
           inputBoxLimitsBuilder = mkLengthInputBoxLimits
+          booleanFiniteUnionLimitsBuilder
+            :: LengthBooleanFiniteUnionLimitSource
+            -> Either
+                LengthBooleanFiniteUnionLimitError
+                LengthBooleanFiniteUnionLimits
+          booleanFiniteUnionLimitsBuilder = mkLengthBooleanFiniteUnionLimits
           inputBoxValidator
             :: LengthEvaluationLimits
             -> LengthInputBoxLimits
@@ -1359,6 +1365,52 @@ facadeTests = testGroup "public Djex facade"
             -> LengthCounterexampleBasis
           strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasisProjection =
             validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasis
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator
+            :: LengthEvaluationLimits
+            -> LengthInputBoxLimits
+            -> LengthBooleanFiniteUnionLimits
+            -> CheckedLengthProblem Int ExferenceLocal
+            -> Either
+                LengthBooleanFiniteUnionApplicableDomainValidationError
+                (LengthApplicableDomainValidation
+                  (BehavioralEvidence
+                    FiniteListSpineLengthV1
+                    ValidatedLengthCounterexample)
+                  (BehavioralEvidence
+                    FiniteListSpineLengthV1
+                    ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain))
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator =
+            validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxesProjection
+            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            -> [[Natural]]
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxesProjection =
+            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCountProjection
+            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            -> Natural
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCountProjection =
+            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainVisitProjection
+            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            -> Natural
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainVisitProjection =
+            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentProjection
+            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            -> Natural
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentProjection =
+            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableProjection
+            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            -> Natural
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableProjection =
+            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasisProjection
+            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            -> LengthCounterexampleBasis
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasisProjection =
+            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
           queryInputReplayer
             :: LengthEvaluationLimits
             -> LengthSMTLibQuery Int ExferenceLocal
@@ -1463,6 +1515,18 @@ facadeTests = testGroup "public Djex facade"
                   ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain)
           queryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidator =
             validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
+          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator
+            :: LengthEvaluationLimits
+            -> LengthInputBoxLimits
+            -> LengthBooleanFiniteUnionLimits
+            -> LengthSMTLibQuery Int ExferenceLocal
+            -> Either
+                LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError
+                (LengthApplicableDomainValidation
+                  ValidatedLengthCounterexample
+                  ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain)
+          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator =
+            validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
           queryInputSymbolsProjection
             :: LengthSMTLibQuery Int ExferenceLocal
             -> [[Word8]]
@@ -1613,6 +1677,7 @@ facadeTests = testGroup "public Djex facade"
         inputCountProjection `seq` preconditionProjection `seq`
         postconditionProjection `seq` basisProjection `seq`
         counterexampleValidator `seq` inputBoxLimitsBuilder `seq`
+        booleanFiniteUnionLimitsBuilder `seq`
         inputBoxValidator `seq` inputBoxMaximumsProjection `seq`
         inputBoxAssignmentCountProjection `seq`
         inputBoxApplicableCountProjection `seq` inputBoxBasisProjection `seq`
@@ -1656,6 +1721,13 @@ facadeTests = testGroup "public Djex facade"
         strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentProjection `seq`
         strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableProjection `seq`
         strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasisProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxesProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCountProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainVisitProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasisProjection `seq`
         queryInputReplayer `seq` queryOriginProber `seq`
         queryInputBoxValidator `seq` queryCounterexampleSimplifier `seq`
         queryApplicableDomainValidator `seq`
@@ -1665,6 +1737,7 @@ facadeTests = testGroup "public Djex facade"
         queryStrictRelationalPositiveAffineQuotientApplicableDomainValidator `seq`
         queryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator `seq`
         queryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidator `seq`
+        queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator `seq`
         queryInputSymbolsProjection `seq`
         queryInputValueRequestProjection `seq` queryObservationAssociator `seq`
         queryObservationReplayer `seq` checkResponseParser `seq`
@@ -1685,6 +1758,10 @@ facadeTests = testGroup "public Djex facade"
         executionArtifactProjection `seq` executionResponseProjection `seq`
         (rnf :: LengthInputBoxLimitSource -> ()) `seq`
         (rnf :: LengthInputBoxLimitError -> ()) `seq`
+        (rnf :: LengthBooleanFiniteUnionLimitSource -> ()) `seq`
+        (rnf :: LengthBooleanFiniteUnionLimits -> ()) `seq`
+        (rnf :: LengthBooleanFiniteUnionLimitField -> ()) `seq`
+        (rnf :: LengthBooleanFiniteUnionLimitError -> ()) `seq`
         (rnf :: LengthInputBoxValidationError -> ()) `seq`
         (rnf :: LengthInputBoxValidation () () -> ()) `seq`
         (rnf :: ValidatedLengthInputBox -> ()) `seq`
@@ -1708,10 +1785,19 @@ facadeTests = testGroup "public Djex facade"
         (rnf
           :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
           -> ()) `seq`
+        (rnf
+          :: LengthBooleanFiniteUnionApplicableDomainValidationError
+          -> ()) `seq`
+        (rnf
+          :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+          -> ()) `seq`
         (rnf :: LengthSMTLibInputReplayError -> ()) `seq`
         (rnf :: LengthSMTLibInputBoxValidationError -> ()) `seq`
         (rnf :: LengthSMTLibCounterexampleSimplificationError -> ()) `seq`
         (rnf :: LengthSMTLibApplicableDomainValidationError -> ()) `seq`
+        (rnf
+          :: LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError
+          -> ()) `seq`
         (rnf :: LengthSMTLibExecutableDigestExpectation -> ()) `seq`
         (rnf :: LengthSMTLibExecutableLaunchStrategy -> ()) `seq`
         (rnf :: LengthSMTLibExecutionConfig -> ()) `seq`
@@ -1725,6 +1811,41 @@ facadeTests = testGroup "public Djex facade"
         Right defaultLengthInputBoxLimits
       lengthInputBoxInputLimit defaultLengthInputBoxLimits @?= 8
       lengthInputBoxAssignmentLimit defaultLengthInputBoxLimits @?= 65536
+      mkLengthBooleanFiniteUnionLimits
+          defaultLengthBooleanFiniteUnionLimitSource @?=
+        Right defaultLengthBooleanFiniteUnionLimits
+      map ($ defaultLengthBooleanFiniteUnionLimits)
+        [ lengthBooleanFiniteUnionGeneratedBranchLimit
+        , lengthBooleanFiniteUnionRuleLimitPerBranch
+        , lengthBooleanFiniteUnionClosureInspectionLimitPerBranch
+        , lengthBooleanFiniteUnionRetainedBoxLimit
+        , lengthBooleanFiniteUnionAssignmentVisitLimit
+        ] @?= [256, 64, 4096, 256, 262144]
+      [ lengthBooleanFiniteUnionLimitSourceMaximumGeneratedBranches
+          defaultLengthBooleanFiniteUnionLimitSource
+        , lengthBooleanFiniteUnionLimitSourceMaximumRulesPerBranch
+          defaultLengthBooleanFiniteUnionLimitSource
+        , lengthBooleanFiniteUnionLimitSourceMaximumClosureInspectionsPerBranch
+          defaultLengthBooleanFiniteUnionLimitSource
+        , lengthBooleanFiniteUnionLimitSourceMaximumRetainedBoxes
+          defaultLengthBooleanFiniteUnionLimitSource
+        , lengthBooleanFiniteUnionLimitSourceMaximumAssignmentVisits
+          defaultLengthBooleanFiniteUnionLimitSource
+        ] @?= [256, 64, 4096, 256, 262144]
+      [ LengthBooleanFiniteUnionMaximumGeneratedBranches
+        , LengthBooleanFiniteUnionMaximumRulesPerBranch
+        , LengthBooleanFiniteUnionMaximumClosureInspectionsPerBranch
+        , LengthBooleanFiniteUnionMaximumRetainedBoxes
+        , LengthBooleanFiniteUnionMaximumAssignmentVisits
+        ] @?= [minBound .. maxBound]
+      mkLengthBooleanFiniteUnionLimits
+          defaultLengthBooleanFiniteUnionLimitSource
+            { lengthBooleanFiniteUnionLimitSourceMaximumGeneratedBranches =
+                -1
+            , lengthBooleanFiniteUnionLimitSourceMaximumRulesPerBranch = -2
+            } @?=
+        Left (NegativeLengthBooleanFiniteUnionLimit
+          LengthBooleanFiniteUnionMaximumGeneratedBranches (-1))
       [ LengthSMTLibPathSnapshotThenDirectSpawn
         , LengthSMTLibDescriptorBoundExecutableLaunch
         , LengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunch
@@ -1776,6 +1897,11 @@ facadeTests = testGroup "public Djex facade"
           ("finite-list-spine-length/\
             \strict-relational-positive-affine-quotient-root-extrema-monus-precondition-domain-establishment/v1"
             :: String)
+      lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag
+        @?= map (fromIntegral . fromEnum)
+          ("finite-list-spine-length/\
+            \strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-precondition-domain-establishment/v1"
+            :: String)
       (LengthInputBoxCounterexample () :: LengthInputBoxValidation () ()) @?=
         LengthInputBoxCounterexample ()
       (LengthInputBoxValidated () :: LengthInputBoxValidation () ()) @?=
@@ -1820,6 +1946,16 @@ facadeTests = testGroup "public Djex facade"
           :: LengthSMTLibApplicableDomainValidationError
         ) @?=
           LengthSMTLibApplicableDomainValidationAssociationRejected
+            ReplayEncodingFingerprintMismatch
+      let finiteUnionFailure =
+            LengthBooleanFiniteUnionClosureInspectionLimitExceeded 2 3 4
+      finiteUnionFailure @?=
+        LengthBooleanFiniteUnionClosureInspectionLimitExceeded 2 3 4
+      ( LengthSMTLibBooleanFiniteUnionApplicableDomainValidationAssociationRejected
+          ReplayEncodingFingerprintMismatch
+          :: LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError
+        ) @?=
+          LengthSMTLibBooleanFiniteUnionApplicableDomainValidationAssociationRejected
             ReplayEncodingFingerprintMismatch
       lengthProblemTermGraphLimits defaultLengthProblemLimits @?=
         defaultTermGraphLimits
@@ -2295,6 +2431,52 @@ facadeTests = testGroup "public Djex facade"
             -> LengthCounterexampleBasis
           strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasisProjection =
             validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasis
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator
+            :: LengthEvaluationLimits
+            -> LengthInputBoxLimits
+            -> LengthBooleanFiniteUnionLimits
+            -> CheckedLengthSpinePairProblem Int ExferenceLocal
+            -> Either
+                LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError
+                (LengthApplicableDomainValidation
+                  (BehavioralEvidence
+                    FiniteBinaryProductSpineLengthsV1
+                    ValidatedLengthSpinePairCounterexample)
+                  (BehavioralEvidence
+                    FiniteBinaryProductSpineLengthsV1
+                    ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain))
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator =
+            validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxesProjection
+            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            -> [[Natural]]
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxesProjection =
+            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCountProjection
+            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            -> Natural
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCountProjection =
+            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainVisitProjection
+            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            -> Natural
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainVisitProjection =
+            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentProjection
+            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            -> Natural
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentProjection =
+            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableProjection
+            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            -> Natural
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableProjection =
+            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasisProjection
+            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            -> LengthCounterexampleBasis
+          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasisProjection =
+            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
           querySealer
             :: LengthSMTLibLimits
             -> CheckedLengthSpinePairProblem Int ExferenceLocal
@@ -2438,6 +2620,18 @@ facadeTests = testGroup "public Djex facade"
                   ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain)
           queryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidator =
             validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
+          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator
+            :: LengthEvaluationLimits
+            -> LengthInputBoxLimits
+            -> LengthBooleanFiniteUnionLimits
+            -> LengthSpinePairSMTLibQuery Int ExferenceLocal
+            -> Either
+                LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationError
+                (LengthApplicableDomainValidation
+                  ValidatedLengthSpinePairCounterexample
+                  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain)
+          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator =
+            validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
       contractInSession `seq` sealer `seq` roleAwareSealer `seq`
         exactCaseSealer `seq` inSessionSealer `seq`
         candidateResultProjection `seq` candidateProviderProjection `seq`
@@ -2491,6 +2685,13 @@ facadeTests = testGroup "public Djex facade"
         strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentProjection `seq`
         strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableProjection `seq`
         strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasisProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxesProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCountProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainVisitProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasisProjection `seq`
         querySealer `seq`
         queryInputSymbolsProjection `seq` queryCheckProjection `seq`
         queryInputValueRequestProjection `seq` queryFingerprintProjection `seq`
@@ -2504,6 +2705,7 @@ facadeTests = testGroup "public Djex facade"
         queryStrictRelationalPositiveAffineQuotientApplicableDomainValidator `seq`
         queryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator `seq`
         queryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidator `seq`
+        queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator `seq`
         (rnf :: CheckedLengthSpinePairCandidate Int ExferenceLocal -> ()) `seq`
         (rnf :: CheckedLengthSpinePairProblem Int ExferenceLocal -> ()) `seq`
         (rnf :: ValidatedLengthSpinePairCounterexample -> ()) `seq`
@@ -2530,6 +2732,12 @@ facadeTests = testGroup "public Djex facade"
         (rnf
           :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
           -> ()) `seq`
+        (rnf
+          :: LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError
+          -> ()) `seq`
+        (rnf
+          :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+          -> ()) `seq`
         (rnf :: LengthSpinePairSMTLibQuery Int ExferenceLocal -> ()) `seq`
         (rnf :: LengthSpinePairSMTLibQueryError -> ()) `seq`
         (rnf :: LengthSpinePairSMTLibModelError -> ()) `seq`
@@ -2540,6 +2748,9 @@ facadeTests = testGroup "public Djex facade"
           -> ()) `seq`
         (rnf
           :: LengthSpinePairSMTLibApplicableDomainValidationError
+          -> ()) `seq`
+        (rnf
+          :: LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationError
           -> ()) `seq`
         pure ()
       let assignment = LengthSpinePairContractAssignment [1]
@@ -2588,6 +2799,11 @@ facadeTests = testGroup "public Djex facade"
           ("finite-binary-product-spine-lengths/\
             \strict-relational-positive-affine-quotient-root-extrema-monus-precondition-domain-establishment/v1"
             :: String)
+      lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag
+        @?= map (fromIntegral . fromEnum)
+          ("finite-binary-product-spine-lengths/\
+            \strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-precondition-domain-establishment/v1"
+            :: String)
       lengthSpinePairSMTLibQuerySchemaTag @?=
         map (fromIntegral . fromEnum)
           ("djex-length-spine-pair-z3-qf-lia-smtlib2/v1" :: String)
@@ -2620,6 +2836,11 @@ facadeTests = testGroup "public Djex facade"
           queryApplicableDomainError =
             LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected
               ReplayDomainMismatch
+          finiteUnionError =
+            LengthSpinePairBooleanFiniteUnionRuleLimitExceeded 1 2 3
+          queryFiniteUnionError =
+            LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationAssociationRejected
+              ReplayEncodingFingerprintMismatch
       queryError @?= LengthSpinePairSMTLibCommandByteLimitExceeded
         LengthSMTLibCheckCommand 3 4
       modelError @?= LengthSpinePairSMTLibBindingArityMismatch 1 2
@@ -2640,11 +2861,16 @@ facadeTests = testGroup "public Djex facade"
       queryApplicableDomainError @?=
         LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected
           ReplayDomainMismatch
+      finiteUnionError @?=
+        LengthSpinePairBooleanFiniteUnionRuleLimitExceeded 1 2 3
+      queryFiniteUnionError @?=
+        LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationAssociationRejected
+          ReplayEncodingFingerprintMismatch
       rnf shapeError `seq` rnf boxError `seq` rnf queryError `seq`
         rnf modelError `seq` rnf replayError `seq` rnf queryBoxError `seq`
         rnf simplificationError `seq` rnf querySimplificationError `seq`
         rnf applicableDomainError `seq` rnf queryApplicableDomainError `seq`
-        pure ()
+        rnf finiteUnionError `seq` rnf queryFiniteUnionError `seq` pure ()
   , testCase "rejects residual constraints at the Djinn render boundary" $ do
       target <- expectRight $ mkIdentifier "identity"
       checkedTarget <- expectRight $ mkDefinitionName target

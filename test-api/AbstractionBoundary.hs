@@ -162,6 +162,7 @@ $(do
           , "LengthSMTLibLiveQueryError"
           , "LengthSpinePairSMTLibLiveQueryError"
           , "PublicDjex.LengthInputBoxLimits"
+          , "PublicDjex.LengthBooleanFiniteUnionLimits"
           , "CheckedLengthSpinePairContract"
           , "CheckedLengthSpinePairCandidate"
           , "CheckedLengthSpinePairProblem"
@@ -184,6 +185,8 @@ $(do
           , "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt"
           , "ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt"
           , "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt"
+          , "ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt"
+          , "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt"
           , "CheckedLengthInterpretationPolicy"
           , "CheckedLengthSession"
           , "CheckedLengthProviderInventory"
@@ -384,6 +387,8 @@ forbiddenConstructionAttempts =
   , noGeneric @LengthLimits "LengthLimits"
   , noGeneric @LengthEvaluationLimits "LengthEvaluationLimits"
   , noGeneric @LengthInputBoxLimits "LengthInputBoxLimits"
+  , noGeneric @LengthBooleanFiniteUnionLimits
+      "LengthBooleanFiniteUnionLimits"
   , noGeneric @ValidatedLengthCounterexample
       "ValidatedLengthCounterexample"
   , ( "ValidatedLengthCounterexample constructor became public"
@@ -523,6 +528,22 @@ forbiddenConstructionAttempts =
     )
   , ( "Strict-relational-positive-affine-quotient-root-extrema-monus scalar and product receipts unexpectedly permit Coercible"
     , forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainCoercion
+        `seq` ()
+    )
+  , noGeneric @ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+      "ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain"
+  , ( "ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain constructor became public"
+    , forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainConstruction
+        `seq` ()
+    )
+  , noGeneric @ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+      "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain"
+  , ( "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain constructor became public"
+    , forbiddenValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainConstruction
+        `seq` ()
+    )
+  , ( "Boolean-finite-union scalar and product receipts unexpectedly permit Coercible"
+    , forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainCoercion
         `seq` ()
     )
   , noGeneric @(CheckedLengthProviderSummary LengthVariableProbe)
@@ -1633,6 +1654,24 @@ forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusAp
   :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
   -> ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
 forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainCoercion =
+  coerce
+
+forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainConstruction
+  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainConstruction =
+  ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+    [] [] 0 0 0 ProviderIndependentFiniteSpineModel
+
+forbiddenValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainConstruction
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+forbiddenValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainConstruction =
+  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+    [] [] 0 0 0 ProviderIndependentFiniteSpineModel
+
+forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainCoercion
+  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  -> ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainCoercion =
   coerce
 
 forbiddenBoundedRawArtifactCoercion

@@ -141,6 +141,7 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , strictRelationalPositiveAffineQuotientApplicableDomainValidationTests
   , strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationTests
   , strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidationTests
+  , strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationTests
   , SMTLibQFLIASpec.smtLibQFLIATests
   , smtLibTests
   , smtLibProtocolTests
@@ -10438,6 +10439,580 @@ strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidation
           valuesBefore
     ]
 
+strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationTests
+  :: TestTree
+strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationTests =
+  testGroup
+    "strict relational positive-affine quotient root-extrema monus Boolean finite-union applicable-domain validation"
+    [ testCase "expand De Morgan DNF and negated equality exactly" $ do
+        let first = Length.LengthVariable $ Length.LengthInput 0
+            second = Length.LengthVariable $ Length.LengthInput 1
+            literal value = Length.LengthLiteral value
+            bound variable maximumValue =
+              Length.LengthAtMost variable $ literal maximumValue
+            disjoin formulas = Length.LengthNot
+              $ Length.LengthAll $ map Length.LengthNot formulas
+            generalPrecondition = Length.LengthAll
+              [ bound first 4
+              , bound second 4
+              , disjoin [bound first 1, bound second 1]
+              , disjoin [bound first 3, bound second 3]
+              ]
+            source precondition = contractWith precondition
+              $ Length.LengthTruth True
+            validate limits box problem =
+              Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+                Evaluate.defaultLengthEvaluationLimits box limits problem
+        general <- adversarialBinaryConstantZeroProblem
+          $ source generalPrecondition
+        generalLimits <- booleanFiniteUnionLimits 4 4 4 2 20
+        generalBox <- inputBoxLimits 2 16
+        generalReceipt <-
+          expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            general $ validate generalLimits generalBox general
+        assertValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+          generalReceipt [[1, 4], [4, 1]] 2 20 16 16
+            Evaluate.ProviderIndependentFiniteSpineModel
+
+        let input = Length.LengthVariable $ Length.LengthInput 0
+            inequality = Length.LengthAll
+              [ bound input 3
+              , Length.LengthNot $ Length.LengthEqual input $ literal 1
+              ]
+        unequal <- adversarialConstantZeroProblem $ source inequality
+        unequalLimits <- booleanFiniteUnionLimits 2 2 2 1 4
+        unequalBox <- inputBoxLimits 1 4
+        unequalReceipt <-
+          expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            unequal $ validate unequalLimits unequalBox unequal
+        assertValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+          unequalReceipt [[3]] 1 4 4 3
+            Evaluate.ProviderIndependentFiniteSpineModel
+    , testCase
+        "canonicalize branch and origin-box antichains without a hull" $ do
+        let first = Length.LengthVariable $ Length.LengthInput 0
+            second = Length.LengthVariable $ Length.LengthInput 1
+            literal value = Length.LengthLiteral value
+            bound variable maximumValue =
+              Length.LengthAtMost variable $ literal maximumValue
+            disjoin formulas = Length.LengthNot
+              $ Length.LengthAll $ map Length.LengthNot formulas
+            source precondition = contractWith precondition
+              $ Length.LengthTruth True
+            validate limits box problem =
+              Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+                Evaluate.defaultLengthEvaluationLimits box limits problem
+            p = Length.LengthAll [bound first 1, bound second 2]
+            q = bound first 0
+            absorbed = Length.LengthAll
+              [disjoin [p, q], disjoin [p, Length.LengthNot q]]
+        absorbedProblem <- adversarialBinaryConstantZeroProblem
+          $ source absorbed
+        absorbedLimits <- booleanFiniteUnionLimits 4 2 2 1 6
+        absorbedBox <- inputBoxLimits 2 6
+        absorbedReceipt <-
+          expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            absorbedProblem
+            $ validate absorbedLimits absorbedBox absorbedProblem
+        assertValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+          absorbedReceipt [[1, 2]] 1 6 6 6
+            Evaluate.ProviderIndependentFiniteSpineModel
+
+        let firstBox = Length.LengthAll
+              [bound first 1, bound second 3]
+            secondBox = Length.LengthAll
+              [bound first 3, bound second 1]
+            containedBox = Length.LengthAll
+              [bound first 1, bound second 2]
+            noHull = disjoin [containedBox, secondBox, firstBox]
+        noHullProblem <- adversarialBinaryConstantZeroProblem $ source noHull
+        noHullLimits <- booleanFiniteUnionLimits 3 2 2 2 16
+        noHullBox <- inputBoxLimits 2 12
+        noHullReceipt <-
+          expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            noHullProblem $ validate noHullLimits noHullBox noHullProblem
+        assertValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+          noHullReceipt [[1, 3], [3, 1]] 2 16 12 12
+            Evaluate.ProviderIndependentFiniteSpineModel
+    , testCase "enforce every work cap at exact max plus one" $ do
+        let first = Length.LengthVariable $ Length.LengthInput 0
+            second = Length.LengthVariable $ Length.LengthInput 1
+            literal value = Length.LengthLiteral value
+            bound variable maximumValue =
+              Length.LengthAtMost variable $ literal maximumValue
+            disjoin formulas = Length.LengthNot
+              $ Length.LengthAll $ map Length.LengthNot formulas
+            source precondition = contractWith precondition
+              $ Length.LengthTruth True
+            validate limits box problem =
+              Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+                (error "finite-union preparation demanded evaluation limits")
+                box limits problem
+            p = Length.LengthAll [bound first 1, bound second 2]
+            q = bound first 0
+            absorbed = Length.LengthAll
+              [disjoin [p, q], disjoin [p, Length.LengthNot q]]
+        branchProblem <- adversarialBinaryConstantZeroProblem $ source absorbed
+        branchLimits <- booleanFiniteUnionLimits 3 64 4096 256 262144
+        branchResult <- evaluateWithin $ validate branchLimits
+          Evaluate.defaultLengthInputBoxLimits branchProblem
+        assertLeft
+          (Evaluate.LengthBooleanFiniteUnionGeneratedBranchLimitExceeded 3 4)
+          branchResult
+
+        equalityProblem <- adversarialConstantZeroProblem $ source
+          $ Length.LengthEqual first $ literal 2
+        ruleLimits <- booleanFiniteUnionLimits 1 1 4096 256 262144
+        ruleResult <- evaluateWithin $ validate ruleLimits
+          Evaluate.defaultLengthInputBoxLimits equalityProblem
+        assertLeft
+          (Evaluate.LengthBooleanFiniteUnionRuleLimitExceeded 0 1 2)
+          ruleResult
+
+        chainProblem <- adversarialBinaryConstantZeroProblem $ source
+          $ Length.LengthAll
+              [Length.LengthAtMost first second, bound second 1]
+        closureLimits <- booleanFiniteUnionLimits 1 2 1 256 262144
+        closureResult <- evaluateWithin $ validate closureLimits
+          Evaluate.defaultLengthInputBoxLimits chainProblem
+        assertLeft
+          (Evaluate.LengthBooleanFiniteUnionClosureInspectionLimitExceeded
+            0 1 2)
+          closureResult
+
+        let firstBox = Length.LengthAll
+              [bound first 1, bound second 3]
+            secondBox = Length.LengthAll
+              [bound first 3, bound second 1]
+            noHull = disjoin [secondBox, firstBox]
+        unionProblem <- adversarialBinaryConstantZeroProblem $ source noHull
+        boxLimits <- booleanFiniteUnionLimits 2 2 2 1 16
+        boxResult <- evaluateWithin $ validate boxLimits
+          Evaluate.defaultLengthInputBoxLimits unionProblem
+        assertLeft
+          (Evaluate.LengthBooleanFiniteUnionRetainedBoxLimitExceeded 1 2)
+          boxResult
+
+        visitLimits <- booleanFiniteUnionLimits 2 2 2 2 15
+        uniqueEleven <- inputBoxLimits 2 11
+        assertLeft
+          (Evaluate.LengthBooleanFiniteUnionAssignmentVisitLimitExceeded 15 16)
+          $ Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+              Evaluate.defaultLengthEvaluationLimits uniqueEleven
+              visitLimits unionProblem
+
+        exactVisitLimits <- booleanFiniteUnionLimits 2 2 2 2 16
+        assertLeft
+          (Evaluate.LengthBooleanFiniteUnionAssignmentLimitExceeded 11 12)
+          $ Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+              Evaluate.defaultLengthEvaluationLimits uniqueEleven
+              exactVisitLimits unionProblem
+    , testCase "distinguish the empty union from the nullary singleton" $ do
+        let input = Length.LengthVariable $ Length.LengthInput 0
+            bound = Length.LengthAtMost input $ Length.LengthLiteral 0
+            complement = Length.LengthAll [bound, Length.LengthNot bound]
+            source precondition = contractWith precondition
+              $ Length.LengthTruth True
+            validate evaluation problem =
+              Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+                evaluation Evaluate.defaultLengthInputBoxLimits
+                Evaluate.defaultLengthBooleanFiniteUnionLimits problem
+        empty <- adversarialConstantZeroProblem $ source complement
+        emptyReceipt <-
+          expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            empty $ validate
+              (error "the empty finite union demanded evaluation limits") empty
+        assertValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+          emptyReceipt [] 0 0 0 0
+            Evaluate.ProviderIndependentFiniteSpineModel
+
+        nullary <- adversarialZeroInputProblem
+          $ source $ Length.LengthTruth True
+        nullaryReceipt <-
+          expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            nullary $ validate Evaluate.defaultLengthEvaluationLimits nullary
+        assertValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+          nullaryReceipt [[]] 1 1 1 1
+            Evaluate.ProviderIndependentFiniteSpineModel
+
+        falseNullary <- adversarialZeroInputProblem
+          $ source $ Length.LengthTruth False
+        falseReceipt <-
+          expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            falseNullary $ validate
+              (error "the false nullary union demanded evaluation limits")
+              falseNullary
+        assertValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+          falseReceipt [] 0 0 0 0
+            Evaluate.ProviderIndependentFiniteSpineModel
+        force emptyReceipt `seq` force nullaryReceipt `seq`
+          force falseReceipt `seq` pure ()
+    , testCase
+        "replay the unique union globally and return its first lexicographic counterexample" $
+        do
+          let first = Length.LengthVariable $ Length.LengthInput 0
+              second = Length.LengthVariable $ Length.LengthInput 1
+              third = Length.LengthVariable $ Length.LengthInput 2
+              literal value = Length.LengthLiteral value
+              bound variable maximumValue =
+                Length.LengthAtMost variable $ literal maximumValue
+              disjoin formulas = Length.LengthNot
+                $ Length.LengthAll $ map Length.LengthNot formulas
+              firstBox = Length.LengthAll
+                [bound first 1, bound second 1, bound third 3]
+              secondBox = Length.LengthAll
+                [bound first 1, bound second 3, bound third 1]
+              precondition = disjoin [secondBox, firstBox]
+              postcondition = Length.LengthAll
+                [bound first 0, bound second 1]
+              source = contractWith precondition postcondition
+          problem <- adversarialWideConstantZeroProblemWithContract 3 source
+          let validation =
+                Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+                  Evaluate.defaultLengthEvaluationLimits
+                  Evaluate.defaultLengthInputBoxLimits
+                  Evaluate.defaultLengthBooleanFiniteUnionLimits problem
+          counterexample <- case validation of
+            Left failure -> assertFailure
+              ("Boolean finite-union validation failed: " ++ show failure)
+                >> error "unreachable"
+            Right (Evaluate.LengthApplicableDomainInapplicable reason) ->
+              assertFailure
+                ("Boolean finite union was inapplicable: " ++ show reason)
+                >> error "unreachable"
+            Right (Evaluate.LengthApplicableDomainEstablished _) ->
+              assertFailure "the violating finite union produced evidence"
+                >> error "unreachable"
+            Right (Evaluate.LengthApplicableDomainCounterexample evidence) ->
+              expectRight $ SemanticProblem.replayBehavioralEvidence
+                (LengthProblem.checkedLengthProblemBehavioralProblem problem)
+                evidence
+          Evaluate.validatedLengthCounterexampleInputs counterexample @?=
+            [0, 2, 0]
+          Evaluate.validatedLengthCounterexampleResult counterexample @?= 0
+          Evaluate.validatedLengthCounterexampleBasis counterexample @?=
+            Evaluate.ProviderIndependentFiniteSpineModel
+    , testCase "retain the full fixed failure precedence" $ do
+        let first = Length.LengthVariable $ Length.LengthInput 0
+            result = Length.LengthVariable Length.LengthResult
+            literal value = Length.LengthLiteral value
+            bound variable maximumValue =
+              Length.LengthAtMost variable $ literal maximumValue
+            source precondition postcondition =
+              contractWith precondition postcondition
+            validate evaluation box limits problem =
+              Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+                evaluation box limits problem
+        narrow <- inputBoxLimits 1 16
+        widthProblem <- adversarialBinaryConstantZeroProblem $ source
+          (Length.LengthAll
+            [bound first 0, Length.LengthNot $ bound first 0])
+          $ Length.LengthTruth True
+        width <- evaluateWithin $ validate
+          (error "width rejection demanded evaluation limits") narrow
+          (error "width rejection demanded finite-union limits") widthProblem
+        assertLeft
+          (Evaluate.LengthBooleanFiniteUnionProblemInputLimitExceeded 1 2)
+          width
+
+        let guarded = Length.LengthAtMost
+              (Length.LengthIf (bound first 1) first $ literal 0)
+              $ literal 3
+        missingProblem <- adversarialConstantZeroProblem $ source guarded
+          $ Length.LengthTruth True
+        zeroWork <- booleanFiniteUnionLimits 1 0 0 0 0
+        missing <-
+          expectLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInapplicability
+            $ validate
+                (error "missing coverage demanded evaluation limits")
+                Evaluate.defaultLengthInputBoxLimits zeroWork missingProblem
+        missing @?= Evaluate.LengthApplicableDomainInputUpperBoundMissing 0
+
+        maximumProblem <- adversarialConstantZeroProblem $ source
+          (bound first 3) $ Length.LengthTruth True
+        noVisits <- booleanFiniteUnionLimits 1 1 1 1 0
+        assertLeft
+          (Evaluate.LengthBooleanFiniteUnionMaximumValueRejected 0 0
+            $ Evaluate.LengthEvaluationValueBitLimitExceeded
+                (Evaluate.LengthProblemInputValue 0) 1 2)
+          $ validate (evaluationLimitsWith 1 8)
+              Evaluate.defaultLengthInputBoxLimits noVisits maximumProblem
+
+        let isZero = Length.LengthEqual first $ literal 0
+            replaySource = source (bound first 0)
+              $ Length.LengthEqual result
+              $ Length.LengthIf isZero (literal 1) (literal 0)
+        replayProblem <- adversarialConstantZeroProblem replaySource
+        oneVisit <- booleanFiniteUnionLimits 1 1 1 1 1
+        zeroAssignments <- inputBoxLimits 1 0
+        assertLeft
+          (Evaluate.LengthBooleanFiniteUnionAssignmentLimitExceeded 0 1)
+          $ validate (evaluationLimitsWith 0 0) zeroAssignments oneVisit
+              replayProblem
+        oneAssignment <- inputBoxLimits 1 1
+        assertLeft
+          (Evaluate.LengthBooleanFiniteUnionAssignmentEvaluationRejected 0
+            $ Evaluate.LengthEvaluationValueBitLimitExceeded
+                Evaluate.LengthIntermediateValue 0 1)
+          $ validate (evaluationLimitsWith 0 0) oneAssignment oneVisit
+              replayProblem
+    , testCase "preserve every monus predecessor projection literally" $ do
+        Evaluate.lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidationSchemaTag
+          @?= asciiBytes
+            "finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-precondition-domain-establishment/v1"
+        Evaluate.lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag
+          @?= asciiBytes
+            "finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-precondition-domain-establishment/v1"
+        let input = Length.LengthVariable $ Length.LengthInput 0
+            literal value = Length.LengthLiteral value
+            source precondition = contractWith precondition
+              $ Length.LengthTruth True
+            validatePredecessor problem =
+              Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
+                Evaluate.defaultLengthEvaluationLimits
+                Evaluate.defaultLengthInputBoxLimits problem
+            validateSuccessor problem =
+              Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+                Evaluate.defaultLengthEvaluationLimits
+                Evaluate.defaultLengthInputBoxLimits
+                Evaluate.defaultLengthBooleanFiniteUnionLimits problem
+            preconditions =
+              [ Length.LengthAtMost input $ literal 2
+              , Length.LengthAtMost
+                  (Length.LengthQuotient 3 input) $ literal 1
+              , Length.LengthAtMost
+                  (Length.LengthMaximum input
+                    $ Length.LengthSum
+                        [Length.LengthScale 2 input, literal 1])
+                  $ literal 5
+              , Length.LengthAtMost
+                  (Length.LengthMonus
+                    (Length.LengthSum
+                      [Length.LengthScale 2 input, literal 1]) input)
+                  $ literal 3
+              ]
+        mapM_ (\precondition -> do
+            problem <- adversarialConstantZeroProblem $ source precondition
+            predecessor <-
+              expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
+                problem $ validatePredecessor problem
+            successor <-
+              expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+                problem $ validateSuccessor problem
+            Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
+                successor @?=
+              [Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainInclusiveMaximums
+                predecessor]
+            Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
+                successor @?= 1
+            Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
+                successor @?=
+              Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentCount
+                predecessor
+            Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
+                successor @?=
+              Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentCount
+                predecessor
+            Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
+                successor @?=
+              Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableAssignmentCount
+                predecessor
+            Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
+                successor @?=
+              Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasis
+                predecessor)
+          preconditions
+    , testCase
+        "associate scalar finite-union evidence without changing query identity" $
+        do
+          let first = Length.LengthVariable $ Length.LengthInput 0
+              second = Length.LengthVariable $ Length.LengthInput 1
+              literal value = Length.LengthLiteral value
+              bound variable maximumValue =
+                Length.LengthAtMost variable $ literal maximumValue
+              disjoin formulas = Length.LengthNot
+                $ Length.LengthAll $ map Length.LengthNot formulas
+              box leftMaximum rightMaximum = Length.LengthAll
+                [bound first leftMaximum, bound second rightMaximum]
+              precondition = disjoin [box 3 1, box 1 3]
+              source = contractWith precondition $ Length.LengthTruth True
+          problem <- adversarialBinaryConstantZeroProblem source
+          let directValidation =
+                Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+                  Evaluate.defaultLengthEvaluationLimits
+                  Evaluate.defaultLengthInputBoxLimits
+                  Evaluate.defaultLengthBooleanFiniteUnionLimits problem
+          (evidence, receipt) <- case directValidation of
+            Right (Evaluate.LengthApplicableDomainEstablished established) ->
+              do
+                replayed <- expectRight
+                  $ SemanticProblem.replayBehavioralEvidence
+                      (LengthProblem.checkedLengthProblemBehavioralProblem
+                        problem)
+                      established
+                pure (established, replayed)
+            Left failure -> assertFailure
+              ("scalar finite-union validation failed: " ++ show failure)
+                >> error "unreachable"
+            Right (Evaluate.LengthApplicableDomainInapplicable reason) ->
+              assertFailure
+                ("scalar finite-union validation was inapplicable: "
+                  ++ show reason) >> error "unreachable"
+            Right (Evaluate.LengthApplicableDomainCounterexample _) ->
+              assertFailure
+                "scalar finite-union validation found a counterexample"
+                  >> error "unreachable"
+          assertValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+            receipt [[1, 3], [3, 1]] 2 16 12 12
+              Evaluate.ProviderIndependentFiniteSpineModel
+          force receipt `seq` pure ()
+          stale <- adversarialBinaryConstantZeroProblem
+            $ contractWith (disjoin [box 2 1, box 1 2])
+                $ Length.LengthTruth True
+          assertLeft SemanticProblem.ReplayEncodingFingerprintMismatch
+            $ SemanticProblem.replayBehavioralEvidence
+                (LengthProblem.checkedLengthProblemBehavioralProblem stale)
+                evidence
+
+          query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+            SMTLib.defaultLengthSMTLibLimits problem
+          let fingerprintBefore = SMTLib.lengthSMTLibQueryFingerprint query
+              checkBefore = SMTLib.lengthSMTLibQueryCheckBytes query
+              symbolsBefore = SMTLib.lengthSMTLibQueryInputSymbols query
+              valuesBefore = SMTLib.lengthSMTLibQueryInputValueRequestBytes query
+          predecessor <- expectRight
+            $ SMTLib.validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
+                Evaluate.defaultLengthEvaluationLimits
+                Evaluate.defaultLengthInputBoxLimits query
+          case predecessor of
+            Evaluate.LengthApplicableDomainInapplicable reason ->
+              reason @?= Evaluate.LengthApplicableDomainInputUpperBoundMissing 0
+            _ -> assertFailure
+              "the single-box predecessor accepted a Boolean union"
+          associated <- expectRight
+            $ SMTLib.validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+                Evaluate.defaultLengthEvaluationLimits
+                Evaluate.defaultLengthInputBoxLimits
+                Evaluate.defaultLengthBooleanFiniteUnionLimits query
+          case associated of
+            Evaluate.LengthApplicableDomainEstablished queryReceipt ->
+              queryReceipt @?= receipt
+            Evaluate.LengthApplicableDomainInapplicable reason -> assertFailure
+              ("scalar Boolean query was inapplicable: " ++ show reason)
+            Evaluate.LengthApplicableDomainCounterexample{} -> assertFailure
+              "scalar Boolean query produced a counterexample"
+          SMTLib.lengthSMTLibQueryFingerprint query @?= fingerprintBefore
+          SMTLib.lengthSMTLibQueryCheckBytes query @?= checkBefore
+          SMTLib.lengthSMTLibQueryInputSymbols query @?= symbolsBefore
+          SMTLib.lengthSMTLibQueryInputValueRequestBytes query @?= valuesBefore
+    , testCase "keep product evidence nominal and pair query bytes unchanged" $ do
+        Evaluate.lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag
+          @?= asciiBytes
+            "finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-precondition-domain-establishment/v1"
+        assertBool "Boolean finite-union product validation reused scalar schema"
+          $ Evaluate.lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag
+              /= Evaluate.lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag
+        let input = Length.LengthVariable $ Length.LengthSpinePairInput 0
+            literal value = Length.LengthLiteral value
+            bound maximumValue = Length.LengthAtMost input
+              $ literal maximumValue
+            disjoin formulas = Length.LengthNot
+              $ Length.LengthAll $ map Length.LengthNot formulas
+            precondition = disjoin [bound 3, bound 1]
+            source = spinePairContractWith precondition
+              $ Length.LengthAll
+                  [ Length.LengthEqual
+                      (pairResultVariable Length.LengthSpinePairFirst) input
+                  , Length.LengthEqual
+                      (pairResultVariable Length.LengthSpinePairSecond)
+                      $ literal 0
+                  ]
+        problem <- adversarialInputAndZeroSpinePairProblem source
+        let directValidation =
+              Evaluate.validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+                Evaluate.defaultLengthEvaluationLimits
+                Evaluate.defaultLengthInputBoxLimits
+                Evaluate.defaultLengthBooleanFiniteUnionLimits problem
+        (evidence, receipt) <- case directValidation of
+          Right (Evaluate.LengthApplicableDomainEstablished established) ->
+            do
+              replayed <- expectRight
+                $ SemanticProblem.replayBehavioralEvidence
+                    (LengthProblem.checkedLengthSpinePairProblemBehavioralProblem
+                      problem)
+                    established
+              pure (established, replayed)
+          Left failure -> assertFailure
+            ("product finite-union validation failed: " ++ show failure)
+              >> error "unreachable"
+          Right (Evaluate.LengthApplicableDomainInapplicable reason) ->
+            assertFailure
+              ("product finite-union validation was inapplicable: "
+                ++ show reason) >> error "unreachable"
+          Right (Evaluate.LengthApplicableDomainCounterexample _) ->
+            assertFailure
+              "product finite-union validation found a counterexample"
+                >> error "unreachable"
+        assertValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+          receipt [[3]] 1 4 4 4
+            Evaluate.ProviderIndependentFiniteSpineModel
+        force receipt `seq` pure ()
+
+        scalar <- adversarialConstantZeroProblem
+          $ contractWith
+              (Length.LengthNot $ Length.LengthAll
+                [ Length.LengthNot $ Length.LengthAtMost
+                    (Length.LengthVariable $ Length.LengthInput 0) $ literal 3
+                , Length.LengthNot $ Length.LengthAtMost
+                    (Length.LengthVariable $ Length.LengthInput 0) $ literal 1
+                ])
+              $ Length.LengthTruth True
+        let forgedScalarEvidence = unsafeCoerce evidence
+              :: SemanticProblem.BehavioralEvidence
+                  Length.FiniteListSpineLengthV1
+                  Evaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+        assertLeft SemanticProblem.ReplayDomainMismatch
+          $ SemanticProblem.replayBehavioralEvidence
+              (LengthProblem.checkedLengthProblemBehavioralProblem scalar)
+              forgedScalarEvidence
+
+        query <- expectRight $ SMTLib.sealLengthSpinePairSMTLibQuery
+          SMTLib.defaultLengthSMTLibLimits problem
+        let fingerprintBefore =
+              SMTLib.lengthSpinePairSMTLibQueryFingerprint query
+            checkBefore = SMTLib.lengthSpinePairSMTLibQueryCheckBytes query
+            symbolsBefore = SMTLib.lengthSpinePairSMTLibQueryInputSymbols query
+            valuesBefore =
+              SMTLib.lengthSpinePairSMTLibQueryInputValueRequestBytes query
+        predecessor <- expectRight
+          $ SMTLib.validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
+              Evaluate.defaultLengthEvaluationLimits
+              Evaluate.defaultLengthInputBoxLimits query
+        case predecessor of
+          Evaluate.LengthApplicableDomainInapplicable reason ->
+            reason @?= Evaluate.LengthApplicableDomainInputUpperBoundMissing 0
+          _ -> assertFailure
+            "the product single-box predecessor accepted a Boolean union"
+        associated <- expectRight
+          $ SMTLib.validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+              Evaluate.defaultLengthEvaluationLimits
+              Evaluate.defaultLengthInputBoxLimits
+              Evaluate.defaultLengthBooleanFiniteUnionLimits query
+        case associated of
+          Evaluate.LengthApplicableDomainEstablished queryReceipt ->
+            queryReceipt @?= receipt
+          Evaluate.LengthApplicableDomainInapplicable reason -> assertFailure
+            ("product Boolean query was inapplicable: " ++ show reason)
+          Evaluate.LengthApplicableDomainCounterexample{} -> assertFailure
+            "product Boolean query produced a counterexample"
+        SMTLib.lengthSpinePairSMTLibQueryFingerprint query @?=
+          fingerprintBefore
+        SMTLib.lengthSpinePairSMTLibQueryCheckBytes query @?= checkBefore
+        SMTLib.lengthSpinePairSMTLibQueryInputSymbols query @?= symbolsBefore
+        SMTLib.lengthSpinePairSMTLibQueryInputValueRequestBytes query @?=
+          valuesBefore
+    ]
+
 type AdversarialLengthApplicableDomainValidation =
   Either Evaluate.LengthApplicableDomainValidationError
     (Evaluate.LengthApplicableDomainValidation
@@ -11296,6 +11871,119 @@ assertValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaM
       receipt @?= applicable
   Evaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasis
       receipt @?= basis
+
+type AdversarialLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidation =
+  Either Evaluate.LengthBooleanFiniteUnionApplicableDomainValidationError
+    (Evaluate.LengthApplicableDomainValidation
+      (SemanticProblem.BehavioralEvidence
+        Length.FiniteListSpineLengthV1
+        Evaluate.ValidatedLengthCounterexample)
+      (SemanticProblem.BehavioralEvidence
+        Length.FiniteListSpineLengthV1
+        Evaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain))
+
+expectLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInapplicability
+  :: AdversarialLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidation
+  -> IO Evaluate.LengthApplicableDomainInapplicability
+expectLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInapplicability
+    validation = case validation of
+  Left failure -> assertFailure
+    ("unexpected Boolean finite-union domain rejection: " ++ show failure)
+      >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainInapplicable reason) -> pure reason
+  Right (Evaluate.LengthApplicableDomainCounterexample _) -> assertFailure
+    "an inapplicable Boolean finite union produced a counterexample"
+      >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainEstablished _) -> assertFailure
+    "an inapplicable Boolean finite union produced positive evidence"
+      >> error "unreachable"
+
+expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  :: LengthProblem.CheckedLengthProblem
+      AdversarialIdentity AdversarialLocal
+  -> AdversarialLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidation
+  -> IO
+      Evaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    problem validation = case validation of
+  Left failure -> assertFailure
+    ("unexpected Boolean finite-union domain rejection: " ++ show failure)
+      >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainInapplicable reason) -> assertFailure
+    ("the Boolean finite-union domain was not bounded: " ++ show reason)
+      >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainCounterexample _) -> assertFailure
+    "the Boolean finite-union domain contained a counterexample"
+      >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainEstablished evidence) -> expectRight
+    $ SemanticProblem.replayBehavioralEvidence
+        (LengthProblem.checkedLengthProblemBehavioralProblem problem) evidence
+
+assertValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  :: Evaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  -> [[Natural]]
+  -> Natural
+  -> Natural
+  -> Natural
+  -> Natural
+  -> Evaluate.LengthCounterexampleBasis
+  -> IO ()
+assertValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    receipt boxes boxCount visits assignments applicable basis = do
+  Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
+      receipt @?= boxes
+  Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
+      receipt @?= boxCount
+  Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
+      receipt @?= visits
+  Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
+      receipt @?= assignments
+  Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
+      receipt @?= applicable
+  Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
+      receipt @?= basis
+
+assertValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  :: Evaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  -> [[Natural]]
+  -> Natural
+  -> Natural
+  -> Natural
+  -> Natural
+  -> Evaluate.LengthCounterexampleBasis
+  -> IO ()
+assertValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    receipt boxes boxCount visits assignments applicable basis = do
+  Evaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
+      receipt @?= boxes
+  Evaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
+      receipt @?= boxCount
+  Evaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
+      receipt @?= visits
+  Evaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
+      receipt @?= assignments
+  Evaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
+      receipt @?= applicable
+  Evaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
+      receipt @?= basis
+
+booleanFiniteUnionLimits
+  :: Int -> Int -> Int -> Int -> Int
+  -> IO Evaluate.LengthBooleanFiniteUnionLimits
+booleanFiniteUnionLimits branches rules inspections boxes visits = expectRight
+  $ Evaluate.mkLengthBooleanFiniteUnionLimits
+      Evaluate.LengthBooleanFiniteUnionLimitSource
+        { Evaluate.lengthBooleanFiniteUnionLimitSourceMaximumGeneratedBranches =
+            branches
+        , Evaluate.lengthBooleanFiniteUnionLimitSourceMaximumRulesPerBranch =
+            rules
+        , Evaluate.lengthBooleanFiniteUnionLimitSourceMaximumClosureInspectionsPerBranch =
+            inspections
+        , Evaluate.lengthBooleanFiniteUnionLimitSourceMaximumRetainedBoxes =
+            boxes
+        , Evaluate.lengthBooleanFiniteUnionLimitSourceMaximumAssignmentVisits =
+            visits
+        }
 
 type AdversarialLengthInputBoxValidation =
   Either Evaluate.LengthInputBoxValidationError

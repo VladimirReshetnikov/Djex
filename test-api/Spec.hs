@@ -334,6 +334,24 @@ projectionSignatures =
   (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasis
     :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
     -> LengthEvaluate.LengthCounterexampleBasis) `seq`
+  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
+    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    -> [[Natural]]) `seq`
+  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
+    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
+    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
+    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
+    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
+    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
   (LengthEvaluate.validatedLengthCounterexampleSimplificationOriginalInputs
     :: LengthEvaluate.ValidatedLengthCounterexampleSimplification
     -> [Natural]) `seq`
@@ -439,6 +457,24 @@ projectionSignatures =
   (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasis
     :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
     -> LengthEvaluate.LengthCounterexampleBasis) `seq`
+  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
+    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    -> [[Natural]]) `seq`
+  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
+    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
+    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
+    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
+    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
+    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
   (LengthEvaluate.validatedLengthSpinePairCounterexampleSimplificationOriginalInputs
     :: LengthEvaluate.ValidatedLengthSpinePairCounterexampleSimplification
     -> [Natural]) `seq`
@@ -542,6 +578,7 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainCoercion"
                       , "forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainCoercion"
                       , "forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainCoercion"
+                      , "forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainCoercion"
                       , "forbiddenCheckedLengthContractCoercion"
                       , "forbiddenCheckedLengthSpinePairContractCoercion"
                       , "forbiddenCheckedLengthContextVariableCoercion"
@@ -647,6 +684,8 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt"
                       , "ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt"
                       , "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt"
+                      , "ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt"
+                      , "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt"
                       ]
                   )
             assertBool

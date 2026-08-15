@@ -71,6 +71,7 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib
   , validateLengthSMTLibQueryInputBox
   , LengthSMTLibApplicableDomainValidationError (..)
   , validateLengthSMTLibQueryApplicableDomain
+  , validateLengthSMTLibQueryPositiveAffineApplicableDomain
   , LengthSpinePairSMTLibQueryFingerprintSubject
   , lengthSpinePairSMTLibQuerySchemaTag
   , lengthSpinePairSMTLibQueryLogic
@@ -93,6 +94,7 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib
   , validateLengthSpinePairSMTLibQueryInputBox
   , LengthSpinePairSMTLibApplicableDomainValidationError (..)
   , validateLengthSpinePairSMTLibQueryApplicableDomain
+  , validateLengthSpinePairSMTLibQueryPositiveAffineApplicableDomain
   ) where
 
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib

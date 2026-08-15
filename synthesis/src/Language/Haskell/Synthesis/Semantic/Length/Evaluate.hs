@@ -116,6 +116,18 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validatedLengthSpinePairApplicableDomainAssignmentCount
   , validatedLengthSpinePairApplicableDomainApplicableAssignmentCount
   , validatedLengthSpinePairApplicableDomainBasis
+  , ValidatedLengthPositiveAffineApplicableDomain
+  , lengthPositiveAffineApplicableDomainValidationSchemaTag
+  , validatedLengthPositiveAffineApplicableDomainInclusiveMaximums
+  , validatedLengthPositiveAffineApplicableDomainAssignmentCount
+  , validatedLengthPositiveAffineApplicableDomainApplicableAssignmentCount
+  , validatedLengthPositiveAffineApplicableDomainBasis
+  , ValidatedLengthSpinePairPositiveAffineApplicableDomain
+  , lengthSpinePairPositiveAffineApplicableDomainValidationSchemaTag
+  , validatedLengthSpinePairPositiveAffineApplicableDomainInclusiveMaximums
+  , validatedLengthSpinePairPositiveAffineApplicableDomainAssignmentCount
+  , validatedLengthSpinePairPositiveAffineApplicableDomainApplicableAssignmentCount
+  , validatedLengthSpinePairPositiveAffineApplicableDomainBasis
   , evaluateLengthContractAssignment
   , evaluateLengthSpinePairContractAssignment
   , evaluateLengthProviderApplication
@@ -127,6 +139,8 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validateLengthSpinePairProblemInputBox
   , validateLengthProblemApplicableDomain
   , validateLengthSpinePairProblemApplicableDomain
+  , validateLengthProblemPositiveAffineApplicableDomain
+  , validateLengthSpinePairProblemPositiveAffineApplicableDomain
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -826,6 +840,103 @@ validatedLengthSpinePairApplicableDomainBasis
 validatedLengthSpinePairApplicableDomainBasis
     (ValidatedLengthSpinePairApplicableDomainReceipt _ inputBox) =
   validatedLengthSpinePairInputBoxBasis inputBox
+
+-- | Versioned positive-affine coverage semantics for the scalar applicable
+-- domain.  This tag belongs only to the additive receipt below; the literal
+-- direct-bound v1 receipt and every problem, query, protocol, and live identity
+-- remain unchanged.
+lengthPositiveAffineApplicableDomainValidationSchemaTag :: [Word8]
+lengthPositiveAffineApplicableDomainValidationSchemaTag = ascii
+  "finite-list-spine-length/positive-affine-precondition-domain-establishment/v1"
+
+-- | Complete scalar applicable-domain validation under the positive-affine
+-- coverage rule.  The constructor is private.  Its nested box receipt owns the
+-- exact derived maxima, traversal counts, and model/provider basis.
+data ValidatedLengthPositiveAffineApplicableDomain =
+  ValidatedLengthPositiveAffineApplicableDomainReceipt
+    ![Word8]
+    !ValidatedLengthInputBox
+  deriving (Eq, Ord, Show)
+
+instance NFData ValidatedLengthPositiveAffineApplicableDomain where
+  rnf (ValidatedLengthPositiveAffineApplicableDomainReceipt schema inputBox) =
+    rnf schema `seq` rnf inputBox
+
+validatedLengthPositiveAffineApplicableDomainInclusiveMaximums
+  :: ValidatedLengthPositiveAffineApplicableDomain
+  -> [Natural]
+validatedLengthPositiveAffineApplicableDomainInclusiveMaximums
+    (ValidatedLengthPositiveAffineApplicableDomainReceipt _ inputBox) =
+  validatedLengthInputBoxInclusiveMaximums inputBox
+
+validatedLengthPositiveAffineApplicableDomainAssignmentCount
+  :: ValidatedLengthPositiveAffineApplicableDomain
+  -> Natural
+validatedLengthPositiveAffineApplicableDomainAssignmentCount
+    (ValidatedLengthPositiveAffineApplicableDomainReceipt _ inputBox) =
+  validatedLengthInputBoxAssignmentCount inputBox
+
+validatedLengthPositiveAffineApplicableDomainApplicableAssignmentCount
+  :: ValidatedLengthPositiveAffineApplicableDomain
+  -> Natural
+validatedLengthPositiveAffineApplicableDomainApplicableAssignmentCount
+    (ValidatedLengthPositiveAffineApplicableDomainReceipt _ inputBox) =
+  validatedLengthInputBoxApplicableAssignmentCount inputBox
+
+validatedLengthPositiveAffineApplicableDomainBasis
+  :: ValidatedLengthPositiveAffineApplicableDomain
+  -> LengthCounterexampleBasis
+validatedLengthPositiveAffineApplicableDomainBasis
+    (ValidatedLengthPositiveAffineApplicableDomainReceipt _ inputBox) =
+  validatedLengthInputBoxBasis inputBox
+
+-- | Nominal binary-product sibling of
+-- 'lengthPositiveAffineApplicableDomainValidationSchemaTag'.
+lengthSpinePairPositiveAffineApplicableDomainValidationSchemaTag :: [Word8]
+lengthSpinePairPositiveAffineApplicableDomainValidationSchemaTag = ascii
+  "finite-binary-product-spine-lengths/positive-affine-precondition-domain-establishment/v1"
+
+-- | Complete product applicable-domain validation under the positive-affine
+-- coverage rule.  Scalar and product receipts remain nominally disjoint even
+-- though their private extraction kernel is shared.
+data ValidatedLengthSpinePairPositiveAffineApplicableDomain =
+  ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt
+    ![Word8]
+    !ValidatedLengthSpinePairInputBox
+  deriving (Eq, Ord, Show)
+
+instance NFData ValidatedLengthSpinePairPositiveAffineApplicableDomain where
+  rnf (ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt
+      schema inputBox) = rnf schema `seq` rnf inputBox
+
+validatedLengthSpinePairPositiveAffineApplicableDomainInclusiveMaximums
+  :: ValidatedLengthSpinePairPositiveAffineApplicableDomain
+  -> [Natural]
+validatedLengthSpinePairPositiveAffineApplicableDomainInclusiveMaximums
+    (ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt
+      _ inputBox) = validatedLengthSpinePairInputBoxInclusiveMaximums inputBox
+
+validatedLengthSpinePairPositiveAffineApplicableDomainAssignmentCount
+  :: ValidatedLengthSpinePairPositiveAffineApplicableDomain
+  -> Natural
+validatedLengthSpinePairPositiveAffineApplicableDomainAssignmentCount
+    (ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt
+      _ inputBox) = validatedLengthSpinePairInputBoxAssignmentCount inputBox
+
+validatedLengthSpinePairPositiveAffineApplicableDomainApplicableAssignmentCount
+  :: ValidatedLengthSpinePairPositiveAffineApplicableDomain
+  -> Natural
+validatedLengthSpinePairPositiveAffineApplicableDomainApplicableAssignmentCount
+    (ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt
+      _ inputBox) =
+  validatedLengthSpinePairInputBoxApplicableAssignmentCount inputBox
+
+validatedLengthSpinePairPositiveAffineApplicableDomainBasis
+  :: ValidatedLengthSpinePairPositiveAffineApplicableDomain
+  -> LengthCounterexampleBasis
+validatedLengthSpinePairPositiveAffineApplicableDomainBasis
+    (ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt
+      _ inputBox) = validatedLengthSpinePairInputBoxBasis inputBox
 
 -- | Fail-closed scalar simplification failure after the caller supplied one
 -- opaque counterexample anchor.  Width and Cartesian-product admission misses
@@ -1650,6 +1761,226 @@ tightApplicableDomainMaximums inputCount inputPosition precondition =
   maximumFor index = case Map.lookup (fromIntegral index) bounds of
     Just maximumValue -> Right maximumValue
     Nothing -> Left $ LengthApplicableDomainInputUpperBoundMissing index
+
+-- | Establish the complete applicable domain of one exact scalar problem when
+-- every compact input is bounded by the additive positive-affine rule.
+--
+-- The original direct-bound entrance remains literal-only.  This sibling also
+-- recognizes a positive-affine expression bounded above by a literal, or equal
+-- to one, and proves an empty applicable domain from a syntactic contradiction.
+-- It still delegates all behavioral authority to the existing finite-box
+-- verifier and consumes no solver observation.
+validateLengthProblemPositiveAffineApplicableDomain
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> CheckedLengthProblem identity local
+  -> Either LengthApplicableDomainValidationError
+      (LengthApplicableDomainValidation
+        (BehavioralEvidence
+          FiniteListSpineLengthV1
+          ValidatedLengthCounterexample)
+        (BehavioralEvidence
+          FiniteListSpineLengthV1
+          ValidatedLengthPositiveAffineApplicableDomain))
+validateLengthProblemPositiveAffineApplicableDomain
+    evaluationLimits inputBoxLimits problem = do
+  let inputCount = checkedLengthProblemInputCount problem
+      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
+  if inputCount <= maximumInputs
+    then pure ()
+    else Left $ LengthApplicableDomainInputBoxValidationRejected
+      $ LengthInputBoxProblemInputLimitExceeded maximumInputs inputCount
+  case positiveAffineApplicableDomainMaximums inputCount scalarInputPosition
+      $ checkedLengthProblemPrecondition problem of
+    Left inapplicability -> Right
+      $ LengthApplicableDomainInapplicable inapplicability
+    Right maximums -> do
+      validation <- either
+        (Left . LengthApplicableDomainInputBoxValidationRejected)
+        Right
+        $ validateLengthProblemInputBox evaluationLimits inputBoxLimits
+            problem maximums
+      pure $ case validation of
+        LengthInputBoxCounterexample evidence ->
+          LengthApplicableDomainCounterexample evidence
+        LengthInputBoxValidated evidence ->
+          LengthApplicableDomainEstablished
+            $ mapBehavioralEvidenceReceipt
+                (ValidatedLengthPositiveAffineApplicableDomainReceipt
+                  lengthPositiveAffineApplicableDomainValidationSchemaTag)
+                evidence
+ where
+  scalarInputPosition variable = case variable of
+    LengthInput position -> Just position
+    LengthResult -> Nothing
+
+-- | Nominal binary-product sibling of
+-- 'validateLengthProblemPositiveAffineApplicableDomain'.
+validateLengthSpinePairProblemPositiveAffineApplicableDomain
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> CheckedLengthSpinePairProblem identity local
+  -> Either LengthSpinePairApplicableDomainValidationError
+      (LengthApplicableDomainValidation
+        (BehavioralEvidence
+          FiniteBinaryProductSpineLengthsV1
+          ValidatedLengthSpinePairCounterexample)
+        (BehavioralEvidence
+          FiniteBinaryProductSpineLengthsV1
+          ValidatedLengthSpinePairPositiveAffineApplicableDomain))
+validateLengthSpinePairProblemPositiveAffineApplicableDomain
+    evaluationLimits inputBoxLimits problem = do
+  let inputCount = checkedLengthSpinePairProblemInputCount problem
+      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
+  if inputCount <= maximumInputs
+    then pure ()
+    else Left $ LengthSpinePairApplicableDomainInputBoxValidationRejected
+      $ LengthSpinePairInputBoxProblemInputLimitExceeded
+          maximumInputs inputCount
+  case positiveAffineApplicableDomainMaximums inputCount spinePairInputPosition
+      $ checkedLengthSpinePairProblemPrecondition problem of
+    Left inapplicability -> Right
+      $ LengthApplicableDomainInapplicable inapplicability
+    Right maximums -> do
+      validation <- either
+        (Left . LengthSpinePairApplicableDomainInputBoxValidationRejected)
+        Right
+        $ validateLengthSpinePairProblemInputBox
+            evaluationLimits inputBoxLimits problem maximums
+      pure $ case validation of
+        LengthInputBoxCounterexample evidence ->
+          LengthApplicableDomainCounterexample evidence
+        LengthInputBoxValidated evidence ->
+          LengthApplicableDomainEstablished
+            $ mapBehavioralEvidenceReceipt
+                (ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt
+                  lengthSpinePairPositiveAffineApplicableDomainValidationSchemaTag)
+                evidence
+ where
+  spinePairInputPosition variable = case variable of
+    LengthSpinePairInput position -> Just position
+    LengthSpinePairResult _ -> Nothing
+
+data PositiveAffineCoverage
+  = PositiveAffineCoverageBounds !(Map.Map Natural Natural)
+  | PositiveAffineCoverageContradiction
+
+data PositiveAffineClauseCoverage
+  = PositiveAffineClauseIgnored
+  | PositiveAffineClauseBounds !(Map.Map Natural Natural)
+  | PositiveAffineClauseContradiction
+
+data PositiveAffineSummary = PositiveAffineSummary
+  !Natural
+  !(Map.Map Natural Natural)
+
+-- The checked precondition is already structurally bounded and normalized.
+-- Nullary validation deliberately avoids demanding it here and delegates the
+-- singleton assignment directly to the box verifier.  For nonnullary problems
+-- the complete canonical clause list is scanned before a missing bound is
+-- reported, unless a prior clause proves the whole conjunction contradictory.
+positiveAffineApplicableDomainMaximums
+  :: Int
+  -> (variable -> Maybe Natural)
+  -> LengthFormula variable
+  -> Either LengthApplicableDomainInapplicability [Natural]
+positiveAffineApplicableDomainMaximums inputCount inputPosition precondition
+  | inputCount == 0 = Right []
+  | otherwise = case collect Map.empty clauses of
+      PositiveAffineCoverageContradiction ->
+        Right $ replicate inputCount 0
+      PositiveAffineCoverageBounds bounds ->
+        mapM (maximumFor bounds) [0 .. inputCount - 1]
+ where
+  clauses = case precondition of
+    LengthAll formulas -> formulas
+    formula -> [formula]
+
+  collect !retained [] = PositiveAffineCoverageBounds retained
+  collect !retained (formula : remaining) =
+    case positiveAffineClauseCoverage inputCount inputPosition formula of
+      PositiveAffineClauseIgnored -> collect retained remaining
+      PositiveAffineClauseBounds bounds ->
+        collect (Map.unionWith min retained bounds) remaining
+      PositiveAffineClauseContradiction ->
+        PositiveAffineCoverageContradiction
+
+  maximumFor bounds index = case Map.lookup (fromIntegral index) bounds of
+    Just maximumValue -> Right maximumValue
+    Nothing -> Left $ LengthApplicableDomainInputUpperBoundMissing index
+
+positiveAffineClauseCoverage
+  :: Int
+  -> (variable -> Maybe Natural)
+  -> LengthFormula variable
+  -> PositiveAffineClauseCoverage
+positiveAffineClauseCoverage inputCount inputPosition formula = case formula of
+  LengthTruth False -> PositiveAffineClauseContradiction
+  LengthAtMost expression (LengthLiteral maximumValue) ->
+    boundedExpression False expression maximumValue
+  LengthEqual expression (LengthLiteral maximumValue) ->
+    boundedExpression True expression maximumValue
+  LengthEqual (LengthLiteral maximumValue) expression ->
+    boundedExpression True expression maximumValue
+  _ -> PositiveAffineClauseIgnored
+ where
+  boundedExpression isEquality expression maximumValue =
+    case summarizePositiveAffineExpression
+        maximumValue inputCount inputPosition expression of
+      Nothing -> PositiveAffineClauseIgnored
+      Just (PositiveAffineSummary constant coefficients)
+        | constant > maximumValue -> PositiveAffineClauseContradiction
+        | isEquality && Map.null coefficients && constant /= maximumValue ->
+            PositiveAffineClauseContradiction
+        | otherwise -> PositiveAffineClauseBounds
+          $ Map.map
+              ((maximumValue - constant) `quot`)
+              coefficients
+
+-- Summaries are saturated at one greater than the atom's literal ceiling.
+-- Saturation preserves both contradiction detection and every derived quotient
+-- because the remaining numerator is strictly below that cap.
+summarizePositiveAffineExpression
+  :: Natural
+  -> Int
+  -> (variable -> Maybe Natural)
+  -> LengthExpression variable
+  -> Maybe PositiveAffineSummary
+summarizePositiveAffineExpression maximumValue inputCount inputPosition = go
+ where
+  cap = maximumValue + 1
+
+  go expression = case expression of
+    LengthVariable variable -> do
+      position <- inputPosition variable
+      if position < fromIntegral inputCount
+        then Just $ PositiveAffineSummary 0 $ Map.singleton position 1
+        else Nothing
+    LengthLiteral value -> Just $ PositiveAffineSummary (min cap value) Map.empty
+    LengthSum terms -> foldM add (PositiveAffineSummary 0 Map.empty) terms
+    LengthScale factor nested
+      | factor == 0 -> Nothing
+      | otherwise -> scale factor <$> go nested
+    _ -> Nothing
+
+  add (PositiveAffineSummary leftConstant leftCoefficients) term = do
+    PositiveAffineSummary rightConstant rightCoefficients <- go term
+    pure $ PositiveAffineSummary
+      (saturatingNaturalAdd cap leftConstant rightConstant)
+      (Map.unionWith
+        (saturatingNaturalAdd cap)
+        leftCoefficients rightCoefficients)
+
+  scale factor (PositiveAffineSummary constant coefficients) =
+    PositiveAffineSummary
+      (saturatingNaturalMultiply cap factor constant)
+      (Map.map (saturatingNaturalMultiply cap factor) coefficients)
+
+saturatingNaturalAdd :: Natural -> Natural -> Natural -> Natural
+saturatingNaturalAdd cap left right = min cap $ left + right
+
+saturatingNaturalMultiply :: Natural -> Natural -> Natural -> Natural
+saturatingNaturalMultiply cap left right = min cap $ left * right
 
 -- | Private replay classification shared by one-assignment counterexample
 -- validation and complete input-box traversal.  Keeping one implementation

@@ -38,6 +38,30 @@ tier, not to the curated stability boundary. Cabal `Other-Modules` remain
 private. Djex is currently marked experimental; the architecture guide records
 these tiers explicitly.
 
+## Contents
+
+- [Components](#components)
+- [Canonical typed candidate identities](#canonical-typed-candidate-identities)
+- [Checked ground class-resolution foundation](#checked-ground-class-resolution-foundation)
+- [Finite list-spine length contracts](#finite-list-spine-length-contracts)
+  - [Finite binary product spine lengths, offline and live SMT replay](#finite-binary-product-spine-lengths-offline-and-live-smt-replay)
+- [Building](#building)
+- [Unified command](#unified-command)
+- [Query boundary](#query-boundary)
+  - [Shared query surface](#shared-query-surface)
+  - [Djinn sessions and requests](#djinn-sessions-and-requests)
+  - [Exference sessions and requests](#exference-sessions-and-requests)
+  - [Loading Haskell source environments](#loading-haskell-source-environments)
+  - [Generated output and rendering](#generated-output-and-rendering)
+  - [Compatibility executables](#compatibility-executables)
+- [Dependency migration](#dependency-migration)
+- [License and credits](#license-and-credits)
+
+The four sections between Components and Building are deep design notes on
+the checked semantic foundations; a reader who only wants to run or embed
+Djex can jump straight to [Building](#building) and the
+[query boundary](#query-boundary).
+
 ## Components
 
 - The unnamed `djex` library is the complete product, compiled from `src/`,

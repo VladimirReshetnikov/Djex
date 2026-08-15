@@ -1254,15 +1254,30 @@ usable work must not receive a fresh host window for every query. A validated
 `LengthSMTLibLiveUsableWorkBudget` is a positive millisecond duration; its pure
 constructor rejects nonpositive values and values which cannot be represented
 by both the host microsecond wait and monotonic nanosecond clock arithmetic.
-Capturing it creates one opaque, generative
-`LengthSMTLibLiveUsableWorkDeadline budget`. The rank-N `budget` parameter
-prevents that absolute deadline from escaping or being reused as unscoped
-authority.
+The original v1 owner creates an opaque, generative
+`LengthSMTLibLiveUsableWorkDeadline budget`. Its rank-N `budget` parameter
+separates independently captured tokens at the type level, but does **not**
+enforce dynamic non-escape: an `IO` closure can retain the token, and a forked
+thread can use it while or after the owner callback returns. That runtime-
+unscoped API is unsafe to retain or share and is kept only for source and byte-
+identity compatibility. New callers should use the v2
+`LengthSMTLibLiveScopedUsableWorkDeadline budget`.
+
+The v2 owner records the creating thread and an open/closed lease state. Only
+that owner thread may checkpoint or open a session, and the owner closes the
+lease on both normal and exceptional callback exit. An action which captured
+the token but runs after exit, or one invoked from a forked thread while the
+scope is open, receives the sanitized
+`LengthSMTLibLiveSessionUsableWorkScopeUnavailable`. That admission happens
+before reading the monotonic clock and, for session opening, before evaluating
+configuration or allocating a workspace, so scope unavailability wins even
+when the absolute deadline has also expired.
 
 This example starts a 30-second window before forcing two deferred sealed
-queries, then opens one session beneath the same token and runs one scalar and
-one product transaction. The nested `Either`s distinguish failure of the outer
-budget owner, session opening/finalization, and each nominal query path:
+queries, performs a cooperative checkpoint, then opens one session beneath the
+same v2 authority and runs one scalar and one product transaction. The nested
+`Either`s distinguish failure of the outer owner from checkpoint/session
+failure and from each nominal query result:
 
 ```haskell
 import Control.DeepSeq (force)
@@ -1273,61 +1288,77 @@ usableWorkBudget <- either (fail . show) pure $
     LengthSMTLibLiveUsableWorkBudgetSource
       { lengthSMTLibLiveUsableWorkBudgetSourceMilliseconds = 30000 }
 
-budgetedBatch <-
-  withLengthSMTLibLiveUsableWorkDeadline usableWorkBudget $ \deadline -> do
+scopedBatch <-
+  withLengthSMTLibLiveScopedUsableWorkDeadline usableWorkBudget $ \deadline -> do
     -- Force application-deferred sealing/ranking work after deadline capture.
     (scalarQuery, pairQuery) <- evaluate $ force
       (deferredScalarQuery, deferredPairQuery)
-    withLengthSMTLibLiveSessionUnderDeadline
-      deadline executionConfig $ \liveSession -> do
-        scalar <- runLengthSMTLibLiveQuery
-          defaultLengthEvaluationLimits liveSession scalarQuery
-        pair <- runLengthSpinePairSMTLibLiveQuery
-          defaultLengthEvaluationLimits liveSession pairQuery
-        pure (scalar, pair)
+    checkpoint <- checkLengthSMTLibLiveScopedUsableWorkDeadline deadline
+    case checkpoint of
+      Left failure -> pure (Left failure)
+      Right () ->
+        withLengthSMTLibLiveSessionUnderScopedDeadline
+          deadline executionConfig $ \liveSession -> do
+            scalar <- runLengthSMTLibLiveQuery
+              defaultLengthEvaluationLimits liveSession scalarQuery
+            pair <- runLengthSpinePairSMTLibLiveQuery
+              defaultLengthEvaluationLimits liveSession pairQuery
+            pure (scalar, pair)
 
-case budgetedBatch of
+case scopedBatch of
   Left budgetOwnerError -> handleSessionError budgetOwnerError
-  Right (Left sessionError) -> handleSessionError sessionError
+  Right (Left checkpointOrSessionError) ->
+    handleSessionError checkpointOrSessionError
   Right (Right (scalarResult, pairResult)) ->
     consumeNominalResults scalarResult pairResult
 ```
 
-`withLengthSMTLibLiveSessionWithUsableWorkBudget` is the shorter form when no
-application work must run between deadline capture and session configuration.
+`withLengthSMTLibLiveSessionWithScopedUsableWorkBudget` is the shorter v2 form
+when no application work must run between deadline capture and session
+configuration. `checkLengthSMTLibLiveScopedUsableWorkDeadline` is only a
+cooperative observation of the same absolute deadline: it neither refreshes
+the window nor consumes a query ordinal, writes SMT-LIB, records an
+observation, or interrupts work which never calls it. It is therefore not a
+watchdog.
+
 The legacy `withLengthSMTLibLiveSession` remains byte-for-byte and
 identity-for-identity on its historical policy: it has a private opener window
-and derives one fresh local host deadline for every query. The budgeted policy
-instead uses the earlier absolute deadline for opening and, for every scalar
-or product call, selects the minimum of the shared deadline and a fresh local
-per-query deadline. The shared deadline wins an exact tie. Waiting for the
-single serial query gate and the transaction, independent replay, and run-
-identity work all remain beneath that effective deadline. The existing shared
-64-transaction ordinal ceiling is independent of this elapsed-time budget.
+and derives one fresh local host deadline for every query. Both v1 and v2
+budgeted policies instead use the earlier absolute deadline for opening and,
+for every scalar or product call, select the minimum of the shared deadline and
+a fresh local per-query deadline. The shared deadline wins an exact tie.
+Waiting for the single serial query gate and the transaction, independent
+replay, and run-identity work all remain beneath that effective deadline. The
+existing shared 64-transaction ordinal ceiling is independent of this elapsed-
+time budget.
 
 This is a usable-work boundary, not an asynchronous watchdog. It does not
 interrupt arbitrary callback IO or a nonterminating pure computation. A live
 operation can observe expiry earlier; otherwise the session checks immediately
-after its callback returns, and the general deadline owner checks when its
-callback returns normally. Callback exceptions remain authoritative and are
-re-thrown after durable cleanup begins. Final readiness and cleanup are run
-under fresh established private windows rather than the shared operational
-deadline. The convenience entrance deliberately performs no second shared
-check after those stages. In the two-step example, however, the general outer
-owner's normal-return check happens after the nested session has completely
-returned, so it may truthfully observe that the shared time elapsed while those
-fresh-window stages ran.
+after its callback returns. The general two-step v2 owner then closes its lease
+and checks the shared deadline when its callback returns normally. Callback
+exceptions remain authoritative: v2 closes the lease before rethrow, and a
+nested session begins its durable owned cleanup before an exception crosses
+that session boundary. Final readiness and cleanup use fresh established
+private windows rather than the shared operational deadline. The v2
+convenience entrance deliberately closes the lease but performs no second
+shared-deadline check after those stages. In the two-step example, however,
+the general outer owner's normal-return check happens after the nested session
+has completely returned, so it may truthfully observe that the shared time
+elapsed while those fresh-window stages ran.
 
 An expiry observed at the owner or session boundary is the existing sanitized
 `LengthSMTLibLiveSessionDeadlineExceeded`; expiry observed by an individual
 scalar or product query uses its corresponding existing byte-free query
 deadline failure. Cleanup incompleteness remains a separate bit, and an
-exception is never replaced by a budget result. Budgeted ready-worker and
-scalar/product run identities are distinct additive envelopes. They bind the
-requested duration, captured shared absolute deadline, minimum-selection rule,
-effective cause, and coverage/exclusion policy around the exact legacy
-identity. Legacy identities, query/protocol bytes, and observation APIs remain
-unchanged.
+exception is never replaced by a budget result. V2 ready-worker, scalar-run,
+and product-run identities are distinct additive scoped-v2 envelopes, separate
+from both the retained v1 budgeted identities and the exact legacy identities.
+They bind the duration, captured shared absolute deadline, minimum-selection
+rule, effective cause, lifecycle/admission policy, and coverage/exclusion
+policy. Owner thread identifiers, mutable lease state, and individual
+checkpoint observations are not identity fields. Query/protocol bytes and
+observation APIs remain unchanged.
 
 The deadline establishes only bounded process/session causality. It does not
 attest the executed image, validate Z3 soundness, turn `unsat` into proof, or
@@ -1335,6 +1366,8 @@ grant pruning authority. Scalar and product observations stay nominally
 separate and `HeuristicRankingOnly`; only exact query association followed by
 independent domain replay can reveal optional counterexample evidence. See the
 [shared live usable-work budget report](docs/reports/2026-08-15-shared-live-usable-work-budget.md).
+The v1 limitation and v2 runtime-scope contract are detailed in the
+[dynamically scoped live usable-work deadline report](docs/reports/2026-08-15-dynamically-scoped-live-usable-work-deadline.md).
 
 SMT-LIB's QF_LIA logic excludes the built-in `div` and `mod` operators. Djex
 therefore lowers every remaining normalized quotient or modulo node to one

@@ -20,6 +20,13 @@ protocol identities, observations, replay behavior, and evidence authority are
 unchanged. Callers opt into the shared elapsed-time policy through explicitly
 new public values and entrances.
 
+This report records the original v1 budgeted entrance. V1 remains available for
+source and exact fingerprint compatibility, but its generative phantom does
+not enforce dynamic non-escape: a returned action closure or fork can retain
+and later use the token. New callers should use the owner-thread-affine v2 API
+documented in the
+[dynamically scoped live usable-work deadline report](2026-08-15-dynamically-scoped-live-usable-work-deadline.md).
+
 ## Public validation and rank-N token
 
 The pure source is:
@@ -45,9 +52,11 @@ duration projection.
 
 `withLengthSMTLibLiveUsableWorkDeadline` samples the monotonic clock once and
 lends an opaque `LengthSMTLibLiveUsableWorkDeadline budget` through a rank-N
-callback. The nominal `budget` parameter is generative, so an absolute deadline
-cannot escape as forgeable or reusable session authority. The owner checks the
-deadline again when its callback returns normally.
+callback. The nominal `budget` parameter is generative, so independently
+captured tokens cannot be mixed by ordinary typing. It does not prevent a
+closure from hiding and retaining the token or a forked thread from using it;
+v1 has no runtime owner-thread or open/closed admission check. The owner checks
+the deadline again when its callback returns normally.
 
 ## Coverage and minimum selection
 

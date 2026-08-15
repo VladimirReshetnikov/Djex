@@ -32,10 +32,14 @@
 -- The legacy entrance retains private opener/finalizer deadlines and one host
 -- deadline per query.  The additive budgeted entrances cap opening and every
 -- query by one shared absolute usable-work deadline while retaining fresh
--- finalizer/cleanup windows.  They do not interrupt arbitrary callback IO and
--- therefore make no hard whole-callback wall-clock claim.  Callback exceptions,
--- including asynchronous exceptions, are rethrown after the private owner has
--- started durable cleanup.
+-- finalizer/cleanup windows.  The retained v1 token is only generative: rank-N
+-- polymorphism does not prevent an action closure or fork from retaining it.
+-- The recommended v2 token additionally admits checkpoints and session opening
+-- only on its owner thread during the owner callback's dynamic extent.  Neither
+-- version interrupts arbitrary callback IO, and neither makes a hard whole-
+-- callback wall-clock claim.  Callback exceptions, including asynchronous
+-- exceptions, remain authoritative: v2 closes admission, and a private session
+-- owner begins durable cleanup before an exception crosses its boundary.
 module Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live
   ( LengthSMTLibLiveSession
   , LengthSMTLibLiveUsableWorkBudgetSource (..)
@@ -143,8 +147,8 @@ data LengthSMTLibLiveSession epoch = LengthSMTLibLiveSession
 
 type role LengthSMTLibLiveSession nominal
 
--- | Pure source for one shared usable-work window.  The window starts when
--- 'withLengthSMTLibLiveUsableWorkDeadline' captures its monotonic deadline.
+-- | Pure source for one shared usable-work window.  The window starts when a
+-- v1 or v2 deadline owner captures its monotonic deadline.
 data LengthSMTLibLiveUsableWorkBudgetSource =
   LengthSMTLibLiveUsableWorkBudgetSource
     { lengthSMTLibLiveUsableWorkBudgetSourceMilliseconds :: Int }
@@ -192,8 +196,11 @@ mkLengthSMTLibLiveUsableWorkBudget
         $ LengthSMTLibLiveUsableWorkBudgetMicrosecondsOverflow milliseconds
   | otherwise = Right $ LengthSMTLibLiveUsableWorkBudget milliseconds
 
--- | Generative, opaque shared absolute deadline.  Its constructor and clock
--- value cannot cross the public boundary.
+-- | Retained v1 generative, opaque shared absolute deadline.  Its constructor
+-- and clock value cannot cross the public boundary, but the rank-N phantom
+-- alone does not stop a returned action closure or forked thread from retaining
+-- and using the token.  Prefer 'LengthSMTLibLiveScopedUsableWorkDeadline' when
+-- runtime non-escape is required.
 data LengthSMTLibLiveUsableWorkDeadline budget =
   LengthSMTLibLiveUsableWorkDeadline
     !(Session.LengthSMTLibSessionUsableWorkDeadline budget)
@@ -202,7 +209,9 @@ type role LengthSMTLibLiveUsableWorkDeadline nominal
 
 -- | Generative v2 deadline authority with an owner-thread-affine runtime
 -- scope.  Its constructor, deadline, owner, and open/closed state remain
--- private.
+-- private.  A closure may retain this value at the Haskell level, but every
+-- public token operation rejects it after the owner callback exits; use from a
+-- different thread is rejected even while that callback remains open.
 data LengthSMTLibLiveScopedUsableWorkDeadline budget =
   LengthSMTLibLiveScopedUsableWorkDeadline
     !(Session.LengthSMTLibSessionScopedUsableWorkDeadline budget)
@@ -430,8 +439,10 @@ defaultLengthSMTLibLiveSessionMaximumQueries =
   Session.lengthSMTLibSessionLimitSourceMaximumQueries
     Session.defaultLengthSMTLibSessionLimitSource
 
--- | Capture one absolute monotonic deadline and lend only its generative,
--- opaque token.  This owner does not interrupt arbitrary callback IO, but it
+-- | Retained runtime-unscoped v1 owner.  It captures one absolute monotonic
+-- deadline and lends its generative, opaque token.  Rank-N generation separates
+-- captures but does not prevent a closure or fork from retaining the token.
+-- This owner does not interrupt arbitrary callback IO, but it
 -- rejects a normally returning callback after expiry.  An overrun can be
 -- rejected earlier by the next live operation or by a budgeted session
 -- immediately after its callback returns, before fresh finalizer/cleanup
@@ -454,11 +465,11 @@ withLengthSMTLibLiveUsableWorkDeadline
       (sessionFailure failure) False
     Right value -> Right value
 
--- | Open one capability-probed worker under an already captured shared
--- deadline.  The effective opener and each effective query deadline are the
--- earlier of their fresh local deadline and this token; the shared deadline
--- wins an exact tie.  Cleanup and the final readiness observation retain their
--- established fresh private windows.
+-- | Open one capability-probed worker under an already captured runtime-
+-- unscoped v1 deadline.  The effective opener and each effective query
+-- deadline are the earlier of their fresh local deadline and this token; the
+-- shared deadline wins an exact tie.  Cleanup and the final readiness
+-- observation retain their established fresh private windows.
 withLengthSMTLibLiveSessionUnderDeadline
   :: LengthSMTLibLiveUsableWorkDeadline budget
   -> LengthSMTLibExecutionConfig
@@ -475,12 +486,12 @@ withLengthSMTLibLiveSessionUnderDeadline
         Left failure -> Left $ sanitizeSessionError failure
         Right value -> Right value
 
--- | Convenience entrance which captures the shared deadline immediately
--- before session configuration/opening.  The two-step token API remains
--- available when pure caller work must consume part of the same window before
--- a deferred live session is opened.  This entrance relies on the session's
--- callback-return check and deliberately performs no second check after its
--- fresh final-readiness and cleanup windows.
+-- | Retained v1 convenience entrance which captures the shared deadline
+-- immediately before session configuration/opening.  The two-step token API
+-- remains available when pure caller work must consume part of the same window
+-- before a deferred live session is opened.  This entrance relies on the
+-- session's callback-return check and deliberately performs no second check
+-- after its fresh final-readiness and cleanup windows.
 withLengthSMTLibLiveSessionWithUsableWorkBudget
   :: LengthSMTLibLiveUsableWorkBudget
   -> LengthSMTLibExecutionConfig
@@ -499,9 +510,12 @@ withLengthSMTLibLiveSessionWithUsableWorkBudget
     Right result -> result
 
 -- | Capture one owner-thread-affine v2 deadline and lend its opaque authority
--- only for this callback's dynamic extent.  Admission closes on normal and
--- exceptional exit.  A normal callback result is accepted only if the shared
--- absolute deadline remains live after closing the scope.
+-- for this callback's dynamic extent.  Admission closes on normal and
+-- exceptional exit, so an escaped action closure cannot use the token later.
+-- A forked use is rejected while the scope is open because it is not running
+-- on the owner thread.  A normal callback result is accepted only if the shared
+-- absolute deadline remains live after closing the scope.  This owner does not
+-- interrupt arbitrary callback work.
 withLengthSMTLibLiveScopedUsableWorkDeadline
   :: forall result. LengthSMTLibLiveUsableWorkBudget
   -> (forall budget.
@@ -517,8 +531,10 @@ withLengthSMTLibLiveScopedUsableWorkDeadline
     Right value -> Right value
 
 -- | Cooperatively observe the v2 authority without refreshing its deadline.
--- Wrong-thread or closed use is rejected before the monotonic clock is read,
--- so scope unavailability wins when the absolute deadline is also expired.
+-- This is a checkpoint, not a watchdog: it interrupts no work, consumes no
+-- query ordinal, emits no SMT-LIB, and creates no solver observation.  Wrong-
+-- thread or closed use is rejected before the monotonic clock is read, so scope
+-- unavailability wins when the absolute deadline is also expired.
 checkLengthSMTLibLiveScopedUsableWorkDeadline
   :: LengthSMTLibLiveScopedUsableWorkDeadline budget
   -> IO (Either LengthSMTLibLiveSessionError ())
@@ -533,7 +549,9 @@ checkLengthSMTLibLiveScopedUsableWorkDeadline
 -- | Open one worker under an open v2 authority.  Owner-thread and lifecycle
 -- admission precede the clock, configuration, and workspace.  The internal
 -- opener repeats that admission at its production boundary before acquiring
--- resources.
+-- resources.  Once admitted, the worker retains the existing session callback
+-- lifecycle and shared scalar/product query lease; this token gate does not
+-- create behavioral evidence or solver authority.
 withLengthSMTLibLiveSessionUnderScopedDeadline
   :: LengthSMTLibLiveScopedUsableWorkDeadline budget
   -> LengthSMTLibExecutionConfig
@@ -556,8 +574,10 @@ withLengthSMTLibLiveSessionUnderScopedDeadline
 
 -- | Capture and consume one scoped v2 budget around exactly one live session.
 -- The session checks callback completion before its fresh final-readiness and
--- cleanup windows; the outer owner closes the authority without charging
--- those excluded windows to a second deadline check.
+-- cleanup windows; after the session returns, the outer owner closes the
+-- authority without charging those excluded windows to a second deadline
+-- check.  The general two-step v2 owner instead closes and checks on its normal
+-- callback return, which occurs after a nested session's finalization.
 withLengthSMTLibLiveSessionWithScopedUsableWorkBudget
   :: LengthSMTLibLiveUsableWorkBudget
   -> LengthSMTLibExecutionConfig

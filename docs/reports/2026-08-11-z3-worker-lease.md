@@ -216,8 +216,11 @@ complete execution key shortens ready-worker and transitive query-run keys, so
 a tight custom identity-byte budget can newly admit an otherwise unchanged
 worker or run. No formerly admitted key becomes too large.
 
-The callback receives no process handle or secret-seed accessor, and its
-phantom epoch cannot escape the rank-N scope directly. The package-private,
+The callback receives no process handle or secret-seed accessor. Its phantom
+epoch cannot appear directly in the callback's result type, but rank-N
+polymorphism alone does not prevent an action closure or fork from retaining a
+worker value. Runtime query admission and the session's closing state—not the
+phantom by itself—reject use after the callback boundary. The package-private,
 reversible identity intentionally contains the already-spent readiness
 barriers and exact transcript; a package consumer can recover those bytes.
 They do not reveal the 256-bit seed from which later, domain-separated query

@@ -1170,8 +1170,9 @@ Supporting vocabulary, all re-exported by the facade:
   counters (`ObservationCounts`, `observationSnapshot`) for reproducible
   reporting.
 
-The [synthesis foundation map](../synthesis/README.md) documents these
-modules individually, and the dated reports indexed at
+The [synthesis foundation map](../synthesis/README.md) tabulates these
+modules, the [semantic foundations reference](semantic-foundations.md)
+narrates them module by module, and the dated reports indexed at
 [docs/reports/README.md](reports/README.md) record each design boundary.
 
 ## Import guidance

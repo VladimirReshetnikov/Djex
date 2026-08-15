@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE InterruptibleFFI #-}
 
 -- | Private ownership of one raw Z3 subprocess.
 --
@@ -34,6 +35,8 @@ module Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process
   ( z3SMTLibExecutableSnapshotStrengthTag
   , z3SMTLibDescriptorBoundExecutableLaunchStrengthTag
   , z3SMTLibDescriptorBoundExecutableLaunchSupported
+  , z3SMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchStrengthTag
+  , z3SMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchSupported
   , Z3SMTLibProcessLimitSource (..)
   , defaultZ3SMTLibProcessLimitSource
   , Z3SMTLibProcessLimits
@@ -75,6 +78,10 @@ module Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process
   , openZ3SMTLibDescriptorBoundProcess
   , openZ3SMTLibDescriptorBoundProcessWithPreExecHook
   , z3SMTLibProcessUsesDescriptorBoundExecutableLaunch
+  , Z3SMTLibEffectiveIDExecutableAccessCheckResult (..)
+  , openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
+  , openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
+  , z3SMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch
   , z3SMTLibProcessSnapshot
   , z3SMTLibProcessObservationFingerprintFields
   , z3SMTLibProcessLimits
@@ -256,6 +263,235 @@ import Language.Haskell.Synthesis.Internal.SMTLib.Causal.StdoutChunk
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
   as Z3
 
+-- | Additive descriptor-bound launch which also observes effective-ID source
+-- VFS execute access before copying and again after staging, immediately
+-- before child allocation.  These observations are point-in-time only.
+openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
+  :: Z3SMTLibProcessLimits
+  -> Z3SMTLibProcessCancellation
+  -> Z3SMTLibProcessDeadline
+  -> Z3.Z3SMTLibExecutionProfile
+  -> FilePath
+  -> Z3SMTLibWorkingDirectoryDescriptor
+  -> IO (Either Z3SMTLibProcessError Z3SMTLibProcess)
+openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
+    limits cancellation deadline profile workingDirectory
+    workingDirectoryDescriptor =
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+  openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
+    limits cancellation deadline profile workingDirectory
+    workingDirectoryDescriptor nativeEffectiveIDExecutableAccessCheck $ pure ()
+#else
+  openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
+    limits cancellation deadline profile workingDirectory
+    workingDirectoryDescriptor
+    (const $ pure Z3SMTLibEffectiveIDExecutableAccessCheckUnavailable)
+    $ pure ()
+#endif
+
+-- | Deterministic package-private seam.  The closed checker is invoked on the
+-- borrowed numeric source descriptor exactly twice along a successful prefix;
+-- it must neither retain nor close that descriptor.  The hook runs after pin
+-- and sealed-image admission but before the second check or any fork/pipe/
+-- child allocation.
+openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
+  :: Z3SMTLibProcessLimits
+  -> Z3SMTLibProcessCancellation
+  -> Z3SMTLibProcessDeadline
+  -> Z3.Z3SMTLibExecutionProfile
+  -> FilePath
+  -> Z3SMTLibWorkingDirectoryDescriptor
+  -> (CInt -> IO Z3SMTLibEffectiveIDExecutableAccessCheckResult)
+  -> IO ()
+  -> IO (Either Z3SMTLibProcessError Z3SMTLibProcess)
+#ifndef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
+    _ _ _ _ _ _ _ _ =
+  pure $ Left $ processError Z3SMTLibProcessSnapshotPhase
+    Z3SMTLibProcessEffectiveIDExecutableAccessCheckUnavailable Nothing
+#else
+openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
+    limits cancellation deadline profile workingDirectory
+    workingDirectoryDescriptor accessCheck preFinalAccessHook =
+  mask $ \restore -> do
+    initial <- checkCancellationDeadline
+      Z3SMTLibProcessSnapshotPhase cancellation deadline
+    case initial of
+      Left failure -> pure $ Left failure
+      Right () -> do
+        admittedWorkingDirectory <- restore $
+          inspectDescriptorWorkingDirectory cancellation deadline
+            workingDirectory workingDirectoryFd
+        case admittedWorkingDirectory of
+          Left failure -> pure $ Left failure
+          Right (canonicalWorkingDirectory, workingDirectoryMetadata) -> do
+            controlledOpen <- restore $ runBeforeZ3SMTLibProcessDeadline
+              cancellation deadline openSourceDescriptor
+              rollbackOpenedDescriptor
+            case controlledOpen of
+              Left failure -> pure $ Left failure
+              Right (Left failure) -> pure $ Left failure
+              Right (Right sourceDescriptor) ->
+                restore
+                  (withSourceDescriptor sourceDescriptor
+                    canonicalWorkingDirectory workingDirectoryMetadata)
+                  `finally` closeDescriptorIgnoringFailure sourceDescriptor
+ where
+  Z3SMTLibWorkingDirectoryDescriptor workingDirectoryRaw =
+    workingDirectoryDescriptor
+  workingDirectoryFd = Fd workingDirectoryRaw
+
+  openSourceDescriptor = do
+    opened <- tryAny $ withFilePath
+      (Z3.z3SMTLibExecutionExecutablePath profile) c_openExecutableDescriptor
+    pure $ case opened of
+      Right raw | raw >= 0 -> Right $ Fd raw
+      _ -> Left $ processError Z3SMTLibProcessSnapshotPhase
+        Z3SMTLibProcessExecutableUnavailable Nothing
+
+  rollbackOpenedDescriptor (Left _) = pure ()
+  rollbackOpenedDescriptor (Right descriptor) =
+    closeDescriptorIgnoringFailure descriptor
+
+  withSourceDescriptor sourceDescriptor canonicalWorkingDirectory
+      workingDirectoryMetadata = do
+    beforeResult <- captureDescriptorMetadata sourceDescriptor
+    case beforeResult of
+      Left failure -> pure $ Left failure
+      Right sourceMetadata
+        | not $ descriptorMetadataIsRegular sourceMetadata ->
+            pure $ Left $ processError Z3SMTLibProcessSnapshotPhase
+              Z3SMTLibProcessExecutableNotRegular Nothing
+        | not $ descriptorMetadataHasExecuteBit sourceMetadata ->
+            pure $ Left $ processError Z3SMTLibProcessSnapshotPhase
+              Z3SMTLibProcessExecutableNotExecutable Nothing
+        | otherwise -> do
+            admitted <- observeEffectiveIDAccess sourceDescriptor
+            case admitted of
+              Left failure -> pure $ Left failure
+              Right () -> createAndSealImage sourceDescriptor sourceMetadata
+                canonicalWorkingDirectory workingDirectoryMetadata
+
+  observeEffectiveIDAccess sourceDescriptor = do
+    controlled <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
+      (tryAny $ accessCheck $ fdToCInt sourceDescriptor)
+      $ const $ pure ()
+    pure $ case controlled of
+      Left failure -> Left failure
+      Right (Left _) -> Left $ processError Z3SMTLibProcessSnapshotPhase
+        Z3SMTLibProcessEffectiveIDExecutableAccessCheckFailed Nothing
+      Right (Right result) -> case result of
+        Z3SMTLibEffectiveIDExecutableAccessAdmitted -> Right ()
+        Z3SMTLibEffectiveIDExecutableAccessDenied -> Left $ processError
+          Z3SMTLibProcessSnapshotPhase
+          Z3SMTLibProcessEffectiveIDExecutableAccessDenied Nothing
+        Z3SMTLibEffectiveIDExecutableAccessCheckUnavailable -> Left
+          $ processError Z3SMTLibProcessSnapshotPhase
+              Z3SMTLibProcessEffectiveIDExecutableAccessCheckUnavailable
+              Nothing
+        Z3SMTLibEffectiveIDExecutableAccessCheckFailed -> Left $ processError
+          Z3SMTLibProcessSnapshotPhase
+          Z3SMTLibProcessEffectiveIDExecutableAccessCheckFailed Nothing
+
+  createAndSealImage sourceDescriptor sourceMetadata
+      canonicalWorkingDirectory workingDirectoryMetadata =
+    mask $ \restoreImage -> do
+      controlledImage <- restoreImage $ runBeforeZ3SMTLibProcessDeadline
+        cancellation deadline createStagedDescriptor rollbackOpenedDescriptor
+      case controlledImage of
+        Left failure -> pure $ Left failure
+        Right (Left failure) -> pure $ Left failure
+        Right (Right stagedDescriptor) ->
+          restoreImage
+            (withStagedDescriptor sourceDescriptor sourceMetadata
+              stagedDescriptor canonicalWorkingDirectory
+              workingDirectoryMetadata)
+            `finally` closeDescriptorIgnoringFailure stagedDescriptor
+
+  createStagedDescriptor = do
+    attempted <- tryAny c_createStagedExecutable
+    pure $ case attempted of
+      Right raw | raw >= 0 -> Right $ Fd raw
+      _ -> Left $ processError Z3SMTLibProcessSnapshotPhase
+        Z3SMTLibProcessDescriptorBoundStagingFailed Nothing
+
+  withStagedDescriptor sourceDescriptor sourceMetadata stagedDescriptor
+      canonicalWorkingDirectory workingDirectoryMetadata = do
+    copied <- copyExecutableToStagedImage limits cancellation deadline
+      sourceDescriptor stagedDescriptor
+    case copied of
+      Left failure -> pure $ Left failure
+      Right (digest, count) -> do
+        afterResult <- captureDescriptorMetadata sourceDescriptor
+        case afterResult of
+          Left failure -> pure $ Left failure
+          Right afterMetadata
+            | sourceMetadata /= afterMetadata -> pure $ Left $ processError
+                Z3SMTLibProcessSnapshotPhase
+                Z3SMTLibProcessExecutableMetadataChanged Nothing
+            | otherwise -> finishStagedImage sourceDescriptor stagedDescriptor
+                sourceMetadata workingDirectoryMetadata
+                canonicalWorkingDirectory digest count
+
+  finishStagedImage sourceDescriptor stagedDescriptor sourceMetadata
+      workingDirectoryMetadata canonicalWorkingDirectory digest count
+    | count > fromIntegral (maxBound :: Int64) =
+        pure $ Left $ processError Z3SMTLibProcessSnapshotPhase
+          Z3SMTLibProcessExecutableByteLimitExceeded $ Just count
+    | otherwise = do
+        let expected = BS.pack <$>
+              Z3.z3SMTLibExecutionExpectedExecutableSHA256 profile
+        case expected of
+          Just pinned | pinned /= digest -> pure $ Left $ processError
+            Z3SMTLibProcessSnapshotPhase
+            Z3SMTLibProcessExecutableDigestMismatch Nothing
+          _ -> do
+            sealed <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
+              (sealAndVerifyEffectiveIDAccessStagedImage stagedDescriptor count)
+              $ const $ pure ()
+            case sealed of
+              Left failure -> pure $ Left failure
+              Right False -> pure $ Left $ processError
+                Z3SMTLibProcessSnapshotPhase
+                Z3SMTLibProcessDescriptorBoundStagingFailed Nothing
+              Right True -> do
+                let snapshot = Z3SMTLibExecutableSnapshot digest count
+                      $ descriptorBoundEffectiveIDExecutableAccessSnapshotField
+                          profile workingDirectory canonicalWorkingDirectory
+                          sourceMetadata workingDirectoryMetadata digest count
+                          expected
+                hooked <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
+                  preFinalAccessHook $ const $ pure ()
+                case hooked of
+                  Left failure -> pure $ Left failure
+                  Right () -> do
+                    admitted <- observeEffectiveIDAccess sourceDescriptor
+                    case admitted of
+                      Left failure -> pure $ Left failure
+                      Right () -> spawnStagedImage snapshot stagedDescriptor
+                        canonicalWorkingDirectory
+
+  spawnStagedImage snapshot stagedDescriptor canonicalWorkingDirectory = do
+    rollbackStatus <- newEmptyTMVarIO
+    let rollbackAttempt attempted = case attempted of
+          Left _ -> pure ()
+          Right created -> do
+            cleanup <- cleanupDescriptorCreated limits created
+            atomically $ void $ tryPutTMVar rollbackStatus cleanup
+    controlledSpawn <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
+      (nativeDescriptorSpawn limits profile stagedDescriptor
+        workingDirectoryFd
+        ProcessDescriptorBoundEffectiveIDExecutableAccessLaunch)
+      rollbackAttempt
+    case controlledSpawn of
+      Left failure -> do
+        cleanup <- atomically $ tryReadTMVar rollbackStatus
+        pure $ Left $ maybe failure (`attachCleanup` failure) cleanup
+      Right (Left failure) -> pure $ Left failure
+      Right (Right created) -> finishDescriptorCreated limits cancellation
+        deadline snapshot canonicalWorkingDirectory created
+#endif
+
 -- | Explicitly weaker than an executed-image attestation method.
 z3SMTLibExecutableSnapshotStrengthTag :: ByteString
 z3SMTLibExecutableSnapshotStrengthTag = asciiBytes
@@ -275,6 +511,26 @@ z3SMTLibDescriptorBoundExecutableLaunchSupported :: Bool
 z3SMTLibDescriptorBoundExecutableLaunchSupported = True
 #else
 z3SMTLibDescriptorBoundExecutableLaunchSupported = False
+#endif
+
+-- | The opened source must pass two effective-filesystem-credential VFS
+-- execute-access observations, while the sealed memfd still binds only the
+-- main-image bytes.  Neither observation is a reservation or a complete
+-- exec/bprm security decision.
+z3SMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchStrengthTag
+  :: ByteString
+z3SMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchStrengthTag =
+  asciiBytes $ concat
+    [ "opened-source-two-point-faccessat2-x-ok-at-empty-path-at-eaccess-"
+    , "hash-copy-sealed-memfd-execveat/point-in-time-effective-id-source-"
+    , "vfs-executable-access-and-main-image-bytes/v1"
+    ]
+
+z3SMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchSupported :: Bool
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+z3SMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchSupported = True
+#else
+z3SMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchSupported = False
 #endif
 
 -- | Borrowed descriptor for the already-owned fresh working directory.  The
@@ -361,6 +617,9 @@ data Z3SMTLibProcessFailureClass
   | Z3SMTLibProcessExited
   | Z3SMTLibProcessClosed
   | Z3SMTLibProcessInternalFailure
+  | Z3SMTLibProcessEffectiveIDExecutableAccessDenied
+  | Z3SMTLibProcessEffectiveIDExecutableAccessCheckUnavailable
+  | Z3SMTLibProcessEffectiveIDExecutableAccessCheckFailed
   deriving (Bounded, Enum, Eq, Ord, Show)
 
 data Z3SMTLibProcessCleanupEscalation
@@ -683,7 +942,17 @@ data Z3SMTLibProcessObservation = Z3SMTLibProcessObservation
 data ProcessExecutableLaunchStrategy
   = ProcessPathSnapshotThenDirectSpawn
   | ProcessDescriptorBoundExecutableLaunch
+  | ProcessDescriptorBoundEffectiveIDExecutableAccessLaunch
   deriving (Eq)
+
+-- | Closed, sanitized result of one effective-ID source execute-access
+-- observation.  Native errno values never cross this boundary.
+data Z3SMTLibEffectiveIDExecutableAccessCheckResult
+  = Z3SMTLibEffectiveIDExecutableAccessAdmitted
+  | Z3SMTLibEffectiveIDExecutableAccessDenied
+  | Z3SMTLibEffectiveIDExecutableAccessCheckUnavailable
+  | Z3SMTLibEffectiveIDExecutableAccessCheckFailed
+  deriving (Bounded, Enum, Eq, Ord, Show)
 
 data Z3SMTLibProcess = Z3SMTLibProcess
   { processInput :: !Handle
@@ -717,6 +986,13 @@ z3SMTLibProcessUsesDescriptorBoundExecutableLaunch
 z3SMTLibProcessUsesDescriptorBoundExecutableLaunch process =
   processExecutableLaunchStrategy process ==
     ProcessDescriptorBoundExecutableLaunch
+
+z3SMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch
+  :: Z3SMTLibProcess
+  -> Bool
+z3SMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch process =
+  processExecutableLaunchStrategy process ==
+    ProcessDescriptorBoundEffectiveIDExecutableAccessLaunch
 
 -- | The ordered, schema-free launch observation projected from this exact
 -- process.  Domain facades should seal this projection directly with the
@@ -1058,7 +1334,7 @@ openZ3SMTLibDescriptorBoundProcessWithPreExecHook limits cancellation deadline
             atomically $ void $ tryPutTMVar rollbackStatus cleanup
     controlledSpawn <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
       (nativeDescriptorSpawn limits profile stagedDescriptor
-        workingDirectoryFd)
+        workingDirectoryFd ProcessDescriptorBoundExecutableLaunch)
       rollbackAttempt
     case controlledSpawn of
       Left failure -> do
@@ -1072,6 +1348,7 @@ openZ3SMTLibDescriptorBoundProcessWithPreExecHook limits cancellation deadline
 #ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
 data DescriptorCreated = DescriptorCreated
   !Handle !Handle !Handle !ProcessHandle !Integer
+  !ProcessExecutableLaunchStrategy
 
 data DescriptorMetadata = DescriptorMetadata
   !Integer !Integer !Integer !Integer !Integer !String !String
@@ -1211,14 +1488,32 @@ sealAndVerifyStagedImage descriptor metadata count = do
       pure $ isRegularFile observed &&
         toInteger (fileSize observed) == toInteger count
 
+sealAndVerifyEffectiveIDAccessStagedImage
+  :: Fd
+  -> Natural
+  -> IO Bool
+sealAndVerifyEffectiveIDAccessStagedImage descriptor count = do
+  sealed <- c_sealEffectiveIDAccessStagedExecutable
+    (fdToCInt descriptor)
+    (fromIntegral count)
+  if sealed /= 0
+    then pure False
+    else do
+      _ <- fdSeek descriptor AbsoluteSeek 0
+      observed <- getFdStatus descriptor
+      pure $ isRegularFile observed &&
+        toInteger (fileSize observed) == toInteger count &&
+        toInteger (fileMode observed) .&. 0o7777 == 0o500
+
 nativeDescriptorSpawn
   :: Z3SMTLibProcessLimits
   -> Z3.Z3SMTLibExecutionProfile
   -> Fd
   -> Fd
+  -> ProcessExecutableLaunchStrategy
   -> IO (Either Z3SMTLibProcessError DescriptorCreated)
 nativeDescriptorSpawn limits profile executableDescriptor
-    workingDirectoryDescriptor = mask $ \restore ->
+    workingDirectoryDescriptor strategy = mask $ \restore ->
   withFilePath (Z3.z3SMTLibExecutionExecutablePath profile) $ \argumentZero ->
   withMany withCString
       (Z3.z3SMTLibExecutionConfiguredArgumentVector profile) $ \arguments ->
@@ -1256,7 +1551,7 @@ nativeDescriptorSpawn limits profile executableDescriptor
             Z3SMTLibProcessSpawnPhase Z3SMTLibProcessInternalFailure Nothing)
           Right handle -> do
             converted <- convertDescriptorPipes limits handle
-              (toInteger pidRaw) rawDescriptors
+              (toInteger pidRaw) strategy rawDescriptors
             case converted of
               Left failure -> pure $ Left failure
               Right (created, statusHandle) -> do
@@ -1275,12 +1570,13 @@ convertDescriptorPipes
   :: Z3SMTLibProcessLimits
   -> ProcessHandle
   -> Integer
+  -> ProcessExecutableLaunchStrategy
   -> [Fd]
   -> IO
       (Either
         Z3SMTLibProcessError
         (DescriptorCreated, Handle))
-convertDescriptorPipes limits handle pid descriptors =
+convertDescriptorPipes limits handle pid strategy descriptors =
   case descriptors of
     [inputFd, outputFd, errorFd, statusFd] -> do
       inputResult <- tryIOError $ fdToHandle inputFd
@@ -1304,7 +1600,7 @@ convertDescriptorPipes limits handle pid descriptors =
                       [inputHandle, outputHandle, errorHandle] [statusFd]
                     Right statusHandle -> pure $ Right
                       ( DescriptorCreated inputHandle outputHandle errorHandle
-                          handle pid
+                          handle pid strategy
                       , statusHandle
                       )
     _ -> pure $ Left $ processError Z3SMTLibProcessSpawnPhase
@@ -1328,7 +1624,7 @@ cleanupDescriptorCreated
   -> DescriptorCreated
   -> IO Z3SMTLibProcessCleanupStatus
 cleanupDescriptorCreated limits
-    (DescriptorCreated input output errorOutput handle pid) =
+    (DescriptorCreated input output errorOutput handle pid _) =
   cleanupAcquired limits (Just input) (Just output) (Just errorOutput)
     handle (Just pid) []
 
@@ -1342,9 +1638,9 @@ finishDescriptorCreated
   -> IO (Either Z3SMTLibProcessError Z3SMTLibProcess)
 finishDescriptorCreated limits cancellation deadline snapshot
     canonicalWorkingDirectory
-    created@(DescriptorCreated input output errorOutput handle pid) = do
+    created@(DescriptorCreated input output errorOutput handle pid strategy) = do
   allocated <- tryAny $ allocateDescriptorProcess limits deadline input output
-    errorOutput handle pid snapshot canonicalWorkingDirectory
+    errorOutput handle pid strategy snapshot canonicalWorkingDirectory
   case allocated of
     Left _ -> do
       cleanup <- cleanupDescriptorCreated limits created
@@ -1375,11 +1671,12 @@ allocateDescriptorProcess
   -> Handle
   -> ProcessHandle
   -> Integer
+  -> ProcessExecutableLaunchStrategy
   -> Z3SMTLibExecutableSnapshot
   -> FilePath
   -> IO Z3SMTLibProcess
 allocateDescriptorProcess limits deadline input output errorOutput handle pid
-    snapshot canonicalWorkingDirectory = do
+    strategy snapshot canonicalWorkingDirectory = do
   stdoutQueue <- newTQueueIO
   stdoutTerminal <- newTVarIO Nothing
   poison <- newTVarIO Nothing
@@ -1391,7 +1688,6 @@ allocateDescriptorProcess limits deadline input output errorOutput handle pid
   closeState <- newMVar CloseNotStarted
   let pidField = FingerprintTag (ascii "pid-observed")
         [integerTextField pid]
-      strategy = ProcessDescriptorBoundExecutableLaunch
       observation = Z3SMTLibProcessObservation
         $ processObservationFingerprintFields strategy deadline snapshot
           canonicalWorkingDirectory pidField
@@ -1422,6 +1718,17 @@ closeDescriptorIgnoringFailure descriptor = void $ tryIOError $ closeFd descript
 fdToCInt :: Fd -> CInt
 fdToCInt (Fd raw) = raw
 
+nativeEffectiveIDExecutableAccessCheck
+  :: CInt
+  -> IO Z3SMTLibEffectiveIDExecutableAccessCheckResult
+nativeEffectiveIDExecutableAccessCheck descriptor = do
+  observed <- c_checkEffectiveIDExecutableAccess descriptor
+  pure $ case observed of
+    0 -> Z3SMTLibEffectiveIDExecutableAccessAdmitted
+    1 -> Z3SMTLibEffectiveIDExecutableAccessDenied
+    2 -> Z3SMTLibEffectiveIDExecutableAccessCheckUnavailable
+    _ -> Z3SMTLibEffectiveIDExecutableAccessCheckFailed
+
 foreign import ccall unsafe "djex_z3_open_executable_descriptor"
   c_openExecutableDescriptor :: CString -> IO CInt
 
@@ -1430,6 +1737,14 @@ foreign import ccall unsafe "djex_z3_create_staged_executable"
 
 foreign import ccall unsafe "djex_z3_seal_staged_executable"
   c_sealStagedExecutable :: CInt -> CUInt -> Int64 -> IO CInt
+
+foreign import ccall interruptible
+  "djex_z3_check_effective_id_executable_access"
+  c_checkEffectiveIDExecutableAccess :: CInt -> IO CInt
+
+foreign import ccall unsafe
+  "djex_z3_seal_effective_id_access_staged_executable"
+  c_sealEffectiveIDAccessStagedExecutable :: CInt -> Int64 -> IO CInt
 
 foreign import ccall unsafe "djex_z3_descriptor_spawn"
   c_descriptorSpawn
@@ -2562,6 +2877,96 @@ descriptorBoundExecutableSnapshotField profile requestedCwd canonicalCwd
         ]
     ]
 
+descriptorBoundEffectiveIDExecutableAccessSnapshotField
+  :: Z3.Z3SMTLibExecutionProfile
+  -> FilePath
+  -> FilePath
+  -> DescriptorMetadata
+  -> DescriptorMetadata
+  -> ByteString
+  -> Natural
+  -> Maybe ByteString
+  -> FingerprintField
+descriptorBoundEffectiveIDExecutableAccessSnapshotField
+    profile requestedCwd canonicalCwd sourceMetadata
+    workingDirectoryMetadata digest count expected =
+  FingerprintTag
+    (ascii "descriptor-bound-effective-id-executable-access-sealed-main-image")
+    [ FingerprintBytes $ BS.unpack
+        z3SMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchStrengthTag
+    , FingerprintTag (ascii "requested-executable-path")
+        [textField $ Z3.z3SMTLibExecutionExecutablePath profile]
+    , FingerprintTag (ascii "opened-source-policy") $ map
+        (FingerprintBytes . ascii)
+        [ "read-only"
+        , "close-on-exec"
+        , "no-follow-final-symlink"
+        , "nonblocking-open-before-regular-file-rejection"
+        , "regular-file"
+        , "at-least-one-execute-mode-bit-shape-prefilter-not-authority"
+        ]
+    , FingerprintTag (ascii "source-effective-id-executable-access") $ map
+        (FingerprintBytes . ascii)
+        [ "raw-faccessat2-on-opened-source-descriptor"
+        , "x-ok"
+        , "at-empty-path"
+        , "at-eaccess"
+        , "before-copy"
+        , "after-seal-and-test-hook-before-child-allocation"
+        , "effective-filesystem-credentials-point-in-time-only"
+        , "vfs-dac-posix-acl-source-mount-noexec-and-inode-permission-hooks"
+        , "not-full-exec-bprm-lsm-ima-binfmt-interpreter-or-loader-authority"
+        ]
+    , FingerprintTag (ascii "source-before-after-consistent-fd-metadata")
+        [descriptorMetadataField sourceMetadata]
+    , FingerprintTag (ascii "sha256-of-bytes-copied-to-staged-image")
+        [FingerprintBytes $ BS.unpack digest]
+    , FingerprintNatural count
+    , case expected of
+        Nothing -> FingerprintTag (ascii "image-pin-absent") []
+        Just pinned -> FingerprintTag (ascii "image-pin-matched")
+          [FingerprintBytes $ BS.unpack pinned]
+    , FingerprintTag (ascii "sealed-staged-image-policy") $ map
+        (FingerprintBytes . ascii)
+        [ "linux-memfd-create-close-on-exec-allow-sealing"
+        , "fixed-owner-read-execute-mode-0500-not-source-metadata-authority"
+        , "setuid-setgid-file-capabilities-acls-and-security-labels-not-carried"
+        , "seal-write-grow-shrink-seal-verified"
+        , "regular-file-exact-size-and-mode-0500-verified"
+        , "rewound-before-exec"
+        ]
+    , FingerprintTag (ascii "spawn-main-image") $ map
+        (FingerprintBytes . ascii)
+        [ "execveat-at-empty-path-sealed-staged-descriptor"
+        , "no-pathname-or-launch-strategy-retry"
+        , "main-image-bytes-only"
+        , "loader-libraries-interpreter-and-solver-unbound"
+        ]
+    , FingerprintTag (ascii "spawn-argv-zero-exact-configured-path")
+        [textField $ Z3.z3SMTLibExecutionExecutablePath profile]
+    , FingerprintTag (ascii "spawn-arguments")
+        [FingerprintSequence $ map textField
+          $ Z3.z3SMTLibExecutionConfiguredArgumentVector profile]
+    , FingerprintTag (ascii "spawn-empty-environment") []
+    , FingerprintTag (ascii "requested-working-directory")
+        [textField requestedCwd]
+    , FingerprintTag (ascii "spawn-working-directory-fchdir-opened-fd")
+        [ textField canonicalCwd
+        , descriptorMetadataField workingDirectoryMetadata
+        ]
+    , FingerprintTag (ascii "spawn-pipe-and-fd-policy") $ map
+        (FingerprintBytes . ascii)
+        [ "three-close-on-exec-pipes"
+        , "close-on-exec-error-handshake-pipe"
+        , "close-every-unrelated-child-descriptor-before-exec"
+        , "close-range-required-fail-closed-when-unavailable"
+        , "process-package-interactive-process-lock"
+        , "block-signals-across-fork-restore-parent-and-child-before-exec"
+        , "child-process-group-pid"
+        , "no-delegated-ctlc"
+        ]
+    ]
+
 descriptorMetadataField :: DescriptorMetadata -> FingerprintField
 descriptorMetadataField
     (DescriptorMetadata device inode mode size links modified changed) =
@@ -2638,6 +3043,35 @@ processObservationFingerprintFields
         [FingerprintNatural $ fromIntegral deadline]
     ]
   ProcessDescriptorBoundExecutableLaunch ->
+    [ z3SMTLibExecutableSnapshotFingerprintField snapshot
+    , FingerprintTag (ascii "canonical-working-directory-observation")
+        [textField canonicalWorkingDirectory]
+    , workingDirectoryEmptinessObservationField
+    , pidField
+    , FingerprintTag
+        (ascii "exec-error-cloexec-pipe-eof-observed-before-ready/v1") []
+    , FingerprintTag (ascii "alive-at-open-snapshot") []
+    , FingerprintTag (ascii "separate-binary-pipes") []
+    , FingerprintTag (ascii "stderr-first-byte-poisons-session") []
+    , FingerprintTag
+        (ascii "stderr-post-poison-discard-count-capped-at-max-plus-one/v1") []
+    , FingerprintTag
+        (ascii "stdout-cumulative-charge-before-fifo-enqueue/v1") []
+    , FingerprintTag (ascii "stdout-chunks-before-terminal-fifo/v1") []
+    , FingerprintTag (ascii "writes-exact-bytes-then-flush/v1") []
+    , FingerprintTag
+        (ascii "control-priority-cancel-deadline-poison-output/v1") []
+    , FingerprintTag
+        (ascii $ concat
+          [ "cleanup-wrapped-child-close-wait-group-term-with-direct-pid-"
+          , "fallback-wait-group-kill-with-direct-pid-fallback-wait/v1"
+          ]) []
+    , FingerprintTag
+        (ascii "descriptor-child-pid-is-process-group-id/v1") []
+    , FingerprintTag (ascii "absolute-monotonic-deadline-nanoseconds")
+        [FingerprintNatural $ fromIntegral deadline]
+    ]
+  ProcessDescriptorBoundEffectiveIDExecutableAccessLaunch ->
     [ z3SMTLibExecutableSnapshotFingerprintField snapshot
     , FingerprintTag (ascii "canonical-working-directory-observation")
         [textField canonicalWorkingDirectory]

@@ -8,8 +8,11 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Proces
   ( lengthSMTLibExecutableSnapshotStrengthTag
   , lengthSMTLibDescriptorBoundExecutableLaunchStrengthTag
   , lengthSMTLibDescriptorBoundExecutableLaunchSupported
+  , lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchStrengthTag
+  , lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchSupported
   , lengthSMTLibProcessSchemaTag
   , lengthSMTLibDescriptorBoundProcessSchemaTag
+  , lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessSchemaTag
   , LengthSMTLibProcessLimitSource (..)
   , defaultLengthSMTLibProcessLimitSource
   , LengthSMTLibProcessLimits
@@ -51,6 +54,10 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Proces
   , openLengthSMTLibDescriptorBoundProcess
   , openLengthSMTLibProcessWithPreDescriptorExecHook
   , lengthSMTLibProcessUsesDescriptorBoundExecutableLaunch
+  , LengthSMTLibEffectiveIDExecutableAccessCheckResult (..)
+  , openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
+  , openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
+  , lengthSMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch
   , lengthSMTLibProcessLimits
   , lengthSMTLibProcessSnapshot
   , lengthSMTLibProcessFingerprintField
@@ -69,6 +76,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Char (ord)
 import Data.Word (Word8, Word64)
+import Foreign.C.Types (CInt)
 import Numeric.Natural (Natural)
 import System.Exit (ExitCode)
 
@@ -95,6 +103,15 @@ lengthSMTLibDescriptorBoundExecutableLaunchSupported :: Bool
 lengthSMTLibDescriptorBoundExecutableLaunchSupported =
   Z3Process.z3SMTLibDescriptorBoundExecutableLaunchSupported
 
+lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchStrengthTag
+  :: ByteString
+lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchStrengthTag =
+  Z3Process.z3SMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchStrengthTag
+
+lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchSupported :: Bool
+lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchSupported =
+  Z3Process.z3SMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchSupported
+
 lengthSMTLibProcessSchemaTag :: ByteString
 lengthSMTLibProcessSchemaTag = asciiBytes
   "djex-length-z3-raw-process/v2"
@@ -102,6 +119,14 @@ lengthSMTLibProcessSchemaTag = asciiBytes
 lengthSMTLibDescriptorBoundProcessSchemaTag :: ByteString
 lengthSMTLibDescriptorBoundProcessSchemaTag = asciiBytes
   "djex-length-z3-descriptor-bound-sealed-main-image-process/v1"
+
+lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessSchemaTag
+  :: ByteString
+lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessSchemaTag =
+  asciiBytes $ concat
+    [ "djex-length-z3-descriptor-bound-effective-id-executable-access-"
+    , "sealed-main-image-process/v1"
+    ]
 
 data LengthSMTLibProcessLimitSource = LengthSMTLibProcessLimitSource
   { lengthSMTLibProcessLimitSourceExecutableBytes :: !Natural
@@ -225,6 +250,9 @@ data LengthSMTLibProcessFailureClass
   | LengthSMTLibProcessExited
   | LengthSMTLibProcessClosed
   | LengthSMTLibProcessInternalFailure
+  | LengthSMTLibProcessEffectiveIDExecutableAccessDenied
+  | LengthSMTLibProcessEffectiveIDExecutableAccessCheckUnavailable
+  | LengthSMTLibProcessEffectiveIDExecutableAccessCheckFailed
   deriving (Bounded, Enum, Eq, Ord, Show)
 
 data LengthSMTLibProcessCleanupEscalation
@@ -447,6 +475,91 @@ lengthSMTLibProcessUsesDescriptorBoundExecutableLaunch
 lengthSMTLibProcessUsesDescriptorBoundExecutableLaunch =
   Z3Process.z3SMTLibProcessUsesDescriptorBoundExecutableLaunch . toZ3Process
 
+data LengthSMTLibEffectiveIDExecutableAccessCheckResult
+  = LengthSMTLibEffectiveIDExecutableAccessAdmitted
+  | LengthSMTLibEffectiveIDExecutableAccessDenied
+  | LengthSMTLibEffectiveIDExecutableAccessCheckUnavailable
+  | LengthSMTLibEffectiveIDExecutableAccessCheckFailed
+  deriving (Bounded, Enum, Eq, Ord, Show)
+
+openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
+  :: LengthSMTLibProcessLimits
+  -> LengthSMTLibProcessCancellation
+  -> LengthSMTLibProcessDeadline
+  -> Z3Execution.Z3SMTLibExecutionProfile
+  -> FilePath
+  -> LengthSMTLibWorkingDirectoryDescriptor
+  -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
+openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
+    limits cancellation deadline profile workingDirectory
+    (LengthSMTLibWorkingDirectoryDescriptor descriptor) =
+  mask $ \restore -> do
+    opened <- restore
+      $ Z3Process.openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
+          (toZ3ProcessLimits limits)
+          (toZ3ProcessCancellation cancellation)
+          (toZ3ProcessDeadline deadline)
+          profile workingDirectory descriptor
+    retainOpenedProcess opened
+
+openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
+  :: LengthSMTLibProcessLimits
+  -> LengthSMTLibProcessCancellation
+  -> LengthSMTLibProcessDeadline
+  -> Z3Execution.Z3SMTLibExecutionProfile
+  -> FilePath
+  -> LengthSMTLibWorkingDirectoryDescriptor
+  -> (CInt -> IO LengthSMTLibEffectiveIDExecutableAccessCheckResult)
+  -> IO ()
+  -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
+-- The checker receives a borrowed numeric source descriptor and must never
+-- retain or close it.
+openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
+    limits cancellation deadline profile workingDirectory
+    (LengthSMTLibWorkingDirectoryDescriptor descriptor) accessCheck hook =
+  mask $ \restore -> do
+    opened <- restore
+      $ Z3Process.openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
+          (toZ3ProcessLimits limits)
+          (toZ3ProcessCancellation cancellation)
+          (toZ3ProcessDeadline deadline)
+          profile workingDirectory descriptor
+          (fmap toZ3EffectiveIDExecutableAccessCheckResult . accessCheck)
+          hook
+    retainOpenedProcess opened
+
+lengthSMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch
+  :: LengthSMTLibProcess
+  -> Bool
+lengthSMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch =
+  Z3Process.z3SMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch
+    . toZ3Process
+
+retainOpenedProcess
+  :: Either Z3Process.Z3SMTLibProcessError Z3Process.Z3SMTLibProcess
+  -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
+retainOpenedProcess opened = case opened of
+  Left failure ->
+    let retained = fromZ3ProcessError failure
+    in retained `seq` pure (Left retained)
+  Right process ->
+    let retained = LengthSMTLibProcess process
+        transientFingerprint = processFingerprintField process
+    in retained `seq` transientFingerprint `seq` pure (Right retained)
+
+toZ3EffectiveIDExecutableAccessCheckResult
+  :: LengthSMTLibEffectiveIDExecutableAccessCheckResult
+  -> Z3Process.Z3SMTLibEffectiveIDExecutableAccessCheckResult
+toZ3EffectiveIDExecutableAccessCheckResult result = case result of
+  LengthSMTLibEffectiveIDExecutableAccessAdmitted ->
+    Z3Process.Z3SMTLibEffectiveIDExecutableAccessAdmitted
+  LengthSMTLibEffectiveIDExecutableAccessDenied ->
+    Z3Process.Z3SMTLibEffectiveIDExecutableAccessDenied
+  LengthSMTLibEffectiveIDExecutableAccessCheckUnavailable ->
+    Z3Process.Z3SMTLibEffectiveIDExecutableAccessCheckUnavailable
+  LengthSMTLibEffectiveIDExecutableAccessCheckFailed ->
+    Z3Process.Z3SMTLibEffectiveIDExecutableAccessCheckFailed
+
 lengthSMTLibProcessSnapshot
   :: LengthSMTLibProcess
   -> LengthSMTLibExecutableSnapshot
@@ -567,12 +680,22 @@ processFingerprintField process = FingerprintTag role
  where
   descriptorBound =
     Z3Process.z3SMTLibProcessUsesDescriptorBoundExecutableLaunch process
-  role = ascii $ if descriptorBound
-    then "length-z3-descriptor-bound-launched-transport"
-    else "length-z3-launched-transport"
-  schema = if descriptorBound
-    then lengthSMTLibDescriptorBoundProcessSchemaTag
-    else lengthSMTLibProcessSchemaTag
+  effectiveIDAccess =
+    Z3Process.z3SMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch
+      process
+  role = ascii $ if effectiveIDAccess
+    then concat
+      [ "length-z3-descriptor-bound-effective-id-executable-access-"
+      , "launched-transport"
+      ]
+    else if descriptorBound
+      then "length-z3-descriptor-bound-launched-transport"
+      else "length-z3-launched-transport"
+  schema
+    | effectiveIDAccess =
+        lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessSchemaTag
+    | descriptorBound = lengthSMTLibDescriptorBoundProcessSchemaTag
+    | otherwise = lengthSMTLibProcessSchemaTag
 
 toZ3ProcessLimitSource
   :: LengthSMTLibProcessLimitSource
@@ -746,6 +869,12 @@ fromZ3ProcessFailureClass failure = case failure of
     LengthSMTLibProcessExecutableMetadataChanged
   Z3Process.Z3SMTLibProcessExecutableDigestMismatch ->
     LengthSMTLibProcessExecutableDigestMismatch
+  Z3Process.Z3SMTLibProcessEffectiveIDExecutableAccessDenied ->
+    LengthSMTLibProcessEffectiveIDExecutableAccessDenied
+  Z3Process.Z3SMTLibProcessEffectiveIDExecutableAccessCheckUnavailable ->
+    LengthSMTLibProcessEffectiveIDExecutableAccessCheckUnavailable
+  Z3Process.Z3SMTLibProcessEffectiveIDExecutableAccessCheckFailed ->
+    LengthSMTLibProcessEffectiveIDExecutableAccessCheckFailed
   Z3Process.Z3SMTLibProcessDescriptorBoundLaunchUnavailable ->
     LengthSMTLibProcessDescriptorBoundLaunchUnavailable
   Z3Process.Z3SMTLibProcessDescriptorBoundStagingFailed ->

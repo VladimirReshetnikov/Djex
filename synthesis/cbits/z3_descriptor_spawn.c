@@ -18,6 +18,17 @@
 #define AT_EMPTY_PATH 0x1000
 #endif
 
+#ifndef AT_EACCESS
+#define AT_EACCESS 0x200
+#endif
+
+enum {
+  DJEX_EFFECTIVE_ID_EXECUTABLE_ACCESS_ADMITTED = 0,
+  DJEX_EFFECTIVE_ID_EXECUTABLE_ACCESS_DENIED = 1,
+  DJEX_EFFECTIVE_ID_EXECUTABLE_ACCESS_UNAVAILABLE = 2,
+  DJEX_EFFECTIVE_ID_EXECUTABLE_ACCESS_FAILED = 3
+};
+
 enum {
   DJEX_DESCRIPTOR_EXEC_STAGE_PROCESS_GROUP = 1,
   DJEX_DESCRIPTOR_EXEC_STAGE_STANDARD_INPUT = 2,
@@ -128,6 +139,29 @@ int djex_z3_open_executable_descriptor(const char *path) {
       O_RDONLY | O_CLOEXEC | O_NOCTTY | O_NOFOLLOW | O_NONBLOCK);
 }
 
+int djex_z3_check_effective_id_executable_access(int descriptor) {
+#ifdef SYS_faccessat2
+  if (syscall(
+          SYS_faccessat2,
+          descriptor,
+          "",
+          X_OK,
+          AT_EMPTY_PATH | AT_EACCESS) == 0) {
+    return DJEX_EFFECTIVE_ID_EXECUTABLE_ACCESS_ADMITTED;
+  }
+  if (errno == EACCES) {
+    return DJEX_EFFECTIVE_ID_EXECUTABLE_ACCESS_DENIED;
+  }
+  if (errno == ENOSYS || errno == EINVAL) {
+    return DJEX_EFFECTIVE_ID_EXECUTABLE_ACCESS_UNAVAILABLE;
+  }
+  return DJEX_EFFECTIVE_ID_EXECUTABLE_ACCESS_FAILED;
+#else
+  (void) descriptor;
+  return DJEX_EFFECTIVE_ID_EXECUTABLE_ACCESS_UNAVAILABLE;
+#endif
+}
+
 int djex_z3_create_staged_executable(void) {
   unsigned int flags = MFD_CLOEXEC | MFD_ALLOW_SEALING;
   return (int) syscall(SYS_memfd_create, "djex-z3-main-image", flags);
@@ -156,6 +190,39 @@ int djex_z3_seal_staged_executable(
     return -1;
   }
   if (fstat(descriptor, &status) < 0 || status.st_size != expected_size) {
+    errno = EIO;
+    return -1;
+  }
+  return 0;
+}
+
+int djex_z3_seal_effective_id_access_staged_executable(
+    int descriptor,
+    int64_t expected_size) {
+  static const int required_seals =
+      F_SEAL_WRITE | F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_SEAL;
+  struct stat status;
+  int observed_seals;
+
+  /* The memfd belongs to the launcher, not to the source-file owner.  Its
+   * fixed owner read/execute bits are staging transport, never copied source
+   * authorization or metadata. */
+  if (fchmod(descriptor, (mode_t) 0500U) < 0) {
+    return -1;
+  }
+  if (fcntl(descriptor, F_ADD_SEALS, required_seals) < 0) {
+    return -1;
+  }
+  observed_seals = fcntl(descriptor, F_GET_SEALS);
+  if (observed_seals < 0 ||
+      (observed_seals & required_seals) != required_seals) {
+    errno = EPERM;
+    return -1;
+  }
+  if (fstat(descriptor, &status) < 0 ||
+      !S_ISREG(status.st_mode) ||
+      status.st_size != expected_size ||
+      (status.st_mode & 07777U) != 0500U) {
     errno = EIO;
     return -1;
   }

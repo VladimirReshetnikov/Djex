@@ -298,6 +298,18 @@ projectionSignatures =
   (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineApplicableDomainBasis
     :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
     -> LengthEvaluate.LengthCounterexampleBasis) `seq`
+  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainInclusiveMaximums
+    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
+    -> [Natural]) `seq`
+  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainAssignmentCount
+    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainApplicableAssignmentCount
+    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainBasis
+    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
+    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
   (LengthEvaluate.validatedLengthCounterexampleSimplificationOriginalInputs
     :: LengthEvaluate.ValidatedLengthCounterexampleSimplification
     -> [Natural]) `seq`
@@ -366,6 +378,18 @@ projectionSignatures =
     -> Natural) `seq`
   (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainBasis
     :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
+    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
+  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainInclusiveMaximums
+    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
+    -> [Natural]) `seq`
+  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainAssignmentCount
+    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainApplicableAssignmentCount
+    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainBasis
+    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
     -> LengthEvaluate.LengthCounterexampleBasis) `seq`
   (LengthEvaluate.validatedLengthSpinePairCounterexampleSimplificationOriginalInputs
     :: LengthEvaluate.ValidatedLengthSpinePairCounterexampleSimplification
@@ -467,6 +491,7 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "forbiddenValidatedLengthPositiveAffineApplicableDomainCoercion"
                       , "forbiddenValidatedLengthRelationalPositiveAffineApplicableDomainCoercion"
                       , "forbiddenValidatedLengthStrictRelationalPositiveAffineApplicableDomainCoercion"
+                      , "forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainCoercion"
                       , "forbiddenCheckedLengthContractCoercion"
                       , "forbiddenCheckedLengthSpinePairContractCoercion"
                       , "forbiddenCheckedLengthContextVariableCoercion"
@@ -566,6 +591,8 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt"
                       , "ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt"
                       , "ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt"
+                      , "ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainReceipt"
+                      , "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainReceipt"
                       ]
                   )
             assertBool

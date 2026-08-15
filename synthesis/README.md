@@ -1016,6 +1016,117 @@ explicit antichains, and the same global replay. It must never silently widen
 to a componentwise hull. See the
 [Boolean finite-union applicable-domain report](../docs/reports/2026-08-15-boolean-finite-union-length-applicable-domain.md).
 
+The atomic-branching finite-union policy is the separately named cumulative
+successor which opens the exact disjunction of one admitted root-extremum or
+may-zero root-monus atom. Its problem entrances are
+`validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain`
+and
+`validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain`;
+the query-owned entrances use the same full suffix under the scalar and
+`SpinePair` SMT-LIB prefixes:
+
+```haskell
+scalarValidation =
+  validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
+    defaultLengthEvaluationLimits
+    defaultLengthInputBoxLimits
+    defaultLengthBooleanFiniteUnionLimits
+    scalarQuery
+
+pairValidation =
+  validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
+    defaultLengthEvaluationLimits
+    defaultLengthInputBoxLimits
+    defaultLengthBooleanFiniteUnionLimits
+    pairQuery
+```
+
+For normalized children `A` and `B` and positive-affine opposite `C`, it adds
+these ordered extremum alternatives:
+
+```text
+C <= max(A,B)          -> [C<=A] | [C<=B]
+min(A,B) <= C          -> [A<=C] | [B<=C]
+not(max(A,B)<=C)       -> [C+1<=A] | [C+1<=B]
+not(C<=min(A,B))       -> [A+1<=C] | [B+1<=C]
+max(A,B)=C             -> [A<=C,B<=C,C<=A]
+                           | [A<=C,B<=C,C<=B]
+min(A,B)=C             -> [C<=A,C<=B,A<=C]
+                           | [C<=A,C<=B,B<=C]
+```
+
+Equality admits the root on either side. Alternatives always follow first
+normalized child then second child, and rules follow the displayed order.
+With `M=A monus B` and nonconstant affine `C` having zero constant, it also
+adds the zero-first exact alternatives:
+
+```text
+C <= M       -> [C<=0] | [B+C<=A]
+M = C        -> [A<=B+C,C<=0] | [A<=B+C,B+C<=A]
+C = M        -> [A<=B+C,C<=0] | [A<=B+C,B+C<=A]
+```
+
+The common equality consequence `A<=B+C` remains the first rule in both
+choices. In particular, the zero alternative is not simplified to `A<=B`.
+Uniformly positive and identically zero opposite operands, supported extrema
+orientations, and all other predecessor leaves remain singleton alternatives
+with their exact predecessor rule order.
+
+Every new atom summarizes `A`, `B`, and `C` before emitting any branch. Each
+must fit the established compact-input, literal, sum, and positive-scale
+grammar. Exactly one normalized relation side may contain the admitted
+immediate binary root. Both-root, nested, embedded, mixed, effectively n-ary,
+unsupported, and expression-conditional shapes remain atomically ignored.
+No partial branch survives a failed summary.
+
+Raw branch admission now counts the lazy Cartesian product of complete
+formula-DNF branches and every per-atom alternative. The existing generated
+branch cap is applied to that complete product before complement cleanup,
+deduplication, or absorption. After admission, canonicalization still operates
+on sets of the original checked formula literals. Each retained set is then
+traversed in `Set` order and expanded into explicit clause-coverage choices.
+Ignored and contradictory results stay explicit. The implementation creates
+no replacement `LengthFormula`, no proof-rule set, no rule deduplication, and
+no `Eq`/`Ord` requirement for rules. Rule-cap and closure errors index the
+resulting expanded canonical stream.
+
+All downstream finite-union behavior is reused literally. Every expanded
+branch has the existing rule and closure-inspection caps; contradictory
+branches drop; all live branches must bound every source input; boxes form the
+same componentwise-maximal antichain; visits include box overlap; unique
+assignments are deduplicated; and the original precondition and postcondition
+replay once in global lexicographic order. Incomparable boxes are never
+replaced by their hull. Thus `[1,3]` and `[3,1]` still retain two boxes, 16
+visits, and 12 unique assignments.
+
+`LengthBooleanFiniteUnionLimits` and every scalar/product direct and SMT-LIB
+Boolean finite-union error type are reused without extension. Defaults remain
+256 generated branches, 64 rules per branch, 4096 closure inspections per
+branch, 256 retained boxes, and 262144 visits. Under the default rule ceiling,
+the 65th collected rule reports the existing bounded `limit+1` error. Input
+width, raw product, branch rule/closure work, missing coverage, box/value,
+visit, unique assignment, global replay, receipt, and query association retain
+the predecessor precedence.
+
+The new opaque receipts are
+`ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain`
+and
+`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain`.
+Their six projections expose canonical inclusive boxes, box count, visits,
+unique assignments, applicable assignments, and basis. Their exact tags are:
+
+```text
+finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-precondition-domain-establishment/v1
+finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-precondition-domain-establishment/v1
+```
+
+These are fresh six-field nominal receipts, not wrappers around predecessor
+evidence. Every earlier entrance, receipt, error, tag, normalized problem/query
+byte sequence, and runtime identity remains literal. Atomic alternatives and
+operational limits enter neither query bytes nor fingerprints; wrappers emit
+no SMT command and consume no solver status. See the
+[atomic-branching applicable-domain report](../docs/reports/2026-08-15-atomic-branching-length-applicable-domain.md).
+
 `FiniteBinaryProductSpineLengthsV1` adds a distinct checked domain for an exact
 boxed binary product whose two source-ordered fields are modeled finite
 spines. `LengthSpinePairContractVariable` retains the scalar domain's compact

@@ -140,6 +140,18 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validatedLengthSpinePairRelationalPositiveAffineApplicableDomainAssignmentCount
   , validatedLengthSpinePairRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
   , validatedLengthSpinePairRelationalPositiveAffineApplicableDomainBasis
+  , ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
+  , lengthStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag
+  , validatedLengthStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
+  , validatedLengthStrictRelationalPositiveAffineApplicableDomainAssignmentCount
+  , validatedLengthStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
+  , validatedLengthStrictRelationalPositiveAffineApplicableDomainBasis
+  , ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
+  , lengthSpinePairStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag
+  , validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
+  , validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainAssignmentCount
+  , validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
+  , validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainBasis
   , evaluateLengthContractAssignment
   , evaluateLengthSpinePairContractAssignment
   , evaluateLengthProviderApplication
@@ -155,6 +167,8 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validateLengthSpinePairProblemPositiveAffineApplicableDomain
   , validateLengthProblemRelationalPositiveAffineApplicableDomain
   , validateLengthSpinePairProblemRelationalPositiveAffineApplicableDomain
+  , validateLengthProblemStrictRelationalPositiveAffineApplicableDomain
+  , validateLengthSpinePairProblemStrictRelationalPositiveAffineApplicableDomain
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -1054,6 +1068,112 @@ validatedLengthSpinePairRelationalPositiveAffineApplicableDomainBasis
   -> LengthCounterexampleBasis
 validatedLengthSpinePairRelationalPositiveAffineApplicableDomainBasis
     (ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt
+      _ inputBox) = validatedLengthSpinePairInputBoxBasis inputBox
+
+-- | Versioned strict relational positive-affine coverage semantics for the
+-- scalar applicable domain.  This additive rule recognizes the exact natural
+-- complement of a top-level affine at-most clause without changing checked
+-- contract normalization or any established receipt family.
+lengthStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag
+  :: [Word8]
+lengthStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag =
+  ascii
+    "finite-list-spine-length/strict-relational-positive-affine-precondition-domain-establishment/v1"
+
+-- | Complete scalar applicable-domain validation under the strict relational
+-- positive-affine coverage rule.  Its constructor is private and its nested
+-- receipt retains the existing finite-box replay authority.
+data ValidatedLengthStrictRelationalPositiveAffineApplicableDomain =
+  ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt
+    ![Word8]
+    !ValidatedLengthInputBox
+  deriving (Eq, Ord, Show)
+
+instance NFData
+    ValidatedLengthStrictRelationalPositiveAffineApplicableDomain where
+  rnf
+      (ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt
+        schema inputBox) = rnf schema `seq` rnf inputBox
+
+validatedLengthStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
+  :: ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
+  -> [Natural]
+validatedLengthStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
+    (ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt
+      _ inputBox) = validatedLengthInputBoxInclusiveMaximums inputBox
+
+validatedLengthStrictRelationalPositiveAffineApplicableDomainAssignmentCount
+  :: ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
+  -> Natural
+validatedLengthStrictRelationalPositiveAffineApplicableDomainAssignmentCount
+    (ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt
+      _ inputBox) = validatedLengthInputBoxAssignmentCount inputBox
+
+validatedLengthStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
+  :: ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
+  -> Natural
+validatedLengthStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
+    (ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt
+      _ inputBox) = validatedLengthInputBoxApplicableAssignmentCount inputBox
+
+validatedLengthStrictRelationalPositiveAffineApplicableDomainBasis
+  :: ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
+  -> LengthCounterexampleBasis
+validatedLengthStrictRelationalPositiveAffineApplicableDomainBasis
+    (ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt
+      _ inputBox) = validatedLengthInputBoxBasis inputBox
+
+-- | Nominal binary-product sibling of
+-- 'lengthStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag'.
+lengthSpinePairStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag
+  :: [Word8]
+lengthSpinePairStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag =
+  ascii
+    "finite-binary-product-spine-lengths/strict-relational-positive-affine-precondition-domain-establishment/v1"
+
+-- | Complete product applicable-domain validation under the strict relational
+-- positive-affine rule.  Scalar and product evidence remain nominally
+-- disjoint while sharing only the private extraction mechanics.
+data ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain =
+  ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt
+    ![Word8]
+    !ValidatedLengthSpinePairInputBox
+  deriving (Eq, Ord, Show)
+
+instance NFData
+    ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain where
+  rnf
+      (ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt
+        schema inputBox) = rnf schema `seq` rnf inputBox
+
+validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
+  -> [Natural]
+validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
+    (ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt
+      _ inputBox) =
+        validatedLengthSpinePairInputBoxInclusiveMaximums inputBox
+
+validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainAssignmentCount
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
+  -> Natural
+validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainAssignmentCount
+    (ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt
+      _ inputBox) = validatedLengthSpinePairInputBoxAssignmentCount inputBox
+
+validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
+  -> Natural
+validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
+    (ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt
+      _ inputBox) =
+        validatedLengthSpinePairInputBoxApplicableAssignmentCount inputBox
+
+validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainBasis
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
+  -> LengthCounterexampleBasis
+validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainBasis
+    (ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt
       _ inputBox) = validatedLengthSpinePairInputBoxBasis inputBox
 
 -- | Fail-closed scalar simplification failure after the caller supplied one
@@ -2076,6 +2196,104 @@ validateLengthSpinePairProblemRelationalPositiveAffineApplicableDomain
     LengthSpinePairInput position -> Just position
     LengthSpinePairResult _ -> Nothing
 
+-- | Establish the complete applicable domain of one exact scalar problem
+-- when ordinary or strict top-level positive-affine relations jointly imply
+-- a finite upper bound for every compact input.  A normalized
+-- @not (left <= right)@ clause contributes the exact natural-number rule
+-- @right + 1 <= left@ only through this additive entrance.
+validateLengthProblemStrictRelationalPositiveAffineApplicableDomain
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> CheckedLengthProblem identity local
+  -> Either LengthApplicableDomainValidationError
+      (LengthApplicableDomainValidation
+        (BehavioralEvidence
+          FiniteListSpineLengthV1
+          ValidatedLengthCounterexample)
+        (BehavioralEvidence
+          FiniteListSpineLengthV1
+          ValidatedLengthStrictRelationalPositiveAffineApplicableDomain))
+validateLengthProblemStrictRelationalPositiveAffineApplicableDomain
+    evaluationLimits inputBoxLimits problem = do
+  let inputCount = checkedLengthProblemInputCount problem
+      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
+  if inputCount <= maximumInputs
+    then pure ()
+    else Left $ LengthApplicableDomainInputBoxValidationRejected
+      $ LengthInputBoxProblemInputLimitExceeded maximumInputs inputCount
+  case strictRelationalPositiveAffineApplicableDomainMaximums
+      inputCount scalarInputPosition
+      $ checkedLengthProblemPrecondition problem of
+    Left inapplicability -> Right
+      $ LengthApplicableDomainInapplicable inapplicability
+    Right maximums -> do
+      validation <- either
+        (Left . LengthApplicableDomainInputBoxValidationRejected)
+        Right
+        $ validateLengthProblemInputBox evaluationLimits inputBoxLimits
+            problem maximums
+      pure $ case validation of
+        LengthInputBoxCounterexample evidence ->
+          LengthApplicableDomainCounterexample evidence
+        LengthInputBoxValidated evidence ->
+          LengthApplicableDomainEstablished
+            $ mapBehavioralEvidenceReceipt
+                (ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt
+                  lengthStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag)
+                evidence
+ where
+  scalarInputPosition variable = case variable of
+    LengthInput position -> Just position
+    LengthResult -> Nothing
+
+-- | Nominal binary-product sibling of
+-- 'validateLengthProblemStrictRelationalPositiveAffineApplicableDomain'.
+validateLengthSpinePairProblemStrictRelationalPositiveAffineApplicableDomain
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> CheckedLengthSpinePairProblem identity local
+  -> Either LengthSpinePairApplicableDomainValidationError
+      (LengthApplicableDomainValidation
+        (BehavioralEvidence
+          FiniteBinaryProductSpineLengthsV1
+          ValidatedLengthSpinePairCounterexample)
+        (BehavioralEvidence
+          FiniteBinaryProductSpineLengthsV1
+          ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain))
+validateLengthSpinePairProblemStrictRelationalPositiveAffineApplicableDomain
+    evaluationLimits inputBoxLimits problem = do
+  let inputCount = checkedLengthSpinePairProblemInputCount problem
+      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
+  if inputCount <= maximumInputs
+    then pure ()
+    else Left $ LengthSpinePairApplicableDomainInputBoxValidationRejected
+      $ LengthSpinePairInputBoxProblemInputLimitExceeded
+          maximumInputs inputCount
+  case strictRelationalPositiveAffineApplicableDomainMaximums
+      inputCount spinePairInputPosition
+      $ checkedLengthSpinePairProblemPrecondition problem of
+    Left inapplicability -> Right
+      $ LengthApplicableDomainInapplicable inapplicability
+    Right maximums -> do
+      validation <- either
+        (Left . LengthSpinePairApplicableDomainInputBoxValidationRejected)
+        Right
+        $ validateLengthSpinePairProblemInputBox
+            evaluationLimits inputBoxLimits problem maximums
+      pure $ case validation of
+        LengthInputBoxCounterexample evidence ->
+          LengthApplicableDomainCounterexample evidence
+        LengthInputBoxValidated evidence ->
+          LengthApplicableDomainEstablished
+            $ mapBehavioralEvidenceReceipt
+                (ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt
+                  lengthSpinePairStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag)
+                evidence
+ where
+  spinePairInputPosition variable = case variable of
+    LengthSpinePairInput position -> Just position
+    LengthSpinePairResult _ -> Nothing
+
 data PositiveAffineCoverage
   = PositiveAffineCoverageBounds !(Map.Map Natural Natural)
   | PositiveAffineCoverageContradiction
@@ -2305,6 +2523,86 @@ relationalPositiveAffineClauseCoverage
     rightSummary <- summarizeRelationalPositiveAffineExpression
       inputCount inputPosition right
     pure (leftSummary, rightSummary)
+
+-- The strict sibling deliberately leaves the established relational scanner
+-- untouched.  It traverses the same normalized top-level conjunction and
+-- adds only the exact natural complement of one immediate at-most clause.
+strictRelationalPositiveAffineApplicableDomainMaximums
+  :: Int
+  -> (variable -> Maybe Natural)
+  -> LengthFormula variable
+  -> Either LengthApplicableDomainInapplicability [Natural]
+strictRelationalPositiveAffineApplicableDomainMaximums
+    inputCount inputPosition precondition
+  | inputCount == 0 = Right []
+  | otherwise = case collect [] clauses of
+      RelationalPositiveAffineRuleCollectionContradiction ->
+        Right $ replicate inputCount 0
+      RelationalPositiveAffineRuleCollection reversedRules ->
+        case closeRelationalPositiveAffineRules $ reverse reversedRules of
+          RelationalPositiveAffineClosureContradiction ->
+            Right $ replicate inputCount 0
+          RelationalPositiveAffineClosureBounds bounds ->
+            mapM (maximumFor bounds) [0 .. inputCount - 1]
+ where
+  clauses = case precondition of
+    LengthAll formulas -> formulas
+    formula -> [formula]
+
+  collect !retained [] = RelationalPositiveAffineRuleCollection retained
+  collect !retained (formula : remaining) =
+    case strictRelationalPositiveAffineClauseCoverage
+        inputCount inputPosition formula of
+      RelationalPositiveAffineClauseIgnored -> collect retained remaining
+      RelationalPositiveAffineClauseRules rules ->
+        collect (prependRulesInReverse retained rules) remaining
+      RelationalPositiveAffineClauseContradiction ->
+        RelationalPositiveAffineRuleCollectionContradiction
+
+  prependRulesInReverse !retained [] = retained
+  prependRulesInReverse !retained (rule : remaining) =
+    prependRulesInReverse (rule : retained) remaining
+
+  maximumFor bounds index = case Map.lookup (fromIntegral index) bounds of
+    Just maximumValue -> Right maximumValue
+    Nothing -> Left $ LengthApplicableDomainInputUpperBoundMissing index
+
+strictRelationalPositiveAffineClauseCoverage
+  :: Int
+  -> (variable -> Maybe Natural)
+  -> LengthFormula variable
+  -> RelationalPositiveAffineClauseCoverage
+strictRelationalPositiveAffineClauseCoverage
+    inputCount inputPosition formula = case formula of
+  LengthNot (LengthAtMost left right) ->
+    case summarizeBoth left right of
+      Nothing -> RelationalPositiveAffineClauseIgnored
+      Just (leftSummary, rightSummary) ->
+        RelationalPositiveAffineClauseRules
+          [ relationalPositiveAffineRule
+              (incrementRelationalPositiveAffineConstant rightSummary)
+              leftSummary
+          ]
+  _ -> relationalPositiveAffineClauseCoverage
+    inputCount inputPosition formula
+ where
+  summarizeBoth left right = do
+    leftSummary <- summarizeRelationalPositiveAffineExpression
+      inputCount inputPosition left
+    rightSummary <- summarizeRelationalPositiveAffineExpression
+      inputCount inputPosition right
+    pure (leftSummary, rightSummary)
+
+-- Over natural values, @not (left <= right)@ is exactly
+-- @right + 1 <= left@.  This proof-only successor is applied to the exact
+-- arbitrary-precision summary; it neither constructs new checked syntax nor
+-- changes the public literal bound or normalized contract identity.
+incrementRelationalPositiveAffineConstant
+  :: RelationalPositiveAffineSummary
+  -> RelationalPositiveAffineSummary
+incrementRelationalPositiveAffineConstant
+    (RelationalPositiveAffineSummary constant coefficients) =
+  RelationalPositiveAffineSummary (constant + 1) coefficients
 
 -- Unlike the literal-ceiling rule above, relational cancellation requires
 -- exact constants and coefficients on both sides.  Checked syntax bounds the

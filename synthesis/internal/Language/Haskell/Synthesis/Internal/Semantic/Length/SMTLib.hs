@@ -50,6 +50,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   , validateLengthSMTLibQueryApplicableDomain
   , validateLengthSMTLibQueryPositiveAffineApplicableDomain
   , validateLengthSMTLibQueryRelationalPositiveAffineApplicableDomain
+  , validateLengthSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
   , LengthSpinePairSMTLibQueryFingerprintSubject
   , lengthSpinePairSMTLibQuerySchemaTag
   , lengthSpinePairSMTLibQueryLogic
@@ -74,6 +75,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   , validateLengthSpinePairSMTLibQueryApplicableDomain
   , validateLengthSpinePairSMTLibQueryPositiveAffineApplicableDomain
   , validateLengthSpinePairSMTLibQueryRelationalPositiveAffineApplicableDomain
+  , validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -134,16 +136,20 @@ import Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , ValidatedLengthSpinePairInputBox
   , ValidatedLengthPositiveAffineApplicableDomain
   , ValidatedLengthRelationalPositiveAffineApplicableDomain
+  , ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
   , ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
+  , ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
   , ValidatedLengthSpinePairPositiveAffineApplicableDomain
   , validateLengthProblemApplicableDomain
   , validateLengthProblemPositiveAffineApplicableDomain
   , validateLengthProblemRelationalPositiveAffineApplicableDomain
+  , validateLengthProblemStrictRelationalPositiveAffineApplicableDomain
   , validateLengthProblemInputBox
   , validateLengthProblemCounterexample
   , validateLengthSpinePairProblemApplicableDomain
   , validateLengthSpinePairProblemPositiveAffineApplicableDomain
   , validateLengthSpinePairProblemRelationalPositiveAffineApplicableDomain
+  , validateLengthSpinePairProblemStrictRelationalPositiveAffineApplicableDomain
   , validateLengthSpinePairProblemInputBox
   , validateLengthSpinePairProblemCounterexample
   , simplifyLengthProblemCounterexample
@@ -861,6 +867,41 @@ validateLengthSMTLibQueryRelationalPositiveAffineApplicableDomain
     Right
     . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
 
+-- | Query-owned strict relational positive-affine applicable-domain
+-- validation.  The query contributes exact association only; the private
+-- complement rewrite and exhaustive replay remain solver-independent.
+validateLengthSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> LengthSMTLibQuery identity local
+  -> Either LengthSMTLibApplicableDomainValidationError
+      (LengthApplicableDomainValidation
+        ValidatedLengthCounterexample
+        ValidatedLengthStrictRelationalPositiveAffineApplicableDomain)
+validateLengthSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
+    evaluationLimits inputBoxLimits query = do
+  validation <- either
+    (Left . LengthSMTLibApplicableDomainValidationRejected)
+    Right
+    $ validateLengthProblemStrictRelationalPositiveAffineApplicableDomain
+        evaluationLimits inputBoxLimits
+        $ queryProblem query
+  case validation of
+    LengthApplicableDomainInapplicable inapplicability -> Right
+      $ LengthApplicableDomainInapplicable inapplicability
+    LengthApplicableDomainCounterexample evidence ->
+      LengthApplicableDomainCounterexample <$> replay evidence
+    LengthApplicableDomainEstablished evidence ->
+      LengthApplicableDomainEstablished <$> replay evidence
+ where
+  replay
+    :: BehavioralEvidence FiniteListSpineLengthV1 receipt
+    -> Either LengthSMTLibApplicableDomainValidationError receipt
+  replay = either
+    (Left . LengthSMTLibApplicableDomainValidationAssociationRejected)
+    Right
+    . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
+
 -- | Structural model rejection or independent product replay failure.
 -- Parser-decoded bindings remain the shared, authority-free input type, while
 -- every rejection and released receipt is product-domain specific.
@@ -1148,6 +1189,44 @@ validateLengthSpinePairSMTLibQueryRelationalPositiveAffineApplicableDomain
     (Left . LengthSpinePairSMTLibApplicableDomainValidationRejected)
     Right
     $ validateLengthSpinePairProblemRelationalPositiveAffineApplicableDomain
+        evaluationLimits inputBoxLimits
+        $ spinePairQueryProblem query
+  case validation of
+    LengthApplicableDomainInapplicable inapplicability -> Right
+      $ LengthApplicableDomainInapplicable inapplicability
+    LengthApplicableDomainCounterexample evidence ->
+      LengthApplicableDomainCounterexample <$> replay evidence
+    LengthApplicableDomainEstablished evidence ->
+      LengthApplicableDomainEstablished <$> replay evidence
+ where
+  replay
+    :: BehavioralEvidence FiniteBinaryProductSpineLengthsV1 receipt
+    -> Either
+        LengthSpinePairSMTLibApplicableDomainValidationError
+        receipt
+  replay = either
+    (Left .
+      LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected)
+    Right
+    . replayBehavioralEvidence
+        (lengthSpinePairSMTLibQueryBehavioralProblem query)
+
+-- | Nominal product-query sibling of
+-- 'validateLengthSMTLibQueryStrictRelationalPositiveAffineApplicableDomain'.
+validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> LengthSpinePairSMTLibQuery identity local
+  -> Either LengthSpinePairSMTLibApplicableDomainValidationError
+      (LengthApplicableDomainValidation
+        ValidatedLengthSpinePairCounterexample
+        ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain)
+validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
+    evaluationLimits inputBoxLimits query = do
+  validation <- either
+    (Left . LengthSpinePairSMTLibApplicableDomainValidationRejected)
+    Right
+    $ validateLengthSpinePairProblemStrictRelationalPositiveAffineApplicableDomain
         evaluationLimits inputBoxLimits
         $ spinePairQueryProblem query
   case validation of

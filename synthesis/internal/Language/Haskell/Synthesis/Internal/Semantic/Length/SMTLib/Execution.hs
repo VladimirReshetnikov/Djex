@@ -34,12 +34,15 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   , LengthSMTLibExecutionConfigSource (..)
   , defaultLengthSMTLibExecutionConfigSource
   , LengthSMTLibExecutionConfig
+  , LengthSMTLibExecutableLaunchStrategy (..)
   , LengthSMTLibExecutableDigestExpectation (..)
   , lengthSMTLibExecutionExecutableDigestExpectation
   , LengthSMTLibExecutionConfigField (..)
   , LengthSMTLibExecutionPathCharacterError (..)
   , LengthSMTLibExecutionConfigError (..)
   , mkLengthSMTLibExecutionConfig
+  , mkLengthSMTLibDescriptorBoundExecutionConfig
+  , lengthSMTLibExecutionExecutableLaunchStrategy
   , lengthSMTLibExecutionSolverTimeoutMilliseconds
   , lengthSMTLibExecutionSolverResourceLimit
   , lengthSMTLibExecutionHostDeadlineMilliseconds
@@ -53,6 +56,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   , lengthSMTLibPostLaunchArtifactPolicy
   , lengthSMTLibPostLaunchResponseLimits
   , lengthSMTLibPostLaunchExecutionPolicyFingerprint
+  , lengthSMTLibPostLaunchExecutableLaunchStrategy
   , lengthSMTLibExecutionZ3Profile
   ) where
 
@@ -269,6 +273,7 @@ defaultLengthSMTLibExecutionConfigSource executable expectedDigest =
 -- instance and no public projection of its reversible canonical fingerprint.
 data LengthSMTLibExecutionConfig = LengthSMTLibExecutionConfig
   !Z3.Z3SMTLibExecutionProfile
+  !LengthSMTLibExecutableLaunchStrategy
   !LengthSMTLibArtifactPolicy
   !LengthSMTLibResponseLimits
   !(Fingerprint LengthSMTLibExecutionPolicyFingerprintSubject)
@@ -283,8 +288,20 @@ instance Eq LengthSMTLibExecutionConfig where
 
 instance NFData LengthSMTLibExecutionConfig where
   rnf (LengthSMTLibExecutionConfig
-      z3 artifacts responses fingerprint) =
-    rnf z3 `seq` rnf artifacts `seq` rnf responses `seq` rnf fingerprint
+      z3 strategy artifacts responses fingerprint) =
+    rnf z3 `seq` rnf strategy `seq` rnf artifacts `seq`
+      rnf responses `seq` rnf fingerprint
+
+-- | Closed executable-launch authority selected by a sealed policy.  The
+-- descriptor-bound strategy binds only the opened main executable image; it
+-- grants no authority over an interpreter, dynamic loader, shared library,
+-- solver behavior, or solver result.
+data LengthSMTLibExecutableLaunchStrategy
+  = LengthSMTLibPathSnapshotThenDirectSpawn
+  | LengthSMTLibDescriptorBoundExecutableLaunch
+  deriving (Bounded, Enum, Eq, Ord, Show, Generic)
+
+instance NFData LengthSMTLibExecutableLaunchStrategy
 
 -- | Whether one sealed policy contains an executable-file digest expectation.
 --
@@ -358,6 +375,25 @@ mkLengthSMTLibExecutionConfig
   -> LengthSMTLibExecutionConfigSource
   -> Either LengthSMTLibExecutionConfigError LengthSMTLibExecutionConfig
 mkLengthSMTLibExecutionConfig limits source = do
+  buildExecutionConfig LengthSMTLibPathSnapshotThenDirectSpawn limits source
+
+-- | Seal the additive Linux descriptor-bound launch policy.  Pure admission
+-- remains platform-independent; a live opener fails closed when the native
+-- descriptor launcher is unavailable.
+mkLengthSMTLibDescriptorBoundExecutionConfig
+  :: LengthSMTLibExecutionLimits
+  -> LengthSMTLibExecutionConfigSource
+  -> Either LengthSMTLibExecutionConfigError LengthSMTLibExecutionConfig
+mkLengthSMTLibDescriptorBoundExecutionConfig limits source =
+  buildExecutionConfig LengthSMTLibDescriptorBoundExecutableLaunch
+    limits source
+
+buildExecutionConfig
+  :: LengthSMTLibExecutableLaunchStrategy
+  -> LengthSMTLibExecutionLimits
+  -> LengthSMTLibExecutionConfigSource
+  -> Either LengthSMTLibExecutionConfigError LengthSMTLibExecutionConfig
+buildExecutionConfig strategy limits source = do
   z3 <- case Z3.mkZ3SMTLibExecutionProfile z3Limits Z3.Z3SMTLibExecutionSource
       { Z3.z3SMTLibExecutionSourceExecutablePath =
           lengthSMTLibExecutionConfigSourceExecutablePath source
@@ -374,8 +410,13 @@ mkLengthSMTLibExecutionConfig limits source = do
     Right profile -> Right profile
   let artifacts = lengthSMTLibExecutionConfigSourceArtifactPolicy source
       responses = lengthSMTLibExecutionConfigSourceResponseLimits source
-  fingerprint <- buildPolicyFingerprint limits z3 artifacts responses
-  pure $ LengthSMTLibExecutionConfig z3 artifacts responses fingerprint
+  fingerprint <- case strategy of
+    LengthSMTLibPathSnapshotThenDirectSpawn ->
+      buildPolicyFingerprint limits z3 artifacts responses
+    LengthSMTLibDescriptorBoundExecutableLaunch ->
+      buildDescriptorBoundPolicyFingerprint limits z3 artifacts responses
+  pure $ LengthSMTLibExecutionConfig
+    z3 strategy artifacts responses fingerprint
  where
   LengthSMTLibExecutionLimits z3Limits _ = limits
 
@@ -404,13 +445,19 @@ lengthSMTLibExecutionArtifactPolicy
   :: LengthSMTLibExecutionConfig
   -> LengthSMTLibArtifactPolicy
 lengthSMTLibExecutionArtifactPolicy
-    (LengthSMTLibExecutionConfig _ value _ _) = value
+    (LengthSMTLibExecutionConfig _ _ value _ _) = value
 
 lengthSMTLibExecutionResponseLimits
   :: LengthSMTLibExecutionConfig
   -> LengthSMTLibResponseLimits
 lengthSMTLibExecutionResponseLimits
-    (LengthSMTLibExecutionConfig _ _ value _) = value
+    (LengthSMTLibExecutionConfig _ _ _ value _) = value
+
+lengthSMTLibExecutionExecutableLaunchStrategy
+  :: LengthSMTLibExecutionConfig
+  -> LengthSMTLibExecutableLaunchStrategy
+lengthSMTLibExecutionExecutableLaunchStrategy
+    (LengthSMTLibExecutionConfig _ value _ _ _) = value
 
 data LengthSMTLibExecutionPolicyFingerprintSubject
 
@@ -418,7 +465,7 @@ lengthSMTLibExecutionPolicyFingerprint
   :: LengthSMTLibExecutionConfig
   -> Fingerprint LengthSMTLibExecutionPolicyFingerprintSubject
 lengthSMTLibExecutionPolicyFingerprint
-    (LengthSMTLibExecutionConfig _ _ _ value) = value
+    (LengthSMTLibExecutionConfig _ _ _ _ value) = value
 
 -- | Strict post-launch authority intended to be retained only after a worker
 -- has passed capability and ready-identity admission.  The structured Z3
@@ -428,14 +475,16 @@ lengthSMTLibExecutionPolicyFingerprint
 data LengthSMTLibPostLaunchExecutionPolicy =
   LengthSMTLibPostLaunchExecutionPolicy
     !Int
+    !LengthSMTLibExecutableLaunchStrategy
     !LengthSMTLibArtifactPolicy
     !LengthSMTLibResponseLimits
     !(Fingerprint LengthSMTLibExecutionPolicyFingerprintSubject)
 
 instance NFData LengthSMTLibPostLaunchExecutionPolicy where
   rnf (LengthSMTLibPostLaunchExecutionPolicy
-      deadline artifacts responses fingerprint) =
-    rnf deadline `seq` rnf artifacts `seq` rnf responses `seq` rnf fingerprint
+      deadline strategy artifacts responses fingerprint) =
+    rnf deadline `seq` rnf strategy `seq` rnf artifacts `seq`
+      rnf responses `seq` rnf fingerprint
 
 -- | Narrow a complete execution policy after ready-identity admission.  This
 -- copies the already validated host deadline, artifact and response policy,
@@ -446,6 +495,7 @@ retainLengthSMTLibPostLaunchExecutionPolicy
 retainLengthSMTLibPostLaunchExecutionPolicy config =
   LengthSMTLibPostLaunchExecutionPolicy
     (lengthSMTLibExecutionHostDeadlineMilliseconds config)
+    (lengthSMTLibExecutionExecutableLaunchStrategy config)
     (lengthSMTLibExecutionArtifactPolicy config)
     (lengthSMTLibExecutionResponseLimits config)
     (lengthSMTLibExecutionPolicyFingerprint config)
@@ -454,31 +504,37 @@ lengthSMTLibPostLaunchHostDeadlineMilliseconds
   :: LengthSMTLibPostLaunchExecutionPolicy
   -> Int
 lengthSMTLibPostLaunchHostDeadlineMilliseconds
-    (LengthSMTLibPostLaunchExecutionPolicy value _ _ _) = value
+    (LengthSMTLibPostLaunchExecutionPolicy value _ _ _ _) = value
+
+lengthSMTLibPostLaunchExecutableLaunchStrategy
+  :: LengthSMTLibPostLaunchExecutionPolicy
+  -> LengthSMTLibExecutableLaunchStrategy
+lengthSMTLibPostLaunchExecutableLaunchStrategy
+    (LengthSMTLibPostLaunchExecutionPolicy _ value _ _ _) = value
 
 lengthSMTLibPostLaunchArtifactPolicy
   :: LengthSMTLibPostLaunchExecutionPolicy
   -> LengthSMTLibArtifactPolicy
 lengthSMTLibPostLaunchArtifactPolicy
-    (LengthSMTLibPostLaunchExecutionPolicy _ value _ _) = value
+    (LengthSMTLibPostLaunchExecutionPolicy _ _ value _ _) = value
 
 lengthSMTLibPostLaunchResponseLimits
   :: LengthSMTLibPostLaunchExecutionPolicy
   -> LengthSMTLibResponseLimits
 lengthSMTLibPostLaunchResponseLimits
-    (LengthSMTLibPostLaunchExecutionPolicy _ _ value _) = value
+    (LengthSMTLibPostLaunchExecutionPolicy _ _ _ value _) = value
 
 lengthSMTLibPostLaunchExecutionPolicyFingerprint
   :: LengthSMTLibPostLaunchExecutionPolicy
   -> Fingerprint LengthSMTLibExecutionPolicyFingerprintSubject
 lengthSMTLibPostLaunchExecutionPolicyFingerprint
-    (LengthSMTLibPostLaunchExecutionPolicy _ _ _ value) = value
+    (LengthSMTLibPostLaunchExecutionPolicy _ _ _ _ value) = value
 
 lengthSMTLibExecutionZ3Profile
   :: LengthSMTLibExecutionConfig
   -> Z3.Z3SMTLibExecutionProfile
 lengthSMTLibExecutionZ3Profile
-    (LengthSMTLibExecutionConfig value _ _ _) = value
+    (LengthSMTLibExecutionConfig value _ _ _ _) = value
 
 mapZ3ExecutionError
   :: Z3.Z3SMTLibExecutionError
@@ -547,6 +603,52 @@ buildPolicyFingerprint limits z3 artifacts responses =
       , fingerprintBuilderFields =
           [ FingerprintBytes lengthSMTLibExecutionPolicySchemaTag
           , FingerprintBytes lengthSMTLibExecutionProtocolSchemaTag
+          ] ++ Z3.z3SMTLibExecutionFingerprintFields z3 ++
+          [ artifactPolicyField artifacts
+          , FingerprintBytes lengthSMTLibResponseSchemaTag
+          , FingerprintNatural $ lengthSMTLibResponseByteLimit responses
+          , FingerprintNatural $ fromIntegral
+              $ lengthSMTLibResponseNestingDepthLimit responses
+          , FingerprintNatural $ lengthSMTLibResponseNodeLimit responses
+          , FingerprintNatural $ lengthSMTLibResponseTokenByteLimit responses
+          , FingerprintNatural $ fromIntegral
+              $ lengthSMTLibResponseIntegerBitLimit responses
+          ]
+      } of
+    Left FingerprintLimitExceeded
+        { fingerprintMaximumBytes = maximumBytesObserved
+        , fingerprintObservedBytesAtLeast = observed
+        } -> Left $ LengthSMTLibExecutionPolicyFingerprintByteLimitExceeded
+          maximumBytesObserved observed
+    Right fingerprint -> Right fingerprint
+ where
+ maximumBytes = lengthSMTLibExecutionPolicyFingerprintByteLimit limits
+
+buildDescriptorBoundPolicyFingerprint
+  :: LengthSMTLibExecutionLimits
+  -> Z3.Z3SMTLibExecutionProfile
+  -> LengthSMTLibArtifactPolicy
+  -> LengthSMTLibResponseLimits
+  -> Either
+      LengthSMTLibExecutionConfigError
+      (Fingerprint LengthSMTLibExecutionPolicyFingerprintSubject)
+buildDescriptorBoundPolicyFingerprint limits z3 artifacts responses =
+  case buildFingerprintWithin maximumBytes FingerprintBuilder
+      { fingerprintBuilderVersion = 1
+      , fingerprintBuilderRole =
+          ascii "length-z3-descriptor-bound-execution-policy"
+      , fingerprintBuilderFields =
+          [ FingerprintBytes $ ascii
+              "djex-length-z3-smtlib2-execution-policy/descriptor-bound-main-image/v1"
+          , FingerprintBytes lengthSMTLibExecutionProtocolSchemaTag
+          , FingerprintTag (ascii "executable-launch-strategy")
+              [ FingerprintBytes $ ascii
+                  "opened-source-hash-copy-sealed-memfd-execveat/main-image-bytes/v1"
+              , FingerprintBytes $ ascii
+                  "sealed-staged-main-image-bytes-only/v1"
+              , FingerprintBytes $ ascii
+                  "no-setuid-file-capability-loader-library-interpreter-or-solver-authority/v1"
+              ]
           ] ++ Z3.z3SMTLibExecutionFingerprintFields z3 ++
           [ artifactPolicyField artifacts
           , FingerprintBytes lengthSMTLibResponseSchemaTag

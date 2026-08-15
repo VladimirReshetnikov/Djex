@@ -926,10 +926,18 @@ sessionProcessFailure failure = case Process.lengthSMTLibProcessErrorClass failu
     LengthSMTLibLiveSessionExecutableUnavailable
   Process.LengthSMTLibProcessExecutableNotRegular ->
     LengthSMTLibLiveSessionExecutableRejected
+  Process.LengthSMTLibProcessExecutableNotExecutable ->
+    LengthSMTLibLiveSessionExecutableRejected
   Process.LengthSMTLibProcessExecutableMetadataChanged ->
     LengthSMTLibLiveSessionExecutableRejected
   Process.LengthSMTLibProcessExecutableDigestMismatch ->
     LengthSMTLibLiveSessionExecutableRejected
+  Process.LengthSMTLibProcessDescriptorBoundLaunchUnavailable ->
+    LengthSMTLibLiveSessionLaunchFailed
+  Process.LengthSMTLibProcessDescriptorBoundStagingFailed ->
+    LengthSMTLibLiveSessionLaunchFailed
+  Process.LengthSMTLibProcessDescriptorBoundExecFailed ->
+    LengthSMTLibLiveSessionLaunchFailed
   Process.LengthSMTLibProcessSpawnFailed ->
     LengthSMTLibLiveSessionLaunchFailed
   Process.LengthSMTLibProcessMissingPipe ->

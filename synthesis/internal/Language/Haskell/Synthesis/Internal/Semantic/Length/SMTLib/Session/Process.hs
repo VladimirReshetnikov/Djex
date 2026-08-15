@@ -6,7 +6,10 @@
 -- Length process schema, fingerprint root, and process-limit wrapper tag.
 module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process
   ( lengthSMTLibExecutableSnapshotStrengthTag
+  , lengthSMTLibDescriptorBoundExecutableLaunchStrengthTag
+  , lengthSMTLibDescriptorBoundExecutableLaunchSupported
   , lengthSMTLibProcessSchemaTag
+  , lengthSMTLibDescriptorBoundProcessSchemaTag
   , LengthSMTLibProcessLimitSource (..)
   , defaultLengthSMTLibProcessLimitSource
   , LengthSMTLibProcessLimits
@@ -43,6 +46,11 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Proces
   , lengthSMTLibExecutableSnapshotFingerprintField
   , LengthSMTLibProcess
   , openLengthSMTLibProcess
+  , LengthSMTLibWorkingDirectoryDescriptor
+  , mkLengthSMTLibWorkingDirectoryDescriptor
+  , openLengthSMTLibDescriptorBoundProcess
+  , openLengthSMTLibProcessWithPreDescriptorExecHook
+  , lengthSMTLibProcessUsesDescriptorBoundExecutableLaunch
   , lengthSMTLibProcessLimits
   , lengthSMTLibProcessSnapshot
   , lengthSMTLibProcessFingerprintField
@@ -79,9 +87,21 @@ lengthSMTLibExecutableSnapshotStrengthTag :: ByteString
 lengthSMTLibExecutableSnapshotStrengthTag =
   Z3Process.z3SMTLibExecutableSnapshotStrengthTag
 
+lengthSMTLibDescriptorBoundExecutableLaunchStrengthTag :: ByteString
+lengthSMTLibDescriptorBoundExecutableLaunchStrengthTag =
+  Z3Process.z3SMTLibDescriptorBoundExecutableLaunchStrengthTag
+
+lengthSMTLibDescriptorBoundExecutableLaunchSupported :: Bool
+lengthSMTLibDescriptorBoundExecutableLaunchSupported =
+  Z3Process.z3SMTLibDescriptorBoundExecutableLaunchSupported
+
 lengthSMTLibProcessSchemaTag :: ByteString
 lengthSMTLibProcessSchemaTag = asciiBytes
   "djex-length-z3-raw-process/v2"
+
+lengthSMTLibDescriptorBoundProcessSchemaTag :: ByteString
+lengthSMTLibDescriptorBoundProcessSchemaTag = asciiBytes
+  "djex-length-z3-descriptor-bound-sealed-main-image-process/v1"
 
 data LengthSMTLibProcessLimitSource = LengthSMTLibProcessLimitSource
   { lengthSMTLibProcessLimitSourceExecutableBytes :: !Natural
@@ -184,9 +204,13 @@ data LengthSMTLibProcessFailureClass
   | LengthSMTLibProcessWorkingDirectoryNotEmpty
   | LengthSMTLibProcessExecutableUnavailable
   | LengthSMTLibProcessExecutableNotRegular
+  | LengthSMTLibProcessExecutableNotExecutable
   | LengthSMTLibProcessExecutableByteLimitExceeded
   | LengthSMTLibProcessExecutableMetadataChanged
   | LengthSMTLibProcessExecutableDigestMismatch
+  | LengthSMTLibProcessDescriptorBoundLaunchUnavailable
+  | LengthSMTLibProcessDescriptorBoundStagingFailed
+  | LengthSMTLibProcessDescriptorBoundExecFailed
   | LengthSMTLibProcessSpawnFailed
   | LengthSMTLibProcessMissingPipe
   | LengthSMTLibProcessHandleConfigurationFailed
@@ -336,6 +360,17 @@ lengthSMTLibExecutableSnapshotFingerprintField =
 data LengthSMTLibProcess = LengthSMTLibProcess
   !Z3Process.Z3SMTLibProcess
 
+data LengthSMTLibWorkingDirectoryDescriptor =
+  LengthSMTLibWorkingDirectoryDescriptor
+    !Z3Process.Z3SMTLibWorkingDirectoryDescriptor
+
+mkLengthSMTLibWorkingDirectoryDescriptor
+  :: Int
+  -> LengthSMTLibWorkingDirectoryDescriptor
+mkLengthSMTLibWorkingDirectoryDescriptor =
+  LengthSMTLibWorkingDirectoryDescriptor
+  . Z3Process.mkZ3SMTLibWorkingDirectoryDescriptor
+
 openLengthSMTLibProcess
   :: LengthSMTLibProcessLimits
   -> LengthSMTLibProcessCancellation
@@ -361,6 +396,56 @@ openLengthSMTLibProcess limits cancellation deadline profile workingDirectory =
             -- ordered observation field list deliberately stays lazy.
             transientFingerprint = processFingerprintField process
         in retained `seq` transientFingerprint `seq` pure (Right retained)
+
+openLengthSMTLibDescriptorBoundProcess
+  :: LengthSMTLibProcessLimits
+  -> LengthSMTLibProcessCancellation
+  -> LengthSMTLibProcessDeadline
+  -> Z3Execution.Z3SMTLibExecutionProfile
+  -> FilePath
+  -> LengthSMTLibWorkingDirectoryDescriptor
+  -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
+openLengthSMTLibDescriptorBoundProcess limits cancellation deadline profile
+    workingDirectory descriptor =
+  openLengthSMTLibProcessWithPreDescriptorExecHook limits cancellation deadline
+    profile workingDirectory descriptor $ pure ()
+
+-- | Deterministic package-private seam used to replace the configured
+-- pathname after the sealed image has been admitted and before child
+-- allocation.  No executable descriptor is exposed to the hook.
+openLengthSMTLibProcessWithPreDescriptorExecHook
+  :: LengthSMTLibProcessLimits
+  -> LengthSMTLibProcessCancellation
+  -> LengthSMTLibProcessDeadline
+  -> Z3Execution.Z3SMTLibExecutionProfile
+  -> FilePath
+  -> LengthSMTLibWorkingDirectoryDescriptor
+  -> IO ()
+  -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
+openLengthSMTLibProcessWithPreDescriptorExecHook limits cancellation deadline
+    profile workingDirectory
+    (LengthSMTLibWorkingDirectoryDescriptor descriptor) hook =
+  mask $ \restore -> do
+    opened <- restore
+      $ Z3Process.openZ3SMTLibDescriptorBoundProcessWithPreExecHook
+          (toZ3ProcessLimits limits)
+          (toZ3ProcessCancellation cancellation)
+          (toZ3ProcessDeadline deadline)
+          profile workingDirectory descriptor hook
+    case opened of
+      Left failure ->
+        let retained = fromZ3ProcessError failure
+        in retained `seq` pure (Left retained)
+      Right process ->
+        let retained = LengthSMTLibProcess process
+            transientFingerprint = processFingerprintField process
+        in retained `seq` transientFingerprint `seq` pure (Right retained)
+
+lengthSMTLibProcessUsesDescriptorBoundExecutableLaunch
+  :: LengthSMTLibProcess
+  -> Bool
+lengthSMTLibProcessUsesDescriptorBoundExecutableLaunch =
+  Z3Process.z3SMTLibProcessUsesDescriptorBoundExecutableLaunch . toZ3Process
 
 lengthSMTLibProcessSnapshot
   :: LengthSMTLibProcess
@@ -472,14 +557,22 @@ closeLengthSMTLibProcess process = mask_ $ do
   retained `seq` pure retained
 
 processFingerprintField :: Z3Process.Z3SMTLibProcess -> FingerprintField
-processFingerprintField process = FingerprintTag
-  (ascii "length-z3-launched-transport")
-  $ FingerprintBytes (BS.unpack lengthSMTLibProcessSchemaTag)
+processFingerprintField process = FingerprintTag role
+  $ FingerprintBytes (BS.unpack schema)
   : Z3Process.z3SMTLibProcessObservationFingerprintFields process
   ++ [ lengthSMTLibProcessLimitsFingerprintField
       $ LengthSMTLibProcessLimits
       $ Z3Process.z3SMTLibProcessLimits process
      ]
+ where
+  descriptorBound =
+    Z3Process.z3SMTLibProcessUsesDescriptorBoundExecutableLaunch process
+  role = ascii $ if descriptorBound
+    then "length-z3-descriptor-bound-launched-transport"
+    else "length-z3-launched-transport"
+  schema = if descriptorBound
+    then lengthSMTLibDescriptorBoundProcessSchemaTag
+    else lengthSMTLibProcessSchemaTag
 
 toZ3ProcessLimitSource
   :: LengthSMTLibProcessLimitSource
@@ -645,12 +738,20 @@ fromZ3ProcessFailureClass failure = case failure of
     LengthSMTLibProcessExecutableUnavailable
   Z3Process.Z3SMTLibProcessExecutableNotRegular ->
     LengthSMTLibProcessExecutableNotRegular
+  Z3Process.Z3SMTLibProcessExecutableNotExecutable ->
+    LengthSMTLibProcessExecutableNotExecutable
   Z3Process.Z3SMTLibProcessExecutableByteLimitExceeded ->
     LengthSMTLibProcessExecutableByteLimitExceeded
   Z3Process.Z3SMTLibProcessExecutableMetadataChanged ->
     LengthSMTLibProcessExecutableMetadataChanged
   Z3Process.Z3SMTLibProcessExecutableDigestMismatch ->
     LengthSMTLibProcessExecutableDigestMismatch
+  Z3Process.Z3SMTLibProcessDescriptorBoundLaunchUnavailable ->
+    LengthSMTLibProcessDescriptorBoundLaunchUnavailable
+  Z3Process.Z3SMTLibProcessDescriptorBoundStagingFailed ->
+    LengthSMTLibProcessDescriptorBoundStagingFailed
+  Z3Process.Z3SMTLibProcessDescriptorBoundExecFailed ->
+    LengthSMTLibProcessDescriptorBoundExecFailed
   Z3Process.Z3SMTLibProcessSpawnFailed -> LengthSMTLibProcessSpawnFailed
   Z3Process.Z3SMTLibProcessMissingPipe -> LengthSMTLibProcessMissingPipe
   Z3Process.Z3SMTLibProcessHandleConfigurationFailed ->

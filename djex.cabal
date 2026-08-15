@@ -317,6 +317,10 @@ Library
   if !os(windows)
     Build-Depends: unix >= 2.7 && < 2.9
 
+  if os(linux)
+    C-Sources:   synthesis/cbits/z3_descriptor_spawn.c
+    Cpp-Options: -DDJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+
 -- The shared interactive and one-shot command is a launcher over the library's
 -- Language.Haskell.Djex.CLI, matching the two historical executables below,
 -- which remain available for their compatibility contracts.
@@ -444,6 +448,10 @@ Test-Suite synthesis-length-tests
 
   if !os(windows)
     Build-Depends: unix >= 2.7 && < 2.9
+
+  if os(linux)
+    C-Sources:   synthesis/cbits/z3_descriptor_spawn.c
+    Cpp-Options: -DDJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
 
 Test-Suite synthesis-term-graph-fingerprint-tests
   import:           tasty-hunit-test

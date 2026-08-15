@@ -52,12 +52,15 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
   , LengthSMTLibExecutionConfigSource (..)
   , defaultLengthSMTLibExecutionConfigSource
   , LengthSMTLibExecutionConfig
+  , LengthSMTLibExecutableLaunchStrategy (..)
   , LengthSMTLibExecutableDigestExpectation (..)
   , lengthSMTLibExecutionExecutableDigestExpectation
   , LengthSMTLibExecutionConfigField (..)
   , LengthSMTLibExecutionPathCharacterError (..)
   , LengthSMTLibExecutionConfigError (..)
   , mkLengthSMTLibExecutionConfig
+  , mkLengthSMTLibDescriptorBoundExecutionConfig
+  , lengthSMTLibExecutionExecutableLaunchStrategy
   , lengthSMTLibExecutionSolverTimeoutMilliseconds
   , lengthSMTLibExecutionSolverResourceLimit
   , lengthSMTLibExecutionHostDeadlineMilliseconds

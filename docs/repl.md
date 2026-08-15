@@ -447,7 +447,7 @@ string literals, matching the path grammar rather than shell escape syntax.
 | `:kind[!] TYPE` (`:k`) | Infer a type's kind in the current loaded module scope; attached `!` also shows its synonym-normalized form. |
 | `:load [TARGET ...]` (`:l`) | Replace the source target set and load local dependencies. No targets clears it. |
 | `:module [+\|-] [[*]MODULE ...]` (`:m`) | Replace, add to, or remove from the shared prompt context. |
-| `:pwd` | Print the process working directory. |
+| `:pwd` | Print the process working directory (an exact synonym of `:show directory`). |
 | `:quit` (`:q`) | Leave successfully. |
 | `:reload` (`:r`) | Re-read the retained canonical source targets and dependencies. |
 | `:script FILE` | Execute REPL inputs from a file. |
@@ -843,9 +843,12 @@ normally retains a `Num a => a` result, while an ambiguity used only internally
 may default. `:type +d EXPRESSION` additionally defaults eligible numeric
 variables that occur in the result. It tries the built-in candidates in
 order—currently `Integer`, then `Double`—and selects the first whose loaded
-instances satisfy every obligation. Only the canonical standard numeric
-classes participate; a user-defined class that happens to be named `Num` is
-not defaulted. This is intentionally narrower than GHCi's extended `+d`
+instances satisfy every obligation. A variable is eligible only when at least
+one canonical standard numeric class constrains it; the other canonical
+interactive classes (`Eq`, `Ord`, `Show`, `Read`, `Enum`, `Bounded`) may
+accompany the numeric obligation without blocking defaulting. Canonicity is
+checked by fully qualified name, so a user-defined class that happens to be
+named `Num` is not defaulted. This is intentionally narrower than GHCi's extended `+d`
 defaulting for nonnumeric interactive classes. The former GHCi `+v` spelling
 is deliberately rejected; plain `:type` already preserves eligible result
 variables. If no loaded default type can satisfy an ambiguity that is absent
@@ -915,11 +918,19 @@ Use any of these forms:
 :set                            -- show every current value
 ```
 
+Bare `:set` also prints an informational `targets = ...` line beside the
+seventeen settings; the target set is workspace state owned by `:load`, not a
+setting, so `:set targets`/`:unset targets` are rejected.
+
 Boolean values also accept `true`/`false` and `yes`/`no`. The compact
 `+NAME`/`-NAME` forms are available only for the boolean settings listed below;
 using a sign with a non-boolean setting is rejected before value parsing and
 leaves the previous state unchanged. Other invalid values have the same
 transactional behavior.
+
+A bare `prompt` value is trimmed like any other setting value, so trailing
+whitespace survives only through the Haskell string-literal form: the default
+is reproduced by `:set prompt "djex[%b]> "`, not by the unquoted spelling.
 
 | Setting | Accepted values | Default | Owner |
 | --- | --- | --- | --- |
@@ -928,7 +939,7 @@ transactional behavior.
 | `select` | `first`, `best`, `all` | `first` | Shared presentation |
 | `render` | `definition`, `expression` | `definition` | Shared presentation |
 | `qualification` | `none`, `identifiers`, `full` | `full` | Shared presentation |
-| `prompt` | Text; `%b` expands to the active selection | `"djex[%b]> "` | Interactive UI |
+| `prompt` | Text, or a Haskell string literal; `%b` expands to the active selection | `"djex[%b]> "` | Interactive UI |
 | `candidate-limit` | Positive integer | `200` | Djinn |
 | `choice-budget` | Non-negative integer; `0` means unbounded | `0` | Djinn |
 | `djinn-axioms` | Boolean | Off | Djinn |

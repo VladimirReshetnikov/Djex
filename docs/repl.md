@@ -133,7 +133,10 @@ silently discarded.
 
 ### Rank-N and impredicative types
 
-<!-- Maintainers: the bounded rank-N/impredicative rule families are rendered in three places - README.md, docs/repl.md (Rank-N and impredicative types), and docs/library-api.md (Djinn example) - and their numeric bounds also appear in the codebase walkthrough. A rule or bound change must be applied everywhere. -->
+<!-- Maintainers: the rank-N/impredicative rule families and their numeric
+bounds are canonical in docs/rank-n.md; this section is a summary rendering.
+Change a rule or bound there first, then re-check this section, the README's
+Unified command section, docs/library-api.md, and the codebase walkthrough. -->
 
 The shared parser enables `RankNTypes` and `ImpredicativeTypes`. Quantification
 may therefore occur below arrows and type constructors, including a list of

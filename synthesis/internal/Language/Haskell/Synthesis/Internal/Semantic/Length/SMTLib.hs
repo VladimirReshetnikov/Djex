@@ -194,6 +194,7 @@ import Language.Haskell.Synthesis.Semantic.Problem
   , behavioralProblemInventoryFingerprint
   , replayBehavioralEvidence
   )
+import Language.Haskell.Synthesis.Count (observedNaturalBits)
 
 -- | Identity of the fixed translator, typed plan, exact problem, and rendered
 -- request bytes.  A future execution identity must additionally bind the Z3
@@ -2062,18 +2063,3 @@ positiveLiteralNaturalQuotientWitnessSchemaTag = ascii
 
 ascii :: String -> [Word8]
 ascii = map $ fromIntegral . fromEnum
-
-observedNaturalBits :: Int -> Natural -> Int
-observedNaturalBits maximumBits = go 0
- where
-  bound = max 0 maximumBits
-
-  go !observed 0 = observed
-  go !observed remaining
-    | observed >= bound = saturatedSuccessor bound
-    | otherwise = go (observed + 1) $ remaining `quot` 2
-
-saturatedSuccessor :: Int -> Int
-saturatedSuccessor value
-  | value == maxBound = maxBound
-  | otherwise = value + 1

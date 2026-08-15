@@ -272,6 +272,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Problem
   , mkBehavioralEvidence
   , replayBehavioralEvidence
   )
+import Language.Haskell.Synthesis.Count (observedNaturalBits)
 
 -- | Raw operational bounds for concrete replay. Zero is valid: only the
 -- natural number zero has a zero-bit representation.
@@ -4346,18 +4347,3 @@ indexNatural :: Natural -> [value] -> Maybe value
 indexNatural 0 (value : _) = Just value
 indexNatural position (_ : remaining) = indexNatural (position - 1) remaining
 indexNatural _ [] = Nothing
-
-observedNaturalBits :: Int -> Natural -> Int
-observedNaturalBits maximumBits = go 0
- where
-  bound = max 0 maximumBits
-
-  go !observed 0 = observed
-  go !observed remaining
-    | observed >= bound = saturatedSuccessor bound
-    | otherwise = go (observed + 1) $ remaining `quot` 2
-
-saturatedSuccessor :: Int -> Int
-saturatedSuccessor value
-  | value == maxBound = maxBound
-  | otherwise = value + 1

@@ -266,6 +266,9 @@ import Language.Haskell.Synthesis.Internal.TypedGenerated.Fingerprint
   ( fingerprintCheckedTypeApplicationCertificateGraphWithTypeStructure
   , fingerprintTermGraphWithTypeStructure
   )
+import Language.Haskell.Synthesis.Count
+  ( saturatedSuccessor
+  )
 
 -- | Candidate-specific work bounds.  Graph limits are already checked by
 -- their own constructor; only the signed evaluation-step field can fail here.
@@ -2703,11 +2706,6 @@ spendEvaluation context = do
     then lift $ Left $ LengthProblemEvaluationStepLimitExceeded
       maximumSteps $ saturatedSuccessor maximumSteps
     else put state {evaluationSteps = observed + 1}
-
-saturatedSuccessor :: Int -> Int
-saturatedSuccessor value
-  | value == maxBound = maxBound
-  | otherwise = value + 1
 
 validateCandidateVariable
   :: Int

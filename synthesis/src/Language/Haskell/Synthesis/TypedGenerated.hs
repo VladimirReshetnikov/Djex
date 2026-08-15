@@ -83,6 +83,9 @@ import qualified Language.Haskell.Synthesis.Generated as Generated
 import Language.Haskell.Synthesis.Name (Boxity (Boxed), Name)
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeAtom as TypeAtom
+import Language.Haskell.Synthesis.Count
+  ( saturatedSuccessor
+  )
 
 -- | Stable identity for a search-created term node in one sealed query.
 newtype TermNodeId = TermNodeId Natural
@@ -1104,11 +1107,6 @@ projectGraph limits nodes root = do
     (projectedPattern, remaining') <- projectPattern remaining pattern
     (bodyExpression, remaining'') <- projectNode remaining' body
     pure ((projectedPattern, bodyExpression) : reversed, remaining'')
-
-saturatedSuccessor :: Int -> Int
-saturatedSuccessor value
-  | value == maxBound = maxBound
-  | otherwise = value + 1
 
 graphMetrics
   :: [(TermNodeId, TermNode ty local)]

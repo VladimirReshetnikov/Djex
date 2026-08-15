@@ -1243,6 +1243,7 @@ Build and test the complete graph from the repository root:
 ```console
 cabal build all
 cabal test all -j1 --test-show-details=direct
+cabal check
 ```
 
 The whole-tree test run is deliberately serial. Several CLI suites invoke the
@@ -2246,8 +2247,11 @@ core and frontend dependencies: `haskell-src-exts`, `directory`, `filepath`,
 engines and frontends that consume their output.
 
 Both backend trees follow the same layout — `src-core/`, `src-frontend/`,
-`app/`, and one explicit directory per test suite — while the package root
-uses `src/`, `app/`, `test-integration/`, `test-api/`, and `test-cli/`.
+`app/`, and one explicit directory per test suite — with `djinn/` adding a
+`src-internal/` root for package-private implementation modules. The package
+root uses `src/`, `app/`, `synthesis/`, `test-integration/`, `test-api/`,
+`test-cli/`, and `test-support/`, the last holding shared CLI test assertions
+and the private fake `cabal`/`z3` fixture executables.
 
 Package-generated code imports `Paths_djex` instead of `Paths_djinn` or
 `Paths_exference`; version discovery and installed-data lookup belong to

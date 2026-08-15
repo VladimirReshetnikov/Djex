@@ -1,6 +1,9 @@
 # Djex architecture
 
-Djex is one Cabal package with one library and three executables. The library
+Djex is one Cabal package with one library, three installable executables
+(`djex`, `djinn`, and `exference`), and two private test-fixture executables
+(`djex-fake-cabal` and `djex-fake-z3`) that test suites invoke as controlled
+stand-ins for the real tools. The library
 contains a shared parser-independent synthesis foundation, two deliberately
 different search engines, checked adapters for both engines, and the historical
 Djinn and Exference compatibility frontends.
@@ -22,6 +25,7 @@ historical review notes rather than as the current API guide.
 | `exference/src-frontend/` | Haskell-source extraction, environment loading, and the historical Exference command API. |
 | `src/` | The `Language.Haskell.Djex` facade, shared REPL and result presentation, and merged `djex` command. |
 | `app/`, `djinn/app/`, `exference/app/` | Thin executable launchers. |
+| `test-support/` | Shared CLI test assertions plus the private `djex-fake-cabal` and `djex-fake-z3` fixture executables. |
 
 All eight source roots compile into the unnamed `djex` library. The directory
 split documents dependency direction and provenance; it is not a set of Cabal
@@ -734,9 +738,11 @@ workers. Downstream code cannot import them through a `djex` dependency.
 
 ## Test boundaries
 
-The package has twelve test suites:
+The package has sixteen test suites:
 
 - shared-foundation, facade integration, downstream API, and merged CLI suites;
+- semantic Length, structural fingerprint, certificate, and term-graph
+  fingerprint suites over the shared foundation;
 - Djinn unit, property, frontend-import, and CLI suites;
 - Exference unit, private-engine, frontend-import, and CLI suites.
 

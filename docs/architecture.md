@@ -737,6 +737,13 @@ private checked-request/session owners for both adapters, the shared REPL's
 command and Haskeline workers, and the historical Djinn formula and REPL
 workers. Downstream code cannot import them through a `djex` dependency.
 
+The converse also holds: a module named `.Internal.` may live under
+`synthesis/src/` rather than `synthesis/internal/` when the shared source
+tier itself consumes it — `Language.Haskell.Synthesis.Internal.InstanceHead`
+sits beside its `Environment` consumer for exactly this reason. Directory
+placement documents dependency direction; Cabal visibility, not the path,
+decides whether a module is private.
+
 ## Test boundaries
 
 The package has sixteen test suites:

@@ -10,6 +10,8 @@ module Language.Haskell.Synthesis.Internal.InstanceHead
   , instanceHeadKey
   , repeatedInstanceHeadsInFirstRepetitionOrder
   , overlappingInstanceHeadPairsInSourceOrder
+  , constraintListEquations
+  , zipExactly
   ) where
 
 import Control.DeepSeq (NFData)
@@ -171,6 +173,8 @@ constraintEquations (Constraint leftClass leftArguments)
   | leftClass /= rightClass = Nothing
   | otherwise = zipExactly leftArguments rightArguments
 
+-- | Argument equations for two same-length constraint lists whose classes
+-- agree pairwise; 'Nothing' on any length or class mismatch.
 constraintListEquations
   :: [Constraint (Type variable)]
   -> [Constraint (Type variable)]
@@ -182,6 +186,7 @@ constraintListEquations (left : leftRest) (right : rightRest) = do
   pure $ equations ++ rest
 constraintListEquations _ _ = Nothing
 
+-- | Zip two lists, or 'Nothing' when their lengths differ.
 zipExactly :: [left] -> [right] -> Maybe [(left, right)]
 zipExactly [] [] = Just []
 zipExactly (left : leftRest) (right : rightRest) =

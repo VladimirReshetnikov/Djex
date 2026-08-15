@@ -399,6 +399,7 @@ main = defaultMain $ testGroup "Djex downstream API"
                       ( "Ord" `isInfixOf` message &&
                         ( "LengthSMTLibExecutionConfig" `isInfixOf` message ||
                           "LengthSMTLibLiveSession" `isInfixOf` message ||
+                          "LengthSMTLibLiveUsableWorkDeadline" `isInfixOf` message ||
                           "LengthSMTLibLiveQueryObservation" `isInfixOf` message ||
                           "LengthSpinePairSMTLibLiveQueryObservation" `isInfixOf` message ||
                           "CheckedLengthInterpretationPolicy" `isInfixOf` message
@@ -407,6 +408,8 @@ main = defaultMain $ testGroup "Djex downstream API"
                       ( ("Eq" `isInfixOf` message || "Show" `isInfixOf` message) &&
                         ( "LengthSMTLibExecutionConfig" `isInfixOf` message ||
                           "LengthSMTLibLiveSession" `isInfixOf` message ||
+                          "LengthSMTLibLiveUsableWorkBudget" `isInfixOf` message ||
+                          "LengthSMTLibLiveUsableWorkDeadline" `isInfixOf` message ||
                           "LengthSMTLibLiveQueryObservation" `isInfixOf` message ||
                           "LengthSpinePairSMTLibLiveQueryObservation" `isInfixOf` message ||
                           "CheckedLengthInterpretationPolicy" `isInfixOf` message
@@ -465,6 +468,8 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "forbiddenAssociatedLengthSMTLibUnsatisfiableCoercion"
                       , "forbiddenAssociatedLengthSMTLibUnknownCoercion"
                       , "forbiddenLengthSMTLibLiveSessionCoercion"
+                      , "forbiddenLengthSMTLibLiveUsableWorkDeadlineCoercion"
+                      , "forbiddenLengthSMTLibLiveUsableWorkBudgetCoercion"
                       , "forbiddenLengthSMTLibLiveObservationEpochCoercion"
                       , "forbiddenLengthSMTLibLiveObservationIdentityCoercion"
                       , "forbiddenLengthSMTLibLiveObservationLocalCoercion"
@@ -484,6 +489,8 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "lengthSMTLibExecutionPolicyFingerprint"
                       , "lengthSMTLibExecutionZ3Profile"
                       , "LengthSMTLibLiveSession"
+                      , "LengthSMTLibLiveUsableWorkBudget"
+                      , "LengthSMTLibLiveUsableWorkDeadline"
                       , "LengthSMTLibLiveQueryObservation"
                       , "LengthSpinePairSMTLibLiveQueryObservation"
                       , "LengthSMTLibLiveSessionError"

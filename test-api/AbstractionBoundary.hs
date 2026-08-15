@@ -152,6 +152,8 @@ $(do
           ]
         hiddenValues =
           [ "LengthSMTLibLiveSession"
+          , "LengthSMTLibLiveUsableWorkBudget"
+          , "LengthSMTLibLiveUsableWorkDeadline"
           , "LengthSMTLibLiveQueryObservation"
           , "LengthSpinePairSMTLibLiveQueryObservation"
           , "LengthSMTLibLiveSessionError"
@@ -288,6 +290,8 @@ newtype LiveIdentityProbe = LiveIdentityProbe Int
 newtype OtherLiveIdentityProbe = OtherLiveIdentityProbe Int
 newtype LiveLocalProbe = LiveLocalProbe Int
 newtype OtherLiveLocalProbe = OtherLiveLocalProbe Int
+newtype LiveBudgetProbe = LiveBudgetProbe Int
+newtype OtherLiveBudgetProbe = OtherLiveBudgetProbe Int
 
 forbiddenConstructionAttempts :: [(String, ())]
 forbiddenConstructionAttempts =
@@ -520,6 +524,22 @@ forbiddenConstructionAttempts =
       "LengthSMTLibLiveSession"
   , noShow @(LengthSMTLibLiveSession LiveEpochProbe)
       "LengthSMTLibLiveSession"
+  , noGeneric @LengthSMTLibLiveUsableWorkBudget
+      "LengthSMTLibLiveUsableWorkBudget"
+  , noShow @LengthSMTLibLiveUsableWorkBudget
+      "LengthSMTLibLiveUsableWorkBudget"
+  , noGeneric
+      @(LengthSMTLibLiveUsableWorkDeadline LiveBudgetProbe)
+      "LengthSMTLibLiveUsableWorkDeadline"
+  , noEq
+      @(LengthSMTLibLiveUsableWorkDeadline LiveBudgetProbe)
+      "LengthSMTLibLiveUsableWorkDeadline"
+  , noOrd
+      @(LengthSMTLibLiveUsableWorkDeadline LiveBudgetProbe)
+      "LengthSMTLibLiveUsableWorkDeadline"
+  , noShow
+      @(LengthSMTLibLiveUsableWorkDeadline LiveBudgetProbe)
+      "LengthSMTLibLiveUsableWorkDeadline"
   , noGeneric
       @(LengthSMTLibLiveQueryObservation
         LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
@@ -564,6 +584,12 @@ forbiddenConstructionAttempts =
       "LengthSpinePairSMTLibLiveObservationReplayError"
   , ( "LengthSMTLibLiveSession epoch unexpectedly permits Coercible"
     , forbiddenLengthSMTLibLiveSessionCoercion `seq` ()
+    )
+  , ( "LengthSMTLibLiveUsableWorkDeadline budget unexpectedly permits Coercible"
+    , forbiddenLengthSMTLibLiveUsableWorkDeadlineCoercion `seq` ()
+    )
+  , ( "LengthSMTLibLiveUsableWorkBudget exposed its newtype representation"
+    , forbiddenLengthSMTLibLiveUsableWorkBudgetCoercion `seq` ()
     )
   , ( "LengthSMTLibLiveQueryObservation epoch unexpectedly permits Coercible"
     , forbiddenLengthSMTLibLiveObservationEpochCoercion `seq` ()
@@ -1658,6 +1684,16 @@ forbiddenLengthSMTLibLiveSessionCoercion
   :: LengthSMTLibLiveSession LiveEpochProbe
   -> LengthSMTLibLiveSession OtherLiveEpochProbe
 forbiddenLengthSMTLibLiveSessionCoercion = coerce
+
+forbiddenLengthSMTLibLiveUsableWorkDeadlineCoercion
+  :: LengthSMTLibLiveUsableWorkDeadline LiveBudgetProbe
+  -> LengthSMTLibLiveUsableWorkDeadline OtherLiveBudgetProbe
+forbiddenLengthSMTLibLiveUsableWorkDeadlineCoercion = coerce
+
+forbiddenLengthSMTLibLiveUsableWorkBudgetCoercion
+  :: LengthSMTLibLiveUsableWorkBudget
+  -> Int
+forbiddenLengthSMTLibLiveUsableWorkBudgetCoercion = coerce
 
 forbiddenLengthSMTLibLiveObservationEpochCoercion
   :: LengthSMTLibLiveQueryObservation

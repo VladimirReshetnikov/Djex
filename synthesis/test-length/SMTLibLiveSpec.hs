@@ -8,6 +8,7 @@ module SMTLibLiveSpec
   , fakeZ3EventTag
   , fakeZ3FieldValues
   , readFakeZ3Events
+  , withFakeZ3Mode
   , withLiveFacadeSession
   , withLiveQueryWorker
   , withLiveQueryWorkerLimits

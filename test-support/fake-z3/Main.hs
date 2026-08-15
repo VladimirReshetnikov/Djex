@@ -61,6 +61,7 @@ data Mode
   | QueryStalePrewrite
   | QueryHangStatus
   | QueryHangValue
+  | QueryDelay300Milliseconds
   | UnknownMode String
   deriving (Eq)
 
@@ -285,6 +286,9 @@ handleCheckSatisfiable trace mode state
           recordQueryHang trace ordinal "status"
           hangForever
         else do
+          if mode == QueryDelay300Milliseconds
+            then threadDelay 300000
+            else pure ()
           emitResponse trace mode $ status <> "\n"
           pure (True, nextState)
 
@@ -466,6 +470,7 @@ modeFromName originalName = case portableStem originalName of
   "djex-fake-z3-query-stale-prewrite" -> QueryStalePrewrite
   "djex-fake-z3-query-hang-status" -> QueryHangStatus
   "djex-fake-z3-query-hang-value" -> QueryHangValue
+  "djex-fake-z3-query-delay-300ms" -> QueryDelay300Milliseconds
   _ -> UnknownMode originalName
 
 portableStem :: FilePath -> FilePath
@@ -494,6 +499,7 @@ modeName mode = case mode of
   QueryStalePrewrite -> "query-stale-prewrite"
   QueryHangStatus -> "query-hang-status"
   QueryHangValue -> "query-hang-value"
+  QueryDelay300Milliseconds -> "query-delay-300ms"
   UnknownMode _ -> "unknown"
 
 hangForever :: IO a

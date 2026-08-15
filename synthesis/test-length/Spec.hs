@@ -1,13 +1,27 @@
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Main (main) where
 
-import Control.Exception (SomeException, displayException, evaluate, try)
+import Control.Concurrent (threadDelay)
+import Control.Exception
+  ( Exception
+  , SomeException
+  , displayException
+  , evaluate
+  , throwIO
+  , try
+  )
 import Control.DeepSeq (force)
 import qualified Crypto.Hash.SHA256 as SHA256
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import Data.List (intercalate, isInfixOf, nub, sort)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Word (Word64, Word8)
+import GHC.Clock (getMonotonicTimeNSec)
 import Numeric.Natural (Natural)
+import System.Directory (doesPathExist)
 import qualified System.Info as SystemInfo
 import System.Timeout (timeout)
 import Unsafe.Coerce (unsafeCoerce)
@@ -121,6 +135,7 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , smtLibTests
   , smtLibProtocolTests
   , SMTLibLiveSpec.smtLibLiveTests
+  , usableWorkBudgetTests
   , smtLibLiveQueryTests
   , smtLibLiveFacadeTests
   , smtLibSpinePairLiveFacadeTests
@@ -129,6 +144,564 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , productiveBoundTests
   , fingerprintTests
   ]
+
+usableWorkBudgetTests :: TestTree
+usableWorkBudgetTests = testGroup "shared live usable-work budget"
+  [ testCase "validate positive, host-wait, and monotonic-clock durations"
+      assertLiveUsableWorkBudgetValidation
+  , testCase
+      "reject a normally returning all-pure callback only after it returns"
+      assertLiveUsableWorkOwnerReturnExpiry
+  , testCase "map absolute-deadline overflow to a sanitized resource failure"
+      assertLiveUsableWorkDeadlineResourceOverflow
+  , testCase "reject an expired token before workspace launch"
+      assertLiveUsableWorkWorkspaceExpiry
+  , testCase "bound a hung opener by the shared deadline"
+      assertLiveUsableWorkOpenerExpiry
+  , testCase
+      "preserve legacy identity bytes and distinguish budgeted query schemas"
+      assertLiveUsableWorkIdentitySchemas
+  , testCase
+      "share one tie-winning deadline across scalar and pair ordinals"
+      assertLiveUsableWorkMixedDomainDeadline
+  , testCase "retain the shorter fresh per-query deadline"
+      assertLiveUsableWorkLocalQueryDeadline
+  , testCase
+      "sanitize query expiry, poison atomically, and remove the workspace"
+      assertLiveUsableWorkPublicQueryExpiry
+  , testCase "check public session callback return before fresh cleanup"
+      assertLiveUsableWorkSessionCallbackReturnExpiry
+  , testCase "exclude final cleanup from the convenience entrance"
+      assertLiveUsableWorkConvenienceCleanupExclusion
+  , testCase "rethrow an expired callback exception after durable cleanup"
+      assertLiveUsableWorkCallbackException
+  ]
+
+assertLiveUsableWorkBudgetValidation :: IO ()
+assertLiveUsableWorkBudgetValidation = do
+  let source milliseconds = SMTLibLive.LengthSMTLibLiveUsableWorkBudgetSource
+        { SMTLibLive.lengthSMTLibLiveUsableWorkBudgetSourceMilliseconds =
+            milliseconds }
+      microsecondsOverflow = maxBound `div` 1000 + 1
+      nanosecondsOverflowInteger =
+        toInteger (maxBound :: Word64) `div` 1000000 + 1
+  assertBudgetValidationFailure
+    (SMTLibLive.LengthSMTLibLiveUsableWorkBudgetNonPositive 0)
+    $ SMTLibLive.mkLengthSMTLibLiveUsableWorkBudget (source 0)
+  assertBudgetValidationFailure
+    (SMTLibLive.LengthSMTLibLiveUsableWorkBudgetNonPositive (-1))
+    $ SMTLibLive.mkLengthSMTLibLiveUsableWorkBudget (source (-1))
+  assertBudgetValidationFailure
+    (SMTLibLive.LengthSMTLibLiveUsableWorkBudgetMicrosecondsOverflow
+      microsecondsOverflow)
+    $ SMTLibLive.mkLengthSMTLibLiveUsableWorkBudget
+        (source microsecondsOverflow)
+  if nanosecondsOverflowInteger <= toInteger (maxBound :: Int)
+    then do
+      let nanosecondsOverflow = fromInteger nanosecondsOverflowInteger
+      assertBudgetValidationFailure
+        (SMTLibLive.LengthSMTLibLiveUsableWorkBudgetMicrosecondsOverflow
+          nanosecondsOverflow)
+        $ SMTLibLive.mkLengthSMTLibLiveUsableWorkBudget
+            (source nanosecondsOverflow)
+    else pure ()
+  one <- mkLiveUsableWorkBudget 1
+  two <- mkLiveUsableWorkBudget 2
+  assertBool "validated usable-work budgets lost their exact ordering"
+    $ one < two
+  evaluate (force sourceOne) >> pure ()
+  evaluate (force one) >> pure ()
+ where
+ sourceOne = SMTLibLive.LengthSMTLibLiveUsableWorkBudgetSource 1
+
+assertBudgetValidationFailure
+  :: SMTLibLive.LengthSMTLibLiveUsableWorkBudgetError
+  -> Either
+      SMTLibLive.LengthSMTLibLiveUsableWorkBudgetError
+      SMTLibLive.LengthSMTLibLiveUsableWorkBudget
+  -> IO ()
+assertBudgetValidationFailure expected result = case result of
+  Left actual -> actual @?= expected
+  Right _ -> assertFailure $ "expected usable-work budget rejection: " ++
+    show expected
+
+assertLiveUsableWorkOwnerReturnExpiry :: IO ()
+assertLiveUsableWorkOwnerReturnExpiry = do
+  budget <- mkLiveUsableWorkBudget 20
+  callbackReturned <- newIORef False
+  scoped <- SMTLibLive.withLengthSMTLibLiveUsableWorkDeadline budget $ \_ -> do
+    threadDelay 80000
+    writeIORef callbackReturned True
+  readIORef callbackReturned >>= (@?= True)
+  assertPublicLiveSessionFailure
+    SMTLibLive.LengthSMTLibLiveSessionDeadlineExceeded scoped
+  let rendered = either show (const "unexpected-success") scoped
+  assertBool "public deadline failure exposed raw monotonic deadline material"
+    $ not ("nanosecond" `isInfixOf` rendered) &&
+        not ("ProcessDeadline" `isInfixOf` rendered)
+
+assertLiveUsableWorkDeadlineResourceOverflow :: IO ()
+assertLiveUsableWorkDeadlineResourceOverflow = do
+  let maximumDeltaMilliseconds =
+        toInteger (maxBound :: Word64) `div` 1000000
+  if maximumDeltaMilliseconds > toInteger (maxBound :: Int)
+    then pure ()
+    else do
+      budget <- mkLiveUsableWorkBudget
+        $ fromInteger maximumDeltaMilliseconds
+      reached <- newIORef False
+      scoped <- SMTLibLive.withLengthSMTLibLiveUsableWorkDeadline budget
+        $ \_ -> writeIORef reached True
+      readIORef reached >>= (@?= False)
+      assertPublicLiveSessionFailure
+        SMTLibLive.LengthSMTLibLiveSessionResourceLimitExceeded scoped
+
+assertLiveUsableWorkWorkspaceExpiry :: IO ()
+assertLiveUsableWorkWorkspaceExpiry =
+  SMTLibLiveSpec.withFakeZ3Mode "healthy" $ \executable _ -> do
+    execution <- mkBudgetLiveExecution executable 1000
+    budget <- mkLiveUsableWorkBudget 25
+    callbackReached <- newIORef False
+    scoped <- SMTLibLive.withLengthSMTLibLiveUsableWorkDeadline budget
+      $ \deadline -> do
+          threadDelay 80000
+          SMTLibLive.withLengthSMTLibLiveSessionUnderDeadline
+            deadline execution $ \_ -> writeIORef callbackReached True
+    readIORef callbackReached >>= (@?= False)
+    assertPublicLiveSessionFailure
+      SMTLibLive.LengthSMTLibLiveSessionDeadlineExceeded scoped
+    spawned <- doesPathExist $ executable ++ ".events"
+    assertBool "an already-expired workspace token spawned the fake solver"
+      $ not spawned
+
+assertLiveUsableWorkOpenerExpiry :: IO ()
+assertLiveUsableWorkOpenerExpiry =
+  SMTLibLiveSpec.withFakeZ3Mode "hang" $ \executable _ -> do
+    execution <- mkBudgetLiveExecution executable 1000
+    budget <- mkLiveUsableWorkBudget 150
+    callbackReached <- newIORef False
+    scoped <- SMTLibLive.withLengthSMTLibLiveSessionWithUsableWorkBudget
+      budget execution $ \_ -> writeIORef callbackReached True
+    readIORef callbackReached >>= (@?= False)
+    assertPublicLiveSessionFailure
+      SMTLibLive.LengthSMTLibLiveSessionDeadlineExceeded scoped
+    assertFakeWorkerWorkspaceRemoved "shared opener deadline" executable
+
+assertLiveUsableWorkIdentitySchemas :: IO ()
+assertLiveUsableWorkIdentitySchemas = do
+  problem <- adversarialConstantZeroProblem identityLengthContract
+  query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  legacy <- SMTLibLiveSpec.withLiveQueryWorker "healthy"
+    InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable id
+    $ \_ worker -> do
+        run <- expectRight =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
+          Evaluate.defaultLengthEvaluationLimits worker query
+        let identity = InternalFingerprint.fingerprintCanonicalBytes
+              $ SMTLibSession.lengthSMTLibQueryRunIdentityFingerprint run
+        assertBool "legacy run identity lost its exact schema"
+          $ SMTLibSession.lengthSMTLibQueryRunSchemaTag `isInfixOf` identity
+        assertBool "legacy run identity acquired the budgeted schema"
+          $ not
+          $ SMTLibSession.lengthSMTLibBudgetedQueryRunSchemaTag
+              `isInfixOf` identity
+  _ <- expectRight legacy
+
+  budgeted <- withInternalBudgetedWorker "healthy" 1000 1000
+    $ \_ worker -> do
+        run <- expectRight =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
+          Evaluate.defaultLengthEvaluationLimits worker query
+        let workerIdentity = InternalFingerprint.fingerprintCanonicalBytes
+              $ SMTLibSession.lengthSMTLibReadyWorkerIdentityFingerprint worker
+            runIdentity = InternalFingerprint.fingerprintCanonicalBytes
+              $ SMTLibSession.lengthSMTLibQueryRunIdentityFingerprint run
+        assertBool "budgeted worker identity omitted its shared deadline schema"
+          $ asciiBytes "djex-length-z3-shared-usable-work-deadline/v1"
+              `isInfixOf` workerIdentity
+        assertBool "budgeted run identity omitted its distinct schema"
+          $ SMTLibSession.lengthSMTLibBudgetedQueryRunSchemaTag
+              `isInfixOf` runIdentity
+        assertBool "budgeted run identity retained the legacy top-level schema"
+          $ not
+          $ SMTLibSession.lengthSMTLibQueryRunSchemaTag `isInfixOf` runIdentity
+        assertEffectiveDeadlineCause
+          "shared-usable-work-deadline" runIdentity
+  _ <- expectRight =<< expectRight budgeted
+  pure ()
+
+assertLiveUsableWorkMixedDomainDeadline :: IO ()
+assertLiveUsableWorkMixedDomainDeadline = do
+  (scalarQuery, pairQuery) <- liveWireTwinQueries
+  scoped <- withInternalBudgetedWorker "query-delay-300ms" 900 1000
+    $ \executable worker -> do
+        scalar <- expectRight
+          =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
+                Evaluate.defaultLengthEvaluationLimits worker scalarQuery
+        pair <- expectRight
+          =<< SMTLibSession.runLengthSpinePairSMTLibReadyWorkerQuery
+                Evaluate.defaultLengthEvaluationLimits worker pairQuery
+        SMTLibSession.lengthSMTLibQueryRunOrdinal scalar @?= 0
+        SMTLibSession.lengthSpinePairSMTLibQueryRunOrdinal pair @?= 1
+        assertLiveValueQueryRun scalarQuery [3] scalar
+        assertLiveSpinePairValueQueryRun
+          pairQuery [3] (Length.LengthSpinePair 3 0) pair
+        let scalarIdentity = InternalFingerprint.fingerprintCanonicalBytes
+              $ SMTLibSession.lengthSMTLibQueryRunIdentityFingerprint scalar
+            pairIdentity = InternalFingerprint.fingerprintCanonicalBytes
+              $ SMTLibSession.lengthSpinePairSMTLibQueryRunIdentityFingerprint
+                  pair
+        assertBool "budgeted scalar run omitted its nominal schema"
+          $ SMTLibSession.lengthSMTLibBudgetedQueryRunSchemaTag
+              `isInfixOf` scalarIdentity
+        assertBool "budgeted pair run omitted its nominal schema"
+          $ SMTLibSession.lengthSpinePairSMTLibBudgetedQueryRunSchemaTag
+              `isInfixOf` pairIdentity
+        assertBool "budgeted scalar and pair runs shared one nominal identity"
+          $ scalarIdentity /= pairIdentity
+
+        expired <- SMTLibSession.runLengthSMTLibReadyWorkerQuery
+          Evaluate.defaultLengthEvaluationLimits worker scalarQuery
+        assertInternalQueryDeadlineFailure True expired
+        spent <- SMTLibSession.runLengthSpinePairSMTLibReadyWorkerQuery
+          Evaluate.defaultLengthEvaluationLimits worker pairQuery
+        assertInternalPairQueryFailure
+          SMTLibSession.LengthSpinePairSMTLibQueryWorkerSpent False spent
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0, 1, 2] events
+  scope <- expectRight scoped
+  assertInternalSessionDeadlineScope scope
+
+assertLiveUsableWorkLocalQueryDeadline :: IO ()
+assertLiveUsableWorkLocalQueryDeadline = do
+  (scalarQuery, pairQuery) <- liveWireTwinQueries
+  healthy <- withInternalBudgetedWorker "healthy" 2000 200
+    $ \_ worker -> do
+        scalar <- expectRight
+          =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
+                Evaluate.defaultLengthEvaluationLimits worker scalarQuery
+        pair <- expectRight
+          =<< SMTLibSession.runLengthSpinePairSMTLibReadyWorkerQuery
+                Evaluate.defaultLengthEvaluationLimits worker pairQuery
+        let scalarIdentity = InternalFingerprint.fingerprintCanonicalBytes
+              $ SMTLibSession.lengthSMTLibQueryRunIdentityFingerprint scalar
+            pairIdentity = InternalFingerprint.fingerprintCanonicalBytes
+              $ SMTLibSession.lengthSpinePairSMTLibQueryRunIdentityFingerprint
+                  pair
+        assertEffectiveDeadlineCause "fresh-per-query-deadline" scalarIdentity
+        assertEffectiveDeadlineCause "fresh-per-query-deadline" pairIdentity
+  _ <- expectRight =<< expectRight healthy
+
+  scalarScoped <- withInternalBudgetedWorker
+    "query-delay-300ms" 2000 200
+    $ \executable worker -> do
+        rejected <- SMTLibSession.runLengthSMTLibReadyWorkerQuery
+          Evaluate.defaultLengthEvaluationLimits worker scalarQuery
+        assertInternalQueryDeadlineFailure True rejected
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0] events
+  _ <- expectRight =<< expectRight scalarScoped
+
+  pairScoped <- withInternalBudgetedWorker
+    "query-delay-300ms" 2000 200
+    $ \executable worker -> do
+        rejected <- SMTLibSession.runLengthSpinePairSMTLibReadyWorkerQuery
+          Evaluate.defaultLengthEvaluationLimits worker pairQuery
+        assertInternalPairQueryDeadlineFailure True rejected
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0] events
+  _ <- expectRight =<< expectRight pairScoped
+  pure ()
+
+assertLiveUsableWorkPublicQueryExpiry :: IO ()
+assertLiveUsableWorkPublicQueryExpiry = do
+  problem <- adversarialConstantZeroProblem identityLengthContract
+  query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  SMTLibLiveSpec.withFakeZ3Mode "query-hang-status" $ \executable _ -> do
+    execution <- mkBudgetLiveExecution executable 1000
+    budget <- mkLiveUsableWorkBudget 400
+    scoped <- SMTLibLive.withLengthSMTLibLiveSessionWithUsableWorkBudget
+      budget execution $ \session -> do
+        rejected <- SMTLibLive.runLengthSMTLibLiveQuery
+          Evaluate.defaultLengthEvaluationLimits session query
+        assertPublicLiveQueryFailure
+          SMTLibLive.LengthSMTLibLiveQueryDeadlineExceeded False rejected
+        spent <- SMTLibLive.runLengthSMTLibLiveQuery
+          Evaluate.defaultLengthEvaluationLimits session query
+        assertPublicLiveQueryFailure
+          SMTLibLive.LengthSMTLibLiveQuerySessionUnavailable False spent
+    assertPublicLiveSessionFailure
+      SMTLibLive.LengthSMTLibLiveSessionDeadlineExceeded scoped
+    events <- SMTLibLiveSpec.readFakeZ3Events executable
+    assertFakeZ3EventOrdinals "query-check" [0] events
+    assertFakeWorkerWorkspaceRemoved "shared query deadline" executable
+
+assertLiveUsableWorkSessionCallbackReturnExpiry :: IO ()
+assertLiveUsableWorkSessionCallbackReturnExpiry =
+  SMTLibLiveSpec.withFakeZ3Mode "healthy" $ \executable _ -> do
+    execution <- mkBudgetLiveExecution executable 1000
+    budget <- mkLiveUsableWorkBudget 500
+    callbackReturned <- newIORef False
+    scoped <- SMTLibLive.withLengthSMTLibLiveSessionWithUsableWorkBudget
+      budget execution $ \_ -> do
+        threadDelay 700000
+        writeIORef callbackReturned True
+    readIORef callbackReturned >>= (@?= True)
+    assertPublicLiveSessionFailure
+      SMTLibLive.LengthSMTLibLiveSessionDeadlineExceeded scoped
+    assertFakeWorkerWorkspaceRemoved "session callback return" executable
+
+assertLiveUsableWorkConvenienceCleanupExclusion :: IO ()
+assertLiveUsableWorkConvenienceCleanupExclusion =
+  SMTLibLiveSpec.withFakeZ3Mode "stubborn-eof" $ \executable _ -> do
+    let budgetMilliseconds = 1500
+        cleanupMarginMilliseconds = 100
+    execution <- mkBudgetLiveExecution executable 1000
+    budget <- mkLiveUsableWorkBudget budgetMilliseconds
+    started <- getMonotonicTimeNSec
+    scoped <- SMTLibLive.withLengthSMTLibLiveSessionWithUsableWorkBudget
+      budget execution $ \_ -> delayUntilMonotonic
+        $ started + fromIntegral
+            ((budgetMilliseconds - cleanupMarginMilliseconds) * 1000000)
+    _ <- expectRight scoped
+    finished <- getMonotonicTimeNSec
+    assertBool "fresh cleanup did not cross the shared usable-work deadline"
+      $ finished >= started + fromIntegral (budgetMilliseconds * 1000000)
+    assertFakeWorkerWorkspaceRemoved "excluded final cleanup" executable
+
+data LiveUsableWorkCallbackException = LiveUsableWorkCallbackException
+  deriving (Eq, Show)
+
+instance Exception LiveUsableWorkCallbackException
+
+assertLiveUsableWorkCallbackException :: IO ()
+assertLiveUsableWorkCallbackException =
+  SMTLibLiveSpec.withFakeZ3Mode "healthy" $ \executable _ -> do
+    execution <- mkBudgetLiveExecution executable 1000
+    budget <- mkLiveUsableWorkBudget 400
+    attempted <- try
+      $ SMTLibLive.withLengthSMTLibLiveSessionWithUsableWorkBudget
+          budget execution $ \_ -> do
+            threadDelay 600000
+            throwIO LiveUsableWorkCallbackException
+    case attempted of
+      Left failure -> failure @?= LiveUsableWorkCallbackException
+      Right (_ :: Either SMTLibLive.LengthSMTLibLiveSessionError ()) ->
+        assertFailure "expired callback exception was replaced by a deadline"
+    assertFakeWorkerWorkspaceRemoved "budgeted callback exception" executable
+
+mkLiveUsableWorkBudget
+  :: Int
+  -> IO SMTLibLive.LengthSMTLibLiveUsableWorkBudget
+mkLiveUsableWorkBudget milliseconds = expectRight
+  $ SMTLibLive.mkLengthSMTLibLiveUsableWorkBudget
+  $ SMTLibLive.LengthSMTLibLiveUsableWorkBudgetSource milliseconds
+
+mkBudgetLiveExecution
+  :: FilePath
+  -> Int
+  -> IO SMTLibExecution.LengthSMTLibExecutionConfig
+mkBudgetLiveExecution executable hostDeadline = expectRight
+  $ SMTLibExecution.mkLengthSMTLibExecutionConfig
+      SMTLibExecution.defaultLengthSMTLibExecutionLimits
+  $ (SMTLibExecution.defaultLengthSMTLibExecutionConfigSource
+      executable Nothing)
+    { SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverTimeoutMilliseconds =
+        100
+    , SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverResourceLimit =
+        4242
+    , SMTLibExecution.lengthSMTLibExecutionConfigSourceArtifactPolicy =
+        SMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+    , SMTLibExecution.lengthSMTLibExecutionConfigSourceHostDeadlineMilliseconds =
+        hostDeadline
+    }
+
+withInternalBudgetedWorker
+  :: String
+  -> Int
+  -> Int
+  -> (forall epoch.
+      FilePath
+      -> SMTLibSession.LengthSMTLibReadyWorker epoch
+      -> IO result)
+  -> IO
+      (Either
+        SMTLibSession.LengthSMTLibSessionError
+        (Either SMTLibSession.LengthSMTLibSessionScopeError result))
+withInternalBudgetedWorker mode budgetMilliseconds hostDeadline use =
+  SMTLibLiveSpec.withFakeZ3Mode mode $ \executable _ -> do
+    config <- mkInternalBudgetSessionConfig executable hostDeadline
+    SMTLibSession.withLengthSMTLibSessionUsableWorkDeadlineForBudgetedSession
+      budgetMilliseconds $ \deadline ->
+        SMTLibSession.withLengthSMTLibReadyWorkerUnderDeadline deadline config
+          $ use executable
+
+mkInternalBudgetSessionConfig
+  :: FilePath
+  -> Int
+  -> IO SMTLibSession.LengthSMTLibSessionConfig
+mkInternalBudgetSessionConfig executable hostDeadline = do
+  execution <- expectRight
+    $ InternalSMTLibExecution.mkLengthSMTLibExecutionConfig
+        InternalSMTLibExecution.defaultLengthSMTLibExecutionLimits
+    $ (InternalSMTLibExecution.defaultLengthSMTLibExecutionConfigSource
+        executable Nothing)
+      { InternalSMTLibExecution.lengthSMTLibExecutionConfigSourceSolverTimeoutMilliseconds =
+          100
+      , InternalSMTLibExecution.lengthSMTLibExecutionConfigSourceSolverResourceLimit =
+          4242
+      , InternalSMTLibExecution.lengthSMTLibExecutionConfigSourceArtifactPolicy =
+          InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+      , InternalSMTLibExecution.lengthSMTLibExecutionConfigSourceHostDeadlineMilliseconds =
+          hostDeadline
+      }
+  process <- expectRight $ SMTLibProcess.mkLengthSMTLibProcessLimits
+    SMTLibProcess.defaultLengthSMTLibProcessLimitSource
+  session <- expectRight $ SMTLibSession.mkLengthSMTLibSessionLimits
+    SMTLibSession.defaultLengthSMTLibSessionLimitSource
+      { SMTLibSession.lengthSMTLibSessionLimitSourceOpenerDeadlineMilliseconds =
+          3000 }
+  expectRight $ SMTLibSession.sealLengthSMTLibSessionConfig
+    session process SMTLibCapability.defaultLengthSMTLibCapabilityLimits
+    SMTLibProtocol.defaultLengthSMTLibProtocolLimits execution
+
+assertPublicLiveSessionFailure
+  :: SMTLibLive.LengthSMTLibLiveSessionFailure
+  -> Either SMTLibLive.LengthSMTLibLiveSessionError value
+  -> IO ()
+assertPublicLiveSessionFailure expected result = case result of
+  Left failure -> do
+    SMTLibLive.lengthSMTLibLiveSessionPrimaryFailure failure @?= expected
+    SMTLibLive.lengthSMTLibLiveSessionCleanupIncomplete failure @?= False
+  Right _ -> assertFailure $ "expected public live session failure: " ++
+    show expected
+
+assertPublicLiveQueryFailure
+  :: SMTLibLive.LengthSMTLibLiveQueryFailure
+  -> Bool
+  -> Either SMTLibLive.LengthSMTLibLiveQueryError value
+  -> IO ()
+assertPublicLiveQueryFailure expected cleanupIncomplete result = case result of
+  Left failure -> do
+    SMTLibLive.lengthSMTLibLiveQueryPrimaryFailure failure @?= expected
+    SMTLibLive.lengthSMTLibLiveQueryCleanupIncomplete failure @?=
+      cleanupIncomplete
+    let rendered = show failure
+    assertBool "public query failure exposed raw deadline or child material"
+      $ not ("ProcessDeadline" `isInfixOf` rendered) &&
+          not ("nanosecond" `isInfixOf` rendered)
+  Right _ -> assertFailure $ "expected public live query failure: " ++
+    show expected
+
+assertInternalQueryDeadlineFailure
+  :: Bool
+  -> Either SMTLibSession.LengthSMTLibQueryRunError value
+  -> IO ()
+assertInternalQueryDeadlineFailure expectedCleanup result = case result of
+  Left failure -> do
+    case SMTLibSession.lengthSMTLibQueryRunPrimaryFailure failure of
+      SMTLibSession.LengthSMTLibQueryDeadlineFailure process ->
+        SMTLibProcess.lengthSMTLibProcessErrorClass process @?=
+          SMTLibProcess.LengthSMTLibProcessDeadlineExceeded
+      unexpected -> assertFailure $ "wrong internal query failure: " ++
+        show unexpected
+    case ( expectedCleanup
+         , SMTLibSession.lengthSMTLibQueryRunProcessCleanupStatus failure) of
+      (True, Just cleanup) -> do
+        SMTLibProcess.lengthSMTLibProcessCleanupReadersStopped cleanup @?= True
+        assertBool "deadline cleanup remained incomplete"
+          $ SMTLibProcess.lengthSMTLibProcessCleanupEscalation cleanup /=
+              SMTLibProcess.LengthSMTLibProcessCleanupIncomplete
+      (False, Nothing) -> pure ()
+      _ -> assertFailure "internal deadline carried the wrong cleanup owner"
+  Right _ -> assertFailure "expected internal query deadline failure"
+
+assertInternalPairQueryFailure
+  :: SMTLibSession.LengthSpinePairSMTLibQueryRunFailure
+  -> Bool
+  -> Either SMTLibSession.LengthSpinePairSMTLibQueryRunError value
+  -> IO ()
+assertInternalPairQueryFailure expected expectedCleanup result = case result of
+  Left failure -> do
+    SMTLibSession.lengthSpinePairSMTLibQueryRunPrimaryFailure failure @?=
+      expected
+    case ( expectedCleanup
+         , SMTLibSession.lengthSpinePairSMTLibQueryRunProcessCleanupStatus
+             failure) of
+      (True, Just _) -> pure ()
+      (False, Nothing) -> pure ()
+      _ -> assertFailure "pair query failure carried the wrong cleanup owner"
+  Right _ -> assertFailure $ "expected internal pair query failure: " ++
+    show expected
+
+assertInternalPairQueryDeadlineFailure
+  :: Bool
+  -> Either SMTLibSession.LengthSpinePairSMTLibQueryRunError value
+  -> IO ()
+assertInternalPairQueryDeadlineFailure expectedCleanup result = case result of
+  Left failure -> do
+    case SMTLibSession.lengthSpinePairSMTLibQueryRunPrimaryFailure failure of
+      SMTLibSession.LengthSpinePairSMTLibQueryDeadlineFailure process ->
+        SMTLibProcess.lengthSMTLibProcessErrorClass process @?=
+          SMTLibProcess.LengthSMTLibProcessDeadlineExceeded
+      unexpected -> assertFailure $ "wrong internal pair query failure: " ++
+        show unexpected
+    case ( expectedCleanup
+         , SMTLibSession.lengthSpinePairSMTLibQueryRunProcessCleanupStatus
+             failure) of
+      (True, Just cleanup) -> do
+        SMTLibProcess.lengthSMTLibProcessCleanupReadersStopped cleanup @?= True
+        assertBool "pair deadline cleanup remained incomplete"
+          $ SMTLibProcess.lengthSMTLibProcessCleanupEscalation cleanup /=
+              SMTLibProcess.LengthSMTLibProcessCleanupIncomplete
+      (False, Nothing) -> pure ()
+      _ -> assertFailure "pair deadline carried the wrong cleanup owner"
+  Right _ -> assertFailure "expected internal pair query deadline failure"
+
+assertInternalSessionDeadlineScope
+  :: Either SMTLibSession.LengthSMTLibSessionScopeError value
+  -> IO ()
+assertInternalSessionDeadlineScope result = case result of
+  Left scope -> case SMTLibSession.lengthSMTLibSessionScopePrimaryError scope of
+    SMTLibSession.LengthSMTLibSessionDeadlineFailure process ->
+      SMTLibProcess.lengthSMTLibProcessErrorClass process @?=
+        SMTLibProcess.LengthSMTLibProcessDeadlineExceeded
+    unexpected -> assertFailure $ "wrong shared session failure: " ++
+      show unexpected
+  Right _ -> assertFailure "expired shared session unexpectedly succeeded"
+
+assertEffectiveDeadlineCause :: String -> [Word8] -> IO ()
+assertEffectiveDeadlineCause expected identity =
+  countByteStringOccurrences
+      (BS.pack $ encodeFingerprintFieldForIdentityTest field)
+      (BS.pack identity) @?= 1
+ where
+  field = InternalFingerprint.FingerprintTag
+    (asciiBytes "effective-cause")
+    [InternalFingerprint.FingerprintBytes $ asciiBytes expected]
+
+assertFakeWorkerWorkspaceRemoved :: String -> FilePath -> IO ()
+assertFakeWorkerWorkspaceRemoved label executable = do
+  events <- SMTLibLiveSpec.readFakeZ3Events executable
+  case fakeZ3Events "start" events of
+    [event] -> case SMTLibLiveSpec.fakeZ3FieldValues
+        (liveTestBytes "cwd") event of
+      [raw] -> do
+        retained <- doesPathExist $ BSC.unpack raw
+        assertBool (label ++ " retained its workspace") $ not retained
+      _ -> assertFailure $ label ++ " trace omitted its cwd"
+    _ -> assertFailure $ label ++ " emitted an unexpected start trace"
+
+delayUntilMonotonic :: Word64 -> IO ()
+delayUntilMonotonic target = do
+  now <- getMonotonicTimeNSec
+  if now >= target
+    then pure ()
+    else do
+      let remainingMicroseconds =
+            fromIntegral ((target - now + 999) `div` 1000)
+      threadDelay remainingMicroseconds
+      delayUntilMonotonic target
 
 smtLibLiveQueryTests :: TestTree
 smtLibLiveQueryTests = testGroup "Length SMT-LIB live queries"
@@ -1239,9 +1812,12 @@ assertLiveSpinePairValueQueryRun query expectedInputs expectedResult run = do
         $ SMTLibSession.lengthSpinePairSMTLibQueryRunIdentityFingerprint run
       replayTag = asciiBytes
         "finite-binary-product-spine-lengths/counterexample-replay/v1"
-  assertBool "the product run schema was absent from its identity"
-    $ SMTLibSession.lengthSpinePairSMTLibQueryRunSchemaTag
-        `isInfixOf` identityBytes
+  let presentSchemas = filter (`isInfixOf` identityBytes)
+        [ SMTLibSession.lengthSpinePairSMTLibQueryRunSchemaTag
+        , SMTLibSession.lengthSpinePairSMTLibBudgetedQueryRunSchemaTag
+        ]
+  assertBool "the product run lacked one exact live-policy schema"
+    $ length presentSchemas == 1
   countByteStringOccurrences (BS.pack replayTag) (BS.pack identityBytes) @?= 1
   assertLiveSpinePairQueryRunAccounting run
 

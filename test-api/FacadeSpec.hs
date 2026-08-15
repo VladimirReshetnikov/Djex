@@ -6,7 +6,7 @@ import Control.DeepSeq (rnf)
 import Data.Either (isRight)
 import qualified Data.Set as Set
 import Data.Void (Void)
-import Data.Word (Word8)
+import Data.Word (Word64, Word8)
 import Numeric.Natural (Natural)
 
 import ExferencePatternImports (patternViewsRoundTrip)
@@ -19,6 +19,7 @@ type FacadeRawArtifact = ()
 data FacadeLiveEpoch
 data FacadeLiveIdentity
 data FacadeLiveLocal
+data FacadeLiveBudget
 
 facadeTests :: TestTree
 facadeTests = testGroup "public Djex facade"
@@ -106,7 +107,32 @@ facadeTests = testGroup "public Djex facade"
         ] @?= [minBound .. maxBound]
       (HeuristicRankingOnly :: RawObservationUse) @?= minBound
   , testCase "exports only the scoped live Length facade" $ do
-      let _scopedRunner
+      let budgetBuilder
+            :: LengthSMTLibLiveUsableWorkBudgetSource
+            -> Either
+                LengthSMTLibLiveUsableWorkBudgetError
+                LengthSMTLibLiveUsableWorkBudget
+          budgetBuilder = mkLengthSMTLibLiveUsableWorkBudget
+          _budgetOwner
+            :: LengthSMTLibLiveUsableWorkBudget
+            -> (forall budget.
+                LengthSMTLibLiveUsableWorkDeadline budget -> IO result)
+            -> IO (Either LengthSMTLibLiveSessionError result)
+          _budgetOwner = withLengthSMTLibLiveUsableWorkDeadline
+          _deadlineSessionRunner
+            :: LengthSMTLibLiveUsableWorkDeadline FacadeLiveBudget
+            -> LengthSMTLibExecutionConfig
+            -> (forall epoch. LengthSMTLibLiveSession epoch -> IO result)
+            -> IO (Either LengthSMTLibLiveSessionError result)
+          _deadlineSessionRunner = withLengthSMTLibLiveSessionUnderDeadline
+          _budgetedSessionRunner
+            :: LengthSMTLibLiveUsableWorkBudget
+            -> LengthSMTLibExecutionConfig
+            -> (forall epoch. LengthSMTLibLiveSession epoch -> IO result)
+            -> IO (Either LengthSMTLibLiveSessionError result)
+          _budgetedSessionRunner =
+            withLengthSMTLibLiveSessionWithUsableWorkBudget
+          _scopedRunner
             :: LengthSMTLibExecutionConfig
             -> (forall epoch. LengthSMTLibLiveSession epoch -> IO result)
             -> IO (Either LengthSMTLibLiveSessionError result)
@@ -251,7 +277,8 @@ facadeTests = testGroup "public Djex facade"
               -> LengthSpinePairSMTLibLiveObservationReplayError -> Ordering)
           pairReplayErrorShow =
             (show :: LengthSpinePairSMTLibLiveObservationReplayError -> String)
-      queryRunner `seq` pairQueryRunner `seq` sessionFailureProjection `seq`
+      budgetBuilder `seq`
+        queryRunner `seq` pairQueryRunner `seq` sessionFailureProjection `seq`
         observationReplay `seq`
         pairObservationReplay `seq`
         sessionCleanupProjection `seq`
@@ -269,6 +296,9 @@ facadeTests = testGroup "public Djex facade"
         replayErrorShow `seq` pairReplayErrorEq `seq`
         pairReplayErrorOrd `seq` pairReplayErrorShow `seq`
         (rnf :: LengthSMTLibLiveSessionError -> ()) `seq`
+        (rnf :: LengthSMTLibLiveUsableWorkBudgetSource -> ()) `seq`
+        (rnf :: LengthSMTLibLiveUsableWorkBudget -> ()) `seq`
+        (rnf :: LengthSMTLibLiveUsableWorkBudgetError -> ()) `seq`
         (rnf :: LengthSMTLibLiveQueryError -> ()) `seq`
         (rnf :: LengthSpinePairSMTLibLiveQueryError -> ()) `seq`
         (rnf :: LengthSMTLibLiveObservationReplayError -> ()) `seq`
@@ -278,6 +308,34 @@ facadeTests = testGroup "public Djex facade"
         (rnf :: LengthSpinePairSMTLibLiveQueryObservation
           FacadeLiveEpoch FacadeLiveIdentity FacadeLiveLocal -> ()) `seq`
         pure ()
+      let source milliseconds = LengthSMTLibLiveUsableWorkBudgetSource
+            { lengthSMTLibLiveUsableWorkBudgetSourceMilliseconds =
+                milliseconds }
+          microsecondsOverflow = maxBound `div` 1000 + 1
+          nanosecondsOverflowInteger =
+            toInteger (maxBound :: Word64) `div` 1000000 + 1
+          assertBudgetFailure expected result = case result of
+            Left actual -> actual @?= expected
+            Right _ -> assertBool
+              "invalid usable-work budget was accepted" False
+      source 7 @?= LengthSMTLibLiveUsableWorkBudgetSource 7
+      lengthSMTLibLiveUsableWorkBudgetSourceMilliseconds (source 7) @?= 7
+      assertBudgetFailure (LengthSMTLibLiveUsableWorkBudgetNonPositive 0)
+        $ mkLengthSMTLibLiveUsableWorkBudget (source 0)
+      assertBudgetFailure (LengthSMTLibLiveUsableWorkBudgetNonPositive (-3))
+        $ mkLengthSMTLibLiveUsableWorkBudget (source (-3))
+      assertBudgetFailure
+        (LengthSMTLibLiveUsableWorkBudgetMicrosecondsOverflow
+          microsecondsOverflow)
+        $ mkLengthSMTLibLiveUsableWorkBudget (source microsecondsOverflow)
+      if nanosecondsOverflowInteger <= toInteger (maxBound :: Int)
+        then do
+          let nanosecondsOverflow = fromInteger nanosecondsOverflowInteger
+          assertBudgetFailure
+            (LengthSMTLibLiveUsableWorkBudgetMicrosecondsOverflow
+              nanosecondsOverflow)
+            $ mkLengthSMTLibLiveUsableWorkBudget (source nanosecondsOverflow)
+        else pure ()
       (defaultLengthSMTLibLiveSessionMaximumQueries :: Natural) @?= 64
       [ LengthSMTLibLiveSessionDeadlineExceeded
         , LengthSMTLibLiveSessionWorkspaceUnavailable

@@ -16,6 +16,19 @@
 -- neither freshness nor process execution.  A later live layer must generate
 -- session-wide distinct barriers, attest and probe its worker, enforce the
 -- returned write actions, and poison that worker after every 'Left'.
+--
+-- This module also owns the complete phase machine, framing validation, and
+-- fingerprint construction shared with the nominal binary-product plan.  A
+-- 'LengthSMTLibProtocolIdentity' record carries everything that
+-- distinguishes one protocol domain: its schema tags, plan fingerprint role,
+-- domain-specific fingerprint fields, and the exact query projections.  The
+-- scalar identity lives here; the product identity and its nominally
+-- distinct plan, receiver, and decoded synonyms live in the thin
+-- "Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol.SpinePair"
+-- wrapper.  The barrier, phase, write-kind, and error vocabularies are
+-- deliberately shared: domain authority lives in the nominal plan, receiver,
+-- and decoded types, which remain distinct through their query and
+-- fingerprint-subject parameters.
 module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   ( lengthSMTLibProtocolPlanSchemaTag
   , lengthSMTLibProtocolPhaseMachineSchemaTag
@@ -32,9 +45,12 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   , LengthSMTLibProtocolRequiredFrame (..)
   , LengthSMTLibProtocolRequiredLimit (..)
   , LengthSMTLibProtocolPlanError (..)
+  , LengthSMTLibProtocolIdentity (..)
   , LengthSMTLibProtocolPlan
+  , LengthSMTLibQueryProtocolPlan
   , LengthSMTLibProtocolPlanFingerprintSubject
   , sealLengthSMTLibProtocolPlan
+  , sealLengthSMTLibQueryProtocolPlan
   , lengthSMTLibProtocolInitialWriteBytes
   , lengthSMTLibProtocolInputValueWriteBytes
   , lengthSMTLibProtocolPlanFingerprint
@@ -45,13 +61,16 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   , LengthSMTLibProtocolPhase (..)
   , LengthSMTLibProtocolWriteKind (..)
   , LengthSMTLibProtocolReceiver
+  , LengthSMTLibQueryProtocolReceiver
   , lengthSMTLibProtocolReceiverPhase
   , LengthSMTLibProtocolAction
+  , LengthSMTLibQueryProtocolAction
   , startLengthSMTLibProtocol
   , feedLengthSMTLibProtocol
   , finishLengthSMTLibProtocol
   , LengthSMTLibProtocolError (..)
   , LengthSMTLibProtocolDecoded
+  , LengthSMTLibQueryProtocolDecoded
   , LengthSMTLibProtocolObservation
   , lengthSMTLibProtocolDecodedObservation
   ) where
@@ -273,6 +292,51 @@ data LengthSMTLibProtocolPlanError
 
 instance NFData LengthSMTLibProtocolPlanError
 
+-- | Everything that distinguishes one protocol domain from another: the
+-- domain schema tags, the plan fingerprint role, the domain-specific
+-- fingerprint fields, and the exact projections of its nominal query type.
+-- The record is static configuration; its function fields never close over
+-- per-plan state.  Deep evaluation forces the retained tag and field
+-- constants and reduces the projection closures to head normal form.
+data LengthSMTLibProtocolIdentity subject query =
+  LengthSMTLibProtocolIdentity
+    { protocolIdentityPlanSchemaTag :: [Word8]
+    , protocolIdentityPhaseMachineSchemaTag :: [Word8]
+    , protocolIdentityPlanFingerprintRole :: [Word8]
+      -- | Complete domain-owned fingerprint fields spliced between the
+      -- @execution-policy@ and @query@ groups; empty for the scalar plan.
+    , protocolIdentityCapabilityReuseFields :: [FingerprintField]
+      -- | Domain-owned prefix of the @query@ group; empty for the scalar
+      -- plan.
+    , protocolIdentityQueryFieldPrefix :: [FingerprintField]
+    , protocolIdentityQueryCheckBytes :: query -> [Word8]
+    , protocolIdentityQueryFingerprintBytes :: query -> [Word8]
+    , protocolIdentityQueryInputSymbols :: query -> [[Word8]]
+    , protocolIdentityQueryInputValueRequestBytes :: query -> Maybe [Word8]
+    , protocolIdentityParseInputValueResponse
+        :: LengthSMTLibResponseLimits
+        -> query
+        -> [Word8]
+        -> Either LengthSMTLibResponseError [LengthSMTLibIntegerBinding]
+    }
+
+type role LengthSMTLibProtocolIdentity nominal nominal
+
+instance NFData (LengthSMTLibProtocolIdentity subject query) where
+  rnf identity =
+    rnf (protocolIdentityPlanSchemaTag identity) `seq`
+    rnf (protocolIdentityPhaseMachineSchemaTag identity) `seq`
+    rnf (protocolIdentityPlanFingerprintRole identity) `seq`
+    forceFieldSpine (protocolIdentityCapabilityReuseFields identity) `seq`
+    forceFieldSpine (protocolIdentityQueryFieldPrefix identity) `seq`
+    protocolIdentityQueryCheckBytes identity `seq`
+    protocolIdentityQueryFingerprintBytes identity `seq`
+    protocolIdentityQueryInputSymbols identity `seq`
+    protocolIdentityQueryInputValueRequestBytes identity `seq`
+    protocolIdentityParseInputValueResponse identity `seq` ()
+   where
+    forceFieldSpine = foldr seq ()
+
 -- | Opaque association of exact artifact/response policy, query, framing
 -- policy, barriers, and the complete identity of their deterministic writes.
 -- Sealing accepts the associated post-launch policy rather than the full
@@ -283,25 +347,61 @@ instance NFData LengthSMTLibProtocolPlanError
 -- fingerprint.  The writes are rendered transiently for fingerprint admission
 -- and later derived on demand through the selectors used at their causal
 -- action edges.
-data LengthSMTLibProtocolPlan identity local = LengthSMTLibProtocolPlan
-  !LengthSMTLibArtifactPolicy
-  !LengthSMTLibResponseLimits
-  !(LengthSMTLibQuery identity local)
-  !SMTLibCausalStreamPolicy
-  !SMTLibEchoSentinel
-  !(Maybe SMTLibEchoSentinel)
-  !(Fingerprint LengthSMTLibProtocolPlanFingerprintSubject)
+data LengthSMTLibQueryProtocolPlan subject query =
+  LengthSMTLibQueryProtocolPlan
+    !(LengthSMTLibProtocolIdentity subject query)
+    !LengthSMTLibArtifactPolicy
+    !LengthSMTLibResponseLimits
+    !query
+    !SMTLibCausalStreamPolicy
+    !SMTLibEchoSentinel
+    !(Maybe SMTLibEchoSentinel)
+    !(Fingerprint subject)
 
-type role LengthSMTLibProtocolPlan nominal nominal
+type role LengthSMTLibQueryProtocolPlan nominal nominal
 
-instance NFData (LengthSMTLibProtocolPlan identity local) where
-  rnf (LengthSMTLibProtocolPlan artifact responses query streamPolicy
-      checkBarrier valueBarrier fingerprint) =
+instance NFData query
+    => NFData (LengthSMTLibQueryProtocolPlan subject query) where
+  rnf (LengthSMTLibQueryProtocolPlan identity artifact responses query
+      streamPolicy checkBarrier valueBarrier fingerprint) =
+    rnf identity `seq`
     rnf artifact `seq` rnf responses `seq` rnf query `seq`
     rnf streamPolicy `seq`
     rnf checkBarrier `seq` rnf valueBarrier `seq` rnf fingerprint
 
+-- | The scalar plan is the generic machine at the scalar query and
+-- fingerprint subject.
+type LengthSMTLibProtocolPlan identity local =
+  LengthSMTLibQueryProtocolPlan
+    LengthSMTLibProtocolPlanFingerprintSubject
+    (LengthSMTLibQuery identity local)
+
 data LengthSMTLibProtocolPlanFingerprintSubject
+
+-- | The scalar protocol identity: the historical Length/Z3 tags, no
+-- domain-owned fingerprint fields, and the scalar query projections.
+scalarProtocolIdentity
+  :: LengthSMTLibProtocolIdentity
+      LengthSMTLibProtocolPlanFingerprintSubject
+      (LengthSMTLibQuery identity local)
+scalarProtocolIdentity = LengthSMTLibProtocolIdentity
+  { protocolIdentityPlanSchemaTag = lengthSMTLibProtocolPlanSchemaTag
+  , protocolIdentityPhaseMachineSchemaTag =
+      lengthSMTLibProtocolPhaseMachineSchemaTag
+  , protocolIdentityPlanFingerprintRole = ascii
+      "finite-list-spine-length/z3-smtlib2-protocol-plan"
+  , protocolIdentityCapabilityReuseFields = []
+  , protocolIdentityQueryFieldPrefix = []
+  , protocolIdentityQueryCheckBytes = lengthSMTLibQueryCheckBytes
+  , protocolIdentityQueryFingerprintBytes =
+      PublicFingerprint.fingerprintCanonicalBytes
+        . lengthSMTLibQueryFingerprint
+  , protocolIdentityQueryInputSymbols = lengthSMTLibQueryInputSymbols
+  , protocolIdentityQueryInputValueRequestBytes =
+      lengthSMTLibQueryInputValueRequestBytes
+  , protocolIdentityParseInputValueResponse =
+      parseLengthSMTLibInputValueResponse
+  }
 
 -- | Seal a pure transaction from caller-provided barrier nonce bytes.  The
 -- optional value nonce is required exactly when the artifact policy requests
@@ -315,10 +415,28 @@ sealLengthSMTLibProtocolPlan
   -> Either
       LengthSMTLibProtocolPlanError
       (LengthSMTLibProtocolPlan identity local)
-sealLengthSMTLibProtocolPlan limits execution query
+sealLengthSMTLibProtocolPlan =
+  sealLengthSMTLibQueryProtocolPlan scalarProtocolIdentity
+
+-- | Generic sealing shared with the binary-product wrapper.  The identity
+-- record supplies every domain-owned tag, fingerprint field, and query
+-- projection; the phase machine, framing validation, and write rendering are
+-- common to both domains.
+sealLengthSMTLibQueryProtocolPlan
+  :: LengthSMTLibProtocolIdentity subject query
+  -> LengthSMTLibProtocolLimits
+  -> LengthSMTLibPostLaunchExecutionPolicy
+  -> query
+  -> [Word8]
+  -> Maybe [Word8]
+  -> Either
+      LengthSMTLibProtocolPlanError
+      (LengthSMTLibQueryProtocolPlan subject query)
+sealLengthSMTLibQueryProtocolPlan identity limits execution query
     rawCheckNonce rawValueNonce = do
-  let symbols = lengthSMTLibQueryInputSymbols query
-      valueRequest = lengthSMTLibQueryInputValueRequestBytes query
+  let symbols = protocolIdentityQueryInputSymbols identity query
+      valueRequest =
+        protocolIdentityQueryInputValueRequestBytes identity query
       requiresValues =
         lengthSMTLibPostLaunchArtifactPolicy execution ==
           LengthSMTLibInputValuesAfterSatisfiable &&
@@ -343,11 +461,12 @@ sealLengthSMTLibProtocolPlan limits execution query
       | barrier == checkBarrier ->
           Left LengthSMTLibProtocolRepeatedBarrierNonce
     _ -> Right ()
-  let initialWrite = renderProtocolInitialWrite query checkBarrier
+  let initialWrite = renderProtocolInitialWrite identity query checkBarrier
       valueWrite = renderProtocolInputValueWrite valueRequest valueBarrier
-  fingerprint <- buildPlanFingerprint limits execution query valueRequest
-    checkBarrier valueBarrier initialWrite valueWrite
-  pure $ LengthSMTLibProtocolPlan
+  fingerprint <- buildPlanFingerprint identity limits execution query
+    valueRequest checkBarrier valueBarrier initialWrite valueWrite
+  pure $ LengthSMTLibQueryProtocolPlan
+    identity
     (lengthSMTLibPostLaunchArtifactPolicy execution)
     (lengthSMTLibPostLaunchResponseLimits execution)
     query
@@ -355,12 +474,13 @@ sealLengthSMTLibProtocolPlan limits execution query
     checkBarrier valueBarrier fingerprint
 
 renderProtocolInitialWrite
-  :: LengthSMTLibQuery identity local
+  :: LengthSMTLibProtocolIdentity subject query
+  -> query
   -> SMTLibEchoSentinel
   -> [Word8]
-renderProtocolInitialWrite query barrier =
+renderProtocolInitialWrite identity query barrier =
   z3SMTLibExecutionQueryResetBytes ++
-  lengthSMTLibQueryCheckBytes query ++
+  protocolIdentityQueryCheckBytes identity query ++
   smtLibEchoSentinelCommandBytes barrier
 
 renderProtocolInputValueWrite
@@ -373,41 +493,42 @@ renderProtocolInputValueWrite request (Just barrier) =
     request
 
 lengthSMTLibProtocolInitialWriteBytes
-  :: LengthSMTLibProtocolPlan identity local
+  :: LengthSMTLibQueryProtocolPlan subject query
   -> [Word8]
 lengthSMTLibProtocolInitialWriteBytes
-    (LengthSMTLibProtocolPlan _ _ query _ checkBarrier _ _) =
-      renderProtocolInitialWrite query checkBarrier
+    (LengthSMTLibQueryProtocolPlan identity _ _ query _ checkBarrier _ _) =
+      renderProtocolInitialWrite identity query checkBarrier
 
 lengthSMTLibProtocolInputValueWriteBytes
-  :: LengthSMTLibProtocolPlan identity local
+  :: LengthSMTLibQueryProtocolPlan subject query
   -> Maybe [Word8]
 lengthSMTLibProtocolInputValueWriteBytes
-    (LengthSMTLibProtocolPlan _ _ query _ _ valueBarrier _) =
+    (LengthSMTLibQueryProtocolPlan identity _ _ query _ _ valueBarrier _) =
       renderProtocolInputValueWrite
-        (lengthSMTLibQueryInputValueRequestBytes query) valueBarrier
+        (protocolIdentityQueryInputValueRequestBytes identity query)
+        valueBarrier
 
 lengthSMTLibProtocolPlanFingerprint
-  :: LengthSMTLibProtocolPlan identity local
-  -> Fingerprint LengthSMTLibProtocolPlanFingerprintSubject
+  :: LengthSMTLibQueryProtocolPlan subject query
+  -> Fingerprint subject
 lengthSMTLibProtocolPlanFingerprint
-    (LengthSMTLibProtocolPlan _ _ _ _ _ _ value) = value
+    (LengthSMTLibQueryProtocolPlan _ _ _ _ _ _ _ value) = value
 
 -- | Exact query retained by this sealed protocol plan.
 lengthSMTLibProtocolPlanQuery
-  :: LengthSMTLibProtocolPlan identity local
-  -> LengthSMTLibQuery identity local
+  :: LengthSMTLibQueryProtocolPlan subject query
+  -> query
 lengthSMTLibProtocolPlanQuery = planQuery
 
 -- | Artifact policy retained by this exact sealed protocol plan.
 lengthSMTLibProtocolPlanArtifactPolicy
-  :: LengthSMTLibProtocolPlan identity local
+  :: LengthSMTLibQueryProtocolPlan subject query
   -> LengthSMTLibArtifactPolicy
 lengthSMTLibProtocolPlanArtifactPolicy = planArtifactPolicy
 
 -- | Final causal transcript cap retained by this exact sealed plan.
 lengthSMTLibProtocolPlanCumulativeStdoutByteLimit
-  :: LengthSMTLibProtocolPlan identity local
+  :: LengthSMTLibQueryProtocolPlan subject query
   -> Natural
 lengthSMTLibProtocolPlanCumulativeStdoutByteLimit =
   smtLibCausalStreamPolicyCumulativeByteLimit . planStreamPolicy
@@ -417,12 +538,13 @@ lengthSMTLibProtocolPlanCumulativeStdoutByteLimit =
 -- session uses this before reserving an ordinal so the remaining process-wide
 -- stdout budget can admit at least one complete branch.
 lengthSMTLibProtocolPlanMinimumStdoutByteCount
-  :: LengthSMTLibProtocolPlan identity local
+  :: LengthSMTLibQueryProtocolPlan subject query
   -> Natural
 lengthSMTLibProtocolPlanMinimumStdoutByteCount plan =
   minimumProtocolStdoutBytes
     (minimalInputValueFrameByteCount
-      $ lengthSMTLibQueryInputSymbols $ planQuery plan)
+      $ protocolIdentityQueryInputSymbols (planIdentity plan)
+      $ planQuery plan)
     $ case planValueBarrier plan of
         Nothing -> False
         Just _ -> True
@@ -458,49 +580,63 @@ instance NFData LengthSMTLibProtocolPhaseState where
 
 -- | A continuation for bytes received only after the write which produced it
 -- has completed.  Constructors and raw framing state never leave the package.
-data LengthSMTLibProtocolReceiver identity local =
-  LengthSMTLibProtocolReceiver
-    !(LengthSMTLibProtocolPlan identity local)
+data LengthSMTLibQueryProtocolReceiver subject query =
+  LengthSMTLibQueryProtocolReceiver
+    !(LengthSMTLibQueryProtocolPlan subject query)
     !LengthSMTLibProtocolPhaseState
     !SMTLibCausalStreamCursor
 
-type role LengthSMTLibProtocolReceiver nominal nominal
+type role LengthSMTLibQueryProtocolReceiver nominal nominal
 
-instance NFData (LengthSMTLibProtocolReceiver identity local) where
-  rnf (LengthSMTLibProtocolReceiver plan phase cursor) =
+instance NFData query
+    => NFData (LengthSMTLibQueryProtocolReceiver subject query) where
+  rnf (LengthSMTLibQueryProtocolReceiver plan phase cursor) =
     rnf plan `seq` rnf phase `seq` rnf cursor
 
+-- | The scalar receiver is the generic machine at the scalar query and
+-- fingerprint subject.
+type LengthSMTLibProtocolReceiver identity local =
+  LengthSMTLibQueryProtocolReceiver
+    LengthSMTLibProtocolPlanFingerprintSubject
+    (LengthSMTLibQuery identity local)
+
 lengthSMTLibProtocolReceiverPhase
-  :: LengthSMTLibProtocolReceiver identity local
+  :: LengthSMTLibQueryProtocolReceiver subject query
   -> LengthSMTLibProtocolPhase
 lengthSMTLibProtocolReceiverPhase
-    (LengthSMTLibProtocolReceiver _ phase _) = phaseName phase
+    (LengthSMTLibQueryProtocolReceiver _ phase _) = phaseName phase
 
 -- | The shared causal action specialized to this plan's nominal receiver and
 -- decoded outcome.  The shared type keeps all three parameters nominal.
-type LengthSMTLibProtocolAction identity local =
+type LengthSMTLibQueryProtocolAction subject query =
   SMTLibCausalAction
     LengthSMTLibProtocolWriteKind
-    (LengthSMTLibProtocolReceiver identity local)
-    (LengthSMTLibProtocolDecoded identity local)
+    (LengthSMTLibQueryProtocolReceiver subject query)
+    (LengthSMTLibQueryProtocolDecoded subject query)
+
+-- | The scalar action synonym retained for scalar consumers.
+type LengthSMTLibProtocolAction identity local =
+  LengthSMTLibQueryProtocolAction
+    LengthSMTLibProtocolPlanFingerprintSubject
+    (LengthSMTLibQuery identity local)
 
 -- | Start with reset, canonical check commands, and the status barrier in one
 -- exact write.  Any unexpected reset response consequently occupies the
 -- status slot and fails closed.
 startLengthSMTLibProtocol
-  :: LengthSMTLibProtocolPlan identity local
-  -> LengthSMTLibProtocolAction identity local
+  :: LengthSMTLibQueryProtocolPlan subject query
+  -> LengthSMTLibQueryProtocolAction subject query
 startLengthSMTLibProtocol plan = SMTLibCausalWrite
   LengthSMTLibProtocolInitialQueryWrite
   (lengthSMTLibProtocolInitialWriteBytes plan)
   (startReceiver plan AwaitLengthSMTLibCheckStatus)
 
 feedLengthSMTLibProtocol
-  :: LengthSMTLibProtocolReceiver identity local
+  :: LengthSMTLibQueryProtocolReceiver subject query
   -> [Word8]
   -> Either
       LengthSMTLibProtocolError
-      (LengthSMTLibProtocolAction identity local)
+      (LengthSMTLibQueryProtocolAction subject query)
 feedLengthSMTLibProtocol receiver bytes = do
   step <- first
     (mapStreamFailure $ lengthSMTLibProtocolReceiverPhase receiver)
@@ -511,10 +647,10 @@ feedLengthSMTLibProtocol receiver bytes = do
 -- Lexical EOF failures retain precedence; otherwise every phase reports its
 -- exact missing response position.
 finishLengthSMTLibProtocol
-  :: LengthSMTLibProtocolReceiver identity local
+  :: LengthSMTLibQueryProtocolReceiver subject query
   -> Either
       LengthSMTLibProtocolError
-      (LengthSMTLibProtocolAction identity local)
+      (LengthSMTLibQueryProtocolAction subject query)
 finishLengthSMTLibProtocol receiver = case
     finishSMTLibCausalStreamCursor $ receiverCursor receiver of
   Left failure -> Left $ mapStreamFailure
@@ -550,39 +686,47 @@ type LengthSMTLibProtocolObservation =
 -- this terminal branch. In a live run raw status and input-value frames
 -- likewise remain in the process-owning causal transcript. This value remains
 -- a pure response/protocol result, not an execution observation.
-data LengthSMTLibProtocolDecoded identity local = LengthSMTLibProtocolDecoded
-  !LengthSMTLibProtocolObservation
+data LengthSMTLibQueryProtocolDecoded subject query =
+  LengthSMTLibQueryProtocolDecoded
+    !LengthSMTLibProtocolObservation
 
-type role LengthSMTLibProtocolDecoded nominal nominal
+type role LengthSMTLibQueryProtocolDecoded nominal nominal
 
-instance NFData (LengthSMTLibProtocolDecoded identity local) where
-  rnf (LengthSMTLibProtocolDecoded observation) = rnf observation
+instance NFData (LengthSMTLibQueryProtocolDecoded subject query) where
+  rnf (LengthSMTLibQueryProtocolDecoded observation) = rnf observation
+
+-- | The scalar decoded outcome is the generic machine at the scalar query
+-- and fingerprint subject.
+type LengthSMTLibProtocolDecoded identity local =
+  LengthSMTLibQueryProtocolDecoded
+    LengthSMTLibProtocolPlanFingerprintSubject
+    (LengthSMTLibQuery identity local)
 
 lengthSMTLibProtocolDecodedObservation
-  :: LengthSMTLibProtocolDecoded identity local
+  :: LengthSMTLibQueryProtocolDecoded subject query
   -> LengthSMTLibProtocolObservation
 lengthSMTLibProtocolDecodedObservation
-    (LengthSMTLibProtocolDecoded observation) = observation
+    (LengthSMTLibQueryProtocolDecoded observation) = observation
 
 -- Generic 'SolverObservation' artifacts deliberately remain lazy. This
 -- trusted wrapper separately forces only the satisfiable 'Maybe' spine to
 -- preserve the former strict decoded-field demand without forcing bindings.
 retainLengthSMTLibProtocolDecoded
   :: LengthSMTLibProtocolObservation
-  -> LengthSMTLibProtocolDecoded identity local
+  -> LengthSMTLibQueryProtocolDecoded subject query
 retainLengthSMTLibProtocolDecoded observation = case observation of
   SatisfiableObservation values -> values `seq`
-    LengthSMTLibProtocolDecoded observation
-  UnsatisfiableObservation () -> LengthSMTLibProtocolDecoded observation
-  UnknownObservation () -> LengthSMTLibProtocolDecoded observation
+    LengthSMTLibQueryProtocolDecoded observation
+  UnsatisfiableObservation () -> LengthSMTLibQueryProtocolDecoded observation
+  UnknownObservation () -> LengthSMTLibQueryProtocolDecoded observation
 
 handleFrame
-  :: LengthSMTLibProtocolPlan identity local
+  :: LengthSMTLibQueryProtocolPlan subject query
   -> LengthSMTLibProtocolPhaseState
   -> SMTLibCausalStreamCompletedFrame
   -> Either
       LengthSMTLibProtocolError
-      (LengthSMTLibProtocolAction identity local)
+      (LengthSMTLibQueryProtocolAction subject query)
 handleFrame plan phase completed = case phase of
   AwaitLengthSMTLibCheckStatus -> do
     let limits = planResponseLimits plan
@@ -620,7 +764,8 @@ handleFrame plan phase completed = case phase of
     bindings <- first
       (LengthSMTLibProtocolResponseFailure
         LengthSMTLibProtocolInputValuePhase)
-      $ parseLengthSMTLibInputValueResponse limits (planQuery plan) frame
+      $ protocolIdentityParseInputValueResponse (planIdentity plan)
+          limits (planQuery plan) frame
     continueWithinWrite plan
       (AwaitLengthSMTLibInputValueBarrier bindings)
       completed
@@ -639,19 +784,19 @@ handleFrame plan phase completed = case phase of
   frame = smtLibCausalStreamCompletedFrameBytes completed
 
 continueWithinWrite
-  :: LengthSMTLibProtocolPlan identity local
+  :: LengthSMTLibQueryProtocolPlan subject query
   -> LengthSMTLibProtocolPhaseState
   -> SMTLibCausalStreamCompletedFrame
   -> Either
       LengthSMTLibProtocolError
-      (LengthSMTLibProtocolAction identity local)
+      (LengthSMTLibQueryProtocolAction subject query)
 continueWithinWrite plan phase completed = do
   step <- first (mapStreamFailure $ phaseName phase)
     $ continueSMTLibCausalStreamCompletedFrame completed
   acceptStreamStep plan phase step
 
 terminalObservation
-  :: LengthSMTLibProtocolPlan identity local
+  :: LengthSMTLibQueryProtocolPlan subject query
   -> SolverStatus
   -> LengthSMTLibProtocolObservation
 terminalObservation plan status = case status of
@@ -659,37 +804,38 @@ terminalObservation plan status = case status of
     $ if planArtifactPolicy plan ==
           LengthSMTLibInputValuesAfterSatisfiable
         && not (isJust
-          $ lengthSMTLibQueryInputValueRequestBytes $ planQuery plan)
+          $ protocolIdentityQueryInputValueRequestBytes (planIdentity plan)
+          $ planQuery plan)
       then Just []
       else Nothing
   SolverUnsatisfiable -> UnsatisfiableObservation ()
   SolverUnknown -> UnknownObservation ()
 
 startReceiver
-  :: LengthSMTLibProtocolPlan identity local
+  :: LengthSMTLibQueryProtocolPlan subject query
   -> LengthSMTLibProtocolPhaseState
-  -> LengthSMTLibProtocolReceiver identity local
-startReceiver plan phase = LengthSMTLibProtocolReceiver plan phase
+  -> LengthSMTLibQueryProtocolReceiver subject query
+startReceiver plan phase = LengthSMTLibQueryProtocolReceiver plan phase
   $ startSMTLibCausalStreamCursor $ planStreamPolicy plan
 
 receiverAtBoundary
-  :: LengthSMTLibProtocolPlan identity local
+  :: LengthSMTLibQueryProtocolPlan subject query
   -> LengthSMTLibProtocolPhaseState
   -> SMTLibCausalStreamBoundary
-  -> LengthSMTLibProtocolReceiver identity local
-receiverAtBoundary plan phase boundary = LengthSMTLibProtocolReceiver
+  -> LengthSMTLibQueryProtocolReceiver subject query
+receiverAtBoundary plan phase boundary = LengthSMTLibQueryProtocolReceiver
   plan phase $ startSMTLibCausalStreamCursorAtBoundary boundary
 
 acceptStreamStep
-  :: LengthSMTLibProtocolPlan identity local
+  :: LengthSMTLibQueryProtocolPlan subject query
   -> LengthSMTLibProtocolPhaseState
   -> SMTLibCausalStreamStep
   -> Either
       LengthSMTLibProtocolError
-      (LengthSMTLibProtocolAction identity local)
+      (LengthSMTLibQueryProtocolAction subject query)
 acceptStreamStep plan phase step = case step of
   SMTLibCausalStreamPending cursor -> Right $ SMTLibCausalAwait
-    $ LengthSMTLibProtocolReceiver plan phase cursor
+    $ LengthSMTLibQueryProtocolReceiver plan phase cursor
   SMTLibCausalStreamComplete completed -> handleFrame plan phase completed
 
 consumeBoundary
@@ -713,19 +859,19 @@ mapStreamFailure phase failure = case failure of
     LengthSMTLibProtocolUnexpectedPostBarrierByte offset byte
 
 receiverPlan
-  :: LengthSMTLibProtocolReceiver identity local
-  -> LengthSMTLibProtocolPlan identity local
-receiverPlan (LengthSMTLibProtocolReceiver value _ _) = value
+  :: LengthSMTLibQueryProtocolReceiver subject query
+  -> LengthSMTLibQueryProtocolPlan subject query
+receiverPlan (LengthSMTLibQueryProtocolReceiver value _ _) = value
 
 receiverPhase
-  :: LengthSMTLibProtocolReceiver identity local
+  :: LengthSMTLibQueryProtocolReceiver subject query
   -> LengthSMTLibProtocolPhaseState
-receiverPhase (LengthSMTLibProtocolReceiver _ value _) = value
+receiverPhase (LengthSMTLibQueryProtocolReceiver _ value _) = value
 
 receiverCursor
-  :: LengthSMTLibProtocolReceiver identity local
+  :: LengthSMTLibQueryProtocolReceiver subject query
   -> SMTLibCausalStreamCursor
-receiverCursor (LengthSMTLibProtocolReceiver _ _ value) = value
+receiverCursor (LengthSMTLibQueryProtocolReceiver _ _ value) = value
 
 phaseName :: LengthSMTLibProtocolPhaseState -> LengthSMTLibProtocolPhase
 phaseName phase = case phase of
@@ -737,25 +883,33 @@ phaseName phase = case phase of
   AwaitLengthSMTLibInputValueBarrier{} ->
     LengthSMTLibProtocolInputValueBarrierPhase
 
+planIdentity
+  :: LengthSMTLibQueryProtocolPlan subject query
+  -> LengthSMTLibProtocolIdentity subject query
+planIdentity (LengthSMTLibQueryProtocolPlan value _ _ _ _ _ _ _) = value
+
 planArtifactPolicy
-  :: LengthSMTLibProtocolPlan identity local
+  :: LengthSMTLibQueryProtocolPlan subject query
   -> LengthSMTLibArtifactPolicy
-planArtifactPolicy (LengthSMTLibProtocolPlan value _ _ _ _ _ _) = value
+planArtifactPolicy
+    (LengthSMTLibQueryProtocolPlan _ value _ _ _ _ _ _) = value
 
 planResponseLimits
-  :: LengthSMTLibProtocolPlan identity local
+  :: LengthSMTLibQueryProtocolPlan subject query
   -> LengthSMTLibResponseLimits
-planResponseLimits (LengthSMTLibProtocolPlan _ value _ _ _ _ _) = value
+planResponseLimits
+    (LengthSMTLibQueryProtocolPlan _ _ value _ _ _ _ _) = value
 
 planQuery
-  :: LengthSMTLibProtocolPlan identity local
-  -> LengthSMTLibQuery identity local
-planQuery (LengthSMTLibProtocolPlan _ _ value _ _ _ _) = value
+  :: LengthSMTLibQueryProtocolPlan subject query
+  -> query
+planQuery (LengthSMTLibQueryProtocolPlan _ _ _ value _ _ _ _) = value
 
 planStreamPolicy
-  :: LengthSMTLibProtocolPlan identity local
+  :: LengthSMTLibQueryProtocolPlan subject query
   -> SMTLibCausalStreamPolicy
-planStreamPolicy (LengthSMTLibProtocolPlan _ _ _ value _ _ _) = value
+planStreamPolicy
+    (LengthSMTLibQueryProtocolPlan _ _ _ _ value _ _ _) = value
 
 limitsStreamPolicy
   :: LengthSMTLibProtocolLimits
@@ -763,16 +917,16 @@ limitsStreamPolicy
 limitsStreamPolicy (LengthSMTLibProtocolLimits value _) = value
 
 planCheckBarrier
-  :: LengthSMTLibProtocolPlan identity local
+  :: LengthSMTLibQueryProtocolPlan subject query
   -> SMTLibEchoSentinel
 planCheckBarrier
-    (LengthSMTLibProtocolPlan _ _ _ _ value _ _) = value
+    (LengthSMTLibQueryProtocolPlan _ _ _ _ _ value _ _) = value
 
 planValueBarrier
-  :: LengthSMTLibProtocolPlan identity local
+  :: LengthSMTLibQueryProtocolPlan subject query
   -> Maybe SMTLibEchoSentinel
 planValueBarrier
-    (LengthSMTLibProtocolPlan _ _ _ _ _ value _) = value
+    (LengthSMTLibQueryProtocolPlan _ _ _ _ _ _ value _) = value
 
 validatePlanFraming
   :: LengthSMTLibProtocolLimits
@@ -874,9 +1028,10 @@ minimalInputValueFrameByteCount symbols = genericLength $
     [openParen] ++ symbol ++ [space, digitZero, closeParen]
 
 buildPlanFingerprint
-  :: LengthSMTLibProtocolLimits
+  :: LengthSMTLibProtocolIdentity subject query
+  -> LengthSMTLibProtocolLimits
   -> LengthSMTLibPostLaunchExecutionPolicy
-  -> LengthSMTLibQuery identity local
+  -> query
   -> Maybe [Word8]
   -> SMTLibEchoSentinel
   -> Maybe SMTLibEchoSentinel
@@ -884,23 +1039,26 @@ buildPlanFingerprint
   -> Maybe [Word8]
   -> Either
       LengthSMTLibProtocolPlanError
-      (Fingerprint LengthSMTLibProtocolPlanFingerprintSubject)
-buildPlanFingerprint limits execution query valueRequest checkBarrier valueBarrier
-    initialWrite valueWrite = case
+      (Fingerprint subject)
+buildPlanFingerprint identity limits execution query valueRequest checkBarrier
+    valueBarrier initialWrite valueWrite = case
   buildFingerprintWithin maximumBytes FingerprintBuilder
     { fingerprintBuilderVersion = 1
-    , fingerprintBuilderRole = ascii
-        "finite-list-spine-length/z3-smtlib2-protocol-plan"
+    , fingerprintBuilderRole =
+        protocolIdentityPlanFingerprintRole identity
     , fingerprintBuilderFields =
         [ tagged "schema"
-            [FingerprintBytes lengthSMTLibProtocolPlanSchemaTag]
+            [FingerprintBytes $ protocolIdentityPlanSchemaTag identity]
         , tagged "execution-policy"
             [ FingerprintBytes $ fingerprintCanonicalBytes
                 $ lengthSMTLibPostLaunchExecutionPolicyFingerprint execution
             ]
-        , tagged "query"
-            [ FingerprintBytes $ PublicFingerprint.fingerprintCanonicalBytes
-                $ lengthSMTLibQueryFingerprint query
+        ] ++
+        protocolIdentityCapabilityReuseFields identity ++
+        [ tagged "query"
+            $ protocolIdentityQueryFieldPrefix identity ++
+            [ FingerprintBytes
+                $ protocolIdentityQueryFingerprintBytes identity query
             ]
         , tagged "stream-framing"
             [ FingerprintBytes smtLibStreamFramingSchemaTag
@@ -915,7 +1073,8 @@ buildPlanFingerprint limits execution query valueRequest checkBarrier valueBarri
             , FingerprintBytes smtLibWhitespaceBytes
             ]
         , tagged "phase-machine"
-            [ FingerprintBytes lengthSMTLibProtocolPhaseMachineSchemaTag
+            [ FingerprintBytes
+                $ protocolIdentityPhaseMachineSchemaTag identity
             , FingerprintSequence $ map (FingerprintBytes . ascii)
                 [ "write-reset-check-status-barrier"
                 , "decode-check-status"
@@ -927,7 +1086,8 @@ buildPlanFingerprint limits execution query valueRequest checkBarrier valueBarri
             ]
         , tagged "initial-write"
             [ FingerprintBytes z3SMTLibExecutionQueryResetBytes
-            , FingerprintBytes $ lengthSMTLibQueryCheckBytes query
+            , FingerprintBytes
+                $ protocolIdentityQueryCheckBytes identity query
             , FingerprintBytes $ smtLibEchoSentinelCommandBytes checkBarrier
             , FingerprintBytes initialWrite
             ]

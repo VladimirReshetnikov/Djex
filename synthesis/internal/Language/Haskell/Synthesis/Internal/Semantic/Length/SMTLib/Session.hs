@@ -213,10 +213,10 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol.SpinePair
   ( LengthSpinePairSMTLibProtocolDecoded
-  , LengthSpinePairSMTLibProtocolError (..)
+  , LengthSpinePairSMTLibProtocolError
   , LengthSpinePairSMTLibProtocolPlan
   , LengthSpinePairSMTLibProtocolPlanError
-  , LengthSpinePairSMTLibProtocolWriteKind (..)
+  , LengthSpinePairSMTLibProtocolWriteKind
   , defaultLengthSpinePairSMTLibProtocolLimits
   , feedLengthSpinePairSMTLibProtocol
   , finishLengthSpinePairSMTLibProtocol
@@ -2196,7 +2196,7 @@ driveSpinePairProtocolQuery worker deadline plan = do
     SMTLibCausalAdoptPredecessorWhitespace
     (lengthSpinePairSMTLibProtocolPlanCumulativeStdoutByteLimit plan)
     feedLengthSpinePairSMTLibProtocol finishLengthSpinePairSMTLibProtocol
-    LengthSpinePairSMTLibProtocolUnexpectedPostBarrierByte
+    LengthSMTLibProtocolUnexpectedPostBarrierByte
     lengthSMTLibCausalTransportOps
     (lengthSMTLibCausalTransport
       (readyWorkerProcess worker) (readyWorkerCancellation worker) deadline)
@@ -2212,7 +2212,7 @@ driveSpinePairProtocolQuery worker deadline plan = do
       LengthSpinePairSMTLibQueryProtocolFailure protocolFailure
     SMTLibCausalCumulativeOutputByteLimitExceeded maximumBytes observed ->
       LengthSpinePairSMTLibQueryProtocolFailure
-        $ LengthSpinePairSMTLibProtocolCumulativeStdoutByteLimitExceeded
+        $ LengthSMTLibProtocolCumulativeStdoutByteLimitExceeded
             maximumBytes observed
     SMTLibCausalInternalFailure -> LengthSpinePairSMTLibQueryInternalFailure
 
@@ -2627,8 +2627,8 @@ spinePairQueryProtocolWriteKindField
   :: LengthSpinePairSMTLibProtocolWriteKind
   -> FingerprintField
 spinePairQueryProtocolWriteKindField kind = FingerprintBytes $ ascii $ case kind of
-  LengthSpinePairSMTLibProtocolInitialQueryWrite -> "initial-query"
-  LengthSpinePairSMTLibProtocolInputValueWrite -> "input-value"
+  LengthSMTLibProtocolInitialQueryWrite -> "initial-query"
+  LengthSMTLibProtocolInputValueWrite -> "input-value"
 
 spinePairQueryRunTranscriptMaximumFieldByteCount
   :: Natural
@@ -2647,9 +2647,9 @@ spinePairQueryRunTranscriptMaximumFieldByteCount maximumBytes maximumEpochs =
             $ taggedFieldByteCount "write-epoch"
                 [ maximum
                     [ fingerprintFieldByteCount $ spinePairQueryProtocolWriteKindField
-                        LengthSpinePairSMTLibProtocolInitialQueryWrite
+                        LengthSMTLibProtocolInitialQueryWrite
                     , fingerprintFieldByteCount $ spinePairQueryProtocolWriteKindField
-                        LengthSpinePairSMTLibProtocolInputValueWrite
+                        LengthSMTLibProtocolInputValueWrite
                     ]
                 , naturalFieldByteCount maximumBytes
                 ]

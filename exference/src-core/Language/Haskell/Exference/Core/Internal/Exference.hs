@@ -1726,13 +1726,14 @@ rateGoals h = sumScores . fmap rateGoal
   where
     rateGoal (TGoal (VarBinding _ t) _ _ _ _) = typeComplexity h t
 
--- TODO: actually measure performance with different values and derive these
--- weights instead of relying on historically chosen defaults.
+-- These weights are historically chosen defaults; none has been derived from
+-- measurement.
 typeComplexity :: ExferenceHeuristicsConfig -> HsType -> Penalty
 typeComplexity h = complexity
  where
   complexity TypeVar{} = heuristics_goalVar h
-  complexity TypeConstant{} = heuristics_goalCons h -- TODO distinct heuristic?
+  -- Constants deliberately share the constructor weight.
+  complexity TypeConstant{} = heuristics_goalCons h
   complexity TypeCons{} = heuristics_goalCons h
   complexity (TypeArrow parameter result) = sumScores
     [heuristics_goalArrow h, complexity parameter, complexity result]
@@ -1839,7 +1840,8 @@ stateStep allocators multiPM allowConstrs h
       modify $ \node -> node
         { nodeDepth = addScore (nodeDepth node)
             $ heuristics_functionGoalTransform h
-          -- TODO: consider a distinct forall-opening heuristic.
+          -- Forall opening reuses the function-goal-transform weight; no
+          -- distinct forall-opening heuristic exists.
         , nodeLastStepBinding = Nothing
         }
       let substs = IntMap.fromList

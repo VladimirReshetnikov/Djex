@@ -85,6 +85,18 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , defaultLengthInputBoxLimits
   , lengthInputBoxInputLimit
   , lengthInputBoxAssignmentLimit
+  , LengthBooleanFiniteUnionLimitSource (..)
+  , LengthBooleanFiniteUnionLimits
+  , LengthBooleanFiniteUnionLimitField (..)
+  , LengthBooleanFiniteUnionLimitError (..)
+  , mkLengthBooleanFiniteUnionLimits
+  , defaultLengthBooleanFiniteUnionLimitSource
+  , defaultLengthBooleanFiniteUnionLimits
+  , lengthBooleanFiniteUnionGeneratedBranchLimit
+  , lengthBooleanFiniteUnionRuleLimitPerBranch
+  , lengthBooleanFiniteUnionClosureInspectionLimitPerBranch
+  , lengthBooleanFiniteUnionRetainedBoxLimit
+  , lengthBooleanFiniteUnionAssignmentVisitLimit
   , lengthInputBoxValidationSchemaTag
   , LengthInputBoxValidationError (..)
   , LengthInputBoxValidation (..)
@@ -188,6 +200,24 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentCount
   , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableAssignmentCount
   , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasis
+  , LengthBooleanFiniteUnionApplicableDomainValidationError (..)
+  , ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  , lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag
+  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
+  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
+  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
+  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
+  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
+  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
+  , LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError (..)
+  , ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  , lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag
+  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
+  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
+  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
+  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
+  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
+  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
   , evaluateLengthContractAssignment
   , evaluateLengthSpinePairContractAssignment
   , evaluateLengthProviderApplication
@@ -211,11 +241,14 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
   , validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
   , validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
+  , validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  , validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
   ) where
 
 import Control.DeepSeq (NFData (rnf))
 import Control.Monad (foldM, unless)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import Data.Word (Word8)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
@@ -272,7 +305,10 @@ import Language.Haskell.Synthesis.Internal.Semantic.Problem
   , mkBehavioralEvidence
   , replayBehavioralEvidence
   )
-import Language.Haskell.Synthesis.Count (observedNaturalBits)
+import Language.Haskell.Synthesis.Count
+  ( observedNaturalBits
+  , saturatedSuccessor
+  )
 
 -- | Raw operational bounds for concrete replay. Zero is valid: only the
 -- natural number zero has a zero-bit representation.
@@ -611,6 +647,124 @@ lengthInputBoxInputLimit (LengthInputBoxLimits inputs _) = inputs
 -- | Maximum number of assignments which may be enumerated.
 lengthInputBoxAssignmentLimit :: LengthInputBoxLimits -> Natural
 lengthInputBoxAssignmentLimit (LengthInputBoxLimits _ assignments) = assignments
+
+-- | Raw operational bounds for finite Boolean expansion, consequence closure,
+-- and finite-union enumeration.  Every field is signed so malformed external
+-- configuration is rejected before a checked precondition is inspected.
+data LengthBooleanFiniteUnionLimitSource =
+  LengthBooleanFiniteUnionLimitSource
+    { lengthBooleanFiniteUnionLimitSourceMaximumGeneratedBranches :: Int
+    , lengthBooleanFiniteUnionLimitSourceMaximumRulesPerBranch :: Int
+    , lengthBooleanFiniteUnionLimitSourceMaximumClosureInspectionsPerBranch
+        :: Int
+    , lengthBooleanFiniteUnionLimitSourceMaximumRetainedBoxes :: Int
+    , lengthBooleanFiniteUnionLimitSourceMaximumAssignmentVisits :: Int
+    }
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthBooleanFiniteUnionLimitSource
+
+-- | Validated finite-union work limits.  The constructor is private so every
+-- validator may use all five bounds as nonnegative finite machine counts.
+data LengthBooleanFiniteUnionLimits = LengthBooleanFiniteUnionLimits
+  !Int
+  !Int
+  !Int
+  !Int
+  !Int
+  deriving (Eq, Ord, Show)
+
+instance NFData LengthBooleanFiniteUnionLimits where
+  rnf (LengthBooleanFiniteUnionLimits branches rules inspections boxes visits) =
+    rnf branches `seq` rnf rules `seq` rnf inspections `seq`
+    rnf boxes `seq` rnf visits
+
+-- | Stable declaration-order identity for finite-union limit diagnostics.
+data LengthBooleanFiniteUnionLimitField
+  = LengthBooleanFiniteUnionMaximumGeneratedBranches
+  | LengthBooleanFiniteUnionMaximumRulesPerBranch
+  | LengthBooleanFiniteUnionMaximumClosureInspectionsPerBranch
+  | LengthBooleanFiniteUnionMaximumRetainedBoxes
+  | LengthBooleanFiniteUnionMaximumAssignmentVisits
+  deriving (Bounded, Enum, Eq, Ord, Show, Generic)
+
+instance NFData LengthBooleanFiniteUnionLimitField
+
+-- | Failure to seal finite-union work limits.
+data LengthBooleanFiniteUnionLimitError =
+  NegativeLengthBooleanFiniteUnionLimit
+    !LengthBooleanFiniteUnionLimitField
+    !Int
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthBooleanFiniteUnionLimitError
+
+-- | Validate all raw finite-union limits in record declaration order.
+mkLengthBooleanFiniteUnionLimits
+  :: LengthBooleanFiniteUnionLimitSource
+  -> Either LengthBooleanFiniteUnionLimitError LengthBooleanFiniteUnionLimits
+mkLengthBooleanFiniteUnionLimits source = do
+  nonnegative LengthBooleanFiniteUnionMaximumGeneratedBranches branches
+  nonnegative LengthBooleanFiniteUnionMaximumRulesPerBranch rules
+  nonnegative
+    LengthBooleanFiniteUnionMaximumClosureInspectionsPerBranch inspections
+  nonnegative LengthBooleanFiniteUnionMaximumRetainedBoxes boxes
+  nonnegative LengthBooleanFiniteUnionMaximumAssignmentVisits visits
+  pure $ LengthBooleanFiniteUnionLimits
+    branches rules inspections boxes visits
+ where
+  branches =
+    lengthBooleanFiniteUnionLimitSourceMaximumGeneratedBranches source
+  rules = lengthBooleanFiniteUnionLimitSourceMaximumRulesPerBranch source
+  inspections =
+    lengthBooleanFiniteUnionLimitSourceMaximumClosureInspectionsPerBranch source
+  boxes = lengthBooleanFiniteUnionLimitSourceMaximumRetainedBoxes source
+  visits = lengthBooleanFiniteUnionLimitSourceMaximumAssignmentVisits source
+
+  nonnegative field value
+    | value < 0 = Left $ NegativeLengthBooleanFiniteUnionLimit field value
+    | otherwise = Right ()
+
+-- | Conservative defaults for one checked normalized Boolean precondition.
+defaultLengthBooleanFiniteUnionLimitSource
+  :: LengthBooleanFiniteUnionLimitSource
+defaultLengthBooleanFiniteUnionLimitSource = LengthBooleanFiniteUnionLimitSource
+  { lengthBooleanFiniteUnionLimitSourceMaximumGeneratedBranches = 256
+  , lengthBooleanFiniteUnionLimitSourceMaximumRulesPerBranch = 64
+  , lengthBooleanFiniteUnionLimitSourceMaximumClosureInspectionsPerBranch = 4096
+  , lengthBooleanFiniteUnionLimitSourceMaximumRetainedBoxes = 256
+  , lengthBooleanFiniteUnionLimitSourceMaximumAssignmentVisits = 262144
+  }
+
+-- | Validated form of 'defaultLengthBooleanFiniteUnionLimitSource'.
+defaultLengthBooleanFiniteUnionLimits :: LengthBooleanFiniteUnionLimits
+defaultLengthBooleanFiniteUnionLimits =
+  LengthBooleanFiniteUnionLimits 256 64 4096 256 262144
+
+lengthBooleanFiniteUnionGeneratedBranchLimit
+  :: LengthBooleanFiniteUnionLimits -> Int
+lengthBooleanFiniteUnionGeneratedBranchLimit
+    (LengthBooleanFiniteUnionLimits branches _ _ _ _) = branches
+
+lengthBooleanFiniteUnionRuleLimitPerBranch
+  :: LengthBooleanFiniteUnionLimits -> Int
+lengthBooleanFiniteUnionRuleLimitPerBranch
+    (LengthBooleanFiniteUnionLimits _ rules _ _ _) = rules
+
+lengthBooleanFiniteUnionClosureInspectionLimitPerBranch
+  :: LengthBooleanFiniteUnionLimits -> Int
+lengthBooleanFiniteUnionClosureInspectionLimitPerBranch
+    (LengthBooleanFiniteUnionLimits _ _ inspections _ _) = inspections
+
+lengthBooleanFiniteUnionRetainedBoxLimit
+  :: LengthBooleanFiniteUnionLimits -> Int
+lengthBooleanFiniteUnionRetainedBoxLimit
+    (LengthBooleanFiniteUnionLimits _ _ _ boxes _) = boxes
+
+lengthBooleanFiniteUnionAssignmentVisitLimit
+  :: LengthBooleanFiniteUnionLimits -> Int
+lengthBooleanFiniteUnionAssignmentVisitLimit
+    (LengthBooleanFiniteUnionLimits _ _ _ _ visits) = visits
 
 -- | Versioned semantics of the deterministic bounded verifier.
 --
@@ -1529,6 +1683,190 @@ validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusAp
 validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasis
     (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt
       _ inputBox) = validatedLengthSpinePairInputBoxBasis inputBox
+
+-- | Fixed-precedence operational failures for scalar Boolean finite-union
+-- establishment.  Branch indices refer to canonical post-deduplication,
+-- post-subsumption DNF order; box indices refer to the canonical retained
+-- componentwise-maximal antichain.
+data LengthBooleanFiniteUnionApplicableDomainValidationError
+  = LengthBooleanFiniteUnionProblemInputLimitExceeded !Int !Int
+  | LengthBooleanFiniteUnionGeneratedBranchLimitExceeded !Int !Int
+  | LengthBooleanFiniteUnionRuleLimitExceeded !Int !Int !Int
+  | LengthBooleanFiniteUnionClosureInspectionLimitExceeded !Int !Int !Int
+  | LengthBooleanFiniteUnionRetainedBoxLimitExceeded !Int !Int
+  | LengthBooleanFiniteUnionMaximumValueRejected
+      !Int !Int !LengthEvaluationError
+  | LengthBooleanFiniteUnionAssignmentVisitLimitExceeded !Int !Int
+  | LengthBooleanFiniteUnionAssignmentLimitExceeded !Natural !Natural
+  | LengthBooleanFiniteUnionAssignmentEvaluationRejected
+      !Natural !LengthEvaluationError
+  | LengthBooleanFiniteUnionInternalEnumerationInvariant
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthBooleanFiniteUnionApplicableDomainValidationError
+
+-- | Nominal binary-product failure vocabulary for the same bounded Boolean
+-- finite-union algorithm.
+data LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError
+  = LengthSpinePairBooleanFiniteUnionProblemInputLimitExceeded !Int !Int
+  | LengthSpinePairBooleanFiniteUnionGeneratedBranchLimitExceeded !Int !Int
+  | LengthSpinePairBooleanFiniteUnionRuleLimitExceeded !Int !Int !Int
+  | LengthSpinePairBooleanFiniteUnionClosureInspectionLimitExceeded
+      !Int !Int !Int
+  | LengthSpinePairBooleanFiniteUnionRetainedBoxLimitExceeded !Int !Int
+  | LengthSpinePairBooleanFiniteUnionMaximumValueRejected
+      !Int !Int !LengthSpinePairEvaluationError
+  | LengthSpinePairBooleanFiniteUnionAssignmentVisitLimitExceeded !Int !Int
+  | LengthSpinePairBooleanFiniteUnionAssignmentLimitExceeded
+      !Natural !Natural
+  | LengthSpinePairBooleanFiniteUnionAssignmentEvaluationRejected
+      !Natural !LengthSpinePairEvaluationError
+  | LengthSpinePairBooleanFiniteUnionInternalEnumerationInvariant
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData
+    LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError
+
+-- | Versioned scalar authority for the exact bounded Boolean DNF finite-union
+-- successor.  This tag changes no checked problem, query, protocol, or live
+-- execution identity.
+lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag
+  :: [Word8]
+lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag =
+  ascii
+    "finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-precondition-domain-establishment/v1"
+
+-- | Opaque scalar receipt for one canonical finite union.  Incomparable boxes
+-- remain separate; no componentwise hull is introduced.  Assignment visits
+-- count every retained-box traversal, while assignment count is the exact
+-- cardinality of their deduplicated union.
+data ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain =
+  ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+    ![Word8]
+    ![[Natural]]
+    !Natural
+    !Natural
+    !Natural
+    !LengthCounterexampleBasis
+  deriving (Eq, Ord, Show)
+
+instance NFData
+    ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain where
+  rnf
+      (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+        schema boxes visits assignments applicable basis) =
+    rnf schema `seq` rnf boxes `seq` rnf visits `seq` rnf assignments `seq`
+    rnf applicable `seq` rnf basis
+
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
+  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  -> [[Natural]]
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
+    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+      _ boxes _ _ _ _) = boxes
+
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
+  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  -> Natural
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
+    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+      _ boxes _ _ _ _) = fromIntegral $ length boxes
+
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
+  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  -> Natural
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
+    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+      _ _ visits _ _ _) = visits
+
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
+  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  -> Natural
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
+    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+      _ _ _ assignments _ _) = assignments
+
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
+  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  -> Natural
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
+    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+      _ _ _ _ applicable _) = applicable
+
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
+  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  -> LengthCounterexampleBasis
+validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
+    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+      _ _ _ _ _ basis) = basis
+
+-- | Nominal binary-product tag for the same bounded Boolean DNF algorithm.
+lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag
+  :: [Word8]
+lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag =
+  ascii
+    "finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-precondition-domain-establishment/v1"
+
+-- | Opaque product-domain sibling of the scalar finite-union receipt.
+data ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain =
+  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+    ![Word8]
+    ![[Natural]]
+    !Natural
+    !Natural
+    !Natural
+    !LengthCounterexampleBasis
+  deriving (Eq, Ord, Show)
+
+instance NFData
+    ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain where
+  rnf
+      (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+        schema boxes visits assignments applicable basis) =
+    rnf schema `seq` rnf boxes `seq` rnf visits `seq` rnf assignments `seq`
+    rnf applicable `seq` rnf basis
+
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  -> [[Natural]]
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
+    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+      _ boxes _ _ _ _) = boxes
+
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  -> Natural
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
+    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+      _ boxes _ _ _ _) = fromIntegral $ length boxes
+
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  -> Natural
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
+    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+      _ _ visits _ _ _) = visits
+
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  -> Natural
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
+    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+      _ _ _ assignments _ _) = assignments
+
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  -> Natural
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
+    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+      _ _ _ _ applicable _) = applicable
+
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  -> LengthCounterexampleBasis
+validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
+    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+      _ _ _ _ _ basis) = basis
 
 -- | Fail-closed scalar simplification failure after the caller supplied one
 -- opaque counterexample anchor.  Width and Cartesian-product admission misses
@@ -2935,9 +3273,576 @@ validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaM
                   lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidationSchemaTag)
                 evidence
  where
+ spinePairInputPosition variable = case variable of
+    LengthSpinePairInput position -> Just position
+    LengthSpinePairResult _ -> Nothing
+
+-- | Cumulative scalar successor which expands the complete normalized
+-- precondition into a bounded canonical Boolean DNF and validates the exact
+-- finite union of independently derived zero-origin boxes.  Incomparable
+-- boxes remain separate, and the original formula is replayed over the global
+-- deduplicated assignment set.
+validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> LengthBooleanFiniteUnionLimits
+  -> CheckedLengthProblem identity local
+  -> Either LengthBooleanFiniteUnionApplicableDomainValidationError
+      (LengthApplicableDomainValidation
+        (BehavioralEvidence
+          FiniteListSpineLengthV1
+          ValidatedLengthCounterexample)
+        (BehavioralEvidence
+          FiniteListSpineLengthV1
+          ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain))
+validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    evaluationLimits inputBoxLimits unionLimits problem = do
+  let inputCount = checkedLengthProblemInputCount problem
+      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
+  if inputCount <= maximumInputs
+    then pure ()
+    else Left $ LengthBooleanFiniteUnionProblemInputLimitExceeded
+      maximumInputs inputCount
+  coverage <- either (Left . preparationError) Right
+    $ booleanFiniteUnionApplicableDomainMaximumBoxes
+        unionLimits inputCount scalarInputPosition
+        $ checkedLengthProblemPrecondition problem
+  case coverage of
+    Left inapplicability -> Right
+      $ LengthApplicableDomainInapplicable inapplicability
+    Right boxes -> do
+      mapM_ checkBox $ zip [0 ..] boxes
+      visits <- either (Left . enumerationError) Right
+        $ booleanFiniteUnionAssignmentVisitCount unionLimits boxes
+      (assignmentCount, assignments) <- either
+        (Left . enumerationError) Right
+        $ enumerateBooleanFiniteUnionAssignments inputBoxLimits boxes
+      replay boxes visits assignmentCount 0 0 $ Set.toAscList assignments
+ where
+  scalarInputPosition variable = case variable of
+    LengthInput position -> Just position
+    LengthResult -> Nothing
+
+  preparationError failure = case failure of
+    BooleanFiniteUnionGeneratedBranchLimitExceeded limit observed ->
+      LengthBooleanFiniteUnionGeneratedBranchLimitExceeded limit observed
+    BooleanFiniteUnionRuleLimitExceeded branch limit observed ->
+      LengthBooleanFiniteUnionRuleLimitExceeded branch limit observed
+    BooleanFiniteUnionClosureInspectionLimitExceeded branch limit observed ->
+      LengthBooleanFiniteUnionClosureInspectionLimitExceeded
+        branch limit observed
+    BooleanFiniteUnionRetainedBoxLimitExceeded limit observed ->
+      LengthBooleanFiniteUnionRetainedBoxLimitExceeded limit observed
+
+  enumerationError failure = case failure of
+    BooleanFiniteUnionAssignmentVisitLimitExceeded limit observed ->
+      LengthBooleanFiniteUnionAssignmentVisitLimitExceeded limit observed
+    BooleanFiniteUnionAssignmentLimitExceeded limit observed ->
+      LengthBooleanFiniteUnionAssignmentLimitExceeded limit observed
+    BooleanFiniteUnionInternalEnumerationInvariant ->
+      LengthBooleanFiniteUnionInternalEnumerationInvariant
+
+  checkBox (boxIndex, maximums) =
+    mapM_ (checkMaximum boxIndex) $ zip [0 ..] maximums
+
+  checkMaximum boxIndex (inputIndex, maximumValue) = either
+    (Left . LengthBooleanFiniteUnionMaximumValueRejected
+      boxIndex inputIndex)
+    Right
+    $ checkAssignedValue evaluationLimits
+        (LengthProblemInputValue inputIndex) maximumValue
+
+  replay boxes visits assignmentCount !ordinal !applicable assignments =
+    case assignments of
+      []
+        | ordinal /= assignmentCount ->
+            Left LengthBooleanFiniteUnionInternalEnumerationInvariant
+        | otherwise ->
+            let receipt =
+                  ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+                    lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag
+                    boxes visits assignmentCount applicable
+                    $ problemBasis problem
+            in Right $ LengthApplicableDomainEstablished
+              $ mkBehavioralEvidence
+                  (checkedLengthProblemBehavioralProblem problem) receipt
+      inputs : remaining -> do
+        assignmentReplay <- either
+          (Left . LengthBooleanFiniteUnionAssignmentEvaluationRejected ordinal)
+          Right
+          $ replayLengthProblemAssignment evaluationLimits problem
+          $ LengthProblemAssignment inputs
+        case assignmentReplay of
+          LengthProblemPostconditionViolated receipt -> Right
+            $ LengthApplicableDomainCounterexample
+            $ mkBehavioralEvidence
+                (checkedLengthProblemBehavioralProblem problem) receipt
+          LengthProblemPreconditionNotMet ->
+            replay boxes visits assignmentCount (ordinal + 1) applicable
+              remaining
+          LengthProblemPostconditionSatisfied ->
+            replay boxes visits assignmentCount (ordinal + 1)
+              (applicable + 1) remaining
+
+-- | Nominal product-domain sibling of the bounded Boolean finite-union
+-- validator.  It uses the same DNF, closure, antichain, visit, and global-set
+-- order while retaining product-specific errors and evidence.
+validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> LengthBooleanFiniteUnionLimits
+  -> CheckedLengthSpinePairProblem identity local
+  -> Either
+      LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError
+      (LengthApplicableDomainValidation
+        (BehavioralEvidence
+          FiniteBinaryProductSpineLengthsV1
+          ValidatedLengthSpinePairCounterexample)
+        (BehavioralEvidence
+          FiniteBinaryProductSpineLengthsV1
+          ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain))
+validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    evaluationLimits inputBoxLimits unionLimits problem = do
+  let inputCount = checkedLengthSpinePairProblemInputCount problem
+      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
+  if inputCount <= maximumInputs
+    then pure ()
+    else Left $ LengthSpinePairBooleanFiniteUnionProblemInputLimitExceeded
+      maximumInputs inputCount
+  coverage <- either (Left . preparationError) Right
+    $ booleanFiniteUnionApplicableDomainMaximumBoxes
+        unionLimits inputCount spinePairInputPosition
+        $ checkedLengthSpinePairProblemPrecondition problem
+  case coverage of
+    Left inapplicability -> Right
+      $ LengthApplicableDomainInapplicable inapplicability
+    Right boxes -> do
+      mapM_ checkBox $ zip [0 ..] boxes
+      visits <- either (Left . enumerationError) Right
+        $ booleanFiniteUnionAssignmentVisitCount unionLimits boxes
+      (assignmentCount, assignments) <- either
+        (Left . enumerationError) Right
+        $ enumerateBooleanFiniteUnionAssignments inputBoxLimits boxes
+      replay boxes visits assignmentCount 0 0 $ Set.toAscList assignments
+ where
   spinePairInputPosition variable = case variable of
     LengthSpinePairInput position -> Just position
     LengthSpinePairResult _ -> Nothing
+
+  preparationError failure = case failure of
+    BooleanFiniteUnionGeneratedBranchLimitExceeded limit observed ->
+      LengthSpinePairBooleanFiniteUnionGeneratedBranchLimitExceeded
+        limit observed
+    BooleanFiniteUnionRuleLimitExceeded branch limit observed ->
+      LengthSpinePairBooleanFiniteUnionRuleLimitExceeded
+        branch limit observed
+    BooleanFiniteUnionClosureInspectionLimitExceeded branch limit observed ->
+      LengthSpinePairBooleanFiniteUnionClosureInspectionLimitExceeded
+        branch limit observed
+    BooleanFiniteUnionRetainedBoxLimitExceeded limit observed ->
+      LengthSpinePairBooleanFiniteUnionRetainedBoxLimitExceeded
+        limit observed
+
+  enumerationError failure = case failure of
+    BooleanFiniteUnionAssignmentVisitLimitExceeded limit observed ->
+      LengthSpinePairBooleanFiniteUnionAssignmentVisitLimitExceeded
+        limit observed
+    BooleanFiniteUnionAssignmentLimitExceeded limit observed ->
+      LengthSpinePairBooleanFiniteUnionAssignmentLimitExceeded limit observed
+    BooleanFiniteUnionInternalEnumerationInvariant ->
+      LengthSpinePairBooleanFiniteUnionInternalEnumerationInvariant
+
+  checkBox (boxIndex, maximums) =
+    mapM_ (checkMaximum boxIndex) $ zip [0 ..] maximums
+
+  checkMaximum boxIndex (inputIndex, maximumValue) = either
+    (Left . LengthSpinePairBooleanFiniteUnionMaximumValueRejected
+      boxIndex inputIndex)
+    Right
+    $ checkSpinePairAssignedValue evaluationLimits
+        (LengthSpinePairProblemInputValue inputIndex) maximumValue
+
+  replay boxes visits assignmentCount !ordinal !applicable assignments =
+    case assignments of
+      []
+        | ordinal /= assignmentCount -> Left
+            LengthSpinePairBooleanFiniteUnionInternalEnumerationInvariant
+        | otherwise ->
+            let receipt =
+                  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
+                    lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag
+                    boxes visits assignmentCount applicable
+                    $ spinePairProblemBasis problem
+            in Right $ LengthApplicableDomainEstablished
+              $ mkBehavioralEvidence
+                  (checkedLengthSpinePairProblemBehavioralProblem problem)
+                  receipt
+      inputs : remaining -> do
+        assignmentReplay <- either
+          (Left .
+            LengthSpinePairBooleanFiniteUnionAssignmentEvaluationRejected
+              ordinal)
+          Right
+          $ replayLengthSpinePairProblemAssignment evaluationLimits problem
+          $ LengthProblemAssignment inputs
+        case assignmentReplay of
+          LengthSpinePairProblemPostconditionViolated receipt -> Right
+            $ LengthApplicableDomainCounterexample
+            $ mkBehavioralEvidence
+                (checkedLengthSpinePairProblemBehavioralProblem problem)
+                receipt
+          LengthSpinePairProblemPreconditionNotMet ->
+            replay boxes visits assignmentCount (ordinal + 1) applicable
+              remaining
+          LengthSpinePairProblemPostconditionSatisfied ->
+            replay boxes visits assignmentCount (ordinal + 1) (applicable + 1)
+              remaining
+
+data BooleanFiniteUnionPolarity
+  = BooleanFiniteUnionPositive
+  | BooleanFiniteUnionNegative
+
+data BooleanFiniteUnionPreparationError
+  = BooleanFiniteUnionGeneratedBranchLimitExceeded !Int !Int
+  | BooleanFiniteUnionRuleLimitExceeded !Int !Int !Int
+  | BooleanFiniteUnionClosureInspectionLimitExceeded !Int !Int !Int
+  | BooleanFiniteUnionRetainedBoxLimitExceeded !Int !Int
+
+data BooleanFiniteUnionEnumerationError
+  = BooleanFiniteUnionAssignmentVisitLimitExceeded !Int !Int
+  | BooleanFiniteUnionAssignmentLimitExceeded !Natural !Natural
+  | BooleanFiniteUnionInternalEnumerationInvariant
+
+-- The checked formula is already normalized and structurally bounded.  This
+-- private expansion preserves exact Boolean meaning: positive conjunction is
+-- Cartesian conjunction, negative conjunction is union, and negative equality
+-- is the exact natural/order split @not (A <= B) || not (B <= A)@.  Boolean
+-- syntax inside an expression-level conditional is deliberately never opened.
+booleanFiniteUnionRawBranches
+  :: LengthFormula variable
+  -> [[LengthFormula variable]]
+booleanFiniteUnionRawBranches = expand BooleanFiniteUnionPositive
+ where
+  expand polarity formula = case formula of
+    LengthTruth value
+      | value == positive polarity -> [[]]
+      | otherwise -> []
+    LengthNot nested -> expand (opposite polarity) nested
+    LengthAll formulas -> case polarity of
+      BooleanFiniteUnionPositive -> conjoin formulas
+      BooleanFiniteUnionNegative ->
+        concatMap (expand BooleanFiniteUnionNegative) formulas
+    LengthAtMost left right -> case polarity of
+      BooleanFiniteUnionPositive -> [[LengthAtMost left right]]
+      BooleanFiniteUnionNegative ->
+        [[LengthNot $ LengthAtMost left right]]
+    LengthEqual left right -> case polarity of
+      BooleanFiniteUnionPositive -> [[LengthEqual left right]]
+      BooleanFiniteUnionNegative ->
+        [ [LengthNot $ LengthAtMost left right]
+        , [LengthNot $ LengthAtMost right left]
+        ]
+
+  conjoin [] = [[]]
+  conjoin (formula : remaining) =
+    [ first ++ rest
+    | first <- expand BooleanFiniteUnionPositive formula
+    , rest <- conjoin remaining
+    ]
+
+  positive polarity = case polarity of
+    BooleanFiniteUnionPositive -> True
+    BooleanFiniteUnionNegative -> False
+
+  opposite polarity = case polarity of
+    BooleanFiniteUnionPositive -> BooleanFiniteUnionNegative
+    BooleanFiniteUnionNegative -> BooleanFiniteUnionPositive
+
+-- Literal order is inherited from the normalized AST's Ord instance.  Exact
+-- complements discard a branch; duplicate branches and branches strictly
+-- stronger than another branch are then removed without changing the union.
+canonicalBooleanFiniteUnionBranches
+  :: Ord variable
+  => [[LengthFormula variable]]
+  -> [Set.Set (LengthFormula variable)]
+canonicalBooleanFiniteUnionBranches rawBranches =
+  filter notStrictlySubsumed uniqueConsistent
+ where
+  uniqueConsistent = Set.toAscList $ Set.fromList
+    [ branch
+    | rawBranch <- rawBranches
+    , let branch = Set.fromList rawBranch
+    , not $ hasExactComplement branch
+    ]
+
+  hasExactComplement branch = any hasComplement $ Set.toAscList branch
+   where
+    hasComplement literal = case literal of
+      LengthNot nested -> Set.member nested branch
+      _ -> Set.member (LengthNot literal) branch
+
+  notStrictlySubsumed branch = not $ any isStrictSubset uniqueConsistent
+   where
+    isStrictSubset candidate =
+      candidate /= branch && Set.isSubsetOf candidate branch
+
+-- Expand, canonicalize, close, and antichain one formula before any maximum
+-- value or assignment is demanded.  All branches finish bounded closure before
+-- missing input coverage is inspected, giving operational cap errors fixed
+-- precedence over ordinary inapplicability.
+booleanFiniteUnionApplicableDomainMaximumBoxes
+  :: Ord variable
+  => LengthBooleanFiniteUnionLimits
+  -> Int
+  -> (variable -> Maybe Natural)
+  -> LengthFormula variable
+  -> Either
+      BooleanFiniteUnionPreparationError
+      (Either LengthApplicableDomainInapplicability [[Natural]])
+booleanFiniteUnionApplicableDomainMaximumBoxes
+    limits inputCount inputPosition precondition = do
+  let rawBranches = booleanFiniteUnionRawBranches precondition
+      branchLimit = lengthBooleanFiniteUnionGeneratedBranchLimit limits
+  case observeBooleanFiniteUnionListLength branchLimit rawBranches of
+    Left observed -> Left $ BooleanFiniteUnionGeneratedBranchLimitExceeded
+      branchLimit observed
+    Right _ -> pure ()
+  let branches = canonicalBooleanFiniteUnionBranches rawBranches
+  closed <- mapM closeBranch $ zip [0 ..] branches
+  let liveBounds = [bounds | Just bounds <- closed]
+  case firstMissingInput liveBounds of
+    Just missing -> pure $ Left
+      $ LengthApplicableDomainInputUpperBoundMissing missing
+    Nothing -> do
+      let boxes = canonicalBooleanFiniteUnionBoxes inputCount liveBounds
+          boxLimit = lengthBooleanFiniteUnionRetainedBoxLimit limits
+      case observeBooleanFiniteUnionListLength boxLimit boxes of
+        Left observed -> Left $ BooleanFiniteUnionRetainedBoxLimitExceeded
+          boxLimit observed
+        Right _ -> pure $ Right boxes
+ where
+  closeBranch (branchIndex, branch) = do
+    collected <- collectBranchRules branchIndex $ Set.toAscList branch
+    case collected of
+      Nothing -> pure Nothing
+      Just rules -> case closeRelationalPositiveAffineRulesWithin
+          (lengthBooleanFiniteUnionClosureInspectionLimitPerBranch limits)
+          rules of
+        Left observed -> Left
+          $ BooleanFiniteUnionClosureInspectionLimitExceeded
+              branchIndex
+              (lengthBooleanFiniteUnionClosureInspectionLimitPerBranch limits)
+              observed
+        Right RelationalPositiveAffineClosureContradiction -> pure Nothing
+        Right (RelationalPositiveAffineClosureBounds bounds) ->
+          pure $ Just bounds
+
+  collectBranchRules branchIndex = go 0 []
+   where
+    ruleLimit = lengthBooleanFiniteUnionRuleLimitPerBranch limits
+
+    go !_ retained [] = Right $ Just retained
+    go !count retained (literal : remaining) = case
+        strictRelationalPositiveAffineQuotientRootExtremaMonusClauseCoverage
+          inputCount inputPosition literal of
+      RelationalPositiveAffineClauseIgnored -> go count retained remaining
+      RelationalPositiveAffineClauseContradiction -> Right Nothing
+      RelationalPositiveAffineClauseRules rules ->
+        let newRuleCount = length rules
+        in if newRuleCount > ruleLimit - count
+            then Left $ BooleanFiniteUnionRuleLimitExceeded
+              branchIndex ruleLimit $ saturatedSuccessor ruleLimit
+            else go (count + newRuleCount) (retained ++ rules) remaining
+
+  firstMissingInput liveBounds = firstMissing 0
+   where
+    firstMissing index
+      | index >= inputCount = Nothing
+      | any (Map.notMember $ fromIntegral index) liveBounds = Just index
+      | otherwise = firstMissing $ index + 1
+
+-- Unlike a saturated numeric observation alone, this helper retains a
+-- separate exceeded arm when the admitted limit itself is maxBound.  It
+-- therefore never mistakes a cap+1 list for an admitted maxBound-length list.
+observeBooleanFiniteUnionListLength :: Int -> [value] -> Either Int Int
+observeBooleanFiniteUnionListLength limit = go 0
+ where
+  go !observed remaining = case remaining of
+    [] -> Right observed
+    _ : following
+      | observed >= limit -> Left $ saturatedSuccessor limit
+      | otherwise -> go (observed + 1) following
+
+-- Keep only the componentwise-maximal zero-origin boxes.  This operation is
+-- exact for a union of boxes and intentionally never constructs the
+-- componentwise hull of incomparable maxima vectors.
+canonicalBooleanFiniteUnionBoxes
+  :: Int
+  -> [Map.Map Natural Natural]
+  -> [[Natural]]
+canonicalBooleanFiniteUnionBoxes inputCount bounds =
+  filter notContained uniqueBoxes
+ where
+  uniqueBoxes = Set.toAscList $ Set.fromList
+    [ [Map.findWithDefault 0 (fromIntegral index) bound
+      | index <- [0 .. inputCount - 1]
+      ]
+    | bound <- bounds
+    ]
+
+  notContained box = not $ any strictlyContains uniqueBoxes
+   where
+    strictlyContains candidate =
+      candidate /= box && and (zipWith (<=) box candidate)
+
+-- Bounded sibling of the predecessor closure.  It preserves seed partition,
+-- canonical rule order, immutable-snapshot passes, and eligible-rule-once
+-- removal exactly; the additive counter observes each attempted rule in a
+-- closure pass and fails before attempt cap+1.
+closeRelationalPositiveAffineRulesWithin
+  :: Int
+  -> [RelationalPositiveAffineRule]
+  -> Either Int RelationalPositiveAffineClosure
+closeRelationalPositiveAffineRulesWithin inspectionLimit rules = do
+  let (seedRules, pendingRules) =
+        partitionRelationalPositiveAffineRules rules
+  (seedInspections, seedPass) <- relationalPositiveAffineRulePassWithin
+    inspectionLimit 0 Map.empty seedRules
+  case seedPass of
+    RelationalPositiveAffineRulePassContradiction ->
+      pure RelationalPositiveAffineClosureContradiction
+    RelationalPositiveAffineRulePassComplete seedBounds retainedSeeds _ ->
+      close seedInspections seedBounds $ retainedSeeds ++ pendingRules
+ where
+  close !_ !bounds [] = pure $ RelationalPositiveAffineClosureBounds bounds
+  close !inspections !bounds pending = do
+    (nextInspections, pass) <- relationalPositiveAffineRulePassWithin
+      inspectionLimit inspections bounds pending
+    case pass of
+      RelationalPositiveAffineRulePassContradiction ->
+        pure RelationalPositiveAffineClosureContradiction
+      RelationalPositiveAffineRulePassComplete nextBounds retained fired
+        | fired -> close nextInspections nextBounds retained
+        | otherwise -> pure $ RelationalPositiveAffineClosureBounds nextBounds
+
+relationalPositiveAffineRulePassWithin
+  :: Int
+  -> Int
+  -> Map.Map Natural Natural
+  -> [RelationalPositiveAffineRule]
+  -> Either Int (Int, RelationalPositiveAffineRulePass)
+relationalPositiveAffineRulePassWithin inspectionLimit = go
+ where
+  go !inspections !bounds rules = scan inspections Map.empty [] False rules
+   where
+    scan !observed !derived !retained !fired remaining = case remaining of
+      [] -> Right
+        ( observed
+        , RelationalPositiveAffineRulePassComplete
+            (Map.unionWith min bounds derived)
+            (reverse retained)
+            fired
+        )
+      rule : following
+        | observed >= inspectionLimit ->
+            Left $ saturatedSuccessor inspectionLimit
+        | otherwise -> case rule of
+            RelationalPositiveAffineRule leftConstant leftCoefficients
+                rightConstant rightCoefficients ->
+              let nextObserved = observed + 1
+              in case relationalPositiveAffineRightMaximum
+                  bounds rightConstant rightCoefficients of
+                Nothing -> scan nextObserved derived (rule : retained) fired
+                  following
+                Just rightMaximum
+                  | leftConstant > rightMaximum -> Right
+                      ( nextObserved
+                      , RelationalPositiveAffineRulePassContradiction
+                      )
+                  | otherwise ->
+                      let numerator = rightMaximum - leftConstant
+                          ruleBounds =
+                            Map.map (numerator `quot`) leftCoefficients
+                          nextDerived = Map.unionWith min derived ruleBounds
+                      in scan nextObserved nextDerived retained True following
+
+-- Check the sum of retained box cardinalities without constructing a single
+-- assignment.  This is intentionally a visit count: overlaps are counted once
+-- per box and are deduplicated only by the later union set.
+booleanFiniteUnionAssignmentVisitCount
+  :: LengthBooleanFiniteUnionLimits
+  -> [[Natural]]
+  -> Either BooleanFiniteUnionEnumerationError Natural
+booleanFiniteUnionAssignmentVisitCount limits = foldM addBox 0
+ where
+  visitLimit = lengthBooleanFiniteUnionAssignmentVisitLimit limits
+  naturalLimit = fromIntegral visitLimit
+  exceeded = saturatedSuccessor visitLimit
+
+  addBox !total maximums = do
+    boxCount <- productWithin 1 maximums
+    if boxCount > naturalLimit - total
+      then Left $ BooleanFiniteUnionAssignmentVisitLimitExceeded
+        visitLimit exceeded
+      else pure $ total + boxCount
+
+  productWithin !total [] = pure total
+  productWithin !total (maximumValue : remaining) =
+    let factor = maximumValue + 1
+    in if factor > 0 && total > naturalLimit `quot` factor
+        then Left $ BooleanFiniteUnionAssignmentVisitLimitExceeded
+          visitLimit exceeded
+        else productWithin (total * factor) remaining
+
+-- Materialize the exact set union under the existing unique-assignment cap.
+-- Each component box is visited lexicographically with the last source input
+-- varying fastest; Set order later supplies one global lexicographic replay.
+enumerateBooleanFiniteUnionAssignments
+  :: LengthInputBoxLimits
+  -> [[Natural]]
+  -> Either
+      BooleanFiniteUnionEnumerationError
+      (Natural, Set.Set [Natural])
+enumerateBooleanFiniteUnionAssignments inputBoxLimits =
+  fmap swapCount . foldM enumerateBox (Set.empty, 0)
+ where
+  assignmentLimit = lengthInputBoxAssignmentLimit inputBoxLimits
+
+  swapCount (assignments, count) = (count, assignments)
+
+  enumerateBox (!assignments, !count) maximums =
+    visit assignments count $ replicate (length maximums) 0
+   where
+    visit !retained !retainedCount values = do
+      (nextRetained, nextCount) <- insertAssignment
+        retained retainedCount values
+      following <- nextBooleanFiniteUnionAssignment maximums values
+      case following of
+        Nothing -> pure (nextRetained, nextCount)
+        Just next -> visit nextRetained nextCount next
+
+  insertAssignment retained retainedCount values
+    | Set.member values retained = pure (retained, retainedCount)
+    | retainedCount >= assignmentLimit = Left
+        $ BooleanFiniteUnionAssignmentLimitExceeded
+            assignmentLimit (assignmentLimit + 1)
+    | otherwise = pure
+        (Set.insert values retained, retainedCount + 1)
+
+nextBooleanFiniteUnionAssignment
+  :: [Natural]
+  -> [Natural]
+  -> Either BooleanFiniteUnionEnumerationError (Maybe [Natural])
+nextBooleanFiniteUnionAssignment maximums values =
+  fmap (fmap reverse) $ advance (reverse maximums) (reverse values)
+ where
+  advance [] [] = Right Nothing
+  advance (maximumValue : remainingMaximums)
+      (value : remainingValues)
+    | value < maximumValue = Right $ Just $ value + 1 : remainingValues
+    | otherwise = fmap (fmap (0 :))
+        $ advance remainingMaximums remainingValues
+  advance _ _ = Left BooleanFiniteUnionInternalEnumerationInvariant
 
 data PositiveAffineCoverage
   = PositiveAffineCoverageBounds !(Map.Map Natural Natural)

@@ -2301,19 +2301,19 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
                 formulaPlanRemainingBudget result /= Just 0
             _ -> True
 
-    formulaFamilyForms plans = SharedCollection.distinctOn id $
-        translatedFormula (primaryFormulaPlan plans) :
-        exactOpaqueFormulaPlan plans :
-        map translatedFormula (singleOpaqueFormulaPlans plans) ++
-        map translatedFormula (singleOpenFormulaPlans plans) ++
-        map translatedFormula (pairOpaqueFormulaPlans plans) ++
-        map translatedFormula (pairOpenFormulaPlans plans) ++
-        map translatedFormula (tripleOpaqueFormulaPlans plans) ++
-        map translatedFormula (tripleOpenFormulaPlans plans) ++
-        map translatedFormula (quadrupleOpaqueFormulaPlans plans) ++
-        map translatedFormula (quadrupleOpenFormulaPlans plans) ++
-        map translatedFormula (quintupleOpaqueFormulaPlans plans) ++
-        map translatedFormula (quintupleOpenFormulaPlans plans)
+    formulaFamilyForms familyPlans = SharedCollection.distinctOn id $
+        translatedFormula (primaryFormulaPlan familyPlans) :
+        exactOpaqueFormulaPlan familyPlans :
+        map translatedFormula (singleOpaqueFormulaPlans familyPlans) ++
+        map translatedFormula (singleOpenFormulaPlans familyPlans) ++
+        map translatedFormula (pairOpaqueFormulaPlans familyPlans) ++
+        map translatedFormula (pairOpenFormulaPlans familyPlans) ++
+        map translatedFormula (tripleOpaqueFormulaPlans familyPlans) ++
+        map translatedFormula (tripleOpenFormulaPlans familyPlans) ++
+        map translatedFormula (quadrupleOpaqueFormulaPlans familyPlans) ++
+        map translatedFormula (quadrupleOpenFormulaPlans familyPlans) ++
+        map translatedFormula (quintupleOpaqueFormulaPlans familyPlans) ++
+        map translatedFormula (quintupleOpenFormulaPlans familyPlans)
 
 -- Goal plans retain their historical linear prefix: the fully opened
 -- translation, the exact opaque fallback, one independently opaque positive

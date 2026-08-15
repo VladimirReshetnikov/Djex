@@ -7,7 +7,6 @@
 module Djinn.Internal.ProofToGenerated
   ( termToGeneratedExpression
   , termToGeneratedClause
-  , termToGeneratedClauseWithoutEta
   , termToGeneratedClauseWithVisibleApplications
   ) where
 
@@ -389,22 +388,13 @@ termToGeneratedClause target term = do
   expression <- termToGeneratedExpression term
   expressionToClause target expression
 
--- | Convert a proof while retaining every eta expansion. This is used only
--- when erased rank-N instantiation evidence exposes an eta redex: Haskell's
--- simplified subsumption can accept @\x -> finish x@ while rejecting the
--- propositionally eta-equivalent @finish@ at the higher-rank type.
-termToGeneratedClauseWithoutEta
-  :: Generated.DefinitionName
-  -> Term
-  -> Either String (Generated.FunctionClause HSymbol)
-termToGeneratedClauseWithoutEta target term = do
-  expression <- termToGeneratedExpressionWithEta False term
-  expressionToClause target expression
-
 -- | Convert a proof whose retained instantiation axioms carry explicit type
 -- choices. Applied evidence becomes @provider @T@; a bare axiom becomes the
 -- corresponding @\provider -> provider @T@ function. Eta contraction stays
--- disabled for the same rank-N reason as 'termToGeneratedClauseWithoutEta'.
+-- disabled because erased rank-N instantiation evidence can expose an eta
+-- redex: Haskell's simplified subsumption can accept @\x -> finish x@ while
+-- rejecting the propositionally eta-equivalent @finish@ at the higher-rank
+-- type.
 termToGeneratedClauseWithVisibleApplications
   :: Map.Map Symbol [Generated.VisibleTypeArgument]
   -> Generated.DefinitionName

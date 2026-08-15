@@ -12,9 +12,7 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , findTypedQueryResultsInEnvironmentWithCheckedOptions
   , findQueryResultsInEnvironmentWithCheckedOptions
   , findTypedQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
-  , findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
   , findTypedQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
-  , findQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
   , findTypedQueryResultsWithAllocators
   , findQueryResultsWithAllocators
   , typedQueryProjectionStrictnessForTesting
@@ -47,7 +45,6 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , exferenceEnvironmentContainsBinding
   , exferenceEnvironmentBindingScheme
   , checkExferenceOptions
-  , validateExferenceOptions
   , validateExferenceQuery
   , validateExferenceInput
   )
@@ -908,20 +905,6 @@ findTypedQueryResultsInEnvironmentWithCheckedOptionsAndCandidates candidates =
   findTypedQueryResultsInEnvironmentWithCheckedOptionsAndEvidence
     candidates M.empty
 
-findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
-  :: M.Map QualifiedName [HsType]
-  -> SharedGenerated.DefinitionName
-  -> ExferenceSourceTypeVariableHints
-  -> ExferenceEnvironment
-  -> ExferenceQuery
-  -> CheckedExferenceOptions
-  -> Either ExferenceInputError [ExferenceResult]
-findQueryResultsInEnvironmentWithCheckedOptionsAndCandidates candidates
-    target sourceHints environment query checkedOptions =
-  projectTypedQueryResults
-    $ findTypedQueryResultsInEnvironmentWithCheckedOptionsAndCandidates
-        candidates target sourceHints environment query checkedOptions
-
 -- | Run a query with adapter-checked exact provider assignments. This private
 -- entrance preserves each ordered vector and keeps the historical flat
 -- candidate API on its unchanged search path.
@@ -936,20 +919,6 @@ findTypedQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
 findTypedQueryResultsInEnvironmentWithCheckedOptionsAndAssignments assignments =
   findTypedQueryResultsInEnvironmentWithCheckedOptionsAndEvidence
     M.empty assignments
-
-findQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
-  :: M.Map QualifiedName [[HsType]]
-  -> SharedGenerated.DefinitionName
-  -> ExferenceSourceTypeVariableHints
-  -> ExferenceEnvironment
-  -> ExferenceQuery
-  -> CheckedExferenceOptions
-  -> Either ExferenceInputError [ExferenceResult]
-findQueryResultsInEnvironmentWithCheckedOptionsAndAssignments assignments
-    target sourceHints environment query checkedOptions =
-  projectTypedQueryResults
-    $ findTypedQueryResultsInEnvironmentWithCheckedOptionsAndAssignments
-        assignments target sourceHints environment query checkedOptions
 
 findTypedQueryResultsInEnvironmentWithCheckedOptionsAndEvidence
   :: M.Map QualifiedName [HsType]
@@ -1351,18 +1320,9 @@ validateExferenceQuery
 validateExferenceQuery environment query =
   () <$ prepareExferenceQuery environment query
 
--- | Validate only query-varying search controls, without inspecting a goal or
--- environment. Checked adapters use this before session-dependent elaboration
--- so an invalid independently supplied option cannot be mislabeled as a
--- source-derived kind, synonym, or lowering failure.
-validateExferenceOptions
-  :: ExferenceOptions
-  -> Either ExferenceInputError ()
-validateExferenceOptions options = () <$ checkExferenceOptions options
-
 -- | Validate every search-control field once and retain the exact accepted
 -- record for later preparation. This remains package-private; public core
--- callers continue through 'validateExferenceOptions' or a checked search.
+-- callers continue through a checked search.
 checkExferenceOptions
   :: ExferenceOptions
   -> Either ExferenceInputError CheckedExferenceOptions

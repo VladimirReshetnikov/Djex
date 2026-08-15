@@ -20,7 +20,6 @@ module Djinn.Internal.CheckedCandidate
     , sortValidatedCandidates
     , ValidatedResult
     , mkValidatedResult
-    , validatedResultCandidates
     , projectValidatedResultWith
     , projectValidatedResult
     ) where
@@ -129,12 +128,6 @@ mkValidatedResult
     -> [ValidatedCandidate details output]
     -> ValidatedResult metadata details output
 mkValidatedResult = ValidatedResult
-
--- | Inspect the final checked associations without rebuilding candidates.
-validatedResultCandidates
-    :: ValidatedResult metadata details output
-    -> [ValidatedCandidate details output]
-validatedResultCandidates (ValidatedResult _ _ _ candidates) = candidates
 
 -- | One-way projection to Djinn's historical shared query result.
 --

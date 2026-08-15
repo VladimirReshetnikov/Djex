@@ -28,7 +28,6 @@ module Language.Haskell.Djex.REPL.Scope
   , scopeExferenceQueryScope
   , resolveScopeNameAmong
   , renderScopeImports
-  , renderScopeModules
   , moduleNamesForBrowse
   , workspaceRecordProjections
   ) where
@@ -361,15 +360,6 @@ renderScopeImports scope = implicitLine ++ map render (scopeEntries scope)
     ++ SharedName.renderModuleName moduleName ++ suffix origin
   suffix ExplicitScope = ""
   suffix AutomaticScope = " -- automatic"
-
--- | Current @:module@ entries, preserving context order and star markers.
-renderScopeModules :: ReplScope -> [String]
-renderScopeModules = mapMaybe render . scopeEntries
- where
-  render (ScopeImport _) = Nothing
-  render (ScopeModule _ starred moduleName) = Just
-    $ (if starred then "*" else "")
-    ++ SharedName.renderModuleName moduleName
 
 automaticEntries :: SourceWorkspace -> Either Diagnostic [ScopeEntry]
 automaticEntries workspace = traverse automatic

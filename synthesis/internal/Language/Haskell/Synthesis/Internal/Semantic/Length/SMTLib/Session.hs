@@ -51,7 +51,6 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session
   , LengthSMTLibReadyWorker
   , LengthSMTLibReadyWorkerIdentitySubject
   , withLengthSMTLibReadyWorker
-  , sameLengthSMTLibReadyWorkerIdentity
   , lengthSMTLibReadyWorkerIdentityFingerprint
   , lengthSMTLibReadyWorkerIdentityFingerprintField
   , lengthSMTLibReadyWorkerExecutableSHA256
@@ -739,14 +738,6 @@ data LengthSMTLibReadyWorker epoch = LengthSMTLibReadyWorker
   }
 
 type role LengthSMTLibReadyWorker nominal
-
-sameLengthSMTLibReadyWorkerIdentity
-  :: LengthSMTLibReadyWorker left
-  -> LengthSMTLibReadyWorker right
-  -> Bool
-sameLengthSMTLibReadyWorkerIdentity left right =
-  fingerprintCanonicalBytes (readyWorkerIdentity left) ==
-    fingerprintCanonicalBytes (readyWorkerIdentity right)
 
 lengthSMTLibReadyWorkerIdentityFingerprint
   :: LengthSMTLibReadyWorker epoch

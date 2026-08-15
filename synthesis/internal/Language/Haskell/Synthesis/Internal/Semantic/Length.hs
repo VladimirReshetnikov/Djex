@@ -176,6 +176,10 @@ import Language.Haskell.Synthesis.Type
   , normalizeType
   , splitLeadingForalls
   )
+import Language.Haskell.Synthesis.Count
+  ( saturatedSuccessor
+  , observedNaturalBits
+  )
 
 -- | Nominal marker for the exact semantic dialect.
 data FiniteListSpineLengthV1
@@ -1514,11 +1518,6 @@ observeTypeWithin limits = inspect
         else Left $ LengthTypeCollectionLimitExceeded
           site maximumWidth observed
 
-saturatedSuccessor :: Int -> Int
-saturatedSuccessor value
-  | value == maxBound = maxBound
-  | otherwise = value + 1
-
 data SyntaxUsage = SyntaxUsage !Int !Int
 
 emptySyntaxUsage :: SyntaxUsage
@@ -1569,16 +1568,6 @@ validateLiteral limits value =
   in if observedBits <= maximumBits
       then Right value
       else Left $ LengthLiteralBitLimitExceeded maximumBits observedBits
-
-observedNaturalBits :: Int -> Natural -> Int
-observedNaturalBits maximumBits = go 0
- where
-  bound = max 0 maximumBits
-
-  go !observed 0 = observed
-  go !observed remaining
-    | observed >= bound = saturatedSuccessor bound
-    | otherwise = go (observed + 1) $ remaining `quot` 2
 
 normalizeLengthExpression
   :: Ord variable

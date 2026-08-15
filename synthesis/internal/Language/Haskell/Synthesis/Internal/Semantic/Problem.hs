@@ -49,6 +49,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Problem
   , replayAssociatedObservation
   , BehavioralEvidence
   , mkBehavioralEvidence
+  , mapBehavioralEvidenceReceipt
   , behavioralEvidenceDomain
   , behavioralEvidenceInventoryFingerprint
   , behavioralEvidenceEncodingFingerprint
@@ -442,6 +443,18 @@ mkBehavioralEvidence
   -> receipt
   -> BehavioralEvidence domain receipt
 mkBehavioralEvidence = BehavioralEvidence
+
+-- | Change only the domain-owned receipt while retaining the exact opaque
+-- problem association.  This package-private operation is for a verifier
+-- which has independently strengthened an already authoritative receipt; it
+-- cannot introduce evidence from a raw observation or substitute a different
+-- problem tuple.
+mapBehavioralEvidenceReceipt
+  :: (receipt -> strengthened)
+  -> BehavioralEvidence domain receipt
+  -> BehavioralEvidence domain strengthened
+mapBehavioralEvidenceReceipt strengthen (BehavioralEvidence problem receipt) =
+  BehavioralEvidence problem $ strengthen receipt
 
 behavioralEvidenceDomain :: BehavioralEvidence domain receipt -> [Word8]
 behavioralEvidenceDomain (BehavioralEvidence problem _) =

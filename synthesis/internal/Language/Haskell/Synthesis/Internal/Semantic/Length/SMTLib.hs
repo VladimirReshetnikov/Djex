@@ -44,6 +44,8 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   , probeLengthSMTLibCounterexampleAtOrigin
   , LengthSMTLibInputBoxValidationError (..)
   , validateLengthSMTLibQueryInputBox
+  , LengthSMTLibApplicableDomainValidationError (..)
+  , validateLengthSMTLibQueryApplicableDomain
   , LengthSpinePairSMTLibQueryFingerprintSubject
   , lengthSpinePairSMTLibQuerySchemaTag
   , lengthSpinePairSMTLibQueryLogic
@@ -62,6 +64,8 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   , probeLengthSpinePairSMTLibCounterexampleAtOrigin
   , LengthSpinePairSMTLibInputBoxValidationError (..)
   , validateLengthSpinePairSMTLibQueryInputBox
+  , LengthSpinePairSMTLibApplicableDomainValidationError (..)
+  , validateLengthSpinePairSMTLibQueryApplicableDomain
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -99,20 +103,27 @@ import Language.Haskell.Synthesis.Semantic.Length
   , LengthFormula (..)
   )
 import Language.Haskell.Synthesis.Semantic.Length.Evaluate
-  ( LengthEvaluationError
+  ( LengthApplicableDomainValidation (..)
+  , LengthApplicableDomainValidationError
+  , LengthEvaluationError
   , LengthEvaluationLimits
   , LengthInputBoxLimits
   , LengthInputBoxValidation (..)
   , LengthInputBoxValidationError
   , LengthProblemAssignment (..)
-  , ValidatedLengthCounterexample
-  , ValidatedLengthInputBox
+  , LengthSpinePairApplicableDomainValidationError
   , LengthSpinePairEvaluationError
   , LengthSpinePairInputBoxValidationError
+  , ValidatedLengthApplicableDomain
+  , ValidatedLengthCounterexample
+  , ValidatedLengthInputBox
+  , ValidatedLengthSpinePairApplicableDomain
   , ValidatedLengthSpinePairCounterexample
   , ValidatedLengthSpinePairInputBox
+  , validateLengthProblemApplicableDomain
   , validateLengthProblemInputBox
   , validateLengthProblemCounterexample
+  , validateLengthSpinePairProblemApplicableDomain
   , validateLengthSpinePairProblemInputBox
   , validateLengthSpinePairProblemCounterexample
   )
@@ -667,6 +678,55 @@ validateLengthSMTLibQueryInputBox evaluationLimits inputBoxLimits query
     Right
     . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
 
+-- | Why complete applicable-domain validation through one exact scalar query
+-- failed.  Semantic inapplicability is carried by the successful result;
+-- these failures are limited to solver-independent box validation or an exact
+-- evidence/problem association mismatch.
+data LengthSMTLibApplicableDomainValidationError
+  = LengthSMTLibApplicableDomainValidationRejected
+      !LengthApplicableDomainValidationError
+  | LengthSMTLibApplicableDomainValidationAssociationRejected
+      !ReplayMismatch
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSMTLibApplicableDomainValidationError
+
+-- | Attempt to establish the entire applicable input domain of the scalar
+-- problem retained by this query.  The query supplies association authority
+-- only: no command is emitted and no solver status or live observation is
+-- consumed.  Both authoritative evidence arms are replayed against the exact
+-- query problem before their opaque receipts are released.
+validateLengthSMTLibQueryApplicableDomain
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> LengthSMTLibQuery identity local
+  -> Either LengthSMTLibApplicableDomainValidationError
+      (LengthApplicableDomainValidation
+        ValidatedLengthCounterexample
+        ValidatedLengthApplicableDomain)
+validateLengthSMTLibQueryApplicableDomain evaluationLimits inputBoxLimits
+    query = do
+  validation <- either
+    (Left . LengthSMTLibApplicableDomainValidationRejected)
+    Right
+    $ validateLengthProblemApplicableDomain evaluationLimits inputBoxLimits
+        $ queryProblem query
+  case validation of
+    LengthApplicableDomainInapplicable inapplicability -> Right
+      $ LengthApplicableDomainInapplicable inapplicability
+    LengthApplicableDomainCounterexample evidence ->
+      LengthApplicableDomainCounterexample <$> replay evidence
+    LengthApplicableDomainEstablished evidence ->
+      LengthApplicableDomainEstablished <$> replay evidence
+ where
+  replay
+    :: BehavioralEvidence FiniteListSpineLengthV1 receipt
+    -> Either LengthSMTLibApplicableDomainValidationError receipt
+  replay = either
+    (Left . LengthSMTLibApplicableDomainValidationAssociationRejected)
+    Right
+    . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
+
 -- | Structural model rejection or independent product replay failure.
 -- Parser-decoded bindings remain the shared, authority-free input type, while
 -- every rejection and released receipt is product-domain specific.
@@ -807,6 +867,56 @@ validateLengthSpinePairSMTLibQueryInputBox evaluationLimits inputBoxLimits
     -> Either LengthSpinePairSMTLibInputBoxValidationError receipt
   replay = either
     (Left . LengthSpinePairSMTLibInputBoxValidationAssociationRejected)
+    Right
+    . replayBehavioralEvidence
+        (lengthSpinePairSMTLibQueryBehavioralProblem query)
+
+-- | Nominal product-domain failure for query-owned applicable-domain
+-- validation.
+data LengthSpinePairSMTLibApplicableDomainValidationError
+  = LengthSpinePairSMTLibApplicableDomainValidationRejected
+      !LengthSpinePairApplicableDomainValidationError
+  | LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected
+      !ReplayMismatch
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSpinePairSMTLibApplicableDomainValidationError
+
+-- | Query-owned complete applicable-domain validation for the exact binary
+-- product problem.  Raw solver statuses remain authority-free; the exact
+-- query association is replayed independently for either evidence arm.
+validateLengthSpinePairSMTLibQueryApplicableDomain
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> LengthSpinePairSMTLibQuery identity local
+  -> Either LengthSpinePairSMTLibApplicableDomainValidationError
+      (LengthApplicableDomainValidation
+        ValidatedLengthSpinePairCounterexample
+        ValidatedLengthSpinePairApplicableDomain)
+validateLengthSpinePairSMTLibQueryApplicableDomain evaluationLimits
+    inputBoxLimits query = do
+  validation <- either
+    (Left . LengthSpinePairSMTLibApplicableDomainValidationRejected)
+    Right
+    $ validateLengthSpinePairProblemApplicableDomain
+        evaluationLimits inputBoxLimits
+        $ spinePairQueryProblem query
+  case validation of
+    LengthApplicableDomainInapplicable inapplicability -> Right
+      $ LengthApplicableDomainInapplicable inapplicability
+    LengthApplicableDomainCounterexample evidence ->
+      LengthApplicableDomainCounterexample <$> replay evidence
+    LengthApplicableDomainEstablished evidence ->
+      LengthApplicableDomainEstablished <$> replay evidence
+ where
+  replay
+    :: BehavioralEvidence FiniteBinaryProductSpineLengthsV1 receipt
+    -> Either
+        LengthSpinePairSMTLibApplicableDomainValidationError
+        receipt
+  replay = either
+    (Left .
+      LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected)
     Right
     . replayBehavioralEvidence
         (lengthSpinePairSMTLibQueryBehavioralProblem query)

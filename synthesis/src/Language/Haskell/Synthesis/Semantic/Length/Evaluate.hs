@@ -80,6 +80,22 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validatedLengthSpinePairInputBoxAssignmentCount
   , validatedLengthSpinePairInputBoxApplicableAssignmentCount
   , validatedLengthSpinePairInputBoxBasis
+  , LengthApplicableDomainInapplicability (..)
+  , LengthApplicableDomainValidation (..)
+  , LengthApplicableDomainValidationError (..)
+  , ValidatedLengthApplicableDomain
+  , lengthApplicableDomainValidationSchemaTag
+  , validatedLengthApplicableDomainInclusiveMaximums
+  , validatedLengthApplicableDomainAssignmentCount
+  , validatedLengthApplicableDomainApplicableAssignmentCount
+  , validatedLengthApplicableDomainBasis
+  , LengthSpinePairApplicableDomainValidationError (..)
+  , ValidatedLengthSpinePairApplicableDomain
+  , lengthSpinePairApplicableDomainValidationSchemaTag
+  , validatedLengthSpinePairApplicableDomainInclusiveMaximums
+  , validatedLengthSpinePairApplicableDomainAssignmentCount
+  , validatedLengthSpinePairApplicableDomainApplicableAssignmentCount
+  , validatedLengthSpinePairApplicableDomainBasis
   , evaluateLengthContractAssignment
   , evaluateLengthSpinePairContractAssignment
   , evaluateLengthProviderApplication
@@ -87,10 +103,13 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validateLengthSpinePairProblemCounterexample
   , validateLengthProblemInputBox
   , validateLengthSpinePairProblemInputBox
+  , validateLengthProblemApplicableDomain
+  , validateLengthSpinePairProblemApplicableDomain
   ) where
 
 import Control.DeepSeq (NFData (rnf))
 import Control.Monad (foldM, unless)
+import qualified Data.Map.Strict as Map
 import Data.Word (Word8)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
@@ -143,6 +162,7 @@ import Language.Haskell.Synthesis.Semantic.Length.Problem
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Problem
   ( BehavioralEvidence
+  , mapBehavioralEvidenceReceipt
   , mkBehavioralEvidence
   )
 
@@ -638,6 +658,152 @@ validatedLengthSpinePairInputBoxBasis
 validatedLengthSpinePairInputBoxBasis
     (ValidatedLengthSpinePairInputBoxReceipt _ _ _ _ basis) = basis
 
+-- | Why an exact checked problem does not expose a finite applicable domain
+-- through the deliberately narrow version-one coverage rule.
+--
+-- Preconditions are already bounded and normalized by contract sealing.  The
+-- rule nevertheless recognizes only a direct top-level conjunct of the exact
+-- form @input <= literal@ for every compact modeled input.  It does not infer
+-- bounds from equality, arithmetic, negation, conditionals, or implications.
+-- The first missing input is reported in compact source order.
+data LengthApplicableDomainInapplicability
+  = LengthApplicableDomainInputUpperBoundMissing !Int
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthApplicableDomainInapplicability
+
+-- | Complete classification of one attempt to validate a problem's entire
+-- applicable input domain.
+--
+-- Inapplicability is an ordinary conservative result: the version-one direct
+-- coverage rule could not derive a finite box.  Counterexample and established
+-- payloads retain authority only through their opaque evidence values.
+data LengthApplicableDomainValidation counterexample established
+  = LengthApplicableDomainInapplicable
+      !LengthApplicableDomainInapplicability
+  | LengthApplicableDomainCounterexample !counterexample
+  | LengthApplicableDomainEstablished !established
+  deriving (Eq, Ord, Show, Generic)
+
+instance (NFData counterexample, NFData established) =>
+    NFData (LengthApplicableDomainValidation counterexample established)
+
+-- | Operational failure after an applicable-domain attempt has passed its
+-- semantic coverage gate.  Width failure is intentionally represented by the
+-- existing input-box error and occurs before the checked precondition is
+-- scanned.
+data LengthApplicableDomainValidationError
+  = LengthApplicableDomainInputBoxValidationRejected
+      !LengthInputBoxValidationError
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthApplicableDomainValidationError
+
+-- | Versioned semantics of scalar applicable-domain establishment.
+--
+-- This tag belongs only to the new receipt.  The exact normalized precondition
+-- remains owned by the already fingerprinted problem, and no problem, query,
+-- protocol, or live-execution identity changes.
+lengthApplicableDomainValidationSchemaTag :: [Word8]
+lengthApplicableDomainValidationSchemaTag =
+  ascii "finite-list-spine-length/finite-precondition-domain-establishment/v1"
+
+-- | Complete validation of every assignment on which one exact scalar Length
+-- problem can apply under the version-one direct-bound rule.
+--
+-- The nested box receipt owns the exact derived maxima, traversal counts, and
+-- model/provider basis.  Its enclosing 'BehavioralEvidence' retains the same
+-- exact problem association as the independently completed box validation.
+data ValidatedLengthApplicableDomain =
+  ValidatedLengthApplicableDomainReceipt
+    ![Word8]
+    !ValidatedLengthInputBox
+  deriving (Eq, Ord, Show)
+
+instance NFData ValidatedLengthApplicableDomain where
+  rnf (ValidatedLengthApplicableDomainReceipt schema inputBox) =
+    rnf schema `seq` rnf inputBox
+
+validatedLengthApplicableDomainInclusiveMaximums
+  :: ValidatedLengthApplicableDomain
+  -> [Natural]
+validatedLengthApplicableDomainInclusiveMaximums
+    (ValidatedLengthApplicableDomainReceipt _ inputBox) =
+  validatedLengthInputBoxInclusiveMaximums inputBox
+
+validatedLengthApplicableDomainAssignmentCount
+  :: ValidatedLengthApplicableDomain
+  -> Natural
+validatedLengthApplicableDomainAssignmentCount
+    (ValidatedLengthApplicableDomainReceipt _ inputBox) =
+  validatedLengthInputBoxAssignmentCount inputBox
+
+validatedLengthApplicableDomainApplicableAssignmentCount
+  :: ValidatedLengthApplicableDomain
+  -> Natural
+validatedLengthApplicableDomainApplicableAssignmentCount
+    (ValidatedLengthApplicableDomainReceipt _ inputBox) =
+  validatedLengthInputBoxApplicableAssignmentCount inputBox
+
+validatedLengthApplicableDomainBasis
+  :: ValidatedLengthApplicableDomain
+  -> LengthCounterexampleBasis
+validatedLengthApplicableDomainBasis
+    (ValidatedLengthApplicableDomainReceipt _ inputBox) =
+  validatedLengthInputBoxBasis inputBox
+
+-- | Product-domain operational failure after direct finite coverage succeeds.
+data LengthSpinePairApplicableDomainValidationError
+  = LengthSpinePairApplicableDomainInputBoxValidationRejected
+      !LengthSpinePairInputBoxValidationError
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSpinePairApplicableDomainValidationError
+
+-- | Versioned semantics of binary-product applicable-domain establishment.
+lengthSpinePairApplicableDomainValidationSchemaTag :: [Word8]
+lengthSpinePairApplicableDomainValidationSchemaTag = ascii
+  "finite-binary-product-spine-lengths/finite-precondition-domain-establishment/v1"
+
+-- | Complete applicable-domain receipt for one exact nominal product problem.
+data ValidatedLengthSpinePairApplicableDomain =
+  ValidatedLengthSpinePairApplicableDomainReceipt
+    ![Word8]
+    !ValidatedLengthSpinePairInputBox
+  deriving (Eq, Ord, Show)
+
+instance NFData ValidatedLengthSpinePairApplicableDomain where
+  rnf (ValidatedLengthSpinePairApplicableDomainReceipt schema inputBox) =
+    rnf schema `seq` rnf inputBox
+
+validatedLengthSpinePairApplicableDomainInclusiveMaximums
+  :: ValidatedLengthSpinePairApplicableDomain
+  -> [Natural]
+validatedLengthSpinePairApplicableDomainInclusiveMaximums
+    (ValidatedLengthSpinePairApplicableDomainReceipt _ inputBox) =
+  validatedLengthSpinePairInputBoxInclusiveMaximums inputBox
+
+validatedLengthSpinePairApplicableDomainAssignmentCount
+  :: ValidatedLengthSpinePairApplicableDomain
+  -> Natural
+validatedLengthSpinePairApplicableDomainAssignmentCount
+    (ValidatedLengthSpinePairApplicableDomainReceipt _ inputBox) =
+  validatedLengthSpinePairInputBoxAssignmentCount inputBox
+
+validatedLengthSpinePairApplicableDomainApplicableAssignmentCount
+  :: ValidatedLengthSpinePairApplicableDomain
+  -> Natural
+validatedLengthSpinePairApplicableDomainApplicableAssignmentCount
+    (ValidatedLengthSpinePairApplicableDomainReceipt _ inputBox) =
+  validatedLengthSpinePairInputBoxApplicableAssignmentCount inputBox
+
+validatedLengthSpinePairApplicableDomainBasis
+  :: ValidatedLengthSpinePairApplicableDomain
+  -> LengthCounterexampleBasis
+validatedLengthSpinePairApplicableDomainBasis
+    (ValidatedLengthSpinePairApplicableDomainReceipt _ inputBox) =
+  validatedLengthSpinePairInputBoxBasis inputBox
+
 -- | Classify one concrete contract assignment.  Arity is checked before any
 -- value, inputs are bounded left-to-right before the result, and a false
 -- precondition does not evaluate the postcondition.
@@ -943,6 +1109,140 @@ validateLengthSpinePairProblemInputBox evaluationLimits inputBoxLimits problem
               $ mkBehavioralEvidence
                   (checkedLengthSpinePairProblemBehavioralProblem problem)
                   receipt
+
+-- | Establish the complete applicable domain of one exact scalar problem when
+-- its normalized precondition directly bounds every compact input.
+--
+-- Width is rejected before the precondition is scanned.  Coverage then admits
+-- only top-level normalized @input <= literal@ conjuncts and chooses the
+-- tightest direct bound for each input.  A missing bound is an ordinary
+-- inapplicable result, not a verification failure.  Exact coverage delegates
+-- to the existing solver-independent box verifier; neither construction nor
+-- completion consumes a solver observation.
+validateLengthProblemApplicableDomain
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> CheckedLengthProblem identity local
+  -> Either LengthApplicableDomainValidationError
+      (LengthApplicableDomainValidation
+        (BehavioralEvidence
+          FiniteListSpineLengthV1
+          ValidatedLengthCounterexample)
+        (BehavioralEvidence
+          FiniteListSpineLengthV1
+          ValidatedLengthApplicableDomain))
+validateLengthProblemApplicableDomain evaluationLimits inputBoxLimits
+    problem = do
+  let inputCount = checkedLengthProblemInputCount problem
+      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
+  if inputCount <= maximumInputs
+    then pure ()
+    else Left $ LengthApplicableDomainInputBoxValidationRejected
+      $ LengthInputBoxProblemInputLimitExceeded maximumInputs inputCount
+  case tightApplicableDomainMaximums inputCount scalarInputPosition
+      $ checkedLengthProblemPrecondition problem of
+    Left inapplicability -> Right
+      $ LengthApplicableDomainInapplicable inapplicability
+    Right maximums -> do
+      validation <- either
+        (Left . LengthApplicableDomainInputBoxValidationRejected)
+        Right
+        $ validateLengthProblemInputBox evaluationLimits inputBoxLimits
+            problem maximums
+      pure $ case validation of
+        LengthInputBoxCounterexample evidence ->
+          LengthApplicableDomainCounterexample evidence
+        LengthInputBoxValidated evidence ->
+          LengthApplicableDomainEstablished
+            $ mapBehavioralEvidenceReceipt
+                (ValidatedLengthApplicableDomainReceipt
+                  lengthApplicableDomainValidationSchemaTag)
+                evidence
+ where
+  scalarInputPosition variable = case variable of
+    LengthInput position -> Just position
+    LengthResult -> Nothing
+
+-- | Nominal binary-product sibling of
+-- 'validateLengthProblemApplicableDomain'.  The direct coverage rule examines
+-- only compact inputs; result-component references cannot occur in a checked
+-- precondition and grant no bound authority here.
+validateLengthSpinePairProblemApplicableDomain
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> CheckedLengthSpinePairProblem identity local
+  -> Either LengthSpinePairApplicableDomainValidationError
+      (LengthApplicableDomainValidation
+        (BehavioralEvidence
+          FiniteBinaryProductSpineLengthsV1
+          ValidatedLengthSpinePairCounterexample)
+        (BehavioralEvidence
+          FiniteBinaryProductSpineLengthsV1
+          ValidatedLengthSpinePairApplicableDomain))
+validateLengthSpinePairProblemApplicableDomain evaluationLimits inputBoxLimits
+    problem = do
+  let inputCount = checkedLengthSpinePairProblemInputCount problem
+      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
+  if inputCount <= maximumInputs
+    then pure ()
+    else Left $ LengthSpinePairApplicableDomainInputBoxValidationRejected
+      $ LengthSpinePairInputBoxProblemInputLimitExceeded
+          maximumInputs inputCount
+  case tightApplicableDomainMaximums inputCount spinePairInputPosition
+      $ checkedLengthSpinePairProblemPrecondition problem of
+    Left inapplicability -> Right
+      $ LengthApplicableDomainInapplicable inapplicability
+    Right maximums -> do
+      validation <- either
+        (Left . LengthSpinePairApplicableDomainInputBoxValidationRejected)
+        Right
+        $ validateLengthSpinePairProblemInputBox
+            evaluationLimits inputBoxLimits problem maximums
+      pure $ case validation of
+        LengthInputBoxCounterexample evidence ->
+          LengthApplicableDomainCounterexample evidence
+        LengthInputBoxValidated evidence ->
+          LengthApplicableDomainEstablished
+            $ mapBehavioralEvidenceReceipt
+                (ValidatedLengthSpinePairApplicableDomainReceipt
+                  lengthSpinePairApplicableDomainValidationSchemaTag)
+                evidence
+ where
+  spinePairInputPosition variable = case variable of
+    LengthSpinePairInput position -> Just position
+    LengthSpinePairResult _ -> Nothing
+
+-- The formula has already passed bounded normalization.  In particular a
+-- top-level conjunction is flat, sorted, and duplicate-free, but this scanner
+-- depends only on its public normalized shape.  It deliberately ignores every
+-- formula except an exact direct natural upper bound.
+tightApplicableDomainMaximums
+  :: Int
+  -> (variable -> Maybe Natural)
+  -> LengthFormula variable
+  -> Either LengthApplicableDomainInapplicability [Natural]
+tightApplicableDomainMaximums inputCount inputPosition precondition =
+  mapM maximumFor [0 .. inputCount - 1]
+ where
+  clauses = case precondition of
+    LengthAll formulas -> formulas
+    formula -> [formula]
+
+  bounds = collect Map.empty clauses
+
+  collect !retained [] = retained
+  collect !retained (formula : remaining) = collect retained' remaining
+   where
+    retained' = case formula of
+      LengthAtMost (LengthVariable variable) (LengthLiteral maximumValue) ->
+        case inputPosition variable of
+          Nothing -> retained
+          Just position -> Map.insertWith min position maximumValue retained
+      _ -> retained
+
+  maximumFor index = case Map.lookup (fromIntegral index) bounds of
+    Just maximumValue -> Right maximumValue
+    Nothing -> Left $ LengthApplicableDomainInputUpperBoundMissing index
 
 -- | Private replay classification shared by one-assignment counterexample
 -- validation and complete input-box traversal.  Keeping one implementation

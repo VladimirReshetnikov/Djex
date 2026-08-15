@@ -178,9 +178,9 @@ and the
 | `Language.Haskell.Synthesis.Diagnostic` | Severity, stable code, checked source locations/spans, ordered context, and deterministic rendering. |
 | `Language.Haskell.Synthesis.Fingerprint` | Public inspection of opaque, nominal, collision-free canonical identities; construction and byte budgets remain package-private. |
 | `Language.Haskell.Synthesis.Semantic.Length` | Exact inventory-bound finite-spine contexts, normalized scalar and exact boxed binary-product contracts, source-bound assumed provider laws, and model-aware nominal fingerprints; an additive trust class retains exact nonempty constrained schemes under a dictionary-uniform conditional-law assumption, while every scalar byte stays exact. |
-| `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked scalar and binary-spine-product contracts, exact candidate problems, finite Cartesian input boxes, and direct, literal-ceiling positive-affine, relational positive-affine, strict relational positive-affine, or root-quotient strict relational applicable domains, with nominally separate counterexample and positive bounded receipts; detached conditional-provider evaluation still fails before argument inspection. |
+| `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked scalar and binary-spine-product contracts, exact candidate problems, finite Cartesian input boxes, and direct, literal-ceiling positive-affine, relational positive-affine, strict relational positive-affine, root-quotient, or cumulative root-extrema applicable domains, with nominally separate counterexample and positive bounded receipts; detached conditional-provider evaluation still fails before argument inspection. |
 | `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and nominally distinct scalar/product typed-candidate behavioral problems: session-owned provider and restricted resolver authority, contract resealing, residual rejection, rigid root/provider authorization, mixed-role opaque targets, exact scalar zero/step cases inside product fields, and provider-only consumption of independently authorized certificate carriers. |
-| `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation plus exact input-symbol, natural-input, origin, finite-box, and direct, literal-ceiling positive-affine, relational positive-affine, strict relational positive-affine, or root-quotient strict relational applicable-domain replay for nominally distinct checked scalar and binary-product Length problems, without launching or trusting a solver. |
+| `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation plus exact input-symbol, natural-input, origin, finite-box, and direct, literal-ceiling positive-affine, relational positive-affine, strict relational positive-affine, root-quotient, or cumulative root-extrema applicable-domain replay for nominally distinct checked scalar and binary-product Length problems, without launching or trusting a solver. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` | Pure validated Z3 launch, resource, artifact, and response-decoder policy with a package-private complete identity and a byte-free digest-expectation presence classifier; it performs no IO or attestation. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` | Rank-N scoped capability-probed Z3 ownership for scalar and exact binary-product queries, with one shared 64-query lease budget, retained runtime-unscoped v1 usable-work tokens, recommended owner-thread-affine dynamically scoped v2 deadlines and cooperative checkpoints, nominal byte-free failures and observations, heuristic status/strength/use, and domain-specific query-first replay gates. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` | Opaque query-specific association of bounded raw solver reports, with heuristic-only safe projections and exact problem-plus-query replay before payload access. |
@@ -701,12 +701,100 @@ validation emits no command and consumes no solver observation.
 
 Only their scalar and product receipt tags add bytes. All predecessor APIs,
 receipts, and contract-through-live identities remain exact, including sealed
-query commands and fingerprints. Root extrema/monus rules, bounded Boolean
-finite unions, and further launch hardening remain separate unranked follow-up
-gaps with independent authority and work-cap designs. A future finite-union
-validator must replay explicit branch boxes rather than widening them to one
-componentwise-maximum rectangle. See the
+query commands and fingerprints. Root extrema are the cumulative successor
+below. Monus rules, bounded Boolean finite unions, and further launch
+hardening remain separate unranked follow-up gaps with independent authority
+and work-cap designs. A future finite-union validator must replay explicit
+branch boxes rather than widening them to one componentwise-maximum rectangle.
+See the
 [strict relational positive-affine quotient applicable-domain report](../docs/reports/2026-08-15-strict-relational-positive-affine-quotient-length-applicable-domain.md).
+
+The cumulative root-extrema policy preserves that complete predecessor and
+adds four exact, conjunctive consequences for one immediate normalized binary
+minimum or maximum at a relation operand's root. Its problem entrances are
+`validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`
+and
+`validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`;
+the query-owned entrances are:
+
+```haskell
+scalarValidation =
+  validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+    defaultLengthEvaluationLimits defaultLengthInputBoxLimits scalarQuery
+
+pairValidation =
+  validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+    defaultLengthEvaluationLimits defaultLengthInputBoxLimits pairQuery
+```
+
+For exact positive-affine `A`, `B`, and `C`, the complete new rule set is:
+
+```text
+max(A, B) <= C        <=>  A <= C and B <= C
+C <= min(A, B)        <=>  C <= A and C <= B
+not (min(A, B) <= C)  <=>  C + 1 <= A and C + 1 <= B
+not (C <= max(A, B))  <=>  A + 1 <= C and B + 1 <= C
+```
+
+All three operands must use only compact inputs, natural literals,
+`LengthSum`, and positive-literal `LengthScale`. They are summarized before
+either component rule is retained, so admission is all-or-nothing. Strict
+successors are inserted before exact cancellation. Equality with a single
+root maximum in either position contributes only `A <= C`, then `B <= C`;
+equality with a single root minimum contributes only `C <= A`, then `C <= B`.
+The omitted half is disjunctive. Consequently equality orientation is
+irrelevant, and no unsafe reverse decomposition is performed.
+
+Contract normalization already flattens, combines literals, deduplicates,
+sorts, and left-associates extrema; it also canonicalizes equality sides and
+top-level conjunct order. Admission is against that normalized tree. The
+scanner retains rules in canonical clause order and normalized first-child,
+second-child order. A retained three-term extremum has a nested extremum child
+and is ignored whole, while a literal-only raw extremum may fold away and
+delegate to the root-quotient predecessor.
+
+Thus `max(x, 2*x + 1) <= 5` derives `[2]` and counts 3/3;
+`2*x + 1 <= min(x + 5, 7)` derives `[3]` and counts 4/4;
+`not (min(x + 4, 9) <= 2*x)` derives `[3]` and counts 4/4; and
+`not (5 <= max(2*x, x + 1))` derives `[2]` and counts 3/3. The equality
+`2*x + 1 = min(x + 5, 7)` derives `[3]`, then exhaustive replay records one
+applicable assignment. `max(x,y) <= z, z <= 4` propagates to `[4,4,4]` with
+125 total and 55 applicable assignments.
+
+The ordinary closure remains synchronous and rule-once: every pass reads one
+immutable bounds snapshot, fired rules are removed, and derived maxima merge
+after the pass. It deliberately does not compute a numeric least fixed point.
+Input width, contradiction-before-missing, derived values, Cartesian count,
+indexed evaluation, first counterexample, receipt, and exact query association
+retain predecessor precedence. Unsupported clauses still participate in
+concrete precondition replay if other clauses establish a complete box.
+
+Disjunctive orientations, both-root, nested, embedded, and retained n-ary
+extrema, mixed extrema/quotient roots, unsupported children, negated equality,
+and nested Boolean formulas contribute no rule or partial consequence. This is
+not general extrema reasoning or finite-union analysis.
+
+The opaque receipts are
+`ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`
+and
+`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`.
+Their correspondingly prefixed projections expose maxima, total/applicable
+counts, and the retained model/provider basis. Only their two receipt tags add
+bytes:
+
+```text
+finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-precondition-domain-establishment/v1
+finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-precondition-domain-establishment/v1
+```
+
+Every predecessor receipt and sealed query command, symbol plan, value request,
+fingerprint, protocol, process, worker, run, and observation identity remains
+literal. Query-owned validation performs no live operation and consumes no
+solver result. Establishment proves only complete bounded replay in the exact
+checked finite-spine model and retained assumed-provider basis; it is not
+source-language totality, universal proof, provider validation, or pruning
+authority. See the
+[root-extrema applicable-domain report](../docs/reports/2026-08-15-root-extrema-length-applicable-domain.md).
 
 `FiniteBinaryProductSpineLengthsV1` adds a distinct checked domain for an exact
 boxed binary product whose two source-ordered fields are modeled finite

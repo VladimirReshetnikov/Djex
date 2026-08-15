@@ -62,6 +62,7 @@ was reached.
   - [Relational positive-affine applicable-domain validation](#relational-positive-affine-applicable-domain-validation)
   - [Strict relational positive-affine applicable-domain validation](#strict-relational-positive-affine-applicable-domain-validation)
   - [Strict relational positive-affine quotient applicable-domain validation](#strict-relational-positive-affine-quotient-applicable-domain-validation)
+  - [Root-extrema applicable-domain validation](#root-extrema-applicable-domain-validation)
   - [Finite binary product spine lengths, offline and live SMT replay](#finite-binary-product-spine-lengths-offline-and-live-smt-replay)
     - [Offline product SMT queries and replay](#offline-product-smt-queries-and-replay)
     - [Live product queries](#live-product-queries)
@@ -1223,12 +1224,134 @@ finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-p
 Every predecessor API and receipt remains literal. Existing contracts,
 inventories, sessions, candidates, encodings, problems, query commands,
 symbols, value requests, fingerprints, protocols, processes, workers, runs,
-and observations retain their identities and bytes. Root extrema and monus,
-bounded Boolean finite unions, and further launch hardening remain separate,
-unranked follow-up candidates requiring their own authority, work-cap,
-identity, and compatibility designs. Any future finite-union design must not
-replace explicit branch boxes with a componentwise-maximum rectangle. See the
+and observations retain their identities and bytes. Root extrema are the
+additive successor specified immediately below. Monus, bounded Boolean finite
+unions, and further launch hardening remain separate, unranked follow-up
+candidates requiring their own authority, work-cap, identity, and
+compatibility designs. Any future finite-union design must not replace
+explicit branch boxes with a componentwise-maximum rectangle. See the
 [strict relational positive-affine quotient applicable-domain report](reports/2026-08-15-strict-relational-positive-affine-quotient-length-applicable-domain.md).
+
+### Root-extrema applicable-domain validation
+
+The cumulative root-extrema successor keeps every quotient-free and
+root-quotient consequence above literal. Its scalar checked-problem and
+query-owned entrances are
+`validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`
+and
+`validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`.
+For exact positive-affine `A`, `B`, and `C`, it adds exactly these four
+conjunctive natural laws:
+
+```text
+max(A, B) <= C        <=>  A <= C and B <= C
+C <= min(A, B)        <=>  C <= A and C <= B
+not (min(A, B) <= C)  <=>  C + 1 <= A and C + 1 <= B
+not (C <= max(A, B))  <=>  A + 1 <= C and B + 1 <= C
+```
+
+All three operands must independently fit the predecessor's exact grammar of
+compact inputs, natural literals, `LengthSum`, and positive-literal
+`LengthScale`. The scanner summarizes all three before it emits either of the
+two component rules. Failure of any child or the opposite operand therefore
+ignores the whole clause for coverage; it never retains one convenient half.
+Successor insertion for a strict law happens on the arbitrary-precision proof
+summary before ordinary constant and coefficient cancellation. No derived
+expression is checked syntax, and no syntax-node or public-literal budget is
+spent.
+
+Equality uses only the necessary conjunctive half of an extremum equality. A
+single root maximum on either side of `=` contributes `A <= C` then `B <= C`;
+a single root minimum on either side contributes `C <= A` then `C <= B`.
+Canonical equality orientation therefore cannot change the result. The
+opposite halves, `C <= max(A,B)` and `min(A,B) <= C`, are disjunctive and add
+no rule. Thus `max(x, x + 1) = x + 1` supplies no finite upper bound, while
+`2*x + 1 = min(x + 5, 7)` derives maximum `[3]`; exhaustive replay finds only
+`x = 3` applicable in the four-assignment box.
+
+Admission observes normalized syntax, not the caller's raw tree. Contract
+sealing flattens each same-kind extremum, combines its literal children,
+deduplicates and sorts all retained children, and left-associates the result.
+It also canonicalizes equality operands and flattens, deduplicates, and sorts
+top-level conjunctions. The validator traverses those canonical clauses in
+order. A supported binary extremum emits its normalized first-child rule and
+then its second-child rule. A retained extremum of three or more canonical
+terms has a nested extremum child and is ignored atomically; an all-literal
+extremum can instead fold away and reach the predecessor scanner.
+
+The generated rules enter the unchanged relational closure. Constant-right
+rules seed bounds. Each later pass reads one immutable bounds snapshot,
+examines pending rules in canonical clause/component order, merges newly
+derived maxima with `min` after the pass, and permanently removes every rule
+that fired. The closure stops when a pass fires nothing; it remains a
+synchronous rule-once consequence calculation, not a numeric least-fixed-point
+solver. For example, `max(x,y) <= z` followed by `z <= 4` derives maxima
+`[4,4,4]`. The resulting box contains 125 assignments, of which 55 satisfy
+the original normalized precondition. The delegated predecessor chain
+`x <= y, y <= 10, y <= z, z <= 2` still derives `[10,2,2]`, not the numeric
+least box `[2,2,2]`.
+
+The other three direct laws give small exact scalar boxes:
+
+```text
+max(x, 2*x + 1) <= 5        ==>  [2], total/applicable 3/3
+2*x + 1 <= min(x + 5, 7)    ==>  [3], total/applicable 4/4
+not (min(x + 4, 9) <= 2*x)  ==>  [3], total/applicable 4/4
+not (5 <= max(2*x, x + 1))  ==>  [2], total/applicable 3/3
+```
+
+The nominal binary-product entrances are
+`validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`
+and
+`validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`.
+Successful scalar and product traversals yield the opaque, nominally disjoint
+`ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`
+and
+`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`.
+Each family exposes inclusive maxima, total assignment count, applicable
+assignment count, and exact finite-spine/provider-law basis through the
+correspondingly prefixed four projections.
+
+The deliberately unsupported orientations are `C <= max(A,B)`,
+`min(A,B) <= C`, `not (max(A,B) <= C)`, and
+`not (C <= min(A,B))`: each would require a disjunction rather than two
+necessary conjuncts. Both-root extrema, nested or embedded extrema, retained
+n-ary extrema, mixed root-extrema/root-quotient clauses, unsupported affine
+children, negated equality, and nested Boolean structure are also ignored as
+whole clauses. Natural monus, modulo, quotient, conditionals, result
+references, and other non-affine nodes cannot appear in any of the three
+summaries. This checkpoint is neither a recursive extrema simplifier nor a
+finite-union domain analysis.
+
+Input-width rejection remains first, and nullary validation still replays the
+singleton assignment `[]`. For a nonnullary problem, normalized extraction
+and closure resolve contradiction before any missing-bound lookup;
+otherwise the first source-ordered input without a maximum is ordinary
+`LengthApplicableDomainInapplicable`. Derived-value and Cartesian-product
+admission, last-input-fastest exhaustive replay, indexed evaluation failure,
+the first exact counterexample, positive receipt construction, and query
+association retain their established precedence. An ignored clause remains
+in the original precondition and is still evaluated for every assignment if
+other clauses establish a complete box.
+
+Query-owned validation emits no SMT-LIB, launches no worker, and consumes no
+solver observation. The existing sealed query commands, symbols, value
+requests, behavioral problem, and fingerprint remain byte-for-byte unchanged;
+the chosen offline validator is not added to query identity. Every predecessor
+API, receipt, tag, behavior, and contract-through-live identity likewise
+remains literal. Only these new nominal receipt tags add bytes:
+
+```text
+finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-precondition-domain-establishment/v1
+finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-precondition-domain-establishment/v1
+```
+
+Establishment remains bounded and relative to the checked total finite-spine
+model and any retained assumed provider laws. It proves complete replay only
+inside the derived rectangle. It is not source-language realization or
+totality, validation of a provider implementation, universal proof, solver
+status authority, or permission to prune candidates. See the
+[root-extrema applicable-domain report](reports/2026-08-15-root-extrema-length-applicable-domain.md).
 
 ### Finite binary product spine lengths, offline and live SMT replay
 

@@ -396,7 +396,8 @@ assertLiveUsableWorkIdentitySchemas = do
 assertLiveUsableWorkMixedDomainDeadline :: IO ()
 assertLiveUsableWorkMixedDomainDeadline = do
   (scalarQuery, pairQuery) <- liveWireTwinQueries
-  scoped <- withInternalBudgetedWorker "query-delay-300ms" 900 1000
+  scoped <- withInternalBudgetedWorker
+    "query-hang-after-two-status" 2000 2000
     $ \executable worker -> do
         scalar <- expectRight
           =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
@@ -440,6 +441,12 @@ assertLiveUsableWorkMixedDomainDeadline = do
           SMTLibSession.LengthSpinePairSMTLibQueryWorkerSpent False spent
         events <- SMTLibLiveSpec.readFakeZ3Events executable
         assertFakeZ3EventOrdinals "query-check" [0, 1, 2] events
+        assertFakeZ3EventOrdinals "query-hang" [2] events
+        case fakeZ3Events "query-hang" events of
+          [event] -> SMTLibLiveSpec.fakeZ3FieldValues
+              (liveTestBytes "phase") event @?= [liveTestBytes "status"]
+          _ -> assertFailure
+            "third-query status hang emitted an unexpected event set"
   scope <- expectRight scoped
   assertInternalSessionDeadlineScope scope
 

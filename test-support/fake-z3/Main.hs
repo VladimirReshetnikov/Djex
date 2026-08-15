@@ -69,6 +69,7 @@ data Mode
   | QueryUnknown
   | QueryStalePrewrite
   | QueryHangStatus
+  | QueryHangAfterTwoStatus
   | QueryHangValue
   | QueryDelay300Milliseconds
   | UnknownMode String
@@ -325,7 +326,9 @@ handleCheckSatisfiable trace mode state
       pure (True, state)
   | otherwise = do
       let ordinal = nextQueryOrdinal state
-          status = queryStatus mode
+          hangAfterTwo =
+            mode == QueryHangAfterTwoStatus && ordinal == 2
+          status = if hangAfterTwo then "hang" else queryStatus mode
           nextState = state
             { nextQueryOrdinal = ordinal + 1
             , pendingQueryCheckEcho = Just ordinal
@@ -335,7 +338,7 @@ handleCheckSatisfiable trace mode state
         [ field "ordinal" $ decimal ordinal
         , field "status" status
         ]
-      if mode == QueryHangStatus
+      if mode == QueryHangStatus || hangAfterTwo
         then do
           recordQueryHang trace ordinal "status"
           hangForever
@@ -523,6 +526,7 @@ modeFromName originalName = case portableStem originalName of
   "djex-fake-z3-query-unknown" -> QueryUnknown
   "djex-fake-z3-query-stale-prewrite" -> QueryStalePrewrite
   "djex-fake-z3-query-hang-status" -> QueryHangStatus
+  "djex-fake-z3-query-hang-after-two-status" -> QueryHangAfterTwoStatus
   "djex-fake-z3-query-hang-value" -> QueryHangValue
   "djex-fake-z3-query-delay-300ms" -> QueryDelay300Milliseconds
   _ -> UnknownMode originalName
@@ -552,6 +556,7 @@ modeName mode = case mode of
   QueryUnknown -> "query-unknown"
   QueryStalePrewrite -> "query-stale-prewrite"
   QueryHangStatus -> "query-hang-status"
+  QueryHangAfterTwoStatus -> "query-hang-after-two-status"
   QueryHangValue -> "query-hang-value"
   QueryDelay300Milliseconds -> "query-delay-300ms"
   UnknownMode _ -> "unknown"

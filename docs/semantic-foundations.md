@@ -88,13 +88,52 @@ was reached.
     - [The public live facade](#the-public-live-facade)
     - [Shared execution profile and complete policy identity](#shared-execution-profile-and-complete-policy-identity)
 - [Length module narrative](#length-module-narrative)
+  - [Contract construction paths and target-argument roles](#contract-construction-paths-and-target-argument-roles)
+  - [Unified interpretation policy](#unified-interpretation-policy)
+  - [Exact zero/step case sealers](#exact-zerostep-case-sealers)
+  - [Associated-certificate carriers](#associated-certificate-carriers)
+  - [Conditional provider summaries and ground discharge](#conditional-provider-summaries-and-ground-discharge)
+  - [Retention identities and schema versions](#retention-identities-and-schema-versions)
   - [Semantic.Length.SMTLib](#semanticlengthsmtlib)
+    - [The canonical query and raw-input replay](#the-canonical-query-and-raw-input-replay)
+    - [The all-zero origin probe](#the-all-zero-origin-probe)
+    - [Exhaustive input-box validation](#exhaustive-input-box-validation)
+    - [Direct literal coverage rule](#direct-literal-coverage-rule)
+    - [Positive-affine coverage rule](#positive-affine-coverage-rule)
+    - [Relational positive-affine coverage rule](#relational-positive-affine-coverage-rule)
+    - [Strict relational coverage rule](#strict-relational-coverage-rule)
+    - [Root-quotient coverage policy](#root-quotient-coverage-policy)
+    - [Root-extrema coverage policy](#root-extrema-coverage-policy)
+    - [Root-monus coverage policy](#root-monus-coverage-policy)
+    - [Boolean finite-union coverage policy](#boolean-finite-union-coverage-policy)
+    - [Atomic-branching coverage policy](#atomic-branching-coverage-policy)
+    - [Recursive piecewise-affine coverage policy](#recursive-piecewise-affine-coverage-policy)
+    - [Finite binary product spine domains](#finite-binary-product-spine-domains)
+    - [The offline product query](#the-offline-product-query)
+    - [Live product runs and the shared ordinal space](#live-product-runs-and-the-shared-ordinal-space)
+    - [Euclidean witnesses and the shared typed QF_LIA plan](#euclidean-witnesses-and-the-shared-typed-qf_lia-plan)
   - [Semantic.Length.SMTLib.Observation](#semanticlengthsmtlibobservation)
   - [Semantic.Length.SMTLib.Response](#semanticlengthsmtlibresponse)
   - [Internal.SMTLib.Stream](#internalsmtlibstream)
   - [Internal.SMTLib.Causal.Stream](#internalsmtlibcausalstream)
   - [Internal.Semantic.Length.SMTLib.Protocol](#internalsemanticlengthsmtlibprotocol)
   - [Internal.Semantic.Length.SMTLib.Session](#internalsemanticlengthsmtlibsession)
+    - [The shared Z3 process layer](#the-shared-z3-process-layer)
+    - [The capability probe and ready-worker identity](#the-capability-probe-and-ready-worker-identity)
+    - [Retained worker policy and run commitment](#retained-worker-policy-and-run-commitment)
+    - [Live facade observation replay](#live-facade-observation-replay)
+    - [Usable-work budgets and scoped deadlines](#usable-work-budgets-and-scoped-deadlines)
+    - [Deadline coverage, expiry, and identities](#deadline-coverage-expiry-and-identities)
+  - [Internal.SMTLib.Z3.Execution and Semantic.Length.SMTLib.Execution](#internalsmtlibz3execution-and-semanticlengthsmtlibexecution)
+    - [Execution-policy construction and fingerprint](#execution-policy-construction-and-fingerprint)
+    - [Descriptor-bound main-image launch](#descriptor-bound-main-image-launch)
+    - [Effective-ID executable-access launch](#effective-id-executable-access-launch)
+    - [Execve-check executable-access launch](#execve-check-executable-access-launch)
+  - [Generated and TypedGenerated](#generated-and-typedgenerated)
+    - [Internal.TypedGenerated.Certificate](#internaltypedgeneratedcertificate)
+    - [Internal.TypedGenerated.Certificate.Association](#internaltypedgeneratedcertificateassociation)
+    - [TypedGenerated.Fingerprint](#typedgeneratedfingerprint)
+  - [Observability](#observability)
 
 ## Canonical typed candidate identities
 
@@ -2668,6 +2707,8 @@ table. This is the module-by-module account of the Length contract dialect,
 its canonical SMT-LIB translation, and the Z3 live stack, in dependency
 order; the sections above state the same design at a higher level.*
 
+### Contract construction paths and target-argument roles
+
 The Length contract has two additive construction paths. Existing sealers
 continue to require every physical target argument to be a modeled list spine.
 Role-aware sealers accept a bounded closed `LengthTargetArgumentRole` vector,
@@ -2683,6 +2724,8 @@ contract, session, and concrete-encoding identities; mixed vectors alone
 select the role-aware policy. The resulting SMT query and model replay expose
 only the compact observed inputs. See the
 [role-aware target-argument report](reports/2026-08-13-role-aware-target-arguments.md).
+
+### Unified interpretation policy
 
 New callers can choose the complete interpretation boundary once through
 `LengthInterpretationPolicySource` and
@@ -2708,6 +2751,8 @@ Productive construction is also preserved; deep `NFData` evaluation now
 honestly forces the newly retained role vector. See the
 [unified interpretation-policy report](reports/2026-08-13-unified-length-interpretation-policy.md).
 
+### Exact zero/step case sealers
+
 Length also has an additive exact-case sealer pair. It accepts only complete
 zero/step splits over the checked spine model; ordinary and role-aware sessions
 retain their case-rejection behavior, signatures, and current-policy
@@ -2724,6 +2769,8 @@ The domain foundation itself remains independent of either frontend. See the
 [exact zero/step case foundation report](reports/2026-08-13-exact-zero-step-length-cases.md)
 and the additive
 [Exference graph report](reports/2026-08-13-exference-exact-zero-step-graphs.md).
+
+### Associated-certificate carriers
 
 Length now also consumes the hidden associated-certificate branch of a
 `TypedCandidate` without projecting it first. Contract resealing and residual
@@ -2746,6 +2793,8 @@ remain nonsemantic coordinates and are absent from both keys. The stamped bare
 graph remains rejected by the public fingerprint and by the plain Length path.
 Empty obligations do not prove dictionary or instance discharge. See the
 [Length associated-provider report](reports/2026-08-13-length-associated-provider-certificates.md).
+
+### Conditional provider summaries and ground discharge
 
 `AssumedConstraintConditionalProviderSummary` must resolve to the same exact
 closed source-inventory scheme as its claim and that scheme must have a
@@ -2784,6 +2833,8 @@ shared-prefix, or otherwise unassociated occurrence remains unauthorized. The
 new discharge and chain failures expose only the provider owner and canonical
 row/step/obligation or base/intermediate positions plus closed reasons.
 
+### Retention identities and schema versions
+
 The retention identities remain exact: all-legacy inventories keep provider
 inventory v2 and semantic inventory v1, while conditional inventories keep the
 preceding provider inventory v3 and semantic inventory v2 bytes. The
@@ -2804,6 +2855,8 @@ session, concrete-encoding, and candidate identities. See the
 
 ### `Semantic.Length.SMTLib`
 
+#### The canonical query and raw-input replay
+
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib` provides a pure canonical
 QF_LIA boundary over an exact checked length problem. Its opaque nominal query
 contains bounded check and input-only `get-value` commands; it neither starts a
@@ -2821,6 +2874,8 @@ SMT translation, checked-problem, query, execution, response, or protocol
 identity/schema version. See the
 [query-owned raw-input replay report](reports/2026-08-14-query-owned-length-input-replay.md).
 
+#### The all-zero origin probe
+
 `probeLengthSMTLibCounterexampleAtOrigin` specializes that exact boundary to
 the canonical all-zero assignment. It derives the compact input count only
 from the checked problem privately retained by the query, constructs no symbol
@@ -2830,6 +2885,8 @@ positive authority, and replay rejection retains the established evaluation or
 association error. The pure probe issues no SMT-LIB, consumes no observation,
 and changes no identity bytes or schema. See the
 [query-owned origin-probe report](reports/2026-08-14-query-owned-length-origin-probe.md).
+
+#### Exhaustive input-box validation
 
 `validateLengthProblemInputBox` independently exhausts a finite Cartesian box
 of compact modeled inputs. `LengthInputBoxLimitSource` seals a nonnegative
@@ -2869,6 +2926,8 @@ execution, process, worker, or live-observation version or canonical bytes
 change. The new v1 tag belongs only to the opaque bounded receipt. See the
 [bounded input-box validation report](reports/2026-08-14-bounded-length-input-box-validation.md).
 
+#### Direct literal coverage rule
+
 `validateLengthProblemApplicableDomain` builds on that verifier with one
 deliberately narrow finite-coverage rule over the checked normalized
 precondition. It recognizes only direct top-level
@@ -2898,6 +2957,8 @@ receipt establishes source-language totality, validates concrete provider
 implementations, authorizes pruning, or upgrades `sat`, `unsat`, or `unknown`.
 See the
 [directly bounded applicable-domain report](reports/2026-08-14-directly-bounded-length-applicable-domain.md).
+
+#### Positive-affine coverage rule
 
 The original applicable-domain surface above remains the exact literal-direct
 v1 path. It still ignores equality and arithmetic-derived bounds. The additive
@@ -2953,6 +3014,8 @@ provider-implementation, solver-status, universal-proof, or pruning authority.
 See the
 [positive-affine applicable-domain report](reports/2026-08-14-positive-affine-length-applicable-domain.md).
 
+#### Relational positive-affine coverage rule
+
 The third, separately selected coverage rule is relational positive-affine
 validation. `validateLengthProblemRelationalPositiveAffineApplicableDomain`
 and
@@ -3001,6 +3064,8 @@ the checked total finite-spine model and retained assumed provider laws; it is
 not source-language totality, provider-implementation validation, universal
 proof, or pruning authority. See the
 [relational positive-affine applicable-domain report](reports/2026-08-15-relational-positive-affine-length-applicable-domain.md).
+
+#### Strict relational coverage rule
 
 The fourth explicit coverage rule adds exact strict natural inequalities without
 changing the relational rule above. Its checked-problem entrances are
@@ -3078,6 +3143,8 @@ session, candidate, encoding, problem, query, response, protocol, runtime, and
 live-observation identity is unchanged. See the
 [strict relational positive-affine applicable-domain report](reports/2026-08-15-strict-relational-positive-affine-length-applicable-domain.md).
 
+#### Root-quotient coverage policy
+
 The fifth explicit coverage policy adds exact consequences for one positive
 checked quotient at a top-level relation operand's root. Its problem entrances
 are
@@ -3145,6 +3212,8 @@ has its own receipt and work caps and replays explicit branch boxes rather than
 widening them to one componentwise-maximum rectangle.
 See the
 [strict relational positive-affine quotient applicable-domain report](reports/2026-08-15-strict-relational-positive-affine-quotient-length-applicable-domain.md).
+
+#### Root-extrema coverage policy
 
 The cumulative root-extrema policy preserves that complete predecessor and
 adds four exact, conjunctive consequences for one immediate normalized binary
@@ -3233,6 +3302,8 @@ source-language totality, universal proof, provider validation, or pruning
 authority. Immediate natural-monus consequences are the cumulative successor
 below. See the
 [root-extrema applicable-domain report](reports/2026-08-15-root-extrema-length-applicable-domain.md).
+
+#### Root-monus coverage policy
 
 The cumulative root-monus policy preserves the complete root-extrema
 predecessor and adds immediate normalized `LengthMonus` consequences. Its
@@ -3335,6 +3406,8 @@ authority. The cumulative Boolean finite-union entrance below handles exact
 bounded formula-level alternatives without changing this single-box receipt.
 See the
 [root-monus applicable-domain report](reports/2026-08-15-root-monus-length-applicable-domain.md).
+
+#### Boolean finite-union coverage policy
 
 The Boolean finite-union policy expands the complete normalized precondition
 under an exact signed DNF. Its problem entrances are
@@ -3454,6 +3527,8 @@ explicit antichains, and the same global replay. It must never silently widen
 to a componentwise hull. See the
 [Boolean finite-union applicable-domain report](reports/2026-08-15-boolean-finite-union-length-applicable-domain.md).
 
+#### Atomic-branching coverage policy
+
 The atomic-branching finite-union policy is the separately named cumulative
 successor which opens the exact disjunction of one admitted root-extremum or
 may-zero root-monus atom. Its problem entrances are
@@ -3564,6 +3639,8 @@ byte sequence, and runtime identity remains literal. Atomic alternatives and
 operational limits enter neither query bytes nor fingerprints; wrappers emit
 no SMT command and consume no solver status. See the
 [atomic-branching applicable-domain report](reports/2026-08-15-atomic-branching-length-applicable-domain.md).
+
+#### Recursive piecewise-affine coverage policy
 
 The recursive piecewise-affine policy is the separately named cumulative
 successor which retains every atomic-branching result and recursively opens
@@ -3690,6 +3767,8 @@ for exhaustive replay under the checked finite-spine model and retained
 provider-law basis. See the
 [recursive piecewise-affine applicable-domain report](reports/2026-08-15-recursive-piecewise-affine-length-applicable-domain.md).
 
+#### Finite binary product spine domains
+
 `FiniteBinaryProductSpineLengthsV1` adds a distinct checked domain for an exact
 boxed binary product whose two source-ordered fields are modeled finite
 spines. `LengthSpinePairContractVariable` retains the scalar domain's compact
@@ -3725,6 +3804,8 @@ releases only an exact `ValidatedLengthSpinePairCounterexample` or positive
 `ValidatedLengthSpinePairInputBox` evidence. It does not consume a solver
 observation.
 
+#### The offline product query
+
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib` now provides the pure
 offline product-query sibling. `sealLengthSpinePairSMTLibQuery` accepts only an
 opaque `CheckedLengthSpinePairProblem` and produces an opaque
@@ -3747,6 +3828,8 @@ probe, and exact finite-box association are exposed by
 `validateLengthSpinePairSMTLibQueryInputBox`. Every entrance evaluates afresh;
 a miss is not positive evidence, and box success remains finite/model-relative
 under its explicit provider basis.
+
+#### Live product runs and the shared ordinal space
 
 The product query now also has bounded query-specific response decoding, a
 distinct package-private protocol plan and phase machine, a nominal product
@@ -3780,6 +3863,8 @@ Leant now consumes the product facade through its exact canonical-`Prod`
 handoff, nominal pair ranking and presentation, and startup configuration
 versions 4 and 6. That downstream integration does not convert pair evidence
 to scalar authority.
+
+#### Euclidean witnesses and the shared typed QF_LIA plan
 
 Positive-literal natural quotient and modulo remain inside QF_LIA by using one
 shared deterministic private Euclidean witness shape rather than the forbidden
@@ -3962,6 +4047,8 @@ empty-directory removal. Windows uses the explicitly weaker portable
 pathname-observation policy because the current dependencies expose no stable
 directory file ID or private-ACL proof.
 
+#### The shared Z3 process layer
+
 The shared `Internal.SMTLib.Z3.Process` layer hashes and bounds the configured
 executable pathname before direct spawn, checks an optional SHA-256 pin,
 supplies the exact configured argv, empty environment, fresh cwd, and three
@@ -3983,6 +4070,8 @@ cancellation gate each operation. Cleanup closes stdin, polls the direct child
 without blocking a non-threaded runtime, then applies bounded TERM/KILL stages
 and bounded reader/handle cleanup. Descendant cleanup remains best effort.
 
+#### The capability probe and ready-worker identity
+
 Before lending the worker through a rank-N callback, the Session drives a
 four-write capability plan: startup print suppression and echo; reset/replay
 with `input = 0`, `sat`, and echo; exact input `get-value` and echo; then a
@@ -4003,6 +4092,8 @@ claim. The same Session drives nominally separate scalar and product query
 plans through the scoped worker and independently replays any model before
 evidence exists. The probe establishes only their shared QF_LIA/input-value
 transport requirements, not cross-domain behavioral authority.
+
+#### Retained worker policy and run commitment
 
 The live worker does not retain the whole pre-readiness Session configuration.
 Its private strict query policy keeps one query-count cap shared by scalar and
@@ -4030,6 +4121,8 @@ normalized compact source-ordered observed-spine counterexample inputs, and
 the private reversible key retains exact transcript bytes; the deletion
 narrows structured authority rather than scrubbing child output.
 
+#### Live facade observation replay
+
 The public live facade copies each domain's whole status-indexed observation
 once along with its bounded query association, rather than re-pairing a status
 and an optional payload. It derives the corresponding heuristic strength from
@@ -4046,6 +4139,8 @@ heuristic status. Neither gate exposes a process, transcript, decoded
 valuation, or stronger use for `unsat`. Direct raw-input replay instead
 evaluates caller-supplied naturals afresh and does not extract any hidden
 live-observation field.
+
+#### Usable-work budgets and scoped deadlines
 
 The public live facade also offers additive elapsed-time policies. A caller
 first validates `LengthSMTLibLiveUsableWorkBudgetSource` with
@@ -4093,6 +4188,8 @@ The shorter `withLengthSMTLibLiveSessionWithScopedUsableWorkBudget` captures
 and consumes v2 around exactly one session. The corresponding v1 two-step and
 convenience names remain available as compatibility entrances, but their
 tokens are unsafe to retain or share.
+
+#### Deadline coverage, expiry, and identities
 
 The legacy `withLengthSMTLibLiveSession` path is unchanged: opening has its
 established private deadline and each query derives a fresh local host
@@ -4151,6 +4248,8 @@ The dynamically enforced v2 scope and the retained v1 limitation are recorded
 in the
 [dynamically scoped live usable-work deadline report](reports/2026-08-15-dynamically-scoped-live-usable-work-deadline.md).
 
+### `Internal.SMTLib.Z3.Execution` and `Semantic.Length.SMTLib.Execution`
+
 `Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution` seals the shared
 pure launch profile below domain protocols. It owns path/pin admission,
 timeout, `rlimit`, host deadline, complete argv, exact startup/reset commands,
@@ -4189,6 +4288,8 @@ The raw runtime extraction and later facade cache deletion are recorded in the
 [shared raw Z3 process report](reports/2026-08-12-shared-z3-process-runtime.md)
 and [derived Length process identity report](reports/2026-08-12-length-process-derived-identity.md).
 
+#### Execution-policy construction and fingerprint
+
 Construction productively bounds and checks an absolute Unicode-scalar
 executable path, optionally records an exact 32-byte SHA-256 executable-file
 pin, rejects unbounded solver time and resource settings, requires a host
@@ -4214,6 +4315,8 @@ identity for an unbounded executable file. Policy equality is therefore not
 run identity, cache authority, or semantic evidence; all eventual statuses
 remain heuristic until the existing independent Length replay validates a
 concrete counterexample.
+
+#### Descriptor-bound main-image launch
 
 `mkLengthSMTLibDescriptorBoundExecutionConfig` is an additive selector over
 the same admitted source. On Linux its later process branch opens the final
@@ -4241,6 +4344,8 @@ the sealed Linux mechanism may construct the opaque policy but reject a live
 open. The precise acquisition, cancellation, cleanup, identity, and adversarial
 replacement contract is recorded in the
 [descriptor-bound Z3 main-image launch report](reports/2026-08-15-descriptor-bound-z3-main-image-launch.md).
+
+#### Effective-ID executable-access launch
 
 `mkLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessExecutionConfig` is
 the third mutually exclusive pure selector. Its classifier is
@@ -4276,6 +4381,8 @@ behavioral receipt, or evidence schema. See the
 [effective-ID descriptor-bound Z3 launch report](reports/2026-08-15-effective-id-descriptor-bound-z3-launch.md)
 for the exact lifecycle, failure mapping, kernel references, characterization,
 and authority exclusions.
+
+#### Execve-check executable-access launch
 
 `mkLengthSMTLibDescriptorBoundExecveCheckExecutableAccessExecutionConfig` is
 the fourth mutually exclusive pure selector. Its closed public classifier is
@@ -4337,6 +4444,8 @@ failure table, authority boundary, and test-seam limitation are recorded in
 the
 [execve-check descriptor-bound Z3 launch report](reports/2026-08-15-execve-check-descriptor-bound-z3-launch.md).
 
+### `Generated` and `TypedGenerated`
+
 `Generated` separates backend-local identity from structural global `Name`s.
 Its checked `DefinitionName` narrows top-level output names once, and its scope
 checker and renderer prevent free locals, binder reuse, capture, and ambiguous
@@ -4355,6 +4464,8 @@ uses and must never be recovered from names or traversal paths. The existing
 candidate and query constructors remain unchanged while engines migrate, so a
 backend must report typed-view absence explicitly rather than inventing an
 annotation after erasure.
+
+#### `Internal.TypedGenerated.Certificate`
 
 The package-private `Internal.TypedGenerated.Certificate` module accepts a
 separately bounded table of raw certificate coordinates, exact source schemes,
@@ -4375,6 +4486,8 @@ is discharged, or that a row belongs to one graph occurrence. Its constructor
 and observations are package-private, and it has no fingerprint entrance. The
 existing public fingerprint failure is unchanged. See the
 [bounded certificate-plan report](reports/2026-08-13-bounded-type-application-certificate-plans.md).
+
+#### `Internal.TypedGenerated.Certificate.Association`
 
 `Internal.TypedGenerated.Certificate.Association` adds an opaque, atomic
 graph-occurrence foundation without widening that neutral table. Its single
@@ -4413,6 +4526,8 @@ failure categories add inventory, kind, constraint-discharge, provenance,
 behavioral, or fingerprint authority. See the
 [Exference wiring report](reports/2026-08-13-exference-certificate-association-wiring.md).
 
+#### `TypedGenerated.Fingerprint`
+
 `TypedGenerated.Fingerprint` reconstructs and reseals that graph with
 `sharedTypeStructure` before assigning its nominal v1 identity. Its rooted-tree
 encoding ignores table order and raw allocation numbers while preserving exact
@@ -4442,6 +4557,8 @@ own claims.
 
 The detailed encoding and trust boundary are recorded in the
 [carrier-aware certificate fingerprint report](reports/2026-08-13-carrier-aware-certificate-graph-fingerprints.md).
+
+### `Observability`
 
 `Observability` is orthogonal to logical evidence and search progress. Its
 `Natural` counts cannot wrap, zero-valued entries have one canonical absent

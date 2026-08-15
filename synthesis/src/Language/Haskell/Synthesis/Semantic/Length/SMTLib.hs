@@ -76,6 +76,7 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib
   , validateLengthSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
   , validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain
   , validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+  , validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
   , LengthSpinePairSMTLibQueryFingerprintSubject
   , lengthSpinePairSMTLibQuerySchemaTag
   , lengthSpinePairSMTLibQueryLogic
@@ -103,6 +104,7 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib
   , validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
   , validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain
   , validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+  , validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
   ) where
 
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib

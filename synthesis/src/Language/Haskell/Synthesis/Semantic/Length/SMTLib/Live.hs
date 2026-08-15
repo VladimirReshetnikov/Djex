@@ -46,6 +46,11 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live
   , withLengthSMTLibLiveUsableWorkDeadline
   , withLengthSMTLibLiveSessionUnderDeadline
   , withLengthSMTLibLiveSessionWithUsableWorkBudget
+  , LengthSMTLibLiveScopedUsableWorkDeadline
+  , withLengthSMTLibLiveScopedUsableWorkDeadline
+  , checkLengthSMTLibLiveScopedUsableWorkDeadline
+  , withLengthSMTLibLiveSessionUnderScopedDeadline
+  , withLengthSMTLibLiveSessionWithScopedUsableWorkBudget
   , LengthSMTLibLiveSessionFailure (..)
   , LengthSMTLibLiveSessionError
   , lengthSMTLibLiveSessionPrimaryFailure
@@ -195,6 +200,15 @@ data LengthSMTLibLiveUsableWorkDeadline budget =
 
 type role LengthSMTLibLiveUsableWorkDeadline nominal
 
+-- | Generative v2 deadline authority with an owner-thread-affine runtime
+-- scope.  Its constructor, deadline, owner, and open/closed state remain
+-- private.
+data LengthSMTLibLiveScopedUsableWorkDeadline budget =
+  LengthSMTLibLiveScopedUsableWorkDeadline
+    !(Session.LengthSMTLibSessionScopedUsableWorkDeadline budget)
+
+type role LengthSMTLibLiveScopedUsableWorkDeadline nominal
+
 -- | Stable, byte-free classes for opening, probing, and closing a live scope.
 data LengthSMTLibLiveSessionFailure
   = LengthSMTLibLiveSessionDeadlineExceeded
@@ -207,6 +221,7 @@ data LengthSMTLibLiveSessionFailure
   | LengthSMTLibLiveSessionTransportFailed
   | LengthSMTLibLiveSessionCleanupFailed
   | LengthSMTLibLiveSessionInternalFailure
+  | LengthSMTLibLiveSessionUsableWorkScopeUnavailable
   deriving (Bounded, Enum, Eq, Ord, Show)
 
 instance NFData LengthSMTLibLiveSessionFailure where
@@ -478,6 +493,83 @@ withLengthSMTLibLiveSessionWithUsableWorkBudget
       milliseconds $ \deadline ->
         withLengthSMTLibLiveSessionUnderDeadline
           (LengthSMTLibLiveUsableWorkDeadline deadline) execution use
+  pure $ case scoped of
+    Left failure -> Left $ LengthSMTLibLiveSessionError
+      (sessionFailure failure) False
+    Right result -> result
+
+-- | Capture one owner-thread-affine v2 deadline and lend its opaque authority
+-- only for this callback's dynamic extent.  Admission closes on normal and
+-- exceptional exit.  A normal callback result is accepted only if the shared
+-- absolute deadline remains live after closing the scope.
+withLengthSMTLibLiveScopedUsableWorkDeadline
+  :: forall result. LengthSMTLibLiveUsableWorkBudget
+  -> (forall budget.
+        LengthSMTLibLiveScopedUsableWorkDeadline budget -> IO result)
+  -> IO (Either LengthSMTLibLiveSessionError result)
+withLengthSMTLibLiveScopedUsableWorkDeadline
+    (LengthSMTLibLiveUsableWorkBudget milliseconds) use = do
+  result <- Session.withLengthSMTLibSessionScopedUsableWorkDeadline milliseconds
+    $ use . LengthSMTLibLiveScopedUsableWorkDeadline
+  pure $ case result of
+    Left failure -> Left $ LengthSMTLibLiveSessionError
+      (sessionFailure failure) False
+    Right value -> Right value
+
+-- | Cooperatively observe the v2 authority without refreshing its deadline.
+-- Wrong-thread or closed use is rejected before the monotonic clock is read,
+-- so scope unavailability wins when the absolute deadline is also expired.
+checkLengthSMTLibLiveScopedUsableWorkDeadline
+  :: LengthSMTLibLiveScopedUsableWorkDeadline budget
+  -> IO (Either LengthSMTLibLiveSessionError ())
+checkLengthSMTLibLiveScopedUsableWorkDeadline
+    (LengthSMTLibLiveScopedUsableWorkDeadline deadline) = do
+  checked <- Session.checkLengthSMTLibSessionScopedUsableWorkDeadline deadline
+  pure $ case checked of
+    Left failure -> Left $ LengthSMTLibLiveSessionError
+      (sessionFailure failure) False
+    Right () -> Right ()
+
+-- | Open one worker under an open v2 authority.  Owner-thread and lifecycle
+-- admission precede the clock, configuration, and workspace.  The internal
+-- opener repeats that admission at its production boundary before acquiring
+-- resources.
+withLengthSMTLibLiveSessionUnderScopedDeadline
+  :: LengthSMTLibLiveScopedUsableWorkDeadline budget
+  -> LengthSMTLibExecutionConfig
+  -> (forall epoch. LengthSMTLibLiveSession epoch -> IO result)
+  -> IO (Either LengthSMTLibLiveSessionError result)
+withLengthSMTLibLiveSessionUnderScopedDeadline
+    (LengthSMTLibLiveScopedUsableWorkDeadline deadline) execution use = do
+  admitted <- Session.checkLengthSMTLibSessionScopedUsableWorkDeadline deadline
+  case admitted of
+    Left failure -> pure $ Left $ LengthSMTLibLiveSessionError
+      (sessionFailure failure) False
+    Right () -> case defaultLiveSessionConfig execution of
+      Left failure -> pure $ Left $ LengthSMTLibLiveSessionError failure False
+      Right config -> do
+        result <- Session.withLengthSMTLibReadyWorkerUnderScopedDeadline
+          deadline config $ use . LengthSMTLibLiveSession
+        pure $ case result of
+          Left failure -> Left $ sanitizeSessionError failure
+          Right value -> Right value
+
+-- | Capture and consume one scoped v2 budget around exactly one live session.
+-- The session checks callback completion before its fresh final-readiness and
+-- cleanup windows; the outer owner closes the authority without charging
+-- those excluded windows to a second deadline check.
+withLengthSMTLibLiveSessionWithScopedUsableWorkBudget
+  :: LengthSMTLibLiveUsableWorkBudget
+  -> LengthSMTLibExecutionConfig
+  -> (forall epoch. LengthSMTLibLiveSession epoch -> IO result)
+  -> IO (Either LengthSMTLibLiveSessionError result)
+withLengthSMTLibLiveSessionWithScopedUsableWorkBudget
+    (LengthSMTLibLiveUsableWorkBudget milliseconds) execution use = do
+  scoped <-
+    Session.withLengthSMTLibSessionScopedUsableWorkDeadlineForBudgetedSession
+      milliseconds $ \deadline ->
+        withLengthSMTLibLiveSessionUnderScopedDeadline
+          (LengthSMTLibLiveScopedUsableWorkDeadline deadline) execution use
   pure $ case scoped of
     Left failure -> Left $ LengthSMTLibLiveSessionError
       (sessionFailure failure) False
@@ -765,6 +857,8 @@ sessionFailure
 sessionFailure failure = case failure of
   Session.LengthSMTLibSessionDeadlineFailure process ->
     sessionProcessFailure process
+  Session.LengthSMTLibSessionUsableWorkScopeUnavailable ->
+    LengthSMTLibLiveSessionUsableWorkScopeUnavailable
   Session.LengthSMTLibSessionWorkspaceFailure workspace ->
     workspaceFailure workspace
   Session.LengthSMTLibSessionCapabilityPlanFailure _ ->

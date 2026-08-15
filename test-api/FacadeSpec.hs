@@ -1291,6 +1291,40 @@ facadeTests = testGroup "public Djex facade"
             -> LengthCounterexampleBasis
           strictRelationalPositiveAffineQuotientApplicableDomainBasisProjection =
             validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainBasis
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator
+            :: LengthEvaluationLimits
+            -> LengthInputBoxLimits
+            -> CheckedLengthProblem Int ExferenceLocal
+            -> Either LengthApplicableDomainValidationError
+                (LengthApplicableDomainValidation
+                  (BehavioralEvidence
+                    FiniteListSpineLengthV1
+                    ValidatedLengthCounterexample)
+                  (BehavioralEvidence
+                    FiniteListSpineLengthV1
+                    ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain))
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator =
+            validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainMaximumsProjection
+            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+            -> [Natural]
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainMaximumsProjection =
+            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInclusiveMaximums
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentProjection
+            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+            -> Natural
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentProjection =
+            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentCount
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableProjection
+            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+            -> Natural
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableProjection =
+            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableAssignmentCount
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasisProjection
+            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+            -> LengthCounterexampleBasis
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasisProjection =
+            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasis
           queryInputReplayer
             :: LengthEvaluationLimits
             -> LengthSMTLibQuery Int ExferenceLocal
@@ -1375,6 +1409,16 @@ facadeTests = testGroup "public Djex facade"
                   ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain)
           queryStrictRelationalPositiveAffineQuotientApplicableDomainValidator =
             validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain
+          queryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator
+            :: LengthEvaluationLimits
+            -> LengthInputBoxLimits
+            -> LengthSMTLibQuery Int ExferenceLocal
+            -> Either LengthSMTLibApplicableDomainValidationError
+                (LengthApplicableDomainValidation
+                  ValidatedLengthCounterexample
+                  ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain)
+          queryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator =
+            validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
           queryInputSymbolsProjection
             :: LengthSMTLibQuery Int ExferenceLocal
             -> [[Word8]]
@@ -1550,6 +1594,11 @@ facadeTests = testGroup "public Djex facade"
         strictRelationalPositiveAffineQuotientApplicableDomainAssignmentProjection `seq`
         strictRelationalPositiveAffineQuotientApplicableDomainApplicableProjection `seq`
         strictRelationalPositiveAffineQuotientApplicableDomainBasisProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainMaximumsProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasisProjection `seq`
         queryInputReplayer `seq` queryOriginProber `seq`
         queryInputBoxValidator `seq` queryCounterexampleSimplifier `seq`
         queryApplicableDomainValidator `seq`
@@ -1557,6 +1606,7 @@ facadeTests = testGroup "public Djex facade"
         queryRelationalPositiveAffineApplicableDomainValidator `seq`
         queryStrictRelationalPositiveAffineApplicableDomainValidator `seq`
         queryStrictRelationalPositiveAffineQuotientApplicableDomainValidator `seq`
+        queryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator `seq`
         queryInputSymbolsProjection `seq`
         queryInputValueRequestProjection `seq` queryObservationAssociator `seq`
         queryObservationReplayer `seq` checkResponseParser `seq`
@@ -1592,6 +1642,9 @@ facadeTests = testGroup "public Djex facade"
           -> ()) `seq`
         (rnf
           :: ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
+          -> ()) `seq`
+        (rnf
+          :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
           -> ()) `seq`
         (rnf :: LengthSMTLibInputReplayError -> ()) `seq`
         (rnf :: LengthSMTLibInputBoxValidationError -> ()) `seq`
@@ -1642,6 +1695,11 @@ facadeTests = testGroup "public Djex facade"
         @?= map (fromIntegral . fromEnum)
           ("finite-list-spine-length/\
             \strict-relational-positive-affine-quotient-precondition-domain-establishment/v1"
+            :: String)
+      lengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationSchemaTag
+        @?= map (fromIntegral . fromEnum)
+          ("finite-list-spine-length/\
+            \strict-relational-positive-affine-quotient-root-extrema-precondition-domain-establishment/v1"
             :: String)
       (LengthInputBoxCounterexample () :: LengthInputBoxValidation () ()) @?=
         LengthInputBoxCounterexample ()
@@ -2094,6 +2152,40 @@ facadeTests = testGroup "public Djex facade"
             -> LengthCounterexampleBasis
           strictRelationalPositiveAffineQuotientApplicableDomainBasisProjection =
             validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainBasis
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator
+            :: LengthEvaluationLimits
+            -> LengthInputBoxLimits
+            -> CheckedLengthSpinePairProblem Int ExferenceLocal
+            -> Either LengthSpinePairApplicableDomainValidationError
+                (LengthApplicableDomainValidation
+                  (BehavioralEvidence
+                    FiniteBinaryProductSpineLengthsV1
+                    ValidatedLengthSpinePairCounterexample)
+                  (BehavioralEvidence
+                    FiniteBinaryProductSpineLengthsV1
+                    ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain))
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator =
+            validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainMaximumsProjection
+            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+            -> [Natural]
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainMaximumsProjection =
+            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInclusiveMaximums
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentProjection
+            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+            -> Natural
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentProjection =
+            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentCount
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableProjection
+            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+            -> Natural
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableProjection =
+            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableAssignmentCount
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasisProjection
+            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+            -> LengthCounterexampleBasis
+          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasisProjection =
+            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasis
           querySealer
             :: LengthSMTLibLimits
             -> CheckedLengthSpinePairProblem Int ExferenceLocal
@@ -2217,6 +2309,16 @@ facadeTests = testGroup "public Djex facade"
                   ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain)
           queryStrictRelationalPositiveAffineQuotientApplicableDomainValidator =
             validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain
+          queryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator
+            :: LengthEvaluationLimits
+            -> LengthInputBoxLimits
+            -> LengthSpinePairSMTLibQuery Int ExferenceLocal
+            -> Either LengthSpinePairSMTLibApplicableDomainValidationError
+                (LengthApplicableDomainValidation
+                  ValidatedLengthSpinePairCounterexample
+                  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain)
+          queryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator =
+            validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
       contractInSession `seq` sealer `seq` roleAwareSealer `seq`
         exactCaseSealer `seq` inSessionSealer `seq`
         candidateResultProjection `seq` candidateProviderProjection `seq`
@@ -2260,6 +2362,11 @@ facadeTests = testGroup "public Djex facade"
         strictRelationalPositiveAffineQuotientApplicableDomainAssignmentProjection `seq`
         strictRelationalPositiveAffineQuotientApplicableDomainApplicableProjection `seq`
         strictRelationalPositiveAffineQuotientApplicableDomainBasisProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainMaximumsProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableProjection `seq`
+        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasisProjection `seq`
         querySealer `seq`
         queryInputSymbolsProjection `seq` queryCheckProjection `seq`
         queryInputValueRequestProjection `seq` queryFingerprintProjection `seq`
@@ -2271,6 +2378,7 @@ facadeTests = testGroup "public Djex facade"
         queryRelationalPositiveAffineApplicableDomainValidator `seq`
         queryStrictRelationalPositiveAffineApplicableDomainValidator `seq`
         queryStrictRelationalPositiveAffineQuotientApplicableDomainValidator `seq`
+        queryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator `seq`
         (rnf :: CheckedLengthSpinePairCandidate Int ExferenceLocal -> ()) `seq`
         (rnf :: CheckedLengthSpinePairProblem Int ExferenceLocal -> ()) `seq`
         (rnf :: ValidatedLengthSpinePairCounterexample -> ()) `seq`
@@ -2290,6 +2398,9 @@ facadeTests = testGroup "public Djex facade"
           -> ()) `seq`
         (rnf
           :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
+          -> ()) `seq`
+        (rnf
+          :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
           -> ()) `seq`
         (rnf :: LengthSpinePairSMTLibQuery Int ExferenceLocal -> ()) `seq`
         (rnf :: LengthSpinePairSMTLibQueryError -> ()) `seq`
@@ -2338,6 +2449,11 @@ facadeTests = testGroup "public Djex facade"
         @?= map (fromIntegral . fromEnum)
           ("finite-binary-product-spine-lengths/\
             \strict-relational-positive-affine-quotient-precondition-domain-establishment/v1"
+            :: String)
+      lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationSchemaTag
+        @?= map (fromIntegral . fromEnum)
+          ("finite-binary-product-spine-lengths/\
+            \strict-relational-positive-affine-quotient-root-extrema-precondition-domain-establishment/v1"
             :: String)
       lengthSpinePairSMTLibQuerySchemaTag @?=
         map (fromIntegral . fromEnum)

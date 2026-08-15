@@ -139,6 +139,7 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , relationalPositiveAffineApplicableDomainValidationTests
   , strictRelationalPositiveAffineApplicableDomainValidationTests
   , strictRelationalPositiveAffineQuotientApplicableDomainValidationTests
+  , strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationTests
   , SMTLibQFLIASpec.smtLibQFLIATests
   , smtLibTests
   , smtLibProtocolTests
@@ -9141,6 +9142,515 @@ strictRelationalPositiveAffineQuotientApplicableDomainValidationTests =
           valuesBefore
     ]
 
+strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationTests
+  :: TestTree
+strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationTests =
+  testGroup
+    "strict relational positive-affine quotient root-extrema applicable-domain validation"
+    [ testCase "apply all four exact extrema laws and propagate their rules" $ do
+        let first = Length.LengthVariable $ Length.LengthInput 0
+            second = Length.LengthVariable $ Length.LengthInput 1
+            third = Length.LengthVariable $ Length.LengthInput 2
+            literal value = Length.LengthLiteral value
+            source precondition = contractWith precondition
+              $ Length.LengthTruth True
+            validate problem =
+              Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+                Evaluate.defaultLengthEvaluationLimits
+                Evaluate.defaultLengthInputBoxLimits problem
+            assertUnary precondition maximums assignments applicable = do
+              problem <- adversarialConstantZeroProblem $ source precondition
+              receipt <-
+                expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+                  problem $ validate problem
+              assertValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+                receipt maximums assignments applicable
+                  Evaluate.ProviderIndependentFiniteSpineModel
+
+        -- max(x, 2x + 1) <= 5 gives x <= 5 and 2x + 1 <= 5.
+        assertUnary
+          (Length.LengthAtMost
+            (Length.LengthMaximum first
+              $ Length.LengthSum
+                  [Length.LengthScale 2 first, literal 1])
+            $ literal 5)
+          [2] 3 3
+
+        -- 2x + 1 <= min(x + 5, 7) gives both directed constraints.
+        assertUnary
+          (Length.LengthAtMost
+            (Length.LengthSum [Length.LengthScale 2 first, literal 1])
+            $ Length.LengthMinimum
+                (Length.LengthSum [first, literal 5]) (literal 7))
+          [3] 4 4
+
+        -- not (min(x + 4, 9) <= 2x) gives 2x + 1 <= x + 4 and <= 9.
+        assertUnary
+          (Length.LengthNot $ Length.LengthAtMost
+            (Length.LengthMinimum
+              (Length.LengthSum [first, literal 4]) (literal 9))
+            $ Length.LengthScale 2 first)
+          [3] 4 4
+
+        -- not (5 <= max(2x, x + 1)) gives 2x + 1 <= 5 and x + 2 <= 5.
+        assertUnary
+          (Length.LengthNot $ Length.LengthAtMost (literal 5)
+            $ Length.LengthMaximum
+                (Length.LengthScale 2 first)
+                (Length.LengthSum [first, literal 1]))
+          [2] 3 3
+
+        propagationProblem <- adversarialWideConstantZeroProblemWithContract 3
+          $ source $ Length.LengthAll
+              [ Length.LengthAtMost
+                  (Length.LengthMaximum first second) third
+              , Length.LengthAtMost third $ literal 4
+              ]
+        propagationReceipt <-
+          expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+            propagationProblem $ validate propagationProblem
+        assertValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+          propagationReceipt [4, 4, 4] 125 55
+            Evaluate.ProviderIndependentFiniteSpineModel
+    , testCase
+        "return the first root-extrema-derived replay counterexample" $ do
+        let input = Length.LengthVariable $ Length.LengthInput 0
+            result = Length.LengthVariable Length.LengthResult
+            source = contractWith
+              (Length.LengthAtMost
+                (Length.LengthMaximum input $ Length.LengthScale 2 input)
+                $ Length.LengthLiteral 4)
+              $ Length.LengthEqual result input
+        problem <- adversarialConstantZeroProblem source
+        counterexample <- case
+            Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+              Evaluate.defaultLengthEvaluationLimits
+              Evaluate.defaultLengthInputBoxLimits problem of
+          Left failure -> assertFailure
+            ("root-extrema counterexample validation failed: " ++ show failure)
+              >> error "unreachable"
+          Right (Evaluate.LengthApplicableDomainInapplicable reason) ->
+            assertFailure
+              ("root-extrema counterexample domain was inapplicable: "
+                ++ show reason) >> error "unreachable"
+          Right (Evaluate.LengthApplicableDomainEstablished _) -> assertFailure
+            "root-extrema counterexample fixture produced positive evidence"
+              >> error "unreachable"
+          Right (Evaluate.LengthApplicableDomainCounterexample evidence) ->
+            expectRight $ SemanticProblem.replayBehavioralEvidence
+              (LengthProblem.checkedLengthProblemBehavioralProblem problem)
+              evidence
+        Evaluate.validatedLengthCounterexampleInputs counterexample @?= [1]
+        Evaluate.validatedLengthCounterexampleResult counterexample @?= 0
+        Evaluate.validatedLengthCounterexampleBasis counterexample @?=
+          Evaluate.ProviderIndependentFiniteSpineModel
+    , testCase
+        "keep equality symmetric while emitting only the necessary extrema direction" $
+        do
+          let input = Length.LengthVariable $ Length.LengthInput 0
+              literal value = Length.LengthLiteral value
+              maximumExpression = Length.LengthMaximum
+                (Length.LengthSum [Length.LengthScale 2 input, literal 1])
+                input
+              minimumLeft =
+                Length.LengthSum [Length.LengthScale 2 input, literal 1]
+              minimumExpression = Length.LengthMinimum
+                (Length.LengthSum [input, literal 5]) $ literal 7
+              source precondition = contractWith precondition
+                $ Length.LengthTruth True
+              validate problem =
+                Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+                  Evaluate.defaultLengthEvaluationLimits
+                  Evaluate.defaultLengthInputBoxLimits problem
+              assertEstablished precondition maximums assignments applicable = do
+                problem <- adversarialConstantZeroProblem
+                  $ source precondition
+                receipt <-
+                  expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+                    problem $ validate problem
+                assertValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+                  receipt maximums assignments applicable
+                    Evaluate.ProviderIndependentFiniteSpineModel
+              assertOneWay equality = do
+                problem <- adversarialConstantZeroProblem $ source equality
+                reason <-
+                  expectLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInapplicability
+                    $ validate problem
+                reason @?= Evaluate.LengthApplicableDomainInputUpperBoundMissing 0
+
+          mapM_ (\equality -> assertEstablished equality [2] 3 1)
+            [ Length.LengthEqual maximumExpression $ literal 5
+            , Length.LengthEqual (literal 5) maximumExpression
+            ]
+          mapM_ (\equality -> assertEstablished equality [3] 4 1)
+            [ Length.LengthEqual minimumLeft minimumExpression
+            , Length.LengthEqual minimumExpression minimumLeft
+            ]
+          mapM_ assertOneWay
+            [ Length.LengthEqual
+                (Length.LengthMinimum input $ literal 100) $ literal 5
+            , Length.LengthEqual (literal 5)
+                $ Length.LengthMinimum input $ literal 100
+            , Length.LengthEqual
+                (Length.LengthMaximum input
+                  $ Length.LengthSum [input, literal 1])
+                $ Length.LengthSum [input, literal 1]
+            , Length.LengthEqual
+                (Length.LengthSum [input, literal 1])
+                $ Length.LengthMaximum input
+                    (Length.LengthSum [input, literal 1])
+            ]
+    , testCase
+        "apply strict successors before cancellation and let contradictions beat missing coverage" $
+        do
+          let first = Length.LengthVariable $ Length.LengthInput 0
+              literal value = Length.LengthLiteral value
+              source precondition = contractWith precondition
+                $ Length.LengthTruth True
+              validate problem =
+                Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+                  Evaluate.defaultLengthEvaluationLimits
+                  Evaluate.defaultLengthInputBoxLimits problem
+          successorProblem <- adversarialConstantZeroProblem $ source
+            $ Length.LengthNot $ Length.LengthAtMost
+                (Length.LengthMinimum
+                  (Length.LengthSum [first, literal 3])
+                  $ literal 10)
+                $ Length.LengthScale 2 first
+          successorReceipt <-
+            expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+              successorProblem $ validate successorProblem
+          assertValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+            successorReceipt [2] 3 3
+              Evaluate.ProviderIndependentFiniteSpineModel
+
+          contradictionProblem <-
+            adversarialWideConstantZeroProblemWithContract 2 $ source
+              $ Length.LengthAtMost
+                  (Length.LengthMaximum (literal 5) first)
+                  $ literal 4
+          contradictionReceipt <-
+            expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+              contradictionProblem $ validate contradictionProblem
+          assertValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+            contradictionReceipt [0, 0] 1 0
+              Evaluate.ProviderIndependentFiniteSpineModel
+    , testCase "preserve literal and root-quotient predecessor projections" $ do
+        let input = Length.LengthVariable $ Length.LengthInput 0
+            literal value = Length.LengthLiteral value
+            source precondition = contractWith precondition
+              $ Length.LengthTruth True
+            validate problem =
+              Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+                Evaluate.defaultLengthEvaluationLimits
+                Evaluate.defaultLengthInputBoxLimits problem
+            validatePredecessor problem =
+              Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientApplicableDomain
+                Evaluate.defaultLengthEvaluationLimits
+                Evaluate.defaultLengthInputBoxLimits problem
+        mapM_ (\precondition -> do
+            problem <- adversarialConstantZeroProblem $ source precondition
+            predecessor <-
+              expectValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
+                problem $ validatePredecessor problem
+            successor <-
+              expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+                problem $ validate problem
+            Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInclusiveMaximums
+                successor @?=
+              Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainInclusiveMaximums
+                predecessor
+            Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentCount
+                successor @?=
+              Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainAssignmentCount
+                predecessor
+            Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableAssignmentCount
+                successor @?=
+              Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainApplicableAssignmentCount
+                predecessor
+            Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasis
+                successor @?=
+              Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainBasis
+                predecessor)
+          [ Length.LengthAtMost input $ literal 2
+          , Length.LengthAtMost
+              (Length.LengthQuotient 3 input) $ literal 1
+          ]
+    , testCase
+        "ignore disjunctive orientations and every excluded extrema shape atomically" $
+        do
+          let input = Length.LengthVariable $ Length.LengthInput 0
+              literal value = Length.LengthLiteral value
+              makeMaximum = Length.LengthMaximum
+              makeMinimum = Length.LengthMinimum
+              source precondition = contractWith precondition
+                $ Length.LengthTruth True
+              validate problem =
+                Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+                  Evaluate.defaultLengthEvaluationLimits
+                  Evaluate.defaultLengthInputBoxLimits problem
+              excluded =
+                [ Length.LengthAtMost input $ makeMaximum input $ literal 4
+                , Length.LengthAtMost (makeMinimum input $ literal 4) $ literal 4
+                , Length.LengthNot $ Length.LengthAtMost
+                    (makeMaximum input $ literal 4) $ literal 4
+                , Length.LengthNot $ Length.LengthAtMost input
+                    $ makeMinimum input $ literal 4
+                , Length.LengthAtMost
+                    (makeMaximum input $ literal 1)
+                    $ makeMinimum input $ literal 4
+                , Length.LengthEqual
+                    (makeMaximum input $ literal 1)
+                    $ makeMinimum input $ literal 4
+                , Length.LengthAtMost
+                    (Length.LengthSum
+                      [makeMaximum input $ literal 1, literal 1])
+                    $ literal 4
+                , Length.LengthAtMost
+                    (makeMaximum input
+                      $ Length.LengthMonus input $ literal 1)
+                    $ literal 4
+                , Length.LengthAtMost
+                    (Length.LengthQuotient 2 input)
+                    $ makeMinimum input $ literal 4
+                , Length.LengthNot $ Length.LengthEqual
+                    (makeMaximum input $ literal 1) $ literal 4
+                ]
+          mapM_ (\precondition -> do
+              problem <- adversarialConstantZeroProblem $ source precondition
+              reason <-
+                expectLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInapplicability
+                  $ validate problem
+              reason @?=
+                Evaluate.LengthApplicableDomainInputUpperBoundMissing 0)
+            excluded
+          let first = Length.LengthVariable $ Length.LengthInput 0
+              second = Length.LengthVariable $ Length.LengthInput 1
+              third = Length.LengthVariable $ Length.LengthInput 2
+          naryProblem <- adversarialWideConstantZeroProblemWithContract 3
+            $ source $ Length.LengthAtMost
+                (makeMaximum (makeMaximum first second) third)
+                $ literal 4
+          naryReason <-
+            expectLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInapplicability
+              $ validate naryProblem
+          naryReason @?= Evaluate.LengthApplicableDomainInputUpperBoundMissing 0
+    , testCase "retain value, Cartesian-product, and replay precedence" $ do
+        let first = Length.LengthVariable $ Length.LengthInput 0
+            second = Length.LengthVariable $ Length.LengthInput 1
+            result = Length.LengthVariable Length.LengthResult
+            literal value = Length.LengthLiteral value
+            bound variable maximumValue = Length.LengthAtMost
+              (Length.LengthMaximum variable $ literal 0)
+              $ literal maximumValue
+            source precondition postcondition =
+              contractWith precondition postcondition
+            validate limits box problem =
+              Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+                limits box problem
+
+        binary <- adversarialBinaryConstantZeroProblem
+          $ source (bound second 1) $ Length.LengthTruth True
+        narrow <- inputBoxLimits 1 16
+        width <- evaluateWithin
+          $ validate (error "width rejection demanded evaluation limits")
+              narrow binary
+        assertLeft
+          (Evaluate.LengthApplicableDomainInputBoxValidationRejected
+            $ Evaluate.LengthInputBoxProblemInputLimitExceeded 1 2)
+          width
+        missing <-
+          expectLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInapplicability
+            $ validate Evaluate.defaultLengthEvaluationLimits
+                Evaluate.defaultLengthInputBoxLimits binary
+        missing @?= Evaluate.LengthApplicableDomainInputUpperBoundMissing 0
+
+        oversized <- adversarialConstantZeroProblem
+          $ source (bound first 8) $ Length.LengthTruth True
+        assertLeft
+          (Evaluate.LengthApplicableDomainInputBoxValidationRejected
+            $ Evaluate.LengthInputBoxMaximumValueRejected 0
+            $ Evaluate.LengthEvaluationValueBitLimitExceeded
+                (Evaluate.LengthProblemInputValue 0) 2 3)
+          $ validate (evaluationLimitsWith 2 8)
+              Evaluate.defaultLengthInputBoxLimits oversized
+
+        productProblem <- adversarialBinaryConstantZeroProblem $ source
+          (Length.LengthAll [bound first 1, bound second 1])
+          $ Length.LengthTruth True
+        threeAssignments <- inputBoxLimits 2 3
+        assertLeft
+          (Evaluate.LengthApplicableDomainInputBoxValidationRejected
+            $ Evaluate.LengthInputBoxAssignmentLimitExceeded 3 4)
+          $ validate (evaluationLimitsWith 1 0)
+              threeAssignments productProblem
+
+        let isZero = Length.LengthEqual first $ literal 0
+        replayProblem <- adversarialConstantZeroProblem $ source
+          (bound first 0)
+          $ Length.LengthEqual result
+          $ Length.LengthIf isZero (literal 2) (literal 1)
+        assertLeft
+          (Evaluate.LengthApplicableDomainInputBoxValidationRejected
+            $ Evaluate.LengthInputBoxAssignmentEvaluationRejected 0
+            $ Evaluate.LengthEvaluationValueBitLimitExceeded
+                Evaluate.LengthIntermediateValue 1 2)
+          $ validate (evaluationLimitsWith 1 1)
+              Evaluate.defaultLengthInputBoxLimits replayProblem
+    , testCase
+        "associate nominal scalar evidence without changing predecessor query identity" $
+        do
+          Evaluate.lengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationSchemaTag
+            @?= asciiBytes
+              "finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-precondition-domain-establishment/v1"
+          assertBool "root-extrema validation reused the quotient predecessor schema"
+            $ Evaluate.lengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationSchemaTag
+                /= Evaluate.lengthStrictRelationalPositiveAffineQuotientApplicableDomainValidationSchemaTag
+          let input = Length.LengthVariable $ Length.LengthInput 0
+              precondition = Length.LengthAtMost
+                (Length.LengthMaximum input
+                  $ Length.LengthSum
+                      [Length.LengthScale 2 input, Length.LengthLiteral 1])
+                $ Length.LengthLiteral 5
+              source = contractWith precondition $ Length.LengthTruth True
+          problem <- adversarialConstantZeroProblem source
+          let directValidation =
+                Evaluate.validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+                  Evaluate.defaultLengthEvaluationLimits
+                  Evaluate.defaultLengthInputBoxLimits problem
+          receipt <-
+            expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+              problem directValidation
+          assertValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+            receipt [2] 3 3 Evaluate.ProviderIndependentFiniteSpineModel
+          force receipt `seq` pure ()
+          evidence <- case directValidation of
+            Right (Evaluate.LengthApplicableDomainEstablished established) ->
+              pure established
+            _ -> assertFailure "root-extrema scalar validation lost positive evidence"
+              >> error "unreachable"
+          stale <- adversarialConstantZeroProblem
+            $ contractWith
+                (Length.LengthAtMost
+                  (Length.LengthMaximum input $ Length.LengthLiteral 0)
+                  $ Length.LengthLiteral 1)
+                $ Length.LengthTruth True
+          assertLeft SemanticProblem.ReplayEncodingFingerprintMismatch
+            $ SemanticProblem.replayBehavioralEvidence
+                (LengthProblem.checkedLengthProblemBehavioralProblem stale)
+                evidence
+
+          query <- expectRight $ SMTLib.sealLengthSMTLibQuery
+            SMTLib.defaultLengthSMTLibLimits problem
+          let fingerprintBefore = SMTLib.lengthSMTLibQueryFingerprint query
+              checkBefore = SMTLib.lengthSMTLibQueryCheckBytes query
+              symbolsBefore = SMTLib.lengthSMTLibQueryInputSymbols query
+              valuesBefore = SMTLib.lengthSMTLibQueryInputValueRequestBytes query
+          predecessorQuery <- expectRight
+            $ SMTLib.validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain
+                Evaluate.defaultLengthEvaluationLimits
+                Evaluate.defaultLengthInputBoxLimits query
+          case predecessorQuery of
+            Evaluate.LengthApplicableDomainInapplicable reason ->
+              reason @?= Evaluate.LengthApplicableDomainInputUpperBoundMissing 0
+            _ -> assertFailure
+              "quotient predecessor query validation accepted an extrema-only bound"
+          queryValidation <- expectRight
+            $ SMTLib.validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+                Evaluate.defaultLengthEvaluationLimits
+                Evaluate.defaultLengthInputBoxLimits query
+          case queryValidation of
+            Evaluate.LengthApplicableDomainEstablished queryReceipt ->
+              queryReceipt @?= receipt
+            Evaluate.LengthApplicableDomainInapplicable reason -> assertFailure
+              $ "root-extrema scalar query validation was inapplicable: "
+                  ++ show reason
+            Evaluate.LengthApplicableDomainCounterexample{} -> assertFailure
+              "root-extrema scalar query validation found a counterexample"
+          SMTLib.lengthSMTLibQueryFingerprint query @?= fingerprintBefore
+          SMTLib.lengthSMTLibQueryCheckBytes query @?= checkBefore
+          SMTLib.lengthSMTLibQueryInputSymbols query @?= symbolsBefore
+          SMTLib.lengthSMTLibQueryInputValueRequestBytes query @?= valuesBefore
+    , testCase "keep product evidence nominal and preserve pair query identity" $ do
+        Evaluate.lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationSchemaTag
+          @?= asciiBytes
+            "finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-precondition-domain-establishment/v1"
+        assertBool "root-extrema product validation reused the scalar schema"
+          $ Evaluate.lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationSchemaTag
+              /= Evaluate.lengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationSchemaTag
+        let input = Length.LengthVariable $ Length.LengthSpinePairInput 0
+            precondition = Length.LengthAtMost
+              (Length.LengthMaximum input $ Length.LengthLiteral 0)
+              $ Length.LengthLiteral 2
+            source = spinePairContractWith precondition
+              $ Length.LengthAll
+                  [ Length.LengthEqual
+                      (pairResultVariable Length.LengthSpinePairFirst) input
+                  , Length.LengthEqual
+                      (pairResultVariable Length.LengthSpinePairSecond)
+                      $ Length.LengthLiteral 0
+                  ]
+        problem <- adversarialInputAndZeroSpinePairProblem source
+        let directValidation =
+              Evaluate.validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+                Evaluate.defaultLengthEvaluationLimits
+                Evaluate.defaultLengthInputBoxLimits problem
+        receipt <-
+          expectValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+            problem directValidation
+        assertValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+          receipt [2] 3 3 Evaluate.ProviderIndependentFiniteSpineModel
+        force receipt `seq` pure ()
+        productEvidence <- case directValidation of
+          Right (Evaluate.LengthApplicableDomainEstablished established) ->
+            pure established
+          _ -> assertFailure "root-extrema product validation lost positive evidence"
+            >> error "unreachable"
+        scalar <- adversarialConstantZeroProblem
+          $ contractWith
+              (Length.LengthAtMost
+                (Length.LengthMaximum
+                  (Length.LengthVariable $ Length.LengthInput 0)
+                  $ Length.LengthLiteral 0)
+                $ Length.LengthLiteral 2)
+              $ Length.LengthTruth True
+        let forgedScalarEvidence = unsafeCoerce productEvidence
+              :: SemanticProblem.BehavioralEvidence
+                  Length.FiniteListSpineLengthV1
+                  Evaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+        assertLeft SemanticProblem.ReplayDomainMismatch
+          $ SemanticProblem.replayBehavioralEvidence
+              (LengthProblem.checkedLengthProblemBehavioralProblem scalar)
+              forgedScalarEvidence
+
+        query <- expectRight $ SMTLib.sealLengthSpinePairSMTLibQuery
+          SMTLib.defaultLengthSMTLibLimits problem
+        let fingerprintBefore =
+              SMTLib.lengthSpinePairSMTLibQueryFingerprint query
+            checkBefore = SMTLib.lengthSpinePairSMTLibQueryCheckBytes query
+            symbolsBefore = SMTLib.lengthSpinePairSMTLibQueryInputSymbols query
+            valuesBefore =
+              SMTLib.lengthSpinePairSMTLibQueryInputValueRequestBytes query
+        queryValidation <- expectRight
+          $ SMTLib.validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+              Evaluate.defaultLengthEvaluationLimits
+              Evaluate.defaultLengthInputBoxLimits query
+        case queryValidation of
+          Evaluate.LengthApplicableDomainEstablished queryReceipt ->
+            queryReceipt @?= receipt
+          Evaluate.LengthApplicableDomainInapplicable reason -> assertFailure
+            $ "root-extrema product query validation was inapplicable: "
+                ++ show reason
+          Evaluate.LengthApplicableDomainCounterexample{} -> assertFailure
+            "root-extrema product query validation found a counterexample"
+        SMTLib.lengthSpinePairSMTLibQueryFingerprint query @?=
+          fingerprintBefore
+        SMTLib.lengthSpinePairSMTLibQueryCheckBytes query @?= checkBefore
+        SMTLib.lengthSpinePairSMTLibQueryInputSymbols query @?= symbolsBefore
+        SMTLib.lengthSpinePairSMTLibQueryInputValueRequestBytes query @?=
+          valuesBefore
+    ]
+
 type AdversarialLengthApplicableDomainValidation =
   Either Evaluate.LengthApplicableDomainValidationError
     (Evaluate.LengthApplicableDomainValidation
@@ -9768,6 +10278,121 @@ assertValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDo
   Evaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainApplicableAssignmentCount
       receipt @?= applicable
   Evaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainBasis
+      receipt @?= basis
+
+type AdversarialLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidation =
+  Either Evaluate.LengthApplicableDomainValidationError
+    (Evaluate.LengthApplicableDomainValidation
+      (SemanticProblem.BehavioralEvidence
+        Length.FiniteListSpineLengthV1
+        Evaluate.ValidatedLengthCounterexample)
+      (SemanticProblem.BehavioralEvidence
+        Length.FiniteListSpineLengthV1
+        Evaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain))
+
+type AdversarialLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidation =
+  Either Evaluate.LengthSpinePairApplicableDomainValidationError
+    (Evaluate.LengthApplicableDomainValidation
+      (SemanticProblem.BehavioralEvidence
+        Length.FiniteBinaryProductSpineLengthsV1
+        Evaluate.ValidatedLengthSpinePairCounterexample)
+      (SemanticProblem.BehavioralEvidence
+        Length.FiniteBinaryProductSpineLengthsV1
+        Evaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain))
+
+expectLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInapplicability
+  :: AdversarialLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidation
+  -> IO Evaluate.LengthApplicableDomainInapplicability
+expectLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInapplicability
+    validation = case validation of
+  Left failure -> assertFailure
+    ("unexpected strict-relational-positive-affine-quotient-root-extrema domain rejection: "
+      ++ show failure) >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainInapplicable reason) -> pure reason
+  Right (Evaluate.LengthApplicableDomainCounterexample _) -> assertFailure
+    "an inapplicable strict-relational-positive-affine-quotient-root-extrema domain produced a counterexample"
+      >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainEstablished _) -> assertFailure
+    "an inapplicable strict-relational-positive-affine-quotient-root-extrema domain produced positive evidence"
+      >> error "unreachable"
+
+expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+  :: LengthProblem.CheckedLengthProblem
+      AdversarialIdentity AdversarialLocal
+  -> AdversarialLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidation
+  -> IO
+      Evaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+expectValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+    problem validation = case validation of
+  Left failure -> assertFailure
+    ("unexpected strict-relational-positive-affine-quotient-root-extrema domain rejection: "
+      ++ show failure) >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainInapplicable reason) -> assertFailure
+    ("the strict-relational-positive-affine-quotient-root-extrema domain was not bounded: "
+      ++ show reason) >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainCounterexample _) -> assertFailure
+    "the strict-relational-positive-affine-quotient-root-extrema domain contained a counterexample"
+      >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainEstablished evidence) -> expectRight
+    $ SemanticProblem.replayBehavioralEvidence
+        (LengthProblem.checkedLengthProblemBehavioralProblem problem) evidence
+
+expectValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+  :: LengthProblem.CheckedLengthSpinePairProblem
+      AdversarialIdentity AdversarialLocal
+  -> AdversarialLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidation
+  -> IO
+      Evaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+expectValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+    problem validation = case validation of
+  Left failure -> assertFailure
+    ("unexpected strict-relational-positive-affine-quotient-root-extrema product-domain rejection: "
+      ++ show failure) >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainInapplicable reason) -> assertFailure
+    ("the strict-relational-positive-affine-quotient-root-extrema product domain was not bounded: "
+      ++ show reason) >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainCounterexample _) -> assertFailure
+    "the strict-relational-positive-affine-quotient-root-extrema product domain contained a counterexample"
+      >> error "unreachable"
+  Right (Evaluate.LengthApplicableDomainEstablished evidence) -> expectRight
+    $ SemanticProblem.replayBehavioralEvidence
+        (LengthProblem.checkedLengthSpinePairProblemBehavioralProblem problem)
+        evidence
+
+assertValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+  :: Evaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+  -> [Natural]
+  -> Natural
+  -> Natural
+  -> Evaluate.LengthCounterexampleBasis
+  -> IO ()
+assertValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+    receipt maximums assignments applicable basis = do
+  Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInclusiveMaximums
+      receipt @?= maximums
+  Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentCount
+      receipt @?= assignments
+  Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableAssignmentCount
+      receipt @?= applicable
+  Evaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasis
+      receipt @?= basis
+
+assertValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+  :: Evaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+  -> [Natural]
+  -> Natural
+  -> Natural
+  -> Evaluate.LengthCounterexampleBasis
+  -> IO ()
+assertValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+    receipt maximums assignments applicable basis = do
+  Evaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInclusiveMaximums
+      receipt @?= maximums
+  Evaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentCount
+      receipt @?= assignments
+  Evaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableAssignmentCount
+      receipt @?= applicable
+  Evaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasis
       receipt @?= basis
 
 type AdversarialLengthInputBoxValidation =

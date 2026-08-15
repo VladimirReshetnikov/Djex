@@ -180,6 +180,8 @@ $(do
           , "ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt"
           , "ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainReceipt"
           , "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainReceipt"
+          , "ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt"
+          , "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt"
           , "CheckedLengthInterpretationPolicy"
           , "CheckedLengthSession"
           , "CheckedLengthProviderInventory"
@@ -487,6 +489,22 @@ forbiddenConstructionAttempts =
     )
   , ( "Strict-relational-positive-affine-quotient scalar and product receipts unexpectedly permit Coercible"
     , forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainCoercion
+        `seq` ()
+    )
+  , noGeneric @ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+      "ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain"
+  , ( "ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain constructor became public"
+    , forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainConstruction
+        `seq` ()
+    )
+  , noGeneric @ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+      "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain"
+  , ( "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain constructor became public"
+    , forbiddenValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainConstruction
+        `seq` ()
+    )
+  , ( "Strict-relational-positive-affine-quotient-root-extrema scalar and product receipts unexpectedly permit Coercible"
+    , forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainCoercion
         `seq` ()
     )
   , noGeneric @(CheckedLengthProviderSummary LengthVariableProbe)
@@ -1561,6 +1579,24 @@ forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainCo
   :: ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
   -> ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
 forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainCoercion =
+  coerce
+
+forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainConstruction
+  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainConstruction =
+  ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt
+    [] forbiddenValidatedLengthInputBoxConstruction
+
+forbiddenValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainConstruction
+  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+forbiddenValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainConstruction =
+  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt
+    [] forbiddenValidatedLengthSpinePairInputBoxConstruction
+
+forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainCoercion
+  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+  -> ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
+forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainCoercion =
   coerce
 
 forbiddenBoundedRawArtifactCoercion

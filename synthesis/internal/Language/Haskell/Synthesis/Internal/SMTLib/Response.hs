@@ -38,7 +38,10 @@ import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Internal.SMTLib.Lexical
-  ( isSMTLibWhitespaceByte )
+  ( isSMTLibBareDelimiterByte
+  , isSMTLibQuotedSymbolCharacterByte
+  , isSMTLibStringCharacterByte
+  , isSMTLibWhitespaceByte )
 
 -- | Raw independent limits for one response slice.  All fields are natural;
 -- zero is meaningful and rejects the first corresponding unit of work.
@@ -317,7 +320,7 @@ scanBareToken limits = go 0 []
 
   go !_ reversed !offset [] = Right (reverse reversed, offset, [])
   go !observed reversed !offset input@(byte : bytes)
-    | isBareDelimiter byte = Right (reverse reversed, offset, input)
+    | isSMTLibBareDelimiterByte byte = Right (reverse reversed, offset, input)
     | observed >= maximumBytes = Left $ SMTLibTokenByteLimitExceeded
         SMTLibBareToken maximumBytes (maximumBytes + 1)
     | otherwise = go (observed + 1) (byte : reversed)
@@ -347,7 +350,7 @@ scanString limits opening = go
             (doubleQuote : reversed) remaining
         _ -> Right
           (SMTLibString $ reverse reversed, offset + 1, bytes)
-    | not $ isStringCharacter byte =
+    | not $ isSMTLibStringCharacterByte byte =
         Left $ SMTLibInvalidStringByte offset byte
     | otherwise = do
         nextObserved <- consumeTokenByte
@@ -370,7 +373,7 @@ scanQuotedSymbol limits opening = go
   go !offset !observed reversed (byte : bytes)
     | byte == verticalBar = Right
         (SMTLibQuotedSymbol $ reverse reversed, offset + 1, bytes)
-    | byte == backslash || not (isQuotedSymbolCharacter byte) =
+    | byte == backslash || not (isSMTLibQuotedSymbolCharacterByte byte) =
         Left $ SMTLibInvalidQuotedSymbolByte offset byte
     | otherwise = do
         nextObserved <- consumeTokenByte
@@ -466,22 +469,6 @@ parseNumeralWithin maximumBits token = go 0 token
         then Left $ SMTLibNumeralBitLimitExceeded
           maximumBits (maximumBits + 1)
         else go next bytes
-
-isBareDelimiter :: Word8 -> Bool
-isBareDelimiter byte =
-  isSMTLibWhitespaceByte byte ||
-  byte == openParen || byte == closeParen ||
-  byte == semicolon || byte == doubleQuote || byte == verticalBar
-
-isStringCharacter :: Word8 -> Bool
-isStringCharacter byte = isSMTLibWhitespaceByte byte || isPrintable byte
-
-isQuotedSymbolCharacter :: Word8 -> Bool
-isQuotedSymbolCharacter byte =
-  isSMTLibWhitespaceByte byte || isPrintable byte
-
-isPrintable :: Word8 -> Bool
-isPrintable byte = (byte >= 32 && byte <= 126) || byte >= 128
 
 isDigit :: Word8 -> Bool
 isDigit byte = byte >= digitZero && byte <= digitNine

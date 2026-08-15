@@ -51,7 +51,10 @@ import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Internal.SMTLib.Lexical
-  ( isSMTLibWhitespaceByte )
+  ( isSMTLibBareDelimiterByte
+  , isSMTLibQuotedSymbolCharacterByte
+  , isSMTLibStringCharacterByte
+  , isSMTLibWhitespaceByte )
 
 -- | Lexical and charged-byte accounting policy bound by higher protocol and
 -- future live-session identities.  V2 adds the exact completion count without
@@ -364,7 +367,7 @@ processBareByte
   -> Word8
   -> Either SMTLibStreamFramingError StreamTransition
 processBareByte offset opening framer byte
-  | isBareDelimiter byte =
+  | isSMTLibBareDelimiterByte byte =
       if insideList framer
         then processNormalByte offset
           framer { streamMode = StreamNormal } byte
@@ -388,7 +391,7 @@ processStringByte offset opening framer byte = do
   if byte == doubleQuote
     then pure $ StreamContinue retained
       { streamMode = StreamStringAfterQuote opening }
-    else if isStringCharacter byte
+    else if isSMTLibStringCharacterByte byte
       then pure $ StreamContinue retained
     else Left $ SMTLibStreamInvalidStringByte offset byte
 
@@ -419,7 +422,7 @@ processQuotedSymbolByte offset opening framer byte = do
       then pure $ StreamContinue retained { streamMode = StreamNormal }
       else pure $ StreamContinue retained
         { streamMode = StreamQuotedSymbolNeedsWhitespace opening }
-    else if byte /= backslash && isQuotedSymbolCharacter byte
+    else if byte /= backslash && isSMTLibQuotedSymbolCharacterByte byte
       then pure $ StreamContinue retained
       else Left $ SMTLibStreamInvalidQuotedSymbolByte offset byte
 
@@ -563,25 +566,10 @@ hexadecimalDigit value
 insideList :: SMTLibStreamFramer -> Bool
 insideList framer = streamDepth framer /= 0
 
-isBareDelimiter :: Word8 -> Bool
-isBareDelimiter byte =
-  isSMTLibWhitespaceByte byte || byte == openParen || byte == closeParen ||
-  byte == semicolon || byte == doubleQuote || byte == verticalBar
-
 isPotentialBareByte :: Word8 -> Bool
 isPotentialBareByte byte = byte >= 33 && byte <= 126 &&
   not (byte == openParen || byte == closeParen || byte == semicolon ||
     byte == doubleQuote || byte == verticalBar)
-
-isStringCharacter :: Word8 -> Bool
-isStringCharacter byte = isSMTLibWhitespaceByte byte || isPrintable byte
-
-isQuotedSymbolCharacter :: Word8 -> Bool
-isQuotedSymbolCharacter byte =
-  isSMTLibWhitespaceByte byte || isPrintable byte
-
-isPrintable :: Word8 -> Bool
-isPrintable byte = (byte >= 32 && byte <= 126) || byte >= 128
 
 ascii :: String -> [Word8]
 ascii = map $ fromIntegral . fromEnum

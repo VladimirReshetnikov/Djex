@@ -178,9 +178,9 @@ and the
 | `Language.Haskell.Synthesis.Diagnostic` | Severity, stable code, checked source locations/spans, ordered context, and deterministic rendering. |
 | `Language.Haskell.Synthesis.Fingerprint` | Public inspection of opaque, nominal, collision-free canonical identities; construction and byte budgets remain package-private. |
 | `Language.Haskell.Synthesis.Semantic.Length` | Exact inventory-bound finite-spine contexts, normalized scalar and exact boxed binary-product contracts, source-bound assumed provider laws, and model-aware nominal fingerprints; an additive trust class retains exact nonempty constrained schemes under a dictionary-uniform conditional-law assumption, while every scalar byte stays exact. |
-| `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked scalar and binary-spine-product contracts, exact candidate problems, and finite Cartesian input boxes, with nominally separate counterexample and positive bounded receipts; detached conditional-provider evaluation still fails before argument inspection. |
+| `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked scalar and binary-spine-product contracts, exact candidate problems, finite Cartesian input boxes, and direct or positive-affine applicable domains, with nominally separate counterexample and positive bounded receipts; detached conditional-provider evaluation still fails before argument inspection. |
 | `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and nominally distinct scalar/product typed-candidate behavioral problems: session-owned provider and restricted resolver authority, contract resealing, residual rejection, rigid root/provider authorization, mixed-role opaque targets, exact scalar zero/step cases inside product fields, and provider-only consumption of independently authorized certificate carriers. |
-| `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation plus exact input-symbol, natural-input, origin, and finite-box replay for nominally distinct checked scalar and binary-product Length problems, without launching or trusting a solver. |
+| `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation plus exact input-symbol, natural-input, origin, finite-box, and direct or positive-affine applicable-domain replay for nominally distinct checked scalar and binary-product Length problems, without launching or trusting a solver. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` | Pure validated Z3 launch, resource, artifact, and response-decoder policy with a package-private complete identity and a byte-free digest-expectation presence classifier; it performs no IO or attestation. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` | Rank-N scoped capability-probed Z3 ownership for scalar and exact binary-product queries, with one shared 64-query lease budget, nominal byte-free failures and observations, heuristic status/strength/use, and domain-specific query-first replay gates. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` | Opaque query-specific association of bounded raw solver reports, with heuristic-only safe projections and exact problem-plus-query replay before payload access. |
@@ -460,6 +460,60 @@ receipt establishes source-language totality, validates concrete provider
 implementations, authorizes pruning, or upgrades `sat`, `unsat`, or `unknown`.
 See the
 [directly bounded applicable-domain report](../docs/reports/2026-08-14-directly-bounded-length-applicable-domain.md).
+
+The original applicable-domain surface above remains the exact literal-direct
+v1 path. It still ignores equality and arithmetic-derived bounds. The additive
+`validateLengthProblemPositiveAffineApplicableDomain` selects a separate,
+strictly more capable syntactic rule; its query-owned sibling is
+`validateLengthSMTLibQueryPositiveAffineApplicableDomain`.
+
+For one recognized atom, the bounded side must be a positive-affine expression
+built only from compact inputs, natural literals, `LengthSum`, and
+positive-literal `LengthScale`. If its normalized value is
+`c + sum (ai * xi)` and it is constrained by either `<= k` or `== k` for a
+literal `k`, every positive coefficient contributes the necessary inclusive
+maximum `(k - c) quot ai` when `c <= k`. The scanner takes the minimum of all
+bounds for an input and requires coverage for every nonnullary compact input.
+It does not mine a partial bound from an otherwise unsupported subtree.
+
+`LengthTruth False` and a recognized atom with `c > k` are exact syntactic
+contradictions. Normalization turns either orientation of a false constant-only
+equality such as `1 == 2` into that false truth value; a true constant-only
+equality is non-binding. For a nonnullary problem, contradiction wins over
+missing-bound inapplicability and selects an all-zero coverage box. The box
+still validates one assignment and therefore records total count one and
+applicable count zero on success. Nullary problems bypass extraction, derive
+maxima `[]`, and replay their ordinary singleton assignment; its applicable
+count is zero or one.
+
+All admission and behavioral work remains in the established box verifier.
+Width is rejected before the normalized precondition is scanned. Without a
+contradiction, the complete clause list is examined before the first missing
+compact input is returned as ordinary `LengthApplicableDomainInapplicable`.
+Derived maxima are checked left-to-right, the Cartesian cap is admitted before
+replay, and assignments retain last-input-fastest lexicographic order and
+indexed evaluation failures.
+
+Complete traversal produces the opaque
+`ValidatedLengthPositiveAffineApplicableDomain`; the product siblings are
+`validateLengthSpinePairProblemPositiveAffineApplicableDomain`,
+`validateLengthSpinePairSMTLibQueryPositiveAffineApplicableDomain`, and
+`ValidatedLengthSpinePairPositiveAffineApplicableDomain`. Both receipt families
+project the exact maxima, total/applicable counts, and model/provider basis.
+The query wrappers issue no solver command and release either authoritative arm
+only after exact behavioral-problem association.
+
+The two new receipt tags are
+`finite-list-spine-length/positive-affine-precondition-domain-establishment/v1`
+and
+`finite-binary-product-spine-lengths/positive-affine-precondition-domain-establishment/v1`.
+They are the first versions of a new nominal receipt family, not changes to the
+old direct-v1 tags. No existing semantic or runtime identity changes.
+Establishment is still model-relative, conditional on any retained assumed
+provider laws, and grants no source-language realization, totality,
+provider-implementation, solver-status, universal-proof, or pruning authority.
+See the
+[positive-affine applicable-domain report](../docs/reports/2026-08-14-positive-affine-length-applicable-domain.md).
 
 `FiniteBinaryProductSpineLengthsV1` adds a distinct checked domain for an exact
 boxed binary product whose two source-ordered fields are modeled finite

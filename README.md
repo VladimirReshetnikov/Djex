@@ -45,6 +45,7 @@ these tiers explicitly.
 - [Checked ground class-resolution foundation](#checked-ground-class-resolution-foundation)
 - [Finite list-spine length contracts](#finite-list-spine-length-contracts)
   - [Directly bounded applicable-domain validation](#directly-bounded-applicable-domain-validation)
+  - [Positive-affine applicable-domain validation](#positive-affine-applicable-domain-validation)
   - [Finite binary product spine lengths, offline and live SMT replay](#finite-binary-product-spine-lengths-offline-and-live-smt-replay)
 - [Building](#building)
 - [Unified command](#unified-command)
@@ -866,6 +867,96 @@ laws. Establishment is neither source-language totality, universal proof,
 provider-implementation validation, nor permission to prune candidates. See
 the
 [directly bounded applicable-domain report](docs/reports/2026-08-14-directly-bounded-length-applicable-domain.md).
+
+### Positive-affine applicable-domain validation
+
+The original applicable-domain functions above remain version-one,
+literal-direct entrances. In particular,
+`validateLengthProblemApplicableDomain` still treats equality and scaled or
+summed bounds as inapplicable. Callers which explicitly select the additive
+rule instead use `validateLengthProblemPositiveAffineApplicableDomain`, or the
+query-owned `validateLengthSMTLibQueryPositiveAffineApplicableDomain`.
+
+The new scanner still examines only the normalized precondition itself or its
+immediate top-level `LengthAll` clauses. It recognizes an expression of the
+form `c + a0*x0 + ... + an*xn`, built only from compact input variables,
+natural literals, `LengthSum`, and positive-literal `LengthScale`, when that
+expression is at most or equal to a literal `k`. Whenever `c <= k`, each
+positive coefficient yields the necessary bound
+`xi <= (k - c) quot ai`. Duplicate bounds are combined with `min`. Unsupported
+subtrees—including monus, minimum, maximum, quotient, modulo, conditionals,
+negation, and nonliteral comparisons—grant no partial bound.
+
+For example, suppose `checkedQuery` retains a candidate which satisfies its
+postcondition on the following applicable inputs:
+
+```haskell
+input0 = LengthVariable (LengthInput 0)
+input1 = LengthVariable (LengthInput 1)
+
+precondition = LengthAll
+  [ LengthAtMost
+      (LengthSum
+        [ LengthScale 2 input0
+        , LengthLiteral 3
+        ])
+      (LengthLiteral 9)
+  , LengthEqual input1 (LengthLiteral 2)
+  ]
+
+validation = validateLengthSMTLibQueryPositiveAffineApplicableDomain
+  defaultLengthEvaluationLimits
+  defaultLengthInputBoxLimits
+  checkedQuery
+
+case validation of
+  Right (LengthApplicableDomainEstablished receipt) ->
+    ( validatedLengthPositiveAffineApplicableDomainInclusiveMaximums receipt
+    , validatedLengthPositiveAffineApplicableDomainAssignmentCount receipt
+    , validatedLengthPositiveAffineApplicableDomainApplicableAssignmentCount
+        receipt
+    ) == ([3, 2], 12, 4)
+  _ -> False
+```
+
+The inequality gives `input0 <= (9 - 3) quot 2`, while equality gives
+`input1 <= 2`; the existing verifier therefore exhausts `[0..3] × [0..2]`.
+The total count is 12 and exactly the four assignments whose second component
+is 2 satisfy this precondition. A violation still returns the ordinary scalar
+counterexample instead of an establishment receipt.
+
+A normalized `LengthTruth False`, including either orientation of an unequal
+constant-only equality such as `1 == 2`, or a recognized affine atom whose
+constant already exceeds its literal ceiling, proves the conjunction
+contradictory. A true constant-only equality is non-binding. A
+nonnullary validator then uses the all-zero maxima as a finite coverage carrier,
+checks its one assignment, and records zero applicable assignments on success.
+Contradiction takes precedence over an otherwise missing input bound. A nullary
+problem does not need extraction: it retains maxima `[]`, validates the single
+assignment `[]`, and records whether that assignment met the precondition.
+
+The opaque positive receipts are
+`ValidatedLengthPositiveAffineApplicableDomain` and the nominal product
+`ValidatedLengthSpinePairPositiveAffineApplicableDomain`. Their projections
+expose derived maxima, total and applicable assignment counts, and the exact
+finite-spine/provider-law basis. Product callers use
+`validateLengthSpinePairProblemPositiveAffineApplicableDomain` or
+`validateLengthSpinePairSMTLibQueryPositiveAffineApplicableDomain`.
+
+The query wrappers emit no SMT-LIB and consume no solver status; they only
+replay either authoritative result against the exact problem retained by the
+query before releasing its receipt. Establishment remains relative to the
+checked total finite-spine model and any named assumed provider laws. It proves
+no source-language realization or totality, provider implementation behavior,
+universal behavior, or pruning authority, and it does not strengthen `sat`,
+`unsat`, or `unknown`.
+
+This checkpoint adds only the two positive-affine receipt tags. Every existing
+contract, inventory, session, candidate, encoding, problem, query, response,
+protocol, process, worker, run, and live-observation identity and canonical byte
+sequence is unchanged; the direct v1 receipts and functions are also unchanged.
+See the
+[positive-affine applicable-domain report](docs/reports/2026-08-14-positive-affine-length-applicable-domain.md).
 
 ### Finite binary product spine lengths, offline and live SMT replay
 

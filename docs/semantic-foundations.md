@@ -35,6 +35,53 @@ was reached.
 
 ---
 
+## Contents
+
+- [What this stratum is, in one screen](#what-this-stratum-is-in-one-screen)
+- [Canonical typed candidate identities](#canonical-typed-candidate-identities)
+  - [Graph fingerprints](#graph-fingerprints)
+  - [Certificate tables and atomic graph associations](#certificate-tables-and-atomic-graph-associations)
+  - [The typed-candidate certificate carrier and Exference wiring](#the-typed-candidate-certificate-carrier-and-exference-wiring)
+  - [Carrier-aware fingerprints and their limits](#carrier-aware-fingerprints-and-their-limits)
+  - [Checked type instantiation](#checked-type-instantiation)
+- [Checked ground class-resolution foundation](#checked-ground-class-resolution-foundation)
+- [Finite list-spine length contracts](#finite-list-spine-length-contracts)
+  - [Provider summaries as a trust boundary](#provider-summaries-as-a-trust-boundary)
+  - [Split contract, inventory, and session identities](#split-contract-inventory-and-session-identities)
+  - [Sealing typed-candidate problems and provider associations](#sealing-typed-candidate-problems-and-provider-associations)
+  - [The symbolic interpreter and target-argument roles](#the-symbolic-interpreter-and-target-argument-roles)
+  - [Exact-case and unified interpretation policies](#exact-case-and-unified-interpretation-policies)
+  - [Case semantics and fail-closed boundaries](#case-semantics-and-fail-closed-boundaries)
+  - [Checked problems and candidate keys](#checked-problems-and-candidate-keys)
+  - [Spine exposure and bounded concrete evaluation](#spine-exposure-and-bounded-concrete-evaluation)
+  - [Offline SMT-LIB queries, replay, and origin probes](#offline-smt-lib-queries-replay-and-origin-probes)
+  - [Query-owned bounded counterexample simplification](#query-owned-bounded-counterexample-simplification)
+  - [Bounded input-box validation](#bounded-input-box-validation)
+  - [Directly bounded applicable-domain validation](#directly-bounded-applicable-domain-validation)
+  - [Positive-affine applicable-domain validation](#positive-affine-applicable-domain-validation)
+  - [Relational positive-affine applicable-domain validation](#relational-positive-affine-applicable-domain-validation)
+  - [Strict relational positive-affine applicable-domain validation](#strict-relational-positive-affine-applicable-domain-validation)
+  - [Strict relational positive-affine quotient applicable-domain validation](#strict-relational-positive-affine-quotient-applicable-domain-validation)
+  - [Finite binary product spine lengths, offline and live SMT replay](#finite-binary-product-spine-lengths-offline-and-live-smt-replay)
+    - [Offline product SMT queries and replay](#offline-product-smt-queries-and-replay)
+    - [Live product queries](#live-product-queries)
+    - [Shared live usable-work budget](#shared-live-usable-work-budget)
+  - [Linear-arithmetic lowering and the SMT-LIB response stack](#linear-arithmetic-lowering-and-the-smt-lib-response-stack)
+    - [Shared typed SMT-LIB syntax and renderer](#shared-typed-smt-lib-syntax-and-renderer)
+    - [Raw-report observation association](#raw-report-observation-association)
+    - [Bounded response parsing](#bounded-response-parsing)
+    - [Lexical whitespace and incremental framing](#lexical-whitespace-and-incremental-framing)
+    - [Causal transaction cursor](#causal-transaction-cursor)
+  - [Live Z3 protocol, session, and process ownership](#live-z3-protocol-session-and-process-ownership)
+    - [Scoped live session ownership](#scoped-live-session-ownership)
+    - [Shared raw Z3 process owner](#shared-raw-z3-process-owner)
+    - [Descriptor-bound Z3 executable launch](#descriptor-bound-z3-executable-launch)
+    - [Derived Length process identity](#derived-length-process-identity)
+    - [Worker readiness and identity](#worker-readiness-and-identity)
+    - [Ordinal-bound live query runs](#ordinal-bound-live-query-runs)
+    - [The public live facade](#the-public-live-facade)
+    - [Shared execution profile and complete policy identity](#shared-execution-profile-and-complete-policy-identity)
+
 ## Canonical typed candidate identities
 
 Both checked engines now expose the same typed-result shape. Exference may
@@ -74,6 +121,8 @@ through `GHC.Generics.to`; deep evaluation uses an explicit `NFData`
 implementation instead. See the
 [Djinn typed-result seam report](reports/2026-08-11-djinn-typed-result-seam.md).
 
+### Graph fingerprints
+
 `Language.Haskell.Synthesis.TypedGenerated.Fingerprint` assigns an opaque,
 nominal structural identity to a shared typed `TermGraph`. Before encoding, it
 reconstructs the raw graph and reseals it with `sharedTypeStructure` under the
@@ -85,6 +134,8 @@ flexible-versus-rigid free-variable flavor, exact global names, normalized node
 and pattern types, term and shared-checkable pattern forms, application and visible-type
 witnesses, inferred-versus-specified type arguments, and case-branch order.
 There is deliberately no beta, eta, let, or behavioral quotienting.
+
+### Certificate tables and atomic graph associations
 
 Certificate allocation numbers are not identities. The package-private
 `Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate` foundation
@@ -116,6 +167,8 @@ therefore continues to reject every certificate-bearing visible application;
 the generic association foundation alone does not stamp an engine graph or
 alter public bytes. See the
 [atomic certificate association report](reports/2026-08-13-atomic-certificate-graph-associations.md).
+
+### The typed-candidate certificate carrier and Exference wiring
 
 The package-private `TypedCandidate` representation can now retain that opaque
 atom without changing its public four-parameter type or either public
@@ -156,6 +209,8 @@ provenance, behavioral, or fingerprint authority.
 The additive public failure vocabulary is documented in the
 [Exference certificate-wiring report](reports/2026-08-13-exference-certificate-association-wiring.md).
 
+### Carrier-aware fingerprints and their limits
+
 A new package-private carrier-aware fingerprint entrance can consume the
 opaque association atom directly. Empty atoms literally delegate to the
 existing v1 graph fingerprint, preserving its bytes, failures, and demand.
@@ -191,6 +246,8 @@ globals against an `Inventory`, prove that holes or residual obligations are
 absent, identify a complete behavioral problem, or provide behavioral evidence.
 A domain-owned session or problem sealer must establish those facts and wrap the
 canonical bytes in its own candidate identity.
+
+### Checked type instantiation
 
 `Language.Haskell.Synthesis.TypeInstantiation` supplies the missing checked
 association for an implicitly specialized typed global. It matches one exact
@@ -274,6 +331,8 @@ one binary payload/recursive constructor. Contracts and provider inventories
 sealed through that context remain opaque values available from the curated
 `Language.Haskell.Djex` facade.
 
+### Provider summaries as a trust boundary
+
 Provider summaries are an explicit trust boundary. A provider name must resolve
 in the retained source inventory, and the caller's claimed scheme must be
 alpha-equivalent to the closed scheme derived from that exact declaration. The
@@ -296,6 +355,8 @@ argument's list length; it does not require the normalized transfer to mention
 it. An unobserved role does not assert purity, totality, strictness, absence of
 effects or type reflection, or even that the provider will not evaluate the
 argument.
+
+### Split contract, inventory, and session identities
 
 The identities deliberately remain split. Contract and provider-inventory
 fingerprints include the exact checked spine model. A contract fingerprint also
@@ -330,6 +391,8 @@ implementations or the complete source inventory. The atomic session does, and
 prevents a context checked from one inventory from being combined with provider
 laws checked from another. It also reserves the modeled zero and step
 constructor names from provider laws, avoiding an ambiguous semantic global.
+
+### Sealing typed-candidate problems and provider associations
 
 `sealLengthTypedCandidateProblem` completes that association without accepting
 a detachable raw graph. It consumes an engine-owned `TypedCandidate`, uses the
@@ -385,6 +448,8 @@ with discharge-required or protected-chain diagnostics. This is why the
 authority is occurrence-specific rather than a dictionary table keyed only by
 provider name or constraint.
 
+### The symbolic interpreter and target-argument roles
+
 The first symbolic interpreter is deliberately narrow and lazy. The legacy
 sealers still treat every target argument as an observed list spine and retain
 their public interpretation behavior and signatures. The additive role-aware
@@ -421,6 +486,8 @@ prefix passed the boundary above.
 The stamped bare graph remains insufficient and is still rejected by the
 public graph fingerprint. Their case and constructor-pattern boundary stays
 fail-closed except through the separately selected exact-case policy.
+
+### Exact-case and unified interpretation policies
 
 The additive `sealExactSpineCaseLengthSession` and
 `sealExactSpineCaseLengthTypedCandidateProblem` entrances opt into one narrow
@@ -460,6 +527,8 @@ Session construction also retains productive role traversal; because the exact
 vector is now stored, honest deep `NFData` evaluation additionally reaches its
 later role payloads.
 
+### Case semantics and fail-closed boundaries
+
 For symbolic scrutinee length `n`, analysis produces
 `if n == 0 then zeroResult else stepResult`; the recursive field receives
 `n monus 1`. The element payload is an opaque, non-inspectable token. Both
@@ -481,6 +550,8 @@ path: a real Exference search over a declared unary spine retains the exact
 zero/step rebuild graph, Length freshly re-seals it against the session
 inventory, and a canonical QF_LIA query accepts model input only after
 independent replay recovers the candidate result.
+
+### Checked problems and candidate keys
 
 A successful `CheckedLengthProblem` carries its compact observed-spine input
 arity,
@@ -511,6 +582,8 @@ it, and even successful behavioral replay is not dictionary evidence. See the
 [associated provider-certificate Length report](reports/2026-08-13-length-associated-provider-certificates.md)
 and the
 [ground constraint-discharge report](reports/2026-08-13-length-ground-constraint-discharge.md).
+
+### Spine exposure and bounded concrete evaluation
 
 On the legacy path, every contract argument and result must expose the
 context's outer modeled spine; their element types remain opaque and may
@@ -549,6 +622,8 @@ language with bottoms or effects. This is not universal behavioral evidence or
 permission to prune other candidates. The Z3 execution facade can rank or
 challenge candidates, but raw solver output is not trusted evidence without
 this independent replay.
+
+### Offline SMT-LIB queries, replay, and origin probes
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib` is a pure Z3-facing
 translation boundary that seals an opaque nominal QF_LIA query from one exact
@@ -635,6 +710,8 @@ no SMT-LIB and changes no problem, query, protocol, process, or live-run
 identity.  Scalar and binary-product receipts and schema tags remain nominally
 distinct.  See the
 [bounded counterexample simplification report](reports/2026-08-14-bounded-length-counterexample-simplification.md).
+
+### Bounded input-box validation
 
 `validateLengthProblemInputBox` adds solver-independent positive bounded
 validation without turning a solver report into evidence. The caller supplies
@@ -1194,6 +1271,8 @@ counterexample or `ValidatedLengthSpinePairInputBox` positive evidence after
 complete traversal. Provider-relative receipts retain the same explicit
 assumed-law basis.
 
+#### Offline product SMT queries and replay
+
 `sealLengthSpinePairSMTLibQuery` now adds the pure offline Z3-facing stage. It
 seals an opaque `LengthSpinePairSMTLibQuery` from the exact checked product
 problem, emits bounded canonical `QF_LIA` check bytes, and requests only the
@@ -1282,6 +1361,8 @@ product-domain evidence. Callers that already hold source-ordered naturals use
 entrances are query-owned specializations of the same exact association
 boundary. A box success is positive only for that finite box and recorded
 provider basis. A replay miss is only `Nothing`.
+
+#### Live product queries
 
 `runLengthSpinePairSMTLibLiveQuery` now supplies the nominal live product path.
 It uses the same capability-probed, serial worker and zero-based ordinal space
@@ -1441,6 +1522,8 @@ independent domain replay can reveal optional counterexample evidence. See the
 The v1 limitation and v2 runtime-scope contract are detailed in the
 [dynamically scoped live usable-work deadline report](reports/2026-08-15-dynamically-scoped-live-usable-work-deadline.md).
 
+### Linear-arithmetic lowering and the SMT-LIB response stack
+
 SMT-LIB's QF_LIA logic excludes the built-in `div` and `mod` operators. Djex
 therefore lowers every remaining normalized quotient or modulo node to one
 shared private Euclidean witness shape. For a positive literal divisor `k` and
@@ -1451,6 +1534,8 @@ in normalized expression preorder, declarations precede assertions, and no
 witness enters `get-value`; only original input symbols cross the model
 boundary. Both canonical rendering and structural fingerprinting cover the
 declarations and constraints.
+
+#### Shared typed SMT-LIB syntax and renderer
 
 The package-private `Language.Haskell.Synthesis.Internal.SMTLib.QFLIA` module
 now owns the reusable typed integer, Boolean, and command syntax together with
@@ -1492,6 +1577,8 @@ Exference's later checker-owned retention of that one closed nonempty graph
 shape is recorded in the
 [exact zero/step Exference graph report](reports/2026-08-13-exference-exact-zero-step-graphs.md).
 
+#### Raw-report observation association
+
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` closes the
 remaining raw-report identity gap. Its opaque association binds bounded
 status-specific artifacts to both the solver-neutral behavioral problem and
@@ -1508,6 +1595,8 @@ executor must separately bind the exact Z3 build and capabilities, invocation,
 protocol session and sentinel state, parser schema, artifact policy, deadlines,
 cancellation, and resource limits. In particular, `unknown` must not be cached
 solely by query identity.
+
+#### Bounded response parsing
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response` adds the pure
 response side without starting a process. It first retains one complete
@@ -1533,6 +1622,8 @@ markers, and fail-closed phase sequencing. The package-private live Session now
 owns worker identity, deadlines, recovery, query-specific execution, and raw
 observation association. Only independent Length replay can create
 model-relative counterexample evidence.
+
+#### Lexical whitespace and incremental framing
 
 `Language.Haskell.Synthesis.Internal.SMTLib.Lexical` is the schema-free leaf
 owner of the exact SMT-LIB whitespace set and its canonical fingerprint order:
@@ -1565,6 +1656,8 @@ top-level string needs one-byte lookahead to distinguish a doubled quote, the
 live Z3 capability probe must also establish that `echo` emits and flushes a
 trailing byte (normally its newline) after the marker's closing quote.
 
+#### Causal transaction cursor
+
 `Language.Haskell.Synthesis.Internal.SMTLib.Causal.Stream` is the shared pure
 transaction layer above that single-frame framer. One opaque policy owns the
 configured frame limits and cumulative maximum. Its zero-start cursor keeps
@@ -1586,6 +1679,8 @@ separate schema-free `Internal.SMTLib.Causal.StdoutChunk` leaf admits each
 nonempty strict Process read before enqueue. Successful generic transport
 reads therefore cannot represent zero progress; FIFO origin, configured byte
 bounds, and process/deadline association remain concrete transport laws.
+
+### Live Z3 protocol, session, and process ownership
 
 `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` composes
 that cumulative cursor with an exact query and the artifact/response policy
@@ -1610,6 +1705,8 @@ lifetime, enforce writes, capability-probe the process, and bind the actual
 transcript into a separate run identity; the Session described below now owns
 those obligations.
 
+#### Scoped live session ownership
+
 `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session` now
 provides that package-private live ownership checkpoint. It samples separate
 secret barrier and public workspace material, launches the exact configured
@@ -1619,6 +1716,8 @@ through a retained no-follow directory descriptor and matched by device,
 inode, owner, mode, and canonical path; cleanup never traverses contents and
 attempts only identity-checked empty-directory removal. The portable Windows
 fallback explicitly claims only repeated pathname observations.
+
+#### Shared raw Z3 process owner
 
 The shared package-private
 `Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process` owner bounds a
@@ -1690,6 +1789,8 @@ The mechanism, rollback boundary, compatibility identities, and adversarial
 replacement characterization are recorded in the
 [descriptor-bound Z3 main-image launch report](reports/2026-08-15-descriptor-bound-z3-main-image-launch.md).
 
+#### Derived Length process identity
+
 The raw process owner consumes only the admitted shared Z3 launch profile and
 retains a schema-free ordered observation. The existing Length
 `...Session.Process` facade maps the generic sanitized failures exhaustively
@@ -1705,6 +1806,8 @@ The extraction is detailed in the
 [shared raw Z3 process report](reports/2026-08-12-shared-z3-process-runtime.md),
 and the facade ownership cleanup in the
 [derived Length process identity report](reports/2026-08-12-length-process-derived-identity.md).
+
+#### Worker readiness and identity
 
 Readiness requires four causally separated writes and fresh positional echo
 barriers. The probe checks startup print suppression; reset/replay with an
@@ -1723,6 +1826,8 @@ key. The reversible key still contains the original policy bytes; this narrows
 structured authority without claiming byte scrubbing.
 The ownership and threat-model details are recorded in the
 [2026-08-11 scoped worker lease report](reports/2026-08-11-z3-worker-lease.md).
+
+#### Ordinal-bound live query runs
 
 The same Session now owns ordinal-bound live queries through the generic private
 `Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver`; its Length-specific
@@ -1765,6 +1870,8 @@ authority, not byte scrubbing.
 The exact design and threat boundary are recorded in the
 [2026-08-11 ordinal-bound query-run report](reports/2026-08-11-z3-query-runs.md).
 
+#### The public live facade
+
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` is the deliberately
 narrow public edge over that owner. It lends an opaque worker only through a
 rank-N scope. Scalar and product observations are nominally distinct; each
@@ -1795,6 +1902,8 @@ by one shared absolute monotonic deadline without claiming an asynchronous
 hard deadline for arbitrary callback IO. The exact coverage and finalizer
 distinction are described in
 [shared live usable-work budget](#shared-live-usable-work-budget).
+
+#### Shared execution profile and complete policy identity
 
 `Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution` now owns the shared
 pure launch profile below behavioral domains: bounded absolute executable path,

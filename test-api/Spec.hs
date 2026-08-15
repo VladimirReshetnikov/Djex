@@ -262,6 +262,27 @@ projectionSignatures =
   (LengthEvaluate.validatedLengthApplicableDomainBasis
     :: LengthEvaluate.ValidatedLengthApplicableDomain
     -> LengthEvaluate.LengthCounterexampleBasis) `seq`
+  (LengthEvaluate.validatedLengthCounterexampleSimplificationOriginalInputs
+    :: LengthEvaluate.ValidatedLengthCounterexampleSimplification
+    -> [Natural]) `seq`
+  (LengthEvaluate.validatedLengthCounterexampleSimplificationInspectedAssignmentCount
+    :: LengthEvaluate.ValidatedLengthCounterexampleSimplification
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthCounterexampleSimplificationCounterexample
+    :: LengthEvaluate.ValidatedLengthCounterexampleSimplification
+    -> LengthEvaluate.ValidatedLengthCounterexample) `seq`
+  (LengthEvaluate.validatedLengthCounterexampleSimplificationInputs
+    :: LengthEvaluate.ValidatedLengthCounterexampleSimplification
+    -> [Natural]) `seq`
+  (LengthEvaluate.validatedLengthCounterexampleSimplificationResult
+    :: LengthEvaluate.ValidatedLengthCounterexampleSimplification
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthCounterexampleSimplificationBasis
+    :: LengthEvaluate.ValidatedLengthCounterexampleSimplification
+    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
+  (LengthEvaluate.validatedLengthCounterexampleSimplificationChanged
+    :: LengthEvaluate.ValidatedLengthCounterexampleSimplification
+    -> Bool) `seq`
   (LengthEvaluate.validatedLengthSpinePairApplicableDomainInclusiveMaximums
     :: LengthEvaluate.ValidatedLengthSpinePairApplicableDomain
     -> [Natural]) `seq`
@@ -274,6 +295,27 @@ projectionSignatures =
   (LengthEvaluate.validatedLengthSpinePairApplicableDomainBasis
     :: LengthEvaluate.ValidatedLengthSpinePairApplicableDomain
     -> LengthEvaluate.LengthCounterexampleBasis) `seq`
+  (LengthEvaluate.validatedLengthSpinePairCounterexampleSimplificationOriginalInputs
+    :: LengthEvaluate.ValidatedLengthSpinePairCounterexampleSimplification
+    -> [Natural]) `seq`
+  (LengthEvaluate.validatedLengthSpinePairCounterexampleSimplificationInspectedAssignmentCount
+    :: LengthEvaluate.ValidatedLengthSpinePairCounterexampleSimplification
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthSpinePairCounterexampleSimplificationCounterexample
+    :: LengthEvaluate.ValidatedLengthSpinePairCounterexampleSimplification
+    -> LengthEvaluate.ValidatedLengthSpinePairCounterexample) `seq`
+  (LengthEvaluate.validatedLengthSpinePairCounterexampleSimplificationInputs
+    :: LengthEvaluate.ValidatedLengthSpinePairCounterexampleSimplification
+    -> [Natural]) `seq`
+  (LengthEvaluate.validatedLengthSpinePairCounterexampleSimplificationResult
+    :: LengthEvaluate.ValidatedLengthSpinePairCounterexampleSimplification
+    -> Length.LengthSpinePair Natural) `seq`
+  (LengthEvaluate.validatedLengthSpinePairCounterexampleSimplificationBasis
+    :: LengthEvaluate.ValidatedLengthSpinePairCounterexampleSimplification
+    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
+  (LengthEvaluate.validatedLengthSpinePairCounterexampleSimplificationChanged
+    :: LengthEvaluate.ValidatedLengthSpinePairCounterexampleSimplification
+    -> Bool) `seq`
   ()
 
 main :: IO ()
@@ -343,6 +385,7 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "forbiddenBehavioralEvidenceDomainCoercion"
                       , "forbiddenBehavioralEvidenceReceiptCoercion"
                       , "forbiddenBoundedRawArtifactCoercion"
+                      , "forbiddenValidatedLengthCounterexampleSimplificationCoercion"
                       , "forbiddenValidatedLengthApplicableDomainCoercion"
                       , "forbiddenCheckedLengthContractCoercion"
                       , "forbiddenCheckedLengthSpinePairContractCoercion"
@@ -425,6 +468,8 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "mkBehavioralEvidence"
                       , "ValidatedLengthCounterexampleReceipt"
                       , "ValidatedLengthSpinePairCounterexampleReceipt"
+                      , "ValidatedLengthCounterexampleSimplificationReceipt"
+                      , "ValidatedLengthSpinePairCounterexampleSimplificationReceipt"
                       , "ValidatedLengthInputBoxReceipt"
                       , "ValidatedLengthSpinePairInputBoxReceipt"
                       , "ValidatedLengthApplicableDomainReceipt"

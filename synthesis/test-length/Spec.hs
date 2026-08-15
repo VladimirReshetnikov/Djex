@@ -112,6 +112,7 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , spinePairSMTLibTests
   , associatedCertificateCandidateTests
   , problemReplayTests
+  , counterexampleSimplificationTests
   , inputBoxValidationTests
   , applicableDomainValidationTests
   , SMTLibQFLIASpec.smtLibQFLIATests
@@ -5001,6 +5002,487 @@ problemReplayTests = testGroup "exact candidate problem replay"
             (evaluationLimitsWith 1 1) scaledResult
             $ Evaluate.LengthProblemAssignment [1]
   ]
+
+counterexampleSimplificationTests :: TestTree
+counterexampleSimplificationTests = testGroup
+  "query-owned bounded counterexample simplification"
+  [ testCase
+      "strictly reduce scalar and product anchors with exact inspected counts" $
+      do
+        Evaluate.lengthCounterexampleSimplificationSchemaTag @?=
+          asciiBytes
+            "finite-list-spine-length/bounded-counterexample-simplification/v1"
+        Evaluate.lengthSpinePairCounterexampleSimplificationSchemaTag @?=
+          asciiBytes
+            "finite-binary-product-spine-lengths/bounded-counterexample-simplification/v1"
+        assertBool "product simplification reused the scalar receipt schema" $
+          Evaluate.lengthSpinePairCounterexampleSimplificationSchemaTag /=
+            Evaluate.lengthCounterexampleSimplificationSchemaTag
+
+        let first = Length.LengthVariable $ Length.LengthInput 0
+            result = Length.LengthVariable Length.LengthResult
+            scalarSource = contractWith (Length.LengthTruth True)
+              $ Length.LengthEqual result first
+        scalarProblem <- adversarialBinaryConstantZeroProblem scalarSource
+        scalarAnchor <- validatedLengthCounterexampleAt scalarProblem [2, 2]
+        (scalarEvidence, scalarReceipt) <- expectLengthSimplification
+          scalarProblem
+          $ Evaluate.simplifyLengthProblemCounterexample
+              Evaluate.defaultLengthEvaluationLimits
+              Evaluate.defaultLengthInputBoxLimits
+              scalarProblem scalarAnchor
+        -- In the [0..2] x [0..2] box, [1,0] has zero-based mixed-radix
+        -- ordinal three because the final source input varies fastest.
+        assertValidatedLengthCounterexampleSimplification
+          scalarReceipt [2, 2] 4 [1, 0] 0
+          Evaluate.ProviderIndependentFiniteSpineModel
+        scalarFresh <- validatedLengthCounterexampleAt scalarProblem [1, 0]
+        Evaluate.validatedLengthCounterexampleSimplificationCounterexample
+            scalarReceipt @?= scalarFresh
+        force scalarReceipt `seq` pure ()
+
+        let pairInput = Length.LengthVariable
+              $ Length.LengthSpinePairInput 0
+            pairSource = spinePairContractWith (Length.LengthTruth True)
+              $ Length.LengthAll
+                  [ Length.LengthEqual
+                      (pairResultVariable Length.LengthSpinePairFirst) pairInput
+                  , Length.LengthEqual
+                      (pairResultVariable Length.LengthSpinePairSecond) pairInput
+                  ]
+        pairProblem <- adversarialInputAndZeroSpinePairProblem pairSource
+        pairAnchor <- validatedLengthSpinePairCounterexampleAt pairProblem [3]
+        (pairEvidence, pairReceipt) <- expectLengthSpinePairSimplification
+          pairProblem
+          $ Evaluate.simplifyLengthSpinePairProblemCounterexample
+              Evaluate.defaultLengthEvaluationLimits
+              Evaluate.defaultLengthInputBoxLimits
+              pairProblem pairAnchor
+        assertValidatedLengthSpinePairCounterexampleSimplification
+          pairReceipt [3] 2 [1] (Length.LengthSpinePair 1 0)
+          Evaluate.ProviderIndependentFiniteSpineModel
+        pairFresh <- validatedLengthSpinePairCounterexampleAt pairProblem [1]
+        Evaluate.validatedLengthSpinePairCounterexampleSimplificationCounterexample
+            pairReceipt @?= pairFresh
+        force pairReceipt `seq` pure ()
+
+        let scalarAsPair = unsafeCoerce scalarEvidence
+              :: SemanticProblem.BehavioralEvidence
+                  Length.FiniteBinaryProductSpineLengthsV1
+                  Evaluate.ValidatedLengthSpinePairCounterexampleSimplification
+            pairAsScalar = unsafeCoerce pairEvidence
+              :: SemanticProblem.BehavioralEvidence
+                  Length.FiniteListSpineLengthV1
+                  Evaluate.ValidatedLengthCounterexampleSimplification
+        assertLeft SemanticProblem.ReplayDomainMismatch
+          $ SemanticProblem.replayBehavioralEvidence
+              (LengthProblem.checkedLengthSpinePairProblemBehavioralProblem
+                pairProblem)
+              scalarAsPair
+        assertLeft SemanticProblem.ReplayDomainMismatch
+          $ SemanticProblem.replayBehavioralEvidence
+              (LengthProblem.checkedLengthProblemBehavioralProblem
+                scalarProblem)
+              pairAsScalar
+  , testCase "return no receipt for unchanged and nullary anchors" $ do
+      scalar <- adversarialConstantZeroProblem identityLengthContract
+      scalarAnchor <- validatedLengthCounterexampleAt scalar [1]
+      expectNoCounterexample
+        $ Evaluate.simplifyLengthProblemCounterexample
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits scalar scalarAnchor
+
+      let result = Length.LengthVariable Length.LengthResult
+          nullarySource = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result $ Length.LengthLiteral 1
+      nullary <- adversarialZeroInputProblem nullarySource
+      nullaryAnchor <- validatedLengthCounterexampleAt nullary []
+      expectNoCounterexample
+        $ Evaluate.simplifyLengthProblemCounterexample
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits nullary nullaryAnchor
+
+      let pairInput = Length.LengthVariable
+            $ Length.LengthSpinePairInput 0
+          pairSource = spinePairContractWith (Length.LengthTruth True)
+            $ Length.LengthEqual
+                (pairResultVariable Length.LengthSpinePairSecond) pairInput
+      pair <- adversarialInputAndZeroSpinePairProblem pairSource
+      pairAnchor <- validatedLengthSpinePairCounterexampleAt pair [1]
+      expectNoCounterexample
+        $ Evaluate.simplifyLengthSpinePairProblemCounterexample
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits pair pairAnchor
+
+      let nullaryPairSource = spinePairContractWith (Length.LengthTruth True)
+            $ Length.LengthEqual
+                (pairResultVariable Length.LengthSpinePairFirst)
+                (Length.LengthLiteral 1)
+      nullaryPair <- adversarialNullaryZeroSpinePairProblem nullaryPairSource
+      nullaryPairAnchor <- validatedLengthSpinePairCounterexampleAt
+        nullaryPair []
+      expectNoCounterexample
+        $ Evaluate.simplifyLengthSpinePairProblemCounterexample
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits
+            nullaryPair nullaryPairAnchor
+  , testCase
+      "treat width and Cartesian-product admission misses as unavailable" $ do
+      binary <- adversarialBinaryConstantZeroProblem identityLengthContract
+      binaryAnchor <- validatedLengthCounterexampleAt binary [1, 1]
+      narrow <- inputBoxLimits 1 16
+      widthResult <- evaluateWithin
+        $ Evaluate.simplifyLengthProblemCounterexample
+            (error "width admission demanded scalar evaluation limits")
+            narrow binary binaryAnchor
+      expectNoCounterexample widthResult
+
+      let pairInput = Length.LengthVariable
+            $ Length.LengthSpinePairInput 0
+          pairSource = spinePairContractWith (Length.LengthTruth True)
+            $ Length.LengthEqual
+                (pairResultVariable Length.LengthSpinePairSecond) pairInput
+      pair <- adversarialInputAndZeroSpinePairProblem pairSource
+      pairAnchor <- validatedLengthSpinePairCounterexampleAt pair [2]
+      twoAssignments <- inputBoxLimits 1 2
+      expectNoCounterexample
+        $ Evaluate.simplifyLengthSpinePairProblemCounterexample
+            Evaluate.defaultLengthEvaluationLimits
+            twoAssignments pair pairAnchor
+  , testCase
+      "reject stale scalar anchor shape, values, and replay states in order" $ do
+      unary <- adversarialConstantZeroProblem identityLengthContract
+      unaryAnchor <- validatedLengthCounterexampleAt unary [1]
+      binary <- adversarialBinaryConstantZeroProblem identityLengthContract
+      shapeResult <- evaluateWithin
+        $ Evaluate.simplifyLengthProblemCounterexample
+            (error "anchor arity demanded evaluation limits")
+            Evaluate.defaultLengthInputBoxLimits binary unaryAnchor
+      assertLeft
+        (Evaluate.LengthCounterexampleSimplificationInputBoxValidationRejected
+          $ Evaluate.LengthInputBoxBoundsArityMismatch 2 1)
+        shapeResult
+
+      largeAnchor <- validatedLengthCounterexampleAt unary [4]
+      assertLeft
+        (Evaluate.LengthCounterexampleSimplificationInputBoxValidationRejected
+          $ Evaluate.LengthInputBoxMaximumValueRejected 0
+          $ Evaluate.LengthEvaluationValueBitLimitExceeded
+              (Evaluate.LengthProblemInputValue 0) 2 3)
+        $ Evaluate.simplifyLengthProblemCounterexample
+            (evaluationLimitsWith 2 8)
+            Evaluate.defaultLengthInputBoxLimits unary largeAnchor
+
+      safe <- adversarialConstantZeroProblem trivialLengthContract
+      assertLeft
+        Evaluate.LengthCounterexampleSimplificationAnchorNotCounterexample
+        $ Evaluate.simplifyLengthProblemCounterexample
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits safe unaryAnchor
+
+      let result = Length.LengthVariable Length.LengthResult
+          overflowingSource = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result $ Length.LengthLiteral 4
+      overflowing <- adversarialConstantZeroProblem overflowingSource
+      assertLeft
+        (Evaluate.LengthCounterexampleSimplificationAnchorEvaluationRejected
+          $ Evaluate.LengthEvaluationValueBitLimitExceeded
+              Evaluate.LengthIntermediateValue 2 3)
+        $ Evaluate.simplifyLengthProblemCounterexample
+            (evaluationLimitsWith 2 2)
+            Evaluate.defaultLengthInputBoxLimits overflowing unaryAnchor
+  , testCase
+      "reject stale product anchor shape, values, and replay states in order" $
+      do
+        let pairInput = Length.LengthVariable
+              $ Length.LengthSpinePairInput 0
+            violatingSource = spinePairContractWith (Length.LengthTruth True)
+              $ Length.LengthEqual
+                  (pairResultVariable Length.LengthSpinePairSecond) pairInput
+        unary <- adversarialInputAndZeroSpinePairProblem violatingSource
+        unaryAnchor <- validatedLengthSpinePairCounterexampleAt unary [1]
+        nullary <- adversarialNullaryZeroSpinePairProblem trivialSpinePairContract
+        shapeResult <- evaluateWithin
+          $ Evaluate.simplifyLengthSpinePairProblemCounterexample
+              (error "pair anchor arity demanded evaluation limits")
+              Evaluate.defaultLengthInputBoxLimits nullary unaryAnchor
+        assertLeft
+          (Evaluate.LengthSpinePairCounterexampleSimplificationInputBoxValidationRejected
+            $ Evaluate.LengthSpinePairInputBoxBoundsArityMismatch 0 1)
+          shapeResult
+
+        largeAnchor <- validatedLengthSpinePairCounterexampleAt unary [4]
+        assertLeft
+          (Evaluate.LengthSpinePairCounterexampleSimplificationInputBoxValidationRejected
+            $ Evaluate.LengthSpinePairInputBoxMaximumValueRejected 0
+            $ Evaluate.LengthSpinePairEvaluationValueBitLimitExceeded
+                (Evaluate.LengthSpinePairProblemInputValue 0) 2 3)
+          $ Evaluate.simplifyLengthSpinePairProblemCounterexample
+              (evaluationLimitsWith 2 8)
+              Evaluate.defaultLengthInputBoxLimits unary largeAnchor
+
+        safe <- adversarialInputAndZeroSpinePairProblem trivialSpinePairContract
+        assertLeft
+          Evaluate.LengthSpinePairCounterexampleSimplificationAnchorNotCounterexample
+          $ Evaluate.simplifyLengthSpinePairProblemCounterexample
+              Evaluate.defaultLengthEvaluationLimits
+              Evaluate.defaultLengthInputBoxLimits safe unaryAnchor
+
+        let overflowingSource = spinePairContractWith (Length.LengthTruth True)
+              $ Length.LengthEqual
+                  (pairResultVariable Length.LengthSpinePairSecond)
+                  (Length.LengthLiteral 4)
+        overflowing <- adversarialInputAndZeroSpinePairProblem overflowingSource
+        assertLeft
+          (Evaluate.LengthSpinePairCounterexampleSimplificationAnchorEvaluationRejected
+            $ Evaluate.LengthSpinePairEvaluationValueBitLimitExceeded
+                Evaluate.LengthSpinePairIntermediateValue 2 3)
+          $ Evaluate.simplifyLengthSpinePairProblemCounterexample
+              (evaluationLimitsWith 2 2)
+              Evaluate.defaultLengthInputBoxLimits overflowing unaryAnchor
+  , testCase "fail closed on an earlier admitted scalar or product trial" $ do
+      let scalarInput = Length.LengthVariable $ Length.LengthInput 0
+          scalarResult = Length.LengthVariable Length.LengthResult
+          scalarIsZero = Length.LengthEqual scalarInput
+            $ Length.LengthLiteral 0
+          scalarSource = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual scalarResult
+            $ Length.LengthIf scalarIsZero
+                (Length.LengthLiteral 2)
+                (Length.LengthLiteral 1)
+      scalar <- adversarialConstantZeroProblem scalarSource
+      scalarAnchor <- validatedLengthCounterexampleAt scalar [2]
+      let scalarOverflow = Evaluate.LengthEvaluationValueBitLimitExceeded
+            Evaluate.LengthIntermediateValue 1 2
+      assertLeft
+        (Evaluate.LengthCounterexampleSimplificationInputBoxValidationRejected
+          $ Evaluate.LengthInputBoxAssignmentEvaluationRejected
+              0 scalarOverflow)
+        $ Evaluate.simplifyLengthProblemCounterexample
+            (evaluationLimitsWith 2 1)
+            Evaluate.defaultLengthInputBoxLimits scalar scalarAnchor
+
+      let pairInput = Length.LengthVariable
+            $ Length.LengthSpinePairInput 0
+          pairIsZero = Length.LengthEqual pairInput $ Length.LengthLiteral 0
+          pairSource = spinePairContractWith (Length.LengthTruth True)
+            $ Length.LengthEqual
+                (pairResultVariable Length.LengthSpinePairSecond)
+            $ Length.LengthIf pairIsZero
+                (Length.LengthLiteral 2)
+                (Length.LengthLiteral 1)
+      pair <- adversarialInputAndZeroSpinePairProblem pairSource
+      pairAnchor <- validatedLengthSpinePairCounterexampleAt pair [2]
+      let pairOverflow =
+            Evaluate.LengthSpinePairEvaluationValueBitLimitExceeded
+              Evaluate.LengthSpinePairIntermediateValue 1 2
+      assertLeft
+        (Evaluate.LengthSpinePairCounterexampleSimplificationInputBoxValidationRejected
+          $ Evaluate.LengthSpinePairInputBoxAssignmentEvaluationRejected
+              0 pairOverflow)
+        $ Evaluate.simplifyLengthSpinePairProblemCounterexample
+            (evaluationLimitsWith 2 1)
+            Evaluate.defaultLengthInputBoxLimits pair pairAnchor
+  , testCase "retain the scalar anchor's assumed-provider basis" $ do
+      let input = Length.LengthVariable $ Length.LengthInput 0
+          result = Length.LengthVariable Length.LengthResult
+          source = contractWith (Length.LengthTruth True)
+            $ Length.LengthEqual result input
+      problem <- adversarialConstantProviderProblem 7 source
+      anchor <- validatedLengthCounterexampleAt problem [3]
+      (_, receipt) <- expectLengthSimplification problem
+        $ Evaluate.simplifyLengthProblemCounterexample
+            Evaluate.defaultLengthEvaluationLimits
+            Evaluate.defaultLengthInputBoxLimits problem anchor
+      providerName <- expectName "Fixture.problemReplayConstant"
+      assertValidatedLengthCounterexampleSimplification
+        receipt [3] 1 [0] 7
+        $ Evaluate.FiniteSpineModelUnderAssumedProviderLaws [providerName]
+  , testCase
+      "associate scalar and product query wrappers without changing identity" $
+      do
+        let scalarFirst = Length.LengthVariable $ Length.LengthInput 0
+            scalarResult = Length.LengthVariable Length.LengthResult
+            scalarSource = contractWith (Length.LengthTruth True)
+              $ Length.LengthEqual scalarResult scalarFirst
+        scalarProblem <- adversarialBinaryConstantZeroProblem scalarSource
+        scalarAnchor <- validatedLengthCounterexampleAt scalarProblem [2, 2]
+        (_, directScalar) <- expectLengthSimplification scalarProblem
+          $ Evaluate.simplifyLengthProblemCounterexample
+              Evaluate.defaultLengthEvaluationLimits
+              Evaluate.defaultLengthInputBoxLimits
+              scalarProblem scalarAnchor
+        scalarQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+          SMTLib.defaultLengthSMTLibLimits scalarProblem
+        let scalarFingerprint = SMTLib.lengthSMTLibQueryFingerprint scalarQuery
+            scalarCheck = SMTLib.lengthSMTLibQueryCheckBytes scalarQuery
+            scalarSymbols = SMTLib.lengthSMTLibQueryInputSymbols scalarQuery
+            scalarRequest =
+              SMTLib.lengthSMTLibQueryInputValueRequestBytes scalarQuery
+        queryScalar <- expectCounterexample
+          $ SMTLib.simplifyLengthSMTLibQueryCounterexample
+              Evaluate.defaultLengthEvaluationLimits
+              Evaluate.defaultLengthInputBoxLimits scalarQuery scalarAnchor
+        queryScalar @?= directScalar
+        SMTLib.lengthSMTLibQueryFingerprint scalarQuery @?= scalarFingerprint
+        SMTLib.lengthSMTLibQueryCheckBytes scalarQuery @?= scalarCheck
+        SMTLib.lengthSMTLibQueryInputSymbols scalarQuery @?= scalarSymbols
+        SMTLib.lengthSMTLibQueryInputValueRequestBytes scalarQuery @?=
+          scalarRequest
+
+        let pairInput = Length.LengthVariable
+              $ Length.LengthSpinePairInput 0
+            pairSource = spinePairContractWith (Length.LengthTruth True)
+              $ Length.LengthEqual
+                  (pairResultVariable Length.LengthSpinePairSecond) pairInput
+        pairProblem <- adversarialInputAndZeroSpinePairProblem pairSource
+        pairAnchor <- validatedLengthSpinePairCounterexampleAt pairProblem [3]
+        (_, directPair) <- expectLengthSpinePairSimplification pairProblem
+          $ Evaluate.simplifyLengthSpinePairProblemCounterexample
+              Evaluate.defaultLengthEvaluationLimits
+              Evaluate.defaultLengthInputBoxLimits pairProblem pairAnchor
+        pairQuery <- expectRight $ SMTLib.sealLengthSpinePairSMTLibQuery
+          SMTLib.defaultLengthSMTLibLimits pairProblem
+        let pairFingerprint =
+              SMTLib.lengthSpinePairSMTLibQueryFingerprint pairQuery
+            pairCheck = SMTLib.lengthSpinePairSMTLibQueryCheckBytes pairQuery
+            pairSymbols = SMTLib.lengthSpinePairSMTLibQueryInputSymbols pairQuery
+            pairRequest =
+              SMTLib.lengthSpinePairSMTLibQueryInputValueRequestBytes pairQuery
+        queryPair <- expectCounterexample
+          $ SMTLib.simplifyLengthSpinePairSMTLibQueryCounterexample
+              Evaluate.defaultLengthEvaluationLimits
+              Evaluate.defaultLengthInputBoxLimits pairQuery pairAnchor
+        queryPair @?= directPair
+        SMTLib.lengthSpinePairSMTLibQueryFingerprint pairQuery @?=
+          pairFingerprint
+        SMTLib.lengthSpinePairSMTLibQueryCheckBytes pairQuery @?= pairCheck
+        SMTLib.lengthSpinePairSMTLibQueryInputSymbols pairQuery @?= pairSymbols
+        SMTLib.lengthSpinePairSMTLibQueryInputValueRequestBytes pairQuery @?=
+          pairRequest
+
+        let scalarValueFailure =
+              Evaluate.LengthCounterexampleSimplificationInputBoxValidationRejected
+                $ Evaluate.LengthInputBoxMaximumValueRejected 0
+                $ Evaluate.LengthEvaluationValueBitLimitExceeded
+                    (Evaluate.LengthProblemInputValue 0) 1 2
+        assertLeft
+          (SMTLib.LengthSMTLibCounterexampleSimplificationRejected
+            scalarValueFailure)
+          $ SMTLib.simplifyLengthSMTLibQueryCounterexample
+              (evaluationLimitsWith 1 8)
+              Evaluate.defaultLengthInputBoxLimits scalarQuery scalarAnchor
+  ]
+
+validatedLengthCounterexampleAt
+  :: LengthProblem.CheckedLengthProblem
+      AdversarialIdentity AdversarialLocal
+  -> [Natural]
+  -> IO Evaluate.ValidatedLengthCounterexample
+validatedLengthCounterexampleAt problem inputs = do
+  evidence <- expectCounterexample
+    $ Evaluate.validateLengthProblemCounterexample
+        Evaluate.defaultLengthEvaluationLimits problem
+        $ Evaluate.LengthProblemAssignment inputs
+  expectRight $ SemanticProblem.replayBehavioralEvidence
+    (LengthProblem.checkedLengthProblemBehavioralProblem problem) evidence
+
+validatedLengthSpinePairCounterexampleAt
+  :: LengthProblem.CheckedLengthSpinePairProblem
+      AdversarialIdentity AdversarialLocal
+  -> [Natural]
+  -> IO Evaluate.ValidatedLengthSpinePairCounterexample
+validatedLengthSpinePairCounterexampleAt problem inputs = do
+  evidence <- expectCounterexample
+    $ Evaluate.validateLengthSpinePairProblemCounterexample
+        Evaluate.defaultLengthEvaluationLimits problem
+        $ Evaluate.LengthProblemAssignment inputs
+  expectRight $ SemanticProblem.replayBehavioralEvidence
+    (LengthProblem.checkedLengthSpinePairProblemBehavioralProblem problem)
+    evidence
+
+expectLengthSimplification
+  :: LengthProblem.CheckedLengthProblem
+      AdversarialIdentity AdversarialLocal
+  -> Either Evaluate.LengthCounterexampleSimplificationError
+      (Maybe
+        (SemanticProblem.BehavioralEvidence
+          Length.FiniteListSpineLengthV1
+          Evaluate.ValidatedLengthCounterexampleSimplification))
+  -> IO
+      ( SemanticProblem.BehavioralEvidence
+          Length.FiniteListSpineLengthV1
+          Evaluate.ValidatedLengthCounterexampleSimplification
+      , Evaluate.ValidatedLengthCounterexampleSimplification
+      )
+expectLengthSimplification problem simplification = do
+  evidence <- expectCounterexample simplification
+  receipt <- expectRight $ SemanticProblem.replayBehavioralEvidence
+    (LengthProblem.checkedLengthProblemBehavioralProblem problem) evidence
+  pure (evidence, receipt)
+
+expectLengthSpinePairSimplification
+  :: LengthProblem.CheckedLengthSpinePairProblem
+      AdversarialIdentity AdversarialLocal
+  -> Either Evaluate.LengthSpinePairCounterexampleSimplificationError
+      (Maybe
+        (SemanticProblem.BehavioralEvidence
+          Length.FiniteBinaryProductSpineLengthsV1
+          Evaluate.ValidatedLengthSpinePairCounterexampleSimplification))
+  -> IO
+      ( SemanticProblem.BehavioralEvidence
+          Length.FiniteBinaryProductSpineLengthsV1
+          Evaluate.ValidatedLengthSpinePairCounterexampleSimplification
+      , Evaluate.ValidatedLengthSpinePairCounterexampleSimplification
+      )
+expectLengthSpinePairSimplification problem simplification = do
+  evidence <- expectCounterexample simplification
+  receipt <- expectRight $ SemanticProblem.replayBehavioralEvidence
+    (LengthProblem.checkedLengthSpinePairProblemBehavioralProblem problem)
+    evidence
+  pure (evidence, receipt)
+
+assertValidatedLengthCounterexampleSimplification
+  :: Evaluate.ValidatedLengthCounterexampleSimplification
+  -> [Natural]
+  -> Natural
+  -> [Natural]
+  -> Natural
+  -> Evaluate.LengthCounterexampleBasis
+  -> IO ()
+assertValidatedLengthCounterexampleSimplification receipt original inspected
+    inputs result basis = do
+  Evaluate.validatedLengthCounterexampleSimplificationOriginalInputs receipt @?=
+    original
+  Evaluate.validatedLengthCounterexampleSimplificationInspectedAssignmentCount
+      receipt @?= inspected
+  Evaluate.validatedLengthCounterexampleSimplificationInputs receipt @?= inputs
+  Evaluate.validatedLengthCounterexampleSimplificationResult receipt @?= result
+  Evaluate.validatedLengthCounterexampleSimplificationBasis receipt @?= basis
+  Evaluate.validatedLengthCounterexampleSimplificationChanged receipt @?= True
+
+assertValidatedLengthSpinePairCounterexampleSimplification
+  :: Evaluate.ValidatedLengthSpinePairCounterexampleSimplification
+  -> [Natural]
+  -> Natural
+  -> [Natural]
+  -> Length.LengthSpinePair Natural
+  -> Evaluate.LengthCounterexampleBasis
+  -> IO ()
+assertValidatedLengthSpinePairCounterexampleSimplification receipt original
+    inspected inputs result basis = do
+  Evaluate.validatedLengthSpinePairCounterexampleSimplificationOriginalInputs
+      receipt @?= original
+  Evaluate.validatedLengthSpinePairCounterexampleSimplificationInspectedAssignmentCount
+      receipt @?= inspected
+  Evaluate.validatedLengthSpinePairCounterexampleSimplificationInputs receipt @?=
+    inputs
+  Evaluate.validatedLengthSpinePairCounterexampleSimplificationResult receipt @?=
+    result
+  Evaluate.validatedLengthSpinePairCounterexampleSimplificationBasis receipt @?=
+    basis
+  Evaluate.validatedLengthSpinePairCounterexampleSimplificationChanged receipt @?=
+    True
 
 inputBoxValidationTests :: TestTree
 inputBoxValidationTests = testGroup "bounded exhaustive input-box validation"

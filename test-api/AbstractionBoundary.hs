@@ -163,6 +163,8 @@ $(do
           , "CheckedLengthSpinePairProblem"
           , "LengthSpinePairSMTLibQuery"
           , "ValidatedLengthSpinePairCounterexampleReceipt"
+          , "ValidatedLengthCounterexampleSimplificationReceipt"
+          , "ValidatedLengthSpinePairCounterexampleSimplificationReceipt"
           , "ValidatedLengthSpinePairInputBoxReceipt"
           , "ValidatedLengthApplicableDomainReceipt"
           , "ValidatedLengthSpinePairApplicableDomainReceipt"
@@ -373,6 +375,20 @@ forbiddenConstructionAttempts =
       "ValidatedLengthSpinePairCounterexample"
   , ( "ValidatedLengthSpinePairCounterexample constructor became public"
     , forbiddenValidatedLengthSpinePairCounterexampleConstruction `seq` ()
+    )
+  , noGeneric @ValidatedLengthCounterexampleSimplification
+      "ValidatedLengthCounterexampleSimplification"
+  , ( "ValidatedLengthCounterexampleSimplification constructor became public"
+    , forbiddenValidatedLengthCounterexampleSimplificationConstruction `seq` ()
+    )
+  , noGeneric @ValidatedLengthSpinePairCounterexampleSimplification
+      "ValidatedLengthSpinePairCounterexampleSimplification"
+  , ( "ValidatedLengthSpinePairCounterexampleSimplification constructor became public"
+    , forbiddenValidatedLengthSpinePairCounterexampleSimplificationConstruction
+        `seq` ()
+    )
+  , ( "Counterexample-simplification scalar and product receipts unexpectedly permit Coercible"
+    , forbiddenValidatedLengthCounterexampleSimplificationCoercion `seq` ()
     )
   , noGeneric @ValidatedLengthInputBox "ValidatedLengthInputBox"
   , ( "ValidatedLengthInputBox constructor became public"
@@ -1316,6 +1332,23 @@ forbiddenValidatedLengthSpinePairCounterexampleConstruction
 forbiddenValidatedLengthSpinePairCounterexampleConstruction =
   ValidatedLengthSpinePairCounterexampleReceipt
     [] (LengthSpinePair 0 0) ProviderIndependentFiniteSpineModel
+
+forbiddenValidatedLengthCounterexampleSimplificationConstruction
+  :: ValidatedLengthCounterexampleSimplification
+forbiddenValidatedLengthCounterexampleSimplificationConstruction =
+  ValidatedLengthCounterexampleSimplificationReceipt
+    [] [] 0 forbiddenValidatedLengthCounterexampleConstruction
+
+forbiddenValidatedLengthSpinePairCounterexampleSimplificationConstruction
+  :: ValidatedLengthSpinePairCounterexampleSimplification
+forbiddenValidatedLengthSpinePairCounterexampleSimplificationConstruction =
+  ValidatedLengthSpinePairCounterexampleSimplificationReceipt
+    [] [] 0 forbiddenValidatedLengthSpinePairCounterexampleConstruction
+
+forbiddenValidatedLengthCounterexampleSimplificationCoercion
+  :: ValidatedLengthCounterexampleSimplification
+  -> ValidatedLengthSpinePairCounterexampleSimplification
+forbiddenValidatedLengthCounterexampleSimplificationCoercion = coerce
 
 forbiddenValidatedLengthInputBoxConstruction :: ValidatedLengthInputBox
 forbiddenValidatedLengthInputBoxConstruction =

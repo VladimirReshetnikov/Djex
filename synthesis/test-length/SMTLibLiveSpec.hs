@@ -17,7 +17,7 @@ module SMTLibLiveSpec
   , withLiveQueryWorkerLimits
   ) where
 
-import Control.Concurrent (forkIO, myThreadId, throwTo)
+import Control.Concurrent (forkIO, myThreadId, threadDelay, throwTo)
 import Control.Concurrent.MVar
   ( newEmptyMVar
   , putMVar
@@ -276,7 +276,7 @@ assertDescriptorBoundSealedImage = withFakeZ3Mode "healthy"
           retiredBytes <- BS.readFile retired
           current @?= invalidImage
           retiredBytes @?= invalidImage
-          events <- readFakeZ3Events executable
+          events <- readFakeZ3EventsAfterStart executable
           start <- expectFakeZ3Event "start" events
           assertSingleFakeField "mode" "healthy" start
           assertSingleFakeField "executable-basename"
@@ -1796,6 +1796,26 @@ data FakeZ3Event = FakeZ3Event
 readFakeZ3Events :: FilePath -> IO [FakeZ3Event]
 readFakeZ3Events executable =
   expectRight . parseFakeZ3Events =<< BS.readFile (fakeZ3EventPath executable)
+
+-- The exec-status pipe closes when the kernel has installed the staged image,
+-- before the newly scheduled child necessarily reaches its first user-space
+-- write.  Under aggregate-suite load, wait for the complete start record
+-- instead of treating that scheduler gap as a missing launch event.
+readFakeZ3EventsAfterStart :: FilePath -> IO [FakeZ3Event]
+readFakeZ3EventsAfterStart executable = do
+  observed <- timeout 3000000 waitForStart
+  case observed of
+    Just events -> pure events
+    Nothing -> readFakeZ3Events executable
+ where
+  waitForStart = do
+    attempted <- tryIOError $ BS.readFile $ fakeZ3EventPath executable
+    case attempted of
+      Right bytes -> case parseFakeZ3Events bytes of
+        Right events
+          | any ((== "start") . fakeZ3EventTag) events -> pure events
+        _ -> threadDelay 5000 >> waitForStart
+      Left _ -> threadDelay 5000 >> waitForStart
 
 parseFakeZ3Events :: ByteString -> Either String [FakeZ3Event]
 parseFakeZ3Events bytes

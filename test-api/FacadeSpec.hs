@@ -1563,6 +1563,14 @@ facadeTests = testGroup "public Djex facade"
                 LengthSMTLibExecutionConfig
           effectiveIDDescriptorBoundExecutionConfigSealer =
             mkLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessExecutionConfig
+          execveCheckDescriptorBoundExecutionConfigSealer
+            :: LengthSMTLibExecutionLimits
+            -> LengthSMTLibExecutionConfigSource
+            -> Either
+                LengthSMTLibExecutionConfigError
+                LengthSMTLibExecutionConfig
+          execveCheckDescriptorBoundExecutionConfigSealer =
+            mkLengthSMTLibDescriptorBoundExecveCheckExecutableAccessExecutionConfig
           executionLaunchStrategyProjection
             :: LengthSMTLibExecutionConfig
             -> LengthSMTLibExecutableLaunchStrategy
@@ -1669,6 +1677,7 @@ facadeTests = testGroup "public Djex facade"
         executionConfigSealer `seq`
         descriptorBoundExecutionConfigSealer `seq`
         effectiveIDDescriptorBoundExecutionConfigSealer `seq`
+        execveCheckDescriptorBoundExecutionConfigSealer `seq`
         executionLaunchStrategyProjection `seq`
         executionDigestExpectationProjection `seq`
         executionTimeoutProjection `seq`
@@ -1705,6 +1714,7 @@ facadeTests = testGroup "public Djex facade"
         (rnf :: LengthSMTLibApplicableDomainValidationError -> ()) `seq`
         (rnf :: LengthSMTLibExecutableDigestExpectation -> ()) `seq`
         (rnf :: LengthSMTLibExecutableLaunchStrategy -> ()) `seq`
+        (rnf :: LengthSMTLibExecutionConfig -> ()) `seq`
         pure ()
       length interpretationPolicySources @?= 5
       lengthProblemAssignmentInputs (LengthProblemAssignment [1, 2]) @?=
@@ -1718,7 +1728,14 @@ facadeTests = testGroup "public Djex facade"
       [ LengthSMTLibPathSnapshotThenDirectSpawn
         , LengthSMTLibDescriptorBoundExecutableLaunch
         , LengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunch
+        , LengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunch
         ] @?= [minBound .. maxBound]
+      map fromEnum
+        [ LengthSMTLibPathSnapshotThenDirectSpawn
+        , LengthSMTLibDescriptorBoundExecutableLaunch
+        , LengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunch
+        , LengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunch
+        ] @?= [0, 1, 2, 3]
       lengthInputBoxValidationSchemaTag @?=
         map (fromIntegral . fromEnum)
           ("finite-list-spine-length/bounded-input-box-validation/v1" :: String)

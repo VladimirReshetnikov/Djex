@@ -1467,6 +1467,14 @@ facadeTests = testGroup "public Djex facade"
                 LengthSMTLibExecutionConfig
           descriptorBoundExecutionConfigSealer =
             mkLengthSMTLibDescriptorBoundExecutionConfig
+          effectiveIDDescriptorBoundExecutionConfigSealer
+            :: LengthSMTLibExecutionLimits
+            -> LengthSMTLibExecutionConfigSource
+            -> Either
+                LengthSMTLibExecutionConfigError
+                LengthSMTLibExecutionConfig
+          effectiveIDDescriptorBoundExecutionConfigSealer =
+            mkLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessExecutionConfig
           executionLaunchStrategyProjection
             :: LengthSMTLibExecutionConfig
             -> LengthSMTLibExecutableLaunchStrategy
@@ -1560,6 +1568,7 @@ facadeTests = testGroup "public Djex facade"
         responseIntegerBitLimitProjection `seq` executionLimitsBuilder `seq`
         executionConfigSealer `seq`
         descriptorBoundExecutionConfigSealer `seq`
+        effectiveIDDescriptorBoundExecutionConfigSealer `seq`
         executionLaunchStrategyProjection `seq`
         executionDigestExpectationProjection `seq`
         executionTimeoutProjection `seq`
@@ -1602,6 +1611,7 @@ facadeTests = testGroup "public Djex facade"
       lengthInputBoxAssignmentLimit defaultLengthInputBoxLimits @?= 65536
       [ LengthSMTLibPathSnapshotThenDirectSpawn
         , LengthSMTLibDescriptorBoundExecutableLaunch
+        , LengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunch
         ] @?= [minBound .. maxBound]
       lengthInputBoxValidationSchemaTag @?=
         map (fromIntegral . fromEnum)

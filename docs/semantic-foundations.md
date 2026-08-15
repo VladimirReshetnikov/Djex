@@ -66,6 +66,7 @@ was reached.
   - [Root-monus applicable-domain validation](#root-monus-applicable-domain-validation)
   - [Boolean finite-union applicable-domain validation](#boolean-finite-union-applicable-domain-validation)
   - [Atomic-branching Boolean finite-union applicable-domain validation](#atomic-branching-boolean-finite-union-applicable-domain-validation)
+  - [Recursive piecewise-affine Boolean finite-union applicable-domain validation](#recursive-piecewise-affine-boolean-finite-union-applicable-domain-validation)
   - [Finite binary product spine lengths, offline and live SMT replay](#finite-binary-product-spine-lengths-offline-and-live-smt-replay)
     - [Offline product SMT queries and replay](#offline-product-smt-queries-and-replay)
     - [Live product queries](#live-product-queries)
@@ -1714,6 +1715,148 @@ remains bounded replay authority only for the checked finite-spine model and
 retained provider-law basis, not source-language realization, provider
 validation, universal proof, solver authority, or pruning authority. See the
 [atomic-branching applicable-domain report](reports/2026-08-15-atomic-branching-length-applicable-domain.md).
+
+### Recursive piecewise-affine Boolean finite-union applicable-domain validation
+
+The recursive piecewise-affine successor preserves the atomic-branching
+validator above literally, then opens an exact recursive case split only when
+that predecessor returns the singleton ignored coverage for a relational atom
+which still contains a minimum, maximum, or natural monus. Its scalar problem
+and query entrances are
+`validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain`
+and
+`validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain`.
+The nominal product entrances insert `SpinePair` after `Length`. All four keep
+the existing evaluation, input-box, and Boolean finite-union limit arguments.
+This is an experimental current-tree specification, not a stability or
+backward-compatibility promise. The public names, tags, errors, and exact bytes
+may be revised before a stable release; predecessor parity below describes the
+current regression boundary only.
+
+Each recursively admitted expression is a finite ordered stream of guarded
+signed-affine cases. Variables, natural literals, sums, and retained
+positive-literal scales have their ordinary affine meaning. A minimum,
+maximum, or monus takes the Cartesian product of the cases of its left child
+and then its right child, and appends these exact selector choices:
+
+```text
+min(L,R)  -> [L<=R; value L] | [R+1<=L; value R]
+max(L,R)  -> [R<=L; value L] | [L+1<=R; value R]
+L monus R -> [L<=R; value 0] | [R+1<=L; value L-R]
+```
+
+Ties therefore choose the first normalized child. A sum expands its terms
+left to right; an outer expression retains all left-descendant guards before
+right-descendant guards and appends its own selector guard last. Once both
+relation operands have expanded, positive at-most appends `L<=R`, strict
+at-most appends `R+1<=L`, and equality appends `L<=R` then `R<=L`. This order
+is public through generated-branch admission, per-branch cap failures, closure
+work, and the eventual canonical box antichain.
+
+The selected monus-positive value may have negative constants or
+coefficients, so signed affine summaries are private proof intermediates.
+Before closure, every inequality moves its negative terms to the opposite
+side and becomes one ordinary positive-sided
+`RelationalPositiveAffineRule`. The existing natural closure remains the sole
+bound authority; no signed bound store, lower-bound solver, or unchecked
+formula syntax is introduced.
+
+The fallback accepts extrema and monus recursively on either relation side,
+including nested, embedded, both-root, mixed extrema/monus, and normalized
+effectively n-ary trees. Admission remains all-or-nothing: one unsupported
+descendant rejects the complete recursive interpretation of that atom and
+leaves the predecessor's ignored coverage in place. The recursive expression
+grammar does not descend through quotient, modulo, or `LengthIf`, and it does
+not admit an out-of-range variable or a retained zero scale. This adds no
+recursive quotient, modulo, conditional, result-reference, or general
+nonlinear authority. Any atom already handled by the atomic predecessor,
+including its exact root laws and all delegated predecessor leaves,
+retains that exact singleton or alternative stream and is never
+reinterpreted.
+
+Raw admission uses the same lazy Cartesian stream as the predecessor, now
+including every recursive selector choice in every atomic alternative. It
+counts complete formula-DNF branches before complement removal,
+deduplication, absorption, guard contradiction, rule collection, or box
+cleanup. After that cap succeeds, the original formula-literal sets are
+canonicalized exactly as before and only then re-expanded in set order into
+recursive coverage alternatives. Public branch indices name that expanded
+canonical stream. Contradictory selector cases still consume raw admission
+work, and all bounded cap failures retain the existing `limit+1` observation.
+
+No new limit, default, or error type is added. The successor reuses
+`LengthBooleanFiniteUnionLimits` with defaults 256 generated branches, 64
+rules per expanded branch, 4096 closure inspections per branch, 256 retained
+boxes, and 262144 raw assignment visits. Scalar and product direct validation
+reuse `LengthBooleanFiniteUnionApplicableDomainValidationError` and
+`LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError`; their
+SMT-LIB wrappers likewise reuse the existing nominal query error types.
+Precedence remains input width; raw generated branches; per-expanded-branch
+rules; per-branch closure; first globally missing input; retained boxes;
+maximum values; raw visits; unique assignments; global lexicographic replay
+of the original formula; receipt; and final query association.
+
+The frozen default 64/65 witness uses 31 clauses: one embedded recursive
+maximum equality contributes three rules, two atomic maximum equalities
+contribute three each, and 28 root-maximum upper relations contribute two
+each. Its eight raw alternatives stay below the generated-branch default, so
+the existing rule-cap error observes 65.
+
+For compact inputs `x` and `y`, the normalized precondition
+
+```text
+max(x,y) <= 3 monus min(x,y), x <= 3, y <= 3
+```
+
+retains the exact recursive antichain `[[2,3],[3,2]]`: two boxes, 24 visits,
+15 unique assignments, and ten applicable assignments. The atomic predecessor
+ignores the recursive atom and therefore retains enclosing box `[[3,3]]`, one
+box, 16 visits, 16 unique assignments, and the same ten applicable assignments
+only because original-formula replay filters the box. The successor derives the
+smaller exact cover without manufacturing a componentwise hull.
+The recursive atom has eight raw alternatives; a cap of seven observes eight.
+
+For a product fixture, let
+
+```text
+u = min(x,y) + (x monus y)
+v = min(x,y) + (y monus x)
+```
+
+and use `max(u,v) <= 2`, `x <= 3`, and `y <= 3`. Each of `u` and `v` has four
+recursive cases and the outer maximum has two, so the raw atom contributes 32
+alternatives. A generated-branch limit of 31 observes 32; 32 admits it even
+though contradictory cases later disappear. Recursive validation retains
+`[[2,2]]`, one box, nine visits, nine unique assignments, and nine applicable
+assignments. The atomic predecessor retains `[[3,3]]`, one box, 16 visits, 16
+unique assignments, and nine applicable assignments.
+Both canonical fixtures retain `ProviderIndependentFiniteSpineModel`.
+
+Successful scalar and product traversals return the fresh opaque six-field
+receipts
+`ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain`
+and
+`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain`.
+Their correspondingly prefixed projections expose canonical inclusive boxes,
+box count, visits, unique assignments, applicable assignments, and the exact
+finite-spine/provider-law basis. Their exact tags are:
+
+```text
+finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-recursive-extrema-monus-piecewise-affine-branching-precondition-domain-establishment/v1
+finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-recursive-extrema-monus-piecewise-affine-branching-precondition-domain-establishment/v1
+```
+
+These nominal receipts embed their own tags and result fields; they do not
+wrap or coerce predecessor evidence. Recursive cases, guards, signed affine
+summaries, proof rules, operational limits, boxes, and replay sets enter
+neither checked problem nor query identity. Query validation emits no command
+and consumes no solver observation. Establishment remains bounded replay
+authority only for the exact checked finite-spine model and retained
+provider-law basis. It does not establish source-language realization,
+termination, totality, or effects; validate provider implementations; make
+solver status authoritative; prove behavior outside the checked model; or
+authorize pruning. See the
+[recursive piecewise-affine applicable-domain report](reports/2026-08-15-recursive-piecewise-affine-length-applicable-domain.md).
 
 ### Finite binary product spine lengths, offline and live SMT replay
 

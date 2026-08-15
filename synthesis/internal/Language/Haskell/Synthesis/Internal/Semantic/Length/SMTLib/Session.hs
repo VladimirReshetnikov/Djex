@@ -48,9 +48,13 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session
   , LengthSMTLibSessionCleanupStatus (..)
   , LengthSMTLibSessionError (..)
   , LengthSMTLibSessionScopeError (..)
+  , LengthSMTLibSessionUsableWorkDeadline
+  , withLengthSMTLibSessionUsableWorkDeadline
+  , withLengthSMTLibSessionUsableWorkDeadlineForBudgetedSession
   , LengthSMTLibReadyWorker
   , LengthSMTLibReadyWorkerIdentitySubject
   , withLengthSMTLibReadyWorker
+  , withLengthSMTLibReadyWorkerUnderDeadline
   , lengthSMTLibReadyWorkerIdentityFingerprint
   , lengthSMTLibReadyWorkerIdentityFingerprintField
   , lengthSMTLibReadyWorkerExecutableSHA256
@@ -63,6 +67,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session
   , lengthSMTLibReadyWorkerWorkingDirectory
   , lengthSMTLibQueryBarrierSchemaTag
   , lengthSMTLibQueryRunSchemaTag
+  , lengthSMTLibBudgetedQueryRunSchemaTag
   , LengthSMTLibQueryRunFailure (..)
   , LengthSMTLibQueryRunError (..)
   , LengthSMTLibQueryRun
@@ -80,6 +85,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session
   , lengthSMTLibQueryRunStderrStart
   , lengthSMTLibQueryRunStderrEnd
   , lengthSpinePairSMTLibQueryRunSchemaTag
+  , lengthSpinePairSMTLibBudgetedQueryRunSchemaTag
   , LengthSpinePairSMTLibQueryRunFailure (..)
   , LengthSpinePairSMTLibQueryRunError (..)
   , LengthSpinePairSMTLibQueryRun
@@ -256,6 +262,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Proces
   , LengthSMTLibProcessLimits
   , LengthSMTLibProcessPhase (..)
   , cancelLengthSMTLibProcess
+  , checkLengthSMTLibProcessDeadline
   , checkLengthSMTLibProcessReady
   , closeLengthSMTLibProcess
   , lengthSMTLibExecutableSnapshotByteCount
@@ -271,6 +278,8 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Proces
   , lengthSMTLibProcessStdoutByteLimit
   , lengthSMTLibProcessSnapshot
   , newLengthSMTLibProcessCancellation
+  , compareLengthSMTLibProcessDeadline
+  , minimumLengthSMTLibProcessDeadline
   , openLengthSMTLibProcess
   , runBeforeLengthSMTLibProcessDeadline
   , waitLengthSMTLibProcessControl
@@ -360,12 +369,29 @@ lengthSMTLibQueryRunSchemaTag :: [Word8]
 lengthSMTLibQueryRunSchemaTag = ascii
   "djex-length-z3-capability-probed-pre-spawn-pathname-snapshot-worker-query-run/v1"
 
+-- | Additive envelope for a scalar run whose effective absolute deadline is
+-- selected under one shared usable-work deadline.  The legacy schema remains
+-- byte-exact for workers which retain the historical fresh-per-query policy.
+lengthSMTLibBudgetedQueryRunSchemaTag :: [Word8]
+lengthSMTLibBudgetedQueryRunSchemaTag = ascii $ concat
+  [ "djex-length-z3-capability-probed-pre-spawn-pathname-snapshot-worker-"
+  , "query-run/shared-usable-work-deadline/v1"
+  ]
+
 -- | Nominal product-domain run envelope.  The shared ready-worker capability
 -- is embedded only as an exact QF_LIA/input-value transport observation; it
 -- contributes no scalar behavioral authority to this product run.
 lengthSpinePairSMTLibQueryRunSchemaTag :: [Word8]
 lengthSpinePairSMTLibQueryRunSchemaTag = ascii
   "djex-length-spine-pair-z3-capability-probed-pre-spawn-pathname-snapshot-worker-query-run/v1"
+
+-- | Additive binary-product sibling of
+-- 'lengthSMTLibBudgetedQueryRunSchemaTag'.
+lengthSpinePairSMTLibBudgetedQueryRunSchemaTag :: [Word8]
+lengthSpinePairSMTLibBudgetedQueryRunSchemaTag = ascii $ concat
+  [ "djex-length-spine-pair-z3-capability-probed-pre-spawn-pathname-"
+  , "snapshot-worker-query-run/shared-usable-work-deadline/v1"
+  ]
 
 lengthSMTLibSessionWorkspaceSchemaTag :: [Word8]
 #ifndef mingw32_HOST_OS
@@ -553,6 +579,136 @@ data LengthSMTLibSessionScopeError = LengthSMTLibSessionScopeError
   }
   deriving (Eq, Ord, Show)
 
+-- | One generative absolute monotonic deadline shared by session opening and
+-- every query admitted beneath it.  The constructor and projections remain
+-- package-private so a caller can neither forge nor extend usable work.
+data LengthSMTLibSessionUsableWorkDeadline budget =
+  LengthSMTLibSessionUsableWorkDeadline
+    !Int
+    !LengthSMTLibProcessDeadline
+
+type role LengthSMTLibSessionUsableWorkDeadline nominal
+
+-- | Capture one shared deadline before any eager session work.  This owner
+-- does not interrupt arbitrary callback IO, but it rejects a normally
+-- returning callback after expiry.  An overrun can therefore be observed by
+-- the next live operation, by a budgeted session's callback-return check, or
+-- by this outer owner when the callback returns without another live operation.
+withLengthSMTLibSessionUsableWorkDeadline
+  :: forall result. Int
+  -> (forall budget. LengthSMTLibSessionUsableWorkDeadline budget -> IO result)
+  -> IO (Either LengthSMTLibSessionError result)
+withLengthSMTLibSessionUsableWorkDeadline =
+  withLengthSMTLibSessionUsableWorkDeadlineOwner True
+
+-- | Capture the same generative token when the callback immediately delegates
+-- ownership to 'withLengthSMTLibReadyWorkerUnderDeadline'.  That session
+-- checks expiry as soon as its user callback returns, before its fresh final
+-- readiness and cleanup windows.  Omitting a second owner check here prevents
+-- those excluded windows from being charged to usable work.
+withLengthSMTLibSessionUsableWorkDeadlineForBudgetedSession
+  :: forall result. Int
+  -> (forall budget. LengthSMTLibSessionUsableWorkDeadline budget -> IO result)
+  -> IO (Either LengthSMTLibSessionError result)
+withLengthSMTLibSessionUsableWorkDeadlineForBudgetedSession =
+  withLengthSMTLibSessionUsableWorkDeadlineOwner False
+
+withLengthSMTLibSessionUsableWorkDeadlineOwner
+  :: forall result. Bool
+  -> Int
+  -> (forall budget. LengthSMTLibSessionUsableWorkDeadline budget -> IO result)
+  -> IO (Either LengthSMTLibSessionError result)
+withLengthSMTLibSessionUsableWorkDeadlineOwner checkOnReturn milliseconds use = do
+  created <- lengthSMTLibProcessDeadlineAfterMilliseconds milliseconds
+  case created of
+    Left failure -> pure $ Left $ LengthSMTLibSessionDeadlineFailure failure
+    Right deadline -> do
+      result <- use
+        $ LengthSMTLibSessionUsableWorkDeadline milliseconds deadline
+      if checkOnReturn
+        then do
+          completed <- checkLengthSMTLibProcessDeadline deadline
+          pure $ case completed of
+            Left failure -> Left $ LengthSMTLibSessionDeadlineFailure failure
+            Right () -> Right result
+        else pure $ Right result
+
+data LengthSMTLibUsableWorkDeadlinePolicy
+  = LengthSMTLibFreshPerQueryDeadline
+  | LengthSMTLibSharedUsableWorkDeadline
+      !Int
+      !LengthSMTLibProcessDeadline
+
+data LengthSMTLibEffectiveDeadlineCause
+  = LengthSMTLibEffectivePerQueryDeadline
+  | LengthSMTLibEffectiveSharedUsableWorkDeadline
+
+data LengthSMTLibEffectiveDeadline = LengthSMTLibEffectiveDeadline
+  !LengthSMTLibEffectiveDeadlineCause
+  !LengthSMTLibProcessDeadline
+
+effectiveLengthSMTLibQueryDeadline
+  :: LengthSMTLibUsableWorkDeadlinePolicy
+  -> LengthSMTLibProcessDeadline
+  -> LengthSMTLibEffectiveDeadline
+effectiveLengthSMTLibQueryDeadline policy queryDeadline = case policy of
+  LengthSMTLibFreshPerQueryDeadline -> LengthSMTLibEffectiveDeadline
+    LengthSMTLibEffectivePerQueryDeadline queryDeadline
+  LengthSMTLibSharedUsableWorkDeadline _ sharedDeadline ->
+    case compareLengthSMTLibProcessDeadline sharedDeadline queryDeadline of
+      LT -> shared
+      EQ -> shared
+      GT -> LengthSMTLibEffectiveDeadline
+        LengthSMTLibEffectivePerQueryDeadline queryDeadline
+   where
+    shared = LengthSMTLibEffectiveDeadline
+      LengthSMTLibEffectiveSharedUsableWorkDeadline
+      $ minimumLengthSMTLibProcessDeadline sharedDeadline queryDeadline
+
+-- Select by configured duration before constructing a fresh local absolute
+-- deadline.  A validated shared duration no greater than the local duration
+-- necessarily wins (including an exact tie), so constructing the later local
+-- candidate would add only an avoidable conversion-overflow failure.  When the
+-- local duration is shorter, it is representable because it is strictly below
+-- the already validated shared duration; elapsed time can still make the
+-- shared absolute deadline earlier, so the final selection compares absolutes.
+-- At monotonic-clock saturation, adding even that shorter duration can fail
+-- although the previously captured shared absolute deadline remains valid;
+-- only that exact deadline-phase conversion overflow falls back to shared.
+effectiveLengthSMTLibDeadlineAfterMilliseconds
+  :: LengthSMTLibUsableWorkDeadlinePolicy
+  -> Int
+  -> IO
+      (Either
+        LengthSMTLibProcessError
+        LengthSMTLibEffectiveDeadline)
+effectiveLengthSMTLibDeadlineAfterMilliseconds policy localMilliseconds =
+  case policy of
+    LengthSMTLibFreshPerQueryDeadline -> do
+      created <- lengthSMTLibProcessDeadlineAfterMilliseconds localMilliseconds
+      pure $ LengthSMTLibEffectiveDeadline
+        LengthSMTLibEffectivePerQueryDeadline <$> created
+    LengthSMTLibSharedUsableWorkDeadline
+        sharedMilliseconds sharedDeadline
+      | sharedMilliseconds <= localMilliseconds -> pure $ Right
+          $ LengthSMTLibEffectiveDeadline
+              LengthSMTLibEffectiveSharedUsableWorkDeadline sharedDeadline
+      | otherwise -> do
+          created <-
+            lengthSMTLibProcessDeadlineAfterMilliseconds localMilliseconds
+          pure $ case created of
+            Left failure
+              | lengthSMTLibProcessErrorPhase failure ==
+                    LengthSMTLibProcessDeadlinePhase &&
+                  lengthSMTLibProcessErrorClass failure ==
+                    LengthSMTLibProcessLimitConversionOverflow -> Right
+                      $ LengthSMTLibEffectiveDeadline
+                          LengthSMTLibEffectiveSharedUsableWorkDeadline
+                          sharedDeadline
+              | otherwise -> Left failure
+            Right localDeadline -> Right
+              $ effectiveLengthSMTLibQueryDeadline policy localDeadline
+
 data LengthSMTLibQueryRunFailure
   = LengthSMTLibQueryWorkerClosing
   | LengthSMTLibQueryWorkerSpent
@@ -710,6 +866,8 @@ data LengthSMTLibReadyWorkerQueryPolicy = LengthSMTLibReadyWorkerQueryPolicy
   , readyQueryRunIdentityFingerprintByteLimit :: !Natural
   , readyQueryProtocolLimits :: !LengthSMTLibProtocolLimits
   , readyQueryPostLaunchExecution :: !LengthSMTLibPostLaunchExecutionPolicy
+  , readyQueryUsableWorkDeadlinePolicy
+      :: !LengthSMTLibUsableWorkDeadlinePolicy
   }
 
 retainLengthSMTLibReadyWorkerQueryPolicy
@@ -721,6 +879,21 @@ retainLengthSMTLibReadyWorkerQueryPolicy
     (LengthSMTLibSessionLimits _ _ maximumQueries _ runIdentityLimit)
     protocolLimits postLaunchExecution = LengthSMTLibReadyWorkerQueryPolicy
       maximumQueries runIdentityLimit protocolLimits postLaunchExecution
+      LengthSMTLibFreshPerQueryDeadline
+
+retainLengthSMTLibReadyWorkerQueryPolicyUnderDeadline
+  :: LengthSMTLibSessionLimits
+  -> LengthSMTLibProtocolLimits
+  -> LengthSMTLibPostLaunchExecutionPolicy
+  -> Int
+  -> LengthSMTLibProcessDeadline
+  -> LengthSMTLibReadyWorkerQueryPolicy
+retainLengthSMTLibReadyWorkerQueryPolicyUnderDeadline
+    (LengthSMTLibSessionLimits _ _ maximumQueries _ runIdentityLimit)
+    protocolLimits postLaunchExecution milliseconds deadline =
+      LengthSMTLibReadyWorkerQueryPolicy
+        maximumQueries runIdentityLimit protocolLimits postLaunchExecution
+        $ LengthSMTLibSharedUsableWorkDeadline milliseconds deadline
 
 data LengthSMTLibReadyWorker epoch = LengthSMTLibReadyWorker
   { readyWorkerProcess :: !LengthSMTLibProcess
@@ -966,12 +1139,13 @@ runLengthSMTLibReadyWorkerQuery
         (LengthSMTLibQueryRun epoch identity local))
 runLengthSMTLibReadyWorkerQuery evaluationLimits worker query =
   mask $ \restore -> do
-    deadlineResult <- lengthSMTLibProcessDeadlineAfterMilliseconds
+    deadlineResult <- effectiveLengthSMTLibDeadlineAfterMilliseconds
+      (readyQueryUsableWorkDeadlinePolicy $ readyWorkerQueryPolicy worker)
       $ lengthSMTLibPostLaunchHostDeadlineMilliseconds postLaunchExecution
     case deadlineResult of
       Left failure -> pure $ queryRunLeft
         $ LengthSMTLibQueryDeadlineFailure failure
-      Right deadline -> do
+      Right (LengthSMTLibEffectiveDeadline _ deadline) -> do
         acquired <- acquireLengthSMTLibQueryGate worker deadline
         case acquired of
           Left failure@LengthSMTLibQueryProcessFailure {} ->
@@ -1495,7 +1669,7 @@ buildLengthSMTLibQueryRunIdentity worker plan evaluationLimits ordinal deadline
     stdoutStart stdoutEnd stderrStart stderrEnd =
   case buildFingerprintWithin maximumBytes FingerprintBuilder
       { fingerprintBuilderVersion = 1
-      , fingerprintBuilderRole = queryRunFingerprintRole
+      , fingerprintBuilderRole = queryRunFingerprintRoleForWorker worker
       , fingerprintBuilderFields =
           queryRunIdentityPrefixFields worker plan ordinal deadline
             checkBarrier valueBarrier ++
@@ -1547,11 +1721,34 @@ admitLengthSMTLibQueryRunIdentity worker plan evaluationLimits
         (lengthSMTLibProcessStderrByteLimit processLimits)
         transcriptMaximum
   requiredMaximum = fingerprintBuilderByteCount
-    queryRunFingerprintRole $ prefixCounts ++ transcriptCount : suffixCounts
+    (queryRunFingerprintRoleForWorker worker)
+    $ prefixCounts ++ transcriptCount : suffixCounts
 
 queryRunFingerprintRole :: [Word8]
 queryRunFingerprintRole = ascii
   "finite-list-spine-length/z3-live-query-run"
+
+budgetedQueryRunFingerprintRole :: [Word8]
+budgetedQueryRunFingerprintRole = ascii
+  "finite-list-spine-length/z3-live-query-run/shared-usable-work-deadline"
+
+queryRunFingerprintRoleForWorker
+  :: LengthSMTLibReadyWorker epoch
+  -> [Word8]
+queryRunFingerprintRoleForWorker worker =
+  case readyQueryUsableWorkDeadlinePolicy $ readyWorkerQueryPolicy worker of
+    LengthSMTLibFreshPerQueryDeadline -> queryRunFingerprintRole
+    LengthSMTLibSharedUsableWorkDeadline {} ->
+      budgetedQueryRunFingerprintRole
+
+queryRunSchemaTagForWorker
+  :: LengthSMTLibReadyWorker epoch
+  -> [Word8]
+queryRunSchemaTagForWorker worker =
+  case readyQueryUsableWorkDeadlinePolicy $ readyWorkerQueryPolicy worker of
+    LengthSMTLibFreshPerQueryDeadline -> lengthSMTLibQueryRunSchemaTag
+    LengthSMTLibSharedUsableWorkDeadline {} ->
+      lengthSMTLibBudgetedQueryRunSchemaTag
 
 queryRunIdentityPrefixFields
   :: LengthSMTLibReadyWorker epoch
@@ -1563,7 +1760,7 @@ queryRunIdentityPrefixFields
   -> [FingerprintField]
 queryRunIdentityPrefixFields worker plan ordinal deadline
     checkBarrier valueBarrier =
-  [ FingerprintBytes lengthSMTLibQueryRunSchemaTag
+  [ FingerprintBytes $ queryRunSchemaTagForWorker worker
   , tagged "authority"
       [ FingerprintBytes $ ascii $ concat
           [ "live-syntactic-process-observation/"
@@ -1589,13 +1786,38 @@ queryRunIdentityPrefixFields worker plan ordinal deadline
       [ FingerprintBytes $ fingerprintCanonicalBytes
           $ lengthSMTLibProtocolPlanFingerprint plan
       ]
-  , lengthSMTLibProcessDeadlineFingerprintField deadline
-  ]
+  ] ++ queryDeadlineIdentityFields worker deadline
  where
   -- Session-limit admission proves every runnable ordinal fits the chosen
   -- wire representation. Keep the Natural lease ordinal authoritative and
   -- derive its fixed-width encoding only at this identity edge.
   ordinalWord = fromIntegral ordinal
+
+queryDeadlineIdentityFields
+  :: LengthSMTLibReadyWorker epoch
+  -> LengthSMTLibProcessDeadline
+  -> [FingerprintField]
+queryDeadlineIdentityFields worker effectiveDeadline =
+  lengthSMTLibProcessDeadlineFingerprintField effectiveDeadline :
+  case readyQueryUsableWorkDeadlinePolicy $ readyWorkerQueryPolicy worker of
+    LengthSMTLibFreshPerQueryDeadline -> []
+    LengthSMTLibSharedUsableWorkDeadline milliseconds sharedDeadline ->
+      [ tagged "shared-usable-work-deadline-selection"
+          [ FingerprintBytes $ ascii
+              "minimum-absolute-monotonic-deadline/shared-wins-tie/v1"
+          , FingerprintNatural $ fromIntegral milliseconds
+          , tagged "shared-deadline"
+              [lengthSMTLibProcessDeadlineFingerprintField sharedDeadline]
+          , tagged "effective-cause"
+              [FingerprintBytes $ ascii cause]
+          ]
+      ]
+     where
+      cause = case compareLengthSMTLibProcessDeadline
+          sharedDeadline effectiveDeadline of
+        EQ -> "shared-usable-work-deadline"
+        GT -> "fresh-per-query-deadline"
+        LT -> "invalid-effective-deadline"
 
 queryRunTranscriptField
   :: SMTLibCausalTranscript LengthSMTLibProtocolWriteKind
@@ -1826,12 +2048,13 @@ runLengthSpinePairSMTLibReadyWorkerQuery
         (LengthSpinePairSMTLibQueryRun epoch identity local))
 runLengthSpinePairSMTLibReadyWorkerQuery evaluationLimits worker query =
   mask $ \restore -> do
-    deadlineResult <- lengthSMTLibProcessDeadlineAfterMilliseconds
+    deadlineResult <- effectiveLengthSMTLibDeadlineAfterMilliseconds
+      (readyQueryUsableWorkDeadlinePolicy $ readyWorkerQueryPolicy worker)
       $ lengthSMTLibPostLaunchHostDeadlineMilliseconds postLaunchExecution
     case deadlineResult of
       Left failure -> pure $ spinePairQueryRunLeft
         $ LengthSpinePairSMTLibQueryDeadlineFailure failure
-      Right deadline -> do
+      Right (LengthSMTLibEffectiveDeadline _ deadline) -> do
         acquired <- acquireLengthSpinePairSMTLibQueryGate worker deadline
         case acquired of
           Left failure@LengthSpinePairSMTLibQueryProcessFailure {} ->
@@ -2350,7 +2573,7 @@ buildLengthSpinePairSMTLibQueryRunIdentity worker plan evaluationLimits ordinal 
     stdoutStart stdoutEnd stderrStart stderrEnd =
   case buildFingerprintWithin maximumBytes FingerprintBuilder
       { fingerprintBuilderVersion = 1
-      , fingerprintBuilderRole = spinePairQueryRunFingerprintRole
+      , fingerprintBuilderRole = spinePairQueryRunFingerprintRoleForWorker worker
       , fingerprintBuilderFields =
           spinePairQueryRunIdentityPrefixFields worker plan ordinal deadline
             checkBarrier valueBarrier ++
@@ -2402,11 +2625,36 @@ admitLengthSpinePairSMTLibQueryRunIdentity worker plan evaluationLimits
         (lengthSMTLibProcessStderrByteLimit processLimits)
         transcriptMaximum
   requiredMaximum = fingerprintBuilderByteCount
-    spinePairQueryRunFingerprintRole $ prefixCounts ++ transcriptCount : suffixCounts
+    (spinePairQueryRunFingerprintRoleForWorker worker)
+    $ prefixCounts ++ transcriptCount : suffixCounts
 
 spinePairQueryRunFingerprintRole :: [Word8]
 spinePairQueryRunFingerprintRole = ascii
   "finite-binary-product-spine-lengths/z3-live-query-run"
+
+budgetedSpinePairQueryRunFingerprintRole :: [Word8]
+budgetedSpinePairQueryRunFingerprintRole = ascii $ concat
+  [ "finite-binary-product-spine-lengths/z3-live-query-run/"
+  , "shared-usable-work-deadline"
+  ]
+
+spinePairQueryRunFingerprintRoleForWorker
+  :: LengthSMTLibReadyWorker epoch
+  -> [Word8]
+spinePairQueryRunFingerprintRoleForWorker worker =
+  case readyQueryUsableWorkDeadlinePolicy $ readyWorkerQueryPolicy worker of
+    LengthSMTLibFreshPerQueryDeadline -> spinePairQueryRunFingerprintRole
+    LengthSMTLibSharedUsableWorkDeadline {} ->
+      budgetedSpinePairQueryRunFingerprintRole
+
+spinePairQueryRunSchemaTagForWorker
+  :: LengthSMTLibReadyWorker epoch
+  -> [Word8]
+spinePairQueryRunSchemaTagForWorker worker =
+  case readyQueryUsableWorkDeadlinePolicy $ readyWorkerQueryPolicy worker of
+    LengthSMTLibFreshPerQueryDeadline -> lengthSpinePairSMTLibQueryRunSchemaTag
+    LengthSMTLibSharedUsableWorkDeadline {} ->
+      lengthSpinePairSMTLibBudgetedQueryRunSchemaTag
 
 spinePairQueryRunIdentityPrefixFields
   :: LengthSMTLibReadyWorker epoch
@@ -2418,7 +2666,7 @@ spinePairQueryRunIdentityPrefixFields
   -> [FingerprintField]
 spinePairQueryRunIdentityPrefixFields worker plan ordinal deadline
     checkBarrier valueBarrier =
-  [ FingerprintBytes lengthSpinePairSMTLibQueryRunSchemaTag
+  [ FingerprintBytes $ spinePairQueryRunSchemaTagForWorker worker
   , tagged "authority"
       [ FingerprintBytes $ ascii $ concat
           [ "live-syntactic-process-observation/"
@@ -2460,8 +2708,7 @@ spinePairQueryRunIdentityPrefixFields worker plan ordinal deadline
       [ FingerprintBytes $ fingerprintCanonicalBytes
           $ lengthSpinePairSMTLibProtocolPlanFingerprint plan
       ]
-  , lengthSMTLibProcessDeadlineFingerprintField deadline
-  ]
+  ] ++ queryDeadlineIdentityFields worker deadline
  where
   -- Session-limit admission proves every runnable ordinal fits the chosen
   -- wire representation. Keep the Natural lease ordinal authoritative and
@@ -2761,13 +3008,33 @@ withLengthSMTLibReadyWorker
   :: forall result. LengthSMTLibSessionConfig
   -> (forall epoch. LengthSMTLibReadyWorker epoch -> IO result)
   -> IO (Either LengthSMTLibSessionScopeError result)
-withLengthSMTLibReadyWorker config use = mask $ \restore -> do
+withLengthSMTLibReadyWorker = withLengthSMTLibReadyWorkerWithDeadlinePolicy
+  LengthSMTLibFreshPerQueryDeadline
+
+withLengthSMTLibReadyWorkerUnderDeadline
+  :: forall budget result. LengthSMTLibSessionUsableWorkDeadline budget
+  -> LengthSMTLibSessionConfig
+  -> (forall epoch. LengthSMTLibReadyWorker epoch -> IO result)
+  -> IO (Either LengthSMTLibSessionScopeError result)
+withLengthSMTLibReadyWorkerUnderDeadline
+    (LengthSMTLibSessionUsableWorkDeadline milliseconds deadline) =
+  withLengthSMTLibReadyWorkerWithDeadlinePolicy
+    $ LengthSMTLibSharedUsableWorkDeadline milliseconds deadline
+
+withLengthSMTLibReadyWorkerWithDeadlinePolicy
+  :: forall result. LengthSMTLibUsableWorkDeadlinePolicy
+  -> LengthSMTLibSessionConfig
+  -> (forall epoch. LengthSMTLibReadyWorker epoch -> IO result)
+  -> IO (Either LengthSMTLibSessionScopeError result)
+withLengthSMTLibReadyWorkerWithDeadlinePolicy deadlinePolicy config use =
+  mask $ \restore -> do
   cancellation <- newLengthSMTLibProcessCancellation
-  deadlineResult <- lengthSMTLibProcessDeadlineAfterMilliseconds openerDeadline
+  deadlineResult <- effectiveLengthSMTLibDeadlineAfterMilliseconds
+    deadlinePolicy openerDeadline
   case deadlineResult of
     Left failure -> pure $ Left $ scopeError
       (LengthSMTLibSessionDeadlineFailure failure) emptyCleanup
-    Right deadline -> do
+    Right (LengthSMTLibEffectiveDeadline _ deadline) -> do
       rolledBackWorkspace <- newTVarIO Nothing
       allocated <- runBeforeLengthSMTLibProcessDeadline cancellation deadline
         (allocateWorkspace sessionLimits $ recordCleanup rolledBackWorkspace)
@@ -2801,33 +3068,58 @@ withLengthSMTLibReadyWorker config use = mask $ \restore -> do
                 -- Retain the pathname rather than risk unlinking a live cwd.
                 _ <- retainWorkspace workspace
                 pure ()
-          preSpawn <- restore (inspectOwnedWorkspace workspace)
-            `onException` protectWorkspace
-          case preSpawn of
-            Left failure -> do
-              workspaceCleanup <- cleanupWorkspace sessionLimits workspace
-              pure $ Left $ scopeError
-                (LengthSMTLibSessionWorkspaceFailure failure)
-                $ emptyCleanup
-                  { lengthSMTLibSessionWorkspaceCleanupStatus = workspaceCleanup }
-            Right () -> do
-              opened <- restore (openLengthSMTLibProcess processLimits
-                cancellation deadline (lengthSMTLibExecutionZ3Profile execution)
-                $ workspacePath workspace)
-                `onException` protectOpen
-              case opened of
+              continueAfterInspection preSpawn = case preSpawn of
                 Left failure -> do
-                  workspaceCleanup <- cleanupWorkspaceAfterProcessFailure
-                    sessionLimits workspace failure
+                  workspaceCleanup <- cleanupWorkspace sessionLimits workspace
                   pure $ Left $ scopeError
-                    (LengthSMTLibSessionProcessFailure failure)
+                    (LengthSMTLibSessionWorkspaceFailure failure)
                     $ emptyCleanup
                       { lengthSMTLibSessionWorkspaceCleanupStatus =
                           workspaceCleanup }
-                Right process -> restore
-                  (runOpened cancellation deadline workspace process)
-                  `onException` durableOwnedCleanup
-                    sessionLimits cancellation workspace process
+                Right () -> do
+                  opened <- restore
+                    (openLengthSMTLibProcess processLimits cancellation deadline
+                      (lengthSMTLibExecutionZ3Profile execution)
+                      $ workspacePath workspace)
+                    `onException` protectOpen
+                  case opened of
+                    Left failure -> do
+                      workspaceCleanup <- cleanupWorkspaceAfterProcessFailure
+                        sessionLimits workspace failure
+                      pure $ Left $ scopeError
+                        (LengthSMTLibSessionProcessFailure failure)
+                        $ emptyCleanup
+                          { lengthSMTLibSessionWorkspaceCleanupStatus =
+                              workspaceCleanup }
+                    Right process -> restore
+                      (runOpened cancellation deadline workspace process)
+                      `onException` durableOwnedCleanup
+                        sessionLimits cancellation workspace process
+          case deadlinePolicy of
+            LengthSMTLibFreshPerQueryDeadline -> do
+              preSpawn <- restore (inspectOwnedWorkspace workspace)
+                `onException` protectWorkspace
+              continueAfterInspection preSpawn
+            LengthSMTLibSharedUsableWorkDeadline {} -> do
+              rolledBackInspection <- newTVarIO Nothing
+              controlled <- restore
+                (runBeforeLengthSMTLibProcessDeadline cancellation deadline
+                  (inspectOwnedWorkspace workspace)
+                  $ \_ -> cleanupWorkspace sessionLimits workspace
+                      >>= recordCleanup rolledBackInspection)
+                `onException` protectWorkspace
+              case controlled of
+                Left failure -> do
+                  rolledBack <- atomically $ readTVar rolledBackInspection
+                  workspaceCleanup <- case rolledBack of
+                    Nothing -> cleanupWorkspace sessionLimits workspace
+                    Just cleanup -> pure cleanup
+                  pure $ Left $ scopeError
+                    (LengthSMTLibSessionDeadlineFailure failure)
+                    $ emptyCleanup
+                        { lengthSMTLibSessionWorkspaceCleanupStatus =
+                            workspaceCleanup }
+                Right preSpawn -> continueAfterInspection preSpawn
  where
   LengthSMTLibSessionConfig sessionLimits processLimits capabilityLimits
       protocolLimits execution = config
@@ -2858,9 +3150,9 @@ withLengthSMTLibReadyWorker config use = mask $ \restore -> do
               then finishFailure workspace process
                 $ LengthSMTLibSessionTranscriptAccountingMismatch
                     transcriptBytes stdoutCount
-              else case buildReadyWorkerIdentity
-                  sessionLimits protocolLimits execution process outcome
-                  transcript workspace stdoutCount stderrCount of
+              else case buildReadyWorkerIdentityForDeadlinePolicy
+                  deadlinePolicy sessionLimits protocolLimits execution process
+                  outcome transcript workspace stdoutCount stderrCount of
               Left failure -> finishFailure workspace process failure
               Right identity -> do
                 queryState <- newTVarIO $ QueryLeaseState
@@ -2872,8 +3164,15 @@ withLengthSMTLibReadyWorker config use = mask $ \restore -> do
                       $ causalTranscriptBytes transcript
                     postLaunchExecution =
                       retainLengthSMTLibPostLaunchExecutionPolicy execution
-                    queryPolicy = retainLengthSMTLibReadyWorkerQueryPolicy
-                      sessionLimits protocolLimits postLaunchExecution
+                    queryPolicy = case deadlinePolicy of
+                      LengthSMTLibFreshPerQueryDeadline ->
+                        retainLengthSMTLibReadyWorkerQueryPolicy
+                          sessionLimits protocolLimits postLaunchExecution
+                      LengthSMTLibSharedUsableWorkDeadline
+                          milliseconds sharedDeadline ->
+                        retainLengthSMTLibReadyWorkerQueryPolicyUnderDeadline
+                          sessionLimits protocolLimits postLaunchExecution
+                          milliseconds sharedDeadline
                     worker = LengthSMTLibReadyWorker
                       { readyWorkerProcess = process
                       , readyWorkerCancellation = cancellation
@@ -2887,25 +3186,43 @@ withLengthSMTLibReadyWorker config use = mask $ \restore -> do
                       , readyWorkerQueryState = queryState
                       , readyWorkerQueryGate = queryGate
                       }
-                callbackResult <- use worker
-                finalMode <- closeQueryAdmission worker
-                case finalMode of
-                  QueryLeaseSpent ->
-                    finishSuccess workspace process callbackResult
-                  _ -> do
-                    finalDeadline <-
-                      lengthSMTLibProcessDeadlineAfterMilliseconds openerDeadline
-                    case finalDeadline of
+                    runCallback readyWorker = do
+                      callbackResult <- use readyWorker
+                      finalMode <- closeQueryAdmission readyWorker
+                      usableWorkComplete <-
+                        checkUsableWorkDeadline deadlinePolicy
+                      case usableWorkComplete of
+                        Left failure -> finishFailure workspace process
+                          $ LengthSMTLibSessionDeadlineFailure failure
+                        Right () -> case finalMode of
+                          QueryLeaseSpent ->
+                            finishSuccess workspace process callbackResult
+                          _ -> do
+                            finalDeadline <-
+                              lengthSMTLibProcessDeadlineAfterMilliseconds
+                                openerDeadline
+                            case finalDeadline of
+                              Left failure -> finishFailure workspace process
+                                $ LengthSMTLibSessionDeadlineFailure failure
+                              Right checkedUntil -> do
+                                stillReady <- checkLengthSMTLibProcessReady
+                                  process cancellation checkedUntil
+                                case stillReady of
+                                  Left failure ->
+                                    finishFailure workspace process
+                                      $ LengthSMTLibSessionProcessFailure failure
+                                  Right () -> finishSuccess
+                                    workspace process callbackResult
+                case deadlinePolicy of
+                  LengthSMTLibFreshPerQueryDeadline -> runCallback worker
+                  LengthSMTLibSharedUsableWorkDeadline {} -> do
+                    constructedWorker <- evaluate worker
+                    usableWorkReady <-
+                      checkLengthSMTLibProcessDeadline deadline
+                    case usableWorkReady of
                       Left failure -> finishFailure workspace process
                         $ LengthSMTLibSessionDeadlineFailure failure
-                      Right checkedUntil -> do
-                        stillReady <- checkLengthSMTLibProcessReady
-                          process cancellation checkedUntil
-                        case stillReady of
-                          Left failure -> finishFailure workspace process
-                            $ LengthSMTLibSessionProcessFailure failure
-                          Right () -> finishSuccess
-                            workspace process callbackResult
+                      Right () -> runCallback constructedWorker
 
   finishFailure workspace process failure = do
     cleanup <- cleanupOwned sessionLimits workspace process
@@ -2919,6 +3236,14 @@ withLengthSMTLibReadyWorker config use = mask $ \restore -> do
 
   recordCleanup target status =
     atomically $ writeTVar target $ Just status
+
+checkUsableWorkDeadline
+  :: LengthSMTLibUsableWorkDeadlinePolicy
+  -> IO (Either LengthSMTLibProcessError ())
+checkUsableWorkDeadline policy = case policy of
+  LengthSMTLibFreshPerQueryDeadline -> pure $ Right ()
+  LengthSMTLibSharedUsableWorkDeadline _ deadline ->
+    checkLengthSMTLibProcessDeadline deadline
 
 -- Close admission before quiescing the one-query gate.  A query which already
 -- owns the gate is bounded by its absolute deadline and commits without
@@ -3386,6 +3711,73 @@ driveCapability plan process cancellation deadline = do
     SMTLibCausalInternalFailure ->
       LengthSMTLibSessionProcessFailure
         $ internalProcessFailure LengthSMTLibProcessInternalFailure
+
+buildReadyWorkerIdentityForDeadlinePolicy
+  :: LengthSMTLibUsableWorkDeadlinePolicy
+  -> LengthSMTLibSessionLimits
+  -> LengthSMTLibProtocolLimits
+  -> LengthSMTLibExecutionConfig
+  -> LengthSMTLibProcess
+  -> LengthSMTLibCapabilityOutcome epoch
+  -> SMTLibCausalTranscript LengthSMTLibCapabilityWriteKind
+  -> Workspace
+  -> Natural
+  -> Natural
+  -> Either
+      LengthSMTLibSessionError
+      (Fingerprint LengthSMTLibReadyWorkerIdentitySubject)
+buildReadyWorkerIdentityForDeadlinePolicy policy sessionLimits protocol execution
+    process outcome transcript workspace stdoutCount stderrCount = do
+  legacy <- buildReadyWorkerIdentity sessionLimits protocol execution process
+    outcome transcript workspace stdoutCount stderrCount
+  case policy of
+    LengthSMTLibFreshPerQueryDeadline -> Right legacy
+    LengthSMTLibSharedUsableWorkDeadline milliseconds deadline ->
+      buildBudgetedReadyWorkerIdentity
+        sessionLimits milliseconds deadline legacy
+
+buildBudgetedReadyWorkerIdentity
+  :: LengthSMTLibSessionLimits
+  -> Int
+  -> LengthSMTLibProcessDeadline
+  -> Fingerprint LengthSMTLibReadyWorkerIdentitySubject
+  -> Either
+      LengthSMTLibSessionError
+      (Fingerprint LengthSMTLibReadyWorkerIdentitySubject)
+buildBudgetedReadyWorkerIdentity
+    (LengthSMTLibSessionLimits _ _ _ maximumBytes _)
+    milliseconds deadline legacy =
+  case buildFingerprintWithin maximumBytes FingerprintBuilder
+      { fingerprintBuilderVersion = 1
+      , fingerprintBuilderRole = ascii
+          "finite-list-spine-length/z3-budgeted-capability-probed-ready-worker"
+      , fingerprintBuilderFields =
+          [ FingerprintBytes $ ascii
+              "djex-length-z3-shared-usable-work-deadline/v1"
+          , tagged "legacy-ready-worker-identity"
+              [FingerprintBytes $ fingerprintCanonicalBytes legacy]
+          , tagged "shared-usable-work-budget"
+              [ FingerprintNatural $ fromIntegral milliseconds
+              , lengthSMTLibProcessDeadlineFingerprintField deadline
+              ]
+          , tagged "deadline-coverage"
+              [ FingerprintBytes $ ascii $ concat
+                  [ "workspace-launch-capability-and-all-query-operations/"
+                  , "minimum-with-fresh-local-deadline/shared-wins-tie/v1"
+                  ]
+              ]
+          , tagged "callback-and-finalizer-boundary"
+              [ FingerprintBytes $ ascii $ concat
+                  [ "no-arbitrary-callback-interruption/expiry-checked-after-"
+                  , "callback/fresh-final-readiness-and-cleanup-windows/v1"
+                  ]
+              ]
+          ]
+      } of
+    Left (FingerprintLimitExceeded fingerprintMaximum observed) -> Left
+      $ LengthSMTLibSessionIdentityFingerprintByteLimitExceeded
+          fingerprintMaximum observed
+    Right identity -> Right identity
 
 buildReadyWorkerIdentity
   :: LengthSMTLibSessionLimits

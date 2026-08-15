@@ -51,6 +51,9 @@ module Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process
   , Z3SMTLibProcessDeadline
   , mkZ3SMTLibProcessDeadline
   , z3SMTLibProcessDeadlineAfterMilliseconds
+  , compareZ3SMTLibProcessDeadline
+  , minimumZ3SMTLibProcessDeadline
+  , checkZ3SMTLibProcessDeadline
   , z3SMTLibProcessMonotonicTimeNanoseconds
   , z3SMTLibProcessDeadlineFingerprintField
   , Z3SMTLibProcessCancellation
@@ -424,6 +427,7 @@ z3SMTLibProcessLimitFingerprintFields limits =
   ]
 
 newtype Z3SMTLibProcessDeadline = Z3SMTLibProcessDeadline Word64
+  deriving (Eq, Ord)
 
 mkZ3SMTLibProcessDeadline :: Word64 -> Z3SMTLibProcessDeadline
 mkZ3SMTLibProcessDeadline = Z3SMTLibProcessDeadline
@@ -445,6 +449,30 @@ z3SMTLibProcessDeadlineAfterMilliseconds milliseconds
           Z3SMTLibProcessLimitConversionOverflow
           (Just $ fromIntegral milliseconds)
         else Right $ Z3SMTLibProcessDeadline $ fromInteger target
+
+compareZ3SMTLibProcessDeadline
+  :: Z3SMTLibProcessDeadline
+  -> Z3SMTLibProcessDeadline
+  -> Ordering
+compareZ3SMTLibProcessDeadline = compare
+
+minimumZ3SMTLibProcessDeadline
+  :: Z3SMTLibProcessDeadline
+  -> Z3SMTLibProcessDeadline
+  -> Z3SMTLibProcessDeadline
+minimumZ3SMTLibProcessDeadline left right
+  | left <= right = left
+  | otherwise = right
+
+checkZ3SMTLibProcessDeadline
+  :: Z3SMTLibProcessDeadline
+  -> IO (Either Z3SMTLibProcessError ())
+checkZ3SMTLibProcessDeadline (Z3SMTLibProcessDeadline deadline) = do
+  now <- getMonotonicTimeNSec
+  pure $ if now >= deadline
+    then Left $ processError
+      Z3SMTLibProcessDeadlinePhase Z3SMTLibProcessDeadlineExceeded Nothing
+    else Right ()
 
 z3SMTLibProcessMonotonicTimeNanoseconds :: IO Word64
 z3SMTLibProcessMonotonicTimeNanoseconds = getMonotonicTimeNSec

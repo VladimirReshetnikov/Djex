@@ -26,14 +26,23 @@
 -- independent domain replay against the exact query problem.  The matching
 -- public replay gate checks complete query identity before inspecting it.
 --
--- Private session defaults own opener and finalizer deadlines; the supplied
--- execution policy owns the host deadline for each query.  This scope does not
--- claim one hard wall-clock deadline for a whole caller-defined batch, and
--- durable cleanup latency can outlive the operation which initiated it.
--- Callback exceptions, including asynchronous exceptions, are rethrown after
--- the private owner has started durable cleanup.
+-- The legacy entrance retains private opener/finalizer deadlines and one host
+-- deadline per query.  The additive budgeted entrances cap opening and every
+-- query by one shared absolute usable-work deadline while retaining fresh
+-- finalizer/cleanup windows.  They do not interrupt arbitrary callback IO and
+-- therefore make no hard whole-callback wall-clock claim.  Callback exceptions,
+-- including asynchronous exceptions, are rethrown after the private owner has
+-- started durable cleanup.
 module Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live
   ( LengthSMTLibLiveSession
+  , LengthSMTLibLiveUsableWorkBudgetSource (..)
+  , LengthSMTLibLiveUsableWorkBudget
+  , LengthSMTLibLiveUsableWorkBudgetError (..)
+  , mkLengthSMTLibLiveUsableWorkBudget
+  , LengthSMTLibLiveUsableWorkDeadline
+  , withLengthSMTLibLiveUsableWorkDeadline
+  , withLengthSMTLibLiveSessionUnderDeadline
+  , withLengthSMTLibLiveSessionWithUsableWorkBudget
   , LengthSMTLibLiveSessionFailure (..)
   , LengthSMTLibLiveSessionError
   , lengthSMTLibLiveSessionPrimaryFailure
@@ -65,6 +74,7 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live
   ) where
 
 import Control.DeepSeq (NFData (rnf))
+import Data.Word (Word64)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Fingerprint (Fingerprint)
@@ -124,6 +134,63 @@ data LengthSMTLibLiveSession epoch = LengthSMTLibLiveSession
   !(Session.LengthSMTLibReadyWorker epoch)
 
 type role LengthSMTLibLiveSession nominal
+
+-- | Pure source for one shared usable-work window.  The window starts when
+-- 'withLengthSMTLibLiveUsableWorkDeadline' captures its monotonic deadline.
+data LengthSMTLibLiveUsableWorkBudgetSource =
+  LengthSMTLibLiveUsableWorkBudgetSource
+    { lengthSMTLibLiveUsableWorkBudgetSourceMilliseconds :: Int }
+  deriving (Eq, Ord, Show)
+
+instance NFData LengthSMTLibLiveUsableWorkBudgetSource where
+  rnf (LengthSMTLibLiveUsableWorkBudgetSource milliseconds) =
+    rnf milliseconds
+
+-- | Validated positive duration.  It contains no process, clock observation,
+-- executable material, or cancellation authority.
+newtype LengthSMTLibLiveUsableWorkBudget =
+  LengthSMTLibLiveUsableWorkBudget Int
+  deriving (Eq, Ord)
+
+instance NFData LengthSMTLibLiveUsableWorkBudget where
+  rnf (LengthSMTLibLiveUsableWorkBudget milliseconds) = rnf milliseconds
+
+-- | Closed pure validation failures for the shared duration.
+data LengthSMTLibLiveUsableWorkBudgetError
+  = LengthSMTLibLiveUsableWorkBudgetNonPositive !Int
+  | LengthSMTLibLiveUsableWorkBudgetMicrosecondsOverflow !Int
+  deriving (Eq, Ord, Show)
+
+instance NFData LengthSMTLibLiveUsableWorkBudgetError where
+  rnf failure = case failure of
+    LengthSMTLibLiveUsableWorkBudgetNonPositive milliseconds ->
+      rnf milliseconds
+    LengthSMTLibLiveUsableWorkBudgetMicrosecondsOverflow milliseconds ->
+      rnf milliseconds
+
+-- | Validate a duration without reading a clock or performing IO.  Both the
+-- host wait conversion and the monotonic nanosecond delta must be representable.
+mkLengthSMTLibLiveUsableWorkBudget
+  :: LengthSMTLibLiveUsableWorkBudgetSource
+  -> Either
+      LengthSMTLibLiveUsableWorkBudgetError
+      LengthSMTLibLiveUsableWorkBudget
+mkLengthSMTLibLiveUsableWorkBudget
+    (LengthSMTLibLiveUsableWorkBudgetSource milliseconds)
+  | milliseconds <= 0 = Left
+      $ LengthSMTLibLiveUsableWorkBudgetNonPositive milliseconds
+  | toInteger milliseconds * 1000 > toInteger (maxBound :: Int) ||
+      toInteger milliseconds * 1000000 > toInteger (maxBound :: Word64) = Left
+        $ LengthSMTLibLiveUsableWorkBudgetMicrosecondsOverflow milliseconds
+  | otherwise = Right $ LengthSMTLibLiveUsableWorkBudget milliseconds
+
+-- | Generative, opaque shared absolute deadline.  Its constructor and clock
+-- value cannot cross the public boundary.
+data LengthSMTLibLiveUsableWorkDeadline budget =
+  LengthSMTLibLiveUsableWorkDeadline
+    !(Session.LengthSMTLibSessionUsableWorkDeadline budget)
+
+type role LengthSMTLibLiveUsableWorkDeadline nominal
 
 -- | Stable, byte-free classes for opening, probing, and closing a live scope.
 data LengthSMTLibLiveSessionFailure
@@ -344,6 +411,69 @@ defaultLengthSMTLibLiveSessionMaximumQueries :: Natural
 defaultLengthSMTLibLiveSessionMaximumQueries =
   Session.lengthSMTLibSessionLimitSourceMaximumQueries
     Session.defaultLengthSMTLibSessionLimitSource
+
+-- | Capture one absolute monotonic deadline and lend only its generative,
+-- opaque token.  This owner does not interrupt arbitrary callback IO, but it
+-- rejects a normally returning callback after expiry.  An overrun can be
+-- rejected earlier by the next live operation or by a budgeted session
+-- immediately after its callback returns, before fresh finalizer/cleanup
+-- windows begin.  Callback exceptions remain authoritative and are rethrown.
+withLengthSMTLibLiveUsableWorkDeadline
+  :: forall result. LengthSMTLibLiveUsableWorkBudget
+  -> (forall budget. LengthSMTLibLiveUsableWorkDeadline budget -> IO result)
+  -> IO (Either LengthSMTLibLiveSessionError result)
+withLengthSMTLibLiveUsableWorkDeadline
+    (LengthSMTLibLiveUsableWorkBudget milliseconds) use = do
+  result <- Session.withLengthSMTLibSessionUsableWorkDeadline milliseconds
+    $ use . LengthSMTLibLiveUsableWorkDeadline
+  pure $ case result of
+    Left failure -> Left $ LengthSMTLibLiveSessionError
+      (sessionFailure failure) False
+    Right value -> Right value
+
+-- | Open one capability-probed worker under an already captured shared
+-- deadline.  The effective opener and each effective query deadline are the
+-- earlier of their fresh local deadline and this token; the shared deadline
+-- wins an exact tie.  Cleanup and the final readiness observation retain their
+-- established fresh private windows.
+withLengthSMTLibLiveSessionUnderDeadline
+  :: LengthSMTLibLiveUsableWorkDeadline budget
+  -> LengthSMTLibExecutionConfig
+  -> (forall epoch. LengthSMTLibLiveSession epoch -> IO result)
+  -> IO (Either LengthSMTLibLiveSessionError result)
+withLengthSMTLibLiveSessionUnderDeadline
+    (LengthSMTLibLiveUsableWorkDeadline deadline) execution use =
+  case defaultLiveSessionConfig execution of
+    Left failure -> pure $ Left $ LengthSMTLibLiveSessionError failure False
+    Right config -> do
+      result <- Session.withLengthSMTLibReadyWorkerUnderDeadline deadline config
+        $ use . LengthSMTLibLiveSession
+      pure $ case result of
+        Left failure -> Left $ sanitizeSessionError failure
+        Right value -> Right value
+
+-- | Convenience entrance which captures the shared deadline immediately
+-- before session configuration/opening.  The two-step token API remains
+-- available when pure caller work must consume part of the same window before
+-- a deferred live session is opened.  This entrance relies on the session's
+-- callback-return check and deliberately performs no second check after its
+-- fresh final-readiness and cleanup windows.
+withLengthSMTLibLiveSessionWithUsableWorkBudget
+  :: LengthSMTLibLiveUsableWorkBudget
+  -> LengthSMTLibExecutionConfig
+  -> (forall epoch. LengthSMTLibLiveSession epoch -> IO result)
+  -> IO (Either LengthSMTLibLiveSessionError result)
+withLengthSMTLibLiveSessionWithUsableWorkBudget
+    (LengthSMTLibLiveUsableWorkBudget milliseconds) execution use = do
+  scoped <-
+    Session.withLengthSMTLibSessionUsableWorkDeadlineForBudgetedSession
+      milliseconds $ \deadline ->
+        withLengthSMTLibLiveSessionUnderDeadline
+          (LengthSMTLibLiveUsableWorkDeadline deadline) execution use
+  pure $ case scoped of
+    Left failure -> Left $ LengthSMTLibLiveSessionError
+      (sessionFailure failure) False
+    Right result -> result
 
 -- | Open, capability-probe, lend, and close one common-QF_LIA worker using
 -- validated private transport/protocol defaults and the caller's public
@@ -625,8 +755,8 @@ sessionFailure
   :: Session.LengthSMTLibSessionError
   -> LengthSMTLibLiveSessionFailure
 sessionFailure failure = case failure of
-  Session.LengthSMTLibSessionDeadlineFailure _ ->
-    LengthSMTLibLiveSessionDeadlineExceeded
+  Session.LengthSMTLibSessionDeadlineFailure process ->
+    sessionProcessFailure process
   Session.LengthSMTLibSessionWorkspaceFailure workspace ->
     workspaceFailure workspace
   Session.LengthSMTLibSessionCapabilityPlanFailure _ ->

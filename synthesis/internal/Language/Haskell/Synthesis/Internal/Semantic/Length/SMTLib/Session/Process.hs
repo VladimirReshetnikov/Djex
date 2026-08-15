@@ -27,6 +27,9 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Proces
   , LengthSMTLibProcessDeadline
   , mkLengthSMTLibProcessDeadline
   , lengthSMTLibProcessDeadlineAfterMilliseconds
+  , compareLengthSMTLibProcessDeadline
+  , minimumLengthSMTLibProcessDeadline
+  , checkLengthSMTLibProcessDeadline
   , lengthSMTLibProcessMonotonicTimeNanoseconds
   , lengthSMTLibProcessDeadlineFingerprintField
   , LengthSMTLibProcessCancellation
@@ -240,6 +243,34 @@ lengthSMTLibProcessDeadlineAfterMilliseconds milliseconds = do
   pure $ case result of
     Left failure -> Left $ fromZ3ProcessError failure
     Right deadline -> Right $ LengthSMTLibProcessDeadline deadline
+
+compareLengthSMTLibProcessDeadline
+  :: LengthSMTLibProcessDeadline
+  -> LengthSMTLibProcessDeadline
+  -> Ordering
+compareLengthSMTLibProcessDeadline
+    (LengthSMTLibProcessDeadline left)
+    (LengthSMTLibProcessDeadline right) =
+      Z3Process.compareZ3SMTLibProcessDeadline left right
+
+minimumLengthSMTLibProcessDeadline
+  :: LengthSMTLibProcessDeadline
+  -> LengthSMTLibProcessDeadline
+  -> LengthSMTLibProcessDeadline
+minimumLengthSMTLibProcessDeadline
+    (LengthSMTLibProcessDeadline left)
+    (LengthSMTLibProcessDeadline right) = LengthSMTLibProcessDeadline
+      $ Z3Process.minimumZ3SMTLibProcessDeadline left right
+
+checkLengthSMTLibProcessDeadline
+  :: LengthSMTLibProcessDeadline
+  -> IO (Either LengthSMTLibProcessError ())
+checkLengthSMTLibProcessDeadline
+    (LengthSMTLibProcessDeadline deadline) = do
+  checked <- Z3Process.checkZ3SMTLibProcessDeadline deadline
+  pure $ case checked of
+    Left failure -> Left $ fromZ3ProcessError failure
+    Right () -> Right ()
 
 lengthSMTLibProcessMonotonicTimeNanoseconds :: IO Word64
 lengthSMTLibProcessMonotonicTimeNanoseconds =

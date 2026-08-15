@@ -7017,7 +7017,7 @@ smtLibProtocolTests = testGroup
       checkBarrier <- protocolSentinel protocolCheckNonce
       valueBarrier <- protocolSentinel protocolValueNonce
       checkReceiver <- expectSpinePairProtocolWrite
-        SMTLibSpinePairProtocol.LengthSpinePairSMTLibProtocolInitialQueryWrite
+        SMTLibSpinePairProtocol.LengthSMTLibProtocolInitialQueryWrite
         (SMTLibSpinePairProtocol.lengthSpinePairSMTLibProtocolInitialWriteBytes
           pairPlan)
         $ SMTLibSpinePairProtocol.startLengthSpinePairSMTLibProtocol pairPlan
@@ -7028,7 +7028,7 @@ smtLibProtocolTests = testGroup
           SMTLibStream.smtLibEchoSentinelResponseBytes checkBarrier ++
           asciiBytes "\n"
       valueReceiver <- expectSpinePairProtocolWrite
-        SMTLibSpinePairProtocol.LengthSpinePairSMTLibProtocolInputValueWrite
+        SMTLibSpinePairProtocol.LengthSMTLibProtocolInputValueWrite
         (maybe [] id
           $ SMTLibSpinePairProtocol.lengthSpinePairSMTLibProtocolInputValueWriteBytes
               pairPlan)

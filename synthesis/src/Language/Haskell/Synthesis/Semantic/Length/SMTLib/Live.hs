@@ -863,31 +863,31 @@ spinePairQueryProtocolPlanFailure
   :: SpinePairProtocol.LengthSpinePairSMTLibProtocolPlanError
   -> LengthSpinePairSMTLibLiveQueryFailure
 spinePairQueryProtocolPlanFailure failure = case failure of
-  SpinePairProtocol.LengthSpinePairSMTLibProtocolRequiredLimitTooSmall {} ->
+  SpinePairProtocol.LengthSMTLibProtocolRequiredLimitTooSmall {} ->
     LengthSpinePairSMTLibLiveQueryConfigurationRejected
-  SpinePairProtocol.LengthSpinePairSMTLibProtocolMinimumStdoutByteLimitExceeded {} ->
+  SpinePairProtocol.LengthSMTLibProtocolMinimumStdoutByteLimitExceeded {} ->
     LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
-  SpinePairProtocol.LengthSpinePairSMTLibProtocolPlanFingerprintByteLimitExceeded {} ->
+  SpinePairProtocol.LengthSMTLibProtocolPlanFingerprintByteLimitExceeded {} ->
     LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
-  SpinePairProtocol.LengthSpinePairSMTLibProtocolBarrierNonceError {} ->
+  SpinePairProtocol.LengthSMTLibProtocolBarrierNonceError {} ->
     LengthSpinePairSMTLibLiveQueryInternalFailure
-  SpinePairProtocol.LengthSpinePairSMTLibProtocolMissingInputValueBarrierNonce ->
+  SpinePairProtocol.LengthSMTLibProtocolMissingInputValueBarrierNonce ->
     LengthSpinePairSMTLibLiveQueryInternalFailure
-  SpinePairProtocol.LengthSpinePairSMTLibProtocolUnexpectedInputValueBarrierNonce ->
+  SpinePairProtocol.LengthSMTLibProtocolUnexpectedInputValueBarrierNonce ->
     LengthSpinePairSMTLibLiveQueryInternalFailure
-  SpinePairProtocol.LengthSpinePairSMTLibProtocolRepeatedBarrierNonce ->
+  SpinePairProtocol.LengthSMTLibProtocolRepeatedBarrierNonce ->
     LengthSpinePairSMTLibLiveQueryInternalFailure
 
 spinePairQueryProtocolFailure
   :: SpinePairProtocol.LengthSpinePairSMTLibProtocolError
   -> LengthSpinePairSMTLibLiveQueryFailure
 spinePairQueryProtocolFailure failure = case failure of
-  SpinePairProtocol.LengthSpinePairSMTLibProtocolCumulativeStdoutByteLimitExceeded {} ->
+  SpinePairProtocol.LengthSMTLibProtocolCumulativeStdoutByteLimitExceeded {} ->
     LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
-  SpinePairProtocol.LengthSpinePairSMTLibProtocolFramingFailure _ framing
+  SpinePairProtocol.LengthSMTLibProtocolFramingFailure _ framing
     | streamFramingLimitFailure framing ->
         LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
-  SpinePairProtocol.LengthSpinePairSMTLibProtocolResponseFailure _ response
+  SpinePairProtocol.LengthSMTLibProtocolResponseFailure _ response
     | responseLimitFailure response ->
         LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
   _ -> LengthSpinePairSMTLibLiveQueryProtocolRejected

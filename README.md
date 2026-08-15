@@ -48,6 +48,7 @@ these tiers explicitly.
   - [Positive-affine applicable-domain validation](#positive-affine-applicable-domain-validation)
   - [Relational positive-affine applicable-domain validation](#relational-positive-affine-applicable-domain-validation)
   - [Strict relational positive-affine applicable-domain validation](#strict-relational-positive-affine-applicable-domain-validation)
+  - [Strict relational positive-affine quotient applicable-domain validation](#strict-relational-positive-affine-quotient-applicable-domain-validation)
   - [Finite binary product spine lengths, offline and live SMT replay](#finite-binary-product-spine-lengths-offline-and-live-smt-replay)
     - [Shared live usable-work budget](#shared-live-usable-work-budget)
     - [Descriptor-bound Z3 executable launch](#descriptor-bound-z3-executable-launch)
@@ -1204,6 +1205,101 @@ origin, simplification, and live validator retains its API, behavior,
 authority, identity, and bytes, as do all existing contract-through-live
 artifacts. See the
 [strict relational positive-affine applicable-domain report](docs/reports/2026-08-15-strict-relational-positive-affine-length-applicable-domain.md).
+
+### Strict relational positive-affine quotient applicable-domain validation
+
+The direct, positive-affine, relational, and strict-relational validators
+retain their exact behavior and receipt families. The additive quotient
+successor is
+`validateLengthProblemStrictRelationalPositiveAffineQuotientApplicableDomain`,
+with query-owned
+`validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain`.
+For a positive checked divisor `d` and exact positive-affine `A` and `B`, it
+recognizes one quotient at a directed relation operand's root through four
+exact natural laws:
+
+```text
+q_d(A) <= B        <=>  A <= d*B + (d - 1)
+A <= q_d(B)        <=>  d*A <= B
+not (q_d(A) <= B)  <=>  d*(B + 1) <= A
+not (A <= q_d(B))  <=>  B + 1 <= d*A
+```
+
+An equality with exactly one root quotient emits both directed rules,
+left-to-right and then right-to-left. The quotient dividend and opposite
+operand must each contain only compact inputs, natural literals, `LengthSum`,
+and positive-literal `LengthScale`. Scaling, successor insertion, and ordinary
+coefficient cancellation operate on arbitrary-precision proof summaries; they
+construct no checked expression and spend no syntax or public literal budget.
+
+For example:
+
+```text
+q_3(2*x + 1) <= 2  <=>  2*x + 1 <= 8  ==>  x <= 3
+q_3(x) = 4         <=>  12 <= x <= 14
+not (4 <= q_3(x))  <=>  x + 1 <= 12   ==>  x <= 11
+```
+
+The corresponding finite boxes have maxima `[3]`, `[14]`, and `[11]`.
+Their total/applicable counts are respectively 4/4, 15/3, and 12/12.
+Relational closure also composes quotient consequences: `x <= q_3(y)` and
+`y <= 8` derive maxima `[2, 8]`, total count 27, and applicable count 18.
+Conversely, `not (q_3(x) <= 4)` together with `x <= 14` proves contradiction
+and selects the established all-zero carrier, with maximum `[0]`, total count
+one, and applicable count zero.
+
+The nominal binary-product entrances are
+`validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientApplicableDomain`
+and
+`validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain`.
+For a safe product problem under `q_3(input) <= 2`, complete traversal yields
+maximum `[8]` and total/applicable counts 9/9. Product evidence remains
+nominally disjoint from scalar evidence.
+
+Nested or embedded quotients, quotients at both relation roots, unsupported
+quotient children or opposite operands, negated equality, and nested Boolean
+structure contribute no rule and no partial bound. Modulo, natural monus,
+minimum, maximum, conditionals, result references, and other non-affine
+subtrees remain excluded. Quotient-free clauses delegate to the predecessor
+strict scanner unchanged. An unsupported clause is not a validation failure;
+it still participates in concrete precondition replay if other clauses derive
+a complete box.
+
+Input-width rejection precedes precondition demand, and nullary problems send
+`[]` directly to the finite-box verifier. For nonnullary problems, syntactic
+or propagated contradiction wins over missing coverage; otherwise the first
+source-ordered unbounded input returns ordinary
+`LengthApplicableDomainInapplicable`. Derived-value and Cartesian limits,
+indexed evaluation, the first counterexample, complete receipt construction,
+and exact query association retain the established order. Equality rule order
+and synchronous rule-once closure remain deterministic.
+
+Successful traversal yields opaque
+`ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain` or
+`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain`.
+Their four projections expose maxima, total/applicable counts, and the exact
+finite-spine/provider-law basis. Query wrappers issue no SMT-LIB command and
+consume no solver status; a query supplies only exact behavioral-problem
+association. Establishment remains model-relative and grants no
+source-language realization, provider validation, universal proof, or pruning
+authority.
+
+Only the two new quotient receipt tags add canonical bytes:
+
+```text
+finite-list-spine-length/strict-relational-positive-affine-quotient-precondition-domain-establishment/v1
+finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-precondition-domain-establishment/v1
+```
+
+Every predecessor API and receipt remains literal. Existing contracts,
+inventories, sessions, candidates, encodings, problems, query commands,
+symbols, value requests, fingerprints, protocols, processes, workers, runs,
+and observations retain their identities and bytes. Root extrema and monus,
+bounded Boolean finite unions, and further launch hardening remain separate,
+unranked follow-up candidates requiring their own authority, work-cap,
+identity, and compatibility designs. Any future finite-union design must not
+replace explicit branch boxes with a componentwise-maximum rectangle. See the
+[strict relational positive-affine quotient applicable-domain report](docs/reports/2026-08-15-strict-relational-positive-affine-quotient-length-applicable-domain.md).
 
 ### Finite binary product spine lengths, offline and live SMT replay
 

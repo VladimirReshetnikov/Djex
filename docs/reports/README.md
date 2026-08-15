@@ -90,3 +90,4 @@ Reports are listed oldest first.
 - 2026-08-14 — [Bounded Length counterexample simplification](2026-08-14-bounded-length-counterexample-simplification.md)
 - 2026-08-14 — [Positive-affine Length applicable-domain validation](2026-08-14-positive-affine-length-applicable-domain.md)
 - 2026-08-15 — [Relational positive-affine Length applicable-domain validation](2026-08-15-relational-positive-affine-length-applicable-domain.md)
+- 2026-08-15 — [Shared live usable-work budget for Length/Z3](2026-08-15-shared-live-usable-work-budget.md)

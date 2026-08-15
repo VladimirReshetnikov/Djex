@@ -182,7 +182,7 @@ and the
 | `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and nominally distinct scalar/product typed-candidate behavioral problems: session-owned provider and restricted resolver authority, contract resealing, residual rejection, rigid root/provider authorization, mixed-role opaque targets, exact scalar zero/step cases inside product fields, and provider-only consumption of independently authorized certificate carriers. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation plus exact input-symbol, natural-input, origin, finite-box, and direct, literal-ceiling positive-affine, or relational positive-affine applicable-domain replay for nominally distinct checked scalar and binary-product Length problems, without launching or trusting a solver. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` | Pure validated Z3 launch, resource, artifact, and response-decoder policy with a package-private complete identity and a byte-free digest-expectation presence classifier; it performs no IO or attestation. |
-| `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` | Rank-N scoped capability-probed Z3 ownership for scalar and exact binary-product queries, with one shared 64-query lease budget, nominal byte-free failures and observations, heuristic status/strength/use, and domain-specific query-first replay gates. |
+| `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` | Rank-N scoped capability-probed Z3 ownership for scalar and exact binary-product queries, with one shared 64-query lease budget and an additive validated shared usable-work deadline, nominal byte-free failures and observations, heuristic status/strength/use, and domain-specific query-first replay gates. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` | Opaque query-specific association of bounded raw solver reports, with heuristic-only safe projections and exact problem-plus-query replay before payload access. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response` | Pure bounded SMT-LIB 2.x check-status and scalar/product query-specific input-valuation decoding; syntax remains untrusted and only independent domain replay may create evidence. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` | Package-private incremental reset/check/value transaction planning with exact positional barriers, causal write boundaries, and bounded cumulative stdout; it performs no IO or attestation. It hosts the one phase machine shared by both domains, parameterized by a `LengthSMTLibProtocolIdentity` record of domain tags, fingerprint fields, and query projections, plus the scalar identity itself. |
@@ -201,7 +201,7 @@ and the
 | `Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution` | Domain-neutral admitted Z3 launch profile, mechanical startup/reset facts, configured argv, and flat launch fingerprint-field slice without process or domain-schema authority. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process` | Domain-neutral opaque direct-process runtime owning pre-spawn observation, pipes, FIFO events, cancellation/deadlines, and bounded cleanup while exposing only associated schema-free observation and limit fields to a domain facade. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Transport` | Length/Z3 adapter which binds one process, cancellation token, and absolute deadline behind the generic causal driver operations. |
-| `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session` | Rank-N scoped ownership of one capability-probed common-QF_LIA worker and one shared 64-entry scalar/product ordinal budget, with secret/public entropy separation, a fresh fd-observed workspace, exact segmented probe transcript, nominal domain runs, and no public process handle. |
+| `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session` | Rank-N scoped ownership of one capability-probed common-QF_LIA worker and one shared 64-entry scalar/product ordinal budget, with an optional generative shared absolute deadline spanning opening and query work, secret/public entropy separation, a fresh fd-observed workspace, exact segmented probe transcript, nominal domain runs, and no public process handle. |
 | `Language.Haskell.Synthesis.Semantic.Observation` | Raw three-valued solver and four-valued behavioral reports without candidate association or evidence claims. |
 | `Language.Haskell.Synthesis.Semantic.Problem` | Bounded raw artifacts associated with exact domain, inventory, encoding, candidate, and problem identities; every raw result is restricted to heuristic ranking, while domain-owned authoritative evidence has only a private construction seam. |
 | `Language.Haskell.Synthesis.Generated` | Scope-aware expressions, patterns, clauses, holes, mixed term/type application spines, bottom-up rewriting, simplification, alpha-equivalence, substitution, and Haskell rendering through the common qualification policy. |
@@ -908,6 +908,61 @@ heuristic status. Neither gate exposes a process, transcript, decoded
 valuation, or stronger use for `unsat`. Direct raw-input replay instead
 evaluates caller-supplied naturals afresh and does not extract any hidden
 live-observation field.
+
+The public live facade also offers one additive elapsed-time policy. A caller
+first validates `LengthSMTLibLiveUsableWorkBudgetSource` with
+`mkLengthSMTLibLiveUsableWorkBudget`; validation is pure and rejects a
+nonpositive duration or host-microsecond/monotonic-nanosecond conversion
+overflow. `withLengthSMTLibLiveUsableWorkDeadline` captures one absolute
+monotonic deadline and lends only a generative
+`LengthSMTLibLiveUsableWorkDeadline budget`. Application work may therefore be
+forced inside that rank-N callback before a deferred session is opened with
+`withLengthSMTLibLiveSessionUnderDeadline`. The convenience
+`withLengthSMTLibLiveSessionWithUsableWorkBudget` captures immediately before
+session configuration and opening.
+
+The legacy `withLengthSMTLibLiveSession` path is unchanged: opening has its
+established private deadline and each query derives a fresh local host
+deadline. Beneath a shared token, the opener and every scalar or product query
+instead select the minimum of the captured absolute deadline and their fresh
+local deadline, with the shared deadline winning an exact tie. This covers
+workspace allocation and inspection, launch and executable snapshot, the
+capability probe, waiting for the one serial gate, transaction transport,
+independent model replay, and run-identity admission/sealing. It is orthogonal
+to the existing shared 64-entry scalar/product ordinal ceiling.
+
+The policy deliberately does not install an asynchronous watchdog around
+arbitrary application callbacks. A blocked callback or nonterminating pure
+computation is not interrupted. Expiry is observed at a live operation or when
+the relevant callback returns normally; callback exceptions remain
+authoritative and are rethrown after durable cleanup begins. The session's
+post-callback final-readiness observation and durable cleanup run under fresh
+established private windows, not the shared operational deadline. The
+convenience entrance performs no second shared check after those stages. The
+general two-step deadline owner does retain its own normal-return check, so an
+outer callback which waits for a nested session to finish can observe that the
+shared time elapsed while the nested fresh-window finalization completed.
+
+Deadline expiry maps into the existing byte-free public failure vocabularies:
+owner/session-boundary expiry is
+`LengthSMTLibLiveSessionDeadlineExceeded`, while expiry observed within a
+scalar or product query is its nominal query deadline failure. Cleanup
+incompleteness remains separately inspectable; neither child bytes nor clock
+values cross the facade. Budgeted workers wrap the exact legacy ready-worker
+identity in the additive
+`djex-length-z3-shared-usable-work-deadline/v1` envelope. Budgeted scalar and
+product runs use distinct shared-deadline schema tags and fingerprint roles,
+and bind the duration, captured shared deadline, effective minimum and cause,
+shared-on-tie rule, and coverage policy. Legacy identities and all query,
+protocol, observation, and replay bytes remain exact.
+
+This deadline is process/session causality only. It supplies no executable-
+image attestation, solver-soundness claim, proof, pruning certificate, or
+cross-domain authority. Scalar and product statuses remain nominally separate
+`HeuristicRankingOnly` observations; optional counterexample evidence still
+requires exact query association and independent domain replay. The API,
+identity, coverage, exclusion, and failure details are recorded in the
+[shared live usable-work budget report](../docs/reports/2026-08-15-shared-live-usable-work-budget.md).
 
 `Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution` seals the shared
 pure launch profile below domain protocols. It owns path/pin admission,

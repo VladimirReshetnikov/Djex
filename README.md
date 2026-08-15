@@ -48,6 +48,7 @@ these tiers explicitly.
   - [Positive-affine applicable-domain validation](#positive-affine-applicable-domain-validation)
   - [Relational positive-affine applicable-domain validation](#relational-positive-affine-applicable-domain-validation)
   - [Finite binary product spine lengths, offline and live SMT replay](#finite-binary-product-spine-lengths-offline-and-live-smt-replay)
+    - [Shared live usable-work budget](#shared-live-usable-work-budget)
 - [Building](#building)
 - [Unified command](#unified-command)
 - [Query boundary](#query-boundary)
@@ -1246,6 +1247,95 @@ Leant now consumes this product observation through its nominal canonical-
 configuration versions 4 and 6. Scalar and product behavioral authority remain
 separate across that downstream integration.
 
+#### Shared live usable-work budget
+
+The live facade has an additive shared-budget entrance for batches whose total
+usable work must not receive a fresh host window for every query. A validated
+`LengthSMTLibLiveUsableWorkBudget` is a positive millisecond duration; its pure
+constructor rejects nonpositive values and values which cannot be represented
+by both the host microsecond wait and monotonic nanosecond clock arithmetic.
+Capturing it creates one opaque, generative
+`LengthSMTLibLiveUsableWorkDeadline budget`. The rank-N `budget` parameter
+prevents that absolute deadline from escaping or being reused as unscoped
+authority.
+
+This example starts a 30-second window before forcing two deferred sealed
+queries, then opens one session beneath the same token and runs one scalar and
+one product transaction. The nested `Either`s distinguish failure of the outer
+budget owner, session opening/finalization, and each nominal query path:
+
+```haskell
+import Control.DeepSeq (force)
+import Control.Exception (evaluate)
+
+usableWorkBudget <- either (fail . show) pure $
+  mkLengthSMTLibLiveUsableWorkBudget
+    LengthSMTLibLiveUsableWorkBudgetSource
+      { lengthSMTLibLiveUsableWorkBudgetSourceMilliseconds = 30000 }
+
+budgetedBatch <-
+  withLengthSMTLibLiveUsableWorkDeadline usableWorkBudget $ \deadline -> do
+    -- Force application-deferred sealing/ranking work after deadline capture.
+    (scalarQuery, pairQuery) <- evaluate $ force
+      (deferredScalarQuery, deferredPairQuery)
+    withLengthSMTLibLiveSessionUnderDeadline
+      deadline executionConfig $ \liveSession -> do
+        scalar <- runLengthSMTLibLiveQuery
+          defaultLengthEvaluationLimits liveSession scalarQuery
+        pair <- runLengthSpinePairSMTLibLiveQuery
+          defaultLengthEvaluationLimits liveSession pairQuery
+        pure (scalar, pair)
+
+case budgetedBatch of
+  Left budgetOwnerError -> handleSessionError budgetOwnerError
+  Right (Left sessionError) -> handleSessionError sessionError
+  Right (Right (scalarResult, pairResult)) ->
+    consumeNominalResults scalarResult pairResult
+```
+
+`withLengthSMTLibLiveSessionWithUsableWorkBudget` is the shorter form when no
+application work must run between deadline capture and session configuration.
+The legacy `withLengthSMTLibLiveSession` remains byte-for-byte and
+identity-for-identity on its historical policy: it has a private opener window
+and derives one fresh local host deadline for every query. The budgeted policy
+instead uses the earlier absolute deadline for opening and, for every scalar
+or product call, selects the minimum of the shared deadline and a fresh local
+per-query deadline. The shared deadline wins an exact tie. Waiting for the
+single serial query gate and the transaction, independent replay, and run-
+identity work all remain beneath that effective deadline. The existing shared
+64-transaction ordinal ceiling is independent of this elapsed-time budget.
+
+This is a usable-work boundary, not an asynchronous watchdog. It does not
+interrupt arbitrary callback IO or a nonterminating pure computation. A live
+operation can observe expiry earlier; otherwise the session checks immediately
+after its callback returns, and the general deadline owner checks when its
+callback returns normally. Callback exceptions remain authoritative and are
+re-thrown after durable cleanup begins. Final readiness and cleanup are run
+under fresh established private windows rather than the shared operational
+deadline. The convenience entrance deliberately performs no second shared
+check after those stages. In the two-step example, however, the general outer
+owner's normal-return check happens after the nested session has completely
+returned, so it may truthfully observe that the shared time elapsed while those
+fresh-window stages ran.
+
+An expiry observed at the owner or session boundary is the existing sanitized
+`LengthSMTLibLiveSessionDeadlineExceeded`; expiry observed by an individual
+scalar or product query uses its corresponding existing byte-free query
+deadline failure. Cleanup incompleteness remains a separate bit, and an
+exception is never replaced by a budget result. Budgeted ready-worker and
+scalar/product run identities are distinct additive envelopes. They bind the
+requested duration, captured shared absolute deadline, minimum-selection rule,
+effective cause, and coverage/exclusion policy around the exact legacy
+identity. Legacy identities, query/protocol bytes, and observation APIs remain
+unchanged.
+
+The deadline establishes only bounded process/session causality. It does not
+attest the executed image, validate Z3 soundness, turn `unsat` into proof, or
+grant pruning authority. Scalar and product observations stay nominally
+separate and `HeuristicRankingOnly`; only exact query association followed by
+independent domain replay can reveal optional counterexample evidence. See the
+[shared live usable-work budget report](docs/reports/2026-08-15-shared-live-usable-work-budget.md).
+
 SMT-LIB's QF_LIA logic excludes the built-in `div` and `mod` operators. Djex
 therefore lowers every remaining normalized quotient or modulo node to one
 shared private Euclidean witness shape. For a positive literal divisor `k` and
@@ -1541,8 +1631,12 @@ byte-free classes plus a
 cleanup-incomplete bit; the pure replay gate returns its own closed byte-free
 association error.
 Child-controlled payloads and operating-system details never cross the facade.
-The private session opener and configured per-query deadlines remain separate
-budgets rather than a claimed hard deadline for a caller-defined batch.
+The legacy entrance retains separate private opener and per-query deadlines.
+The additive budgeted entrances can instead cap usable opening and query work
+by one shared absolute monotonic deadline without claiming an asynchronous
+hard deadline for arbitrary callback IO. The exact coverage and finalizer
+distinction are described in
+[shared live usable-work budget](#shared-live-usable-work-budget).
 
 `Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution` now owns the shared
 pure launch profile below behavioral domains: bounded absolute executable path,

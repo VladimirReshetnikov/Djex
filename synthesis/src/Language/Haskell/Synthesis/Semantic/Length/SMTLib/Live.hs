@@ -3,16 +3,19 @@
 
 -- | A narrow live Length/Z3 boundary.
 --
--- This module owns one capability-probed worker only for the dynamic extent of
--- 'withLengthSMTLibLiveSession'.  Public callers can submit sealed scalar or
--- exact binary-product spine queries and inspect status and heuristic strength,
--- then consume a completed live observation's exact nominal query association
--- and independently replayed counterexample evidence only through the matching
+-- This module lends one capability-probed worker only for the dynamic extent
+-- of one of its scoped session entrances.  The legacy
+-- 'withLengthSMTLibLiveSession' entrance and the additive shared-usable-work
+-- entrances retain the same public query and replay surface.  Public callers
+-- can submit sealed scalar or exact binary-product spine queries and inspect
+-- status and heuristic strength, then consume a completed live observation's
+-- exact nominal query association and independently replayed counterexample
+-- evidence only through the matching
 -- 'replayLengthSMTLibLiveQueryObservation' or
--- 'replayLengthSpinePairSMTLibLiveQueryObservation' gate.  They cannot inspect
--- or retain a process handle, cancellation token, executable or workspace path,
--- barrier, ordinal, transcript, decoded valuation, transport counter, or
--- reversible run identity.
+-- 'replayLengthSpinePairSMTLibLiveQueryObservation' gate.  They cannot
+-- inspect or retain a process handle, cancellation token, executable or
+-- workspace path, barrier, ordinal, transcript, decoded valuation, transport
+-- counter, or reversible run identity.
 --
 -- The common readiness probe establishes only the exact QF_LIA, reset, status,
 -- input-value, framing, and transport profile.  Product protocol, run,
@@ -417,7 +420,12 @@ defaultLengthSMTLibLiveSessionMaximumQueries =
 -- rejects a normally returning callback after expiry.  An overrun can be
 -- rejected earlier by the next live operation or by a budgeted session
 -- immediately after its callback returns, before fresh finalizer/cleanup
--- windows begin.  Callback exceptions remain authoritative and are rethrown.
+-- windows begin.  If this general owner callback waits for such a nested
+-- session to finish, its own final check occurs after that session's fresh
+-- finalizer/cleanup windows.  Use
+-- 'withLengthSMTLibLiveSessionWithUsableWorkBudget' when no second
+-- post-finalization owner check is desired.  Callback exceptions remain
+-- authoritative and are rethrown.
 withLengthSMTLibLiveUsableWorkDeadline
   :: forall result. LengthSMTLibLiveUsableWorkBudget
   -> (forall budget. LengthSMTLibLiveUsableWorkDeadline budget -> IO result)

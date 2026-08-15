@@ -1720,6 +1720,11 @@ is made executable, sealed against writes and size changes, checked, rewound,
 and passed to `execveat` with `AT_EMPTY_PATH`. The optional pin is compared
 before any child is forked. A pathname replacement or in-place source rewrite
 after sealing therefore cannot change the staged bytes which the kernel loads.
+Before `execveat`, the child requires Linux `close_range` to close every
+unrelated inherited descriptor around the two retained descriptors. If that
+primitive is unavailable or rejects any segment, the child reports launch
+failure and exits; there is no soft-`RLIMIT_NOFILE` fallback whose ceiling
+could omit a descriptor opened before the limit was lowered.
 Any unavailable primitive, admission failure, pin mismatch, seal failure, or
 descriptor-exec failure closes the owned resources and fails without retrying
 the pathname launcher.

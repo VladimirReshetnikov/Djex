@@ -8,7 +8,6 @@
 #include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -86,22 +85,6 @@ static void djex_report_exec_failure(int descriptor, int stage) {
   (void) ignored;
 }
 
-static int djex_child_descriptor_limit(void) {
-  struct rlimit limit;
-  long configured;
-  if (getrlimit(RLIMIT_NOFILE, &limit) == 0 && limit.rlim_cur != RLIM_INFINITY) {
-    if (limit.rlim_cur > (rlim_t) INT_MAX) {
-      return INT_MAX;
-    }
-    return (int) limit.rlim_cur;
-  }
-  configured = sysconf(_SC_OPEN_MAX);
-  if (configured < 0 || configured > INT_MAX) {
-    return 65536;
-  }
-  return (int) configured;
-}
-
 static int djex_close_range(unsigned int first, unsigned int last) {
   if (first > last) {
     return 0;
@@ -116,11 +99,9 @@ static int djex_close_range(unsigned int first, unsigned int last) {
 
 static int djex_close_child_descriptors(
     int executable_descriptor,
-    int status_descriptor,
-    int descriptor_limit) {
+    int status_descriptor) {
   unsigned int first_kept;
   unsigned int second_kept;
-  int descriptor;
 
   if (executable_descriptor < status_descriptor) {
     first_kept = (unsigned int) executable_descriptor;
@@ -134,25 +115,11 @@ static int djex_close_child_descriptors(
       djex_close_range(second_kept + 1U, UINT_MAX) == 0) {
     return 0;
   }
-  if (errno != ENOSYS) {
-    return -1;
-  }
-
-  /* Linux before close_range: finite exact fallback over the inherited table. */
-  for (descriptor = STDERR_FILENO + 1;
-       descriptor < descriptor_limit;
-       ++descriptor) {
-    if (descriptor != executable_descriptor && descriptor != status_descriptor) {
-      int closed;
-      do {
-        closed = close(descriptor);
-      } while (closed < 0 && errno == EINTR);
-      if (closed < 0 && errno != EBADF) {
-        return -1;
-      }
-    }
-  }
-  return 0;
+  /* No RLIMIT-bounded fallback can prove closure of already-open descriptors
+   * above a subsequently lowered soft limit.  An unavailable or rejected
+   * close_range therefore fails this launch before exec rather than silently
+   * weakening descriptor isolation. */
+  return -1;
 }
 
 int djex_z3_open_executable_descriptor(const char *path) {
@@ -217,7 +184,6 @@ int djex_z3_descriptor_spawn(
   int status_pipe[2] = {-1, -1};
   int executable_copy = -1;
   int working_directory_copy = -1;
-  int descriptor_limit;
   int signal_result;
   int signals_blocked = 0;
   sigset_t blocked_signals;
@@ -240,7 +206,6 @@ int djex_z3_descriptor_spawn(
       djex_pipe_cloexec(status_pipe) < 0) {
     goto failed;
   }
-  descriptor_limit = djex_child_descriptor_limit();
   if (sigfillset(&blocked_signals) < 0) {
     goto failed;
   }
@@ -289,7 +254,7 @@ int djex_z3_descriptor_spawn(
     }
     (void) close(working_directory_copy);
     if (djex_close_child_descriptors(
-          executable_copy, status_pipe[1], descriptor_limit) < 0) {
+            executable_copy, status_pipe[1]) < 0) {
       djex_report_exec_failure(
           status_pipe[1], DJEX_DESCRIPTOR_EXEC_STAGE_CLOSE_DESCRIPTORS);
       _exit(127);

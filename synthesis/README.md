@@ -1165,6 +1165,11 @@ native failure is fail-closed with no pathname retry. Pure construction remains
 IO-free; `lengthSMTLibExecutionExecutableLaunchStrategy` exposes only the
 closed strategy classifier.
 
+The child also requires Linux `close_range` for exact unrelated-descriptor
+closure before `execveat`. An unavailable or rejected call fails the launch;
+there is deliberately no current-soft-limit scan, because a descriptor opened
+before `RLIMIT_NOFILE` was lowered can lie above that limit.
+
 This stronger branch deliberately drops source set-id and file-capability
 metadata and does not bind an interpreter, dynamic loader, shared library,
 solver implementation, or status. Its execution-policy, process observation,

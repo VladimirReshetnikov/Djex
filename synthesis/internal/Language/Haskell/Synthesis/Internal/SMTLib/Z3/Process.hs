@@ -2554,6 +2554,7 @@ descriptorBoundExecutableSnapshotField profile requestedCwd canonicalCwd
         [ "three-close-on-exec-pipes"
         , "close-on-exec-error-handshake-pipe"
         , "close-every-unrelated-child-descriptor-before-exec"
+        , "close-range-required-fail-closed-when-unavailable"
         , "process-package-interactive-process-lock"
         , "block-signals-across-fork-restore-parent-and-child-before-exec"
         , "child-process-group-pid"

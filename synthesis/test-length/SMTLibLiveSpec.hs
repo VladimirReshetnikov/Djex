@@ -838,6 +838,9 @@ assertLiveDescriptorBoundHealthy = withFakeZ3Mode "healthy"
       assertBool "descriptor ready identity omitted its exact strength"
         $ Process.lengthSMTLibDescriptorBoundExecutableLaunchStrengthTag
             `BS.isInfixOf` readyIdentity
+      assertBool "descriptor ready identity omitted fail-closed fd isolation"
+        $ "close-range-required-fail-closed-when-unavailable"
+            `BS.isInfixOf` readyIdentity
       assertBool "descriptor ready identity acquired the legacy ready schema"
         $ not $ BS.pack Session.lengthSMTLibReadyWorkerSchemaTag
             `BS.isInfixOf` readyIdentity

@@ -86,8 +86,12 @@ cancellation and absolute opener deadline:
 9. Allocate isolated stdin, stdout, stderr, and exec-status pipes; fork a new
    process-group leader; select the already-owned fresh working directory by
    descriptor; install only the three standard streams; close every unrelated
-   inherited descriptor; and invoke `execveat` with an empty pathname and
-   `AT_EMPTY_PATH` on the sealed image.
+   inherited descriptor with Linux `close_range`; and invoke `execveat` with
+   an empty pathname and `AT_EMPTY_PATH` on the sealed image. If any required
+   `close_range` segment is unavailable or rejected, report launch failure and
+   exit before exec. There is no current-soft-`RLIMIT_NOFILE` scan fallback:
+   such a ceiling can exclude a descriptor opened before the limit was
+   lowered.
 10. Admit the process only after the close-on-exec status pipe reports exec
     success. A fixed child failure payload is mapped to the existing sanitized
     process/session failure boundary and never exposes errno text or paths.
@@ -95,7 +99,7 @@ cancellation and absolute opener deadline:
 There is no `/proc/self/fd` pathname, inherited ambient environment, shell, or
 fallback to direct path spawn. Failure of `memfd_create`, source admission,
 copying, hashing, pin comparison, `fchmod`, sealing, descriptor preparation,
-`fork`, or `execveat` is terminal for this opening attempt.
+`close_range`, `fork`, or `execveat` is terminal for this opening attempt.
 
 ## Why the copied image is the authority
 
@@ -165,7 +169,9 @@ incompleteness separately and grants no candidate evidence.
 Pure descriptor policy construction is platform-independent so configuration
 can be decoded without IO. A platform without the native sealed-image backend
 fails closed only if a live session actually tries to open it. It never
-silently chooses the legacy path launcher.
+silently chooses the legacy path launcher. On Linux, a kernel without working
+`close_range` likewise fails the descriptor launch rather than weakening the
+advertised child-descriptor isolation.
 
 ## Characterization
 

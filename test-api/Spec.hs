@@ -400,6 +400,7 @@ main = defaultMain $ testGroup "Djex downstream API"
                         ( "LengthSMTLibExecutionConfig" `isInfixOf` message ||
                           "LengthSMTLibLiveSession" `isInfixOf` message ||
                           "LengthSMTLibLiveUsableWorkDeadline" `isInfixOf` message ||
+                          "LengthSMTLibLiveScopedUsableWorkDeadline" `isInfixOf` message ||
                           "LengthSMTLibLiveQueryObservation" `isInfixOf` message ||
                           "LengthSpinePairSMTLibLiveQueryObservation" `isInfixOf` message ||
                           "CheckedLengthInterpretationPolicy" `isInfixOf` message
@@ -410,6 +411,7 @@ main = defaultMain $ testGroup "Djex downstream API"
                           "LengthSMTLibLiveSession" `isInfixOf` message ||
                           "LengthSMTLibLiveUsableWorkBudget" `isInfixOf` message ||
                           "LengthSMTLibLiveUsableWorkDeadline" `isInfixOf` message ||
+                          "LengthSMTLibLiveScopedUsableWorkDeadline" `isInfixOf` message ||
                           "LengthSMTLibLiveQueryObservation" `isInfixOf` message ||
                           "LengthSpinePairSMTLibLiveQueryObservation" `isInfixOf` message ||
                           "CheckedLengthInterpretationPolicy" `isInfixOf` message
@@ -469,6 +471,7 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "forbiddenAssociatedLengthSMTLibUnknownCoercion"
                       , "forbiddenLengthSMTLibLiveSessionCoercion"
                       , "forbiddenLengthSMTLibLiveUsableWorkDeadlineCoercion"
+                      , "forbiddenLengthSMTLibLiveScopedUsableWorkDeadlineCoercion"
                       , "forbiddenLengthSMTLibLiveUsableWorkBudgetCoercion"
                       , "forbiddenLengthSMTLibLiveObservationEpochCoercion"
                       , "forbiddenLengthSMTLibLiveObservationIdentityCoercion"
@@ -491,6 +494,7 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "LengthSMTLibLiveSession"
                       , "LengthSMTLibLiveUsableWorkBudget"
                       , "LengthSMTLibLiveUsableWorkDeadline"
+                      , "LengthSMTLibLiveScopedUsableWorkDeadline"
                       , "LengthSMTLibLiveQueryObservation"
                       , "LengthSpinePairSMTLibLiveQueryObservation"
                       , "LengthSMTLibLiveSessionError"

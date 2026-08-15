@@ -132,6 +132,32 @@ facadeTests = testGroup "public Djex facade"
             -> IO (Either LengthSMTLibLiveSessionError result)
           _budgetedSessionRunner =
             withLengthSMTLibLiveSessionWithUsableWorkBudget
+          _scopedBudgetOwner
+            :: LengthSMTLibLiveUsableWorkBudget
+            -> (forall budget.
+                LengthSMTLibLiveScopedUsableWorkDeadline budget -> IO result)
+            -> IO (Either LengthSMTLibLiveSessionError result)
+          _scopedBudgetOwner =
+            withLengthSMTLibLiveScopedUsableWorkDeadline
+          _scopedDeadlineCheck
+            :: LengthSMTLibLiveScopedUsableWorkDeadline FacadeLiveBudget
+            -> IO (Either LengthSMTLibLiveSessionError ())
+          _scopedDeadlineCheck =
+            checkLengthSMTLibLiveScopedUsableWorkDeadline
+          _scopedDeadlineSessionRunner
+            :: LengthSMTLibLiveScopedUsableWorkDeadline FacadeLiveBudget
+            -> LengthSMTLibExecutionConfig
+            -> (forall epoch. LengthSMTLibLiveSession epoch -> IO result)
+            -> IO (Either LengthSMTLibLiveSessionError result)
+          _scopedDeadlineSessionRunner =
+            withLengthSMTLibLiveSessionUnderScopedDeadline
+          _scopedBudgetedSessionRunner
+            :: LengthSMTLibLiveUsableWorkBudget
+            -> LengthSMTLibExecutionConfig
+            -> (forall epoch. LengthSMTLibLiveSession epoch -> IO result)
+            -> IO (Either LengthSMTLibLiveSessionError result)
+          _scopedBudgetedSessionRunner =
+            withLengthSMTLibLiveSessionWithScopedUsableWorkBudget
           _scopedRunner
             :: LengthSMTLibExecutionConfig
             -> (forall epoch. LengthSMTLibLiveSession epoch -> IO result)
@@ -277,7 +303,7 @@ facadeTests = testGroup "public Djex facade"
               -> LengthSpinePairSMTLibLiveObservationReplayError -> Ordering)
           pairReplayErrorShow =
             (show :: LengthSpinePairSMTLibLiveObservationReplayError -> String)
-      budgetBuilder `seq`
+      budgetBuilder `seq` _scopedDeadlineCheck `seq`
         queryRunner `seq` pairQueryRunner `seq` sessionFailureProjection `seq`
         observationReplay `seq`
         pairObservationReplay `seq`
@@ -295,6 +321,7 @@ facadeTests = testGroup "public Djex facade"
         pairQueryErrorShow `seq` replayErrorEq `seq` replayErrorOrd `seq`
         replayErrorShow `seq` pairReplayErrorEq `seq`
         pairReplayErrorOrd `seq` pairReplayErrorShow `seq`
+        (rnf :: LengthSMTLibLiveSessionFailure -> ()) `seq`
         (rnf :: LengthSMTLibLiveSessionError -> ()) `seq`
         (rnf :: LengthSMTLibLiveUsableWorkBudgetSource -> ()) `seq`
         (rnf :: LengthSMTLibLiveUsableWorkBudget -> ()) `seq`
@@ -347,6 +374,7 @@ facadeTests = testGroup "public Djex facade"
         , LengthSMTLibLiveSessionTransportFailed
         , LengthSMTLibLiveSessionCleanupFailed
         , LengthSMTLibLiveSessionInternalFailure
+        , LengthSMTLibLiveSessionUsableWorkScopeUnavailable
         ] @?= [minBound .. maxBound]
       let queryFailures =
             [ LengthSMTLibLiveQuerySessionUnavailable

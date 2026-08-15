@@ -3,12 +3,18 @@
 
 module Main (main) where
 
-import Control.Concurrent (threadDelay)
+import Control.Concurrent (forkIO, myThreadId, threadDelay, throwTo)
+import Control.Concurrent.MVar
+  ( newEmptyMVar
+  , putMVar
+  , takeMVar
+  )
 import Control.Exception
   ( Exception
   , SomeException
   , displayException
   , evaluate
+  , finally
   , throwIO
   , try
   )
@@ -175,6 +181,23 @@ usableWorkBudgetTests = testGroup "shared live usable-work budget"
       assertLiveUsableWorkConvenienceCleanupExclusion
   , testCase "rethrow an expired callback exception after durable cleanup"
       assertLiveUsableWorkCallbackException
+  , testCase
+      "reject an expired escaped v2 closure before resources or solver events"
+      assertLiveScopedUsableWorkEscapedClosure
+  , testCase
+      "reject a forked v2 use without spending the owner's live authority"
+      assertLiveScopedUsableWorkWrongThread
+  , testCase "close v2 authority after synchronous callback exceptions"
+      assertLiveScopedUsableWorkSynchronousException
+  , testCase "close v2 authority after throwTo callback exceptions"
+      assertLiveScopedUsableWorkAsynchronousException
+  , testCase "observe one absolute v2 deadline across repeated checkpoints"
+      assertLiveScopedUsableWorkCheckpointExpiry
+  , testCase
+      "separate v2 ready, scalar, and pair identity from byte-exact v1 tags"
+      assertLiveScopedUsableWorkIdentitySchemas
+  , testCase "exclude fresh finalization from the scoped convenience entrance"
+      assertLiveScopedUsableWorkConvenienceCleanupExclusion
   ]
 
 assertLiveUsableWorkBudgetValidation :: IO ()
@@ -289,6 +312,25 @@ assertLiveUsableWorkOpenerExpiry =
 
 assertLiveUsableWorkIdentitySchemas :: IO ()
 assertLiveUsableWorkIdentitySchemas = do
+  SMTLibSession.lengthSMTLibReadyWorkerSchemaTag @?=
+    asciiBytes "djex-length-z3-capability-probed-ready-worker/v4"
+  SMTLibSession.lengthSMTLibQueryRunSchemaTag @?= asciiBytes (concat
+    [ "djex-length-z3-capability-probed-pre-spawn-pathname-snapshot-"
+    , "worker-query-run/v1"
+    ])
+  SMTLibSession.lengthSMTLibBudgetedQueryRunSchemaTag @?= asciiBytes (concat
+    [ "djex-length-z3-capability-probed-pre-spawn-pathname-snapshot-worker-"
+    , "query-run/shared-usable-work-deadline/v1"
+    ])
+  SMTLibSession.lengthSpinePairSMTLibQueryRunSchemaTag @?= asciiBytes (concat
+    [ "djex-length-spine-pair-z3-capability-probed-pre-spawn-pathname-"
+    , "snapshot-worker-query-run/v1"
+    ])
+  SMTLibSession.lengthSpinePairSMTLibBudgetedQueryRunSchemaTag @?=
+    asciiBytes (concat
+      [ "djex-length-spine-pair-z3-capability-probed-pre-spawn-pathname-"
+      , "snapshot-worker-query-run/shared-usable-work-deadline/v1"
+      ])
   problem <- adversarialConstantZeroProblem identityLengthContract
   query <- expectRight $ SMTLib.sealLengthSMTLibQuery
     SMTLib.defaultLengthSMTLibLimits problem
@@ -305,6 +347,10 @@ assertLiveUsableWorkIdentitySchemas = do
           $ not
           $ SMTLibSession.lengthSMTLibBudgetedQueryRunSchemaTag
               `isInfixOf` identity
+        assertBool "legacy run identity acquired the scoped-v2 schema"
+          $ not
+          $ SMTLibSession.lengthSMTLibScopedBudgetedQueryRunSchemaTag
+              `isInfixOf` identity
   _ <- expectRight legacy
 
   budgeted <- withInternalBudgetedWorker "healthy" 1000 1000
@@ -318,8 +364,17 @@ assertLiveUsableWorkIdentitySchemas = do
         assertBool "budgeted worker identity omitted its shared deadline schema"
           $ asciiBytes "djex-length-z3-shared-usable-work-deadline/v1"
               `isInfixOf` workerIdentity
+        assertBool "v1 worker identity acquired the scoped-v2 schema"
+          $ not
+          $ asciiBytes
+              "djex-length-z3-scoped-shared-usable-work-deadline/v2"
+                `isInfixOf` workerIdentity
         assertBool "budgeted run identity omitted its distinct schema"
           $ SMTLibSession.lengthSMTLibBudgetedQueryRunSchemaTag
+              `isInfixOf` runIdentity
+        assertBool "v1 run identity acquired the scoped-v2 schema"
+          $ not
+          $ SMTLibSession.lengthSMTLibScopedBudgetedQueryRunSchemaTag
               `isInfixOf` runIdentity
         assertBool "budgeted run identity retained the legacy top-level schema"
           $ not
@@ -355,6 +410,14 @@ assertLiveUsableWorkMixedDomainDeadline = do
               `isInfixOf` scalarIdentity
         assertBool "budgeted pair run omitted its nominal schema"
           $ SMTLibSession.lengthSpinePairSMTLibBudgetedQueryRunSchemaTag
+              `isInfixOf` pairIdentity
+        assertBool "v1 scalar run acquired the scoped-v2 schema"
+          $ not
+          $ SMTLibSession.lengthSMTLibScopedBudgetedQueryRunSchemaTag
+              `isInfixOf` scalarIdentity
+        assertBool "v1 pair run acquired the scoped-v2 schema"
+          $ not
+          $ SMTLibSession.lengthSpinePairSMTLibScopedBudgetedQueryRunSchemaTag
               `isInfixOf` pairIdentity
         assertBool "budgeted scalar and pair runs shared one nominal identity"
           $ scalarIdentity /= pairIdentity
@@ -490,6 +553,245 @@ assertLiveUsableWorkCallbackException =
         assertFailure "expired callback exception was replaced by a deadline"
     assertFakeWorkerWorkspaceRemoved "budgeted callback exception" executable
 
+assertLiveScopedUsableWorkEscapedClosure :: IO ()
+assertLiveScopedUsableWorkEscapedClosure =
+  SMTLibLiveSpec.withFakeZ3Mode "healthy" $ \executable _ -> do
+    execution <- mkBudgetLiveExecution executable 1000
+    budget <- mkLiveUsableWorkBudget 100
+    callbackReached <- newIORef False
+    escapedResult <-
+      SMTLibLive.withLengthSMTLibLiveScopedUsableWorkDeadline budget
+        $ \deadline -> pure
+        $ SMTLibLive.withLengthSMTLibLiveSessionUnderScopedDeadline
+            deadline execution $ \_ -> writeIORef callbackReached True
+    escaped <- expectRight escapedResult
+    threadDelay 250000
+    rejected <- escaped
+    assertPublicLiveSessionFailure
+      SMTLibLive.LengthSMTLibLiveSessionUsableWorkScopeUnavailable rejected
+    readIORef callbackReached >>= (@?= False)
+    spawned <- doesPathExist $ executable ++ ".events"
+    assertBool
+      "a closed and expired scoped authority acquired a workspace or solver"
+      $ not spawned
+
+assertLiveScopedUsableWorkWrongThread :: IO ()
+assertLiveScopedUsableWorkWrongThread =
+  SMTLibLiveSpec.withFakeZ3Mode "healthy" $ \executable _ -> do
+    execution <- mkBudgetLiveExecution executable 1000
+    budget <- mkLiveUsableWorkBudget 4000
+    scoped <- SMTLibLive.withLengthSMTLibLiveScopedUsableWorkDeadline budget
+      $ \deadline -> do
+          forkedResult <- newEmptyMVar
+          _ <- forkIO $ do
+            rejected <-
+              SMTLibLive.withLengthSMTLibLiveSessionUnderScopedDeadline
+                deadline execution $ \_ -> pure ()
+            putMVar forkedResult rejected
+          received <- timeout 2000000 $ takeMVar forkedResult
+          rejected <- case received of
+            Nothing -> assertFailure
+              "forked scoped-deadline admission did not terminate"
+            Just result -> pure result
+          assertPublicLiveSessionFailure
+            SMTLibLive.LengthSMTLibLiveSessionUsableWorkScopeUnavailable
+            rejected
+          spawned <- doesPathExist $ executable ++ ".events"
+          assertBool "wrong-thread admission reached the fake solver" $ not spawned
+          ownerSession <-
+            SMTLibLive.withLengthSMTLibLiveSessionUnderScopedDeadline
+              deadline execution $ \_ -> pure ()
+          _ <- expectRight ownerSession
+          _ <- expectRight
+            =<< SMTLibLive.checkLengthSMTLibLiveScopedUsableWorkDeadline
+                  deadline
+          pure ()
+    _ <- expectRight scoped
+    assertFakeWorkerWorkspaceRemoved "owner reuse after fork rejection" executable
+
+data LiveScopedUsableWorkSynchronousException =
+  LiveScopedUsableWorkSynchronousException
+  deriving (Eq, Show)
+
+instance Exception LiveScopedUsableWorkSynchronousException
+
+assertLiveScopedUsableWorkSynchronousException :: IO ()
+assertLiveScopedUsableWorkSynchronousException = do
+  budget <- mkLiveUsableWorkBudget 1000
+  escapedRef <- newIORef Nothing
+  attempted <- try
+    (SMTLibLive.withLengthSMTLibLiveScopedUsableWorkDeadline budget
+      (\deadline -> do
+        writeIORef escapedRef $ Just
+          $ SMTLibLive.checkLengthSMTLibLiveScopedUsableWorkDeadline deadline
+        throwIO LiveScopedUsableWorkSynchronousException)
+      :: IO (Either SMTLibLive.LengthSMTLibLiveSessionError ()))
+  case attempted of
+    Left failure -> failure @?= LiveScopedUsableWorkSynchronousException
+    Right _ -> assertFailure
+      "scoped deadline owner swallowed a synchronous exception"
+  escaped <- readIORef escapedRef >>= maybe
+    (assertFailure "synchronous exception callback did not publish its closure")
+    pure
+  rejected <- escaped
+  assertPublicLiveSessionFailure
+    SMTLibLive.LengthSMTLibLiveSessionUsableWorkScopeUnavailable rejected
+
+data LiveScopedUsableWorkAsynchronousException =
+  LiveScopedUsableWorkAsynchronousException
+  deriving (Eq, Show)
+
+instance Exception LiveScopedUsableWorkAsynchronousException
+
+assertLiveScopedUsableWorkAsynchronousException :: IO ()
+assertLiveScopedUsableWorkAsynchronousException = do
+  budget <- mkLiveUsableWorkBudget 2000
+  target <- myThreadId
+  throwerFinished <- newEmptyMVar
+  callbackBlock <- newEmptyMVar
+  escapedRef <- newIORef Nothing
+  attempted <- try
+    (SMTLibLive.withLengthSMTLibLiveScopedUsableWorkDeadline budget
+      (\deadline -> do
+        writeIORef escapedRef $ Just
+          $ SMTLibLive.checkLengthSMTLibLiveScopedUsableWorkDeadline deadline
+        _ <- forkIO $ throwTo target
+          LiveScopedUsableWorkAsynchronousException
+            `finally` putMVar throwerFinished ()
+        takeMVar callbackBlock)
+      :: IO (Either SMTLibLive.LengthSMTLibLiveSessionError ()))
+  case attempted of
+    Left failure -> failure @?= LiveScopedUsableWorkAsynchronousException
+    Right _ -> assertFailure "scoped deadline owner swallowed a throwTo exception"
+  finished <- timeout 1000000 $ takeMVar throwerFinished
+  case finished of
+    Nothing -> assertFailure "scoped deadline throwTo helper did not terminate"
+    Just () -> pure ()
+  escaped <- readIORef escapedRef >>= maybe
+    (assertFailure "throwTo callback did not publish its closure") pure
+  rejected <- escaped
+  assertPublicLiveSessionFailure
+    SMTLibLive.LengthSMTLibLiveSessionUsableWorkScopeUnavailable rejected
+
+assertLiveScopedUsableWorkCheckpointExpiry :: IO ()
+assertLiveScopedUsableWorkCheckpointExpiry = do
+  let budgetMilliseconds = 500
+      millisecondNanoseconds :: Int -> Word64
+      millisecondNanoseconds milliseconds =
+        fromIntegral milliseconds * 1000000
+  budget <- mkLiveUsableWorkBudget budgetMilliseconds
+  finalObservation <- newIORef Nothing
+  scoped <- SMTLibLive.withLengthSMTLibLiveScopedUsableWorkDeadline budget
+    $ \deadline -> do
+        started <- getMonotonicTimeNSec
+        mapM_ (\milliseconds -> do
+          delayUntilMonotonic
+            $ started + millisecondNanoseconds milliseconds
+          _ <- expectRight
+            =<< SMTLibLive.checkLengthSMTLibLiveScopedUsableWorkDeadline
+                  deadline
+          pure ()) [100, 200, 300]
+        delayUntilMonotonic $ started + millisecondNanoseconds 650
+        observed <-
+          SMTLibLive.checkLengthSMTLibLiveScopedUsableWorkDeadline deadline
+        writeIORef finalObservation $ Just observed
+  assertPublicLiveSessionFailure
+    SMTLibLive.LengthSMTLibLiveSessionDeadlineExceeded scoped
+  observed <- readIORef finalObservation >>= maybe
+    (assertFailure "final scoped checkpoint was not observed") pure
+  assertPublicLiveSessionFailure
+    SMTLibLive.LengthSMTLibLiveSessionDeadlineExceeded observed
+
+assertLiveScopedUsableWorkIdentitySchemas :: IO ()
+assertLiveScopedUsableWorkIdentitySchemas = do
+  SMTLibSession.lengthSMTLibScopedBudgetedQueryRunSchemaTag @?=
+    asciiBytes (concat
+      [ "djex-length-z3-capability-probed-pre-spawn-pathname-snapshot-worker-"
+      , "query-run/scoped-shared-usable-work-deadline/v2"
+      ])
+  SMTLibSession.lengthSpinePairSMTLibScopedBudgetedQueryRunSchemaTag @?=
+    asciiBytes (concat
+      [ "djex-length-spine-pair-z3-capability-probed-pre-spawn-pathname-"
+      , "snapshot-worker-query-run/scoped-shared-usable-work-deadline/v2"
+      ])
+  (scalarQuery, pairQuery) <- liveWireTwinQueries
+  scoped <- withInternalScopedBudgetedWorker "healthy" 2000 3000
+    $ \_ worker -> do
+        scalar <- expectRight
+          =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
+                Evaluate.defaultLengthEvaluationLimits worker scalarQuery
+        pair <- expectRight
+          =<< SMTLibSession.runLengthSpinePairSMTLibReadyWorkerQuery
+                Evaluate.defaultLengthEvaluationLimits worker pairQuery
+        let readyIdentity = InternalFingerprint.fingerprintCanonicalBytes
+              $ SMTLibSession.lengthSMTLibReadyWorkerIdentityFingerprint worker
+            scalarIdentity = InternalFingerprint.fingerprintCanonicalBytes
+              $ SMTLibSession.lengthSMTLibQueryRunIdentityFingerprint scalar
+            pairIdentity = InternalFingerprint.fingerprintCanonicalBytes
+              $ SMTLibSession.lengthSpinePairSMTLibQueryRunIdentityFingerprint
+                  pair
+            v1Ready = asciiBytes
+              "djex-length-z3-shared-usable-work-deadline/v1"
+            v2Ready = asciiBytes
+              "djex-length-z3-scoped-shared-usable-work-deadline/v2"
+        assertBool "v2 ready identity omitted its scoped schema"
+          $ v2Ready `isInfixOf` readyIdentity
+        assertBool "v2 ready identity reused its v1 budget schema"
+          $ not $ v1Ready `isInfixOf` readyIdentity
+        assertBool "v2 scalar identity omitted its nominal run schema"
+          $ SMTLibSession.lengthSMTLibScopedBudgetedQueryRunSchemaTag
+              `isInfixOf` scalarIdentity
+        assertBool "v2 scalar identity reused its v1 run schema"
+          $ not
+          $ SMTLibSession.lengthSMTLibBudgetedQueryRunSchemaTag
+              `isInfixOf` scalarIdentity
+        assertBool "v2 pair identity omitted its nominal run schema"
+          $ SMTLibSession.lengthSpinePairSMTLibScopedBudgetedQueryRunSchemaTag
+              `isInfixOf` pairIdentity
+        assertBool "v2 pair identity reused its v1 run schema"
+          $ not
+          $ SMTLibSession.lengthSpinePairSMTLibBudgetedQueryRunSchemaTag
+              `isInfixOf` pairIdentity
+        assertBool "v2 scalar and pair runs shared one nominal identity"
+          $ scalarIdentity /= pairIdentity
+        assertBool "v2 ready and scalar identities shared one byte envelope"
+          $ readyIdentity /= scalarIdentity
+        assertBool "v2 ready and pair identities shared one byte envelope"
+          $ readyIdentity /= pairIdentity
+        assertBool "v2 scalar identity admitted the product run schema"
+          $ not
+          $ SMTLibSession.lengthSpinePairSMTLibScopedBudgetedQueryRunSchemaTag
+              `isInfixOf` scalarIdentity
+        assertBool "v2 pair identity admitted the scalar run schema"
+          $ not
+          $ SMTLibSession.lengthSMTLibScopedBudgetedQueryRunSchemaTag
+              `isInfixOf` pairIdentity
+        assertEffectiveDeadlineCause
+          "scoped-shared-usable-work-deadline" scalarIdentity
+        assertEffectiveDeadlineCause
+          "scoped-shared-usable-work-deadline" pairIdentity
+  _ <- expectRight =<< expectRight scoped
+  pure ()
+
+assertLiveScopedUsableWorkConvenienceCleanupExclusion :: IO ()
+assertLiveScopedUsableWorkConvenienceCleanupExclusion =
+  SMTLibLiveSpec.withFakeZ3Mode "stubborn-eof" $ \executable _ -> do
+    let budgetMilliseconds = 1500
+        cleanupMarginMilliseconds = 100
+    execution <- mkBudgetLiveExecution executable 1000
+    budget <- mkLiveUsableWorkBudget budgetMilliseconds
+    started <- getMonotonicTimeNSec
+    scoped <-
+      SMTLibLive.withLengthSMTLibLiveSessionWithScopedUsableWorkBudget
+        budget execution $ \_ -> delayUntilMonotonic
+          $ started + fromIntegral
+              ((budgetMilliseconds - cleanupMarginMilliseconds) * 1000000)
+    _ <- expectRight scoped
+    finished <- getMonotonicTimeNSec
+    assertBool "fresh scoped cleanup did not cross the usable-work deadline"
+      $ finished >= started + fromIntegral (budgetMilliseconds * 1000000)
+    assertFakeWorkerWorkspaceRemoved "excluded scoped final cleanup" executable
+
 mkLiveUsableWorkBudget
   :: Int
   -> IO SMTLibLive.LengthSMTLibLiveUsableWorkBudget
@@ -535,6 +837,26 @@ withInternalBudgetedWorker mode budgetMilliseconds hostDeadline use =
       budgetMilliseconds $ \deadline ->
         SMTLibSession.withLengthSMTLibReadyWorkerUnderDeadline deadline config
           $ use executable
+
+withInternalScopedBudgetedWorker
+  :: String
+  -> Int
+  -> Int
+  -> (forall epoch.
+      FilePath
+      -> SMTLibSession.LengthSMTLibReadyWorker epoch
+      -> IO result)
+  -> IO
+      (Either
+        SMTLibSession.LengthSMTLibSessionError
+        (Either SMTLibSession.LengthSMTLibSessionScopeError result))
+withInternalScopedBudgetedWorker mode budgetMilliseconds hostDeadline use =
+  SMTLibLiveSpec.withFakeZ3Mode mode $ \executable _ -> do
+    config <- mkInternalBudgetSessionConfig executable hostDeadline
+    SMTLibSession.withLengthSMTLibSessionScopedUsableWorkDeadlineForBudgetedSession
+      budgetMilliseconds $ \deadline ->
+        SMTLibSession.withLengthSMTLibReadyWorkerUnderScopedDeadline
+          deadline config $ use executable
 
 mkInternalBudgetSessionConfig
   :: FilePath

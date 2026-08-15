@@ -154,6 +154,7 @@ $(do
           [ "LengthSMTLibLiveSession"
           , "LengthSMTLibLiveUsableWorkBudget"
           , "LengthSMTLibLiveUsableWorkDeadline"
+          , "LengthSMTLibLiveScopedUsableWorkDeadline"
           , "LengthSMTLibLiveQueryObservation"
           , "LengthSpinePairSMTLibLiveQueryObservation"
           , "LengthSMTLibLiveSessionError"
@@ -541,6 +542,18 @@ forbiddenConstructionAttempts =
       @(LengthSMTLibLiveUsableWorkDeadline LiveBudgetProbe)
       "LengthSMTLibLiveUsableWorkDeadline"
   , noGeneric
+      @(LengthSMTLibLiveScopedUsableWorkDeadline LiveBudgetProbe)
+      "LengthSMTLibLiveScopedUsableWorkDeadline"
+  , noEq
+      @(LengthSMTLibLiveScopedUsableWorkDeadline LiveBudgetProbe)
+      "LengthSMTLibLiveScopedUsableWorkDeadline"
+  , noOrd
+      @(LengthSMTLibLiveScopedUsableWorkDeadline LiveBudgetProbe)
+      "LengthSMTLibLiveScopedUsableWorkDeadline"
+  , noShow
+      @(LengthSMTLibLiveScopedUsableWorkDeadline LiveBudgetProbe)
+      "LengthSMTLibLiveScopedUsableWorkDeadline"
+  , noGeneric
       @(LengthSMTLibLiveQueryObservation
         LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
       "LengthSMTLibLiveQueryObservation"
@@ -587,6 +600,9 @@ forbiddenConstructionAttempts =
     )
   , ( "LengthSMTLibLiveUsableWorkDeadline budget unexpectedly permits Coercible"
     , forbiddenLengthSMTLibLiveUsableWorkDeadlineCoercion `seq` ()
+    )
+  , ( "LengthSMTLibLiveScopedUsableWorkDeadline budget unexpectedly permits Coercible"
+    , forbiddenLengthSMTLibLiveScopedUsableWorkDeadlineCoercion `seq` ()
     )
   , ( "LengthSMTLibLiveUsableWorkBudget exposed its newtype representation"
     , forbiddenLengthSMTLibLiveUsableWorkBudgetCoercion `seq` ()
@@ -1689,6 +1705,11 @@ forbiddenLengthSMTLibLiveUsableWorkDeadlineCoercion
   :: LengthSMTLibLiveUsableWorkDeadline LiveBudgetProbe
   -> LengthSMTLibLiveUsableWorkDeadline OtherLiveBudgetProbe
 forbiddenLengthSMTLibLiveUsableWorkDeadlineCoercion = coerce
+
+forbiddenLengthSMTLibLiveScopedUsableWorkDeadlineCoercion
+  :: LengthSMTLibLiveScopedUsableWorkDeadline LiveBudgetProbe
+  -> LengthSMTLibLiveScopedUsableWorkDeadline OtherLiveBudgetProbe
+forbiddenLengthSMTLibLiveScopedUsableWorkDeadlineCoercion = coerce
 
 forbiddenLengthSMTLibLiveUsableWorkBudgetCoercion
   :: LengthSMTLibLiveUsableWorkBudget

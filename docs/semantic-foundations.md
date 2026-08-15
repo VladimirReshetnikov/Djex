@@ -63,6 +63,7 @@ was reached.
   - [Strict relational positive-affine applicable-domain validation](#strict-relational-positive-affine-applicable-domain-validation)
   - [Strict relational positive-affine quotient applicable-domain validation](#strict-relational-positive-affine-quotient-applicable-domain-validation)
   - [Root-extrema applicable-domain validation](#root-extrema-applicable-domain-validation)
+  - [Root-monus applicable-domain validation](#root-monus-applicable-domain-validation)
   - [Finite binary product spine lengths, offline and live SMT replay](#finite-binary-product-spine-lengths-offline-and-live-smt-replay)
     - [Offline product SMT queries and replay](#offline-product-smt-queries-and-replay)
     - [Live product queries](#live-product-queries)
@@ -1224,12 +1225,10 @@ finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-p
 Every predecessor API and receipt remains literal. Existing contracts,
 inventories, sessions, candidates, encodings, problems, query commands,
 symbols, value requests, fingerprints, protocols, processes, workers, runs,
-and observations retain their identities and bytes. Root extrema are the
-additive successor specified immediately below. Monus, bounded Boolean finite
-unions, and further launch hardening remain separate, unranked follow-up
-candidates requiring their own authority, work-cap, identity, and
-compatibility designs. Any future finite-union design must not replace
-explicit branch boxes with a componentwise-maximum rectangle. See the
+and observations retain their identities and bytes. Root extrema and root
+monus are the cumulative successors specified below. Bounded Boolean finite
+unions remain a separate authority and work-cap design. Such a design must not
+replace explicit branch boxes with a componentwise-maximum rectangle. See the
 [strict relational positive-affine quotient applicable-domain report](reports/2026-08-15-strict-relational-positive-affine-quotient-length-applicable-domain.md).
 
 ### Root-extrema applicable-domain validation
@@ -1350,8 +1349,140 @@ Establishment remains bounded and relative to the checked total finite-spine
 model and any retained assumed provider laws. It proves complete replay only
 inside the derived rectangle. It is not source-language realization or
 totality, validation of a provider implementation, universal proof, solver
-status authority, or permission to prune candidates. See the
+status authority, or permission to prune candidates. Immediate natural-monus
+consequences are the additive successor specified next. See the
 [root-extrema applicable-domain report](reports/2026-08-15-root-extrema-length-applicable-domain.md).
+
+### Root-monus applicable-domain validation
+
+The cumulative root-monus successor preserves every quotient-free,
+root-quotient, and root-extrema clause path above literally. Its scalar
+checked-problem and query-owned entrances are
+`validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`
+and
+`validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`.
+
+Let `M = A monus B = max(A-B,0)`. The scanner first summarizes `A`, `B`,
+and the opposite operand `C` in the exact positive-affine grammar. Writing the
+summary of `C` as `c + sum(k_i*x_i)`, with nonnegative coefficients, gives the
+following five admitted cases:
+
+```text
+M <= C                 <=>  A <= B + C
+C <= M, when c > 0     <=>  B + C <= A
+not (M <= C)           <=>  B + C + 1 <= A
+not (C <= M)           <=>  1 <= C and A + 1 <= B + C
+M = C or C = M          ==>  A <= B + C
+```
+
+The second case has a deliberate zero boundary. If `c > 0`, `C` is uniformly
+positive for every natural assignment and the displayed rewrite is exact. If
+`c = 0` and `C` has no coefficients, it is identically zero, so `0 <= M` is a
+tautology and contributes no rule. If `c = 0` with at least one coefficient,
+`C` may be zero and the exact formula is disjunctive:
+
+```text
+C <= A monus B  <=>  C = 0 or B + C <= A
+```
+
+That may-zero clause is ignored as a whole. Positivity is never borrowed from
+another conjunct, and the scanner does not substitute the weaker `C <= A`.
+For equality, `A <= B+C` is always a necessary supported half. When `c > 0`,
+the scanner appends `B+C <= A`, making the two extracted affine rules exact;
+when `C` is identically zero, the first rule is the exact `A <= B`; and when
+`C` may be zero, only the necessary first rule is retained. Original-formula
+replay, rather than the extracted rules, remains the final equality authority.
+
+The strict reverse rule is atomic. It emits `1 <= C` first and
+`A+1 <= B+C` second only after all three operands summarize. Omitting the
+boundary rule is unsound at `A=0`, `B=1`, `C=0`: `A+1 <= B+C` holds while
+`not (C <= A monus B)` does not. The same values refute an unconditional
+rewrite of `C <= A monus B` to `B+C <= A`. Equality always emits
+`A <= B+C` first and its uniformly-positive reverse second, independent of
+which canonical equality side contains the monus.
+
+Every operand must use only a compact input, natural literal, `LengthSum`, or
+positive-literal `LengthScale`. Exactly one normalized relation operand may be
+an immediate root `LengthMonus`. Both-root monus, nested or embedded monus,
+mixed root-monus/root-extrema or root-quotient clauses, unsupported children
+or opposite operands, negated equality, and nested Boolean formulas are
+ignored whole. No rule survives a failed three-operand summary. A clause with
+no immediate root monus delegates to the root-extrema predecessor unchanged.
+
+Admission observes the normalized contract. Literal/literal monus is folded,
+`A monus 0` becomes `A`, and `A monus A` becomes zero; otherwise operand order
+is retained. Equality operands and top-level conjuncts are canonicalized and
+conjuncts are traversed in that order. A raw monus which normalizes away is
+therefore handled by the predecessor, while a retained immediate binary monus
+is owned by the new scanner. Derived sums and successors exist only in exact
+arbitrary-precision summaries; they create no checked syntax and consume no
+syntax-node or public-literal budget.
+
+Small scalar examples fix the boundary:
+
+```text
+(x monus 3) <= 5             ==> [8], total/applicable 9/9
+1 <= (5 monus x)             ==> [4], total/applicable 5/5
+not ((5 monus x) <= 2)       ==> [2], total/applicable 3/3
+not (3 <= (x monus 2))       ==> [4], total/applicable 5/5
+(x monus 3) = 5              ==> [8], total/applicable 9/1
+```
+
+The consequence `(x monus y) <= z`, together with `y <= 2` and `z <= 3`,
+propagates through the existing closure to `[5,2,3]`; 42 of the 72 assignments
+satisfy the original precondition. Conversely, `0 <= (0 monus x)` is
+tautological and cannot bound `x`, so the may-zero entrance remains ordinarily
+inapplicable rather than falsely establishing `[0]`.
+
+The new scanner still contributes at most two rules per normalized clause,
+matching the established relational, quotient-equality, and root-extrema
+maximum. For formula-clause limit `F`, closure sees at most `2*F` rules; the
+default sealed limit `F=32` therefore gives at most 64. It remains synchronous
+and rule-once: each pass reads one immutable bounds snapshot, fired rules are
+removed, and derived maxima merge afterward.
+The existing syntax, input-width, value, and Cartesian-assignment caps bound
+all other work; no monus-specific cap or lower-bound store was introduced.
+
+The nominal binary-product entrances are
+`validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`
+and
+`validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`.
+Successful traversal returns opaque, nominally disjoint
+`ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`
+or
+`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`.
+Each family exposes inclusive maxima, total assignment count, applicable
+assignment count, and exact finite-spine/provider-law basis through its four
+correspondingly prefixed projections.
+
+Input-width rejection remains first; nullary problems bypass extraction and
+replay `[]`. Canonical scan and closure resolve contradiction to an all-zero
+carrier before missing-bound lookup. The first source-ordered missing maximum,
+derived-value checks, Cartesian cap, last-input-fastest exhaustive replay,
+first indexed evaluation failure or exact counterexample, nominal receipt,
+and final query association retain predecessor order. Ignored clauses remain
+in the original normalized precondition and are evaluated during replay.
+
+Query validation emits no SMT-LIB, starts no worker, and consumes no solver
+observation. Every predecessor API, receipt, tag, behavior, and normalized
+contract-through-live identity remains byte-for-byte literal. Only the two new
+nominal receipt tags add bytes:
+
+```text
+finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-precondition-domain-establishment/v1
+finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-precondition-domain-establishment/v1
+```
+
+Establishment proves complete bounded replay only in the derived rectangle,
+under the checked finite-spine model and retained assumed-provider basis. It
+is not universal proof, source-language totality, provider implementation
+validation, solver authority, or permission to prune candidates. General
+may-zero monus, disjunctive extrema orientations, and nested Boolean coverage
+would require a new explicit finite-union receipt, canonical branch and replay
+orders, and separate branch/work/assignment caps. Such a design must replay
+the admitted union boxes directly; componentwise-maximum widening would add
+assignments outside every branch. See the
+[root-monus applicable-domain report](reports/2026-08-15-root-monus-length-applicable-domain.md).
 
 ### Finite binary product spine lengths, offline and live SMT replay
 

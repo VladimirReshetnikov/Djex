@@ -178,9 +178,9 @@ and the
 | `Language.Haskell.Synthesis.Diagnostic` | Severity, stable code, checked source locations/spans, ordered context, and deterministic rendering. |
 | `Language.Haskell.Synthesis.Fingerprint` | Public inspection of opaque, nominal, collision-free canonical identities; construction and byte budgets remain package-private. |
 | `Language.Haskell.Synthesis.Semantic.Length` | Exact inventory-bound finite-spine contexts, normalized scalar and exact boxed binary-product contracts, source-bound assumed provider laws, and model-aware nominal fingerprints; an additive trust class retains exact nonempty constrained schemes under a dictionary-uniform conditional-law assumption, while every scalar byte stays exact. |
-| `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked scalar and binary-spine-product contracts, exact candidate problems, finite Cartesian input boxes, and direct, literal-ceiling positive-affine, relational positive-affine, strict relational positive-affine, root-quotient, or cumulative root-extrema applicable domains, with nominally separate counterexample and positive bounded receipts; detached conditional-provider evaluation still fails before argument inspection. |
+| `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked scalar and binary-spine-product contracts, exact candidate problems, finite Cartesian input boxes, and direct, literal-ceiling positive-affine, relational positive-affine, strict relational positive-affine, root-quotient, cumulative root-extrema, or cumulative root-monus applicable domains, with nominally separate counterexample and positive bounded receipts; detached conditional-provider evaluation still fails before argument inspection. |
 | `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and nominally distinct scalar/product typed-candidate behavioral problems: session-owned provider and restricted resolver authority, contract resealing, residual rejection, rigid root/provider authorization, mixed-role opaque targets, exact scalar zero/step cases inside product fields, and provider-only consumption of independently authorized certificate carriers. |
-| `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation plus exact input-symbol, natural-input, origin, finite-box, and direct, literal-ceiling positive-affine, relational positive-affine, strict relational positive-affine, root-quotient, or cumulative root-extrema applicable-domain replay for nominally distinct checked scalar and binary-product Length problems, without launching or trusting a solver. |
+| `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation plus exact input-symbol, natural-input, origin, finite-box, and direct, literal-ceiling positive-affine, relational positive-affine, strict relational positive-affine, root-quotient, cumulative root-extrema, or cumulative root-monus applicable-domain replay for nominally distinct checked scalar and binary-product Length problems, without launching or trusting a solver. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` | Pure validated Z3 launch, resource, artifact, and response-decoder policy with a package-private complete identity and a byte-free digest-expectation presence classifier; it performs no IO or attestation. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` | Rank-N scoped capability-probed Z3 ownership for scalar and exact binary-product queries, with one shared 64-query lease budget, retained runtime-unscoped v1 usable-work tokens, recommended owner-thread-affine dynamically scoped v2 deadlines and cooperative checkpoints, nominal byte-free failures and observations, heuristic status/strength/use, and domain-specific query-first replay gates. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` | Opaque query-specific association of bounded raw solver reports, with heuristic-only safe projections and exact problem-plus-query replay before payload access. |
@@ -701,11 +701,11 @@ validation emits no command and consumes no solver observation.
 
 Only their scalar and product receipt tags add bytes. All predecessor APIs,
 receipts, and contract-through-live identities remain exact, including sealed
-query commands and fingerprints. Root extrema are the cumulative successor
-below. Monus rules, bounded Boolean finite unions, and further launch
-hardening remain separate unranked follow-up gaps with independent authority
-and work-cap designs. A future finite-union validator must replay explicit
-branch boxes rather than widening them to one componentwise-maximum rectangle.
+query commands and fingerprints. Root extrema and root monus are the
+cumulative successors below. Bounded Boolean finite unions remain a separate
+authority and work-cap design. A future finite-union validator must replay
+explicit branch boxes rather than widening them to one componentwise-maximum
+rectangle.
 See the
 [strict relational positive-affine quotient applicable-domain report](../docs/reports/2026-08-15-strict-relational-positive-affine-quotient-length-applicable-domain.md).
 
@@ -793,8 +793,111 @@ literal. Query-owned validation performs no live operation and consumes no
 solver result. Establishment proves only complete bounded replay in the exact
 checked finite-spine model and retained assumed-provider basis; it is not
 source-language totality, universal proof, provider validation, or pruning
-authority. See the
+authority. Immediate natural-monus consequences are the cumulative successor
+below. See the
 [root-extrema applicable-domain report](../docs/reports/2026-08-15-root-extrema-length-applicable-domain.md).
+
+The cumulative root-monus policy preserves the complete root-extrema
+predecessor and adds immediate normalized `LengthMonus` consequences. Its
+problem entrances are
+`validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`
+and
+`validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`;
+the query-owned entrances are:
+
+```haskell
+scalarValidation =
+  validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
+    defaultLengthEvaluationLimits defaultLengthInputBoxLimits scalarQuery
+
+pairValidation =
+  validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
+    defaultLengthEvaluationLimits defaultLengthInputBoxLimits pairQuery
+```
+
+Let `M = A monus B`. After all three positive-affine operands have been
+summarized, the five admitted shapes are:
+
+```text
+M <= C                 <=>  A <= B + C
+C <= M, if min(C) > 0  <=>  B + C <= A
+not (M <= C)           <=>  B + C + 1 <= A
+not (C <= M)           <=>  1 <= C and A + 1 <= B + C
+M = C or C = M          ==>  A <= B + C
+```
+
+Here `min(C)` is the exact constant in the nonnegative affine summary
+`C = c + sum(k_i*x_i)`. When `c > 0`, `C` is uniformly positive. Direct
+`C <= M` then emits the exact `B+C <= A`. An identically-zero `C` makes that
+direct relation tautological and emits no rule. A zero-constant `C` with
+coefficients may be zero, so its exact form is
+`C=0 or B+C<=A`; the whole direct clause is ignored rather than approximated.
+No cross-clause lower bound and no weaker `C<=A` grants authority.
+
+Equality always emits `A<=B+C`. It appends `B+C<=A` when `c>0`; with
+identically-zero `C`, the first rule is exact `A<=B`; with a may-zero affine
+`C`, it is only the necessary supported half. The strict reverse case emits
+`1<=C` first and `A+1<=B+C` second, atomically. Omitting the boundary rule or
+unconditionally rewriting the direct reverse relation is refuted by
+`A=0,B=1,C=0`.
+
+Every `A`, `B`, and `C` must contain only compact inputs, natural literals,
+`LengthSum`, and positive-literal `LengthScale`. Exactly one relation operand
+may be an immediate normalized root monus. Both-root, nested, embedded, mixed
+root-monus/root-extrema or quotient, unsupported operands, negated equality,
+and nested Boolean syntax contribute no rule or partial consequence. Clauses
+without an immediate root monus delegate to root-extrema unchanged.
+
+Normalization folds literal/literal monus, `A monus 0`, and `A monus A`
+before admission. It preserves retained monus operand order while
+canonicalizing equality operands and top-level conjunct order. Proof-summary
+addition and successor insertion use arbitrary-precision naturals and create
+no checked syntax. At most two rules are emitted per clause, so a seal with
+clause limit `F` yields at most `2*F` rules; the default `F=32` gives 64.
+Synchronous immutable-snapshot, eligible-rule-once closure is unchanged.
+
+Representative scalar results are:
+
+```text
+(x monus 3) <= 5        ==> [8], counts 9/9
+1 <= (5 monus x)        ==> [4], counts 5/5
+not ((5 monus x) <= 2)  ==> [2], counts 3/3
+not (3 <= (x monus 2))  ==> [4], counts 5/5
+(x monus 3) = 5         ==> [8], counts 9/1
+```
+
+The chain `(x monus y) <= z`, `y <= 2`, `z <= 3` derives `[5,2,3]`, with
+72 total and 42 applicable assignments. The nominal product direct case has
+the same `[8]` and 9/9 projections under its separate domain.
+
+Input width, nullary singleton replay, contradiction-before-missing,
+source-ordered missing bounds, derived values, Cartesian admission,
+last-input-fastest indexed replay, first counterexample, receipt construction,
+and query association retain predecessor precedence. Unsupported clauses are
+still evaluated in the original normalized precondition when other rules
+establish a complete rectangle.
+
+The opaque receipts are
+`ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`
+and
+`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`.
+Their correspondingly prefixed projections expose maxima, total/applicable
+counts, and basis. Only their tags add bytes:
+
+```text
+finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-precondition-domain-establishment/v1
+finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-precondition-domain-establishment/v1
+```
+
+All predecessor APIs, receipt tags, normalized contracts, query commands,
+fingerprints, protocols, executions, workers, runs, and observations remain
+literal. Query validation emits no command and consumes no solver result.
+Establishment remains bounded finite-spine/model-relative evidence, not
+universal proof, source-language totality, provider validation, or pruning
+authority. General may-zero and Boolean disjunctions require a separately
+capped explicit finite-union receipt and replay order; they must not be widened
+to one componentwise-maximum box. See the
+[root-monus applicable-domain report](../docs/reports/2026-08-15-root-monus-length-applicable-domain.md).
 
 `FiniteBinaryProductSpineLengthsV1` adds a distinct checked domain for an exact
 boxed binary product whose two source-ordered fields are modeled finite

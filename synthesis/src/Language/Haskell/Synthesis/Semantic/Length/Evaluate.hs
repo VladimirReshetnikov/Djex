@@ -56,6 +56,26 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validatedLengthSpinePairCounterexampleInputs
   , validatedLengthSpinePairCounterexampleResult
   , validatedLengthSpinePairCounterexampleBasis
+  , LengthCounterexampleSimplificationError (..)
+  , ValidatedLengthCounterexampleSimplification
+  , lengthCounterexampleSimplificationSchemaTag
+  , validatedLengthCounterexampleSimplificationOriginalInputs
+  , validatedLengthCounterexampleSimplificationInspectedAssignmentCount
+  , validatedLengthCounterexampleSimplificationCounterexample
+  , validatedLengthCounterexampleSimplificationInputs
+  , validatedLengthCounterexampleSimplificationResult
+  , validatedLengthCounterexampleSimplificationBasis
+  , validatedLengthCounterexampleSimplificationChanged
+  , LengthSpinePairCounterexampleSimplificationError (..)
+  , ValidatedLengthSpinePairCounterexampleSimplification
+  , lengthSpinePairCounterexampleSimplificationSchemaTag
+  , validatedLengthSpinePairCounterexampleSimplificationOriginalInputs
+  , validatedLengthSpinePairCounterexampleSimplificationInspectedAssignmentCount
+  , validatedLengthSpinePairCounterexampleSimplificationCounterexample
+  , validatedLengthSpinePairCounterexampleSimplificationInputs
+  , validatedLengthSpinePairCounterexampleSimplificationResult
+  , validatedLengthSpinePairCounterexampleSimplificationBasis
+  , validatedLengthSpinePairCounterexampleSimplificationChanged
   , LengthInputBoxLimitSource (..)
   , LengthInputBoxLimits
   , LengthInputBoxLimitField (..)
@@ -101,6 +121,8 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , evaluateLengthProviderApplication
   , validateLengthProblemCounterexample
   , validateLengthSpinePairProblemCounterexample
+  , simplifyLengthProblemCounterexample
+  , simplifyLengthSpinePairProblemCounterexample
   , validateLengthProblemInputBox
   , validateLengthSpinePairProblemInputBox
   , validateLengthProblemApplicableDomain
@@ -164,6 +186,7 @@ import Language.Haskell.Synthesis.Internal.Semantic.Problem
   ( BehavioralEvidence
   , mapBehavioralEvidenceReceipt
   , mkBehavioralEvidence
+  , replayBehavioralEvidence
   )
 
 -- | Raw operational bounds for concrete replay. Zero is valid: only the
@@ -804,6 +827,197 @@ validatedLengthSpinePairApplicableDomainBasis
     (ValidatedLengthSpinePairApplicableDomainReceipt _ inputBox) =
   validatedLengthSpinePairInputBoxBasis inputBox
 
+-- | Fail-closed scalar simplification failure after the caller supplied one
+-- opaque counterexample anchor.  Width and Cartesian-product admission misses
+-- are deliberately absent: those are conservative @Right Nothing@ results.
+-- Arity or maximum-value rejection instead means that an allegedly validated
+-- anchor is stale under the exact problem or current replay limits.  Search
+-- failures retain the zero-based lexicographic assignment ordinal through the
+-- nested input-box error.
+data LengthCounterexampleSimplificationError
+  = LengthCounterexampleSimplificationInputBoxValidationRejected
+      !LengthInputBoxValidationError
+  | LengthCounterexampleSimplificationAnchorEvaluationRejected
+      !LengthEvaluationError
+  | LengthCounterexampleSimplificationAnchorNotCounterexample
+  | LengthCounterexampleSimplificationInternalInvariant
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthCounterexampleSimplificationError
+
+-- | Versioned metadata semantics for one strict scalar counterexample
+-- improvement.  This is a receipt-only tag: it changes no checked problem,
+-- SMT query, process protocol, or live-execution identity.
+lengthCounterexampleSimplificationSchemaTag :: [Word8]
+lengthCounterexampleSimplificationSchemaTag = ascii
+  "finite-list-spine-length/bounded-counterexample-simplification/v1"
+
+-- | Opaque provenance for a strict deterministic simplification.
+--
+-- The nested counterexample is ordinary freshly replayed evidence.  The
+-- wrapper adds only the original input vector, exact number of lexicographic
+-- search assignments inspected through the returned hit, and verifier schema.
+-- It is not positive evidence, proof of minimality outside the admitted box,
+-- or authority derived from a solver report.
+data ValidatedLengthCounterexampleSimplification =
+  ValidatedLengthCounterexampleSimplificationReceipt
+    ![Word8]
+    ![Natural]
+    !Natural
+    !ValidatedLengthCounterexample
+  deriving (Eq, Ord, Show)
+
+instance NFData ValidatedLengthCounterexampleSimplification where
+  rnf (ValidatedLengthCounterexampleSimplificationReceipt schema original
+      inspected counterexample) =
+    rnf schema `seq` rnf original `seq` rnf inspected `seq`
+    rnf counterexample
+
+-- | Source-ordered inputs of the independently revalidated anchor.
+validatedLengthCounterexampleSimplificationOriginalInputs
+  :: ValidatedLengthCounterexampleSimplification
+  -> [Natural]
+validatedLengthCounterexampleSimplificationOriginalInputs
+    (ValidatedLengthCounterexampleSimplificationReceipt _ original _ _) =
+  original
+
+-- | Search assignments inspected through and including the returned hit.
+-- The separate anchor replay is not counted.
+validatedLengthCounterexampleSimplificationInspectedAssignmentCount
+  :: ValidatedLengthCounterexampleSimplification
+  -> Natural
+validatedLengthCounterexampleSimplificationInspectedAssignmentCount
+    (ValidatedLengthCounterexampleSimplificationReceipt _ _ inspected _) =
+  inspected
+
+-- | Fresh ordinary counterexample found by exact-problem bounded replay.
+validatedLengthCounterexampleSimplificationCounterexample
+  :: ValidatedLengthCounterexampleSimplification
+  -> ValidatedLengthCounterexample
+validatedLengthCounterexampleSimplificationCounterexample
+    (ValidatedLengthCounterexampleSimplificationReceipt _ _ _ value) =
+  value
+
+-- | Source-ordered inputs of the simplified ordinary counterexample.
+validatedLengthCounterexampleSimplificationInputs
+  :: ValidatedLengthCounterexampleSimplification
+  -> [Natural]
+validatedLengthCounterexampleSimplificationInputs =
+  validatedLengthCounterexampleInputs .
+    validatedLengthCounterexampleSimplificationCounterexample
+
+-- | Candidate result recomputed for the simplified inputs.
+validatedLengthCounterexampleSimplificationResult
+  :: ValidatedLengthCounterexampleSimplification
+  -> Natural
+validatedLengthCounterexampleSimplificationResult =
+  validatedLengthCounterexampleResult .
+    validatedLengthCounterexampleSimplificationCounterexample
+
+-- | Provider-independent or assumed-provider-relative basis of the fresh
+-- ordinary counterexample.
+validatedLengthCounterexampleSimplificationBasis
+  :: ValidatedLengthCounterexampleSimplification
+  -> LengthCounterexampleBasis
+validatedLengthCounterexampleSimplificationBasis =
+  validatedLengthCounterexampleBasis .
+    validatedLengthCounterexampleSimplificationCounterexample
+
+-- | Always 'True': an opaque receipt is constructed only for a strict input
+-- vector change.  @Right Nothing@ represents both admission unavailability
+-- and an admitted search whose first counterexample is the anchor itself.
+validatedLengthCounterexampleSimplificationChanged
+  :: ValidatedLengthCounterexampleSimplification
+  -> Bool
+validatedLengthCounterexampleSimplificationChanged receipt =
+  validatedLengthCounterexampleSimplificationOriginalInputs receipt /=
+    validatedLengthCounterexampleSimplificationInputs receipt
+
+-- | Nominal binary-product sibling of
+-- 'LengthCounterexampleSimplificationError'.
+data LengthSpinePairCounterexampleSimplificationError
+  = LengthSpinePairCounterexampleSimplificationInputBoxValidationRejected
+      !LengthSpinePairInputBoxValidationError
+  | LengthSpinePairCounterexampleSimplificationAnchorEvaluationRejected
+      !LengthSpinePairEvaluationError
+  | LengthSpinePairCounterexampleSimplificationAnchorNotCounterexample
+  | LengthSpinePairCounterexampleSimplificationInternalInvariant
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSpinePairCounterexampleSimplificationError
+
+-- | Versioned metadata semantics for strict product counterexample
+-- simplification, nominally distinct from the scalar tag.
+lengthSpinePairCounterexampleSimplificationSchemaTag :: [Word8]
+lengthSpinePairCounterexampleSimplificationSchemaTag = ascii
+  "finite-binary-product-spine-lengths/bounded-counterexample-simplification/v1"
+
+-- | Opaque provenance for a strict product-domain simplification.  Both
+-- result components remain owned by the nested freshly replayed ordinary
+-- product counterexample.
+data ValidatedLengthSpinePairCounterexampleSimplification =
+  ValidatedLengthSpinePairCounterexampleSimplificationReceipt
+    ![Word8]
+    ![Natural]
+    !Natural
+    !ValidatedLengthSpinePairCounterexample
+  deriving (Eq, Ord, Show)
+
+instance NFData ValidatedLengthSpinePairCounterexampleSimplification where
+  rnf (ValidatedLengthSpinePairCounterexampleSimplificationReceipt schema
+      original inspected counterexample) =
+    rnf schema `seq` rnf original `seq` rnf inspected `seq`
+    rnf counterexample
+
+validatedLengthSpinePairCounterexampleSimplificationOriginalInputs
+  :: ValidatedLengthSpinePairCounterexampleSimplification
+  -> [Natural]
+validatedLengthSpinePairCounterexampleSimplificationOriginalInputs
+    (ValidatedLengthSpinePairCounterexampleSimplificationReceipt _ original
+      _ _) = original
+
+validatedLengthSpinePairCounterexampleSimplificationInspectedAssignmentCount
+  :: ValidatedLengthSpinePairCounterexampleSimplification
+  -> Natural
+validatedLengthSpinePairCounterexampleSimplificationInspectedAssignmentCount
+    (ValidatedLengthSpinePairCounterexampleSimplificationReceipt _ _
+      inspected _) = inspected
+
+validatedLengthSpinePairCounterexampleSimplificationCounterexample
+  :: ValidatedLengthSpinePairCounterexampleSimplification
+  -> ValidatedLengthSpinePairCounterexample
+validatedLengthSpinePairCounterexampleSimplificationCounterexample
+    (ValidatedLengthSpinePairCounterexampleSimplificationReceipt _ _ _
+      value) = value
+
+validatedLengthSpinePairCounterexampleSimplificationInputs
+  :: ValidatedLengthSpinePairCounterexampleSimplification
+  -> [Natural]
+validatedLengthSpinePairCounterexampleSimplificationInputs =
+  validatedLengthSpinePairCounterexampleInputs .
+    validatedLengthSpinePairCounterexampleSimplificationCounterexample
+
+validatedLengthSpinePairCounterexampleSimplificationResult
+  :: ValidatedLengthSpinePairCounterexampleSimplification
+  -> LengthSpinePair Natural
+validatedLengthSpinePairCounterexampleSimplificationResult =
+  validatedLengthSpinePairCounterexampleResult .
+    validatedLengthSpinePairCounterexampleSimplificationCounterexample
+
+validatedLengthSpinePairCounterexampleSimplificationBasis
+  :: ValidatedLengthSpinePairCounterexampleSimplification
+  -> LengthCounterexampleBasis
+validatedLengthSpinePairCounterexampleSimplificationBasis =
+  validatedLengthSpinePairCounterexampleBasis .
+    validatedLengthSpinePairCounterexampleSimplificationCounterexample
+
+validatedLengthSpinePairCounterexampleSimplificationChanged
+  :: ValidatedLengthSpinePairCounterexampleSimplification
+  -> Bool
+validatedLengthSpinePairCounterexampleSimplificationChanged receipt =
+  validatedLengthSpinePairCounterexampleSimplificationOriginalInputs receipt
+    /= validatedLengthSpinePairCounterexampleSimplificationInputs receipt
+
 -- | Classify one concrete contract assignment.  Arity is checked before any
 -- value, inputs are bounded left-to-right before the result, and a false
 -- precondition does not evaluate the postcondition.
@@ -964,6 +1178,199 @@ validateLengthSpinePairProblemCounterexample limits problem assignment = do
     LengthSpinePairProblemPostconditionViolated receipt -> Just
       $ mkBehavioralEvidence
           (checkedLengthSpinePairProblemBehavioralProblem problem) receipt
+
+-- | Deterministically seek a strictly smaller scalar counterexample inside
+-- the anchor's componentwise dominated box.
+--
+-- Admission reuses 'LengthInputBoxLimits'.  Target width is considered before
+-- the anchor arity, values are checked left-to-right under the current replay
+-- limits, and the complete Cartesian product is admitted before the anchor is
+-- revalidated.  Width or product misses conservatively return @Right Nothing@.
+-- Arity, value, anchor, and admitted-search defects fail closed.
+--
+-- After anchor replay, the existing input-box verifier supplies the
+-- lexicographically first violation with the last input varying fastest.  A
+-- receipt exists only when that input vector differs from the anchor.  Its
+-- nested counterexample remains ordinary exact-problem behavioral evidence;
+-- this operation consumes no solver status and creates no positive evidence.
+simplifyLengthProblemCounterexample
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> CheckedLengthProblem identity local
+  -> ValidatedLengthCounterexample
+  -> Either LengthCounterexampleSimplificationError
+      (Maybe
+        (BehavioralEvidence
+          FiniteListSpineLengthV1
+          ValidatedLengthCounterexampleSimplification))
+simplifyLengthProblemCounterexample evaluationLimits inputBoxLimits problem
+    anchor = do
+  admitted <- admit
+  case admitted of
+    Nothing -> Right Nothing
+    Just maximums -> do
+      anchorReplay <- either
+        (Left .
+          LengthCounterexampleSimplificationAnchorEvaluationRejected)
+        Right
+        $ replayLengthProblemAssignment evaluationLimits problem
+        $ LengthProblemAssignment maximums
+      case anchorReplay of
+        LengthProblemPostconditionViolated _ -> pure ()
+        LengthProblemPreconditionNotMet -> Left
+          LengthCounterexampleSimplificationAnchorNotCounterexample
+        LengthProblemPostconditionSatisfied -> Left
+          LengthCounterexampleSimplificationAnchorNotCounterexample
+      validation <- either
+        (Left .
+          LengthCounterexampleSimplificationInputBoxValidationRejected)
+        Right
+        $ validateLengthProblemInputBox evaluationLimits inputBoxLimits
+            problem maximums
+      case validation of
+        LengthInputBoxValidated _ -> Left
+          LengthCounterexampleSimplificationInternalInvariant
+        LengthInputBoxCounterexample evidence -> do
+          counterexample <- either
+            (const $ Left
+              LengthCounterexampleSimplificationInternalInvariant)
+            Right
+            $ replayBehavioralEvidence
+                (checkedLengthProblemBehavioralProblem problem) evidence
+          let simplifiedInputs = validatedLengthCounterexampleInputs
+                counterexample
+          if simplifiedInputs == maximums
+            then Right Nothing
+            else do
+              inspected <- case inputBoxInspectedAssignmentCount
+                  maximums simplifiedInputs of
+                Nothing -> Left
+                  LengthCounterexampleSimplificationInternalInvariant
+                Just value -> Right value
+              let receipt = ValidatedLengthCounterexampleSimplificationReceipt
+                    lengthCounterexampleSimplificationSchemaTag
+                    maximums inspected counterexample
+              Right $ Just
+                $ mapBehavioralEvidenceReceipt (const receipt) evidence
+ where
+  originalInputs = validatedLengthCounterexampleInputs anchor
+  inputCount = checkedLengthProblemInputCount problem
+
+  admit
+    :: Either LengthCounterexampleSimplificationError (Maybe [Natural])
+  admit
+    | inputCount > lengthInputBoxInputLimit inputBoxLimits = Right Nothing
+    | otherwise = do
+        maximums <- either rejectInputBox Right
+          $ exactInputBoxBounds inputCount originalInputs
+        mapM_ checkMaximum $ zip [0 ..] maximums
+        case inputBoxAssignmentCount inputBoxLimits maximums of
+          Left LengthInputBoxAssignmentLimitExceeded {} -> Right Nothing
+          Left failure -> rejectInputBox failure
+          Right _ -> Right $ Just maximums
+
+  checkMaximum (index, value) = either
+    (rejectInputBox . LengthInputBoxMaximumValueRejected index)
+    Right
+    $ checkAssignedValue evaluationLimits
+        (LengthProblemInputValue index) value
+
+  rejectInputBox = Left .
+    LengthCounterexampleSimplificationInputBoxValidationRejected
+
+-- | Nominal binary-product sibling of
+-- 'simplifyLengthProblemCounterexample'.  It uses the identical dominated-box
+-- ordering while retaining closed product replay errors and evidence.
+simplifyLengthSpinePairProblemCounterexample
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> CheckedLengthSpinePairProblem identity local
+  -> ValidatedLengthSpinePairCounterexample
+  -> Either LengthSpinePairCounterexampleSimplificationError
+      (Maybe
+        (BehavioralEvidence
+          FiniteBinaryProductSpineLengthsV1
+          ValidatedLengthSpinePairCounterexampleSimplification))
+simplifyLengthSpinePairProblemCounterexample evaluationLimits inputBoxLimits
+    problem anchor = do
+  admitted <- admit
+  case admitted of
+    Nothing -> Right Nothing
+    Just maximums -> do
+      anchorReplay <- either
+        (Left .
+          LengthSpinePairCounterexampleSimplificationAnchorEvaluationRejected)
+        Right
+        $ replayLengthSpinePairProblemAssignment evaluationLimits problem
+        $ LengthProblemAssignment maximums
+      case anchorReplay of
+        LengthSpinePairProblemPostconditionViolated _ -> pure ()
+        LengthSpinePairProblemPreconditionNotMet -> Left
+          LengthSpinePairCounterexampleSimplificationAnchorNotCounterexample
+        LengthSpinePairProblemPostconditionSatisfied -> Left
+          LengthSpinePairCounterexampleSimplificationAnchorNotCounterexample
+      validation <- either
+        (Left .
+          LengthSpinePairCounterexampleSimplificationInputBoxValidationRejected)
+        Right
+        $ validateLengthSpinePairProblemInputBox evaluationLimits
+            inputBoxLimits problem maximums
+      case validation of
+        LengthInputBoxValidated _ -> Left
+          LengthSpinePairCounterexampleSimplificationInternalInvariant
+        LengthInputBoxCounterexample evidence -> do
+          counterexample <- either
+            (const $ Left
+              LengthSpinePairCounterexampleSimplificationInternalInvariant)
+            Right
+            $ replayBehavioralEvidence
+                (checkedLengthSpinePairProblemBehavioralProblem problem)
+                evidence
+          let simplifiedInputs = validatedLengthSpinePairCounterexampleInputs
+                counterexample
+          if simplifiedInputs == maximums
+            then Right Nothing
+            else do
+              inspected <- case inputBoxInspectedAssignmentCount
+                  maximums simplifiedInputs of
+                Nothing -> Left
+                  LengthSpinePairCounterexampleSimplificationInternalInvariant
+                Just value -> Right value
+              let receipt =
+                    ValidatedLengthSpinePairCounterexampleSimplificationReceipt
+                      lengthSpinePairCounterexampleSimplificationSchemaTag
+                      maximums inspected counterexample
+              Right $ Just
+                $ mapBehavioralEvidenceReceipt (const receipt) evidence
+ where
+  originalInputs = validatedLengthSpinePairCounterexampleInputs anchor
+  inputCount = checkedLengthSpinePairProblemInputCount problem
+
+  admit
+    :: Either
+        LengthSpinePairCounterexampleSimplificationError
+        (Maybe [Natural])
+  admit
+    | inputCount > lengthInputBoxInputLimit inputBoxLimits = Right Nothing
+    | otherwise = do
+        maximums <- either rejectInputBox Right
+          $ exactSpinePairInputBoxBounds inputCount originalInputs
+        mapM_ checkMaximum $ zip [0 ..] maximums
+        case spinePairInputBoxAssignmentCount inputBoxLimits maximums of
+          Left LengthSpinePairInputBoxAssignmentLimitExceeded {} ->
+            Right Nothing
+          Left failure -> rejectInputBox failure
+          Right _ -> Right $ Just maximums
+
+  checkMaximum (index, value) = either
+    (rejectInputBox .
+      LengthSpinePairInputBoxMaximumValueRejected index)
+    Right
+    $ checkSpinePairAssignedValue evaluationLimits
+        (LengthSpinePairProblemInputValue index) value
+
+  rejectInputBox = Left .
+    LengthSpinePairCounterexampleSimplificationInputBoxValidationRejected
 
 -- | Exhaustively check the Cartesian product described by source-ordered,
 -- inclusive input maximums.  Enumeration is lexicographic with the last input
@@ -1410,6 +1817,24 @@ inputBoxAssignmentCount limits = go 1
     | otherwise = go (total * factor) remaining
    where
     factor = maximumValue + 1
+
+-- | Convert one exact mixed-radix assignment to the number of lexicographic
+-- assignments inspected through it.  The final source input is the
+-- least-significant digit, matching 'nextInputBoxAssignment'.
+inputBoxInspectedAssignmentCount
+  :: [Natural]
+  -> [Natural]
+  -> Maybe Natural
+inputBoxInspectedAssignmentCount = go 0
+ where
+  go !ordinal [] [] = Just $ ordinal + 1
+  go !ordinal (maximumValue : remainingMaximums)
+      (value : remainingValues)
+    | value <= maximumValue = go
+        (ordinal * (maximumValue + 1) + value)
+        remainingMaximums remainingValues
+    | otherwise = Nothing
+  go _ _ _ = Nothing
 
 -- | Advance a source-ordered mixed-radix vector.  Reversing makes the final
 -- source input the least-significant digit, hence the fastest-varying one.

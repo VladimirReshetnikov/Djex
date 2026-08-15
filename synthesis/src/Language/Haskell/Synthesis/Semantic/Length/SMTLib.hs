@@ -65,6 +65,8 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib
   , LengthSMTLibInputReplayError (..)
   , replayLengthSMTLibCounterexampleInputs
   , probeLengthSMTLibCounterexampleAtOrigin
+  , LengthSMTLibCounterexampleSimplificationError (..)
+  , simplifyLengthSMTLibQueryCounterexample
   , LengthSMTLibInputBoxValidationError (..)
   , validateLengthSMTLibQueryInputBox
   , LengthSMTLibApplicableDomainValidationError (..)
@@ -85,6 +87,8 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib
   , LengthSpinePairSMTLibInputReplayError (..)
   , replayLengthSpinePairSMTLibCounterexampleInputs
   , probeLengthSpinePairSMTLibCounterexampleAtOrigin
+  , LengthSpinePairSMTLibCounterexampleSimplificationError (..)
+  , simplifyLengthSpinePairSMTLibQueryCounterexample
   , LengthSpinePairSMTLibInputBoxValidationError (..)
   , validateLengthSpinePairSMTLibQueryInputBox
   , LengthSpinePairSMTLibApplicableDomainValidationError (..)

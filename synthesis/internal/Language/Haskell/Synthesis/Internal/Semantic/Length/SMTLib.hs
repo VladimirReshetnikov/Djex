@@ -42,6 +42,8 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   , LengthSMTLibInputReplayError (..)
   , replayLengthSMTLibCounterexampleInputs
   , probeLengthSMTLibCounterexampleAtOrigin
+  , LengthSMTLibCounterexampleSimplificationError (..)
+  , simplifyLengthSMTLibQueryCounterexample
   , LengthSMTLibInputBoxValidationError (..)
   , validateLengthSMTLibQueryInputBox
   , LengthSMTLibApplicableDomainValidationError (..)
@@ -62,6 +64,8 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   , LengthSpinePairSMTLibInputReplayError (..)
   , replayLengthSpinePairSMTLibCounterexampleInputs
   , probeLengthSpinePairSMTLibCounterexampleAtOrigin
+  , LengthSpinePairSMTLibCounterexampleSimplificationError (..)
+  , simplifyLengthSpinePairSMTLibQueryCounterexample
   , LengthSpinePairSMTLibInputBoxValidationError (..)
   , validateLengthSpinePairSMTLibQueryInputBox
   , LengthSpinePairSMTLibApplicableDomainValidationError (..)
@@ -105,6 +109,7 @@ import Language.Haskell.Synthesis.Semantic.Length
 import Language.Haskell.Synthesis.Semantic.Length.Evaluate
   ( LengthApplicableDomainValidation (..)
   , LengthApplicableDomainValidationError
+  , LengthCounterexampleSimplificationError
   , LengthEvaluationError
   , LengthEvaluationLimits
   , LengthInputBoxLimits
@@ -112,13 +117,16 @@ import Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , LengthInputBoxValidationError
   , LengthProblemAssignment (..)
   , LengthSpinePairApplicableDomainValidationError
+  , LengthSpinePairCounterexampleSimplificationError
   , LengthSpinePairEvaluationError
   , LengthSpinePairInputBoxValidationError
   , ValidatedLengthApplicableDomain
   , ValidatedLengthCounterexample
+  , ValidatedLengthCounterexampleSimplification
   , ValidatedLengthInputBox
   , ValidatedLengthSpinePairApplicableDomain
   , ValidatedLengthSpinePairCounterexample
+  , ValidatedLengthSpinePairCounterexampleSimplification
   , ValidatedLengthSpinePairInputBox
   , validateLengthProblemApplicableDomain
   , validateLengthProblemInputBox
@@ -126,6 +134,8 @@ import Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validateLengthSpinePairProblemApplicableDomain
   , validateLengthSpinePairProblemInputBox
   , validateLengthSpinePairProblemCounterexample
+  , simplifyLengthProblemCounterexample
+  , simplifyLengthSpinePairProblemCounterexample
   )
 import Language.Haskell.Synthesis.Semantic.Length.Problem
   ( CheckedLengthProblem
@@ -627,6 +637,48 @@ probeLengthSMTLibCounterexampleAtOrigin evaluationLimits query =
   replayLengthSMTLibCounterexampleInputs evaluationLimits query
     $ replicate (checkedLengthProblemInputCount $ queryProblem query) 0
 
+-- | Fail-closed query-owned scalar simplification error.  The nested domain
+-- error preserves bounded replay detail; association failure reveals only the
+-- sanitized exact-problem mismatch class.
+data LengthSMTLibCounterexampleSimplificationError
+  = LengthSMTLibCounterexampleSimplificationRejected
+      !LengthCounterexampleSimplificationError
+  | LengthSMTLibCounterexampleSimplificationAssociationRejected
+      !ReplayMismatch
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSMTLibCounterexampleSimplificationError
+
+-- | Seek a strict deterministic improvement of one opaque scalar
+-- counterexample through the checked problem retained by this exact query.
+--
+-- The query contributes only problem ownership and final evidence
+-- association.  This function emits no commands, consumes no solver status,
+-- and changes no query bytes or fingerprint.  @Right Nothing@ makes no claim:
+-- either the dominated box was not admitted or its canonical first
+-- counterexample was the revalidated anchor itself.
+simplifyLengthSMTLibQueryCounterexample
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> LengthSMTLibQuery identity local
+  -> ValidatedLengthCounterexample
+  -> Either LengthSMTLibCounterexampleSimplificationError
+      (Maybe ValidatedLengthCounterexampleSimplification)
+simplifyLengthSMTLibQueryCounterexample evaluationLimits inputBoxLimits query
+    counterexample = do
+  evidence <- either
+    (Left . LengthSMTLibCounterexampleSimplificationRejected)
+    Right
+    $ simplifyLengthProblemCounterexample evaluationLimits inputBoxLimits
+        (queryProblem query) counterexample
+  traverse replay evidence
+ where
+  replay = either
+    (Left .
+      LengthSMTLibCounterexampleSimplificationAssociationRejected)
+    Right
+    . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
+
 -- | Why exhaustive finite-box validation through a sealed query failed.
 -- Validation failures come only from the solver-independent Length verifier;
 -- association failures expose the same sanitized exact-problem mismatch class
@@ -826,6 +878,45 @@ probeLengthSpinePairSMTLibCounterexampleAtOrigin evaluationLimits query =
         (checkedLengthSpinePairProblemInputCount
           $ spinePairQueryProblem query)
         0
+
+-- | Nominal product-domain failure for query-owned bounded counterexample
+-- simplification.
+data LengthSpinePairSMTLibCounterexampleSimplificationError
+  = LengthSpinePairSMTLibCounterexampleSimplificationRejected
+      !LengthSpinePairCounterexampleSimplificationError
+  | LengthSpinePairSMTLibCounterexampleSimplificationAssociationRejected
+      !ReplayMismatch
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSpinePairSMTLibCounterexampleSimplificationError
+
+-- | Product-domain sibling of
+-- 'simplifyLengthSMTLibQueryCounterexample'.  It retains nominal product
+-- evidence and metadata while using the same deterministic dominated-box
+-- ordering and exact-query association boundary.
+simplifyLengthSpinePairSMTLibQueryCounterexample
+  :: LengthEvaluationLimits
+  -> LengthInputBoxLimits
+  -> LengthSpinePairSMTLibQuery identity local
+  -> ValidatedLengthSpinePairCounterexample
+  -> Either LengthSpinePairSMTLibCounterexampleSimplificationError
+      (Maybe ValidatedLengthSpinePairCounterexampleSimplification)
+simplifyLengthSpinePairSMTLibQueryCounterexample evaluationLimits
+    inputBoxLimits query counterexample = do
+  evidence <- either
+    (Left . LengthSpinePairSMTLibCounterexampleSimplificationRejected)
+    Right
+    $ simplifyLengthSpinePairProblemCounterexample
+        evaluationLimits inputBoxLimits
+        (spinePairQueryProblem query) counterexample
+  traverse replay evidence
+ where
+  replay = either
+    (Left .
+      LengthSpinePairSMTLibCounterexampleSimplificationAssociationRejected)
+    Right
+    . replayBehavioralEvidence
+        (lengthSpinePairSMTLibQueryBehavioralProblem query)
 
 -- | Why exhaustive finite-box validation through a product query failed.
 data LengthSpinePairSMTLibInputBoxValidationError

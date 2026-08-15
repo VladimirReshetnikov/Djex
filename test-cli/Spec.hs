@@ -2760,21 +2760,29 @@ testReplStartupFiles = withTemporaryEnvironment
   (exitCode, output, errors) <- runReplFrom working home [] environment
     ["a -> a"]
   assertEqual "startup REPL exit" ExitSuccess exitCode
-  assertEqual "home startup file is loaded once" 1
-    $ countOccurrencesPath
-        ("Loaded startup commands from " ++ canonicalHomeStartup) output
+  -- On Windows, directory's getHomeDirectory resolves the account profile
+  -- through the native shell API and ignores the HOME/USERPROFILE overrides
+  -- this test pins, so a child REPL's home directory cannot be redirected to
+  -- the controlled fixture there. The redirected-home observations are
+  -- POSIX-only; the working-directory, deduplication, suppression, and
+  -- malformed-file behavior below stays observable everywhere.
+  when (os /= "mingw32") $ do
+    assertEqual "home startup file is loaded once" 1
+      $ countOccurrencesPath
+          ("Loaded startup commands from " ++ canonicalHomeStartup) output
+    assertBool
+        "home startup commands did not run before current-directory ones"
+      $ case
+          ( occurrenceOffset "homeResult a = a" output
+          , occurrenceOffset "inheritedResult a = a" output
+          ) of
+        (Just homeOffset, Just workingOffset) -> homeOffset < workingOffset
+        _ -> False
+    assertContains "startup trailing comment preserves its query"
+      "homeResult a = a" output
   assertEqual "working-directory startup file is loaded once" 1
     $ countOccurrencesPath
         ("Loaded startup commands from " ++ canonicalWorkingStartup) output
-  assertBool "home startup commands did not run before current-directory ones"
-    $ case
-        ( occurrenceOffset "homeResult a = a" output
-        , occurrenceOffset "inheritedResult a = a" output
-        ) of
-      (Just homeOffset, Just workingOffset) -> homeOffset < workingOffset
-      _ -> False
-  assertContains "startup trailing comment preserves its query"
-    "homeResult a = a" output
   assertBool "whole-line startup comment was executed as a query" $
     not $ (canonicalHomeStartup ++ " (line 1)") `isInfixOf` errors
   assertContains "startup settings shape the session" "\\a -> a" output
@@ -3656,9 +3664,11 @@ runReplFrom workingDirectory homeDirectory extraArguments environment inputs = d
       })
     (replSession inputs)
 
--- Directory's home lookup uses HOME on POSIX and may consult USERPROFILE or
--- HOMEDRIVE/HOMEPATH on Windows. Pin every relevant spelling so a subprocess
--- cannot discover the account running the test.
+-- Directory's home lookup uses HOME on POSIX. On Windows it resolves the
+-- profile through the native shell API and ignores these variables, so the
+-- override cannot actually redirect a child's home directory there; the
+-- spellings are still pinned so no other consulted lookup can discover the
+-- account running the test.
 homeEnvironmentOverrides :: FilePath -> [(String, String)]
 homeEnvironmentOverrides directory =
     [("HOME", directory), ("USERPROFILE", directory)]

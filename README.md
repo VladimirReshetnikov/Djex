@@ -52,6 +52,7 @@ these tiers explicitly.
   - [Finite binary product spine lengths, offline and live SMT replay](#finite-binary-product-spine-lengths-offline-and-live-smt-replay)
     - [Shared live usable-work budget](#shared-live-usable-work-budget)
     - [Descriptor-bound Z3 executable launch](#descriptor-bound-z3-executable-launch)
+    - [Effective-ID executable-access descriptor launch](#effective-id-executable-access-descriptor-launch)
 - [Building](#building)
 - [Unified command](#unified-command)
 - [Query boundary](#query-boundary)
@@ -1838,6 +1839,78 @@ need the unavailable native mechanism.
 The mechanism, rollback boundary, compatibility identities, and adversarial
 replacement characterization are recorded in the
 [descriptor-bound Z3 main-image launch report](docs/reports/2026-08-15-descriptor-bound-z3-main-image-launch.md).
+
+#### Effective-ID executable-access descriptor launch
+
+`mkLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessExecutionConfig` is
+the additive Linux sibling for callers that also require the opened source to
+pass an effective-credential VFS execute-access check. The closed public
+classifier is
+`LengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunch`; the existing
+`lengthSMTLibExecutionExecutableLaunchStrategy` projection distinguishes all
+three strategies without revealing a path, digest, descriptor, access result,
+or process observation:
+
+```haskell
+let source =
+      defaultLengthSMTLibExecutionConfigSource
+        "/usr/bin/z3"
+        (Just expectedZ3SHA256)
+in case
+    mkLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessExecutionConfig
+      defaultLengthSMTLibExecutionLimits source of
+  Left rejected -> Left rejected
+  Right execution ->
+    Right
+      ( lengthSMTLibExecutionExecutableLaunchStrategy execution
+      , execution
+      )
+```
+
+Construction is pure. When a later live miss opens the policy, Linux opens the
+final source component with no-follow, close-on-exec, no-controlling-terminal,
+and nonblocking flags; requires a regular file and at least one execute mode
+bit as a shape prefilter; then calls the raw
+`faccessat2(fd, "", X_OK, AT_EMPTY_PATH | AT_EACCESS)` system call on that
+opened descriptor. The first successful check precedes copying. Djex streams
+each bounded chunk once to SHA-256 and a private memfd, rechecks source
+metadata, compares the optional pin, sets the staged image to fixed mode
+`0500`, seals and verifies writes/size/seals/type/mode, and rewinds it. After
+the deterministic test hook, the same opened source descriptor must pass the
+same access check a second time immediately before child allocation. Only the
+sealed memfd reaches `execveat(AT_EMPTY_PATH)`; there is no pathname or launch-
+strategy retry.
+
+The two checks are point-in-time observations under the caller's effective
+filesystem credentials. They cover the VFS access path, including ordinary
+DAC, applicable POSIX ACLs, source-mount `noexec`, and inode permission hooks;
+they are not a reservation and do not establish a complete source `exec`/
+`bprm`/LSM/IMA/binfmt decision. The actual executable is a different memfd
+inode whose `0500` mode is transport metadata. Source ownership, group, ACLs,
+set-id bits, capabilities, extended attributes, security labels, and mount
+identity are not copied. Interpreters, loaders, libraries, solver behavior,
+and solver results remain unbound.
+
+`EACCES` is a closed executable rejection. A build without the syscall,
+`ENOSYS`, or rejection of the fixed flags with `EINVAL` is closed access-check
+unavailability; every other checker error is a closed launch failure. Either
+check remains under the existing cancellation and absolute opener deadline.
+Unsupported platforms and kernels fail only when live work demands the
+strategy and never fall back to either older launcher. An all-pure deferred
+batch therefore still performs no source, access-check, staging, or process
+IO.
+
+The third policy has domain-separated execution, process, ready-worker, and
+fresh/shared/scoped scalar and binary-product run identities. Both established
+strategies retain their literal identities. No query, protocol, contract,
+behavioral receipt, or evidence schema changes. Linux 6.14's distinct
+`AT_EXECVE_CHECK` facility is intentionally not selected opportunistically;
+adopting that stronger and differently scoped operation would require a new
+versioned strategy and identity.
+
+The precise lifecycle, failure mapping, kernel-source references, authority
+limits, and characterization matrix are recorded in the
+[effective-ID descriptor-bound Z3 launch report](docs/reports/2026-08-15-effective-id-descriptor-bound-z3-launch.md).
 
 The raw process owner consumes only the admitted shared Z3 launch profile and
 retains a schema-free ordered observation. The existing Length

@@ -1248,6 +1248,43 @@ open. The precise acquisition, cancellation, cleanup, identity, and adversarial
 replacement contract is recorded in the
 [descriptor-bound Z3 main-image launch report](../docs/reports/2026-08-15-descriptor-bound-z3-main-image-launch.md).
 
+`mkLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessExecutionConfig` is
+the third mutually exclusive pure selector. Its classifier is
+`LengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunch`; the two
+established selectors and all of their canonical bytes remain literal. The
+new Linux opener retains the descriptor launch's sealed-byte authority and
+additionally requires the opened source to pass the exact raw
+`faccessat2(fd, "", X_OK, AT_EMPTY_PATH | AT_EACCESS)` check twice: first
+after regular-file and execute-bit shape admission but before copying, and
+again after the image is hashed, pinned, assigned fixed mode `0500`, sealed,
+verified, and rewound, immediately before child allocation.
+
+Those are point-in-time VFS observations under the caller's effective
+filesystem credentials. They cover ordinary DAC, applicable POSIX ACLs,
+source-mount `noexec`, and inode permission hooks, but are not a reservation or
+a complete `exec`/`bprm`/LSM/IMA/binfmt decision. The staged memfd is a
+different inode: its fixed `0500` is transport metadata, and source ownership,
+group, ACLs, set-id bits, capabilities, extended attributes, security labels,
+and mount identity are not carried. Loaders, interpreters, libraries, solver
+behavior, and results remain unbound.
+
+Denial, checker unavailability, and checker failure are distinct internal
+closed classes; the public live boundary maps denial to executable rejection
+and the latter two to launch failure. Both checks share the existing opener
+deadline and cancellation owner. Unsupported platforms, missing syscalls, and
+fixed-flag rejection fail closed at the first demanded live open. There is no
+mode-bit, pathname, libc-emulation, or older-strategy fallback, while an
+all-pure deferred batch still performs zero executable/access/process IO.
+
+The effective-ID sibling uses fresh process, ready-worker, and fresh/shared/
+scoped scalar and product identities. It changes no query, protocol,
+behavioral receipt, or evidence schema. Linux 6.14's distinct
+`AT_EXECVE_CHECK` is left to a separately versioned future policy rather than
+being selected opportunistically under this v1 identity. See the
+[effective-ID descriptor-bound Z3 launch report](../docs/reports/2026-08-15-effective-id-descriptor-bound-z3-launch.md)
+for the exact lifecycle, failure mapping, kernel references, characterization,
+and authority exclusions.
+
 `Generated` separates backend-local identity from structural global `Name`s.
 Its checked `DefinitionName` narrows top-level output names once, and its scope
 checker and renderer prevent free locals, binder reuse, capture, and ambiguous

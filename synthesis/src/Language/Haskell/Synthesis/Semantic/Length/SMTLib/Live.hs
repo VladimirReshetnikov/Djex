@@ -4,21 +4,27 @@
 -- | A narrow live Length/Z3 boundary.
 --
 -- This module owns one capability-probed worker only for the dynamic extent of
--- 'withLengthSMTLibLiveSession'.  Public callers can submit sealed queries and
--- inspect status and heuristic strength, then consume a completed live
--- observation's exact query association and independently replayed
--- counterexample evidence only through
--- 'replayLengthSMTLibLiveQueryObservation'.  They cannot inspect or retain a
--- process handle, cancellation token, executable or workspace path, barrier,
--- ordinal, transcript, decoded valuation, transport counter, or reversible run
--- identity.
+-- 'withLengthSMTLibLiveSession'.  Public callers can submit sealed scalar or
+-- exact binary-product spine queries and inspect status and heuristic strength,
+-- then consume a completed live observation's exact nominal query association
+-- and independently replayed counterexample evidence only through the matching
+-- 'replayLengthSMTLibLiveQueryObservation' or
+-- 'replayLengthSpinePairSMTLibLiveQueryObservation' gate.  They cannot inspect
+-- or retain a process handle, cancellation token, executable or workspace path,
+-- barrier, ordinal, transcript, decoded valuation, transport counter, or
+-- reversible run identity.
+--
+-- The common readiness probe establishes only the exact QF_LIA, reset, status,
+-- input-value, framing, and transport profile.  Product protocol, run,
+-- observation, and evidence authority remain nominally distinct from scalar
+-- authority.  One scope admits 64 scalar-plus-product transactions in total,
+-- not 64 of each.
 --
 -- Solver status remains an observation.  In particular, @unsat@ is relative to
 -- the checked encoding and every status is restricted to
--- 'HeuristicRankingOnly'.  Only the optional 'BehavioralEvidence' has survived
--- independent Length replay against the exact query problem.  Consumers can
--- reveal its receipt through 'replayLengthSMTLibLiveQueryObservation', which
--- checks the complete query identity before inspecting that evidence.
+-- 'HeuristicRankingOnly'.  Only optional 'BehavioralEvidence' has survived
+-- independent domain replay against the exact query problem.  The matching
+-- public replay gate checks complete query identity before inspecting it.
 --
 -- Private session defaults own opener and finalizer deadlines; the supplied
 -- execution policy owns the host deadline for each query.  This scope does not
@@ -45,6 +51,17 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live
   , lengthSMTLibLiveQueryObservationSolverStatus
   , lengthSMTLibLiveQueryObservationResultStrength
   , lengthSMTLibLiveQueryObservationUse
+  , LengthSpinePairSMTLibLiveQueryObservation
+  , LengthSpinePairSMTLibLiveQueryFailure (..)
+  , LengthSpinePairSMTLibLiveQueryError
+  , lengthSpinePairSMTLibLiveQueryPrimaryFailure
+  , lengthSpinePairSMTLibLiveQueryCleanupIncomplete
+  , LengthSpinePairSMTLibLiveObservationReplayError (..)
+  , runLengthSpinePairSMTLibLiveQuery
+  , replayLengthSpinePairSMTLibLiveQueryObservation
+  , lengthSpinePairSMTLibLiveQueryObservationSolverStatus
+  , lengthSpinePairSMTLibLiveQueryObservationResultStrength
+  , lengthSpinePairSMTLibLiveQueryObservationUse
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -53,6 +70,8 @@ import Numeric.Natural (Natural)
 import Language.Haskell.Synthesis.Fingerprint (Fingerprint)
 import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   as Protocol
+import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol.SpinePair
+  as SpinePairProtocol
 import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Response
   as Response
 import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session
@@ -66,16 +85,23 @@ import qualified Language.Haskell.Synthesis.Internal.SMTLib.Response
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Stream
   as Stream
 import Language.Haskell.Synthesis.Semantic.Length
-  ( FiniteListSpineLengthV1 )
+  ( FiniteBinaryProductSpineLengthsV1
+  , FiniteListSpineLengthV1
+  )
 import Language.Haskell.Synthesis.Semantic.Length.Evaluate
   ( LengthEvaluationLimits
   , ValidatedLengthCounterexample
+  , ValidatedLengthSpinePairCounterexample
   )
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib
   ( LengthSMTLibQuery
   , LengthSMTLibQueryFingerprintSubject
+  , LengthSpinePairSMTLibQuery
+  , LengthSpinePairSMTLibQueryFingerprintSubject
   , lengthSMTLibQueryBehavioralProblem
   , lengthSMTLibQueryFingerprint
+  , lengthSpinePairSMTLibQueryBehavioralProblem
+  , lengthSpinePairSMTLibQueryFingerprint
   )
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
   ( LengthSMTLibExecutionConfig )
@@ -183,6 +209,51 @@ lengthSMTLibLiveQueryCleanupIncomplete
 lengthSMTLibLiveQueryCleanupIncomplete
     (LengthSMTLibLiveQueryError _ incomplete) = incomplete
 
+-- | Nominal, byte-free failure classes for a binary-product query sharing the
+-- same scoped worker.  These constructors carry no scalar problem or evidence
+-- authority.
+data LengthSpinePairSMTLibLiveQueryFailure
+  = LengthSpinePairSMTLibLiveQuerySessionUnavailable
+  | LengthSpinePairSMTLibLiveQueryLimitExceeded !Natural !Natural
+  | LengthSpinePairSMTLibLiveQueryDeadlineExceeded
+  | LengthSpinePairSMTLibLiveQueryConfigurationRejected
+  | LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
+  | LengthSpinePairSMTLibLiveQueryTransportFailed
+  | LengthSpinePairSMTLibLiveQueryProtocolRejected
+  | LengthSpinePairSMTLibLiveQueryCounterexampleRejected
+  | LengthSpinePairSMTLibLiveQueryInternalFailure
+  deriving (Eq, Ord, Show)
+
+instance NFData LengthSpinePairSMTLibLiveQueryFailure where
+  rnf failure = case failure of
+    LengthSpinePairSMTLibLiveQueryLimitExceeded limit observed ->
+      rnf limit `seq` rnf observed
+    _ -> failure `seq` ()
+
+-- | Sanitized product-query failure.  The nominal product protocol and replay
+-- diagnostics cannot be projected through the scalar error vocabulary.
+data LengthSpinePairSMTLibLiveQueryError =
+  LengthSpinePairSMTLibLiveQueryError
+    !LengthSpinePairSMTLibLiveQueryFailure
+    !Bool
+  deriving (Eq, Ord, Show)
+
+instance NFData LengthSpinePairSMTLibLiveQueryError where
+  rnf (LengthSpinePairSMTLibLiveQueryError failure incomplete) =
+    rnf failure `seq` rnf incomplete
+
+lengthSpinePairSMTLibLiveQueryPrimaryFailure
+  :: LengthSpinePairSMTLibLiveQueryError
+  -> LengthSpinePairSMTLibLiveQueryFailure
+lengthSpinePairSMTLibLiveQueryPrimaryFailure
+    (LengthSpinePairSMTLibLiveQueryError failure _) = failure
+
+lengthSpinePairSMTLibLiveQueryCleanupIncomplete
+  :: LengthSpinePairSMTLibLiveQueryError
+  -> Bool
+lengthSpinePairSMTLibLiveQueryCleanupIncomplete
+    (LengthSpinePairSMTLibLiveQueryError _ incomplete) = incomplete
+
 -- | Why a completed live observation could not be replayed against one exact
 -- query.  The query fingerprint is checked before optional evidence, so a
 -- stale query fails without inspecting or replaying a retained receipt.
@@ -195,6 +266,21 @@ instance NFData LengthSMTLibLiveObservationReplayError where
   rnf failure = case failure of
     LengthSMTLibLiveObservationQueryFingerprintMismatch -> ()
     LengthSMTLibLiveObservationEvidenceProblemMismatch mismatch ->
+      rnf mismatch
+
+-- | Why a product live observation could not be consumed with one exact
+-- product query.  Scalar query fingerprints and scalar evidence cannot enter
+-- this gate.
+data LengthSpinePairSMTLibLiveObservationReplayError
+  = LengthSpinePairSMTLibLiveObservationQueryFingerprintMismatch
+  | LengthSpinePairSMTLibLiveObservationEvidenceProblemMismatch
+      !ReplayMismatch
+  deriving (Eq, Ord, Show)
+
+instance NFData LengthSpinePairSMTLibLiveObservationReplayError where
+  rnf failure = case failure of
+    LengthSpinePairSMTLibLiveObservationQueryFingerprintMismatch -> ()
+    LengthSpinePairSMTLibLiveObservationEvidenceProblemMismatch mismatch ->
       rnf mismatch
 
 -- | Safe projection of one completed query.  It freshly copies only bounded
@@ -222,15 +308,42 @@ instance NFData
   rnf (LengthSMTLibLiveQueryObservation query observation) =
     rnf query `seq` rnf observation
 
+-- | Opaque product-domain observation retaining one exact product query
+-- fingerprint and one status-indexed outcome.  Its optional receipt has
+-- already survived independent two-component replay, but remains accessible
+-- only through 'replayLengthSpinePairSMTLibLiveQueryObservation'.
+data LengthSpinePairSMTLibLiveQueryObservation epoch identity local =
+  LengthSpinePairSMTLibLiveQueryObservation
+    !(Fingerprint LengthSpinePairSMTLibQueryFingerprintSubject)
+    !LengthSpinePairSMTLibLiveSolverObservation
+
+type LengthSpinePairSMTLibLiveSolverObservation = SolverObservation
+  (Maybe
+    (BehavioralEvidence
+      FiniteBinaryProductSpineLengthsV1
+      ValidatedLengthSpinePairCounterexample))
+  ()
+  ()
+
+type role LengthSpinePairSMTLibLiveQueryObservation nominal nominal nominal
+
+instance NFData
+    (LengthSpinePairSMTLibLiveQueryObservation epoch identity local) where
+  rnf (LengthSpinePairSMTLibLiveQueryObservation query observation) =
+    rnf query `seq` rnf observation
+
 -- | The fixed private session default.  A scope admits at most this many
--- serial queries and rejects maximum-plus-one before writing it.
+-- serial queries in total across scalar and product domains and rejects
+-- maximum-plus-one before writing it.  The current exact value is 64.
 defaultLengthSMTLibLiveSessionMaximumQueries :: Natural
 defaultLengthSMTLibLiveSessionMaximumQueries =
   Session.lengthSMTLibSessionLimitSourceMaximumQueries
     Session.defaultLengthSMTLibSessionLimitSource
 
--- | Open, capability-probe, lend, and close one worker using validated private
--- transport/protocol defaults and the caller's public execution policy.
+-- | Open, capability-probe, lend, and close one common-QF_LIA worker using
+-- validated private transport/protocol defaults and the caller's public
+-- execution policy.  Readiness grants transport capability only; each query
+-- path retains its own nominal protocol and behavioral authority.
 withLengthSMTLibLiveSession
   :: LengthSMTLibExecutionConfig
   -> (forall epoch. LengthSMTLibLiveSession epoch -> IO result)
@@ -346,6 +459,107 @@ retainLengthSMTLibLiveQueryObservation query observation = case observation of
     LengthSMTLibLiveQueryObservation query observation
   UnknownObservation () -> LengthSMTLibLiveQueryObservation query observation
 
+-- | Run one nominal product query in the same serial lease, 64-query budget,
+-- and ordinal space as scalar queries.  It seals and records a distinct product
+-- protocol and run identity.  A values-policy satisfiable result succeeds only
+-- after exact product-input decoding and independent recomputation of both
+-- product result components.  The returned status remains heuristic.
+runLengthSpinePairSMTLibLiveQuery
+  :: LengthEvaluationLimits
+  -> LengthSMTLibLiveSession epoch
+  -> LengthSpinePairSMTLibQuery identity local
+  -> IO
+      (Either
+        LengthSpinePairSMTLibLiveQueryError
+        (LengthSpinePairSMTLibLiveQueryObservation epoch identity local))
+runLengthSpinePairSMTLibLiveQuery evaluationLimits
+    (LengthSMTLibLiveSession worker) query = do
+  result <- Session.runLengthSpinePairSMTLibReadyWorkerQuery
+    evaluationLimits worker query
+  pure $ case result of
+    Left failure -> Left $ sanitizeSpinePairQueryError failure
+    Right run -> Right $ retainLengthSpinePairSMTLibLiveQueryObservation
+      (lengthSpinePairSMTLibQueryFingerprint query)
+      (Session.lengthSpinePairSMTLibQueryRunObservation run)
+
+-- | Consume the safe semantic payload of a completed product observation with
+-- the exact sealed product query supplied by its consumer.
+--
+-- The product query fingerprint is compared before the hidden observation is
+-- inspected.  Optional evidence is then replayed against that query's retained
+-- product @BehavioralProblem@.  'Nothing' grants no evidence, including for an
+-- @unsat@ or @unknown@ status; 'Just' reveals only the already independently
+-- validated two-component counterexample receipt.  Solver status remains
+-- 'HeuristicRankingOnly'.
+replayLengthSpinePairSMTLibLiveQueryObservation
+  :: LengthSpinePairSMTLibQuery identity local
+  -> LengthSpinePairSMTLibLiveQueryObservation epoch identity local
+  -> Either
+      LengthSpinePairSMTLibLiveObservationReplayError
+      (Maybe ValidatedLengthSpinePairCounterexample)
+replayLengthSpinePairSMTLibLiveQueryObservation query observation
+  | lengthSpinePairSMTLibQueryFingerprint query /=
+      lengthSpinePairSMTLibLiveQueryObservationQueryFingerprint observation =
+        Left LengthSpinePairSMTLibLiveObservationQueryFingerprintMismatch
+  | otherwise = case
+      lengthSpinePairSMTLibLiveQueryObservationSolverObservation observation of
+    SatisfiableObservation Nothing -> Right Nothing
+    SatisfiableObservation (Just evidence) -> case replayBehavioralEvidence
+        (lengthSpinePairSMTLibQueryBehavioralProblem query) evidence of
+      Left mismatch -> Left
+        $ LengthSpinePairSMTLibLiveObservationEvidenceProblemMismatch mismatch
+      Right receipt -> Right $ Just receipt
+    UnsatisfiableObservation () -> Right Nothing
+    UnknownObservation () -> Right Nothing
+
+lengthSpinePairSMTLibLiveQueryObservationQueryFingerprint
+  :: LengthSpinePairSMTLibLiveQueryObservation epoch identity local
+  -> Fingerprint LengthSpinePairSMTLibQueryFingerprintSubject
+lengthSpinePairSMTLibLiveQueryObservationQueryFingerprint
+    (LengthSpinePairSMTLibLiveQueryObservation query _) = query
+
+-- | Project the heuristic solver status without exposing product evidence.
+lengthSpinePairSMTLibLiveQueryObservationSolverStatus
+  :: LengthSpinePairSMTLibLiveQueryObservation epoch identity local
+  -> SolverStatus
+lengthSpinePairSMTLibLiveQueryObservationSolverStatus =
+  solverObservationStatus .
+    lengthSpinePairSMTLibLiveQueryObservationSolverObservation
+
+-- | Derive the raw heuristic strength from the product observation's status.
+lengthSpinePairSMTLibLiveQueryObservationResultStrength
+  :: LengthSpinePairSMTLibLiveQueryObservation epoch identity local
+  -> RawResultStrength
+lengthSpinePairSMTLibLiveQueryObservationResultStrength observation =
+  solverStatusStrength
+    $ lengthSpinePairSMTLibLiveQueryObservationSolverStatus observation
+
+-- | Product live observations, including those carrying separately validated
+-- receipts, have heuristic ranking authority only.
+lengthSpinePairSMTLibLiveQueryObservationUse
+  :: LengthSpinePairSMTLibLiveQueryObservation epoch identity local
+  -> RawObservationUse
+lengthSpinePairSMTLibLiveQueryObservationUse _ = HeuristicRankingOnly
+
+lengthSpinePairSMTLibLiveQueryObservationSolverObservation
+  :: LengthSpinePairSMTLibLiveQueryObservation epoch identity local
+  -> LengthSpinePairSMTLibLiveSolverObservation
+lengthSpinePairSMTLibLiveQueryObservationSolverObservation
+    (LengthSpinePairSMTLibLiveQueryObservation _ observation) = observation
+
+retainLengthSpinePairSMTLibLiveQueryObservation
+  :: Fingerprint LengthSpinePairSMTLibQueryFingerprintSubject
+  -> Session.LengthSpinePairSMTLibQueryRunObservation
+  -> LengthSpinePairSMTLibLiveQueryObservation epoch identity local
+retainLengthSpinePairSMTLibLiveQueryObservation query observation =
+  case observation of
+    SatisfiableObservation evidence -> evidence `seq`
+      LengthSpinePairSMTLibLiveQueryObservation query observation
+    UnsatisfiableObservation () ->
+      LengthSpinePairSMTLibLiveQueryObservation query observation
+    UnknownObservation () ->
+      LengthSpinePairSMTLibLiveQueryObservation query observation
+
 defaultLiveSessionConfig
   :: LengthSMTLibExecutionConfig
   -> Either LengthSMTLibLiveSessionFailure Session.LengthSMTLibSessionConfig
@@ -384,6 +598,15 @@ sanitizeQueryError failure = LengthSMTLibLiveQueryError
   (queryFailure $ Session.lengthSMTLibQueryRunPrimaryFailure failure)
   (maybe False processCleanupIncomplete
     $ Session.lengthSMTLibQueryRunProcessCleanupStatus failure)
+
+sanitizeSpinePairQueryError
+  :: Session.LengthSpinePairSMTLibQueryRunError
+  -> LengthSpinePairSMTLibLiveQueryError
+sanitizeSpinePairQueryError failure = LengthSpinePairSMTLibLiveQueryError
+  (spinePairQueryFailure
+    $ Session.lengthSpinePairSMTLibQueryRunPrimaryFailure failure)
+  (maybe False processCleanupIncomplete
+    $ Session.lengthSpinePairSMTLibQueryRunProcessCleanupStatus failure)
 
 sessionConfigFailure
   :: Session.LengthSMTLibSessionConfigError
@@ -567,6 +790,99 @@ queryProtocolFailure failure = case failure of
     | responseLimitFailure response ->
         LengthSMTLibLiveQueryResourceLimitExceeded
   _ -> LengthSMTLibLiveQueryProtocolRejected
+
+spinePairQueryFailure
+  :: Session.LengthSpinePairSMTLibQueryRunFailure
+  -> LengthSpinePairSMTLibLiveQueryFailure
+spinePairQueryFailure failure = case failure of
+  Session.LengthSpinePairSMTLibQueryWorkerClosing ->
+    LengthSpinePairSMTLibLiveQuerySessionUnavailable
+  Session.LengthSpinePairSMTLibQueryWorkerSpent ->
+    LengthSpinePairSMTLibLiveQuerySessionUnavailable
+  Session.LengthSpinePairSMTLibQueryLimitExceeded limit observed ->
+    LengthSpinePairSMTLibLiveQueryLimitExceeded limit observed
+  Session.LengthSpinePairSMTLibQueryProtocolPlanFailure plan ->
+    spinePairQueryProtocolPlanFailure plan
+  Session.LengthSpinePairSMTLibQueryProcessStdoutCapacityTooSmall {} ->
+    LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
+  Session.LengthSpinePairSMTLibQueryBarrierCollision ->
+    LengthSpinePairSMTLibLiveQueryInternalFailure
+  Session.LengthSpinePairSMTLibQueryDeadlineFailure _ ->
+    LengthSpinePairSMTLibLiveQueryDeadlineExceeded
+  Session.LengthSpinePairSMTLibQueryProcessFailure process ->
+    spinePairQueryProcessFailure process
+  Session.LengthSpinePairSMTLibQueryProtocolFailure protocol ->
+    spinePairQueryProtocolFailure protocol
+  Session.LengthSpinePairSMTLibQueryTranscriptAccountingMismatch {} ->
+    LengthSpinePairSMTLibLiveQueryTransportFailed
+  Session.LengthSpinePairSMTLibQueryStderrAccountingMismatch {} ->
+    LengthSpinePairSMTLibLiveQueryTransportFailed
+  Session.LengthSpinePairSMTLibQueryModelFailure _ ->
+    LengthSpinePairSMTLibLiveQueryCounterexampleRejected
+  Session.LengthSpinePairSMTLibQueryModelNotCounterexample ->
+    LengthSpinePairSMTLibLiveQueryCounterexampleRejected
+  Session.LengthSpinePairSMTLibQueryRunIdentityAdmissionTooSmall {} ->
+    LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
+  Session.LengthSpinePairSMTLibQueryRunIdentityFingerprintByteLimitExceeded {} ->
+    LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
+  Session.LengthSpinePairSMTLibQueryInternalFailure ->
+    LengthSpinePairSMTLibLiveQueryInternalFailure
+
+spinePairQueryProcessFailure
+  :: Process.LengthSMTLibProcessError
+  -> LengthSpinePairSMTLibLiveQueryFailure
+spinePairQueryProcessFailure failure =
+  case Process.lengthSMTLibProcessErrorClass failure of
+    Process.LengthSMTLibProcessCancelled ->
+      LengthSpinePairSMTLibLiveQuerySessionUnavailable
+    Process.LengthSMTLibProcessClosed ->
+      LengthSpinePairSMTLibLiveQuerySessionUnavailable
+    Process.LengthSMTLibProcessDeadlineExceeded ->
+      LengthSpinePairSMTLibLiveQueryDeadlineExceeded
+    Process.LengthSMTLibProcessNonPositiveLimit ->
+      LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
+    Process.LengthSMTLibProcessLimitConversionOverflow ->
+      LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
+    Process.LengthSMTLibProcessExecutableByteLimitExceeded ->
+      LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
+    Process.LengthSMTLibProcessStdoutByteLimitExceeded ->
+      LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
+    Process.LengthSMTLibProcessInternalFailure ->
+      LengthSpinePairSMTLibLiveQueryInternalFailure
+    _ -> LengthSpinePairSMTLibLiveQueryTransportFailed
+
+spinePairQueryProtocolPlanFailure
+  :: SpinePairProtocol.LengthSpinePairSMTLibProtocolPlanError
+  -> LengthSpinePairSMTLibLiveQueryFailure
+spinePairQueryProtocolPlanFailure failure = case failure of
+  SpinePairProtocol.LengthSpinePairSMTLibProtocolRequiredLimitTooSmall {} ->
+    LengthSpinePairSMTLibLiveQueryConfigurationRejected
+  SpinePairProtocol.LengthSpinePairSMTLibProtocolMinimumStdoutByteLimitExceeded {} ->
+    LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
+  SpinePairProtocol.LengthSpinePairSMTLibProtocolPlanFingerprintByteLimitExceeded {} ->
+    LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
+  SpinePairProtocol.LengthSpinePairSMTLibProtocolBarrierNonceError {} ->
+    LengthSpinePairSMTLibLiveQueryInternalFailure
+  SpinePairProtocol.LengthSpinePairSMTLibProtocolMissingInputValueBarrierNonce ->
+    LengthSpinePairSMTLibLiveQueryInternalFailure
+  SpinePairProtocol.LengthSpinePairSMTLibProtocolUnexpectedInputValueBarrierNonce ->
+    LengthSpinePairSMTLibLiveQueryInternalFailure
+  SpinePairProtocol.LengthSpinePairSMTLibProtocolRepeatedBarrierNonce ->
+    LengthSpinePairSMTLibLiveQueryInternalFailure
+
+spinePairQueryProtocolFailure
+  :: SpinePairProtocol.LengthSpinePairSMTLibProtocolError
+  -> LengthSpinePairSMTLibLiveQueryFailure
+spinePairQueryProtocolFailure failure = case failure of
+  SpinePairProtocol.LengthSpinePairSMTLibProtocolCumulativeStdoutByteLimitExceeded {} ->
+    LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
+  SpinePairProtocol.LengthSpinePairSMTLibProtocolFramingFailure _ framing
+    | streamFramingLimitFailure framing ->
+        LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
+  SpinePairProtocol.LengthSpinePairSMTLibProtocolResponseFailure _ response
+    | responseLimitFailure response ->
+        LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
+  _ -> LengthSpinePairSMTLibLiveQueryProtocolRejected
 
 streamFramingLimitFailure :: Stream.SMTLibStreamFramingError -> Bool
 streamFramingLimitFailure failure = case failure of

@@ -153,8 +153,10 @@ $(do
         hiddenValues =
           [ "LengthSMTLibLiveSession"
           , "LengthSMTLibLiveQueryObservation"
+          , "LengthSpinePairSMTLibLiveQueryObservation"
           , "LengthSMTLibLiveSessionError"
           , "LengthSMTLibLiveQueryError"
+          , "LengthSpinePairSMTLibLiveQueryError"
           , "PublicDjex.LengthInputBoxLimits"
           , "CheckedLengthSpinePairContract"
           , "CheckedLengthSpinePairCandidate"
@@ -168,6 +170,9 @@ $(do
           , "lengthSMTLibLiveQueryObservationQueryFingerprint"
           , "lengthSMTLibLiveQueryObservationCounterexampleEvidence"
           , "lengthSMTLibLiveQueryObservationSolverObservation"
+          , "lengthSpinePairSMTLibLiveQueryObservationQueryFingerprint"
+          , "lengthSpinePairSMTLibLiveQueryObservationCounterexampleEvidence"
+          , "lengthSpinePairSMTLibLiveQueryObservationSolverObservation"
           , "associatedSolverObservationStatus"
           , "LengthProblemProviderResealRejected"
           , "LengthProblemProviderContextMismatch"
@@ -465,12 +470,32 @@ forbiddenConstructionAttempts =
       @(LengthSMTLibLiveQueryObservation
         LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
       "LengthSMTLibLiveQueryObservation"
+  , noGeneric
+      @(LengthSpinePairSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      "LengthSpinePairSMTLibLiveQueryObservation"
+  , noEq
+      @(LengthSpinePairSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      "LengthSpinePairSMTLibLiveQueryObservation"
+  , noOrd
+      @(LengthSpinePairSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      "LengthSpinePairSMTLibLiveQueryObservation"
+  , noShow
+      @(LengthSpinePairSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      "LengthSpinePairSMTLibLiveQueryObservation"
   , noGeneric @LengthSMTLibLiveSessionError
       "LengthSMTLibLiveSessionError"
   , noGeneric @LengthSMTLibLiveQueryError
       "LengthSMTLibLiveQueryError"
   , noGeneric @LengthSMTLibLiveObservationReplayError
       "LengthSMTLibLiveObservationReplayError"
+  , noGeneric @LengthSpinePairSMTLibLiveQueryError
+      "LengthSpinePairSMTLibLiveQueryError"
+  , noGeneric @LengthSpinePairSMTLibLiveObservationReplayError
+      "LengthSpinePairSMTLibLiveObservationReplayError"
   , ( "LengthSMTLibLiveSession epoch unexpectedly permits Coercible"
     , forbiddenLengthSMTLibLiveSessionCoercion `seq` ()
     )
@@ -482,6 +507,15 @@ forbiddenConstructionAttempts =
     )
   , ( "LengthSMTLibLiveQueryObservation local unexpectedly permits Coercible"
     , forbiddenLengthSMTLibLiveObservationLocalCoercion `seq` ()
+    )
+  , ( "LengthSpinePairSMTLibLiveQueryObservation epoch unexpectedly permits Coercible"
+    , forbiddenLengthSpinePairSMTLibLiveObservationEpochCoercion `seq` ()
+    )
+  , ( "LengthSpinePairSMTLibLiveQueryObservation identity unexpectedly permits Coercible"
+    , forbiddenLengthSpinePairSMTLibLiveObservationIdentityCoercion `seq` ()
+    )
+  , ( "LengthSpinePairSMTLibLiveQueryObservation local unexpectedly permits Coercible"
+    , forbiddenLengthSpinePairSMTLibLiveObservationLocalCoercion `seq` ()
     )
   , ( "LengthSMTLibLiveSession exposed its private worker"
     , forbiddenLengthSMTLibLiveSessionWorkerProjection `seq` ()
@@ -510,11 +544,41 @@ forbiddenConstructionAttempts =
   , ( "LengthSMTLibLiveQueryObservation exposed stderr counters"
     , forbiddenLengthSMTLibLiveObservationStderrProjection `seq` ()
     )
+  , ( "LengthSpinePairSMTLibLiveQueryObservation exposed its ordinal"
+    , forbiddenLengthSpinePairSMTLibLiveObservationOrdinalProjection `seq` ()
+    )
+  , ( "LengthSpinePairSMTLibLiveQueryObservation exposed decoded input values"
+    , forbiddenLengthSpinePairSMTLibLiveObservationInputValuesProjection `seq` ()
+    )
+  , ( "LengthSpinePairSMTLibLiveQueryObservation exposed its whole solver observation"
+    , forbiddenLengthSpinePairSMTLibLiveObservationSolverObservationProjection
+        `seq` ()
+    )
+  , ( "LengthSpinePairSMTLibLiveQueryObservation exposed its reversible run identity"
+    , forbiddenLengthSpinePairSMTLibLiveObservationRunIdentityProjection `seq` ()
+    )
+  , ( "LengthSpinePairSMTLibLiveQueryObservation exposed its transcript digest"
+    , forbiddenLengthSpinePairSMTLibLiveObservationTranscriptDigestProjection
+        `seq` ()
+    )
+  , ( "LengthSpinePairSMTLibLiveQueryObservation exposed transcript bytes"
+    , forbiddenLengthSpinePairSMTLibLiveObservationTranscriptBytesProjection
+        `seq` ()
+    )
+  , ( "LengthSpinePairSMTLibLiveQueryObservation exposed stdout counters"
+    , forbiddenLengthSpinePairSMTLibLiveObservationStdoutProjection `seq` ()
+    )
+  , ( "LengthSpinePairSMTLibLiveQueryObservation exposed stderr counters"
+    , forbiddenLengthSpinePairSMTLibLiveObservationStderrProjection `seq` ()
+    )
   , ( "LengthSMTLibLiveSessionError exposed child-controlled bytes"
     , forbiddenLengthSMTLibLiveSessionErrorBytesProjection `seq` ()
     )
   , ( "LengthSMTLibLiveQueryError exposed child-controlled bytes"
     , forbiddenLengthSMTLibLiveQueryErrorBytesProjection `seq` ()
+    )
+  , ( "LengthSpinePairSMTLibLiveQueryError exposed child-controlled bytes"
+    , forbiddenLengthSpinePairSMTLibLiveQueryErrorBytesProjection `seq` ()
     )
   , ( "LengthSMTLibLive facade exposed the internal ready worker type"
     , forbiddenLengthSMTLibReadyWorkerTypeExposure `seq` ()
@@ -524,6 +588,9 @@ forbiddenConstructionAttempts =
     )
   , ( "LengthSMTLibLive facade exposed the internal query run type"
     , forbiddenLengthSMTLibQueryRunTypeExposure `seq` ()
+    )
+  , ( "LengthSMTLibLive facade exposed the internal pair query run type"
+    , forbiddenLengthSpinePairSMTLibQueryRunTypeExposure `seq` ()
     )
   , ( "LengthSMTLibLive facade exposed the internal process type"
     , forbiddenLengthSMTLibProcessTypeExposure `seq` ()
@@ -1027,6 +1094,61 @@ forbiddenConstructionAttempts =
         ()
         ())
       "LengthSMTLibLiveQueryObservation.solverObservation"
+  , noField
+      @"lengthSpinePairSMTLibLiveQueryPrimaryFailure"
+      @LengthSpinePairSMTLibLiveQueryError
+      @LengthSpinePairSMTLibLiveQueryFailure
+      "LengthSpinePairSMTLibLiveQueryError.lengthSpinePairSMTLibLiveQueryPrimaryFailure"
+  , noField
+      @"lengthSpinePairSMTLibLiveQueryCleanupIncomplete"
+      @LengthSpinePairSMTLibLiveQueryError
+      @Bool
+      "LengthSpinePairSMTLibLiveQueryError.lengthSpinePairSMTLibLiveQueryCleanupIncomplete"
+  , noField
+      @"lengthSpinePairSMTLibLiveQueryObservationQueryFingerprint"
+      @(LengthSpinePairSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      @(Fingerprint LengthSpinePairSMTLibQueryFingerprintSubject)
+      "LengthSpinePairSMTLibLiveQueryObservation.queryFingerprint"
+  , noField
+      @"lengthSpinePairSMTLibLiveQueryObservationSolverStatus"
+      @(LengthSpinePairSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      @SolverStatus
+      "LengthSpinePairSMTLibLiveQueryObservation.solverStatus"
+  , noField
+      @"lengthSpinePairSMTLibLiveQueryObservationResultStrength"
+      @(LengthSpinePairSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      @RawResultStrength
+      "LengthSpinePairSMTLibLiveQueryObservation.resultStrength"
+  , noField
+      @"lengthSpinePairSMTLibLiveQueryObservationUse"
+      @(LengthSpinePairSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      @RawObservationUse
+      "LengthSpinePairSMTLibLiveQueryObservation.use"
+  , noField
+      @"lengthSpinePairSMTLibLiveQueryObservationCounterexampleEvidence"
+      @(LengthSpinePairSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      @(Maybe
+        (BehavioralEvidence
+          FiniteBinaryProductSpineLengthsV1
+          ValidatedLengthSpinePairCounterexample))
+      "LengthSpinePairSMTLibLiveQueryObservation.counterexampleEvidence"
+  , noField
+      @"lengthSpinePairSMTLibLiveQueryObservationSolverObservation"
+      @(LengthSpinePairSMTLibLiveQueryObservation
+        LiveEpochProbe LiveIdentityProbe LiveLocalProbe)
+      @(SolverObservation
+        (Maybe
+          (BehavioralEvidence
+            FiniteBinaryProductSpineLengthsV1
+            ValidatedLengthSpinePairCounterexample))
+        ()
+        ())
+      "LengthSpinePairSMTLibLiveQueryObservation.solverObservation"
   ]
 
 -- Positive controls prove that both dictionary-forcing helpers work and that
@@ -1423,6 +1545,27 @@ forbiddenLengthSMTLibLiveObservationLocalCoercion
       LiveEpochProbe LiveIdentityProbe OtherLiveLocalProbe
 forbiddenLengthSMTLibLiveObservationLocalCoercion = coerce
 
+forbiddenLengthSpinePairSMTLibLiveObservationEpochCoercion
+  :: LengthSpinePairSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> LengthSpinePairSMTLibLiveQueryObservation
+      OtherLiveEpochProbe LiveIdentityProbe LiveLocalProbe
+forbiddenLengthSpinePairSMTLibLiveObservationEpochCoercion = coerce
+
+forbiddenLengthSpinePairSMTLibLiveObservationIdentityCoercion
+  :: LengthSpinePairSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> LengthSpinePairSMTLibLiveQueryObservation
+      LiveEpochProbe OtherLiveIdentityProbe LiveLocalProbe
+forbiddenLengthSpinePairSMTLibLiveObservationIdentityCoercion = coerce
+
+forbiddenLengthSpinePairSMTLibLiveObservationLocalCoercion
+  :: LengthSpinePairSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> LengthSpinePairSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe OtherLiveLocalProbe
+forbiddenLengthSpinePairSMTLibLiveObservationLocalCoercion = coerce
+
 forbiddenLengthSMTLibLiveSessionWorkerProjection
   :: LengthSMTLibLiveSession LiveEpochProbe
   -> ()
@@ -1485,6 +1628,62 @@ forbiddenLengthSMTLibLiveObservationStderrProjection
 forbiddenLengthSMTLibLiveObservationStderrProjection =
   lengthSMTLibLiveQueryObservationStderrCounters `seq` const ()
 
+forbiddenLengthSpinePairSMTLibLiveObservationOrdinalProjection
+  :: LengthSpinePairSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> ()
+forbiddenLengthSpinePairSMTLibLiveObservationOrdinalProjection =
+  lengthSpinePairSMTLibLiveQueryObservationOrdinal `seq` const ()
+
+forbiddenLengthSpinePairSMTLibLiveObservationInputValuesProjection
+  :: LengthSpinePairSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> ()
+forbiddenLengthSpinePairSMTLibLiveObservationInputValuesProjection =
+  lengthSpinePairSMTLibLiveQueryObservationInputValues `seq` const ()
+
+forbiddenLengthSpinePairSMTLibLiveObservationSolverObservationProjection
+  :: LengthSpinePairSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> ()
+forbiddenLengthSpinePairSMTLibLiveObservationSolverObservationProjection =
+  lengthSpinePairSMTLibLiveQueryObservationSolverObservation `seq` const ()
+
+forbiddenLengthSpinePairSMTLibLiveObservationRunIdentityProjection
+  :: LengthSpinePairSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> ()
+forbiddenLengthSpinePairSMTLibLiveObservationRunIdentityProjection =
+  lengthSpinePairSMTLibLiveQueryObservationRunIdentityFingerprint `seq` const ()
+
+forbiddenLengthSpinePairSMTLibLiveObservationTranscriptDigestProjection
+  :: LengthSpinePairSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> ()
+forbiddenLengthSpinePairSMTLibLiveObservationTranscriptDigestProjection =
+  lengthSpinePairSMTLibLiveQueryObservationTranscriptSHA256 `seq` const ()
+
+forbiddenLengthSpinePairSMTLibLiveObservationTranscriptBytesProjection
+  :: LengthSpinePairSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> ()
+forbiddenLengthSpinePairSMTLibLiveObservationTranscriptBytesProjection =
+  lengthSpinePairSMTLibLiveQueryObservationTranscriptByteCount `seq` const ()
+
+forbiddenLengthSpinePairSMTLibLiveObservationStdoutProjection
+  :: LengthSpinePairSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> ()
+forbiddenLengthSpinePairSMTLibLiveObservationStdoutProjection =
+  lengthSpinePairSMTLibLiveQueryObservationStdoutCounters `seq` const ()
+
+forbiddenLengthSpinePairSMTLibLiveObservationStderrProjection
+  :: LengthSpinePairSMTLibLiveQueryObservation
+      LiveEpochProbe LiveIdentityProbe LiveLocalProbe
+  -> ()
+forbiddenLengthSpinePairSMTLibLiveObservationStderrProjection =
+  lengthSpinePairSMTLibLiveQueryObservationStderrCounters `seq` const ()
+
 forbiddenLengthSMTLibLiveSessionErrorBytesProjection
   :: LengthSMTLibLiveSessionError
   -> ()
@@ -1496,6 +1695,12 @@ forbiddenLengthSMTLibLiveQueryErrorBytesProjection
   -> ()
 forbiddenLengthSMTLibLiveQueryErrorBytesProjection =
   lengthSMTLibLiveQueryErrorChildBytes `seq` const ()
+
+forbiddenLengthSpinePairSMTLibLiveQueryErrorBytesProjection
+  :: LengthSpinePairSMTLibLiveQueryError
+  -> ()
+forbiddenLengthSpinePairSMTLibLiveQueryErrorBytesProjection =
+  lengthSpinePairSMTLibLiveQueryErrorChildBytes `seq` const ()
 
 forbiddenLengthSMTLibReadyWorkerTypeExposure
   :: ()
@@ -1511,6 +1716,11 @@ forbiddenLengthSMTLibQueryRunTypeExposure
   :: ()
 forbiddenLengthSMTLibQueryRunTypeExposure =
   LengthSMTLibQueryRun `seq` ()
+
+forbiddenLengthSpinePairSMTLibQueryRunTypeExposure
+  :: ()
+forbiddenLengthSpinePairSMTLibQueryRunTypeExposure =
+  LengthSpinePairSMTLibQueryRun `seq` ()
 
 forbiddenLengthSMTLibProcessTypeExposure
   :: ()
@@ -1579,4 +1789,9 @@ selectorNamesInScope =
   lengthSMTLibLiveQueryObservationSolverStatus `seq`
   lengthSMTLibLiveQueryObservationResultStrength `seq`
   lengthSMTLibLiveQueryObservationUse `seq`
+  lengthSpinePairSMTLibLiveQueryPrimaryFailure `seq`
+  lengthSpinePairSMTLibLiveQueryCleanupIncomplete `seq`
+  lengthSpinePairSMTLibLiveQueryObservationSolverStatus `seq`
+  lengthSpinePairSMTLibLiveQueryObservationResultStrength `seq`
+  lengthSpinePairSMTLibLiveQueryObservationUse `seq`
   ()

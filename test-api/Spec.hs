@@ -284,6 +284,7 @@ main = defaultMain $ testGroup "Djex downstream API"
                         ( "LengthSMTLibExecutionConfig" `isInfixOf` message ||
                           "LengthSMTLibLiveSession" `isInfixOf` message ||
                           "LengthSMTLibLiveQueryObservation" `isInfixOf` message ||
+                          "LengthSpinePairSMTLibLiveQueryObservation" `isInfixOf` message ||
                           "CheckedLengthInterpretationPolicy" `isInfixOf` message
                         )
                       ) ||
@@ -291,6 +292,7 @@ main = defaultMain $ testGroup "Djex downstream API"
                         ( "LengthSMTLibExecutionConfig" `isInfixOf` message ||
                           "LengthSMTLibLiveSession" `isInfixOf` message ||
                           "LengthSMTLibLiveQueryObservation" `isInfixOf` message ||
+                          "LengthSpinePairSMTLibLiveQueryObservation" `isInfixOf` message ||
                           "CheckedLengthInterpretationPolicy" `isInfixOf` message
                         )
                       )
@@ -346,6 +348,9 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "forbiddenLengthSMTLibLiveObservationEpochCoercion"
                       , "forbiddenLengthSMTLibLiveObservationIdentityCoercion"
                       , "forbiddenLengthSMTLibLiveObservationLocalCoercion"
+                      , "forbiddenLengthSpinePairSMTLibLiveObservationEpochCoercion"
+                      , "forbiddenLengthSpinePairSMTLibLiveObservationIdentityCoercion"
+                      , "forbiddenLengthSpinePairSMTLibLiveObservationLocalCoercion"
                       ]
                   ) ||
                   ( "not in scope" `isInfixOf` message &&
@@ -360,8 +365,10 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "lengthSMTLibExecutionZ3Profile"
                       , "LengthSMTLibLiveSession"
                       , "LengthSMTLibLiveQueryObservation"
+                      , "LengthSpinePairSMTLibLiveQueryObservation"
                       , "LengthSMTLibLiveSessionError"
                       , "LengthSMTLibLiveQueryError"
+                      , "LengthSpinePairSMTLibLiveQueryError"
                       , "lengthSMTLibLiveSessionWorker"
                       , "lengthSMTLibLiveQueryObservationOrdinal"
                       , "lengthSMTLibLiveQueryObservationInputValues"
@@ -371,11 +378,21 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "lengthSMTLibLiveQueryObservationTranscriptByteCount"
                       , "lengthSMTLibLiveQueryObservationStdoutCounters"
                       , "lengthSMTLibLiveQueryObservationStderrCounters"
+                      , "lengthSpinePairSMTLibLiveQueryObservationOrdinal"
+                      , "lengthSpinePairSMTLibLiveQueryObservationInputValues"
+                      , "lengthSpinePairSMTLibLiveQueryObservationSolverObservation"
+                      , "lengthSpinePairSMTLibLiveQueryObservationRunIdentityFingerprint"
+                      , "lengthSpinePairSMTLibLiveQueryObservationTranscriptSHA256"
+                      , "lengthSpinePairSMTLibLiveQueryObservationTranscriptByteCount"
+                      , "lengthSpinePairSMTLibLiveQueryObservationStdoutCounters"
+                      , "lengthSpinePairSMTLibLiveQueryObservationStderrCounters"
                       , "lengthSMTLibLiveSessionErrorChildBytes"
                       , "lengthSMTLibLiveQueryErrorChildBytes"
+                      , "lengthSpinePairSMTLibLiveQueryErrorChildBytes"
                       , "LengthSMTLibReadyWorker"
                       , "LengthSMTLibSessionConfig"
                       , "LengthSMTLibQueryRun"
+                      , "LengthSpinePairSMTLibQueryRun"
                       , "LengthSMTLibProcess"
                       , "LengthSpinePairSMTLibQuery"
                       , "mkBehavioralEvidence"

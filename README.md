@@ -725,7 +725,7 @@ identity or canonical bytes. Its v1 tag belongs to the newly opaque receipt,
 not to an existing semantic or solver envelope. See the
 [bounded Length input-box validation report](docs/reports/2026-08-14-bounded-length-input-box-validation.md).
 
-### Finite binary product spine lengths and offline SMT replay
+### Finite binary product spine lengths, offline and live SMT replay
 
 `FiniteBinaryProductSpineLengthsV1` is an additive behavioral domain for one
 exact boxed binary product whose two source-ordered result fields expose the
@@ -779,8 +779,9 @@ scalar query even when the rendered bytes are identical.
 
 For example, this source contract states that the two result lengths conserve
 the first compact input length. Given a checked session, exact product target,
-typed candidate, and parser-decoded input bindings, the same flow seals the
-contract, candidate problem, and offline query before replay:
+typed candidate, parser-decoded input bindings, and an already sealed
+`executionConfig`, the same flow seals the contract, candidate problem, and
+query, supports pure replay, and runs that exact query in a scoped live worker:
 
 ```haskell
 let input0 = LengthVariable (LengthSpinePairInput 0)
@@ -827,6 +828,23 @@ boundedResult <- either (fail . show) pure $
     defaultLengthInputBoxLimits
     pairQuery
     [8, 8] -- inclusive maximum for each compact input
+
+liveProductResult <-
+  withLengthSMTLibLiveSession executionConfig $ \liveSession -> do
+    runResult <- runLengthSpinePairSMTLibLiveQuery
+      defaultLengthEvaluationLimits liveSession pairQuery
+    pure $ case runResult of
+      Left queryError -> Left $ show queryError
+      Right observation -> do
+        counterexample <- either (Left . show) Right $
+          replayLengthSpinePairSMTLibLiveQueryObservation
+            pairQuery observation
+        Right
+          ( lengthSpinePairSMTLibLiveQueryObservationSolverStatus observation
+          , lengthSpinePairSMTLibLiveQueryObservationResultStrength observation
+          , lengthSpinePairSMTLibLiveQueryObservationUse observation
+          , counterexample
+          )
 ```
 
 `validateLengthSpinePairSMTLibCounterexample` accepts only the exact generated
@@ -838,18 +856,40 @@ entrances are query-owned specializations of the same exact association
 boundary. A box success is positive only for that finite box and recorded
 provider basis. A replay miss is only `Nothing`.
 
-This checkpoint deliberately has no product response, execution, protocol,
-process, worker, or live-Z3 facade. The check and value-request bytes are data
-for an external/offline driver; `sat`, `unsat`, and `unknown` are never
-evidence. Only independent decoded-input replay or complete domain-owned box
-traversal can create a receipt.
+`runLengthSpinePairSMTLibLiveQuery` now supplies the nominal live product path.
+It uses the same capability-probed, serial worker and zero-based ordinal space
+as `runLengthSMTLibLiveQuery`. The default scope has one fixed 64-transaction
+ordinal budget across any interleaving of scalar and product queries, not 64 of
+each; maximum-plus-one is rejected before a write. Cumulative stdout,
+per-query response, process, identity, and deadline limits can reject an
+earlier transaction independently of that count.
+
+The shared readiness transcript establishes only the exact common QF_LIA,
+reset, status, input-valuation, framing, and transport profile needed by both
+query shapes. It supplies no scalar authority to a product query. Product
+execution instead has a distinct protocol plan and phase machine, nominal
+query-run schema and fingerprint role, public observation and failure types,
+and `FiniteBinaryProductSpineLengthsV1` evidence association. A values-policy
+`sat` run cannot succeed until the returned input symbols have been decoded
+against the exact product query and both result components have been
+independently recomputed. Public consumers must then pass the opaque live
+observation and that exact query through
+`replayLengthSpinePairSMTLibLiveQueryObservation` to reveal an optional receipt.
+The status, derived strength, and observation use remain heuristic even when a
+separate replayed receipt is present; `unsat` and `unknown` never become proof
+or pruning authority.
 
 All historical `FiniteListSpineLengthV1` constructors, signatures, nominal
 types, tags, fingerprint fields, canonical bytes, replay behavior, and Z3 APIs
 remain unchanged. See the stage-one
 [finite binary product spine-length foundation report](docs/reports/2026-08-14-finite-binary-product-spine-length-foundation.md)
 and the subsequent
-[offline product SMT and replay report](docs/reports/2026-08-14-finite-binary-product-spine-smt-replay.md).
+[offline product SMT and replay report](docs/reports/2026-08-14-finite-binary-product-spine-smt-replay.md),
+then the
+[live binary-product Length/Z3 report](docs/reports/2026-08-14-live-binary-product-spine-z3.md).
+Djex exposes the product observation for an integration to rank, but Leant does
+not yet consume it in candidate ranking; that engine integration is the next
+checkpoint.
 
 SMT-LIB's QF_LIA logic excludes the built-in `div` and `mod` operators. Djex
 therefore lowers every remaining normalized quotient or modulo node to one
@@ -1086,7 +1126,9 @@ The same Session now owns ordinal-bound live queries through the generic private
 `...Session.Transport` adapter binds one process, cancellation token, and
 absolute deadline as a single transport handle. A masked serial gate allocates
 zero-based ordinals and two HMAC-SHA256 marker roles from the unexposed session
-seed, checks all markers against a bounded lease-wide set, and seals the exact
+seed. The default limit is one shared total of 64 scalar-plus-product
+transactions, rather than a separate allowance per domain. The gate checks all
+markers against a bounded lease-wide set and seals the exact domain-specific
 pure protocol plan before reservation. The shared causal driver writes before
 feeding admitted boundary bytes and activating their receiver. For the initial
 adopted predecessor boundary it also defers receipt projection until that first
@@ -1097,12 +1139,16 @@ ordinal, cancels the lease, and closes the process; plan, capacity,
 identity-admission, and query-count rejections before reservation remain
 non-mutating.
 
-Successful query runs retain an opaque nominal reversible identity over the
-ready worker, plan, ordinal, spent markers, absolute deadline, exact segmented
-transcript, decoded branch, replay policy, and transport counters. `sat` under
-the input-value policy yields counterexample evidence only after independent
-Length replay under explicit evaluation limits. Status-only `sat`, `unsat`,
-and `unknown` remain heuristic observations and grant no pruning authority.
+Successful scalar and product query runs retain separate opaque nominal
+reversible identities over the common ready worker, their domain-specific plan,
+ordinal, spent markers, absolute deadline, exact segmented transcript, decoded
+branch, replay policy, and transport counters. The shared readiness identity is
+only a common QF_LIA/input-value transport capability; it is not scalar
+behavioral authority imported into the product run. `sat` under the input-value
+policy yields counterexample evidence only after independent replay under
+explicit evaluation limits, including recomputation of both result components
+for a product query. Status-only `sat`, `unsat`, and `unknown` remain heuristic
+observations and grant no pruning authority.
 After replay and identity sealing, the package-private run retains its ordinal,
 one strict status-indexed observation, reversible key, transcript digest, and
 accounting boundaries. Only the satisfiable observation branch can carry
@@ -1118,20 +1164,21 @@ The exact design and threat boundary are recorded in the
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` is the deliberately
 narrow public edge over that owner. It lends an opaque worker only through a
-rank-N scope. Each successful query observation internally retains its exact
-query fingerprint and one strict status-indexed observation whose satisfiable
-branch alone may carry independently replayed counterexample evidence. Its
-heuristic strength is derived from that observation's status rather than
-stored as a second fact; public selectors expose status, that derived strength,
-and heuristic use. Neither the fingerprint, evidence, nor whole observation
-has a detached public projection:
-`replayLengthSMTLibLiveQueryObservation` is the only public semantic extraction
-edge from those live-observation fields. It checks the exact query fingerprint
+rank-N scope. Scalar and product observations are nominally distinct; each
+internally retains its exact query fingerprint and one strict status-indexed
+observation whose satisfiable branch alone may carry independently replayed
+counterexample evidence. Heuristic strength is derived from status rather than
+stored as a second fact; domain-specific public selectors expose status, that
+derived strength, and heuristic use. Neither fingerprint, evidence, nor whole
+observation has a detached public projection.
+`replayLengthSMTLibLiveQueryObservation` and
+`replayLengthSpinePairSMTLibLiveQueryObservation` are the corresponding public
+semantic extraction gates. Each checks the exact nominal query fingerprint
 before inspecting the hidden observation, then replays any evidence against
-the query's retained behavioral problem. The separate raw-input replay
-entrance constructs new evidence from caller-supplied naturals; it does not
-extract anything from a live observation. A successful `Nothing` from the live
-gate remains only an exactly associated heuristic status. Process handles,
+that query's retained behavioral problem. The separate raw-input replay
+entrances construct new evidence from caller-supplied naturals; they do not
+extract anything from a live observation. A successful `Nothing` from either
+live gate remains only an exactly associated heuristic status. Process handles,
 cancellation, paths, executable observations, barriers, ordinals, decoded
 valuations, transcripts, transport counters, and reversible run identities
 remain private. Public session and query execution failures are mapped to

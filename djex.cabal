@@ -254,6 +254,7 @@ Library
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Observation
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
+    Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol.SpinePair
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capability
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process
@@ -408,6 +409,7 @@ Test-Suite synthesis-length-tests
     Language.Haskell.Synthesis.Internal.Fingerprint
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
+    Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol.SpinePair
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capability
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process

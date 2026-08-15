@@ -180,12 +180,13 @@ and the
 | `Language.Haskell.Synthesis.Semantic.Length` | Exact inventory-bound finite-spine contexts, normalized scalar and exact boxed binary-product contracts, source-bound assumed provider laws, and model-aware nominal fingerprints; an additive trust class retains exact nonempty constrained schemes under a dictionary-uniform conditional-law assumption, while every scalar byte stays exact. |
 | `Language.Haskell.Synthesis.Semantic.Length.Evaluate` | Bounded deterministic replay of checked scalar and binary-spine-product contracts, exact candidate problems, and finite Cartesian input boxes, with nominally separate counterexample and positive bounded receipts; detached conditional-provider evaluation still fails before argument inspection. |
 | `Language.Haskell.Synthesis.Semantic.Length.Problem` | Atomic checked sessions and nominally distinct scalar/product typed-candidate behavioral problems: session-owned provider and restricted resolver authority, contract resealing, residual rejection, rigid root/provider authorization, mixed-role opaque targets, exact scalar zero/step cases inside product fields, and provider-only consumption of independently authorized certificate carriers. |
-| `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation, exact input-symbol model replay, query-owned source-ordered natural-input replay, and exact-query association of solver-independent finite-box validation for one checked Length problem, without launching or trusting a solver. |
+| `Language.Haskell.Synthesis.Semantic.Length.SMTLib` | Bounded canonical QF_LIA translation plus exact input-symbol, natural-input, origin, and finite-box replay for nominally distinct checked scalar and binary-product Length problems, without launching or trusting a solver. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution` | Pure validated Z3 launch, resource, artifact, and response-decoder policy with a package-private complete identity and a byte-free digest-expectation presence classifier; it performs no IO or attestation. |
-| `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` | Rank-N scoped capability-probed Z3 ownership with byte-free failures, heuristic status/strength/use, and a query-first replay gate for independently validated counterexample evidence. |
+| `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live` | Rank-N scoped capability-probed Z3 ownership for scalar and exact binary-product queries, with one shared 64-query lease budget, nominal byte-free failures and observations, heuristic status/strength/use, and domain-specific query-first replay gates. |
 | `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation` | Opaque query-specific association of bounded raw solver reports, with heuristic-only safe projections and exact problem-plus-query replay before payload access. |
-| `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response` | Pure bounded SMT-LIB 2.x check-status and query-specific input-valuation decoding; syntax remains untrusted and only independent Length replay may create evidence. |
-| `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` | Package-private incremental reset/check/value transaction planning with exact positional barriers, causal write boundaries, and bounded cumulative stdout; it performs no IO or attestation. |
+| `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response` | Pure bounded SMT-LIB 2.x check-status and scalar/product query-specific input-valuation decoding; syntax remains untrusted and only independent domain replay may create evidence. |
+| `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol` | Package-private scalar incremental reset/check/value transaction planning with exact positional barriers, causal write boundaries, and bounded cumulative stdout; it performs no IO or attestation. |
+| `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol.SpinePair` | Nominal product sibling of the pure reset/check/value phase machine, with product-specific plan, phase, decoded-outcome, error, and fingerprint authority over the shared framing/response mechanics. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capability` | Package-private four-write readiness probe for print suppression, reset replay, exact `sat`, input valuation, contradictory `unsat`, and positional fresh barriers. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Process` | Length compatibility and identity facade which exhaustively maps the shared runtime's sanitized vocabulary and derives the unchanged raw-process v2 root from its exact associated observation and process-owned limits without caching a parallel root. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Causal` | Domain-neutral pure write/await/complete action algebra with nominal write-kind, receiver, and outcome associations. |
@@ -200,7 +201,7 @@ and the
 | `Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution` | Domain-neutral admitted Z3 launch profile, mechanical startup/reset facts, configured argv, and flat launch fingerprint-field slice without process or domain-schema authority. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process` | Domain-neutral opaque direct-process runtime owning pre-spawn observation, pipes, FIFO events, cancellation/deadlines, and bounded cleanup while exposing only associated schema-free observation and limit fields to a domain facade. |
 | `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Transport` | Length/Z3 adapter which binds one process, cancellation token, and absolute deadline behind the generic causal driver operations. |
-| `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session` | Rank-N scoped ownership of one capability-probed worker, with secret/public entropy separation, a fresh fd-observed workspace, exact segmented probe transcript, and no public process handle. |
+| `Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session` | Rank-N scoped ownership of one capability-probed common-QF_LIA worker and one shared 64-entry scalar/product ordinal budget, with secret/public entropy separation, a fresh fd-observed workspace, exact segmented probe transcript, nominal domain runs, and no public process handle. |
 | `Language.Haskell.Synthesis.Semantic.Observation` | Raw three-valued solver and four-valued behavioral reports without candidate association or evidence claims. |
 | `Language.Haskell.Synthesis.Semantic.Problem` | Bounded raw artifacts associated with exact domain, inventory, encoding, candidate, and problem identities; every raw result is restricted to heuristic ranking, while domain-owned authoritative evidence has only a private construction seam. |
 | `Language.Haskell.Synthesis.Generated` | Scope-aware expressions, patterns, clauses, holes, mixed term/type application spines, bottom-up rewriting, simplification, alpha-equivalence, substitution, and Haskell rendering through the common qualification policy. |
@@ -488,13 +489,36 @@ probe, and exact finite-box association are exposed by
 a miss is not positive evidence, and box success remains finite/model-relative
 under its explicit provider basis.
 
-This checkpoint adds no product response, execution, protocol, process,
-worker, or live-Z3 layer. It never interprets a raw `sat`, `unsat`, or
-`unknown` status as evidence. Every historical scalar public signature,
-canonical query byte, and identity remains exact. See the stage-one
+The product query now also has bounded query-specific response decoding, a
+distinct package-private protocol plan and phase machine, a nominal product
+query-run identity, and a public live observation/failure/replay surface. It
+reuses the scoped worker only after that worker's four-write probe has
+established the common QF_LIA/reset/status/input-valuation transport profile.
+That readiness fact supplies no scalar problem, observation, or evidence
+authority to the product path.
+
+Scalar and product runs reserve from the same serial zero-based ordinal space.
+The public default is exactly 64 transactions total across an arbitrary mixed
+sequence, not 64 per domain, and maximum-plus-one fails before a write. Product
+protocol, run, observation, and evidence identities remain separate even if a
+product query's canonical input-only bytes happen to equal scalar bytes. A
+values-policy `sat` path must decode the exact product input set and
+independently recompute both result components before optional product evidence
+can exist. The public consumer must still use
+`replayLengthSpinePairSMTLibLiveQueryObservation` with the exact product query
+to reveal that receipt. All status projections and their derived strength/use
+remain heuristic; `unsat` and `unknown` have no proof or pruning authority.
+
+Every historical scalar public signature, schema tag, canonical query and
+protocol byte, run identity field, replay behavior, and observation API remains
+exact. See the stage-one
 [finite binary product spine-length foundation report](../docs/reports/2026-08-14-finite-binary-product-spine-length-foundation.md)
 and the
-[offline product SMT and replay report](../docs/reports/2026-08-14-finite-binary-product-spine-smt-replay.md).
+[offline product SMT and replay report](../docs/reports/2026-08-14-finite-binary-product-spine-smt-replay.md),
+followed by the
+[live binary-product Length/Z3 report](../docs/reports/2026-08-14-live-binary-product-spine-z3.md).
+Leant product-result ranking is not part of this Djex checkpoint and remains
+the next engine-integration step.
 
 Positive-literal natural quotient and modulo remain inside QF_LIA by using one
 shared deterministic private Euclidean witness shape rather than the forbidden
@@ -702,12 +726,15 @@ once, then the process launch snapshot and policy, capability plan, exact
 segmented transcript, secret-seed commitment, workspace policy/path, and
 semantic limits. It is
 still not a solver result, proof, pruning authority, or general Z3 feature
-claim. The same Session drives individual query plans through the scoped worker
-and independently replays any model before evidence exists.
+claim. The same Session drives nominally separate scalar and product query
+plans through the scoped worker and independently replays any model before
+evidence exists. The probe establishes only their shared QF_LIA/input-value
+transport requirements, not cross-domain behavioral authority.
 
 The live worker does not retain the whole pre-readiness Session configuration.
-Its private strict query policy keeps only the query-count cap, query-run
-identity budget, protocol limits, and a post-launch execution policy containing
+Its private strict query policy keeps one query-count cap shared by scalar and
+product runs, the query-run identity budget, protocol limits, and a post-launch
+execution policy containing
 only the host deadline, artifact policy, response limits, and original complete
 execution-policy key needed to derive each query deadline and seal future
 plans. It does not retain the structured Z3 launch profile, executable path or
@@ -717,33 +744,35 @@ retained opaque runtime. Workspace-allocation, capability, and ready-identity
 admission work has completed before lending; the opener deadline and Session
 workspace-cleanup authority remain with the enclosing scope.
 Once a plan is sealed, replay reads the exact query and artifact policy from
-that plan rather than pairing it with independent worker-wide fields. Response
-decoding likewise reads the limits retained by that exact plan.
+that domain's plan rather than pairing it with independent worker-wide fields.
+Response decoding likewise reads the limits retained by that exact plan.
 The terminal decoded value remains local through independent replay and the
-unchanged query-run identity builder. Before a successful run escapes, commit
-forces a narrower owner containing its ordinal, one strict status-indexed
-observation, reversible key, transcript digest, and accounting boundaries,
+corresponding nominal query-run identity builder. Before a successful run
+escapes, commit forces a narrower owner containing its ordinal, one strict
+status-indexed observation, reversible key, transcript digest, and accounting
+boundaries,
 but no parsed symbol/integer binding list. Only the satisfiable observation
 branch can contain optional problem-bound evidence. Evidence retains the
 normalized compact source-ordered observed-spine counterexample inputs, and
 the private reversible key retains exact transcript bytes; the deletion
 narrows structured authority rather than scrubbing child output.
 
-The public live facade copies the whole status-indexed observation once along
-with the bounded query association, rather than re-pairing a status and an
-optional payload. It derives the corresponding heuristic strength from the
-observation's status. Public selectors expose status, derived strength, and
-use, but not the retained query key, whole observation, or optional evidence.
-`replayLengthSMTLibLiveQueryObservation` is the sole checked semantic
-extraction edge from those live-observation hidden fields: it compares the
-complete collision-free query key before it inspects optional evidence, then
-replays any retained evidence against the
-exact `BehavioralProblem` owned by that query. A mismatched query therefore
-cannot make receipt replay observable, while a successful result without a
-receipt remains only an exactly associated heuristic status. The gate exposes
-no process, transcript, decoded valuation, or stronger use for `unsat`. Direct
-raw-input replay instead evaluates caller-supplied naturals afresh and does not
-extract any hidden live-observation field.
+The public live facade copies each domain's whole status-indexed observation
+once along with its bounded query association, rather than re-pairing a status
+and an optional payload. It derives the corresponding heuristic strength from
+the observation's status. Scalar and product selectors expose status, derived
+strength, and use, but not the retained query key, whole observation, or
+optional evidence. `replayLengthSMTLibLiveQueryObservation` and
+`replayLengthSpinePairSMTLibLiveQueryObservation` are the respective checked
+semantic extraction edges: each compares the complete collision-free nominal
+query key before it inspects optional evidence, then replays any retained
+evidence against the exact `BehavioralProblem` owned by that query. A
+mismatched query therefore cannot make receipt replay observable, while a
+successful result without a receipt remains only an exactly associated
+heuristic status. Neither gate exposes a process, transcript, decoded
+valuation, or stronger use for `unsat`. Direct raw-input replay instead
+evaluates caller-supplied naturals afresh and does not extract any hidden
+live-observation field.
 
 `Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution` seals the shared
 pure launch profile below domain protocols. It owns path/pin admission,

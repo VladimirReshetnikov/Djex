@@ -25,6 +25,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Response
   , LengthSMTLibResponseError (..)
   , parseLengthSMTLibCheckResponse
   , parseLengthSMTLibInputValueResponse
+  , parseLengthSpinePairSMTLibInputValueResponse
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -57,8 +58,11 @@ import qualified Language.Haskell.Synthesis.Internal.SMTLib.Response.Standard
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib
   ( LengthSMTLibIntegerBinding (..)
   , LengthSMTLibQuery
+  , LengthSpinePairSMTLibQuery
   , lengthSMTLibQueryInputSymbols
   , lengthSMTLibQueryInputValueRequestBytes
+  , lengthSpinePairSMTLibQueryInputSymbols
+  , lengthSpinePairSMTLibQueryInputValueRequestBytes
   )
 import Language.Haskell.Synthesis.Semantic.Observation (SolverStatus)
 
@@ -249,6 +253,25 @@ parseLengthSMTLibInputValueResponse limits query bytes = do
     Just failure -> Left $ mapStandardResponseFailure failure
     Nothing -> decodeValuations query expression
 
+-- | Decode the exact input-only valuation requested by one canonical
+-- binary-product spine query.  The lexical and integer policy is shared with
+-- the scalar decoder because the returned artifact is still only an
+-- authority-free list of input bindings.  Product-domain authority is granted
+-- only later by independent two-component replay.
+parseLengthSpinePairSMTLibInputValueResponse
+  :: LengthSMTLibResponseLimits
+  -> LengthSpinePairSMTLibQuery identity local
+  -> [Word8]
+  -> Either LengthSMTLibResponseError [LengthSMTLibIntegerBinding]
+parseLengthSpinePairSMTLibInputValueResponse limits query bytes = do
+  case lengthSpinePairSMTLibQueryInputValueRequestBytes query of
+    Nothing -> Left LengthSMTLibInputValueResponseNotExpected
+    Just _ -> Right ()
+  expression <- parseResponse limits bytes
+  case Standard.classifySMTLibStandardResponseFailure expression of
+    Just failure -> Left $ mapStandardResponseFailure failure
+    Nothing -> decodeSpinePairValuations query expression
+
 parseResponse
   :: LengthSMTLibResponseLimits
   -> [Word8]
@@ -287,6 +310,26 @@ decodeValuations
 decodeValuations query expression = case expression of
   SMTLibListExpression pairs -> do
     let symbols = lengthSMTLibQueryInputSymbols query
+        expectedCount = length symbols
+        observedCount = observedListLength expectedCount pairs
+    if observedCount == expectedCount
+      then Right ()
+      else Left $ LengthSMTLibInputValueArityMismatch
+        expectedCount observedCount
+    decoded <- foldM
+      (decodeValuation $ Map.fromList $ map (\symbol -> (symbol, ())) symbols)
+      Map.empty
+      $ zip [0 :: Int ..] pairs
+    mapM (restoreBinding decoded) symbols
+  _ -> Left LengthSMTLibUnexpectedInputValueResponse
+
+decodeSpinePairValuations
+  :: LengthSpinePairSMTLibQuery identity local
+  -> SMTLibSExpression
+  -> Either LengthSMTLibResponseError [LengthSMTLibIntegerBinding]
+decodeSpinePairValuations query expression = case expression of
+  SMTLibListExpression pairs -> do
+    let symbols = lengthSpinePairSMTLibQueryInputSymbols query
         expectedCount = length symbols
         observedCount = observedListLength expectedCount pairs
     if observedCount == expectedCount

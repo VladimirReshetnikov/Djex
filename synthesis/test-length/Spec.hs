@@ -39,6 +39,8 @@ import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Exec
   as InternalSMTLibExecution
 import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   as SMTLibProtocol
+import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol.SpinePair
+  as SMTLibSpinePairProtocol
 import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session
   as SMTLibSession
 import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capability
@@ -117,6 +119,7 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , SMTLibLiveSpec.smtLibLiveTests
   , smtLibLiveQueryTests
   , smtLibLiveFacadeTests
+  , smtLibSpinePairLiveFacadeTests
   , evaluationTests
   , normalizationTests
   , productiveBoundTests
@@ -151,6 +154,9 @@ smtLibLiveQueryTests = testGroup "Length SMT-LIB live queries"
       assertLiveQueryHangStatus
   , testCase "admit exactly maximum queries and reject maximum plus one"
       assertLiveQueryMaximum
+  , testCase
+      "share all 64 default ordinals across scalar and product domains"
+      assertLiveMixedDomainQueryMaximum
   , testCase "retain the query-run identity cap after readiness"
       assertLiveQueryRunIdentityMaximum
   , testCase "source remaining stdout capacity from the retained process"
@@ -202,6 +208,338 @@ smtLibLiveFacadeTests = testGroup "public Length SMT-LIB live facade"
   , testCase "sanitize a deadline and reject reuse of the spent session"
       assertLiveFacadeDeadlineFailure
   ]
+
+smtLibSpinePairLiveFacadeTests :: TestTree
+smtLibSpinePairLiveFacadeTests = testGroup
+  "public binary product-of-spines SMT-LIB live facade"
+  [ testCase
+      "replay one model and reject pair-stale and cross-domain observations"
+      assertSpinePairLiveFacadeEvidence
+  , testCase "report satisfiable status-only without pair evidence"
+      assertSpinePairLiveFacadeStatusOnlySatisfiable
+  , testGroup "terminal pair heuristic observations"
+      [ testCase "report pair unsatisfiable without evidence"
+          $ assertSpinePairLiveFacadeTerminalStatus "query-unsat"
+              Observation.SolverUnsatisfiable
+              SemanticProblem.RawSolverUnsatRelativeToEncoding
+      , testCase "report pair unknown without evidence"
+          $ assertSpinePairLiveFacadeTerminalStatus "query-unknown"
+              Observation.SolverUnknown
+              SemanticProblem.RawSolverUnknown
+      ]
+  , testCase "replay pair models under split and drip stdout"
+      assertSpinePairLiveFacadeChunkModes
+  , testCase
+      "associate a vacuous pair model with origin and input-box replay"
+      assertSpinePairLiveFacadeZeroInputParity
+  , testCase
+      "sanitize stale pair output and spend the shared scalar session"
+      assertSpinePairLiveFacadeStaleFailure
+  , testCase "sanitize a pair deadline and reject shared-session reuse"
+      assertSpinePairLiveFacadeDeadlineFailure
+  ]
+
+assertSpinePairLiveFacadeEvidence :: IO ()
+assertSpinePairLiveFacadeEvidence = do
+  (scalarQuery, pairQuery) <- liveWireTwinQueries
+  staleProblem <- adversarialInputAndZeroSpinePairProblem
+    trivialSpinePairContract
+  staleQuery <- expectRight $ SMTLib.sealLengthSpinePairSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits staleProblem
+  assertBool "distinct pair fixtures shared a query fingerprint"
+    $ SMTLib.lengthSpinePairSMTLibQueryFingerprint pairQuery /=
+        SMTLib.lengthSpinePairSMTLibQueryFingerprint staleQuery
+  scoped <- SMTLibLiveSpec.withLiveFacadeSession "healthy"
+    SMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+    $ \executable session -> do
+        scalarObservation <- expectRight
+          =<< SMTLibLive.runLengthSMTLibLiveQuery
+                Evaluate.defaultLengthEvaluationLimits session scalarQuery
+        pairObservation <- expectRight
+          =<< SMTLibLive.runLengthSpinePairSMTLibLiveQuery
+                Evaluate.defaultLengthEvaluationLimits session pairQuery
+        scalarReceipt <- case
+            SMTLibLive.replayLengthSMTLibLiveQueryObservation
+              scalarQuery scalarObservation of
+          Left failure -> assertFailure
+            ("wire-twin scalar replay failed: " ++ show failure)
+              >> error "unreachable"
+          Right Nothing -> assertFailure
+            "wire-twin scalar replay omitted its evidence"
+              >> error "unreachable"
+          Right (Just receipt) -> pure receipt
+        Evaluate.validatedLengthCounterexampleInputs scalarReceipt @?= [3]
+        pairReceipt <- assertSpinePairLiveFacadeObservation
+          pairQuery [3] (Length.LengthSpinePair 3 0) pairObservation
+        direct <- expectCounterexample
+          $ SMTLib.replayLengthSpinePairSMTLibCounterexampleInputs
+              Evaluate.defaultLengthEvaluationLimits pairQuery [3]
+        pairReceipt @?= direct
+
+        assertSpinePairLiveReplayMismatch staleQuery pairObservation
+          SMTLibLive.LengthSpinePairSMTLibLiveObservationQueryFingerprintMismatch
+        let scalarAsPair = unsafeCoerce scalarObservation
+              :: SMTLibLive.LengthSpinePairSMTLibLiveQueryObservation
+                  epoch AdversarialIdentity AdversarialLocal
+            pairAsScalar = unsafeCoerce pairObservation
+              :: SMTLibLive.LengthSMTLibLiveQueryObservation
+                  epoch AdversarialIdentity AdversarialLocal
+        assertSpinePairLiveReplayMismatch pairQuery scalarAsPair
+          SMTLibLive.LengthSpinePairSMTLibLiveObservationQueryFingerprintMismatch
+        assertLiveFacadeQueryMismatch scalarQuery pairAsScalar
+
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0, 1] events
+        assertFakeZ3EventOrdinals "query-get-value" [0, 1] events
+  _ <- expectRight scoped
+  pure ()
+
+assertSpinePairLiveFacadeObservation
+  :: SMTLib.LengthSpinePairSMTLibQuery identity local
+  -> [Natural]
+  -> Length.LengthSpinePair Natural
+  -> SMTLibLive.LengthSpinePairSMTLibLiveQueryObservation
+      epoch identity local
+  -> IO Evaluate.ValidatedLengthSpinePairCounterexample
+assertSpinePairLiveFacadeObservation query expectedInputs expectedResult
+    observation = do
+  SMTLibLive.lengthSpinePairSMTLibLiveQueryObservationSolverStatus observation
+    @?= Observation.SolverSatisfiable
+  SMTLibLive.lengthSpinePairSMTLibLiveQueryObservationResultStrength observation
+    @?= SemanticProblem.RawSolverModelHint
+  SMTLibLive.lengthSpinePairSMTLibLiveQueryObservationUse observation @?=
+    SemanticProblem.HeuristicRankingOnly
+  receipt <- case
+      SMTLibLive.replayLengthSpinePairSMTLibLiveQueryObservation
+        query observation of
+    Left failure -> assertFailure
+      ("matching pair live observation replay failed: " ++ show failure)
+        >> error "unreachable"
+    Right Nothing -> assertFailure
+      "matching pair live observation omitted its evidence"
+        >> error "unreachable"
+    Right (Just value) -> pure value
+  Evaluate.validatedLengthSpinePairCounterexampleInputs receipt @?=
+    expectedInputs
+  Evaluate.validatedLengthSpinePairCounterexampleResult receipt @?=
+    expectedResult
+  pure receipt
+
+assertSpinePairLiveReplayMismatch
+  :: SMTLib.LengthSpinePairSMTLibQuery identity local
+  -> SMTLibLive.LengthSpinePairSMTLibLiveQueryObservation
+      epoch identity local
+  -> SMTLibLive.LengthSpinePairSMTLibLiveObservationReplayError
+  -> IO ()
+assertSpinePairLiveReplayMismatch query observation expected = case
+    SMTLibLive.replayLengthSpinePairSMTLibLiveQueryObservation
+      query observation of
+  Left failure -> failure @?= expected
+  Right _ -> assertFailure
+    "stale or cross-domain pair live observation replay unexpectedly succeeded"
+
+assertSpinePairLiveFacadeStatusOnlySatisfiable :: IO ()
+assertSpinePairLiveFacadeStatusOnlySatisfiable = do
+  (_, query) <- liveWireTwinQueries
+  scoped <- SMTLibLiveSpec.withLiveFacadeSession "healthy"
+    SMTLibExecution.LengthSMTLibStatusOnly
+    $ \executable session -> do
+        observation <- expectRight
+          =<< SMTLibLive.runLengthSpinePairSMTLibLiveQuery
+                Evaluate.defaultLengthEvaluationLimits session query
+        assertSpinePairLiveFacadeStatusObservation query
+          Observation.SolverSatisfiable
+          SemanticProblem.RawSolverModelHint observation
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0] events
+        assertFakeZ3EventCount "query-get-value" 0 events
+  _ <- expectRight scoped
+  pure ()
+
+assertSpinePairLiveFacadeTerminalStatus
+  :: String
+  -> Observation.SolverStatus
+  -> SemanticProblem.RawResultStrength
+  -> IO ()
+assertSpinePairLiveFacadeTerminalStatus mode expectedStatus expectedStrength =
+  do
+    (_, query) <- liveWireTwinQueries
+    scoped <- SMTLibLiveSpec.withLiveFacadeSession mode
+      SMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+      $ \executable session -> do
+          observation <- expectRight
+            =<< SMTLibLive.runLengthSpinePairSMTLibLiveQuery
+                  Evaluate.defaultLengthEvaluationLimits session query
+          assertSpinePairLiveFacadeStatusObservation query expectedStatus
+            expectedStrength observation
+          events <- SMTLibLiveSpec.readFakeZ3Events executable
+          assertFakeZ3EventOrdinals "query-check" [0] events
+          assertFakeZ3EventCount "query-get-value" 0 events
+    _ <- expectRight scoped
+    pure ()
+
+assertSpinePairLiveFacadeStatusObservation
+  :: SMTLib.LengthSpinePairSMTLibQuery identity local
+  -> Observation.SolverStatus
+  -> SemanticProblem.RawResultStrength
+  -> SMTLibLive.LengthSpinePairSMTLibLiveQueryObservation
+      epoch identity local
+  -> IO ()
+assertSpinePairLiveFacadeStatusObservation query expectedStatus
+    expectedStrength observation = do
+  SMTLibLive.lengthSpinePairSMTLibLiveQueryObservationSolverStatus observation
+    @?= expectedStatus
+  SMTLibLive.lengthSpinePairSMTLibLiveQueryObservationResultStrength observation
+    @?= expectedStrength
+  SMTLibLive.lengthSpinePairSMTLibLiveQueryObservationUse observation @?=
+    SemanticProblem.HeuristicRankingOnly
+  case SMTLibLive.replayLengthSpinePairSMTLibLiveQueryObservation
+      query observation of
+    Left failure -> assertFailure
+      $ "matching pair status-only replay failed: " ++ show failure
+    Right Nothing -> pure ()
+    Right (Just _) -> assertFailure
+      "pair status-only observation replay invented evidence"
+
+assertSpinePairLiveFacadeChunkModes :: IO ()
+assertSpinePairLiveFacadeChunkModes = mapM_ runMode
+  ["split-output", "drip-output"]
+ where
+  runMode mode = do
+    (_, query) <- liveWireTwinQueries
+    scoped <- SMTLibLiveSpec.withLiveFacadeSession mode
+      SMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+      $ \executable session -> do
+          observation <- expectRight
+            =<< SMTLibLive.runLengthSpinePairSMTLibLiveQuery
+                  Evaluate.defaultLengthEvaluationLimits session query
+          _ <- assertSpinePairLiveFacadeObservation
+            query [3] (Length.LengthSpinePair 3 0) observation
+          events <- SMTLibLiveSpec.readFakeZ3Events executable
+          assertFakeZ3EventOrdinals "query-check" [0] events
+          assertFakeZ3EventOrdinals "query-get-value" [0] events
+    _ <- expectRight scoped
+    pure ()
+
+assertSpinePairLiveFacadeZeroInputParity :: IO ()
+assertSpinePairLiveFacadeZeroInputParity = do
+  let firstResult = pairResultVariable Length.LengthSpinePairFirst
+      secondResult = pairResultVariable Length.LengthSpinePairSecond
+      source = spinePairContractWith (Length.LengthTruth True)
+        $ Length.LengthAll
+            [ Length.LengthEqual firstResult $ Length.LengthLiteral 1
+            , Length.LengthEqual secondResult $ Length.LengthLiteral 0
+            ]
+  problem <- adversarialNullaryZeroSpinePairProblem source
+  query <- expectRight $ SMTLib.sealLengthSpinePairSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits problem
+  SMTLib.lengthSpinePairSMTLibQueryInputSymbols query @?= []
+  SMTLib.lengthSpinePairSMTLibQueryInputValueRequestBytes query @?= Nothing
+  origin <- expectCounterexample
+    $ SMTLib.probeLengthSpinePairSMTLibCounterexampleAtOrigin
+        Evaluate.defaultLengthEvaluationLimits query
+  boxed <- expectRight
+    $ SMTLib.validateLengthSpinePairSMTLibQueryInputBox
+        Evaluate.defaultLengthEvaluationLimits
+        Evaluate.defaultLengthInputBoxLimits query []
+  boxCounterexample <- case boxed of
+    Evaluate.LengthInputBoxCounterexample receipt -> pure receipt
+    Evaluate.LengthInputBoxValidated{} -> assertFailure
+      "the violating nullary pair query produced positive box evidence"
+        >> error "unreachable"
+  origin @?= boxCounterexample
+
+  scoped <- SMTLibLiveSpec.withLiveFacadeSession "healthy"
+    SMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+    $ \executable session -> do
+        observation <- expectRight
+          =<< SMTLibLive.runLengthSpinePairSMTLibLiveQuery
+                Evaluate.defaultLengthEvaluationLimits session query
+        receipt <- assertSpinePairLiveFacadeObservation
+          query [] (Length.LengthSpinePair 0 0) observation
+        receipt @?= origin
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0] events
+        assertFakeZ3EventCount "query-get-value" 0 events
+  _ <- expectRight scoped
+  pure ()
+
+assertSpinePairLiveFacadeStaleFailure :: IO ()
+assertSpinePairLiveFacadeStaleFailure = do
+  (scalarQuery, pairQuery) <- liveWireTwinQueries
+  scoped <- SMTLibLiveSpec.withLiveFacadeSession "query-stale-prewrite"
+    SMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+    $ \executable session -> do
+        rejected <- SMTLibLive.runLengthSpinePairSMTLibLiveQuery
+          Evaluate.defaultLengthEvaluationLimits session pairQuery
+        _ <- expectSpinePairLiveFacadeQueryFailure
+          SMTLibLive.LengthSpinePairSMTLibLiveQueryProtocolRejected rejected
+        spent <- SMTLibLive.runLengthSMTLibLiveQuery
+          Evaluate.defaultLengthEvaluationLimits session scalarQuery
+        _ <- expectLiveFacadeQueryFailure
+          SMTLibLive.LengthSMTLibLiveQuerySessionUnavailable spent
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0] events
+        assertFakeZ3EventCount "query-get-value" 0 events
+  _ <- expectRight scoped
+  pure ()
+
+assertSpinePairLiveFacadeDeadlineFailure :: IO ()
+assertSpinePairLiveFacadeDeadlineFailure = do
+  (scalarQuery, pairQuery) <- liveWireTwinQueries
+  scoped <- SMTLibLiveSpec.withLiveFacadeSession "query-hang-status"
+    SMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+    $ \executable session -> do
+        rejected <- SMTLibLive.runLengthSpinePairSMTLibLiveQuery
+          Evaluate.defaultLengthEvaluationLimits session pairQuery
+        _ <- expectSpinePairLiveFacadeQueryFailure
+          SMTLibLive.LengthSpinePairSMTLibLiveQueryDeadlineExceeded rejected
+        spent <- SMTLibLive.runLengthSMTLibLiveQuery
+          Evaluate.defaultLengthEvaluationLimits session scalarQuery
+        _ <- expectLiveFacadeQueryFailure
+          SMTLibLive.LengthSMTLibLiveQuerySessionUnavailable spent
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0] events
+        assertFakeZ3EventCount "query-get-value" 0 events
+  _ <- expectRight scoped
+  pure ()
+
+expectSpinePairLiveFacadeQueryFailure
+  :: SMTLibLive.LengthSpinePairSMTLibLiveQueryFailure
+  -> Either SMTLibLive.LengthSpinePairSMTLibLiveQueryError value
+  -> IO SMTLibLive.LengthSpinePairSMTLibLiveQueryError
+expectSpinePairLiveFacadeQueryFailure expected result = case result of
+  Left failure -> do
+    SMTLibLive.lengthSpinePairSMTLibLiveQueryPrimaryFailure failure @?=
+      expected
+    SMTLibLive.lengthSpinePairSMTLibLiveQueryCleanupIncomplete failure @?=
+      False
+    pure failure
+  Right _ -> assertFailure $ "expected public pair query failure: " ++
+    show expected
+
+liveWireTwinQueries
+  :: IO
+      ( SMTLib.LengthSMTLibQuery AdversarialIdentity AdversarialLocal
+      , SMTLib.LengthSpinePairSMTLibQuery
+          AdversarialIdentity AdversarialLocal
+      )
+liveWireTwinQueries = do
+  scalarProblem <- adversarialConstantZeroProblem identityLengthContract
+  scalarQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits scalarProblem
+  let input = Length.LengthVariable $ Length.LengthSpinePairInput 0
+      source = spinePairContractWith (Length.LengthTruth True)
+        $ Length.LengthEqual
+            (pairResultVariable Length.LengthSpinePairSecond) input
+  pairProblem <- adversarialInputAndZeroSpinePairProblem source
+  pairQuery <- expectRight $ SMTLib.sealLengthSpinePairSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits pairProblem
+  SMTLib.lengthSpinePairSMTLibQueryCheckBytes pairQuery @?=
+    SMTLib.lengthSMTLibQueryCheckBytes scalarQuery
+  SMTLib.lengthSpinePairSMTLibQueryInputValueRequestBytes pairQuery @?=
+    SMTLib.lengthSMTLibQueryInputValueRequestBytes scalarQuery
+  pure (scalarQuery, pairQuery)
 
 assertLiveFacadeSequentialEvidence :: IO ()
 assertLiveFacadeSequentialEvidence = do
@@ -685,6 +1023,74 @@ assertLiveQueryMaximum = do
   _ <- expectRight scoped
   pure ()
 
+assertLiveMixedDomainQueryMaximum :: IO ()
+assertLiveMixedDomainQueryMaximum = do
+  (scalarQuery, pairQuery) <- liveWireTwinQueries
+  let maximumQueries =
+        SMTLibSession.lengthSMTLibSessionLimitSourceMaximumQueries
+          SMTLibSession.defaultLengthSMTLibSessionLimitSource
+  maximumQueries @?= 64
+  SMTLibLive.defaultLengthSMTLibLiveSessionMaximumQueries @?= maximumQueries
+  scoped <- SMTLibLiveSpec.withLiveQueryWorker "healthy"
+    InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable id
+    $ \executable worker -> do
+        scalarRun <- expectRight
+          =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
+                Evaluate.defaultLengthEvaluationLimits worker scalarQuery
+        pairRun <- expectRight
+          =<< SMTLibSession.runLengthSpinePairSMTLibReadyWorkerQuery
+                Evaluate.defaultLengthEvaluationLimits worker pairQuery
+        SMTLibSession.lengthSMTLibQueryRunOrdinal scalarRun @?= 0
+        SMTLibSession.lengthSpinePairSMTLibQueryRunOrdinal pairRun @?= 1
+        assertLiveValueQueryRun scalarQuery [3] scalarRun
+        assertLiveSpinePairValueQueryRun
+          pairQuery [3] (Length.LengthSpinePair 3 0) pairRun
+        let scalarIdentity = InternalFingerprint.fingerprintCanonicalBytes
+              $ SMTLibSession.lengthSMTLibQueryRunIdentityFingerprint scalarRun
+            pairIdentity = InternalFingerprint.fingerprintCanonicalBytes
+              $ SMTLibSession.lengthSpinePairSMTLibQueryRunIdentityFingerprint
+                  pairRun
+        assertBool
+          "wire-identical scalar and product runs shared nominal identity"
+          $ scalarIdentity /= pairIdentity
+        SMTLibSession.lengthSpinePairSMTLibQueryRunStdoutStart pairRun @?=
+          SMTLibSession.lengthSMTLibQueryRunStdoutEnd scalarRun
+        SMTLibSession.lengthSpinePairSMTLibQueryRunStderrStart pairRun @?=
+          SMTLibSession.lengthSMTLibQueryRunStderrEnd scalarRun
+
+        mapM_ (runRemaining worker scalarQuery pairQuery)
+          [2 .. maximumQueries - 1]
+        rejected <- SMTLibSession.runLengthSpinePairSMTLibReadyWorkerQuery
+          Evaluate.defaultLengthEvaluationLimits worker pairQuery
+        case rejected of
+          Left failure -> do
+            SMTLibSession.lengthSpinePairSMTLibQueryRunPrimaryFailure failure
+              @?= SMTLibSession.LengthSpinePairSMTLibQueryLimitExceeded
+                    maximumQueries (maximumQueries + 1)
+            SMTLibSession.lengthSpinePairSMTLibQueryRunProcessCleanupStatus
+                failure @?= Nothing
+          Right _ -> assertFailure
+            "the sixty-fifth mixed-domain query unexpectedly ran"
+        events <- SMTLibLiveSpec.readFakeZ3Events executable
+        assertFakeZ3EventOrdinals "query-check" [0 .. maximumQueries - 1]
+          events
+        assertFakeZ3EventOrdinals "query-get-value"
+          [0 .. maximumQueries - 1] events
+  _ <- expectRight scoped
+  pure ()
+ where
+  runRemaining worker scalarQuery pairQuery ordinal
+    | even ordinal = do
+        run <- expectRight
+          =<< SMTLibSession.runLengthSMTLibReadyWorkerQuery
+                Evaluate.defaultLengthEvaluationLimits worker scalarQuery
+        SMTLibSession.lengthSMTLibQueryRunOrdinal run @?= ordinal
+    | otherwise = do
+        run <- expectRight
+          =<< SMTLibSession.runLengthSpinePairSMTLibReadyWorkerQuery
+                Evaluate.defaultLengthEvaluationLimits worker pairQuery
+        SMTLibSession.lengthSpinePairSMTLibQueryRunOrdinal run @?= ordinal
+
 assertLiveQueryRunIdentityMaximum :: IO ()
 assertLiveQueryRunIdentityMaximum = do
   problem <- adversarialConstantZeroProblem identityLengthContract
@@ -806,6 +1212,35 @@ assertLiveValueQueryRun query expectedInputs run = do
     run
   assertLiveQueryRunAccounting run
 
+assertLiveSpinePairValueQueryRun
+  :: SMTLib.LengthSpinePairSMTLibQuery identity local
+  -> [Natural]
+  -> Length.LengthSpinePair Natural
+  -> SMTLibSession.LengthSpinePairSMTLibQueryRun epoch identity local
+  -> IO ()
+assertLiveSpinePairValueQueryRun query expectedInputs expectedResult run = do
+  evidence <- case
+      SMTLibSession.lengthSpinePairSMTLibQueryRunObservation run of
+    Observation.SatisfiableObservation (Just value) -> pure value
+    _ -> assertFailure
+      "satisfiable pair values run lost its status-indexed replay evidence"
+        >> error "unreachable"
+  receipt <- expectRight $ Djex.replayBehavioralEvidence
+    (SMTLib.lengthSpinePairSMTLibQueryBehavioralProblem query) evidence
+  Evaluate.validatedLengthSpinePairCounterexampleInputs receipt @?=
+    expectedInputs
+  Evaluate.validatedLengthSpinePairCounterexampleResult receipt @?=
+    expectedResult
+  let identityBytes = InternalFingerprint.fingerprintCanonicalBytes
+        $ SMTLibSession.lengthSpinePairSMTLibQueryRunIdentityFingerprint run
+      replayTag = asciiBytes
+        "finite-binary-product-spine-lengths/counterexample-replay/v1"
+  assertBool "the product run schema was absent from its identity"
+    $ SMTLibSession.lengthSpinePairSMTLibQueryRunSchemaTag
+        `isInfixOf` identityBytes
+  countByteStringOccurrences (BS.pack replayTag) (BS.pack identityBytes) @?= 1
+  assertLiveSpinePairQueryRunAccounting run
+
 assertLiveQueryRunIdentityBranch
   :: Observation.SolverStatus
   -> String
@@ -908,6 +1343,27 @@ assertLiveQueryRunAccounting run = do
   assertBool "live query produced an empty transcript" $ transcriptBytes > 0
   stderrEnd @?= stderrStart
   BS.length (SMTLibSession.lengthSMTLibQueryRunTranscriptSHA256 run) @?= 32
+
+assertLiveSpinePairQueryRunAccounting
+  :: SMTLibSession.LengthSpinePairSMTLibQueryRun epoch identity local
+  -> IO ()
+assertLiveSpinePairQueryRunAccounting run = do
+  let stdoutStart =
+        SMTLibSession.lengthSpinePairSMTLibQueryRunStdoutStart run
+      stdoutEnd = SMTLibSession.lengthSpinePairSMTLibQueryRunStdoutEnd run
+      stderrStart =
+        SMTLibSession.lengthSpinePairSMTLibQueryRunStderrStart run
+      stderrEnd = SMTLibSession.lengthSpinePairSMTLibQueryRunStderrEnd run
+      transcriptBytes =
+        SMTLibSession.lengthSpinePairSMTLibQueryRunTranscriptByteCount run
+  assertBool "live pair query observed a decreasing stdout boundary"
+    $ stdoutEnd >= stdoutStart
+  transcriptBytes @?= stdoutEnd - stdoutStart
+  assertBool "live pair query produced an empty transcript"
+    $ transcriptBytes > 0
+  stderrEnd @?= stderrStart
+  BS.length
+      (SMTLibSession.lengthSpinePairSMTLibQueryRunTranscriptSHA256 run) @?= 32
 
 assertLiveQueryFailure
   :: SMTLibSession.LengthSMTLibQueryRunFailure
@@ -6514,6 +6970,79 @@ smtLibProtocolTests = testGroup
       SMTLibProtocol.lengthSMTLibProtocolDecodedObservation decoded @?=
         Observation.SatisfiableObservation
           (Just [smtIntegerBinding (asciiBytes "djex_length_input_0") 3])
+  , testCase
+      "preserve exact scalar wire bytes behind a nominal product plan" $ do
+      (scalarQuery, pairQuery) <- liveWireTwinQueries
+      execution <- protocolExecutionConfig
+        InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+      scalarPlan <- expectRight $ SMTLibProtocol.sealLengthSMTLibProtocolPlan
+        SMTLibProtocol.defaultLengthSMTLibProtocolLimits
+        execution scalarQuery protocolCheckNonce $ Just protocolValueNonce
+      pairPlan <- expectRight
+        $ SMTLibSpinePairProtocol.sealLengthSpinePairSMTLibProtocolPlan
+            SMTLibSpinePairProtocol.defaultLengthSpinePairSMTLibProtocolLimits
+            execution pairQuery protocolCheckNonce $ Just protocolValueNonce
+
+      SMTLibSpinePairProtocol.lengthSpinePairSMTLibProtocolPlanSchemaTag @?=
+        asciiBytes "djex-length-spine-pair-z3-smtlib2-protocol-plan/v1"
+      SMTLibSpinePairProtocol.lengthSpinePairSMTLibProtocolPhaseMachineSchemaTag
+        @?= asciiBytes
+          "djex-length-spine-pair-z3-smtlib2-protocol-phase-machine/v1"
+      SMTLibSpinePairProtocol.lengthSpinePairSMTLibProtocolPostBarrierSchemaTag
+        @?= SMTLibProtocol.lengthSMTLibProtocolPostBarrierSchemaTag
+      SMTLibSpinePairProtocol.lengthSpinePairSMTLibProtocolInitialWriteBytes
+          pairPlan @?=
+        SMTLibProtocol.lengthSMTLibProtocolInitialWriteBytes scalarPlan
+      SMTLibSpinePairProtocol.lengthSpinePairSMTLibProtocolInputValueWriteBytes
+          pairPlan @?=
+        SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes scalarPlan
+      SMTLib.lengthSpinePairSMTLibQueryFingerprint
+          (SMTLibSpinePairProtocol.lengthSpinePairSMTLibProtocolPlanQuery
+            pairPlan) @?=
+        SMTLib.lengthSpinePairSMTLibQueryFingerprint pairQuery
+      SMTLibSpinePairProtocol.lengthSpinePairSMTLibProtocolPlanArtifactPolicy
+          pairPlan @?=
+        InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+      let scalarIdentity = InternalFingerprint.fingerprintCanonicalBytes
+            $ SMTLibProtocol.lengthSMTLibProtocolPlanFingerprint scalarPlan
+          pairIdentity = InternalFingerprint.fingerprintCanonicalBytes
+            $ SMTLibSpinePairProtocol.lengthSpinePairSMTLibProtocolPlanFingerprint
+                pairPlan
+      assertBool "wire-identical scalar and pair plans shared nominal identity"
+        $ scalarIdentity /= pairIdentity
+      assertBool "the product protocol schema was absent from its identity"
+        $ SMTLibSpinePairProtocol.lengthSpinePairSMTLibProtocolPlanSchemaTag
+            `isInfixOf` pairIdentity
+
+      checkBarrier <- protocolSentinel protocolCheckNonce
+      valueBarrier <- protocolSentinel protocolValueNonce
+      checkReceiver <- expectSpinePairProtocolWrite
+        SMTLibSpinePairProtocol.LengthSpinePairSMTLibProtocolInitialQueryWrite
+        (SMTLibSpinePairProtocol.lengthSpinePairSMTLibProtocolInitialWriteBytes
+          pairPlan)
+        $ SMTLibSpinePairProtocol.startLengthSpinePairSMTLibProtocol pairPlan
+      valueAction <- expectRight
+        $ SMTLibSpinePairProtocol.feedLengthSpinePairSMTLibProtocol
+            checkReceiver
+        $ asciiBytes "sat\n" ++
+          SMTLibStream.smtLibEchoSentinelResponseBytes checkBarrier ++
+          asciiBytes "\n"
+      valueReceiver <- expectSpinePairProtocolWrite
+        SMTLibSpinePairProtocol.LengthSpinePairSMTLibProtocolInputValueWrite
+        (maybe [] id
+          $ SMTLibSpinePairProtocol.lengthSpinePairSMTLibProtocolInputValueWriteBytes
+              pairPlan)
+        valueAction
+      decoded <- expectSpinePairProtocolComplete =<< expectRight
+        (SMTLibSpinePairProtocol.feedLengthSpinePairSMTLibProtocol
+          valueReceiver
+          $ protocolSpinePairValueFrame pairQuery [3] ++
+            SMTLibStream.smtLibEchoSentinelResponseBytes valueBarrier ++
+            asciiBytes "\n")
+      SMTLibSpinePairProtocol.lengthSpinePairSMTLibProtocolDecodedObservation
+          decoded @?=
+        Observation.SatisfiableObservation
+          (Just [smtIntegerBinding (asciiBytes "djex_length_input_0") 3])
   , testCase "publish schemas, validated defaults, and exact admission minima" $ do
       SMTLibProtocol.lengthSMTLibProtocolPlanSchemaTag @?=
         asciiBytes "djex-length-z3-smtlib2-protocol-plan/v1"
@@ -7107,6 +7636,17 @@ protocolValueFrame query values =
         zip (SMTLib.lengthSMTLibQueryInputSymbols query) values
     ] ++ [41]
 
+protocolSpinePairValueFrame
+  :: SMTLib.LengthSpinePairSMTLibQuery identity local
+  -> [Integer]
+  -> [Word8]
+protocolSpinePairValueFrame query values =
+  [40] ++ intercalate [32]
+    [ [40] ++ symbol ++ [32] ++ asciiBytes (show value) ++ [41]
+    | (symbol, value) <-
+        zip (SMTLib.lengthSpinePairSMTLibQueryInputSymbols query) values
+    ] ++ [41]
+
 expectProtocolWrite
   :: SMTLibProtocol.LengthSMTLibProtocolWriteKind
   -> [Word8]
@@ -7141,6 +7681,35 @@ expectProtocolComplete action = case action of
     assertFailure "expected protocol completion, observed write"
   SMTLibCausal.SMTLibCausalAwait{} ->
     assertFailure "expected protocol completion, observed await"
+
+expectSpinePairProtocolWrite
+  :: SMTLibSpinePairProtocol.LengthSpinePairSMTLibProtocolWriteKind
+  -> [Word8]
+  -> SMTLibSpinePairProtocol.LengthSpinePairSMTLibProtocolAction identity local
+  -> IO
+      (SMTLibSpinePairProtocol.LengthSpinePairSMTLibProtocolReceiver
+        identity local)
+expectSpinePairProtocolWrite expectedKind expectedBytes action = case action of
+  SMTLibCausal.SMTLibCausalWrite kind bytes receiver -> do
+    kind @?= expectedKind
+    bytes @?= expectedBytes
+    pure receiver
+  SMTLibCausal.SMTLibCausalAwait{} ->
+    assertFailure "expected a pair protocol write action, observed await"
+  SMTLibCausal.SMTLibCausalComplete{} ->
+    assertFailure "expected a pair protocol write action, observed completion"
+
+expectSpinePairProtocolComplete
+  :: SMTLibSpinePairProtocol.LengthSpinePairSMTLibProtocolAction identity local
+  -> IO
+      (SMTLibSpinePairProtocol.LengthSpinePairSMTLibProtocolDecoded
+        identity local)
+expectSpinePairProtocolComplete action = case action of
+  SMTLibCausal.SMTLibCausalComplete decoded -> pure decoded
+  SMTLibCausal.SMTLibCausalWrite{} ->
+    assertFailure "expected pair protocol completion, observed write"
+  SMTLibCausal.SMTLibCausalAwait{} ->
+    assertFailure "expected pair protocol completion, observed await"
 
 feedProtocolChunks
   :: SMTLibProtocol.LengthSMTLibProtocolReceiver identity local

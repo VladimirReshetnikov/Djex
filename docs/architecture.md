@@ -10,7 +10,8 @@ Djinn and Exference compatibility frontends.
 
 This guide describes the current architecture. The dated files under
 `docs/reports/` record how the repository reached it and should be read as
-historical review notes rather than as the current API guide.
+historical review notes rather than as the current API guide; the
+[reports index](reports/README.md) lists all of them chronologically.
 
 ## Source and component layout
 

@@ -140,7 +140,8 @@ The earlier [post-merge code review](docs/reports/2026-07-21-post-merge-code-rev
 [final convergence review](docs/reports/2026-07-17-final-convergence-review.md),
 and [checker-boundary follow-up](docs/reports/2026-07-17-checker-boundary-follow-up.md)
 record the larger strictness, compatibility, and raw-checker migrations that
-preceded it.
+preceded it. The complete chronological list, including reports not cited
+above, is in the [reports index](docs/reports/README.md).
 
 ## Canonical typed candidate identities
 

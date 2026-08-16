@@ -52,6 +52,8 @@ data Scope binding = Scope
 instance NFData binding => NFData (Scope binding) where
   rnf (Scope bindings parent) = rnf bindings `seq` rnf parent
 
+-- | A rooted forest of lexical scopes, each holding its bindings and an
+-- optional parent link, together with the next unallocated scope ID.
 -- The next ID is kept separate from the map so allocation stays O(log n).
 -- Constructors are hidden: in particular, callers cannot reparent a scope or
 -- insert an edge to a scope that does not already exist.
@@ -96,6 +98,8 @@ instance NFData ScopeInvariantError where
 renderPath :: [Int] -> String
 renderPath = intercalate " -> " . map show
 
+-- | The ID of the root scope present in 'initialScopes'; every other scope
+-- is a descendant of it.
 initialScopeId :: ScopeId
 initialScopeId = ScopeId 0
 

@@ -45,6 +45,12 @@ import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Name as SynthesisName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
+-- | A search-environment value binding in the engine's flat shape: the
+-- result type, the global name, the caller-owned search penalty, the
+-- leading class constraints, and the arrow parameters of its opened prenex
+-- signature.  Build it from a signature with 'functionBindingFromType' and
+-- recover the types with 'functionBindingType' or
+-- 'functionBindingSignature'.
 data FunctionBinding = FunctionBinding
   { functionResult :: HsType
   , functionName :: QualifiedName
@@ -111,6 +117,8 @@ mapFunctionBindingTypes transform binding = binding
   , functionParameters = map transform $ functionParameters binding
   }
 
+-- | One data constructor of a 'DeconstructorBinding': its name and its
+-- field types in declaration order.
 data ConstructorBinding = ConstructorBinding
   { constructorName :: QualifiedName
   , constructorFields :: [HsType]
@@ -119,6 +127,11 @@ data ConstructorBinding = ConstructorBinding
 
 instance NFData ConstructorBinding
 
+-- | A datatype the search may pattern-match on: the scrutinee type (whose
+-- nominal head identifies the datatype), its constructors, and whether the
+-- datatype is recursive.  'validateDeconstructorBinding' requires a
+-- non-function nominal head and that every constructor field's free
+-- flexible variables occur in the input type.
 data DeconstructorBinding = DeconstructorBinding
   { deconstructorInput :: HsType
   , deconstructorConstructors :: [ConstructorBinding]
@@ -207,6 +220,11 @@ mapDeconstructorBindingTypes transform binding = binding
   transformConstructor constructor = constructor
     { constructorFields = map transform $ constructorFields constructor }
 
+-- | A raw search environment: the value bindings, the datatype eliminators,
+-- and the sealed class environment.  Search sealing and independent
+-- expression checking both validate it with
+-- 'validateEnvironmentBindingIdentities', 'validateEnvironmentBindingRatings'
+-- and 'validateEnvironmentBindingSyntax' before use.
 data EnvDictionary = EnvDictionary
   { environmentFunctions :: [FunctionBinding]
   , environmentDeconstructors :: [DeconstructorBinding]

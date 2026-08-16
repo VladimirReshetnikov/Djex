@@ -13,6 +13,9 @@ module Language.Haskell.Djex.Internal.DependencyGraph
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 
+-- | The first cycle found by 'stableDependencyOrder', described as the
+-- node whose dependency edge closed it and the closed path in traversal
+-- order.
 data DependencyCycle key = DependencyCycle
   { dependencyCycleSource :: key
     -- ^ The node containing the edge that returned to an active ancestor.

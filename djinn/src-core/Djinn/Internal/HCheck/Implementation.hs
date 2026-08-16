@@ -108,13 +108,17 @@ forceSynonymArities [] = ()
 forceSynonymArities ((name, arity) : rest) =
     name `seq` arity `seq` forceSynonymArities rest
 
+-- | Check that a type has kind @*@ in the given checked environment
+-- ('htCheckTypeKind' with 'KStar').
 htCheckType :: [(HSymbol, ([HSymbol], HType, HKind))] -> HType -> Either String ()
 htCheckType its = htCheckTypeKind its KStar
 
+-- | 'htCheckType' against an already prepared kind-checking scope, so the
+-- whole-environment assumption conversion is not repeated per type.
 htCheckTypePrepared :: PreparedKindCheck -> HType -> Either String ()
 htCheckTypePrepared prepared = htCheckTypeKindPrepared prepared KStar
 
--- Check that a type is well-kinded and has the given (ground) kind.  Free
+-- | Check that a type is well-kinded and has the given (ground) kind.  Free
 -- type variables receive fresh kinds, so a variable argument fits any
 -- expected kind while a mis-kinded application is still rejected.
 htCheckTypeKind :: [(HSymbol, ([HSymbol], HType, HKind))]
@@ -126,7 +130,7 @@ htCheckTypeKindPrepared :: PreparedKindCheck
 htCheckTypeKindPrepared prepared expected t =
     htCheckTypesKindsPrepared prepared [(expected, t)]
 
--- Check several types in one kind-inference scope.  This matters whenever
+-- | Check several types in one kind-inference scope.  This matters whenever
 -- free variables are shared between types: checking each type separately
 -- could incorrectly assign the same variable a different kind each time.
 htCheckTypesKinds :: [(HSymbol, ([HSymbol], HType, HKind))]
@@ -170,7 +174,7 @@ checkSynthesisObligations
 checkSynthesisObligations assumptions =
     first show . SharedInference.checkTypesKinds assumptions
 
--- Infer the kind of every class parameter from the class's method types,
+-- | Infer the kind of every class parameter from the class's method types,
 -- as Haskell98 does.  Parameters left unconstrained (including every
 -- parameter of a method-less class) default to *.  Only class parameters
 -- share kind variables across methods: every other variable is implicitly
@@ -182,6 +186,9 @@ htInferClassKinds its params methodTypes = do
     prepared <- prepareKindCheck its
     htInferClassKindsPrepared prepared params methodTypes
 
+-- | 'htInferClassKinds' against an already prepared kind-checking scope.
+-- Synonym saturation of every method type is checked before inference, and
+-- the result pairs the parameters in the given order with ground kinds.
 htInferClassKindsPrepared :: PreparedKindCheck
                           -> [HSymbol] -> [HType]
                           -> Either String [(HSymbol, HKind)]
@@ -208,6 +215,11 @@ synthesisAssumptions definitions = do
         <$> first show (SharedName.parseName sourceName)
         <*> checkedGroundHKind kind
 
+-- | Kind-check a raw type environment and return it with the inferred ground
+-- kind of every type constructor attached, replacing whatever the third
+-- component held.  Abstract types keep their declared kind; synonym
+-- saturation is checked first, and any recursive declaration group is
+-- rejected.
 htCheckEnv :: [(HSymbol, ([HSymbol], HType, a))]
            -> Either String [(HSymbol, ([HSymbol], HType, HKind))]
 htCheckEnv = fmap fst . prepareKindEnvironment

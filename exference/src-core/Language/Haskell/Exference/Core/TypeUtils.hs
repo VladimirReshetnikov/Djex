@@ -67,6 +67,9 @@ largestId :: HsType -> TVarId
 largestId = maybe (-1) id . maximumFlexibleId
 {-# DEPRECATED largestId "Use maximumFlexibleId; every Int is a valid TVarId." #-}
 
+-- | Whether any argument of a constraint has a free flexible variable (see
+-- 'freeVars'); rigid constants do not count.  The constraint solver defers
+-- such constraints instead of resolving them against instances.
 constraintContainsVariables :: HsConstraint -> Bool
 constraintContainsVariables =
   any (not . S.null . freeVars) . constraint_params
@@ -185,6 +188,8 @@ containsForall = SharedType.containsForall
 containsNestedForall :: HsType -> Bool
 containsNestedForall = SharedType.containsNestedForall
 
+-- | Whether explicit quantification occurs at any depth inside any argument
+-- of a constraint; the per-argument test is 'containsForall'.
 constraintContainsForall :: HsConstraint -> Bool
 constraintContainsForall = SharedType.constraintContainsForall
 

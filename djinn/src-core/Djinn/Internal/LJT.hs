@@ -39,7 +39,7 @@ import Djinn.Internal.ProofCheck (checkProofEnvironment)
 -- Whether local proof-search cuts should retain their alternative paths.
 type MoreSolutions = Bool
 
--- How alternative branches are explored at each choice point.  DepthFirst
+-- | How alternative branches are explored at each choice point.  DepthFirst
 -- is the classical order (fully explore the first branch before the second),
 -- except for the bounded local rotation of the three oldest proofs while
 -- enumerating retained alternatives for an exact atomic @A -> A -> A@ suffix.
@@ -49,7 +49,7 @@ type MoreSolutions = Bool
 data Strategy = DepthFirst | Interleave
     deriving (Eq, Show)
 
--- A named description of one proof search.
+-- | A named description of one proof search.
 data SearchMode = SearchMode {
     -- Retain alternative proofs at local search cuts (multiple solutions).
     searchAlternatives :: Bool,
@@ -61,7 +61,7 @@ data SearchMode = SearchMode {
     }
     deriving (Show)
 
--- The classical search: depth-first apart from the documented exact binary-
+-- | The classical search: depth-first apart from the documented exact binary-
 -- endomorphism exception, unbudgeted, and complete.
 defaultSearchMode :: MoreSolutions -> SearchMode
 defaultSearchMode more = SearchMode {
@@ -70,6 +70,11 @@ defaultSearchMode more = SearchMode {
     searchBudget = Nothing
     }
 
+-- | The result of one mode-aware search: the lazily produced proof terms
+-- (whose free variables are the assumption names), whether the choice-point
+-- budget ran out with unexplored space left, and the budget remaining.  An
+-- empty proof list means "unprovable" only when 'searchExhausted' is
+-- 'False'.
 data SearchOutcome = SearchOutcome {
     searchProofs :: [Proof],
     -- True when the budget ran out with unexplored search space left.
@@ -80,6 +85,8 @@ data SearchOutcome = SearchOutcome {
     remainingSearchBudget :: Maybe Integer
     }
 
+-- | Whether a formula is intuitionistically provable from no assumptions,
+-- by an unbudgeted depth-first search (so this is a decision procedure).
 provable :: Formula -> Bool
 provable = not . null . prove False []
 
@@ -131,6 +138,8 @@ redtop more env goal = do
 
 ------------------------------
 -----
+-- | A proof is a lambda term of the proof calculus; the search returns
+-- normalized terms whose free variables are the assumption symbols.
 type Proof = Term
 
 -- The proof search gives every binder a globally fresh symbol (including with

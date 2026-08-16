@@ -81,6 +81,9 @@ defaultExferenceOptions = ExferenceOptions
   , exferenceHeuristics = defaultHeuristicsConfig
   }
 
+-- | Every heuristic weight paired with its field name (without the
+-- @heuristics_@ prefix), in declaration order; option validation reports the
+-- first non-finite weight under that name.
 -- Keep names beside the record that owns them, so validation cannot silently
 -- drift when a heuristic field is added.
 heuristicFields :: ExferenceHeuristicsConfig -> [(String, Penalty)]

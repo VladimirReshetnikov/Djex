@@ -33,6 +33,12 @@ import Djinn.Internal.HTypes
   , hTypeSynthesisStructure
   )
 
+-- | Why a type could not cross between Djinn's 'HType' vocabulary and the
+-- shared source-type vocabulary: an unparsable or non-ConId type constructor
+-- name, a non-@varid@ type variable, an unsupported class name, a
+-- declaration body ('HTUnion' or 'HTAbstract') used as a type, a shared
+-- validation failure, or a shared form Djinn cannot spell (unboxed tuples,
+-- partially applied tuple constructors other than @(,)@).
 data SynthesisTypeError
   = InvalidHTypeName HSymbol SharedName.NameError
   | InvalidDjinnTypeVariable HSymbol
@@ -57,6 +63,11 @@ checkedDjinnTypeVariable variable
   | isVarId variable = Right variable
   | otherwise = Left $ InvalidDjinnTypeVariable variable
 
+-- | Convert an 'HType' into a validated, canonical shared type.  Natively
+-- stored source types are normalized directly; raw compatibility trees are
+-- converted node by node, checking that every constructor is a supported
+-- built-in or a (possibly qualified) ConId and every variable a @varid@.
+-- Declaration bodies ('HTUnion', 'HTAbstract') are rejected.
 toSynthesisType
   :: HType
   -> Either SynthesisTypeError (SharedType.Type HSymbol)
@@ -223,6 +234,10 @@ validateSynthesisConstraintHeader (Constraint className _) = do
 renderSynthesisType :: SharedType.Type HSymbol -> String
 renderSynthesisType = SharedTypeRender.renderType id
 
+-- | Inverse of 'toSynthesisType': normalize and validate a shared type with
+-- 'normalizeSynthesisType', then project it into an 'HType'.  The result
+-- keeps the shared structure natively when it is representable and, like
+-- every 'HType', presents the shared unit type as @'HTCon' \"()\"@.
 fromSynthesisType
   :: SharedType.Type HSymbol
   -> Either SynthesisTypeError HType

@@ -259,12 +259,16 @@ workspaceUnresolvedImportsWithSources workspace =
   loadedNames = Set.fromList
     $ map parsedModuleName $ workspaceModules workspace
 
+-- | The module name declared by the module header, or @Main@ when the file
+-- has none.
 workspaceModuleName :: WorkspaceModule -> String
 workspaceModuleName = parsedModuleName
 
+-- | The canonical path of the source file the module was parsed from.
 workspaceModulePath :: WorkspaceModule -> FilePath
 workspaceModulePath = parsedModulePath
 
+-- | The parsed HSE syntax tree of the module.
 workspaceModuleSyntax
   :: WorkspaceModule
   -> HSE.Module HSE.SrcSpanInfo
@@ -281,6 +285,10 @@ workspaceTargetDisplay target = starPrefix ++ base
     Just name | locatorKind locator == ModuleNameTarget -> name
     _ -> locatorPath locator
 
+-- | The canonical source files supplied directly by a target as of the
+-- last workspace snapshot: exactly one for a file or named-module target,
+-- and every discovered source file, in deterministic order, for a
+-- directory target. Modules pulled in only as dependencies are excluded.
 workspaceTargetModuleFiles :: WorkspaceTarget -> [FilePath]
 workspaceTargetModuleFiles = targetSourceFiles
 

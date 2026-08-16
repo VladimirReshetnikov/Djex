@@ -14,12 +14,19 @@ import Numeric.Natural (Natural)
 import Djinn.Internal.LJTFormula
 import Language.Haskell.Synthesis.Fresh (allocateFresh)
 
+-- | External proof assumptions re-keyed by fresh internal identities, built
+-- by 'prepareProofEnvironment'.  It holds the search bindings without any
+-- target-named assumption, the bindings including them, the map from
+-- internal names back to the external display names, and whether a
+-- target-named assumption was excluded.
 data ProofEnvironment = ProofEnvironment
     [(Symbol, Formula)]
     [(Symbol, Formula)]
     [(Symbol, Symbol)]
     Bool
 
+-- | The assumptions to search with, keyed by their unique internal names and
+-- excluding any assumption named like the target.
 -- Ordinary projections are intentional. Exported record fields would allow
 -- callers to update one derived view while leaving the hidden display-name
 -- map and target-exclusion flag unchanged.
@@ -32,9 +39,13 @@ proofBindings (ProofEnvironment bindings _ _ _) = bindings
 proofBindingsIncludingTarget :: ProofEnvironment -> [(Symbol, Formula)]
 proofBindingsIncludingTarget (ProofEnvironment _ bindings _ _) = bindings
 
+-- | Whether at least one supplied assumption had the target's name and was
+-- therefore left out of 'proofBindings'.
 targetWasExcluded :: ProofEnvironment -> Bool
 targetWasExcluded (ProofEnvironment _ _ _ excluded) = excluded
 
+-- | Assign each assumption a fresh internal proof name, keeping the given
+-- order, and set aside those named like the target definition.
 -- A same-named assumption would be printed as a recursive reference to the
 -- definition being generated.  Other assumptions receive internal names so
 -- proof checking never has to guess between overloaded display names.
@@ -63,6 +74,8 @@ prepareProofEnvironment target bindings =
                 used next
         in (external, internalName, formula) : build rest used' next'
 
+-- | Rename the internal assumption names occurring free in a proof term back
+-- to their external display names.
 -- Restore only free assumption variables.  Removing a mapping below a lambda
 -- makes this correct even for externally supplied terms that shadow an internal
 -- name, although LJT itself reserves every environment symbol.

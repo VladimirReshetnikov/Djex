@@ -38,6 +38,9 @@ import Language.Haskell.Exference.Core.ExferenceStats
 {-# DEPRECATED findExpressions, findOneExpression
   "Use Language.Haskell.Djex.Exference.runExferenceQuery; apply Language.Haskell.Synthesis.Selection.selectQueryResults when selecting results." #-}
 
+-- | Return every raw search result in discovery order.  A malformed input
+-- yields the empty list, indistinguishable from a search without results;
+-- 'findExpressionsEither' retains the error.
 findExpressions :: ExferenceInput -> [ExferenceOutputElement]
 findExpressions = either (const []) id . Core.findExpressionsEither
 

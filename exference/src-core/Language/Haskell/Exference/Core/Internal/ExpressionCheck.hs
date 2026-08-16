@@ -92,6 +92,9 @@ import qualified Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.
   as SharedAssociation
 import qualified Language.Haskell.Synthesis.TypedGenerated as SharedTyped
 
+-- | Why the independent checker rejected an expression, its expected type or
+-- constraints, or the environment it was checked against.  Checking stops at
+-- the first failure, so a result carries exactly one reason.
 data ExpressionCheckError
   = UnknownVariable TVarId
   | UnknownBinding QualifiedName
@@ -246,6 +249,8 @@ data CheckedTypeApplicationOriginStep = CheckedTypeApplicationOriginStep
   HsType
   [HsConstraint]
 
+-- | Every exact global specialization the checker recorded for a checked
+-- expression, in allocation order (ascending 'checkedTypeApplicationOriginId').
 checkedExpressionTypeApplicationOrigins
   :: CheckedExpressionEvidence
   -> [CheckedTypeApplicationOrigin]
@@ -308,52 +313,70 @@ checkedExpressionTypeApplicationOriginReferences
       CheckedGlobal name candidate -> Just (name, candidate, slots)
       _ -> Nothing
 
+-- | The origin's identity within one checked expression: a counter allocated
+-- in checking order, unique among that expression's origins only.
 checkedTypeApplicationOriginId :: CheckedTypeApplicationOrigin -> Natural
 checkedTypeApplicationOriginId
     (CheckedTypeApplicationOrigin identifier _ _ _) = identifier
 
+-- | The global binding whose specified scheme the visible type applications
+-- instantiate.
 checkedTypeApplicationOriginOwner
   :: CheckedTypeApplicationOrigin
   -> QualifiedName
 checkedTypeApplicationOriginOwner
     (CheckedTypeApplicationOrigin _ owner _ _) = owner
 
+-- | The owner's exact leading-forall scheme as retained by the checker
+-- context, before any visible argument was applied.
 checkedTypeApplicationOriginSource
   :: CheckedTypeApplicationOrigin
   -> HsType
 checkedTypeApplicationOriginSource
     (CheckedTypeApplicationOrigin _ _ source _) = source
 
+-- | The recorded visible applications, in structural source order.  Their
+-- slots form the contiguous zero-based prefix of the owner's specified
+-- binders that the expression instantiated.
 checkedTypeApplicationOriginSteps
   :: CheckedTypeApplicationOrigin
   -> [CheckedTypeApplicationOriginStep]
 checkedTypeApplicationOriginSteps
     (CheckedTypeApplicationOrigin _ _ _ steps) = steps
 
+-- | The zero-based position of this visible application in the owner's
+-- direct type-application spine.
 checkedTypeApplicationOriginStepSlot
   :: CheckedTypeApplicationOriginStep
   -> Natural
 checkedTypeApplicationOriginStepSlot
     (CheckedTypeApplicationOriginStep slot _ _ _ _) = slot
 
+-- | The quantified type the function had immediately before this visible
+-- application consumed its next binder.
 checkedTypeApplicationOriginStepSource
   :: CheckedTypeApplicationOriginStep
   -> HsType
 checkedTypeApplicationOriginStepSource
     (CheckedTypeApplicationOriginStep _ source _ _ _) = source
 
+-- | The type substituted for the consumed binder: the closed argument as
+-- written, or a fresh variable for an inferred (@\@_@) argument.
 checkedTypeApplicationOriginStepSelected
   :: CheckedTypeApplicationOriginStep
   -> HsType
 checkedTypeApplicationOriginStepSelected
     (CheckedTypeApplicationOriginStep _ _ selected _ _) = selected
 
+-- | The function's type after this visible application.
 checkedTypeApplicationOriginStepResult
   :: CheckedTypeApplicationOriginStep
   -> HsType
 checkedTypeApplicationOriginStepResult
     (CheckedTypeApplicationOriginStep _ _ _ result _) = result
 
+-- | The source contexts which became unconditional obligations at this step;
+-- empty unless the step consumed the last binder of its forall layer.
 checkedTypeApplicationOriginStepObligations
   :: CheckedTypeApplicationOriginStep
   -> [HsConstraint]

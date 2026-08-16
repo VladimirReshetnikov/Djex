@@ -3,6 +3,8 @@ module Djinn.Internal.Help (verboseHelp) where
 import Data.Version (showVersion)
 import Paths_djex (version)
 
+-- | The long-form explanation of every REPL command, with examples, that
+-- @:verboseHelp@ prints after the regular command summary.
 verboseHelp :: String
 verboseHelp = "\
 \\n\

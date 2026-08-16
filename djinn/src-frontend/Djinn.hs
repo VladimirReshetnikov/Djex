@@ -37,6 +37,10 @@ import qualified Paths_djex
 version :: String
 version = "version " ++ showVersion Paths_djex.version
 
+-- | Entry point of the historical @djinn@ executable: runs
+-- 'runWithSessionInitializer' with the standard session and the command-line
+-- arguments (options, then files to load; with no files, the interactive
+-- REPL starts).
 main :: IO ()
 main = do
     args <- getArgs

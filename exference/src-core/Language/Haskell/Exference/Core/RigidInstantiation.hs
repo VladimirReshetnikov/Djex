@@ -112,6 +112,8 @@ instance NFData RigidInstantiationPlan where
   rnf (RigidInstantiationPlan instantiations supply nestedCount) =
     rnf instantiations `seq` rnf supply `seq` rnf nestedCount
 
+-- | The plan's @(flexible binder, rigid skolem)@ pairs in the lexical order
+-- of the leading forall chain.
 -- An ordinary projection prevents record-update syntax from replacing the
 -- checked lexical pairing while the constructor remains hidden.
 rigidInstantiations :: RigidInstantiationPlan -> [(TVarId, TVarId)]

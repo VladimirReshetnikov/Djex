@@ -20,6 +20,9 @@ import Language.Haskell.Exference.Core.Types
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
+-- | A map from source flexible identifiers to their fresh spellings.
+-- Identifiers absent from the map are left unchanged by
+-- 'renameFlexibleType' and 'renameFlexibleConstraint'.
 type FlexibleRenaming = IntMap.IntMap TVarId
 
 -- | Freshen one local polymorphic namespace. For ordinary parser-produced
@@ -85,6 +88,7 @@ allocateCanonicalIdentifiers rawRequested initialSupply = do
           , nextFreshSupply
           )
 
+-- | Every flexible type-variable identifier occurring anywhere in a type.
 -- The shared fold visits both binder declarations and occurrences, including
 -- constraint arguments and structural tuple elements. Filtering by the tag
 -- keeps the flexible and rigid integer namespaces distinct.
@@ -92,6 +96,8 @@ flexibleIdentifiers :: HsType -> IntSet.IntSet
 flexibleIdentifiers = foldMap
   $ SharedType.foldFlexibleVariable IntSet.singleton
 
+-- | Rename every flexible identifier of a type through the renaming, leaving
+-- unmapped identifiers and all rigid variables as they are.
 -- This is a whole-namespace rename, not a substitution originating outside a
 -- lexical scope: binder declarations and their owned occurrences move
 -- together. The shared functor performs exactly that traversal while
@@ -100,5 +106,7 @@ renameFlexibleType :: FlexibleRenaming -> HsType -> HsType
 renameFlexibleType renaming = fmap $ SharedType.mapFlexibleVariable
   $ \identifier -> IntMap.findWithDefault identifier identifier renaming
 
+-- | 'renameFlexibleType' applied to every type argument of a constraint;
+-- the class name is untouched.
 renameFlexibleConstraint :: FlexibleRenaming -> HsConstraint -> HsConstraint
 renameFlexibleConstraint renaming = fmap $ renameFlexibleType renaming

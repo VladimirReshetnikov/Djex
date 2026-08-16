@@ -14,5 +14,7 @@ import Language.Haskell.Exference.Core.Types
   , emptyStaticClassEnv
   )
 
+-- | Compatibility spelling of 'emptyStaticClassEnv': the class environment
+-- with no classes and no instances.
 emptyClassEnv :: StaticClassEnv
 emptyClassEnv = emptyStaticClassEnv

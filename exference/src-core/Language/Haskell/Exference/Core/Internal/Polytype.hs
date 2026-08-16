@@ -423,6 +423,9 @@ substituteClosedVariables substitutions source = case source of
       (map (fmap $ substituteClosedVariables visible) constraints)
       (substituteClosedVariables visible body)
 
+-- | Whether a query subtree may serve as a visible type argument: it must be
+-- a ground monotype, or a closed forall-rooted type with no constraints
+-- anywhere in its tree.
 -- Query-derived visible arguments stay deliberately narrower than arbitrary
 -- closed types. A quantified candidate must be the complete forall-rooted type
 -- observed in a proper-type position, and every context in its tree must be

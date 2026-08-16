@@ -758,6 +758,10 @@ data GeneratedQueryReport = GeneratedQueryReport {
     }
     deriving (Eq, Show)
 
+-- | The logical verdict of a compatibility 'inhabit' query, mirroring the
+-- backend-independent evidence classification with the candidates already
+-- rendered as Haskell.  Only 'Realized' carries clauses; the other
+-- constructors distinguish a proved-uninhabitable goal from an undecided one.
 data QueryOutcome
     -- | Rendered Haskell clauses, best candidate first, de-duplicated.
     = Realized [String]
@@ -771,6 +775,9 @@ data QueryOutcome
     | Undecided
     deriving (Eq, Show)
 
+-- | The result of a successful 'inhabit' call: the translated formula, the
+-- search completion status, the scope-checked candidate clauses, and the
+-- rendered 'QueryOutcome' derived from them.
 data QueryReport = QueryReport {
     -- | The intuitionistic formula the goal type translated to.
     reportFormula :: String,
@@ -784,6 +791,8 @@ data QueryReport = QueryReport {
     -- compatibility strings in 'Realized' are derived from these values.
     reportGeneratedClauses ::
         [SharedGenerated.FunctionClause HSymbol],
+    -- | The verdict; 'Realized' holds the rendering of
+    -- 'reportGeneratedClauses'.
     reportOutcome :: QueryOutcome
     }
     deriving (Show)

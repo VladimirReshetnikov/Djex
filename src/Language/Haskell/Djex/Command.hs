@@ -112,12 +112,19 @@ parseQualification subject source = case normalize source of
   "full" -> Right FullyQualified
   _ -> Left $ subject ++ " must be none, identifiers, or full"
 
+-- | Parse an 'Int' setting that must be at least @1@, with a caller-owned
+-- option name for the failure message. Values above 'maxBound' are
+-- rejected rather than wrapped.
+--
 -- Parse machine-sized values through Integer first. Reading an out-of-range
 -- literal directly as Int silently wraps modulo the host Int range.
 positiveInt :: String -> String -> Either String Int
 positiveInt subject = checkedInt 1
   $ subject ++ " must be a positive integer"
 
+-- | Parse an 'Int' setting that must be at least @0@, with a caller-owned
+-- option name for the failure message. Values above 'maxBound' are
+-- rejected rather than wrapped.
 nonNegativeInt :: String -> String -> Either String Int
 nonNegativeInt subject = checkedInt 0
   $ subject ++ " must be a non-negative integer"
@@ -129,15 +136,22 @@ checkedInt lowerBound failure source = case readMaybe $ trim source of
     , value <= toInteger (maxBound :: Int) -> Right $ fromInteger value
   _ -> Left failure
 
+-- | Parse an arbitrary-precision setting that must be at least @0@, with a
+-- caller-owned option name for the failure message.
 nonNegativeInteger :: String -> String -> Either String Integer
 nonNegativeInteger subject source = case readMaybe $ trim source of
   Just value | value >= 0 -> Right value
   _ -> Left $ subject ++ " must be a non-negative integer"
 
+-- | Parse an optional limit: the word @unbounded@ (case-insensitively)
+-- yields 'Nothing', anything else must satisfy 'nonNegativeInt'.
 boundedNonNegativeInt :: String -> String -> Either String (Maybe Int)
 boundedNonNegativeInt _ source | normalize source == "unbounded" = Right Nothing
 boundedNonNegativeInt subject source = Just <$> nonNegativeInt subject source
 
+-- | Parse an optional penalty bound: the word @unbounded@
+-- (case-insensitively) yields 'Nothing', anything else must be a finite
+-- non-negative number.
 boundedPenalty :: String -> String -> Either String (Maybe Penalty)
 boundedPenalty _ source | normalize source == "unbounded" = Right Nothing
 boundedPenalty subject source = case readMaybe $ trim source of
@@ -147,21 +161,31 @@ boundedPenalty subject source = case readMaybe $ trim source of
   _ -> Left $ subject
     ++ " must be a finite non-negative number or unbounded"
 
+-- | The setting spelling of a selection mode, as accepted by
+-- 'parseSelectionMode'; a lookahead mode renders as @best-lookahead=N@,
+-- which that parser does not accept.
 selectionModeName :: SelectionMode -> String
 selectionModeName SelectFirst = "first"
 selectionModeName SelectBest = "best"
 selectionModeName (SelectBestLookahead count) = "best-lookahead=" ++ show count
 selectionModeName SelectAll = "all"
 
+-- | The setting spelling of a render mode, as accepted by
+-- 'parseRenderMode'.
 renderModeName :: RenderMode -> String
 renderModeName RenderDefinition = "definition"
 renderModeName RenderExpression = "expression"
 
+-- | The setting spelling of a qualification level, as accepted by
+-- 'parseQualification'.
 qualificationName :: Qualification -> String
 qualificationName Unqualified = "none"
 qualificationName QualifyIdentifiers = "identifiers"
 qualificationName FullyQualified = "full"
 
+-- | Render an optional limit for display: 'Nothing' as @unbounded@,
+-- otherwise the shown value, matching the spellings accepted by
+-- 'boundedNonNegativeInt' and 'boundedPenalty'.
 renderBounded :: Show value => Maybe value -> String
 renderBounded = maybe "unbounded" show
 

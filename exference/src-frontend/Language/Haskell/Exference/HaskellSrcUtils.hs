@@ -27,12 +27,17 @@ import Language.Haskell.Exts.Syntax
 import Language.Haskell.Exts.SrcLoc (SrcLoc, SrcSpan)
 import qualified Language.Haskell.Exts.SrcLoc as HSE
 
+-- | Flatten an optional HSE context into its list of constraint assertions,
+-- in source order; a missing or empty context yields no constraints.
 contextConstraints :: Maybe (Context l) -> [Asst l]
 contextConstraints Nothing = []
 contextConstraints (Just (CxSingle _ constraint)) = [constraint]
 contextConstraints (Just (CxTuple _ constraints)) = constraints
 contextConstraints (Just (CxEmpty _)) = []
 
+-- | The name and top-level declarations of an ordinary Haskell module. A
+-- module without a header is named @Main@; XML page and hybrid modules
+-- yield 'Nothing'.
 moduleNameAndDecls :: Module l -> Maybe (ModuleName l, [Decl l])
 moduleNameAndDecls (Module _ (Just (ModuleHead _ name _ _)) _ _ declarations) =
   Just (name, declarations)
@@ -42,6 +47,10 @@ moduleNameAndDecls (Module location Nothing _ _ declarations) =
 -- deliberately outside the ordinary Haskell-module extractor.
 moduleNameAndDecls _ = Nothing
 
+-- | Split a type used as a class application into the class name and its
+-- arguments in source order, looking through parentheses and accepting an
+-- unpromoted infix operator as the class head. Any other head yields
+-- 'Nothing'.
 splitClassApplication :: Type l -> Maybe (QName l, [Type l])
 splitClassApplication = go []
   where
@@ -57,6 +66,8 @@ splitClassApplication = go []
     go arguments (TyCon _ name) = Just (name, arguments)
     go _ _ = Nothing
 
+-- | Split a declaration head into the declared name and its bound type
+-- variables in source order, looking through parentheses and infix heads.
 splitDeclHead :: DeclHead l -> (Name l, [TyVarBind l])
 splitDeclHead = go []
   where
@@ -65,6 +76,10 @@ splitDeclHead = go []
     go variables (DHParen _ head') = go variables head'
     go variables (DHApp _ head' variable) = go (variable : variables) head'
 
+-- | Split an instance rule into its explicit binders, its context, the
+-- class name, and the class arguments in source order, looking through
+-- parentheses in both the rule and its head. Every HSE instance-head form
+-- is handled, so the result is always 'Just'.
 splitInstRule
   :: InstRule l
   -> Maybe (Maybe [TyVarBind l], Maybe (Context l), QName l, [Type l])

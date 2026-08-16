@@ -101,6 +101,8 @@ data DjinnScopeOmission = DjinnScopeOmission
   }
   deriving (Eq, Show)
 
+-- | Render one omission as a single @subject: reason@ line for the
+-- @:show omissions@ report.
 renderDjinnScopeOmission :: DjinnScopeOmission -> String
 renderDjinnScopeOmission omission =
   djinnOmissionSubject omission ++ ": " ++ djinnOmissionReason omission

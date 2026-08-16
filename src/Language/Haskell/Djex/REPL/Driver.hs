@@ -59,10 +59,19 @@ data ReplCompletions = ReplCompletions
     -- from being suggested where the parser necessarily expects a type.
   }
 
+-- | The evaluator's verdict after one logical input: keep prompting with
+-- the updated state, or leave the loop and return it.
 data ReplStep state
   = ContinueRepl state
   | ExitRepl state
 
+-- | Run the Haskeline read-evaluate loop until the evaluator returns
+-- 'ExitRepl' or input reaches end-of-file, then return the final state.
+-- Before every prompt the completion snapshot is refreshed from the current
+-- state; the evaluator receives the state, the history lines recorded
+-- before the current input (oldest first), and one logical input,
+-- where @:{@ ... @:}@ collects several lines. An interrupt prints
+-- @Interrupted.@ and continues with the unchanged state.
 runReplDriver
   :: Maybe FilePath
   -> state

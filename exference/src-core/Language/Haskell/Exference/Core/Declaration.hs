@@ -72,6 +72,11 @@ import Language.Haskell.Exference.Core.Score
   )
 import Language.Haskell.Exference.Core.Types
 
+-- | The annotation Exference attaches to shared declarations: a search
+-- penalty on value signatures and data constructors, a recursion flag on
+-- datatype declarations, and nothing on classes, instances, and synonyms.
+-- The lowering adapters below require the metadata kind matching the
+-- declaration kind and fail otherwise.
 data DeclarationMetadata
   = NoDeclarationMetadata
   | SearchPenaltyMetadata Penalty
@@ -80,12 +85,20 @@ data DeclarationMetadata
 
 instance NFData DeclarationMetadata
 
+-- | A shared source declaration over Exference's variables, with no explicit
+-- kind variables and 'DeclarationMetadata' annotations.
 type SynthesisDeclaration = SharedDeclaration.Declaration
   SynthesisVariable Void DeclarationMetadata
 
+-- | A sealed shared environment of 'SynthesisDeclaration's; the checked
+-- counterpart of 'EnvDictionary' (see 'toSynthesisEnvironment' and
+-- 'fromSynthesisEnvironment').
 type SynthesisEnvironment = SharedEnvironment.Environment
   SynthesisVariable Void DeclarationMetadata
 
+-- | A 'SynthesisEnvironment' paired with the kind assumptions inferred from
+-- it, as produced by Exference's source frontend; prepared for search by
+-- 'prepareSourceSynthesisInventory'.
 type SynthesisInventory = SharedInventory.Inventory
   SynthesisVariable DeclarationMetadata
 
@@ -529,6 +542,9 @@ implicitizeExferenceForalls outerVariables source =
     SharedType.FreshVariableSupplyExhausted binder -> binder
     SharedType.FreshVariableAlreadyReserved binder _ -> binder
 
+-- | Convert a flat search binding to a checked shared value declaration.
+-- The signature is rebuilt with 'functionBindingSignature', its types are
+-- validated, and the penalty is stored as 'SearchPenaltyMetadata'.
 toSynthesisFunctionBinding
   :: FunctionBinding
   -> Either SynthesisDeclarationError SynthesisDeclaration
@@ -545,6 +561,10 @@ valueSignature binding = SharedDeclaration.ValueSignature
   (functionName binding)
   <$> checkedType (functionBindingSignature binding)
 
+-- | Lower a shared value declaration to a flat search binding.  The
+-- declaration must be valid, carry 'SearchPenaltyMetadata', and have a type
+-- with no explicit forall binders (an implicitly quantified context is
+-- accepted); the arrow spine of the body becomes the parameters and result.
 fromSynthesisFunctionBinding
   :: SynthesisDeclaration
   -> Either SynthesisDeclarationError FunctionBinding
@@ -567,6 +587,9 @@ fromSynthesisFunctionBinding declaration = do
         else Left $ ExplicitFunctionForallUnsupported variables
     _ -> Left ExpectedValueDeclaration
 
+-- | Convert a method-free class declaration to a checked shared class
+-- declaration; equivalent to 'toSynthesisClassDeclarationWithMethods' with
+-- no methods.
 toSynthesisClassDeclaration
   :: HsTypeClass
   -> Either SynthesisDeclarationError SynthesisDeclaration
@@ -599,6 +622,10 @@ toSynthesisClassDeclarationWithMethods declaration methods = checked $
           (functionName binding) expectedConstraint actual
     _ -> Left $ MissingClassMethodConstraint $ functionName binding
 
+-- | Lower a shared class declaration to Exference's class record.  Only
+-- method-free classes with unkinded flexible parameters are accepted; a
+-- class with methods fails with 'ClassMethodsUnsupported' (use
+-- 'fromSynthesisClassDeclarationWithMethods' to lower those).
 fromSynthesisClassDeclaration
   :: SynthesisDeclaration
   -> Either SynthesisDeclarationError HsTypeClass
@@ -651,6 +678,10 @@ addClassMethodConstraint constraint typeExpression = case typeExpression of
     TypeForallNative variables (constraint : constraints) body
   body -> TypeForall [] [constraint] body
 
+-- | Convert an instance rule to a checked shared instance declaration.  The
+-- implicitly quantified variables of the head and prerequisites
+-- ('instanceConstraintVariables') become the declaration's explicit binder
+-- list, in ascending order.
 toSynthesisInstanceDeclaration
   :: HsInstance
   -> Either SynthesisDeclarationError SynthesisDeclaration
@@ -666,6 +697,10 @@ toSynthesisInstanceDeclaration declaration = checked $
     Right $ SharedDeclaration.InstanceDeclaration NoDeclarationMetadata
       variables prerequisites headConstraint
 
+-- | Lower a shared instance declaration to Exference's instance rule.  The
+-- declaration's binder list must be exactly the free variables of its head
+-- and prerequisites and all of them flexible, because 'HsInstance'
+-- quantifies implicitly; anything else fails with 'NonImplicitInstanceForall'.
 fromSynthesisInstanceDeclaration
   :: SynthesisDeclaration
   -> Either SynthesisDeclarationError HsInstance
@@ -681,6 +716,10 @@ fromSynthesisInstanceDeclaration declaration = do
       | otherwise -> Left $ NonImplicitInstanceForall variables
     _ -> Left ExpectedInstanceDeclaration
 
+-- | Convert a search datatype to a checked shared datatype declaration.
+-- The input type must be a nominal head applied to distinct type variables;
+-- the recursion flag is stored as 'RecursiveDataMetadata' and constructors
+-- carry no metadata (see 'toSynthesisRatedDataDeclaration' for ratings).
 toSynthesisDataDeclaration
   :: DeconstructorBinding
   -> Either SynthesisDeclarationError SynthesisDeclaration
@@ -716,6 +755,11 @@ toSynthesisDataDeclarationWith constructorMetadata declaration = do
     <$> mapM (convertedConstructorWith constructorMetadata)
           (deconstructorConstructors declaration)
 
+-- | Lower a shared datatype declaration to a search deconstructor.  The
+-- declaration must carry 'RecursiveDataMetadata' and unkinded flexible
+-- parameters; the input type is rebuilt as the head applied to those
+-- parameters, and constructor penalties are ignored (see
+-- 'fromSynthesisRatedDataDeclaration').
 fromSynthesisDataDeclaration
   :: SynthesisDeclaration
   -> Either SynthesisDeclarationError DeconstructorBinding
@@ -782,6 +826,12 @@ fromSynthesisRatedDataDeclaration declaration = do
       Right (functions, deconstructor)
     _ -> Left ExpectedDataDeclaration
 
+-- | Convert a raw search environment to a sealed shared environment:
+-- functions, then deconstructors, then classes (in name order, without
+-- methods), then explicit instances, with the first declaration failure
+-- reported before shared environment sealing runs.  Constructor ratings and
+-- class methods are not represented; see
+-- 'toSynthesisEnvironmentWithConstructorPenaltiesAndClassMethods'.
 toSynthesisEnvironment
   :: EnvDictionary
   -> Either SynthesisEnvironmentError SynthesisEnvironment
@@ -825,6 +875,11 @@ toSynthesisEnvironmentWith convertDataDeclaration methods environment = do
   either (Left . InvalidSharedEnvironment) Right
     $ SharedEnvironment.mkEnvironment declarations
 
+-- | Lower a shared environment to a raw search environment in declaration
+-- order.  Only explicitly declared value bindings become functions
+-- (constructor bindings are not derived), classes must be method-free, and
+-- type synonyms and abstract types are rejected with
+-- 'UnsupportedCoreEnvironmentDeclaration'.
 fromSynthesisEnvironment
   :: SynthesisEnvironment
   -> Either SynthesisEnvironmentError EnvDictionary

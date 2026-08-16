@@ -49,9 +49,15 @@ import qualified Language.Haskell.Exference.Core.Score as Score
 {-# DEPRECATED findExpressions, findExpressionsChunked, findExpressionsWithStats
   "These compatibility functions discard ExferenceInputError; use findExpressionsEither or findExpressionsWithStatsEither." #-}
 
+-- | Run a search and return every solution in discovery order.  A malformed
+-- input yields the empty list, indistinguishable from a search without
+-- results; prefer 'findExpressionsEither'.
 findExpressions :: E.ExferenceInput -> [E.ExferenceOutputElement]
 findExpressions = either (const []) id . findExpressionsEither
 
+-- | Validate an input once and run the search, returning every solution in
+-- discovery order (all chunks concatenated) or the exact
+-- 'E.ExferenceInputError'.
 findExpressionsEither
   :: E.ExferenceInput
   -> Either E.ExferenceInputError [E.ExferenceOutputElement]
@@ -59,6 +65,9 @@ findExpressionsEither input = do
   chunks <- runSearch input
   pure $ concatMap E.chunkElements chunks
 
+-- | Run a search and return its solutions grouped by the search step that
+-- produced them (many groups are empty).  A malformed input yields the empty
+-- list; prefer 'findExpressionsChunkedEither'.
 findExpressionsChunked :: E.ExferenceInput
                    -> [[E.ExferenceOutputElement]]
 findExpressionsChunked = either (const []) id . findExpressionsChunkedEither
@@ -70,6 +79,10 @@ findExpressionsChunkedEither
   -> Either E.ExferenceInputError [[E.ExferenceOutputElement]]
 findExpressionsChunkedEither = fmap (map E.chunkElements) . runSearch
 
+-- | Run a search and return one 'E.ExferenceChunkElement' per search step,
+-- carrying the search status, cumulative binding usages, and that step's
+-- solutions.  A malformed input yields the empty list; prefer
+-- 'findExpressionsWithStatsEither'.
 findExpressionsWithStats :: E.ExferenceInput
                          -> [E.ExferenceChunkElement]
 findExpressionsWithStats = either (const []) id . findExpressionsWithStatsEither

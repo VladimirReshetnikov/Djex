@@ -191,6 +191,12 @@ defaultExferenceSessionPolicy = ExferenceSessionPolicy
   , exferenceRatingOverrides = Map.empty
   }
 
+-- | Seal a session from a parser-neutral declaration environment: the
+-- environment is validated and kind-checked into an inventory (with
+-- generalized class kinds), prepared for search, and then projected under
+-- the policy exactly as by 'sealPreparedExferenceSessionWithPolicy'.
+-- Inventory and preparation failures are reported as @DJEX_EXF_ENV@
+-- diagnostics.
 sealNeutralExferenceSessionWithPolicy
   :: ExferenceSessionPolicy
   -> ExferenceEnvironment
@@ -372,6 +378,9 @@ applyRatingOverrides overrides bindings = do
         overrides
     }
 
+-- | The sealed core search environment currently used to run queries: the
+-- policy-filtered projection, further narrowed by the most recent
+-- 'scopeExferenceSession'.
 sessionSearchEnvironment :: ExferenceSession -> Core.ExferenceEnvironment
 sessionSearchEnvironment = searchView
 
@@ -441,6 +450,9 @@ normalizeSessionTypeSynonyms
 normalizeSessionTypeSynonyms session = normalizePreparedTypeSynonyms
   freshSynthesisVariable $ preparedView session
 
+-- | The complete annotation-erased neutral inventory the session was sealed
+-- from.  It is unaffected by session policy and interactive scoping, which
+-- narrow only the search projection.
 exferenceSessionInventory
   :: ExferenceSession
   -> ExferenceInventory
@@ -471,6 +483,8 @@ sessionInspectionTermSchemes = inspectionTermSchemesView
 sessionInspectionClasses :: ExferenceSession -> QueryClassEnv
 sessionInspectionClasses = inspectionClassesView
 
+-- | Every search capability the session policy removed at sealing time, in
+-- source binding order.  Interactive scoping does not add omissions.
 sessionOmissions :: ExferenceSession -> [ExferenceOmission]
 sessionOmissions = omissionView
 

@@ -82,6 +82,13 @@ type ExferenceTypeVariable = SharedType.Variable ExferenceLocal
 -- | Exference's checked type surface, expressed entirely in the neutral IR.
 type ExferenceType = Type ExferenceTypeVariable
 
+-- The private execution data sealed beside the caller's exact query: the
+-- canonical goal and the detached checked source spellings.
+data ExferenceRequestPlan = ExferenceRequestPlan
+  { plannedGoal :: ExferenceType
+  , plannedSourceTypeVariableNames :: ExferenceSourceTypeVariableNames
+  }
+
 -- | An opaque, validated Exference request. Equality and display observe the
 -- caller's exact neutral query; normalized goals, source-name hints, and
 -- diagnostic provenance remain private execution data.
@@ -90,11 +97,6 @@ type ExferenceType = Type ExferenceTypeVariable
 -- of the stable request value. Location provenance is owned separately by the
 -- shared envelope, which gives both adapters the same query-only equality and
 -- display contract.
-data ExferenceRequestPlan = ExferenceRequestPlan
-  { plannedGoal :: ExferenceType
-  , plannedSourceTypeVariableNames :: ExferenceSourceTypeVariableNames
-  }
-
 newtype ExferenceRequest = ExferenceRequest
   (CachedQuery ExferenceType ExferenceOptions ExferenceRequestPlan)
   deriving (Eq, Show)
@@ -175,6 +177,9 @@ exferenceRequestQuery
   -> QueryRequest ExferenceType ExferenceOptions
 exferenceRequestQuery (ExferenceRequest query) = cachedQueryRequest query
 
+-- | Attach the request's source location to a diagnostic when the request
+-- was sealed from source text ('mkExferenceRequestWithSourceInfo'); a
+-- programmatic request leaves the diagnostic unchanged.
 withExferenceRequestProvenance
   :: ExferenceRequest
   -> Diagnostic

@@ -164,6 +164,11 @@ mainOpts arguments = case getOpt (ReturnInOrder Input) options arguments of
         (flags, [source | Input source <- flags])
   (_, _, errors) -> Left $ concat errors ++ fullUsageInfo
 
+-- | Entry point of the @exference@ command-line tool. Parses the process
+-- arguments; with no flags or @--help@ it prints usage, with @--version@
+-- the version, and otherwise loads the source environment, seals a session,
+-- and answers every @--input@ query in order. Usage and load errors are
+-- reported on stderr and terminate the process with a failure exit code.
 main :: IO ()
 main = do
   hSetBuffering stdout LineBuffering

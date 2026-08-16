@@ -129,6 +129,8 @@ data SourceBinding
   | SourceClassMethod QualifiedName FunctionBinding
   deriving (Show)
 
+-- | The flat function projection of a 'SourceBinding', dropping the owning
+-- class of a 'SourceClassMethod'.
 sourceBindingFunction :: SourceBinding -> FunctionBinding
 sourceBindingFunction binding = case binding of
   SourceFunction function -> function
@@ -766,6 +768,11 @@ abstractTypeVisibilityInventory manifest abstractNames inventory =
       $ "type visibility kinds are inconsistent with the source inventory: "
           ++ show failure) NonEmpty.:| []
 
+-- | Validate a raw 'SourceEnvironment' into a 'CheckedSourceEnvironment':
+-- seal and kind-check its declarations as a shared inventory, prepare
+-- synonym expansion, and reconcile the lowered backend with the source
+-- order and ratings of the bindings. The 'sourceTypeNames' cache is
+-- ignored; every failure is an 'InvalidSourceInventory'.
 checkSourceEnvironment
   :: SourceEnvironment
   -> Either EnvironmentLoadError CheckedSourceEnvironment
@@ -1701,6 +1708,11 @@ methodBindingExtraction (SourcedExtraction slot result) = case result of
     | ClassMethodDeclaration owner binding <- methods
     ] [] []
 
+-- | Parse the contents of a rating file: whitespace-separated pairs of a
+-- qualified name (spelled as for 'parseQualifiedName') and a finite
+-- 'Double' penalty, returned in file order without duplicate resolution.
+-- The first malformed pair, non-numeric or non-finite rating, or trailing
+-- unpaired name is reported as an error 'Diagnostic'.
 parseRatings :: String -> Either Diagnostic [(QualifiedName, Penalty)]
 parseRatings = go . words
   where
@@ -1793,6 +1805,10 @@ environmentFromModuleM
   -> Loader (Either EnvironmentLoadError CheckedSourceEnvironment)
 environmentFromModuleM modulePath = environmentFromFilesM [modulePath] []
 
+-- | Load and seal one source module together with one rating file. This is
+-- 'environmentFromFiles' applied to a single module path and a single
+-- rating path; unreadable or malformed ratings only produce warnings in the
+-- 'LoadReport'.
 environmentFromModuleAndRatings
   :: FilePath
   -> FilePath
@@ -1901,6 +1917,12 @@ finishEnvironmentLoadWith checkEnvironment environmentResult loadRatings =
         (concat $ rights ratingResults) environment
 
 
+-- | Load and seal an environment directory: every @.hs@ file becomes a
+-- source module, every @.ratings@ file a rating file, and every
+-- @.visibility@ file part of one type visibility manifest, each group
+-- processed in sorted file-name order. An unreadable directory fails with
+-- 'EnvironmentDirectoryReadError'; the environment is checked with
+-- 'checkSourceEnvironmentWithTypeVisibility' when a manifest is present.
 environmentFromPath
   :: FilePath
   -> IO (LoadReport CheckedSourceEnvironment)

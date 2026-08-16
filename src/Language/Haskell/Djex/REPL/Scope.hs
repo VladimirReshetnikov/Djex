@@ -107,6 +107,12 @@ data ScopeNamespace
   | AnyScope
   deriving (Eq, Ord, Show)
 
+-- | The validated prompt name scope: the ordered module-context and import
+-- entries together with the name surfaces they admit (unqualified at the
+-- prompt, visible to backend search, and per written qualifier), the
+-- qualifier aliases, and the current module. Construct it only through
+-- 'scopeFromWorkspace' and the transactional update functions.
+--
 -- The separate projections are intentional. A qualified import adds bindings
 -- to backend search, but it must not make a type constructor legal bare at the
 -- prompt. Keeping both sets avoids recreating that distinction downstream.
@@ -121,6 +127,7 @@ data ReplScope = ReplScope
   }
   deriving (Eq, Show)
 
+-- | The module-context and import entries of the scope, in prompt order.
 scopeEntries :: ReplScope -> [ScopeEntry]
 scopeEntries = replScopeEntries
 

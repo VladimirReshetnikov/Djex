@@ -30,9 +30,14 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 
 type HSymbol = String
 
+-- | A legacy function clause: the defined name, its argument patterns, and
+-- the right-hand side.  Values are validated by 'toGeneratedClause' before
+-- any rendering.
 data HClause = HClause HSymbol [HPat] HExpr
   deriving (Show, Eq)
 
+-- | A legacy pattern.  @'HPVar' \"_\"@ is the wildcard; constructor
+-- arguments are curried through 'HPApply' and must have an 'HPCon' head.
 data HPat
   = HPVar HSymbol
   | HPCon HSymbol
@@ -41,6 +46,9 @@ data HPat
   | HPApply HPat HPat
   deriving (Show, Eq)
 
+-- | A legacy proof-output expression: lambdas, application, constructor and
+-- variable references, tuples, and case.  An 'HEVar' names a bound local
+-- when a surrounding pattern binds it and a global value otherwise.
 data HExpr
   = HELam [HPat] HExpr
   | HEApply HExpr HExpr
@@ -50,9 +58,15 @@ data HExpr
   | HECase HExpr [(HPat, HExpr)]
   deriving (Show, Eq)
 
+-- | Render a legacy clause as Haskell source by converting it with
+-- 'toGeneratedClause' and then applying 'renderGeneratedClause'; either
+-- step's failure is reported.
 hPrClause :: HClause -> Either String String
 hPrClause clause = toGeneratedClause clause >>= renderGeneratedClause
 
+-- | Scope-check a shared clause and render it as a Haskell equation with
+-- fully qualified global names.  This is the rendering policy of Djinn's
+-- compatibility layer, e.g. the strings in 'Djinn.Core.Realized'.
 renderGeneratedClause
   :: Generated.FunctionClause HSymbol
   -> Either String String

@@ -282,6 +282,11 @@ runConversionTWithState initial action = ExceptT $ do
   (result, finalState) <- runStateT (runExceptT action) initial
   pure $ fmap (\value -> (value, finalState)) result
 
+-- | The HSE parse mode shared by source-module loading and query parsing:
+-- Haskell 2010 plus the extensions needed for quantified and operator
+-- types, without fixity resolution. The source name is used for
+-- diagnostics; a name with no extension gains @.hs@, while an
+-- angle-bracketed virtual name is kept verbatim.
 haskellSrcExtsParseMode :: String -> P.ParseMode
 haskellSrcExtsParseMode sourceName = P.ParseMode parseSourceName
                                       Haskell2010
@@ -351,6 +356,9 @@ convertTypeNoDeclWithResolver resolver mn t = do
     (convertTypeNoDeclInternalWithResolver resolver mn t)
   pure (converted, convDataTypeVarIndex finalState)
 
+-- | Stateful counterpart of 'convertTypeNoDecl': convert one source type
+-- inside an existing 'ConversionT' scope so its type variables share the
+-- scope's inventory. Names are resolved through 'legacyTypeResolver'.
 convertTypeNoDeclInternal
   :: Monad m
   => M.Map T.QualifiedName T.HsTypeClass
@@ -434,6 +442,11 @@ convertTypeNoDeclInternalWithResolver resolver defModuleName ty = do
   -- pretty-printing or showing the unchecked recursive payload.
   helper _                = throwE "unsupported type syntax"
 
+-- | Alpha-normalize the explicit @forall@ binders of a freshly converted
+-- type against the given set of already-claimed variable IDs and reserve
+-- the resulting IDs in the conversion state; duplicate or rigid binders and
+-- supply exhaustion are conversion failures.
+--
 -- HSE's spelling map deliberately remains the compatibility hint index, but
 -- one spelling can denote several lexically shadowing binders. Normalize only
 -- after raw conversion succeeds, retain the original hints, and reserve the
@@ -498,7 +511,12 @@ getVar n = do
     Just i ->
       pure i
 
--- defaultModule -> potentially-qualified-name-thingy -> exference-q-name
+-- | Convert an HSE qualified name to a core 'T.QualifiedName' using the
+-- unique-global compatibility lookup: special constructors map to their
+-- built-in names, a written qualifier is kept as spelled, and an
+-- unqualified name resolves to the default module's own declaration when
+-- known, otherwise to the unique known name with that occurrence, otherwise
+-- to the bare external spelling; several matches are ambiguous.
 --
 -- The shared core can represent unboxed tuple names and types, but Exference's
 -- HSE compatibility frontend and search engine do not yet implement their
@@ -832,12 +850,17 @@ validateConstraintArityMap classes name actual = case M.lookup name classes of
   unqualifiedClassName qualifiedName = fromMaybe (show qualifiedName)
     $ SharedName.nameSpelling qualifiedName
 
+-- | Allocate or look up the conversion-scope variable ID of an unkinded
+-- @forall@ binder via 'getVar'; a kinded binder is a conversion failure.
 tyVarTransform :: Monad m
                => TyVarBind SrcSpanInfo
                -> ConversionT String m T.TVarId
 tyVarTransform (KindedVar _ _ _) = throwE "kinded type variable"
 tyVarTransform (UnkindedVar _ n) = getVar n
 
+-- | Every type constructor mentioned in the type (including inside
+-- constraint parameters) that is neither a built-in special name nor in
+-- the given list of valid names, in traversal order and with repetitions.
 findInvalidNames :: [T.QualifiedName] -> T.HsType -> [T.QualifiedName]
 findInvalidNames _ T.TypeVar {}          = []
 findInvalidNames _ T.TypeConstant {}     = []

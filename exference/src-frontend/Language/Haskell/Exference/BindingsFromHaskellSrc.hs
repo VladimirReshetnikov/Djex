@@ -49,6 +49,11 @@ data LoweredConstructor = LoweredConstructor
   }
 
 
+-- | Extract a 'FunctionBinding' for every name in every top-level type
+-- signature and foreign import of the given modules, resolving names with
+-- the unique-global 'legacyTypeResolver' built from the data type list and
+-- class map. Failures are reported as plain messages; use
+-- 'getDeclsLocated' to keep the source span of the offending signature.
 getDecls
   :: Monad m
   => [QualifiedName]

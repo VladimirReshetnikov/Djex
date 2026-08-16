@@ -51,6 +51,8 @@ data ReplBackend
   | BothBackends
   deriving (Eq, Show)
 
+-- | The canonical spelling of a backend selection (@djinn@, @exference@,
+-- or @both@), as accepted by 'parseReplBackend' and shown in settings.
 replBackendName :: ReplBackend -> String
 replBackendName (OneBackend DjinnBackend) = "djinn"
 replBackendName (OneBackend ExferenceBackend) = "exference"
@@ -70,6 +72,9 @@ data ReplInput
   | ReplCommand ReplCommand
   deriving (Eq, Show)
 
+-- | A parsed colon command with its already validated arguments. The
+-- synthesis commands @:synth@, @:djinn@, and @:exference@ are not included:
+-- they parse to 'ReplQuery' instead.
 data ReplCommand
   = AddEnvironment [FilePath]
   | Browse (Maybe String)
@@ -167,6 +172,8 @@ data ReplSetting
   | FixSetting
   deriving (Bounded, Enum, Eq, Show)
 
+-- | The option name of a setting as written after @:set@ and @:unset@ and
+-- accepted by 'parseReplSetting'.
 replSettingName :: ReplSetting -> String
 replSettingName setting = case setting of
   BackendSetting -> "backend"
@@ -202,6 +209,8 @@ replSettingIsBoolean setting = case setting of
   FixSetting -> True
   _ -> False
 
+-- | Resolve a setting name case-insensitively and exactly (no prefixes) to
+-- its 'ReplSetting'.
 parseReplSetting :: String -> Either String ReplSetting
 parseReplSetting source = case filter ((== normalize source) . replSettingName)
     [minBound .. maxBound] of
@@ -218,6 +227,12 @@ data CommandDescriptor = CommandDescriptor
   , descriptorParser :: String -> Either String ReplInput
   }
 
+-- | Classify one complete logical REPL input. A bare @:@ repeats the last
+-- query, @:!@ runs a shell command, any other leading colon selects a
+-- command by exact alias or unique prefix and parses its arguments; after
+-- line comments are stripped, blank input is 'ReplNoInput', an @import@
+-- keyword is 'ReplImport', and everything else is a query against the
+-- active backends.
 parseReplInput :: String -> Either String ReplInput
 parseReplInput source
   | rawInput == ":" = Right $ ReplCommand RepeatQuery
@@ -320,6 +335,9 @@ resolveCommandSyntax source = case attachedKindBangBase normalized of
   (moduleToken, _) = normalizeAttachedModule withoutColon ""
   normalized = map toLower moduleToken
 
+-- | Resolve a backend selection case-insensitively: an exact
+-- 'replBackendName' wins, otherwise a nonempty unique prefix of one;
+-- unknown and ambiguous spellings are errors listing the candidates.
 parseReplBackend :: String -> Either String ReplBackend
 parseReplBackend source = case exactMatches of
   [backend] -> Right backend
@@ -473,6 +491,9 @@ commandWith completion details name aliases arguments summary parser =
     , descriptorParser = parser
     }
 
+-- | Every colon-prefixed command spelling offered by completion: each
+-- canonical name followed by its aliases, in descriptor order, plus the
+-- special forms @:kind!@, @:k!@, @:!@, @:{@, and @:}@.
 commandNames :: [String]
 commandNames = concatMap completionNames commandDescriptors
   ++ [":kind!", ":k!", ":!", ":{", ":}"]
@@ -487,12 +508,18 @@ helpNames :: [String]
 helpNames = "import" : "module+" : "module-"
   : map (dropWhile (== ':')) commandNames
 
+-- | The backend selection spellings in display order: @djinn@,
+-- @exference@, @both@.
 backendNames :: [String]
 backendNames = map replBackendName replBackendChoices
 
+-- | Every setting name in the stable 'ReplSetting' order, for help and
+-- completion.
 settingNames :: [String]
 settingNames = map replSettingName [minBound .. maxBound]
 
+-- | The names of the settings that accept the @+NAME@ and @-NAME@ sign
+-- forms (see 'replSettingIsBoolean'), in 'ReplSetting' order.
 booleanSettingNames :: [String]
 booleanSettingNames =
   [ replSettingName setting
@@ -500,6 +527,8 @@ booleanSettingNames =
   , replSettingIsBoolean setting
   ]
 
+-- | The subjects accepted by @:show@, in help and completion order. The
+-- parser does not validate the subject; the executing frontend does.
 showNames :: [String]
 showNames =
   [ "settings"
@@ -513,6 +542,9 @@ showNames =
   , "directory"
   ]
 
+-- | The overview printed by a bare @:help@: prompt conventions followed by
+-- one aligned usage-and-summary line per command in descriptor order,
+-- plus the @import@ and @:!@ forms.
 shortHelp :: String
 shortHelp = unlines
   $ "Enter a Haskell type to synthesize with the active backend(s)."
@@ -535,6 +567,11 @@ shortHelp = unlines
    where
     usage = descriptorUsage descriptor
 
+-- | Detailed help for one @:help@ subject: usage, summary, aliases, and
+-- details of the command resolved as in 'parseReplInput' (a leading colon
+-- and the @module+@, @module-@, or @kind!@ modes are accepted), or the
+-- fixed text for @!@, @{@, @}@, and @import@. Unknown or ambiguous
+-- subjects yield the parser's error.
 commandHelp :: String -> Either String String
 commandHelp source = case token of
   "!" -> Right $ unlines

@@ -73,6 +73,10 @@ data TypeLayer source
     | TypeUnionLayer [(String, [source])]
     | TypeAbstractLayer String
 
+-- | How the formula compiler observes one layer of a caller-supplied type
+-- representation, or fails with a diagnostic for a node it cannot view.
+-- Both the legacy 'Djinn.Internal.HTypes.HType' frontend and the shared
+-- source-type frontend supply one of these instead of a converted tree.
 type TypeView source = source -> Either String (TypeLayer source)
 
 -- | The three declaration shapes relevant to formula compilation.  Value and

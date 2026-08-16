@@ -244,6 +244,9 @@ matchCase (Expression expression) = case expression of
     pure (Expression scrutinee, matched)
   _ -> Nothing
 
+-- | Why 'renderExpression' refused an expression: a local variable that is
+-- unbound or bound twice at one pattern, or a shared syntax/rendering error.
+-- The scope check runs first.
 data ExpressionRenderError
   = ExpressionScopeError (Generated.ScopeError TVarId)
   | ExpressionSyntaxError Generated.RenderError
@@ -259,6 +262,11 @@ toGeneratedExpression (Expression expression) =
 annotatedIdentity :: AnnotatedLocal -> TVarId
 annotatedIdentity (AnnotatedLocal variable _) = variable
 
+-- | Render a closed expression as Haskell source under the given name
+-- qualification policy.  Local-variable scope is validated first, then the
+-- shared renderer allocates local names using this expression's
+-- type-derived hints ('expressionNameHints'); use 'showExpression' for
+-- unchecked diagnostic output of partial search trees.
 renderExpression
   :: Generated.Qualification
   -> Expression
@@ -332,6 +340,10 @@ expressionTypedLocals (Expression expression) =
   | AnnotatedLocal variable (Just annotation) <- toList expression
   ]
 
+-- | @fillExprHole hole replacement expression@ replaces every 'ExpHole' with
+-- identity @hole@ in @expression@ by @replacement@.  The replacement is
+-- inserted as a whole and not itself searched, so fresh holes it introduces
+-- are never mistaken for the one just filled.
 fillExprHole :: TVarId -> Expression -> Expression -> Expression
 fillExprHole variable (Expression replacement) (Expression expression) =
   Expression $ Generated.fillExpressionHole

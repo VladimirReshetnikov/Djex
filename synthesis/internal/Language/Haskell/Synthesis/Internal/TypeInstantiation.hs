@@ -35,6 +35,7 @@ import Language.Haskell.Synthesis.Internal.Alpha
   ( AlphaVariable (..)
   , BinderSlotPolicy (PositionalBinderSlots)
   , alphaNormalizeTypeWith
+  , eraseVacuousForalls
   )
 import Language.Haskell.Synthesis.Type
   ( Type (..)
@@ -373,21 +374,7 @@ containsPairedSkolem = any isPaired
   isPaired _ = False
 
 canonicalInstantiationForm :: Type variable -> Type variable
-canonicalInstantiationForm source = case source of
-  TypeVariable{} -> source
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (canonicalInstantiationForm function)
-    (canonicalInstantiationForm argument)
-  FunctionType parameter result -> FunctionType
-    (canonicalInstantiationForm parameter)
-    (canonicalInstantiationForm result)
-  TupleType boxity fields -> TupleType boxity
-    $ map canonicalInstantiationForm fields
-  ForallType [] [] body -> canonicalInstantiationForm body
-  ForallType binders constraints body -> ForallType binders
-    (map (fmap canonicalInstantiationForm) constraints)
-    $ canonicalInstantiationForm body
+canonicalInstantiationForm = eraseVacuousForalls
 
 naturalPrefix :: Natural -> [Natural]
 naturalPrefix count = naturalPrefixFrom 0 count

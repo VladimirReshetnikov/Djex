@@ -62,6 +62,7 @@ import Language.Haskell.Synthesis.Internal.Alpha
   ( AlphaVariable (..)
   , BinderSlotPolicy (PositionalBinderSlots)
   , alphaNormalizeTypeWith
+  , eraseVacuousForalls
   )
 import Language.Haskell.Synthesis.Name (Name)
 import Language.Haskell.Synthesis.Type
@@ -464,24 +465,6 @@ prepareSelectionType ordinal = fmap convert
     AlphaBoundVariable scope slot ->
       TypeApplicationCertificateSelectionBound ordinal scope slot
     AlphaFreeVariable variable -> TypeApplicationCertificateFree variable
-
--- Binderless, context-free foralls have no semantic scope.  Erase them before
--- assigning private scope coordinates, matching the canonical type and graph
--- fingerprint policies without coupling this structural plan to either key.
-eraseVacuousForalls :: Type variable -> Type variable
-eraseVacuousForalls source = case source of
-  TypeVariable{} -> source
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (eraseVacuousForalls function) (eraseVacuousForalls argument)
-  FunctionType parameter result -> FunctionType
-    (eraseVacuousForalls parameter) (eraseVacuousForalls result)
-  TupleType boxity fields -> TupleType boxity
-    $ map eraseVacuousForalls fields
-  ForallType [] [] body -> eraseVacuousForalls body
-  ForallType binders constraints body -> ForallType binders
-    (map (fmap eraseVacuousForalls) constraints)
-    (eraseVacuousForalls body)
 
 replaySelections
   :: Ord variable

@@ -41,6 +41,7 @@ import Language.Haskell.Synthesis.Internal.Alpha
   ( AlphaVariable (..)
   , BinderSlotPolicy (PositionalBinderSlots)
   , alphaNormalizeTypeWith
+  , eraseVacuousForalls
   )
 import Language.Haskell.Synthesis.Type
   ( FreshVariableAllocator
@@ -329,22 +330,7 @@ sealTypeAtom source = TypeAtom source
   $ TypeAtomKey $ alphaNormalizeTypeWith PositionalBinderSlots source
 
 -- Text rendering intentionally elides a forall with no binders or context.
--- Erasing those no-op nodes here gives sealed atoms a genuine textual
--- round-trip instead of retaining invisible structure.
-eraseVacuousForalls :: Type variable -> Type variable
-eraseVacuousForalls source = case source of
-  TypeVariable{} -> source
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (eraseVacuousForalls function) (eraseVacuousForalls argument)
-  FunctionType parameter result -> FunctionType
-    (eraseVacuousForalls parameter) (eraseVacuousForalls result)
-  TupleType boxity elements -> TupleType boxity
-    $ map eraseVacuousForalls elements
-  ForallType [] [] body -> eraseVacuousForalls body
-  ForallType variables constraints body -> ForallType variables
-    (map (fmap eraseVacuousForalls) constraints)
-    (eraseVacuousForalls body)
-
+-- Erasing those no-op nodes gives sealed atoms a genuine textual round-trip
+-- instead of retaining invisible structure.
 atomCanonicalForm :: Type variable -> Type variable
 atomCanonicalForm = eraseVacuousForalls . canonicalizeType

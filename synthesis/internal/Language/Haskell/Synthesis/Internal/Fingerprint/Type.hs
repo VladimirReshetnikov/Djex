@@ -19,6 +19,7 @@ import Language.Haskell.Synthesis.Constraint (Constraint (..))
 import Language.Haskell.Synthesis.Internal.Fingerprint
   ( FingerprintField (..)
   )
+import Language.Haskell.Synthesis.Internal.Alpha (eraseVacuousForalls)
 import Language.Haskell.Synthesis.Name (Boxity (..))
 import Language.Haskell.Synthesis.Type (Type (..), canonicalizeType)
 
@@ -29,20 +30,6 @@ import Language.Haskell.Synthesis.Type (Type (..), canonicalizeType)
 -- structure without assigning any identity to free variables.
 canonicalTypeFingerprintForm :: Type variable -> Type variable
 canonicalTypeFingerprintForm = eraseVacuousForalls . canonicalizeType
- where
-  eraseVacuousForalls source = case source of
-    TypeVariable{} -> source
-    TypeConstructor{} -> source
-    TypeApplication function argument -> TypeApplication
-      (eraseVacuousForalls function) (eraseVacuousForalls argument)
-    FunctionType parameter result -> FunctionType
-      (eraseVacuousForalls parameter) (eraseVacuousForalls result)
-    TupleType boxity fields -> TupleType boxity
-      $ map eraseVacuousForalls fields
-    ForallType [] [] body -> eraseVacuousForalls body
-    ForallType binders constraints body -> ForallType binders
-      (map (fmap eraseVacuousForalls) constraints)
-      (eraseVacuousForalls body)
 
 -- | Encode one already-normalized shared type.  The caller owns variable
 -- identity because closed schemes, query-wide free variables, and other

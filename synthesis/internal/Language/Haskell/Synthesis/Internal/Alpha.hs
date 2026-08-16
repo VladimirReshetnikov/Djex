@@ -12,6 +12,7 @@ module Language.Haskell.Synthesis.Internal.Alpha
   , BinderSlotPolicy (..)
   , alphaNormalizeTypeWith
   , alphaNormalizeConstraintWithOuter
+  , eraseVacuousForalls
   ) where
 
 import Control.DeepSeq (NFData)
@@ -164,3 +165,24 @@ allocateScope = do
   let scope = nextScope state
   put state { nextScope = scope + 1 }
   pure scope
+
+-- | Erase binderless, context-free foralls throughout a type.  Such a node
+-- contributes no semantic scope: text rendering elides it, the checked type
+-- structure's equality ignores it, and every canonical form (atom keys, type
+-- and graph fingerprints, certificate scope coordinates, instantiation
+-- plans) erases it before assigning identities.  This is the one shared
+-- definition of that erasure.
+eraseVacuousForalls :: Type variable -> Type variable
+eraseVacuousForalls source = case source of
+  TypeVariable{} -> source
+  TypeConstructor{} -> source
+  TypeApplication function argument -> TypeApplication
+    (eraseVacuousForalls function) (eraseVacuousForalls argument)
+  FunctionType parameter result -> FunctionType
+    (eraseVacuousForalls parameter) (eraseVacuousForalls result)
+  TupleType boxity fields -> TupleType boxity
+    $ map eraseVacuousForalls fields
+  ForallType [] [] body -> eraseVacuousForalls body
+  ForallType binders constraints body -> ForallType binders
+    (map (fmap eraseVacuousForalls) constraints)
+    (eraseVacuousForalls body)

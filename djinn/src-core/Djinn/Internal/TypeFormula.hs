@@ -984,21 +984,30 @@ expansionSymbol source
         <$> expansionSourceType source
     | otherwise = Right $ Symbol $ renderExpansionType source
 
+-- The immediate sub-expansions of a node, in source order: an application's
+-- function and argument, tuple components, an arrow's argument and result,
+-- every union constructor's fields, and the wrapped argument of an argument
+-- or exact-assignment marker.  Variables, constructors, abstract atoms and
+-- opaque foralls are leaves here: a forall's atom is a source type rather
+-- than an expansion, so analyses that need it match 'ExpansionForall' first
+-- and fall back to this descent for everything else.
+expansionChildren :: ExpansionType -> [ExpansionType]
+expansionChildren source = case source of
+    ExpansionApp function argument -> [function, argument]
+    ExpansionTuple types -> types
+    ExpansionArrow argument result -> [argument, result]
+    ExpansionUnion constructors -> concatMap snd constructors
+    ExpansionArgument _ argument -> [argument]
+    ExpansionExactAssignment argument -> [argument]
+    ExpansionVar{} -> []
+    ExpansionCon{} -> []
+    ExpansionForall{} -> []
+    ExpansionAbstract{} -> []
+
 expansionContainsForall :: ExpansionType -> Bool
 expansionContainsForall source = case source of
-    ExpansionApp function argument ->
-        expansionContainsForall function || expansionContainsForall argument
-    ExpansionVar{} -> False
-    ExpansionCon{} -> False
-    ExpansionTuple types -> any expansionContainsForall types
-    ExpansionArrow argument result ->
-        expansionContainsForall argument || expansionContainsForall result
     ExpansionForall{} -> True
-    ExpansionUnion constructors -> any
-        (any expansionContainsForall . snd) constructors
-    ExpansionAbstract{} -> False
-    ExpansionArgument _ argument -> expansionContainsForall argument
-    ExpansionExactAssignment argument -> expansionContainsForall argument
+    _ -> any expansionContainsForall $ expansionChildren source
 
 -- Recover the shared source structure of a normalized, non-logical expansion
 -- subtree. Unions are formula definitions rather than Haskell source types and
@@ -1342,18 +1351,7 @@ fidelityExpansionApplication source arguments exactHead = case source of
 expansionContainsExact :: ExpansionType -> Bool
 expansionContainsExact source = case source of
     ExpansionExactAssignment{} -> True
-    ExpansionApp function argument ->
-        expansionContainsExact function || expansionContainsExact argument
-    ExpansionTuple types -> any expansionContainsExact types
-    ExpansionArrow argument result ->
-        expansionContainsExact argument || expansionContainsExact result
-    ExpansionUnion constructors -> any
-        (any expansionContainsExact . snd) constructors
-    ExpansionArgument _ argument -> expansionContainsExact argument
-    ExpansionVar{} -> False
-    ExpansionCon{} -> False
-    ExpansionForall{} -> False
-    ExpansionAbstract{} -> False
+    _ -> any expansionContainsExact $ expansionChildren source
 
 -- Expand one declaration with all of its formals marked at once, then cache
 -- the observed index set for the rest of this fidelity check.  The previous
@@ -1461,24 +1459,9 @@ structuralVariableObservations definitions selected path source = case source of
 
 expansionFreeVariables :: ExpansionType -> Set.Set String
 expansionFreeVariables source = case source of
-    ExpansionApp function argument ->
-        expansionFreeVariables function `Set.union`
-            expansionFreeVariables argument
     ExpansionVar variable -> Set.singleton variable
-    ExpansionCon{} -> Set.empty
-    ExpansionTuple types -> Set.unions $ map expansionFreeVariables types
-    ExpansionArrow argument result ->
-        expansionFreeVariables argument `Set.union`
-            expansionFreeVariables result
     ExpansionForall _ atom -> SharedTypeAtom.typeAtomFreeVariables atom
-    ExpansionUnion constructors -> Set.unions
-        [ expansionFreeVariables field
-        | (_, fields) <- constructors
-        , field <- fields
-        ]
-    ExpansionAbstract{} -> Set.empty
-    ExpansionArgument _ argument -> expansionFreeVariables argument
-    ExpansionExactAssignment argument -> expansionFreeVariables argument
+    _ -> Set.unions $ map expansionFreeVariables $ expansionChildren source
 
 normalizedExpansionAlgebra :: ExpansionAlgebra ExpansionType
 normalizedExpansionAlgebra = ExpansionAlgebra
@@ -1716,21 +1699,8 @@ preparedDefinitionIsAlias (PreparedDefinition _ _ _ isAlias) = isAlias
 -- saturated redex.
 definitionReferences :: ExpansionType -> Set.Set String
 definitionReferences source = case source of
-    ExpansionApp function argument ->
-        definitionReferences function `Set.union`
-            definitionReferences argument
     ExpansionCon name _ -> Set.singleton name
-    ExpansionTuple types -> Set.unions $ map definitionReferences types
-    ExpansionArrow argument result ->
-        definitionReferences argument `Set.union`
-            definitionReferences result
     ExpansionForall _ atom -> Set.map SharedName.renderCanonical
         $ SharedType.typeConstructors
         $ SharedTypeAtom.typeAtomType atom
-    ExpansionUnion constructors -> Set.unions
-        [definitionReferences field |
-            (_, fields) <- constructors, field <- fields]
-    ExpansionArgument _ argument -> definitionReferences argument
-    ExpansionExactAssignment argument -> definitionReferences argument
-    ExpansionVar _ -> Set.empty
-    ExpansionAbstract _ -> Set.empty
+    _ -> Set.unions $ map definitionReferences $ expansionChildren source

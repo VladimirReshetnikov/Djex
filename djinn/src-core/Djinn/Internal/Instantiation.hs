@@ -203,6 +203,44 @@ instantiationScheme source = case SharedType.splitLeadingForalls source of
 schemeKey :: InstantiationScheme -> SharedTypeAtom.TypeAtomKey String
 schemeKey = SharedTypeAtom.alphaTypeKey . schemeSource
 
+-- The atoms of one checked query: goal formulas enter at obligation side and
+-- premise formulas at hypothesis side. Every axiom family below draws its
+-- candidate vocabulary from this list.
+queryAtomSymbols :: [Formula] -> [Formula] -> [(SequentSide, Symbol)]
+queryAtomSymbols goalFormulas premiseFormulas =
+    concatMap (sidedAtomSymbols ObligationSide) goalFormulas ++
+    concatMap (sidedAtomSymbols HypothesisSide) premiseFormulas
+
+-- The retained source types behind opaque atoms, in atom order.
+opaqueAtomSources :: [(SequentSide, Symbol)] -> [SharedType.Type String]
+opaqueAtomSources atoms =
+    [ source
+    | (_, symbol) <- atoms
+    , Just source <- [opaqueSymbolSource symbol]
+    ]
+
+-- Candidate variables in the callers' first-occurrence order, deduplicated.
+variableCandidatesOf :: [String] -> [SharedType.Type String]
+variableCandidatesOf = map SharedType.TypeVariable . distinctOn id
+
+-- Guarded quantified candidates: the closed quantified subtrees of the
+-- opaque sources, in rendered order, one per alpha-equivalence class.
+quantifiedCandidatesOf
+    :: [SharedType.Type String] -> [SharedType.Type String]
+quantifiedCandidatesOf =
+    distinctOn SharedTypeAtom.alphaTypeKey .
+    sortOn (SharedTypeRender.renderType id) .
+    concatMap closedQuantifiedSubtrees
+
+-- The distinct instantiation schemes seeded by hypothesis-side opaque atoms.
+hypothesisSchemes :: [(SequentSide, Symbol)] -> [InstantiationScheme]
+hypothesisSchemes atoms = distinctOn schemeKey
+    [ scheme
+    | (HypothesisSide, symbol) <- atoms
+    , Just source <- [opaqueSymbolSource symbol]
+    , Just scheme <- [instantiationScheme source]
+    ]
+
 -- | Build the bounded axiom set for one query.
 --
 -- The translator must be the sealed environment's opaque formula compiler:
@@ -235,22 +273,10 @@ instantiationAxioms translator visibleArgument variableSpellings goalFormulas
             (length $ schemeBinders scheme))
         initialSchemes
   where
-    atoms =
-        concatMap (sidedAtomSymbols ObligationSide) goalFormulas ++
-        concatMap (sidedAtomSymbols HypothesisSide) premiseFormulas
-    opaqueSources =
-        [ source
-        | (_, symbol) <- atoms
-        , Just source <- [opaqueSymbolSource symbol]
-        ]
-    sourceVariableCandidates = map SharedType.TypeVariable $
-        distinctOn id variableSpellings
-    historicalVariableCandidates = map SharedType.TypeVariable $
-        distinctOn id $ sort variableSpellings
-    quantifiedCandidates =
-        distinctOn SharedTypeAtom.alphaTypeKey $
-        sortOn (SharedTypeRender.renderType id) $
-        concatMap closedQuantifiedSubtrees opaqueSources
+    atoms = queryAtomSymbols goalFormulas premiseFormulas
+    sourceVariableCandidates = variableCandidatesOf variableSpellings
+    historicalVariableCandidates = variableCandidatesOf $ sort variableSpellings
+    quantifiedCandidates = quantifiedCandidatesOf $ opaqueAtomSources atoms
     historicalCandidates =
         historicalVariableCandidates ++ quantifiedCandidates
     -- The callers supply source first-occurrence order: goal variables first,
@@ -258,12 +284,7 @@ instantiationAxioms translator visibleArgument variableSpellings goalFormulas
     -- wide-binder heuristics so alpha-renaming cannot reshuffle useful
     -- source-ordered runs merely because their spellings sort differently.
     wideCandidates = sourceVariableCandidates ++ quantifiedCandidates
-    initialSchemes = distinctOn schemeKey
-        [ scheme
-        | (HypothesisSide, symbol) <- atoms
-        , Just source <- [opaqueSymbolSource symbol]
-        , Just scheme <- [instantiationScheme source]
-        ]
+    initialSchemes = hypothesisSchemes atoms
 
 -- | Build an additive positive-only family for a query-local scheme instance
 -- whose complete result already occurs in the checked query.
@@ -295,21 +316,11 @@ queryCorrelatedInstantiationAxioms translator visibleArgument
         "$djinn$query-correlated-instantiation$" translator True
         visibleArgument correlatedTuples initialSchemes
   where
-    candidateAtoms =
-        concatMap (sidedAtomSymbols ObligationSide) goalFormulas ++
-        concatMap (sidedAtomSymbols HypothesisSide) premiseFormulas
+    candidateAtoms = queryAtomSymbols goalFormulas premiseFormulas
     schemeAtoms = concatMap (sidedAtomSymbols ObligationSide) goalFormulas
-    opaqueSources =
-        [ source
-        | (_, symbol) <- candidateAtoms
-        , Just source <- [opaqueSymbolSource symbol]
-        ]
-    sourceVariableCandidates = map SharedType.TypeVariable $
-        distinctOn id variableSpellings
+    sourceVariableCandidates = variableCandidatesOf variableSpellings
     quantifiedCandidates =
-        distinctOn SharedTypeAtom.alphaTypeKey $
-        sortOn (SharedTypeRender.renderType id) $
-        concatMap closedQuantifiedSubtrees opaqueSources
+        quantifiedCandidatesOf $ opaqueAtomSources candidateAtoms
     quantifiedCandidateKeys = Set.fromList $
         map SharedTypeAtom.alphaTypeKey quantifiedCandidates
     candidates = distinctOn SharedTypeAtom.alphaTypeKey $
@@ -341,12 +352,7 @@ queryCorrelatedInstantiationAxioms translator visibleArgument
       where
         arity = length $ schemeBinders scheme
         bodyVariables = SharedType.freeVariables $ schemeBody scheme
-    initialSchemes = distinctOn schemeKey
-        [ scheme
-        | (HypothesisSide, symbol) <- schemeAtoms
-        , Just source <- [opaqueSymbolSource symbol]
-        , Just scheme <- [instantiationScheme source]
-        ]
+    initialSchemes = hypothesisSchemes schemeAtoms
 
 -- | Build an additive hypothesis-instantiation tail whose tuples use at
 -- least one closed, forall-free subtree already present in the checked query.
@@ -376,26 +382,16 @@ queryClosedInstantiationAxioms translator visibleArgument variableSpellings
         candidateTuples
         initialSchemes
   where
-    candidateAtoms =
-        concatMap (sidedAtomSymbols ObligationSide) goalFormulas ++
-        concatMap (sidedAtomSymbols HypothesisSide) premiseFormulas
+    candidateAtoms = queryAtomSymbols goalFormulas premiseFormulas
     -- Only hypothesis-side schemes embedded in the requested goal belong to
     -- this local family. Exact loaded schemes have their own retained-source
     -- path; rediscovering global premise variants here would duplicate that
     -- path and could misclassify an ordinary safe local axiom as target-only
     -- diagnostic evidence.
     schemeAtoms = concatMap (sidedAtomSymbols ObligationSide) goalFormulas
-    opaqueSources =
-        [ source
-        | (_, symbol) <- candidateAtoms
-        , Just source <- [opaqueSymbolSource symbol]
-        ]
-    variableCandidates = map SharedType.TypeVariable $
-        distinctOn id variableSpellings
+    variableCandidates = variableCandidatesOf variableSpellings
     quantifiedCandidates =
-        distinctOn SharedTypeAtom.alphaTypeKey $
-        sortOn (SharedTypeRender.renderType id) $
-        concatMap closedQuantifiedSubtrees opaqueSources
+        quantifiedCandidatesOf $ opaqueAtomSources candidateAtoms
     retainedClosedCandidates =
         distinctOn SharedTypeAtom.alphaTypeKey closedCandidates
     closedCandidateKeys = Set.fromList $
@@ -406,12 +402,7 @@ queryClosedInstantiationAxioms translator visibleArgument variableSpellings
         fairCandidateTuples candidates $ length $ schemeBinders scheme
     containsClosedCandidate = any $ \candidate ->
         SharedTypeAtom.alphaTypeKey candidate `Set.member` closedCandidateKeys
-    initialSchemes = distinctOn schemeKey
-        [ scheme
-        | (HypothesisSide, symbol) <- schemeAtoms
-        , Just source <- [opaqueSymbolSource symbol]
-        , Just scheme <- [instantiationScheme source]
-        ]
+    initialSchemes = hypothesisSchemes schemeAtoms
 
 -- | Build the additive instantiation tail for polymorphic values retained from
 -- the sealed environment. Unlike the historical hypothesis rule, this phase
@@ -438,30 +429,15 @@ loadedInstantiationAxioms translator visibleArgument variableSpellings
             length $ schemeBinders scheme)
         initialSchemes
   where
-    candidateAtoms =
-        concatMap (sidedAtomSymbols ObligationSide) goalFormulas ++
-        concatMap (sidedAtomSymbols HypothesisSide) premiseFormulas
+    candidateAtoms = queryAtomSymbols goalFormulas premiseFormulas
     schemeAtoms = concatMap (sidedAtomSymbols HypothesisSide)
         loadedSchemeFormulas
-    opaqueSources =
-        [ source
-        | (_, symbol) <- candidateAtoms
-        , Just source <- [opaqueSymbolSource symbol]
-        ]
-    variableCandidates = map SharedType.TypeVariable $
-        distinctOn id variableSpellings
+    variableCandidates = variableCandidatesOf variableSpellings
     quantifiedCandidates =
-        distinctOn SharedTypeAtom.alphaTypeKey $
-        sortOn (SharedTypeRender.renderType id) $
-        concatMap closedQuantifiedSubtrees opaqueSources
+        quantifiedCandidatesOf $ opaqueAtomSources candidateAtoms
     candidates = distinctOn SharedTypeAtom.alphaTypeKey $
         variableCandidates ++ quantifiedCandidates ++ closedCandidates
-    initialSchemes = distinctOn schemeKey
-        [ scheme
-        | (HypothesisSide, symbol) <- schemeAtoms
-        , Just source <- [opaqueSymbolSource symbol]
-        , Just scheme <- [instantiationScheme source]
-        ]
+    initialSchemes = hypothesisSchemes schemeAtoms
 
 -- | Build a bounded family of direct provider-local specialization premises.
 --

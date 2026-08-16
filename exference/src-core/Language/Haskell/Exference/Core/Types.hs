@@ -716,14 +716,9 @@ validateConstraintInTable
   -> ConstraintSite
   -> HsConstraint
   -> Either ClassEnvError ()
-validateConstraintInTable table site constraint = do
-  validateConstraintClass constraint
-  case M.lookup name table of
-    Nothing -> Left $ UnknownConstraintClass site name
-    Just declaration -> validateConstraintArity site constraint declaration
-      >> validateConstraintArguments site constraint
-  where
-    name = constraint_tclass constraint
+validateConstraintInTable table site constraint =
+  validateConstraintHeader table site constraint
+    >> validateConstraintArguments site constraint
 
 validateConstraintArity
   :: ConstraintSite

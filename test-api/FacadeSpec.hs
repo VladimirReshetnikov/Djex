@@ -911,6 +911,243 @@ facadeTests = testGroup "public Djex facade"
 
       let quantified = ForallType ["bound"] [] $ TypeVariable "bound"
       isLeadingForallInstantiation quantified typeA typeA @?= True
+  , testCase "exports nominal bounded Length counterexample banks" $ do
+      let scalarProblemScope
+            :: CheckedLengthProblem Int ExferenceLocal
+            -> LengthCounterexampleBankScope Int
+          scalarProblemScope = checkedLengthProblemCounterexampleBankScope
+          scalarQueryScope
+            :: LengthSMTLibQuery Int ExferenceLocal
+            -> LengthCounterexampleBankScope Int
+          scalarQueryScope = lengthSMTLibQueryCounterexampleBankScope
+          scalarScopeFingerprint
+            :: LengthCounterexampleBankScope Int
+            -> Fingerprint LengthCounterexampleBankScopeFingerprintSubject
+          scalarScopeFingerprint = lengthCounterexampleBankScopeFingerprint
+          scalarTargetFingerprint
+            :: LengthCounterexampleBankScope Int
+            -> Fingerprint LengthCounterexampleBankTargetFingerprintSubject
+          scalarTargetFingerprint =
+            lengthCounterexampleBankScopeTargetFingerprint
+          scalarEmpty
+            :: LengthCounterexampleBankLimits
+            -> LengthCounterexampleBankScope Int
+            -> LengthCounterexampleBank Int
+          scalarEmpty = emptyLengthCounterexampleBank
+          scalarMatches
+            :: LengthCounterexampleBankScope Int
+            -> LengthCounterexampleBank Int
+            -> Bool
+          scalarMatches = lengthCounterexampleBankMatchesScope
+          scalarInsert
+            :: LengthCounterexampleBankOrigin
+            -> [Natural]
+            -> LengthCounterexampleBank Int
+            -> Either LengthCounterexampleBankError
+                (LengthCounterexampleBank Int)
+          scalarInsert = insertLengthCounterexampleBankSample
+          scalarAttempt
+            :: LengthCounterexampleBank Int
+            -> Either LengthCounterexampleBankError
+                (LengthCounterexampleBank Int)
+          scalarAttempt = recordLengthCounterexampleBankReplayAttempt
+          scalarBankScope
+            :: LengthCounterexampleBank Int
+            -> LengthCounterexampleBankScope Int
+          scalarBankScope = lengthCounterexampleBankScope
+          scalarBankLimits
+            :: LengthCounterexampleBank Int
+            -> LengthCounterexampleBankLimits
+          scalarBankLimits = lengthCounterexampleBankLimits
+          scalarSamples
+            :: LengthCounterexampleBank Int
+            -> [LengthCounterexampleBankSample]
+          scalarSamples = lengthCounterexampleBankSamples
+          scalarStats
+            :: LengthCounterexampleBank Int
+            -> LengthCounterexampleBankStats
+          scalarStats = lengthCounterexampleBankStats
+          scalarSampleInputs
+            :: LengthCounterexampleBankSample -> [Natural]
+          scalarSampleInputs = lengthCounterexampleBankSampleInputs
+          scalarSampleOrigin
+            :: LengthCounterexampleBankSample
+            -> LengthCounterexampleBankOrigin
+          scalarSampleOrigin = lengthCounterexampleBankSampleOrigin
+          scalarSampleBytes
+            :: LengthCounterexampleBankSample -> Natural
+          scalarSampleBytes = lengthCounterexampleBankSampleEncodedByteCount
+          scalarStatsProjections =
+            [ lengthCounterexampleBankStatsRetainedEntryCount
+            , lengthCounterexampleBankStatsRetainedEncodedByteCount
+            , lengthCounterexampleBankStatsRecordedSampleCount
+            , lengthCounterexampleBankStatsDuplicatePromotionCount
+            , lengthCounterexampleBankStatsEvictedSampleCount
+            , lengthCounterexampleBankStatsReplayAttemptCount
+            ]
+          pairProblemScope
+            :: CheckedLengthSpinePairProblem Int ExferenceLocal
+            -> LengthSpinePairCounterexampleBankScope Int
+          pairProblemScope =
+            checkedLengthSpinePairProblemCounterexampleBankScope
+          pairQueryScope
+            :: LengthSpinePairSMTLibQuery Int ExferenceLocal
+            -> LengthSpinePairCounterexampleBankScope Int
+          pairQueryScope = lengthSpinePairSMTLibQueryCounterexampleBankScope
+          pairScopeFingerprint
+            :: LengthSpinePairCounterexampleBankScope Int
+            -> Fingerprint
+                LengthSpinePairCounterexampleBankScopeFingerprintSubject
+          pairScopeFingerprint =
+            lengthSpinePairCounterexampleBankScopeFingerprint
+          pairTargetFingerprint
+            :: LengthSpinePairCounterexampleBankScope Int
+            -> Fingerprint
+                LengthSpinePairCounterexampleBankTargetFingerprintSubject
+          pairTargetFingerprint =
+            lengthSpinePairCounterexampleBankScopeTargetFingerprint
+          pairEmpty
+            :: LengthSpinePairCounterexampleBankLimits
+            -> LengthSpinePairCounterexampleBankScope Int
+            -> LengthSpinePairCounterexampleBank Int
+          pairEmpty = emptyLengthSpinePairCounterexampleBank
+          pairMatches
+            :: LengthSpinePairCounterexampleBankScope Int
+            -> LengthSpinePairCounterexampleBank Int
+            -> Bool
+          pairMatches = lengthSpinePairCounterexampleBankMatchesScope
+          pairInsert
+            :: LengthSpinePairCounterexampleBankOrigin
+            -> [Natural]
+            -> LengthSpinePairCounterexampleBank Int
+            -> Either LengthSpinePairCounterexampleBankError
+                (LengthSpinePairCounterexampleBank Int)
+          pairInsert = insertLengthSpinePairCounterexampleBankSample
+          pairAttempt
+            :: LengthSpinePairCounterexampleBank Int
+            -> Either LengthSpinePairCounterexampleBankError
+                (LengthSpinePairCounterexampleBank Int)
+          pairAttempt = recordLengthSpinePairCounterexampleBankReplayAttempt
+          pairBankScope
+            :: LengthSpinePairCounterexampleBank Int
+            -> LengthSpinePairCounterexampleBankScope Int
+          pairBankScope = lengthSpinePairCounterexampleBankScope
+          pairBankLimits
+            :: LengthSpinePairCounterexampleBank Int
+            -> LengthSpinePairCounterexampleBankLimits
+          pairBankLimits = lengthSpinePairCounterexampleBankLimits
+          pairSamples
+            :: LengthSpinePairCounterexampleBank Int
+            -> [LengthSpinePairCounterexampleBankSample]
+          pairSamples = lengthSpinePairCounterexampleBankSamples
+          pairStats
+            :: LengthSpinePairCounterexampleBank Int
+            -> LengthSpinePairCounterexampleBankStats
+          pairStats = lengthSpinePairCounterexampleBankStats
+          pairSampleInputs
+            :: LengthSpinePairCounterexampleBankSample -> [Natural]
+          pairSampleInputs = lengthSpinePairCounterexampleBankSampleInputs
+          pairSampleOrigin
+            :: LengthSpinePairCounterexampleBankSample
+            -> LengthSpinePairCounterexampleBankOrigin
+          pairSampleOrigin = lengthSpinePairCounterexampleBankSampleOrigin
+          pairSampleBytes
+            :: LengthSpinePairCounterexampleBankSample -> Natural
+          pairSampleBytes =
+            lengthSpinePairCounterexampleBankSampleEncodedByteCount
+          pairStatsProjections =
+            [ lengthSpinePairCounterexampleBankStatsRetainedEntryCount
+            , lengthSpinePairCounterexampleBankStatsRetainedEncodedByteCount
+            , lengthSpinePairCounterexampleBankStatsRecordedSampleCount
+            , lengthSpinePairCounterexampleBankStatsDuplicatePromotionCount
+            , lengthSpinePairCounterexampleBankStatsEvictedSampleCount
+            , lengthSpinePairCounterexampleBankStatsReplayAttemptCount
+            ]
+          scalarErrors :: [LengthCounterexampleBankError]
+          scalarErrors =
+            [ LengthCounterexampleBankEntryLimitExceeded 0 1
+            , LengthCounterexampleBankSampleWidthLimitExceeded 0 1
+            , LengthCounterexampleBankNaturalBitLimitExceeded 0 0 1
+            , LengthCounterexampleBankSampleEncodedByteLimitExceeded 0 1
+            , LengthCounterexampleBankReplayAttemptLimitExceeded 0 1
+            ]
+          pairErrors :: [LengthSpinePairCounterexampleBankError]
+          pairErrors =
+            [ LengthSpinePairCounterexampleBankEntryLimitExceeded 0 1
+            , LengthSpinePairCounterexampleBankSampleWidthLimitExceeded 0 1
+            , LengthSpinePairCounterexampleBankNaturalBitLimitExceeded 0 0 1
+            , LengthSpinePairCounterexampleBankSampleEncodedByteLimitExceeded
+                0 1
+            , LengthSpinePairCounterexampleBankReplayAttemptLimitExceeded 0 1
+            ]
+      scalarProblemScope `seq` scalarQueryScope `seq`
+        scalarScopeFingerprint `seq` scalarTargetFingerprint `seq`
+        scalarEmpty `seq` scalarMatches `seq` scalarInsert `seq`
+        scalarAttempt `seq` scalarBankScope `seq` scalarBankLimits `seq`
+        scalarSamples `seq` scalarStats `seq` scalarSampleInputs `seq`
+        scalarSampleOrigin `seq` scalarSampleBytes `seq`
+        pairProblemScope `seq` pairQueryScope `seq`
+        pairScopeFingerprint `seq` pairTargetFingerprint `seq`
+        pairEmpty `seq` pairMatches `seq` pairInsert `seq` pairAttempt `seq`
+        pairBankScope `seq` pairBankLimits `seq` pairSamples `seq`
+        pairStats `seq` pairSampleInputs `seq` pairSampleOrigin `seq`
+        pairSampleBytes `seq` scalarStatsProjections `seq`
+        pairStatsProjections `seq` scalarErrors `seq` pairErrors `seq`
+        (rnf :: LengthCounterexampleBankScope Int -> ()) `seq`
+        (rnf :: LengthCounterexampleBank Int -> ()) `seq`
+        (rnf :: LengthSpinePairCounterexampleBankScope Int -> ()) `seq`
+        (rnf :: LengthSpinePairCounterexampleBank Int -> ()) `seq`
+        pure ()
+      map ($ defaultLengthCounterexampleBankLimits)
+        [ lengthCounterexampleBankEntryLimit
+        , lengthCounterexampleBankSampleWidthLimit
+        , lengthCounterexampleBankNaturalBitLimit
+        ] @?= [4, 8, 256]
+      lengthCounterexampleBankEncodedByteLimit
+          defaultLengthCounterexampleBankLimits @?= 4096
+      lengthCounterexampleBankReplayAttemptLimit
+          defaultLengthCounterexampleBankLimits @?= 256
+      map ($ defaultLengthSpinePairCounterexampleBankLimits)
+        [ lengthSpinePairCounterexampleBankEntryLimit
+        , lengthSpinePairCounterexampleBankSampleWidthLimit
+        , lengthSpinePairCounterexampleBankNaturalBitLimit
+        ] @?= [4, 8, 256]
+      lengthSpinePairCounterexampleBankEncodedByteLimit
+          defaultLengthSpinePairCounterexampleBankLimits @?= 4096
+      lengthSpinePairCounterexampleBankReplayAttemptLimit
+          defaultLengthSpinePairCounterexampleBankLimits @?= 256
+      mkLengthCounterexampleBankLimits 4 8 256 4096 256 @?=
+        Right defaultLengthCounterexampleBankLimits
+      mkLengthCounterexampleBankLimits (-1) maxBound maxBound 0 0 @?=
+        Left (NegativeLengthCounterexampleBankLimit
+          LengthCounterexampleBankEntries (-1))
+      mkLengthCounterexampleBankLimits 0 maxBound 0 0 0 @?=
+        Left (UnobservableLengthCounterexampleBankFirstExcess
+          LengthCounterexampleBankSampleWidth maxBound)
+      mkLengthSpinePairCounterexampleBankLimits 4 8 256 4096 256 @?=
+        Right defaultLengthSpinePairCounterexampleBankLimits
+      mkLengthSpinePairCounterexampleBankLimits
+          (-1) maxBound maxBound 0 0 @?=
+        Left (NegativeLengthSpinePairCounterexampleBankLimit
+          LengthSpinePairCounterexampleBankEntries (-1))
+      mkLengthSpinePairCounterexampleBankLimits 0 maxBound 0 0 0 @?=
+        Left (UnobservableLengthSpinePairCounterexampleBankFirstExcess
+          LengthSpinePairCounterexampleBankSampleWidth maxBound)
+      lengthCounterexampleBankScopeSchemaTag @?=
+        map (fromIntegral . fromEnum)
+          ("djex-length-counterexample-bank-scope/v1" :: String)
+      lengthSpinePairCounterexampleBankScopeSchemaTag @?=
+        map (fromIntegral . fromEnum)
+          ("djex-length-spine-pair-counterexample-bank-scope/v1" :: String)
+      assertBool "scalar and product bank origins were not nominally closed"
+        $ lengthCounterexampleBankLiveModelReplayOrigin /=
+            lengthCounterexampleBankSolverIndependentReplayOrigin &&
+          lengthCounterexampleBankSolverIndependentReplayOrigin /=
+            lengthCounterexampleBankSimplificationReplayOrigin &&
+          lengthSpinePairCounterexampleBankLiveModelReplayOrigin /=
+            lengthSpinePairCounterexampleBankSolverIndependentReplayOrigin &&
+          lengthSpinePairCounterexampleBankSolverIndependentReplayOrigin /=
+            lengthSpinePairCounterexampleBankSimplificationReplayOrigin
   , testCase "exports atomic finite-spine candidate problems" $ do
       let sealer
             :: LengthProblemLimits

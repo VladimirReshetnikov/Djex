@@ -119,7 +119,6 @@ import Control.Concurrent.MVar
   , putMVar
   , readMVar
   , takeMVar
-  , withMVar
   )
 import Control.Concurrent.STM
   ( STM
@@ -157,13 +156,12 @@ import Control.Exception
   )
 import Control.Monad (void, when)
 import qualified Crypto.Hash.SHA256 as SHA256
-import Data.Bits ((.&.))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Char (ord)
 import Data.Int (Int64)
 import Data.Word (Word8, Word32, Word64)
-import Foreign.C.Types (CInt (..), CUInt (..))
+import Foreign.C.Types (CInt (..))
 import GHC.Clock (getMonotonicTimeNSec)
 import Numeric.Natural (Natural)
 import System.Directory
@@ -185,7 +183,6 @@ import System.IO
   ( BufferMode (NoBuffering)
   , Handle
   , IOMode (ReadMode)
-  , SeekMode (AbsoluteSeek)
   , hClose
   , hFlush
   , hSetBinaryMode
@@ -245,7 +242,10 @@ import System.Posix.Signals
 #endif
 
 #ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+import Control.Concurrent.MVar (withMVar)
+import Data.Bits ((.&.))
 import Foreign.C.String (CString, withCString)
+import Foreign.C.Types (CUInt (..))
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Array (withArray0)
 import Foreign.Marshal.Utils (withMany)
@@ -254,6 +254,7 @@ import Foreign.Storable (peek)
 import System.Posix.Internals (withFilePath)
 import System.Posix.IO (closeFd, dup, fdSeek, fdToHandle)
 import System.Posix.Types (CPid, Fd (..))
+import System.IO (SeekMode (AbsoluteSeek))
 import qualified System.Process.Internals as ProcessInternals
 #endif
 
@@ -322,183 +323,26 @@ openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
 openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
     limits cancellation deadline profile workingDirectory
     workingDirectoryDescriptor accessCheck preFinalAccessHook =
-  mask $ \restore -> do
-    initial <- checkCancellationDeadline
-      Z3SMTLibProcessSnapshotPhase cancellation deadline
-    case initial of
-      Left failure -> pure $ Left failure
-      Right () -> do
-        admittedWorkingDirectory <- restore $
-          inspectDescriptorWorkingDirectory cancellation deadline
-            workingDirectory workingDirectoryFd
-        case admittedWorkingDirectory of
-          Left failure -> pure $ Left failure
-          Right (canonicalWorkingDirectory, workingDirectoryMetadata) -> do
-            controlledOpen <- restore $ runBeforeZ3SMTLibProcessDeadline
-              cancellation deadline openSourceDescriptor
-              rollbackOpenedDescriptor
-            case controlledOpen of
-              Left failure -> pure $ Left failure
-              Right (Left failure) -> pure $ Left failure
-              Right (Right sourceDescriptor) ->
-                restore
-                  (withSourceDescriptor sourceDescriptor
-                    canonicalWorkingDirectory workingDirectoryMetadata)
-                  `finally` closeDescriptorIgnoringFailure sourceDescriptor
- where
-  Z3SMTLibWorkingDirectoryDescriptor workingDirectoryRaw =
+  openDescriptorBoundProcessWith
+    DescriptorBoundLaunchPolicy
+      { launchAdmitsWorkingDirectoryFirst = True
+      , launchAdmitSource = observeEffectiveIDAccess
+      , launchCreateStagedDescriptor = c_createStagedExecutable
+      , launchSealAndVerifyStagedImage = \_ stagedDescriptor count ->
+          sealAndVerifyEffectiveIDAccessStagedImage stagedDescriptor count
+      , launchInspectSealedImage = const $ pure $ Right ()
+      , launchSnapshotField =
+          descriptorBoundEffectiveIDExecutableAccessSnapshotField
+      , launchPreFinalHook = preFinalAccessHook
+      , launchAdmitFinal = \sourceDescriptor _ ->
+          observeEffectiveIDAccess sourceDescriptor
+      , launchStrategy = ProcessDescriptorBoundEffectiveIDExecutableAccessLaunch
+      }
+    limits cancellation deadline profile workingDirectory
     workingDirectoryDescriptor
-  workingDirectoryFd = Fd workingDirectoryRaw
-
-  openSourceDescriptor = do
-    opened <- tryAny $ withFilePath
-      (Z3.z3SMTLibExecutionExecutablePath profile) c_openExecutableDescriptor
-    pure $ case opened of
-      Right raw | raw >= 0 -> Right $ Fd raw
-      _ -> Left $ processError Z3SMTLibProcessSnapshotPhase
-        Z3SMTLibProcessExecutableUnavailable Nothing
-
-  rollbackOpenedDescriptor (Left _) = pure ()
-  rollbackOpenedDescriptor (Right descriptor) =
-    closeDescriptorIgnoringFailure descriptor
-
-  withSourceDescriptor sourceDescriptor canonicalWorkingDirectory
-      workingDirectoryMetadata = do
-    beforeResult <- captureDescriptorMetadata sourceDescriptor
-    case beforeResult of
-      Left failure -> pure $ Left failure
-      Right sourceMetadata
-        | not $ descriptorMetadataIsRegular sourceMetadata ->
-            pure $ Left $ processError Z3SMTLibProcessSnapshotPhase
-              Z3SMTLibProcessExecutableNotRegular Nothing
-        | not $ descriptorMetadataHasExecuteBit sourceMetadata ->
-            pure $ Left $ processError Z3SMTLibProcessSnapshotPhase
-              Z3SMTLibProcessExecutableNotExecutable Nothing
-        | otherwise -> do
-            admitted <- observeEffectiveIDAccess sourceDescriptor
-            case admitted of
-              Left failure -> pure $ Left failure
-              Right () -> createAndSealImage sourceDescriptor sourceMetadata
-                canonicalWorkingDirectory workingDirectoryMetadata
-
-  observeEffectiveIDAccess sourceDescriptor = do
-    controlled <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
-      (tryAny $ accessCheck $ fdToCInt sourceDescriptor)
-      $ const $ pure ()
-    pure $ case controlled of
-      Left failure -> Left failure
-      Right (Left _) -> Left $ processError Z3SMTLibProcessSnapshotPhase
-        Z3SMTLibProcessEffectiveIDExecutableAccessCheckFailed Nothing
-      Right (Right result) -> case result of
-        Z3SMTLibEffectiveIDExecutableAccessAdmitted -> Right ()
-        Z3SMTLibEffectiveIDExecutableAccessDenied -> Left $ processError
-          Z3SMTLibProcessSnapshotPhase
-          Z3SMTLibProcessEffectiveIDExecutableAccessDenied Nothing
-        Z3SMTLibEffectiveIDExecutableAccessCheckUnavailable -> Left
-          $ processError Z3SMTLibProcessSnapshotPhase
-              Z3SMTLibProcessEffectiveIDExecutableAccessCheckUnavailable
-              Nothing
-        Z3SMTLibEffectiveIDExecutableAccessCheckFailed -> Left $ processError
-          Z3SMTLibProcessSnapshotPhase
-          Z3SMTLibProcessEffectiveIDExecutableAccessCheckFailed Nothing
-
-  createAndSealImage sourceDescriptor sourceMetadata
-      canonicalWorkingDirectory workingDirectoryMetadata =
-    mask $ \restoreImage -> do
-      controlledImage <- restoreImage $ runBeforeZ3SMTLibProcessDeadline
-        cancellation deadline createStagedDescriptor rollbackOpenedDescriptor
-      case controlledImage of
-        Left failure -> pure $ Left failure
-        Right (Left failure) -> pure $ Left failure
-        Right (Right stagedDescriptor) ->
-          restoreImage
-            (withStagedDescriptor sourceDescriptor sourceMetadata
-              stagedDescriptor canonicalWorkingDirectory
-              workingDirectoryMetadata)
-            `finally` closeDescriptorIgnoringFailure stagedDescriptor
-
-  createStagedDescriptor = do
-    attempted <- tryAny c_createStagedExecutable
-    pure $ case attempted of
-      Right raw | raw >= 0 -> Right $ Fd raw
-      _ -> Left $ processError Z3SMTLibProcessSnapshotPhase
-        Z3SMTLibProcessDescriptorBoundStagingFailed Nothing
-
-  withStagedDescriptor sourceDescriptor sourceMetadata stagedDescriptor
-      canonicalWorkingDirectory workingDirectoryMetadata = do
-    copied <- copyExecutableToStagedImage limits cancellation deadline
-      sourceDescriptor stagedDescriptor
-    case copied of
-      Left failure -> pure $ Left failure
-      Right (digest, count) -> do
-        afterResult <- captureDescriptorMetadata sourceDescriptor
-        case afterResult of
-          Left failure -> pure $ Left failure
-          Right afterMetadata
-            | sourceMetadata /= afterMetadata -> pure $ Left $ processError
-                Z3SMTLibProcessSnapshotPhase
-                Z3SMTLibProcessExecutableMetadataChanged Nothing
-            | otherwise -> finishStagedImage sourceDescriptor stagedDescriptor
-                sourceMetadata workingDirectoryMetadata
-                canonicalWorkingDirectory digest count
-
-  finishStagedImage sourceDescriptor stagedDescriptor sourceMetadata
-      workingDirectoryMetadata canonicalWorkingDirectory digest count
-    | count > fromIntegral (maxBound :: Int64) =
-        pure $ Left $ processError Z3SMTLibProcessSnapshotPhase
-          Z3SMTLibProcessExecutableByteLimitExceeded $ Just count
-    | otherwise = do
-        let expected = BS.pack <$>
-              Z3.z3SMTLibExecutionExpectedExecutableSHA256 profile
-        case expected of
-          Just pinned | pinned /= digest -> pure $ Left $ processError
-            Z3SMTLibProcessSnapshotPhase
-            Z3SMTLibProcessExecutableDigestMismatch Nothing
-          _ -> do
-            sealed <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
-              (sealAndVerifyEffectiveIDAccessStagedImage stagedDescriptor count)
-              $ const $ pure ()
-            case sealed of
-              Left failure -> pure $ Left failure
-              Right False -> pure $ Left $ processError
-                Z3SMTLibProcessSnapshotPhase
-                Z3SMTLibProcessDescriptorBoundStagingFailed Nothing
-              Right True -> do
-                let snapshot = Z3SMTLibExecutableSnapshot digest count
-                      $ descriptorBoundEffectiveIDExecutableAccessSnapshotField
-                          profile workingDirectory canonicalWorkingDirectory
-                          sourceMetadata workingDirectoryMetadata digest count
-                          expected
-                hooked <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
-                  preFinalAccessHook $ const $ pure ()
-                case hooked of
-                  Left failure -> pure $ Left failure
-                  Right () -> do
-                    admitted <- observeEffectiveIDAccess sourceDescriptor
-                    case admitted of
-                      Left failure -> pure $ Left failure
-                      Right () -> spawnStagedImage snapshot stagedDescriptor
-                        canonicalWorkingDirectory
-
-  spawnStagedImage snapshot stagedDescriptor canonicalWorkingDirectory = do
-    rollbackStatus <- newEmptyTMVarIO
-    let rollbackAttempt attempted = case attempted of
-          Left _ -> pure ()
-          Right created -> do
-            cleanup <- cleanupDescriptorCreated limits created
-            atomically $ void $ tryPutTMVar rollbackStatus cleanup
-    controlledSpawn <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
-      (nativeDescriptorSpawn limits profile stagedDescriptor
-        workingDirectoryFd
-        ProcessDescriptorBoundEffectiveIDExecutableAccessLaunch)
-      rollbackAttempt
-    case controlledSpawn of
-      Left failure -> do
-        cleanup <- atomically $ tryReadTMVar rollbackStatus
-        pure $ Left $ maybe failure (`attachCleanup` failure) cleanup
-      Right (Left failure) -> pure $ Left failure
-      Right (Right created) -> finishDescriptorCreated limits cancellation
-        deadline snapshot canonicalWorkingDirectory created
+ where
+  observeEffectiveIDAccess =
+    observeEffectiveIDAccessWith cancellation deadline accessCheck
 #endif
 
 -- | Additive Linux 6.14 descriptor-bound launch.  The opened source passes
@@ -590,239 +434,57 @@ openZ3SMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithTestHooks
     limits cancellation deadline profile workingDirectory
     workingDirectoryDescriptor accessCheck execveCheck stagedCreator
     stagedSealer stagedInspectionHook preFinalChecksHook =
-  mask $ \restore -> do
-    initial <- checkCancellationDeadline
-      Z3SMTLibProcessSnapshotPhase cancellation deadline
-    case initial of
-      Left failure -> pure $ Left failure
-      Right () -> do
-        admittedWorkingDirectory <- restore $
-          inspectDescriptorWorkingDirectory cancellation deadline
-            workingDirectory workingDirectoryFd
-        case admittedWorkingDirectory of
-          Left failure -> pure $ Left failure
-          Right (canonicalWorkingDirectory, workingDirectoryMetadata) -> do
-            controlledOpen <- restore $ runBeforeZ3SMTLibProcessDeadline
-              cancellation deadline openSourceDescriptor
-              rollbackOpenedDescriptor
-            case controlledOpen of
-              Left failure -> pure $ Left failure
-              Right (Left failure) -> pure $ Left failure
-              Right (Right sourceDescriptor) ->
-                restore
-                  (withSourceDescriptor sourceDescriptor
-                    canonicalWorkingDirectory workingDirectoryMetadata)
-                  `finally` closeDescriptorIgnoringFailure sourceDescriptor
- where
-  Z3SMTLibWorkingDirectoryDescriptor workingDirectoryRaw =
+  openDescriptorBoundProcessWith
+    DescriptorBoundLaunchPolicy
+      { launchAdmitsWorkingDirectoryFirst = True
+      , launchAdmitSource = \sourceDescriptor -> admitInOrder
+          [ observeEffectiveIDAccess sourceDescriptor
+          , observeSourceExecveCheck sourceDescriptor
+          ]
+      , launchCreateStagedDescriptor = stagedCreator
+      , launchSealAndVerifyStagedImage = \_ stagedDescriptor count ->
+          sealAndVerifyExecveCheckStagedImageWith stagedSealer
+            stagedDescriptor count
+      , launchInspectSealedImage = inspectSealedImage
+      , launchSnapshotField =
+          descriptorBoundExecveCheckExecutableAccessSnapshotField
+      , launchPreFinalHook = preFinalChecksHook
+      , launchAdmitFinal = \sourceDescriptor stagedDescriptor -> admitInOrder
+          [ observeEffectiveIDAccess sourceDescriptor
+          , observeSourceExecveCheck sourceDescriptor
+          , observeStagedExecveCheck stagedDescriptor
+          ]
+      , launchStrategy = ProcessDescriptorBoundExecveCheckExecutableAccessLaunch
+      }
+    limits cancellation deadline profile workingDirectory
     workingDirectoryDescriptor
-  workingDirectoryFd = Fd workingDirectoryRaw
+ where
+  observeEffectiveIDAccess =
+    observeEffectiveIDAccessWith cancellation deadline accessCheck
 
-  openSourceDescriptor = do
-    opened <- tryAny $ withFilePath
-      (Z3.z3SMTLibExecutionExecutablePath profile) c_openExecutableDescriptor
-    pure $ case opened of
-      Right raw | raw >= 0 -> Right $ Fd raw
-      _ -> Left $ processError Z3SMTLibProcessSnapshotPhase
-        Z3SMTLibProcessExecutableUnavailable Nothing
-
-  rollbackOpenedDescriptor (Left _) = pure ()
-  rollbackOpenedDescriptor (Right descriptor) =
-    closeDescriptorIgnoringFailure descriptor
-
-  withSourceDescriptor sourceDescriptor canonicalWorkingDirectory
-      workingDirectoryMetadata = do
-    beforeResult <- captureDescriptorMetadata sourceDescriptor
-    case beforeResult of
-      Left failure -> pure $ Left failure
-      Right sourceMetadata
-        | not $ descriptorMetadataIsRegular sourceMetadata ->
-            pure $ Left $ processError Z3SMTLibProcessSnapshotPhase
-              Z3SMTLibProcessExecutableNotRegular Nothing
-        | not $ descriptorMetadataHasExecuteBit sourceMetadata ->
-            pure $ Left $ processError Z3SMTLibProcessSnapshotPhase
-              Z3SMTLibProcessExecutableNotExecutable Nothing
-        | otherwise -> do
-            effectiveAdmitted <- observeEffectiveIDAccess sourceDescriptor
-            case effectiveAdmitted of
-              Left failure -> pure $ Left failure
-              Right () -> do
-                execveAdmitted <- observeSourceExecveCheck sourceDescriptor
-                case execveAdmitted of
-                  Left failure -> pure $ Left failure
-                  Right () -> createAndSealImage sourceDescriptor
-                    sourceMetadata canonicalWorkingDirectory
-                    workingDirectoryMetadata
-
-  observeEffectiveIDAccess sourceDescriptor = do
-    controlled <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
-      (tryAny $ accessCheck $ fdToCInt sourceDescriptor)
-      $ const $ pure ()
-    pure $ case controlled of
-      Left failure -> Left failure
-      Right (Left _) -> Left $ processError Z3SMTLibProcessSnapshotPhase
-        Z3SMTLibProcessEffectiveIDExecutableAccessCheckFailed Nothing
-      Right (Right result) -> case result of
-        Z3SMTLibEffectiveIDExecutableAccessAdmitted -> Right ()
-        Z3SMTLibEffectiveIDExecutableAccessDenied -> Left $ processError
-          Z3SMTLibProcessSnapshotPhase
-          Z3SMTLibProcessEffectiveIDExecutableAccessDenied Nothing
-        Z3SMTLibEffectiveIDExecutableAccessCheckUnavailable -> Left
-          $ processError Z3SMTLibProcessSnapshotPhase
-              Z3SMTLibProcessEffectiveIDExecutableAccessCheckUnavailable
-              Nothing
-        Z3SMTLibEffectiveIDExecutableAccessCheckFailed -> Left $ processError
-          Z3SMTLibProcessSnapshotPhase
-          Z3SMTLibProcessEffectiveIDExecutableAccessCheckFailed Nothing
-
-  observeSourceExecveCheck descriptor =
-    observeExecveCheck descriptor
+  observeSourceExecveCheck =
+    observeExecveCheckWith cancellation deadline execveCheck
       Z3SMTLibProcessSourceExecveCheckDenied
       Z3SMTLibProcessSourceExecveCheckUnavailable
       Z3SMTLibProcessSourceExecveCheckFailed
 
-  observeStagedExecveCheck descriptor =
-    observeExecveCheck descriptor
+  observeStagedExecveCheck =
+    observeExecveCheckWith cancellation deadline execveCheck
       Z3SMTLibProcessStagedExecveCheckDenied
       Z3SMTLibProcessStagedExecveCheckUnavailable
       Z3SMTLibProcessStagedExecveCheckFailed
 
-  observeExecveCheck descriptor denied unavailable failed = do
-    controlled <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
-      (tryAny $ execveCheck $ fdToCInt descriptor)
+  -- The inspection hook borrows the sealed descriptor after Haskell metadata
+  -- verification; an exception from it is a staging failure.
+  inspectSealedImage stagedDescriptor = do
+    inspected <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
+      (tryAny $ stagedInspectionHook $ fdToCInt stagedDescriptor)
       $ const $ pure ()
-    pure $ case controlled of
+    pure $ case inspected of
       Left failure -> Left failure
-      Right (Left _) -> Left $ processError
-        Z3SMTLibProcessSnapshotPhase failed Nothing
-      Right (Right result) -> case result of
-        Z3SMTLibExecveCheckAdmitted -> Right ()
-        Z3SMTLibExecveCheckDenied -> Left $ processError
-          Z3SMTLibProcessSnapshotPhase denied Nothing
-        Z3SMTLibExecveCheckUnavailable -> Left $ processError
-          Z3SMTLibProcessSnapshotPhase unavailable Nothing
-        Z3SMTLibExecveCheckFailed -> Left $ processError
-          Z3SMTLibProcessSnapshotPhase failed Nothing
-
-  createAndSealImage sourceDescriptor sourceMetadata
-      canonicalWorkingDirectory workingDirectoryMetadata =
-    mask $ \restoreImage -> do
-      controlledImage <- restoreImage $ runBeforeZ3SMTLibProcessDeadline
-        cancellation deadline createStagedDescriptor rollbackOpenedDescriptor
-      case controlledImage of
-        Left failure -> pure $ Left failure
-        Right (Left failure) -> pure $ Left failure
-        Right (Right stagedDescriptor) ->
-          restoreImage
-            (withStagedDescriptor sourceDescriptor sourceMetadata
-              stagedDescriptor canonicalWorkingDirectory
-              workingDirectoryMetadata)
-            `finally` closeDescriptorIgnoringFailure stagedDescriptor
-
-  createStagedDescriptor = do
-    attempted <- tryAny stagedCreator
-    pure $ case attempted of
-      Right raw | raw >= 0 -> Right $ Fd raw
-      _ -> Left $ processError Z3SMTLibProcessSnapshotPhase
+      Right (Left _) -> Left $ processError Z3SMTLibProcessSnapshotPhase
         Z3SMTLibProcessDescriptorBoundStagingFailed Nothing
-
-  withStagedDescriptor sourceDescriptor sourceMetadata stagedDescriptor
-      canonicalWorkingDirectory workingDirectoryMetadata = do
-    copied <- copyExecutableToStagedImage limits cancellation deadline
-      sourceDescriptor stagedDescriptor
-    case copied of
-      Left failure -> pure $ Left failure
-      Right (digest, count) -> do
-        afterResult <- captureDescriptorMetadata sourceDescriptor
-        case afterResult of
-          Left failure -> pure $ Left failure
-          Right afterMetadata
-            | sourceMetadata /= afterMetadata -> pure $ Left $ processError
-                Z3SMTLibProcessSnapshotPhase
-                Z3SMTLibProcessExecutableMetadataChanged Nothing
-            | otherwise -> finishStagedImage sourceDescriptor stagedDescriptor
-                sourceMetadata workingDirectoryMetadata
-                canonicalWorkingDirectory digest count
-
-  finishStagedImage sourceDescriptor stagedDescriptor sourceMetadata
-      workingDirectoryMetadata canonicalWorkingDirectory digest count
-    | count > fromIntegral (maxBound :: Int64) =
-        pure $ Left $ processError Z3SMTLibProcessSnapshotPhase
-          Z3SMTLibProcessExecutableByteLimitExceeded $ Just count
-    | otherwise = do
-        let expected = BS.pack <$>
-              Z3.z3SMTLibExecutionExpectedExecutableSHA256 profile
-        case expected of
-          Just pinned | pinned /= digest -> pure $ Left $ processError
-            Z3SMTLibProcessSnapshotPhase
-            Z3SMTLibProcessExecutableDigestMismatch Nothing
-          _ -> do
-            sealed <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
-              (sealAndVerifyExecveCheckStagedImageWith
-                stagedSealer stagedDescriptor count)
-              $ const $ pure ()
-            case sealed of
-              Left failure -> pure $ Left failure
-              Right False -> pure $ Left $ processError
-                Z3SMTLibProcessSnapshotPhase
-                Z3SMTLibProcessDescriptorBoundStagingFailed Nothing
-              Right True -> do
-                inspected <- runBeforeZ3SMTLibProcessDeadline
-                  cancellation deadline
-                  (tryAny $ stagedInspectionHook $ fdToCInt stagedDescriptor)
-                  $ const $ pure ()
-                case inspected of
-                  Left failure -> pure $ Left failure
-                  Right (Left _) -> pure $ Left $ processError
-                    Z3SMTLibProcessSnapshotPhase
-                    Z3SMTLibProcessDescriptorBoundStagingFailed Nothing
-                  Right (Right ()) -> do
-                    let snapshot = Z3SMTLibExecutableSnapshot digest count
-                          $ descriptorBoundExecveCheckExecutableAccessSnapshotField
-                              profile workingDirectory canonicalWorkingDirectory
-                              sourceMetadata workingDirectoryMetadata digest count
-                              expected
-                    hooked <- runBeforeZ3SMTLibProcessDeadline
-                      cancellation deadline preFinalChecksHook $ const $ pure ()
-                    case hooked of
-                      Left failure -> pure $ Left failure
-                      Right () -> do
-                        effectiveAdmitted <-
-                          observeEffectiveIDAccess sourceDescriptor
-                        case effectiveAdmitted of
-                          Left failure -> pure $ Left failure
-                          Right () -> do
-                            sourceExecveAdmitted <-
-                              observeSourceExecveCheck sourceDescriptor
-                            case sourceExecveAdmitted of
-                              Left failure -> pure $ Left failure
-                              Right () -> do
-                                stagedExecveAdmitted <-
-                                  observeStagedExecveCheck stagedDescriptor
-                                case stagedExecveAdmitted of
-                                  Left failure -> pure $ Left failure
-                                  Right () -> spawnStagedImage snapshot
-                                    stagedDescriptor canonicalWorkingDirectory
-
-  spawnStagedImage snapshot stagedDescriptor canonicalWorkingDirectory = do
-    rollbackStatus <- newEmptyTMVarIO
-    let rollbackAttempt attempted = case attempted of
-          Left _ -> pure ()
-          Right created -> do
-            cleanup <- cleanupDescriptorCreated limits created
-            atomically $ void $ tryPutTMVar rollbackStatus cleanup
-    controlledSpawn <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
-      (nativeDescriptorSpawn limits profile stagedDescriptor
-        workingDirectoryFd
-        ProcessDescriptorBoundExecveCheckExecutableAccessLaunch)
-      rollbackAttempt
-    case controlledSpawn of
-      Left failure -> do
-        cleanup <- atomically $ tryReadTMVar rollbackStatus
-        pure $ Left $ maybe failure (`attachCleanup` failure) cleanup
-      Right (Left failure) -> pure $ Left failure
-      Right (Right created) -> finishDescriptorCreated limits cancellation
-        deadline snapshot canonicalWorkingDirectory created
+      Right (Right ()) -> Right ()
 #endif
 
 -- | Explicitly weaker than an executed-image attestation method.
@@ -1596,24 +1258,112 @@ openZ3SMTLibDescriptorBoundProcessWithPreExecHook _ _ _ _ _ _ _ =
 #else
 openZ3SMTLibDescriptorBoundProcessWithPreExecHook limits cancellation deadline
     profile workingDirectory workingDirectoryDescriptor preExecHook =
+  openDescriptorBoundProcessWith
+    DescriptorBoundLaunchPolicy
+      { launchAdmitsWorkingDirectoryFirst = False
+      , launchAdmitSource = const $ pure $ Right ()
+      , launchCreateStagedDescriptor = c_createStagedExecutable
+      , launchSealAndVerifyStagedImage = \sourceMetadata stagedDescriptor
+          count -> sealAndVerifyStagedImage stagedDescriptor sourceMetadata
+            count
+      , launchInspectSealedImage = const $ pure $ Right ()
+      , launchSnapshotField = descriptorBoundExecutableSnapshotField
+      , launchPreFinalHook = preExecHook
+      , launchAdmitFinal = \_ _ -> pure $ Right ()
+      , launchStrategy = ProcessDescriptorBoundExecutableLaunch
+      }
+    limits cancellation deadline profile workingDirectory
+    workingDirectoryDescriptor
+#endif
+
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+-- | The points at which the three descriptor-bound launches differ.  The
+-- launch spine is written once in 'openDescriptorBoundProcessWith': open the
+-- configured source read-only, admit the working directory, capture and
+-- re-check the source metadata, copy the bytes once into an anonymous staged
+-- image, compare the digest with the pin, seal and verify the image, build
+-- the snapshot, and spawn from the sealed descriptor.  Each public opener
+-- supplies one of these policies; the fields follow pipeline order.
+data DescriptorBoundLaunchPolicy = DescriptorBoundLaunchPolicy
+  { launchAdmitsWorkingDirectoryFirst :: !Bool
+    -- ^ Whether the working directory is admitted before the source is
+    -- opened (the access-checked launches) or only once the source is open
+    -- (the original launch).  Both refusal orders are preserved exactly.
+  , launchAdmitSource :: Fd -> IO (Either Z3SMTLibProcessError ())
+    -- ^ Access observations on the opened source, run after its regular-file
+    -- and execute-bit shape checks and before staging.
+  , launchCreateStagedDescriptor :: IO CInt
+    -- ^ The native staged-image creator; a negative descriptor is a staging
+    -- failure.
+  , launchSealAndVerifyStagedImage
+      :: DescriptorMetadata -> Fd -> Natural -> IO Bool
+    -- ^ Seal the copied image and verify it in Haskell.  The source metadata
+    -- is passed for the launch that copies its ordinary mode bits.
+  , launchInspectSealedImage :: Fd -> IO (Either Z3SMTLibProcessError ())
+    -- ^ Borrow the sealed image after verification and before the snapshot;
+    -- the execve-check test seam, a no-op elsewhere.
+  , launchSnapshotField :: DescriptorBoundSnapshotFieldBuilder
+    -- ^ The launch's snapshot schema.
+  , launchPreFinalHook :: IO ()
+    -- ^ Deterministic test hook run after the snapshot is built and before
+    -- the final observations or any child allocation.
+  , launchAdmitFinal :: Fd -> Fd -> IO (Either Z3SMTLibProcessError ())
+    -- ^ Final observations on the source and on the sealed image,
+    -- immediately before child allocation.
+  , launchStrategy :: !ProcessExecutableLaunchStrategy
+    -- ^ The strategy the native spawner is told it is executing.
+  }
+
+-- | The one descriptor-bound launch pipeline; see
+-- 'DescriptorBoundLaunchPolicy' for the per-launch parts.  Every refusal is
+-- a sanitized snapshot-phase failure, the source and staged descriptors are
+-- closed on every path, and a spawn refusal carries the cleanup status of
+-- any child that had already been created.
+openDescriptorBoundProcessWith
+  :: DescriptorBoundLaunchPolicy
+  -> Z3SMTLibProcessLimits
+  -> Z3SMTLibProcessCancellation
+  -> Z3SMTLibProcessDeadline
+  -> Z3.Z3SMTLibExecutionProfile
+  -> FilePath
+  -> Z3SMTLibWorkingDirectoryDescriptor
+  -> IO (Either Z3SMTLibProcessError Z3SMTLibProcess)
+openDescriptorBoundProcessWith policy limits cancellation deadline profile
+    workingDirectory workingDirectoryDescriptor =
   mask $ \restore -> do
     initial <- checkCancellationDeadline
       Z3SMTLibProcessSnapshotPhase cancellation deadline
+    let withOpenedSource continue = do
+          controlledOpen <- restore $ runBeforeZ3SMTLibProcessDeadline
+            cancellation deadline openSourceDescriptor
+            rollbackOpenedDescriptor
+          case controlledOpen of
+            Left failure -> pure $ Left failure
+            Right (Left failure) -> pure $ Left failure
+            Right (Right sourceDescriptor) ->
+              restore (continue sourceDescriptor)
+                `finally` closeDescriptorIgnoringFailure sourceDescriptor
     case initial of
       Left failure -> pure $ Left failure
-      Right () -> do
-        controlledOpen <- restore $ runBeforeZ3SMTLibProcessDeadline
-          cancellation deadline openSourceDescriptor rollbackOpenedDescriptor
-        case controlledOpen of
-          Left failure -> pure $ Left failure
-          Right (Left failure) -> pure $ Left failure
-          Right (Right sourceDescriptor) ->
-            restore (withSourceDescriptor sourceDescriptor)
-              `finally` closeDescriptorIgnoringFailure sourceDescriptor
+      Right ()
+        | launchAdmitsWorkingDirectoryFirst policy -> do
+            admittedWorkingDirectory <- restore admitWorkingDirectory
+            case admittedWorkingDirectory of
+              Left failure -> pure $ Left failure
+              Right admitted -> withOpenedSource $ \sourceDescriptor ->
+                withSourceDescriptor sourceDescriptor admitted
+        | otherwise -> withOpenedSource $ \sourceDescriptor -> do
+            admittedWorkingDirectory <- admitWorkingDirectory
+            case admittedWorkingDirectory of
+              Left failure -> pure $ Left failure
+              Right admitted -> withSourceDescriptor sourceDescriptor admitted
  where
   Z3SMTLibWorkingDirectoryDescriptor workingDirectoryRaw =
     workingDirectoryDescriptor
   workingDirectoryFd = Fd workingDirectoryRaw
+
+  admitWorkingDirectory = inspectDescriptorWorkingDirectory cancellation
+    deadline workingDirectory workingDirectoryFd
 
   openSourceDescriptor = do
     opened <- tryAny $ withFilePath
@@ -1627,23 +1377,23 @@ openZ3SMTLibDescriptorBoundProcessWithPreExecHook limits cancellation deadline
   rollbackOpenedDescriptor (Right descriptor) =
     closeDescriptorIgnoringFailure descriptor
 
-  withSourceDescriptor sourceDescriptor = do
-    admittedWorkingDirectory <- inspectDescriptorWorkingDirectory cancellation
-      deadline workingDirectory workingDirectoryFd
-    case admittedWorkingDirectory of
+  withSourceDescriptor sourceDescriptor
+      (canonicalWorkingDirectory, workingDirectoryMetadata) = do
+    beforeResult <- captureDescriptorMetadata sourceDescriptor
+    case beforeResult of
       Left failure -> pure $ Left failure
-      Right (canonicalWorkingDirectory, workingDirectoryMetadata) -> do
-        beforeResult <- captureDescriptorMetadata sourceDescriptor
-        case beforeResult of
-          Left failure -> pure $ Left failure
-          Right sourceMetadata
-            | not $ descriptorMetadataIsRegular sourceMetadata ->
-                pure $ Left $ processError Z3SMTLibProcessSnapshotPhase
-                  Z3SMTLibProcessExecutableNotRegular Nothing
-            | not $ descriptorMetadataHasExecuteBit sourceMetadata ->
-                pure $ Left $ processError Z3SMTLibProcessSnapshotPhase
-                  Z3SMTLibProcessExecutableNotExecutable Nothing
-            | otherwise -> createAndSealImage sourceDescriptor sourceMetadata
+      Right sourceMetadata
+        | not $ descriptorMetadataIsRegular sourceMetadata ->
+            pure $ Left $ processError Z3SMTLibProcessSnapshotPhase
+              Z3SMTLibProcessExecutableNotRegular Nothing
+        | not $ descriptorMetadataHasExecuteBit sourceMetadata ->
+            pure $ Left $ processError Z3SMTLibProcessSnapshotPhase
+              Z3SMTLibProcessExecutableNotExecutable Nothing
+        | otherwise -> do
+            admitted <- launchAdmitSource policy sourceDescriptor
+            case admitted of
+              Left failure -> pure $ Left failure
+              Right () -> createAndSealImage sourceDescriptor sourceMetadata
                 canonicalWorkingDirectory workingDirectoryMetadata
 
   createAndSealImage sourceDescriptor sourceMetadata
@@ -1662,7 +1412,7 @@ openZ3SMTLibDescriptorBoundProcessWithPreExecHook limits cancellation deadline
             `finally` closeDescriptorIgnoringFailure stagedDescriptor
 
   createStagedDescriptor = do
-    attempted <- tryAny c_createStagedExecutable
+    attempted <- tryAny $ launchCreateStagedDescriptor policy
     pure $ case attempted of
       Right raw | raw >= 0 -> Right $ Fd raw
       _ -> Left $ processError Z3SMTLibProcessSnapshotPhase
@@ -1682,11 +1432,12 @@ openZ3SMTLibDescriptorBoundProcessWithPreExecHook limits cancellation deadline
             | sourceMetadata /= afterMetadata -> pure $ Left $ processError
                 Z3SMTLibProcessSnapshotPhase
                 Z3SMTLibProcessExecutableMetadataChanged Nothing
-            | otherwise -> finishStagedImage stagedDescriptor sourceMetadata
-                workingDirectoryMetadata canonicalWorkingDirectory digest count
+            | otherwise -> finishStagedImage sourceDescriptor stagedDescriptor
+                sourceMetadata workingDirectoryMetadata
+                canonicalWorkingDirectory digest count
 
-  finishStagedImage stagedDescriptor sourceMetadata workingDirectoryMetadata
-      canonicalWorkingDirectory digest count
+  finishStagedImage sourceDescriptor stagedDescriptor sourceMetadata
+      workingDirectoryMetadata canonicalWorkingDirectory digest count
     | count > fromIntegral (maxBound :: Int64) =
         pure $ Left $ processError Z3SMTLibProcessSnapshotPhase
           Z3SMTLibProcessExecutableByteLimitExceeded $ Just count
@@ -1699,7 +1450,8 @@ openZ3SMTLibDescriptorBoundProcessWithPreExecHook limits cancellation deadline
             Z3SMTLibProcessExecutableDigestMismatch Nothing
           _ -> do
             sealed <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
-              (sealAndVerifyStagedImage stagedDescriptor sourceMetadata count)
+              (launchSealAndVerifyStagedImage policy sourceMetadata
+                stagedDescriptor count)
               $ const $ pure ()
             case sealed of
               Left failure -> pure $ Left failure
@@ -1707,17 +1459,26 @@ openZ3SMTLibDescriptorBoundProcessWithPreExecHook limits cancellation deadline
                 Z3SMTLibProcessSnapshotPhase
                 Z3SMTLibProcessDescriptorBoundStagingFailed Nothing
               Right True -> do
-                let snapshot = Z3SMTLibExecutableSnapshot digest count
-                      $ descriptorBoundExecutableSnapshotField profile
-                          workingDirectory canonicalWorkingDirectory
-                          sourceMetadata workingDirectoryMetadata digest count
-                          expected
-                hooked <- runBeforeZ3SMTLibProcessDeadline
-                  cancellation deadline preExecHook $ const $ pure ()
-                case hooked of
+                inspected <- launchInspectSealedImage policy stagedDescriptor
+                case inspected of
                   Left failure -> pure $ Left failure
-                  Right () -> spawnStagedImage snapshot stagedDescriptor
-                    canonicalWorkingDirectory
+                  Right () -> do
+                    let snapshot = Z3SMTLibExecutableSnapshot digest count
+                          $ launchSnapshotField policy profile workingDirectory
+                              canonicalWorkingDirectory sourceMetadata
+                              workingDirectoryMetadata digest count expected
+                    hooked <- runBeforeZ3SMTLibProcessDeadline
+                      cancellation deadline (launchPreFinalHook policy)
+                      $ const $ pure ()
+                    case hooked of
+                      Left failure -> pure $ Left failure
+                      Right () -> do
+                        admitted <- launchAdmitFinal policy sourceDescriptor
+                          stagedDescriptor
+                        case admitted of
+                          Left failure -> pure $ Left failure
+                          Right () -> spawnStagedImage snapshot
+                            stagedDescriptor canonicalWorkingDirectory
 
   spawnStagedImage snapshot stagedDescriptor canonicalWorkingDirectory = do
     rollbackStatus <- newEmptyTMVarIO
@@ -1728,7 +1489,7 @@ openZ3SMTLibDescriptorBoundProcessWithPreExecHook limits cancellation deadline
             atomically $ void $ tryPutTMVar rollbackStatus cleanup
     controlledSpawn <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
       (nativeDescriptorSpawn limits profile stagedDescriptor
-        workingDirectoryFd ProcessDescriptorBoundExecutableLaunch)
+        workingDirectoryFd $ launchStrategy policy)
       rollbackAttempt
     case controlledSpawn of
       Left failure -> do
@@ -1737,9 +1498,79 @@ openZ3SMTLibDescriptorBoundProcessWithPreExecHook limits cancellation deadline
       Right (Left failure) -> pure $ Left failure
       Right (Right created) -> finishDescriptorCreated limits cancellation
         deadline snapshot canonicalWorkingDirectory created
-#endif
 
-#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+-- | Run one effective-ID access checker on a borrowed descriptor under the
+-- cancellation and deadline, mapping its verdict, or any exception it
+-- raises, onto the sanitized snapshot-phase refusal.
+observeEffectiveIDAccessWith
+  :: Z3SMTLibProcessCancellation
+  -> Z3SMTLibProcessDeadline
+  -> (CInt -> IO Z3SMTLibEffectiveIDExecutableAccessCheckResult)
+  -> Fd
+  -> IO (Either Z3SMTLibProcessError ())
+observeEffectiveIDAccessWith cancellation deadline accessCheck descriptor = do
+  controlled <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
+    (tryAny $ accessCheck $ fdToCInt descriptor)
+    $ const $ pure ()
+  pure $ case controlled of
+    Left failure -> Left failure
+    Right (Left _) -> Left $ processError Z3SMTLibProcessSnapshotPhase
+      Z3SMTLibProcessEffectiveIDExecutableAccessCheckFailed Nothing
+    Right (Right result) -> case result of
+      Z3SMTLibEffectiveIDExecutableAccessAdmitted -> Right ()
+      Z3SMTLibEffectiveIDExecutableAccessDenied -> Left $ processError
+        Z3SMTLibProcessSnapshotPhase
+        Z3SMTLibProcessEffectiveIDExecutableAccessDenied Nothing
+      Z3SMTLibEffectiveIDExecutableAccessCheckUnavailable -> Left
+        $ processError Z3SMTLibProcessSnapshotPhase
+            Z3SMTLibProcessEffectiveIDExecutableAccessCheckUnavailable
+            Nothing
+      Z3SMTLibEffectiveIDExecutableAccessCheckFailed -> Left $ processError
+        Z3SMTLibProcessSnapshotPhase
+        Z3SMTLibProcessEffectiveIDExecutableAccessCheckFailed Nothing
+
+-- | Run one @AT_EXECVE_CHECK@ checker on a borrowed descriptor under the
+-- cancellation and deadline.  The three failure classes name whether the
+-- source or the sealed staged image was being checked; an exception from the
+-- checker is reported as the failed class.
+observeExecveCheckWith
+  :: Z3SMTLibProcessCancellation
+  -> Z3SMTLibProcessDeadline
+  -> (CInt -> IO Z3SMTLibExecveCheckResult)
+  -> Z3SMTLibProcessFailureClass
+  -> Z3SMTLibProcessFailureClass
+  -> Z3SMTLibProcessFailureClass
+  -> Fd
+  -> IO (Either Z3SMTLibProcessError ())
+observeExecveCheckWith cancellation deadline execveCheck denied unavailable
+    failed descriptor = do
+  controlled <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
+    (tryAny $ execveCheck $ fdToCInt descriptor)
+    $ const $ pure ()
+  pure $ case controlled of
+    Left failure -> Left failure
+    Right (Left _) -> Left $ processError
+      Z3SMTLibProcessSnapshotPhase failed Nothing
+    Right (Right result) -> case result of
+      Z3SMTLibExecveCheckAdmitted -> Right ()
+      Z3SMTLibExecveCheckDenied -> Left $ processError
+        Z3SMTLibProcessSnapshotPhase denied Nothing
+      Z3SMTLibExecveCheckUnavailable -> Left $ processError
+        Z3SMTLibProcessSnapshotPhase unavailable Nothing
+      Z3SMTLibExecveCheckFailed -> Left $ processError
+        Z3SMTLibProcessSnapshotPhase failed Nothing
+
+-- | Run admissions in order and stop at the first refusal.
+admitInOrder
+  :: [IO (Either Z3SMTLibProcessError ())]
+  -> IO (Either Z3SMTLibProcessError ())
+admitInOrder [] = pure $ Right ()
+admitInOrder (admission : rest) = do
+  admitted <- admission
+  case admitted of
+    Left failure -> pure $ Left failure
+    Right () -> admitInOrder rest
+
 data DescriptorCreated = DescriptorCreated
   !Handle !Handle !Handle !ProcessHandle !Integer
   !ProcessExecutableLaunchStrategy

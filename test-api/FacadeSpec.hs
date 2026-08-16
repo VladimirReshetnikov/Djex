@@ -1131,8 +1131,10 @@ facadeTests = testGroup "public Djex facade"
           applicableDomainValidator
             :: LengthEvaluationLimits
             -> LengthInputBoxLimits
+            -> LengthBooleanFiniteUnionLimits
             -> CheckedLengthProblem Int ExferenceLocal
-            -> Either LengthApplicableDomainValidationError
+            -> Either
+                LengthApplicableDomainValidationError
                 (LengthApplicableDomainValidation
                   (BehavioralEvidence
                     FiniteListSpineLengthV1
@@ -1140,12 +1142,23 @@ facadeTests = testGroup "public Djex facade"
                   (BehavioralEvidence
                     FiniteListSpineLengthV1
                     ValidatedLengthApplicableDomain))
-          applicableDomainValidator = validateLengthProblemApplicableDomain
-          applicableDomainMaximumsProjection
+          applicableDomainValidator =
+            validateLengthProblemApplicableDomain
+          applicableDomainBoxesProjection
             :: ValidatedLengthApplicableDomain
-            -> [Natural]
-          applicableDomainMaximumsProjection =
-            validatedLengthApplicableDomainInclusiveMaximums
+            -> [[Natural]]
+          applicableDomainBoxesProjection =
+            validatedLengthApplicableDomainInclusiveMaximumBoxes
+          applicableDomainBoxCountProjection
+            :: ValidatedLengthApplicableDomain
+            -> Natural
+          applicableDomainBoxCountProjection =
+            validatedLengthApplicableDomainBoxCount
+          applicableDomainVisitProjection
+            :: ValidatedLengthApplicableDomain
+            -> Natural
+          applicableDomainVisitProjection =
+            validatedLengthApplicableDomainAssignmentVisitCount
           applicableDomainAssignmentProjection
             :: ValidatedLengthApplicableDomain
             -> Natural
@@ -1161,348 +1174,6 @@ facadeTests = testGroup "public Djex facade"
             -> LengthCounterexampleBasis
           applicableDomainBasisProjection =
             validatedLengthApplicableDomainBasis
-          positiveAffineApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> CheckedLengthProblem Int ExferenceLocal
-            -> Either LengthApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  (BehavioralEvidence
-                    FiniteListSpineLengthV1
-                    ValidatedLengthCounterexample)
-                  (BehavioralEvidence
-                    FiniteListSpineLengthV1
-                    ValidatedLengthPositiveAffineApplicableDomain))
-          positiveAffineApplicableDomainValidator =
-            validateLengthProblemPositiveAffineApplicableDomain
-          positiveAffineApplicableDomainMaximumsProjection
-            :: ValidatedLengthPositiveAffineApplicableDomain
-            -> [Natural]
-          positiveAffineApplicableDomainMaximumsProjection =
-            validatedLengthPositiveAffineApplicableDomainInclusiveMaximums
-          positiveAffineApplicableDomainAssignmentProjection
-            :: ValidatedLengthPositiveAffineApplicableDomain
-            -> Natural
-          positiveAffineApplicableDomainAssignmentProjection =
-            validatedLengthPositiveAffineApplicableDomainAssignmentCount
-          positiveAffineApplicableDomainApplicableProjection
-            :: ValidatedLengthPositiveAffineApplicableDomain
-            -> Natural
-          positiveAffineApplicableDomainApplicableProjection =
-            validatedLengthPositiveAffineApplicableDomainApplicableAssignmentCount
-          positiveAffineApplicableDomainBasisProjection
-            :: ValidatedLengthPositiveAffineApplicableDomain
-            -> LengthCounterexampleBasis
-          positiveAffineApplicableDomainBasisProjection =
-            validatedLengthPositiveAffineApplicableDomainBasis
-          relationalPositiveAffineApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> CheckedLengthProblem Int ExferenceLocal
-            -> Either LengthApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  (BehavioralEvidence
-                    FiniteListSpineLengthV1
-                    ValidatedLengthCounterexample)
-                  (BehavioralEvidence
-                    FiniteListSpineLengthV1
-                    ValidatedLengthRelationalPositiveAffineApplicableDomain))
-          relationalPositiveAffineApplicableDomainValidator =
-            validateLengthProblemRelationalPositiveAffineApplicableDomain
-          relationalPositiveAffineApplicableDomainMaximumsProjection
-            :: ValidatedLengthRelationalPositiveAffineApplicableDomain
-            -> [Natural]
-          relationalPositiveAffineApplicableDomainMaximumsProjection =
-            validatedLengthRelationalPositiveAffineApplicableDomainInclusiveMaximums
-          relationalPositiveAffineApplicableDomainAssignmentProjection
-            :: ValidatedLengthRelationalPositiveAffineApplicableDomain
-            -> Natural
-          relationalPositiveAffineApplicableDomainAssignmentProjection =
-            validatedLengthRelationalPositiveAffineApplicableDomainAssignmentCount
-          relationalPositiveAffineApplicableDomainApplicableProjection
-            :: ValidatedLengthRelationalPositiveAffineApplicableDomain
-            -> Natural
-          relationalPositiveAffineApplicableDomainApplicableProjection =
-            validatedLengthRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-          relationalPositiveAffineApplicableDomainBasisProjection
-            :: ValidatedLengthRelationalPositiveAffineApplicableDomain
-            -> LengthCounterexampleBasis
-          relationalPositiveAffineApplicableDomainBasisProjection =
-            validatedLengthRelationalPositiveAffineApplicableDomainBasis
-          strictRelationalPositiveAffineApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> CheckedLengthProblem Int ExferenceLocal
-            -> Either LengthApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  (BehavioralEvidence
-                    FiniteListSpineLengthV1
-                    ValidatedLengthCounterexample)
-                  (BehavioralEvidence
-                    FiniteListSpineLengthV1
-                    ValidatedLengthStrictRelationalPositiveAffineApplicableDomain))
-          strictRelationalPositiveAffineApplicableDomainValidator =
-            validateLengthProblemStrictRelationalPositiveAffineApplicableDomain
-          strictRelationalPositiveAffineApplicableDomainMaximumsProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
-            -> [Natural]
-          strictRelationalPositiveAffineApplicableDomainMaximumsProjection =
-            validatedLengthStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
-          strictRelationalPositiveAffineApplicableDomainAssignmentProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineApplicableDomainAssignmentProjection =
-            validatedLengthStrictRelationalPositiveAffineApplicableDomainAssignmentCount
-          strictRelationalPositiveAffineApplicableDomainApplicableProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineApplicableDomainApplicableProjection =
-            validatedLengthStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-          strictRelationalPositiveAffineApplicableDomainBasisProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
-            -> LengthCounterexampleBasis
-          strictRelationalPositiveAffineApplicableDomainBasisProjection =
-            validatedLengthStrictRelationalPositiveAffineApplicableDomainBasis
-          strictRelationalPositiveAffineQuotientApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> CheckedLengthProblem Int ExferenceLocal
-            -> Either LengthApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  (BehavioralEvidence
-                    FiniteListSpineLengthV1
-                    ValidatedLengthCounterexample)
-                  (BehavioralEvidence
-                    FiniteListSpineLengthV1
-                    ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain))
-          strictRelationalPositiveAffineQuotientApplicableDomainValidator =
-            validateLengthProblemStrictRelationalPositiveAffineQuotientApplicableDomain
-          strictRelationalPositiveAffineQuotientApplicableDomainMaximumsProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
-            -> [Natural]
-          strictRelationalPositiveAffineQuotientApplicableDomainMaximumsProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainInclusiveMaximums
-          strictRelationalPositiveAffineQuotientApplicableDomainAssignmentProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientApplicableDomainAssignmentProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainAssignmentCount
-          strictRelationalPositiveAffineQuotientApplicableDomainApplicableProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientApplicableDomainApplicableProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainApplicableAssignmentCount
-          strictRelationalPositiveAffineQuotientApplicableDomainBasisProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
-            -> LengthCounterexampleBasis
-          strictRelationalPositiveAffineQuotientApplicableDomainBasisProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainBasis
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> CheckedLengthProblem Int ExferenceLocal
-            -> Either LengthApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  (BehavioralEvidence
-                    FiniteListSpineLengthV1
-                    ValidatedLengthCounterexample)
-                  (BehavioralEvidence
-                    FiniteListSpineLengthV1
-                    ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain))
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator =
-            validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainMaximumsProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-            -> [Natural]
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainMaximumsProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInclusiveMaximums
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasisProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-            -> LengthCounterexampleBasis
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasisProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasis
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> CheckedLengthProblem Int ExferenceLocal
-            -> Either LengthApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  (BehavioralEvidence
-                    FiniteListSpineLengthV1
-                    ValidatedLengthCounterexample)
-                  (BehavioralEvidence
-                    FiniteListSpineLengthV1
-                    ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain))
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidator =
-            validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainMaximumsProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-            -> [Natural]
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainMaximumsProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainInclusiveMaximums
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasisProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-            -> LengthCounterexampleBasis
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasisProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasis
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthBooleanFiniteUnionLimits
-            -> CheckedLengthProblem Int ExferenceLocal
-            -> Either
-                LengthBooleanFiniteUnionApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  (BehavioralEvidence
-                    FiniteListSpineLengthV1
-                    ValidatedLengthCounterexample)
-                  (BehavioralEvidence
-                    FiniteListSpineLengthV1
-                    ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain))
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator =
-            validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxesProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-            -> [[Natural]]
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxesProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCountProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCountProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainVisitProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainVisitProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasisProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-            -> LengthCounterexampleBasis
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasisProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthBooleanFiniteUnionLimits
-            -> CheckedLengthProblem Int ExferenceLocal
-            -> Either
-                LengthBooleanFiniteUnionApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  (BehavioralEvidence
-                    FiniteListSpineLengthV1
-                    ValidatedLengthCounterexample)
-                  (BehavioralEvidence
-                    FiniteListSpineLengthV1
-                    ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain))
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidator =
-            validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxesProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-            -> [[Natural]]
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxesProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainInclusiveMaximumBoxes
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxCountProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxCountProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainVisitProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainVisitProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentVisitCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainApplicableProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainApplicableProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainApplicableAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBasisProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-            -> LengthCounterexampleBasis
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBasisProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBasis
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthBooleanFiniteUnionLimits
-            -> CheckedLengthProblem Int ExferenceLocal
-            -> Either
-                LengthBooleanFiniteUnionApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  (BehavioralEvidence
-                    FiniteListSpineLengthV1
-                    ValidatedLengthCounterexample)
-                  (BehavioralEvidence
-                    FiniteListSpineLengthV1
-                    ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain))
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidator =
-            validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxesProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-            -> [[Natural]]
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxesProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainInclusiveMaximumBoxes
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCountProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCountProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainVisitProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainVisitProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentVisitCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasisProjection
-            :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-            -> LengthCounterexampleBasis
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasisProjection =
-            validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasis
           queryInputReplayer
             :: LengthEvaluationLimits
             -> LengthSMTLibQuery Int ExferenceLocal
@@ -1540,109 +1211,15 @@ facadeTests = testGroup "public Djex facade"
           queryApplicableDomainValidator
             :: LengthEvaluationLimits
             -> LengthInputBoxLimits
+            -> LengthBooleanFiniteUnionLimits
             -> LengthSMTLibQuery Int ExferenceLocal
-            -> Either LengthSMTLibApplicableDomainValidationError
+            -> Either
+                LengthSMTLibApplicableDomainValidationError
                 (LengthApplicableDomainValidation
                   ValidatedLengthCounterexample
                   ValidatedLengthApplicableDomain)
           queryApplicableDomainValidator =
             validateLengthSMTLibQueryApplicableDomain
-          queryPositiveAffineApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthSMTLibQuery Int ExferenceLocal
-            -> Either LengthSMTLibApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  ValidatedLengthCounterexample
-                  ValidatedLengthPositiveAffineApplicableDomain)
-          queryPositiveAffineApplicableDomainValidator =
-            validateLengthSMTLibQueryPositiveAffineApplicableDomain
-          queryRelationalPositiveAffineApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthSMTLibQuery Int ExferenceLocal
-            -> Either LengthSMTLibApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  ValidatedLengthCounterexample
-                  ValidatedLengthRelationalPositiveAffineApplicableDomain)
-          queryRelationalPositiveAffineApplicableDomainValidator =
-            validateLengthSMTLibQueryRelationalPositiveAffineApplicableDomain
-          queryStrictRelationalPositiveAffineApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthSMTLibQuery Int ExferenceLocal
-            -> Either LengthSMTLibApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  ValidatedLengthCounterexample
-                  ValidatedLengthStrictRelationalPositiveAffineApplicableDomain)
-          queryStrictRelationalPositiveAffineApplicableDomainValidator =
-            validateLengthSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
-          queryStrictRelationalPositiveAffineQuotientApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthSMTLibQuery Int ExferenceLocal
-            -> Either LengthSMTLibApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  ValidatedLengthCounterexample
-                  ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain)
-          queryStrictRelationalPositiveAffineQuotientApplicableDomainValidator =
-            validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain
-          queryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthSMTLibQuery Int ExferenceLocal
-            -> Either LengthSMTLibApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  ValidatedLengthCounterexample
-                  ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain)
-          queryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator =
-            validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthSMTLibQuery Int ExferenceLocal
-            -> Either LengthSMTLibApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  ValidatedLengthCounterexample
-                  ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain)
-          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidator =
-            validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthBooleanFiniteUnionLimits
-            -> LengthSMTLibQuery Int ExferenceLocal
-            -> Either
-                LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  ValidatedLengthCounterexample
-                  ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain)
-          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator =
-            validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthBooleanFiniteUnionLimits
-            -> LengthSMTLibQuery Int ExferenceLocal
-            -> Either
-                LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  ValidatedLengthCounterexample
-                  ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain)
-          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidator =
-            validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthBooleanFiniteUnionLimits
-            -> LengthSMTLibQuery Int ExferenceLocal
-            -> Either
-                LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  ValidatedLengthCounterexample
-                  ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain)
-          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidator =
-            validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
           queryInputSymbolsProjection
             :: LengthSMTLibQuery Int ExferenceLocal
             -> [[Word8]]
@@ -1803,73 +1380,15 @@ facadeTests = testGroup "public Djex facade"
         simplificationInputsProjection `seq` simplificationResultProjection `seq`
         simplificationBasisProjection `seq` simplificationChangedProjection `seq`
         applicableDomainValidator `seq`
-        applicableDomainMaximumsProjection `seq`
+        applicableDomainBoxesProjection `seq`
+        applicableDomainBoxCountProjection `seq`
+        applicableDomainVisitProjection `seq`
         applicableDomainAssignmentProjection `seq`
         applicableDomainApplicableProjection `seq`
         applicableDomainBasisProjection `seq`
-        positiveAffineApplicableDomainValidator `seq`
-        positiveAffineApplicableDomainMaximumsProjection `seq`
-        positiveAffineApplicableDomainAssignmentProjection `seq`
-        positiveAffineApplicableDomainApplicableProjection `seq`
-        positiveAffineApplicableDomainBasisProjection `seq`
-        relationalPositiveAffineApplicableDomainValidator `seq`
-        relationalPositiveAffineApplicableDomainMaximumsProjection `seq`
-        relationalPositiveAffineApplicableDomainAssignmentProjection `seq`
-        relationalPositiveAffineApplicableDomainApplicableProjection `seq`
-        relationalPositiveAffineApplicableDomainBasisProjection `seq`
-        strictRelationalPositiveAffineApplicableDomainValidator `seq`
-        strictRelationalPositiveAffineApplicableDomainMaximumsProjection `seq`
-        strictRelationalPositiveAffineApplicableDomainAssignmentProjection `seq`
-        strictRelationalPositiveAffineApplicableDomainApplicableProjection `seq`
-        strictRelationalPositiveAffineApplicableDomainBasisProjection `seq`
-        strictRelationalPositiveAffineQuotientApplicableDomainValidator `seq`
-        strictRelationalPositiveAffineQuotientApplicableDomainMaximumsProjection `seq`
-        strictRelationalPositiveAffineQuotientApplicableDomainAssignmentProjection `seq`
-        strictRelationalPositiveAffineQuotientApplicableDomainApplicableProjection `seq`
-        strictRelationalPositiveAffineQuotientApplicableDomainBasisProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainMaximumsProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasisProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidator `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainMaximumsProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasisProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxesProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCountProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainVisitProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasisProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidator `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxesProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxCountProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainVisitProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainApplicableProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBasisProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidator `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxesProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCountProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainVisitProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasisProjection `seq`
         queryInputReplayer `seq` queryOriginProber `seq`
         queryInputBoxValidator `seq` queryCounterexampleSimplifier `seq`
         queryApplicableDomainValidator `seq`
-        queryPositiveAffineApplicableDomainValidator `seq`
-        queryRelationalPositiveAffineApplicableDomainValidator `seq`
-        queryStrictRelationalPositiveAffineApplicableDomainValidator `seq`
-        queryStrictRelationalPositiveAffineQuotientApplicableDomainValidator `seq`
-        queryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator `seq`
-        queryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidator `seq`
-        queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator `seq`
-        queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidator `seq`
-        queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidator `seq`
         queryInputSymbolsProjection `seq`
         queryInputValueRequestProjection `seq` queryObservationAssociator `seq`
         queryObservationReplayer `seq` checkResponseParser `seq`
@@ -1903,39 +1422,10 @@ facadeTests = testGroup "public Djex facade"
         (rnf :: LengthApplicableDomainValidation () () -> ()) `seq`
         (rnf :: LengthApplicableDomainValidationError -> ()) `seq`
         (rnf :: ValidatedLengthApplicableDomain -> ()) `seq`
-        (rnf :: ValidatedLengthPositiveAffineApplicableDomain -> ()) `seq`
-        (rnf :: ValidatedLengthRelationalPositiveAffineApplicableDomain -> ())
-          `seq`
-        (rnf :: ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
-          -> ()) `seq`
-        (rnf
-          :: ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
-          -> ()) `seq`
-        (rnf
-          :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-          -> ()) `seq`
-        (rnf
-          :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-          -> ()) `seq`
-        (rnf
-          :: LengthBooleanFiniteUnionApplicableDomainValidationError
-          -> ()) `seq`
-        (rnf
-          :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-          -> ()) `seq`
-        (rnf
-          :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-          -> ()) `seq`
-        (rnf
-          :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-          -> ()) `seq`
         (rnf :: LengthSMTLibInputReplayError -> ()) `seq`
         (rnf :: LengthSMTLibInputBoxValidationError -> ()) `seq`
         (rnf :: LengthSMTLibCounterexampleSimplificationError -> ()) `seq`
         (rnf :: LengthSMTLibApplicableDomainValidationError -> ()) `seq`
-        (rnf
-          :: LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError
-          -> ()) `seq`
         (rnf :: LengthSMTLibExecutableDigestExpectation -> ()) `seq`
         (rnf :: LengthSMTLibExecutableLaunchStrategy -> ()) `seq`
         (rnf :: LengthSMTLibExecutionConfig -> ()) `seq`
@@ -2002,54 +1492,6 @@ facadeTests = testGroup "public Djex facade"
         map (fromIntegral . fromEnum)
           ("finite-list-spine-length/\
             \bounded-counterexample-simplification/v1" :: String)
-      lengthApplicableDomainValidationSchemaTag @?=
-        map (fromIntegral . fromEnum)
-          ("finite-list-spine-length/\
-            \finite-precondition-domain-establishment/v1" :: String)
-      lengthPositiveAffineApplicableDomainValidationSchemaTag @?=
-        map (fromIntegral . fromEnum)
-          ("finite-list-spine-length/\
-            \positive-affine-precondition-domain-establishment/v1" :: String)
-      lengthRelationalPositiveAffineApplicableDomainValidationSchemaTag @?=
-        map (fromIntegral . fromEnum)
-          ("finite-list-spine-length/\
-            \relational-positive-affine-precondition-domain-establishment/v1"
-            :: String)
-      lengthStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag
-        @?= map (fromIntegral . fromEnum)
-          ("finite-list-spine-length/\
-            \strict-relational-positive-affine-precondition-domain-establishment/v1"
-            :: String)
-      lengthStrictRelationalPositiveAffineQuotientApplicableDomainValidationSchemaTag
-        @?= map (fromIntegral . fromEnum)
-          ("finite-list-spine-length/\
-            \strict-relational-positive-affine-quotient-precondition-domain-establishment/v1"
-            :: String)
-      lengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationSchemaTag
-        @?= map (fromIntegral . fromEnum)
-          ("finite-list-spine-length/\
-            \strict-relational-positive-affine-quotient-root-extrema-precondition-domain-establishment/v1"
-            :: String)
-      lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidationSchemaTag
-        @?= map (fromIntegral . fromEnum)
-          ("finite-list-spine-length/\
-            \strict-relational-positive-affine-quotient-root-extrema-monus-precondition-domain-establishment/v1"
-            :: String)
-      lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag
-        @?= map (fromIntegral . fromEnum)
-          ("finite-list-spine-length/\
-            \strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-precondition-domain-establishment/v1"
-            :: String)
-      lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidationSchemaTag
-        @?= map (fromIntegral . fromEnum)
-          ("finite-list-spine-length/\
-            \strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-precondition-domain-establishment/v1"
-            :: String)
-      lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag
-        @?= map (fromIntegral . fromEnum)
-          ("finite-list-spine-length/\
-            \strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-recursive-extrema-monus-piecewise-affine-branching-precondition-domain-establishment/v1"
-            :: String)
       (LengthInputBoxCounterexample () :: LengthInputBoxValidation () ()) @?=
         LengthInputBoxCounterexample ()
       (LengthInputBoxValidated () :: LengthInputBoxValidation () ()) @?=
@@ -2066,11 +1508,9 @@ facadeTests = testGroup "public Djex facade"
           :: LengthApplicableDomainValidation () ()
         ) @?= LengthApplicableDomainEstablished ()
       let applicableDomainError =
-            LengthApplicableDomainInputBoxValidationRejected
-              $ LengthInputBoxBoundsArityMismatch 1 2
+            LengthApplicableDomainClosureInspectionLimitExceeded 2 3 4
       applicableDomainError @?=
-        LengthApplicableDomainInputBoxValidationRejected
-          (LengthInputBoxBoundsArityMismatch 1 2)
+        LengthApplicableDomainClosureInspectionLimitExceeded 2 3 4
       ( LengthSMTLibInputBoxValidationAssociationRejected
           ReplayDomainMismatch
           :: LengthSMTLibInputBoxValidationError
@@ -2095,16 +1535,11 @@ facadeTests = testGroup "public Djex facade"
         ) @?=
           LengthSMTLibApplicableDomainValidationAssociationRejected
             ReplayEncodingFingerprintMismatch
-      let finiteUnionFailure =
-            LengthBooleanFiniteUnionClosureInspectionLimitExceeded 2 3 4
-      finiteUnionFailure @?=
-        LengthBooleanFiniteUnionClosureInspectionLimitExceeded 2 3 4
-      ( LengthSMTLibBooleanFiniteUnionApplicableDomainValidationAssociationRejected
-          ReplayEncodingFingerprintMismatch
-          :: LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError
+      ( LengthSMTLibApplicableDomainValidationRejected applicableDomainError
+          :: LengthSMTLibApplicableDomainValidationError
         ) @?=
-          LengthSMTLibBooleanFiniteUnionApplicableDomainValidationAssociationRejected
-            ReplayEncodingFingerprintMismatch
+          LengthSMTLibApplicableDomainValidationRejected
+            applicableDomainError
       lengthProblemTermGraphLimits defaultLengthProblemLimits @?=
         defaultTermGraphLimits
       lengthProblemGraphFingerprintByteLimit defaultLengthProblemLimits @?=
@@ -2344,8 +1779,10 @@ facadeTests = testGroup "public Djex facade"
           applicableDomainValidator
             :: LengthEvaluationLimits
             -> LengthInputBoxLimits
+            -> LengthBooleanFiniteUnionLimits
             -> CheckedLengthSpinePairProblem Int ExferenceLocal
-            -> Either LengthSpinePairApplicableDomainValidationError
+            -> Either
+                LengthSpinePairApplicableDomainValidationError
                 (LengthApplicableDomainValidation
                   (BehavioralEvidence
                     FiniteBinaryProductSpineLengthsV1
@@ -2355,11 +1792,21 @@ facadeTests = testGroup "public Djex facade"
                     ValidatedLengthSpinePairApplicableDomain))
           applicableDomainValidator =
             validateLengthSpinePairProblemApplicableDomain
-          applicableDomainMaximumsProjection
+          applicableDomainBoxesProjection
             :: ValidatedLengthSpinePairApplicableDomain
-            -> [Natural]
-          applicableDomainMaximumsProjection =
-            validatedLengthSpinePairApplicableDomainInclusiveMaximums
+            -> [[Natural]]
+          applicableDomainBoxesProjection =
+            validatedLengthSpinePairApplicableDomainInclusiveMaximumBoxes
+          applicableDomainBoxCountProjection
+            :: ValidatedLengthSpinePairApplicableDomain
+            -> Natural
+          applicableDomainBoxCountProjection =
+            validatedLengthSpinePairApplicableDomainBoxCount
+          applicableDomainVisitProjection
+            :: ValidatedLengthSpinePairApplicableDomain
+            -> Natural
+          applicableDomainVisitProjection =
+            validatedLengthSpinePairApplicableDomainAssignmentVisitCount
           applicableDomainAssignmentProjection
             :: ValidatedLengthSpinePairApplicableDomain
             -> Natural
@@ -2375,348 +1822,6 @@ facadeTests = testGroup "public Djex facade"
             -> LengthCounterexampleBasis
           applicableDomainBasisProjection =
             validatedLengthSpinePairApplicableDomainBasis
-          positiveAffineApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> CheckedLengthSpinePairProblem Int ExferenceLocal
-            -> Either LengthSpinePairApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  (BehavioralEvidence
-                    FiniteBinaryProductSpineLengthsV1
-                    ValidatedLengthSpinePairCounterexample)
-                  (BehavioralEvidence
-                    FiniteBinaryProductSpineLengthsV1
-                    ValidatedLengthSpinePairPositiveAffineApplicableDomain))
-          positiveAffineApplicableDomainValidator =
-            validateLengthSpinePairProblemPositiveAffineApplicableDomain
-          positiveAffineApplicableDomainMaximumsProjection
-            :: ValidatedLengthSpinePairPositiveAffineApplicableDomain
-            -> [Natural]
-          positiveAffineApplicableDomainMaximumsProjection =
-            validatedLengthSpinePairPositiveAffineApplicableDomainInclusiveMaximums
-          positiveAffineApplicableDomainAssignmentProjection
-            :: ValidatedLengthSpinePairPositiveAffineApplicableDomain
-            -> Natural
-          positiveAffineApplicableDomainAssignmentProjection =
-            validatedLengthSpinePairPositiveAffineApplicableDomainAssignmentCount
-          positiveAffineApplicableDomainApplicableProjection
-            :: ValidatedLengthSpinePairPositiveAffineApplicableDomain
-            -> Natural
-          positiveAffineApplicableDomainApplicableProjection =
-            validatedLengthSpinePairPositiveAffineApplicableDomainApplicableAssignmentCount
-          positiveAffineApplicableDomainBasisProjection
-            :: ValidatedLengthSpinePairPositiveAffineApplicableDomain
-            -> LengthCounterexampleBasis
-          positiveAffineApplicableDomainBasisProjection =
-            validatedLengthSpinePairPositiveAffineApplicableDomainBasis
-          relationalPositiveAffineApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> CheckedLengthSpinePairProblem Int ExferenceLocal
-            -> Either LengthSpinePairApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  (BehavioralEvidence
-                    FiniteBinaryProductSpineLengthsV1
-                    ValidatedLengthSpinePairCounterexample)
-                  (BehavioralEvidence
-                    FiniteBinaryProductSpineLengthsV1
-                    ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain))
-          relationalPositiveAffineApplicableDomainValidator =
-            validateLengthSpinePairProblemRelationalPositiveAffineApplicableDomain
-          relationalPositiveAffineApplicableDomainMaximumsProjection
-            :: ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
-            -> [Natural]
-          relationalPositiveAffineApplicableDomainMaximumsProjection =
-            validatedLengthSpinePairRelationalPositiveAffineApplicableDomainInclusiveMaximums
-          relationalPositiveAffineApplicableDomainAssignmentProjection
-            :: ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
-            -> Natural
-          relationalPositiveAffineApplicableDomainAssignmentProjection =
-            validatedLengthSpinePairRelationalPositiveAffineApplicableDomainAssignmentCount
-          relationalPositiveAffineApplicableDomainApplicableProjection
-            :: ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
-            -> Natural
-          relationalPositiveAffineApplicableDomainApplicableProjection =
-            validatedLengthSpinePairRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-          relationalPositiveAffineApplicableDomainBasisProjection
-            :: ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
-            -> LengthCounterexampleBasis
-          relationalPositiveAffineApplicableDomainBasisProjection =
-            validatedLengthSpinePairRelationalPositiveAffineApplicableDomainBasis
-          strictRelationalPositiveAffineApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> CheckedLengthSpinePairProblem Int ExferenceLocal
-            -> Either LengthSpinePairApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  (BehavioralEvidence
-                    FiniteBinaryProductSpineLengthsV1
-                    ValidatedLengthSpinePairCounterexample)
-                  (BehavioralEvidence
-                    FiniteBinaryProductSpineLengthsV1
-                    ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain))
-          strictRelationalPositiveAffineApplicableDomainValidator =
-            validateLengthSpinePairProblemStrictRelationalPositiveAffineApplicableDomain
-          strictRelationalPositiveAffineApplicableDomainMaximumsProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
-            -> [Natural]
-          strictRelationalPositiveAffineApplicableDomainMaximumsProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
-          strictRelationalPositiveAffineApplicableDomainAssignmentProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineApplicableDomainAssignmentProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainAssignmentCount
-          strictRelationalPositiveAffineApplicableDomainApplicableProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineApplicableDomainApplicableProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-          strictRelationalPositiveAffineApplicableDomainBasisProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
-            -> LengthCounterexampleBasis
-          strictRelationalPositiveAffineApplicableDomainBasisProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainBasis
-          strictRelationalPositiveAffineQuotientApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> CheckedLengthSpinePairProblem Int ExferenceLocal
-            -> Either LengthSpinePairApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  (BehavioralEvidence
-                    FiniteBinaryProductSpineLengthsV1
-                    ValidatedLengthSpinePairCounterexample)
-                  (BehavioralEvidence
-                    FiniteBinaryProductSpineLengthsV1
-                    ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain))
-          strictRelationalPositiveAffineQuotientApplicableDomainValidator =
-            validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientApplicableDomain
-          strictRelationalPositiveAffineQuotientApplicableDomainMaximumsProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
-            -> [Natural]
-          strictRelationalPositiveAffineQuotientApplicableDomainMaximumsProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainInclusiveMaximums
-          strictRelationalPositiveAffineQuotientApplicableDomainAssignmentProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientApplicableDomainAssignmentProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainAssignmentCount
-          strictRelationalPositiveAffineQuotientApplicableDomainApplicableProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientApplicableDomainApplicableProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainApplicableAssignmentCount
-          strictRelationalPositiveAffineQuotientApplicableDomainBasisProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
-            -> LengthCounterexampleBasis
-          strictRelationalPositiveAffineQuotientApplicableDomainBasisProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainBasis
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> CheckedLengthSpinePairProblem Int ExferenceLocal
-            -> Either LengthSpinePairApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  (BehavioralEvidence
-                    FiniteBinaryProductSpineLengthsV1
-                    ValidatedLengthSpinePairCounterexample)
-                  (BehavioralEvidence
-                    FiniteBinaryProductSpineLengthsV1
-                    ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain))
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator =
-            validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainMaximumsProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-            -> [Natural]
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainMaximumsProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInclusiveMaximums
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasisProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-            -> LengthCounterexampleBasis
-          strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasisProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasis
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> CheckedLengthSpinePairProblem Int ExferenceLocal
-            -> Either LengthSpinePairApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  (BehavioralEvidence
-                    FiniteBinaryProductSpineLengthsV1
-                    ValidatedLengthSpinePairCounterexample)
-                  (BehavioralEvidence
-                    FiniteBinaryProductSpineLengthsV1
-                    ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain))
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidator =
-            validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainMaximumsProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-            -> [Natural]
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainMaximumsProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainInclusiveMaximums
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasisProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-            -> LengthCounterexampleBasis
-          strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasisProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasis
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthBooleanFiniteUnionLimits
-            -> CheckedLengthSpinePairProblem Int ExferenceLocal
-            -> Either
-                LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  (BehavioralEvidence
-                    FiniteBinaryProductSpineLengthsV1
-                    ValidatedLengthSpinePairCounterexample)
-                  (BehavioralEvidence
-                    FiniteBinaryProductSpineLengthsV1
-                    ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain))
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator =
-            validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxesProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-            -> [[Natural]]
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxesProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCountProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCountProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainVisitProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainVisitProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasisProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-            -> LengthCounterexampleBasis
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasisProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthBooleanFiniteUnionLimits
-            -> CheckedLengthSpinePairProblem Int ExferenceLocal
-            -> Either
-                LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  (BehavioralEvidence
-                    FiniteBinaryProductSpineLengthsV1
-                    ValidatedLengthSpinePairCounterexample)
-                  (BehavioralEvidence
-                    FiniteBinaryProductSpineLengthsV1
-                    ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain))
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidator =
-            validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxesProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-            -> [[Natural]]
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxesProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainInclusiveMaximumBoxes
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxCountProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxCountProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainVisitProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainVisitProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentVisitCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainApplicableProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainApplicableProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainApplicableAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBasisProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-            -> LengthCounterexampleBasis
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBasisProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBasis
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthBooleanFiniteUnionLimits
-            -> CheckedLengthSpinePairProblem Int ExferenceLocal
-            -> Either
-                LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  (BehavioralEvidence
-                    FiniteBinaryProductSpineLengthsV1
-                    ValidatedLengthSpinePairCounterexample)
-                  (BehavioralEvidence
-                    FiniteBinaryProductSpineLengthsV1
-                    ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain))
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidator =
-            validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxesProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-            -> [[Natural]]
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxesProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainInclusiveMaximumBoxes
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCountProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCountProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainVisitProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainVisitProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentVisitCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-            -> Natural
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableAssignmentCount
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasisProjection
-            :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-            -> LengthCounterexampleBasis
-          strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasisProjection =
-            validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasis
           querySealer
             :: LengthSMTLibLimits
             -> CheckedLengthSpinePairProblem Int ExferenceLocal
@@ -2793,109 +1898,15 @@ facadeTests = testGroup "public Djex facade"
           queryApplicableDomainValidator
             :: LengthEvaluationLimits
             -> LengthInputBoxLimits
+            -> LengthBooleanFiniteUnionLimits
             -> LengthSpinePairSMTLibQuery Int ExferenceLocal
-            -> Either LengthSpinePairSMTLibApplicableDomainValidationError
+            -> Either
+                LengthSpinePairSMTLibApplicableDomainValidationError
                 (LengthApplicableDomainValidation
                   ValidatedLengthSpinePairCounterexample
                   ValidatedLengthSpinePairApplicableDomain)
           queryApplicableDomainValidator =
             validateLengthSpinePairSMTLibQueryApplicableDomain
-          queryPositiveAffineApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthSpinePairSMTLibQuery Int ExferenceLocal
-            -> Either LengthSpinePairSMTLibApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  ValidatedLengthSpinePairCounterexample
-                  ValidatedLengthSpinePairPositiveAffineApplicableDomain)
-          queryPositiveAffineApplicableDomainValidator =
-            validateLengthSpinePairSMTLibQueryPositiveAffineApplicableDomain
-          queryRelationalPositiveAffineApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthSpinePairSMTLibQuery Int ExferenceLocal
-            -> Either LengthSpinePairSMTLibApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  ValidatedLengthSpinePairCounterexample
-                  ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain)
-          queryRelationalPositiveAffineApplicableDomainValidator =
-            validateLengthSpinePairSMTLibQueryRelationalPositiveAffineApplicableDomain
-          queryStrictRelationalPositiveAffineApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthSpinePairSMTLibQuery Int ExferenceLocal
-            -> Either LengthSpinePairSMTLibApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  ValidatedLengthSpinePairCounterexample
-                  ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain)
-          queryStrictRelationalPositiveAffineApplicableDomainValidator =
-            validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
-          queryStrictRelationalPositiveAffineQuotientApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthSpinePairSMTLibQuery Int ExferenceLocal
-            -> Either LengthSpinePairSMTLibApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  ValidatedLengthSpinePairCounterexample
-                  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain)
-          queryStrictRelationalPositiveAffineQuotientApplicableDomainValidator =
-            validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain
-          queryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthSpinePairSMTLibQuery Int ExferenceLocal
-            -> Either LengthSpinePairSMTLibApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  ValidatedLengthSpinePairCounterexample
-                  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain)
-          queryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator =
-            validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthSpinePairSMTLibQuery Int ExferenceLocal
-            -> Either LengthSpinePairSMTLibApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  ValidatedLengthSpinePairCounterexample
-                  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain)
-          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidator =
-            validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthBooleanFiniteUnionLimits
-            -> LengthSpinePairSMTLibQuery Int ExferenceLocal
-            -> Either
-                LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  ValidatedLengthSpinePairCounterexample
-                  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain)
-          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator =
-            validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthBooleanFiniteUnionLimits
-            -> LengthSpinePairSMTLibQuery Int ExferenceLocal
-            -> Either
-                LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  ValidatedLengthSpinePairCounterexample
-                  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain)
-          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidator =
-            validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidator
-            :: LengthEvaluationLimits
-            -> LengthInputBoxLimits
-            -> LengthBooleanFiniteUnionLimits
-            -> LengthSpinePairSMTLibQuery Int ExferenceLocal
-            -> Either
-                LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationError
-                (LengthApplicableDomainValidation
-                  ValidatedLengthSpinePairCounterexample
-                  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain)
-          queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidator =
-            validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
       contractInSession `seq` sealer `seq` roleAwareSealer `seq`
         exactCaseSealer `seq` inSessionSealer `seq`
         candidateResultProjection `seq` candidateProviderProjection `seq`
@@ -2915,61 +1926,12 @@ facadeTests = testGroup "public Djex facade"
         simplificationInputsProjection `seq` simplificationResultProjection `seq`
         simplificationBasisProjection `seq` simplificationChangedProjection `seq`
         applicableDomainValidator `seq`
-        applicableDomainMaximumsProjection `seq`
+        applicableDomainBoxesProjection `seq`
+        applicableDomainBoxCountProjection `seq`
+        applicableDomainVisitProjection `seq`
         applicableDomainAssignmentProjection `seq`
         applicableDomainApplicableProjection `seq`
         applicableDomainBasisProjection `seq`
-        positiveAffineApplicableDomainValidator `seq`
-        positiveAffineApplicableDomainMaximumsProjection `seq`
-        positiveAffineApplicableDomainAssignmentProjection `seq`
-        positiveAffineApplicableDomainApplicableProjection `seq`
-        positiveAffineApplicableDomainBasisProjection `seq`
-        relationalPositiveAffineApplicableDomainValidator `seq`
-        relationalPositiveAffineApplicableDomainMaximumsProjection `seq`
-        relationalPositiveAffineApplicableDomainAssignmentProjection `seq`
-        relationalPositiveAffineApplicableDomainApplicableProjection `seq`
-        relationalPositiveAffineApplicableDomainBasisProjection `seq`
-        strictRelationalPositiveAffineApplicableDomainValidator `seq`
-        strictRelationalPositiveAffineApplicableDomainMaximumsProjection `seq`
-        strictRelationalPositiveAffineApplicableDomainAssignmentProjection `seq`
-        strictRelationalPositiveAffineApplicableDomainApplicableProjection `seq`
-        strictRelationalPositiveAffineApplicableDomainBasisProjection `seq`
-        strictRelationalPositiveAffineQuotientApplicableDomainValidator `seq`
-        strictRelationalPositiveAffineQuotientApplicableDomainMaximumsProjection `seq`
-        strictRelationalPositiveAffineQuotientApplicableDomainAssignmentProjection `seq`
-        strictRelationalPositiveAffineQuotientApplicableDomainApplicableProjection `seq`
-        strictRelationalPositiveAffineQuotientApplicableDomainBasisProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainMaximumsProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasisProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidator `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainMaximumsProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasisProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxesProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCountProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainVisitProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasisProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidator `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxesProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxCountProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainVisitProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainApplicableProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBasisProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidator `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxesProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCountProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainVisitProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableProjection `seq`
-        strictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasisProjection `seq`
         querySealer `seq`
         queryInputSymbolsProjection `seq` queryCheckProjection `seq`
         queryInputValueRequestProjection `seq` queryFingerprintProjection `seq`
@@ -2977,15 +1939,6 @@ facadeTests = testGroup "public Djex facade"
         queryInputReplayer `seq` queryOriginProber `seq`
         queryBoxValidator `seq` queryCounterexampleSimplifier `seq`
         queryApplicableDomainValidator `seq`
-        queryPositiveAffineApplicableDomainValidator `seq`
-        queryRelationalPositiveAffineApplicableDomainValidator `seq`
-        queryStrictRelationalPositiveAffineApplicableDomainValidator `seq`
-        queryStrictRelationalPositiveAffineQuotientApplicableDomainValidator `seq`
-        queryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidator `seq`
-        queryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidator `seq`
-        queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidator `seq`
-        queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidator `seq`
-        queryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidator `seq`
         (rnf :: CheckedLengthSpinePairCandidate Int ExferenceLocal -> ()) `seq`
         (rnf :: CheckedLengthSpinePairProblem Int ExferenceLocal -> ()) `seq`
         (rnf :: ValidatedLengthSpinePairCounterexample -> ()) `seq`
@@ -2994,36 +1947,6 @@ facadeTests = testGroup "public Djex facade"
         (rnf :: ValidatedLengthSpinePairCounterexampleSimplification -> ()) `seq`
         (rnf :: LengthSpinePairApplicableDomainValidationError -> ()) `seq`
         (rnf :: ValidatedLengthSpinePairApplicableDomain -> ()) `seq`
-        (rnf
-          :: ValidatedLengthSpinePairPositiveAffineApplicableDomain
-          -> ()) `seq`
-        (rnf
-          :: ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
-          -> ()) `seq`
-        (rnf
-          :: ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
-          -> ()) `seq`
-        (rnf
-          :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
-          -> ()) `seq`
-        (rnf
-          :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-          -> ()) `seq`
-        (rnf
-          :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-          -> ()) `seq`
-        (rnf
-          :: LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError
-          -> ()) `seq`
-        (rnf
-          :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-          -> ()) `seq`
-        (rnf
-          :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-          -> ()) `seq`
-        (rnf
-          :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-          -> ()) `seq`
         (rnf :: LengthSpinePairSMTLibQuery Int ExferenceLocal -> ()) `seq`
         (rnf :: LengthSpinePairSMTLibQueryError -> ()) `seq`
         (rnf :: LengthSpinePairSMTLibModelError -> ()) `seq`
@@ -3034,9 +1957,6 @@ facadeTests = testGroup "public Djex facade"
           -> ()) `seq`
         (rnf
           :: LengthSpinePairSMTLibApplicableDomainValidationError
-          -> ()) `seq`
-        (rnf
-          :: LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationError
           -> ()) `seq`
         pure ()
       let assignment = LengthSpinePairContractAssignment [1]
@@ -3052,54 +1972,6 @@ facadeTests = testGroup "public Djex facade"
         map (fromIntegral . fromEnum)
           ("finite-binary-product-spine-lengths/\
             \bounded-counterexample-simplification/v1" :: String)
-      lengthSpinePairApplicableDomainValidationSchemaTag @?=
-        map (fromIntegral . fromEnum)
-          ("finite-binary-product-spine-lengths/\
-            \finite-precondition-domain-establishment/v1" :: String)
-      lengthSpinePairPositiveAffineApplicableDomainValidationSchemaTag @?=
-        map (fromIntegral . fromEnum)
-          ("finite-binary-product-spine-lengths/\
-            \positive-affine-precondition-domain-establishment/v1" :: String)
-      lengthSpinePairRelationalPositiveAffineApplicableDomainValidationSchemaTag
-        @?= map (fromIntegral . fromEnum)
-          ("finite-binary-product-spine-lengths/\
-            \relational-positive-affine-precondition-domain-establishment/v1"
-            :: String)
-      lengthSpinePairStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag
-        @?= map (fromIntegral . fromEnum)
-          ("finite-binary-product-spine-lengths/\
-            \strict-relational-positive-affine-precondition-domain-establishment/v1"
-            :: String)
-      lengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainValidationSchemaTag
-        @?= map (fromIntegral . fromEnum)
-          ("finite-binary-product-spine-lengths/\
-            \strict-relational-positive-affine-quotient-precondition-domain-establishment/v1"
-            :: String)
-      lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationSchemaTag
-        @?= map (fromIntegral . fromEnum)
-          ("finite-binary-product-spine-lengths/\
-            \strict-relational-positive-affine-quotient-root-extrema-precondition-domain-establishment/v1"
-            :: String)
-      lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidationSchemaTag
-        @?= map (fromIntegral . fromEnum)
-          ("finite-binary-product-spine-lengths/\
-            \strict-relational-positive-affine-quotient-root-extrema-monus-precondition-domain-establishment/v1"
-            :: String)
-      lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag
-        @?= map (fromIntegral . fromEnum)
-          ("finite-binary-product-spine-lengths/\
-            \strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-precondition-domain-establishment/v1"
-            :: String)
-      lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidationSchemaTag
-        @?= map (fromIntegral . fromEnum)
-          ("finite-binary-product-spine-lengths/\
-            \strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-precondition-domain-establishment/v1"
-            :: String)
-      lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag
-        @?= map (fromIntegral . fromEnum)
-          ("finite-binary-product-spine-lengths/\
-            \strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-recursive-extrema-monus-piecewise-affine-branching-precondition-domain-establishment/v1"
-            :: String)
       lengthSpinePairSMTLibQuerySchemaTag @?=
         map (fromIntegral . fromEnum)
           ("djex-length-spine-pair-z3-qf-lia-smtlib2/v1" :: String)
@@ -3127,16 +1999,10 @@ facadeTests = testGroup "public Djex facade"
             LengthSpinePairSMTLibCounterexampleSimplificationAssociationRejected
               ReplayDomainMismatch
           applicableDomainError =
-            LengthSpinePairApplicableDomainInputBoxValidationRejected
-              $ LengthSpinePairInputBoxBoundsArityMismatch 2 1
+            LengthSpinePairApplicableDomainRuleLimitExceeded 1 2 3
           queryApplicableDomainError =
             LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected
               ReplayDomainMismatch
-          finiteUnionError =
-            LengthSpinePairBooleanFiniteUnionRuleLimitExceeded 1 2 3
-          queryFiniteUnionError =
-            LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationAssociationRejected
-              ReplayEncodingFingerprintMismatch
       queryError @?= LengthSpinePairSMTLibCommandByteLimitExceeded
         LengthSMTLibCheckCommand 3 4
       modelError @?= LengthSpinePairSMTLibBindingArityMismatch 1 2
@@ -3152,21 +2018,19 @@ facadeTests = testGroup "public Djex facade"
         LengthSpinePairSMTLibCounterexampleSimplificationAssociationRejected
           ReplayDomainMismatch
       applicableDomainError @?=
-        LengthSpinePairApplicableDomainInputBoxValidationRejected
-          (LengthSpinePairInputBoxBoundsArityMismatch 2 1)
+        LengthSpinePairApplicableDomainRuleLimitExceeded 1 2 3
       queryApplicableDomainError @?=
         LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected
           ReplayDomainMismatch
-      finiteUnionError @?=
-        LengthSpinePairBooleanFiniteUnionRuleLimitExceeded 1 2 3
-      queryFiniteUnionError @?=
-        LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationAssociationRejected
-          ReplayEncodingFingerprintMismatch
+      LengthSpinePairSMTLibApplicableDomainValidationRejected
+          applicableDomainError @?=
+        LengthSpinePairSMTLibApplicableDomainValidationRejected
+          applicableDomainError
       rnf shapeError `seq` rnf boxError `seq` rnf queryError `seq`
         rnf modelError `seq` rnf replayError `seq` rnf queryBoxError `seq`
         rnf simplificationError `seq` rnf querySimplificationError `seq`
         rnf applicableDomainError `seq` rnf queryApplicableDomainError `seq`
-        rnf finiteUnionError `seq` rnf queryFiniteUnionError `seq` pure ()
+        pure ()
   , testCase "rejects residual constraints at the Djinn render boundary" $ do
       target <- expectRight $ mkIdentifier "identity"
       checkedTarget <- expectRight $ mkDefinitionName target

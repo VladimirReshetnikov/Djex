@@ -250,9 +250,15 @@ projectionSignatures =
     :: Length.CheckedLengthProviderInventory Int
     -> Fingerprint.Fingerprint
         Length.LengthProviderInventoryFingerprintSubject) `seq`
-  (LengthEvaluate.validatedLengthApplicableDomainInclusiveMaximums
+  (LengthEvaluate.validatedLengthApplicableDomainInclusiveMaximumBoxes
     :: LengthEvaluate.ValidatedLengthApplicableDomain
-    -> [Natural]) `seq`
+    -> [[Natural]]) `seq`
+  (LengthEvaluate.validatedLengthApplicableDomainBoxCount
+    :: LengthEvaluate.ValidatedLengthApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthApplicableDomainAssignmentVisitCount
+    :: LengthEvaluate.ValidatedLengthApplicableDomain
+    -> Natural) `seq`
   (LengthEvaluate.validatedLengthApplicableDomainAssignmentCount
     :: LengthEvaluate.ValidatedLengthApplicableDomain
     -> Natural) `seq`
@@ -261,132 +267,6 @@ projectionSignatures =
     -> Natural) `seq`
   (LengthEvaluate.validatedLengthApplicableDomainBasis
     :: LengthEvaluate.ValidatedLengthApplicableDomain
-    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
-  (LengthEvaluate.validatedLengthPositiveAffineApplicableDomainInclusiveMaximums
-    :: LengthEvaluate.ValidatedLengthPositiveAffineApplicableDomain
-    -> [Natural]) `seq`
-  (LengthEvaluate.validatedLengthPositiveAffineApplicableDomainAssignmentCount
-    :: LengthEvaluate.ValidatedLengthPositiveAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthPositiveAffineApplicableDomainApplicableAssignmentCount
-    :: LengthEvaluate.ValidatedLengthPositiveAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthPositiveAffineApplicableDomainBasis
-    :: LengthEvaluate.ValidatedLengthPositiveAffineApplicableDomain
-    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
-  (LengthEvaluate.validatedLengthRelationalPositiveAffineApplicableDomainInclusiveMaximums
-    :: LengthEvaluate.ValidatedLengthRelationalPositiveAffineApplicableDomain
-    -> [Natural]) `seq`
-  (LengthEvaluate.validatedLengthRelationalPositiveAffineApplicableDomainAssignmentCount
-    :: LengthEvaluate.ValidatedLengthRelationalPositiveAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-    :: LengthEvaluate.ValidatedLengthRelationalPositiveAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthRelationalPositiveAffineApplicableDomainBasis
-    :: LengthEvaluate.ValidatedLengthRelationalPositiveAffineApplicableDomain
-    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
-    -> [Natural]) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineApplicableDomainAssignmentCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineApplicableDomainBasis
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
-    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainInclusiveMaximums
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
-    -> [Natural]) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainAssignmentCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainApplicableAssignmentCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainBasis
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
-    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInclusiveMaximums
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-    -> [Natural]) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableAssignmentCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasis
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainInclusiveMaximums
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-    -> [Natural]) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableAssignmentCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasis
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-    -> [[Natural]]) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainInclusiveMaximumBoxes
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-    -> [[Natural]]) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentVisitCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainApplicableAssignmentCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBasis
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainInclusiveMaximumBoxes
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-    -> [[Natural]]) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentVisitCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableAssignmentCount
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasis
-    :: LengthEvaluate.ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
     -> LengthEvaluate.LengthCounterexampleBasis) `seq`
   (LengthEvaluate.validatedLengthCounterexampleSimplificationOriginalInputs
     :: LengthEvaluate.ValidatedLengthCounterexampleSimplification
@@ -409,9 +289,15 @@ projectionSignatures =
   (LengthEvaluate.validatedLengthCounterexampleSimplificationChanged
     :: LengthEvaluate.ValidatedLengthCounterexampleSimplification
     -> Bool) `seq`
-  (LengthEvaluate.validatedLengthSpinePairApplicableDomainInclusiveMaximums
+  (LengthEvaluate.validatedLengthSpinePairApplicableDomainInclusiveMaximumBoxes
     :: LengthEvaluate.ValidatedLengthSpinePairApplicableDomain
-    -> [Natural]) `seq`
+    -> [[Natural]]) `seq`
+  (LengthEvaluate.validatedLengthSpinePairApplicableDomainBoxCount
+    :: LengthEvaluate.ValidatedLengthSpinePairApplicableDomain
+    -> Natural) `seq`
+  (LengthEvaluate.validatedLengthSpinePairApplicableDomainAssignmentVisitCount
+    :: LengthEvaluate.ValidatedLengthSpinePairApplicableDomain
+    -> Natural) `seq`
   (LengthEvaluate.validatedLengthSpinePairApplicableDomainAssignmentCount
     :: LengthEvaluate.ValidatedLengthSpinePairApplicableDomain
     -> Natural) `seq`
@@ -420,132 +306,6 @@ projectionSignatures =
     -> Natural) `seq`
   (LengthEvaluate.validatedLengthSpinePairApplicableDomainBasis
     :: LengthEvaluate.ValidatedLengthSpinePairApplicableDomain
-    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
-  (LengthEvaluate.validatedLengthSpinePairPositiveAffineApplicableDomainInclusiveMaximums
-    :: LengthEvaluate.ValidatedLengthSpinePairPositiveAffineApplicableDomain
-    -> [Natural]) `seq`
-  (LengthEvaluate.validatedLengthSpinePairPositiveAffineApplicableDomainAssignmentCount
-    :: LengthEvaluate.ValidatedLengthSpinePairPositiveAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairPositiveAffineApplicableDomainApplicableAssignmentCount
-    :: LengthEvaluate.ValidatedLengthSpinePairPositiveAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairPositiveAffineApplicableDomainBasis
-    :: LengthEvaluate.ValidatedLengthSpinePairPositiveAffineApplicableDomain
-    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
-  (LengthEvaluate.validatedLengthSpinePairRelationalPositiveAffineApplicableDomainInclusiveMaximums
-    :: LengthEvaluate.ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
-    -> [Natural]) `seq`
-  (LengthEvaluate.validatedLengthSpinePairRelationalPositiveAffineApplicableDomainAssignmentCount
-    :: LengthEvaluate.ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-    :: LengthEvaluate.ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairRelationalPositiveAffineApplicableDomainBasis
-    :: LengthEvaluate.ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
-    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
-    -> [Natural]) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainAssignmentCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainBasis
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
-    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainInclusiveMaximums
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
-    -> [Natural]) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainAssignmentCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainApplicableAssignmentCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainBasis
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
-    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInclusiveMaximums
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-    -> [Natural]) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableAssignmentCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasis
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainInclusiveMaximums
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-    -> [Natural]) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableAssignmentCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasis
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-    -> [[Natural]]) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainInclusiveMaximumBoxes
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-    -> [[Natural]]) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentVisitCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainApplicableAssignmentCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBasis
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-    -> LengthEvaluate.LengthCounterexampleBasis) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainInclusiveMaximumBoxes
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-    -> [[Natural]]) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentVisitCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableAssignmentCount
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-    -> Natural) `seq`
-  (LengthEvaluate.validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasis
-    :: LengthEvaluate.ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
     -> LengthEvaluate.LengthCounterexampleBasis) `seq`
   (LengthEvaluate.validatedLengthSpinePairCounterexampleSimplificationOriginalInputs
     :: LengthEvaluate.ValidatedLengthSpinePairCounterexampleSimplification
@@ -644,15 +404,6 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "forbiddenBoundedRawArtifactCoercion"
                       , "forbiddenValidatedLengthCounterexampleSimplificationCoercion"
                       , "forbiddenValidatedLengthApplicableDomainCoercion"
-                      , "forbiddenValidatedLengthPositiveAffineApplicableDomainCoercion"
-                      , "forbiddenValidatedLengthRelationalPositiveAffineApplicableDomainCoercion"
-                      , "forbiddenValidatedLengthStrictRelationalPositiveAffineApplicableDomainCoercion"
-                      , "forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainCoercion"
-                      , "forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainCoercion"
-                      , "forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainCoercion"
-                      , "forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainCoercion"
-                      , "forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainCoercion"
-                      , "forbiddenValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainCoercion"
                       , "forbiddenCheckedLengthContractCoercion"
                       , "forbiddenCheckedLengthSpinePairContractCoercion"
                       , "forbiddenCheckedLengthContextVariableCoercion"
@@ -746,24 +497,6 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "ValidatedLengthSpinePairInputBoxReceipt"
                       , "ValidatedLengthApplicableDomainReceipt"
                       , "ValidatedLengthSpinePairApplicableDomainReceipt"
-                      , "ValidatedLengthPositiveAffineApplicableDomainReceipt"
-                      , "ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt"
-                      , "ValidatedLengthRelationalPositiveAffineApplicableDomainReceipt"
-                      , "ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt"
-                      , "ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt"
-                      , "ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt"
-                      , "ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainReceipt"
-                      , "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainReceipt"
-                      , "ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt"
-                      , "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt"
-                      , "ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt"
-                      , "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt"
-                      , "ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt"
-                      , "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt"
-                      , "ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt"
-                      , "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt"
-                      , "ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt"
-                      , "ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt"
                       ]
                   )
             assertBool

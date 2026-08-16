@@ -30,8 +30,14 @@ import Control.Concurrent.MVar
   )
 import Control.Exception
   ( Exception
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+  , MaskingState (MaskedInterruptible)
+#endif
   , bracket
   , finally
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+  , getMaskingState
+#endif
   , onException
   , throwIO
   , try
@@ -200,6 +206,8 @@ descriptorBoundProcessTests = testGroup
       assertDescriptorBoundStrengths
   , testCase "close the exec-status handle on every read exit"
       assertDescriptorSpawnExecStatusHandleOwnership
+  , testCase "rollback a completed spawn interrupted at its masked handoff"
+      assertDescriptorSpawnAcquiredHandoffOwnership
   , testCase
       "execute the sealed bytes after replacing the path and source inode"
       assertDescriptorBoundSealedImage
@@ -407,6 +415,58 @@ assertDescriptorSpawnExecStatusHandleOwnership = do
       Left failure -> failure @?= LiveAsynchronousCallbackException
       Right _ -> assertFailure "interrupted exec-status read returned"
     hIsClosed statusHandle >>= (@?= True)
+
+assertDescriptorSpawnAcquiredHandoffOwnership :: IO ()
+assertDescriptorSpawnAcquiredHandoffOwnership = do
+  temporaryRoot <- getTemporaryDirectory
+  cancellation <- Z3Process.newZ3SMTLibProcessCancellation
+  deadline <- expectRight =<<
+    Z3Process.z3SMTLibProcessDeadlineAfterMilliseconds 3000
+  observedMask <- newEmptyMVar
+  acquiredPair <- newEmptyMVar
+  entered <- newEmptyMVar
+  release <- newEmptyMVar
+  outcome <- newEmptyMVar
+  consumerEntered <- newIORef False
+  let cleanup (path, handle) = do
+        ignoreIOError $ hClose handle
+        ignoreIOError $ removeFile path
+      acquire = do
+        state <- getMaskingState
+        putMVar observedMask state
+        pair <- openTempFile temporaryRoot "djex-z3-acquired"
+        putMVar acquiredPair pair
+        pure pair
+  worker <- forkIO $ do
+    attempted <- try
+      (Z3Process.handoffZ3SMTLibProcessAcquiredWith
+        (Z3Process.runBeforeZ3SMTLibProcessDeadlineMaskedAction
+          cancellation deadline acquire cleanup)
+        cleanup
+        (putMVar entered () >> takeMVar release)
+        (\_ _ -> writeIORef consumerEntered True >> pure (Right ())))
+      :: IO
+          (Either
+            LiveAsynchronousCallbackException
+            (Either Z3Process.Z3SMTLibProcessError ()))
+    putMVar outcome attempted
+  pair@(path, acquiredHandle) <-
+    expectWithin "descriptor worker acquisition" 3000000 $ takeMVar acquiredPair
+  flip finally (cleanup pair) $ do
+    maskingState <- expectWithin "descriptor worker masking state" 3000000
+      $ takeMVar observedMask
+    maskingState @?= MaskedInterruptible
+    _ <- expectWithin "descriptor acquired-handoff entrance" 3000000
+      $ takeMVar entered
+    throwTo worker LiveAsynchronousCallbackException
+    attempted <- expectWithin "interrupted descriptor acquired handoff" 3000000
+      $ takeMVar outcome
+    case attempted of
+      Left failure -> failure @?= LiveAsynchronousCallbackException
+      Right _ -> assertFailure "interrupted acquired handoff returned"
+    hIsClosed acquiredHandle >>= (@?= True)
+    doesPathExist path >>= (@?= False)
+    readIORef consumerEntered >>= (@?= False)
 
 withTemporaryStatusHandle :: (Handle -> IO result) -> IO result
 withTemporaryStatusHandle use = do

@@ -12,8 +12,8 @@ License-Files:
   LICENSE
   djinn/LICENSE
   exference/LICENSE
-Author:        Vladimir Reshetnikov, Lennart Augustsson, Lennart Spitzner, and contributors
-Maintainer:    Vladimir Reshetnikov
+Author:        Lennart Augustsson, Lennart Spitzner, and Djex contributors
+Maintainer:    https://github.com/VladimirReshetnikov/Djex
 Homepage:      https://github.com/VladimirReshetnikov/Djex
 Bug-Reports:   https://github.com/VladimirReshetnikov/Djex/issues
 Tested-With:   GHC == 9.12.4

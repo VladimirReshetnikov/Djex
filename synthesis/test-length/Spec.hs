@@ -7314,34 +7314,167 @@ applicableDomainValidationTests
   :: TestTree
 applicableDomainValidationTests =
   testGroup
-    "current recursive piecewise-affine applicable-domain validation"
+    "current guarded recursive piecewise-affine applicable-domain validation"
     [ testCase
-        "establish the frozen recursive scalar domain beyond atomic roots" $ do
+        "establish finite scalar guards and retain every negative alternative" $ do
+        let input = Length.LengthVariable $ Length.LengthInput 0
+            literal value = Length.LengthLiteral value
+            bound expression maximumValue =
+              Length.LengthAtMost expression $ literal maximumValue
+            validate limits problem =
+              Evaluate.validateLengthProblemApplicableDomain
+                Evaluate.defaultLengthEvaluationLimits
+                Evaluate.defaultLengthInputBoxLimits limits problem
+            establish limits source = do
+              problem <- adversarialConstantZeroProblem
+                $ contractWith source $ Length.LengthTruth True
+              receipt <- expectValidatedLengthApplicableDomain problem
+                $ validate limits problem
+              pure (problem, receipt)
+
+            finiteGuard = Length.LengthAtMost
+              (Length.LengthIf (bound input 2) input $ literal 5)
+              $ literal 3
+        finiteProblem <- adversarialConstantZeroProblem
+          $ contractWith finiteGuard $ Length.LengthTruth True
+        cap1 <- booleanFiniteUnionLimits 1 64 4096 256 262144
+        finiteCapped <- evaluateWithin $ validate cap1 finiteProblem
+        assertLeft
+          (Evaluate.LengthApplicableDomainGeneratedBranchLimitExceeded 1 2)
+          finiteCapped
+        cap2 <- booleanFiniteUnionLimits 2 64 4096 256 262144
+        (_, finiteReceipt) <- establish cap2 finiteGuard
+        assertValidatedLengthApplicableDomain
+          finiteReceipt [[2]] 1 3 3 3
+            Evaluate.ProviderIndependentFiniteSpineModel
+
+        let negativeEquality = Length.LengthAtMost
+              (Length.LengthIf
+                (Length.LengthEqual input $ literal 0)
+                (literal 1) input)
+              $ literal 2
+        negativeEqualityProblem <- adversarialConstantZeroProblem
+          $ contractWith negativeEquality $ Length.LengthTruth True
+        negativeEqualityCapped <- evaluateWithin
+          $ validate cap2 negativeEqualityProblem
+        assertLeft
+          (Evaluate.LengthApplicableDomainGeneratedBranchLimitExceeded 2 3)
+          negativeEqualityCapped
+        cap3 <- booleanFiniteUnionLimits 3 64 4096 256 262144
+        (_, negativeEqualityReceipt) <- establish cap3 negativeEquality
+        assertValidatedLengthApplicableDomain
+          negativeEqualityReceipt [[2]] 1 3 3 3
+            Evaluate.ProviderIndependentFiniteSpineModel
+
+        let unboundedNegativeGuard = Length.LengthAtMost
+              (Length.LengthIf (bound input 1) (literal 0) input)
+              $ literal 3
+        (_, unboundedNegativeReceipt) <- establish cap2 unboundedNegativeGuard
+        assertValidatedLengthApplicableDomain
+          unboundedNegativeReceipt [[3]] 1 4 4 4
+            Evaluate.ProviderIndependentFiniteSpineModel
+    , testCase
+        "compose guarded extrema and monus without finite-domain undercoverage" $ do
         let first = Length.LengthVariable $ Length.LengthInput 0
             second = Length.LengthVariable $ Length.LengthInput 1
             literal value = Length.LengthLiteral value
             bound expression maximumValue =
               Length.LengthAtMost expression $ literal maximumValue
+            guarded = Length.LengthIf
+              (bound first 1)
+              (Length.LengthMaximum first second)
+              (Length.LengthMonus first second)
             precondition = Length.LengthAll
-              [ Length.LengthAtMost
-                  (Length.LengthMaximum first second)
-                  (Length.LengthMonus (literal 3)
-                    $ Length.LengthMinimum first second)
-              , bound first 3
-              , bound second 3
-              ]
+              [bound second 2, bound guarded 2]
             source = contractWith precondition $ Length.LengthTruth True
+            validate limits problem =
+              Evaluate.validateLengthProblemApplicableDomain
+                Evaluate.defaultLengthEvaluationLimits
+                Evaluate.defaultLengthInputBoxLimits limits problem
         problem <- adversarialBinaryConstantZeroProblem source
+
+        branchLimits <- booleanFiniteUnionLimits 3 0 0 0 0
+        branches <- evaluateWithin $ validate branchLimits problem
+        assertLeft
+          (Evaluate.LengthApplicableDomainGeneratedBranchLimitExceeded 3 4)
+          branches
+
+        ruleLimits <- booleanFiniteUnionLimits 4 3 0 0 0
+        rules <- evaluateWithin $ validate ruleLimits problem
+        assertLeft
+          (Evaluate.LengthApplicableDomainRuleLimitExceeded 0 3 4)
+          rules
+
+        closureLimits <- booleanFiniteUnionLimits 4 4 3 0 0
+        closure <- evaluateWithin $ validate closureLimits problem
+        assertLeft
+          (Evaluate.LengthApplicableDomainClosureInspectionLimitExceeded
+            0 3 4)
+          closure
+
+        exactLimits <- booleanFiniteUnionLimits 4 4 6 1 15
         receipt <-
           expectValidatedLengthApplicableDomain
             problem
-            $ Evaluate.validateLengthProblemApplicableDomain
-                Evaluate.defaultLengthEvaluationLimits
-                Evaluate.defaultLengthInputBoxLimits
-                Evaluate.defaultLengthBooleanFiniteUnionLimits problem
+            $ validate exactLimits problem
         assertValidatedLengthApplicableDomain
-          receipt [[2, 3], [3, 2]] 2 24 15 10
+          receipt [[4, 2]] 1 15 15 12
             Evaluate.ProviderIndependentFiniteSpineModel
+
+        let listType = listOf closedPayloadType
+            target = FunctionType listType $ FunctionType listType listType
+        checkedContract <- expectRight $ sealContract
+          Length.defaultLengthLimits target source
+        let assignments =
+              [[firstValue, secondValue]
+              | firstValue <- [0 .. 5]
+              , secondValue <- [0 .. 3]
+              ]
+            boxes =
+              Evaluate.validatedLengthApplicableDomainInclusiveMaximumBoxes
+                receipt
+            covered inputs maximums =
+              length inputs == length maximums
+                && and (zipWith (<=) inputs maximums)
+            replay inputs = Evaluate.evaluateLengthContractAssignment
+              Evaluate.defaultLengthEvaluationLimits checkedContract
+              $ Evaluate.LengthContractAssignment inputs 0
+        applicable <- fmap concat $ mapM (\inputs -> case replay inputs of
+            Left failure -> assertFailure
+              ("guarded undercoverage oracle rejected " ++ show inputs
+                ++ ": " ++ show failure)
+                >> pure []
+            Right Evaluate.LengthPostconditionViolated -> assertFailure
+              ("truth-postcondition oracle violated at " ++ show inputs)
+                >> pure []
+            Right Evaluate.LengthPreconditionNotMet -> pure []
+            Right Evaluate.LengthPostconditionSatisfied -> do
+              assertBool
+                ("guarded finite union omitted satisfying assignment "
+                  ++ show inputs)
+                $ any (covered inputs) boxes
+              pure [inputs]) assignments
+        length applicable @?= 12
+    , testCase
+        "reject a conditional atom when either selected arm is unsupported" $ do
+        let input = Length.LengthVariable $ Length.LengthInput 0
+            literal value = Length.LengthLiteral value
+            bound expression maximumValue =
+              Length.LengthAtMost expression $ literal maximumValue
+            trapped = Length.LengthAtMost
+              (Length.LengthIf
+                (bound input 2)
+                input
+                (Length.LengthModulo 2 input))
+              $ literal 3
+            source = contractWith trapped $ Length.LengthTruth True
+        problem <- adversarialConstantZeroProblem source
+        reason <- expectLengthApplicableDomainInapplicability
+          $ Evaluate.validateLengthProblemApplicableDomain
+              (error "unsupported-arm trap demanded evaluation limits")
+              Evaluate.defaultLengthInputBoxLimits
+              Evaluate.defaultLengthBooleanFiniteUnionLimits problem
+        reason @?= Evaluate.LengthApplicableDomainInputUpperBoundMissing 0
     , testCase
         "preserve selector laws and signed relation conversion exactly" $ do
         let first = Length.LengthVariable $ Length.LengthInput 0
@@ -7605,16 +7738,19 @@ applicableDomainValidationTests =
             0 1 2)
           closure
 
-        let guarded = Length.LengthAtMost
+        let unsupportedConditional = Length.LengthAtMost
               (Length.LengthSum
                 [ Length.LengthMinimum
-                    (Length.LengthIf (bound first 1) first $ literal 0)
+                    (Length.LengthIf
+                      (bound first 1)
+                      first
+                      $ Length.LengthQuotient 2 first)
                     first
                 , literal 1
                 ])
               $ literal 3
         missingProblem <- adversarialConstantZeroProblem
-          $ source guarded $ Length.LengthTruth True
+          $ source unsupportedConditional $ Length.LengthTruth True
         missing <-
           expectLengthApplicableDomainInapplicability
             $ validate
@@ -7789,7 +7925,8 @@ applicableDomainValidationTests =
                   $ validate problem
               reason @?=
                 Evaluate.LengthApplicableDomainInputUpperBoundMissing 0
-            conditional = Length.LengthIf (bound first 1) first $ literal 0
+            unsupportedConditional = Length.LengthIf
+              (bound first 1) first $ Length.LengthModulo 2 first
         mapM_ assertMissing
           [ Length.LengthAtMost
               (Length.LengthSum
@@ -7807,28 +7944,28 @@ applicableDomainValidationTests =
               $ literal 5
           , Length.LengthAtMost
               (Length.LengthSum
-                [Length.LengthMinimum conditional second, literal 1])
+                [ Length.LengthMinimum unsupportedConditional second
+                , literal 1
+                ])
               $ literal 5
           , Length.LengthAtMost
               (Length.LengthScale 0 $ Length.LengthMinimum first second)
               $ literal 0
           ]
     , testCase
-        "associate recursive scalar evidence without changing query identity" $ do
+        "associate guarded scalar evidence without changing query identity" $ do
         let first = Length.LengthVariable $ Length.LengthInput 0
             second = Length.LengthVariable $ Length.LengthInput 1
             literal value = Length.LengthLiteral value
             bound expression maximumValue =
               Length.LengthAtMost expression $ literal maximumValue
-            precondition = Length.LengthAll
-              [ Length.LengthAtMost
-                  (Length.LengthMaximum first second)
-                  (Length.LengthMonus (literal 3)
-                    $ Length.LengthMinimum first second)
-              , bound first 3
-              , bound second 3
-              ]
-            source = contractWith precondition $ Length.LengthTruth True
+            guarded maximumGuard = Length.LengthIf
+              (bound first maximumGuard)
+              (Length.LengthMaximum first second)
+              (Length.LengthMonus first second)
+            precondition maximumGuard = Length.LengthAll
+              [bound second 2, bound (guarded maximumGuard) 2]
+            source = contractWith (precondition 1) $ Length.LengthTruth True
         problem <- adversarialBinaryConstantZeroProblem source
         let directValidation =
               Evaluate.validateLengthProblemApplicableDomain
@@ -7843,30 +7980,21 @@ applicableDomainValidationTests =
                   established
             pure (established, replayed)
           Left failure -> assertFailure
-            ("scalar recursive validation failed: " ++ show failure)
+            ("scalar guarded validation failed: " ++ show failure)
               >> error "unreachable"
           Right (Evaluate.LengthApplicableDomainInapplicable reason) ->
-            assertFailure ("scalar recursive validation was inapplicable: "
+            assertFailure ("scalar guarded validation was inapplicable: "
               ++ show reason) >> error "unreachable"
           Right (Evaluate.LengthApplicableDomainCounterexample _) ->
-            assertFailure "scalar recursive validation found a counterexample"
+            assertFailure "scalar guarded validation found a counterexample"
               >> error "unreachable"
         assertValidatedLengthApplicableDomain
-          receipt [[2, 3], [3, 2]] 2 24 15 10
+          receipt [[4, 2]] 1 15 15 12
             Evaluate.ProviderIndependentFiniteSpineModel
         force receipt `seq` pure ()
 
         stale <- adversarialBinaryConstantZeroProblem
-          $ contractWith
-              (Length.LengthAll
-                [ Length.LengthAtMost
-                    (Length.LengthMaximum first second)
-                    (Length.LengthMonus (literal 2)
-                      $ Length.LengthMinimum first second)
-                , bound first 3
-                , bound second 3
-                ])
-              $ Length.LengthTruth True
+          $ contractWith (precondition 0) $ Length.LengthTruth True
         assertLeft SemanticProblem.ReplayEncodingFingerprintMismatch
           $ SemanticProblem.replayBehavioralEvidence
               (LengthProblem.checkedLengthProblemBehavioralProblem stale)
@@ -7887,49 +8015,45 @@ applicableDomainValidationTests =
           Evaluate.LengthApplicableDomainEstablished queryReceipt ->
             queryReceipt @?= receipt
           Evaluate.LengthApplicableDomainInapplicable reason -> assertFailure
-            ("scalar recursive query was inapplicable: " ++ show reason)
+            ("scalar guarded query was inapplicable: " ++ show reason)
           Evaluate.LengthApplicableDomainCounterexample{} -> assertFailure
-            "scalar recursive query produced a counterexample"
+            "scalar guarded query produced a counterexample"
         SMTLib.lengthSMTLibQueryFingerprint query @?= fingerprintBefore
         SMTLib.lengthSMTLibQueryCheckBytes query @?= checkBefore
         SMTLib.lengthSMTLibQueryInputSymbols query @?= symbolsBefore
         SMTLib.lengthSMTLibQueryInputValueRequestBytes query @?= valuesBefore
     , testCase
-        "pin the 32-way product receipt cap nominality and query identity" $ do
+        "pin guarded product receipt nominality and query identity" $ do
         let first = Length.LengthVariable $ Length.LengthSpinePairInput 0
             second = Length.LengthVariable $ Length.LengthSpinePairInput 1
             literal value = Length.LengthLiteral value
             bound expression maximumValue =
               Length.LengthAtMost expression $ literal maximumValue
-            minimumExpression = Length.LengthMinimum first second
-            forward = Length.LengthSum
-              [minimumExpression, Length.LengthMonus first second]
-            reverseExpression = Length.LengthSum
-              [minimumExpression, Length.LengthMonus second first]
+            guarded = Length.LengthIf
+              (bound first 1)
+              (Length.LengthMaximum first second)
+              (Length.LengthMonus first second)
             precondition = Length.LengthAll
-              [ bound (Length.LengthMaximum forward reverseExpression) 2
-              , bound first 3
-              , bound second 3
-              ]
+              [bound second 2, bound guarded 2]
             source = spinePairContractWith precondition
               $ Length.LengthTruth True
         problem <- adversarialBinaryZeroSpinePairProblem source
 
-        cap31 <- booleanFiniteUnionLimits 31 64 4096 256 262144
+        cap3 <- booleanFiniteUnionLimits 3 64 4096 256 262144
         capped <- evaluateWithin
           $ Evaluate.validateLengthSpinePairProblemApplicableDomain
-              (error "32-way product preparation demanded evaluation limits")
-              Evaluate.defaultLengthInputBoxLimits cap31 problem
+              (error "guarded product preparation demanded evaluation limits")
+              Evaluate.defaultLengthInputBoxLimits cap3 problem
         assertLeft
           (Evaluate.LengthSpinePairApplicableDomainGeneratedBranchLimitExceeded
-            31 32)
+            3 4)
           capped
 
-        cap32 <- booleanFiniteUnionLimits 32 64 4096 256 262144
+        cap4 <- booleanFiniteUnionLimits 4 64 4096 256 262144
         let directValidation =
               Evaluate.validateLengthSpinePairProblemApplicableDomain
                 Evaluate.defaultLengthEvaluationLimits
-                Evaluate.defaultLengthInputBoxLimits cap32 problem
+                Evaluate.defaultLengthInputBoxLimits cap4 problem
         (evidence, receipt) <- case directValidation of
           Right (Evaluate.LengthApplicableDomainEstablished established) -> do
             replayed <- expectRight
@@ -7939,16 +8063,16 @@ applicableDomainValidationTests =
                   established
             pure (established, replayed)
           Left failure -> assertFailure
-            ("product recursive validation failed: " ++ show failure)
+            ("product guarded validation failed: " ++ show failure)
               >> error "unreachable"
           Right (Evaluate.LengthApplicableDomainInapplicable reason) ->
-            assertFailure ("product recursive validation was inapplicable: "
+            assertFailure ("product guarded validation was inapplicable: "
               ++ show reason) >> error "unreachable"
           Right (Evaluate.LengthApplicableDomainCounterexample _) ->
-            assertFailure "product recursive validation found a counterexample"
+            assertFailure "product guarded validation found a counterexample"
               >> error "unreachable"
         assertValidatedLengthSpinePairApplicableDomain
-          receipt [[2, 2]] 1 9 9 9
+          receipt [[4, 2]] 1 15 15 12
             Evaluate.ProviderIndependentFiniteSpineModel
         force receipt `seq` pure ()
 
@@ -7983,14 +8107,14 @@ applicableDomainValidationTests =
         associated <- expectRight
           $ SMTLib.validateLengthSpinePairSMTLibQueryApplicableDomain
               Evaluate.defaultLengthEvaluationLimits
-              Evaluate.defaultLengthInputBoxLimits cap32 query
+              Evaluate.defaultLengthInputBoxLimits cap4 query
         case associated of
           Evaluate.LengthApplicableDomainEstablished queryReceipt ->
             queryReceipt @?= receipt
           Evaluate.LengthApplicableDomainInapplicable reason -> assertFailure
-            ("product recursive query was inapplicable: " ++ show reason)
+            ("product guarded query was inapplicable: " ++ show reason)
           Evaluate.LengthApplicableDomainCounterexample{} -> assertFailure
-            "product recursive query produced a counterexample"
+            "product guarded query produced a counterexample"
         SMTLib.lengthSpinePairSMTLibQueryFingerprint query @?=
           fingerprintBefore
         SMTLib.lengthSpinePairSMTLibQueryCheckBytes query @?= checkBefore

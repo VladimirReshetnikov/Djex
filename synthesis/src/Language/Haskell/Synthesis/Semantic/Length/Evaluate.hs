@@ -821,7 +821,8 @@ validatedLengthSpinePairInputBoxBasis
     (ValidatedLengthSpinePairInputBoxReceipt _ _ _ _ basis) = basis
 
 -- | Why an exact checked problem does not expose a finite applicable domain
--- through the current bounded recursive piecewise-affine coverage rule.
+-- through the current bounded guarded recursive piecewise-affine coverage
+-- rule.
 --
 -- Preconditions are already bounded and normalized by contract sealing. The
 -- analysis expands their Boolean structure, admits its exact supported affine
@@ -891,20 +892,16 @@ data LengthSpinePairApplicableDomainValidationError
 
 instance NFData LengthSpinePairApplicableDomainValidationError
 
--- These receipt-only schema identities remain byte-for-byte identical to the
--- recursive piecewise-affine algorithm they identify. They are deliberately
+-- These receipt-only schema identities name the complete current guarded
+-- recursive piecewise-affine finite-union algorithm. They are deliberately
 -- private: callers consume the opaque current receipts instead.
-lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag
-  :: [Word8]
-lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag =
-  ascii
-    "finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-recursive-extrema-monus-piecewise-affine-branching-precondition-domain-establishment/v1"
+lengthApplicableDomainValidationSchemaTag :: [Word8]
+lengthApplicableDomainValidationSchemaTag = ascii
+  "finite-list-spine-length/guarded-recursive-piecewise-affine-finite-union-precondition-domain-establishment/v1"
 
-lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag
-  :: [Word8]
-lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag =
-  ascii
-    "finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-recursive-extrema-monus-piecewise-affine-branching-precondition-domain-establishment/v1"
+lengthSpinePairApplicableDomainValidationSchemaTag :: [Word8]
+lengthSpinePairApplicableDomainValidationSchemaTag = ascii
+  "finite-binary-product-spine-lengths/guarded-recursive-piecewise-affine-finite-union-precondition-domain-establishment/v1"
 
 -- | Opaque scalar receipt for the complete current applicable-domain
 -- algorithm. Incomparable boxes remain separate; assignment visits count
@@ -1938,9 +1935,9 @@ validateLengthSpinePairProblemApplicableDomainWith maximumBoxesFor mkReceipt
               remaining
 
 -- | Validate the complete applicable input domain of one exact scalar
--- problem with the current bounded recursive piecewise-affine analysis. The
--- original checked precondition remains the sole replay authority over the
--- global deduplicated assignment union.
+-- problem with the current bounded guarded recursive piecewise-affine
+-- analysis. The original checked precondition remains the sole replay
+-- authority over the global deduplicated assignment union.
 validateLengthProblemApplicableDomain
   :: LengthEvaluationLimits
   -> LengthInputBoxLimits
@@ -1959,7 +1956,7 @@ validateLengthProblemApplicableDomain
   validateLengthProblemApplicableDomainWith
     booleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainMaximumBoxes
     (ValidatedLengthApplicableDomainReceipt
-      lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag)
+      lengthApplicableDomainValidationSchemaTag)
     evaluationLimits inputBoxLimits unionLimits problem
 
 -- | Nominal binary-product sibling of current applicable-domain validation.
@@ -1983,7 +1980,7 @@ validateLengthSpinePairProblemApplicableDomain
   validateLengthSpinePairProblemApplicableDomainWith
     booleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainMaximumBoxes
     (ValidatedLengthSpinePairApplicableDomainReceipt
-      lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag)
+      lengthSpinePairApplicableDomainValidationSchemaTag)
     evaluationLimits inputBoxLimits unionLimits problem
 
 data BooleanFiniteUnionPolarity
@@ -2004,8 +2001,9 @@ data BooleanFiniteUnionEnumerationError
 -- The checked formula is already normalized and structurally bounded.  This
 -- private expansion preserves exact Boolean meaning: positive conjunction is
 -- Cartesian conjunction, negative conjunction is union, and negative equality
--- is the exact natural/order split @not (A <= B) || not (B <= A)@.  Boolean
--- syntax inside an expression-level conditional is deliberately never opened.
+-- is the exact natural/order split @not (A <= B) || not (B <= A)@.  The same
+-- raw expansion is reused for expression-level conditional guards;
+-- their recursive atom coverage is resolved by the guarded fallback below.
 booleanFiniteUnionRawBranches
   :: LengthFormula variable
   -> [[LengthFormula variable]]
@@ -3010,14 +3008,21 @@ data RecursivePiecewiseAffineSummary = RecursivePiecewiseAffineSummary
   !Integer
   !(Map.Map Natural Integer)
 
+-- Coverage fragments remain separate until the enclosing relation is formed.
+-- In particular, an impossible conditional guard retains its selected value
+-- and therefore still participates in every surrounding Cartesian selector
+-- product.  The raw generated-branch cap observes that complete product before
+-- the fragments collapse to one branch-local contradiction.
 data RecursivePiecewiseAffineBranch = RecursivePiecewiseAffineBranch
-  ![RelationalPositiveAffineRule]
+  ![RelationalPositiveAffineClauseCoverage]
   !RecursivePiecewiseAffineSummary
 
 -- Atomic branching remains the first authority.  Recursive interpretation is
 -- attempted only for its exact singleton-Ignored result and only for a
--- relational atom which retains an extrema or monus constructor.  Any
--- unsupported child rejects that whole fallback atom.
+-- relational atom which retains an extrema, monus, or conditional constructor.
+-- A conditional is all-or-nothing: both selected expressions and every leaf
+-- of both the condition and its complement must be supported.  Any unsupported
+-- child rejects that whole fallback atom.
 strictRelationalPositiveAffineQuotientRootExtremaMonusAtomicBranchingRecursivePiecewiseAffineClauseBranches
   :: Int
   -> (variable -> Maybe Natural)
@@ -3029,7 +3034,7 @@ strictRelationalPositiveAffineQuotientRootExtremaMonusAtomicBranchingRecursivePi
     [RelationalPositiveAffineClauseIgnored]
       | hasRecursivePiecewiseAffineOperation formula ->
           case recursiveFormulaBranches formula of
-            Just branches -> map RelationalPositiveAffineClauseRules branches
+            Just branches -> branches
             Nothing -> predecessorBranches
     _ -> predecessorBranches
  where
@@ -3048,7 +3053,11 @@ strictRelationalPositiveAffineQuotientRootExtremaMonusAtomicBranchingRecursivePi
     leftBranches <- expressionBranches left
     rightBranches <- expressionBranches right
     pure
-      [ leftGuards ++ rightGuards ++ appendRelation leftValue rightValue
+      [ collapseRecursivePiecewiseAffineCoverage
+          $ leftGuards ++ rightGuards
+          ++ [ RelationalPositiveAffineClauseRules
+                $ appendRelation leftValue rightValue
+             ]
       | RecursivePiecewiseAffineBranch leftGuards leftValue <- leftBranches
       , RecursivePiecewiseAffineBranch rightGuards rightValue <- rightBranches
       ]
@@ -3092,7 +3101,19 @@ strictRelationalPositiveAffineQuotientRootExtremaMonusAtomicBranchingRecursivePi
       selectBinary monusSelections left right
     LengthQuotient _ _ -> Nothing
     LengthModulo _ _ -> Nothing
-    LengthIf _ _ _ -> Nothing
+    LengthIf condition whenTrue whenFalse
+      | not
+          ( conditionFullySupported BooleanFiniteUnionPositive condition
+          && conditionFullySupported BooleanFiniteUnionNegative condition
+          ) -> Nothing
+      | otherwise -> do
+          trueBranches <- expressionBranches whenTrue
+          falseBranches <- expressionBranches whenFalse
+          pure
+            $ conditionalArmBranches
+                BooleanFiniteUnionPositive condition trueBranches
+            ++ conditionalArmBranches
+                BooleanFiniteUnionNegative condition falseBranches
 
   zeroBranch = RecursivePiecewiseAffineBranch []
     $ RecursivePiecewiseAffineSummary 0 Map.empty
@@ -3129,37 +3150,125 @@ strictRelationalPositiveAffineQuotientRootExtremaMonusAtomicBranchingRecursivePi
 
   minimumSelections left right =
     [ RecursivePiecewiseAffineBranch
-        [recursivePiecewiseAffineRule left right] left
+        [ RelationalPositiveAffineClauseRules
+            [recursivePiecewiseAffineRule left right]
+        ]
+        left
     , RecursivePiecewiseAffineBranch
-        [ recursivePiecewiseAffineRule
-            (incrementRecursivePiecewiseAffineSummary right)
-            left
+        [ RelationalPositiveAffineClauseRules
+            [ recursivePiecewiseAffineRule
+                (incrementRecursivePiecewiseAffineSummary right)
+                left
+            ]
         ]
         right
     ]
 
   maximumSelections left right =
     [ RecursivePiecewiseAffineBranch
-        [recursivePiecewiseAffineRule right left] left
+        [ RelationalPositiveAffineClauseRules
+            [recursivePiecewiseAffineRule right left]
+        ]
+        left
     , RecursivePiecewiseAffineBranch
-        [ recursivePiecewiseAffineRule
-            (incrementRecursivePiecewiseAffineSummary left)
-            right
+        [ RelationalPositiveAffineClauseRules
+            [ recursivePiecewiseAffineRule
+                (incrementRecursivePiecewiseAffineSummary left)
+                right
+            ]
         ]
         right
     ]
 
   monusSelections left right =
     [ RecursivePiecewiseAffineBranch
-        [recursivePiecewiseAffineRule left right]
+        [ RelationalPositiveAffineClauseRules
+            [recursivePiecewiseAffineRule left right]
+        ]
         $ RecursivePiecewiseAffineSummary 0 Map.empty
     , RecursivePiecewiseAffineBranch
-        [ recursivePiecewiseAffineRule
-            (incrementRecursivePiecewiseAffineSummary right)
-            left
+        [ RelationalPositiveAffineClauseRules
+            [ recursivePiecewiseAffineRule
+                (incrementRecursivePiecewiseAffineSummary right)
+                left
+            ]
         ]
         $ subtractRecursivePiecewiseAffineSummaries left right
     ]
+
+  -- A conditional's true arm precedes its false arm.  Within one arm, raw
+  -- condition-DNF alternatives are outermost and selected-expression
+  -- alternatives are innermost.  Condition coverage therefore precedes every
+  -- selected-expression guard.  These generated selector alternatives are not
+  -- independently canonicalized; the enclosing raw branch witness counts them
+  -- before the existing original-formula cleanup.
+  conditionalArmBranches polarity condition selectedBranches =
+    [ RecursivePiecewiseAffineBranch
+        (conditionGuards ++ selectedGuards) selectedValue
+    | conditionGuards <- conditionalGuardBranches polarity condition
+    , RecursivePiecewiseAffineBranch selectedGuards selectedValue <-
+        selectedBranches
+    ]
+
+  conditionalGuardBranches polarity condition =
+    concatMap expandConditionConjunction
+      $ booleanFiniteUnionRawBranches
+      $ case polarity of
+          BooleanFiniteUnionPositive -> condition
+          BooleanFiniteUnionNegative -> LengthNot condition
+
+  expandConditionConjunction [] = [[]]
+  expandConditionConjunction (literal : remaining) =
+    [ coverage : following
+    | coverage <- recursiveClauseBranches literal
+    , following <- expandConditionConjunction remaining
+    ]
+
+  -- Full support is checked structurally before the lazy DNF stream above is
+  -- constructed.  This preserves all-or-nothing admission without forcing an
+  -- exponentially large condition expansion before the generated-branch cap.
+  conditionFullySupported polarity source = case source of
+    LengthTruth _ -> True
+    LengthNot nested -> conditionFullySupported
+      (oppositeBooleanFiniteUnionPolarity polarity) nested
+    LengthAll formulas -> all (conditionFullySupported polarity) formulas
+    LengthAtMost left right -> literalCoverageSupported $ case polarity of
+      BooleanFiniteUnionPositive -> LengthAtMost left right
+      BooleanFiniteUnionNegative -> LengthNot $ LengthAtMost left right
+    LengthEqual left right -> case polarity of
+      BooleanFiniteUnionPositive ->
+        literalCoverageSupported $ LengthEqual left right
+      BooleanFiniteUnionNegative ->
+        literalCoverageSupported
+          (LengthNot $ LengthAtMost left right)
+        && literalCoverageSupported
+          (LengthNot $ LengthAtMost right left)
+
+  literalCoverageSupported literal = case recursiveClauseBranches literal of
+    [RelationalPositiveAffineClauseIgnored] -> False
+    _ -> True
+
+  recursiveClauseBranches literal =
+    strictRelationalPositiveAffineQuotientRootExtremaMonusAtomicBranchingRecursivePiecewiseAffineClauseBranches
+      inputCount inputPosition literal
+
+  oppositeBooleanFiniteUnionPolarity polarity = case polarity of
+    BooleanFiniteUnionPositive -> BooleanFiniteUnionNegative
+    BooleanFiniteUnionNegative -> BooleanFiniteUnionPositive
+
+  collapseRecursivePiecewiseAffineCoverage = collapse False []
+   where
+    collapse contradiction retained remaining = case remaining of
+      []
+        | contradiction -> RelationalPositiveAffineClauseContradiction
+        | otherwise -> RelationalPositiveAffineClauseRules
+            $ concat $ reverse retained
+      RelationalPositiveAffineClauseIgnored : _ ->
+        RelationalPositiveAffineClauseIgnored
+      RelationalPositiveAffineClauseContradiction : following ->
+        collapse True retained following
+      RelationalPositiveAffineClauseRules rules : following ->
+        collapse contradiction (rules : retained) following
 
   hasRecursivePiecewiseAffineOperation source = case source of
     LengthAtMost left right -> inExpression left || inExpression right
@@ -3178,8 +3287,7 @@ strictRelationalPositiveAffineQuotientRootExtremaMonusAtomicBranchingRecursivePi
     LengthMonus _ _ -> True
     LengthMinimum _ _ -> True
     LengthMaximum _ _ -> True
-    LengthIf _ consequent alternate ->
-      inExpression consequent || inExpression alternate
+    LengthIf _ _ _ -> True
 
 addRecursivePiecewiseAffineSummaries
   :: RecursivePiecewiseAffineSummary

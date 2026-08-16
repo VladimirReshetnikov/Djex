@@ -18,7 +18,7 @@
 -- prune other candidates.  The same replay kernel can exhaust an explicitly
 -- finite Cartesian input box under independent width and assignment-count
 -- limits plus the existing value bounds.  A positive receipt records the
--- versioned verifier, exact box, total and precondition-applicable assignment
+-- schema-bound verifier, exact box, total and precondition-applicable assignment
 -- counts, and provider/model basis.  It remains bounded/model-relative and does
 -- not strengthen a solver's @unsat@ report into universal evidence.
 --
@@ -116,140 +116,20 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , LengthApplicableDomainValidation (..)
   , LengthApplicableDomainValidationError (..)
   , ValidatedLengthApplicableDomain
-  , lengthApplicableDomainValidationSchemaTag
-  , validatedLengthApplicableDomainInclusiveMaximums
+  , validatedLengthApplicableDomainInclusiveMaximumBoxes
+  , validatedLengthApplicableDomainBoxCount
+  , validatedLengthApplicableDomainAssignmentVisitCount
   , validatedLengthApplicableDomainAssignmentCount
   , validatedLengthApplicableDomainApplicableAssignmentCount
   , validatedLengthApplicableDomainBasis
   , LengthSpinePairApplicableDomainValidationError (..)
   , ValidatedLengthSpinePairApplicableDomain
-  , lengthSpinePairApplicableDomainValidationSchemaTag
-  , validatedLengthSpinePairApplicableDomainInclusiveMaximums
+  , validatedLengthSpinePairApplicableDomainInclusiveMaximumBoxes
+  , validatedLengthSpinePairApplicableDomainBoxCount
+  , validatedLengthSpinePairApplicableDomainAssignmentVisitCount
   , validatedLengthSpinePairApplicableDomainAssignmentCount
   , validatedLengthSpinePairApplicableDomainApplicableAssignmentCount
   , validatedLengthSpinePairApplicableDomainBasis
-  , ValidatedLengthPositiveAffineApplicableDomain
-  , lengthPositiveAffineApplicableDomainValidationSchemaTag
-  , validatedLengthPositiveAffineApplicableDomainInclusiveMaximums
-  , validatedLengthPositiveAffineApplicableDomainAssignmentCount
-  , validatedLengthPositiveAffineApplicableDomainApplicableAssignmentCount
-  , validatedLengthPositiveAffineApplicableDomainBasis
-  , ValidatedLengthSpinePairPositiveAffineApplicableDomain
-  , lengthSpinePairPositiveAffineApplicableDomainValidationSchemaTag
-  , validatedLengthSpinePairPositiveAffineApplicableDomainInclusiveMaximums
-  , validatedLengthSpinePairPositiveAffineApplicableDomainAssignmentCount
-  , validatedLengthSpinePairPositiveAffineApplicableDomainApplicableAssignmentCount
-  , validatedLengthSpinePairPositiveAffineApplicableDomainBasis
-  , ValidatedLengthRelationalPositiveAffineApplicableDomain
-  , lengthRelationalPositiveAffineApplicableDomainValidationSchemaTag
-  , validatedLengthRelationalPositiveAffineApplicableDomainInclusiveMaximums
-  , validatedLengthRelationalPositiveAffineApplicableDomainAssignmentCount
-  , validatedLengthRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-  , validatedLengthRelationalPositiveAffineApplicableDomainBasis
-  , ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
-  , lengthSpinePairRelationalPositiveAffineApplicableDomainValidationSchemaTag
-  , validatedLengthSpinePairRelationalPositiveAffineApplicableDomainInclusiveMaximums
-  , validatedLengthSpinePairRelationalPositiveAffineApplicableDomainAssignmentCount
-  , validatedLengthSpinePairRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-  , validatedLengthSpinePairRelationalPositiveAffineApplicableDomainBasis
-  , ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
-  , lengthStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag
-  , validatedLengthStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
-  , validatedLengthStrictRelationalPositiveAffineApplicableDomainAssignmentCount
-  , validatedLengthStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-  , validatedLengthStrictRelationalPositiveAffineApplicableDomainBasis
-  , ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
-  , lengthSpinePairStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag
-  , validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
-  , validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainAssignmentCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainBasis
-  , ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
-  , lengthStrictRelationalPositiveAffineQuotientApplicableDomainValidationSchemaTag
-  , validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainInclusiveMaximums
-  , validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainAssignmentCount
-  , validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainApplicableAssignmentCount
-  , validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainBasis
-  , ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
-  , lengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainValidationSchemaTag
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainInclusiveMaximums
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainAssignmentCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainApplicableAssignmentCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainBasis
-  , ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  , lengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationSchemaTag
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInclusiveMaximums
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentCount
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableAssignmentCount
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasis
-  , ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  , lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationSchemaTag
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInclusiveMaximums
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableAssignmentCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasis
-  , ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  , lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidationSchemaTag
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainInclusiveMaximums
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentCount
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableAssignmentCount
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasis
-  , ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  , lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidationSchemaTag
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainInclusiveMaximums
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableAssignmentCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasis
-  , LengthBooleanFiniteUnionApplicableDomainValidationError (..)
-  , ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  , lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
-  , LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError (..)
-  , ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  , lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
-  , ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  , lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidationSchemaTag
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainInclusiveMaximumBoxes
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxCount
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentVisitCount
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentCount
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainApplicableAssignmentCount
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBasis
-  , ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  , lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidationSchemaTag
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainInclusiveMaximumBoxes
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentVisitCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainApplicableAssignmentCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBasis
-  , ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-  , lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainInclusiveMaximumBoxes
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCount
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentVisitCount
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentCount
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableAssignmentCount
-  , validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasis
-  , ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-  , lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainInclusiveMaximumBoxes
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentVisitCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableAssignmentCount
-  , validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasis
   , evaluateLengthContractAssignment
   , evaluateLengthSpinePairContractAssignment
   , evaluateLengthProviderApplication
@@ -261,24 +141,6 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validateLengthSpinePairProblemInputBox
   , validateLengthProblemApplicableDomain
   , validateLengthSpinePairProblemApplicableDomain
-  , validateLengthProblemPositiveAffineApplicableDomain
-  , validateLengthSpinePairProblemPositiveAffineApplicableDomain
-  , validateLengthProblemRelationalPositiveAffineApplicableDomain
-  , validateLengthSpinePairProblemRelationalPositiveAffineApplicableDomain
-  , validateLengthProblemStrictRelationalPositiveAffineApplicableDomain
-  , validateLengthSpinePairProblemStrictRelationalPositiveAffineApplicableDomain
-  , validateLengthProblemStrictRelationalPositiveAffineQuotientApplicableDomain
-  , validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientApplicableDomain
-  , validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  , validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  , validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  , validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  , validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  , validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  , validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  , validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  , validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-  , validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -959,13 +821,12 @@ validatedLengthSpinePairInputBoxBasis
     (ValidatedLengthSpinePairInputBoxReceipt _ _ _ _ basis) = basis
 
 -- | Why an exact checked problem does not expose a finite applicable domain
--- through the deliberately narrow version-one coverage rule.
+-- through the current bounded recursive piecewise-affine coverage rule.
 --
--- Preconditions are already bounded and normalized by contract sealing.  The
--- rule nevertheless recognizes only a direct top-level conjunct of the exact
--- form @input <= literal@ for every compact modeled input.  It does not infer
--- bounds from equality, arithmetic, negation, conditionals, or implications.
--- The first missing input is reported in compact source order.
+-- Preconditions are already bounded and normalized by contract sealing. The
+-- analysis expands their Boolean structure, admits its exact supported affine
+-- consequences, and returns the first compact input still missing from any
+-- live finite-union branch.
 data LengthApplicableDomainInapplicability
   = LengthApplicableDomainInputUpperBoundMissing !Int
   deriving (Eq, Ord, Show, Generic)
@@ -975,8 +836,8 @@ instance NFData LengthApplicableDomainInapplicability
 -- | Complete classification of one attempt to validate a problem's entire
 -- applicable input domain.
 --
--- Inapplicability is an ordinary conservative result: the version-one direct
--- coverage rule could not derive a finite box.  Counterexample and established
+-- Inapplicability is an ordinary conservative result: the current analysis
+-- could not derive a finite union of boxes. Counterexample and established
 -- payloads retain authority only through their opaque evidence values.
 data LengthApplicableDomainValidation counterexample established
   = LengthApplicableDomainInapplicable
@@ -988,1144 +849,69 @@ data LengthApplicableDomainValidation counterexample established
 instance (NFData counterexample, NFData established) =>
     NFData (LengthApplicableDomainValidation counterexample established)
 
--- | Operational failure after an applicable-domain attempt has passed its
--- semantic coverage gate.  Width failure is intentionally represented by the
--- existing input-box error and occurs before the checked precondition is
--- scanned.
+-- | Fixed-precedence operational failures for scalar applicable-domain
+-- establishment. Branch indices refer to canonical post-deduplication,
+-- post-subsumption DNF order; box indices refer to the canonical retained
+-- componentwise-maximal antichain.
 data LengthApplicableDomainValidationError
-  = LengthApplicableDomainInputBoxValidationRejected
-      !LengthInputBoxValidationError
+  = LengthApplicableDomainProblemInputLimitExceeded !Int !Int
+  | LengthApplicableDomainGeneratedBranchLimitExceeded !Int !Int
+  | LengthApplicableDomainRuleLimitExceeded !Int !Int !Int
+  | LengthApplicableDomainClosureInspectionLimitExceeded !Int !Int !Int
+  | LengthApplicableDomainRetainedBoxLimitExceeded !Int !Int
+  | LengthApplicableDomainMaximumValueRejected
+      !Int !Int !LengthEvaluationError
+  | LengthApplicableDomainAssignmentVisitLimitExceeded !Int !Int
+  | LengthApplicableDomainAssignmentLimitExceeded !Natural !Natural
+  | LengthApplicableDomainAssignmentEvaluationRejected
+      !Natural !LengthEvaluationError
+  | LengthApplicableDomainInternalEnumerationInvariant
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData LengthApplicableDomainValidationError
 
--- | Versioned semantics of scalar applicable-domain establishment.
---
--- This tag belongs only to the new receipt.  The exact normalized precondition
--- remains owned by the already fingerprinted problem, and no problem, query,
--- protocol, or live-execution identity changes.
-lengthApplicableDomainValidationSchemaTag :: [Word8]
-lengthApplicableDomainValidationSchemaTag =
-  ascii "finite-list-spine-length/finite-precondition-domain-establishment/v1"
-
--- | Complete validation of every assignment on which one exact scalar Length
--- problem can apply under the version-one direct-bound rule.
---
--- The nested box receipt owns the exact derived maxima, traversal counts, and
--- model/provider basis.  Its enclosing 'BehavioralEvidence' retains the same
--- exact problem association as the independently completed box validation.
-data ValidatedLengthApplicableDomain =
-  ValidatedLengthApplicableDomainReceipt
-    ![Word8]
-    !ValidatedLengthInputBox
-  deriving (Eq, Ord, Show)
-
-instance NFData ValidatedLengthApplicableDomain where
-  rnf (ValidatedLengthApplicableDomainReceipt schema inputBox) =
-    rnf schema `seq` rnf inputBox
-
-validatedLengthApplicableDomainInclusiveMaximums
-  :: ValidatedLengthApplicableDomain
-  -> [Natural]
-validatedLengthApplicableDomainInclusiveMaximums
-    (ValidatedLengthApplicableDomainReceipt _ inputBox) =
-  validatedLengthInputBoxInclusiveMaximums inputBox
-
-validatedLengthApplicableDomainAssignmentCount
-  :: ValidatedLengthApplicableDomain
-  -> Natural
-validatedLengthApplicableDomainAssignmentCount
-    (ValidatedLengthApplicableDomainReceipt _ inputBox) =
-  validatedLengthInputBoxAssignmentCount inputBox
-
-validatedLengthApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthApplicableDomain
-  -> Natural
-validatedLengthApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthApplicableDomainReceipt _ inputBox) =
-  validatedLengthInputBoxApplicableAssignmentCount inputBox
-
-validatedLengthApplicableDomainBasis
-  :: ValidatedLengthApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthApplicableDomainBasis
-    (ValidatedLengthApplicableDomainReceipt _ inputBox) =
-  validatedLengthInputBoxBasis inputBox
-
--- | Product-domain operational failure after direct finite coverage succeeds.
+-- | Nominal binary-product failure vocabulary for the same bounded
+-- applicable-domain algorithm.
 data LengthSpinePairApplicableDomainValidationError
-  = LengthSpinePairApplicableDomainInputBoxValidationRejected
-      !LengthSpinePairInputBoxValidationError
+  = LengthSpinePairApplicableDomainProblemInputLimitExceeded !Int !Int
+  | LengthSpinePairApplicableDomainGeneratedBranchLimitExceeded !Int !Int
+  | LengthSpinePairApplicableDomainRuleLimitExceeded !Int !Int !Int
+  | LengthSpinePairApplicableDomainClosureInspectionLimitExceeded
+      !Int !Int !Int
+  | LengthSpinePairApplicableDomainRetainedBoxLimitExceeded !Int !Int
+  | LengthSpinePairApplicableDomainMaximumValueRejected
+      !Int !Int !LengthSpinePairEvaluationError
+  | LengthSpinePairApplicableDomainAssignmentVisitLimitExceeded !Int !Int
+  | LengthSpinePairApplicableDomainAssignmentLimitExceeded
+      !Natural !Natural
+  | LengthSpinePairApplicableDomainAssignmentEvaluationRejected
+      !Natural !LengthSpinePairEvaluationError
+  | LengthSpinePairApplicableDomainInternalEnumerationInvariant
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData LengthSpinePairApplicableDomainValidationError
 
--- | Versioned semantics of binary-product applicable-domain establishment.
-lengthSpinePairApplicableDomainValidationSchemaTag :: [Word8]
-lengthSpinePairApplicableDomainValidationSchemaTag = ascii
-  "finite-binary-product-spine-lengths/finite-precondition-domain-establishment/v1"
-
--- | Complete applicable-domain receipt for one exact nominal product problem.
-data ValidatedLengthSpinePairApplicableDomain =
-  ValidatedLengthSpinePairApplicableDomainReceipt
-    ![Word8]
-    !ValidatedLengthSpinePairInputBox
-  deriving (Eq, Ord, Show)
-
-instance NFData ValidatedLengthSpinePairApplicableDomain where
-  rnf (ValidatedLengthSpinePairApplicableDomainReceipt schema inputBox) =
-    rnf schema `seq` rnf inputBox
-
-validatedLengthSpinePairApplicableDomainInclusiveMaximums
-  :: ValidatedLengthSpinePairApplicableDomain
-  -> [Natural]
-validatedLengthSpinePairApplicableDomainInclusiveMaximums
-    (ValidatedLengthSpinePairApplicableDomainReceipt _ inputBox) =
-  validatedLengthSpinePairInputBoxInclusiveMaximums inputBox
-
-validatedLengthSpinePairApplicableDomainAssignmentCount
-  :: ValidatedLengthSpinePairApplicableDomain
-  -> Natural
-validatedLengthSpinePairApplicableDomainAssignmentCount
-    (ValidatedLengthSpinePairApplicableDomainReceipt _ inputBox) =
-  validatedLengthSpinePairInputBoxAssignmentCount inputBox
-
-validatedLengthSpinePairApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthSpinePairApplicableDomain
-  -> Natural
-validatedLengthSpinePairApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthSpinePairApplicableDomainReceipt _ inputBox) =
-  validatedLengthSpinePairInputBoxApplicableAssignmentCount inputBox
-
-validatedLengthSpinePairApplicableDomainBasis
-  :: ValidatedLengthSpinePairApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthSpinePairApplicableDomainBasis
-    (ValidatedLengthSpinePairApplicableDomainReceipt _ inputBox) =
-  validatedLengthSpinePairInputBoxBasis inputBox
-
--- | Versioned positive-affine coverage semantics for the scalar applicable
--- domain.  This tag belongs only to the additive receipt below; the literal
--- direct-bound v1 receipt and every problem, query, protocol, and live identity
--- remain unchanged.
-lengthPositiveAffineApplicableDomainValidationSchemaTag :: [Word8]
-lengthPositiveAffineApplicableDomainValidationSchemaTag = ascii
-  "finite-list-spine-length/positive-affine-precondition-domain-establishment/v1"
-
--- | Complete scalar applicable-domain validation under the positive-affine
--- coverage rule.  The constructor is private.  Its nested box receipt owns the
--- exact derived maxima, traversal counts, and model/provider basis.
-data ValidatedLengthPositiveAffineApplicableDomain =
-  ValidatedLengthPositiveAffineApplicableDomainReceipt
-    ![Word8]
-    !ValidatedLengthInputBox
-  deriving (Eq, Ord, Show)
-
-instance NFData ValidatedLengthPositiveAffineApplicableDomain where
-  rnf (ValidatedLengthPositiveAffineApplicableDomainReceipt schema inputBox) =
-    rnf schema `seq` rnf inputBox
-
-validatedLengthPositiveAffineApplicableDomainInclusiveMaximums
-  :: ValidatedLengthPositiveAffineApplicableDomain
-  -> [Natural]
-validatedLengthPositiveAffineApplicableDomainInclusiveMaximums
-    (ValidatedLengthPositiveAffineApplicableDomainReceipt _ inputBox) =
-  validatedLengthInputBoxInclusiveMaximums inputBox
-
-validatedLengthPositiveAffineApplicableDomainAssignmentCount
-  :: ValidatedLengthPositiveAffineApplicableDomain
-  -> Natural
-validatedLengthPositiveAffineApplicableDomainAssignmentCount
-    (ValidatedLengthPositiveAffineApplicableDomainReceipt _ inputBox) =
-  validatedLengthInputBoxAssignmentCount inputBox
-
-validatedLengthPositiveAffineApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthPositiveAffineApplicableDomain
-  -> Natural
-validatedLengthPositiveAffineApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthPositiveAffineApplicableDomainReceipt _ inputBox) =
-  validatedLengthInputBoxApplicableAssignmentCount inputBox
-
-validatedLengthPositiveAffineApplicableDomainBasis
-  :: ValidatedLengthPositiveAffineApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthPositiveAffineApplicableDomainBasis
-    (ValidatedLengthPositiveAffineApplicableDomainReceipt _ inputBox) =
-  validatedLengthInputBoxBasis inputBox
-
--- | Nominal binary-product sibling of
--- 'lengthPositiveAffineApplicableDomainValidationSchemaTag'.
-lengthSpinePairPositiveAffineApplicableDomainValidationSchemaTag :: [Word8]
-lengthSpinePairPositiveAffineApplicableDomainValidationSchemaTag = ascii
-  "finite-binary-product-spine-lengths/positive-affine-precondition-domain-establishment/v1"
-
--- | Complete product applicable-domain validation under the positive-affine
--- coverage rule.  Scalar and product receipts remain nominally disjoint even
--- though their private extraction kernel is shared.
-data ValidatedLengthSpinePairPositiveAffineApplicableDomain =
-  ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt
-    ![Word8]
-    !ValidatedLengthSpinePairInputBox
-  deriving (Eq, Ord, Show)
-
-instance NFData ValidatedLengthSpinePairPositiveAffineApplicableDomain where
-  rnf (ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt
-      schema inputBox) = rnf schema `seq` rnf inputBox
-
-validatedLengthSpinePairPositiveAffineApplicableDomainInclusiveMaximums
-  :: ValidatedLengthSpinePairPositiveAffineApplicableDomain
-  -> [Natural]
-validatedLengthSpinePairPositiveAffineApplicableDomainInclusiveMaximums
-    (ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt
-      _ inputBox) = validatedLengthSpinePairInputBoxInclusiveMaximums inputBox
-
-validatedLengthSpinePairPositiveAffineApplicableDomainAssignmentCount
-  :: ValidatedLengthSpinePairPositiveAffineApplicableDomain
-  -> Natural
-validatedLengthSpinePairPositiveAffineApplicableDomainAssignmentCount
-    (ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt
-      _ inputBox) = validatedLengthSpinePairInputBoxAssignmentCount inputBox
-
-validatedLengthSpinePairPositiveAffineApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthSpinePairPositiveAffineApplicableDomain
-  -> Natural
-validatedLengthSpinePairPositiveAffineApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt
-      _ inputBox) =
-  validatedLengthSpinePairInputBoxApplicableAssignmentCount inputBox
-
-validatedLengthSpinePairPositiveAffineApplicableDomainBasis
-  :: ValidatedLengthSpinePairPositiveAffineApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthSpinePairPositiveAffineApplicableDomainBasis
-    (ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt
-      _ inputBox) = validatedLengthSpinePairInputBoxBasis inputBox
-
--- | Versioned relational positive-affine coverage semantics for the scalar
--- applicable domain.  This additive receipt is nominally separate from both
--- the literal-direct and literal-ceiling positive-affine rules.
-lengthRelationalPositiveAffineApplicableDomainValidationSchemaTag :: [Word8]
-lengthRelationalPositiveAffineApplicableDomainValidationSchemaTag = ascii
-  "finite-list-spine-length/relational-positive-affine-precondition-domain-establishment/v1"
-
--- | Complete scalar applicable-domain validation under the relational
--- positive-affine coverage rule.  The private constructor retains the exact
--- completed scalar input-box receipt beside the rule's fixed schema tag.
-data ValidatedLengthRelationalPositiveAffineApplicableDomain =
-  ValidatedLengthRelationalPositiveAffineApplicableDomainReceipt
-    ![Word8]
-    !ValidatedLengthInputBox
-  deriving (Eq, Ord, Show)
-
-instance NFData ValidatedLengthRelationalPositiveAffineApplicableDomain where
-  rnf
-      (ValidatedLengthRelationalPositiveAffineApplicableDomainReceipt
-        schema inputBox) = rnf schema `seq` rnf inputBox
-
-validatedLengthRelationalPositiveAffineApplicableDomainInclusiveMaximums
-  :: ValidatedLengthRelationalPositiveAffineApplicableDomain
-  -> [Natural]
-validatedLengthRelationalPositiveAffineApplicableDomainInclusiveMaximums
-    (ValidatedLengthRelationalPositiveAffineApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxInclusiveMaximums inputBox
-
-validatedLengthRelationalPositiveAffineApplicableDomainAssignmentCount
-  :: ValidatedLengthRelationalPositiveAffineApplicableDomain
-  -> Natural
-validatedLengthRelationalPositiveAffineApplicableDomainAssignmentCount
-    (ValidatedLengthRelationalPositiveAffineApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxAssignmentCount inputBox
-
-validatedLengthRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthRelationalPositiveAffineApplicableDomain
-  -> Natural
-validatedLengthRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthRelationalPositiveAffineApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxApplicableAssignmentCount inputBox
-
-validatedLengthRelationalPositiveAffineApplicableDomainBasis
-  :: ValidatedLengthRelationalPositiveAffineApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthRelationalPositiveAffineApplicableDomainBasis
-    (ValidatedLengthRelationalPositiveAffineApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxBasis inputBox
-
--- | Nominal binary-product sibling of
--- 'lengthRelationalPositiveAffineApplicableDomainValidationSchemaTag'.
-lengthSpinePairRelationalPositiveAffineApplicableDomainValidationSchemaTag
-  :: [Word8]
-lengthSpinePairRelationalPositiveAffineApplicableDomainValidationSchemaTag =
-  ascii
-    "finite-binary-product-spine-lengths/relational-positive-affine-precondition-domain-establishment/v1"
-
--- | Complete product applicable-domain validation under the relational
--- positive-affine coverage rule.  Scalar and product evidence cannot be
--- interchanged even though their private extraction kernel is shared.
-data ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain =
-  ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt
-    ![Word8]
-    !ValidatedLengthSpinePairInputBox
-  deriving (Eq, Ord, Show)
-
-instance NFData
-    ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain where
-  rnf
-      (ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt
-        schema inputBox) = rnf schema `seq` rnf inputBox
-
-validatedLengthSpinePairRelationalPositiveAffineApplicableDomainInclusiveMaximums
-  :: ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
-  -> [Natural]
-validatedLengthSpinePairRelationalPositiveAffineApplicableDomainInclusiveMaximums
-    (ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt
-      _ inputBox) =
-        validatedLengthSpinePairInputBoxInclusiveMaximums inputBox
-
-validatedLengthSpinePairRelationalPositiveAffineApplicableDomainAssignmentCount
-  :: ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
-  -> Natural
-validatedLengthSpinePairRelationalPositiveAffineApplicableDomainAssignmentCount
-    (ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt
-      _ inputBox) = validatedLengthSpinePairInputBoxAssignmentCount inputBox
-
-validatedLengthSpinePairRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
-  -> Natural
-validatedLengthSpinePairRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt
-      _ inputBox) =
-        validatedLengthSpinePairInputBoxApplicableAssignmentCount inputBox
-
-validatedLengthSpinePairRelationalPositiveAffineApplicableDomainBasis
-  :: ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthSpinePairRelationalPositiveAffineApplicableDomainBasis
-    (ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt
-      _ inputBox) = validatedLengthSpinePairInputBoxBasis inputBox
-
--- | Versioned strict relational positive-affine coverage semantics for the
--- scalar applicable domain.  This additive rule recognizes the exact natural
--- complement of a top-level affine at-most clause without changing checked
--- contract normalization or any established receipt family.
-lengthStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag
-  :: [Word8]
-lengthStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag =
-  ascii
-    "finite-list-spine-length/strict-relational-positive-affine-precondition-domain-establishment/v1"
-
--- | Complete scalar applicable-domain validation under the strict relational
--- positive-affine coverage rule.  Its constructor is private and its nested
--- receipt retains the existing finite-box replay authority.
-data ValidatedLengthStrictRelationalPositiveAffineApplicableDomain =
-  ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt
-    ![Word8]
-    !ValidatedLengthInputBox
-  deriving (Eq, Ord, Show)
-
-instance NFData
-    ValidatedLengthStrictRelationalPositiveAffineApplicableDomain where
-  rnf
-      (ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt
-        schema inputBox) = rnf schema `seq` rnf inputBox
-
-validatedLengthStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
-  :: ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
-  -> [Natural]
-validatedLengthStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
-    (ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxInclusiveMaximums inputBox
-
-validatedLengthStrictRelationalPositiveAffineApplicableDomainAssignmentCount
-  :: ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineApplicableDomainAssignmentCount
-    (ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxAssignmentCount inputBox
-
-validatedLengthStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxApplicableAssignmentCount inputBox
-
-validatedLengthStrictRelationalPositiveAffineApplicableDomainBasis
-  :: ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthStrictRelationalPositiveAffineApplicableDomainBasis
-    (ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxBasis inputBox
-
--- | Nominal binary-product sibling of
--- 'lengthStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag'.
-lengthSpinePairStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag
-  :: [Word8]
-lengthSpinePairStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag =
-  ascii
-    "finite-binary-product-spine-lengths/strict-relational-positive-affine-precondition-domain-establishment/v1"
-
--- | Complete product applicable-domain validation under the strict relational
--- positive-affine rule.  Scalar and product evidence remain nominally
--- disjoint while sharing only the private extraction mechanics.
-data ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain =
-  ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt
-    ![Word8]
-    !ValidatedLengthSpinePairInputBox
-  deriving (Eq, Ord, Show)
-
-instance NFData
-    ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain where
-  rnf
-      (ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt
-        schema inputBox) = rnf schema `seq` rnf inputBox
-
-validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
-  -> [Natural]
-validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt
-      _ inputBox) =
-        validatedLengthSpinePairInputBoxInclusiveMaximums inputBox
-
-validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainAssignmentCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
-  -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainAssignmentCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt
-      _ inputBox) = validatedLengthSpinePairInputBoxAssignmentCount inputBox
-
-validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
-  -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt
-      _ inputBox) =
-        validatedLengthSpinePairInputBoxApplicableAssignmentCount inputBox
-
-validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainBasis
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainBasis
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt
-      _ inputBox) = validatedLengthSpinePairInputBoxBasis inputBox
-
--- | Versioned successor to strict relational positive-affine coverage.  It
--- adds only exact natural-number consequences for one positive-literal
--- quotient occurring at a directed relation's operand root.
-lengthStrictRelationalPositiveAffineQuotientApplicableDomainValidationSchemaTag
-  :: [Word8]
-lengthStrictRelationalPositiveAffineQuotientApplicableDomainValidationSchemaTag =
-  ascii
-    "finite-list-spine-length/strict-relational-positive-affine-quotient-precondition-domain-establishment/v1"
-
--- | Complete scalar applicable-domain validation under the root-quotient
--- successor rule.  The constructor remains private and the nested box receipt
--- retains the exact traversal evidence.
-data ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain =
-  ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainReceipt
-    ![Word8]
-    !ValidatedLengthInputBox
-  deriving (Eq, Ord, Show)
-
-instance NFData
-    ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain where
-  rnf
-      (ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainReceipt
-        schema inputBox) = rnf schema `seq` rnf inputBox
-
-validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainInclusiveMaximums
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
-  -> [Natural]
-validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainInclusiveMaximums
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxInclusiveMaximums inputBox
-
-validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainAssignmentCount
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainAssignmentCount
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxAssignmentCount inputBox
-
-validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxApplicableAssignmentCount inputBox
-
-validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainBasis
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainBasis
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxBasis inputBox
-
--- | Nominal binary-product sibling of
--- 'lengthStrictRelationalPositiveAffineQuotientApplicableDomainValidationSchemaTag'.
-lengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainValidationSchemaTag
-  :: [Word8]
-lengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainValidationSchemaTag =
-  ascii
-    "finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-precondition-domain-establishment/v1"
-
--- | Product-domain root-quotient receipt.  Its nominal type prevents scalar
--- and product establishment evidence from being interchanged.
-data ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain =
-  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainReceipt
-    ![Word8]
-    !ValidatedLengthSpinePairInputBox
-  deriving (Eq, Ord, Show)
-
-instance NFData
-    ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain where
-  rnf
-      (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainReceipt
-        schema inputBox) = rnf schema `seq` rnf inputBox
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainInclusiveMaximums
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
-  -> [Natural]
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainInclusiveMaximums
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainReceipt
-      _ inputBox) =
-        validatedLengthSpinePairInputBoxInclusiveMaximums inputBox
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainAssignmentCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
-  -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainAssignmentCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainReceipt
-      _ inputBox) = validatedLengthSpinePairInputBoxAssignmentCount inputBox
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
-  -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainReceipt
-      _ inputBox) =
-        validatedLengthSpinePairInputBoxApplicableAssignmentCount inputBox
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainBasis
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainBasis
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainReceipt
-      _ inputBox) = validatedLengthSpinePairInputBoxBasis inputBox
-
--- | Versioned cumulative successor to root-quotient strict relational
--- positive-affine coverage.  It adds only conjunctive consequences for one
--- immediate binary minimum or maximum at a relation operand's root.
-lengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationSchemaTag
-  :: [Word8]
-lengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationSchemaTag =
-  ascii
-    "finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-precondition-domain-establishment/v1"
-
--- | Complete scalar applicable-domain validation under the cumulative
--- root-extrema successor.  Its constructor is private; the nested input-box
--- receipt retains the exhaustive traversal evidence.
-data ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain =
-  ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt
-    ![Word8]
-    !ValidatedLengthInputBox
-  deriving (Eq, Ord, Show)
-
-instance NFData
-    ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain where
-  rnf
-      (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt
-        schema inputBox) = rnf schema `seq` rnf inputBox
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInclusiveMaximums
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  -> [Natural]
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInclusiveMaximums
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxInclusiveMaximums inputBox
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentCount
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentCount
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxAssignmentCount inputBox
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxApplicableAssignmentCount inputBox
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasis
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasis
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxBasis inputBox
-
--- | Nominal binary-product sibling of
--- 'lengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationSchemaTag'.
-lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationSchemaTag
-  :: [Word8]
-lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationSchemaTag =
-  ascii
-    "finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-precondition-domain-establishment/v1"
-
--- | Product-domain cumulative root-extrema receipt.  Its nominal type keeps
--- scalar and product establishment evidence disjoint.
-data ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain =
-  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt
-    ![Word8]
-    !ValidatedLengthSpinePairInputBox
-  deriving (Eq, Ord, Show)
-
-instance NFData
-    ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain where
-  rnf
-      (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt
-        schema inputBox) = rnf schema `seq` rnf inputBox
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInclusiveMaximums
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  -> [Natural]
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainInclusiveMaximums
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt
-      _ inputBox) =
-        validatedLengthSpinePairInputBoxInclusiveMaximums inputBox
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainAssignmentCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt
-      _ inputBox) = validatedLengthSpinePairInputBoxAssignmentCount inputBox
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt
-      _ inputBox) =
-        validatedLengthSpinePairInputBoxApplicableAssignmentCount inputBox
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasis
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainBasis
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt
-      _ inputBox) = validatedLengthSpinePairInputBoxBasis inputBox
-
--- | Versioned cumulative successor which adds exact conjunctive consequences
--- for one immediate natural monus at a relation operand's root.
-lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidationSchemaTag
-  :: [Word8]
-lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidationSchemaTag =
-  ascii
-    "finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-precondition-domain-establishment/v1"
-
--- | Complete scalar applicable-domain validation under the cumulative monus
--- successor.  Its constructor remains private and its nested input-box
--- receipt retains the exhaustive traversal evidence.
-data ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain =
-  ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt
-    ![Word8]
-    !ValidatedLengthInputBox
-  deriving (Eq, Ord, Show)
-
-instance NFData
-    ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain where
-  rnf
-      (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt
-        schema inputBox) = rnf schema `seq` rnf inputBox
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainInclusiveMaximums
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  -> [Natural]
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainInclusiveMaximums
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxInclusiveMaximums inputBox
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentCount
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentCount
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxAssignmentCount inputBox
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxApplicableAssignmentCount inputBox
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasis
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasis
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt
-      _ inputBox) = validatedLengthInputBoxBasis inputBox
-
--- | Nominal binary-product sibling of
--- 'lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidationSchemaTag'.
-lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidationSchemaTag
-  :: [Word8]
-lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidationSchemaTag =
-  ascii
-    "finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-precondition-domain-establishment/v1"
-
--- | Product-domain cumulative monus receipt.  Its nominal type keeps scalar
--- and product establishment evidence disjoint.
-data ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain =
-  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt
-    ![Word8]
-    !ValidatedLengthSpinePairInputBox
-  deriving (Eq, Ord, Show)
-
-instance NFData
-    ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain where
-  rnf
-      (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt
-        schema inputBox) = rnf schema `seq` rnf inputBox
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainInclusiveMaximums
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  -> [Natural]
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainInclusiveMaximums
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt
-      _ inputBox) =
-        validatedLengthSpinePairInputBoxInclusiveMaximums inputBox
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainAssignmentCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt
-      _ inputBox) = validatedLengthSpinePairInputBoxAssignmentCount inputBox
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt
-      _ inputBox) =
-        validatedLengthSpinePairInputBoxApplicableAssignmentCount inputBox
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasis
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainBasis
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt
-      _ inputBox) = validatedLengthSpinePairInputBoxBasis inputBox
-
--- | Fixed-precedence operational failures for scalar Boolean finite-union
--- establishment.  Branch indices refer to canonical post-deduplication,
--- post-subsumption DNF order; box indices refer to the canonical retained
--- componentwise-maximal antichain.
-data LengthBooleanFiniteUnionApplicableDomainValidationError
-  = LengthBooleanFiniteUnionProblemInputLimitExceeded !Int !Int
-  | LengthBooleanFiniteUnionGeneratedBranchLimitExceeded !Int !Int
-  | LengthBooleanFiniteUnionRuleLimitExceeded !Int !Int !Int
-  | LengthBooleanFiniteUnionClosureInspectionLimitExceeded !Int !Int !Int
-  | LengthBooleanFiniteUnionRetainedBoxLimitExceeded !Int !Int
-  | LengthBooleanFiniteUnionMaximumValueRejected
-      !Int !Int !LengthEvaluationError
-  | LengthBooleanFiniteUnionAssignmentVisitLimitExceeded !Int !Int
-  | LengthBooleanFiniteUnionAssignmentLimitExceeded !Natural !Natural
-  | LengthBooleanFiniteUnionAssignmentEvaluationRejected
-      !Natural !LengthEvaluationError
-  | LengthBooleanFiniteUnionInternalEnumerationInvariant
-  deriving (Eq, Ord, Show, Generic)
-
-instance NFData LengthBooleanFiniteUnionApplicableDomainValidationError
-
--- | Nominal binary-product failure vocabulary for the same bounded Boolean
--- finite-union algorithm.
-data LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError
-  = LengthSpinePairBooleanFiniteUnionProblemInputLimitExceeded !Int !Int
-  | LengthSpinePairBooleanFiniteUnionGeneratedBranchLimitExceeded !Int !Int
-  | LengthSpinePairBooleanFiniteUnionRuleLimitExceeded !Int !Int !Int
-  | LengthSpinePairBooleanFiniteUnionClosureInspectionLimitExceeded
-      !Int !Int !Int
-  | LengthSpinePairBooleanFiniteUnionRetainedBoxLimitExceeded !Int !Int
-  | LengthSpinePairBooleanFiniteUnionMaximumValueRejected
-      !Int !Int !LengthSpinePairEvaluationError
-  | LengthSpinePairBooleanFiniteUnionAssignmentVisitLimitExceeded !Int !Int
-  | LengthSpinePairBooleanFiniteUnionAssignmentLimitExceeded
-      !Natural !Natural
-  | LengthSpinePairBooleanFiniteUnionAssignmentEvaluationRejected
-      !Natural !LengthSpinePairEvaluationError
-  | LengthSpinePairBooleanFiniteUnionInternalEnumerationInvariant
-  deriving (Eq, Ord, Show, Generic)
-
-instance NFData
-    LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError
-
--- | Versioned scalar authority for the exact bounded Boolean DNF finite-union
--- successor.  This tag changes no checked problem, query, protocol, or live
--- execution identity.
-lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag
-  :: [Word8]
-lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag =
-  ascii
-    "finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-precondition-domain-establishment/v1"
-
--- | Opaque scalar receipt for one canonical finite union.  Incomparable boxes
--- remain separate; no componentwise hull is introduced.  Assignment visits
--- count every retained-box traversal, while assignment count is the exact
--- cardinality of their deduplicated union.
-data ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain =
-  ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
-    ![Word8]
-    ![[Natural]]
-    !Natural
-    !Natural
-    !Natural
-    !LengthCounterexampleBasis
-  deriving (Eq, Ord, Show)
-
-instance NFData
-    ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain where
-  rnf
-      (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
-        schema boxes visits assignments applicable basis) =
-    rnf schema `seq` rnf boxes `seq` rnf visits `seq` rnf assignments `seq`
-    rnf applicable `seq` rnf basis
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  -> [[Natural]]
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
-      _ boxes _ _ _ _) = boxes
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
-      _ boxes _ _ _ _) = fromIntegral $ length boxes
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
-      _ _ visits _ _ _) = visits
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
-      _ _ _ assignments _ _) = assignments
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
-      _ _ _ _ applicable _) = applicable
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
-      _ _ _ _ _ basis) = basis
-
--- | Nominal binary-product tag for the same bounded Boolean DNF algorithm.
-lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag
-  :: [Word8]
-lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag =
-  ascii
-    "finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-precondition-domain-establishment/v1"
-
--- | Opaque product-domain sibling of the scalar finite-union receipt.
-data ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain =
-  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
-    ![Word8]
-    ![[Natural]]
-    !Natural
-    !Natural
-    !Natural
-    !LengthCounterexampleBasis
-  deriving (Eq, Ord, Show)
-
-instance NFData
-    ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain where
-  rnf
-      (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
-        schema boxes visits assignments applicable basis) =
-    rnf schema `seq` rnf boxes `seq` rnf visits `seq` rnf assignments `seq`
-    rnf applicable `seq` rnf basis
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  -> [[Natural]]
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainInclusiveMaximumBoxes
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
-      _ boxes _ _ _ _) = boxes
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBoxCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
-      _ boxes _ _ _ _) = fromIntegral $ length boxes
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentVisitCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
-      _ _ visits _ _ _) = visits
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainAssignmentCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
-      _ _ _ assignments _ _) = assignments
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
-      _ _ _ _ applicable _) = applicable
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainBasis
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
-      _ _ _ _ _ basis) = basis
-
--- | Versioned scalar authority for the cumulative finite-union validator
--- which additionally opens the exact disjunctions of the admitted immediate
--- root extrema and may-zero root monus atoms.  The predecessor receipt remains
--- nominally and byte-for-byte distinct.
-lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidationSchemaTag
-  :: [Word8]
-lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidationSchemaTag =
-  ascii
-    "finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-precondition-domain-establishment/v1"
-
--- | Opaque scalar receipt for the atomic-branching finite union.  Its fresh
--- six-field payload embeds the new schema tag directly rather than wrapping
--- or reusing predecessor evidence.
-data ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain =
-  ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
-    ![Word8]
-    ![[Natural]]
-    !Natural
-    !Natural
-    !Natural
-    !LengthCounterexampleBasis
-  deriving (Eq, Ord, Show)
-
-instance NFData
-    ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain where
-  rnf
-      (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
-        schema boxes visits assignments applicable basis) =
-    rnf schema `seq` rnf boxes `seq` rnf visits `seq` rnf assignments `seq`
-    rnf applicable `seq` rnf basis
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainInclusiveMaximumBoxes
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  -> [[Natural]]
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainInclusiveMaximumBoxes
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
-      _ boxes _ _ _ _) = boxes
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxCount
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxCount
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
-      _ boxes _ _ _ _) = fromIntegral $ length boxes
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentVisitCount
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentVisitCount
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
-      _ _ visits _ _ _) = visits
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentCount
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentCount
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
-      _ _ _ assignments _ _) = assignments
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
-      _ _ _ _ applicable _) = applicable
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBasis
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBasis
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
-      _ _ _ _ _ basis) = basis
-
--- | Nominal product-domain tag for the same atomic-branching algorithm.
-lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidationSchemaTag
-  :: [Word8]
-lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidationSchemaTag =
-  ascii
-    "finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-precondition-domain-establishment/v1"
-
-data ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain =
-  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
-    ![Word8]
-    ![[Natural]]
-    !Natural
-    !Natural
-    !Natural
-    !LengthCounterexampleBasis
-  deriving (Eq, Ord, Show)
-
-instance NFData
-    ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain where
-  rnf
-      (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
-        schema boxes visits assignments applicable basis) =
-    rnf schema `seq` rnf boxes `seq` rnf visits `seq` rnf assignments `seq`
-    rnf applicable `seq` rnf basis
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainInclusiveMaximumBoxes
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  -> [[Natural]]
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainInclusiveMaximumBoxes
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
-      _ boxes _ _ _ _) = boxes
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBoxCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
-      _ boxes _ _ _ _) = fromIntegral $ length boxes
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentVisitCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentVisitCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
-      _ _ visits _ _ _) = visits
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainAssignmentCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
-      _ _ _ assignments _ _) = assignments
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
-      _ _ _ _ applicable _) = applicable
-
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBasis
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainBasis
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
-      _ _ _ _ _ basis) = basis
-
--- | Versioned scalar authority for the recursive piecewise-affine successor.
--- It retains every exact atomic-branching result and opens only otherwise
--- ignored relational atoms whose admitted expressions contain nested extrema
--- or monus operations.
+-- These receipt-only schema identities remain byte-for-byte identical to the
+-- recursive piecewise-affine algorithm they identify. They are deliberately
+-- private: callers consume the opaque current receipts instead.
 lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag
   :: [Word8]
 lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag =
   ascii
     "finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-recursive-extrema-monus-piecewise-affine-branching-precondition-domain-establishment/v1"
 
--- | Fresh opaque scalar receipt for recursive piecewise-affine branching.
--- The exact schema tag is embedded directly; predecessor evidence is neither
--- coerced nor wrapped.
-data ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain =
-  ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
-    ![Word8]
-    ![[Natural]]
-    !Natural
-    !Natural
-    !Natural
-    !LengthCounterexampleBasis
-  deriving (Eq, Ord, Show)
-
-instance NFData
-    ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain where
-  rnf
-      (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
-        schema boxes visits assignments applicable basis) =
-    rnf schema `seq` rnf boxes `seq` rnf visits `seq` rnf assignments `seq`
-    rnf applicable `seq` rnf basis
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainInclusiveMaximumBoxes
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-  -> [[Natural]]
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainInclusiveMaximumBoxes
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
-      _ boxes _ _ _ _) = boxes
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCount
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCount
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
-      _ boxes _ _ _ _) = fromIntegral $ length boxes
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentVisitCount
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentVisitCount
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
-      _ _ visits _ _ _) = visits
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentCount
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentCount
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
-      _ _ _ assignments _ _) = assignments
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-  -> Natural
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
-      _ _ _ _ applicable _) = applicable
-
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasis
-  :: ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-  -> LengthCounterexampleBasis
-validatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasis
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
-      _ _ _ _ _ basis) = basis
-
--- | Nominal binary-product tag for the recursive piecewise-affine algorithm.
 lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag
   :: [Word8]
 lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag =
   ascii
     "finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-recursive-extrema-monus-piecewise-affine-branching-precondition-domain-establishment/v1"
 
-data ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain =
-  ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+-- | Opaque scalar receipt for the complete current applicable-domain
+-- algorithm. Incomparable boxes remain separate; assignment visits count
+-- every retained-box traversal, while assignment count is the exact
+-- cardinality of their deduplicated union.
+data ValidatedLengthApplicableDomain =
+  ValidatedLengthApplicableDomainReceipt
     ![Word8]
     ![[Natural]]
     !Natural
@@ -2134,55 +920,107 @@ data ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMo
     !LengthCounterexampleBasis
   deriving (Eq, Ord, Show)
 
-instance NFData
-    ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain where
+instance NFData ValidatedLengthApplicableDomain where
   rnf
-      (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+      (ValidatedLengthApplicableDomainReceipt
         schema boxes visits assignments applicable basis) =
     rnf schema `seq` rnf boxes `seq` rnf visits `seq` rnf assignments `seq`
     rnf applicable `seq` rnf basis
 
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainInclusiveMaximumBoxes
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+validatedLengthApplicableDomainInclusiveMaximumBoxes
+  :: ValidatedLengthApplicableDomain
   -> [[Natural]]
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainInclusiveMaximumBoxes
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
-      _ boxes _ _ _ _) = boxes
+validatedLengthApplicableDomainInclusiveMaximumBoxes
+    (ValidatedLengthApplicableDomainReceipt _ boxes _ _ _ _) = boxes
 
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+validatedLengthApplicableDomainBoxCount
+  :: ValidatedLengthApplicableDomain
   -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBoxCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
-      _ boxes _ _ _ _) = fromIntegral $ length boxes
+validatedLengthApplicableDomainBoxCount
+    (ValidatedLengthApplicableDomainReceipt _ boxes _ _ _ _) =
+  fromIntegral $ length boxes
 
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentVisitCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+validatedLengthApplicableDomainAssignmentVisitCount
+  :: ValidatedLengthApplicableDomain
   -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentVisitCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
-      _ _ visits _ _ _) = visits
+validatedLengthApplicableDomainAssignmentVisitCount
+    (ValidatedLengthApplicableDomainReceipt _ _ visits _ _ _) = visits
 
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+validatedLengthApplicableDomainAssignmentCount
+  :: ValidatedLengthApplicableDomain
   -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainAssignmentCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
-      _ _ _ assignments _ _) = assignments
+validatedLengthApplicableDomainAssignmentCount
+    (ValidatedLengthApplicableDomainReceipt _ _ _ assignments _ _) =
+  assignments
 
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableAssignmentCount
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+validatedLengthApplicableDomainApplicableAssignmentCount
+  :: ValidatedLengthApplicableDomain
   -> Natural
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainApplicableAssignmentCount
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
-      _ _ _ _ applicable _) = applicable
+validatedLengthApplicableDomainApplicableAssignmentCount
+    (ValidatedLengthApplicableDomainReceipt _ _ _ _ applicable _) = applicable
 
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasis
-  :: ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+validatedLengthApplicableDomainBasis
+  :: ValidatedLengthApplicableDomain
   -> LengthCounterexampleBasis
-validatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainBasis
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
-      _ _ _ _ _ basis) = basis
+validatedLengthApplicableDomainBasis
+    (ValidatedLengthApplicableDomainReceipt _ _ _ _ _ basis) = basis
+
+-- | Opaque nominal binary-product sibling of the current scalar receipt.
+data ValidatedLengthSpinePairApplicableDomain =
+  ValidatedLengthSpinePairApplicableDomainReceipt
+    ![Word8]
+    ![[Natural]]
+    !Natural
+    !Natural
+    !Natural
+    !LengthCounterexampleBasis
+  deriving (Eq, Ord, Show)
+
+instance NFData ValidatedLengthSpinePairApplicableDomain where
+  rnf
+      (ValidatedLengthSpinePairApplicableDomainReceipt
+        schema boxes visits assignments applicable basis) =
+    rnf schema `seq` rnf boxes `seq` rnf visits `seq` rnf assignments `seq`
+    rnf applicable `seq` rnf basis
+
+validatedLengthSpinePairApplicableDomainInclusiveMaximumBoxes
+  :: ValidatedLengthSpinePairApplicableDomain
+  -> [[Natural]]
+validatedLengthSpinePairApplicableDomainInclusiveMaximumBoxes
+    (ValidatedLengthSpinePairApplicableDomainReceipt _ boxes _ _ _ _) = boxes
+
+validatedLengthSpinePairApplicableDomainBoxCount
+  :: ValidatedLengthSpinePairApplicableDomain
+  -> Natural
+validatedLengthSpinePairApplicableDomainBoxCount
+    (ValidatedLengthSpinePairApplicableDomainReceipt _ boxes _ _ _ _) =
+  fromIntegral $ length boxes
+
+validatedLengthSpinePairApplicableDomainAssignmentVisitCount
+  :: ValidatedLengthSpinePairApplicableDomain
+  -> Natural
+validatedLengthSpinePairApplicableDomainAssignmentVisitCount
+    (ValidatedLengthSpinePairApplicableDomainReceipt _ _ visits _ _ _) = visits
+
+validatedLengthSpinePairApplicableDomainAssignmentCount
+  :: ValidatedLengthSpinePairApplicableDomain
+  -> Natural
+validatedLengthSpinePairApplicableDomainAssignmentCount
+    (ValidatedLengthSpinePairApplicableDomainReceipt _ _ _ assignments _ _) =
+  assignments
+
+validatedLengthSpinePairApplicableDomainApplicableAssignmentCount
+  :: ValidatedLengthSpinePairApplicableDomain
+  -> Natural
+validatedLengthSpinePairApplicableDomainApplicableAssignmentCount
+    (ValidatedLengthSpinePairApplicableDomainReceipt _ _ _ _ applicable _) =
+  applicable
+
+validatedLengthSpinePairApplicableDomainBasis
+  :: ValidatedLengthSpinePairApplicableDomain
+  -> LengthCounterexampleBasis
+validatedLengthSpinePairApplicableDomainBasis
+    (ValidatedLengthSpinePairApplicableDomainReceipt _ _ _ _ _ basis) = basis
 
 -- | Fail-closed scalar simplification failure after the caller supplied one
 -- opaque counterexample anchor.  Width and Cartesian-product admission misses
@@ -2874,526 +1712,10 @@ validateLengthSpinePairProblemInputBox evaluationLimits inputBoxLimits problem
                   (checkedLengthSpinePairProblemBehavioralProblem problem)
                   receipt
 
--- | Establish the complete applicable domain of one exact scalar problem when
--- its normalized precondition directly bounds every compact input.
---
--- Width is rejected before the precondition is scanned.  Coverage then admits
--- only top-level normalized @input <= literal@ conjuncts and chooses the
--- tightest direct bound for each input.  A missing bound is an ordinary
--- inapplicable result, not a verification failure.  Exact coverage delegates
--- to the existing solver-independent box verifier; neither construction nor
--- completion consumes a solver observation.
-validateLengthProblemApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> CheckedLengthProblem identity local
-  -> Either LengthApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthCounterexample)
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthApplicableDomain))
-validateLengthProblemApplicableDomain evaluationLimits inputBoxLimits
-    problem = do
-  let inputCount = checkedLengthProblemInputCount problem
-      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
-  if inputCount <= maximumInputs
-    then pure ()
-    else Left $ LengthApplicableDomainInputBoxValidationRejected
-      $ LengthInputBoxProblemInputLimitExceeded maximumInputs inputCount
-  case tightApplicableDomainMaximums inputCount scalarInputPosition
-      $ checkedLengthProblemPrecondition problem of
-    Left inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    Right maximums -> do
-      validation <- either
-        (Left . LengthApplicableDomainInputBoxValidationRejected)
-        Right
-        $ validateLengthProblemInputBox evaluationLimits inputBoxLimits
-            problem maximums
-      pure $ case validation of
-        LengthInputBoxCounterexample evidence ->
-          LengthApplicableDomainCounterexample evidence
-        LengthInputBoxValidated evidence ->
-          LengthApplicableDomainEstablished
-            $ mapBehavioralEvidenceReceipt
-                (ValidatedLengthApplicableDomainReceipt
-                  lengthApplicableDomainValidationSchemaTag)
-                evidence
- where
-  scalarInputPosition variable = case variable of
-    LengthInput position -> Just position
-    LengthResult -> Nothing
-
--- | Nominal binary-product sibling of
--- 'validateLengthProblemApplicableDomain'.  The direct coverage rule examines
--- only compact inputs; result-component references cannot occur in a checked
--- precondition and grant no bound authority here.
-validateLengthSpinePairProblemApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> CheckedLengthSpinePairProblem identity local
-  -> Either LengthSpinePairApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairCounterexample)
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairApplicableDomain))
-validateLengthSpinePairProblemApplicableDomain evaluationLimits inputBoxLimits
-    problem = do
-  let inputCount = checkedLengthSpinePairProblemInputCount problem
-      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
-  if inputCount <= maximumInputs
-    then pure ()
-    else Left $ LengthSpinePairApplicableDomainInputBoxValidationRejected
-      $ LengthSpinePairInputBoxProblemInputLimitExceeded
-          maximumInputs inputCount
-  case tightApplicableDomainMaximums inputCount spinePairInputPosition
-      $ checkedLengthSpinePairProblemPrecondition problem of
-    Left inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    Right maximums -> do
-      validation <- either
-        (Left . LengthSpinePairApplicableDomainInputBoxValidationRejected)
-        Right
-        $ validateLengthSpinePairProblemInputBox
-            evaluationLimits inputBoxLimits problem maximums
-      pure $ case validation of
-        LengthInputBoxCounterexample evidence ->
-          LengthApplicableDomainCounterexample evidence
-        LengthInputBoxValidated evidence ->
-          LengthApplicableDomainEstablished
-            $ mapBehavioralEvidenceReceipt
-                (ValidatedLengthSpinePairApplicableDomainReceipt
-                  lengthSpinePairApplicableDomainValidationSchemaTag)
-                evidence
- where
-  spinePairInputPosition variable = case variable of
-    LengthSpinePairInput position -> Just position
-    LengthSpinePairResult _ -> Nothing
-
--- The formula has already passed bounded normalization.  In particular a
--- top-level conjunction is flat, sorted, and duplicate-free, but this scanner
--- depends only on its public normalized shape.  It deliberately ignores every
--- formula except an exact direct natural upper bound.
-tightApplicableDomainMaximums
-  :: Int
-  -> (variable -> Maybe Natural)
-  -> LengthFormula variable
-  -> Either LengthApplicableDomainInapplicability [Natural]
-tightApplicableDomainMaximums inputCount inputPosition precondition =
-  mapM maximumFor [0 .. inputCount - 1]
- where
-  clauses = case precondition of
-    LengthAll formulas -> formulas
-    formula -> [formula]
-
-  bounds = collect Map.empty clauses
-
-  collect !retained [] = retained
-  collect !retained (formula : remaining) = collect retained' remaining
-   where
-    retained' = case formula of
-      LengthAtMost (LengthVariable variable) (LengthLiteral maximumValue) ->
-        case inputPosition variable of
-          Nothing -> retained
-          Just position -> Map.insertWith min position maximumValue retained
-      _ -> retained
-
-  maximumFor index = case Map.lookup (fromIntegral index) bounds of
-    Just maximumValue -> Right maximumValue
-    Nothing -> Left $ LengthApplicableDomainInputUpperBoundMissing index
-
--- | The one applicable-domain validation shared by every coverage rule on a
--- scalar problem.  A rule supplies its maximums extractor — which either
--- proves the precondition inapplicable or returns one inclusive maximum per
--- compact input — and the receipt constructor (with its schema tag already
--- applied) that wraps a completed input-box receipt.  Input-count admission,
--- extractor dispatch, exhaustive box replay, and evidence mapping are
--- identical across rules; each public rule entrance below is one
--- instantiation.
+-- | Shared scalar implementation of the current bounded finite-union
+-- validation. The analysis and receipt constructor are private inputs;
+-- admission, enumeration, replay, and evidence construction have one order.
 validateLengthProblemApplicableDomainWith
-  :: (Int
-      -> (LengthContractVariable -> Maybe Natural)
-      -> LengthFormula LengthContractVariable
-      -> Either LengthApplicableDomainInapplicability [Natural])
-  -> (ValidatedLengthInputBox -> receipt)
-  -> LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> CheckedLengthProblem identity local
-  -> Either LengthApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthCounterexample)
-        (BehavioralEvidence FiniteListSpineLengthV1 receipt))
-validateLengthProblemApplicableDomainWith maximumsFor mkReceipt
-    evaluationLimits inputBoxLimits problem = do
-  let inputCount = checkedLengthProblemInputCount problem
-      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
-  if inputCount <= maximumInputs
-    then pure ()
-    else Left $ LengthApplicableDomainInputBoxValidationRejected
-      $ LengthInputBoxProblemInputLimitExceeded maximumInputs inputCount
-  case maximumsFor inputCount scalarInputPosition
-      $ checkedLengthProblemPrecondition problem of
-    Left inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    Right maximums -> do
-      validation <- either
-        (Left . LengthApplicableDomainInputBoxValidationRejected)
-        Right
-        $ validateLengthProblemInputBox evaluationLimits inputBoxLimits
-            problem maximums
-      pure $ case validation of
-        LengthInputBoxCounterexample evidence ->
-          LengthApplicableDomainCounterexample evidence
-        LengthInputBoxValidated evidence ->
-          LengthApplicableDomainEstablished
-            $ mapBehavioralEvidenceReceipt mkReceipt evidence
- where
-  scalarInputPosition variable = case variable of
-    LengthInput position -> Just position
-    LengthResult -> Nothing
-
--- | Nominal binary-product sibling of
--- 'validateLengthProblemApplicableDomainWith'.
-validateLengthSpinePairProblemApplicableDomainWith
-  :: (Int
-      -> (LengthSpinePairContractVariable -> Maybe Natural)
-      -> LengthFormula LengthSpinePairContractVariable
-      -> Either LengthApplicableDomainInapplicability [Natural])
-  -> (ValidatedLengthSpinePairInputBox -> receipt)
-  -> LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> CheckedLengthSpinePairProblem identity local
-  -> Either LengthSpinePairApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairCounterexample)
-        (BehavioralEvidence FiniteBinaryProductSpineLengthsV1 receipt))
-validateLengthSpinePairProblemApplicableDomainWith maximumsFor mkReceipt
-    evaluationLimits inputBoxLimits problem = do
-  let inputCount = checkedLengthSpinePairProblemInputCount problem
-      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
-  if inputCount <= maximumInputs
-    then pure ()
-    else Left $ LengthSpinePairApplicableDomainInputBoxValidationRejected
-      $ LengthSpinePairInputBoxProblemInputLimitExceeded
-          maximumInputs inputCount
-  case maximumsFor inputCount spinePairInputPosition
-      $ checkedLengthSpinePairProblemPrecondition problem of
-    Left inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    Right maximums -> do
-      validation <- either
-        (Left . LengthSpinePairApplicableDomainInputBoxValidationRejected)
-        Right
-        $ validateLengthSpinePairProblemInputBox
-            evaluationLimits inputBoxLimits problem maximums
-      pure $ case validation of
-        LengthInputBoxCounterexample evidence ->
-          LengthApplicableDomainCounterexample evidence
-        LengthInputBoxValidated evidence ->
-          LengthApplicableDomainEstablished
-            $ mapBehavioralEvidenceReceipt mkReceipt evidence
- where
-  spinePairInputPosition variable = case variable of
-    LengthSpinePairInput position -> Just position
-    LengthSpinePairResult _ -> Nothing
-
--- | Establish the complete applicable domain of one exact scalar problem when
--- every compact input is bounded by the additive positive-affine rule.
---
--- The original direct-bound entrance remains literal-only.  This sibling also
--- recognizes a positive-affine expression bounded above by a literal, or equal
--- to one, and proves an empty applicable domain from a syntactic contradiction.
--- It still delegates all behavioral authority to the existing finite-box
--- verifier and consumes no solver observation.
-validateLengthProblemPositiveAffineApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> CheckedLengthProblem identity local
-  -> Either LengthApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthCounterexample)
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthPositiveAffineApplicableDomain))
-validateLengthProblemPositiveAffineApplicableDomain
-    evaluationLimits inputBoxLimits problem =
-  validateLengthProblemApplicableDomainWith
-    positiveAffineApplicableDomainMaximums
-    (ValidatedLengthPositiveAffineApplicableDomainReceipt
-      lengthPositiveAffineApplicableDomainValidationSchemaTag)
-    evaluationLimits inputBoxLimits problem
-
--- | Nominal binary-product sibling of
--- 'validateLengthProblemPositiveAffineApplicableDomain'.
-validateLengthSpinePairProblemPositiveAffineApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> CheckedLengthSpinePairProblem identity local
-  -> Either LengthSpinePairApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairCounterexample)
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairPositiveAffineApplicableDomain))
-validateLengthSpinePairProblemPositiveAffineApplicableDomain
-    evaluationLimits inputBoxLimits problem =
-  validateLengthSpinePairProblemApplicableDomainWith
-    positiveAffineApplicableDomainMaximums
-    (ValidatedLengthSpinePairPositiveAffineApplicableDomainReceipt
-      lengthSpinePairPositiveAffineApplicableDomainValidationSchemaTag)
-    evaluationLimits inputBoxLimits problem
-
--- | Establish the complete applicable domain of one exact scalar problem
--- when top-level positive-affine relations jointly imply a finite upper bound
--- for every compact input.  This solver-free entrance is additive: neither of
--- the established applicable-domain rules changes meaning.
-validateLengthProblemRelationalPositiveAffineApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> CheckedLengthProblem identity local
-  -> Either LengthApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthCounterexample)
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthRelationalPositiveAffineApplicableDomain))
-validateLengthProblemRelationalPositiveAffineApplicableDomain
-    evaluationLimits inputBoxLimits problem =
-  validateLengthProblemApplicableDomainWith
-    relationalPositiveAffineApplicableDomainMaximums
-    (ValidatedLengthRelationalPositiveAffineApplicableDomainReceipt
-      lengthRelationalPositiveAffineApplicableDomainValidationSchemaTag)
-    evaluationLimits inputBoxLimits problem
-
--- | Nominal binary-product sibling of
--- 'validateLengthProblemRelationalPositiveAffineApplicableDomain'.
-validateLengthSpinePairProblemRelationalPositiveAffineApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> CheckedLengthSpinePairProblem identity local
-  -> Either LengthSpinePairApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairCounterexample)
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain))
-validateLengthSpinePairProblemRelationalPositiveAffineApplicableDomain
-    evaluationLimits inputBoxLimits problem =
-  validateLengthSpinePairProblemApplicableDomainWith
-    relationalPositiveAffineApplicableDomainMaximums
-    (ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomainReceipt
-      lengthSpinePairRelationalPositiveAffineApplicableDomainValidationSchemaTag)
-    evaluationLimits inputBoxLimits problem
-
--- | Establish the complete applicable domain of one exact scalar problem
--- when ordinary or strict top-level positive-affine relations jointly imply
--- a finite upper bound for every compact input.  A normalized
--- @not (left <= right)@ clause contributes the exact natural-number rule
--- @right + 1 <= left@ only through this additive entrance.
-validateLengthProblemStrictRelationalPositiveAffineApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> CheckedLengthProblem identity local
-  -> Either LengthApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthCounterexample)
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthStrictRelationalPositiveAffineApplicableDomain))
-validateLengthProblemStrictRelationalPositiveAffineApplicableDomain
-    evaluationLimits inputBoxLimits problem =
-  validateLengthProblemApplicableDomainWith
-    strictRelationalPositiveAffineApplicableDomainMaximums
-    (ValidatedLengthStrictRelationalPositiveAffineApplicableDomainReceipt
-      lengthStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag)
-    evaluationLimits inputBoxLimits problem
-
--- | Nominal binary-product sibling of
--- 'validateLengthProblemStrictRelationalPositiveAffineApplicableDomain'.
-validateLengthSpinePairProblemStrictRelationalPositiveAffineApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> CheckedLengthSpinePairProblem identity local
-  -> Either LengthSpinePairApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairCounterexample)
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain))
-validateLengthSpinePairProblemStrictRelationalPositiveAffineApplicableDomain
-    evaluationLimits inputBoxLimits problem =
-  validateLengthSpinePairProblemApplicableDomainWith
-    strictRelationalPositiveAffineApplicableDomainMaximums
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainReceipt
-      lengthSpinePairStrictRelationalPositiveAffineApplicableDomainValidationSchemaTag)
-    evaluationLimits inputBoxLimits problem
-
--- | Add exact root-quotient consequences to the strict relational
--- positive-affine extractor.  Every supported quotient atom is converted to
--- at most two proof-only affine rules before the established closure and
--- finite-box replay are used unchanged.
-validateLengthProblemStrictRelationalPositiveAffineQuotientApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> CheckedLengthProblem identity local
-  -> Either LengthApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthCounterexample)
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain))
-validateLengthProblemStrictRelationalPositiveAffineQuotientApplicableDomain
-    evaluationLimits inputBoxLimits problem =
-  validateLengthProblemApplicableDomainWith
-    strictRelationalPositiveAffineQuotientApplicableDomainMaximums
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomainReceipt
-      lengthStrictRelationalPositiveAffineQuotientApplicableDomainValidationSchemaTag)
-    evaluationLimits inputBoxLimits problem
-
--- | Nominal binary-product sibling of
--- 'validateLengthProblemStrictRelationalPositiveAffineQuotientApplicableDomain'.
-validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> CheckedLengthSpinePairProblem identity local
-  -> Either LengthSpinePairApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairCounterexample)
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain))
-validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientApplicableDomain
-    evaluationLimits inputBoxLimits problem =
-  validateLengthSpinePairProblemApplicableDomainWith
-    strictRelationalPositiveAffineQuotientApplicableDomainMaximums
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainReceipt
-      lengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomainValidationSchemaTag)
-    evaluationLimits inputBoxLimits problem
-
--- | Cumulative scalar successor which adds sound, conjunctive consequences
--- for one immediate root minimum or maximum.  Unsupported extrema clauses
--- contribute no rule; the original checked precondition is still replayed
--- exhaustively over every derived assignment.
-validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> CheckedLengthProblem identity local
-  -> Either LengthApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthCounterexample)
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain))
-validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-    evaluationLimits inputBoxLimits problem =
-  validateLengthProblemApplicableDomainWith
-    strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainMaximums
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt
-      lengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationSchemaTag)
-    evaluationLimits inputBoxLimits problem
-
--- | Nominal binary-product sibling of
--- 'validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain'.
-validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> CheckedLengthSpinePairProblem identity local
-  -> Either LengthSpinePairApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairCounterexample)
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain))
-validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-    evaluationLimits inputBoxLimits problem =
-  validateLengthSpinePairProblemApplicableDomainWith
-    strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainMaximums
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainReceipt
-      lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomainValidationSchemaTag)
-    evaluationLimits inputBoxLimits problem
-
--- | Cumulative scalar successor which adds exact conjunctive consequences for
--- one immediate natural monus.  Unsupported monus clauses contribute no rule;
--- the original checked precondition is still replayed exhaustively over every
--- derived assignment.
-validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> CheckedLengthProblem identity local
-  -> Either LengthApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthCounterexample)
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain))
-validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-    evaluationLimits inputBoxLimits problem =
-  validateLengthProblemApplicableDomainWith
-    strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainMaximums
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt
-      lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidationSchemaTag)
-    evaluationLimits inputBoxLimits problem
-
--- | Nominal binary-product sibling of
--- 'validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain'.
-validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> CheckedLengthSpinePairProblem identity local
-  -> Either LengthSpinePairApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairCounterexample)
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain))
-validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-    evaluationLimits inputBoxLimits problem =
-  validateLengthSpinePairProblemApplicableDomainWith
-    strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainMaximums
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainReceipt
-      lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainValidationSchemaTag)
-    evaluationLimits inputBoxLimits problem
-
--- | The one bounded Boolean finite-union validation shared by every union
--- coverage rule on a scalar problem.  A rule supplies its maximum-boxes
--- extractor and the receipt constructor (schema tag already applied);
--- admission, DNF enumeration, per-box checks, exhaustive replay, and
--- evidence construction are identical across rules.
-validateLengthProblemBooleanFiniteUnionApplicableDomainWith
   :: (LengthBooleanFiniteUnionLimits
       -> Int
       -> (LengthContractVariable -> Maybe Natural)
@@ -3407,17 +1729,17 @@ validateLengthProblemBooleanFiniteUnionApplicableDomainWith
   -> LengthInputBoxLimits
   -> LengthBooleanFiniteUnionLimits
   -> CheckedLengthProblem identity local
-  -> Either LengthBooleanFiniteUnionApplicableDomainValidationError
+  -> Either LengthApplicableDomainValidationError
       (LengthApplicableDomainValidation
         (BehavioralEvidence FiniteListSpineLengthV1 ValidatedLengthCounterexample)
         (BehavioralEvidence FiniteListSpineLengthV1 receipt))
-validateLengthProblemBooleanFiniteUnionApplicableDomainWith maximumBoxesFor mkReceipt
+validateLengthProblemApplicableDomainWith maximumBoxesFor mkReceipt
     evaluationLimits inputBoxLimits unionLimits problem = do
   let inputCount = checkedLengthProblemInputCount problem
       maximumInputs = lengthInputBoxInputLimit inputBoxLimits
   if inputCount <= maximumInputs
     then pure ()
-    else Left $ LengthBooleanFiniteUnionProblemInputLimitExceeded
+    else Left $ LengthApplicableDomainProblemInputLimitExceeded
       maximumInputs inputCount
   coverage <- either (Left . preparationError) Right
     $ maximumBoxesFor
@@ -3441,28 +1763,28 @@ validateLengthProblemBooleanFiniteUnionApplicableDomainWith maximumBoxesFor mkRe
 
   preparationError failure = case failure of
     BooleanFiniteUnionGeneratedBranchLimitExceeded limit observed ->
-      LengthBooleanFiniteUnionGeneratedBranchLimitExceeded limit observed
+      LengthApplicableDomainGeneratedBranchLimitExceeded limit observed
     BooleanFiniteUnionRuleLimitExceeded branch limit observed ->
-      LengthBooleanFiniteUnionRuleLimitExceeded branch limit observed
+      LengthApplicableDomainRuleLimitExceeded branch limit observed
     BooleanFiniteUnionClosureInspectionLimitExceeded branch limit observed ->
-      LengthBooleanFiniteUnionClosureInspectionLimitExceeded
+      LengthApplicableDomainClosureInspectionLimitExceeded
         branch limit observed
     BooleanFiniteUnionRetainedBoxLimitExceeded limit observed ->
-      LengthBooleanFiniteUnionRetainedBoxLimitExceeded limit observed
+      LengthApplicableDomainRetainedBoxLimitExceeded limit observed
 
   enumerationError failure = case failure of
     BooleanFiniteUnionAssignmentVisitLimitExceeded limit observed ->
-      LengthBooleanFiniteUnionAssignmentVisitLimitExceeded limit observed
+      LengthApplicableDomainAssignmentVisitLimitExceeded limit observed
     BooleanFiniteUnionAssignmentLimitExceeded limit observed ->
-      LengthBooleanFiniteUnionAssignmentLimitExceeded limit observed
+      LengthApplicableDomainAssignmentLimitExceeded limit observed
     BooleanFiniteUnionInternalEnumerationInvariant ->
-      LengthBooleanFiniteUnionInternalEnumerationInvariant
+      LengthApplicableDomainInternalEnumerationInvariant
 
   checkBox (boxIndex, maximums) =
     mapM_ (checkMaximum boxIndex) $ zip [0 ..] maximums
 
   checkMaximum boxIndex (inputIndex, maximumValue) = either
-    (Left . LengthBooleanFiniteUnionMaximumValueRejected
+    (Left . LengthApplicableDomainMaximumValueRejected
       boxIndex inputIndex)
     Right
     $ checkAssignedValue evaluationLimits
@@ -3472,7 +1794,7 @@ validateLengthProblemBooleanFiniteUnionApplicableDomainWith maximumBoxesFor mkRe
     case assignments of
       []
         | ordinal /= assignmentCount ->
-            Left LengthBooleanFiniteUnionInternalEnumerationInvariant
+            Left LengthApplicableDomainInternalEnumerationInvariant
         | otherwise ->
             let receipt =
                   mkReceipt
@@ -3483,7 +1805,7 @@ validateLengthProblemBooleanFiniteUnionApplicableDomainWith maximumBoxesFor mkRe
                   (checkedLengthProblemBehavioralProblem problem) receipt
       inputs : remaining -> do
         assignmentReplay <- either
-          (Left . LengthBooleanFiniteUnionAssignmentEvaluationRejected ordinal)
+          (Left . LengthApplicableDomainAssignmentEvaluationRejected ordinal)
           Right
           $ replayLengthProblemAssignment evaluationLimits problem
           $ LengthProblemAssignment inputs
@@ -3500,8 +1822,8 @@ validateLengthProblemBooleanFiniteUnionApplicableDomainWith maximumBoxesFor mkRe
               (applicable + 1) remaining
 
 -- | Nominal binary-product sibling of
--- 'validateLengthProblemBooleanFiniteUnionApplicableDomainWith'.
-validateLengthSpinePairProblemBooleanFiniteUnionApplicableDomainWith
+-- 'validateLengthProblemApplicableDomainWith'.
+validateLengthSpinePairProblemApplicableDomainWith
   :: (LengthBooleanFiniteUnionLimits
       -> Int
       -> (LengthSpinePairContractVariable -> Maybe Natural)
@@ -3515,17 +1837,17 @@ validateLengthSpinePairProblemBooleanFiniteUnionApplicableDomainWith
   -> LengthInputBoxLimits
   -> LengthBooleanFiniteUnionLimits
   -> CheckedLengthSpinePairProblem identity local
-  -> Either LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError
+  -> Either LengthSpinePairApplicableDomainValidationError
       (LengthApplicableDomainValidation
         (BehavioralEvidence FiniteBinaryProductSpineLengthsV1 ValidatedLengthSpinePairCounterexample)
         (BehavioralEvidence FiniteBinaryProductSpineLengthsV1 receipt))
-validateLengthSpinePairProblemBooleanFiniteUnionApplicableDomainWith maximumBoxesFor mkReceipt
+validateLengthSpinePairProblemApplicableDomainWith maximumBoxesFor mkReceipt
     evaluationLimits inputBoxLimits unionLimits problem = do
   let inputCount = checkedLengthSpinePairProblemInputCount problem
       maximumInputs = lengthInputBoxInputLimit inputBoxLimits
   if inputCount <= maximumInputs
     then pure ()
-    else Left $ LengthSpinePairBooleanFiniteUnionProblemInputLimitExceeded
+    else Left $ LengthSpinePairApplicableDomainProblemInputLimitExceeded
       maximumInputs inputCount
   coverage <- either (Left . preparationError) Right
     $ maximumBoxesFor
@@ -3549,32 +1871,32 @@ validateLengthSpinePairProblemBooleanFiniteUnionApplicableDomainWith maximumBoxe
 
   preparationError failure = case failure of
     BooleanFiniteUnionGeneratedBranchLimitExceeded limit observed ->
-      LengthSpinePairBooleanFiniteUnionGeneratedBranchLimitExceeded
+      LengthSpinePairApplicableDomainGeneratedBranchLimitExceeded
         limit observed
     BooleanFiniteUnionRuleLimitExceeded branch limit observed ->
-      LengthSpinePairBooleanFiniteUnionRuleLimitExceeded
+      LengthSpinePairApplicableDomainRuleLimitExceeded
         branch limit observed
     BooleanFiniteUnionClosureInspectionLimitExceeded branch limit observed ->
-      LengthSpinePairBooleanFiniteUnionClosureInspectionLimitExceeded
+      LengthSpinePairApplicableDomainClosureInspectionLimitExceeded
         branch limit observed
     BooleanFiniteUnionRetainedBoxLimitExceeded limit observed ->
-      LengthSpinePairBooleanFiniteUnionRetainedBoxLimitExceeded
+      LengthSpinePairApplicableDomainRetainedBoxLimitExceeded
         limit observed
 
   enumerationError failure = case failure of
     BooleanFiniteUnionAssignmentVisitLimitExceeded limit observed ->
-      LengthSpinePairBooleanFiniteUnionAssignmentVisitLimitExceeded
+      LengthSpinePairApplicableDomainAssignmentVisitLimitExceeded
         limit observed
     BooleanFiniteUnionAssignmentLimitExceeded limit observed ->
-      LengthSpinePairBooleanFiniteUnionAssignmentLimitExceeded limit observed
+      LengthSpinePairApplicableDomainAssignmentLimitExceeded limit observed
     BooleanFiniteUnionInternalEnumerationInvariant ->
-      LengthSpinePairBooleanFiniteUnionInternalEnumerationInvariant
+      LengthSpinePairApplicableDomainInternalEnumerationInvariant
 
   checkBox (boxIndex, maximums) =
     mapM_ (checkMaximum boxIndex) $ zip [0 ..] maximums
 
   checkMaximum boxIndex (inputIndex, maximumValue) = either
-    (Left . LengthSpinePairBooleanFiniteUnionMaximumValueRejected
+    (Left . LengthSpinePairApplicableDomainMaximumValueRejected
       boxIndex inputIndex)
     Right
     $ checkSpinePairAssignedValue evaluationLimits
@@ -3584,7 +1906,7 @@ validateLengthSpinePairProblemBooleanFiniteUnionApplicableDomainWith maximumBoxe
     case assignments of
       []
         | ordinal /= assignmentCount -> Left
-            LengthSpinePairBooleanFiniteUnionInternalEnumerationInvariant
+            LengthSpinePairApplicableDomainInternalEnumerationInvariant
         | otherwise ->
             let receipt =
                   mkReceipt
@@ -3597,7 +1919,7 @@ validateLengthSpinePairProblemBooleanFiniteUnionApplicableDomainWith maximumBoxe
       inputs : remaining -> do
         assignmentReplay <- either
           (Left .
-            LengthSpinePairBooleanFiniteUnionAssignmentEvaluationRejected
+            LengthSpinePairApplicableDomainAssignmentEvaluationRejected
               ordinal)
           Right
           $ replayLengthSpinePairProblemAssignment evaluationLimits problem
@@ -3615,154 +1937,52 @@ validateLengthSpinePairProblemBooleanFiniteUnionApplicableDomainWith maximumBoxe
             replay boxes visits assignmentCount (ordinal + 1) (applicable + 1)
               remaining
 
--- | Cumulative scalar successor which expands the complete normalized
--- precondition into a bounded canonical Boolean DNF and validates the exact
--- finite union of independently derived zero-origin boxes.  Incomparable
--- boxes remain separate, and the original formula is replayed over the global
--- deduplicated assignment set.
-validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+-- | Validate the complete applicable input domain of one exact scalar
+-- problem with the current bounded recursive piecewise-affine analysis. The
+-- original checked precondition remains the sole replay authority over the
+-- global deduplicated assignment union.
+validateLengthProblemApplicableDomain
   :: LengthEvaluationLimits
   -> LengthInputBoxLimits
   -> LengthBooleanFiniteUnionLimits
   -> CheckedLengthProblem identity local
-  -> Either LengthBooleanFiniteUnionApplicableDomainValidationError
+  -> Either LengthApplicableDomainValidationError
       (LengthApplicableDomainValidation
         (BehavioralEvidence
           FiniteListSpineLengthV1
           ValidatedLengthCounterexample)
         (BehavioralEvidence
           FiniteListSpineLengthV1
-          ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain))
-validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+          ValidatedLengthApplicableDomain))
+validateLengthProblemApplicableDomain
     evaluationLimits inputBoxLimits unionLimits problem =
-  validateLengthProblemBooleanFiniteUnionApplicableDomainWith
-    booleanFiniteUnionApplicableDomainMaximumBoxes
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
-      lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag)
-    evaluationLimits inputBoxLimits unionLimits problem
-
--- | Nominal product-domain sibling of the bounded Boolean finite-union
--- validator.  It uses the same DNF, closure, antichain, visit, and global-set
--- order while retaining product-specific errors and evidence.
-validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthBooleanFiniteUnionLimits
-  -> CheckedLengthSpinePairProblem identity local
-  -> Either
-      LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairCounterexample)
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain))
-validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-    evaluationLimits inputBoxLimits unionLimits problem =
-  validateLengthSpinePairProblemBooleanFiniteUnionApplicableDomainWith
-    booleanFiniteUnionApplicableDomainMaximumBoxes
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainReceipt
-      lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomainValidationSchemaTag)
-    evaluationLimits inputBoxLimits unionLimits problem
-
--- | Cumulative scalar successor which counts formula and admitted atomic
--- alternatives under the existing raw branch cap, derives a canonical finite
--- union without constructing proof syntax, and exhaustively replays the
--- original checked formula over the global deduplicated assignment set.
-validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthBooleanFiniteUnionLimits
-  -> CheckedLengthProblem identity local
-  -> Either LengthBooleanFiniteUnionApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthCounterexample)
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain))
-validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-    evaluationLimits inputBoxLimits unionLimits problem =
-  validateLengthProblemBooleanFiniteUnionApplicableDomainWith
-    booleanFiniteUnionAtomicBranchingApplicableDomainMaximumBoxes
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
-      lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidationSchemaTag)
-    evaluationLimits inputBoxLimits unionLimits problem
-
--- | Nominal binary-product sibling of the atomic-branching finite-union
--- validator, with the same cap and replay precedence and product-specific
--- errors and evidence.
-validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthBooleanFiniteUnionLimits
-  -> CheckedLengthSpinePairProblem identity local
-  -> Either
-      LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairCounterexample)
-        (BehavioralEvidence
-          FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain))
-validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-    evaluationLimits inputBoxLimits unionLimits problem =
-  validateLengthSpinePairProblemBooleanFiniteUnionApplicableDomainWith
-    booleanFiniteUnionAtomicBranchingApplicableDomainMaximumBoxes
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainReceipt
-      lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomainValidationSchemaTag)
-    evaluationLimits inputBoxLimits unionLimits problem
-
--- | Cumulative scalar successor which retains every atomic-branching result
--- and applies recursive piecewise-affine branching only to exactly ignored
--- relational atoms.  The original checked formula remains the sole replay
--- authority over the global deduplicated assignment union.
-validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthBooleanFiniteUnionLimits
-  -> CheckedLengthProblem identity local
-  -> Either LengthBooleanFiniteUnionApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthCounterexample)
-        (BehavioralEvidence
-          FiniteListSpineLengthV1
-          ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain))
-validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-    evaluationLimits inputBoxLimits unionLimits problem =
-  validateLengthProblemBooleanFiniteUnionApplicableDomainWith
+  validateLengthProblemApplicableDomainWith
     booleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainMaximumBoxes
-    (ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+    (ValidatedLengthApplicableDomainReceipt
       lengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag)
     evaluationLimits inputBoxLimits unionLimits problem
 
--- | Nominal binary-product sibling of recursive piecewise-affine finite-union
--- validation.  It shares all operational caps and precedence while producing
--- only fresh product-domain evidence.
-validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+-- | Nominal binary-product sibling of current applicable-domain validation.
+-- It shares every operational cap and precedence while producing only fresh
+-- product-domain evidence.
+validateLengthSpinePairProblemApplicableDomain
   :: LengthEvaluationLimits
   -> LengthInputBoxLimits
   -> LengthBooleanFiniteUnionLimits
   -> CheckedLengthSpinePairProblem identity local
-  -> Either
-      LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError
+  -> Either LengthSpinePairApplicableDomainValidationError
       (LengthApplicableDomainValidation
         (BehavioralEvidence
           FiniteBinaryProductSpineLengthsV1
           ValidatedLengthSpinePairCounterexample)
         (BehavioralEvidence
           FiniteBinaryProductSpineLengthsV1
-          ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain))
-validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
+          ValidatedLengthSpinePairApplicableDomain))
+validateLengthSpinePairProblemApplicableDomain
     evaluationLimits inputBoxLimits unionLimits problem =
-  validateLengthSpinePairProblemBooleanFiniteUnionApplicableDomainWith
+  validateLengthSpinePairProblemApplicableDomainWith
     booleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainMaximumBoxes
-    (ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainReceipt
+    (ValidatedLengthSpinePairApplicableDomainReceipt
       lengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainValidationSchemaTag)
     evaluationLimits inputBoxLimits unionLimits problem
 
@@ -3853,125 +2073,6 @@ canonicalBooleanFiniteUnionBranches rawBranches =
    where
     isStrictSubset candidate =
       candidate /= branch && Set.isSubsetOf candidate branch
-
--- Formula-level Boolean expansion and atomic proof expansion form one lazy
--- Cartesian witness stream.  Its elements carry no reconstructed syntax or
--- proof payload: they exist only so the public generated-branch cap observes
--- the complete formula-by-atomic product before formula canonicalization.
-booleanFiniteUnionAtomicBranchingRawBranchWitnesses
-  :: Int
-  -> (variable -> Maybe Natural)
-  -> LengthFormula variable
-  -> [()]
-booleanFiniteUnionAtomicBranchingRawBranchWitnesses
-    inputCount inputPosition precondition =
-  concatMap expandBranch $ booleanFiniteUnionRawBranches precondition
- where
-  expandBranch [] = [()]
-  expandBranch (literal : remaining) =
-    [ ()
-    | _ <- strictRelationalPositiveAffineQuotientRootExtremaMonusAtomicBranchingClauseBranches
-            inputCount inputPosition literal
-    , _ <- expandBranch remaining
-    ]
-
--- After the raw-product cap succeeds, the original formula branches retain
--- their exact predecessor complement/deduplication/subsumption order.  Each
--- surviving Set-ordered literal is then expanded into its proof alternatives;
--- Ignored and Contradiction remain explicit coverage values.
-expandBooleanFiniteUnionAtomicBranchingBranch
-  :: Int
-  -> (variable -> Maybe Natural)
-  -> Set.Set (LengthFormula variable)
-  -> [[RelationalPositiveAffineClauseCoverage]]
-expandBooleanFiniteUnionAtomicBranchingBranch
-    inputCount inputPosition = expand . Set.toAscList
- where
-  expand [] = [[]]
-  expand (literal : remaining) =
-    [ coverage : rest
-    | coverage <-
-        strictRelationalPositiveAffineQuotientRootExtremaMonusAtomicBranchingClauseBranches
-          inputCount inputPosition literal
-    , rest <- expand remaining
-    ]
-
--- Atomic-branching sibling of the published Boolean finite-union preparation
--- pipeline.  Every downstream cap and precedence edge is inherited literally;
--- only raw branch construction and branch-local proof-rule collection differ.
-booleanFiniteUnionAtomicBranchingApplicableDomainMaximumBoxes
-  :: Ord variable
-  => LengthBooleanFiniteUnionLimits
-  -> Int
-  -> (variable -> Maybe Natural)
-  -> LengthFormula variable
-  -> Either
-      BooleanFiniteUnionPreparationError
-      (Either LengthApplicableDomainInapplicability [[Natural]])
-booleanFiniteUnionAtomicBranchingApplicableDomainMaximumBoxes
-    limits inputCount inputPosition precondition = do
-  let rawFormulaBranches = booleanFiniteUnionRawBranches precondition
-      rawBranchWitnesses = booleanFiniteUnionAtomicBranchingRawBranchWitnesses
-        inputCount inputPosition precondition
-      branchLimit = lengthBooleanFiniteUnionGeneratedBranchLimit limits
-  case observeBooleanFiniteUnionListLength branchLimit rawBranchWitnesses of
-    Left observed -> Left $ BooleanFiniteUnionGeneratedBranchLimitExceeded
-      branchLimit observed
-    Right _ -> pure ()
-  let branches = concatMap
-        (expandBooleanFiniteUnionAtomicBranchingBranch
-          inputCount inputPosition)
-        $ canonicalBooleanFiniteUnionBranches rawFormulaBranches
-  closed <- mapM closeBranch $ zip [0 ..] branches
-  let liveBounds = [bounds | Just bounds <- closed]
-  case firstMissingInput liveBounds of
-    Just missing -> pure $ Left
-      $ LengthApplicableDomainInputUpperBoundMissing missing
-    Nothing -> do
-      let boxes = canonicalBooleanFiniteUnionBoxes inputCount liveBounds
-          boxLimit = lengthBooleanFiniteUnionRetainedBoxLimit limits
-      case observeBooleanFiniteUnionListLength boxLimit boxes of
-        Left observed -> Left $ BooleanFiniteUnionRetainedBoxLimitExceeded
-          boxLimit observed
-        Right _ -> pure $ Right boxes
- where
-  closeBranch (branchIndex, branch) = do
-    collected <- collectBranchRules branchIndex branch
-    case collected of
-      Nothing -> pure Nothing
-      Just rules -> case closeRelationalPositiveAffineRulesWithin
-          (lengthBooleanFiniteUnionClosureInspectionLimitPerBranch limits)
-          rules of
-        Left observed -> Left
-          $ BooleanFiniteUnionClosureInspectionLimitExceeded
-              branchIndex
-              (lengthBooleanFiniteUnionClosureInspectionLimitPerBranch limits)
-              observed
-        Right RelationalPositiveAffineClosureContradiction -> pure Nothing
-        Right (RelationalPositiveAffineClosureBounds bounds) ->
-          pure $ Just bounds
-
-  collectBranchRules branchIndex = go 0 []
-   where
-    ruleLimit = lengthBooleanFiniteUnionRuleLimitPerBranch limits
-
-    go !_ retained [] = Right $ Just retained
-    go !count retained (coverage : remaining) = case coverage of
-      RelationalPositiveAffineClauseIgnored -> go count retained remaining
-      RelationalPositiveAffineClauseContradiction -> Right Nothing
-      RelationalPositiveAffineClauseRules rules ->
-        let newRuleCount = length rules
-        in if newRuleCount > ruleLimit - count
-            then Left $ BooleanFiniteUnionRuleLimitExceeded
-              branchIndex ruleLimit $ saturatedSuccessor ruleLimit
-            else go (count + newRuleCount) (retained ++ rules) remaining
-
-  firstMissingInput liveBounds = firstMissing 0
-   where
-    firstMissing index
-      | index >= inputCount = Nothing
-      | any (Map.notMember $ fromIntegral index) liveBounds = Just index
-      | otherwise = firstMissing $ index + 1
 
 -- Formula-level Boolean expansion and complete atomic-or-recursive proof
 -- expansion form one lazy witness stream.  The public generated-branch cap
@@ -4077,81 +2178,6 @@ booleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainMaximum
 
     go !_ retained [] = Right $ Just retained
     go !count retained (coverage : remaining) = case coverage of
-      RelationalPositiveAffineClauseIgnored -> go count retained remaining
-      RelationalPositiveAffineClauseContradiction -> Right Nothing
-      RelationalPositiveAffineClauseRules rules ->
-        let newRuleCount = length rules
-        in if newRuleCount > ruleLimit - count
-            then Left $ BooleanFiniteUnionRuleLimitExceeded
-              branchIndex ruleLimit $ saturatedSuccessor ruleLimit
-            else go (count + newRuleCount) (retained ++ rules) remaining
-
-  firstMissingInput liveBounds = firstMissing 0
-   where
-    firstMissing index
-      | index >= inputCount = Nothing
-      | any (Map.notMember $ fromIntegral index) liveBounds = Just index
-      | otherwise = firstMissing $ index + 1
-
--- Expand, canonicalize, close, and antichain one formula before any maximum
--- value or assignment is demanded.  All branches finish bounded closure before
--- missing input coverage is inspected, giving operational cap errors fixed
--- precedence over ordinary inapplicability.
-booleanFiniteUnionApplicableDomainMaximumBoxes
-  :: Ord variable
-  => LengthBooleanFiniteUnionLimits
-  -> Int
-  -> (variable -> Maybe Natural)
-  -> LengthFormula variable
-  -> Either
-      BooleanFiniteUnionPreparationError
-      (Either LengthApplicableDomainInapplicability [[Natural]])
-booleanFiniteUnionApplicableDomainMaximumBoxes
-    limits inputCount inputPosition precondition = do
-  let rawBranches = booleanFiniteUnionRawBranches precondition
-      branchLimit = lengthBooleanFiniteUnionGeneratedBranchLimit limits
-  case observeBooleanFiniteUnionListLength branchLimit rawBranches of
-    Left observed -> Left $ BooleanFiniteUnionGeneratedBranchLimitExceeded
-      branchLimit observed
-    Right _ -> pure ()
-  let branches = canonicalBooleanFiniteUnionBranches rawBranches
-  closed <- mapM closeBranch $ zip [0 ..] branches
-  let liveBounds = [bounds | Just bounds <- closed]
-  case firstMissingInput liveBounds of
-    Just missing -> pure $ Left
-      $ LengthApplicableDomainInputUpperBoundMissing missing
-    Nothing -> do
-      let boxes = canonicalBooleanFiniteUnionBoxes inputCount liveBounds
-          boxLimit = lengthBooleanFiniteUnionRetainedBoxLimit limits
-      case observeBooleanFiniteUnionListLength boxLimit boxes of
-        Left observed -> Left $ BooleanFiniteUnionRetainedBoxLimitExceeded
-          boxLimit observed
-        Right _ -> pure $ Right boxes
- where
-  closeBranch (branchIndex, branch) = do
-    collected <- collectBranchRules branchIndex $ Set.toAscList branch
-    case collected of
-      Nothing -> pure Nothing
-      Just rules -> case closeRelationalPositiveAffineRulesWithin
-          (lengthBooleanFiniteUnionClosureInspectionLimitPerBranch limits)
-          rules of
-        Left observed -> Left
-          $ BooleanFiniteUnionClosureInspectionLimitExceeded
-              branchIndex
-              (lengthBooleanFiniteUnionClosureInspectionLimitPerBranch limits)
-              observed
-        Right RelationalPositiveAffineClosureContradiction -> pure Nothing
-        Right (RelationalPositiveAffineClosureBounds bounds) ->
-          pure $ Just bounds
-
-  collectBranchRules branchIndex = go 0 []
-   where
-    ruleLimit = lengthBooleanFiniteUnionRuleLimitPerBranch limits
-
-    go !_ retained [] = Right $ Just retained
-    go !count retained (literal : remaining) = case
-        strictRelationalPositiveAffineQuotientRootExtremaMonusClauseCoverage
-          inputCount inputPosition literal of
       RelationalPositiveAffineClauseIgnored -> go count retained remaining
       RelationalPositiveAffineClauseContradiction -> Right Nothing
       RelationalPositiveAffineClauseRules rules ->
@@ -4351,132 +2377,6 @@ nextBooleanFiniteUnionAssignment maximums values =
         $ advance remainingMaximums remainingValues
   advance _ _ = Left BooleanFiniteUnionInternalEnumerationInvariant
 
-data PositiveAffineCoverage
-  = PositiveAffineCoverageBounds !(Map.Map Natural Natural)
-  | PositiveAffineCoverageContradiction
-
-data PositiveAffineClauseCoverage
-  = PositiveAffineClauseIgnored
-  | PositiveAffineClauseBounds !(Map.Map Natural Natural)
-  | PositiveAffineClauseContradiction
-
-data PositiveAffineSummary = PositiveAffineSummary
-  !Natural
-  !(Map.Map Natural Natural)
-
--- The checked precondition is already structurally bounded and normalized.
--- Nullary validation deliberately avoids demanding it here and delegates the
--- singleton assignment directly to the box verifier.  For nonnullary problems
--- the complete canonical clause list is scanned before a missing bound is
--- reported, unless a prior clause proves the whole conjunction contradictory.
-positiveAffineApplicableDomainMaximums
-  :: Int
-  -> (variable -> Maybe Natural)
-  -> LengthFormula variable
-  -> Either LengthApplicableDomainInapplicability [Natural]
-positiveAffineApplicableDomainMaximums inputCount inputPosition precondition
-  | inputCount == 0 = Right []
-  | otherwise = case collect Map.empty clauses of
-      PositiveAffineCoverageContradiction ->
-        Right $ replicate inputCount 0
-      PositiveAffineCoverageBounds bounds ->
-        mapM (maximumFor bounds) [0 .. inputCount - 1]
- where
-  clauses = case precondition of
-    LengthAll formulas -> formulas
-    formula -> [formula]
-
-  collect !retained [] = PositiveAffineCoverageBounds retained
-  collect !retained (formula : remaining) =
-    case positiveAffineClauseCoverage inputCount inputPosition formula of
-      PositiveAffineClauseIgnored -> collect retained remaining
-      PositiveAffineClauseBounds bounds ->
-        collect (Map.unionWith min retained bounds) remaining
-      PositiveAffineClauseContradiction ->
-        PositiveAffineCoverageContradiction
-
-  maximumFor bounds index = case Map.lookup (fromIntegral index) bounds of
-    Just maximumValue -> Right maximumValue
-    Nothing -> Left $ LengthApplicableDomainInputUpperBoundMissing index
-
-positiveAffineClauseCoverage
-  :: Int
-  -> (variable -> Maybe Natural)
-  -> LengthFormula variable
-  -> PositiveAffineClauseCoverage
-positiveAffineClauseCoverage inputCount inputPosition formula = case formula of
-  LengthTruth False -> PositiveAffineClauseContradiction
-  LengthAtMost expression (LengthLiteral maximumValue) ->
-    boundedExpression False expression maximumValue
-  LengthEqual expression (LengthLiteral maximumValue) ->
-    boundedExpression True expression maximumValue
-  LengthEqual (LengthLiteral maximumValue) expression ->
-    boundedExpression True expression maximumValue
-  _ -> PositiveAffineClauseIgnored
- where
-  boundedExpression isEquality expression maximumValue =
-    case summarizePositiveAffineExpression
-        maximumValue inputCount inputPosition expression of
-      Nothing -> PositiveAffineClauseIgnored
-      Just (PositiveAffineSummary constant coefficients)
-        | constant > maximumValue -> PositiveAffineClauseContradiction
-        | isEquality && Map.null coefficients && constant /= maximumValue ->
-            PositiveAffineClauseContradiction
-        | otherwise -> PositiveAffineClauseBounds
-          $ Map.map
-              ((maximumValue - constant) `quot`)
-              coefficients
-
--- Summaries are saturated at one greater than the atom's literal ceiling.
--- Saturation preserves both contradiction detection and every derived quotient
--- because the remaining numerator is strictly below that cap.
-summarizePositiveAffineExpression
-  :: Natural
-  -> Int
-  -> (variable -> Maybe Natural)
-  -> LengthExpression variable
-  -> Maybe PositiveAffineSummary
-summarizePositiveAffineExpression maximumValue inputCount inputPosition = go
- where
-  cap = maximumValue + 1
-
-  go expression = case expression of
-    LengthVariable variable -> do
-      position <- inputPosition variable
-      if position < fromIntegral inputCount
-        then Just $ PositiveAffineSummary 0 $ Map.singleton position 1
-        else Nothing
-    LengthLiteral value -> Just $ PositiveAffineSummary (min cap value) Map.empty
-    LengthSum terms -> foldM add (PositiveAffineSummary 0 Map.empty) terms
-    LengthScale factor nested
-      | factor == 0 -> Nothing
-      | otherwise -> scale factor <$> go nested
-    _ -> Nothing
-
-  add (PositiveAffineSummary leftConstant leftCoefficients) term = do
-    PositiveAffineSummary rightConstant rightCoefficients <- go term
-    pure $ PositiveAffineSummary
-      (saturatingNaturalAdd cap leftConstant rightConstant)
-      (Map.unionWith
-        (saturatingNaturalAdd cap)
-        leftCoefficients rightCoefficients)
-
-  scale factor (PositiveAffineSummary constant coefficients) =
-    PositiveAffineSummary
-      (saturatingNaturalMultiply cap factor constant)
-      (Map.map (saturatingNaturalMultiply cap factor) coefficients)
-
-saturatingNaturalAdd :: Natural -> Natural -> Natural -> Natural
-saturatingNaturalAdd cap left right = min cap $ left + right
-
-saturatingNaturalMultiply :: Natural -> Natural -> Natural -> Natural
-saturatingNaturalMultiply cap left right = min cap $ left * right
-
-data RelationalPositiveAffineRuleCollection
-  = RelationalPositiveAffineRuleCollection
-      ![RelationalPositiveAffineRule]
-  | RelationalPositiveAffineRuleCollectionContradiction
-
 data RelationalPositiveAffineClauseCoverage
   = RelationalPositiveAffineClauseIgnored
   | RelationalPositiveAffineClauseRules
@@ -4507,51 +2407,6 @@ data RelationalPositiveAffineRule = RelationalPositiveAffineRule
   !Natural
   !(Map.Map Natural Natural)
 
--- The checked precondition is bounded and normalized.  Nullary validation
--- deliberately bypasses extraction and delegates its singleton assignment to
--- the existing box verifier.  For nonnullary problems, exact affine summaries
--- are collected from both sides of top-level relations.  Equality contributes
--- both directed inequalities.
-relationalPositiveAffineApplicableDomainMaximums
-  :: Int
-  -> (variable -> Maybe Natural)
-  -> LengthFormula variable
-  -> Either LengthApplicableDomainInapplicability [Natural]
-relationalPositiveAffineApplicableDomainMaximums
-    inputCount inputPosition precondition
-  | inputCount == 0 = Right []
-  | otherwise = case collect [] clauses of
-      RelationalPositiveAffineRuleCollectionContradiction ->
-        Right $ replicate inputCount 0
-      RelationalPositiveAffineRuleCollection reversedRules ->
-        case closeRelationalPositiveAffineRules $ reverse reversedRules of
-          RelationalPositiveAffineClosureContradiction ->
-            Right $ replicate inputCount 0
-          RelationalPositiveAffineClosureBounds bounds ->
-            mapM (maximumFor bounds) [0 .. inputCount - 1]
- where
-  clauses = case precondition of
-    LengthAll formulas -> formulas
-    formula -> [formula]
-
-  collect !retained [] = RelationalPositiveAffineRuleCollection retained
-  collect !retained (formula : remaining) =
-    case relationalPositiveAffineClauseCoverage
-        inputCount inputPosition formula of
-      RelationalPositiveAffineClauseIgnored -> collect retained remaining
-      RelationalPositiveAffineClauseRules rules ->
-        collect (prependRulesInReverse retained rules) remaining
-      RelationalPositiveAffineClauseContradiction ->
-        RelationalPositiveAffineRuleCollectionContradiction
-
-  prependRulesInReverse !retained [] = retained
-  prependRulesInReverse !retained (rule : remaining) =
-    prependRulesInReverse (rule : retained) remaining
-
-  maximumFor bounds index = case Map.lookup (fromIntegral index) bounds of
-    Just maximumValue -> Right maximumValue
-    Nothing -> Left $ LengthApplicableDomainInputUpperBoundMissing index
-
 relationalPositiveAffineClauseCoverage
   :: Int
   -> (variable -> Maybe Natural)
@@ -4581,49 +2436,6 @@ relationalPositiveAffineClauseCoverage
       inputCount inputPosition right
     pure (leftSummary, rightSummary)
 
--- The strict sibling deliberately leaves the established relational scanner
--- untouched.  It traverses the same normalized top-level conjunction and
--- adds only the exact natural complement of one immediate at-most clause.
-strictRelationalPositiveAffineApplicableDomainMaximums
-  :: Int
-  -> (variable -> Maybe Natural)
-  -> LengthFormula variable
-  -> Either LengthApplicableDomainInapplicability [Natural]
-strictRelationalPositiveAffineApplicableDomainMaximums
-    inputCount inputPosition precondition
-  | inputCount == 0 = Right []
-  | otherwise = case collect [] clauses of
-      RelationalPositiveAffineRuleCollectionContradiction ->
-        Right $ replicate inputCount 0
-      RelationalPositiveAffineRuleCollection reversedRules ->
-        case closeRelationalPositiveAffineRules $ reverse reversedRules of
-          RelationalPositiveAffineClosureContradiction ->
-            Right $ replicate inputCount 0
-          RelationalPositiveAffineClosureBounds bounds ->
-            mapM (maximumFor bounds) [0 .. inputCount - 1]
- where
-  clauses = case precondition of
-    LengthAll formulas -> formulas
-    formula -> [formula]
-
-  collect !retained [] = RelationalPositiveAffineRuleCollection retained
-  collect !retained (formula : remaining) =
-    case strictRelationalPositiveAffineClauseCoverage
-        inputCount inputPosition formula of
-      RelationalPositiveAffineClauseIgnored -> collect retained remaining
-      RelationalPositiveAffineClauseRules rules ->
-        collect (prependRulesInReverse retained rules) remaining
-      RelationalPositiveAffineClauseContradiction ->
-        RelationalPositiveAffineRuleCollectionContradiction
-
-  prependRulesInReverse !retained [] = retained
-  prependRulesInReverse !retained (rule : remaining) =
-    prependRulesInReverse (rule : retained) remaining
-
-  maximumFor bounds index = case Map.lookup (fromIntegral index) bounds of
-    Just maximumValue -> Right maximumValue
-    Nothing -> Left $ LengthApplicableDomainInputUpperBoundMissing index
-
 strictRelationalPositiveAffineClauseCoverage
   :: Int
   -> (variable -> Maybe Natural)
@@ -4649,51 +2461,6 @@ strictRelationalPositiveAffineClauseCoverage
     rightSummary <- summarizeRelationalPositiveAffineExpression
       inputCount inputPosition right
     pure (leftSummary, rightSummary)
-
--- The quotient successor is intentionally a separate scanner.  It delegates
--- every quotient-free clause to the strict predecessor verbatim and accepts
--- only one positive quotient at a directed relation operand's root.  The
--- rewrites below are exact over naturals and operate only on proof summaries;
--- no enlarged checked literal or expression is constructed.
-strictRelationalPositiveAffineQuotientApplicableDomainMaximums
-  :: Int
-  -> (variable -> Maybe Natural)
-  -> LengthFormula variable
-  -> Either LengthApplicableDomainInapplicability [Natural]
-strictRelationalPositiveAffineQuotientApplicableDomainMaximums
-    inputCount inputPosition precondition
-  | inputCount == 0 = Right []
-  | otherwise = case collect [] clauses of
-      RelationalPositiveAffineRuleCollectionContradiction ->
-        Right $ replicate inputCount 0
-      RelationalPositiveAffineRuleCollection reversedRules ->
-        case closeRelationalPositiveAffineRules $ reverse reversedRules of
-          RelationalPositiveAffineClosureContradiction ->
-            Right $ replicate inputCount 0
-          RelationalPositiveAffineClosureBounds bounds ->
-            mapM (maximumFor bounds) [0 .. inputCount - 1]
- where
-  clauses = case precondition of
-    LengthAll formulas -> formulas
-    formula -> [formula]
-
-  collect !retained [] = RelationalPositiveAffineRuleCollection retained
-  collect !retained (formula : remaining) =
-    case strictRelationalPositiveAffineQuotientClauseCoverage
-        inputCount inputPosition formula of
-      RelationalPositiveAffineClauseIgnored -> collect retained remaining
-      RelationalPositiveAffineClauseRules rules ->
-        collect (prependRulesInReverse retained rules) remaining
-      RelationalPositiveAffineClauseContradiction ->
-        RelationalPositiveAffineRuleCollectionContradiction
-
-  prependRulesInReverse !retained [] = retained
-  prependRulesInReverse !retained (rule : remaining) =
-    prependRulesInReverse (rule : retained) remaining
-
-  maximumFor bounds index = case Map.lookup (fromIntegral index) bounds of
-    Just maximumValue -> Right maximumValue
-    Nothing -> Left $ LengthApplicableDomainInputUpperBoundMissing index
 
 strictRelationalPositiveAffineQuotientClauseCoverage
   :: Int
@@ -4769,50 +2536,6 @@ strictRelationalPositiveAffineQuotientClauseCoverage
             (scaleRelationalPositiveAffineSummary divisor oppositeSummary)
       | otherwise -> Nothing
     _ -> Nothing
-
--- The root-extrema successor preserves the quotient scanner and closure
--- literally for every clause without an immediate root minimum or maximum.
--- A supported extremum contributes two conjunctive rules atomically; no
--- component rule survives if any of its three affine operands is unsupported.
-strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainMaximums
-  :: Int
-  -> (variable -> Maybe Natural)
-  -> LengthFormula variable
-  -> Either LengthApplicableDomainInapplicability [Natural]
-strictRelationalPositiveAffineQuotientRootExtremaApplicableDomainMaximums
-    inputCount inputPosition precondition
-  | inputCount == 0 = Right []
-  | otherwise = case collect [] clauses of
-      RelationalPositiveAffineRuleCollectionContradiction ->
-        Right $ replicate inputCount 0
-      RelationalPositiveAffineRuleCollection reversedRules ->
-        case closeRelationalPositiveAffineRules $ reverse reversedRules of
-          RelationalPositiveAffineClosureContradiction ->
-            Right $ replicate inputCount 0
-          RelationalPositiveAffineClosureBounds bounds ->
-            mapM (maximumFor bounds) [0 .. inputCount - 1]
- where
-  clauses = case precondition of
-    LengthAll formulas -> formulas
-    formula -> [formula]
-
-  collect !retained [] = RelationalPositiveAffineRuleCollection retained
-  collect !retained (formula : remaining) =
-    case strictRelationalPositiveAffineQuotientRootExtremaClauseCoverage
-        inputCount inputPosition formula of
-      RelationalPositiveAffineClauseIgnored -> collect retained remaining
-      RelationalPositiveAffineClauseRules rules ->
-        collect (prependRulesInReverse retained rules) remaining
-      RelationalPositiveAffineClauseContradiction ->
-        RelationalPositiveAffineRuleCollectionContradiction
-
-  prependRulesInReverse !retained [] = retained
-  prependRulesInReverse !retained (rule : remaining) =
-    prependRulesInReverse (rule : retained) remaining
-
-  maximumFor bounds index = case Map.lookup (fromIntegral index) bounds of
-    Just maximumValue -> Right maximumValue
-    Nothing -> Left $ LengthApplicableDomainInputUpperBoundMissing index
 
 strictRelationalPositiveAffineQuotientRootExtremaClauseCoverage
   :: Int
@@ -4921,52 +2644,6 @@ strictRelationalPositiveAffineQuotientRootExtremaClauseCoverage
       | not $ hasRootExtrema opposite ->
           strictAtMostMaximumRules opposite first second
     _ -> Nothing
-
--- The monus successor delegates every clause without an immediate root monus
--- to the root-extrema predecessor.  Its rewrites are exact over naturals,
--- except that equality deliberately retains only its supported necessary
--- at-most half when the opposite affine expression may be zero.  Every
--- multi-rule result is admitted atomically after all three operands have been
--- summarized.
-strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainMaximums
-  :: Int
-  -> (variable -> Maybe Natural)
-  -> LengthFormula variable
-  -> Either LengthApplicableDomainInapplicability [Natural]
-strictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomainMaximums
-    inputCount inputPosition precondition
-  | inputCount == 0 = Right []
-  | otherwise = case collect [] clauses of
-      RelationalPositiveAffineRuleCollectionContradiction ->
-        Right $ replicate inputCount 0
-      RelationalPositiveAffineRuleCollection reversedRules ->
-        case closeRelationalPositiveAffineRules $ reverse reversedRules of
-          RelationalPositiveAffineClosureContradiction ->
-            Right $ replicate inputCount 0
-          RelationalPositiveAffineClosureBounds bounds ->
-            mapM (maximumFor bounds) [0 .. inputCount - 1]
- where
-  clauses = case precondition of
-    LengthAll formulas -> formulas
-    formula -> [formula]
-
-  collect !retained [] = RelationalPositiveAffineRuleCollection retained
-  collect !retained (formula : remaining) =
-    case strictRelationalPositiveAffineQuotientRootExtremaMonusClauseCoverage
-        inputCount inputPosition formula of
-      RelationalPositiveAffineClauseIgnored -> collect retained remaining
-      RelationalPositiveAffineClauseRules rules ->
-        collect (prependRulesInReverse retained rules) remaining
-      RelationalPositiveAffineClauseContradiction ->
-        RelationalPositiveAffineRuleCollectionContradiction
-
-  prependRulesInReverse !retained [] = retained
-  prependRulesInReverse !retained (rule : remaining) =
-    prependRulesInReverse (rule : retained) remaining
-
-  maximumFor bounds index = case Map.lookup (fromIntegral index) bounds of
-    Just maximumValue -> Right maximumValue
-    Nothing -> Left $ LengthApplicableDomainInputUpperBoundMissing index
 
 strictRelationalPositiveAffineQuotientRootExtremaMonusClauseCoverage
   :: Int
@@ -5693,27 +3370,6 @@ positiveCoefficientDifference minuend subtrahend =
 -- all rules which become eligible in that pass fire once and are then removed.
 -- Consequently even a numeric tightening cycle cannot iterate toward a least
 -- fixed point: successful progress consumes at least one still-pending rule.
-closeRelationalPositiveAffineRules
-  :: [RelationalPositiveAffineRule]
-  -> RelationalPositiveAffineClosure
-closeRelationalPositiveAffineRules rules =
-  let (seedRules, pendingRules) =
-        partitionRelationalPositiveAffineRules rules
-  in case relationalPositiveAffineRulePass Map.empty seedRules of
-    RelationalPositiveAffineRulePassContradiction ->
-      RelationalPositiveAffineClosureContradiction
-    RelationalPositiveAffineRulePassComplete seedBounds retainedSeeds _ ->
-      close seedBounds $ retainedSeeds ++ pendingRules
- where
-  close !bounds [] = RelationalPositiveAffineClosureBounds bounds
-  close !bounds pending = case
-      relationalPositiveAffineRulePass bounds pending of
-    RelationalPositiveAffineRulePassContradiction ->
-      RelationalPositiveAffineClosureContradiction
-    RelationalPositiveAffineRulePassComplete nextBounds retained fired
-      | fired -> close nextBounds retained
-      | otherwise -> RelationalPositiveAffineClosureBounds nextBounds
-
 partitionRelationalPositiveAffineRules
   :: [RelationalPositiveAffineRule]
   -> ([RelationalPositiveAffineRule], [RelationalPositiveAffineRule])
@@ -5724,32 +3380,6 @@ partitionRelationalPositiveAffineRules = go [] []
     RelationalPositiveAffineRule _ _ _ rightCoefficients
       | Map.null rightCoefficients -> go (rule : seeds) pending remaining
       | otherwise -> go seeds (rule : pending) remaining
-
-relationalPositiveAffineRulePass
-  :: Map.Map Natural Natural
-  -> [RelationalPositiveAffineRule]
-  -> RelationalPositiveAffineRulePass
-relationalPositiveAffineRulePass bounds = go Map.empty [] False
- where
-  go !derived !retained !fired [] =
-    RelationalPositiveAffineRulePassComplete
-      (Map.unionWith min bounds derived)
-      (reverse retained)
-      fired
-  go !derived !retained !fired (rule : remaining) = case rule of
-    RelationalPositiveAffineRule leftConstant leftCoefficients
-        rightConstant rightCoefficients ->
-      case relationalPositiveAffineRightMaximum
-          bounds rightConstant rightCoefficients of
-        Nothing -> go derived (rule : retained) fired remaining
-        Just rightMaximum
-          | leftConstant > rightMaximum ->
-              RelationalPositiveAffineRulePassContradiction
-          | otherwise ->
-              let numerator = rightMaximum - leftConstant
-                  ruleBounds = Map.map (numerator `quot`) leftCoefficients
-                  nextDerived = Map.unionWith min derived ruleBounds
-              in go nextDerived retained True remaining
 
 relationalPositiveAffineRightMaximum
   :: Map.Map Natural Natural

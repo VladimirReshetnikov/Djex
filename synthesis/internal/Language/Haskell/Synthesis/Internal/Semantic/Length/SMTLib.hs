@@ -48,16 +48,6 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   , validateLengthSMTLibQueryInputBox
   , LengthSMTLibApplicableDomainValidationError (..)
   , validateLengthSMTLibQueryApplicableDomain
-  , validateLengthSMTLibQueryPositiveAffineApplicableDomain
-  , validateLengthSMTLibQueryRelationalPositiveAffineApplicableDomain
-  , validateLengthSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
-  , validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain
-  , validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  , validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  , LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError (..)
-  , validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  , validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  , validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
   , LengthSpinePairSMTLibQueryFingerprintSubject
   , lengthSpinePairSMTLibQuerySchemaTag
   , lengthSpinePairSMTLibQueryLogic
@@ -80,16 +70,6 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   , validateLengthSpinePairSMTLibQueryInputBox
   , LengthSpinePairSMTLibApplicableDomainValidationError (..)
   , validateLengthSpinePairSMTLibQueryApplicableDomain
-  , validateLengthSpinePairSMTLibQueryPositiveAffineApplicableDomain
-  , validateLengthSpinePairSMTLibQueryRelationalPositiveAffineApplicableDomain
-  , validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
-  , validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain
-  , validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  , validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  , LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationError (..)
-  , validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  , validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  , validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -129,7 +109,6 @@ import Language.Haskell.Synthesis.Semantic.Length
 import Language.Haskell.Synthesis.Semantic.Length.Evaluate
   ( LengthApplicableDomainValidation (..)
   , LengthApplicableDomainValidationError
-  , LengthBooleanFiniteUnionApplicableDomainValidationError
   , LengthBooleanFiniteUnionLimits
   , LengthCounterexampleSimplificationError
   , LengthEvaluationError
@@ -139,7 +118,6 @@ import Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , LengthInputBoxValidationError
   , LengthProblemAssignment (..)
   , LengthSpinePairApplicableDomainValidationError
-  , LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError
   , LengthSpinePairCounterexampleSimplificationError
   , LengthSpinePairEvaluationError
   , LengthSpinePairInputBoxValidationError
@@ -151,46 +129,10 @@ import Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , ValidatedLengthSpinePairCounterexample
   , ValidatedLengthSpinePairCounterexampleSimplification
   , ValidatedLengthSpinePairInputBox
-  , ValidatedLengthPositiveAffineApplicableDomain
-  , ValidatedLengthRelationalPositiveAffineApplicableDomain
-  , ValidatedLengthStrictRelationalPositiveAffineApplicableDomain
-  , ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain
-  , ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  , ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  , ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  , ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  , ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-  , ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain
-  , ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain
-  , ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain
-  , ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  , ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  , ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  , ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  , ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-  , ValidatedLengthSpinePairPositiveAffineApplicableDomain
   , validateLengthProblemApplicableDomain
-  , validateLengthProblemPositiveAffineApplicableDomain
-  , validateLengthProblemRelationalPositiveAffineApplicableDomain
-  , validateLengthProblemStrictRelationalPositiveAffineApplicableDomain
-  , validateLengthProblemStrictRelationalPositiveAffineQuotientApplicableDomain
-  , validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  , validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  , validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  , validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  , validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
   , validateLengthProblemInputBox
   , validateLengthProblemCounterexample
   , validateLengthSpinePairProblemApplicableDomain
-  , validateLengthSpinePairProblemPositiveAffineApplicableDomain
-  , validateLengthSpinePairProblemRelationalPositiveAffineApplicableDomain
-  , validateLengthSpinePairProblemStrictRelationalPositiveAffineApplicableDomain
-  , validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientApplicableDomain
-  , validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  , validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  , validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  , validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  , validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
   , validateLengthSpinePairProblemInputBox
   , validateLengthSpinePairProblemCounterexample
   , simplifyLengthProblemCounterexample
@@ -790,10 +732,9 @@ validateLengthSMTLibQueryInputBox evaluationLimits inputBoxLimits query
     Right
     . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
 
--- | Why complete applicable-domain validation through one exact scalar query
--- failed.  Semantic inapplicability is carried by the successful result;
--- these failures are limited to solver-independent box validation or an exact
--- evidence/problem association mismatch.
+-- | Why current applicable-domain validation through one exact scalar query
+-- failed. Semantic inapplicability remains a successful result; failures are
+-- bounded validation rejection or exact evidence/problem mismatch.
 data LengthSMTLibApplicableDomainValidationError
   = LengthSMTLibApplicableDomainValidationRejected
       !LengthApplicableDomainValidationError
@@ -803,285 +744,24 @@ data LengthSMTLibApplicableDomainValidationError
 
 instance NFData LengthSMTLibApplicableDomainValidationError
 
--- | Attempt to establish the entire applicable input domain of the scalar
--- problem retained by this query.  The query supplies association authority
--- only: no command is emitted and no solver status or live observation is
--- consumed.  Both authoritative evidence arms are replayed against the exact
--- query problem before their opaque receipts are released.
+-- | Validate the entire applicable input domain of the scalar problem
+-- retained by this query. The query supplies association authority only: no
+-- command is emitted and no solver observation is consumed.
 validateLengthSMTLibQueryApplicableDomain
   :: LengthEvaluationLimits
   -> LengthInputBoxLimits
+  -> LengthBooleanFiniteUnionLimits
   -> LengthSMTLibQuery identity local
   -> Either LengthSMTLibApplicableDomainValidationError
       (LengthApplicableDomainValidation
         ValidatedLengthCounterexample
         ValidatedLengthApplicableDomain)
-validateLengthSMTLibQueryApplicableDomain evaluationLimits inputBoxLimits
-    query = do
-  validation <- either
-    (Left . LengthSMTLibApplicableDomainValidationRejected)
-    Right
-    $ validateLengthProblemApplicableDomain evaluationLimits inputBoxLimits
-        $ queryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteListSpineLengthV1 receipt
-    -> Either LengthSMTLibApplicableDomainValidationError receipt
-  replay = either
-    (Left . LengthSMTLibApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
-
--- | Query-owned positive-affine applicable-domain validation.  The query adds
--- exact problem association only: no command is emitted and no solver status
--- is consumed.  The original literal-only query entrance remains unchanged.
-validateLengthSMTLibQueryPositiveAffineApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthSMTLibQuery identity local
-  -> Either LengthSMTLibApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        ValidatedLengthCounterexample
-        ValidatedLengthPositiveAffineApplicableDomain)
-validateLengthSMTLibQueryPositiveAffineApplicableDomain
-    evaluationLimits inputBoxLimits query = do
-  validation <- either
-    (Left . LengthSMTLibApplicableDomainValidationRejected)
-    Right
-    $ validateLengthProblemPositiveAffineApplicableDomain
-        evaluationLimits inputBoxLimits
-        $ queryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteListSpineLengthV1 receipt
-    -> Either LengthSMTLibApplicableDomainValidationError receipt
-  replay = either
-    (Left . LengthSMTLibApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
-
--- | Query-owned relational positive-affine applicable-domain validation.  The
--- query supplies exact problem association only; extraction and exhaustive
--- replay remain solver-independent.
-validateLengthSMTLibQueryRelationalPositiveAffineApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthSMTLibQuery identity local
-  -> Either LengthSMTLibApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        ValidatedLengthCounterexample
-        ValidatedLengthRelationalPositiveAffineApplicableDomain)
-validateLengthSMTLibQueryRelationalPositiveAffineApplicableDomain
-    evaluationLimits inputBoxLimits query = do
-  validation <- either
-    (Left . LengthSMTLibApplicableDomainValidationRejected)
-    Right
-    $ validateLengthProblemRelationalPositiveAffineApplicableDomain
-        evaluationLimits inputBoxLimits
-        $ queryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteListSpineLengthV1 receipt
-    -> Either LengthSMTLibApplicableDomainValidationError receipt
-  replay = either
-    (Left . LengthSMTLibApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
-
--- | Query-owned strict relational positive-affine applicable-domain
--- validation.  The query contributes exact association only; the private
--- complement rewrite and exhaustive replay remain solver-independent.
-validateLengthSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthSMTLibQuery identity local
-  -> Either LengthSMTLibApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        ValidatedLengthCounterexample
-        ValidatedLengthStrictRelationalPositiveAffineApplicableDomain)
-validateLengthSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
-    evaluationLimits inputBoxLimits query = do
-  validation <- either
-    (Left . LengthSMTLibApplicableDomainValidationRejected)
-    Right
-    $ validateLengthProblemStrictRelationalPositiveAffineApplicableDomain
-        evaluationLimits inputBoxLimits
-        $ queryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteListSpineLengthV1 receipt
-    -> Either LengthSMTLibApplicableDomainValidationError receipt
-  replay = either
-    (Left . LengthSMTLibApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
-
--- | Query-owned root-quotient successor to strict relational
--- positive-affine applicable-domain validation.  The sealed query contributes
--- exact problem association only; consequence extraction and exhaustive
--- replay remain solver-independent.
-validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthSMTLibQuery identity local
-  -> Either LengthSMTLibApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        ValidatedLengthCounterexample
-        ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain)
-validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain
-    evaluationLimits inputBoxLimits query = do
-  validation <- either
-    (Left . LengthSMTLibApplicableDomainValidationRejected)
-    Right
-    $ validateLengthProblemStrictRelationalPositiveAffineQuotientApplicableDomain
-        evaluationLimits inputBoxLimits
-        $ queryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteListSpineLengthV1 receipt
-    -> Either LengthSMTLibApplicableDomainValidationError receipt
-  replay = either
-    (Left . LengthSMTLibApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
-
--- | Query-owned cumulative root-extrema successor.  The sealed query supplies
--- exact association only; affine consequence extraction and exhaustive replay
--- remain independent of the solver.
-validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthSMTLibQuery identity local
-  -> Either LengthSMTLibApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        ValidatedLengthCounterexample
-        ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain)
-validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-    evaluationLimits inputBoxLimits query = do
-  validation <- either
-    (Left . LengthSMTLibApplicableDomainValidationRejected)
-    Right
-    $ validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-        evaluationLimits inputBoxLimits
-        $ queryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteListSpineLengthV1 receipt
-    -> Either LengthSMTLibApplicableDomainValidationError receipt
-  replay = either
-    (Left . LengthSMTLibApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
-
--- | Query-owned cumulative natural-monus successor.  The sealed query
--- supplies exact association only; affine consequence extraction and
--- exhaustive replay remain independent of the solver.
-validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthSMTLibQuery identity local
-  -> Either LengthSMTLibApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        ValidatedLengthCounterexample
-        ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain)
-validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-    evaluationLimits inputBoxLimits query = do
-  validation <- either
-    (Left . LengthSMTLibApplicableDomainValidationRejected)
-    Right
-    $ validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-        evaluationLimits inputBoxLimits
-        $ queryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteListSpineLengthV1 receipt
-    -> Either LengthSMTLibApplicableDomainValidationError receipt
-  replay = either
-    (Left . LengthSMTLibApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
-
--- | Query-owned failure vocabulary for the bounded Boolean finite-union
--- successor.  Its validation arm is nominally distinct from every single-box
--- predecessor; its association arm retains the exact sanitized replay class.
-data LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError
-  = LengthSMTLibBooleanFiniteUnionApplicableDomainValidationRejected
-      !LengthBooleanFiniteUnionApplicableDomainValidationError
-  | LengthSMTLibBooleanFiniteUnionApplicableDomainValidationAssociationRejected
-      !ReplayMismatch
-  deriving (Eq, Ord, Show, Generic)
-
-instance NFData
-    LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError
-
--- | Associate one independently established scalar Boolean finite union with
--- the exact sealed query that owns its checked problem.  This emits no query
--- bytes and consumes no solver observation.
-validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthBooleanFiniteUnionLimits
-  -> LengthSMTLibQuery identity local
-  -> Either LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        ValidatedLengthCounterexample
-        ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain)
-validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+validateLengthSMTLibQueryApplicableDomain
     evaluationLimits inputBoxLimits unionLimits query = do
   validation <- either
-    (Left .
-      LengthSMTLibBooleanFiniteUnionApplicableDomainValidationRejected)
+    (Left . LengthSMTLibApplicableDomainValidationRejected)
     Right
-    $ validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
+    $ validateLengthProblemApplicableDomain
         evaluationLimits inputBoxLimits unionLimits
         $ queryProblem query
   case validation of
@@ -1094,93 +774,9 @@ validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusB
  where
   replay
     :: BehavioralEvidence FiniteListSpineLengthV1 receipt
-    -> Either
-        LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError
-        receipt
+    -> Either LengthSMTLibApplicableDomainValidationError receipt
   replay = either
-    (Left .
-      LengthSMTLibBooleanFiniteUnionApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
-
--- | Associate one independently established scalar atomic-branching finite
--- union with the exact sealed query that owns its checked problem.  The shared
--- Boolean finite-union error vocabulary and validation/association precedence
--- remain unchanged.
-validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthBooleanFiniteUnionLimits
-  -> LengthSMTLibQuery identity local
-  -> Either LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        ValidatedLengthCounterexample
-        ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain)
-validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-    evaluationLimits inputBoxLimits unionLimits query = do
-  validation <- either
-    (Left .
-      LengthSMTLibBooleanFiniteUnionApplicableDomainValidationRejected)
-    Right
-    $ validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-        evaluationLimits inputBoxLimits unionLimits
-        $ queryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteListSpineLengthV1 receipt
-    -> Either
-        LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError
-        receipt
-  replay = either
-    (Left .
-      LengthSMTLibBooleanFiniteUnionApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
-
--- | Associate recursive piecewise-affine finite-union evidence with the exact
--- sealed scalar query which owns the checked problem.  No solver observation
--- or query byte participates in this independent bounded replay.
-validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthBooleanFiniteUnionLimits
-  -> LengthSMTLibQuery identity local
-  -> Either LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        ValidatedLengthCounterexample
-        ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain)
-validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-    evaluationLimits inputBoxLimits unionLimits query = do
-  validation <- either
-    (Left .
-      LengthSMTLibBooleanFiniteUnionApplicableDomainValidationRejected)
-    Right
-    $ validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-        evaluationLimits inputBoxLimits unionLimits
-        $ queryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteListSpineLengthV1 receipt
-    -> Either
-        LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError
-        receipt
-  replay = either
-    (Left .
-      LengthSMTLibBooleanFiniteUnionApplicableDomainValidationAssociationRejected)
+    (Left . LengthSMTLibApplicableDomainValidationAssociationRejected)
     Right
     . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
 
@@ -1367,7 +963,7 @@ validateLengthSpinePairSMTLibQueryInputBox evaluationLimits inputBoxLimits
     . replayBehavioralEvidence
         (lengthSpinePairSMTLibQueryBehavioralProblem query)
 
--- | Nominal product-domain failure for query-owned applicable-domain
+-- | Nominal product-domain failure for current query-owned applicable-domain
 -- validation.
 data LengthSpinePairSMTLibApplicableDomainValidationError
   = LengthSpinePairSMTLibApplicableDomainValidationRejected
@@ -1378,304 +974,24 @@ data LengthSpinePairSMTLibApplicableDomainValidationError
 
 instance NFData LengthSpinePairSMTLibApplicableDomainValidationError
 
--- | Query-owned complete applicable-domain validation for the exact binary
--- product problem.  Raw solver statuses remain authority-free; the exact
--- query association is replayed independently for either evidence arm.
+-- | Query-owned current applicable-domain validation for the exact binary
+-- product problem. Raw solver statuses remain authority-free; either evidence
+-- arm is replayed independently against the query association.
 validateLengthSpinePairSMTLibQueryApplicableDomain
   :: LengthEvaluationLimits
   -> LengthInputBoxLimits
+  -> LengthBooleanFiniteUnionLimits
   -> LengthSpinePairSMTLibQuery identity local
   -> Either LengthSpinePairSMTLibApplicableDomainValidationError
       (LengthApplicableDomainValidation
         ValidatedLengthSpinePairCounterexample
         ValidatedLengthSpinePairApplicableDomain)
-validateLengthSpinePairSMTLibQueryApplicableDomain evaluationLimits
-    inputBoxLimits query = do
+validateLengthSpinePairSMTLibQueryApplicableDomain
+    evaluationLimits inputBoxLimits unionLimits query = do
   validation <- either
     (Left . LengthSpinePairSMTLibApplicableDomainValidationRejected)
     Right
     $ validateLengthSpinePairProblemApplicableDomain
-        evaluationLimits inputBoxLimits
-        $ spinePairQueryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteBinaryProductSpineLengthsV1 receipt
-    -> Either
-        LengthSpinePairSMTLibApplicableDomainValidationError
-        receipt
-  replay = either
-    (Left .
-      LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence
-        (lengthSpinePairSMTLibQueryBehavioralProblem query)
-
--- | Nominal product-query sibling of
--- 'validateLengthSMTLibQueryPositiveAffineApplicableDomain'.
-validateLengthSpinePairSMTLibQueryPositiveAffineApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthSpinePairSMTLibQuery identity local
-  -> Either LengthSpinePairSMTLibApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        ValidatedLengthSpinePairCounterexample
-        ValidatedLengthSpinePairPositiveAffineApplicableDomain)
-validateLengthSpinePairSMTLibQueryPositiveAffineApplicableDomain
-    evaluationLimits inputBoxLimits query = do
-  validation <- either
-    (Left . LengthSpinePairSMTLibApplicableDomainValidationRejected)
-    Right
-    $ validateLengthSpinePairProblemPositiveAffineApplicableDomain
-        evaluationLimits inputBoxLimits
-        $ spinePairQueryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteBinaryProductSpineLengthsV1 receipt
-    -> Either
-        LengthSpinePairSMTLibApplicableDomainValidationError
-        receipt
-  replay = either
-    (Left .
-      LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence
-        (lengthSpinePairSMTLibQueryBehavioralProblem query)
-
--- | Nominal product-query sibling of
--- 'validateLengthSMTLibQueryRelationalPositiveAffineApplicableDomain'.
-validateLengthSpinePairSMTLibQueryRelationalPositiveAffineApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthSpinePairSMTLibQuery identity local
-  -> Either LengthSpinePairSMTLibApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        ValidatedLengthSpinePairCounterexample
-        ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain)
-validateLengthSpinePairSMTLibQueryRelationalPositiveAffineApplicableDomain
-    evaluationLimits inputBoxLimits query = do
-  validation <- either
-    (Left . LengthSpinePairSMTLibApplicableDomainValidationRejected)
-    Right
-    $ validateLengthSpinePairProblemRelationalPositiveAffineApplicableDomain
-        evaluationLimits inputBoxLimits
-        $ spinePairQueryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteBinaryProductSpineLengthsV1 receipt
-    -> Either
-        LengthSpinePairSMTLibApplicableDomainValidationError
-        receipt
-  replay = either
-    (Left .
-      LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence
-        (lengthSpinePairSMTLibQueryBehavioralProblem query)
-
--- | Nominal product-query sibling of
--- 'validateLengthSMTLibQueryStrictRelationalPositiveAffineApplicableDomain'.
-validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthSpinePairSMTLibQuery identity local
-  -> Either LengthSpinePairSMTLibApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        ValidatedLengthSpinePairCounterexample
-        ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain)
-validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
-    evaluationLimits inputBoxLimits query = do
-  validation <- either
-    (Left . LengthSpinePairSMTLibApplicableDomainValidationRejected)
-    Right
-    $ validateLengthSpinePairProblemStrictRelationalPositiveAffineApplicableDomain
-        evaluationLimits inputBoxLimits
-        $ spinePairQueryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteBinaryProductSpineLengthsV1 receipt
-    -> Either
-        LengthSpinePairSMTLibApplicableDomainValidationError
-        receipt
-  replay = either
-    (Left .
-      LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence
-        (lengthSpinePairSMTLibQueryBehavioralProblem query)
-
--- | Nominal product-query sibling of
--- 'validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain'.
-validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthSpinePairSMTLibQuery identity local
-  -> Either LengthSpinePairSMTLibApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        ValidatedLengthSpinePairCounterexample
-        ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain)
-validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain
-    evaluationLimits inputBoxLimits query = do
-  validation <- either
-    (Left . LengthSpinePairSMTLibApplicableDomainValidationRejected)
-    Right
-    $ validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientApplicableDomain
-        evaluationLimits inputBoxLimits
-        $ spinePairQueryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteBinaryProductSpineLengthsV1 receipt
-    -> Either
-        LengthSpinePairSMTLibApplicableDomainValidationError
-        receipt
-  replay = either
-    (Left .
-      LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence
-        (lengthSpinePairSMTLibQueryBehavioralProblem query)
-
--- | Nominal product-query sibling of
--- 'validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain'.
-validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthSpinePairSMTLibQuery identity local
-  -> Either LengthSpinePairSMTLibApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        ValidatedLengthSpinePairCounterexample
-        ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain)
-validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-    evaluationLimits inputBoxLimits query = do
-  validation <- either
-    (Left . LengthSpinePairSMTLibApplicableDomainValidationRejected)
-    Right
-    $ validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-        evaluationLimits inputBoxLimits
-        $ spinePairQueryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteBinaryProductSpineLengthsV1 receipt
-    -> Either
-        LengthSpinePairSMTLibApplicableDomainValidationError
-        receipt
-  replay = either
-    (Left .
-      LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence
-        (lengthSpinePairSMTLibQueryBehavioralProblem query)
-
--- | Nominal product-query sibling of
--- 'validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain'.
-validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthSpinePairSMTLibQuery identity local
-  -> Either LengthSpinePairSMTLibApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        ValidatedLengthSpinePairCounterexample
-        ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain)
-validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-    evaluationLimits inputBoxLimits query = do
-  validation <- either
-    (Left . LengthSpinePairSMTLibApplicableDomainValidationRejected)
-    Right
-    $ validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-        evaluationLimits inputBoxLimits
-        $ spinePairQueryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteBinaryProductSpineLengthsV1 receipt
-    -> Either
-        LengthSpinePairSMTLibApplicableDomainValidationError
-        receipt
-  replay = either
-    (Left .
-      LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence
-        (lengthSpinePairSMTLibQueryBehavioralProblem query)
-
--- | Nominal product-query failure vocabulary for bounded Boolean finite-union
--- validation and exact same-query association.
-data LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationError
-  = LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationRejected
-      !LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError
-  | LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationAssociationRejected
-      !ReplayMismatch
-  deriving (Eq, Ord, Show, Generic)
-
-instance NFData
-    LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationError
-
--- | Nominal product-query sibling of
--- 'validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain'.
-validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthBooleanFiniteUnionLimits
-  -> LengthSpinePairSMTLibQuery identity local
-  -> Either
-      LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        ValidatedLengthSpinePairCounterexample
-        ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain)
-validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-    evaluationLimits inputBoxLimits unionLimits query = do
-  validation <- either
-    (Left .
-      LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationRejected)
-    Right
-    $ validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
         evaluationLimits inputBoxLimits unionLimits
         $ spinePairQueryProblem query
   case validation of
@@ -1688,95 +1004,10 @@ validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtr
  where
   replay
     :: BehavioralEvidence FiniteBinaryProductSpineLengthsV1 receipt
-    -> Either
-        LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationError
-        receipt
+    -> Either LengthSpinePairSMTLibApplicableDomainValidationError receipt
   replay = either
     (Left .
-      LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence
-        (lengthSpinePairSMTLibQueryBehavioralProblem query)
-
--- | Nominal product-query sibling of the atomic-branching scalar association
--- wrapper.  It emits no query bytes and consumes no solver observation.
-validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthBooleanFiniteUnionLimits
-  -> LengthSpinePairSMTLibQuery identity local
-  -> Either
-      LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        ValidatedLengthSpinePairCounterexample
-        ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain)
-validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-    evaluationLimits inputBoxLimits unionLimits query = do
-  validation <- either
-    (Left .
-      LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationRejected)
-    Right
-    $ validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-        evaluationLimits inputBoxLimits unionLimits
-        $ spinePairQueryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteBinaryProductSpineLengthsV1 receipt
-    -> Either
-        LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationError
-        receipt
-  replay = either
-    (Left .
-      LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence
-        (lengthSpinePairSMTLibQueryBehavioralProblem query)
-
--- | Associate recursive piecewise-affine finite-union evidence with its exact
--- product query.  The shared Boolean failure vocabulary and validation-before-
--- association precedence remain unchanged.
-validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-  :: LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthBooleanFiniteUnionLimits
-  -> LengthSpinePairSMTLibQuery identity local
-  -> Either
-      LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        ValidatedLengthSpinePairCounterexample
-        ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain)
-validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-    evaluationLimits inputBoxLimits unionLimits query = do
-  validation <- either
-    (Left .
-      LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationRejected)
-    Right
-    $ validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-        evaluationLimits inputBoxLimits unionLimits
-        $ spinePairQueryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteBinaryProductSpineLengthsV1 receipt
-    -> Either
-        LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationError
-        receipt
-  replay = either
-    (Left .
-      LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationAssociationRejected)
+      LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected)
     Right
     . replayBehavioralEvidence
         (lengthSpinePairSMTLibQueryBehavioralProblem query)

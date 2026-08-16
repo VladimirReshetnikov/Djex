@@ -197,16 +197,15 @@ executeDjinnCommand
   -> IO ExitCode
 executeDjinnCommand presentation fieldSelectors session options target
     sourceName source =
-  case parseDjinnRequestWithCheckedTarget
+  executeParsedQuery
+    (parseDjinnRequestWithCheckedTarget
       session
       (prepareDjinnQueryOptions presentation options)
       target
       sourceName
-      source of
-    Left failure -> diagnosticFailure failure
-    Right request -> case runDjinnQuery session request of
-      Left failure -> diagnosticFailure failure
-      Right result -> presentDjinn presentation fieldSelectors result
+      source)
+    (runDjinnQuery session)
+    (presentDjinn presentation fieldSelectors)
 
 -- | Parse, execute, and present one checked Exference query.
 executeExferenceCommand
@@ -220,12 +219,11 @@ executeExferenceCommand
   -> IO ExitCode
 executeExferenceCommand presentation fieldSelectors session options target
     sourceName source =
-  case parseExferenceRequestWithCheckedTarget
-      session options target sourceName source of
-    Left failure -> diagnosticFailure failure
-    Right request -> case runExferenceQuery session request of
-      Left failure -> diagnosticFailure failure
-      Right results -> presentExference presentation fieldSelectors results
+  executeParsedQuery
+    (parseExferenceRequestWithCheckedTarget
+      session options target sourceName source)
+    (runExferenceQuery session)
+    (presentExference presentation fieldSelectors)
 
 -- | Parse, execute, and present an Exference query in an interactive module
 -- scope. The supplied session may already have its search dictionary narrowed;
@@ -242,12 +240,24 @@ executeExferenceCommandInScope
   -> IO ExitCode
 executeExferenceCommandInScope presentation fieldSelectors session options
     target scope sourceName source =
-  case parseExferenceRequestWithCheckedTargetInScope
-      session options target scope sourceName source of
+  executeParsedQuery
+    (parseExferenceRequestWithCheckedTargetInScope
+      session options target scope sourceName source)
+    (runExferenceQuery session)
+    (presentExference presentation fieldSelectors)
+
+-- Run one parsed request and present its result, reporting a parse or query
+-- failure as a diagnostic.  Every command above is this shape.
+executeParsedQuery
+  :: Either Diagnostic request
+  -> (request -> Either Diagnostic result)
+  -> (result -> IO ExitCode)
+  -> IO ExitCode
+executeParsedQuery parsed run present = case parsed of
+  Left failure -> diagnosticFailure failure
+  Right request -> case run request of
     Left failure -> diagnosticFailure failure
-    Right request -> case runExferenceQuery session request of
-      Left failure -> diagnosticFailure failure
-      Right results -> presentExference presentation fieldSelectors results
+    Right result -> present result
 
 -- | Select, render, and report one terminal Djinn result.
 presentDjinn

@@ -195,10 +195,14 @@ Checked scalar and binary-product Length problems now also retain nominal,
 candidate-independent counterexample-bank scopes, and pure queries project
 those same scopes. The accompanying bounded newest-first banks store only
 natural input vectors and coarse origins: a scope match authorizes attempting
-fresh replay, never a verdict, receipt, proof, or pruning decision. This is a
-storage and association foundation only; it does not yet drive live replay,
-candidate scheduling, persistent state, or Leant behavior. See the
-[nominal Length counterexample-bank report](docs/reports/2026-08-16-nominal-length-counterexample-bank-foundation.md).
+fresh replay, never a verdict, receipt, proof, or pruning decision. Explicit
+query-owned operations can now freshly reproduce one receipt before recording
+its inputs in a same-scope bank, or replay one exact retained sample against a
+later same-scope query. Every hit is a new receipt from the current query, and
+every begun replay returns the charged successor bank even on a miss or
+failure. These pure operations still provide no automatic traversal, solver
+execution, candidate scheduling, persistent state, or Leant behavior. See the
+[Length counterexample-bank query-replay report](docs/reports/2026-08-16-length-counterexample-bank-query-replay-bridge.md).
 
 
 ## Building

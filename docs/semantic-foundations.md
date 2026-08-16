@@ -90,6 +90,7 @@ was reached.
   - [Semantic.Length.CounterexampleBank](#semanticlengthcounterexamplebank)
   - [Semantic.Length.SMTLib](#semanticlengthsmtlib)
     - [The canonical query and raw-input replay](#the-canonical-query-and-raw-input-replay)
+    - [Counterexample-bank query replay](#counterexample-bank-query-replay)
     - [The all-zero origin probe](#the-all-zero-origin-probe)
     - [Exhaustive input-box validation](#exhaustive-input-box-validation)
     - [Current guarded recursive piecewise-affine coverage policy](#current-guarded-recursive-piecewise-affine-coverage-policy)
@@ -696,12 +697,23 @@ must pass the projected inputs through the current exact problem/query replay
 boundary, which may reject the arity, fail under evaluation limits, return a
 miss, or mint a fresh narrow receipt.
 
-This checkpoint wires no bank into offline replay, live Z3 execution,
-candidate scheduling, persistent/session state, or Leant. It establishes the
-scope, bounded storage policy, and attempt accounting needed by a future
-integration; it grants no proof or pruning authority now. The complete design
-and frozen characterization are recorded in the
-[nominal Length counterexample-bank report](reports/2026-08-16-nominal-length-counterexample-bank-foundation.md).
+The pure SMT-LIB facade now provides two explicit association operations for
+each nominal domain. One freshly reproduces an opaque counterexample through
+the current query before inserting only its inputs; the other replays one
+exact sample currently retained by the bank. Scope and attempt admission guard
+the first path. Scope, full sample membership, and attempt admission guard the
+second. Every begun replay returns the charged successor bank, and every hit
+is fresh evidence minted through the current query. The exact-sample path scans
+the bounded retained set for full membership, but neither path automatically
+replays any other sample or runs a solver.
+
+No bank is wired into live Z3 execution, candidate scheduling,
+persistent/session state, or Leant. The foundation and the additive query
+association remain storage and replay mechanics without proof or pruning
+authority. Their frozen characterizations are recorded in the
+[nominal Length counterexample-bank report](reports/2026-08-16-nominal-length-counterexample-bank-foundation.md)
+and the
+[counterexample-bank query-replay report](reports/2026-08-16-length-counterexample-bank-query-replay-bridge.md).
 
 ### Spine exposure and bounded concrete evaluation
 
@@ -2229,12 +2241,15 @@ empty construction, bounded insertion, explicit attempt recording, sample and
 statistics projections, and the two scope-match functions are the only
 mutation-shaped operations. `lengthCounterexampleBankMatchesScope` and its
 product sibling compare the complete scope fingerprint alone; they do not
-record an attempt or validate a stored vector. See
+record an attempt or validate a stored vector. The SMT-LIB operations which
+associate the store with fresh query replay remain outside this module. See
 [Candidate-independent counterexample-bank scopes and bounded stores](#candidate-independent-counterexample-bank-scopes-and-bounded-stores)
 for the exact inclusion, retention, eviction, statistics, and authority rules,
-and the
-[dated report](reports/2026-08-16-nominal-length-counterexample-bank-foundation.md)
-for the frozen characterization.
+the
+[nominal bank report](reports/2026-08-16-nominal-length-counterexample-bank-foundation.md)
+for the storage characterization, and the
+[query-replay bridge report](reports/2026-08-16-length-counterexample-bank-query-replay-bridge.md)
+for the association boundary.
 
 ### `Semantic.Length.SMTLib`
 
@@ -2256,6 +2271,43 @@ observation, and gives `unsat` no authority. The additive entrance changes no
 SMT translation, checked-problem, query, execution, response, or protocol
 identity/schema version. See the
 [query-owned raw-input replay report](reports/2026-08-14-query-owned-length-input-replay.md).
+
+#### Counterexample-bank query replay
+
+The nominal scalar operation
+`recordLengthSMTLibQueryCounterexampleInBank` and product operation
+`recordLengthSpinePairSMTLibQueryCounterexampleInBank` accept an opaque
+validated counterexample, a coarse origin, and a bank. They first require the
+bank to match the current query's candidate-independent scope, then admit one
+bank replay attempt. Only after that admission do they project the old
+receipt's inputs and run ordinary exact query-owned replay. An ordinary miss
+does not enter the store. A fresh hit delegates insertion to the bounded bank
+kernel, which alone owns validation, input-only duplicate promotion, MRU
+ordering, tail eviction, and storage statistics.
+
+The returned pair always carries the authoritative bank state. Scope mismatch
+or attempt-cap refusal occurs before replay and returns the original bank.
+Once replay has begun, evaluation or association rejection, a miss, and
+insertion rejection all retain the attempt-charged successor. Success returns
+that recorded successor together with the newly minted current-query receipt;
+the bank itself stores only inputs and the caller's non-attesting origin.
+
+`replayLengthSMTLibCounterexampleBankSample` and its nominal product sibling
+operate on one exact opaque retained sample. Their precedence is scope match,
+full sample membership, attempt admission, then current-query replay. The first
+three refusals leave the bank unchanged; any replay result returns the charged
+successor. A hit is a fresh current-query receipt and a miss is ordinary
+`Nothing`. This operation performs the bounded exact-membership scan, but no
+whole-bank replay traversal, promotion, reinsertion, origin rewrite, or
+storage-statistic mutation beyond the replay-attempt count.
+
+Both bridges are pure and solver-independent. They do not issue SMT-LIB,
+consume a model or status, operate a live worker, choose a candidate or sample,
+schedule another synthesis lane, own bank lifetime, persist state, or change
+Leant. They add no receipt reuse, proof, verdict, or pruning authority and
+change no problem, query, execution, response, protocol, or solver identity.
+See the
+[counterexample-bank query-replay report](reports/2026-08-16-length-counterexample-bank-query-replay-bridge.md).
 
 #### The all-zero origin probe
 

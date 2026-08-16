@@ -1157,9 +1157,12 @@ resource-bounded and fail-closed:
 
 `Language.Haskell.Synthesis.Semantic.Length.CounterexampleBank`, re-exported
 by `Language.Haskell.Djex`, provides nominal scalar and binary-product storage
-for input vectors that a later integration may want to replay. This checkpoint
-does not automatically populate, persist, or consume a bank. In particular,
-the live Z3 facade and the current Leant integration do not consult it.
+for input vectors that a later integration may want to replay. The pure
+`Semantic.Length.SMTLib` facade now provides explicit query-owned operations
+for freshly reproducing and recording one counterexample, and for replaying
+one exact retained sample. It does not automatically populate, traverse,
+persist, or consume a bank. In particular, the live Z3 facade and the current
+Leant integration do not consult it.
 
 Project a scalar scope with
 `checkedLengthProblemCounterexampleBankScope`, or from a sealed query with
@@ -1227,12 +1230,48 @@ match is evidence. Project a sample with
 call the existing exact problem/query replay entrance; only a newly returned
 receipt has its ordinary narrow authority.
 
+`recordLengthSMTLibQueryCounterexampleInBank` performs the complete scalar
+association sequence for one opaque receipt. Its nominal product counterpart
+is `recordLengthSpinePairSMTLibQueryCounterexampleInBank`. Each operation:
+
+1. requires the bank to match the current query's scope;
+2. records one replay attempt;
+3. extracts only the old receipt's inputs and replays them through the exact
+   current query;
+4. requires that replay to reproduce a counterexample; and
+5. delegates bounded storage, input-only duplicate promotion, statistics, and
+   eviction to the ordinary bank insertion kernel.
+
+The result pairs the authoritative bank with either a nominal error or the
+fresh current-query receipt. Scope or attempt-admission refusal returns the
+unchanged bank. Once the attempt has been admitted, replay rejection, an
+ordinary non-counterexample, or insertion refusal returns the charged
+successor; real replay work is never rolled back. Successful recording stores
+only the freshly reproduced natural inputs and the caller's coarse origin,
+not either receipt or any verdict.
+
+`replayLengthSMTLibCounterexampleBankSample` and its `SpinePair` counterpart
+take one exact opaque sample. They check scope, full retained-sample membership,
+and attempt admission in that order before replaying the sample's inputs
+through the current query. A pre-admission refusal leaves the bank unchanged;
+a replay rejection, miss, or hit returns the charged successor. A hit is again
+a fresh current-query receipt. This single-sample primitive performs no
+whole-bank traversal, promotion, reinsertion, origin rewrite, solver operation,
+or solver-status inspection.
+
+These functions provide association and accounting mechanics, not runtime
+policy. They do not choose a sample or candidate, operate a live solver,
+schedule another lane, own a command/session bank, persist state, or grant
+Leant any behavior.
+
 Djex is experimental and promises neither stability nor backward
 compatibility. Treat these current nominal types and short names as the whole
 bank contract; do not infer a persistence format from any exposed `Show`
 rendering or from the modeled byte statistic. The exact foundation is
 recorded in the
-[dated counterexample-bank report](reports/2026-08-16-nominal-length-counterexample-bank-foundation.md).
+[nominal bank report](reports/2026-08-16-nominal-length-counterexample-bank-foundation.md),
+and the explicit query association is frozen in the
+[query-replay bridge report](reports/2026-08-16-length-counterexample-bank-query-replay-bridge.md).
 
 ### Validate the current applicable domain
 

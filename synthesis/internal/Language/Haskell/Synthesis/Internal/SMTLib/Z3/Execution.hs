@@ -46,6 +46,8 @@ import System.FilePath (isAbsolute)
 
 import Language.Haskell.Synthesis.Internal.Fingerprint
   ( FingerprintField (..))
+import Language.Haskell.Synthesis.Internal.SMTLib.Lexical
+  ( retainExactByteCount )
 
 -- | Fixed argument prefix passed directly to @process@ without a shell.
 z3SMTLibExecutionArgumentPrefix :: [String]
@@ -331,20 +333,8 @@ retainExecutablePath maximumCharacters = go 0 maximumCharacters []
 retainExpectedDigest
   :: [Word8]
   -> Either Z3SMTLibExecutionError [Word8]
-retainExpectedDigest = go 0 []
- where
-  expected = 32
-  go !observed reversed []
-    | observed == expected = Right $ reverse reversed
-    | otherwise = Left $
-        Z3SMTLibExecutionExpectedExecutableSHA256LengthMismatch
-          expected observed
-  go !observed _ (_ : _)
-    | observed == expected = Left $
-        Z3SMTLibExecutionExpectedExecutableSHA256LengthMismatch
-          expected (expected + 1)
-  go !observed reversed (byte : bytes) =
-    go (observed + 1) (byte : reversed) bytes
+retainExpectedDigest = retainExactByteCount 32
+  Z3SMTLibExecutionExpectedExecutableSHA256LengthMismatch
 
 optionalBytesField :: [Word8] -> Maybe [Word8] -> FingerprintField
 optionalBytesField tag value = FingerprintTag tag $ case value of

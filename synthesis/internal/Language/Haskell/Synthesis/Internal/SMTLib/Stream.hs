@@ -54,7 +54,8 @@ import Language.Haskell.Synthesis.Internal.SMTLib.Lexical
   ( isSMTLibBareDelimiterByte
   , isSMTLibQuotedSymbolCharacterByte
   , isSMTLibStringCharacterByte
-  , isSMTLibWhitespaceByte )
+  , isSMTLibWhitespaceByte
+  , retainExactByteCount )
 
 -- | Lexical and charged-byte accounting policy bound by higher protocol and
 -- future live-session identities.  V2 adds the exact completion count without
@@ -539,18 +540,8 @@ unterminatedList framer = case streamOpenLists framer of
 retainExactNonce
   :: [Word8]
   -> Either SMTLibEchoSentinelError [Word8]
-retainExactNonce = go 0 []
- where
-  expected = smtLibEchoSentinelNonceByteCount
-  go !observed reversed []
-    | observed == expected = Right $ reverse reversed
-    | otherwise = Left $ SMTLibEchoSentinelNonceLengthMismatch
-        expected observed
-  go !observed _ (_ : _)
-    | observed == expected = Left $
-        SMTLibEchoSentinelNonceLengthMismatch expected (expected + 1)
-  go !observed reversed (byte : bytes) =
-    go (observed + 1) (byte : reversed) bytes
+retainExactNonce = retainExactByteCount smtLibEchoSentinelNonceByteCount
+  SMTLibEchoSentinelNonceLengthMismatch
 
 hexadecimalByte :: Word8 -> [Word8]
 hexadecimalByte byte =

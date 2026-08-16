@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 -- | Package-private SMT-LIB lexical facts shared by framing, parsing, causal
 -- accounting, transport-boundary validation, and domain plan identities.
 --
@@ -13,9 +14,11 @@ module Language.Haskell.Synthesis.Internal.SMTLib.Lexical
   , isSMTLibPrintableByte
   , isSMTLibStringCharacterByte
   , isSMTLibQuotedSymbolCharacterByte
+  , retainExactByteCount
   ) where
 
 import Data.Word (Word8)
+import Numeric.Natural (Natural)
 
 -- | The four whitespace bytes admitted by SMT-LIB 2.7, in canonical
 -- fingerprint order.
@@ -62,3 +65,22 @@ closeParen = 41
 semicolon = 59
 doubleQuote = 34
 verticalBar = 124
+
+-- | Retain a byte string only if it has exactly the expected length,
+-- reporting the first surplus byte as one more than expected rather than
+-- traversing the remainder.  The caller supplies its own mismatch error,
+-- taking the expected and observed counts.
+retainExactByteCount
+  :: Natural
+  -> (Natural -> Natural -> failure)
+  -> [Word8]
+  -> Either failure [Word8]
+retainExactByteCount expected mismatch = go 0 []
+ where
+  go !observed reversed []
+    | observed == expected = Right $ reverse reversed
+    | otherwise = Left $ mismatch expected observed
+  go !observed _ (_ : _)
+    | observed == expected = Left $ mismatch expected (expected + 1)
+  go !observed reversed (byte : bytes) =
+    go (observed + 1) (byte : reversed) bytes

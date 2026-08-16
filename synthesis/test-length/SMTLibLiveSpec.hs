@@ -80,7 +80,14 @@ import System.Directory
   )
 import System.FilePath ((</>), takeFileName)
 import qualified System.Info as SystemInfo
-import System.IO (hClose, openTempFile)
+import System.IO
+  ( hClose
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+  , Handle
+  , hIsClosed
+#endif
+  , openTempFile
+  )
 import System.IO.Error (tryIOError)
 import System.Timeout (timeout)
 
@@ -117,6 +124,10 @@ import qualified Language.Haskell.Synthesis.Internal.SMTLib.Stream
   as SMTLibStream
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
   as Z3Execution
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+import qualified Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process
+  as Z3Process
+#endif
 import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
   as PublicExecution
 import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live
@@ -187,6 +198,8 @@ descriptorBoundProcessTests = testGroup
 #ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
   [ testCase "publish exact legacy and sealed-image strengths"
       assertDescriptorBoundStrengths
+  , testCase "close the exec-status handle on every read exit"
+      assertDescriptorSpawnExecStatusHandleOwnership
   , testCase
       "execute the sealed bytes after replacing the path and source inode"
       assertDescriptorBoundSealedImage
@@ -356,6 +369,54 @@ assertDescriptorBoundStrengths = do
     "djex-length-z3-raw-process/v2"
   Process.lengthSMTLibDescriptorBoundProcessSchemaTag @?=
     "djex-length-z3-descriptor-bound-sealed-main-image-process/v1"
+
+assertDescriptorSpawnExecStatusHandleOwnership :: IO ()
+assertDescriptorSpawnExecStatusHandleOwnership = do
+  withTemporaryStatusHandle $ \statusHandle -> do
+    bytes <- Z3Process.readZ3SMTLibDescriptorSpawnExecStatusWith
+      (\_ -> pure BS.empty) statusHandle
+    bytes @?= BS.empty
+    hIsClosed statusHandle >>= (@?= True)
+
+  withTemporaryStatusHandle $ \statusHandle -> do
+    attempted <- tryIOError $
+      Z3Process.readZ3SMTLibDescriptorSpawnExecStatusWith
+        (\_ -> ioError $ userError "synthetic exec-status read failure")
+        statusHandle
+    case attempted of
+      Left _ -> pure ()
+      Right () -> assertFailure "exec-status read failure was not propagated"
+    hIsClosed statusHandle >>= (@?= True)
+
+  withTemporaryStatusHandle $ \statusHandle -> do
+    entered <- newEmptyMVar
+    release <- newEmptyMVar
+    outcome <- newEmptyMVar
+    worker <- forkIO $ do
+      attempted <- try
+        (Z3Process.readZ3SMTLibDescriptorSpawnExecStatusWith
+          (\_ -> putMVar entered () >> takeMVar release)
+          statusHandle)
+        :: IO (Either LiveAsynchronousCallbackException ByteString)
+      putMVar outcome attempted
+    _ <- expectWithin "exec-status read entrance" 3000000 $ takeMVar entered
+    throwTo worker LiveAsynchronousCallbackException
+    attempted <- expectWithin "interrupted exec-status read" 3000000
+      $ takeMVar outcome
+    case attempted of
+      Left failure -> failure @?= LiveAsynchronousCallbackException
+      Right _ -> assertFailure "interrupted exec-status read returned"
+    hIsClosed statusHandle >>= (@?= True)
+
+withTemporaryStatusHandle :: (Handle -> IO result) -> IO result
+withTemporaryStatusHandle use = do
+  temporaryRoot <- getTemporaryDirectory
+  bracket
+    (openTempFile temporaryRoot "djex-z3-exec-status")
+    (\(path, handle) -> do
+      ignoreIOError $ hClose handle
+      ignoreIOError $ removeFile path)
+    (use . snd)
 
 assertEffectiveIDDescriptorBoundStrengths :: IO ()
 assertEffectiveIDDescriptorBoundStrengths = do

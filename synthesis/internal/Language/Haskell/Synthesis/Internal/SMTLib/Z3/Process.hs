@@ -80,6 +80,9 @@ module Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process
   , openZ3SMTLibDescriptorBoundProcess
   , openZ3SMTLibDescriptorBoundProcessWithPreExecHook
   , z3SMTLibProcessUsesDescriptorBoundExecutableLaunch
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+  , readZ3SMTLibDescriptorSpawnExecStatusWith
+#endif
   , Z3SMTLibEffectiveIDExecutableAccessCheckResult (..)
   , openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
   , openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
@@ -1965,9 +1968,12 @@ nativeDescriptorSpawn limits profile executableDescriptor
             case converted of
               Left failure -> pure $ Left failure
               Right (created, statusHandle) -> do
-                handshake <- restore (tryIOError $ BS.hGetSome statusHandle 1)
+                handshake <- restore
+                  (readZ3SMTLibDescriptorSpawnExecStatusWith
+                    (\statusStream ->
+                      tryIOError $ BS.hGetSome statusStream 1)
+                    statusHandle)
                   `onException` void (cleanupDescriptorCreated limits created)
-                _ <- tryIOError $ hClose statusHandle
                 case handshake of
                   Right bytes | BS.null bytes -> pure $ Right created
                   _ -> do
@@ -1975,6 +1981,19 @@ nativeDescriptorSpawn limits profile executableDescriptor
                     pure $ Left $ attachCleanup cleanup $ processError
                       Z3SMTLibProcessSpawnPhase
                       Z3SMTLibProcessDescriptorBoundExecFailed Nothing
+
+-- | Run the descriptor-spawn exec-status read while retaining ownership of
+-- the parent status handle on every exit.  The read is restored to the
+-- caller's incoming masking state, but handle closure is masked.  The native
+-- launch path wraps this helper in its separate child/stdio cleanup handler.
+readZ3SMTLibDescriptorSpawnExecStatusWith
+  :: (Handle -> IO result)
+  -> Handle
+  -> IO result
+readZ3SMTLibDescriptorSpawnExecStatusWith readStatus statusHandle =
+  mask $ \restoreRead ->
+    restoreRead (readStatus statusHandle)
+      `finally` void (tryIOError $ hClose statusHandle)
 
 convertDescriptorPipes
   :: Z3SMTLibProcessLimits

@@ -1152,7 +1152,7 @@ resource-bounded and fail-closed:
 
 ### Validate the current applicable domain
 
-There is one public applicable-domain algorithm: bounded recursive
+There is one public applicable-domain algorithm: bounded guarded recursive
 piecewise-affine finite-union analysis followed by exhaustive replay of the
 original checked problem. Call `validateLengthProblemApplicableDomain` for a
 scalar checked problem or `validateLengthSpinePairProblemApplicableDomain` for
@@ -1202,22 +1202,29 @@ schema bytes are private.
 
 Internally the complete algorithm retains an ordered fallback from direct and
 positive-affine consequences through relational, strict, positive-literal
-quotient, extrema, monus, Boolean/atomic branching, and finally recursive
-piecewise-affine cases. Those stages are implementation details, not public
-policy choices. Minimum, maximum, and monus cases are ordered left-first with
-the first child owning ties. Raw DNF/case counting precedes cleanup; every live
-branch must establish all input maxima; incomparable boxes remain a canonical
-antichain rather than being widened to a hull; overlapping boxes count as
-visits but assignments are deduplicated; and one global lexicographic replay
-of the original precondition and postcondition is final authority.
+quotient, extrema, monus, Boolean/atomic branching, and finally guarded
+recursive piecewise-affine cases. Those stages are implementation details, not
+public policy choices. Minimum, maximum, and monus cases are ordered left-first
+with the first child owning ties. An admitted `LengthIf` expands positive
+guard/true-arm alternatives before negative guard/false-arm alternatives;
+both guard polarities and both arms must be fully supported or the whole
+fallback atom remains conservatively ignored. Condition rules precede selected-
+arm and enclosing selector rules.
+
+Raw DNF and guarded-case counting precedes contradiction and every other
+cleanup, then the existing branch, rule, and closure caps apply in that order.
+Every live branch must establish all input maxima; incomparable boxes remain a
+canonical antichain rather than being widened to a hull; overlapping boxes
+count as visits but assignments are deduplicated; and one global lexicographic
+replay of the original precondition and postcondition is final authority.
 
 The older public validator/receipt/tag ladder was deleted without aliases or
 migration. Djex is experimental and promises neither stability nor backward
 compatibility, so current code should import only the short names above and
 must not persist or compare private receipt-schema bytes. See the
-[full applicable-domain semantics](semantic-foundations.md#current-recursive-piecewise-affine-applicable-domain-validation)
+[full applicable-domain semantics](semantic-foundations.md#current-guarded-recursive-piecewise-affine-applicable-domain-validation)
 and the dated
-[surface-reset report](reports/2026-08-15-current-length-applicable-domain-surface.md).
+[guarded conditional report](reports/2026-08-15-guarded-conditional-length-applicable-domain.md).
 
 A nominally distinct binary-product sibling
 (`sealLengthSpinePairContractInSession` and the `LengthSpinePair*` family)

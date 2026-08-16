@@ -14,7 +14,9 @@ checkpoint through the recursive piecewise-affine checkpoint preserve the
 design history of what was once a public validator ladder. Those predecessor
 entrances, receipts, errors, and tag projections are no longer current API.
 The later current-surface reset report supersedes their public-surface claims
-without rewriting their dated algorithm history.
+without rewriting their dated algorithm history. The guarded-conditional
+report in turn supersedes the reset and recursive reports only where they say
+that current recursive expression coverage excludes `LengthIf`.
 
 Reports are listed oldest first.
 
@@ -111,3 +113,5 @@ Reports are listed oldest first.
 - 2026-08-15 — [Descriptor-bound Z3 main-image launch](2026-08-15-descriptor-bound-z3-main-image-launch.md)
 - 2026-08-15 — [Effective-ID descriptor-bound Z3 launch](2026-08-15-effective-id-descriptor-bound-z3-launch.md)
 - 2026-08-15 — [Execve-check descriptor-bound Z3 launch](2026-08-15-execve-check-descriptor-bound-z3-launch.md)
+- 2026-08-15 — [Descriptor spawn resource ownership](2026-08-15-descriptor-spawn-resource-ownership.md)
+- 2026-08-15 — [Guarded conditional Length applicable-domain validation](2026-08-15-guarded-conditional-length-applicable-domain.md)

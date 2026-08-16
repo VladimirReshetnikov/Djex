@@ -184,6 +184,13 @@ complete specification is
 four closed live Z3 launch profiles adds descriptor-bound Linux 6.14
 executable checks; its narrow authority is recorded in the
 [execve-check descriptor-bound launch report](docs/reports/2026-08-15-execve-check-descriptor-bound-z3-launch.md).
+The current finite applicable-domain analysis also covers fully supported
+guarded `LengthIf` expressions without replacing exact replay or widening
+incomparable boxes; see the
+[guarded conditional report](docs/reports/2026-08-15-guarded-conditional-length-applicable-domain.md).
+All native descriptor launch profiles transfer an acquired child through one
+masked, rollback-protected owner boundary, detailed in the
+[descriptor spawn resource-ownership report](docs/reports/2026-08-15-descriptor-spawn-resource-ownership.md).
 
 
 ## Building

@@ -739,17 +739,21 @@ instance NFData (CheckedLengthSpinePairProblem identity local) where
     rnf postcondition `seq` rnf condition `seq`
     rnf (behavioralProblemEncodingFingerprint problem) `seq` rnf problem
 
+-- | Normalized symbolic lengths computed for both components of the
+-- candidate's product result.
 checkedLengthSpinePairCandidateResult
   :: CheckedLengthSpinePairCandidate identity local
   -> LengthSpinePair (LengthExpression LengthContractVariable)
 checkedLengthSpinePairCandidateResult
     (CheckedLengthSpinePairCandidate result _ _) = result
 
+-- | Exact provider laws reached by lazy interpretation, in name order.
 checkedLengthSpinePairCandidateUsedProviders
   :: CheckedLengthSpinePairCandidate identity local -> [Name]
 checkedLengthSpinePairCandidateUsedProviders
     (CheckedLengthSpinePairCandidate _ providers _) = providers
 
+-- | Product-domain-wrapped candidate-only identity.
 checkedLengthSpinePairCandidateFingerprint
   :: CheckedLengthSpinePairCandidate identity local
   -> Fingerprint
@@ -757,35 +761,49 @@ checkedLengthSpinePairCandidateFingerprint
 checkedLengthSpinePairCandidateFingerprint
     (CheckedLengthSpinePairCandidate _ _ candidate) = candidate
 
+-- | Recover the interpreted product candidate receipt retained by the
+-- problem.
 checkedLengthSpinePairProblemCandidate
   :: CheckedLengthSpinePairProblem identity local
   -> CheckedLengthSpinePairCandidate identity local
 checkedLengthSpinePairProblemCandidate
     (CheckedLengthSpinePairProblem candidate _ _ _ _ _) = candidate
 
+-- | Number of compact source-ordered observed-spine inputs admitted by the
+-- sealed product contract, retained redundantly with the fingerprinted
+-- contract so a model decoder can reject missing or extra assignments.
 checkedLengthSpinePairProblemInputCount
   :: CheckedLengthSpinePairProblem identity local -> Int
 checkedLengthSpinePairProblemInputCount
     (CheckedLengthSpinePairProblem _ inputCount _ _ _ _) = inputCount
 
+-- | Normalized product contract precondition retained for ordered concrete
+-- replay.
 checkedLengthSpinePairProblemPrecondition
   :: CheckedLengthSpinePairProblem identity local
   -> LengthFormula LengthSpinePairContractVariable
 checkedLengthSpinePairProblemPrecondition
     (CheckedLengthSpinePairProblem _ _ precondition _ _ _) = precondition
 
+-- | Normalized product contract postcondition before candidate-result
+-- substitution.  Concrete replay evaluates this only after the precondition
+-- succeeds and binds both 'LengthSpinePairResult' components to the results
+-- computed from the checked candidate.
 checkedLengthSpinePairProblemPostcondition
   :: CheckedLengthSpinePairProblem identity local
   -> LengthFormula LengthSpinePairContractVariable
 checkedLengthSpinePairProblemPostcondition
     (CheckedLengthSpinePairProblem _ _ _ postcondition _ _) = postcondition
 
+-- | Solver-neutral bad-state formula: precondition and negated postcondition
+-- with both result components substituted, so only input variables remain.
 checkedLengthSpinePairProblemCounterexampleCondition
   :: CheckedLengthSpinePairProblem identity local
   -> LengthFormula LengthContractVariable
 checkedLengthSpinePairProblemCounterexampleCondition
     (CheckedLengthSpinePairProblem _ _ _ _ condition _) = condition
 
+-- | Concrete identity of contract, policy, used laws, results, and bad state.
 checkedLengthSpinePairProblemEncodingFingerprint
   :: CheckedLengthSpinePairProblem identity local
   -> Fingerprint
@@ -794,6 +812,8 @@ checkedLengthSpinePairProblemEncodingFingerprint
     (CheckedLengthSpinePairProblem _ _ _ _ _ problem) =
   behavioralProblemEncodingFingerprint problem
 
+-- | Generic domain/inventory/encoding/candidate/problem envelope for the
+-- product domain.
 checkedLengthSpinePairProblemBehavioralProblem
   :: CheckedLengthSpinePairProblem identity local
   -> BehavioralProblem FiniteBinaryProductSpineLengthsV1
@@ -884,6 +904,10 @@ sealLengthTypedCandidateProblemInSession
 sealLengthTypedCandidateProblemInSession =
   sealLengthTypedCandidateProblemWithMode LengthSessionPolicyProblemSealer
 
+-- | Product-domain sibling of 'sealLengthTypedCandidateProblem'.  The
+-- candidate is interpreted to a binary spine pair, both components are
+-- normalized and substituted into the bad-state formula, and a contract with
+-- an unobserved target argument is rejected before any revalidation.
 sealLengthSpinePairTypedCandidateProblem
   :: (Ord identity, Ord local)
   => LengthProblemLimits
@@ -899,6 +923,9 @@ sealLengthSpinePairTypedCandidateProblem
 sealLengthSpinePairTypedCandidateProblem =
   sealLengthSpinePairTypedCandidateProblemWithMode LengthLegacyProblemSealer
 
+-- | Product-domain sibling of 'sealRoleAwareLengthTypedCandidateProblem'.
+-- A mixed contract requires a session sealed for mixed opaque-target
+-- semantics, and the contract's mixedness must match the session's policy.
 sealRoleAwareLengthSpinePairTypedCandidateProblem
   :: (Ord identity, Ord local)
   => LengthProblemLimits
@@ -914,6 +941,10 @@ sealRoleAwareLengthSpinePairTypedCandidateProblem
 sealRoleAwareLengthSpinePairTypedCandidateProblem =
   sealLengthSpinePairTypedCandidateProblemWithMode LengthRoleAwareProblemSealer
 
+-- | Product-domain sibling of
+-- 'sealExactSpineCaseLengthTypedCandidateProblem'.  The session must have
+-- been sealed with the exact zero/step case policy; the legacy and role-aware
+-- product sealers instead require a session that rejects cases.
 sealExactSpineCaseLengthSpinePairTypedCandidateProblem
   :: (Ord identity, Ord local)
   => LengthProblemLimits
@@ -930,6 +961,10 @@ sealExactSpineCaseLengthSpinePairTypedCandidateProblem =
   sealLengthSpinePairTypedCandidateProblemWithMode
     LengthExactSpineCaseProblemSealer
 
+-- | Product-domain sibling of 'sealLengthTypedCandidateProblemInSession'.
+-- The session's own case policy is required, and an explicitly associated
+-- target-role vector must equal the contract's roles, order and arity
+-- included, before the contract is resealed through the session.
 sealLengthSpinePairTypedCandidateProblemInSession
   :: (Ord identity, Ord local)
   => LengthProblemLimits

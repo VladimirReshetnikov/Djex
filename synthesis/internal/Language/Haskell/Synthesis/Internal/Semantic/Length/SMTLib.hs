@@ -216,17 +216,23 @@ instance NFData LengthSMTLibLimits where
   rnf (LengthSMTLibLimits commands fingerprint numerals) =
     rnf commands `seq` rnf fingerprint `seq` rnf numerals
 
+-- | Identity of the one signed query bound that sealing can reject.  The
+-- two byte caps are 'Natural' and therefore have no field here.
 data LengthSMTLibLimitField = LengthSMTLibNumeralBits
   deriving (Bounded, Enum, Eq, Ord, Show, Generic)
 
 instance NFData LengthSMTLibLimitField
 
+-- | Failure to seal 'LengthSMTLibLimitSource': the named field carried the
+-- retained negative value.
 data LengthSMTLibLimitError = NegativeLengthSMTLibLimit
   !LengthSMTLibLimitField !Int
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData LengthSMTLibLimitError
 
+-- | Seal raw query limits.  Only a negative numeral bit limit is rejected;
+-- both byte caps are retained as given, zero included.
 mkLengthSMTLibLimits
   :: LengthSMTLibLimitSource
   -> Either LengthSMTLibLimitError LengthSMTLibLimits
@@ -240,6 +246,8 @@ mkLengthSMTLibLimits source
  where
   numeralBits = lengthSMTLibLimitSourceNumeralBits source
 
+-- | The documented default query bounds: 65,536 command bytes, 262,144
+-- fingerprint bytes, and 4,096 numeral bits.
 defaultLengthSMTLibLimitSource :: LengthSMTLibLimitSource
 defaultLengthSMTLibLimitSource = LengthSMTLibLimitSource
   { lengthSMTLibLimitSourceCommandBytes = 65536
@@ -247,15 +255,22 @@ defaultLengthSMTLibLimitSource = LengthSMTLibLimitSource
   , lengthSMTLibLimitSourceNumeralBits = 4096
   }
 
+-- | Validated form of 'defaultLengthSMTLibLimitSource'.
 defaultLengthSMTLibLimits :: LengthSMTLibLimits
 defaultLengthSMTLibLimits = LengthSMTLibLimits 65536 262144 4096
 
+-- | Maximum rendered byte length admitted for each command artifact
+-- separately: the check program and the optional input value request.
 lengthSMTLibCommandByteLimit :: LengthSMTLibLimits -> Natural
 lengthSMTLibCommandByteLimit (LengthSMTLibLimits value _ _) = value
 
+-- | Maximum number of bytes the complete query fingerprint builder may
+-- consume.
 lengthSMTLibFingerprintByteLimit :: LengthSMTLibLimits -> Natural
 lengthSMTLibFingerprintByteLimit (LengthSMTLibLimits _ value _) = value
 
+-- | Maximum bit width of any natural numeral rendered into the query; a
+-- wider literal, scale, or divisor fails at its 'LengthSMTLibNumeralSite'.
 lengthSMTLibNumeralBitLimit :: LengthSMTLibLimits -> Int
 lengthSMTLibNumeralBitLimit (LengthSMTLibLimits _ _ value) = value
 
@@ -415,16 +430,23 @@ sealLengthSMTLibQuery limits problem = do
     checkBytes valueRequestBytes
   pure $ LengthSMTLibQuery problem checkBytes fingerprint
 
+-- | Canonical solver symbols for the modeled inputs, in source position
+-- order, recomputed from the sealed problem arity.
 lengthSMTLibQueryInputSymbols
   :: LengthSMTLibQuery identity local
   -> [[Word8]]
 lengthSMTLibQueryInputSymbols = fst . lengthSMTLibQueryInputArtifacts
 
+-- | Rendered bytes of the bounded check program: preamble, declarations,
+-- nonnegativity and witness assertions, the bad-state assertion, and the
+-- satisfiability check.
 lengthSMTLibQueryCheckBytes
   :: LengthSMTLibQuery identity local
   -> [Word8]
 lengthSMTLibQueryCheckBytes (LengthSMTLibQuery _ bytes _) = bytes
 
+-- | Rendered value request for every input symbol, or 'Nothing' for a
+-- nullary problem, which has nothing to request.
 lengthSMTLibQueryInputValueRequestBytes
   :: LengthSMTLibQuery identity local
   -> Maybe [Word8]
@@ -439,12 +461,15 @@ lengthSMTLibQueryInputArtifacts (LengthSMTLibQuery problem _ _) =
         $ checkedLengthProblemInputCount problem
   in (symbols, fmap renderQFLIACommand $ inputValueRequestForSymbols symbols)
 
+-- | Complete structural identity of translator schema, typed plan, exact
+-- problem, and rendered request bytes.
 lengthSMTLibQueryFingerprint
   :: LengthSMTLibQuery identity local
   -> Fingerprint LengthSMTLibQueryFingerprintSubject
 lengthSMTLibQueryFingerprint (LengthSMTLibQuery _ _ fingerprint) =
   fingerprint
 
+-- | Generic behavioral envelope of the checked problem this query encodes.
 lengthSMTLibQueryBehavioralProblem
   :: LengthSMTLibQuery identity local
   -> BehavioralProblem FiniteListSpineLengthV1
@@ -490,18 +515,24 @@ sealLengthSpinePairSMTLibQuery limits problem = do
     checkBytes valueRequestBytes
   pure $ LengthSpinePairSMTLibQuery problem checkBytes fingerprint
 
+-- | Canonical solver symbols for the compact modeled inputs, in source
+-- position order, recomputed from the sealed product problem arity.
 lengthSpinePairSMTLibQueryInputSymbols
   :: LengthSpinePairSMTLibQuery identity local
   -> [[Word8]]
 lengthSpinePairSMTLibQueryInputSymbols =
   fst . lengthSpinePairSMTLibQueryInputArtifacts
 
+-- | Rendered bytes of the bounded input-only check program; neither modeled
+-- result component appears as a solver binding.
 lengthSpinePairSMTLibQueryCheckBytes
   :: LengthSpinePairSMTLibQuery identity local
   -> [Word8]
 lengthSpinePairSMTLibQueryCheckBytes
     (LengthSpinePairSMTLibQuery _ bytes _) = bytes
 
+-- | Rendered value request for every input symbol, or 'Nothing' for a
+-- nullary problem, which has nothing to request.
 lengthSpinePairSMTLibQueryInputValueRequestBytes
   :: LengthSpinePairSMTLibQuery identity local
   -> Maybe [Word8]
@@ -517,12 +548,17 @@ lengthSpinePairSMTLibQueryInputArtifacts
         $ checkedLengthSpinePairProblemInputCount problem
   in (symbols, fmap renderQFLIACommand $ inputValueRequestForSymbols symbols)
 
+-- | Complete structural identity of the product translator schema, typed
+-- plan, exact product problem, and rendered request bytes.  It never
+-- coincides with a scalar query fingerprint even for identical bytes.
 lengthSpinePairSMTLibQueryFingerprint
   :: LengthSpinePairSMTLibQuery identity local
   -> Fingerprint LengthSpinePairSMTLibQueryFingerprintSubject
 lengthSpinePairSMTLibQueryFingerprint
     (LengthSpinePairSMTLibQuery _ _ fingerprint) = fingerprint
 
+-- | Generic behavioral envelope of the checked product problem this query
+-- encodes.
 lengthSpinePairSMTLibQueryBehavioralProblem
   :: LengthSpinePairSMTLibQuery identity local
   -> BehavioralProblem FiniteBinaryProductSpineLengthsV1

@@ -85,13 +85,22 @@ z3SMTLibExecutionQueryResetBytes = ascii
 z3SMTLibExecutionChildEnvironment :: Maybe [(String, String)]
 z3SMTLibExecutionChildEnvironment = Just []
 
+-- | Versioned name of the 'z3SMTLibExecutionChildEnvironment' policy, bound
+-- into every fingerprint slice.  A different environment policy requires a
+-- new tag.
 z3SMTLibExecutionEnvironmentPolicyTag :: [Word8]
 z3SMTLibExecutionEnvironmentPolicyTag = ascii "empty-environment/v1"
 
+-- | Versioned name of the working-directory policy: each child runs in a
+-- fresh empty directory rather than an inherited one.  Bound into every
+-- fingerprint slice.
 z3SMTLibExecutionWorkingDirectoryPolicyTag :: [Word8]
 z3SMTLibExecutionWorkingDirectoryPolicyTag =
   ascii "fresh-empty-working-directory/v1"
 
+-- | Versioned meaning of the optional expected digest: a SHA-256 over the
+-- exact executable file bytes.  It tags the digest's presence or absence in
+-- 'z3SMTLibExecutionFingerprintFields'.
 z3SMTLibExecutionExpectedDigestSchemaTag :: [Word8]
 z3SMTLibExecutionExpectedDigestSchemaTag =
   ascii "sha256/exact-executable-file-bytes/v1"
@@ -107,9 +116,15 @@ data Z3SMTLibExecutionLimits = Z3SMTLibExecutionLimits !Natural
 instance NFData Z3SMTLibExecutionLimits where
   rnf (Z3SMTLibExecutionLimits pathCharacters) = rnf pathCharacters
 
+-- | Retain the executable-path character bound verbatim; no validation is
+-- performed.
 mkZ3SMTLibExecutionLimits :: Natural -> Z3SMTLibExecutionLimits
 mkZ3SMTLibExecutionLimits = Z3SMTLibExecutionLimits
 
+-- | Maximum number of 'FilePath' characters an executable path may have;
+-- 'mkZ3SMTLibExecutionProfile' fails with
+-- 'Z3SMTLibExecutionExecutablePathCharacterLimitExceeded' on the first
+-- character past it.  The count is in characters, not encoded bytes.
 z3SMTLibExecutionExecutablePathCharacterLimit
   :: Z3SMTLibExecutionLimits
   -> Natural
@@ -150,6 +165,9 @@ instance NFData Z3SMTLibExecutionProfile where
     rnf executable `seq` rnf expected `seq` rnf timeout `seq`
     rnf resource `seq` rnf deadline
 
+-- | Which validated numeric control a 'Z3SMTLibExecutionError' refers to.
+-- Constructor order is the order 'mkZ3SMTLibExecutionProfile' validates the
+-- fields.
 data Z3SMTLibExecutionField
   = Z3SMTLibExecutionSolverTimeoutMilliseconds
   | Z3SMTLibExecutionSolverResourceLimit
@@ -158,6 +176,10 @@ data Z3SMTLibExecutionField
 
 instance NFData Z3SMTLibExecutionField
 
+-- | Which character rule an executable path broke, reported alongside the
+-- zero-based offset of the offending character in
+-- 'Z3SMTLibExecutionInvalidExecutablePathCharacter'.  NUL and UTF-16
+-- surrogate code points are rejected.
 data Z3SMTLibExecutionPathCharacterError
   = Z3SMTLibExecutionPathContainsNul
   | Z3SMTLibExecutionPathContainsSurrogate
@@ -208,28 +230,42 @@ mkZ3SMTLibExecutionProfile limits source = do
   pure $ Z3SMTLibExecutionProfile executable expectedDigest
     timeout resource deadline
 
+-- | Admitted executable path: non-empty, absolute, within the character
+-- bound, and free of NUL and surrogate characters.  Its existence on disk
+-- has not been checked.
 z3SMTLibExecutionExecutablePath :: Z3SMTLibExecutionProfile -> FilePath
 z3SMTLibExecutionExecutablePath
     (Z3SMTLibExecutionProfile value _ _ _ _) = value
 
+-- | Optional expected SHA-256 of the executable file bytes; when present it
+-- is exactly 32 bytes.  Its meaning is named by
+-- 'z3SMTLibExecutionExpectedDigestSchemaTag'.
 z3SMTLibExecutionExpectedExecutableSHA256
   :: Z3SMTLibExecutionProfile
   -> Maybe [Word8]
 z3SMTLibExecutionExpectedExecutableSHA256
     (Z3SMTLibExecutionProfile _ value _ _ _) = value
 
+-- | Validated Z3 @timeout=@ launch parameter in milliseconds; admission
+-- guarantees it is positive and strictly below the 32-bit unsigned maximum.
 z3SMTLibExecutionSolverTimeoutMilliseconds
   :: Z3SMTLibExecutionProfile
   -> Int
 z3SMTLibExecutionSolverTimeoutMilliseconds
     (Z3SMTLibExecutionProfile _ _ value _ _) = value
 
+-- | Validated Z3 @rlimit=@ launch parameter; admission guarantees it is
+-- positive and at most the 32-bit unsigned maximum.
 z3SMTLibExecutionSolverResourceLimit
   :: Z3SMTLibExecutionProfile
   -> Int
 z3SMTLibExecutionSolverResourceLimit
     (Z3SMTLibExecutionProfile _ _ _ value _) = value
 
+-- | Validated host-side deadline in milliseconds.  Admission guarantees it
+-- is positive, exceeds the solver timeout by at least
+-- 'z3SMTLibMinimumHostDeadlineMarginMilliseconds', and converts to
+-- microseconds without 'Int' overflow.
 z3SMTLibExecutionHostDeadlineMilliseconds
   :: Z3SMTLibExecutionProfile
   -> Int

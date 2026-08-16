@@ -90,6 +90,8 @@ data TypeApplicationCertificateLimitField
 
 instance NFData TypeApplicationCertificateLimitField
 
+-- | Why 'mkTypeApplicationCertificateLimits' rejected its arguments: the
+-- first negative field, in declaration order, together with its value.
 data TypeApplicationCertificateLimitError
   = NegativeTypeApplicationCertificateLimit
       !TypeApplicationCertificateLimitField !Int
@@ -109,6 +111,9 @@ instance NFData TypeApplicationCertificateLimits where
     rnf entries `seq` rnf selections `seq` rnf obligations `seq`
       rnf nodes `seq` rnf width
 
+-- | Validate the five bounds in the order entries, selections, obligations,
+-- type nodes, collection width, rejecting the first negative one.  Zero is
+-- accepted for every field.
 mkTypeApplicationCertificateLimits
   :: Int
   -> Int
@@ -129,30 +134,47 @@ mkTypeApplicationCertificateLimits entries selections obligations nodes width
   negative field value = Left $
     NegativeTypeApplicationCertificateLimit field value
 
+-- | Default bounds: 32 certificates, 64 selections per certificate, 256
+-- obligations per certificate, 4096 nodes per type, and a collection width
+-- of 256.
 defaultTypeApplicationCertificateLimits :: TypeApplicationCertificateLimits
 defaultTypeApplicationCertificateLimits = TypeApplicationCertificateLimits
   32 64 256 4096 256
 
+-- | Maximum number of certificate sources one table may hold; exceeding it
+-- fails sealing with 'TypeApplicationCertificateEntryLimitExceeded' before
+-- any source payload is inspected.
 maximumTypeApplicationCertificates
   :: TypeApplicationCertificateLimits -> Int
 maximumTypeApplicationCertificates
     (TypeApplicationCertificateLimits value _ _ _ _) = value
 
+-- | Maximum number of selected types, and hence leading binders, per
+-- certificate.  It bounds the selection list, the telescope, and the number
+-- of observations 'matchCheckedTypeApplicationCertificateObservations'
+-- will count.
 maximumTypeApplicationCertificateSelections
   :: TypeApplicationCertificateLimits -> Int
 maximumTypeApplicationCertificateSelections
     (TypeApplicationCertificateLimits _ value _ _ _) = value
 
+-- | Maximum total number of obligations accumulated across all steps of one
+-- certificate's replay, and likewise across one observation list when
+-- matching.
 maximumTypeApplicationCertificateObligations
   :: TypeApplicationCertificateLimits -> Int
 maximumTypeApplicationCertificateObligations
     (TypeApplicationCertificateLimits _ _ value _ _) = value
 
+-- | Maximum node count of any single scheme, selection, derived, or observed
+-- type, measured by 'observeTypeWithin' before normalization.
 maximumTypeApplicationCertificateTypeNodes
   :: TypeApplicationCertificateLimits -> Int
 maximumTypeApplicationCertificateTypeNodes
     (TypeApplicationCertificateLimits _ _ _ value _) = value
 
+-- | Maximum width of any collection inside a bounded type, and of an
+-- observed obligation's argument list.
 maximumTypeApplicationCertificateCollectionWidth
   :: TypeApplicationCertificateLimits -> Int
 maximumTypeApplicationCertificateCollectionWidth
@@ -211,6 +233,11 @@ data TypeApplicationCertificateTypeSite
 
 instance NFData TypeApplicationCertificateTypeSite
 
+-- | Closed rejection vocabulary shared by 'sealTypeApplicationCertificateTable'
+-- and 'matchCheckedTypeApplicationCertificateObservations'.  Limit
+-- constructors carry the maximum followed by the observed count; slot and
+-- ordinal fields are zero-based; a bounded observed count stops at maximum
+-- plus one.
 data TypeApplicationCertificateError variable
   = TypeApplicationCertificateEntryLimitExceeded !Int !Int
   | DuplicateTypeApplicationCertificateId !CertificateId
@@ -257,6 +284,9 @@ data TypeApplicationCertificateError variable
 
 instance NFData variable => NFData (TypeApplicationCertificateError variable)
 
+-- | Variable namespace of every type stored in a checked plan: positional
+-- source binders, positional binders of the ordinal-th selected type, and
+-- free variables carried verbatim.
 -- Private variable namespaces make substitution capture-free without asking a
 -- caller for fresh backend identities.  Bound spelling is never an authority;
 -- free variables retain their exact nominal identity.
@@ -269,6 +299,10 @@ data TypeApplicationCertificatePlanVariable variable
 instance NFData variable =>
     NFData (TypeApplicationCertificatePlanVariable variable)
 
+-- | One replayed binder consumption: the zero-based slot, the source type
+-- before consumption, the selected type, the canonical result, and the
+-- ordered obligations made unconditional by this step.  Read through the
+-- @checkedTypeApplicationCertificateStep...@ projections.
 data CheckedTypeApplicationCertificateStep variable =
   CheckedTypeApplicationCertificateStep
     !Natural
@@ -286,6 +320,10 @@ instance NFData variable =>
     rnf slot `seq` rnf source `seq` rnf selected `seq` rnf result `seq`
       rnf obligations
 
+-- | Complete replay of one certificate's leading telescope: the steps in
+-- slot order (one per selected type) and the total obligation count across
+-- them.  Obtained only from a sealed table via
+-- 'lookupCheckedTypeApplicationCertificatePlan' or a successful match.
 data CheckedTypeApplicationCertificatePlan variable =
   CheckedTypeApplicationCertificatePlan
     ![CheckedTypeApplicationCertificateStep variable]
@@ -298,6 +336,10 @@ instance NFData variable =>
   rnf (CheckedTypeApplicationCertificatePlan steps obligations) =
     rnf steps `seq` rnf obligations
 
+-- | Sealed map from certificate identifier to its checked plan, with every
+-- identifier distinct.  Constructed only by
+-- 'sealTypeApplicationCertificateTable'; it proves structural replay only,
+-- not inventory membership, kinds, discharge, or graph occurrence.
 data CheckedTypeApplicationCertificateTable variable =
   CheckedTypeApplicationCertificateTable
     !(Map CertificateId (CheckedTypeApplicationCertificatePlan variable))
@@ -716,11 +758,14 @@ matchCheckedTypeApplicationCertificateObservations limits certificate
   matchesPlan actual expected = TypeAtom.alphaEquivalentTypes
     (fmap TypeApplicationCertificateFree actual) expected
 
+-- | Number of distinct certificates in a sealed table.
 checkedTypeApplicationCertificateCount
   :: CheckedTypeApplicationCertificateTable variable -> Int
 checkedTypeApplicationCertificateCount
     (CheckedTypeApplicationCertificateTable plans) = Map.size plans
 
+-- | Checked plan for one certificate identifier, or 'Nothing' when the
+-- table holds no certificate with that identifier.
 lookupCheckedTypeApplicationCertificatePlan
   :: CertificateId
   -> CheckedTypeApplicationCertificateTable variable
@@ -729,52 +774,67 @@ lookupCheckedTypeApplicationCertificatePlan certificate
     (CheckedTypeApplicationCertificateTable plans) =
   Map.lookup certificate plans
 
+-- | Number of steps in a plan, equal to the number of selected types and
+-- of consumed leading binders.
 checkedTypeApplicationCertificateStepCount
   :: CheckedTypeApplicationCertificatePlan variable -> Int
 checkedTypeApplicationCertificateStepCount
     (CheckedTypeApplicationCertificatePlan steps _) = length steps
 
+-- | Steps of a plan in slot order, starting at slot zero.
 checkedTypeApplicationCertificateSteps
   :: CheckedTypeApplicationCertificatePlan variable
   -> [CheckedTypeApplicationCertificateStep variable]
 checkedTypeApplicationCertificateSteps
     (CheckedTypeApplicationCertificatePlan steps _) = steps
 
+-- | Zero-based position of the consumed binder within the leading telescope.
 checkedTypeApplicationCertificateStepSlot
   :: CheckedTypeApplicationCertificateStep variable -> Natural
 checkedTypeApplicationCertificateStepSlot
     (CheckedTypeApplicationCertificateStep slot _ _ _ _) = slot
 
+-- | Type the step consumed a binder from: the prepared scheme for slot zero,
+-- otherwise the previous step's result.
 checkedTypeApplicationCertificateStepSource
   :: CheckedTypeApplicationCertificateStep variable
   -> Type (TypeApplicationCertificatePlanVariable variable)
 checkedTypeApplicationCertificateStepSource
     (CheckedTypeApplicationCertificateStep _ source _ _ _) = source
 
+-- | Prepared selected type substituted for the consumed binder.
 checkedTypeApplicationCertificateStepSelected
   :: CheckedTypeApplicationCertificateStep variable
   -> Type (TypeApplicationCertificatePlanVariable variable)
 checkedTypeApplicationCertificateStepSelected
     (CheckedTypeApplicationCertificateStep _ _ selected _ _) = selected
 
+-- | Canonical type remaining after the substitution; it is the source of the
+-- next step when one exists.
 checkedTypeApplicationCertificateStepResult
   :: CheckedTypeApplicationCertificateStep variable
   -> Type (TypeApplicationCertificatePlanVariable variable)
 checkedTypeApplicationCertificateStepResult
     (CheckedTypeApplicationCertificateStep _ _ _ result _) = result
 
+-- | Ordered canonical obligations made unconditional by this step.  They are
+-- non-empty only for the step consuming the final binder of the complete
+-- leading chain.
 checkedTypeApplicationCertificateStepObligations
   :: CheckedTypeApplicationCertificateStep variable
   -> [Constraint (Type (TypeApplicationCertificatePlanVariable variable))]
 checkedTypeApplicationCertificateStepObligations
     (CheckedTypeApplicationCertificateStep _ _ _ _ obligations) = obligations
 
+-- | Length of 'checkedTypeApplicationCertificateStepObligations'.
 checkedTypeApplicationCertificateStepObligationCount
   :: CheckedTypeApplicationCertificateStep variable -> Int
 checkedTypeApplicationCertificateStepObligationCount
     (CheckedTypeApplicationCertificateStep _ _ _ _ obligations) =
   length obligations
 
+-- | Total obligations across every step of the plan, as counted during
+-- replay against 'maximumTypeApplicationCertificateObligations'.
 checkedTypeApplicationCertificateObligationCount
   :: CheckedTypeApplicationCertificatePlan variable -> Int
 checkedTypeApplicationCertificateObligationCount

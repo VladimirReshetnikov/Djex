@@ -501,11 +501,15 @@ instance NFData LengthInputBoxLimits where
   rnf (LengthInputBoxLimits inputs assignments) =
     rnf inputs `seq` rnf assignments
 
+-- | Identity of the one signed input-box bound that sealing can reject.  The
+-- assignment cap is a 'Natural' and therefore has no field here.
 data LengthInputBoxLimitField = LengthInputBoxMaximumInputs
   deriving (Bounded, Enum, Eq, Ord, Show, Generic)
 
 instance NFData LengthInputBoxLimitField
 
+-- | Failure to seal 'LengthInputBoxLimitSource': the named field carried the
+-- retained negative value.
 data LengthInputBoxLimitError = NegativeLengthInputBoxLimit
   !LengthInputBoxLimitField !Int
   deriving (Eq, Ord, Show, Generic)
@@ -639,26 +643,34 @@ defaultLengthBooleanFiniteUnionLimits :: LengthBooleanFiniteUnionLimits
 defaultLengthBooleanFiniteUnionLimits =
   LengthBooleanFiniteUnionLimits 256 64 4096 256 262144
 
+-- | Maximum number of raw disjunctive branches the checked precondition may
+-- expand into before any branch is closed.
 lengthBooleanFiniteUnionGeneratedBranchLimit
   :: LengthBooleanFiniteUnionLimits -> Int
 lengthBooleanFiniteUnionGeneratedBranchLimit
     (LengthBooleanFiniteUnionLimits branches _ _ _ _) = branches
 
+-- | Maximum number of relational rules collected within one branch.
 lengthBooleanFiniteUnionRuleLimitPerBranch
   :: LengthBooleanFiniteUnionLimits -> Int
 lengthBooleanFiniteUnionRuleLimitPerBranch
     (LengthBooleanFiniteUnionLimits _ rules _ _ _) = rules
 
+-- | Maximum number of rule inspections the bound closure of one branch may
+-- attempt across all of its passes.
 lengthBooleanFiniteUnionClosureInspectionLimitPerBranch
   :: LengthBooleanFiniteUnionLimits -> Int
 lengthBooleanFiniteUnionClosureInspectionLimitPerBranch
     (LengthBooleanFiniteUnionLimits _ _ inspections _ _) = inspections
 
+-- | Maximum number of componentwise-maximal boxes retained after closure.
 lengthBooleanFiniteUnionRetainedBoxLimit
   :: LengthBooleanFiniteUnionLimits -> Int
 lengthBooleanFiniteUnionRetainedBoxLimit
     (LengthBooleanFiniteUnionLimits _ _ _ boxes _) = boxes
 
+-- | Maximum sum of retained-box cardinalities, counted per box before
+-- overlapping assignments are deduplicated by the union set.
 lengthBooleanFiniteUnionAssignmentVisitLimit
   :: LengthBooleanFiniteUnionLimits -> Int
 lengthBooleanFiniteUnionAssignmentVisitLimit
@@ -927,12 +939,16 @@ instance NFData ValidatedLengthApplicableDomain where
     rnf schema `seq` rnf boxes `seq` rnf visits `seq` rnf assignments `seq`
     rnf applicable `seq` rnf basis
 
+-- | The retained componentwise-maximal zero-origin boxes, in ascending
+-- lexicographic order.  Each box lists an inclusive source-ordered maximum for
+-- every modeled input; no box is componentwise dominated by another.
 validatedLengthApplicableDomainInclusiveMaximumBoxes
   :: ValidatedLengthApplicableDomain
   -> [[Natural]]
 validatedLengthApplicableDomainInclusiveMaximumBoxes
     (ValidatedLengthApplicableDomainReceipt _ boxes _ _ _ _) = boxes
 
+-- | Number of retained boxes.
 validatedLengthApplicableDomainBoxCount
   :: ValidatedLengthApplicableDomain
   -> Natural
@@ -940,12 +956,17 @@ validatedLengthApplicableDomainBoxCount
     (ValidatedLengthApplicableDomainReceipt _ boxes _ _ _ _) =
   fromIntegral $ length boxes
 
+-- | Sum of the retained box cardinalities.  An assignment shared by several
+-- boxes is counted once per box, so this is at least
+-- 'validatedLengthApplicableDomainAssignmentCount'.
 validatedLengthApplicableDomainAssignmentVisitCount
   :: ValidatedLengthApplicableDomain
   -> Natural
 validatedLengthApplicableDomainAssignmentVisitCount
     (ValidatedLengthApplicableDomainReceipt _ _ visits _ _ _) = visits
 
+-- | Exact cardinality of the deduplicated union of the retained boxes; every
+-- such assignment was replayed against the exact problem.
 validatedLengthApplicableDomainAssignmentCount
   :: ValidatedLengthApplicableDomain
   -> Natural
@@ -953,12 +974,14 @@ validatedLengthApplicableDomainAssignmentCount
     (ValidatedLengthApplicableDomainReceipt _ _ _ assignments _ _) =
   assignments
 
+-- | Number of replayed assignments for which the precondition held.
 validatedLengthApplicableDomainApplicableAssignmentCount
   :: ValidatedLengthApplicableDomain
   -> Natural
 validatedLengthApplicableDomainApplicableAssignmentCount
     (ValidatedLengthApplicableDomainReceipt _ _ _ _ applicable _) = applicable
 
+-- | Provider-independent or assumed-provider-relative semantic basis.
 validatedLengthApplicableDomainBasis
   :: ValidatedLengthApplicableDomain
   -> LengthCounterexampleBasis
@@ -983,12 +1006,16 @@ instance NFData ValidatedLengthSpinePairApplicableDomain where
     rnf schema `seq` rnf boxes `seq` rnf visits `seq` rnf assignments `seq`
     rnf applicable `seq` rnf basis
 
+-- | The retained componentwise-maximal zero-origin boxes, in ascending
+-- lexicographic order.  Each box lists an inclusive source-ordered maximum for
+-- every compact modeled input; no box is componentwise dominated by another.
 validatedLengthSpinePairApplicableDomainInclusiveMaximumBoxes
   :: ValidatedLengthSpinePairApplicableDomain
   -> [[Natural]]
 validatedLengthSpinePairApplicableDomainInclusiveMaximumBoxes
     (ValidatedLengthSpinePairApplicableDomainReceipt _ boxes _ _ _ _) = boxes
 
+-- | Number of retained boxes.
 validatedLengthSpinePairApplicableDomainBoxCount
   :: ValidatedLengthSpinePairApplicableDomain
   -> Natural
@@ -996,12 +1023,17 @@ validatedLengthSpinePairApplicableDomainBoxCount
     (ValidatedLengthSpinePairApplicableDomainReceipt _ boxes _ _ _ _) =
   fromIntegral $ length boxes
 
+-- | Sum of the retained box cardinalities.  An assignment shared by several
+-- boxes is counted once per box, so this is at least
+-- 'validatedLengthSpinePairApplicableDomainAssignmentCount'.
 validatedLengthSpinePairApplicableDomainAssignmentVisitCount
   :: ValidatedLengthSpinePairApplicableDomain
   -> Natural
 validatedLengthSpinePairApplicableDomainAssignmentVisitCount
     (ValidatedLengthSpinePairApplicableDomainReceipt _ _ visits _ _ _) = visits
 
+-- | Exact cardinality of the deduplicated union of the retained boxes; every
+-- such assignment was replayed against the exact product problem.
 validatedLengthSpinePairApplicableDomainAssignmentCount
   :: ValidatedLengthSpinePairApplicableDomain
   -> Natural
@@ -1009,6 +1041,7 @@ validatedLengthSpinePairApplicableDomainAssignmentCount
     (ValidatedLengthSpinePairApplicableDomainReceipt _ _ _ assignments _ _) =
   assignments
 
+-- | Number of replayed assignments for which the precondition held.
 validatedLengthSpinePairApplicableDomainApplicableAssignmentCount
   :: ValidatedLengthSpinePairApplicableDomain
   -> Natural
@@ -1016,6 +1049,7 @@ validatedLengthSpinePairApplicableDomainApplicableAssignmentCount
     (ValidatedLengthSpinePairApplicableDomainReceipt _ _ _ _ applicable _) =
   applicable
 
+-- | Provider-independent or assumed-provider-relative semantic basis.
 validatedLengthSpinePairApplicableDomainBasis
   :: ValidatedLengthSpinePairApplicableDomain
   -> LengthCounterexampleBasis
@@ -1164,6 +1198,7 @@ instance NFData ValidatedLengthSpinePairCounterexampleSimplification where
     rnf schema `seq` rnf original `seq` rnf inspected `seq`
     rnf counterexample
 
+-- | Source-ordered inputs of the independently revalidated product anchor.
 validatedLengthSpinePairCounterexampleSimplificationOriginalInputs
   :: ValidatedLengthSpinePairCounterexampleSimplification
   -> [Natural]
@@ -1171,6 +1206,8 @@ validatedLengthSpinePairCounterexampleSimplificationOriginalInputs
     (ValidatedLengthSpinePairCounterexampleSimplificationReceipt _ original
       _ _) = original
 
+-- | Search assignments inspected through and including the returned hit.
+-- The separate anchor replay is not counted.
 validatedLengthSpinePairCounterexampleSimplificationInspectedAssignmentCount
   :: ValidatedLengthSpinePairCounterexampleSimplification
   -> Natural
@@ -1178,6 +1215,8 @@ validatedLengthSpinePairCounterexampleSimplificationInspectedAssignmentCount
     (ValidatedLengthSpinePairCounterexampleSimplificationReceipt _ _
       inspected _) = inspected
 
+-- | Fresh ordinary product counterexample found by exact-problem bounded
+-- replay.
 validatedLengthSpinePairCounterexampleSimplificationCounterexample
   :: ValidatedLengthSpinePairCounterexampleSimplification
   -> ValidatedLengthSpinePairCounterexample
@@ -1185,6 +1224,7 @@ validatedLengthSpinePairCounterexampleSimplificationCounterexample
     (ValidatedLengthSpinePairCounterexampleSimplificationReceipt _ _ _
       value) = value
 
+-- | Source-ordered inputs of the simplified ordinary product counterexample.
 validatedLengthSpinePairCounterexampleSimplificationInputs
   :: ValidatedLengthSpinePairCounterexampleSimplification
   -> [Natural]
@@ -1192,6 +1232,7 @@ validatedLengthSpinePairCounterexampleSimplificationInputs =
   validatedLengthSpinePairCounterexampleInputs .
     validatedLengthSpinePairCounterexampleSimplificationCounterexample
 
+-- | Both source-ordered result lengths recomputed for the simplified inputs.
 validatedLengthSpinePairCounterexampleSimplificationResult
   :: ValidatedLengthSpinePairCounterexampleSimplification
   -> LengthSpinePair Natural
@@ -1199,6 +1240,8 @@ validatedLengthSpinePairCounterexampleSimplificationResult =
   validatedLengthSpinePairCounterexampleResult .
     validatedLengthSpinePairCounterexampleSimplificationCounterexample
 
+-- | Provider-independent or assumed-provider-relative basis of the fresh
+-- ordinary product counterexample.
 validatedLengthSpinePairCounterexampleSimplificationBasis
   :: ValidatedLengthSpinePairCounterexampleSimplification
   -> LengthCounterexampleBasis
@@ -1206,6 +1249,9 @@ validatedLengthSpinePairCounterexampleSimplificationBasis =
   validatedLengthSpinePairCounterexampleBasis .
     validatedLengthSpinePairCounterexampleSimplificationCounterexample
 
+-- | Always 'True': an opaque receipt is constructed only for a strict input
+-- vector change.  @Right Nothing@ represents both admission unavailability
+-- and an admitted search whose first counterexample is the anchor itself.
 validatedLengthSpinePairCounterexampleSimplificationChanged
   :: ValidatedLengthSpinePairCounterexampleSimplification
   -> Bool

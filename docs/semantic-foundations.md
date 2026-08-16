@@ -57,16 +57,7 @@ was reached.
   - [Offline SMT-LIB queries, replay, and origin probes](#offline-smt-lib-queries-replay-and-origin-probes)
   - [Query-owned bounded counterexample simplification](#query-owned-bounded-counterexample-simplification)
   - [Bounded input-box validation](#bounded-input-box-validation)
-  - [Directly bounded applicable-domain validation](#directly-bounded-applicable-domain-validation)
-  - [Positive-affine applicable-domain validation](#positive-affine-applicable-domain-validation)
-  - [Relational positive-affine applicable-domain validation](#relational-positive-affine-applicable-domain-validation)
-  - [Strict relational positive-affine applicable-domain validation](#strict-relational-positive-affine-applicable-domain-validation)
-  - [Strict relational positive-affine quotient applicable-domain validation](#strict-relational-positive-affine-quotient-applicable-domain-validation)
-  - [Root-extrema applicable-domain validation](#root-extrema-applicable-domain-validation)
-  - [Root-monus applicable-domain validation](#root-monus-applicable-domain-validation)
-  - [Boolean finite-union applicable-domain validation](#boolean-finite-union-applicable-domain-validation)
-  - [Atomic-branching Boolean finite-union applicable-domain validation](#atomic-branching-boolean-finite-union-applicable-domain-validation)
-  - [Recursive piecewise-affine Boolean finite-union applicable-domain validation](#recursive-piecewise-affine-boolean-finite-union-applicable-domain-validation)
+  - [Current recursive piecewise-affine applicable-domain validation](#current-recursive-piecewise-affine-applicable-domain-validation)
   - [Finite binary product spine lengths, offline and live SMT replay](#finite-binary-product-spine-lengths-offline-and-live-smt-replay)
     - [Offline product SMT queries and replay](#offline-product-smt-queries-and-replay)
     - [Live product queries](#live-product-queries)
@@ -98,16 +89,7 @@ was reached.
     - [The canonical query and raw-input replay](#the-canonical-query-and-raw-input-replay)
     - [The all-zero origin probe](#the-all-zero-origin-probe)
     - [Exhaustive input-box validation](#exhaustive-input-box-validation)
-    - [Direct literal coverage rule](#direct-literal-coverage-rule)
-    - [Positive-affine coverage rule](#positive-affine-coverage-rule)
-    - [Relational positive-affine coverage rule](#relational-positive-affine-coverage-rule)
-    - [Strict relational coverage rule](#strict-relational-coverage-rule)
-    - [Root-quotient coverage policy](#root-quotient-coverage-policy)
-    - [Root-extrema coverage policy](#root-extrema-coverage-policy)
-    - [Root-monus coverage policy](#root-monus-coverage-policy)
-    - [Boolean finite-union coverage policy](#boolean-finite-union-coverage-policy)
-    - [Atomic-branching coverage policy](#atomic-branching-coverage-policy)
-    - [Recursive piecewise-affine coverage policy](#recursive-piecewise-affine-coverage-policy)
+    - [Current recursive piecewise-affine coverage policy](#current-recursive-piecewise-affine-coverage-policy)
     - [Finite binary product spine domains](#finite-binary-product-spine-domains)
     - [The offline product query](#the-offline-product-query)
     - [Live product runs and the shared ordinal space](#live-product-runs-and-the-shared-ordinal-space)
@@ -801,1109 +783,279 @@ identity or canonical bytes. Its v1 tag belongs to the newly opaque receipt,
 not to an existing semantic or solver envelope. See the
 [bounded Length input-box validation report](reports/2026-08-14-bounded-length-input-box-validation.md).
 
-### Directly bounded applicable-domain validation
+### Current recursive piecewise-affine applicable-domain validation
 
-`validateLengthProblemApplicableDomain` can now derive the exact finite box
-on which a checked scalar problem may apply when its normalized precondition
-contains a direct top-level upper bound for every compact modeled input. The
-version-one rule deliberately recognizes only clauses of the form
-`input <= literal`; it does not infer bounds from equality, arithmetic,
-negation, conditionals, implications, or a source program. When more than one
-direct clause bounds the same input, Djex uses the tightest literal. Every
-compact input of a nonnullary problem must be covered; a missing bound is the
-ordinary `LengthApplicableDomainInapplicable` result rather than a failed
-verification. A nullary problem derives maxima `[]` and validates its one
-assignment `[]`.
+Djex exposes one applicable-domain algorithm for checked Length problems. The
+scalar problem entrance is `validateLengthProblemApplicableDomain`; its
+nominal binary-product sibling is
+`validateLengthSpinePairProblemApplicableDomain`. The query-owned entrances
+are `validateLengthSMTLibQueryApplicableDomain` and
+`validateLengthSpinePairSMTLibQueryApplicableDomain`. Each takes, in order,
+`LengthEvaluationLimits`, `LengthInputBoxLimits`,
+`LengthBooleanFiniteUnionLimits`, and the exact checked problem or sealed
+query. `LengthBooleanFiniteUnionLimits` remains the current resource-cap
+bundle; its historical name does not select a separate validator.
 
-For example, the relevant scalar precondition and query-owned validation call
-can be written as follows once `checkedQuery` has been sealed from that
-contract and exact candidate:
+The former progression of directly bounded, positive-affine, relational,
+strict, quotient, extrema, monus, Boolean-union, atomic-branching, and
+recursive validators is no longer a public API ladder. Djex is experimental,
+has no stability or backward-compatibility promise, and has no compatibility
+migration here: the predecessor functions, receipt families, error families,
+and public receipt-schema-tag projections were deleted. Historical dated
+reports still explain how the algorithm was developed, but they are not a
+catalogue of current imports. The implementation still uses the lower-level
+analyses privately because their exact fallback semantics are useful; callers
+select only the complete current algorithm.
+
+A scalar call using the defaults has this shape:
 
 ```haskell
--- Direct bounds for compact inputs 0 and 1.  The duplicate bound for input 0
--- is tightened from 7 to 3, so the derived inclusive box is [3, 2].
-precondition = LengthAll
-  [ LengthAtMost
-      (LengthVariable (LengthInput 0)) (LengthLiteral 7)
-  , LengthAtMost
-      (LengthVariable (LengthInput 0)) (LengthLiteral 3)
-  , LengthAtMost
-      (LengthVariable (LengthInput 1)) (LengthLiteral 2)
-  ]
-
-validation = validateLengthSMTLibQueryApplicableDomain
+validation = validateLengthProblemApplicableDomain
   defaultLengthEvaluationLimits
   defaultLengthInputBoxLimits
-  checkedQuery
+  defaultLengthBooleanFiniteUnionLimits
+  checkedProblem
 
-case validation of
-  Right (LengthApplicableDomainEstablished receipt) ->
-    validatedLengthApplicableDomainInclusiveMaximums receipt == [3, 2]
-  Right (LengthApplicableDomainCounterexample _) -> False
-  Right (LengthApplicableDomainInapplicable _) -> False
-  Left _ -> False
-```
-
-After deriving `[3, 2]`, Djex delegates to the existing solver-independent
-finite-box verifier. The first violation is therefore the ordinary exact-
-problem counterexample evidence. Complete traversal instead yields the opaque
-`ValidatedLengthApplicableDomain` receipt, which retains the derived maxima,
-total and precondition-applicable assignment counts, and exact model/provider
-basis. Query owners can call
-`validateLengthSMTLibQueryApplicableDomain`; the query contributes only exact
-problem association and emits no SMT-LIB command. Raw or live `sat`, `unsat`,
-and `unknown` statuses have no role.
-
-The nominal binary-product sibling is
-`validateLengthSpinePairProblemApplicableDomain`, with the query-owned
-`validateLengthSpinePairSMTLibQueryApplicableDomain` and opaque
-`ValidatedLengthSpinePairApplicableDomain` receipt. Both domains remain
-relative to their checked finite-spine model and any named assumed provider
-laws. Establishment is neither source-language totality, universal proof,
-provider-implementation validation, nor permission to prune candidates. See
-the
-[directly bounded applicable-domain report](reports/2026-08-14-directly-bounded-length-applicable-domain.md).
-
-### Positive-affine applicable-domain validation
-
-The original applicable-domain functions above remain version-one,
-literal-direct entrances. In particular,
-`validateLengthProblemApplicableDomain` still treats equality and scaled or
-summed bounds as inapplicable. Callers which explicitly select the additive
-rule instead use `validateLengthProblemPositiveAffineApplicableDomain`, or the
-query-owned `validateLengthSMTLibQueryPositiveAffineApplicableDomain`.
-
-The new scanner still examines only the normalized precondition itself or its
-immediate top-level `LengthAll` clauses. It recognizes an expression of the
-form `c + a0*x0 + ... + an*xn`, built only from compact input variables,
-natural literals, `LengthSum`, and positive-literal `LengthScale`, when that
-expression is at most or equal to a literal `k`. Whenever `c <= k`, each
-positive coefficient yields the necessary bound
-`xi <= (k - c) quot ai`. Duplicate bounds are combined with `min`. Unsupported
-subtrees—including monus, minimum, maximum, quotient, modulo, conditionals,
-negation, and nonliteral comparisons—grant no partial bound.
-
-For example, suppose `checkedQuery` retains a candidate which satisfies its
-postcondition on the following applicable inputs:
-
-```haskell
-input0 = LengthVariable (LengthInput 0)
-input1 = LengthVariable (LengthInput 1)
-
-precondition = LengthAll
-  [ LengthAtMost
-      (LengthSum
-        [ LengthScale 2 input0
-        , LengthLiteral 3
-        ])
-      (LengthLiteral 9)
-  , LengthEqual input1 (LengthLiteral 2)
-  ]
-
-validation = validateLengthSMTLibQueryPositiveAffineApplicableDomain
+queryValidation = validateLengthSMTLibQueryApplicableDomain
   defaultLengthEvaluationLimits
   defaultLengthInputBoxLimits
+  defaultLengthBooleanFiniteUnionLimits
   checkedQuery
-
-case validation of
-  Right (LengthApplicableDomainEstablished receipt) ->
-    ( validatedLengthPositiveAffineApplicableDomainInclusiveMaximums receipt
-    , validatedLengthPositiveAffineApplicableDomainAssignmentCount receipt
-    , validatedLengthPositiveAffineApplicableDomainApplicableAssignmentCount
-        receipt
-    ) == ([3, 2], 12, 4)
-  _ -> False
 ```
 
-The inequality gives `input0 <= (9 - 3) quot 2`, while equality gives
-`input1 <= 2`; the existing verifier therefore exhausts `[0..3] × [0..2]`.
-The total count is 12 and exactly the four assignments whose second component
-is 2 satisfy this precondition. A violation still returns the ordinary scalar
-counterexample instead of an establishment receipt.
+The product calls have the same argument order. Direct validation returns
+either `LengthApplicableDomainValidationError` or the three-way
+`LengthApplicableDomainValidation`: ordinary conservative inapplicability,
+the first exact counterexample found during bounded replay, or established
+opaque evidence. Product failures use the nominally distinct
+`LengthSpinePairApplicableDomainValidationError`. Query wrappers add
+`LengthSMTLibApplicableDomainValidationError` and
+`LengthSpinePairSMTLibApplicableDomainValidationError`, respectively, so an
+exact evidence/problem association mismatch cannot be confused with semantic
+validation failure.
 
-A normalized `LengthTruth False`, including either orientation of an unequal
-constant-only equality such as `1 == 2`, or a recognized affine atom whose
-constant already exceeds its literal ceiling, proves the conjunction
-contradictory. A true constant-only equality is non-binding. A
-nonnullary validator then uses the all-zero maxima as a finite coverage carrier,
-checks its one assignment, and records zero applicable assignments on success.
-Contradiction takes precedence over an otherwise missing input bound. A nullary
-problem does not need extraction: it retains maxima `[]`, validates the single
-assignment `[]`, and records whether that assignment met the precondition.
+#### Private ordered analysis and atomic-first fallback
 
-The opaque positive receipts are
-`ValidatedLengthPositiveAffineApplicableDomain` and the nominal product
-`ValidatedLengthSpinePairPositiveAffineApplicableDomain`. Their projections
-expose derived maxima, total and applicable assignment counts, and the exact
-finite-spine/provider-law basis. Product callers use
-`validateLengthSpinePairProblemPositiveAffineApplicableDomain` or
-`validateLengthSpinePairSMTLibQueryPositiveAffineApplicableDomain`.
-
-The query wrappers emit no SMT-LIB and consume no solver status; they only
-replay either authoritative result against the exact problem retained by the
-query before releasing its receipt. Establishment remains relative to the
-checked total finite-spine model and any named assumed provider laws. It proves
-no source-language realization or totality, provider implementation behavior,
-universal behavior, or pruning authority, and it does not strengthen `sat`,
-`unsat`, or `unknown`.
-
-This checkpoint adds only the two positive-affine receipt tags. Every existing
-contract, inventory, session, candidate, encoding, problem, query, response,
-protocol, process, worker, run, and live-observation identity and canonical byte
-sequence is unchanged; the direct v1 receipts and functions are also unchanged.
-See the
-[positive-affine applicable-domain report](reports/2026-08-14-positive-affine-length-applicable-domain.md).
-
-### Relational positive-affine applicable-domain validation
-
-The direct and literal-ceiling positive-affine validators above retain their
-exact behavior, receipt tags, and authority. Callers that need bounds to flow
-between compact inputs explicitly select
-`validateLengthProblemRelationalPositiveAffineApplicableDomain` or its
-query-owned sibling,
-`validateLengthSMTLibQueryRelationalPositiveAffineApplicableDomain`.
-
-This rule summarizes both sides of a top-level `LengthAtMost` or `LengthEqual`
-as exact positive-affine expressions over compact inputs, natural literals,
-`LengthSum`, and positive-literal `LengthScale`. It cancels common constants
-and per-input coefficients before retaining a directed inequality. Equality
-contributes the normalized left-to-right rule followed by its reverse.
-Unsupported clauses contribute no rule and no partial authority.
-
-For example, equality can transfer a literal bound between two scalar inputs:
-
-```haskell
-input0 = LengthVariable (LengthInput 0)
-input1 = LengthVariable (LengthInput 1)
-
-precondition = LengthAll
-  [ LengthEqual input0 input1
-  , LengthAtMost input1 (LengthLiteral 5)
-  ]
-
-validation =
-  validateLengthSMTLibQueryRelationalPositiveAffineApplicableDomain
-    defaultLengthEvaluationLimits
-    defaultLengthInputBoxLimits
-    checkedQuery
-
-case validation of
-  Right (LengthApplicableDomainEstablished receipt) ->
-    ( validatedLengthRelationalPositiveAffineApplicableDomainInclusiveMaximums
-        receipt
-    , validatedLengthRelationalPositiveAffineApplicableDomainAssignmentCount
-        receipt
-    , validatedLengthRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-        receipt
-    ) == ([5, 5], 36, 6)
-  _ -> False
-```
-
-Propagation is intentionally synchronous and rule-once. Rules with a constant
-residual right side seed the initial bounds. Each later pass tests every
-pending rule against one immutable bounds snapshot; all eligible rules fire,
-their derived bounds are merged with `min` only after the pass, and those rules
-are permanently removed. Ineligible rules retry in canonical stored order.
-Processing stops when no pending rule fires, so a numeric tightening cycle is
-not iterated to a least fixed point. For example, the stored clauses
-`x <= y`, `y <= 10`, `y <= z`, and `z <= 2` derive the sound, deliberately
-nonleast maxima `[10, 2, 2]`: `x <= y` fires from the same snapshot in which
-`y <= z` tightens `y`, and it is not fired again.
-
-The nominal binary-product entrance applies the same rule to its compact input
-variables while retaining product-specific evidence:
-
-```haskell
-input = LengthVariable (LengthSpinePairInput 0)
-
-precondition = LengthAtMost
-  (LengthScale 2 input)
-  (LengthSum [input, LengthLiteral 1])
-
-pairValidation =
-  validateLengthSpinePairSMTLibQueryRelationalPositiveAffineApplicableDomain
-    defaultLengthEvaluationLimits
-    defaultLengthInputBoxLimits
-    checkedPairQuery
-
-case pairValidation of
-  Right (LengthApplicableDomainEstablished receipt) ->
-    ( validatedLengthSpinePairRelationalPositiveAffineApplicableDomainInclusiveMaximums
-        receipt
-    , validatedLengthSpinePairRelationalPositiveAffineApplicableDomainAssignmentCount
-        receipt
-    , validatedLengthSpinePairRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-        receipt
-    ) == ([1], 2, 2)
-  _ -> False
-```
-
-Here exact cancellation reduces `2*input <= input + 1` to `input <= 1`.
-Multi-hop rules similarly retry until every rule that can fire has fired once.
-If a fired rule's residual left constant already exceeds the maximum of its
-bounded right side, or the normalized conjunction is `LengthTruth False`, the
-precondition is contradictory and the existing verifier checks an all-zero
-coverage carrier. Otherwise the first compact input still lacking a bound
-produces ordinary `LengthApplicableDomainInapplicable`.
-
-Successful traversal yields opaque
-`ValidatedLengthRelationalPositiveAffineApplicableDomain` or the nominally
-separate
-`ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain`. Their
-projections expose maxima, total/applicable counts, and the exact
-finite-spine/provider-law basis. Query wrappers emit no SMT-LIB and consume no
-solver status; they contribute only exact behavioral-problem association.
-Establishment remains model-relative and does not prove source-language
-realization or totality, validate provider implementations, establish
-universal behavior, or authorize pruning.
-
-Only the two new relational receipt tags add canonical bytes. Existing
-contracts, inventories, sessions, candidates, encodings, problems, queries,
-responses, protocols, processes, workers, runs, live observations, and the
-older direct and positive-affine receipts retain their identities and bytes.
-See the
-[relational positive-affine applicable-domain report](reports/2026-08-15-relational-positive-affine-length-applicable-domain.md).
-
-### Strict relational positive-affine applicable-domain validation
-
-The direct, literal-ceiling positive-affine, and relational positive-affine
-validators retain their exact behavior and receipt families. The additive
-strict entrance is
-`validateLengthProblemStrictRelationalPositiveAffineApplicableDomain`, with
-query-owned
-`validateLengthSMTLibQueryStrictRelationalPositiveAffineApplicableDomain`.
-It accepts every ordinary top-level relation recognized by the relational
-rule and adds exactly one normalized clause shape:
+Each normalized formula leaf passes through one private ordered progression:
 
 ```text
-not (L <= R)  ==>  R + 1 <= L
+direct literal -> positive affine -> relational -> strict relational
+  -> positive-literal quotient -> root extrema -> root monus
+  -> Boolean finite union / atomic branching
+  -> recursive piecewise-affine fallback
 ```
 
-This equivalence is exact over the modeled natural lengths. Both `L` and `R`
-must be positive-affine expressions over compact inputs, natural literals,
-`LengthSum`, and positive-literal `LengthScale`. The proof-only successor is
-added to the exact arbitrary-precision summary of `R` before ordinary constant
-and coefficient cancellation; it does not construct checked syntax, consume
-the contract's literal budget, or change contract or query identity.
-
-For example, two strict scalar clauses form a bounded chain:
-
-```haskell
-input0 = LengthVariable (LengthInput 0)
-input1 = LengthVariable (LengthInput 1)
-
-precondition = LengthAll
-  [ LengthNot
-      (LengthAtMost (LengthLiteral 5) input0)
-  , LengthNot
-      (LengthAtMost input0 input1)
-  ]
-
-validation =
-  validateLengthSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
-    defaultLengthEvaluationLimits
-    defaultLengthInputBoxLimits
-    checkedQuery
-
-case validation of
-  Right (LengthApplicableDomainEstablished receipt) ->
-    ( validatedLengthStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
-        receipt
-    , validatedLengthStrictRelationalPositiveAffineApplicableDomainAssignmentCount
-        receipt
-    , validatedLengthStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-        receipt
-    ) == ([4, 3], 20, 10)
-  _ -> False
-```
-
-The first clause is `not (5 <= input0)`, hence `input0 + 1 <= 5` and
-`input0 <= 4`. The second is `not (input0 <= input1)`, hence
-`input1 + 1 <= input0`; the existing relational closure then derives
-`input1 <= 3`. The finite-box verifier traverses 20 assignments, exactly ten
-of which satisfy `input1 < input0 < 5`.
-
-The nominal binary-product query entrance applies the same proof rule while
-keeping product evidence separate. This example combines successor insertion
-with exact coefficient cancellation:
-
-```haskell
-input = LengthVariable (LengthSpinePairInput 0)
-
-precondition = LengthNot $ LengthAtMost
-  (LengthSum [input, LengthLiteral 3])
-  (LengthScale 2 input)
-
-pairValidation =
-  validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
-    defaultLengthEvaluationLimits
-    defaultLengthInputBoxLimits
-    checkedPairQuery
-
-case pairValidation of
-  Right (LengthApplicableDomainEstablished receipt) ->
-    ( validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainInclusiveMaximums
-        receipt
-    , validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainAssignmentCount
-        receipt
-    , validatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomainApplicableAssignmentCount
-        receipt
-    ) == ([2], 3, 3)
-  _ -> False
-```
-
-Here `not (input + 3 <= 2*input)` becomes
-`2*input + 1 <= input + 3`; cancellation leaves `input <= 2`.
-
-Negated equality, nested logical structure, and a negated comparison with
-monus, minimum, maximum, quotient, modulo, a conditional, a result reference,
-or any other non-affine subtree grant no rule and no partial bound. Such a
-clause remains part of actual precondition replay if other clauses establish a
-finite box. This is neither a general Boolean complement pass nor an SMT
-inference step.
-
-Width rejection precedes precondition demand. A nullary problem bypasses
-extraction and validates `[]`. For a nonnullary problem, syntactic or
-propagated contradiction wins over missing-bound inapplicability and selects
-the existing all-zero carrier; otherwise the first source-ordered unbounded
-input produces ordinary `LengthApplicableDomainInapplicable`. Derived maxima,
-Cartesian cardinality, assignment evaluation, first counterexample, and final
-query association retain the established finite-box precedence.
-
-Successful traversal yields opaque
-`ValidatedLengthStrictRelationalPositiveAffineApplicableDomain` or the
-nominally distinct
-`ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain`.
-Query wrappers emit no SMT-LIB and consume no solver status; the query supplies
-only exact behavioral-problem association. Receipts retain maxima,
-total/applicable counts, and the exact finite-spine/provider-law basis. Their
-authority remains model-relative and grants no source-language realization,
-provider-implementation validation, universal proof, or pruning authority.
-
-Only the two strict-relational receipt tags add canonical bytes. Every older
-explicit-box, direct, positive-affine, relational, counterexample, replay,
-origin, simplification, and live validator retains its API, behavior,
-authority, identity, and bytes, as do all existing contract-through-live
-artifacts. See the
-[strict relational positive-affine applicable-domain report](reports/2026-08-15-strict-relational-positive-affine-length-applicable-domain.md).
-
-### Strict relational positive-affine quotient applicable-domain validation
-
-The direct, positive-affine, relational, and strict-relational validators
-retain their exact behavior and receipt families. The additive quotient
-successor is
-`validateLengthProblemStrictRelationalPositiveAffineQuotientApplicableDomain`,
-with query-owned
-`validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain`.
-For a positive checked divisor `d` and exact positive-affine `A` and `B`, it
-recognizes one quotient at a directed relation operand's root through four
-exact natural laws:
-
-```text
-q_d(A) <= B        <=>  A <= d*B + (d - 1)
-A <= q_d(B)        <=>  d*A <= B
-not (q_d(A) <= B)  <=>  d*(B + 1) <= A
-not (A <= q_d(B))  <=>  B + 1 <= d*A
-```
-
-An equality with exactly one root quotient emits both directed rules,
-left-to-right and then right-to-left. The quotient dividend and opposite
-operand must each contain only compact inputs, natural literals, `LengthSum`,
-and positive-literal `LengthScale`. Scaling, successor insertion, and ordinary
-coefficient cancellation operate on arbitrary-precision proof summaries; they
-construct no checked expression and spend no syntax or public literal budget.
-
-For example:
-
-```text
-q_3(2*x + 1) <= 2  <=>  2*x + 1 <= 8  ==>  x <= 3
-q_3(x) = 4         <=>  12 <= x <= 14
-not (4 <= q_3(x))  <=>  x + 1 <= 12   ==>  x <= 11
-```
-
-The corresponding finite boxes have maxima `[3]`, `[14]`, and `[11]`.
-Their total/applicable counts are respectively 4/4, 15/3, and 12/12.
-Relational closure also composes quotient consequences: `x <= q_3(y)` and
-`y <= 8` derive maxima `[2, 8]`, total count 27, and applicable count 18.
-Conversely, `not (q_3(x) <= 4)` together with `x <= 14` proves contradiction
-and selects the established all-zero carrier, with maximum `[0]`, total count
-one, and applicable count zero.
-
-The nominal binary-product entrances are
-`validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientApplicableDomain`
-and
-`validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain`.
-For a safe product problem under `q_3(input) <= 2`, complete traversal yields
-maximum `[8]` and total/applicable counts 9/9. Product evidence remains
-nominally disjoint from scalar evidence.
-
-Nested or embedded quotients, quotients at both relation roots, unsupported
-quotient children or opposite operands, negated equality, and nested Boolean
-structure contribute no rule and no partial bound. Modulo, natural monus,
-minimum, maximum, conditionals, result references, and other non-affine
-subtrees remain excluded. Quotient-free clauses delegate to the predecessor
-strict scanner unchanged. An unsupported clause is not a validation failure;
-it still participates in concrete precondition replay if other clauses derive
-a complete box.
-
-Input-width rejection precedes precondition demand, and nullary problems send
-`[]` directly to the finite-box verifier. For nonnullary problems, syntactic
-or propagated contradiction wins over missing coverage; otherwise the first
-source-ordered unbounded input returns ordinary
-`LengthApplicableDomainInapplicable`. Derived-value and Cartesian limits,
-indexed evaluation, the first counterexample, complete receipt construction,
-and exact query association retain the established order. Equality rule order
-and synchronous rule-once closure remain deterministic.
-
-Successful traversal yields opaque
-`ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain` or
-`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain`.
-Their four projections expose maxima, total/applicable counts, and the exact
-finite-spine/provider-law basis. Query wrappers issue no SMT-LIB command and
-consume no solver status; a query supplies only exact behavioral-problem
-association. Establishment remains model-relative and grants no
-source-language realization, provider validation, universal proof, or pruning
-authority.
-
-Only the two new quotient receipt tags add canonical bytes:
-
-```text
-finite-list-spine-length/strict-relational-positive-affine-quotient-precondition-domain-establishment/v1
-finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-precondition-domain-establishment/v1
-```
-
-Every predecessor API and receipt remains literal. Existing contracts,
-inventories, sessions, candidates, encodings, problems, query commands,
-symbols, value requests, fingerprints, protocols, processes, workers, runs,
-and observations retain their identities and bytes. Root extrema, root monus,
-and bounded Boolean finite unions are the cumulative successors specified
-below. The finite-union receipt has separate work caps and retains explicit
-branch boxes rather than replacing them with a componentwise-maximum
-rectangle. See the
-[strict relational positive-affine quotient applicable-domain report](reports/2026-08-15-strict-relational-positive-affine-quotient-length-applicable-domain.md).
-
-### Root-extrema applicable-domain validation
-
-The cumulative root-extrema successor keeps every quotient-free and
-root-quotient consequence above literal. Its scalar checked-problem and
-query-owned entrances are
-`validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`
-and
-`validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`.
-For exact positive-affine `A`, `B`, and `C`, it adds exactly these four
-conjunctive natural laws:
-
-```text
-max(A, B) <= C        <=>  A <= C and B <= C
-C <= min(A, B)        <=>  C <= A and C <= B
-not (min(A, B) <= C)  <=>  C + 1 <= A and C + 1 <= B
-not (C <= max(A, B))  <=>  A + 1 <= C and B + 1 <= C
-```
-
-All three operands must independently fit the predecessor's exact grammar of
-compact inputs, natural literals, `LengthSum`, and positive-literal
-`LengthScale`. The scanner summarizes all three before it emits either of the
-two component rules. Failure of any child or the opposite operand therefore
-ignores the whole clause for coverage; it never retains one convenient half.
-Successor insertion for a strict law happens on the arbitrary-precision proof
-summary before ordinary constant and coefficient cancellation. No derived
-expression is checked syntax, and no syntax-node or public-literal budget is
-spent.
-
-Equality uses only the necessary conjunctive half of an extremum equality. A
-single root maximum on either side of `=` contributes `A <= C` then `B <= C`;
-a single root minimum on either side contributes `C <= A` then `C <= B`.
-Canonical equality orientation therefore cannot change the result. The
-opposite halves, `C <= max(A,B)` and `min(A,B) <= C`, are disjunctive and add
-no rule. Thus `max(x, x + 1) = x + 1` supplies no finite upper bound, while
-`2*x + 1 = min(x + 5, 7)` derives maximum `[3]`; exhaustive replay finds only
-`x = 3` applicable in the four-assignment box.
-
-Admission observes normalized syntax, not the caller's raw tree. Contract
-sealing flattens each same-kind extremum, combines its literal children,
-deduplicates and sorts all retained children, and left-associates the result.
-It also canonicalizes equality operands and flattens, deduplicates, and sorts
-top-level conjunctions. The validator traverses those canonical clauses in
-order. A supported binary extremum emits its normalized first-child rule and
-then its second-child rule. A retained extremum of three or more canonical
-terms has a nested extremum child and is ignored atomically; an all-literal
-extremum can instead fold away and reach the predecessor scanner.
-
-The generated rules enter the unchanged relational closure. Constant-right
-rules seed bounds. Each later pass reads one immutable bounds snapshot,
-examines pending rules in canonical clause/component order, merges newly
-derived maxima with `min` after the pass, and permanently removes every rule
-that fired. The closure stops when a pass fires nothing; it remains a
-synchronous rule-once consequence calculation, not a numeric least-fixed-point
-solver. For example, `max(x,y) <= z` followed by `z <= 4` derives maxima
-`[4,4,4]`. The resulting box contains 125 assignments, of which 55 satisfy
-the original normalized precondition. The delegated predecessor chain
-`x <= y, y <= 10, y <= z, z <= 2` still derives `[10,2,2]`, not the numeric
-least box `[2,2,2]`.
-
-The other three direct laws give small exact scalar boxes:
-
-```text
-max(x, 2*x + 1) <= 5        ==>  [2], total/applicable 3/3
-2*x + 1 <= min(x + 5, 7)    ==>  [3], total/applicable 4/4
-not (min(x + 4, 9) <= 2*x)  ==>  [3], total/applicable 4/4
-not (5 <= max(2*x, x + 1))  ==>  [2], total/applicable 3/3
-```
-
-The nominal binary-product entrances are
-`validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`
-and
-`validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`.
-Successful scalar and product traversals yield the opaque, nominally disjoint
-`ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`
-and
-`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`.
-Each family exposes inclusive maxima, total assignment count, applicable
-assignment count, and exact finite-spine/provider-law basis through the
-correspondingly prefixed four projections.
-
-The deliberately unsupported orientations are `C <= max(A,B)`,
-`min(A,B) <= C`, `not (max(A,B) <= C)`, and
-`not (C <= min(A,B))`: each would require a disjunction rather than two
-necessary conjuncts. Both-root extrema, nested or embedded extrema, retained
-n-ary extrema, mixed root-extrema/root-quotient clauses, unsupported affine
-children, negated equality, and nested Boolean structure are also ignored as
-whole clauses. Natural monus, modulo, quotient, conditionals, result
-references, and other non-affine nodes cannot appear in any of the three
-summaries. This checkpoint is neither a recursive extrema simplifier nor a
-finite-union domain analysis.
-
-Input-width rejection remains first, and nullary validation still replays the
-singleton assignment `[]`. For a nonnullary problem, normalized extraction
-and closure resolve contradiction before any missing-bound lookup;
-otherwise the first source-ordered input without a maximum is ordinary
-`LengthApplicableDomainInapplicable`. Derived-value and Cartesian-product
-admission, last-input-fastest exhaustive replay, indexed evaluation failure,
-the first exact counterexample, positive receipt construction, and query
-association retain their established precedence. An ignored clause remains
-in the original precondition and is still evaluated for every assignment if
-other clauses establish a complete box.
-
-Query-owned validation emits no SMT-LIB, launches no worker, and consumes no
-solver observation. The existing sealed query commands, symbols, value
-requests, behavioral problem, and fingerprint remain byte-for-byte unchanged;
-the chosen offline validator is not added to query identity. Every predecessor
-API, receipt, tag, behavior, and contract-through-live identity likewise
-remains literal. Only these new nominal receipt tags add bytes:
-
-```text
-finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-precondition-domain-establishment/v1
-finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-precondition-domain-establishment/v1
-```
-
-Establishment remains bounded and relative to the checked total finite-spine
-model and any retained assumed provider laws. It proves complete replay only
-inside the derived rectangle. It is not source-language realization or
-totality, validation of a provider implementation, universal proof, solver
-status authority, or permission to prune candidates. Immediate natural-monus
-consequences are the additive successor specified next. See the
-[root-extrema applicable-domain report](reports/2026-08-15-root-extrema-length-applicable-domain.md).
-
-### Root-monus applicable-domain validation
-
-The cumulative root-monus successor preserves every quotient-free,
-root-quotient, and root-extrema clause path above literally. Its scalar
-checked-problem and query-owned entrances are
-`validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`
-and
-`validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`.
-
-Let `M = A monus B = max(A-B,0)`. The scanner first summarizes `A`, `B`,
-and the opposite operand `C` in the exact positive-affine grammar. Writing the
-summary of `C` as `c + sum(k_i*x_i)`, with nonnegative coefficients, gives the
-following five admitted cases:
-
-```text
-M <= C                 <=>  A <= B + C
-C <= M, when c > 0     <=>  B + C <= A
-not (M <= C)           <=>  B + C + 1 <= A
-not (C <= M)           <=>  1 <= C and A + 1 <= B + C
-M = C or C = M          ==>  A <= B + C
-```
-
-The second case has a deliberate zero boundary. If `c > 0`, `C` is uniformly
-positive for every natural assignment and the displayed rewrite is exact. If
-`c = 0` and `C` has no coefficients, it is identically zero, so `0 <= M` is a
-tautology and contributes no rule. If `c = 0` with at least one coefficient,
-`C` may be zero and the exact formula is disjunctive:
-
-```text
-C <= A monus B  <=>  C = 0 or B + C <= A
-```
-
-That may-zero clause is ignored as a whole. Positivity is never borrowed from
-another conjunct, and the scanner does not substitute the weaker `C <= A`.
-For equality, `A <= B+C` is always a necessary supported half. When `c > 0`,
-the scanner appends `B+C <= A`, making the two extracted affine rules exact;
-when `C` is identically zero, the first rule is the exact `A <= B`; and when
-`C` may be zero, only the necessary first rule is retained. Original-formula
-replay, rather than the extracted rules, remains the final equality authority.
-
-The strict reverse rule is atomic. It emits `1 <= C` first and
-`A+1 <= B+C` second only after all three operands summarize. Omitting the
-boundary rule is unsound at `A=0`, `B=1`, `C=0`: `A+1 <= B+C` holds while
-`not (C <= A monus B)` does not. The same values refute an unconditional
-rewrite of `C <= A monus B` to `B+C <= A`. Equality always emits
-`A <= B+C` first and its uniformly-positive reverse second, independent of
-which canonical equality side contains the monus.
-
-Every operand must use only a compact input, natural literal, `LengthSum`, or
-positive-literal `LengthScale`. Exactly one normalized relation operand may be
-an immediate root `LengthMonus`. Both-root monus, nested or embedded monus,
-mixed root-monus/root-extrema or root-quotient clauses, unsupported children
-or opposite operands, negated equality, and nested Boolean formulas are
-ignored whole. No rule survives a failed three-operand summary. A clause with
-no immediate root monus delegates to the root-extrema predecessor unchanged.
-
-Admission observes the normalized contract. Literal/literal monus is folded,
-`A monus 0` becomes `A`, and `A monus A` becomes zero; otherwise operand order
-is retained. Equality operands and top-level conjuncts are canonicalized and
-conjuncts are traversed in that order. A raw monus which normalizes away is
-therefore handled by the predecessor, while a retained immediate binary monus
-is owned by the new scanner. Derived sums and successors exist only in exact
-arbitrary-precision summaries; they create no checked syntax and consume no
-syntax-node or public-literal budget.
-
-Small scalar examples fix the boundary:
-
-```text
-(x monus 3) <= 5             ==> [8], total/applicable 9/9
-1 <= (5 monus x)             ==> [4], total/applicable 5/5
-not ((5 monus x) <= 2)       ==> [2], total/applicable 3/3
-not (3 <= (x monus 2))       ==> [4], total/applicable 5/5
-(x monus 3) = 5              ==> [8], total/applicable 9/1
-```
-
-The consequence `(x monus y) <= z`, together with `y <= 2` and `z <= 3`,
-propagates through the existing closure to `[5,2,3]`; 42 of the 72 assignments
-satisfy the original precondition. Conversely, `0 <= (0 monus x)` is
-tautological and cannot bound `x`, so the may-zero entrance remains ordinarily
-inapplicable rather than falsely establishing `[0]`.
-
-The new scanner still contributes at most two rules per normalized clause,
-matching the established relational, quotient-equality, and root-extrema
-maximum. For formula-clause limit `F`, closure sees at most `2*F` rules; the
-default sealed limit `F=32` therefore gives at most 64. It remains synchronous
-and rule-once: each pass reads one immutable bounds snapshot, fired rules are
-removed, and derived maxima merge afterward.
-The existing syntax, input-width, value, and Cartesian-assignment caps bound
-all other work; no monus-specific cap or lower-bound store was introduced.
-
-The nominal binary-product entrances are
-`validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`
-and
-`validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`.
-Successful traversal returns opaque, nominally disjoint
-`ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`
-or
-`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`.
-Each family exposes inclusive maxima, total assignment count, applicable
-assignment count, and exact finite-spine/provider-law basis through its four
-correspondingly prefixed projections.
-
-Input-width rejection remains first; nullary problems bypass extraction and
-replay `[]`. Canonical scan and closure resolve contradiction to an all-zero
-carrier before missing-bound lookup. The first source-ordered missing maximum,
-derived-value checks, Cartesian cap, last-input-fastest exhaustive replay,
-first indexed evaluation failure or exact counterexample, nominal receipt,
-and final query association retain predecessor order. Ignored clauses remain
-in the original normalized precondition and are evaluated during replay.
-
-Query validation emits no SMT-LIB, starts no worker, and consumes no solver
-observation. Every predecessor API, receipt, tag, behavior, and normalized
-contract-through-live identity remains byte-for-byte literal. Only the two new
-nominal receipt tags add bytes:
-
-```text
-finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-precondition-domain-establishment/v1
-finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-precondition-domain-establishment/v1
-```
-
-Establishment proves complete bounded replay only in the derived rectangle,
-under the checked finite-spine model and retained assumed-provider basis. It
-is not universal proof, source-language totality, provider implementation
-validation, solver authority, or permission to prune candidates. The additive
-Boolean finite-union successor below handles bounded formula-level alternatives
-without changing this single-box receipt. See the
-[root-monus applicable-domain report](reports/2026-08-15-root-monus-length-applicable-domain.md).
-
-### Boolean finite-union applicable-domain validation
-
-The cumulative Boolean successor keeps every root-monus leaf rule literal and
-adds an exact bounded DNF over the normalized formula. Its scalar problem and
-query entrances are
-`validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain`
-and
-`validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain`.
-Both take `LengthEvaluationLimits`, `LengthInputBoxLimits`, and the new opaque
-`LengthBooleanFiniteUnionLimits` before the problem or query.
-
-The signed expansion has one fixed grammar:
-
-```text
-+true / -false       -> one empty branch
-+false / -true       -> no branches
-+not F / -not F      -> expand -F / +F
-+all [F_i]           -> Cartesian conjunction of +F_i branches
--all [F_i]           -> union of -F_i branches
-+(A<=B) / -(A<=B)    -> positive / strict at-most leaf
-+(A=B)               -> one equality leaf
--(A=B)               -> not(A<=B) or not(B<=A)
-```
-
-The final split is exact natural disequality. Expansion never descends into
-an expression-level `LengthIf`, and it does not expose a disjunction hidden
-inside one extrema or monus relation. Every signed leaf delegates to the
-existing root-monus clause scanner.
-
-The raw complete-branch cap runs before cleanup. Each admitted branch then
-becomes a sorted literal set: duplicate literals disappear, an exact
-literal/complement pair drops the branch, equal branches deduplicate, and a
-strict literal-set superset is removed by Boolean absorption. Remaining
-branches are ordered canonically. Each branch independently enforces its rule
-cap and closure-inspection cap. Closure retains constant-right seeding,
-immutable-snapshot passes, canonical inspection order, `min` merging, and
-eligible-rule-once removal. A contradiction drops that branch. All branches
-finish bounded closure before the first source input missing from any live
-branch returns ordinary inapplicability.
-
-Every fully bounded branch yields one zero-origin maximum box. Equal boxes
-deduplicate and a componentwise-contained box is removed; the remaining
-componentwise-maximal antichain is lexicographically ordered. Incomparable
-boxes are never widened to their componentwise hull. Thus `[1,3]` and `[3,1]`
-remain two boxes: their raw visit count is 16 and their exact union count is
-12, whereas hull `[3,3]` would add four cross-corner assignments outside both
-alternatives.
-
-The new raw visit count is the sum of retained box cardinalities, including
-overlap visits. After that cap succeeds, last-input-fastest traversal inserts
-assignments into `Set [Natural]`; the existing input-box assignment limit caps
-new unique values. Original-problem replay uses `Set.toAscList`, so indexed
-evaluation failures and counterexamples follow one global lexicographic order,
-not box order. The original checked precondition remains authoritative on
-every replayed value.
-
-Empty union is a positive explicit result: it retains no boxes and records
-zero visits, unique assignments, and applicable assignments without concrete
-replay. Nullary true instead retains `[[]]`, consumes one visit and unique
-assignment, and replays `[]`; nullary false is empty union. A nonnullary true
-branch is ordinarily missing input zero. These semantics are additive and do
-not change the predecessor's all-zero contradiction carrier or nullary path.
-
-`LengthBooleanFiniteUnionLimitSource` declares, and
-`mkLengthBooleanFiniteUnionLimits` validates in order, maximum generated
-branches, rules per branch, closure inspections per branch, retained boxes,
-and assignment visits. Their defaults are respectively 256, 64, 4096, 256,
-and 262144. The five public projections begin
-`lengthBooleanFiniteUnion` and end `GeneratedBranchLimit`,
-`RuleLimitPerBranch`, `ClosureInspectionLimitPerBranch`, `RetainedBoxLimit`,
-and `AssignmentVisitLimit`. The source fields are signed `Int` values;
-negative construction fails through `LengthBooleanFiniteUnionLimitError`.
-
-Failure precedence is width; raw branch cap; branch complement/dedup/
-subsumption; canonical per-branch rule and closure caps; contradiction drop;
-first missing input; box dedup/containment and retained-box cap; box/input value
-checks; raw visits; unique assignment cap; global replay; first evaluation
-failure or counterexample; receipt; final query association. Scalar direct
-errors inhabit `LengthBooleanFiniteUnionApplicableDomainValidationError`.
-Product direct errors inhabit the nominal
-`LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError`; query
-wrappers use the correspondingly nominal
-`LengthSMTLibBooleanFiniteUnionApplicableDomainValidationError` and
-`LengthSpinePairSMTLibBooleanFiniteUnionApplicableDomainValidationError`.
-
-Complete traversal returns opaque, nominally disjoint
-`ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain`
-or
-`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain`.
-Their six projections expose canonical inclusive maximum boxes, box count, raw
-visit count, unique assignment count, applicable count, and the exact
-finite-spine/provider-law basis. Their tags are:
-
-```text
-finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-precondition-domain-establishment/v1
-finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-precondition-domain-establishment/v1
-```
-
-No DNF, rule, box, assignment set, or operational limit enters SMT-LIB or a
-problem/query identity. Every predecessor API, receipt, scanner, tag, and
-contract-through-live byte sequence remains literal. The query wrapper emits
-no command and consumes no status; it supplies only exact evidence/problem
-association. Establishment is complete only for the checked finite-spine model
-and retained provider-law basis. It is not source-language realization,
-provider validation, solver authority, universal proof, or pruning authority.
-
-Disjunctive extrema orientations and may-zero monus laws remain atomic-leaf
-gaps. Supporting them requires a separately named and tagged successor whose
-atomic scanner emits exact ordered branches all-or-nothing under a frozen cap.
-It must reuse explicit branch/box antichains and global union replay, never
-silently modify this v1 or introduce a componentwise hull. See the
-[Boolean finite-union applicable-domain report](reports/2026-08-15-boolean-finite-union-length-applicable-domain.md).
-
-### Atomic-branching Boolean finite-union applicable-domain validation
-
-The cumulative atomic-branching successor preserves the complete Boolean-DNF
-finite-union pipeline above and opens the exact disjunction carried by one
-admitted immediate root-extremum or may-zero root-monus atom. Its scalar
-problem and query entrances are
-`validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain`
-and
-`validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain`.
-The nominal product entrances insert `SpinePair` after `Length`. All four take
-the existing `LengthEvaluationLimits`, `LengthInputBoxLimits`, and
-`LengthBooleanFiniteUnionLimits`; this checkpoint introduces no limit or
-failure type.
-
-Let `A` and `B` be the normalized children of the one immediate binary root,
-and let `C` be the independently summarized positive-affine opposite operand.
-The exact extremum alternatives are:
-
-```text
-C <= max(A,B)          -> [C<=A] | [C<=B]
-min(A,B) <= C          -> [A<=C] | [B<=C]
-not(max(A,B)<=C)       -> [C+1<=A] | [C+1<=B]
-not(C<=min(A,B))       -> [A+1<=C] | [B+1<=C]
-max(A,B)=C             -> [A<=C,B<=C,C<=A]
-                           | [A<=C,B<=C,C<=B]
-min(A,B)=C             -> [C<=A,C<=B,A<=C]
-                           | [C<=A,C<=B,B<=C]
-```
-
-Equality accepts the root on either canonical side. Alternatives are ordered
-first normalized child then second normalized child, and rules inside each
-alternative have exactly the displayed order. Existing supported extremum
-orientations remain singleton predecessor alternatives; they are not
-reinterpreted by this successor.
-
-For `M = A monus B` and a nonconstant affine `C` whose constant is zero, the
-may-zero laws are:
-
-```text
-C <= M       -> [C<=0] | [B+C<=A]
-M = C        -> [A<=B+C,C<=0] | [A<=B+C,B+C<=A]
-C = M        -> [A<=B+C,C<=0] | [A<=B+C,B+C<=A]
-```
-
-These alternatives are ordered zero branch then bound branch. The equality
-predecessor consequence `A<=B+C` remains first in both alternatives; the zero
-branch is deliberately not rewritten as `A<=B`. Uniformly positive and
-identically zero opposite operands retain their existing singleton root-monus
-behavior. All other relational, strict, quotient, extremum, and monus leaves
-also remain singleton predecessor results, including explicit ignored and
-contradictory coverage.
-
-All three operands are summarized before any new alternative is emitted.
-They must use the predecessor positive-affine grammar of compact inputs,
-naturals, sums, and positive-literal scales. Exactly one relation operand may
-have the admitted immediate binary root. Both-root, nested, embedded, mixed,
-or normalized effectively n-ary extrema/monus shapes, unsupported children,
-expression-level conditionals, and other non-affine operands are ignored as
-whole atoms. No convenient child rule survives a failed summary, and no
-positivity is borrowed from another literal.
-
-Admission counts the lazy Cartesian product of complete raw formula-DNF
-branches and every per-literal atomic alternative under the existing generated
-branch cap. This happens before complement removal, duplicate removal, or
-Boolean absorption. Only after that cap succeeds are the original checked
-formula literals converted to the existing canonical `Set` antichain. Each
-surviving set is traversed in `Set` order and expanded into explicit
-`RelationalPositiveAffineClauseCoverage` alternatives. The implementation
-does not manufacture a `LengthFormula` for an atomic alternative, does not put
-proof rules in a `Set`, does not add `Eq` or `Ord` to the rule type, and does
-not deduplicate equal rule alternatives. Public branch indices name this
-expanded canonical stream.
-
-Each expanded branch then follows the predecessor finite-union order
-literally: collect ordered rules, enforce the existing per-branch rule cap,
-run bounded synchronous rule-once closure, drop contradiction, reject the
-first source input unbounded in a live branch, derive the canonical box
-antichain, enforce box/value/visit/unique-assignment caps, and replay the
-original checked problem over one global lexicographic assignment set. With
-the default rule limit 64, a 65th collected rule reports the existing bounded
-`limit+1` rule-cap failure. The existing default generated-branch, closure,
-box, and visit limits remain 256, 4096, 256, and 262144. No result is widened
-to a componentwise hull: `[1,3]` and `[3,1]` still mean two boxes, 16 visits,
-and 12 unique assignments.
-
-Input width still precedes raw generation. Rule and closure work for all
-expanded branches precedes missing coverage; box antichaining precedes value,
-visit, and unique-assignment checks; original-formula replay keeps the first
-global evaluation failure or counterexample; receipt construction precedes
-final query association. Scalar and product validators reuse
-`LengthBooleanFiniteUnionApplicableDomainValidationError`,
-`LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError`, and their
-existing SMT-LIB wrappers without new constructors or changed precedence.
-
-Complete traversal returns the fresh opaque six-field receipts
-`ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain`
-and
-`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain`.
-Their six correspondingly prefixed projections expose inclusive boxes, box
-count, assignment visits, unique assignments, applicable assignments, and the
-finite-spine/provider-law basis. Their exact tags are:
-
-```text
-finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-precondition-domain-establishment/v1
-finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-precondition-domain-establishment/v1
-```
-
-The new receipt embeds its new tag and result fields directly; it neither
-wraps nor coerces predecessor evidence. Every predecessor problem validator,
-query wrapper, receipt, error, tag, normalized problem/query byte sequence,
-and runtime identity remains literal. Atomic alternatives, proof rules,
-limits, boxes, and replay sets enter neither SMT-LIB nor query identity. Query
-validation emits no command and consumes no solver observation. Establishment
-remains bounded replay authority only for the checked finite-spine model and
-retained provider-law basis, not source-language realization, provider
-validation, universal proof, solver authority, or pruning authority. See the
-[atomic-branching applicable-domain report](reports/2026-08-15-atomic-branching-length-applicable-domain.md).
-
-### Recursive piecewise-affine Boolean finite-union applicable-domain validation
-
-The recursive piecewise-affine successor preserves the atomic-branching
-validator above literally, then opens an exact recursive case split only when
-that predecessor returns the singleton ignored coverage for a relational atom
-which still contains a minimum, maximum, or natural monus. Its scalar problem
-and query entrances are
-`validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain`
-and
-`validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain`.
-The nominal product entrances insert `SpinePair` after `Length`. All four keep
-the existing evaluation, input-box, and Boolean finite-union limit arguments.
-This is an experimental current-tree specification, not a stability or
-backward-compatibility promise. The public names, tags, errors, and exact bytes
-may be revised before a stable release; predecessor parity below describes the
-current regression boundary only.
-
-Each recursively admitted expression is a finite ordered stream of guarded
-signed-affine cases. Variables, natural literals, sums, and retained
-positive-literal scales have their ordinary affine meaning. A minimum,
-maximum, or monus takes the Cartesian product of the cases of its left child
-and then its right child, and appends these exact selector choices:
-
-```text
-min(L,R)  -> [L<=R; value L] | [R+1<=L; value R]
-max(L,R)  -> [R<=L; value L] | [L+1<=R; value R]
-L monus R -> [L<=R; value 0] | [R+1<=L; value L-R]
-```
-
-Ties therefore choose the first normalized child. A sum expands its terms
-left to right; an outer expression retains all left-descendant guards before
-right-descendant guards and appends its own selector guard last. Once both
-relation operands have expanded, positive at-most appends `L<=R`, strict
-at-most appends `R+1<=L`, and equality appends `L<=R` then `R<=L`. This order
-is public through generated-branch admission, per-branch cap failures, closure
-work, and the eventual canonical box antichain.
-
-The selected monus-positive value may have negative constants or
-coefficients, so signed affine summaries are private proof intermediates.
-Before closure, every inequality moves its negative terms to the opposite
-side and becomes one ordinary positive-sided
-`RelationalPositiveAffineRule`. The existing natural closure remains the sole
-bound authority; no signed bound store, lower-bound solver, or unchecked
-formula syntax is introduced.
-
-The fallback accepts extrema and monus recursively on either relation side,
-including nested, embedded, both-root, mixed extrema/monus, and normalized
-effectively n-ary trees. Admission remains all-or-nothing: one unsupported
-descendant rejects the complete recursive interpretation of that atom and
-leaves the predecessor's ignored coverage in place. The recursive expression
-grammar does not descend through quotient, modulo, or `LengthIf`, and it does
-not admit an out-of-range variable or a retained zero scale. This adds no
-recursive quotient, modulo, conditional, result-reference, or general
-nonlinear authority. Any atom already handled by the atomic predecessor,
-including its exact root laws and all delegated predecessor leaves,
-retains that exact singleton or alternative stream and is never
+The progression is semantic ordering, not a set of public modes. A leaf
+already classified by an earlier stage is retained literally. Recursive
+interpretation is attempted only when the complete atomic scanner returns its
+single ignored alternative and the relation still contains a minimum,
+maximum, or natural monus somewhere in either operand. Thus an exact
+predecessor rule, alternative stream, or contradiction is never
 reinterpreted.
 
-Raw admission uses the same lazy Cartesian stream as the predecessor, now
-including every recursive selector choice in every atomic alternative. It
-counts complete formula-DNF branches before complement removal,
-deduplication, absorption, guard contradiction, rule collection, or box
-cleanup. After that cap succeeds, the original formula-literal sets are
-canonicalized exactly as before and only then re-expanded in set order into
-recursive coverage alternatives. Public branch indices name that expanded
-canonical stream. Contradictory selector cases still consume raw admission
-work, and all bounded cap failures retain the existing `limit+1` observation.
-
-No new limit, default, or error type is added. The successor reuses
-`LengthBooleanFiniteUnionLimits` with defaults 256 generated branches, 64
-rules per expanded branch, 4096 closure inspections per branch, 256 retained
-boxes, and 262144 raw assignment visits. Scalar and product direct validation
-reuse `LengthBooleanFiniteUnionApplicableDomainValidationError` and
-`LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError`; their
-SMT-LIB wrappers likewise reuse the existing nominal query error types.
-Precedence remains input width; raw generated branches; per-expanded-branch
-rules; per-branch closure; first globally missing input; retained boxes;
-maximum values; raw visits; unique assignments; global lexicographic replay
-of the original formula; receipt; and final query association.
-
-The frozen default 64/65 witness uses 31 clauses: one embedded recursive
-maximum equality contributes three rules, two atomic maximum equalities
-contribute three each, and 28 root-maximum upper relations contribute two
-each. Its eight raw alternatives stay below the generated-branch default, so
-the existing rule-cap error observes 65.
-
-For compact inputs `x` and `y`, the normalized precondition
+The recursive fallback accepts the signed relational leaves supplied by the
+Boolean normalizer:
 
 ```text
-max(x,y) <= 3 monus min(x,y), x <= 3, y <= 3
+L <= R
+not (L <= R)
+L = R
 ```
 
-retains the exact recursive antichain `[[2,3],[3,2]]`: two boxes, 24 visits,
-15 unique assignments, and ten applicable assignments. The atomic predecessor
-ignores the recursive atom and therefore retains enclosing box `[[3,3]]`, one
-box, 16 visits, 16 unique assignments, and the same ten applicable assignments
-only because original-formula replay filters the box. The successor derives the
-smaller exact cover without manufacturing a componentwise hull.
-The recursive atom has eight raw alternatives; a cap of seven observes eight.
+Negative equality has already become two strict alternatives. Boolean
+structure outside a leaf belongs to the bounded DNF layer, not the expression
+case splitter.
 
-For a product fixture, let
+One recursively admitted expression is an ordered finite stream of guarded
+signed-affine values. The recursive grammar contains compact in-range input
+variables, natural literals, normalized sums in left-to-right order, retained
+positive-literal scales, and binary minimum, maximum, and monus nodes. It does
+not descend through quotient, modulo, `LengthIf`, a result reference, an
+out-of-range variable, a retained zero scale, or another unsupported child.
+This exclusion does not remove the earlier private quotient and atomic
+semantics: atomic-first handling may already have accepted such a whole leaf.
+If any required recursive descendant is unsupported, the entire fallback
+atom remains ignored; no descendant is erased or approximated.
+
+Every binary piecewise node appends two exact selector cases:
+
+```text
+min(L,R)  -> [L <= R;     value L]
+           | [R + 1 <= L; value R]
+max(L,R)  -> [R <= L;     value L]
+           | [L + 1 <= R; value R]
+L monus R -> [L <= R;     value 0]
+           | [R + 1 <= L; value L - R]
+```
+
+The first alternative owns equality. Cases use left-child order, then
+right-child order, then first selector followed by second. Descendant guards
+precede the current selector. Once relation operands have expanded in the
+same left-first Cartesian order, the final relation rules are appended:
+`L <= R` for at-most, `R + 1 <= L` for strict at-most, and `L <= R` then
+`R <= L` for equality. Equal-looking guards are not deduplicated, because
+their order is observable at rule and closure caps.
+
+The positive monus case can create signed constants or coefficients. These
+remain private proof intermediates. For every generated inequality, negative
+terms are moved exactly to the opposite side before the result becomes an
+ordinary natural-coefficient relational rule. The existing synchronous
+rule-once closure is then the sole upper-bound authority:
+
+1. constant-right rules seed bounds in rule order;
+2. each pass reads one immutable bounds snapshot;
+3. eligible pending rules fire once, in order;
+4. newly derived maxima merge with `min` after that pass; and
+5. a pass with no firing ends closure.
+
+This is not linear programming, a lower-bound database, or a numeric
+least-fixed-point solver.
+
+#### Boolean admission, boxes, and replay
+
+The complete normalized formula DNF is the outer branch source. Every raw
+conjunction takes the Cartesian product of the complete alternative streams
+of its leaves. The generated-branch cap observes that lazy raw stream before
+complement removal, literal or branch deduplication, absorption, selector
+contradiction, rule collection, closure, or box cleanup. Impossible cases
+therefore still consume admission work, and every bounded witness stops at
+at most `limit + 1`.
+
+Only after raw admission succeeds does Djex canonicalize the original
+formula-literal sets: duplicates disappear, exact complement branches drop,
+equal sets deduplicate, strict supersets are absorbed, and surviving sets
+remain in set order. Those sets are then re-expanded in set and recursive
+alternative order. Rule and closure error indices name this canonical
+expanded stream, not the earlier raw witness stream.
+
+Each expanded branch processes coverage in literal order: ignored coverage
+adds no rule, a coverage contradiction drops the branch, and rule coverage
+appends every rule literally. A surviving branch enforces the per-branch rule
+cap and completes bounded closure. Contradictory recursive cases have already
+consumed raw branch-admission work, even if their expanded branch does not
+survive to closure. All live branches finish rule collection and closure
+before coverage is inspected. If any live branch lacks a maximum for one
+compact input, the first such source input makes the whole result ordinarily
+inapplicable; a bounded branch cannot hide an unbounded alternative.
+
+Every completely bounded branch supplies one inclusive-maximum vector. Djex
+deduplicates equal vectors, removes any vector componentwise contained in
+another, retains incomparable vectors, and orders the resulting maximal
+antichain lexicographically. It never replaces incomparable boxes with a
+componentwise hull.
+
+Assignment visits are the sum of every retained box cardinality, including
+overlap. A bounded set union then deduplicates assignments. Djex replays that
+union once in global lexicographic order against the original checked
+precondition and postcondition. Selector guards and derived rules are only
+coverage machinery; they never replace original-problem replay. The first
+evaluation rejection or postcondition counterexample stops replay, and only a
+complete successful traversal creates established evidence.
+
+The exact operational precedence is:
+
+1. input width;
+2. lazy raw DNF and recursive-alternative counting;
+3. generated-branch cap;
+4. original formula-literal-set canonicalization;
+5. canonical-set re-expansion;
+6. per-branch rule cap;
+7. per-branch closure-inspection cap;
+8. contradictory-branch removal;
+9. first input missing a maximum in any live branch;
+10. box antichain construction;
+11. retained-box cap;
+12. maximum-value checks in box and input order;
+13. assignment-visit cap;
+14. unique-assignment cap while materializing the union;
+15. original-problem replay in global lexicographic order;
+16. first indexed evaluation rejection or counterexample;
+17. receipt construction after complete replay; and
+18. exact query association, for a query wrapper, last.
+
+The defaults are:
+
+| Owner and projection | Default |
+| --- | ---: |
+| `lengthInputBoxInputLimit` | 8 inputs |
+| `lengthInputBoxAssignmentLimit` | 65,536 unique assignments |
+| `lengthBooleanFiniteUnionGeneratedBranchLimit` | 256 |
+| `lengthBooleanFiniteUnionRuleLimitPerBranch` | 64 per branch |
+| `lengthBooleanFiniteUnionClosureInspectionLimitPerBranch` | 4,096 per branch |
+| `lengthBooleanFiniteUnionRetainedBoxLimit` | 256 |
+| `lengthBooleanFiniteUnionAssignmentVisitLimit` | 262,144 |
+
+`LengthEvaluationLimits` separately owns assigned and intermediate values
+during maximum admission and original-problem replay.
+
+For example, the scalar precondition
+
+```text
+max(x,y) <= 3 monus min(x,y)
+x <= 3
+y <= 3
+```
+
+retains the exact antichain `[[2,3],[3,2]]`: two boxes, 24 visits, 15 unique
+assignments, and ten applicable assignments. The boxes overlap, but no
+`[3,3]` hull is manufactured. The recursive atom has eight raw alternatives,
+so a branch cap of seven observes eight.
+
+For the product fixture
 
 ```text
 u = min(x,y) + (x monus y)
 v = min(x,y) + (y monus x)
+max(u,v) <= 2
+x <= 3
+y <= 3
 ```
 
-and use `max(u,v) <= 2`, `x <= 3`, and `y <= 3`. Each of `u` and `v` has four
-recursive cases and the outer maximum has two, so the raw atom contributes 32
-alternatives. A generated-branch limit of 31 observes 32; 32 admits it even
-though contradictory cases later disappear. Recursive validation retains
-`[[2,2]]`, one box, nine visits, nine unique assignments, and nine applicable
-assignments. The atomic predecessor retains `[[3,3]]`, one box, 16 visits, 16
-unique assignments, and nine applicable assignments.
-Both canonical fixtures retain `ProviderIndependentFiniteSpineModel`.
+the four cases of `u`, four of `v`, and two outer maximum choices produce 32
+raw alternatives. A cap of 31 observes 32. Closure retains `[[2,2]]`, with
+one box and 9/9/9 visit, unique-assignment, and applicable-assignment counts.
+Both fixtures use `ProviderIndependentFiniteSpineModel`.
 
-Successful scalar and product traversals return the fresh opaque six-field
-receipts
-`ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain`
-and
-`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain`.
-Their correspondingly prefixed projections expose canonical inclusive boxes,
-box count, visits, unique assignments, applicable assignments, and the exact
-finite-spine/provider-law basis. Their exact tags are:
+#### Receipts and authority
 
-```text
-finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-recursive-extrema-monus-piecewise-affine-branching-precondition-domain-establishment/v1
-finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-recursive-extrema-monus-piecewise-affine-branching-precondition-domain-establishment/v1
-```
+Successful scalar validation uses the opaque
+`ValidatedLengthApplicableDomain`; product validation uses the nominally
+separate `ValidatedLengthSpinePairApplicableDomain`. Each receipt has exactly
+six public projections:
 
-These nominal receipts embed their own tags and result fields; they do not
-wrap or coerce predecessor evidence. Recursive cases, guards, signed affine
-summaries, proof rules, operational limits, boxes, and replay sets enter
-neither checked problem nor query identity. Query validation emits no command
-and consumes no solver observation. Establishment remains bounded replay
-authority only for the exact checked finite-spine model and retained
-provider-law basis. It does not establish source-language realization,
-termination, totality, or effects; validate provider implementations; make
-solver status authoritative; prove behavior outside the checked model; or
-authorize pruning. See the
-[recursive piecewise-affine applicable-domain report](reports/2026-08-15-recursive-piecewise-affine-length-applicable-domain.md).
+| Scalar projection | Product projection |
+| --- | --- |
+| `validatedLengthApplicableDomainInclusiveMaximumBoxes` | `validatedLengthSpinePairApplicableDomainInclusiveMaximumBoxes` |
+| `validatedLengthApplicableDomainBoxCount` | `validatedLengthSpinePairApplicableDomainBoxCount` |
+| `validatedLengthApplicableDomainAssignmentVisitCount` | `validatedLengthSpinePairApplicableDomainAssignmentVisitCount` |
+| `validatedLengthApplicableDomainAssignmentCount` | `validatedLengthSpinePairApplicableDomainAssignmentCount` |
+| `validatedLengthApplicableDomainApplicableAssignmentCount` | `validatedLengthSpinePairApplicableDomainApplicableAssignmentCount` |
+| `validatedLengthApplicableDomainBasis` | `validatedLengthSpinePairApplicableDomainBasis` |
+
+Constructors are private. Each receipt internally retains an algorithm schema
+tag, boxes, visits, unique count, applicable count, and exact
+finite-spine/provider-law basis; box count is derived from the boxes. The
+schema-tag values and byte projections are deliberately private and are not a
+caller persistence or compatibility contract.
+
+Recursive cases, guards, rules, limits, boxes, and replay sets enter neither
+the checked problem nor query fingerprint. A query wrapper emits no command,
+launches no worker, and consumes no solver observation; it validates directly
+and checks exact evidence/problem association last.
+
+Established evidence means only that the retained finite union covers every
+input satisfying the original checked precondition and that every unique
+assignment in the union was replayed under the exact checked finite-spine
+model and retained provider-law basis. It does not establish source-language
+realization, termination, totality, or effects; validate a provider
+implementation; make solver status authoritative; prove behavior outside the
+checked model; or authorize candidate pruning.
+
+See the dated
+[current applicable-domain surface reset report](reports/2026-08-15-current-length-applicable-domain-surface.md)
+for the public reset and the historical
+[recursive piecewise-affine report](reports/2026-08-15-recursive-piecewise-affine-length-applicable-domain.md)
+for the algorithm checkpoint that preceded it.
 
 ### Finite binary product spine lengths, offline and live SMT replay
 
@@ -2926,846 +2078,72 @@ execution, process, worker, or live-observation version or canonical bytes
 change. The new v1 tag belongs only to the opaque bounded receipt. See the
 [bounded input-box validation report](reports/2026-08-14-bounded-length-input-box-validation.md).
 
-#### Direct literal coverage rule
-
-`validateLengthProblemApplicableDomain` builds on that verifier with one
-deliberately narrow finite-coverage rule over the checked normalized
-precondition. It recognizes only direct top-level
-`LengthAtMost (LengthVariable (LengthInput i)) (LengthLiteral maximum)`
-clauses, retains the tightest maximum for duplicate input clauses, and requires
-one for every compact modeled input. It performs no implication, equality,
-arithmetic, nested-formula, or solver reasoning. Missing coverage and the
-nonnullary problem's first unbounded input produce the ordinary
-`LengthApplicableDomainInapplicable` result. A nullary problem instead derives
-maxima `[]` and validates the single assignment `[]`.
-
-When coverage succeeds, the derived source-ordered maxima form one tight
-solver-independent Cartesian box. The established box limits and evaluation
-limits still gate width, cardinality, values, and intermediate arithmetic. A
-violation releases the ordinary `ValidatedLengthCounterexample`; complete
-traversal releases a nominal opaque `ValidatedLengthApplicableDomain` which
-retains the derived maxima, total/applicable counts, and exact model/provider
-basis. `validateLengthSMTLibQueryApplicableDomain` adds only same-problem
-association and never emits a command or consumes a solver status.
-
-The product-domain siblings are
-`validateLengthSpinePairProblemApplicableDomain`,
-`validateLengthSpinePairSMTLibQueryApplicableDomain`, and
-`ValidatedLengthSpinePairApplicableDomain`. Their result classification is
-shared but their behavioral evidence remains nominally separate. Neither
-receipt establishes source-language totality, validates concrete provider
-implementations, authorizes pruning, or upgrades `sat`, `unsat`, or `unknown`.
-See the
-[directly bounded applicable-domain report](reports/2026-08-14-directly-bounded-length-applicable-domain.md).
-
-#### Positive-affine coverage rule
-
-The original applicable-domain surface above remains the exact literal-direct
-v1 path. It still ignores equality and arithmetic-derived bounds. The additive
-`validateLengthProblemPositiveAffineApplicableDomain` selects a separate,
-strictly more capable syntactic rule; its query-owned sibling is
-`validateLengthSMTLibQueryPositiveAffineApplicableDomain`.
-
-For one recognized atom, the bounded side must be a positive-affine expression
-built only from compact inputs, natural literals, `LengthSum`, and
-positive-literal `LengthScale`. If its normalized value is
-`c + sum (ai * xi)` and it is constrained by either `<= k` or `== k` for a
-literal `k`, every positive coefficient contributes the necessary inclusive
-maximum `(k - c) quot ai` when `c <= k`. The scanner takes the minimum of all
-bounds for an input and requires coverage for every nonnullary compact input.
-It does not mine a partial bound from an otherwise unsupported subtree.
-
-`LengthTruth False` and a recognized atom with `c > k` are exact syntactic
-contradictions. Normalization turns either orientation of a false constant-only
-equality such as `1 == 2` into that false truth value; a true constant-only
-equality is non-binding. For a nonnullary problem, contradiction wins over
-missing-bound inapplicability and selects an all-zero coverage box. The box
-still validates one assignment and therefore records total count one and
-applicable count zero on success. Nullary problems bypass extraction, derive
-maxima `[]`, and replay their ordinary singleton assignment; its applicable
-count is zero or one.
-
-All admission and behavioral work remains in the established box verifier.
-Width is rejected before the normalized precondition is scanned. Without a
-contradiction, the complete clause list is examined before the first missing
-compact input is returned as ordinary `LengthApplicableDomainInapplicable`.
-Derived maxima are checked left-to-right, the Cartesian cap is admitted before
-replay, and assignments retain last-input-fastest lexicographic order and
-indexed evaluation failures.
-
-Complete traversal produces the opaque
-`ValidatedLengthPositiveAffineApplicableDomain`; the product siblings are
-`validateLengthSpinePairProblemPositiveAffineApplicableDomain`,
-`validateLengthSpinePairSMTLibQueryPositiveAffineApplicableDomain`, and
-`ValidatedLengthSpinePairPositiveAffineApplicableDomain`. Both receipt families
-project the exact maxima, total/applicable counts, and model/provider basis.
-The query wrappers issue no solver command and release either authoritative arm
-only after exact behavioral-problem association.
-
-The two new receipt tags are
-`finite-list-spine-length/positive-affine-precondition-domain-establishment/v1`
-and
-`finite-binary-product-spine-lengths/positive-affine-precondition-domain-establishment/v1`.
-They are the first versions of a new nominal receipt family, not changes to the
-old direct-v1 tags. No existing semantic or runtime identity changes.
-Establishment is still model-relative, conditional on any retained assumed
-provider laws, and grants no source-language realization, totality,
-provider-implementation, solver-status, universal-proof, or pruning authority.
-See the
-[positive-affine applicable-domain report](reports/2026-08-14-positive-affine-length-applicable-domain.md).
-
-#### Relational positive-affine coverage rule
-
-The third, separately selected coverage rule is relational positive-affine
-validation. `validateLengthProblemRelationalPositiveAffineApplicableDomain`
-and
-`validateLengthSpinePairProblemRelationalPositiveAffineApplicableDomain`
-summarize both sides of top-level `LengthAtMost` and `LengthEqual` clauses over
-compact inputs, natural literals, sums, and positive scales. They cancel common
-constants and coefficients exactly. An inequality contributes one directed
-rule; equality contributes the normalized left-to-right rule followed by its
-reverse. The query-owned entrances are:
-
-```haskell
-scalarValidation =
-  validateLengthSMTLibQueryRelationalPositiveAffineApplicableDomain
-    defaultLengthEvaluationLimits defaultLengthInputBoxLimits scalarQuery
-
-pairValidation =
-  validateLengthSpinePairSMTLibQueryRelationalPositiveAffineApplicableDomain
-    defaultLengthEvaluationLimits defaultLengthInputBoxLimits pairQuery
-```
-
-A constant-right rule seeds bounds. Every subsequent pass observes one
-immutable snapshot: all rules whose right-side inputs are bounded fire once,
-their results are merged with `min` after the pass, and fired rules are
-removed. Skipped rules retry in canonical order. The closure stops when a pass
-fires nothing; it deliberately does not seek a numeric least fixed point. Thus
-`x <= y`, `y <= 10`, `y <= z`, and `z <= 2` derive `[10, 2, 2]`, not
-`[2, 2, 2]`. This finite box is sound because each fired rule derives necessary
-bounds from already established right-side maxima.
-
-`LengthTruth False` and a fired rule whose residual left constant exceeds its
-right-side maximum establish contradiction and select the ordinary all-zero
-coverage carrier. Without contradiction, the first unbounded compact input is
-ordinary `LengthApplicableDomainInapplicable`. All width, value, product,
-evaluation, counterexample, nullary, provider-basis, and exact query-association
-behavior remains owned by the existing box verifier and evidence layer.
-
-The opaque receipts are
-`ValidatedLengthRelationalPositiveAffineApplicableDomain` and
-`ValidatedLengthSpinePairRelationalPositiveAffineApplicableDomain`. Only their
-new scalar and product receipt tags add canonical bytes. Query-owned validation
-issues no solver command and consumes no status. The direct-v1 and
-literal-ceiling positive-affine validators remain unchanged, as do all existing
-contract, inventory, session, candidate, encoding, problem, query, protocol,
-runtime, and live-observation identities. Establishment remains relative to
-the checked total finite-spine model and retained assumed provider laws; it is
-not source-language totality, provider-implementation validation, universal
-proof, or pruning authority. See the
-[relational positive-affine applicable-domain report](reports/2026-08-15-relational-positive-affine-length-applicable-domain.md).
-
-#### Strict relational coverage rule
-
-The fourth explicit coverage rule adds exact strict natural inequalities without
-changing the relational rule above. Its checked-problem entrances are
-`validateLengthProblemStrictRelationalPositiveAffineApplicableDomain` and
-`validateLengthSpinePairProblemStrictRelationalPositiveAffineApplicableDomain`;
-the query-owned entrances are:
-
-```haskell
-scalarValidation =
-  validateLengthSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
-    defaultLengthEvaluationLimits defaultLengthInputBoxLimits scalarQuery
-
-pairValidation =
-  validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineApplicableDomain
-    defaultLengthEvaluationLimits defaultLengthInputBoxLimits pairQuery
-```
-
-The strict scanner delegates every ordinary `LengthAtMost`, `LengthEqual`, and
-`LengthTruth False` clause to the unchanged relational scanner. In addition,
-one immediate top-level normalized clause whose exact shape is
-`LengthNot (LengthAtMost left right)` contributes this proof rule over
-naturals:
-
-```text
-not (left <= right)  ==>  right + 1 <= left
-```
-
-Both sides must use only compact inputs, natural literals, `LengthSum`, and
-positive-literal `LengthScale`. The successor increments the exact
-arbitrary-precision affine summary of the original right side before the
-ordinary relational cancellation pass. It creates no checked expression and
-therefore spends no syntax or literal budget and changes no checked contract
-or query bytes.
-
-For a scalar chain, `not (5 <= x)` yields `x <= 4`; a second clause
-`not (x <= y)` yields `y + 1 <= x`, so the first maximum propagates to
-`y <= 3`. Query-owned complete traversal therefore reports maxima `[4, 3]`,
-total count 20, and applicable count 10 for `y < x < 5`. For a one-input
-product problem, `not (x + 3 <= 2*x)` becomes
-`2*x + 1 <= x + 3`; exact common-coefficient cancellation gives `x <= 2`,
-so the product box has maximum `[2]` and three applicable assignments.
-
-The strict rule retains the relational closure's exact sequencing. Constant-
-right rules seed bounds; later rules retry against immutable pass snapshots,
-fire at most once, and merge after the pass. It is still not a general solver
-or a numeric least-fixed-point computation. A negated equality, nested
-logical formula, or negated comparison containing monus, minimum, maximum,
-quotient, modulo, a conditional, a result reference, or another non-affine
-subtree contributes no rule and no partial coverage. Unsupported clauses still
-participate in ordinary precondition replay if other clauses bound the box.
-
-Input-width rejection precedes precondition extraction. Nullary problems
-delegate `[]` directly to the finite-box verifier. For nonnullary problems,
-syntactic or closure contradiction wins over otherwise missing coverage and
-selects the all-zero carrier; absent contradiction, the first source-ordered
-missing bound is ordinary `LengthApplicableDomainInapplicable`. Derived values,
-Cartesian cardinality, indexed evaluation, first counterexample, and exact
-query-association failures retain the existing finite-box order.
-
-The opaque receipts are
-`ValidatedLengthStrictRelationalPositiveAffineApplicableDomain` and
-`ValidatedLengthSpinePairStrictRelationalPositiveAffineApplicableDomain`.
-They retain exact maxima, total/applicable counts, and model/provider basis,
-but remain nominally disjoint. Query-owned validation emits no SMT-LIB and
-consumes no solver observation; it only replays authoritative evidence against
-the query's exact behavioral problem. Establishment is model-relative and
-does not establish source-language behavior, validate providers, supply
-universal proof, or authorize pruning.
-
-Only the two new strict-relational receipt tags add bytes. All older explicit-
-box, direct, positive-affine, relational, counterexample, raw-input, origin,
-simplification, and live validators retain their exact surfaces, behavior,
-receipt tags, authority, and identities. Every existing contract, inventory,
-session, candidate, encoding, problem, query, response, protocol, runtime, and
-live-observation identity is unchanged. See the
-[strict relational positive-affine applicable-domain report](reports/2026-08-15-strict-relational-positive-affine-length-applicable-domain.md).
-
-#### Root-quotient coverage policy
-
-The fifth explicit coverage policy adds exact consequences for one positive
-checked quotient at a top-level relation operand's root. Its problem entrances
-are
-`validateLengthProblemStrictRelationalPositiveAffineQuotientApplicableDomain`
-and
-`validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientApplicableDomain`;
-the query-owned entrances are:
-
-```haskell
-scalarValidation =
-  validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain
-    defaultLengthEvaluationLimits defaultLengthInputBoxLimits scalarQuery
-
-pairValidation =
-  validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientApplicableDomain
-    defaultLengthEvaluationLimits defaultLengthInputBoxLimits pairQuery
-```
-
-For positive `d` and exact positive-affine `A` and `B`, the proof-only laws
-are:
-
-```text
-q_d(A) <= B        <=>  A <= d*B + (d - 1)
-A <= q_d(B)        <=>  d*A <= B
-not (q_d(A) <= B)  <=>  d*(B + 1) <= A
-not (A <= q_d(B))  <=>  B + 1 <= d*A
-```
-
-An equality with exactly one root quotient contributes its left-to-right and
-reverse inequalities, in that order. The dividend and opposite operand must
-use only compact inputs, natural literals, `LengthSum`, and positive-literal
-`LengthScale`. The implementation scales exact arbitrary-precision summaries
-and then uses the existing coefficient cancellation and synchronous rule-once
-closure. No generated proof term becomes checked syntax or changes a checked
-contract or query.
-
-Thus `q_3(2*x + 1) <= 2` derives `[3]` with total/applicable counts 4/4;
-`q_3(x) = 4` derives `[14]` with counts 15/3; and
-`not (4 <= q_3(x))` derives `[11]` with counts 12/12. The chain
-`x <= q_3(y), y <= 8` derives `[2, 8]`, total count 27, and applicable count
-18. The nominal product case `q_3(x) <= 2` derives `[8]` and counts 9/9.
-
-Exactly one quotient must occur at the relation root. Nested, embedded, or
-both-root quotients, unsupported quotient children or opposite operands,
-negated equality, and nested Boolean structure contribute no rule. Modulo,
-monus, extrema, conditionals, results, and other non-affine expressions remain
-excluded. Any unsupported quotient clause is ignored as a whole for coverage,
-while quotient-free clauses delegate to the strict predecessor unchanged.
-
-Width and nullary handling remain first. Contradiction wins over missing
-coverage; otherwise missing bounds are source-ordered inapplicability. Derived
-values, Cartesian count, indexed evaluation, first counterexample, receipt,
-and query association retain the established precedence. The new opaque
-receipts are
-`ValidatedLengthStrictRelationalPositiveAffineQuotientApplicableDomain` and
-`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientApplicableDomain`.
-Their maxima, counts, and basis projections are nominally separate. Query
-validation emits no command and consumes no solver observation.
-
-Only their scalar and product receipt tags add bytes. All predecessor APIs,
-receipts, and contract-through-live identities remain exact, including sealed
-query commands and fingerprints. Root extrema, root monus, and bounded Boolean
-finite unions are the cumulative successors below. The finite-union entrance
-has its own receipt and work caps and replays explicit branch boxes rather than
-widening them to one componentwise-maximum rectangle.
-See the
-[strict relational positive-affine quotient applicable-domain report](reports/2026-08-15-strict-relational-positive-affine-quotient-length-applicable-domain.md).
-
-#### Root-extrema coverage policy
-
-The cumulative root-extrema policy preserves that complete predecessor and
-adds four exact, conjunctive consequences for one immediate normalized binary
-minimum or maximum at a relation operand's root. Its problem entrances are
-`validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`
-and
-`validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`;
-the query-owned entrances are:
-
-```haskell
-scalarValidation =
-  validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-    defaultLengthEvaluationLimits defaultLengthInputBoxLimits scalarQuery
-
-pairValidation =
-  validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain
-    defaultLengthEvaluationLimits defaultLengthInputBoxLimits pairQuery
-```
-
-For exact positive-affine `A`, `B`, and `C`, the complete new rule set is:
-
-```text
-max(A, B) <= C        <=>  A <= C and B <= C
-C <= min(A, B)        <=>  C <= A and C <= B
-not (min(A, B) <= C)  <=>  C + 1 <= A and C + 1 <= B
-not (C <= max(A, B))  <=>  A + 1 <= C and B + 1 <= C
-```
-
-All three operands must use only compact inputs, natural literals,
-`LengthSum`, and positive-literal `LengthScale`. They are summarized before
-either component rule is retained, so admission is all-or-nothing. Strict
-successors are inserted before exact cancellation. Equality with a single
-root maximum in either position contributes only `A <= C`, then `B <= C`;
-equality with a single root minimum contributes only `C <= A`, then `C <= B`.
-The omitted half is disjunctive. Consequently equality orientation is
-irrelevant, and no unsafe reverse decomposition is performed.
-
-Contract normalization already flattens, combines literals, deduplicates,
-sorts, and left-associates extrema; it also canonicalizes equality sides and
-top-level conjunct order. Admission is against that normalized tree. The
-scanner retains rules in canonical clause order and normalized first-child,
-second-child order. A retained three-term extremum has a nested extremum child
-and is ignored whole, while a literal-only raw extremum may fold away and
-delegate to the root-quotient predecessor.
-
-Thus `max(x, 2*x + 1) <= 5` derives `[2]` and counts 3/3;
-`2*x + 1 <= min(x + 5, 7)` derives `[3]` and counts 4/4;
-`not (min(x + 4, 9) <= 2*x)` derives `[3]` and counts 4/4; and
-`not (5 <= max(2*x, x + 1))` derives `[2]` and counts 3/3. The equality
-`2*x + 1 = min(x + 5, 7)` derives `[3]`, then exhaustive replay records one
-applicable assignment. `max(x,y) <= z, z <= 4` propagates to `[4,4,4]` with
-125 total and 55 applicable assignments.
-
-The ordinary closure remains synchronous and rule-once: every pass reads one
-immutable bounds snapshot, fired rules are removed, and derived maxima merge
-after the pass. It deliberately does not compute a numeric least fixed point.
-Input width, contradiction-before-missing, derived values, Cartesian count,
-indexed evaluation, first counterexample, receipt, and exact query association
-retain predecessor precedence. Unsupported clauses still participate in
-concrete precondition replay if other clauses establish a complete box.
-
-Disjunctive orientations, both-root, nested, embedded, and retained n-ary
-extrema, mixed extrema/quotient roots, unsupported children, negated equality,
-and nested Boolean formulas contribute no rule or partial consequence. This is
-not general extrema reasoning or finite-union analysis.
-
-The opaque receipts are
-`ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`
-and
-`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaApplicableDomain`.
-Their correspondingly prefixed projections expose maxima, total/applicable
-counts, and the retained model/provider basis. Only their two receipt tags add
-bytes:
-
-```text
-finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-precondition-domain-establishment/v1
-finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-precondition-domain-establishment/v1
-```
-
-Every predecessor receipt and sealed query command, symbol plan, value request,
-fingerprint, protocol, process, worker, run, and observation identity remains
-literal. Query-owned validation performs no live operation and consumes no
-solver result. Establishment proves only complete bounded replay in the exact
-checked finite-spine model and retained assumed-provider basis; it is not
-source-language totality, universal proof, provider validation, or pruning
-authority. Immediate natural-monus consequences are the cumulative successor
-below. See the
-[root-extrema applicable-domain report](reports/2026-08-15-root-extrema-length-applicable-domain.md).
-
-#### Root-monus coverage policy
-
-The cumulative root-monus policy preserves the complete root-extrema
-predecessor and adds immediate normalized `LengthMonus` consequences. Its
-problem entrances are
-`validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`
-and
-`validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`;
-the query-owned entrances are:
-
-```haskell
-scalarValidation =
-  validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-    defaultLengthEvaluationLimits defaultLengthInputBoxLimits scalarQuery
-
-pairValidation =
-  validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain
-    defaultLengthEvaluationLimits defaultLengthInputBoxLimits pairQuery
-```
-
-Let `M = A monus B`. After all three positive-affine operands have been
-summarized, the five admitted shapes are:
-
-```text
-M <= C                 <=>  A <= B + C
-C <= M, if min(C) > 0  <=>  B + C <= A
-not (M <= C)           <=>  B + C + 1 <= A
-not (C <= M)           <=>  1 <= C and A + 1 <= B + C
-M = C or C = M          ==>  A <= B + C
-```
-
-Here `min(C)` is the exact constant in the nonnegative affine summary
-`C = c + sum(k_i*x_i)`. When `c > 0`, `C` is uniformly positive. Direct
-`C <= M` then emits the exact `B+C <= A`. An identically-zero `C` makes that
-direct relation tautological and emits no rule. A zero-constant `C` with
-coefficients may be zero, so its exact form is
-`C=0 or B+C<=A`; the whole direct clause is ignored rather than approximated.
-No cross-clause lower bound and no weaker `C<=A` grants authority.
-
-Equality always emits `A<=B+C`. It appends `B+C<=A` when `c>0`; with
-identically-zero `C`, the first rule is exact `A<=B`; with a may-zero affine
-`C`, it is only the necessary supported half. The strict reverse case emits
-`1<=C` first and `A+1<=B+C` second, atomically. Omitting the boundary rule or
-unconditionally rewriting the direct reverse relation is refuted by
-`A=0,B=1,C=0`.
-
-Every `A`, `B`, and `C` must contain only compact inputs, natural literals,
-`LengthSum`, and positive-literal `LengthScale`. Exactly one relation operand
-may be an immediate normalized root monus. Both-root, nested, embedded, mixed
-root-monus/root-extrema or quotient, unsupported operands, negated equality,
-and nested Boolean syntax contribute no rule or partial consequence. Clauses
-without an immediate root monus delegate to root-extrema unchanged.
-
-Normalization folds literal/literal monus, `A monus 0`, and `A monus A`
-before admission. It preserves retained monus operand order while
-canonicalizing equality operands and top-level conjunct order. Proof-summary
-addition and successor insertion use arbitrary-precision naturals and create
-no checked syntax. At most two rules are emitted per clause, so a seal with
-clause limit `F` yields at most `2*F` rules; the default `F=32` gives 64.
-Synchronous immutable-snapshot, eligible-rule-once closure is unchanged.
-
-Representative scalar results are:
-
-```text
-(x monus 3) <= 5        ==> [8], counts 9/9
-1 <= (5 monus x)        ==> [4], counts 5/5
-not ((5 monus x) <= 2)  ==> [2], counts 3/3
-not (3 <= (x monus 2))  ==> [4], counts 5/5
-(x monus 3) = 5         ==> [8], counts 9/1
-```
-
-The chain `(x monus y) <= z`, `y <= 2`, `z <= 3` derives `[5,2,3]`, with
-72 total and 42 applicable assignments. The nominal product direct case has
-the same `[8]` and 9/9 projections under its separate domain.
-
-Input width, nullary singleton replay, contradiction-before-missing,
-source-ordered missing bounds, derived values, Cartesian admission,
-last-input-fastest indexed replay, first counterexample, receipt construction,
-and query association retain predecessor precedence. Unsupported clauses are
-still evaluated in the original normalized precondition when other rules
-establish a complete rectangle.
-
-The opaque receipts are
-`ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`
-and
-`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusApplicableDomain`.
-Their correspondingly prefixed projections expose maxima, total/applicable
-counts, and basis. Only their tags add bytes:
-
-```text
-finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-precondition-domain-establishment/v1
-finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-precondition-domain-establishment/v1
-```
-
-All predecessor APIs, receipt tags, normalized contracts, query commands,
-fingerprints, protocols, executions, workers, runs, and observations remain
-literal. Query validation emits no command and consumes no solver result.
-Establishment remains bounded finite-spine/model-relative evidence, not
-universal proof, source-language totality, provider validation, or pruning
-authority. The cumulative Boolean finite-union entrance below handles exact
-bounded formula-level alternatives without changing this single-box receipt.
-See the
-[root-monus applicable-domain report](reports/2026-08-15-root-monus-length-applicable-domain.md).
-
-#### Boolean finite-union coverage policy
-
-The Boolean finite-union policy expands the complete normalized precondition
-under an exact signed DNF. Its problem entrances are
-`validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain`
-and
-`validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain`;
-its query-owned entrances use the same full suffix under the scalar and
-`SpinePair` SMT-LIB prefixes:
-
-```haskell
-scalarValidation =
-  validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-    defaultLengthEvaluationLimits
-    defaultLengthInputBoxLimits
-    defaultLengthBooleanFiniteUnionLimits
-    scalarQuery
-
-pairValidation =
-  validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain
-    defaultLengthEvaluationLimits
-    defaultLengthInputBoxLimits
-    defaultLengthBooleanFiniteUnionLimits
-    pairQuery
-```
-
-Positive truth and negative false produce one empty conjunction; their
-opposites produce no branches. Negation flips polarity. Positive `LengthAll`
-takes the Cartesian conjunction of child DNFs, while negative `LengthAll`
-takes their union. At-most is a positive or strict leaf. Positive equality is
-one leaf; negative equality splits exactly into `not(A<=B)` or `not(B<=A)`.
-The traversal opens no Boolean syntax inside `LengthIf` and delegates every
-signed leaf to the unchanged root-monus clause scanner.
-
-The raw complete-branch cap runs before canonicalization. Within the admitted
-DNF, literals and branches deduplicate, an exact literal/complement branch is
-dropped, and a strict literal-set superset is removed by absorption. Remaining
-branches use canonical `Set` order. Each has an independent rule cap and
-closure-inspection cap. Closure keeps the predecessor's seed partition,
-immutable-snapshot passes, ordered eligible-rule-once firing, and `min`
-merging. Contradiction drops one branch. After every branch closes, the first
-source input unbounded in any live branch returns ordinary inapplicability.
-
-Live branch maxima form zero-origin boxes. Equal boxes deduplicate and a
-componentwise-contained box is removed. Incomparable maxima remain a
-lexicographically ordered antichain; they are never replaced by their
-componentwise hull. Alternatives `[1,3]` and `[3,1]` therefore retain two
-boxes, 16 raw visits, and 12 unique assignments. Hull `[3,3]` would add four
-cross-corner assignments outside both alternatives and has no authority here.
-
-Raw visits sum each retained box's Cartesian cardinality, including overlap.
-After the new visit cap succeeds, last-input-fastest enumeration inserts each
-assignment into `Set [Natural]` under the existing unique-assignment cap.
-Original-formula replay consumes `Set.toAscList`, so evaluation errors and
-counterexamples follow one global lexicographic order rather than box order.
-Ignored clauses still decide applicability during that replay.
-
-Empty union retains no boxes and records zero visits, unique assignments, and
-applicable assignments without concrete candidate-result evaluation. Nullary true
-instead retains `[[]]`, admits one visit and unique assignment, and replays
-`[]`; nullary false is empty. A nonnullary true formula is missing its first
-compact input. These rules do not change predecessor contradiction or nullary
-behavior.
-
-The opaque `LengthBooleanFiniteUnionLimits` is built with
-`mkLengthBooleanFiniteUnionLimits`. Its five default projections are:
-
-```text
-lengthBooleanFiniteUnionGeneratedBranchLimit                 = 256
-lengthBooleanFiniteUnionRuleLimitPerBranch                   = 64
-lengthBooleanFiniteUnionClosureInspectionLimitPerBranch      = 4096
-lengthBooleanFiniteUnionRetainedBoxLimit                     = 256
-lengthBooleanFiniteUnionAssignmentVisitLimit                 = 262144
-```
-
-`LengthBooleanFiniteUnionLimitSource` exposes the corresponding signed
-`MaximumGeneratedBranches`, `MaximumRulesPerBranch`,
-`MaximumClosureInspectionsPerBranch`, `MaximumRetainedBoxes`, and
-`MaximumAssignmentVisits` fields. Negative fields fail in declaration order
-through `LengthBooleanFiniteUnionLimitError`. Existing input-box limits still
-own compact width and unique union cardinality; evaluation limits still own
-assigned and intermediate values.
-
-Failure order is width; raw branches; branch complement/dedup/subsumption;
-canonical branch rule and closure caps; contradiction drop; first missing
-input; box dedup/containment and retained-box cap; box/input values; raw
-visits; unique assignments; global replay; first evaluation failure or
-counterexample; receipt; query association. Direct failures use
-`LengthBooleanFiniteUnionApplicableDomainValidationError` or the nominal
-`LengthSpinePairBooleanFiniteUnionApplicableDomainValidationError`. Query
-wrappers use the correspondingly nominal scalar/product SMT-LIB Boolean
-finite-union error types.
-
-The opaque receipts are
-`ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain`
-and
-`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionApplicableDomain`.
-Their six projections expose inclusive maximum boxes, box count, raw visit
-count, unique assignment count, applicable count, and basis. Their exact tags
-are:
-
-```text
-finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-precondition-domain-establishment/v1
-finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-precondition-domain-establishment/v1
-```
-
-All predecessor scanners, receipts, errors, tags, normalized problem/query
-bytes, and runtime identities remain literal. Query validation emits no
-command and consumes no solver result. Establishment is bounded evidence for
-the complete applicable domain in the exact checked finite-spine model and
-retained provider-law basis; it is not source-language totality, provider
-validation, solver authority, universal proof, or pruning authority.
-
-Disjunctions hidden inside an atomic extrema or may-zero monus relation remain
-excluded. They require a separately named and tagged branch-producing atomic
-successor with all-or-nothing summaries, frozen branch accounting, the same
-explicit antichains, and the same global replay. It must never silently widen
-to a componentwise hull. See the
-[Boolean finite-union applicable-domain report](reports/2026-08-15-boolean-finite-union-length-applicable-domain.md).
-
-#### Atomic-branching coverage policy
-
-The atomic-branching finite-union policy is the separately named cumulative
-successor which opens the exact disjunction of one admitted root-extremum or
-may-zero root-monus atom. Its problem entrances are
-`validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain`
-and
-`validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain`;
-the query-owned entrances use the same full suffix under the scalar and
-`SpinePair` SMT-LIB prefixes:
-
-```haskell
-scalarValidation =
-  validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-    defaultLengthEvaluationLimits
-    defaultLengthInputBoxLimits
-    defaultLengthBooleanFiniteUnionLimits
-    scalarQuery
-
-pairValidation =
-  validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain
-    defaultLengthEvaluationLimits
-    defaultLengthInputBoxLimits
-    defaultLengthBooleanFiniteUnionLimits
-    pairQuery
-```
-
-For normalized children `A` and `B` and positive-affine opposite `C`, it adds
-these ordered extremum alternatives:
-
-```text
-C <= max(A,B)          -> [C<=A] | [C<=B]
-min(A,B) <= C          -> [A<=C] | [B<=C]
-not(max(A,B)<=C)       -> [C+1<=A] | [C+1<=B]
-not(C<=min(A,B))       -> [A+1<=C] | [B+1<=C]
-max(A,B)=C             -> [A<=C,B<=C,C<=A]
-                           | [A<=C,B<=C,C<=B]
-min(A,B)=C             -> [C<=A,C<=B,A<=C]
-                           | [C<=A,C<=B,B<=C]
-```
-
-Equality admits the root on either side. Alternatives always follow first
-normalized child then second child, and rules follow the displayed order.
-With `M=A monus B` and nonconstant affine `C` having zero constant, it also
-adds the zero-first exact alternatives:
-
-```text
-C <= M       -> [C<=0] | [B+C<=A]
-M = C        -> [A<=B+C,C<=0] | [A<=B+C,B+C<=A]
-C = M        -> [A<=B+C,C<=0] | [A<=B+C,B+C<=A]
-```
-
-The common equality consequence `A<=B+C` remains the first rule in both
-choices. In particular, the zero alternative is not simplified to `A<=B`.
-Uniformly positive and identically zero opposite operands, supported extrema
-orientations, and all other predecessor leaves remain singleton alternatives
-with their exact predecessor rule order.
-
-Every new atom summarizes `A`, `B`, and `C` before emitting any branch. Each
-must fit the established compact-input, literal, sum, and positive-scale
-grammar. Exactly one normalized relation side may contain the admitted
-immediate binary root. Both-root, nested, embedded, mixed, effectively n-ary,
-unsupported, and expression-conditional shapes remain atomically ignored.
-No partial branch survives a failed summary.
-
-Raw branch admission now counts the lazy Cartesian product of complete
-formula-DNF branches and every per-atom alternative. The existing generated
-branch cap is applied to that complete product before complement cleanup,
-deduplication, or absorption. After admission, canonicalization still operates
-on sets of the original checked formula literals. Each retained set is then
-traversed in `Set` order and expanded into explicit clause-coverage choices.
-Ignored and contradictory results stay explicit. The implementation creates
-no replacement `LengthFormula`, no proof-rule set, no rule deduplication, and
-no `Eq`/`Ord` requirement for rules. Rule-cap and closure errors index the
-resulting expanded canonical stream.
-
-All downstream finite-union behavior is reused literally. Every expanded
-branch has the existing rule and closure-inspection caps; contradictory
-branches drop; all live branches must bound every source input; boxes form the
-same componentwise-maximal antichain; visits include box overlap; unique
-assignments are deduplicated; and the original precondition and postcondition
-replay once in global lexicographic order. Incomparable boxes are never
-replaced by their hull. Thus `[1,3]` and `[3,1]` still retain two boxes, 16
-visits, and 12 unique assignments.
-
-`LengthBooleanFiniteUnionLimits` and every scalar/product direct and SMT-LIB
-Boolean finite-union error type are reused without extension. Defaults remain
-256 generated branches, 64 rules per branch, 4096 closure inspections per
-branch, 256 retained boxes, and 262144 visits. Under the default rule ceiling,
-the 65th collected rule reports the existing bounded `limit+1` error. Input
-width, raw product, branch rule/closure work, missing coverage, box/value,
-visit, unique assignment, global replay, receipt, and query association retain
-the predecessor precedence.
-
-The new opaque receipts are
-`ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain`
-and
-`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingApplicableDomain`.
-Their six projections expose canonical inclusive boxes, box count, visits,
-unique assignments, applicable assignments, and basis. Their exact tags are:
-
-```text
-finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-precondition-domain-establishment/v1
-finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-precondition-domain-establishment/v1
-```
-
-These are fresh six-field nominal receipts, not wrappers around predecessor
-evidence. Every earlier entrance, receipt, error, tag, normalized problem/query
-byte sequence, and runtime identity remains literal. Atomic alternatives and
-operational limits enter neither query bytes nor fingerprints; wrappers emit
-no SMT command and consume no solver status. See the
-[atomic-branching applicable-domain report](reports/2026-08-15-atomic-branching-length-applicable-domain.md).
-
-#### Recursive piecewise-affine coverage policy
-
-The recursive piecewise-affine policy is the separately named cumulative
-successor which retains every atomic-branching result and recursively opens
-an extrema/monus relation only when that predecessor returns exactly one
-ignored alternative. Its problem entrances are
-`validateLengthProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain`
-and
-`validateLengthSpinePairProblemStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain`;
-the query-owned entrances use the same full suffix under the scalar and
-`SpinePair` SMT-LIB prefixes:
-
-```haskell
-scalarValidation =
-  validateLengthSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-    defaultLengthEvaluationLimits
-    defaultLengthInputBoxLimits
-    defaultLengthBooleanFiniteUnionLimits
-    scalarQuery
-
-pairValidation =
-  validateLengthSpinePairSMTLibQueryStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain
-    defaultLengthEvaluationLimits
-    defaultLengthInputBoxLimits
-    defaultLengthBooleanFiniteUnionLimits
-    pairQuery
-```
-
-This documents the experimental current tree, not a stability or
-backward-compatibility promise. Public names, tags, errors, and exact bytes may
-be revised before a stable release. Predecessor parity here is a current
-regression characterization only.
-
-Recursive expressions retain compact inputs, naturals, sums, and
-positive-literal scales, then add ordered exact cases for every nested minimum,
-maximum, or monus:
-
-```text
-min(L,R)  -> [L<=R; value L] | [R+1<=L; value R]
-max(L,R)  -> [R<=L; value L] | [L+1<=R; value R]
-L monus R -> [L<=R; value 0] | [R+1<=L; value L-R]
-```
-
-The first child owns ties. Descendant guards follow left-to-right expression
-order, the current selector guard follows them, and the final relation rule is
-last: `L<=R` for at-most, `R+1<=L` for strict at-most, and `L<=R` then `R<=L`
-for equality. Sums and relation operands form their Cartesian products in the
-same left-first order. Signed coefficients created by the positive monus case
-are private: each generated inequality moves negative terms across the
-relation before entering the unchanged positive-sided closure.
-
-The fallback therefore handles nested, embedded, both-root, mixed
-extrema/monus, and normalized effectively n-ary shapes. It is all-or-nothing
-per atom. An unsupported descendant leaves the predecessor ignored result;
-the recursive grammar does not descend through quotient, modulo, or
-`LengthIf`, and adds no conditional, result-reference, or general nonlinear
-authority. Any exact predecessor alternative, rule result, or contradiction
-is retained without recursive reinterpretation.
-
-Raw branch accounting remains the lazy Cartesian product of the complete
-formula DNF and all atomic alternatives, now including every recursive
-selector case. The existing generated-branch cap runs before complement,
-duplicate, absorption, guard-contradiction, rule, or box cleanup. After it
-succeeds, canonical original-literal sets are re-expanded in set order, so
-public rule and closure branch indices name the expanded canonical stream.
-Contradictory cases consume raw work, and bounded cap errors retain the
-existing `limit+1` observation.
-
-No limits or errors are added. Defaults remain 256 generated branches, 64
-rules per expanded branch, 4096 closure inspections per branch, 256 retained
-boxes, and 262144 assignment visits. Width, raw branches, branch rules,
-branch closure, global missing coverage, retained boxes, maximum values, raw
-visits, unique assignments, global lexicographic original-problem replay,
-receipt, and query association retain that exact precedence.
-
-The default 64/65 discriminator fits in 31 clauses: one embedded recursive
-maximum equality contributes three rules, two atomic maximum equalities
-contribute three each, and 28 root-maximum upper relations contribute two
-each. Its three binary choices make eight raw alternatives, so generated
-admission succeeds and the existing rule-cap error observes 65.
-
-The scalar fixture
-
-```text
-max(x,y) <= 3 monus min(x,y), x <= 3, y <= 3
-```
-
-retains boxes `[[2,3],[3,2]]`, two boxes, 24 visits, 15 unique assignments,
-and ten applicable assignments. The atomic predecessor instead retains
-`[[3,3]]`, one box, 16 visits, 16 unique assignments, and ten applicable
-assignments. Its eight raw alternatives fail a cap of seven with observed
-eight. For the product fixture
-
-```text
-u = min(x,y) + (x monus y)
-v = min(x,y) + (y monus x)
-max(u,v) <= 2, x <= 3, y <= 3
-```
-
-`u` contributes four cases, `v` four, and the outer maximum two. The 32 raw
-alternatives fail a generated-branch cap of 31 with observed 32 and pass a cap
-of 32. The recursive receipt retains `[[2,2]]`, one box and 9/9/9
-visit/unique/applicable counts; the predecessor retains `[[3,3]]`, one box
-and 16/16/9. Both fixtures retain `ProviderIndependentFiniteSpineModel`.
-
-The new opaque receipts are
-`ValidatedLengthStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain`
-and
-`ValidatedLengthSpinePairStrictRelationalPositiveAffineQuotientRootExtremaMonusBooleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomain`.
-Their six projections expose canonical inclusive boxes, box count, visits,
-unique assignments, applicable assignments, and basis. Their exact tags are:
-
-```text
-finite-list-spine-length/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-recursive-extrema-monus-piecewise-affine-branching-precondition-domain-establishment/v1
-finite-binary-product-spine-lengths/strict-relational-positive-affine-quotient-root-extrema-monus-boolean-dnf-finite-union-root-extrema-may-zero-monus-atomic-branching-recursive-extrema-monus-piecewise-affine-branching-precondition-domain-establishment/v1
-```
-
-These are fresh nominal six-field receipts, not wrappers or coercions. Every
-predecessor comparison in this checkpoint observes the current API, tag,
-error, normalized problem/query bytes, and runtime identity literally; it is
-not a compatibility commitment. Recursive cases, rules, limits, boxes, and
-replay sets enter neither SMT-LIB nor fingerprints; query wrappers emit no
-command and consume no solver status. The receipt is bounded authority only
-for exhaustive replay under the checked finite-spine model and retained
-provider-law basis. See the
-[recursive piecewise-affine applicable-domain report](reports/2026-08-15-recursive-piecewise-affine-length-applicable-domain.md).
+#### Current recursive piecewise-affine coverage policy
+
+`Semantic.Length.Evaluate` exposes only the complete current applicable-domain
+analysis. The direct scalar and product functions are
+`validateLengthProblemApplicableDomain` and
+`validateLengthSpinePairProblemApplicableDomain`; the opaque positive receipts
+are `ValidatedLengthApplicableDomain` and
+`ValidatedLengthSpinePairApplicableDomain`. Their nominal operational error
+types are `LengthApplicableDomainValidationError` and
+`LengthSpinePairApplicableDomainValidationError`.
+
+`Semantic.Length.SMTLib` adds the association-only wrappers
+`validateLengthSMTLibQueryApplicableDomain` and
+`validateLengthSpinePairSMTLibQueryApplicableDomain`, with
+`LengthSMTLibApplicableDomainValidationError` and
+`LengthSpinePairSMTLibApplicableDomainValidationError`. These wrappers emit no
+SMT-LIB command and inspect no solver result. They run the same direct
+analysis, then replay the resulting opaque evidence against the query-owned
+behavioral problem; association is the final possible failure.
+
+Internally, formula leaves retain the ordered semantic progression from
+direct and positive-affine consequences through relational, strict,
+positive-literal quotient, root extrema, root monus, Boolean finite-union,
+atomic branching, and recursive piecewise-affine fallback. Those stages are
+private implementation structure, not independently selectable contracts.
+The recursive stage runs atomic-first and opens an extrema/monus relation only
+after the atomic scanner returns its singleton ignored result.
+
+Minimum, maximum, and monus recursively use exact two-way cases with the
+first child owning ties. Child cases are left-first, descendant guards precede
+the current selector, and relation rules follow selectors. Signed affine
+cases transfer negative terms across the inequality before entering the
+unchanged natural-coefficient, synchronous, rule-once closure. Quotient,
+modulo, conditionals, result references, out-of-range variables, zero scales,
+and unsupported descendants are not admitted by the recursive grammar,
+although an earlier private atomic stage may already have handled the whole
+leaf exactly.
+
+Raw DNF by atomic-alternative counting precedes every Boolean and guard
+cleanup. Original literal sets are then canonicalized and re-expanded before
+per-branch rule and closure work. All live branches must be bounded. Their
+boxes are reduced to a lexicographically ordered componentwise-maximal
+antichain without a hull. Box visits count overlap; a bounded union
+deduplicates assignments; and the original checked problem is replayed in one
+global lexicographic order. Derived guards and rules never replace that replay.
+
+The default limits remain 256 raw branches, 64 rules per expanded branch,
+4,096 closure inspections per branch, 256 retained boxes, 262,144 box visits,
+eight inputs, and 65,536 unique assignments. Operational precedence is width,
+raw branches, canonical expansion, rules, closure, missing coverage, boxes,
+maximum values, visits, unique assignments, original replay, receipt, then
+query association.
+
+Each current receipt exposes inclusive maximum boxes, derived box count, raw
+assignment visits, unique assignments, applicable assignments, and the exact
+finite-spine/provider-law basis through the six short scalar or `SpinePair`
+projections. Constructors and embedded receipt-schema bytes remain private.
+The earlier public ladder and tag projections were deleted without migration:
+Djex is experimental and promises neither stability nor backward
+compatibility.
+
+For the full selector grammar, closure order, cap precedence, fixtures, and
+authority limits, see
+[Current recursive piecewise-affine applicable-domain validation](#current-recursive-piecewise-affine-applicable-domain-validation)
+and the dated
+[current applicable-domain surface reset report](reports/2026-08-15-current-length-applicable-domain-surface.md).
 
 #### Finite binary product spine domains
 

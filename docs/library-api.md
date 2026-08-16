@@ -1150,6 +1150,75 @@ resource-bounded and fail-closed:
    `ValidatedLengthCounterexample` or bounded-positive receipt, and even
    `unsat` never becomes proof or pruning authority.
 
+### Validate the current applicable domain
+
+There is one public applicable-domain algorithm: bounded recursive
+piecewise-affine finite-union analysis followed by exhaustive replay of the
+original checked problem. Call `validateLengthProblemApplicableDomain` for a
+scalar checked problem or `validateLengthSpinePairProblemApplicableDomain` for
+the nominal product problem:
+
+```haskell
+validation = validateLengthProblemApplicableDomain
+  defaultLengthEvaluationLimits
+  defaultLengthInputBoxLimits
+  defaultLengthBooleanFiniteUnionLimits
+  checkedProblem
+```
+
+`LengthBooleanFiniteUnionLimits` is the retained resource-cap bundle for the
+private branch pipeline; it does not select an older public algorithm.
+
+The result is either `LengthApplicableDomainValidationError` or the shared
+three-way `LengthApplicableDomainValidation`: conservative inapplicability,
+the first replayed counterexample, or established evidence carrying the
+opaque `ValidatedLengthApplicableDomain`. Product validation uses
+`LengthSpinePairApplicableDomainValidationError` and
+`ValidatedLengthSpinePairApplicableDomain`.
+
+For a sealed query, use `validateLengthSMTLibQueryApplicableDomain` or
+`validateLengthSpinePairSMTLibQueryApplicableDomain`. Their nominal errors are
+`LengthSMTLibApplicableDomainValidationError` and
+`LengthSpinePairSMTLibApplicableDomainValidationError`. These wrappers do not
+run or trust Z3: they perform direct validation and then check that the fresh
+evidence belongs to the query's exact behavioral problem.
+
+Both receipts expose the same six facts under short scalar or `SpinePair`
+projection names:
+
+| Scalar | Product |
+| --- | --- |
+| `validatedLengthApplicableDomainInclusiveMaximumBoxes` | `validatedLengthSpinePairApplicableDomainInclusiveMaximumBoxes` |
+| `validatedLengthApplicableDomainBoxCount` | `validatedLengthSpinePairApplicableDomainBoxCount` |
+| `validatedLengthApplicableDomainAssignmentVisitCount` | `validatedLengthSpinePairApplicableDomainAssignmentVisitCount` |
+| `validatedLengthApplicableDomainAssignmentCount` | `validatedLengthSpinePairApplicableDomainAssignmentCount` |
+| `validatedLengthApplicableDomainApplicableAssignmentCount` | `validatedLengthSpinePairApplicableDomainApplicableAssignmentCount` |
+| `validatedLengthApplicableDomainBasis` | `validatedLengthSpinePairApplicableDomainBasis` |
+
+They report canonical inclusive-maximum boxes, derived box count, raw box
+visits, unique assignments, applicable assignments, and the exact
+finite-spine/provider-law basis. Their constructors and embedded algorithm
+schema bytes are private.
+
+Internally the complete algorithm retains an ordered fallback from direct and
+positive-affine consequences through relational, strict, positive-literal
+quotient, extrema, monus, Boolean/atomic branching, and finally recursive
+piecewise-affine cases. Those stages are implementation details, not public
+policy choices. Minimum, maximum, and monus cases are ordered left-first with
+the first child owning ties. Raw DNF/case counting precedes cleanup; every live
+branch must establish all input maxima; incomparable boxes remain a canonical
+antichain rather than being widened to a hull; overlapping boxes count as
+visits but assignments are deduplicated; and one global lexicographic replay
+of the original precondition and postcondition is final authority.
+
+The older public validator/receipt/tag ladder was deleted without aliases or
+migration. Djex is experimental and promises neither stability nor backward
+compatibility, so current code should import only the short names above and
+must not persist or compare private receipt-schema bytes. See the
+[full applicable-domain semantics](semantic-foundations.md#current-recursive-piecewise-affine-applicable-domain-validation)
+and the dated
+[surface-reset report](reports/2026-08-15-current-length-applicable-domain-surface.md).
+
 A nominally distinct binary-product sibling
 (`sealLengthSpinePairContractInSession` and the `LengthSpinePair*` family)
 covers results that are one boxed pair of spines; its evidence cannot be

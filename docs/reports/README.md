@@ -3,10 +3,18 @@
 Each file below records one review, migration, or feature checkpoint at
 the time it landed. Read these as historical review notes: they explain
 how the repository reached its current shape, and earlier reports are
-routinely superseded by later ones. The current API and ownership rules
-live in the [architecture guide](../architecture.md), and the
-[README](../../README.md) links the reports that document each
-still-current invariant.
+routinely superseded by later ones. The current API and ownership rules live
+in the [library guide](../library-api.md), the
+[semantic foundations](../semantic-foundations.md), and the
+[architecture guide](../architecture.md); the [README](../../README.md) links
+the reports that document each still-current invariant.
+
+In particular, the applicable-domain reports from the directly bounded
+checkpoint through the recursive piecewise-affine checkpoint preserve the
+design history of what was once a public validator ladder. Those predecessor
+entrances, receipts, errors, and tag projections are no longer current API.
+The later current-surface reset report supersedes their public-surface claims
+without rewriting their dated algorithm history.
 
 Reports are listed oldest first.
 
@@ -97,6 +105,7 @@ Reports are listed oldest first.
 - 2026-08-15 — [Boolean finite-union Length applicable-domain validation](2026-08-15-boolean-finite-union-length-applicable-domain.md)
 - 2026-08-15 — [Atomic-branching Length applicable-domain validation](2026-08-15-atomic-branching-length-applicable-domain.md)
 - 2026-08-15 — [Recursive piecewise-affine Length applicable-domain validation](2026-08-15-recursive-piecewise-affine-length-applicable-domain.md)
+- 2026-08-15 — [Current Length applicable-domain surface reset](2026-08-15-current-length-applicable-domain-surface.md)
 - 2026-08-15 — [Shared live usable-work budget for Length/Z3](2026-08-15-shared-live-usable-work-budget.md)
 - 2026-08-15 — [Dynamically scoped live usable-work deadline](2026-08-15-dynamically-scoped-live-usable-work-deadline.md)
 - 2026-08-15 — [Descriptor-bound Z3 main-image launch](2026-08-15-descriptor-bound-z3-main-image-launch.md)

@@ -65,6 +65,10 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib
   , validateLengthSMTLibCounterexample
   , LengthSMTLibInputReplayError (..)
   , replayLengthSMTLibCounterexampleInputs
+  , LengthSMTLibCounterexampleBankRecordError (..)
+  , recordLengthSMTLibQueryCounterexampleInBank
+  , LengthSMTLibCounterexampleBankSampleReplayError (..)
+  , replayLengthSMTLibCounterexampleBankSample
   , probeLengthSMTLibCounterexampleAtOrigin
   , LengthSMTLibCounterexampleSimplificationError (..)
   , simplifyLengthSMTLibQueryCounterexample
@@ -88,6 +92,10 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib
   , validateLengthSpinePairSMTLibCounterexample
   , LengthSpinePairSMTLibInputReplayError (..)
   , replayLengthSpinePairSMTLibCounterexampleInputs
+  , LengthSpinePairSMTLibCounterexampleBankRecordError (..)
+  , recordLengthSpinePairSMTLibQueryCounterexampleInBank
+  , LengthSpinePairSMTLibCounterexampleBankSampleReplayError (..)
+  , replayLengthSpinePairSMTLibCounterexampleBankSample
   , probeLengthSpinePairSMTLibCounterexampleAtOrigin
   , LengthSpinePairSMTLibCounterexampleSimplificationError (..)
   , simplifyLengthSpinePairSMTLibQueryCounterexample

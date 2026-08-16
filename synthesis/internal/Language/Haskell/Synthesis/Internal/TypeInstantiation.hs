@@ -36,6 +36,8 @@ import Language.Haskell.Synthesis.Internal.Alpha
   , BinderSlotPolicy (PositionalBinderSlots)
   , alphaNormalizeTypeWith
   , eraseVacuousForalls
+  , ForallRewrite (ThroughForalls)
+  , rewriteTypeVariables
   )
 import Language.Haskell.Synthesis.Type
   ( Type (..)
@@ -319,44 +321,22 @@ zonk
   => Substitutions variable
   -> Type (InstantiationVariable variable)
   -> Type (InstantiationVariable variable)
-zonk substitutions source = case source of
-  TypeVariable (InstantiationBindable slot) -> case Map.lookup slot substitutions of
-    Nothing -> source
-    Just replacement -> zonk substitutions replacement
-  TypeVariable{} -> source
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (zonk substitutions function) (zonk substitutions argument)
-  FunctionType parameter result -> FunctionType
-    (zonk substitutions parameter) (zonk substitutions result)
-  TupleType boxity fields -> TupleType boxity $ map (zonk substitutions) fields
-  ForallType binders constraints body -> ForallType binders
-    (map (fmap $ zonk substitutions) constraints)
-    $ zonk substitutions body
+zonk substitutions = rewriteTypeVariables ThroughForalls $ \variable ->
+  case variable of
+    InstantiationBindable slot
+      | Just replacement <- Map.lookup slot substitutions ->
+          zonk substitutions replacement
+    _ -> TypeVariable variable
 
 substitute
-  :: Eq variable
-  => Natural
+  :: Natural
   -> Type (InstantiationVariable variable)
   -> Type (InstantiationVariable variable)
   -> Type (InstantiationVariable variable)
-substitute selected replacement source = case source of
-  TypeVariable (InstantiationBindable slot)
-    | slot == selected -> replacement
-    | otherwise -> source
-  TypeVariable{} -> source
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (substitute selected replacement function)
-    (substitute selected replacement argument)
-  FunctionType parameter result -> FunctionType
-    (substitute selected replacement parameter)
-    (substitute selected replacement result)
-  TupleType boxity fields -> TupleType boxity
-    $ map (substitute selected replacement) fields
-  ForallType binders constraints body -> ForallType binders
-    (map (fmap $ substitute selected replacement) constraints)
-    $ substitute selected replacement body
+substitute selected replacement =
+  rewriteTypeVariables ThroughForalls $ \variable -> case variable of
+    InstantiationBindable slot | slot == selected -> replacement
+    _ -> TypeVariable variable
 
 occursIn
   :: Eq variable

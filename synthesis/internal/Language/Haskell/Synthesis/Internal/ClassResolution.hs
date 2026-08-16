@@ -81,6 +81,10 @@ import Language.Haskell.Synthesis.Inventory
 import qualified Language.Haskell.Synthesis.Kind as Kind
 import Language.Haskell.Synthesis.KindInference
 import Language.Haskell.Synthesis.Name
+import Language.Haskell.Synthesis.Internal.Alpha
+  ( ForallRewrite (OpaqueForalls)
+  , rewriteTypeVariables
+  )
 import Language.Haskell.Synthesis.Type
 import Language.Haskell.Synthesis.TypedGenerated
   ( TypeStructure (observeTypeWithin)
@@ -1092,40 +1096,20 @@ substituteResolutionOverlap
   -> Type (ResolutionOverlapVariable variable)
   -> Type (ResolutionOverlapVariable variable)
   -> Type (ResolutionOverlapVariable variable)
-substituteResolutionOverlap variable replacement source = case source of
-  TypeVariable candidate
-    | candidate == variable -> replacement
-    | otherwise -> source
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (substituteResolutionOverlap variable replacement function)
-    (substituteResolutionOverlap variable replacement argument)
-  FunctionType parameter result -> FunctionType
-    (substituteResolutionOverlap variable replacement parameter)
-    (substituteResolutionOverlap variable replacement result)
-  TupleType boxity elements -> TupleType boxity
-    $ map (substituteResolutionOverlap variable replacement) elements
-  ForallType{} -> source
+substituteResolutionOverlap variable replacement =
+  rewriteTypeVariables OpaqueForalls $ \candidate ->
+    if candidate == variable then replacement else TypeVariable candidate
 
 zonkResolutionOverlap
   :: Ord variable
   => ResolutionOverlapSubstitutions variable
   -> Type (ResolutionOverlapVariable variable)
   -> Type (ResolutionOverlapVariable variable)
-zonkResolutionOverlap substitutions source = case source of
-  TypeVariable variable -> case Map.lookup variable substitutions of
-    Nothing -> source
-    Just replacement -> zonkResolutionOverlap substitutions replacement
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (zonkResolutionOverlap substitutions function)
-    (zonkResolutionOverlap substitutions argument)
-  FunctionType parameter result -> FunctionType
-    (zonkResolutionOverlap substitutions parameter)
-    (zonkResolutionOverlap substitutions result)
-  TupleType boxity elements -> TupleType boxity
-    $ map (zonkResolutionOverlap substitutions) elements
-  ForallType{} -> source
+zonkResolutionOverlap substitutions =
+  rewriteTypeVariables OpaqueForalls $ \variable ->
+    case Map.lookup variable substitutions of
+      Nothing -> TypeVariable variable
+      Just replacement -> zonkResolutionOverlap substitutions replacement
 
 rejectSuperclassCycles
   :: [ResolutionClass variable]
@@ -1230,18 +1214,9 @@ substituteFirstOrder
   => Map variable (Type variable)
   -> Type variable
   -> Type variable
-substituteFirstOrder substitutions source = case source of
-  TypeVariable variable -> Map.findWithDefault source variable substitutions
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (substituteFirstOrder substitutions function)
-    (substituteFirstOrder substitutions argument)
-  FunctionType parameter result -> FunctionType
-    (substituteFirstOrder substitutions parameter)
-    (substituteFirstOrder substitutions result)
-  TupleType boxity elements -> TupleType boxity
-    $ map (substituteFirstOrder substitutions) elements
-  ForallType{} -> source
+substituteFirstOrder substitutions =
+  rewriteTypeVariables OpaqueForalls $ \variable ->
+    Map.findWithDefault (TypeVariable variable) variable substitutions
 
 rejectExpandingPrerequisites
   :: Ord variable

@@ -13,6 +13,8 @@ module Language.Haskell.Synthesis.Internal.Alpha
   , alphaNormalizeTypeWith
   , alphaNormalizeConstraintWithOuter
   , eraseVacuousForalls
+  , ForallRewrite (..)
+  , rewriteTypeVariables
   ) where
 
 import Control.DeepSeq (NFData)
@@ -186,3 +188,37 @@ eraseVacuousForalls source = case source of
   ForallType binders constraints body -> ForallType binders
     (map (fmap eraseVacuousForalls) constraints)
     (eraseVacuousForalls body)
+
+-- | How 'rewriteTypeVariables' treats a forall it meets.
+data ForallRewrite
+  = OpaqueForalls
+    -- ^ Leave the whole forall untouched: the rewrite is a first-order
+    -- operation and quantified structure is not part of it.
+  | ThroughForalls
+    -- ^ Rewrite the forall's constraints and body while leaving its binders
+    -- alone.  Callers guarantee no capture, typically because the rewritten
+    -- variables and bound variables are distinct constructors of the variable
+    -- type.
+
+-- | Rewrite every variable occurrence of a type by @atVariable@, rebuilding
+-- applications, arrows and tuples around the results, and treating foralls
+-- according to the policy.  The first-order substitution and zonk
+-- operations of the solvers are all instances of this walk.
+rewriteTypeVariables
+  :: ForallRewrite
+  -> (variable -> Type variable)
+  -> Type variable
+  -> Type variable
+rewriteTypeVariables foralls atVariable = go
+ where
+  go source = case source of
+    TypeVariable variable -> atVariable variable
+    TypeConstructor{} -> source
+    TypeApplication function argument ->
+      TypeApplication (go function) (go argument)
+    FunctionType parameter result -> FunctionType (go parameter) (go result)
+    TupleType boxity fields -> TupleType boxity $ map go fields
+    ForallType binders constraints body -> case foralls of
+      OpaqueForalls -> source
+      ThroughForalls ->
+        ForallType binders (map (fmap go) constraints) (go body)

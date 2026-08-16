@@ -441,23 +441,46 @@ openLengthSMTLibProcess
   -> FilePath
   -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
 openLengthSMTLibProcess limits cancellation deadline profile workingDirectory =
+  openRetained limits cancellation deadline $ \z3Limits z3Cancellation
+      z3Deadline ->
+    Z3Process.openZ3SMTLibProcess z3Limits z3Cancellation z3Deadline
+      profile workingDirectory
+
+-- | Run one raw opener under the converted limits, cancellation, and
+-- deadline, and retain its outcome in Length vocabulary at the masked
+-- handoff.  Every Length opener below is this wrapper around one raw opener.
+openRetained
+  :: LengthSMTLibProcessLimits
+  -> LengthSMTLibProcessCancellation
+  -> LengthSMTLibProcessDeadline
+  -> (Z3Process.Z3SMTLibProcessLimits
+      -> Z3Process.Z3SMTLibProcessCancellation
+      -> Z3Process.Z3SMTLibProcessDeadline
+      -> IO (Either Z3Process.Z3SMTLibProcessError Z3Process.Z3SMTLibProcess))
+  -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
+openRetained limits cancellation deadline open =
   mask $ \restore -> do
-    opened <- restore $ Z3Process.openZ3SMTLibProcess
+    opened <- restore $ open
       (toZ3ProcessLimits limits)
       (toZ3ProcessCancellation cancellation)
       (toZ3ProcessDeadline deadline)
-      profile workingDirectory
-    case opened of
-      Left failure ->
-        let retained = fromZ3ProcessError failure
-        in retained `seq` pure (Left retained)
-      Right process ->
-        let retained = LengthSMTLibProcess process
-            -- Preserve the former strict cached-root demand at the successful
-            -- masked handoff. Only the outer FingerprintTag is demanded; its
-            -- ordered observation field list deliberately stays lazy.
-            transientFingerprint = processFingerprintField process
-        in retained `seq` transientFingerprint `seq` pure (Right retained)
+    retainOpenedProcess opened
+
+-- | Retain one raw opener outcome in Length vocabulary.  On success this
+-- preserves the former strict cached-root demand at the successful masked
+-- handoff: only the outer FingerprintTag is demanded; its ordered observation
+-- field list deliberately stays lazy.
+retainOpenedProcess
+  :: Either Z3Process.Z3SMTLibProcessError Z3Process.Z3SMTLibProcess
+  -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
+retainOpenedProcess opened = case opened of
+  Left failure ->
+    let retained = fromZ3ProcessError failure
+    in retained `seq` pure (Left retained)
+  Right process ->
+    let retained = LengthSMTLibProcess process
+        transientFingerprint = processFingerprintField process
+    in retained `seq` transientFingerprint `seq` pure (Right retained)
 
 openLengthSMTLibDescriptorBoundProcess
   :: LengthSMTLibProcessLimits
@@ -487,21 +510,10 @@ openLengthSMTLibProcessWithPreDescriptorExecHook
 openLengthSMTLibProcessWithPreDescriptorExecHook limits cancellation deadline
     profile workingDirectory
     (LengthSMTLibWorkingDirectoryDescriptor descriptor) hook =
-  mask $ \restore -> do
-    opened <- restore
-      $ Z3Process.openZ3SMTLibDescriptorBoundProcessWithPreExecHook
-          (toZ3ProcessLimits limits)
-          (toZ3ProcessCancellation cancellation)
-          (toZ3ProcessDeadline deadline)
-          profile workingDirectory descriptor hook
-    case opened of
-      Left failure ->
-        let retained = fromZ3ProcessError failure
-        in retained `seq` pure (Left retained)
-      Right process ->
-        let retained = LengthSMTLibProcess process
-            transientFingerprint = processFingerprintField process
-        in retained `seq` transientFingerprint `seq` pure (Right retained)
+  openRetained limits cancellation deadline $ \z3Limits z3Cancellation
+      z3Deadline ->
+    Z3Process.openZ3SMTLibDescriptorBoundProcessWithPreExecHook z3Limits
+      z3Cancellation z3Deadline profile workingDirectory descriptor hook
 
 lengthSMTLibProcessUsesDescriptorBoundExecutableLaunch
   :: LengthSMTLibProcess
@@ -527,14 +539,10 @@ openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
 openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
     limits cancellation deadline profile workingDirectory
     (LengthSMTLibWorkingDirectoryDescriptor descriptor) =
-  mask $ \restore -> do
-    opened <- restore
-      $ Z3Process.openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
-          (toZ3ProcessLimits limits)
-          (toZ3ProcessCancellation cancellation)
-          (toZ3ProcessDeadline deadline)
-          profile workingDirectory descriptor
-    retainOpenedProcess opened
+  openRetained limits cancellation deadline $ \z3Limits z3Cancellation
+      z3Deadline ->
+    Z3Process.openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
+      z3Limits z3Cancellation z3Deadline profile workingDirectory descriptor
 
 openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
   :: LengthSMTLibProcessLimits
@@ -551,16 +559,12 @@ openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
 openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
     limits cancellation deadline profile workingDirectory
     (LengthSMTLibWorkingDirectoryDescriptor descriptor) accessCheck hook =
-  mask $ \restore -> do
-    opened <- restore
-      $ Z3Process.openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
-          (toZ3ProcessLimits limits)
-          (toZ3ProcessCancellation cancellation)
-          (toZ3ProcessDeadline deadline)
-          profile workingDirectory descriptor
-          (fmap toZ3EffectiveIDExecutableAccessCheckResult . accessCheck)
-          hook
-    retainOpenedProcess opened
+  openRetained limits cancellation deadline $ \z3Limits z3Cancellation
+      z3Deadline ->
+    Z3Process.openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
+      z3Limits z3Cancellation z3Deadline profile workingDirectory descriptor
+      (fmap toZ3EffectiveIDExecutableAccessCheckResult . accessCheck)
+      hook
 
 lengthSMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch
   :: LengthSMTLibProcess
@@ -568,18 +572,6 @@ lengthSMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch
 lengthSMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch =
   Z3Process.z3SMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch
     . toZ3Process
-
-retainOpenedProcess
-  :: Either Z3Process.Z3SMTLibProcessError Z3Process.Z3SMTLibProcess
-  -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
-retainOpenedProcess opened = case opened of
-  Left failure ->
-    let retained = fromZ3ProcessError failure
-    in retained `seq` pure (Left retained)
-  Right process ->
-    let retained = LengthSMTLibProcess process
-        transientFingerprint = processFingerprintField process
-    in retained `seq` transientFingerprint `seq` pure (Right retained)
 
 toZ3EffectiveIDExecutableAccessCheckResult
   :: LengthSMTLibEffectiveIDExecutableAccessCheckResult
@@ -632,14 +624,10 @@ openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcess
 openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcess
     limits cancellation deadline profile workingDirectory
     (LengthSMTLibWorkingDirectoryDescriptor descriptor) =
-  mask $ \restore -> do
-    opened <- restore
-      $ Z3Process.openZ3SMTLibDescriptorBoundExecveCheckExecutableAccessProcess
-          (toZ3ProcessLimits limits)
-          (toZ3ProcessCancellation cancellation)
-          (toZ3ProcessDeadline deadline)
-          profile workingDirectory descriptor
-    retainOpenedProcess opened
+  openRetained limits cancellation deadline $ \z3Limits z3Cancellation
+      z3Deadline ->
+    Z3Process.openZ3SMTLibDescriptorBoundExecveCheckExecutableAccessProcess
+      z3Limits z3Cancellation z3Deadline profile workingDirectory descriptor
 
 openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithHooks
   :: LengthSMTLibProcessLimits
@@ -656,17 +644,13 @@ openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithHooks
     limits cancellation deadline profile workingDirectory
     (LengthSMTLibWorkingDirectoryDescriptor descriptor) accessCheck
     execveCheck hook =
-  mask $ \restore -> do
-    opened <- restore
-      $ Z3Process.openZ3SMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithHooks
-          (toZ3ProcessLimits limits)
-          (toZ3ProcessCancellation cancellation)
-          (toZ3ProcessDeadline deadline)
-          profile workingDirectory descriptor
-          (fmap toZ3EffectiveIDExecutableAccessCheckResult . accessCheck)
-          (fmap toZ3ExecveCheckResult . execveCheck)
-          hook
-    retainOpenedProcess opened
+  openRetained limits cancellation deadline $ \z3Limits z3Cancellation
+      z3Deadline ->
+    Z3Process.openZ3SMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithHooks
+      z3Limits z3Cancellation z3Deadline profile workingDirectory descriptor
+      (fmap toZ3EffectiveIDExecutableAccessCheckResult . accessCheck)
+      (fmap toZ3ExecveCheckResult . execveCheck)
+      hook
 
 openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithTestHooks
   :: LengthSMTLibProcessLimits
@@ -686,17 +670,13 @@ openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithTestHooks
     limits cancellation deadline profile workingDirectory
     (LengthSMTLibWorkingDirectoryDescriptor descriptor) accessCheck
     execveCheck creator sealer inspectionHook hook =
-  mask $ \restore -> do
-    opened <- restore
-      $ Z3Process.openZ3SMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithTestHooks
-          (toZ3ProcessLimits limits)
-          (toZ3ProcessCancellation cancellation)
-          (toZ3ProcessDeadline deadline)
-          profile workingDirectory descriptor
-          (fmap toZ3EffectiveIDExecutableAccessCheckResult . accessCheck)
-          (fmap toZ3ExecveCheckResult . execveCheck)
-          creator sealer inspectionHook hook
-    retainOpenedProcess opened
+  openRetained limits cancellation deadline $ \z3Limits z3Cancellation
+      z3Deadline ->
+    Z3Process.openZ3SMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithTestHooks
+      z3Limits z3Cancellation z3Deadline profile workingDirectory descriptor
+      (fmap toZ3EffectiveIDExecutableAccessCheckResult . accessCheck)
+      (fmap toZ3ExecveCheckResult . execveCheck)
+      creator sealer inspectionHook hook
 
 lengthSMTLibProcessUsesDescriptorBoundExecveCheckExecutableAccessLaunch
   :: LengthSMTLibProcess

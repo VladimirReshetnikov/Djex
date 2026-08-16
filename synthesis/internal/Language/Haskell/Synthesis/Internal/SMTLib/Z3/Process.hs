@@ -1864,32 +1864,23 @@ duplicateDescriptorHandle descriptor = mask_ $ do
   duplicated <- dup descriptor
   fdToHandle duplicated `onException` closeFd duplicated
 
-sealAndVerifyStagedImage
-  :: Fd
-  -> DescriptorMetadata
-  -> Natural
-  -> IO Bool
-sealAndVerifyStagedImage descriptor metadata count = do
-  sealed <- c_sealStagedExecutable
-    (fdToCInt descriptor)
-    (descriptorMetadataMode metadata)
-    (fromIntegral count)
-  if sealed /= 0
-    then pure False
-    else do
-      _ <- fdSeek descriptor AbsoluteSeek 0
-      observed <- getFdStatus descriptor
-      pure $ isRegularFile observed &&
-        toInteger (fileSize observed) == toInteger count
+-- | Which mode the sealed staged image must carry: the source's ordinary
+-- mode bits (the original launch) or the fixed owner read-execute mode 0500
+-- that the access-checked launches impose independently of source metadata.
+data SealedImageMode = SealedImageModeCopiedFromSource | SealedImageMode0500
 
-sealAndVerifyEffectiveIDAccessStagedImage
-  :: Fd
+-- | Run the native sealer, then rewind the image and verify in Haskell that
+-- it is a regular file of exactly the copied byte count and, for the
+-- fixed-mode launches, that its permission bits are exactly 0500.  A
+-- nonzero sealer status is a staging failure without further inspection.
+sealAndVerifyStagedImageWith
+  :: IO CInt
+  -> SealedImageMode
+  -> Fd
   -> Natural
   -> IO Bool
-sealAndVerifyEffectiveIDAccessStagedImage descriptor count = do
-  sealed <- c_sealEffectiveIDAccessStagedExecutable
-    (fdToCInt descriptor)
-    (fromIntegral count)
+sealAndVerifyStagedImageWith seal mode descriptor count = do
+  sealed <- seal
   if sealed /= 0
     then pure False
     else do
@@ -1897,23 +1888,41 @@ sealAndVerifyEffectiveIDAccessStagedImage descriptor count = do
       observed <- getFdStatus descriptor
       pure $ isRegularFile observed &&
         toInteger (fileSize observed) == toInteger count &&
-        toInteger (fileMode observed) .&. 0o7777 == 0o500
+        case mode of
+          SealedImageModeCopiedFromSource -> True
+          SealedImageMode0500 ->
+            toInteger (fileMode observed) .&. 0o7777 == 0o500
+
+sealAndVerifyStagedImage
+  :: Fd
+  -> DescriptorMetadata
+  -> Natural
+  -> IO Bool
+sealAndVerifyStagedImage descriptor metadata count =
+  sealAndVerifyStagedImageWith
+    (c_sealStagedExecutable (fdToCInt descriptor)
+      (descriptorMetadataMode metadata) (fromIntegral count))
+    SealedImageModeCopiedFromSource descriptor count
+
+sealAndVerifyEffectiveIDAccessStagedImage
+  :: Fd
+  -> Natural
+  -> IO Bool
+sealAndVerifyEffectiveIDAccessStagedImage descriptor count =
+  sealAndVerifyStagedImageWith
+    (c_sealEffectiveIDAccessStagedExecutable (fdToCInt descriptor)
+      (fromIntegral count))
+    SealedImageMode0500 descriptor count
 
 sealAndVerifyExecveCheckStagedImageWith
   :: (CInt -> Int64 -> IO CInt)
   -> Fd
   -> Natural
   -> IO Bool
-sealAndVerifyExecveCheckStagedImageWith sealer descriptor count = do
-  sealed <- sealer (fdToCInt descriptor) $ fromIntegral count
-  if sealed /= 0
-    then pure False
-    else do
-      _ <- fdSeek descriptor AbsoluteSeek 0
-      observed <- getFdStatus descriptor
-      pure $ isRegularFile observed &&
-        toInteger (fileSize observed) == toInteger count &&
-        toInteger (fileMode observed) .&. 0o7777 == 0o500
+sealAndVerifyExecveCheckStagedImageWith sealer descriptor count =
+  sealAndVerifyStagedImageWith
+    (sealer (fdToCInt descriptor) $ fromIntegral count)
+    SealedImageMode0500 descriptor count
 
 nativeDescriptorSpawn
   :: Z3SMTLibProcessLimits
@@ -3278,8 +3287,39 @@ executableSnapshotField profile requestedCwd canonicalCwd canonicalExecutable
   ]
 
 #ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
-descriptorBoundExecutableSnapshotField
-  :: Z3.Z3SMTLibExecutionProfile
+-- | The claims in which one descriptor-bound sealed-main-image snapshot
+-- schema differs from the other two.  All three descriptor-bound openers
+-- attest the same spine (requested executable path, opened-source policy,
+-- before/after-consistent source metadata, digest and byte count of the
+-- copied bytes, pin outcome, sealed-image policy, main-image spawn, argv,
+-- empty environment, working directory, and pipe/fd policy);
+-- 'descriptorBoundSnapshotField' emits that spine once and splices these
+-- schema-specific claims into their fixed positions, so the three schemas can
+-- be compared claim by claim.  Fields are listed in emission order.
+data DescriptorBoundSnapshotSchema = DescriptorBoundSnapshotSchema
+  { snapshotSchemaTag :: String
+    -- ^ Outer tag of the whole snapshot field.
+  , snapshotStrengthTag :: ByteString
+    -- ^ The exported launch strength tag the schema attests.
+  , snapshotExecuteBitClaim :: String
+    -- ^ Last opened-source-policy item: whether the source's execute mode
+    -- bit is the admission itself or only a shape prefilter that a kernel
+    -- access check later decides.
+  , snapshotSourceAccessClaims :: [FingerprintField]
+    -- ^ Access observations made on the opened source, in order, emitted
+    -- directly after the opened-source policy.
+  , snapshotSealedImageClaims :: [String]
+    -- ^ The sealed staged-image policy.
+  , snapshotStagedAccessClaims :: [FingerprintField]
+    -- ^ Access observations made on the sealed staged image, in order,
+    -- emitted directly after the sealed-image policy.
+  , snapshotSpawnRetryClaim :: String
+    -- ^ Second spawn-main-image item: what is never retried after a failed
+    -- spawn.
+  }
+
+type DescriptorBoundSnapshotFieldBuilder
+  = Z3.Z3SMTLibExecutionProfile
   -> FilePath
   -> FilePath
   -> DescriptorMetadata
@@ -3288,33 +3328,84 @@ descriptorBoundExecutableSnapshotField
   -> Natural
   -> Maybe ByteString
   -> FingerprintField
-descriptorBoundExecutableSnapshotField profile requestedCwd canonicalCwd
+
+descriptorBoundSnapshotField
+  :: DescriptorBoundSnapshotSchema
+  -> DescriptorBoundSnapshotFieldBuilder
+descriptorBoundSnapshotField schema profile requestedCwd canonicalCwd
     sourceMetadata workingDirectoryMetadata digest count expected =
-  FingerprintTag (ascii "descriptor-bound-sealed-main-image")
-    [ FingerprintBytes
-        $ BS.unpack z3SMTLibDescriptorBoundExecutableLaunchStrengthTag
-    , FingerprintTag (ascii "requested-executable-path")
-        [textField $ Z3.z3SMTLibExecutionExecutablePath profile]
-    , FingerprintTag (ascii "opened-source-policy") $ map
-        (FingerprintBytes . ascii)
-        [ "read-only"
-        , "close-on-exec"
-        , "no-follow-final-symlink"
-        , "nonblocking-open-before-regular-file-rejection"
-        , "regular-file"
-        , "at-least-one-execute-mode-bit"
-        ]
-    , FingerprintTag (ascii "source-before-after-consistent-fd-metadata")
-        [descriptorMetadataField sourceMetadata]
-    , FingerprintTag (ascii "sha256-of-bytes-copied-to-staged-image")
-        [FingerprintBytes $ BS.unpack digest]
-    , FingerprintNatural count
-    , case expected of
-        Nothing -> FingerprintTag (ascii "image-pin-absent") []
-        Just pinned -> FingerprintTag (ascii "image-pin-matched")
-          [FingerprintBytes $ BS.unpack pinned]
-    , FingerprintTag (ascii "sealed-staged-image-policy") $ map
-        (FingerprintBytes . ascii)
+  FingerprintTag (ascii $ snapshotSchemaTag schema) $ concat
+    [ [ FingerprintBytes $ BS.unpack $ snapshotStrengthTag schema
+      , FingerprintTag (ascii "requested-executable-path")
+          [textField $ Z3.z3SMTLibExecutionExecutablePath profile]
+      , FingerprintTag (ascii "opened-source-policy") $ map
+          (FingerprintBytes . ascii)
+          [ "read-only"
+          , "close-on-exec"
+          , "no-follow-final-symlink"
+          , "nonblocking-open-before-regular-file-rejection"
+          , "regular-file"
+          , snapshotExecuteBitClaim schema
+          ]
+      ]
+    , snapshotSourceAccessClaims schema
+    , [ FingerprintTag (ascii "source-before-after-consistent-fd-metadata")
+          [descriptorMetadataField sourceMetadata]
+      , FingerprintTag (ascii "sha256-of-bytes-copied-to-staged-image")
+          [FingerprintBytes $ BS.unpack digest]
+      , FingerprintNatural count
+      , case expected of
+          Nothing -> FingerprintTag (ascii "image-pin-absent") []
+          Just pinned -> FingerprintTag (ascii "image-pin-matched")
+            [FingerprintBytes $ BS.unpack pinned]
+      , FingerprintTag (ascii "sealed-staged-image-policy") $ map
+          (FingerprintBytes . ascii) $ snapshotSealedImageClaims schema
+      ]
+    , snapshotStagedAccessClaims schema
+    , [ FingerprintTag (ascii "spawn-main-image") $ map
+          (FingerprintBytes . ascii)
+          [ "execveat-at-empty-path-sealed-staged-descriptor"
+          , snapshotSpawnRetryClaim schema
+          , "main-image-bytes-only"
+          , "loader-libraries-interpreter-and-solver-unbound"
+          ]
+      , FingerprintTag (ascii "spawn-argv-zero-exact-configured-path")
+          [textField $ Z3.z3SMTLibExecutionExecutablePath profile]
+      , FingerprintTag (ascii "spawn-arguments")
+          [FingerprintSequence $ map textField
+            $ Z3.z3SMTLibExecutionConfiguredArgumentVector profile]
+      , FingerprintTag (ascii "spawn-empty-environment") []
+      , FingerprintTag (ascii "requested-working-directory")
+          [textField requestedCwd]
+      , FingerprintTag (ascii "spawn-working-directory-fchdir-opened-fd")
+          [ textField canonicalCwd
+          , descriptorMetadataField workingDirectoryMetadata
+          ]
+      , FingerprintTag (ascii "spawn-pipe-and-fd-policy") $ map
+          (FingerprintBytes . ascii)
+          [ "three-close-on-exec-pipes"
+          , "close-on-exec-error-handshake-pipe"
+          , "close-every-unrelated-child-descriptor-before-exec"
+          , "close-range-required-fail-closed-when-unavailable"
+          , "process-package-interactive-process-lock"
+          , "block-signals-across-fork-restore-parent-and-child-before-exec"
+          , "child-process-group-pid"
+          , "no-delegated-ctlc"
+          ]
+      ]
+    ]
+
+-- | The original descriptor-bound schema: the execute bit is the admission,
+-- no kernel access check is made, and the sealed image copies the source's
+-- ordinary mode bits.
+descriptorBoundExecutableSnapshotField :: DescriptorBoundSnapshotFieldBuilder
+descriptorBoundExecutableSnapshotField =
+  descriptorBoundSnapshotField DescriptorBoundSnapshotSchema
+    { snapshotSchemaTag = "descriptor-bound-sealed-main-image"
+    , snapshotStrengthTag = z3SMTLibDescriptorBoundExecutableLaunchStrengthTag
+    , snapshotExecuteBitClaim = "at-least-one-execute-mode-bit"
+    , snapshotSourceAccessClaims = []
+    , snapshotSealedImageClaims =
         [ "linux-memfd-create-close-on-exec-allow-sealing"
         , "ordinary-rwx-mode-bits-copied"
         , "setuid-setgid-and-file-capabilities-not-carried"
@@ -3322,89 +3413,24 @@ descriptorBoundExecutableSnapshotField profile requestedCwd canonicalCwd
         , "regular-file-and-exact-size-verified"
         , "rewound-before-exec"
         ]
-    , FingerprintTag (ascii "spawn-main-image") $ map
-        (FingerprintBytes . ascii)
-        [ "execveat-at-empty-path-sealed-staged-descriptor"
-        , "no-pathname-exec-retry"
-        , "main-image-bytes-only"
-        , "loader-libraries-interpreter-and-solver-unbound"
-        ]
-    , FingerprintTag (ascii "spawn-argv-zero-exact-configured-path")
-        [textField $ Z3.z3SMTLibExecutionExecutablePath profile]
-    , FingerprintTag (ascii "spawn-arguments")
-        [FingerprintSequence $ map textField
-          $ Z3.z3SMTLibExecutionConfiguredArgumentVector profile]
-    , FingerprintTag (ascii "spawn-empty-environment") []
-    , FingerprintTag (ascii "requested-working-directory")
-        [textField requestedCwd]
-    , FingerprintTag (ascii "spawn-working-directory-fchdir-opened-fd")
-        [ textField canonicalCwd
-        , descriptorMetadataField workingDirectoryMetadata
-        ]
-    , FingerprintTag (ascii "spawn-pipe-and-fd-policy") $ map
-        (FingerprintBytes . ascii)
-        [ "three-close-on-exec-pipes"
-        , "close-on-exec-error-handshake-pipe"
-        , "close-every-unrelated-child-descriptor-before-exec"
-        , "close-range-required-fail-closed-when-unavailable"
-        , "process-package-interactive-process-lock"
-        , "block-signals-across-fork-restore-parent-and-child-before-exec"
-        , "child-process-group-pid"
-        , "no-delegated-ctlc"
-        ]
-    ]
+    , snapshotStagedAccessClaims = []
+    , snapshotSpawnRetryClaim = "no-pathname-exec-retry"
+    }
 
+-- | The effective-ID schema adds the two-point @faccessat2@ source
+-- observation and seals the image to the fixed owner read-execute mode.
 descriptorBoundEffectiveIDExecutableAccessSnapshotField
-  :: Z3.Z3SMTLibExecutionProfile
-  -> FilePath
-  -> FilePath
-  -> DescriptorMetadata
-  -> DescriptorMetadata
-  -> ByteString
-  -> Natural
-  -> Maybe ByteString
-  -> FingerprintField
-descriptorBoundEffectiveIDExecutableAccessSnapshotField
-    profile requestedCwd canonicalCwd sourceMetadata
-    workingDirectoryMetadata digest count expected =
-  FingerprintTag
-    (ascii "descriptor-bound-effective-id-executable-access-sealed-main-image")
-    [ FingerprintBytes $ BS.unpack
+  :: DescriptorBoundSnapshotFieldBuilder
+descriptorBoundEffectiveIDExecutableAccessSnapshotField =
+  descriptorBoundSnapshotField DescriptorBoundSnapshotSchema
+    { snapshotSchemaTag =
+        "descriptor-bound-effective-id-executable-access-sealed-main-image"
+    , snapshotStrengthTag =
         z3SMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchStrengthTag
-    , FingerprintTag (ascii "requested-executable-path")
-        [textField $ Z3.z3SMTLibExecutionExecutablePath profile]
-    , FingerprintTag (ascii "opened-source-policy") $ map
-        (FingerprintBytes . ascii)
-        [ "read-only"
-        , "close-on-exec"
-        , "no-follow-final-symlink"
-        , "nonblocking-open-before-regular-file-rejection"
-        , "regular-file"
-        , "at-least-one-execute-mode-bit-shape-prefilter-not-authority"
-        ]
-    , FingerprintTag (ascii "source-effective-id-executable-access") $ map
-        (FingerprintBytes . ascii)
-        [ "raw-faccessat2-on-opened-source-descriptor"
-        , "x-ok"
-        , "at-empty-path"
-        , "at-eaccess"
-        , "before-copy"
-        , "after-seal-and-test-hook-before-child-allocation"
-        , "effective-filesystem-credentials-point-in-time-only"
-        , "vfs-dac-posix-acl-source-mount-noexec-and-inode-permission-hooks"
-        , "not-full-exec-bprm-lsm-ima-binfmt-interpreter-or-loader-authority"
-        ]
-    , FingerprintTag (ascii "source-before-after-consistent-fd-metadata")
-        [descriptorMetadataField sourceMetadata]
-    , FingerprintTag (ascii "sha256-of-bytes-copied-to-staged-image")
-        [FingerprintBytes $ BS.unpack digest]
-    , FingerprintNatural count
-    , case expected of
-        Nothing -> FingerprintTag (ascii "image-pin-absent") []
-        Just pinned -> FingerprintTag (ascii "image-pin-matched")
-          [FingerprintBytes $ BS.unpack pinned]
-    , FingerprintTag (ascii "sealed-staged-image-policy") $ map
-        (FingerprintBytes . ascii)
+    , snapshotExecuteBitClaim =
+        "at-least-one-execute-mode-bit-shape-prefilter-not-authority"
+    , snapshotSourceAccessClaims = [sourceEffectiveIDExecutableAccessClaim]
+    , snapshotSealedImageClaims =
         [ "linux-memfd-create-close-on-exec-allow-sealing"
         , "fixed-owner-read-execute-mode-0500-not-source-metadata-authority"
         , "setuid-setgid-file-capabilities-acls-and-security-labels-not-carried"
@@ -3412,99 +3438,38 @@ descriptorBoundEffectiveIDExecutableAccessSnapshotField
         , "regular-file-exact-size-and-mode-0500-verified"
         , "rewound-before-exec"
         ]
-    , FingerprintTag (ascii "spawn-main-image") $ map
-        (FingerprintBytes . ascii)
-        [ "execveat-at-empty-path-sealed-staged-descriptor"
-        , "no-pathname-or-launch-strategy-retry"
-        , "main-image-bytes-only"
-        , "loader-libraries-interpreter-and-solver-unbound"
-        ]
-    , FingerprintTag (ascii "spawn-argv-zero-exact-configured-path")
-        [textField $ Z3.z3SMTLibExecutionExecutablePath profile]
-    , FingerprintTag (ascii "spawn-arguments")
-        [FingerprintSequence $ map textField
-          $ Z3.z3SMTLibExecutionConfiguredArgumentVector profile]
-    , FingerprintTag (ascii "spawn-empty-environment") []
-    , FingerprintTag (ascii "requested-working-directory")
-        [textField requestedCwd]
-    , FingerprintTag (ascii "spawn-working-directory-fchdir-opened-fd")
-        [ textField canonicalCwd
-        , descriptorMetadataField workingDirectoryMetadata
-        ]
-    , FingerprintTag (ascii "spawn-pipe-and-fd-policy") $ map
-        (FingerprintBytes . ascii)
-        [ "three-close-on-exec-pipes"
-        , "close-on-exec-error-handshake-pipe"
-        , "close-every-unrelated-child-descriptor-before-exec"
-        , "close-range-required-fail-closed-when-unavailable"
-        , "process-package-interactive-process-lock"
-        , "block-signals-across-fork-restore-parent-and-child-before-exec"
-        , "child-process-group-pid"
-        , "no-delegated-ctlc"
-        ]
-    ]
+    , snapshotStagedAccessClaims = []
+    , snapshotSpawnRetryClaim = "no-pathname-or-launch-strategy-retry"
+    }
 
+-- | The @AT_EXECVE_CHECK@ schema adds the source exec check to the
+-- effective-ID observation, stages into an @MFD_EXEC@ image whose seal set
+-- also forbids future writes and unsealing of exec, and checks the sealed
+-- image once more before spawn.
 descriptorBoundExecveCheckExecutableAccessSnapshotField
-  :: Z3.Z3SMTLibExecutionProfile
-  -> FilePath
-  -> FilePath
-  -> DescriptorMetadata
-  -> DescriptorMetadata
-  -> ByteString
-  -> Natural
-  -> Maybe ByteString
-  -> FingerprintField
-descriptorBoundExecveCheckExecutableAccessSnapshotField
-    profile requestedCwd canonicalCwd sourceMetadata
-    workingDirectoryMetadata digest count expected =
-  FingerprintTag
-    (ascii "descriptor-bound-execve-check-executable-access-sealed-main-image")
-    [ FingerprintBytes $ BS.unpack
+  :: DescriptorBoundSnapshotFieldBuilder
+descriptorBoundExecveCheckExecutableAccessSnapshotField =
+  descriptorBoundSnapshotField DescriptorBoundSnapshotSchema
+    { snapshotSchemaTag =
+        "descriptor-bound-execve-check-executable-access-sealed-main-image"
+    , snapshotStrengthTag =
         z3SMTLibDescriptorBoundExecveCheckExecutableAccessLaunchStrengthTag
-    , FingerprintTag (ascii "requested-executable-path")
-        [textField $ Z3.z3SMTLibExecutionExecutablePath profile]
-    , FingerprintTag (ascii "opened-source-policy") $ map
-        (FingerprintBytes . ascii)
-        [ "read-only"
-        , "close-on-exec"
-        , "no-follow-final-symlink"
-        , "nonblocking-open-before-regular-file-rejection"
-        , "regular-file"
-        , "at-least-one-execute-mode-bit-shape-prefilter-not-authority"
+    , snapshotExecuteBitClaim =
+        "at-least-one-execute-mode-bit-shape-prefilter-not-authority"
+    , snapshotSourceAccessClaims =
+        [ sourceEffectiveIDExecutableAccessClaim
+        , FingerprintTag (ascii "source-execve-check-executable-access") $ map
+            (FingerprintBytes . ascii)
+            [ "raw-execveat-on-opened-source-descriptor"
+            , "at-empty-path"
+            , "at-execve-check"
+            , "before-copy"
+            , "after-hook-before-child-allocation"
+            , "point-in-time-only"
+            , "file-format-and-interpreter-dependencies-ignored"
+            ]
         ]
-    , FingerprintTag (ascii "source-effective-id-executable-access") $ map
-        (FingerprintBytes . ascii)
-        [ "raw-faccessat2-on-opened-source-descriptor"
-        , "x-ok"
-        , "at-empty-path"
-        , "at-eaccess"
-        , "before-copy"
-        , "after-seal-and-test-hook-before-child-allocation"
-        , "effective-filesystem-credentials-point-in-time-only"
-        , "vfs-dac-posix-acl-source-mount-noexec-and-inode-permission-hooks"
-        , "not-full-exec-bprm-lsm-ima-binfmt-interpreter-or-loader-authority"
-        ]
-    , FingerprintTag (ascii "source-execve-check-executable-access") $ map
-        (FingerprintBytes . ascii)
-        [ "raw-execveat-on-opened-source-descriptor"
-        , "at-empty-path"
-        , "at-execve-check"
-        , "before-copy"
-        , "after-hook-before-child-allocation"
-        , "point-in-time-only"
-        , "file-format-and-interpreter-dependencies-ignored"
-        ]
-    , FingerprintTag (ascii "source-before-after-consistent-fd-metadata")
-        [descriptorMetadataField sourceMetadata]
-    , FingerprintTag (ascii "sha256-of-bytes-copied-to-staged-image")
-        [FingerprintBytes $ BS.unpack digest]
-    , FingerprintNatural count
-    , case expected of
-        Nothing -> FingerprintTag (ascii "image-pin-absent") []
-        Just pinned -> FingerprintTag (ascii "image-pin-matched")
-          [FingerprintBytes $ BS.unpack pinned]
-    , FingerprintTag (ascii "sealed-staged-image-policy") $ map
-        (FingerprintBytes . ascii)
+    , snapshotSealedImageClaims =
         [ "linux-memfd-create-close-on-exec-allow-sealing-mfd-exec"
         , "mfd-exec-fixed-owner-read-execute-mode-0500-not-source-metadata-authority"
         , "setuid-setgid-file-capabilities-acls-and-security-labels-not-carried"
@@ -3512,46 +3477,36 @@ descriptorBoundExecveCheckExecutableAccessSnapshotField
         , "regular-file-exact-size-and-mode-0500-verified"
         , "rewound-before-exec"
         ]
-    , FingerprintTag
-        (ascii "sealed-staged-image-execve-check-executable-access") $ map
-        (FingerprintBytes . ascii)
-        [ "raw-execveat-on-sealed-staged-descriptor"
-        , "at-empty-path"
-        , "at-execve-check"
-        , "after-final-source-check-before-child-allocation"
-        , "point-in-time-only"
-        , "file-format-and-interpreter-dependencies-ignored"
+    , snapshotStagedAccessClaims =
+        [ FingerprintTag
+            (ascii "sealed-staged-image-execve-check-executable-access") $ map
+            (FingerprintBytes . ascii)
+            [ "raw-execveat-on-sealed-staged-descriptor"
+            , "at-empty-path"
+            , "at-execve-check"
+            , "after-final-source-check-before-child-allocation"
+            , "point-in-time-only"
+            , "file-format-and-interpreter-dependencies-ignored"
+            ]
         ]
-    , FingerprintTag (ascii "spawn-main-image") $ map
-        (FingerprintBytes . ascii)
-        [ "execveat-at-empty-path-sealed-staged-descriptor"
-        , "no-pathname-or-launch-strategy-retry"
-        , "main-image-bytes-only"
-        , "loader-libraries-interpreter-and-solver-unbound"
-        ]
-    , FingerprintTag (ascii "spawn-argv-zero-exact-configured-path")
-        [textField $ Z3.z3SMTLibExecutionExecutablePath profile]
-    , FingerprintTag (ascii "spawn-arguments")
-        [FingerprintSequence $ map textField
-          $ Z3.z3SMTLibExecutionConfiguredArgumentVector profile]
-    , FingerprintTag (ascii "spawn-empty-environment") []
-    , FingerprintTag (ascii "requested-working-directory")
-        [textField requestedCwd]
-    , FingerprintTag (ascii "spawn-working-directory-fchdir-opened-fd")
-        [ textField canonicalCwd
-        , descriptorMetadataField workingDirectoryMetadata
-        ]
-    , FingerprintTag (ascii "spawn-pipe-and-fd-policy") $ map
-        (FingerprintBytes . ascii)
-        [ "three-close-on-exec-pipes"
-        , "close-on-exec-error-handshake-pipe"
-        , "close-every-unrelated-child-descriptor-before-exec"
-        , "close-range-required-fail-closed-when-unavailable"
-        , "process-package-interactive-process-lock"
-        , "block-signals-across-fork-restore-parent-and-child-before-exec"
-        , "child-process-group-pid"
-        , "no-delegated-ctlc"
-        ]
+    , snapshotSpawnRetryClaim = "no-pathname-or-launch-strategy-retry"
+    }
+
+-- | The two-point effective-ID VFS execute-access observation both
+-- access-checked schemas make on the opened source.
+sourceEffectiveIDExecutableAccessClaim :: FingerprintField
+sourceEffectiveIDExecutableAccessClaim =
+  FingerprintTag (ascii "source-effective-id-executable-access") $ map
+    (FingerprintBytes . ascii)
+    [ "raw-faccessat2-on-opened-source-descriptor"
+    , "x-ok"
+    , "at-empty-path"
+    , "at-eaccess"
+    , "before-copy"
+    , "after-seal-and-test-hook-before-child-allocation"
+    , "effective-filesystem-credentials-point-in-time-only"
+    , "vfs-dac-posix-acl-source-mount-noexec-and-inode-permission-hooks"
+    , "not-full-exec-bprm-lsm-ima-binfmt-interpreter-or-loader-authority"
     ]
 
 descriptorMetadataField :: DescriptorMetadata -> FingerprintField

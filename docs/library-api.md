@@ -1135,10 +1135,13 @@ resource-bounded and fail-closed:
    `CheckedLengthContract`.
 3. `sealLengthTypedCandidateProblem` associates one engine-owned
    `TypedCandidate` with that contract, symbolically interpreting the
-   candidate's sealed term graph into a `CheckedLengthProblem`.
+   candidate's sealed term graph into a `CheckedLengthProblem`. At this exact
+   session/contract/target boundary it also seals a candidate-independent
+   counterexample-bank scope.
 4. `sealLengthSMTLibQuery` renders the problem into a bounded canonical
-   `QF_LIA` query. Nothing has executed yet; the query is pure bytes plus a
-   complete fingerprint.
+   `QF_LIA` query. Nothing has executed yet; the opaque query retains the exact
+   problem, bounded pure bytes, and a complete fingerprint, and it projects
+   the problem's unchanged bank scope.
 5. `withLengthSMTLibLiveSession` opens the library's only external-process
    boundary: one capability-probed Z3 worker, lent through a rank-N scope,
    serving at most 64 scalar-plus-product query transactions in total.
@@ -1149,6 +1152,87 @@ resource-bounded and fail-closed:
    re-evaluate candidate behavior independently; only that replay can mint a
    `ValidatedLengthCounterexample` or bounded-positive receipt, and even
    `unsat` never becomes proof or pruning authority.
+
+### Prepare a bounded replay-input bank
+
+`Language.Haskell.Synthesis.Semantic.Length.CounterexampleBank`, re-exported
+by `Language.Haskell.Djex`, provides nominal scalar and binary-product storage
+for input vectors that a later integration may want to replay. This checkpoint
+does not automatically populate, persist, or consume a bank. In particular,
+the live Z3 facade and the current Leant integration do not consult it.
+
+Project a scalar scope with
+`checkedLengthProblemCounterexampleBankScope`, or from a sealed query with
+`lengthSMTLibQueryCounterexampleBankScope`. The product names are
+`checkedLengthSpinePairProblemCounterexampleBankScope` and
+`lengthSpinePairSMTLibQueryCounterexampleBankScope`. A scope contains only
+candidate-independent facts:
+
+- the complete checked session inventory and admitted provider-law basis;
+- the solver-neutral interpretation/model policy;
+- the exact revalidated contract; and
+- the exact normalized target.
+
+It deliberately excludes the candidate graph, interpreted result,
+counterexample condition, candidate-used provider subset, query and execution
+identity, preferences, solver status, receipts, and verdicts. Scalar and
+product scopes and banks are nominally separate.
+
+Create an empty scalar bank with `emptyLengthCounterexampleBank` and the
+following default limits; use `emptyLengthSpinePairCounterexampleBank` for the
+product domain:
+
+| Resource | Scalar and product default |
+| --- | ---: |
+| Retained entries | 4 |
+| Inputs per sample | 8 |
+| Bits per natural input | 256 |
+| Aggregate retained modeled bytes | 4,096 |
+| Recorded replay attempts | 256 |
+
+`mkLengthCounterexampleBankLimits` and its `SpinePair` sibling construct
+custom limits. They reject negative entry, width, and bit limits in that
+order, then reject `maxBound` width or bit limits because their first excess
+would be unobservable. Byte and attempt caps are `Natural` values.
+
+`insertLengthCounterexampleBankSample` accepts one of the three opaque origin
+values—live-model replay, solver-independent replay, or simplification
+replay—and a source-ordered `[Natural]`. Those origins are caller-supplied
+labels, not provenance receipts. The scalar constants are
+`lengthCounterexampleBankLiveModelReplayOrigin`,
+`lengthCounterexampleBankSolverIndependentReplayOrigin`, and
+`lengthCounterexampleBankSimplificationReplayOrigin`; their product names add
+`SpinePair` after the initial `length`. Insertion checks zero capacity before
+demanding the origin or vector, observes only the bounded first-excess width,
+checks element bit widths left to right, then applies the modeled byte cap.
+Successful retention is strict. Samples are newest first and deduplicate by
+input vector alone: reinserting a vector replaces its origin and promotes it
+to the front. Entry or aggregate-byte pressure evicts a deterministic oldest
+tail rather than skipping entries inside it.
+
+The six scalar statistics projections (and their `SpinePair` counterparts)
+report retained entries, retained modeled bytes, successful records, duplicate
+promotions, tail evictions, and replay attempts. Recording an attempt is an
+explicit immutable update through
+`recordLengthCounterexampleBankReplayAttempt`; insertion does not increment
+that counter.
+
+Finally, `lengthCounterexampleBankMatchesScope` and its product sibling compare
+only the complete scope fingerprint. They ignore limits, entries, origins, and
+statistics, and they do not inspect or replay a sample. A match authorizes at
+most trying fresh replay against the current checked problem. Bank insertion
+does not even assert semantic input arity, and neither a stored vector nor a
+match is evidence. Project a sample with
+`lengthCounterexampleBankSampleInputs` (or its `SpinePair` counterpart) and
+call the existing exact problem/query replay entrance; only a newly returned
+receipt has its ordinary narrow authority.
+
+Djex is experimental and promises neither stability nor backward
+compatibility. Treat these current nominal types and short names as the whole
+bank contract; do not infer a persistence format from any exposed `Show`
+rendering or from the modeled byte statistic. The exact foundation is
+recorded in the
+[dated counterexample-bank report](reports/2026-08-16-nominal-length-counterexample-bank-foundation.md).
 
 ### Validate the current applicable domain
 

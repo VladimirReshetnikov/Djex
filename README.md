@@ -191,6 +191,14 @@ incomparable boxes; see the
 All native descriptor launch profiles transfer an acquired child through one
 masked, rollback-protected owner boundary, detailed in the
 [descriptor spawn resource-ownership report](docs/reports/2026-08-15-descriptor-spawn-resource-ownership.md).
+Checked scalar and binary-product Length problems now also retain nominal,
+candidate-independent counterexample-bank scopes, and pure queries project
+those same scopes. The accompanying bounded newest-first banks store only
+natural input vectors and coarse origins: a scope match authorizes attempting
+fresh replay, never a verdict, receipt, proof, or pruning decision. This is a
+storage and association foundation only; it does not yet drive live replay,
+candidate scheduling, persistent state, or Leant behavior. See the
+[nominal Length counterexample-bank report](docs/reports/2026-08-16-nominal-length-counterexample-bank-foundation.md).
 
 
 ## Building

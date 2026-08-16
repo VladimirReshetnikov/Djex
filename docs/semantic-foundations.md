@@ -53,6 +53,7 @@ was reached.
   - [Exact-case and unified interpretation policies](#exact-case-and-unified-interpretation-policies)
   - [Case semantics and fail-closed boundaries](#case-semantics-and-fail-closed-boundaries)
   - [Checked problems and candidate keys](#checked-problems-and-candidate-keys)
+  - [Candidate-independent counterexample-bank scopes and bounded stores](#candidate-independent-counterexample-bank-scopes-and-bounded-stores)
   - [Spine exposure and bounded concrete evaluation](#spine-exposure-and-bounded-concrete-evaluation)
   - [Offline SMT-LIB queries, replay, and origin probes](#offline-smt-lib-queries-replay-and-origin-probes)
   - [Query-owned bounded counterexample simplification](#query-owned-bounded-counterexample-simplification)
@@ -86,6 +87,7 @@ was reached.
   - [Associated-certificate carriers](#associated-certificate-carriers)
   - [Conditional provider summaries and ground discharge](#conditional-provider-summaries-and-ground-discharge)
   - [Retention identities and schema versions](#retention-identities-and-schema-versions)
+  - [Semantic.Length.CounterexampleBank](#semanticlengthcounterexamplebank)
   - [Semantic.Length.SMTLib](#semanticlengthsmtlib)
     - [The canonical query and raw-input replay](#the-canonical-query-and-raw-input-replay)
     - [The all-zero origin probe](#the-all-zero-origin-probe)
@@ -590,16 +592,17 @@ independent replay recovers the candidate result.
 ### Checked problems and candidate keys
 
 A successful `CheckedLengthProblem` carries its compact observed-spine input
-arity,
-normalized replay formulas, interpreted candidate, and one generic
-`BehavioralProblem` envelope. That envelope is the sole field of the checked
-problem which retains the inventory, concrete encoding, and complete problem
-fingerprints; it also binds the candidate fingerprint retained by the
-interpreted candidate receipt. The concrete encoding identifies the re-sealed
-contract, normalized result and counterexample condition, interpreter policy,
-and exactly the provider laws actually used. Its ordinary legacy/all-observed,
-mixed-role, and exact-case versions remain 1/2/3; a conditional-capable session
-uses 4/5/6. The candidate key wraps the fresh
+arity, normalized replay formulas, interpreted candidate, one generic
+`BehavioralProblem` envelope, and one candidate-independent counterexample-bank
+scope. The envelope remains the sole observation/evidence association owner:
+it retains the inventory, concrete encoding, candidate, and complete problem
+fingerprints. The separate bank scope retains only a collision-free projection
+of the complete candidate-independent session, contract, and target basis.
+The concrete encoding identifies the re-sealed contract, normalized result and
+counterexample condition, interpreter policy, and exactly the provider laws
+actually used. Its ordinary legacy/all-observed, mixed-role, and exact-case
+versions remain 1/2/3; a conditional-capable session uses 4/5/6. The candidate
+key wraps the fresh
 shared graph identity and explicitly describes candidate-only authority. The
 raw graph fingerprint is transient after those exact bytes enter that key, so
 the receipt retains no parallel graph-identity field. It does not pretend to
@@ -618,6 +621,87 @@ it, and even successful behavioral replay is not dictionary evidence. See the
 [associated provider-certificate Length report](reports/2026-08-13-length-associated-provider-certificates.md)
 and the
 [ground constraint-discharge report](reports/2026-08-13-length-ground-constraint-discharge.md).
+
+### Candidate-independent counterexample-bank scopes and bounded stores
+
+`Language.Haskell.Synthesis.Semantic.Length.CounterexampleBank` introduces
+nominally separate scalar and binary-product replay-input foundations. A scope
+is sealed inside the problem constructor while the exact checked session, the
+contract freshly revalidated through that session, and the normalized target
+coexist. Its identity binds:
+
+- the complete annotation-erased source inventory, checked spine model, and
+  admitted provider-law/trust table;
+- the solver-neutral interpretation/model policy;
+- the exact contract; and
+- the exact normalized target, including positional bound-variable slots and
+  first-occurrence free-variable slots with flexible/rigid distinction.
+
+The target has its own fingerprint because the existing contract fingerprint
+deliberately omits it. Scalar and product scopes use distinct domain and schema
+tags, fingerprints, phantom subjects, and nominal identity roles. A scalar
+scope cannot be coerced into a product scope even when its concrete facts or
+stored inputs happen to agree.
+
+The scope deliberately excludes every candidate graph, interpreted result,
+counterexample condition, candidate-used provider-law subset, SMT query,
+solver/execution identity, preference, receipt, and verdict. Consequently two
+different candidates can share a scope while retaining different candidate,
+problem, and query identities. Changing the canonical complete
+inventory/provider basis, retained interpretation policy, normalized contract,
+or normalized target changes the scope.
+`checkedLengthProblemCounterexampleBankScope` and its `SpinePair` sibling
+project it from a problem; `lengthSMTLibQueryCounterexampleBankScope` and its
+product sibling project the same retained value from a pure query. Query
+translation, canonical bytes, query identity, and runtime behavior do not
+consume the scope. Problem sealing can now report its bounded construction
+through `LengthCounterexampleBankScopeFingerprint` or
+`LengthSpinePairCounterexampleBankScopeFingerprint` in the existing nominal
+fingerprint-limit error families.
+
+An empty bank pairs one scope with caller-selected limits. Scalar and product
+defaults are four retained entries, eight inputs per entry, 256 bits per
+natural, 4,096 aggregate retained modeled bytes, and 256 replay attempts.
+Custom construction checks negative entry, width, and bit limits in that order,
+then rejects `maxBound` width and bit caps whose first excess could not be
+observed. The natural byte and attempt caps need no negative check.
+
+Insertion is productive and fixed-precedence. A zero entry cap rejects before
+demanding the opaque origin or input vector. Otherwise the store observes at
+most one list cell beyond the width cap, validates natural bit widths left to
+right, computes one bounded modeled encoding, and forces every retained vector
+and statistic before success. The encoding charges an origin byte, a
+variable-width arity, and a nonempty magnitude representation with its own
+variable-width byte count for every natural. The same byte cap bounds an
+individual sample and the aggregate retained newest prefix.
+
+Samples are newest first. Bank duplicate detection and promotion use only the
+input vector, not the coarse caller-supplied origin. Reinsertion replaces the
+origin and promotes that vector; a new vector is prepended. Entry or
+aggregate-byte pressure retains one deterministic newest prefix and evicts the
+complete oldest tail at the first excess rather than scanning past it for
+smaller entries. Exact cumulative statistics distinguish retained entry/byte
+counts, successful records (including duplicates), duplicate promotions, tail
+evictions, and explicit replay attempts. Recording an attempt is a separate
+immutable operation with its own cap; inserting a sample does not imply an
+attempt.
+
+`lengthCounterexampleBankMatchesScope` and the product sibling compare only
+the complete scope fingerprint and deliberately inspect no limits, samples,
+origins, or statistics. A match authorizes at most attempting fresh replay. A
+bank sample contains `[Natural]` and one coarse origin—live-model,
+solver-independent, or simplification replay—but no checked arity, verdict,
+evidence, or receipt. Those origins are labels, not attestations. Every use
+must pass the projected inputs through the current exact problem/query replay
+boundary, which may reject the arity, fail under evaluation limits, return a
+miss, or mint a fresh narrow receipt.
+
+This checkpoint wires no bank into offline replay, live Z3 execution,
+candidate scheduling, persistent/session state, or Leant. It establishes the
+scope, bounded storage policy, and attempt accounting needed by a future
+integration; it grants no proof or pruning authority now. The complete design
+and frozen characterization are recorded in the
+[nominal Length counterexample-bank report](reports/2026-08-16-nominal-length-counterexample-bank-foundation.md).
 
 ### Spine exposure and bounded concrete evaluation
 
@@ -2109,6 +2193,48 @@ carrier graph remains v2. Complete-problem and SMT-query schemas and versions
 are unchanged, although their existing composition transitively binds the new
 session, concrete-encoding, and candidate identities. See the
 [ground constraint-discharge report](reports/2026-08-13-length-ground-constraint-discharge.md).
+
+### `Semantic.Length.CounterexampleBank`
+
+`Language.Haskell.Synthesis.Semantic.Length.CounterexampleBank` is the curated
+public surface for candidate-independent scalar and binary-product bank scopes
+and bounded replay-input stores. `Language.Haskell.Djex` re-exports it. Scope,
+bank, sample, origin, limits, statistics, error, schema-subject, and
+target-subject families remain nominally separate across the two domains; the
+package-private module shares only their strict bounded kernel and construction
+edge.
+
+The scalar scope schema is
+`djex-length-counterexample-bank-scope/v1`; the product schema is
+`djex-length-spine-pair-counterexample-bank-scope/v1`. Each scope composes the
+complete domain-appropriate inventory/provider-law fingerprint, the exact
+solver-neutral session-policy fingerprint, the exact contract fingerprint,
+and a new target fingerprint. Target normalization alpha-normalizes lexical
+binders by positional slots and free variables by first occurrence while
+preserving flexible versus rigid class. The final scope records explicit
+candidate, query/execution, preference, receipt, and verdict exclusions in its
+canonical identity.
+
+Problem sealing constructs and retains the scope only after contract
+revalidation and complete problem fingerprinting; construction failure maps to
+the new nominal counterexample-bank scope fingerprint part. A sealed SMT-LIB
+query retains that same problem and exposes a read-only scope projector. The
+scope is not part of the complete-problem or query fingerprint and does not
+alter canonical query bytes. Its constituent facts are already exact checked
+authorities; the separate composition exists to permit sharing across
+candidates without confusing their distinct problem/query keys.
+
+The public banks are immutable and opaque. Limit builders, default limits,
+empty construction, bounded insertion, explicit attempt recording, sample and
+statistics projections, and the two scope-match functions are the only
+mutation-shaped operations. `lengthCounterexampleBankMatchesScope` and its
+product sibling compare the complete scope fingerprint alone; they do not
+record an attempt or validate a stored vector. See
+[Candidate-independent counterexample-bank scopes and bounded stores](#candidate-independent-counterexample-bank-scopes-and-bounded-stores)
+for the exact inclusion, retention, eviction, statistics, and authority rules,
+and the
+[dated report](reports/2026-08-16-nominal-length-counterexample-bank-foundation.md)
+for the frozen characterization.
 
 ### `Semantic.Length.SMTLib`
 

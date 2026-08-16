@@ -1564,6 +1564,20 @@ spawn has a same-UID namespace race, and neither the loader nor shared
 libraries are measured. Descendant cleanup is best effort after the direct
 child exits.
 
+The three descriptor-bound launches described next are one pipeline in that
+module, `openDescriptorBoundProcessWith`, instantiated by a
+`DescriptorBoundLaunchPolicy` value per launch. The spine — open the source
+read-only, admit the working directory, capture and re-check the source
+metadata, copy the bytes once into an anonymous staged image, compare the pin,
+seal and verify the image, build the snapshot, spawn from the sealed
+descriptor — is written once; a policy names only what differs: whether the
+working directory is admitted before or after the source is opened, the
+source and final access observations, the staged-image creator and sealer,
+the snapshot schema (`DescriptorBoundSnapshotSchema`, which likewise lists
+only the claims in which the three fingerprints differ), and the launch
+strategy. The sections below therefore describe policy differences, not
+separate mechanisms.
+
 #### Descriptor-bound Z3 executable launch
 
 `mkLengthSMTLibDescriptorBoundExecutionConfig` is the additive Linux launch

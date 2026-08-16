@@ -1,6 +1,12 @@
 {-# LANGUAGE GADTs #-}
 {-# OPTIONS_GHC -Wno-partial-fields #-}
 
+-- | Conversion of haskell-src-exts types and names into Exference's core
+-- 'T.HsType' and 'T.QualifiedName'.  A 'ConversionT' scope owns the private
+-- type-variable inventory ('ConvData'), and a 'TypeResolver' supplies the
+-- nominal lookup (unique-global for compatibility callers, import-scoped
+-- for the loader and REPL).  Synonym expansion is not done here; see
+-- "Language.Haskell.Exference.TypeDeclsFromHaskellSrc" for that layer.
 module Language.Haskell.Exference.TypeFromHaskellSrc
   ( ConvData
   , emptyConvData

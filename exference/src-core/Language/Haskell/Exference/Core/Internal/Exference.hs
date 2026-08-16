@@ -3,6 +3,12 @@
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE MonadComprehensions #-}
 
+-- | The Exference search engine proper: the priority-queue-driven best-first
+-- search over 'SearchNode's, the validation of inputs, environments,
+-- queries, and options, and the result projections in both the historical
+-- chunk API and the shared query envelope.  Every public entrance validates
+-- once and hands the raw lazy engine a sealed artifact whose constructor is
+-- private, so nothing unchecked reaches 'stateStep'.
 module Language.Haskell.Exference.Core.Internal.Exference
   ( findExpressions
   , findExpressionsWithAllocators

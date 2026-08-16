@@ -1,7 +1,10 @@
---
--- Haskell identifier and operator syntax shared by parsers and printers,
+-- | Haskell identifier and operator syntax shared by parsers and printers,
 -- plus the token-level ReadP helpers shared by every Djinn parser.
 --
+-- The identifier predicates and renderers are thin views over the shared
+-- "Language.Haskell.Synthesis.Name" vocabulary, and 'stripLineComments' is
+-- re-exported from the shared frontend lexer used by both REPLs, so Djinn
+-- keeps no second definition of what a valid name is.
 module Djinn.Internal.HIdentifier (
     pVarId, pConId, pQualifiedVarId, pQualifiedConId,
     pParenthesizedVarOp,

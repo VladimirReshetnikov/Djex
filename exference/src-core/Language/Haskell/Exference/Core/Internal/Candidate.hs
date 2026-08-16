@@ -1,5 +1,11 @@
 {-# LANGUAGE DeriveGeneric #-}
 
+-- | The Exference result payload and its type-variable naming hints.  An
+-- 'ExferenceCandidate' is the shared 'Candidate' carrying a checked function
+-- clause plus 'ExferenceCandidateDetails'; 'projectValidatedCandidate' is
+-- how the engine builds one once every result check has passed.  The
+-- opaque source-spelling witnesses seal frontend spellings against a
+-- canonical goal so search and rendering can trust them without rechecking.
 module Language.Haskell.Exference.Core.Internal.Candidate
   ( ExferenceCandidateDetails (..)
   , ExferenceTypeVariableHints

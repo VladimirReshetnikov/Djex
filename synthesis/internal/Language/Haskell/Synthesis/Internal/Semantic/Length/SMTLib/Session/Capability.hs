@@ -158,6 +158,10 @@ data LengthSMTLibCapabilityLimitSource = LengthSMTLibCapabilityLimitSource
 
 instance NFData LengthSMTLibCapabilityLimitSource
 
+-- | Retained capability bounds: the causal stream policy (per-frame stream
+-- limits plus the cumulative transcript maximum) which every sealed plan
+-- copies, and the plan-fingerprint byte limit which is consulted only while
+-- sealing.
 data LengthSMTLibCapabilityLimits = LengthSMTLibCapabilityLimits
   !SMTLibCausalStreamPolicy !Natural
   deriving (Eq, Ord)
@@ -166,6 +170,9 @@ instance NFData LengthSMTLibCapabilityLimits where
   rnf (LengthSMTLibCapabilityLimits streamPolicy fingerprint) =
     rnf streamPolicy `seq` rnf fingerprint
 
+-- | Retain a limit source.  This is total: the stream limits are converted
+-- as given and no minimum is enforced here; whether they can frame every
+-- required response is checked by 'sealLengthSMTLibCapabilityPlan'.
 mkLengthSMTLibCapabilityLimits
   :: LengthSMTLibCapabilityLimitSource
   -> LengthSMTLibCapabilityLimits
@@ -176,6 +183,8 @@ mkLengthSMTLibCapabilityLimits source = LengthSMTLibCapabilityLimits
     (lengthSMTLibCapabilityLimitSourceCumulativeOutputBytes source))
   (lengthSMTLibCapabilityLimitSourcePlanFingerprintBytes source)
 
+-- | The default stream limits with a 512 KiB cumulative transcript maximum
+-- and a 256 KiB plan-fingerprint admission limit.
 defaultLengthSMTLibCapabilityLimitSource
   :: LengthSMTLibCapabilityLimitSource
 defaultLengthSMTLibCapabilityLimitSource = LengthSMTLibCapabilityLimitSource
@@ -185,10 +194,13 @@ defaultLengthSMTLibCapabilityLimitSource = LengthSMTLibCapabilityLimitSource
   , lengthSMTLibCapabilityLimitSourcePlanFingerprintBytes = 262144
   }
 
+-- | 'defaultLengthSMTLibCapabilityLimitSource' retained.
 defaultLengthSMTLibCapabilityLimits :: LengthSMTLibCapabilityLimits
 defaultLengthSMTLibCapabilityLimits =
   mkLengthSMTLibCapabilityLimits defaultLengthSMTLibCapabilityLimitSource
 
+-- | The per-frame stream limits (total, frame, and nesting-depth bounds)
+-- applied afresh to each expected response frame.
 lengthSMTLibCapabilityStreamLimits
   :: LengthSMTLibCapabilityLimits
   -> SMTLibStreamLimits
@@ -196,6 +208,10 @@ lengthSMTLibCapabilityStreamLimits
     (LengthSMTLibCapabilityLimits streamPolicy _) =
       smtLibCausalStreamPolicyStreamLimits streamPolicy
 
+-- | The maximum number of stdout bytes charged across the whole readiness
+-- transcript, counting every framed byte and every accepted post-barrier
+-- whitespace byte.  Sealing rejects a value below
+-- 'lengthSMTLibCapabilityMinimumOutputByteCount'.
 lengthSMTLibCapabilityCumulativeOutputByteLimit
   :: LengthSMTLibCapabilityLimits
   -> Natural
@@ -203,12 +219,17 @@ lengthSMTLibCapabilityCumulativeOutputByteLimit
     (LengthSMTLibCapabilityLimits streamPolicy _) =
       smtLibCausalStreamPolicyCumulativeByteLimit streamPolicy
 
+-- | The maximum encoded size admitted for the plan fingerprint while
+-- sealing.  It bounds admission only and is not itself part of the plan
+-- identity.
 lengthSMTLibCapabilityPlanFingerprintByteLimit
   :: LengthSMTLibCapabilityLimits
   -> Natural
 lengthSMTLibCapabilityPlanFingerprintByteLimit
     (LengthSMTLibCapabilityLimits _ value) = value
 
+-- | The four positional echo barriers of the handshake, one per write, in
+-- transcript order.  Each is carried by its own distinct nonce.
 data LengthSMTLibCapabilityBarrier
   = LengthSMTLibCapabilityStartupBarrier
   | LengthSMTLibCapabilityCheckBarrier
@@ -218,6 +239,9 @@ data LengthSMTLibCapabilityBarrier
 
 instance NFData LengthSMTLibCapabilityBarrier
 
+-- | The seven response frames the fixed machine must be able to receive, in
+-- transcript order.  Sealing checks each against the stream limits and
+-- names the first frame which they cannot accommodate.
 data LengthSMTLibCapabilityRequiredFrame
   = LengthSMTLibCapabilityStartupBarrierFrame
   | LengthSMTLibCapabilityCheckStatusFrame
@@ -230,6 +254,8 @@ data LengthSMTLibCapabilityRequiredFrame
 
 instance NFData LengthSMTLibCapabilityRequiredFrame
 
+-- | Which stream limit was too small for a required frame: the per-frame
+-- total byte, frame byte, or nesting-depth bound.
 data LengthSMTLibCapabilityRequiredLimit
   = LengthSMTLibCapabilityStreamTotalBytes
   | LengthSMTLibCapabilityStreamFrameBytes
@@ -276,6 +302,8 @@ instance NFData (LengthSMTLibCapabilityPlan identity) where
     rnf startup `seq` rnf check `seq` rnf value `seq` rnf ready `seq`
     rnf fingerprint
 
+-- | Phantom subject distinguishing capability-plan fingerprints from every
+-- other 'Fingerprint' in the package.  It has no values.
 data LengthSMTLibCapabilityPlanFingerprintSubject
 
 -- | Seal the capability transaction from four exact, pairwise-distinct
@@ -344,30 +372,49 @@ renderCapabilityReadyWrite ready =
   capabilityCheckSatisfiableBytes ++
   smtLibEchoSentinelCommandBytes ready
 
+-- | The exact bytes of the first write: the Z3 startup print-success
+-- suppression followed by the startup barrier's echo command.  These are the
+-- bytes 'startLengthSMTLibCapability' emits.
 lengthSMTLibCapabilityStartupWriteBytes
   :: LengthSMTLibCapabilityPlan identity
   -> [Word8]
 lengthSMTLibCapabilityStartupWriteBytes =
   renderCapabilityStartupWrite . planStartupBarrier
 
+-- | The exact bytes of the second write: a query reset, the canonical Length
+-- preamble, a declaration asserted equal to zero, @(check-sat)@, and the
+-- check barrier's echo command.  Its expected responses are @sat@ then the
+-- barrier echo.
 lengthSMTLibCapabilityCheckWriteBytes
   :: LengthSMTLibCapabilityPlan identity
   -> [Word8]
 lengthSMTLibCapabilityCheckWriteBytes =
   renderCapabilityCheckWrite . planCheckBarrier
 
+-- | The exact bytes of the third write: a @get-value@ request for the
+-- declared constant followed by the input-value barrier's echo command.  Its
+-- expected responses are @((djex_capability_input 0))@ then the barrier
+-- echo.
 lengthSMTLibCapabilityInputValueWriteBytes
   :: LengthSMTLibCapabilityPlan identity
   -> [Word8]
 lengthSMTLibCapabilityInputValueWriteBytes =
   renderCapabilityInputValueWrite . planValueBarrier
 
+-- | The exact bytes of the fourth write: a query reset, the canonical
+-- preamble, the declaration asserted equal to both zero and one,
+-- @(check-sat)@, and the ready barrier's echo command.  Its expected
+-- responses are @unsat@ then the barrier echo, which completes readiness.
 lengthSMTLibCapabilityReadyWriteBytes
   :: LengthSMTLibCapabilityPlan identity
   -> [Word8]
 lengthSMTLibCapabilityReadyWriteBytes =
   renderCapabilityReadyWrite . planReadyBarrier
 
+-- | The complete plan key sealed at construction.  It binds the schema tags,
+-- canonical query profile, stream and cumulative limits, phase machine, all
+-- four exact writes, and all expected responses; the same key is what a
+-- completed outcome retains.
 lengthSMTLibCapabilityPlanFingerprint
   :: LengthSMTLibCapabilityPlan identity
   -> Fingerprint LengthSMTLibCapabilityPlanFingerprintSubject
@@ -381,6 +428,9 @@ lengthSMTLibCapabilityPlanCumulativeOutputByteLimit
 lengthSMTLibCapabilityPlanCumulativeOutputByteLimit =
   smtLibCausalStreamPolicyCumulativeByteLimit . planStreamPolicy
 
+-- | Which of the seven expected response frames a receiver is currently
+-- awaiting, in transcript order.  Errors name the phase in which they were
+-- detected.
 data LengthSMTLibCapabilityPhase
   = LengthSMTLibCapabilityStartupBarrierPhase
   | LengthSMTLibCapabilityCheckStatusPhase
@@ -393,6 +443,8 @@ data LengthSMTLibCapabilityPhase
 
 instance NFData LengthSMTLibCapabilityPhase
 
+-- | Label carried by each write action the machine emits, naming which of
+-- the four exact plan writes the accompanying bytes are.
 data LengthSMTLibCapabilityWriteKind
   = LengthSMTLibCapabilityStartupWrite
   | LengthSMTLibCapabilityCheckWrite
@@ -414,6 +466,10 @@ data LengthSMTLibCapabilityPhaseState
 instance NFData LengthSMTLibCapabilityPhaseState where
   rnf state = state `seq` ()
 
+-- | The pure receiving state of the handshake between two actions: the
+-- sealed plan, the phase being awaited, and the causal stream cursor
+-- holding partially framed bytes.  A receiver is only obtained from an
+-- action of the same plan and is advanced by 'feedLengthSMTLibCapability'.
 data LengthSMTLibCapabilityReceiver identity =
   LengthSMTLibCapabilityReceiver
     !(LengthSMTLibCapabilityPlan identity)
@@ -426,6 +482,7 @@ instance NFData (LengthSMTLibCapabilityReceiver identity) where
   rnf (LengthSMTLibCapabilityReceiver plan phase cursor) =
     rnf plan `seq` rnf phase `seq` rnf cursor
 
+-- | The response frame this receiver is currently awaiting.
 lengthSMTLibCapabilityReceiverPhase
   :: LengthSMTLibCapabilityReceiver identity
   -> LengthSMTLibCapabilityPhase
@@ -449,6 +506,12 @@ startLengthSMTLibCapability plan = SMTLibCausalWrite
   (lengthSMTLibCapabilityStartupWriteBytes plan)
   (startReceiver plan AwaitLengthSMTLibCapabilityStartupBarrier)
 
+-- | Feed one stdout chunk to the receiver.  Bytes are framed under the
+-- plan's stream policy; an incomplete frame yields an await on the advanced
+-- receiver, and a completed frame is compared byte-exactly against the
+-- phase's expected status, value, or barrier echo, yielding the next write,
+-- the next await, or the completed outcome after the ready barrier.  The
+-- composing live session poisons its worker after any 'Left'.
 feedLengthSMTLibCapability
   :: LengthSMTLibCapabilityReceiver identity
   -> [Word8]
@@ -501,6 +564,8 @@ type role LengthSMTLibCapabilityOutcome nominal
 instance NFData (LengthSMTLibCapabilityOutcome identity) where
   rnf (LengthSMTLibCapabilityOutcome fingerprint) = rnf fingerprint
 
+-- | The sealed plan key of the plan whose transcript this outcome completed;
+-- it equals 'lengthSMTLibCapabilityPlanFingerprint' of that plan.
 lengthSMTLibCapabilityOutcomePlanFingerprint
   :: LengthSMTLibCapabilityOutcome identity
   -> Fingerprint LengthSMTLibCapabilityPlanFingerprintSubject

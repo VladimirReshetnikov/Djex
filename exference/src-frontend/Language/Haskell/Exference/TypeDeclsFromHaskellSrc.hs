@@ -1,5 +1,11 @@
 {-# LANGUAGE MonadComprehensions #-}
 
+-- | Type synonym declarations and synonym-aware type conversion for the
+-- Exference source frontend.  'HsTypeDecl' and the 'TypeDeclMap' index come
+-- from parsed modules via 'getTypeDecls'; 'applyTypeDecls' expands
+-- saturated synonym applications, and the @convertType*@ and @parseType*@
+-- entry points wrap "Language.Haskell.Exference.TypeFromHaskellSrc" with
+-- that expansion, forall normalization, and inventory-based kind checking.
 module Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( HsTypeDecl (..)
   , TypeDeclMap

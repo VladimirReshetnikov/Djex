@@ -109,6 +109,10 @@ matchContextFreeScheme rawSource rawActual = do
   pure $ ContextFreeSchemeMatch
     [selection slot | slot <- naturalPrefix binderCount]
 
+-- | One entry per binder of the source's complete leading forall prefix, in
+-- source binder order (outer forall first): @Just@ the inferred selection for
+-- a binder the match solved, or @Nothing@ for a vacuous prefix binder that
+-- the source body never mentions.
 contextFreeSchemeSelections
   :: ContextFreeSchemeMatch variable
   -> [Maybe (ContextFreeSchemeSelection variable)]

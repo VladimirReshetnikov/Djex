@@ -2,6 +2,12 @@
 {-# LANGUAGE MonadComprehensions #-}
 {-# LANGUAGE TypeOperators #-}
 
+-- | The complete Exference source-environment loader.  It parses Haskell
+-- modules, rating files, and visibility manifests (from paths, directories,
+-- or in-memory snapshots), runs the binding, synonym, and class extractors,
+-- applies ratings, and seals everything as a 'CheckedSourceEnvironment'
+-- backed by one prepared shared inventory; every fatal phase is an
+-- 'EnvironmentLoadError' and non-fatal messages travel in the 'LoadReport'.
 module Language.Haskell.Exference.EnvironmentParser
   ( SourceBinding (..)
   , sourceBindingFunction

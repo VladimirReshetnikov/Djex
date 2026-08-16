@@ -195,6 +195,9 @@ data LengthSMTLibProtocolLimitSource = LengthSMTLibProtocolLimitSource
 
 instance NFData LengthSMTLibProtocolLimitSource
 
+-- | Retained pure-protocol bounds: the causal stream policy (per-frame limits
+-- plus the cumulative stdout cap) and the admission-only plan fingerprint
+-- byte limit.  Constructed only through 'mkLengthSMTLibProtocolLimits'.
 data LengthSMTLibProtocolLimits = LengthSMTLibProtocolLimits
   !SMTLibCausalStreamPolicy !Natural
   deriving (Eq, Ord)
@@ -203,6 +206,9 @@ instance NFData LengthSMTLibProtocolLimits where
   rnf (LengthSMTLibProtocolLimits streamPolicy fingerprint) =
     rnf streamPolicy `seq` rnf fingerprint
 
+-- | Retain raw protocol bounds without validation: the stream limits become
+-- the per-frame framing policy, the cumulative stdout bytes become the
+-- transaction cap, and the fingerprint bytes are kept as the admission bound.
 mkLengthSMTLibProtocolLimits
   :: LengthSMTLibProtocolLimitSource
   -> LengthSMTLibProtocolLimits
@@ -213,6 +219,8 @@ mkLengthSMTLibProtocolLimits source = LengthSMTLibProtocolLimits
     (lengthSMTLibProtocolLimitSourceCumulativeStdoutBytes source))
   (lengthSMTLibProtocolLimitSourcePlanFingerprintBytes source)
 
+-- | Default raw bounds: the default per-frame stream limits, a 512 KiB
+-- cumulative stdout cap, and a 256 KiB plan fingerprint bound.
 defaultLengthSMTLibProtocolLimitSource :: LengthSMTLibProtocolLimitSource
 defaultLengthSMTLibProtocolLimitSource = LengthSMTLibProtocolLimitSource
   { lengthSMTLibProtocolLimitSourceStreamLimits =
@@ -221,10 +229,14 @@ defaultLengthSMTLibProtocolLimitSource = LengthSMTLibProtocolLimitSource
   , lengthSMTLibProtocolLimitSourcePlanFingerprintBytes = 262144
   }
 
+-- | 'defaultLengthSMTLibProtocolLimitSource' retained through
+-- 'mkLengthSMTLibProtocolLimits'.
 defaultLengthSMTLibProtocolLimits :: LengthSMTLibProtocolLimits
 defaultLengthSMTLibProtocolLimits =
   mkLengthSMTLibProtocolLimits defaultLengthSMTLibProtocolLimitSource
 
+-- | Per-frame framing limits (total bytes, retained frame bytes, nesting
+-- depth) applied afresh to each expected response frame.
 lengthSMTLibProtocolStreamLimits
   :: LengthSMTLibProtocolLimits
   -> SMTLibStreamLimits
@@ -232,6 +244,9 @@ lengthSMTLibProtocolStreamLimits
     (LengthSMTLibProtocolLimits streamPolicy _) =
       smtLibCausalStreamPolicyStreamLimits streamPolicy
 
+-- | Maximum stdout bytes one whole transaction may consume across all its
+-- frames and accepted post-barrier whitespace.  Plan sealing rejects a cap
+-- below the smallest complete transcript the plan can admit.
 lengthSMTLibProtocolCumulativeStdoutByteLimit
   :: LengthSMTLibProtocolLimits
   -> Natural
@@ -239,12 +254,18 @@ lengthSMTLibProtocolCumulativeStdoutByteLimit
     (LengthSMTLibProtocolLimits streamPolicy _) =
       smtLibCausalStreamPolicyCumulativeByteLimit streamPolicy
 
+-- | Admission-only cap on the canonical byte size of a sealed plan
+-- fingerprint; exceeding it fails sealing with
+-- 'LengthSMTLibProtocolPlanFingerprintByteLimitExceeded'.  It is not itself
+-- a fingerprint field.
 lengthSMTLibProtocolPlanFingerprintByteLimit
   :: LengthSMTLibProtocolLimits
   -> Natural
 lengthSMTLibProtocolPlanFingerprintByteLimit
     (LengthSMTLibProtocolLimits _ value) = value
 
+-- | Which of the two echo barriers a nonce or mismatch diagnostic refers to:
+-- the one following @check-sat@ or the one following @get-value@.
 data LengthSMTLibProtocolBarrier
   = LengthSMTLibProtocolCheckBarrier
   | LengthSMTLibProtocolInputValueBarrier
@@ -252,6 +273,9 @@ data LengthSMTLibProtocolBarrier
 
 instance NFData LengthSMTLibProtocolBarrier
 
+-- | Response frame whose minimal size the configured limits must admit at
+-- sealing time.  The two input-value frames are checked only when the plan
+-- requests values.
 data LengthSMTLibProtocolRequiredFrame
   = LengthSMTLibProtocolCheckStatusFrame
   | LengthSMTLibProtocolCheckBarrierFrame
@@ -261,6 +285,9 @@ data LengthSMTLibProtocolRequiredFrame
 
 instance NFData LengthSMTLibProtocolRequiredFrame
 
+-- | Which stream-framing or response-parsing bound was too small for a
+-- required frame; reported by 'LengthSMTLibProtocolRequiredLimitTooSmall'
+-- together with the frame, the configured maximum, and the requirement.
 data LengthSMTLibProtocolRequiredLimit
   = LengthSMTLibProtocolStreamTotalBytes
   | LengthSMTLibProtocolStreamFrameBytes
@@ -376,6 +403,9 @@ type LengthSMTLibProtocolPlan identity local =
     LengthSMTLibProtocolPlanFingerprintSubject
     (LengthSMTLibQuery identity local)
 
+-- | Uninhabited phantom subject of a scalar plan fingerprint.  It keeps a
+-- scalar plan's fingerprint nominally distinct from the binary-product one
+-- even when the two would render identical bytes.
 data LengthSMTLibProtocolPlanFingerprintSubject
 
 -- | The scalar protocol identity: the historical Length/Z3 tags, no
@@ -492,6 +522,10 @@ renderProtocolInputValueWrite request (Just barrier) =
   fmap (++ smtLibEchoSentinelCommandBytes barrier)
     request
 
+-- | Exact bytes of the plan's first write: the Z3 query reset prefix, the
+-- query's canonical check commands, then the status-barrier echo command.
+-- Rendered on demand from the retained plan; identical bytes were bound into
+-- the plan fingerprint at sealing.
 lengthSMTLibProtocolInitialWriteBytes
   :: LengthSMTLibQueryProtocolPlan subject query
   -> [Word8]
@@ -499,6 +533,10 @@ lengthSMTLibProtocolInitialWriteBytes
     (LengthSMTLibQueryProtocolPlan identity _ _ query _ checkBarrier _ _) =
       renderProtocolInitialWrite identity query checkBarrier
 
+-- | Exact bytes of the conditional second write: the query's @get-value@
+-- request followed by the value-barrier echo command.  'Nothing' when the
+-- plan carries no value barrier or the query has no input symbols; the write
+-- is issued only after a satisfiable status and matched check barrier.
 lengthSMTLibProtocolInputValueWriteBytes
   :: LengthSMTLibQueryProtocolPlan subject query
   -> Maybe [Word8]
@@ -508,6 +546,11 @@ lengthSMTLibProtocolInputValueWriteBytes
         (protocolIdentityQueryInputValueRequestBytes identity query)
         valueBarrier
 
+-- | Complete reversible identity of the sealed plan, built at sealing from
+-- the domain schema, execution-policy key, query, framing limits, cumulative
+-- cap, phase machine, exact write bytes, and barrier response bytes.  Its
+-- subject is the domain's fingerprint subject, so scalar and product plan
+-- fingerprints do not unify.
 lengthSMTLibProtocolPlanFingerprint
   :: LengthSMTLibQueryProtocolPlan subject query
   -> Fingerprint subject
@@ -549,6 +592,10 @@ lengthSMTLibProtocolPlanMinimumStdoutByteCount plan =
         Nothing -> False
         Just _ -> True
 
+-- | Which response frame a receiver is currently awaiting, in transaction
+-- order: the @check-sat@ status, its echo barrier, the @get-value@ frame,
+-- then its echo barrier.  Framing, response, and EOF errors are tagged with
+-- the phase in which they arose.
 data LengthSMTLibProtocolPhase
   = LengthSMTLibProtocolCheckStatusPhase
   | LengthSMTLibProtocolCheckBarrierPhase
@@ -558,6 +605,9 @@ data LengthSMTLibProtocolPhase
 
 instance NFData LengthSMTLibProtocolPhase
 
+-- | Which of the plan's two writes a returned 'SMTLibCausalWrite' action
+-- carries: the initial reset/check/barrier write, or the conditional
+-- input-value write issued after a satisfiable status.
 data LengthSMTLibProtocolWriteKind
   = LengthSMTLibProtocolInitialQueryWrite
   | LengthSMTLibProtocolInputValueWrite
@@ -600,6 +650,9 @@ type LengthSMTLibProtocolReceiver identity local =
     LengthSMTLibProtocolPlanFingerprintSubject
     (LengthSMTLibQuery identity local)
 
+-- | Name of the response frame this receiver is waiting for.  Only the phase
+-- tag is exposed; the decoded status or bindings carried by the internal
+-- state stay package-private.
 lengthSMTLibProtocolReceiverPhase
   :: LengthSMTLibQueryProtocolReceiver subject query
   -> LengthSMTLibProtocolPhase
@@ -631,6 +684,13 @@ startLengthSMTLibProtocol plan = SMTLibCausalWrite
   (lengthSMTLibProtocolInitialWriteBytes plan)
   (startReceiver plan AwaitLengthSMTLibCheckStatus)
 
+-- | Feed one chunk of stdout bytes received after the receiver's write.  A
+-- completed frame is decoded and matched in the current phase; the stream
+-- tail is consumed further only while it answers commands already written,
+-- and once a barrier is accepted only bounded SMT-LIB whitespace may remain
+-- before the next 'SMTLibCausalWrite' or 'SMTLibCausalComplete'.  A 'Left'
+-- carries no continuation; the module header requires a live layer to poison
+-- its worker after one.
 feedLengthSMTLibProtocol
   :: LengthSMTLibQueryProtocolReceiver subject query
   -> [Word8]
@@ -658,6 +718,12 @@ finishLengthSMTLibProtocol receiver = case
   Right _ -> Left $ LengthSMTLibProtocolUnexpectedEOF
     $ lengthSMTLibProtocolReceiverPhase receiver
 
+-- | Closed transaction failure reported by 'feedLengthSMTLibProtocol' and
+-- 'finishLengthSMTLibProtocol'.  Framing, response, and EOF failures carry
+-- the phase in which they arose; the cumulative-limit and post-barrier-byte
+-- constructors carry the configured maximum and observed count, and the
+-- zero-based offset and offending byte, respectively.  A barrier mismatch
+-- names the barrier but retains neither the expected nor the observed bytes.
 data LengthSMTLibProtocolError
   = LengthSMTLibProtocolFramingFailure
       !LengthSMTLibProtocolPhase !SMTLibStreamFramingError
@@ -702,6 +768,9 @@ type LengthSMTLibProtocolDecoded identity local =
     LengthSMTLibProtocolPlanFingerprintSubject
     (LengthSMTLibQuery identity local)
 
+-- | The status-indexed observation decoded by a completed transaction.  This
+-- is a syntactic protocol result only: it carries no run identity and grants
+-- no semantic authority to the status or bindings.
 lengthSMTLibProtocolDecodedObservation
   :: LengthSMTLibQueryProtocolDecoded subject query
   -> LengthSMTLibProtocolObservation

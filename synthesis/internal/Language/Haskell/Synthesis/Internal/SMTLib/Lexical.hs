@@ -27,6 +27,10 @@ isSMTLibWhitespaceByte byte =
   byte == horizontalTab || byte == lineFeed ||
   byte == carriageReturn || byte == space
 
+-- | Exactly the bytes accepted by 'isSMTLibWhitespaceByte' (tab, line feed,
+-- carriage return, space) in the canonical order that protocol and
+-- capability schema fingerprints embed; the order is part of those
+-- identities.
 smtLibWhitespaceBytes :: [Word8]
 smtLibWhitespaceBytes = [horizontalTab, lineFeed, carriageReturn, space]
 

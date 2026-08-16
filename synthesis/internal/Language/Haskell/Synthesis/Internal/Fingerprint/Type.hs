@@ -63,6 +63,9 @@ typeFingerprintField variableField source = case source of
     , typeFingerprintField variableField body
     ]
 
+-- | Encode one class constraint as a @constraint@-tagged field holding the
+-- class name followed by the argument types in order, each encoded with
+-- 'typeFingerprintField' under the caller's variable policy.
 constraintFingerprintField
   :: (variable -> FingerprintField)
   -> Constraint (Type variable)
@@ -73,14 +76,20 @@ constraintFingerprintField variableField
   , FingerprintSequence $ map (typeFingerprintField variableField) arguments
   ]
 
+-- | Encode tuple boxity as the ASCII byte field @boxed@ or @unboxed@.
 boxityFingerprintField :: Boxity -> FingerprintField
 boxityFingerprintField boxity = FingerprintBytes $ asciiFingerprintBytes $
   case boxity of
     Boxed -> "boxed"
     Unboxed -> "unboxed"
 
+-- | Build a 'FingerprintTag' whose tag is the ASCII encoding of the given
+-- string and whose payload is the given field sequence.
 taggedFingerprintField :: String -> [FingerprintField] -> FingerprintField
 taggedFingerprintField tag = FingerprintTag $ asciiFingerprintBytes tag
 
+-- | Encode a string one byte per character by truncating each code point to
+-- eight bits.  Intended for the ASCII tags and labels used in fingerprint
+-- fields; non-ASCII characters are not preserved faithfully.
 asciiFingerprintBytes :: String -> [Word8]
 asciiFingerprintBytes = map $ fromIntegral . ord

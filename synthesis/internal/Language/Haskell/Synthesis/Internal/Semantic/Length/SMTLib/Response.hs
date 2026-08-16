@@ -113,6 +113,9 @@ instance Show LengthSMTLibResponseLimits where
 instance NFData LengthSMTLibResponseLimits where
   rnf (LengthSMTLibResponseLimits parserLimits) = rnf parserLimits
 
+-- | Names the signed field of 'LengthSMTLibResponseLimitSource' that
+-- 'mkLengthSMTLibResponseLimits' rejected.  Only the nesting depth and the
+-- integer bit limit are signed and can fail validation.
 data LengthSMTLibResponseLimitField
   = LengthSMTLibResponseNestingDepth
   | LengthSMTLibResponseIntegerBits
@@ -120,12 +123,18 @@ data LengthSMTLibResponseLimitField
 
 instance NFData LengthSMTLibResponseLimitField
 
+-- | Rejection of a negative signed limit, carrying the offending field and
+-- its value.  Nesting depth is checked before integer bits.
 data LengthSMTLibResponseLimitError = NegativeLengthSMTLibResponseLimit
   !LengthSMTLibResponseLimitField !Int
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData LengthSMTLibResponseLimitError
 
+-- | Validate raw Length response limits.  The nesting depth and then the
+-- integer bit limit must be non-negative; the natural byte, node, and token
+-- fields are accepted as given, zero included.  On success the values feed
+-- the shared parser policy through 'mkSMTLibResponseLimits'.
 mkLengthSMTLibResponseLimits
   :: LengthSMTLibResponseLimitSource
   -> Either LengthSMTLibResponseLimitError LengthSMTLibResponseLimits
@@ -139,6 +148,10 @@ mkLengthSMTLibResponseLimits source
   depth = lengthSMTLibResponseLimitSourceNestingDepth source
   integerBits = lengthSMTLibResponseLimitSourceIntegerBits source
 
+-- | Default raw limits: 65536 response bytes, nesting depth 64, 4096 nodes,
+-- 4096 token bytes, and 4096 integer bits, the same values as
+-- @defaultSMTLibResponseLimitSource@ in
+-- "Language.Haskell.Synthesis.Internal.SMTLib.Response".
 defaultLengthSMTLibResponseLimitSource :: LengthSMTLibResponseLimitSource
 defaultLengthSMTLibResponseLimitSource = LengthSMTLibResponseLimitSource
   { lengthSMTLibResponseLimitSourceBytes = 65536
@@ -148,6 +161,8 @@ defaultLengthSMTLibResponseLimitSource = LengthSMTLibResponseLimitSource
   , lengthSMTLibResponseLimitSourceIntegerBits = 4096
   }
 
+-- | The validated form of 'defaultLengthSMTLibResponseLimitSource', built
+-- directly because its signed fields are known to be non-negative.
 defaultLengthSMTLibResponseLimits :: LengthSMTLibResponseLimits
 defaultLengthSMTLibResponseLimits =
   buildLengthSMTLibResponseLimits defaultLengthSMTLibResponseLimitSource
@@ -170,10 +185,16 @@ buildLengthSMTLibResponseLimits source = LengthSMTLibResponseLimits
   tokenBytes = lengthSMTLibResponseLimitSourceTokenBytes source
   integerBits = lengthSMTLibResponseLimitSourceIntegerBits source
 
+-- | Maximum number of response bytes retained before tokenization; a longer
+-- response is rejected with 'SMTLibResponseByteLimitExceeded' as soon as one
+-- more byte is seen.
 lengthSMTLibResponseByteLimit :: LengthSMTLibResponseLimits -> Natural
 lengthSMTLibResponseByteLimit
     (LengthSMTLibResponseLimits limits) = smtLibResponseByteLimit limits
 
+-- | Maximum list nesting depth, returned as the 'Int' the source supplied.
+-- Opening a list when the current depth already equals this limit fails with
+-- 'SMTLibNestingDepthLimitExceeded'.
 lengthSMTLibResponseNestingDepthLimit
   :: LengthSMTLibResponseLimits
   -> Int
@@ -181,16 +202,26 @@ lengthSMTLibResponseNestingDepthLimit
     (LengthSMTLibResponseLimits limits) = fromIntegral
       $ smtLibResponseNestingDepthLimit limits
 
+-- | Maximum number of S-expression nodes, counting every list and every atom,
+-- admitted in one response; the next node fails with
+-- 'SMTLibNodeLimitExceeded'.
 lengthSMTLibResponseNodeLimit :: LengthSMTLibResponseLimits -> Natural
 lengthSMTLibResponseNodeLimit
     (LengthSMTLibResponseLimits limits) = smtLibResponseNodeLimit limits
 
+-- | Maximum content bytes of one token: bare tokens count their whole lexeme,
+-- strings count both bytes of each doubled-quote escape, and quoted symbols
+-- count their delimiter-free content (see 'SMTLibTokenPart').
 lengthSMTLibResponseTokenByteLimit
   :: LengthSMTLibResponseLimits
   -> Natural
 lengthSMTLibResponseTokenByteLimit
     (LengthSMTLibResponseLimits limits) = smtLibResponseTokenByteLimit limits
 
+-- | Maximum bit width of a decoded integer magnitude, returned as the 'Int'
+-- the source supplied.  A numeral whose value reaches @2 ^ limit@ is
+-- rejected with 'SMTLibNumeralBitLimitExceeded'; this is the Length name for
+-- the shared numeral bit limit.
 lengthSMTLibResponseIntegerBitLimit
   :: LengthSMTLibResponseLimits
   -> Int

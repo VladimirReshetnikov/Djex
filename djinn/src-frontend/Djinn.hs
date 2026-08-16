@@ -2,6 +2,13 @@
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
 --
+
+-- | The historical @djinn@ command-line frontend: argument decoding, the
+-- ReadP command grammar (@?@ queries, declarations, @:@ commands, @:set@
+-- options), and the read-eval-print loop over an opaque 'DjinnSession'.
+-- Edits and queries go through the checked session API of
+-- "Language.Haskell.Djex.Djinn" and its compatibility session module; this
+-- module only parses, dispatches, formats, and drives "Djinn.Internal.REPL".
 module Djinn
     ( main
     , runWithSessionInitializer

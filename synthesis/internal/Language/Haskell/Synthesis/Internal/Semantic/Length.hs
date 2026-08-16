@@ -213,6 +213,10 @@ finiteBinaryProductSpineLengthsDomainTag :: [Word8]
 finiteBinaryProductSpineLengthsDomainTag =
   ascii "finite-binary-product-spine-lengths/v1"
 
+-- | Symbolic natural-valued length term over the variables of one contract,
+-- provider law, or candidate.  Arithmetic is exact over unbounded naturals:
+-- 'LengthMonus' is truncated subtraction, 'LengthQuotient' and 'LengthModulo'
+-- take a positive literal divisor, and 'LengthIf' selects by a formula.
 data LengthExpression variable
   = LengthVariable variable
   | LengthLiteral Natural
@@ -233,6 +237,9 @@ data LengthExpression variable
 
 instance NFData variable => NFData (LengthExpression variable)
 
+-- | Boolean assertion over length expressions.  Only equality, at-most,
+-- negation, and finite conjunction are primitive; strict comparison is
+-- written as @'LengthNot' ('LengthAtMost' ...)@.
 data LengthFormula variable
   = LengthTruth Bool
   | LengthEqual (LengthExpression variable) (LengthExpression variable)
@@ -243,6 +250,9 @@ data LengthFormula variable
 
 instance NFData variable => NFData (LengthFormula variable)
 
+-- | Variables admitted by a scalar contract.  'LengthInput' indexes observed
+-- spine arguments compactly from zero in source order; 'LengthResult' names
+-- the result spine and is admitted only in the postcondition.
 data LengthContractVariable
   = LengthInput Natural
   | LengthResult
@@ -250,6 +260,9 @@ data LengthContractVariable
 
 instance NFData LengthContractVariable
 
+-- | Unchecked scalar contract as supplied by the caller.  Both formulas are
+-- normalized and bounded by 'sealLengthContract' and its variants before any
+-- authority is granted; the precondition may not mention 'LengthResult'.
 data LengthContractSource = LengthContractSource
   { lengthContractPrecondition :: LengthFormula LengthContractVariable
   , lengthContractPostcondition :: LengthFormula LengthContractVariable
@@ -287,6 +300,9 @@ data LengthSpinePairContractVariable
 
 instance NFData LengthSpinePairContractVariable
 
+-- | Unchecked binary product-of-spines contract as supplied by the caller.
+-- Sealing normalizes and bounds both formulas; the precondition may not
+-- mention either 'LengthSpinePairResult' component.
 data LengthSpinePairContractSource = LengthSpinePairContractSource
   { lengthSpinePairContractPrecondition
       :: LengthFormula LengthSpinePairContractVariable
@@ -323,6 +339,9 @@ data LengthProviderArgumentRole
 
 instance NFData LengthProviderArgumentRole
 
+-- | Variable admitted by a provider transfer: the zero-based source position
+-- of one provider argument.  Sealing rejects positions beyond the scheme's
+-- arity and positions whose role is 'LengthUnobservedArgument'.
 newtype LengthProviderVariable = LengthProviderArgument Natural
   deriving (Eq, Ord, Show, Generic)
 
@@ -356,6 +375,9 @@ data LengthProviderSummarySource variable
 
 instance NFData variable => NFData (LengthProviderSummarySource variable)
 
+-- | Retained classifier of how far an assumed provider law may be used.  It
+-- is fixed by the 'LengthProviderSummarySource' constructor at sealing time
+-- and participates in the provider-inventory fingerprint.
 data LengthProviderTrust
   = AssumedProviderLaw
     -- ^ Context-free assumed law, directly usable by the Length interpreter.
@@ -367,6 +389,9 @@ data LengthProviderTrust
 
 instance NFData LengthProviderTrust
 
+-- | Caller-supplied structural bounds for the Length semantic core, one field
+-- per 'LengthLimitField'.  Values are validated by 'mkLengthLimits', which
+-- rejects any negative field.
 data LengthLimitSource = LengthLimitSource
   { lengthLimitSourceTypeNodes :: Int
   , lengthLimitSourceContractInputs :: Int
@@ -382,6 +407,9 @@ data LengthLimitSource = LengthLimitSource
 
 instance NFData LengthLimitSource
 
+-- | Validated, nonnegative Length bounds.  Construct with 'mkLengthLimits'
+-- or use 'defaultLengthLimits'; read individual bounds with the
+-- @length...Limit@ projections.
 data LengthLimits = LengthLimits
   !Int !Int !Int !Int !Int !Int !Int !Int !Int
   deriving (Eq, Ord, Show)
@@ -400,6 +428,8 @@ instance NFData LengthLimits where
     rnf literalBits `seq`
     rnf fingerprintBytes
 
+-- | Which bound of a 'LengthLimitSource' a limit diagnostic refers to, in
+-- the source record's field order.
 data LengthLimitField
   = LengthTypeNodes
   | LengthContractInputs
@@ -414,11 +444,16 @@ data LengthLimitField
 
 instance NFData LengthLimitField
 
+-- | Rejection by 'mkLengthLimits': the named field carried the given
+-- negative value.
 data LengthLimitError = NegativeLengthLimit LengthLimitField Int
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData LengthLimitError
 
+-- | Validate every field of a 'LengthLimitSource', checking them in field
+-- order and reporting the first negative one.  All nonnegative values are
+-- accepted unchanged.
 mkLengthLimits :: LengthLimitSource -> Either LengthLimitError LengthLimits
 mkLengthLimits source = do
   nonnegative LengthTypeNodes $ lengthLimitSourceTypeNodes source
@@ -448,6 +483,8 @@ mkLengthLimits source = do
     | value < 0 = Left $ NegativeLengthLimit field value
     | otherwise = Right ()
 
+-- | Source form of the default bounds; 'mkLengthLimits' accepts it and
+-- yields 'defaultLengthLimits'.
 defaultLengthLimitSource :: LengthLimitSource
 defaultLengthLimitSource = LengthLimitSource
   { lengthLimitSourceTypeNodes = 4096
@@ -461,6 +498,8 @@ defaultLengthLimitSource = LengthLimitSource
   , lengthLimitSourceFingerprintBytes = 65536
   }
 
+-- | Default validated bounds, field for field the same values as
+-- 'defaultLengthLimitSource'.
 defaultLengthLimits :: LengthLimits
 defaultLengthLimits = LengthLimits 4096 8 1024 32 64 256 16 256 65536
 
@@ -478,6 +517,8 @@ lengthProviderArgumentLimit (LengthLimits _ _ _ _ _ _ value _ _) = value
 lengthLiteralBitLimit (LengthLimits _ _ _ _ _ _ _ value _) = value
 lengthFingerprintByteLimit (LengthLimits _ _ _ _ _ _ _ _ value) = value
 
+-- | Which list inside a type exceeded the collection-width bound while a
+-- target or scheme was being measured.
 data LengthTypeCollectionSite
   = LengthTupleFields
   | LengthForallBinders
@@ -487,6 +528,9 @@ data LengthTypeCollectionSite
 
 instance NFData LengthTypeCollectionSite
 
+-- | Structural rejection of a type before it is normalized or kind-checked.
+-- Both constructors carry the maximum followed by the observed count, where
+-- the observed count is capped at one past the maximum.
 data LengthTypeBoundError
   = LengthTypeNodeLimitExceeded Int Int
   | LengthTypeCollectionLimitExceeded LengthTypeCollectionSite Int Int
@@ -611,6 +655,10 @@ lengthContextSpineModel
   -> CheckedLengthSpineModel variable
 lengthContextSpineModel (CheckedLengthContext _ model) = model
 
+-- | Bind one source inventory to its finite-spine model.  'BuiltinListSpine'
+-- always succeeds without consulting the inventory; a 'DeclaredListSpine' is
+-- looked up in the inventory and validated against the narrow two-constructor
+-- schema, failing on the first violation in declaration-shape order.
 sealLengthContext
   :: Ord variable
   => LengthLimits
@@ -698,6 +746,8 @@ builtinListSpineModel = CheckedLengthSpineModel
       , FingerprintNatural 1
       ]
 
+-- | Which list inside a length expression or formula exceeded the
+-- collection-width bound during normalization.
 data LengthSyntaxCollectionSite
   = LengthSumTerms
   | LengthConjunctionClauses
@@ -705,6 +755,10 @@ data LengthSyntaxCollectionSite
 
 instance NFData LengthSyntaxCollectionSite
 
+-- | Rejection of a length expression or formula by 'normalizeLengthExpression'
+-- or 'normalizeLengthFormula'.  Limit constructors carry the maximum then the
+-- observed count; the variable-reference constructors are produced by the
+-- caller-supplied variable check and name the offending position.
 data LengthSyntaxError
   = LengthSyntaxNodeLimitExceeded Int Int
   | LengthFormulaClauseLimitExceeded Int Int
@@ -721,6 +775,10 @@ data LengthSyntaxError
 
 instance NFData LengthSyntaxError
 
+-- | Fixed-precedence rejection while sealing a scalar contract.  Constructors
+-- are listed in the order the checks run: target bound, normalization, kind,
+-- constraint-freedom, input and role bounds, spine shape of inputs then
+-- result, precondition, postcondition, and finally the fingerprint budget.
 data LengthContractError variable
   = LengthContractTargetBoundError LengthTypeBoundError
   | LengthContractTargetTypeError (TypeError variable)
@@ -761,6 +819,11 @@ data LengthSpinePairContractError variable
 
 instance NFData variable => NFData (LengthSpinePairContractError variable)
 
+-- | Rejection of one assumed provider summary.  The named provider must have
+-- a term scheme in the source inventory that alpha-matches the supplied
+-- closed scheme; the scheme's constraint context must agree with the source
+-- constructor's trust; and every argument role must line up with the
+-- scheme's spine before the transfer expression is normalized.
 data LengthProviderSummaryError variable
   = LengthProviderNotInSourceInventory Name
   | LengthProviderSourceSchemeBoundError LengthTypeBoundError
@@ -784,6 +847,9 @@ data LengthProviderSummaryError variable
 
 instance NFData variable => NFData (LengthProviderSummaryError variable)
 
+-- | Rejection of a whole provider inventory.  A rejected summary is reported
+-- with its zero-based source index and provider name; a duplicate name is
+-- detected before the later duplicate is sealed.
 data LengthProviderInventoryError variable
   = LengthProviderSummaryLimitExceeded Int Int
   | LengthProviderSummaryRejected
@@ -818,6 +884,7 @@ instance NFData variable => NFData (CheckedLengthContract variable) where
     rnf postcondition `seq`
     rnf fingerprint
 
+-- | The normalized, constraint-free target type the contract was sealed for.
 checkedLengthContractTarget :: CheckedLengthContract variable -> Type variable
 checkedLengthContractTarget (CheckedLengthContract target _ _ _ _ _) = target
 
@@ -827,18 +894,25 @@ checkedLengthContractTargetArgumentRoles
 checkedLengthContractTargetArgumentRoles
     (CheckedLengthContract _ roles _ _ _ _) = roles
 
+-- | Number of observed spine inputs, i.e. the number of admitted
+-- 'LengthInput' positions.  Unobserved target arguments are not counted.
 checkedLengthContractInputCount :: CheckedLengthContract variable -> Int
 checkedLengthContractInputCount
     (CheckedLengthContract _ _ count _ _ _) = count
 
+-- | The normalized precondition; it never mentions 'LengthResult'.
 checkedLengthContractPrecondition
   :: CheckedLengthContract variable -> LengthFormula LengthContractVariable
 checkedLengthContractPrecondition (CheckedLengthContract _ _ _ pre _ _) = pre
 
+-- | The normalized postcondition, which may mention 'LengthResult'.
 checkedLengthContractPostcondition
   :: CheckedLengthContract variable -> LengthFormula LengthContractVariable
 checkedLengthContractPostcondition (CheckedLengthContract _ _ _ _ post _) = post
 
+-- | Contract identity built at sealing time from the dialect, semantic policy,
+-- spine model, argument roles and observed input count, and both normalized
+-- formulas.  It does not cover the target type or the inventory.
 lengthContractFingerprint
   :: CheckedLengthContract variable
   -> Fingerprint LengthContractFingerprintSubject
@@ -868,33 +942,44 @@ instance NFData variable => NFData (CheckedLengthSpinePairContract variable) whe
     rnf postcondition `seq`
     rnf fingerprint
 
+-- | The normalized, constraint-free target type; its result is a boxed pair
+-- of modeled spines.
 checkedLengthSpinePairContractTarget
   :: CheckedLengthSpinePairContract variable -> Type variable
 checkedLengthSpinePairContractTarget
     (CheckedLengthSpinePairContract target _ _ _ _ _) = target
 
+-- | Exact source-ordered argument-role authority retained by the contract,
+-- one role per physical target argument.
 checkedLengthSpinePairContractTargetArgumentRoles
   :: CheckedLengthSpinePairContract variable -> [LengthTargetArgumentRole]
 checkedLengthSpinePairContractTargetArgumentRoles
     (CheckedLengthSpinePairContract _ roles _ _ _ _) = roles
 
+-- | Number of observed spine inputs, i.e. the number of admitted
+-- 'LengthSpinePairInput' positions.
 checkedLengthSpinePairContractInputCount
   :: CheckedLengthSpinePairContract variable -> Int
 checkedLengthSpinePairContractInputCount
     (CheckedLengthSpinePairContract _ _ count _ _ _) = count
 
+-- | The normalized precondition; it never mentions a result component.
 checkedLengthSpinePairContractPrecondition
   :: CheckedLengthSpinePairContract variable
   -> LengthFormula LengthSpinePairContractVariable
 checkedLengthSpinePairContractPrecondition
     (CheckedLengthSpinePairContract _ _ _ precondition _ _) = precondition
 
+-- | The normalized postcondition, which may address either result component.
 checkedLengthSpinePairContractPostcondition
   :: CheckedLengthSpinePairContract variable
   -> LengthFormula LengthSpinePairContractVariable
 checkedLengthSpinePairContractPostcondition
     (CheckedLengthSpinePairContract _ _ _ _ postcondition _) = postcondition
 
+-- | Product-contract identity built at sealing time from the product dialect,
+-- semantic policy, spine model, argument roles, result shape, and both
+-- normalized formulas.  It does not cover the target type or the inventory.
 lengthSpinePairContractFingerprint
   :: CheckedLengthSpinePairContract variable
   -> Fingerprint LengthSpinePairContractFingerprintSubject
@@ -924,25 +1009,33 @@ instance NFData variable => NFData (CheckedLengthProviderSummary variable) where
     rnf trust `seq`
     rnfFingerprintField schemeField
 
+-- | The provider's term name, which is unique within its checked inventory.
 checkedLengthProviderName :: CheckedLengthProviderSummary variable -> Name
 checkedLengthProviderName (CheckedLengthProviderSummary name _ _ _ _ _) = name
 
+-- | The provider's closed, normalized term scheme as resolved from the source
+-- inventory (not the caller-supplied copy, which was only alpha-matched).
 checkedLengthProviderScheme
   :: CheckedLengthProviderSummary variable -> Type variable
 checkedLengthProviderScheme
     (CheckedLengthProviderSummary _ scheme _ _ _ _) = scheme
 
+-- | Source-ordered argument roles, exactly one per argument of the scheme.
 checkedLengthProviderArgumentRoles
   :: CheckedLengthProviderSummary variable -> [LengthProviderArgumentRole]
 checkedLengthProviderArgumentRoles
     (CheckedLengthProviderSummary _ _ roles _ _ _) = roles
 
+-- | The normalized transfer giving the result spine length; it references
+-- only positions whose role is 'LengthSpineArgument'.
 checkedLengthProviderTransfer
   :: CheckedLengthProviderSummary variable
   -> LengthExpression LengthProviderVariable
 checkedLengthProviderTransfer
     (CheckedLengthProviderSummary _ _ _ transfer _ _) = transfer
 
+-- | Trust classifier fixed by the source constructor at sealing time; the
+-- interpreter consults it before applying the law.
 checkedLengthProviderTrust
   :: CheckedLengthProviderSummary variable -> LengthProviderTrust
 checkedLengthProviderTrust
@@ -961,12 +1054,14 @@ instance NFData variable => NFData (CheckedLengthProviderInventory variable) whe
   rnf (CheckedLengthProviderInventory summaries fingerprint) =
     rnf summaries `seq` rnf fingerprint
 
+-- | All checked summaries in ascending provider-name order, not source order.
 checkedLengthProviderSummaries
   :: CheckedLengthProviderInventory variable
   -> [CheckedLengthProviderSummary variable]
 checkedLengthProviderSummaries (CheckedLengthProviderInventory summaries _) =
   Map.elems summaries
 
+-- | Find the checked summary for one provider name, if it was sealed.
 lookupCheckedLengthProviderSummary
   :: Name
   -> CheckedLengthProviderInventory variable
@@ -974,6 +1069,9 @@ lookupCheckedLengthProviderSummary
 lookupCheckedLengthProviderSummary name
     (CheckedLengthProviderInventory summaries _) = Map.lookup name summaries
 
+-- | Identity of the assumed laws only: dialect, spine model, and every
+-- checked summary in provider-name order.  Its version rises when any
+-- summary carries conditional trust.
 lengthProviderInventoryFingerprint
   :: CheckedLengthProviderInventory variable
   -> Fingerprint LengthProviderInventoryFingerprintSubject
@@ -1170,6 +1268,11 @@ sealLengthSpinePairContractInContext limits
   sealLengthSpinePairContractInContextWithRoles limits inventory model
     Nothing rawTarget source
 
+-- | Seal a role-aware binary product-of-spines contract against one exact
+-- checked context.  The role vector is bounded and must match the physical
+-- target argument count; only observed spine arguments receive compact
+-- 'LengthSpinePairInput' indices, and any unobserved role selects the
+-- role-aware fingerprint identity.
 sealRoleAwareLengthSpinePairContractInContext
   :: Ord variable
   => LengthLimits
@@ -1466,6 +1569,9 @@ inventoryTermScheme inventory name
       Just signature -> Just $ valueType signature
       Nothing -> findScheme remaining
 
+-- | Whether a type is exactly one application of the modeled spine's type
+-- constructor.  Only the head constructor name is compared; the element type
+-- is not inspected.
 isModeledSpine
   :: CheckedLengthSpineModel variable
   -> Type variable
@@ -1518,8 +1624,12 @@ observeTypeWithin limits = inspect
         else Left $ LengthTypeCollectionLimitExceeded
           site maximumWidth observed
 
+-- | Running count of syntax nodes and formula clauses consumed so far by the
+-- normalizers.  Threading one value through several formulas makes them
+-- share a single node and clause budget.
 data SyntaxUsage = SyntaxUsage !Int !Int
 
+-- | Fresh usage with nothing consumed.
 emptySyntaxUsage :: SyntaxUsage
 emptySyntaxUsage = SyntaxUsage 0 0
 
@@ -1569,6 +1679,12 @@ validateLiteral limits value =
       then Right value
       else Left $ LengthLiteralBitLimitExceeded maximumBits observedBits
 
+-- | Bound and canonicalize one length expression.  Every node consumes syntax
+-- budget, every literal is checked against the literal bit bound, and every
+-- variable is passed to the supplied check; sums and extrema are then
+-- flattened, literals folded, and terms sorted, while trivial scales, monus,
+-- quotients, moduli, and conditionals are reduced.  Children are normalized
+-- before any reduction, so a reducible node cannot hide an invalid child.
 normalizeLengthExpression
   :: Ord variable
   => LengthLimits
@@ -1686,6 +1802,12 @@ normalizeLengthExpression limits checkVariable usage source = do
       flattenMaximum left ++ flattenMaximum right
     _ -> [expression]
 
+-- | Bound and canonicalize one length formula.  Each formula node consumes
+-- syntax budget and each atomic clause additionally consumes clause budget;
+-- operands go through 'normalizeLengthExpression'.  Equalities are oriented
+-- by 'Ord', double negation and literal comparisons are folded, and
+-- conjunctions are flattened, deduplicated, sorted, and collapsed to
+-- @LengthTruth False@ when any clause is false.
 normalizeLengthFormula
   :: Ord variable
   => LengthLimits
@@ -2054,12 +2176,17 @@ buildLengthProviderInventoryFingerprint limits model summaries =
           ]
       }
 
+-- | The spine model's precomputed identity field, fixed when the model was
+-- sealed; every Length contract, provider-inventory, and problem fingerprint
+-- embeds it under a @spine-model@ tag.
 checkedLengthSpineModelField
   :: CheckedLengthSpineModel variable
   -> FingerprintField
 checkedLengthSpineModelField
     (CheckedLengthSpineModel _ _ _ _ _ field) = field
 
+-- | Identity field of one checked provider summary: name, closed
+-- alpha-normal scheme, ordered argument roles, transfer, and trust.
 providerSummaryField
   :: CheckedLengthProviderSummary variable
   -> FingerprintField
@@ -2103,11 +2230,15 @@ providerRoleField role = FingerprintBytes $ ascii $ case role of
   LengthSpineArgument -> "spine-length-argument"
   LengthUnobservedArgument -> "length-unobserved-argument"
 
+-- | Identity field of a scalar contract variable, for use as the variable
+-- encoder of 'lengthExpressionField' and 'lengthFormulaField'.
 contractVariableField :: LengthContractVariable -> FingerprintField
 contractVariableField variable = case variable of
   LengthInput position -> tagged "input" [FingerprintNatural position]
   LengthResult -> tagged "result" []
 
+-- | Identity field of a product-contract variable.  Inputs share the scalar
+-- @input@ encoding; each result component is tagged distinctly.
 lengthSpinePairContractVariableField
   :: LengthSpinePairContractVariable -> FingerprintField
 lengthSpinePairContractVariableField variable = case variable of
@@ -2122,6 +2253,9 @@ providerVariableField :: LengthProviderVariable -> FingerprintField
 providerVariableField (LengthProviderArgument position) =
   tagged "argument" [FingerprintNatural position]
 
+-- | Structural identity field of a length expression, tagging each
+-- constructor and encoding variables with the supplied encoder.  Callers pass
+-- normalized expressions so that canonically equal terms fingerprint alike.
 lengthExpressionField
   :: (variable -> FingerprintField)
   -> LengthExpression variable
@@ -2163,6 +2297,8 @@ lengthExpressionField variableField source = case source of
     , lengthExpressionField variableField falseBranch
     ]
 
+-- | Structural identity field of a length formula, tagging each constructor
+-- and delegating operands to 'lengthExpressionField' with the same encoder.
 lengthFormulaField
   :: (variable -> FingerprintField)
   -> LengthFormula variable
@@ -2198,6 +2334,8 @@ alphaVariableField variable = case variable of
   -- granting any useful identity to an open scheme.
   AlphaFreeVariable{} -> tagged "rejected-free-variable" []
 
+-- | Wrap fields in a 'FingerprintTag' whose tag is the ASCII bytes of the
+-- given label.
 tagged :: String -> [FingerprintField] -> FingerprintField
 tagged = FingerprintType.taggedFingerprintField
 
@@ -2215,5 +2353,7 @@ rnfFingerprintField field = case field of
     fields
   FingerprintName name -> rnf name
 
+-- | Encode a label as fingerprint bytes, one byte per character by code
+-- point; callers pass only ASCII literals.
 ascii :: String -> [Word8]
 ascii = FingerprintType.asciiFingerprintBytes

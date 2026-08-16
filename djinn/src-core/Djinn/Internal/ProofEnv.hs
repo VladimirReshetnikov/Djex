@@ -1,6 +1,10 @@
+-- | Assign stable internal identities to external proof assumptions.
 --
--- Assign stable internal identities to external proof assumptions.
---
+-- 'prepareProofEnvironment' re-keys every assumption by a fresh internal
+-- 'Symbol' and sets aside any assumption named like the target definition,
+-- so proof search and checking never guess between overloaded display
+-- names; 'restoreProofTerm' maps a finished proof back to the external
+-- names.  "Djinn.Core" wraps every LJT search of a query in this way.
 module Djinn.Internal.ProofEnv (
     ProofEnvironment, prepareProofEnvironment,
     proofBindings, proofBindingsIncludingTarget,

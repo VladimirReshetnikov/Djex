@@ -66,6 +66,8 @@ instance NFData SMTLibResponseLimits where
     rnf bytes `seq` rnf depth `seq` rnf nodes `seq`
     rnf tokenBytes `seq` rnf numeralBits
 
+-- | Retain the five raw limits as validated limits.  Every field is a
+-- 'Natural', so no value is rejected and the conversion is total.
 mkSMTLibResponseLimits :: SMTLibResponseLimitSource -> SMTLibResponseLimits
 mkSMTLibResponseLimits source = SMTLibResponseLimits
   (smtLibResponseLimitSourceBytes source)
@@ -85,23 +87,36 @@ defaultSMTLibResponseLimitSource = SMTLibResponseLimitSource
   , smtLibResponseLimitSourceNumeralBits = 4096
   }
 
+-- | The limits built from 'defaultSMTLibResponseLimitSource'.
 defaultSMTLibResponseLimits :: SMTLibResponseLimits
 defaultSMTLibResponseLimits =
   mkSMTLibResponseLimits defaultSMTLibResponseLimitSource
 
+-- | Maximum number of response bytes retained before tokenization.  The
+-- response is rejected with 'SMTLibResponseByteLimitExceeded' as soon as one
+-- byte beyond this limit exists, without forcing the rest of the input.
 smtLibResponseByteLimit :: SMTLibResponseLimits -> Natural
 smtLibResponseByteLimit (SMTLibResponseLimits value _ _ _ _) = value
 
+-- | Maximum list nesting depth.  Opening a list when the current depth
+-- already equals this limit fails with 'SMTLibNestingDepthLimitExceeded'.
 smtLibResponseNestingDepthLimit :: SMTLibResponseLimits -> Natural
 smtLibResponseNestingDepthLimit
     (SMTLibResponseLimits _ value _ _ _) = value
 
+-- | Maximum number of nodes, counting every list and every atom, admitted in
+-- one response; the next node fails with 'SMTLibNodeLimitExceeded'.
 smtLibResponseNodeLimit :: SMTLibResponseLimits -> Natural
 smtLibResponseNodeLimit (SMTLibResponseLimits _ _ value _ _) = value
 
+-- | Maximum content bytes of a single token, applied alike to bare tokens,
+-- string contents, and quoted-symbol contents; 'SMTLibTokenPart' describes
+-- what each kind counts.
 smtLibResponseTokenByteLimit :: SMTLibResponseLimits -> Natural
 smtLibResponseTokenByteLimit (SMTLibResponseLimits _ _ _ value _) = value
 
+-- | Maximum bit width of a numeral: a numeral whose value reaches
+-- @2 ^ limit@ is rejected with 'SMTLibNumeralBitLimitExceeded'.
 smtLibResponseNumeralBitLimit :: SMTLibResponseLimits -> Natural
 smtLibResponseNumeralBitLimit (SMTLibResponseLimits _ _ _ _ value) = value
 

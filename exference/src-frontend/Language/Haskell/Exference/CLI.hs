@@ -1,5 +1,11 @@
 {-# LANGUAGE MultiWayIf #-}
 
+-- | The @exference@ command-line tool: GetOpt flag parsing, loading and
+-- sealing the source environment into an 'ExferenceSession', running each
+-- @--input@ query through the checked request API of
+-- "Language.Haskell.Djex.Exference" (and its @HaskellSrc@ parsing adapter),
+-- and presenting the selected results.  It carries the historical CLI
+-- heuristics profile, which deliberately differs from the library default.
 module Language.Haskell.Exference.CLI (main) where
 
 import Control.Monad (forM_, unless, when)

@@ -54,6 +54,13 @@ data SMTLibCausalInitialBoundary
 
 instance NFData SMTLibCausalInitialBoundary
 
+-- | Why 'driveSMTLibCausalActions' stopped: a transport operation failed, the
+-- pure machine rejected input (including a stale boundary byte reported
+-- through the caller's constructor), the completed transcript exceeded the
+-- cumulative output maximum (maximum, then observed as maximum plus one), or
+-- the machine returned an action the driver protocol does not permit at that
+-- point (for example a non-write initial action, or any response other than
+-- an await to fed boundary whitespace).
 data SMTLibCausalFailure transportFailure machineFailure
   = SMTLibCausalTransportFailure !transportFailure
   | SMTLibCausalMachineFailure !machineFailure
@@ -63,6 +70,11 @@ data SMTLibCausalFailure transportFailure machineFailure
 
 type role SMTLibCausalFailure nominal nominal
 
+-- | Every stdout byte the driver consumed while running one machine to
+-- completion: the whitespace attributed to the boundary before the first
+-- write's response, followed by one epoch per write in write order.  The
+-- constructor is hidden; a transcript is produced only by
+-- 'driveSMTLibCausalActions'.
 data SMTLibCausalTranscript kind = SMTLibCausalTranscript
   !ByteString [SMTLibCausalTranscriptEpoch kind]
 
@@ -72,6 +84,9 @@ instance NFData kind => NFData (SMTLibCausalTranscript kind) where
   rnf (SMTLibCausalTranscript inherited epochs) =
     rnf inherited `seq` rnf epochs
 
+-- | The stdout bytes attributed to one write: the write's kind and the
+-- response bytes read for it, including any boundary whitespace drained
+-- after the response and before the next write or completion.
 data SMTLibCausalTranscriptEpoch kind =
   SMTLibCausalTranscriptEpoch !kind !ByteString
 
@@ -81,18 +96,26 @@ instance NFData kind => NFData (SMTLibCausalTranscriptEpoch kind) where
   rnf (SMTLibCausalTranscriptEpoch kind bytes) =
     rnf kind `seq` rnf bytes
 
+-- | Whitespace consumed before the first write's response: the predecessor
+-- boundary whitespace adopted under
+-- 'SMTLibCausalAdoptPredecessorWhitespace' plus any whitespace prefix of the
+-- first response.  Empty under 'SMTLibCausalRequireEmptyBoundary'.
 smtLibCausalTranscriptInheritedBytes
   :: SMTLibCausalTranscript kind
   -> ByteString
 smtLibCausalTranscriptInheritedBytes
     (SMTLibCausalTranscript bytes _) = bytes
 
+-- | One epoch per write the driver issued, in write order.
 smtLibCausalTranscriptEpochs
   :: SMTLibCausalTranscript kind
   -> [SMTLibCausalTranscriptEpoch kind]
 smtLibCausalTranscriptEpochs
     (SMTLibCausalTranscript _ epochs) = epochs
 
+-- | Total stdout bytes in the transcript: the inherited bytes plus every
+-- epoch's bytes.  This is the quantity 'driveSMTLibCausalActions' compares
+-- against its cumulative maximum on completion.
 smtLibCausalTranscriptByteCount
   :: SMTLibCausalTranscript kind
   -> Natural
@@ -101,12 +124,16 @@ smtLibCausalTranscriptByteCount transcript =
   sum (map (byteCount . smtLibCausalTranscriptEpochBytes)
     $ smtLibCausalTranscriptEpochs transcript)
 
+-- | The kind carried by the 'SMTLibCausalWrite' this epoch answers.
 smtLibCausalTranscriptEpochKind
   :: SMTLibCausalTranscriptEpoch kind
   -> kind
 smtLibCausalTranscriptEpochKind
     (SMTLibCausalTranscriptEpoch kind _) = kind
 
+-- | The stdout bytes read in response to this epoch's write, in transport
+-- order, including trailing boundary whitespace drained before the next
+-- write or completion.
 smtLibCausalTranscriptEpochBytes
   :: SMTLibCausalTranscriptEpoch kind
   -> ByteString

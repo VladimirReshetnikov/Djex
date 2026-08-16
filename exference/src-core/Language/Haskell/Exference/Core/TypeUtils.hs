@@ -1,3 +1,9 @@
+-- | Structural utilities over Exference's 'HsType': flexible-variable
+-- renumbering and bounds, forall quantification and alpha-normalization,
+-- arrow-chain splitting, and forall/head queries.  Many are thin
+-- compatibility names over "Language.Haskell.Synthesis.Type"; the class-
+-- environment names in the export list are re-exported from
+-- "Language.Haskell.Exference.Core.Types" for historical callers.
 module Language.Haskell.Exference.Core.TypeUtils
   ( incVarIds
   , maximumFlexibleId

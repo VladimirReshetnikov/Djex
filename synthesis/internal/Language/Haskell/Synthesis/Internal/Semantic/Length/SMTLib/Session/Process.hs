@@ -102,44 +102,79 @@ import qualified Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process
   as Z3Process
 
+-- | Strength tag of the plain path-snapshot launch: the executable is hashed
+-- through its pathname before spawn and that same pathname is then handed to
+-- the process creator, so the tag names a stable-namespace assumption and is
+-- explicitly weaker than an executed-image attestation.
 lengthSMTLibExecutableSnapshotStrengthTag :: ByteString
 lengthSMTLibExecutableSnapshotStrengthTag =
   Z3Process.z3SMTLibExecutableSnapshotStrengthTag
 
+-- | Strength tag of the descriptor-bound launch: the digest and the executed
+-- main image both come from one opened source stream copied once into one
+-- sealed anonymous image.  It claims nothing about set-id or capability
+-- metadata, the ELF loader, shared objects, interpreters, or solver results.
 lengthSMTLibDescriptorBoundExecutableLaunchStrengthTag :: ByteString
 lengthSMTLibDescriptorBoundExecutableLaunchStrengthTag =
   Z3Process.z3SMTLibDescriptorBoundExecutableLaunchStrengthTag
 
+-- | Whether this build can perform the descriptor-bound launch at all.  When
+-- 'False', 'openLengthSMTLibDescriptorBoundProcess' fails with
+-- 'LengthSMTLibProcessDescriptorBoundLaunchUnavailable' without spawning.
 lengthSMTLibDescriptorBoundExecutableLaunchSupported :: Bool
 lengthSMTLibDescriptorBoundExecutableLaunchSupported =
   Z3Process.z3SMTLibDescriptorBoundExecutableLaunchSupported
 
+-- | Strength tag of the effective-ID descriptor-bound launch: the opened
+-- source additionally passes two point-in-time effective-credential VFS
+-- execute-access observations, while the sealed image still binds only the
+-- main-image bytes.  Neither observation is a reservation or a complete exec
+-- security decision.
 lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchStrengthTag
   :: ByteString
 lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchStrengthTag =
   Z3Process.z3SMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchStrengthTag
 
+-- | Whether this build can perform the effective-ID descriptor-bound launch.
+-- It is enabled by the same build flag as the plain descriptor-bound launch.
 lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchSupported :: Bool
 lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchSupported =
   Z3Process.z3SMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchSupported
 
+-- | Strength tag of the execve-check descriptor-bound launch: two source
+-- checks pair effective-ID VFS execute access with the Linux 6.14
+-- @AT_EXECVE_CHECK@ observation, and the separately checked @MFD_EXEC@ image
+-- carries a fixed mode and verified seal set.  Every check is point-in-time.
 lengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunchStrengthTag
   :: ByteString
 lengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunchStrengthTag =
   Z3Process.z3SMTLibDescriptorBoundExecveCheckExecutableAccessLaunchStrengthTag
 
+-- | Whether this build can perform the execve-check descriptor-bound launch.
+-- It is enabled by the same build flag as the plain descriptor-bound launch;
+-- kernel support is only discovered when the launch actually runs.
 lengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunchSupported :: Bool
 lengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunchSupported =
   Z3Process.z3SMTLibDescriptorBoundExecveCheckExecutableAccessLaunchSupported
 
+-- | Schema tag sealed as the first field of
+-- 'lengthSMTLibProcessFingerprintField' for a process opened by
+-- 'openLengthSMTLibProcess'.  This module is the sole owner of the raw
+-- Length process schema.
 lengthSMTLibProcessSchemaTag :: ByteString
 lengthSMTLibProcessSchemaTag = asciiBytes
   "djex-length-z3-raw-process/v2"
 
+-- | Schema tag sealed as the first field of
+-- 'lengthSMTLibProcessFingerprintField' for a process opened by
+-- 'openLengthSMTLibDescriptorBoundProcess'.
 lengthSMTLibDescriptorBoundProcessSchemaTag :: ByteString
 lengthSMTLibDescriptorBoundProcessSchemaTag = asciiBytes
   "djex-length-z3-descriptor-bound-sealed-main-image-process/v1"
 
+-- | Schema tag sealed as the first field of
+-- 'lengthSMTLibProcessFingerprintField' for a process opened by
+-- 'openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcess'.
 lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessSchemaTag
   :: ByteString
 lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessSchemaTag =
@@ -148,6 +183,9 @@ lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessSchemaTag =
     , "sealed-main-image-process/v1"
     ]
 
+-- | Schema tag sealed as the first field of
+-- 'lengthSMTLibProcessFingerprintField' for a process opened by
+-- 'openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcess'.
 lengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessSchemaTag
   :: ByteString
 lengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessSchemaTag =
@@ -156,6 +194,10 @@ lengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessSchemaTag =
     , "sealed-main-image-process/v1"
     ]
 
+-- | Caller-supplied raw process bounds before validation.  Byte fields bound
+-- the hashed executable, retained stdout, retained stderr, and one pipe read;
+-- the millisecond fields are the successive cleanup waits before escalating
+-- from graceful close to terminate to kill.
 data LengthSMTLibProcessLimitSource = LengthSMTLibProcessLimitSource
   { lengthSMTLibProcessLimitSourceExecutableBytes :: !Natural
   , lengthSMTLibProcessLimitSourceStdoutBytes :: !Natural
@@ -167,13 +209,26 @@ data LengthSMTLibProcessLimitSource = LengthSMTLibProcessLimitSource
   }
   deriving (Eq, Ord, Show)
 
+-- | The shared raw Z3 process defaults restated in Length vocabulary:
+-- 256 MiB executable, 1 MiB stdout, 64 KiB stderr, 4 KiB read chunks, and
+-- 100/500/500 millisecond graceful-close, terminate, and kill waits.
 defaultLengthSMTLibProcessLimitSource :: LengthSMTLibProcessLimitSource
 defaultLengthSMTLibProcessLimitSource = fromZ3ProcessLimitSource
   Z3Process.defaultZ3SMTLibProcessLimitSource
 
+-- | Validated raw process bounds.  A value can only be obtained through
+-- 'mkLengthSMTLibProcessLimits' or read back from an opened process with
+-- 'lengthSMTLibProcessLimits'.
 data LengthSMTLibProcessLimits = LengthSMTLibProcessLimits
   !Z3Process.Z3SMTLibProcessLimits
 
+-- | Validate a limit source.  The executable, read-chunk, and three
+-- millisecond fields must be nonzero
+-- ('LengthSMTLibProcessNonPositiveLimit'), and the read chunk and
+-- milliseconds must fit the native integer range used by the process
+-- runtime ('LengthSMTLibProcessLimitConversionOverflow'); the stdout and
+-- stderr byte fields are accepted as given.  Failures report
+-- 'LengthSMTLibProcessLimitPhase' and the offending value.
 mkLengthSMTLibProcessLimits
   :: LengthSMTLibProcessLimitSource
   -> Either LengthSMTLibProcessError LengthSMTLibProcessLimits
@@ -182,48 +237,70 @@ mkLengthSMTLibProcessLimits source =
     Left failure -> Left $ fromZ3ProcessError failure
     Right limits -> Right $ LengthSMTLibProcessLimits limits
 
+-- | Maximum number of executable bytes hashed for the pre-spawn snapshot;
+-- a larger file fails opening with
+-- 'LengthSMTLibProcessExecutableByteLimitExceeded'.
 lengthSMTLibProcessExecutableByteLimit
   :: LengthSMTLibProcessLimits
   -> Natural
 lengthSMTLibProcessExecutableByteLimit =
   Z3Process.z3SMTLibProcessExecutableByteLimit . toZ3ProcessLimits
 
+-- | Maximum number of stdout bytes retained over the whole process
+-- lifetime.  Bytes are charged before they are queued, and the first byte
+-- beyond the limit records 'LengthSMTLibProcessStdoutByteLimitExceeded' as a
+-- stdout terminal condition behind the permitted prefix.
 lengthSMTLibProcessStdoutByteLimit
   :: LengthSMTLibProcessLimits
   -> Natural
 lengthSMTLibProcessStdoutByteLimit =
   Z3Process.z3SMTLibProcessStdoutByteLimit . toZ3ProcessLimits
 
+-- | Maximum stderr byte count reported by
+-- 'lengthSMTLibProcessObservedStderrBytes'; the observed count saturates at
+-- this limit plus one.  Any stderr byte at all poisons the process.
 lengthSMTLibProcessStderrByteLimit
   :: LengthSMTLibProcessLimits
   -> Natural
 lengthSMTLibProcessStderrByteLimit =
   Z3Process.z3SMTLibProcessStderrByteLimit . toZ3ProcessLimits
 
+-- | Maximum number of bytes requested from a pipe or the executable file in
+-- one read, and so the maximum size of one stdout chunk.
 lengthSMTLibProcessReadChunkByteLimit
   :: LengthSMTLibProcessLimits
   -> Natural
 lengthSMTLibProcessReadChunkByteLimit =
   Z3Process.z3SMTLibProcessReadChunkByteLimit . toZ3ProcessLimits
 
+-- | How long cleanup waits for the child to exit after its stdin is closed
+-- before sending a terminate signal.
 lengthSMTLibProcessGracefulCloseMilliseconds
   :: LengthSMTLibProcessLimits
   -> Natural
 lengthSMTLibProcessGracefulCloseMilliseconds =
   Z3Process.z3SMTLibProcessGracefulCloseMilliseconds . toZ3ProcessLimits
 
+-- | How long cleanup waits after the terminate signal before escalating to a
+-- kill.
 lengthSMTLibProcessTerminateMilliseconds
   :: LengthSMTLibProcessLimits
   -> Natural
 lengthSMTLibProcessTerminateMilliseconds =
   Z3Process.z3SMTLibProcessTerminateMilliseconds . toZ3ProcessLimits
 
+-- | How long cleanup waits after the kill signal for the child to be reaped,
+-- and also its bound for stopping reader threads and closing pipe handles.
 lengthSMTLibProcessKillMilliseconds
   :: LengthSMTLibProcessLimits
   -> Natural
 lengthSMTLibProcessKillMilliseconds =
   Z3Process.z3SMTLibProcessKillMilliseconds . toZ3ProcessLimits
 
+-- | The seven limits sealed under the Length-owned
+-- @length-z3-process-limits/v1@ tag, in the order executable, stdout,
+-- stderr, read-chunk, graceful-close, terminate, kill.  This is the last
+-- field of 'lengthSMTLibProcessFingerprintField'.
 lengthSMTLibProcessLimitsFingerprintField
   :: LengthSMTLibProcessLimits
   -> FingerprintField
@@ -232,6 +309,8 @@ lengthSMTLibProcessLimitsFingerprintField limits = FingerprintTag
   $ Z3Process.z3SMTLibProcessLimitFingerprintFields
   $ toZ3ProcessLimits limits
 
+-- | Where in the raw process lifecycle a failure was detected.  Phases are
+-- listed in lifecycle order, from limit validation through close.
 data LengthSMTLibProcessPhase
   = LengthSMTLibProcessLimitPhase
   | LengthSMTLibProcessDeadlinePhase
@@ -247,6 +326,9 @@ data LengthSMTLibProcessPhase
   | LengthSMTLibProcessClosePhase
   deriving (Bounded, Enum, Eq, Ord, Show)
 
+-- | Stable sanitized failure classes of the raw process.  No constructor
+-- retains a path, digest, command, output byte, exception string, or
+-- operating-system error text.
 data LengthSMTLibProcessFailureClass
   = LengthSMTLibProcessNonPositiveLimit
   | LengthSMTLibProcessLimitConversionOverflow
@@ -289,6 +371,10 @@ data LengthSMTLibProcessFailureClass
   | LengthSMTLibProcessStagedExecveCheckFailed
   deriving (Bounded, Enum, Eq, Ord, Show)
 
+-- | How far cleanup had to escalate to get the child reaped: it exited
+-- within the graceful-close wait, needed a terminate signal, needed a kill
+-- signal, or was still not reaped (or its readers still not stopped) when
+-- the kill wait ran out.
 data LengthSMTLibProcessCleanupEscalation
   = LengthSMTLibProcessClosedGracefully
   | LengthSMTLibProcessTerminated
@@ -296,15 +382,32 @@ data LengthSMTLibProcessCleanupEscalation
   | LengthSMTLibProcessCleanupIncomplete
   deriving (Bounded, Enum, Eq, Ord, Show)
 
+-- | Outcome of one cleanup of the raw child.  The escalation is
+-- 'LengthSMTLibProcessCleanupIncomplete' whenever no exit code was reaped or
+-- the reader threads did not stop in time, regardless of which signals were
+-- sent.
 data LengthSMTLibProcessCleanupStatus = LengthSMTLibProcessCleanupStatus
   { lengthSMTLibProcessCleanupEscalation
       :: !LengthSMTLibProcessCleanupEscalation
+    -- ^ The final escalation level reached, as described on the type.
   , lengthSMTLibProcessCleanupExitCode :: !(Maybe ExitCode)
+    -- ^ The reaped exit code, or 'Nothing' if the child was not observed
+    -- exiting within the cleanup waits.
   , lengthSMTLibProcessCleanupFailureCount :: !Natural
+    -- ^ Number of failed signal deliveries and handle closes, plus one if
+    -- the readers did not stop.
   , lengthSMTLibProcessCleanupReadersStopped :: !Bool
+    -- ^ Whether every reader and writer thread of the process was joined
+    -- within the kill wait; the stdout and stderr handles are only closed
+    -- when this holds.
   }
   deriving (Eq, Ord, Show)
 
+-- | Sanitized failure of one raw process operation.  The observed count is
+-- an operation-specific lower bound (for example the offending limit value,
+-- or the stdout byte count at which a terminal condition was recorded); the
+-- cleanup status is present only when a failing open had already acquired a
+-- child which it then cleaned up.
 data LengthSMTLibProcessError = LengthSMTLibProcessError
   { lengthSMTLibProcessErrorPhase :: !LengthSMTLibProcessPhase
   , lengthSMTLibProcessErrorClass :: !LengthSMTLibProcessFailureClass
@@ -314,13 +417,23 @@ data LengthSMTLibProcessError = LengthSMTLibProcessError
   }
   deriving (Eq, Ord, Show)
 
+-- | An absolute deadline on the process-runtime monotonic clock, in
+-- nanoseconds.  Every blocking raw process operation is bounded by one, and
+-- a deadline is exceeded once the clock reads at or past it.
 data LengthSMTLibProcessDeadline = LengthSMTLibProcessDeadline
   !Z3Process.Z3SMTLibProcessDeadline
 
+-- | Wrap an absolute monotonic-clock reading in nanoseconds, as returned by
+-- 'lengthSMTLibProcessMonotonicTimeNanoseconds', as a deadline.
 mkLengthSMTLibProcessDeadline :: Word64 -> LengthSMTLibProcessDeadline
 mkLengthSMTLibProcessDeadline = LengthSMTLibProcessDeadline
   . Z3Process.mkZ3SMTLibProcessDeadline
 
+-- | Read the monotonic clock now and place the deadline that many
+-- milliseconds ahead.  A non-positive count fails with
+-- 'LengthSMTLibProcessNonPositiveLimit' and a target beyond the clock range
+-- with 'LengthSMTLibProcessLimitConversionOverflow', both in
+-- 'LengthSMTLibProcessDeadlinePhase'.
 lengthSMTLibProcessDeadlineAfterMilliseconds
   :: Int
   -> IO (Either LengthSMTLibProcessError LengthSMTLibProcessDeadline)
@@ -330,6 +443,8 @@ lengthSMTLibProcessDeadlineAfterMilliseconds milliseconds = do
     Left failure -> Left $ fromZ3ProcessError failure
     Right deadline -> Right $ LengthSMTLibProcessDeadline deadline
 
+-- | Compare two deadlines by their absolute clock instant; the earlier
+-- deadline is the smaller one.
 compareLengthSMTLibProcessDeadline
   :: LengthSMTLibProcessDeadline
   -> LengthSMTLibProcessDeadline
@@ -339,6 +454,7 @@ compareLengthSMTLibProcessDeadline
     (LengthSMTLibProcessDeadline right) =
       Z3Process.compareZ3SMTLibProcessDeadline left right
 
+-- | The earlier of two deadlines; the left one is returned on a tie.
 minimumLengthSMTLibProcessDeadline
   :: LengthSMTLibProcessDeadline
   -> LengthSMTLibProcessDeadline
@@ -348,6 +464,10 @@ minimumLengthSMTLibProcessDeadline
     (LengthSMTLibProcessDeadline right) = LengthSMTLibProcessDeadline
       $ Z3Process.minimumZ3SMTLibProcessDeadline left right
 
+-- | Read the monotonic clock and fail with
+-- 'LengthSMTLibProcessDeadlineExceeded' in 'LengthSMTLibProcessDeadlinePhase'
+-- if the deadline has been reached or passed.  This checks the deadline
+-- alone, not any cancellation token.
 checkLengthSMTLibProcessDeadline
   :: LengthSMTLibProcessDeadline
   -> IO (Either LengthSMTLibProcessError ())
@@ -358,27 +478,43 @@ checkLengthSMTLibProcessDeadline
     Left failure -> Left $ fromZ3ProcessError failure
     Right () -> Right ()
 
+-- | The monotonic clock reading, in nanoseconds, against which every
+-- 'LengthSMTLibProcessDeadline' is measured.
 lengthSMTLibProcessMonotonicTimeNanoseconds :: IO Word64
 lengthSMTLibProcessMonotonicTimeNanoseconds =
   Z3Process.z3SMTLibProcessMonotonicTimeNanoseconds
 
+-- | The deadline's absolute nanosecond instant tagged with the clock schema
+-- it was read from, for sealing into a Length identity.
 lengthSMTLibProcessDeadlineFingerprintField
   :: LengthSMTLibProcessDeadline
   -> FingerprintField
 lengthSMTLibProcessDeadlineFingerprintField =
   Z3Process.z3SMTLibProcessDeadlineFingerprintField . toZ3ProcessDeadline
 
+-- | A shared, one-way cancellation token.  Once cancelled it stays
+-- cancelled, and every raw process operation given it fails with
+-- 'LengthSMTLibProcessCancelled' at its next control check.
 data LengthSMTLibProcessCancellation = LengthSMTLibProcessCancellation
   !Z3Process.Z3SMTLibProcessCancellation
 
+-- | Allocate a fresh, not yet cancelled token.
 newLengthSMTLibProcessCancellation :: IO LengthSMTLibProcessCancellation
 newLengthSMTLibProcessCancellation = LengthSMTLibProcessCancellation
   <$> Z3Process.newZ3SMTLibProcessCancellation
 
+-- | Set the token to cancelled.  This only flags the token; it does not
+-- itself close or signal any process, and cancelling twice is harmless.
 cancelLengthSMTLibProcess :: LengthSMTLibProcessCancellation -> IO ()
 cancelLengthSMTLibProcess = Z3Process.cancelZ3SMTLibProcess
   . toZ3ProcessCancellation
 
+-- | Run pre-process allocation work under the given cancellation token and
+-- absolute deadline.  The action runs unmasked in a private thread;
+-- cancellation or deadline expiry interrupts and joins it before returning.
+-- If the action produced a value but a final cancellation/deadline check
+-- then fails, the rollback is run on that value before it is discarded.
+-- Exception payloads from either callback are never retained.
 runBeforeLengthSMTLibProcessDeadline
   :: LengthSMTLibProcessCancellation
   -> LengthSMTLibProcessDeadline
@@ -393,21 +529,37 @@ runBeforeLengthSMTLibProcessDeadline cancellation deadline action rollback =
       action rollback
     retainZ3ProcessResult result
 
+-- | The bounded executable observation taken by an opener before the child
+-- was created: the SHA-256 digest and byte count of the bytes it hashed,
+-- plus the fingerprint field describing how they were obtained.  For the
+-- plain launch this is a pre-spawn pathname snapshot and not an attestation
+-- of the executed image; the descriptor-bound launches hash the same opened
+-- source that is copied into the executed sealed image.
 data LengthSMTLibExecutableSnapshot = LengthSMTLibExecutableSnapshot
   !Z3Process.Z3SMTLibExecutableSnapshot
 
+-- | The raw 32-byte SHA-256 digest of the hashed executable bytes.  When
+-- the execution profile pins an expected digest, opening only succeeds if
+-- this value matched it.
 lengthSMTLibExecutableSnapshotSHA256
   :: LengthSMTLibExecutableSnapshot
   -> ByteString
 lengthSMTLibExecutableSnapshotSHA256 =
   Z3Process.z3SMTLibExecutableSnapshotSHA256 . toZ3ExecutableSnapshot
 
+-- | The number of executable bytes hashed into the digest; it never exceeds
+-- 'lengthSMTLibProcessExecutableByteLimit'.
 lengthSMTLibExecutableSnapshotByteCount
   :: LengthSMTLibExecutableSnapshot
   -> Natural
 lengthSMTLibExecutableSnapshotByteCount =
   Z3Process.z3SMTLibExecutableSnapshotByteCount . toZ3ExecutableSnapshot
 
+-- | The snapshot field retained at open time, in a schema specific to the
+-- launch strategy: the strength tag, requested executable path, source
+-- metadata, digest, byte count, pin outcome, argument vector, working
+-- directory, and spawn policy of the launch.  It is the observation the
+-- opener sealed and is not recomputed on read.
 lengthSMTLibExecutableSnapshotFingerprintField
   :: LengthSMTLibExecutableSnapshot
   -> FingerprintField
@@ -422,10 +574,17 @@ lengthSMTLibExecutableSnapshotFingerprintField =
 data LengthSMTLibProcess = LengthSMTLibProcess
   !Z3Process.Z3SMTLibProcess
 
+-- | A borrowed open descriptor for the already-owned fresh working
+-- directory of a descriptor-bound launch.  The native launcher duplicates
+-- it before fork and never closes it; the caller keeps ownership.
 data LengthSMTLibWorkingDirectoryDescriptor =
   LengthSMTLibWorkingDirectoryDescriptor
     !Z3Process.Z3SMTLibWorkingDirectoryDescriptor
 
+-- | Wrap a raw numeric file descriptor of the working directory.  No check
+-- is made here; the descriptor-bound opener it is passed to verifies that
+-- it is a directory and refers to the same inode as the working directory
+-- path.
 mkLengthSMTLibWorkingDirectoryDescriptor
   :: Int
   -> LengthSMTLibWorkingDirectoryDescriptor
@@ -433,6 +592,13 @@ mkLengthSMTLibWorkingDirectoryDescriptor =
   LengthSMTLibWorkingDirectoryDescriptor
   . Z3Process.mkZ3SMTLibWorkingDirectoryDescriptor
 
+-- | Open one raw Z3 process by the portable path-snapshot launch: the
+-- working directory must be an absolute, existing, empty directory, the
+-- configured executable is hashed through its pathname (honouring the
+-- profile's pin, if any) with its metadata checked before and after, and
+-- that pathname is then spawned with piped stdin/stdout/stderr in its own
+-- process group.  A failure after the child was created carries the cleanup
+-- status of that child.
 openLengthSMTLibProcess
   :: LengthSMTLibProcessLimits
   -> LengthSMTLibProcessCancellation
@@ -482,6 +648,13 @@ retainOpenedProcess opened = case opened of
         transientFingerprint = processFingerprintField process
     in retained `seq` transientFingerprint `seq` pure (Right retained)
 
+-- | Open one raw Z3 process by the Linux-only descriptor-bound launch: the
+-- configured pathname is opened once without following a final symlink,
+-- copied once while hashing into a sealed anonymous memory file, and that
+-- sealed image rather than the pathname is executed.  On a build without
+-- descriptor-bound support (see
+-- 'lengthSMTLibDescriptorBoundExecutableLaunchSupported') this fails with
+-- 'LengthSMTLibProcessDescriptorBoundLaunchUnavailable' before any spawn.
 openLengthSMTLibDescriptorBoundProcess
   :: LengthSMTLibProcessLimits
   -> LengthSMTLibProcessCancellation
@@ -515,12 +688,22 @@ openLengthSMTLibProcessWithPreDescriptorExecHook limits cancellation deadline
     Z3Process.openZ3SMTLibDescriptorBoundProcessWithPreExecHook z3Limits
       z3Cancellation z3Deadline profile workingDirectory descriptor hook
 
+-- | Whether this process was opened by the plain descriptor-bound launch
+-- ('openLengthSMTLibDescriptorBoundProcess').  The three
+-- @lengthSMTLibProcessUsesDescriptorBound...@ predicates are mutually
+-- exclusive: each names exactly one launch strategy, and a path-snapshot
+-- process answers 'False' to all of them.
 lengthSMTLibProcessUsesDescriptorBoundExecutableLaunch
   :: LengthSMTLibProcess
   -> Bool
 lengthSMTLibProcessUsesDescriptorBoundExecutableLaunch =
   Z3Process.z3SMTLibProcessUsesDescriptorBoundExecutableLaunch . toZ3Process
 
+-- | Closed, sanitized result of one effective-ID source execute-access
+-- observation supplied by an access checker; native errno values never
+-- cross this boundary.  Only 'LengthSMTLibEffectiveIDExecutableAccessAdmitted'
+-- lets the launch continue; the other three map to the failure classes of
+-- the same name.
 data LengthSMTLibEffectiveIDExecutableAccessCheckResult
   = LengthSMTLibEffectiveIDExecutableAccessAdmitted
   | LengthSMTLibEffectiveIDExecutableAccessDenied
@@ -528,6 +711,12 @@ data LengthSMTLibEffectiveIDExecutableAccessCheckResult
   | LengthSMTLibEffectiveIDExecutableAccessCheckFailed
   deriving (Bounded, Enum, Eq, Ord, Show)
 
+-- | The descriptor-bound launch which additionally observes effective-ID
+-- source VFS execute access on the opened source, once before copying and
+-- again after staging immediately before child allocation.  Both
+-- observations are point-in-time only.  On a build without descriptor-bound
+-- support this fails with
+-- 'LengthSMTLibProcessEffectiveIDExecutableAccessCheckUnavailable'.
 openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
   :: LengthSMTLibProcessLimits
   -> LengthSMTLibProcessCancellation
@@ -544,6 +733,11 @@ openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
     Z3Process.openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
       z3Limits z3Cancellation z3Deadline profile workingDirectory descriptor
 
+-- | Deterministic package-private seam of the effective-ID launch for
+-- tests.  The access checker replaces the native check and is invoked on
+-- the borrowed source descriptor exactly twice along a successful prefix;
+-- the hook runs after pin and sealed-image admission but before the second
+-- check or any fork, pipe, or child allocation.
 openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
   :: LengthSMTLibProcessLimits
   -> LengthSMTLibProcessCancellation
@@ -566,6 +760,9 @@ openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
       (fmap toZ3EffectiveIDExecutableAccessCheckResult . accessCheck)
       hook
 
+-- | Whether this process was opened by the effective-ID descriptor-bound
+-- launch; see 'lengthSMTLibProcessUsesDescriptorBoundExecutableLaunch' for
+-- the exclusivity of these predicates.
 lengthSMTLibProcessUsesDescriptorBoundEffectiveIDExecutableAccessLaunch
   :: LengthSMTLibProcess
   -> Bool
@@ -586,6 +783,11 @@ toZ3EffectiveIDExecutableAccessCheckResult result = case result of
   LengthSMTLibEffectiveIDExecutableAccessCheckFailed ->
     Z3Process.Z3SMTLibEffectiveIDExecutableAccessCheckFailed
 
+-- | Closed, sanitized result of one Linux @AT_EXECVE_CHECK@ observation
+-- supplied by an execve checker; native errno values never cross this
+-- boundary.  Only 'LengthSMTLibExecveCheckAdmitted' lets the launch
+-- continue; the others become the source- or staged-execve-check failure
+-- class of the same name, depending on which descriptor was checked.
 data LengthSMTLibExecveCheckResult
   = LengthSMTLibExecveCheckAdmitted
   | LengthSMTLibExecveCheckDenied
@@ -593,6 +795,11 @@ data LengthSMTLibExecveCheckResult
   | LengthSMTLibExecveCheckFailed
   deriving (Bounded, Enum, Eq, Ord, Show)
 
+-- | Sanitized observation of a borrowed staged-image descriptor.  The
+-- requested creation-flag word names the production creator's policy and is
+-- not a property observed on the descriptor; the regular-file flag, mode,
+-- byte count, and seal set are descriptor observations.  This value
+-- transfers no ownership.
 data LengthSMTLibExecveCheckStagedImageInspection =
   LengthSMTLibExecveCheckStagedImageInspection
     { lengthSMTLibExecveCheckStagedImageRequestedCreationFlags :: !Word32
@@ -613,6 +820,12 @@ inspectLengthSMTLibExecveCheckStagedImage descriptor = do
   inspected <- Z3Process.inspectZ3SMTLibExecveCheckStagedImage descriptor
   pure $ fmap fromZ3ExecveCheckStagedImageInspection inspected
 
+-- | The Linux 6.14 descriptor-bound launch: the opened source must pass
+-- both the effective-ID VFS access check and @AT_EXECVE_CHECK@ before
+-- copying and again after staging, and the sealed @MFD_EXEC@ image must
+-- pass one final @AT_EXECVE_CHECK@ before child allocation.  On a build
+-- without descriptor-bound support this fails with
+-- 'LengthSMTLibProcessSourceExecveCheckUnavailable'.
 openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcess
   :: LengthSMTLibProcessLimits
   -> LengthSMTLibProcessCancellation
@@ -629,6 +842,12 @@ openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcess
     Z3Process.openZ3SMTLibDescriptorBoundExecveCheckExecutableAccessProcess
       z3Limits z3Cancellation z3Deadline profile workingDirectory descriptor
 
+-- | Deterministic package-private seam of the execve-check launch for
+-- tests.  Both checkers receive borrowed numeric descriptors and must never
+-- retain or close them: along a complete successful prefix the access
+-- checker sees the source twice, and the execve checker sees the source
+-- twice and the staged image once.  The hook runs after sealing and before
+-- every final check or child allocation.
 openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithHooks
   :: LengthSMTLibProcessLimits
   -> LengthSMTLibProcessCancellation
@@ -652,6 +871,11 @@ openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithHooks
       (fmap toZ3ExecveCheckResult . execveCheck)
       hook
 
+-- | Deeper package-private seam of the execve-check launch for old-kernel
+-- tests.  In addition to the two checkers and the pre-final hook it injects
+-- the staged-image creator and sealer (never used by the production opener)
+-- and an inspection hook which borrows the staged descriptor after sealing
+-- and metadata verification and must neither retain nor close it.
 openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithTestHooks
   :: LengthSMTLibProcessLimits
   -> LengthSMTLibProcessCancellation
@@ -678,6 +902,9 @@ openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithTestHooks
       (fmap toZ3ExecveCheckResult . execveCheck)
       creator sealer inspectionHook hook
 
+-- | Whether this process was opened by the execve-check descriptor-bound
+-- launch; see 'lengthSMTLibProcessUsesDescriptorBoundExecutableLaunch' for
+-- the exclusivity of these predicates.
 lengthSMTLibProcessUsesDescriptorBoundExecveCheckExecutableAccessLaunch
   :: LengthSMTLibProcess
   -> Bool
@@ -713,6 +940,7 @@ fromZ3ExecveCheckStagedImageInspection inspection =
         Z3Process.z3SMTLibExecveCheckStagedImageSeals inspection
     }
 
+-- | The executable snapshot this exact process was opened from.
 lengthSMTLibProcessSnapshot
   :: LengthSMTLibProcess
   -> LengthSMTLibExecutableSnapshot
@@ -726,23 +954,41 @@ lengthSMTLibProcessLimits
 lengthSMTLibProcessLimits = LengthSMTLibProcessLimits
   . Z3Process.z3SMTLibProcessLimits . toZ3Process
 
+-- | The Length identity of this exact process: a tag whose role names the
+-- launch strategy, containing the matching schema tag (for example
+-- 'lengthSMTLibProcessSchemaTag'), then the raw launch observation fields
+-- sealed by the opener, then 'lengthSMTLibProcessLimitsFingerprintField' of
+-- the process-owned limits.  Only the outer tag was forced at open time; the
+-- field list is encoded lazily on demand.
 lengthSMTLibProcessFingerprintField
   :: LengthSMTLibProcess
   -> FingerprintField
 lengthSMTLibProcessFingerprintField = processFingerprintField . toZ3Process
 
+-- | Total stdout bytes charged against 'lengthSMTLibProcessStdoutByteLimit'
+-- so far, including bytes still queued and not yet read.  It reads limit
+-- plus one once the limit has been exceeded.
 lengthSMTLibProcessObservedStdoutBytes
   :: LengthSMTLibProcess
   -> IO Natural
 lengthSMTLibProcessObservedStdoutBytes =
   Z3Process.z3SMTLibProcessObservedStdoutBytes . toZ3Process
 
+-- | Total stderr bytes observed so far, saturating at
+-- 'lengthSMTLibProcessStderrByteLimit' plus one.  Any nonzero value means
+-- the process is poisoned with 'LengthSMTLibProcessStderrObserved'.
 lengthSMTLibProcessObservedStderrBytes
   :: LengthSMTLibProcess
   -> IO Natural
 lengthSMTLibProcessObservedStderrBytes =
   Z3Process.z3SMTLibProcessObservedStderrBytes . toZ3Process
 
+-- | Write exactly these bytes to the child's stdin and flush.  Writes are
+-- serialized by a token; each is admitted only while the process is open,
+-- unpoisoned, uncancelled, within its deadline, and no stdout terminal
+-- condition has been recorded.  A write which fails or is interrupted after
+-- admission poisons the process, so 'Right' means every byte was written
+-- and flushed.
 writeLengthSMTLibProcess
   :: LengthSMTLibProcess
   -> LengthSMTLibProcessCancellation
@@ -758,6 +1004,12 @@ writeLengthSMTLibProcess process cancellation deadline bytes =
       bytes
     retainZ3ProcessResult result
 
+-- | Dequeue the next stdout chunk in FIFO order, waiting until one is
+-- available, the process is poisoned or closed, the token is cancelled, or
+-- the deadline passes.  A successful chunk is provably nonempty and no
+-- larger than 'lengthSMTLibProcessReadChunkByteLimit'; a queued terminal
+-- condition (EOF, read failure, or stdout limit exceeded) is delivered at
+-- its exact position after all preceding chunks and poisons the process.
 nextLengthSMTLibProcessStdoutChunk
   :: LengthSMTLibProcess
   -> LengthSMTLibProcessCancellation
@@ -771,6 +1023,13 @@ nextLengthSMTLibProcessStdoutChunk process cancellation deadline =
       (toZ3ProcessDeadline deadline)
     retainZ3ProcessResult result
 
+-- | Nonblockingly drain the stdout chunks already queued behind the
+-- preceding protocol write, admitting them only if every byte is SMT-LIB
+-- whitespace, and return the opaque causal-boundary receipt.  Draining is
+-- all-or-nothing: on a non-whitespace chunk every dequeued chunk is
+-- restored in its original FIFO position and the process is poisoned with
+-- 'LengthSMTLibProcessUnexpectedPendingStdout'; a queued terminal condition
+-- is propagated at its exact position after any preceding whitespace.
 drainLengthSMTLibProcessBoundaryWhitespace
   :: LengthSMTLibProcess
   -> LengthSMTLibProcessCancellation
@@ -784,6 +1043,13 @@ drainLengthSMTLibProcessBoundaryWhitespace process cancellation deadline =
       (toZ3ProcessDeadline deadline)
     retainZ3ProcessResult result
 
+-- | Nonblocking readiness check in 'LengthSMTLibProcessReadyPhase': succeeds
+-- only if the token is uncancelled, the deadline has not passed, the
+-- process is open and unpoisoned, no stdout is queued, and the child has not
+-- exited (checked between two such snapshots).  Queued stdout fails with
+-- 'LengthSMTLibProcessUnexpectedPendingStdout' (or the queued terminal
+-- condition), an exited child with 'LengthSMTLibProcessExited'; every
+-- failure poisons the process.
 checkLengthSMTLibProcessReady
   :: LengthSMTLibProcess
   -> LengthSMTLibProcessCancellation
@@ -797,6 +1063,13 @@ checkLengthSMTLibProcessReady process cancellation deadline =
       (toZ3ProcessDeadline deadline)
     retainZ3ProcessResult result
 
+-- | Wait for one non-owning STM admission observation under the same
+-- precedence as the pipe operations: cancellation, then process poison,
+-- then a closed lifecycle, then the action, all bounded by the absolute
+-- deadline and re-checked after the action commits.  Failures are reported
+-- in the given phase.  The action must not destructively acquire a
+-- resource, because the final check may discard its result; observe a gate
+-- here, then claim it nonblockingly under masking.
 waitLengthSMTLibProcessControl
   :: LengthSMTLibProcess
   -> LengthSMTLibProcessCancellation
@@ -814,6 +1087,12 @@ waitLengthSMTLibProcessControl process cancellation deadline phase action =
       action
     retainZ3ProcessResult result
 
+-- | Close the process and clean up its child: poison it with
+-- 'LengthSMTLibProcessClosed', close stdin, then wait for exit with the
+-- graceful-close, terminate, and kill escalation before stopping the reader
+-- threads and closing the remaining pipes.  Cleanup runs once; concurrent
+-- or repeated calls block on and return the same status.  Only the direct
+-- child is owned and reaped; descendants are signalled best-effort.
 closeLengthSMTLibProcess
   :: LengthSMTLibProcess
   -> IO LengthSMTLibProcessCleanupStatus

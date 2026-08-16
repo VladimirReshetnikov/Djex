@@ -2,6 +2,13 @@
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
 --
+
+-- | The object language of the LJT prover: propositional 'Formula's over
+-- 'Symbol' atoms, and the untyped proof 'Term's the search produces.  A
+-- 'Symbol' names both proof variables and atoms; an opaque type atom
+-- additionally seals a shared source type with alpha-normal identity.
+-- "Djinn.Internal.LJT" re-exports this module and searches over it, while
+-- "Djinn.Internal.TypeFormula" compiles source types into these formulae.
 module Djinn.Internal.LJTFormula (
     Symbol(Symbol), opaqueTypeSymbol, opaqueSymbolSource, symbolSpelling,
     Formula(..), (<->), (&), (|:), fnot, false, true,

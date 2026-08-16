@@ -386,36 +386,52 @@ sealLengthSessionWithInterpretationPolicy limits policySource inventory modelSou
             else LengthLegacyObservedTargetPolicy)
           casePolicy
 
+-- | The checked spine context sealed from the session's source inventory
+-- and spine model.  Provider summaries were resolved against exactly this
+-- context, so it is the only context under which the session's contracts
+-- may be sealed.
 checkedLengthSessionContext
   :: CheckedLengthSession identity annotation
   -> CheckedLengthContext (Variable identity) annotation
 checkedLengthSessionContext
     (CheckedLengthSession _ _ context _ _ _ _) = context
 
+-- | The checked provider laws sealed in 'checkedLengthSessionContext'.  No
+-- retained provider is named after either modeled spine constructor.
 checkedLengthSessionProviderInventory
   :: CheckedLengthSession identity annotation
   -> CheckedLengthProviderInventory (Variable identity)
 checkedLengthSessionProviderInventory
     (CheckedLengthSession _ _ _ providers _ _ _) = providers
 
--- Package-private resolver authority co-sealed from the exact session
--- inventory whenever at least one retained provider law is conditional on
--- independent constraint discharge.  'Nothing' means either that no retained
--- provider needs it or that this deliberately restricted resolver could not
--- seal the inventory; candidate admission distinguishes those cases from the
--- provider row and fails closed.
+-- | The optional checked class-resolution environment retained by this
+-- session.  Package-private resolver authority co-sealed from the exact
+-- session inventory whenever at least one retained provider law is
+-- conditional on independent constraint discharge.  'Nothing' means either
+-- that no retained provider needs it or that this deliberately restricted
+-- resolver could not seal the inventory; candidate admission distinguishes
+-- those cases from the provider row and fails closed.
 checkedLengthSessionClassResolutionEnvironment
   :: CheckedLengthSession identity annotation
   -> Maybe (CheckedClassResolutionEnvironment (Variable identity))
 checkedLengthSessionClassResolutionEnvironment
     (CheckedLengthSession _ _ _ _ resolver _ _) = resolver
 
+-- | Structural identity of the scalar session's inventory: dialect tag,
+-- annotation-erasure policy, the neutral source inventory, the checked spine
+-- model, and the assumed provider laws (with a constraint-policy field, and
+-- builder version 2, when any provider law is conditional).  Product
+-- sessions wrap these bytes rather than reusing the fingerprint.
 lengthSessionInventoryFingerprint
   :: CheckedLengthSession identity annotation
   -> Fingerprint (InventoryFingerprintSubject FiniteListSpineLengthV1)
 lengthSessionInventoryFingerprint
     (CheckedLengthSession _ _ _ _ _ inventory _) = inventory
 
+-- | Identity of the solver-neutral encoding policy selected for this
+-- session.  Its version and fields depend on the target-argument policy, the
+-- case policy, whether any provider law is conditional, and the checked spine
+-- model; the explicit role vector is deliberately not an input.
 lengthSessionEncodingPolicyFingerprint
   :: CheckedLengthSession identity annotation
   -> Fingerprint LengthEncodingPolicyFingerprintSubject
@@ -429,9 +445,10 @@ checkedLengthSessionInterpretationPolicy
 checkedLengthSessionInterpretationPolicy
     (CheckedLengthSession _ policy _ _ _ _ _) = policy
 
--- Package-private exact association authority.  'Nothing' is the legacy
--- implicit-all-observed entrance; every explicit source retains 'Just', even
--- for an empty vector.
+-- | The explicit target-role vector retained by this session's checked
+-- interpretation policy.  Package-private exact association authority.
+-- 'Nothing' is the legacy implicit-all-observed entrance; every explicit
+-- source retains 'Just', even for an empty vector.
 checkedLengthSessionExplicitTargetRoles
   :: CheckedLengthSession identity annotation
   -> Maybe [LengthTargetArgumentRole]
@@ -520,12 +537,18 @@ checkedLengthSessionLimits
 checkedLengthSessionLimits
     (CheckedLengthSession limits _ _ _ _ _ _) = limits
 
+-- | The target-argument policy retained by this session: legacy all-observed
+-- for a legacy source or an explicit vector without 'LengthUnobservedTarget',
+-- and mixed otherwise.  It is one of the encoding-policy fingerprint inputs.
 checkedLengthSessionTargetArgumentPolicy
   :: CheckedLengthSession identity annotation
   -> LengthTargetArgumentPolicy
 checkedLengthSessionTargetArgumentPolicy = checkedPolicyTargetArgumentPolicy
   . checkedLengthSessionInterpretationPolicy
 
+-- | The candidate-case policy retained by this session; exact zero/step
+-- cases are admitted only when the session was sealed from an explicit
+-- exact-case source.  It is one of the encoding-policy fingerprint inputs.
 checkedLengthSessionCasePolicy
   :: CheckedLengthSession identity annotation
   -> LengthCasePolicy

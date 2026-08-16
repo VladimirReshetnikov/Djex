@@ -1,3 +1,9 @@
+-- | Construction of the Exference class environment from parsed
+-- haskell-src-exts modules: class declarations, their superclass contexts
+-- and method signatures, and instance declarations are collected into one
+-- transactional 'LoadedClassEnvironment' holding the sealed 'StaticClassEnv'
+-- and per-module method bindings.  A failed class or instance phase is a
+-- 'ClassEnvironmentLoadError' rather than a silently dropped declaration.
 module Language.Haskell.Exference.ClassEnvFromHaskellSrc
   ( ClassEnvironmentLoadError (..)
   , ClassMethodDeclaration (..)

@@ -1,3 +1,9 @@
+-- | The public facade of the Exference search core.  It re-exports the input,
+-- environment, query, option, candidate, and result vocabulary of the
+-- internal engine and offers the historical @findExpressions*@ entry points,
+-- each validating its 'E.ExferenceInput' exactly once through
+-- 'E.prepareExferenceInput' before the raw lazy search runs.  The
+-- list-returning variants are deprecated: prefer the @Either@ forms.
 module Language.Haskell.Exference.Core
   ( findExpressions
   , findExpressionsChunked

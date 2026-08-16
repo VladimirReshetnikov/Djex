@@ -1,5 +1,10 @@
 {-# LANGUAGE DeriveGeneric #-}
 
+-- | Operational measurements attached to Exference search output: the
+-- per-candidate 'ExferenceStats', the cumulative 'BindingUsages' counts, and
+-- the per-batch 'ExferenceBatchMetadata' with its pruning totals.  These are
+-- plain data with exact 'Natural' totals; rendering belongs to presentation
+-- boundaries, not to this module.
 module Language.Haskell.Exference.Core.ExferenceStats
   ( ExferenceStats (..)
   , BindingUsages

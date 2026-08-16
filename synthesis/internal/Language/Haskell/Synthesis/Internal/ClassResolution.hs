@@ -109,6 +109,10 @@ data ClassResolutionLimitField
 instance NFData ClassResolutionLimitField where
   rnf value = value `seq` ()
 
+-- | Rejection of a limit table by 'mkClassResolutionLimits': the named
+-- field was supplied with the recorded negative value.  Fields are checked
+-- in 'ClassResolutionLimitField' order and only the first offender is
+-- reported.
 data ClassResolutionLimitError
   = NegativeClassResolutionLimit !ClassResolutionLimitField !Int
   deriving (Eq, Ord, Show)
@@ -117,8 +121,12 @@ instance NFData ClassResolutionLimitError where
   rnf (NegativeClassResolutionLimit field value) =
     rnf field `seq` rnf value
 
--- 'Generic' is deliberately absent.  The constructor is hidden so callers
--- cannot bypass nonnegative validation or silently reorder limit fields.
+-- | The validated, nonnegative bound table consulted by
+-- 'sealClassResolutionEnvironment' and every discharge or replay against the
+-- sealed environment; construct it with 'mkClassResolutionLimits' or use
+-- 'defaultClassResolutionLimits'.  'Generic' is deliberately absent.  The
+-- constructor is hidden so callers cannot bypass nonnegative validation or
+-- silently reorder limit fields.
 data ClassResolutionLimits = ClassResolutionLimits
   !Int !Int !Int !Int !Int !Int !Int !Int !Int !Int
   deriving (Eq, Ord, Show)
@@ -131,6 +139,10 @@ instance NFData ClassResolutionLimits where
       rnf kindNodes `seq` rnf overlapComparisons `seq` rnf depth `seq`
       rnf proofs
 
+-- | Validate ten limits, supplied in 'ClassResolutionLimitField' order
+-- (declarations, classes, instances, type-constructor kinds, collection
+-- width, type nodes, kind nodes, overlap comparisons, proof depth, proof
+-- nodes).  The first negative argument is reported; zero is accepted.
 mkClassResolutionLimits
   :: Int
   -> Int
@@ -168,42 +180,64 @@ defaultClassResolutionLimits :: ClassResolutionLimits
 defaultClassResolutionLimits = ClassResolutionLimits
   32768 4096 16384 32768 256 4096 256 262144 256 4096
 
+-- | Maximum number of declarations the sealed inventory environment may
+-- contain; sealing counts them up to this bound and rejects any excess.
 maximumClassResolutionDeclarations :: ClassResolutionLimits -> Int
 maximumClassResolutionDeclarations
     (ClassResolutionLimits value _ _ _ _ _ _ _ _ _) = value
 
+-- | Maximum number of class declarations admitted while sealing.
 maximumClassResolutionClasses :: ClassResolutionLimits -> Int
 maximumClassResolutionClasses
     (ClassResolutionLimits _ value _ _ _ _ _ _ _ _) = value
 
+-- | Maximum number of instance declarations admitted while sealing.
 maximumClassResolutionInstances :: ClassResolutionLimits -> Int
 maximumClassResolutionInstances
     (ClassResolutionLimits _ _ value _ _ _ _ _ _ _) = value
 
+-- | Maximum size of the inventory's type-constructor kind table retained by
+-- the sealed environment.
 maximumClassResolutionTypeConstructorKinds :: ClassResolutionLimits -> Int
 maximumClassResolutionTypeConstructorKinds
     (ClassResolutionLimits _ _ _ value _ _ _ _ _ _) = value
 
+-- | Maximum width of every declaration-owned list (class parameters,
+-- superclasses, instance binders, and raw or completed prerequisites; see
+-- 'ClassResolutionCollectionSite') and of every collection inside a
+-- constraint argument type.
 maximumClassResolutionCollectionWidth :: ClassResolutionLimits -> Int
 maximumClassResolutionCollectionWidth
     (ClassResolutionLimits _ _ _ _ value _ _ _ _ _) = value
 
+-- | Maximum node count of any single constraint argument type, whether it
+-- comes from a retained declaration or from a query.
 maximumClassResolutionTypeNodes :: ClassResolutionLimits -> Int
 maximumClassResolutionTypeNodes
     (ClassResolutionLimits _ _ _ _ _ value _ _ _ _) = value
 
+-- | Maximum node count of any single retained kind tree (a type-constructor
+-- kind or a class-parameter kind; see 'ClassResolutionKindSite').
 maximumClassResolutionKindNodes :: ClassResolutionLimits -> Int
 maximumClassResolutionKindNodes
     (ClassResolutionLimits _ _ _ _ _ _ value _ _ _) = value
 
+-- | Maximum number of pairwise same-class instance-head overlap checks
+-- performed across one sealing pass.
 maximumClassResolutionOverlapComparisons :: ClassResolutionLimits -> Int
 maximumClassResolutionOverlapComparisons
     (ClassResolutionLimits _ _ _ _ _ _ _ value _ _) = value
 
+-- | Maximum instance-nesting depth of one proof search; a query whose
+-- prerequisites would nest deeper fails with
+-- 'ClassResolutionProofDepthLimitExceeded'.
 maximumClassResolutionProofDepth :: ClassResolutionLimits -> Int
 maximumClassResolutionProofDepth
     (ClassResolutionLimits _ _ _ _ _ _ _ _ value _) = value
 
+-- | Maximum number of instance applications (proof nodes) one query may
+-- perform in total; exceeding it fails with
+-- 'ClassResolutionProofNodeLimitExceeded'.
 maximumClassResolutionProofNodes :: ClassResolutionLimits -> Int
 maximumClassResolutionProofNodes
     (ClassResolutionLimits _ _ _ _ _ _ _ _ _ value) = value
@@ -293,6 +327,11 @@ instance NFData variable => NFData (ClassResolutionConstraintError variable) whe
     ClassResolutionConstraintForallUnsupported ordinal -> rnf ordinal
     IllKindedClassResolutionConstraint cause -> rnf cause
 
+-- | Why 'sealClassResolutionEnvironment' refused an inventory: an exceeded
+-- admission or retention bound (each carrying the maximum and the observed
+-- count), a malformed retained constraint at a named site, a duplicate or
+-- overlapping instance head, a superclass cycle, or an instance
+-- prerequisite that grows relative to its head.
 data ClassResolutionEnvironmentError variable
   = ClassResolutionDeclarationLimitExceeded !Int !Int
   | ClassResolutionClassLimitExceeded !Int !Int
@@ -365,8 +404,13 @@ instance NFData variable => NFData (ResolutionInstance variable) where
     rnf ordinal `seq` rnf binders `seq` rnf binderSet `seq`
       rnf prerequisites `seq` rnf headConstraint
 
--- 'Generic' and the constructor are intentionally absent: the list, maps,
--- assumptions, alias set, and limits must all derive from one sealing pass.
+-- | A closed declared-class environment produced by
+-- 'sealClassResolutionEnvironment': the limits it was sealed under, the
+-- kind assumptions, the type-synonym names, and the checked classes and
+-- completed instances that 'dischargeGroundConstraint' and
+-- 'replayCheckedConstraintDischarge' consult.  'Generic' and the constructor
+-- are intentionally absent: the list, maps, assumptions, alias set, and
+-- limits must all derive from one sealing pass.
 data CheckedClassResolutionEnvironment variable =
   CheckedClassResolutionEnvironment
     !ClassResolutionLimits
@@ -604,6 +648,9 @@ instance NFData variable => NFData (ClassResolutionProof variable) where
   rnf (ClassResolutionProof goal headConstraint prerequisites) =
     rnf goal `seq` rnf headConstraint `seq` rnf prerequisites
 
+-- | The canonical ground constraint this proof node establishes.  At the
+-- root it is the prepared query goal; in a prerequisite it is the
+-- instantiated prerequisite constraint.
 classResolutionProofGoal
   :: ClassResolutionProof variable
   -> Constraint (Type variable)
@@ -618,6 +665,10 @@ classResolutionProofInstanceHead
 classResolutionProofInstanceHead (ClassResolutionProof _ headConstraint _) =
   headConstraint
 
+-- | Sub-proofs for the selected instance's completed prerequisites, one per
+-- prerequisite in the instance's completed prerequisite order.  Every
+-- prerequisite of the chosen instance is proved; the list is empty for a
+-- prerequisite-free instance.
 classResolutionProofPrerequisites
   :: ClassResolutionProof variable
   -> [ClassResolutionProof variable]
@@ -636,6 +687,10 @@ instance NFData variable => NFData (CheckedConstraintDischarge variable) where
   rnf (CheckedConstraintDischarge environment goal proof) =
     rnf environment `seq` rnf goal `seq` rnf proof
 
+-- | The canonical ground goal this receipt discharges, in the checked
+-- environment's variable namespace.  It is the prepared form of the query
+-- (normalized, alias-free, kind-checked), and it is what
+-- 'replayCheckedConstraintDischarge' compares a replay goal against.
 checkedConstraintDischargeGoal
   :: CheckedConstraintDischarge variable
   -> Constraint (Type variable)
@@ -721,6 +776,11 @@ retypeGroundConstraint
 retypeGroundConstraint = traverse $ traverse $ \variable ->
   Left $ ClassResolutionGroundConstraintHasFreeVariables [variable]
 
+-- | Why 'replayCheckedConstraintDischarge' refused to release a proof: the
+-- receipt was issued against a different checked environment, the replay
+-- goal failed the same preparation the original query passed, or the
+-- prepared replay goal differs from the retained goal (expected, then
+-- actual).  The environment check runs before the goal is inspected.
 data ClassResolutionReplayMismatch variable
   = ClassResolutionReplayEnvironmentMismatch
   | ClassResolutionReplayGoalRejected

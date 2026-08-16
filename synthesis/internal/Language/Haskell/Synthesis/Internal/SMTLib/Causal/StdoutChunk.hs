@@ -31,6 +31,7 @@ admitSMTLibCausalStdoutChunk bytes
   | BS.null bytes = Nothing
   | otherwise = Just $ SMTLibCausalStdoutChunk bytes
 
+-- | Project the admitted chunk; the result is never empty.
 smtLibCausalStdoutChunkBytes
   :: SMTLibCausalStdoutChunk
   -> ByteString

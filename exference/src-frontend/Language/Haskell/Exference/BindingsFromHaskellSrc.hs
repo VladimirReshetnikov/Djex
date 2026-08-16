@@ -1,5 +1,11 @@
 {-# LANGUAGE TupleSections #-}
 
+-- | Extraction of search bindings from parsed haskell-src-exts modules:
+-- 'FunctionBinding's from top-level type signatures and foreign imports,
+-- constructor and record-selector bindings plus 'DeconstructorBinding's from
+-- data declarations, and the list of declared data type names.  Each
+-- extractor comes in string-error, located, and source-slot-batched forms;
+-- "Language.Haskell.Exference.EnvironmentParser" consumes the batched ones.
 module Language.Haskell.Exference.BindingsFromHaskellSrc
   ( getDecls
   , getDeclsLocated

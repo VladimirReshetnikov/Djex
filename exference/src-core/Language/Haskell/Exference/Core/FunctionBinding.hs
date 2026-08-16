@@ -1,5 +1,11 @@
 {-# LANGUAGE DeriveGeneric #-}
 
+-- | The raw search-environment records of the Exference engine: flat
+-- 'FunctionBinding's built from opened prenex signatures, datatype
+-- 'DeconstructorBinding's for pattern matching, and the 'EnvDictionary'
+-- that bundles them with the sealed class environment.  The validators here
+-- (identities, ratings, syntax, deconstructor shape) are the single policy
+-- shared by search-environment sealing and independent expression checking.
 module Language.Haskell.Exference.Core.FunctionBinding
   ( ConstructorBinding (..)
   , DeconstructorBinding (..)

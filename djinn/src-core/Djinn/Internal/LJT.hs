@@ -18,6 +18,12 @@
 -- properly, taking account of first-argument indexing,
 -- and I learnt a trick or two from Neil Tennant's "Autologic" book.
 
+-- | The intuitionistic propositional prover at the heart of Djinn: proof
+-- search in Dyckhoff's contraction-free LJT calculus, extended to produce
+-- proof terms ('Proof' is a "Djinn.Internal.LJTFormula" 'Term').  A
+-- 'SearchMode' selects the branch strategy, alternative retention, and an
+-- optional choice-point budget; unbudgeted search is a decision procedure,
+-- and 'proveWithModeChecked' first validates the assumption identities.
 module Djinn.Internal.LJT (
     module Djinn.Internal.LJTFormula, provable, prove, Proof,
     SearchMode(..), Strategy(..), SearchOutcome(..),

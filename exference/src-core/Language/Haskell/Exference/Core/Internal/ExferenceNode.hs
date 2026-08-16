@@ -1,6 +1,12 @@
 {-# LANGUAGE DeriveGeneric #-}
 
 
+-- | The state of one Exference search branch: the 'SearchNode' record with
+-- its pending 'TGoal's, lexical 'Scopes' of 'VarPBinding's, use counts, and
+-- rigid, identifier, and depth bookkeeping, plus the substitution and
+-- goal-construction helpers over it.  Scope structure itself is delegated to
+-- "Language.Haskell.Exference.Core.Internal.Scope"; the engine in
+-- "Language.Haskell.Exference.Core.Internal.Exference" steps these nodes.
 module Language.Haskell.Exference.Core.Internal.ExferenceNode
   ( SearchNode (..)
   , ForallGoalMode (..)

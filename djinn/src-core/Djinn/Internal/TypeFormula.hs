@@ -2,13 +2,14 @@
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
 --
--- Representation-neutral compilation of Djinn source types into LJT formulae.
+
+-- | Representation-neutral compilation of Djinn source types into LJT
+-- formulae.
 --
 -- The public compatibility surface still accepts 'HType', while checked Djex
 -- sessions use the shared synthesis type tree.  Both representations enter
--- this package-private engine through a one-layer view and share the same
--- validated definition cache, expansion provenance, and atom renderer.
---
+-- this package-private engine through a one-layer 'TypeView' and share the
+-- same validated definition cache, expansion provenance, and atom renderer.
 module Djinn.Internal.TypeFormula
     ( TypeLayer(..)
     , TypeView

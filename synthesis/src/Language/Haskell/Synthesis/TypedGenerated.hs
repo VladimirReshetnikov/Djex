@@ -155,6 +155,9 @@ data TermGraphLimits = TermGraphLimits
 
 instance NFData TermGraphLimits
 
+-- | Rejection of a limit table by 'mkTermGraphLimits': the named bound was
+-- supplied with the recorded negative value.  Bounds are checked in field
+-- order and only the first offender is reported.
 data TermGraphLimitError
   = NegativeTermGraphNodeLimit Int
   | NegativeTermGraphEdgeLimit Int
@@ -219,6 +222,11 @@ data TypeStructureLimitError
 
 instance NFData TypeStructureLimitError
 
+-- | The type-language operations consulted by 'sealTermGraph', abstracted
+-- over the annotation type @ty@: equivalence, bounded structural observation,
+-- annotation validity, function and tuple decomposition, constructor field
+-- schemas, and visible-type-application witness checking.
+-- 'sharedTypeStructure' instantiates it for the shared synthesis type.
 data TypeStructure ty = TypeStructure
   { equivalentTypes :: ty -> ty -> Bool
   , observeTypeWithin
@@ -345,6 +353,10 @@ data TypedPattern ty local = TypedPattern
 
 instance (NFData ty, NFData local) => NFData (TypedPattern ty local)
 
+-- | The shape of one 'TypedPattern': a binder, a wildcard, a constructor or
+-- tuple pattern over typed sub-patterns, or an as-pattern.  'TypedBind' and
+-- 'TypedAs' introduce a local whose identity must be unique across the sealed
+-- graph.
 data TypedPatternNode ty local
   = TypedBind local
   | TypedWildcard
@@ -396,6 +408,10 @@ data TermGraphSource ty local = TermGraphSource
 
 instance (NFData ty, NFData local) => NFData (TermGraphSource ty local)
 
+-- | Which graph-owned list exceeded 'maximumTermGraphNodes' (the node table)
+-- or 'maximumTermGraphCollectionWidth' (a lambda's patterns, a tuple's
+-- elements, a case's alternatives, or a constructor or tuple pattern's
+-- fields), as reported by 'TermGraphCollectionLimitExceeded'.
 data GraphCollectionSite
   = GraphNodeTable
   | LambdaPatternList TermNodeId

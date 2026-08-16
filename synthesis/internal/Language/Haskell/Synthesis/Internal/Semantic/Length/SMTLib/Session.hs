@@ -359,6 +359,9 @@ import Language.Haskell.Synthesis.Semantic.Observation
 import Language.Haskell.Synthesis.Semantic.Problem
   ( BehavioralEvidence )
 
+-- | Schema tag of the scoped worker-session layer, bound as the first field
+-- of every ready-worker identity fingerprint ahead of the launch-specific
+-- ready-worker tag.
 lengthSMTLibSessionSchemaTag :: [Word8]
 lengthSMTLibSessionSchemaTag =
   ascii "djex-length-z3-scoped-worker-session/v3"
@@ -370,6 +373,10 @@ lengthSMTLibCausalDriverSchemaTag :: [Word8]
 lengthSMTLibCausalDriverSchemaTag = ascii
   "djex-length-z3-causal-byte-stream-driver/v1"
 
+-- | Ready-worker identity schema tag for the portable pre-spawn
+-- pathname-snapshot launch.  Descriptor-bound launches bind their own
+-- sibling tags, so this value appears in a ready-worker identity only when
+-- the process was spawned directly from its pathname.
 lengthSMTLibReadyWorkerSchemaTag :: [Word8]
 lengthSMTLibReadyWorkerSchemaTag =
   ascii "djex-length-z3-capability-probed-ready-worker/v4"
@@ -404,10 +411,17 @@ lengthSMTLibSessionEpochSchemaTag :: [Word8]
 lengthSMTLibSessionEpochSchemaTag =
   ascii "os-entropy-512/split-public-label-secret-barrier-seed/v3"
 
+-- | Schema tag for per-query barrier derivation.  Each query barrier is
+-- HMAC-SHA256 under the secret session seed over this tag, a one-byte role
+-- (check or input-value), and the big-endian 64-bit query ordinal; the tag is
+-- also bound in the query-allocation field of every query-run identity.
 lengthSMTLibQueryBarrierSchemaTag :: [Word8]
 lengthSMTLibQueryBarrierSchemaTag = ascii
   "hmac-sha256/secret-seed/fixed-role/u64be-ordinal/v1"
 
+-- | Query-run identity schema tag for a scalar run on a portable
+-- pathname-snapshot worker under the fresh-per-query deadline policy.
+-- Budgeted, scoped, and descriptor-bound workers bind their own sibling tags.
 lengthSMTLibQueryRunSchemaTag :: [Word8]
 lengthSMTLibQueryRunSchemaTag = ascii
   "djex-length-z3-capability-probed-pre-spawn-pathname-snapshot-worker-query-run/v1"
@@ -590,6 +604,11 @@ lengthSpinePairSMTLibDescriptorBoundExecveCheckExecutableAccessScopedBudgetedQue
     , "scoped-shared-usable-work-deadline/v1"
     ]
 
+-- | Platform-specific schema tag for the fresh working directory, bound in
+-- the ready-worker identity next to the workspace path.  It names how the
+-- directory is created and verified (an exclusive POSIX 0700 directory
+-- tracked through an open descriptor, or a Windows path-only observation) and
+-- that cleanup only ever removes it as an empty directory.
 lengthSMTLibSessionWorkspaceSchemaTag :: [Word8]
 #ifndef mingw32_HOST_OS
 lengthSMTLibSessionWorkspaceSchemaTag =
@@ -605,6 +624,10 @@ lengthSMTLibSessionWorkspaceSchemaTag =
     ]
 #endif
 
+-- | Identifies which session limit a 'LengthSMTLibSessionConfigError' refers
+-- to.  Constructor order matches the field order of
+-- 'LengthSMTLibSessionLimitSource' and the order in which
+-- 'mkLengthSMTLibSessionLimits' validates the fields.
 data LengthSMTLibSessionLimitField
   = LengthSMTLibSessionOpenerDeadlineMilliseconds
   | LengthSMTLibSessionWorkspaceAllocationAttempts
@@ -613,6 +636,12 @@ data LengthSMTLibSessionLimitField
   | LengthSMTLibSessionQueryRunIdentityFingerprintBytes
   deriving (Bounded, Enum, Eq, Ord, Show)
 
+-- | Raw, unvalidated session limits: the opener deadline in milliseconds,
+-- how many exclusive workspace-creation attempts may collide before
+-- allocation gives up, the maximum number of queries one worker admits
+-- (shared between scalar and spine-pair runs), and the byte caps for the
+-- ready-worker identity fingerprint and for each query-run identity
+-- fingerprint.  Validate with 'mkLengthSMTLibSessionLimits'.
 data LengthSMTLibSessionLimitSource = LengthSMTLibSessionLimitSource
   { lengthSMTLibSessionLimitSourceOpenerDeadlineMilliseconds :: !Natural
   , lengthSMTLibSessionLimitSourceWorkspaceAllocationAttempts :: !Natural
@@ -630,6 +659,11 @@ instance NFData LengthSMTLibSessionLimitSource where
     rnf (lengthSMTLibSessionLimitSourceIdentityFingerprintBytes source) `seq`
     rnf (lengthSMTLibSessionLimitSourceQueryRunIdentityFingerprintBytes source)
 
+-- | Default raw limits: a 5000 ms opener deadline, 8 workspace-allocation
+-- attempts, 64 queries per worker, 262144 ready-identity fingerprint bytes,
+-- and 2097152 query-run identity fingerprint bytes.
+-- 'mkLengthSMTLibSessionLimits' accepts these values and yields the same
+-- limits as 'defaultLengthSMTLibSessionLimits'.
 defaultLengthSMTLibSessionLimitSource :: LengthSMTLibSessionLimitSource
 defaultLengthSMTLibSessionLimitSource = LengthSMTLibSessionLimitSource
   { lengthSMTLibSessionLimitSourceOpenerDeadlineMilliseconds = 5000
@@ -639,6 +673,10 @@ defaultLengthSMTLibSessionLimitSource = LengthSMTLibSessionLimitSource
   , lengthSMTLibSessionLimitSourceQueryRunIdentityFingerprintBytes = 2097152
   }
 
+-- | Validated session limits accepted by 'sealLengthSMTLibSessionConfig'.
+-- Every limit is positive and the opener deadline is retained as an 'Int'
+-- millisecond count.  The constructor is private; obtain a value through
+-- 'mkLengthSMTLibSessionLimits' or 'defaultLengthSMTLibSessionLimits'.
 data LengthSMTLibSessionLimits = LengthSMTLibSessionLimits
   !Int !Natural !Natural !Natural !Natural
 
@@ -647,6 +685,12 @@ instance NFData LengthSMTLibSessionLimits where
     rnf deadline `seq` rnf attempts `seq` rnf queries `seq` rnf identity `seq`
     rnf runIdentity
 
+-- | Why 'mkLengthSMTLibSessionLimits' or 'sealLengthSMTLibSessionConfig'
+-- rejected its inputs: a zero limit, a limit too large for its runtime
+-- representation, capability limits that cannot admit even a fixed-nonce
+-- four-stage plan, or a process stdout limit below the minimum capability
+-- output.  Limit failures carry the field and its raw value; the stdout
+-- failure carries the configured maximum and the required minimum.
 data LengthSMTLibSessionConfigError
   = LengthSMTLibSessionNonPositiveLimit
       !LengthSMTLibSessionLimitField !Natural
@@ -657,6 +701,11 @@ data LengthSMTLibSessionConfigError
   | LengthSMTLibSessionProcessStdoutAdmissionTooSmall !Natural !Natural
   deriving (Eq, Ord, Show)
 
+-- | Validate raw session limits in field order, reporting the first failing
+-- field.  Every limit must be positive; in addition the opener deadline must
+-- not exceed one thousandth of the largest 'Int' and the query maximum must
+-- fit a 'Word64', otherwise a 'LengthSMTLibSessionLimitConversionOverflow'
+-- names the field.
 mkLengthSMTLibSessionLimits
   :: LengthSMTLibSessionLimitSource
   -> Either LengthSMTLibSessionConfigError LengthSMTLibSessionLimits
@@ -688,10 +737,18 @@ mkLengthSMTLibSessionLimits source = do
       then Left $ LengthSMTLibSessionLimitConversionOverflow field retained
       else Right $ fromIntegral retained
 
+-- | The validated form of 'defaultLengthSMTLibSessionLimitSource': a 5000 ms
+-- opener deadline, 8 workspace-allocation attempts, 64 queries per worker,
+-- and 262144 / 2097152-byte caps on the ready-worker and query-run identity
+-- fingerprints.
 defaultLengthSMTLibSessionLimits :: LengthSMTLibSessionLimits
 defaultLengthSMTLibSessionLimits =
   LengthSMTLibSessionLimits 5000 8 64 262144 2097152
 
+-- | Sealed inputs for opening one worker: session, process, capability, and
+-- protocol limits together with the execution configuration.  Only
+-- 'sealLengthSMTLibSessionConfig' constructs it, so a value has already
+-- passed the capability-admission and stdout-capacity preflight.
 data LengthSMTLibSessionConfig = LengthSMTLibSessionConfig
   !LengthSMTLibSessionLimits
   !LengthSMTLibProcessLimits
@@ -727,6 +784,13 @@ sealLengthSMTLibSessionConfig session process capability protocol execution = do
     Right _ -> Right $ LengthSMTLibSessionConfig
       session process capability protocol execution
 
+-- | Why the fresh working directory could not be allocated, verified, or
+-- removed.  Allocation failures cover the temporary-directory lookup, OS
+-- entropy, exhausted collision retries, and directory creation; the
+-- postcondition failure means the directory did not verify as the owned,
+-- empty, non-symlink directory that was created; the last two describe
+-- cleanup (removal failed, or the child process was not confirmed released
+-- so the pathname was retained).
 data LengthSMTLibSessionWorkspaceFailure
   = LengthSMTLibSessionTemporaryDirectoryUnavailable
   | LengthSMTLibSessionTemporaryDirectoryNotAbsolute
@@ -739,6 +803,13 @@ data LengthSMTLibSessionWorkspaceFailure
   | LengthSMTLibSessionWorkspaceProcessCleanupIncomplete
   deriving (Eq, Ord, Show)
 
+-- | Final disposition of the workspace directory.
+-- 'LengthSMTLibSessionWorkspaceRemoved' is the only successful outcome once a
+-- directory exists; 'LengthSMTLibSessionWorkspaceRetained' means the pathname
+-- was deliberately left in place for the stated reason (for example while the
+-- child's release was unconfirmed), and
+-- 'LengthSMTLibSessionWorkspaceCleanupIncomplete' means removal or descriptor
+-- release itself failed.
 data LengthSMTLibSessionWorkspaceCleanupStatus
   = LengthSMTLibSessionWorkspaceNotAllocated
   | LengthSMTLibSessionWorkspaceRemoved !Natural
@@ -748,6 +819,12 @@ data LengthSMTLibSessionWorkspaceCleanupStatus
       !LengthSMTLibSessionWorkspaceFailure
   deriving (Eq, Ord, Show)
 
+-- | Combined cleanup outcome of one worker scope: the process cleanup status
+-- when a process was opened, whether process cleanup threw, and the
+-- workspace disposition.  A scope whose callback returned normally still
+-- fails with 'LengthSMTLibSessionCleanupFailure' unless the process closed
+-- without escalation or failures, its readers stopped, and the workspace was
+-- removed.
 data LengthSMTLibSessionCleanupStatus = LengthSMTLibSessionCleanupStatus
   { lengthSMTLibSessionProcessCleanupStatus
       :: !(Maybe LengthSMTLibProcessCleanupStatus)
@@ -757,6 +834,11 @@ data LengthSMTLibSessionCleanupStatus = LengthSMTLibSessionCleanupStatus
   }
   deriving (Eq, Ord, Show)
 
+-- | Primary failure of a worker scope, from the opener deadline through
+-- workspace allocation, capability planning and probing, process launch,
+-- barrier derivation, ready-point transcript accounting, identity fingerprint
+-- sizing, final cleanup, and scoped-deadline admission.  It is paired with
+-- the cleanup outcome in 'LengthSMTLibSessionScopeError'.
 data LengthSMTLibSessionError
   = LengthSMTLibSessionDeadlineFailure !LengthSMTLibProcessError
   | LengthSMTLibSessionWorkspaceFailure !LengthSMTLibSessionWorkspaceFailure
@@ -771,6 +853,10 @@ data LengthSMTLibSessionError
   | LengthSMTLibSessionUsableWorkScopeUnavailable
   deriving (Eq, Ord, Show)
 
+-- | What a worker scope returns on failure: the primary
+-- 'LengthSMTLibSessionError' and the cleanup status reached before
+-- returning.  Callback exceptions are not converted into this type; they are
+-- rethrown after cleanup has been started.
 data LengthSMTLibSessionScopeError = LengthSMTLibSessionScopeError
   { lengthSMTLibSessionScopePrimaryError :: !LengthSMTLibSessionError
   , lengthSMTLibSessionScopeCleanupStatus :: !LengthSMTLibSessionCleanupStatus
@@ -1034,6 +1120,12 @@ effectiveLengthSMTLibDeadlineAfterMilliseconds policy localMilliseconds =
             Right localDeadline -> Right
               $ effectiveLengthSMTLibQueryDeadline policy localDeadline
 
+-- | Primary reason a scalar query run failed, from lease admission (worker
+-- closing or spent, query maximum reached) through protocol planning,
+-- barrier reservation, deadline, process, protocol, transcript and stderr
+-- accounting, counterexample replay, and run-identity sizing.  These are
+-- package-private diagnostics and may retain bounded child bytes or integer
+-- values.
 data LengthSMTLibQueryRunFailure
   = LengthSMTLibQueryWorkerClosing
   | LengthSMTLibQueryWorkerSpent
@@ -1054,6 +1146,10 @@ data LengthSMTLibQueryRunFailure
   | LengthSMTLibQueryInternalFailure
   deriving (Eq, Ord, Show)
 
+-- | Failure returned by 'runLengthSMTLibReadyWorkerQuery': the primary
+-- failure plus the process cleanup status when the failure spent the worker
+-- (its lease closed and the process cancelled and closed).  The status is
+-- 'Nothing' when the worker remains usable for further queries.
 data LengthSMTLibQueryRunError = LengthSMTLibQueryRunError
   { lengthSMTLibQueryRunPrimaryFailure :: !LengthSMTLibQueryRunFailure
   , lengthSMTLibQueryRunProcessCleanupStatus
@@ -1075,6 +1171,8 @@ data QueryLeaseState = QueryLeaseState
   !Natural
   !Natural
 
+-- | Phantom fingerprint subject of a scalar query-run identity, keeping it
+-- distinct from ready-worker and spine-pair run fingerprints.
 data LengthSMTLibQueryRunIdentitySubject
 
 -- | One successfully delimited live query and its independent Length replay.
@@ -1094,6 +1192,13 @@ type LengthSMTLibQueryRunObservation = SolverObservation
   ()
   ()
 
+-- | One committed scalar query run: its zero-based ordinal in the worker's
+-- lease, the replayed status-indexed observation, its private identity
+-- fingerprint, the SHA-256 of the causal transcript, and the cumulative
+-- stdout and stderr byte boundaries at which it started and ended.  All
+-- three phantoms are nominal, tying the run to its worker epoch and to the
+-- query's identity and local scopes; only the @lengthSMTLibQueryRun*@
+-- projections are exported.
 data LengthSMTLibQueryRun epoch identity local = LengthSMTLibQueryRun
   !Natural
   !LengthSMTLibQueryRunObservation
@@ -1139,6 +1244,10 @@ data LengthSpinePairSMTLibQueryRunFailure
   | LengthSpinePairSMTLibQueryInternalFailure
   deriving (Eq, Ord, Show)
 
+-- | Failure returned by 'runLengthSpinePairSMTLibReadyWorkerQuery': the
+-- primary failure plus the process cleanup status when the failure spent the
+-- shared worker (its lease closed and the process cancelled and closed).  The
+-- status is 'Nothing' when the worker remains usable.
 data LengthSpinePairSMTLibQueryRunError = LengthSpinePairSMTLibQueryRunError
   { lengthSpinePairSMTLibQueryRunPrimaryFailure
       :: !LengthSpinePairSMTLibQueryRunFailure
@@ -1147,8 +1256,13 @@ data LengthSpinePairSMTLibQueryRunError = LengthSpinePairSMTLibQueryRunError
   }
   deriving (Eq, Ord, Show)
 
+-- | Phantom fingerprint subject of a spine-pair query-run identity, keeping
+-- it distinct from scalar run and ready-worker fingerprints.
 data LengthSpinePairSMTLibQueryRunIdentitySubject
 
+-- | Binary-product sibling of 'LengthSMTLibQueryRunObservation': a strict
+-- status-indexed observation whose satisfiable branch alone may carry
+-- independently replayed spine-pair counterexample evidence.
 type LengthSpinePairSMTLibQueryRunObservation = SolverObservation
   (Maybe
     (BehavioralEvidence
@@ -1157,6 +1271,12 @@ type LengthSpinePairSMTLibQueryRunObservation = SolverObservation
   ()
   ()
 
+-- | One committed spine-pair query run on the shared ready worker, with the
+-- same shape as 'LengthSMTLibQueryRun': ordinal, replayed observation,
+-- private identity fingerprint, transcript SHA-256, and the cumulative stdout
+-- and stderr boundaries of the run.  Ordinals are drawn from the same lease as
+-- scalar runs; only the @lengthSpinePairSMTLibQueryRun*@ projections are
+-- exported.
 data LengthSpinePairSMTLibQueryRun epoch identity local =
   LengthSpinePairSMTLibQueryRun
     !Natural
@@ -1178,6 +1298,8 @@ instance NFData
     rnf digest `seq` rnf stdoutStart `seq` rnf stdoutEnd `seq` rnf stderrStart
       `seq` rnf stderrEnd
 
+-- | Phantom fingerprint subject of a ready-worker identity, keeping it
+-- distinct from query-run fingerprints.
 data LengthSMTLibReadyWorkerIdentitySubject
 
 -- | Exact policy the worker itself still needs after capability admission.
@@ -1234,6 +1356,13 @@ retainLengthSMTLibReadyWorkerQueryPolicyUnderScopedDeadline
         maximumQueries runIdentityLimit protocolLimits postLaunchExecution
         $ LengthSMTLibScopedSharedUsableWorkDeadline milliseconds deadline
 
+-- | One capability-probed, ready Z3 worker lent to the callback of
+-- 'withLengthSMTLibReadyWorker' or one of its deadline variants.  It owns the
+-- process, its cancellation, the retained query policy, the ready identity,
+-- the barrier seed, and the serial query lease shared by scalar and
+-- spine-pair runs; the nominal @epoch@ phantom keeps a worker from escaping
+-- its scope at the type level.  Fields are private; use the
+-- @lengthSMTLibReadyWorker*@ projections.
 data LengthSMTLibReadyWorker epoch = LengthSMTLibReadyWorker
   { readyWorkerProcess :: !LengthSMTLibProcess
   , readyWorkerCancellation :: !LengthSMTLibProcessCancellation
@@ -1251,11 +1380,21 @@ data LengthSMTLibReadyWorker epoch = LengthSMTLibReadyWorker
 
 type role LengthSMTLibReadyWorker nominal
 
+-- | The private, reversible ready-worker identity computed at the ready
+-- point.  It binds the session and launch schema tags, the execution policy,
+-- the process observation, the executable snapshot strength, the capability
+-- outcome and its exact transcript, the session-epoch commitment, the
+-- workspace, protocol and session limits, and the output counts observed at
+-- ready commit; under a shared usable-work deadline it additionally wraps
+-- that legacy identity with the deadline policy.
 lengthSMTLibReadyWorkerIdentityFingerprint
   :: LengthSMTLibReadyWorker epoch
   -> Fingerprint LengthSMTLibReadyWorkerIdentitySubject
 lengthSMTLibReadyWorkerIdentityFingerprint = readyWorkerIdentity
 
+-- | The ready-worker identity as a tagged fingerprint field, ready to embed
+-- in a dependent fingerprint.  Every query-run identity built on this worker
+-- includes exactly this field.
 lengthSMTLibReadyWorkerIdentityFingerprintField
   :: LengthSMTLibReadyWorker epoch
   -> FingerprintField
@@ -1263,6 +1402,11 @@ lengthSMTLibReadyWorkerIdentityFingerprintField worker = FingerprintTag
   (ascii "capability-probed-ready-worker-identity")
   [FingerprintBytes $ fingerprintCanonicalBytes $ readyWorkerIdentity worker]
 
+-- | SHA-256 digest of the solver executable image observed at launch: for
+-- the portable launch, the file at the configured pathname read before
+-- spawning; for descriptor-bound launches, the bytes copied into the sealed
+-- image that was executed.  The digest covers the main image only, not the
+-- dynamic loader or shared libraries.
 lengthSMTLibReadyWorkerExecutableSHA256
   :: LengthSMTLibReadyWorker epoch
   -> ByteString
@@ -1270,6 +1414,8 @@ lengthSMTLibReadyWorkerExecutableSHA256 =
   lengthSMTLibExecutableSnapshotSHA256 .
     lengthSMTLibProcessSnapshot . readyWorkerProcess
 
+-- | Byte count of the same executable snapshot whose digest
+-- 'lengthSMTLibReadyWorkerExecutableSHA256' reports.
 lengthSMTLibReadyWorkerExecutableByteCount
   :: LengthSMTLibReadyWorker epoch
   -> Natural
@@ -1277,6 +1423,11 @@ lengthSMTLibReadyWorkerExecutableByteCount =
   lengthSMTLibExecutableSnapshotByteCount .
     lengthSMTLibProcessSnapshot . readyWorkerProcess
 
+-- | Tag naming how strongly the executable digest is bound to the running
+-- process, chosen from the process launch strategy: the descriptor-bound
+-- execve-check tag first, then the effective-ID descriptor-bound tag, then
+-- the plain descriptor-bound tag, otherwise the portable pathname-snapshot
+-- tag.  The same tag is bound in the ready-worker identity.
 lengthSMTLibReadyWorkerExecutableSnapshotStrengthTag
   :: LengthSMTLibReadyWorker epoch
   -> ByteString
@@ -1292,11 +1443,18 @@ lengthSMTLibReadyWorkerExecutableSnapshotStrengthTag worker
       lengthSMTLibDescriptorBoundExecutableLaunchStrengthTag
   | otherwise = lengthSMTLibExecutableSnapshotStrengthTag
 
+-- | SHA-256 of the complete causal stdout transcript of the readiness
+-- capability probe: the inherited predecessor whitespace followed by every
+-- write epoch's bytes, in order.
 lengthSMTLibReadyWorkerCapabilityTranscriptSHA256
   :: LengthSMTLibReadyWorker epoch
   -> ByteString
 lengthSMTLibReadyWorkerCapabilityTranscriptSHA256 = readyWorkerTranscriptDigest
 
+-- | Byte count of the readiness capability transcript.  It equals the total
+-- stdout byte count observed at the ready commit point, because readiness
+-- fails with 'LengthSMTLibSessionTranscriptAccountingMismatch' whenever the
+-- transcript count and that boundary differ.
 lengthSMTLibReadyWorkerCapabilityTranscriptByteCount
   :: LengthSMTLibReadyWorker epoch
   -> Natural
@@ -1305,39 +1463,65 @@ lengthSMTLibReadyWorkerCapabilityTranscriptByteCount
 lengthSMTLibReadyWorkerCapabilityTranscriptByteCount =
   readyWorkerStdoutAtCommit
 
+-- | Total stdout bytes the process had produced when the worker was
+-- committed ready.  It equals
+-- 'lengthSMTLibReadyWorkerCapabilityTranscriptByteCount' and is the stdout
+-- start boundary of the first query run.
 lengthSMTLibReadyWorkerObservedStdoutBytes
   :: LengthSMTLibReadyWorker epoch
   -> Natural
 lengthSMTLibReadyWorkerObservedStdoutBytes = readyWorkerStdoutAtCommit
 
+-- | Total stderr bytes observed when the worker was committed ready, and the
+-- stderr start boundary of the first query run.  This is a point-in-time
+-- reader observation, not proof that the child never writes to stderr.
 lengthSMTLibReadyWorkerObservedStderrBytes
   :: LengthSMTLibReadyWorker epoch
   -> Natural
 lengthSMTLibReadyWorkerObservedStderrBytes = readyWorkerStderrAtCommit
 
+-- | Absolute path of the fresh, exclusively created directory the solver
+-- process was started in.  It is bound in the ready-worker identity, and
+-- scope cleanup removes it only after re-verifying that the pathname still
+-- names the directory the scope created, and only when it is empty.
 lengthSMTLibReadyWorkerWorkingDirectory
   :: LengthSMTLibReadyWorker epoch
   -> FilePath
 lengthSMTLibReadyWorkerWorkingDirectory = readyWorkerWorkspace
 
+-- | Zero-based ordinal of this run in its worker's serial query lease.
+-- Ordinals are shared between scalar and spine-pair runs on the same worker
+-- and increase by one per reserved run.
 lengthSMTLibQueryRunOrdinal
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunOrdinal
     (LengthSMTLibQueryRun value _ _ _ _ _ _ _) = value
 
+-- | The retained solver observation: satisfiable (carrying independently
+-- replayed counterexample evidence exactly when the artifact policy requested
+-- input values), unsatisfiable, or unknown.  No branch asserts solver
+-- soundness.
 lengthSMTLibQueryRunObservation
   :: LengthSMTLibQueryRun epoch identity local
   -> LengthSMTLibQueryRunObservation
 lengthSMTLibQueryRunObservation
     (LengthSMTLibQueryRun _ observation _ _ _ _ _ _) = observation
 
+-- | Private, reversible identity of the run.  It binds the run schema tag,
+-- the executable authority, the ready-worker identity, the query allocation
+-- (ordinal, both spent barrier markers, and the seed commitment), the
+-- protocol plan, the effective deadline and its selection, the exact causal
+-- transcript, the decoded outcome and replay policy, and the transport
+-- commit boundaries.
 lengthSMTLibQueryRunIdentityFingerprint
   :: LengthSMTLibQueryRun epoch identity local
   -> Fingerprint LengthSMTLibQueryRunIdentitySubject
 lengthSMTLibQueryRunIdentityFingerprint
     (LengthSMTLibQueryRun _ _ value _ _ _ _ _) = value
 
+-- | The run identity as a tagged fingerprint field for embedding in a
+-- dependent fingerprint.
 lengthSMTLibQueryRunIdentityFingerprintField
   :: LengthSMTLibQueryRun epoch identity local
   -> FingerprintField
@@ -1345,12 +1529,18 @@ lengthSMTLibQueryRunIdentityFingerprintField run = tagged "query-run-identity"
   [FingerprintBytes $ fingerprintCanonicalBytes
     $ lengthSMTLibQueryRunIdentityFingerprint run]
 
+-- | SHA-256 of the exact causal stdout transcript of this run: the inherited
+-- predecessor whitespace followed by every write epoch's bytes, in order.
 lengthSMTLibQueryRunTranscriptSHA256
   :: LengthSMTLibQueryRun epoch identity local
   -> ByteString
 lengthSMTLibQueryRunTranscriptSHA256
     (LengthSMTLibQueryRun _ _ _ value _ _ _ _) = value
 
+-- | Byte count of the run's causal transcript, computed as the difference
+-- between its stdout end and start boundaries.  A run is constructed only
+-- after accounting proved that this difference equals the transcript's own
+-- byte count, so the subtraction cannot underflow.
 lengthSMTLibQueryRunTranscriptByteCount
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
@@ -1361,48 +1551,71 @@ lengthSMTLibQueryRunTranscriptByteCount
     (LengthSMTLibQueryRun _ _ _ _ stdoutStart stdoutEnd _ _) =
       stdoutEnd - stdoutStart
 
+-- | Cumulative process stdout byte count at which this run's transport
+-- began: the previous committed run's end boundary, or the ready-commit count
+-- for the first run.
 lengthSMTLibQueryRunStdoutStart
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunStdoutStart
     (LengthSMTLibQueryRun _ _ _ _ value _ _ _) = value
 
+-- | Cumulative process stdout byte count observed at the run's final
+-- boundary.  It exceeds the start by exactly the transcript byte count and
+-- becomes the start boundary of the next committed run.
 lengthSMTLibQueryRunStdoutEnd
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunStdoutEnd
     (LengthSMTLibQueryRun _ _ _ _ _ value _ _) = value
 
+-- | Cumulative process stderr byte count when this run's transport began.
 lengthSMTLibQueryRunStderrStart
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunStderrStart
     (LengthSMTLibQueryRun _ _ _ _ _ _ value _) = value
 
+-- | Cumulative process stderr byte count at the run's final boundary.  For a
+-- committed run it always equals the start, because any stderr byte observed
+-- during the run fails accounting instead of producing a run.
 lengthSMTLibQueryRunStderrEnd
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunStderrEnd
     (LengthSMTLibQueryRun _ _ _ _ _ _ _ value) = value
 
+-- | Zero-based ordinal of this run in the shared worker's serial query lease;
+-- scalar and spine-pair runs draw ordinals from the same counter.
 lengthSpinePairSMTLibQueryRunOrdinal
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> Natural
 lengthSpinePairSMTLibQueryRunOrdinal
     (LengthSpinePairSMTLibQueryRun value _ _ _ _ _ _ _) = value
 
+-- | The retained solver observation of the product query: satisfiable
+-- (carrying independently replayed spine-pair counterexample evidence exactly
+-- when the artifact policy requested input values), unsatisfiable, or
+-- unknown.  No branch asserts solver soundness.
 lengthSpinePairSMTLibQueryRunObservation
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> LengthSpinePairSMTLibQueryRunObservation
 lengthSpinePairSMTLibQueryRunObservation
     (LengthSpinePairSMTLibQueryRun _ observation _ _ _ _ _ _) = observation
 
+-- | Private, reversible identity of the spine-pair run, the product-domain
+-- sibling of 'lengthSMTLibQueryRunIdentityFingerprint'.  It embeds the
+-- shared ready-worker identity, the query allocation, the spine-pair
+-- protocol plan, the effective deadline, the exact causal transcript, and
+-- the decoded outcome, replay policy, and transport commit boundaries.
 lengthSpinePairSMTLibQueryRunIdentityFingerprint
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> Fingerprint LengthSpinePairSMTLibQueryRunIdentitySubject
 lengthSpinePairSMTLibQueryRunIdentityFingerprint
     (LengthSpinePairSMTLibQueryRun _ _ value _ _ _ _ _) = value
 
+-- | The spine-pair run identity as a tagged fingerprint field for embedding
+-- in a dependent fingerprint.
 lengthSpinePairSMTLibQueryRunIdentityFingerprintField
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> FingerprintField
@@ -1411,12 +1624,18 @@ lengthSpinePairSMTLibQueryRunIdentityFingerprintField run =
     [FingerprintBytes $ fingerprintCanonicalBytes
       $ lengthSpinePairSMTLibQueryRunIdentityFingerprint run]
 
+-- | SHA-256 of the exact causal stdout transcript of this run: the inherited
+-- predecessor whitespace followed by every write epoch's bytes, in order.
 lengthSpinePairSMTLibQueryRunTranscriptSHA256
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> ByteString
 lengthSpinePairSMTLibQueryRunTranscriptSHA256
     (LengthSpinePairSMTLibQueryRun _ _ _ value _ _ _ _) = value
 
+-- | Byte count of the run's causal transcript, computed as the difference
+-- between its stdout end and start boundaries.  A run is constructed only
+-- after accounting proved that this difference equals the transcript's own
+-- byte count, so the subtraction cannot underflow.
 lengthSpinePairSMTLibQueryRunTranscriptByteCount
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> Natural
@@ -1424,24 +1643,34 @@ lengthSpinePairSMTLibQueryRunTranscriptByteCount
     (LengthSpinePairSMTLibQueryRun _ _ _ _ stdoutStart stdoutEnd _ _) =
       stdoutEnd - stdoutStart
 
+-- | Cumulative process stdout byte count at which this run's transport
+-- began: the previous committed run's end boundary (of either domain), or
+-- the ready-commit count for the first run.
 lengthSpinePairSMTLibQueryRunStdoutStart
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> Natural
 lengthSpinePairSMTLibQueryRunStdoutStart
     (LengthSpinePairSMTLibQueryRun _ _ _ _ value _ _ _) = value
 
+-- | Cumulative process stdout byte count observed at the run's final
+-- boundary.  It exceeds the start by exactly the transcript byte count and
+-- becomes the start boundary of the next committed run.
 lengthSpinePairSMTLibQueryRunStdoutEnd
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> Natural
 lengthSpinePairSMTLibQueryRunStdoutEnd
     (LengthSpinePairSMTLibQueryRun _ _ _ _ _ value _ _) = value
 
+-- | Cumulative process stderr byte count when this run's transport began.
 lengthSpinePairSMTLibQueryRunStderrStart
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> Natural
 lengthSpinePairSMTLibQueryRunStderrStart
     (LengthSpinePairSMTLibQueryRun _ _ _ _ _ _ value _) = value
 
+-- | Cumulative process stderr byte count at the run's final boundary.  For a
+-- committed run it always equals the start, because any stderr byte observed
+-- during the run fails accounting instead of producing a run.
 lengthSpinePairSMTLibQueryRunStderrEnd
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> Natural
@@ -3699,6 +3928,13 @@ withLengthSMTLibReadyWorker
 withLengthSMTLibReadyWorker = withLengthSMTLibReadyWorkerWithDeadlinePolicy
   LengthSMTLibFreshPerQueryDeadline
 
+-- | Open, probe, lend, and close one worker as 'withLengthSMTLibReadyWorker'
+-- does, but under an already captured shared usable-work deadline.  The
+-- effective opener deadline and every query deadline become the earlier of
+-- their fresh local deadline and the shared one (the shared deadline wins a
+-- tie); expiry is checked once more just before the callback runs and again
+-- as soon as it returns, before the final readiness and cleanup windows, and
+-- the worker and run identities record the shared-deadline policy.
 withLengthSMTLibReadyWorkerUnderDeadline
   :: forall budget result. LengthSMTLibSessionUsableWorkDeadline budget
   -> LengthSMTLibSessionConfig

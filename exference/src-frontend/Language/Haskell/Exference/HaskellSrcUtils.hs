@@ -1,3 +1,8 @@
+-- | Small helpers over haskell-src-exts syntax shared by the Exference
+-- source extractors: flattening contexts, splitting declaration heads,
+-- class applications, and instance rules into name-plus-arguments form,
+-- and converting HSE points and spans into the checked shared diagnostic
+-- location vocabulary of "Language.Haskell.Synthesis.Diagnostic".
 module Language.Haskell.Exference.HaskellSrcUtils
   ( contextConstraints
   , haskellSrcLocation

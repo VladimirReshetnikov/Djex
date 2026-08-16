@@ -2,6 +2,12 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
+-- | Exference's numeric score carriers: the signed 'Penalty' used for
+-- heuristics, ratings, and depth limits, and the queue-key 'Priority'.
+-- Both wrap a raw 'Double' with a total 'Ord' even for NaN, and the
+-- exported arithmetic saturates within the finite domain, so search never
+-- has to reason about overflow or a broken queue ordering; the finiteness
+-- predicates are what checked boundaries use to reject malformed input.
 module Language.Haskell.Exference.Core.Score
   ( Penalty (..)
   , Priority (..)

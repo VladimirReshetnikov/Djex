@@ -5,6 +5,13 @@
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
 --
+
+-- | Djinn's historical compatibility AST for kinds and types, with its ReadP
+-- parsers, its formula translation, and the legacy clause view of proof
+-- terms.  'HKind' and 'HType' are views over the shared Djex kind and
+-- source-type trees rather than second recursive representations; bundled
+-- pattern synonyms keep the old @HKind(..)@ and @HType(..)@ syntax, with a
+-- narrow fallback layer for declaration-only and constructor-sensitive forms.
 module Djinn.Internal.HTypes(
         HKind(KStar, KArrow, KVar),
         HType(HTApp, HTVar, HTCon, HTTuple, HTArrow, HTForall,

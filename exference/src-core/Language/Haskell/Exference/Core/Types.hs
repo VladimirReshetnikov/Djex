@@ -4,6 +4,12 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
 
+-- | The core type vocabulary of the Exference engine.  'HsType' is the shared
+-- Djex type tree over 'SynthesisVariable's identified by 'TVarId'; the
+-- pattern synonyms retain the historical constructor names without a second
+-- representation.  The module also owns substitutions, 'HsConstraint's, the
+-- validated 'StaticClassEnv' with its instance completion, the per-query
+-- 'QueryClassEnv', and the compatibility renderers for types and constraints.
 module Language.Haskell.Exference.Core.Types
   ( TVarId
   , module Language.Haskell.Exference.Core.Name

@@ -2,6 +2,11 @@
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
 --
+
+-- | A minimal line-oriented read-eval-print loop over Haskeline.  The
+-- 'REPL' record supplies the init, eval, and exit callbacks and 'repl' runs
+-- them until quit or EOF; the module knows nothing about Djinn commands, and
+-- "Djinn" is the frontend that instantiates it.
 module Djinn.Internal.REPL (REPL(..), repl) where
 import Control.Monad.Trans.Class (lift)
 import System.Console.Haskeline

@@ -455,7 +455,7 @@ by design.
 
 The active API is described by the
 [library guide](../library-api.md#validate-the-current-applicable-domain) and
-[semantic foundations](../semantic-foundations.md#current-recursive-piecewise-affine-applicable-domain-validation).
+[semantic foundations](../semantic-foundations.md#current-guarded-recursive-piecewise-affine-applicable-domain-validation).
 The historical
 [recursive piecewise-affine report](2026-08-15-recursive-piecewise-affine-length-applicable-domain.md)
 and its predecessors remain useful algorithm-development records, but this

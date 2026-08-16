@@ -1135,10 +1135,13 @@ resource-bounded and fail-closed:
    `CheckedLengthContract`.
 3. `sealLengthTypedCandidateProblem` associates one engine-owned
    `TypedCandidate` with that contract, symbolically interpreting the
-   candidate's sealed term graph into a `CheckedLengthProblem`.
+   candidate's sealed term graph into a `CheckedLengthProblem`. At this exact
+   session/contract/target boundary it also seals a candidate-independent
+   counterexample-bank scope.
 4. `sealLengthSMTLibQuery` renders the problem into a bounded canonical
-   `QF_LIA` query. Nothing has executed yet; the query is pure bytes plus a
-   complete fingerprint.
+   `QF_LIA` query. Nothing has executed yet; the opaque query retains the exact
+   problem, bounded pure bytes, and a complete fingerprint, and it projects
+   the problem's unchanged bank scope.
 5. `withLengthSMTLibLiveSession` opens the library's only external-process
    boundary: one capability-probed Z3 worker, lent through a rank-N scope,
    serving at most 64 scalar-plus-product query transactions in total.
@@ -1150,9 +1153,129 @@ resource-bounded and fail-closed:
    `ValidatedLengthCounterexample` or bounded-positive receipt, and even
    `unsat` never becomes proof or pruning authority.
 
+### Prepare a bounded replay-input bank
+
+`Language.Haskell.Synthesis.Semantic.Length.CounterexampleBank`, re-exported
+by `Language.Haskell.Djex`, provides nominal scalar and binary-product storage
+for input vectors that a later integration may want to replay. The pure
+`Semantic.Length.SMTLib` facade now provides explicit query-owned operations
+for freshly reproducing and recording one counterexample, and for replaying
+one exact retained sample. It does not automatically populate, traverse,
+persist, or consume a bank. In particular, the live Z3 facade and the current
+Leant integration do not consult it.
+
+Project a scalar scope with
+`checkedLengthProblemCounterexampleBankScope`, or from a sealed query with
+`lengthSMTLibQueryCounterexampleBankScope`. The product names are
+`checkedLengthSpinePairProblemCounterexampleBankScope` and
+`lengthSpinePairSMTLibQueryCounterexampleBankScope`. A scope contains only
+candidate-independent facts:
+
+- the complete checked session inventory and admitted provider-law basis;
+- the solver-neutral interpretation/model policy;
+- the exact revalidated contract; and
+- the exact normalized target.
+
+It deliberately excludes the candidate graph, interpreted result,
+counterexample condition, candidate-used provider subset, query and execution
+identity, preferences, solver status, receipts, and verdicts. Scalar and
+product scopes and banks are nominally separate.
+
+Create an empty scalar bank with `emptyLengthCounterexampleBank` and the
+following default limits; use `emptyLengthSpinePairCounterexampleBank` for the
+product domain:
+
+| Resource | Scalar and product default |
+| --- | ---: |
+| Retained entries | 4 |
+| Inputs per sample | 8 |
+| Bits per natural input | 256 |
+| Aggregate retained modeled bytes | 4,096 |
+| Recorded replay attempts | 256 |
+
+`mkLengthCounterexampleBankLimits` and its `SpinePair` sibling construct
+custom limits. They reject negative entry, width, and bit limits in that
+order, then reject `maxBound` width or bit limits because their first excess
+would be unobservable. Byte and attempt caps are `Natural` values.
+
+`insertLengthCounterexampleBankSample` accepts one of the three opaque origin
+values—live-model replay, solver-independent replay, or simplification
+replay—and a source-ordered `[Natural]`. Those origins are caller-supplied
+labels, not provenance receipts. The scalar constants are
+`lengthCounterexampleBankLiveModelReplayOrigin`,
+`lengthCounterexampleBankSolverIndependentReplayOrigin`, and
+`lengthCounterexampleBankSimplificationReplayOrigin`; their product names add
+`SpinePair` after the initial `length`. Insertion checks zero capacity before
+demanding the origin or vector, observes only the bounded first-excess width,
+checks element bit widths left to right, then applies the modeled byte cap.
+Successful retention is strict. Samples are newest first and deduplicate by
+input vector alone: reinserting a vector replaces its origin and promotes it
+to the front. Entry or aggregate-byte pressure evicts a deterministic oldest
+tail rather than skipping entries inside it.
+
+The six scalar statistics projections (and their `SpinePair` counterparts)
+report retained entries, retained modeled bytes, successful records, duplicate
+promotions, tail evictions, and replay attempts. Recording an attempt is an
+explicit immutable update through
+`recordLengthCounterexampleBankReplayAttempt`; insertion does not increment
+that counter.
+
+Finally, `lengthCounterexampleBankMatchesScope` and its product sibling compare
+only the complete scope fingerprint. They ignore limits, entries, origins, and
+statistics, and they do not inspect or replay a sample. A match authorizes at
+most trying fresh replay against the current checked problem. Bank insertion
+does not even assert semantic input arity, and neither a stored vector nor a
+match is evidence. Project a sample with
+`lengthCounterexampleBankSampleInputs` (or its `SpinePair` counterpart) and
+call the existing exact problem/query replay entrance; only a newly returned
+receipt has its ordinary narrow authority.
+
+`recordLengthSMTLibQueryCounterexampleInBank` performs the complete scalar
+association sequence for one opaque receipt. Its nominal product counterpart
+is `recordLengthSpinePairSMTLibQueryCounterexampleInBank`. Each operation:
+
+1. requires the bank to match the current query's scope;
+2. records one replay attempt;
+3. extracts only the old receipt's inputs and replays them through the exact
+   current query;
+4. requires that replay to reproduce a counterexample; and
+5. delegates bounded storage, input-only duplicate promotion, statistics, and
+   eviction to the ordinary bank insertion kernel.
+
+The result pairs the authoritative bank with either a nominal error or the
+fresh current-query receipt. Scope or attempt-admission refusal returns the
+unchanged bank. Once the attempt has been admitted, replay rejection, an
+ordinary non-counterexample, or insertion refusal returns the charged
+successor; real replay work is never rolled back. Successful recording stores
+only the freshly reproduced natural inputs and the caller's coarse origin,
+not either receipt or any verdict.
+
+`replayLengthSMTLibCounterexampleBankSample` and its `SpinePair` counterpart
+take one exact opaque sample. They check scope, full retained-sample membership,
+and attempt admission in that order before replaying the sample's inputs
+through the current query. A pre-admission refusal leaves the bank unchanged;
+a replay rejection, miss, or hit returns the charged successor. A hit is again
+a fresh current-query receipt. This single-sample primitive performs no
+whole-bank traversal, promotion, reinsertion, origin rewrite, solver operation,
+or solver-status inspection.
+
+These functions provide association and accounting mechanics, not runtime
+policy. They do not choose a sample or candidate, operate a live solver,
+schedule another lane, own a command/session bank, persist state, or grant
+Leant any behavior.
+
+Djex is experimental and promises neither stability nor backward
+compatibility. Treat these current nominal types and short names as the whole
+bank contract; do not infer a persistence format from any exposed `Show`
+rendering or from the modeled byte statistic. The exact foundation is
+recorded in the
+[nominal bank report](reports/2026-08-16-nominal-length-counterexample-bank-foundation.md),
+and the explicit query association is frozen in the
+[query-replay bridge report](reports/2026-08-16-length-counterexample-bank-query-replay-bridge.md).
+
 ### Validate the current applicable domain
 
-There is one public applicable-domain algorithm: bounded recursive
+There is one public applicable-domain algorithm: bounded guarded recursive
 piecewise-affine finite-union analysis followed by exhaustive replay of the
 original checked problem. Call `validateLengthProblemApplicableDomain` for a
 scalar checked problem or `validateLengthSpinePairProblemApplicableDomain` for
@@ -1202,22 +1325,29 @@ schema bytes are private.
 
 Internally the complete algorithm retains an ordered fallback from direct and
 positive-affine consequences through relational, strict, positive-literal
-quotient, extrema, monus, Boolean/atomic branching, and finally recursive
-piecewise-affine cases. Those stages are implementation details, not public
-policy choices. Minimum, maximum, and monus cases are ordered left-first with
-the first child owning ties. Raw DNF/case counting precedes cleanup; every live
-branch must establish all input maxima; incomparable boxes remain a canonical
-antichain rather than being widened to a hull; overlapping boxes count as
-visits but assignments are deduplicated; and one global lexicographic replay
-of the original precondition and postcondition is final authority.
+quotient, extrema, monus, Boolean/atomic branching, and finally guarded
+recursive piecewise-affine cases. Those stages are implementation details, not
+public policy choices. Minimum, maximum, and monus cases are ordered left-first
+with the first child owning ties. An admitted `LengthIf` expands positive
+guard/true-arm alternatives before negative guard/false-arm alternatives;
+both guard polarities and both arms must be fully supported or the whole
+fallback atom remains conservatively ignored. Condition rules precede selected-
+arm and enclosing selector rules.
+
+Raw DNF and guarded-case counting precedes contradiction and every other
+cleanup, then the existing branch, rule, and closure caps apply in that order.
+Every live branch must establish all input maxima; incomparable boxes remain a
+canonical antichain rather than being widened to a hull; overlapping boxes
+count as visits but assignments are deduplicated; and one global lexicographic
+replay of the original precondition and postcondition is final authority.
 
 The older public validator/receipt/tag ladder was deleted without aliases or
 migration. Djex is experimental and promises neither stability nor backward
 compatibility, so current code should import only the short names above and
 must not persist or compare private receipt-schema bytes. See the
-[full applicable-domain semantics](semantic-foundations.md#current-recursive-piecewise-affine-applicable-domain-validation)
+[full applicable-domain semantics](semantic-foundations.md#current-guarded-recursive-piecewise-affine-applicable-domain-validation)
 and the dated
-[surface-reset report](reports/2026-08-15-current-length-applicable-domain-surface.md).
+[guarded conditional report](reports/2026-08-15-guarded-conditional-length-applicable-domain.md).
 
 A nominally distinct binary-product sibling
 (`sealLengthSpinePairContractInSession` and the `LengthSpinePair*` family)

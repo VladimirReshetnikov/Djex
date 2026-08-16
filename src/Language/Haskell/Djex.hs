@@ -51,6 +51,7 @@ module Language.Haskell.Djex
   , module Language.Haskell.Synthesis.Search
   , module Language.Haskell.Synthesis.Selection
   , module Language.Haskell.Synthesis.Semantic.Length
+  , module Language.Haskell.Synthesis.Semantic.Length.CounterexampleBank
   , module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , module Language.Haskell.Synthesis.Semantic.Length.Problem
   , module Language.Haskell.Synthesis.Semantic.Length.SMTLib
@@ -98,6 +99,7 @@ import Language.Haskell.Synthesis.Query
 import Language.Haskell.Synthesis.Search
 import Language.Haskell.Synthesis.Selection
 import Language.Haskell.Synthesis.Semantic.Length
+import Language.Haskell.Synthesis.Semantic.Length.CounterexampleBank
 import Language.Haskell.Synthesis.Semantic.Length.Evaluate
 import Language.Haskell.Synthesis.Semantic.Length.Problem
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib

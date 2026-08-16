@@ -41,6 +41,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.Problem.Candidate
   , checkedLengthProblemCounterexampleCondition
   , checkedLengthProblemEncodingFingerprint
   , checkedLengthProblemBehavioralProblem
+  , checkedLengthProblemCounterexampleBankScope
   , CheckedLengthSpinePairCandidate
   , CheckedLengthSpinePairProblem
   , sealLengthSpinePairTypedCandidateProblem
@@ -57,6 +58,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.Problem.Candidate
   , checkedLengthSpinePairProblemCounterexampleCondition
   , checkedLengthSpinePairProblemEncodingFingerprint
   , checkedLengthSpinePairProblemBehavioralProblem
+  , checkedLengthSpinePairProblemCounterexampleBankScope
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -185,6 +187,12 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
   , lengthSessionInventoryFingerprint
   , sealLengthContractInSession
   , sealLengthSpinePairContractInSession
+  )
+import Language.Haskell.Synthesis.Internal.Semantic.Length.CounterexampleBank
+  ( LengthCounterexampleBankScope
+  , LengthSpinePairCounterexampleBankScope
+  , sealLengthCounterexampleBankScope
+  , sealLengthSpinePairCounterexampleBankScopeWithInventory
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Problem
   ( BehavioralProblem
@@ -326,6 +334,8 @@ data LengthProblemFingerprintPart
     -- ^ Domain wrapper around the shared typed graph identity.
   | LengthCompleteProblemFingerprint
     -- ^ Inventory, concrete encoding, and candidate association.
+  | LengthCounterexampleBankScopeFingerprint
+    -- ^ Candidate-independent session, contract, and normalized target.
   deriving (Bounded, Enum, Eq, Ord, Show, Generic)
 
 instance NFData LengthProblemFingerprintPart
@@ -336,6 +346,7 @@ data LengthSpinePairProblemFingerprintPart
   | LengthSpinePairConcreteEncodingFingerprint
   | LengthSpinePairCandidateFingerprint
   | LengthSpinePairCompleteProblemFingerprint
+  | LengthSpinePairCounterexampleBankScopeFingerprint
   deriving (Bounded, Enum, Eq, Ord, Show, Generic)
 
 instance NFData LengthSpinePairProblemFingerprintPart
@@ -616,15 +627,17 @@ data CheckedLengthProblem identity local = CheckedLengthProblem
   !(LengthFormula LengthContractVariable)
   !(LengthFormula LengthContractVariable)
   !(BehavioralProblem FiniteListSpineLengthV1)
+  !(LengthCounterexampleBankScope identity)
 
 type role CheckedLengthProblem nominal nominal
 
 instance NFData (CheckedLengthProblem identity local) where
   rnf (CheckedLengthProblem candidate inputCount precondition postcondition
-      condition problem) =
+      condition problem scope) =
     rnf candidate `seq` rnf inputCount `seq` rnf precondition `seq`
     rnf postcondition `seq` rnf condition `seq`
-    rnf (behavioralProblemEncodingFingerprint problem) `seq` rnf problem
+    rnf (behavioralProblemEncodingFingerprint problem) `seq` rnf problem `seq`
+    rnf scope
 
 -- | Normalized symbolic length computed for the candidate result.
 checkedLengthCandidateResult
@@ -651,7 +664,7 @@ checkedLengthProblemCandidate
   :: CheckedLengthProblem identity local
   -> CheckedLengthCandidate identity local
 checkedLengthProblemCandidate
-    (CheckedLengthProblem candidate _ _ _ _ _) = candidate
+    (CheckedLengthProblem candidate _ _ _ _ _ _) = candidate
 
 -- | Number of compact source-ordered observed-spine inputs admitted by the
 -- sealed contract.
@@ -663,7 +676,7 @@ checkedLengthProblemInputCount
   :: CheckedLengthProblem identity local
   -> Int
 checkedLengthProblemInputCount
-    (CheckedLengthProblem _ inputCount _ _ _ _) =
+    (CheckedLengthProblem _ inputCount _ _ _ _ _) =
   inputCount
 
 -- | Normalized contract precondition retained for ordered concrete replay.
@@ -671,7 +684,7 @@ checkedLengthProblemPrecondition
   :: CheckedLengthProblem identity local
   -> LengthFormula LengthContractVariable
 checkedLengthProblemPrecondition
-    (CheckedLengthProblem _ _ precondition _ _ _) = precondition
+    (CheckedLengthProblem _ _ precondition _ _ _ _) = precondition
 
 -- | Normalized contract postcondition before candidate-result substitution.
 -- Concrete replay evaluates this only after the precondition succeeds and
@@ -680,14 +693,14 @@ checkedLengthProblemPostcondition
   :: CheckedLengthProblem identity local
   -> LengthFormula LengthContractVariable
 checkedLengthProblemPostcondition
-    (CheckedLengthProblem _ _ _ postcondition _ _) = postcondition
+    (CheckedLengthProblem _ _ _ postcondition _ _ _) = postcondition
 
 -- | Solver-neutral bad-state formula: precondition and negated postcondition.
 checkedLengthProblemCounterexampleCondition
   :: CheckedLengthProblem identity local
   -> LengthFormula LengthContractVariable
 checkedLengthProblemCounterexampleCondition
-    (CheckedLengthProblem _ _ _ _ condition _) = condition
+    (CheckedLengthProblem _ _ _ _ condition _ _) = condition
 
 -- | Concrete identity of contract, policy, used laws, result, and bad state.
 checkedLengthProblemEncodingFingerprint
@@ -695,7 +708,7 @@ checkedLengthProblemEncodingFingerprint
   -> Fingerprint
       (EncodingFingerprintSubject FiniteListSpineLengthV1)
 checkedLengthProblemEncodingFingerprint
-    (CheckedLengthProblem _ _ _ _ _ problem) =
+    (CheckedLengthProblem _ _ _ _ _ problem _) =
   behavioralProblemEncodingFingerprint problem
 
 -- | Generic domain/inventory/encoding/candidate/problem envelope.
@@ -703,7 +716,17 @@ checkedLengthProblemBehavioralProblem
   :: CheckedLengthProblem identity local
   -> BehavioralProblem FiniteListSpineLengthV1
 checkedLengthProblemBehavioralProblem
-    (CheckedLengthProblem _ _ _ _ _ problem) = problem
+    (CheckedLengthProblem _ _ _ _ _ problem _) = problem
+
+-- | Candidate-independent replay-input scope sealed solely from the exact
+-- session, revalidated contract, and normalized target.  Its construction is
+-- intentionally independent of every candidate-specific field retained by
+-- this problem.
+checkedLengthProblemCounterexampleBankScope
+  :: CheckedLengthProblem identity local
+  -> LengthCounterexampleBankScope identity
+checkedLengthProblemCounterexampleBankScope
+    (CheckedLengthProblem _ _ _ _ _ _ scope) = scope
 
 -- | Opaque symbolic binary spine result for one engine-owned candidate.
 data CheckedLengthSpinePairCandidate identity local =
@@ -729,15 +752,17 @@ data CheckedLengthSpinePairProblem identity local =
     !(LengthFormula LengthSpinePairContractVariable)
     !(LengthFormula LengthContractVariable)
     !(BehavioralProblem FiniteBinaryProductSpineLengthsV1)
+    !(LengthSpinePairCounterexampleBankScope identity)
 
 type role CheckedLengthSpinePairProblem nominal nominal
 
 instance NFData (CheckedLengthSpinePairProblem identity local) where
   rnf (CheckedLengthSpinePairProblem candidate inputCount precondition
-      postcondition condition problem) =
+      postcondition condition problem scope) =
     rnf candidate `seq` rnf inputCount `seq` rnf precondition `seq`
     rnf postcondition `seq` rnf condition `seq`
-    rnf (behavioralProblemEncodingFingerprint problem) `seq` rnf problem
+    rnf (behavioralProblemEncodingFingerprint problem) `seq` rnf problem `seq`
+    rnf scope
 
 -- | Normalized symbolic lengths computed for both components of the
 -- candidate's product result.
@@ -767,7 +792,7 @@ checkedLengthSpinePairProblemCandidate
   :: CheckedLengthSpinePairProblem identity local
   -> CheckedLengthSpinePairCandidate identity local
 checkedLengthSpinePairProblemCandidate
-    (CheckedLengthSpinePairProblem candidate _ _ _ _ _) = candidate
+    (CheckedLengthSpinePairProblem candidate _ _ _ _ _ _) = candidate
 
 -- | Number of compact source-ordered observed-spine inputs admitted by the
 -- sealed product contract, retained redundantly with the fingerprinted
@@ -775,7 +800,7 @@ checkedLengthSpinePairProblemCandidate
 checkedLengthSpinePairProblemInputCount
   :: CheckedLengthSpinePairProblem identity local -> Int
 checkedLengthSpinePairProblemInputCount
-    (CheckedLengthSpinePairProblem _ inputCount _ _ _ _) = inputCount
+    (CheckedLengthSpinePairProblem _ inputCount _ _ _ _ _) = inputCount
 
 -- | Normalized product contract precondition retained for ordered concrete
 -- replay.
@@ -783,7 +808,7 @@ checkedLengthSpinePairProblemPrecondition
   :: CheckedLengthSpinePairProblem identity local
   -> LengthFormula LengthSpinePairContractVariable
 checkedLengthSpinePairProblemPrecondition
-    (CheckedLengthSpinePairProblem _ _ precondition _ _ _) = precondition
+    (CheckedLengthSpinePairProblem _ _ precondition _ _ _ _) = precondition
 
 -- | Normalized product contract postcondition before candidate-result
 -- substitution.  Concrete replay evaluates this only after the precondition
@@ -793,7 +818,7 @@ checkedLengthSpinePairProblemPostcondition
   :: CheckedLengthSpinePairProblem identity local
   -> LengthFormula LengthSpinePairContractVariable
 checkedLengthSpinePairProblemPostcondition
-    (CheckedLengthSpinePairProblem _ _ _ postcondition _ _) = postcondition
+    (CheckedLengthSpinePairProblem _ _ _ postcondition _ _ _) = postcondition
 
 -- | Solver-neutral bad-state formula: precondition and negated postcondition
 -- with both result components substituted, so only input variables remain.
@@ -801,7 +826,7 @@ checkedLengthSpinePairProblemCounterexampleCondition
   :: CheckedLengthSpinePairProblem identity local
   -> LengthFormula LengthContractVariable
 checkedLengthSpinePairProblemCounterexampleCondition
-    (CheckedLengthSpinePairProblem _ _ _ _ condition _) = condition
+    (CheckedLengthSpinePairProblem _ _ _ _ condition _ _) = condition
 
 -- | Concrete identity of contract, policy, used laws, results, and bad state.
 checkedLengthSpinePairProblemEncodingFingerprint
@@ -809,7 +834,7 @@ checkedLengthSpinePairProblemEncodingFingerprint
   -> Fingerprint
       (EncodingFingerprintSubject FiniteBinaryProductSpineLengthsV1)
 checkedLengthSpinePairProblemEncodingFingerprint
-    (CheckedLengthSpinePairProblem _ _ _ _ _ problem) =
+    (CheckedLengthSpinePairProblem _ _ _ _ _ problem _) =
   behavioralProblemEncodingFingerprint problem
 
 -- | Generic domain/inventory/encoding/candidate/problem envelope for the
@@ -818,7 +843,13 @@ checkedLengthSpinePairProblemBehavioralProblem
   :: CheckedLengthSpinePairProblem identity local
   -> BehavioralProblem FiniteBinaryProductSpineLengthsV1
 checkedLengthSpinePairProblemBehavioralProblem
-    (CheckedLengthSpinePairProblem _ _ _ _ _ problem) = problem
+    (CheckedLengthSpinePairProblem _ _ _ _ _ problem _) = problem
+
+checkedLengthSpinePairProblemCounterexampleBankScope
+  :: CheckedLengthSpinePairProblem identity local
+  -> LengthSpinePairCounterexampleBankScope identity
+checkedLengthSpinePairProblemCounterexampleBankScope
+    (CheckedLengthSpinePairProblem _ _ _ _ _ _ scope) = scope
 
 -- | Atomically retain, interpret, identify, and envelope one engine-owned
 -- typed candidate. The provider inventory is consumed directly from the
@@ -1167,6 +1198,9 @@ sealLengthTypedCandidateProblemWithMode sealer problemLimits session
   problemFingerprint <- mapFingerprintFailure LengthCompleteProblemFingerprint
     $ buildCompleteProblemFingerprint session encodingFingerprint
         candidateFingerprint
+  bankScope <- mapFingerprintFailure
+    LengthCounterexampleBankScopeFingerprint
+    $ sealLengthCounterexampleBankScope session contract
   let checkedCandidate = CheckedLengthCandidate
         result usedProviderNames candidateFingerprint
       behavioralProblem = mkBehavioralProblem
@@ -1181,6 +1215,7 @@ sealLengthTypedCandidateProblemWithMode sealer problemLimits session
     (checkedLengthContractPostcondition contract)
     condition
     behavioralProblem
+    bankScope
 
 sealLengthSpinePairTypedCandidateProblemWithMode
   :: (Ord identity, Ord local)
@@ -1307,6 +1342,10 @@ sealLengthSpinePairTypedCandidateProblemWithMode sealer problemLimits session
     LengthSpinePairCompleteProblemFingerprint
     $ buildSpinePairCompleteProblemFingerprint session productInventory
         encodingFingerprint candidateFingerprint
+  bankScope <- mapSpinePairFingerprintFailure
+    LengthSpinePairCounterexampleBankScopeFingerprint
+    $ sealLengthSpinePairCounterexampleBankScopeWithInventory
+        session productInventory contract
   let checkedCandidate = CheckedLengthSpinePairCandidate
         result usedProviderNames candidateFingerprint
       behavioralProblem = mkBehavioralProblem
@@ -1321,6 +1360,7 @@ sealLengthSpinePairTypedCandidateProblemWithMode sealer problemLimits session
     (checkedLengthSpinePairContractPostcondition contract)
     condition
     behavioralProblem
+    bankScope
  where
   mapSharedFailure = first lengthProblemErrorToSpinePairProblemError
 
@@ -1550,6 +1590,8 @@ lengthProblemErrorToSpinePairProblemError failure = case failure of
       LengthSpinePairConcreteEncodingFingerprint
     LengthCandidateFingerprint -> LengthSpinePairCandidateFingerprint
     LengthCompleteProblemFingerprint -> LengthSpinePairCompleteProblemFingerprint
+    LengthCounterexampleBankScopeFingerprint ->
+      LengthSpinePairCounterexampleBankScopeFingerprint
 
 matchRootOpening
   :: Ord identity

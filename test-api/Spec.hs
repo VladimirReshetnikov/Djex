@@ -48,8 +48,14 @@ import Language.Haskell.Synthesis.Query
 import qualified Language.Haskell.Synthesis.Query as Query
 import qualified Language.Haskell.Synthesis.Search as Search
 import qualified Language.Haskell.Synthesis.Semantic.Length as Length
+import qualified Language.Haskell.Synthesis.Semantic.Length.CounterexampleBank
+  as LengthBank
 import qualified Language.Haskell.Synthesis.Semantic.Length.Evaluate
   as LengthEvaluate
+import qualified Language.Haskell.Synthesis.Semantic.Length.Problem
+  as LengthProblem
+import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib
+  as LengthSMTLib
 import qualified Language.Haskell.Synthesis.TypedGenerated as TypedGenerated
 import qualified Language.Haskell.Synthesis.TypedGenerated.Fingerprint
   as TypedGeneratedFingerprint
@@ -250,6 +256,116 @@ projectionSignatures =
     :: Length.CheckedLengthProviderInventory Int
     -> Fingerprint.Fingerprint
         Length.LengthProviderInventoryFingerprintSubject) `seq`
+  (LengthProblem.checkedLengthProblemCounterexampleBankScope
+    :: LengthProblem.CheckedLengthProblem Int ()
+    -> LengthBank.LengthCounterexampleBankScope Int) `seq`
+  (LengthProblem.checkedLengthSpinePairProblemCounterexampleBankScope
+    :: LengthProblem.CheckedLengthSpinePairProblem Int ()
+    -> LengthBank.LengthSpinePairCounterexampleBankScope Int) `seq`
+  (LengthSMTLib.lengthSMTLibQueryCounterexampleBankScope
+    :: LengthSMTLib.LengthSMTLibQuery Int ()
+    -> LengthBank.LengthCounterexampleBankScope Int) `seq`
+  (LengthSMTLib.lengthSpinePairSMTLibQueryCounterexampleBankScope
+    :: LengthSMTLib.LengthSpinePairSMTLibQuery Int ()
+    -> LengthBank.LengthSpinePairCounterexampleBankScope Int) `seq`
+  (LengthSMTLib.recordLengthSMTLibQueryCounterexampleInBank
+    :: LengthEvaluate.LengthEvaluationLimits
+    -> LengthSMTLib.LengthSMTLibQuery Int ()
+    -> LengthBank.LengthCounterexampleBankOrigin
+    -> LengthEvaluate.ValidatedLengthCounterexample
+    -> LengthBank.LengthCounterexampleBank Int
+    -> ( LengthBank.LengthCounterexampleBank Int
+       , Either
+          LengthSMTLib.LengthSMTLibCounterexampleBankRecordError
+          LengthEvaluate.ValidatedLengthCounterexample
+       )) `seq`
+  (LengthSMTLib.replayLengthSMTLibCounterexampleBankSample
+    :: LengthEvaluate.LengthEvaluationLimits
+    -> LengthSMTLib.LengthSMTLibQuery Int ()
+    -> LengthBank.LengthCounterexampleBankSample
+    -> LengthBank.LengthCounterexampleBank Int
+    -> ( LengthBank.LengthCounterexampleBank Int
+       , Either
+          LengthSMTLib.LengthSMTLibCounterexampleBankSampleReplayError
+          (Maybe LengthEvaluate.ValidatedLengthCounterexample)
+       )) `seq`
+  (LengthSMTLib.recordLengthSpinePairSMTLibQueryCounterexampleInBank
+    :: LengthEvaluate.LengthEvaluationLimits
+    -> LengthSMTLib.LengthSpinePairSMTLibQuery Int ()
+    -> LengthBank.LengthSpinePairCounterexampleBankOrigin
+    -> LengthEvaluate.ValidatedLengthSpinePairCounterexample
+    -> LengthBank.LengthSpinePairCounterexampleBank Int
+    -> ( LengthBank.LengthSpinePairCounterexampleBank Int
+       , Either
+          LengthSMTLib.LengthSpinePairSMTLibCounterexampleBankRecordError
+          LengthEvaluate.ValidatedLengthSpinePairCounterexample
+       )) `seq`
+  (LengthSMTLib.replayLengthSpinePairSMTLibCounterexampleBankSample
+    :: LengthEvaluate.LengthEvaluationLimits
+    -> LengthSMTLib.LengthSpinePairSMTLibQuery Int ()
+    -> LengthBank.LengthSpinePairCounterexampleBankSample
+    -> LengthBank.LengthSpinePairCounterexampleBank Int
+    -> ( LengthBank.LengthSpinePairCounterexampleBank Int
+       , Either
+          LengthSMTLib.LengthSpinePairSMTLibCounterexampleBankSampleReplayError
+          (Maybe LengthEvaluate.ValidatedLengthSpinePairCounterexample)
+       )) `seq`
+  (LengthBank.lengthCounterexampleBankScopeFingerprint
+    :: LengthBank.LengthCounterexampleBankScope Int
+    -> Fingerprint.Fingerprint
+        LengthBank.LengthCounterexampleBankScopeFingerprintSubject) `seq`
+  (LengthBank.lengthCounterexampleBankScopeTargetFingerprint
+    :: LengthBank.LengthCounterexampleBankScope Int
+    -> Fingerprint.Fingerprint
+        LengthBank.LengthCounterexampleBankTargetFingerprintSubject) `seq`
+  (LengthBank.lengthCounterexampleBankSampleInputs
+    :: LengthBank.LengthCounterexampleBankSample -> [Natural]) `seq`
+  (LengthBank.lengthCounterexampleBankSampleOrigin
+    :: LengthBank.LengthCounterexampleBankSample
+    -> LengthBank.LengthCounterexampleBankOrigin) `seq`
+  (LengthBank.lengthCounterexampleBankSampleEncodedByteCount
+    :: LengthBank.LengthCounterexampleBankSample -> Natural) `seq`
+  (LengthBank.lengthCounterexampleBankStatsRetainedEntryCount
+    :: LengthBank.LengthCounterexampleBankStats -> Natural) `seq`
+  (LengthBank.lengthCounterexampleBankStatsRetainedEncodedByteCount
+    :: LengthBank.LengthCounterexampleBankStats -> Natural) `seq`
+  (LengthBank.lengthCounterexampleBankStatsRecordedSampleCount
+    :: LengthBank.LengthCounterexampleBankStats -> Natural) `seq`
+  (LengthBank.lengthCounterexampleBankStatsDuplicatePromotionCount
+    :: LengthBank.LengthCounterexampleBankStats -> Natural) `seq`
+  (LengthBank.lengthCounterexampleBankStatsEvictedSampleCount
+    :: LengthBank.LengthCounterexampleBankStats -> Natural) `seq`
+  (LengthBank.lengthCounterexampleBankStatsReplayAttemptCount
+    :: LengthBank.LengthCounterexampleBankStats -> Natural) `seq`
+  (LengthBank.lengthSpinePairCounterexampleBankScopeFingerprint
+    :: LengthBank.LengthSpinePairCounterexampleBankScope Int
+    -> Fingerprint.Fingerprint
+        LengthBank.LengthSpinePairCounterexampleBankScopeFingerprintSubject)
+      `seq`
+  (LengthBank.lengthSpinePairCounterexampleBankScopeTargetFingerprint
+    :: LengthBank.LengthSpinePairCounterexampleBankScope Int
+    -> Fingerprint.Fingerprint
+        LengthBank.LengthSpinePairCounterexampleBankTargetFingerprintSubject)
+      `seq`
+  (LengthBank.lengthSpinePairCounterexampleBankSampleInputs
+    :: LengthBank.LengthSpinePairCounterexampleBankSample -> [Natural]) `seq`
+  (LengthBank.lengthSpinePairCounterexampleBankSampleOrigin
+    :: LengthBank.LengthSpinePairCounterexampleBankSample
+    -> LengthBank.LengthSpinePairCounterexampleBankOrigin) `seq`
+  (LengthBank.lengthSpinePairCounterexampleBankSampleEncodedByteCount
+    :: LengthBank.LengthSpinePairCounterexampleBankSample -> Natural) `seq`
+  (LengthBank.lengthSpinePairCounterexampleBankStatsRetainedEntryCount
+    :: LengthBank.LengthSpinePairCounterexampleBankStats -> Natural) `seq`
+  (LengthBank.lengthSpinePairCounterexampleBankStatsRetainedEncodedByteCount
+    :: LengthBank.LengthSpinePairCounterexampleBankStats -> Natural) `seq`
+  (LengthBank.lengthSpinePairCounterexampleBankStatsRecordedSampleCount
+    :: LengthBank.LengthSpinePairCounterexampleBankStats -> Natural) `seq`
+  (LengthBank.lengthSpinePairCounterexampleBankStatsDuplicatePromotionCount
+    :: LengthBank.LengthSpinePairCounterexampleBankStats -> Natural) `seq`
+  (LengthBank.lengthSpinePairCounterexampleBankStatsEvictedSampleCount
+    :: LengthBank.LengthSpinePairCounterexampleBankStats -> Natural) `seq`
+  (LengthBank.lengthSpinePairCounterexampleBankStatsReplayAttemptCount
+    :: LengthBank.LengthSpinePairCounterexampleBankStats -> Natural) `seq`
   (LengthEvaluate.validatedLengthApplicableDomainInclusiveMaximumBoxes
     :: LengthEvaluate.ValidatedLengthApplicableDomain
     -> [[Natural]]) `seq`
@@ -404,6 +520,18 @@ main = defaultMain $ testGroup "Djex downstream API"
                       , "forbiddenBoundedRawArtifactCoercion"
                       , "forbiddenValidatedLengthCounterexampleSimplificationCoercion"
                       , "forbiddenValidatedLengthApplicableDomainCoercion"
+                      , "forbiddenLengthCounterexampleBankScopeIdentityCoercion"
+                      , "forbiddenLengthCounterexampleBankIdentityCoercion"
+                      , "forbiddenLengthSpinePairCounterexampleBankScopeIdentityCoercion"
+                      , "forbiddenLengthSpinePairCounterexampleBankIdentityCoercion"
+                      , "forbiddenLengthCounterexampleBankScopeDomainCoercion"
+                      , "forbiddenLengthCounterexampleBankLimitsDomainCoercion"
+                      , "forbiddenLengthCounterexampleBankOriginDomainCoercion"
+                      , "forbiddenLengthCounterexampleBankSampleDomainCoercion"
+                      , "forbiddenLengthCounterexampleBankStatsDomainCoercion"
+                      , "forbiddenLengthCounterexampleBankDomainCoercion"
+                      , "forbiddenLengthCounterexampleBankSampleEvidenceCoercion"
+                      , "forbiddenLengthSpinePairCounterexampleBankSampleEvidenceCoercion"
                       , "forbiddenCheckedLengthContractCoercion"
                       , "forbiddenCheckedLengthSpinePairContractCoercion"
                       , "forbiddenCheckedLengthContextVariableCoercion"

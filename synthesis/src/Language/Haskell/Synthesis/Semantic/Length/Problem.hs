@@ -82,6 +82,7 @@ module Language.Haskell.Synthesis.Semantic.Length.Problem
   , checkedLengthProblemCounterexampleCondition
   , checkedLengthProblemEncodingFingerprint
   , checkedLengthProblemBehavioralProblem
+  , checkedLengthProblemCounterexampleBankScope
   , CheckedLengthSpinePairCandidate
   , CheckedLengthSpinePairProblem
   , sealLengthSpinePairTypedCandidateProblem
@@ -98,6 +99,7 @@ module Language.Haskell.Synthesis.Semantic.Length.Problem
   , checkedLengthSpinePairProblemCounterexampleCondition
   , checkedLengthSpinePairProblemEncodingFingerprint
   , checkedLengthSpinePairProblemBehavioralProblem
+  , checkedLengthSpinePairProblemCounterexampleBankScope
   ) where
 
 import Language.Haskell.Synthesis.Internal.Semantic.Length.Problem

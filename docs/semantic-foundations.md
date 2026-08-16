@@ -53,11 +53,12 @@ was reached.
   - [Exact-case and unified interpretation policies](#exact-case-and-unified-interpretation-policies)
   - [Case semantics and fail-closed boundaries](#case-semantics-and-fail-closed-boundaries)
   - [Checked problems and candidate keys](#checked-problems-and-candidate-keys)
+  - [Candidate-independent counterexample-bank scopes and bounded stores](#candidate-independent-counterexample-bank-scopes-and-bounded-stores)
   - [Spine exposure and bounded concrete evaluation](#spine-exposure-and-bounded-concrete-evaluation)
   - [Offline SMT-LIB queries, replay, and origin probes](#offline-smt-lib-queries-replay-and-origin-probes)
   - [Query-owned bounded counterexample simplification](#query-owned-bounded-counterexample-simplification)
   - [Bounded input-box validation](#bounded-input-box-validation)
-  - [Current recursive piecewise-affine applicable-domain validation](#current-recursive-piecewise-affine-applicable-domain-validation)
+  - [Current guarded recursive piecewise-affine applicable-domain validation](#current-guarded-recursive-piecewise-affine-applicable-domain-validation)
   - [Finite binary product spine lengths, offline and live SMT replay](#finite-binary-product-spine-lengths-offline-and-live-smt-replay)
     - [Offline product SMT queries and replay](#offline-product-smt-queries-and-replay)
     - [Live product queries](#live-product-queries)
@@ -71,6 +72,7 @@ was reached.
   - [Live Z3 protocol, session, and process ownership](#live-z3-protocol-session-and-process-ownership)
     - [Scoped live session ownership](#scoped-live-session-ownership)
     - [Shared raw Z3 process owner](#shared-raw-z3-process-owner)
+    - [Resource acquisition and descriptor-child handoff](#resource-acquisition-and-descriptor-child-handoff)
     - [Descriptor-bound Z3 executable launch](#descriptor-bound-z3-executable-launch)
     - [Effective-ID executable-access descriptor launch](#effective-id-executable-access-descriptor-launch)
     - [Derived Length process identity](#derived-length-process-identity)
@@ -85,11 +87,13 @@ was reached.
   - [Associated-certificate carriers](#associated-certificate-carriers)
   - [Conditional provider summaries and ground discharge](#conditional-provider-summaries-and-ground-discharge)
   - [Retention identities and schema versions](#retention-identities-and-schema-versions)
+  - [Semantic.Length.CounterexampleBank](#semanticlengthcounterexamplebank)
   - [Semantic.Length.SMTLib](#semanticlengthsmtlib)
     - [The canonical query and raw-input replay](#the-canonical-query-and-raw-input-replay)
+    - [Counterexample-bank query replay](#counterexample-bank-query-replay)
     - [The all-zero origin probe](#the-all-zero-origin-probe)
     - [Exhaustive input-box validation](#exhaustive-input-box-validation)
-    - [Current recursive piecewise-affine coverage policy](#current-recursive-piecewise-affine-coverage-policy)
+    - [Current guarded recursive piecewise-affine coverage policy](#current-guarded-recursive-piecewise-affine-coverage-policy)
     - [Finite binary product spine domains](#finite-binary-product-spine-domains)
     - [The offline product query](#the-offline-product-query)
     - [Live product runs and the shared ordinal space](#live-product-runs-and-the-shared-ordinal-space)
@@ -589,16 +593,17 @@ independent replay recovers the candidate result.
 ### Checked problems and candidate keys
 
 A successful `CheckedLengthProblem` carries its compact observed-spine input
-arity,
-normalized replay formulas, interpreted candidate, and one generic
-`BehavioralProblem` envelope. That envelope is the sole field of the checked
-problem which retains the inventory, concrete encoding, and complete problem
-fingerprints; it also binds the candidate fingerprint retained by the
-interpreted candidate receipt. The concrete encoding identifies the re-sealed
-contract, normalized result and counterexample condition, interpreter policy,
-and exactly the provider laws actually used. Its ordinary legacy/all-observed,
-mixed-role, and exact-case versions remain 1/2/3; a conditional-capable session
-uses 4/5/6. The candidate key wraps the fresh
+arity, normalized replay formulas, interpreted candidate, one generic
+`BehavioralProblem` envelope, and one candidate-independent counterexample-bank
+scope. The envelope remains the sole observation/evidence association owner:
+it retains the inventory, concrete encoding, candidate, and complete problem
+fingerprints. The separate bank scope retains only a collision-free projection
+of the complete candidate-independent session, contract, and target basis.
+The concrete encoding identifies the re-sealed contract, normalized result and
+counterexample condition, interpreter policy, and exactly the provider laws
+actually used. Its ordinary legacy/all-observed, mixed-role, and exact-case
+versions remain 1/2/3; a conditional-capable session uses 4/5/6. The candidate
+key wraps the fresh
 shared graph identity and explicitly describes candidate-only authority. The
 raw graph fingerprint is transient after those exact bytes enter that key, so
 the receipt retains no parallel graph-identity field. It does not pretend to
@@ -617,6 +622,98 @@ it, and even successful behavioral replay is not dictionary evidence. See the
 [associated provider-certificate Length report](reports/2026-08-13-length-associated-provider-certificates.md)
 and the
 [ground constraint-discharge report](reports/2026-08-13-length-ground-constraint-discharge.md).
+
+### Candidate-independent counterexample-bank scopes and bounded stores
+
+`Language.Haskell.Synthesis.Semantic.Length.CounterexampleBank` introduces
+nominally separate scalar and binary-product replay-input foundations. A scope
+is sealed inside the problem constructor while the exact checked session, the
+contract freshly revalidated through that session, and the normalized target
+coexist. Its identity binds:
+
+- the complete annotation-erased source inventory, checked spine model, and
+  admitted provider-law/trust table;
+- the solver-neutral interpretation/model policy;
+- the exact contract; and
+- the exact normalized target, including positional bound-variable slots and
+  first-occurrence free-variable slots with flexible/rigid distinction.
+
+The target has its own fingerprint because the existing contract fingerprint
+deliberately omits it. Scalar and product scopes use distinct domain and schema
+tags, fingerprints, phantom subjects, and nominal identity roles. A scalar
+scope cannot be coerced into a product scope even when its concrete facts or
+stored inputs happen to agree.
+
+The scope deliberately excludes every candidate graph, interpreted result,
+counterexample condition, candidate-used provider-law subset, SMT query,
+solver/execution identity, preference, receipt, and verdict. Consequently two
+different candidates can share a scope while retaining different candidate,
+problem, and query identities. Changing the canonical complete
+inventory/provider basis, retained interpretation policy, normalized contract,
+or normalized target changes the scope.
+`checkedLengthProblemCounterexampleBankScope` and its `SpinePair` sibling
+project it from a problem; `lengthSMTLibQueryCounterexampleBankScope` and its
+product sibling project the same retained value from a pure query. Query
+translation, canonical bytes, query identity, and runtime behavior do not
+consume the scope. Problem sealing can now report its bounded construction
+through `LengthCounterexampleBankScopeFingerprint` or
+`LengthSpinePairCounterexampleBankScopeFingerprint` in the existing nominal
+fingerprint-limit error families.
+
+An empty bank pairs one scope with caller-selected limits. Scalar and product
+defaults are four retained entries, eight inputs per entry, 256 bits per
+natural, 4,096 aggregate retained modeled bytes, and 256 replay attempts.
+Custom construction checks negative entry, width, and bit limits in that order,
+then rejects `maxBound` width and bit caps whose first excess could not be
+observed. The natural byte and attempt caps need no negative check.
+
+Insertion is productive and fixed-precedence. A zero entry cap rejects before
+demanding the opaque origin or input vector. Otherwise the store observes at
+most one list cell beyond the width cap, validates natural bit widths left to
+right, computes one bounded modeled encoding, and forces every retained vector
+and statistic before success. The encoding charges an origin byte, a
+variable-width arity, and a nonempty magnitude representation with its own
+variable-width byte count for every natural. The same byte cap bounds an
+individual sample and the aggregate retained newest prefix.
+
+Samples are newest first. Bank duplicate detection and promotion use only the
+input vector, not the coarse caller-supplied origin. Reinsertion replaces the
+origin and promotes that vector; a new vector is prepended. Entry or
+aggregate-byte pressure retains one deterministic newest prefix and evicts the
+complete oldest tail at the first excess rather than scanning past it for
+smaller entries. Exact cumulative statistics distinguish retained entry/byte
+counts, successful records (including duplicates), duplicate promotions, tail
+evictions, and explicit replay attempts. Recording an attempt is a separate
+immutable operation with its own cap; inserting a sample does not imply an
+attempt.
+
+`lengthCounterexampleBankMatchesScope` and the product sibling compare only
+the complete scope fingerprint and deliberately inspect no limits, samples,
+origins, or statistics. A match authorizes at most attempting fresh replay. A
+bank sample contains `[Natural]` and one coarse origin—live-model,
+solver-independent, or simplification replay—but no checked arity, verdict,
+evidence, or receipt. Those origins are labels, not attestations. Every use
+must pass the projected inputs through the current exact problem/query replay
+boundary, which may reject the arity, fail under evaluation limits, return a
+miss, or mint a fresh narrow receipt.
+
+The pure SMT-LIB facade now provides two explicit association operations for
+each nominal domain. One freshly reproduces an opaque counterexample through
+the current query before inserting only its inputs; the other replays one
+exact sample currently retained by the bank. Scope and attempt admission guard
+the first path. Scope, full sample membership, and attempt admission guard the
+second. Every begun replay returns the charged successor bank, and every hit
+is fresh evidence minted through the current query. The exact-sample path scans
+the bounded retained set for full membership, but neither path automatically
+replays any other sample or runs a solver.
+
+No bank is wired into live Z3 execution, candidate scheduling,
+persistent/session state, or Leant. The foundation and the additive query
+association remain storage and replay mechanics without proof or pruning
+authority. Their frozen characterizations are recorded in the
+[nominal Length counterexample-bank report](reports/2026-08-16-nominal-length-counterexample-bank-foundation.md)
+and the
+[counterexample-bank query-replay report](reports/2026-08-16-length-counterexample-bank-query-replay-bridge.md).
 
 ### Spine exposure and bounded concrete evaluation
 
@@ -783,10 +880,11 @@ identity or canonical bytes. Its v1 tag belongs to the newly opaque receipt,
 not to an existing semantic or solver envelope. See the
 [bounded Length input-box validation report](reports/2026-08-14-bounded-length-input-box-validation.md).
 
-### Current recursive piecewise-affine applicable-domain validation
+### Current guarded recursive piecewise-affine applicable-domain validation
 
-Djex exposes one applicable-domain algorithm for checked Length problems. The
-scalar problem entrance is `validateLengthProblemApplicableDomain`; its
+Djex exposes one guarded applicable-domain algorithm for checked Length
+problems. The scalar problem entrance is
+`validateLengthProblemApplicableDomain`; its
 nominal binary-product sibling is
 `validateLengthSpinePairProblemApplicableDomain`. The query-owned entrances
 are `validateLengthSMTLibQueryApplicableDomain` and
@@ -842,14 +940,14 @@ Each normalized formula leaf passes through one private ordered progression:
 direct literal -> positive affine -> relational -> strict relational
   -> positive-literal quotient -> root extrema -> root monus
   -> Boolean finite union / atomic branching
-  -> recursive piecewise-affine fallback
+  -> guarded recursive piecewise-affine fallback
 ```
 
 The progression is semantic ordering, not a set of public modes. A leaf
 already classified by an earlier stage is retained literally. Recursive
 interpretation is attempted only when the complete atomic scanner returns its
 single ignored alternative and the relation still contains a minimum,
-maximum, or natural monus somewhere in either operand. Thus an exact
+maximum, natural monus, or `LengthIf` somewhere in either operand. Thus an exact
 predecessor rule, alternative stream, or contradiction is never
 reinterpreted.
 
@@ -869,13 +967,40 @@ case splitter.
 One recursively admitted expression is an ordered finite stream of guarded
 signed-affine values. The recursive grammar contains compact in-range input
 variables, natural literals, normalized sums in left-to-right order, retained
-positive-literal scales, and binary minimum, maximum, and monus nodes. It does
-not descend through quotient, modulo, `LengthIf`, a result reference, an
-out-of-range variable, a retained zero scale, or another unsupported child.
-This exclusion does not remove the earlier private quotient and atomic
-semantics: atomic-first handling may already have accepted such a whole leaf.
-If any required recursive descendant is unsupported, the entire fallback
-atom remains ignored; no descendant is erased or approximated.
+positive-literal scales, binary minimum, maximum, and monus nodes, and guarded
+`LengthIf` nodes. It does not descend through quotient, modulo, a result
+reference, an out-of-range variable, a retained zero scale, or another
+unsupported child. This exclusion does not remove the earlier private quotient
+and atomic semantics: atomic-first handling may already have accepted such a
+whole leaf. If any required recursive descendant is unsupported, the entire
+fallback atom remains ignored; no descendant is erased or approximated.
+
+#### Guarded `LengthIf` expansion
+
+For `LengthIf condition whenTrue whenFalse`, support is all-or-nothing. Before
+constructing the lazy guard DNF, Djex structurally requires every leaf of both
+`condition` and its complement to have exact atomic-first coverage, and it
+requires both selected expressions to belong to the recursive grammar. This
+check includes the syntactically unselected arm of a constant condition. One
+unsupported guard leaf or arm rejects the whole enclosing fallback atom; the
+validator does not erase the arm, assume a truth value, or approximate the
+conditional.
+
+An admitted conditional expands in this exact order:
+
+```text
+positive DNF(condition) x recursive cases(whenTrue)
+negative DNF(condition) x recursive cases(whenFalse)
+```
+
+The true arm precedes the false arm. Within an arm, condition-DNF alternatives
+are outermost and selected-expression alternatives are innermost. Every guard
+coverage fragment precedes the selected arm's descendant guards, which in turn
+precede enclosing minimum/maximum/monus selectors and the final relation
+rules. Negative equality contributes both strict alternatives. A contradictory
+guard remains in surrounding Cartesian products and consumes raw
+generated-branch admission before its coverage fragments collapse the
+expanded branch to a contradiction.
 
 Every binary piecewise node appends two exact selector cases:
 
@@ -889,9 +1014,10 @@ L monus R -> [L <= R;     value 0]
 ```
 
 The first alternative owns equality. Cases use left-child order, then
-right-child order, then first selector followed by second. Descendant guards
-precede the current selector. Once relation operands have expanded in the
-same left-first Cartesian order, the final relation rules are appended:
+right-child order, then first selector followed by second. Conditional guards
+precede selected-arm guards; all descendant guards precede the current
+selector. Once relation operands have expanded in the same left-first
+Cartesian order, the final relation rules are appended:
 `L <= R` for at-most, `R + 1 <= L` for strict at-most, and `L <= R` then
 `R <= L` for equality. Equal-looking guards are not deduplicated, because
 their order is observable at rule and closure caps.
@@ -915,11 +1041,13 @@ least-fixed-point solver.
 
 The complete normalized formula DNF is the outer branch source. Every raw
 conjunction takes the Cartesian product of the complete alternative streams
-of its leaves. The generated-branch cap observes that lazy raw stream before
-complement removal, literal or branch deduplication, absorption, selector
-contradiction, rule collection, closure, or box cleanup. Impossible cases
-therefore still consume admission work, and every bounded witness stops at
-at most `limit + 1`.
+of its leaves. A guarded conditional contributes its positive-condition/true-
+arm alternatives followed by its negative-condition/false-arm alternatives.
+The generated-branch cap observes that lazy raw stream before complement
+removal, literal or branch deduplication, absorption, conditional-guard or
+selector contradiction, rule collection, closure, or box cleanup. Impossible
+cases therefore still consume admission work, and every bounded witness stops
+at `limit + 1` at the latest.
 
 Only after raw admission succeeds does Djex canonicalize the original
 formula-literal sets: duplicates disappear, exact complement branches drop,
@@ -955,7 +1083,7 @@ complete successful traversal creates established evidence.
 The exact operational precedence is:
 
 1. input width;
-2. lazy raw DNF and recursive-alternative counting;
+2. lazy raw DNF, guarded-conditional, and recursive-alternative counting;
 3. generated-branch cap;
 4. original formula-literal-set canonicalization;
 5. canonical-set re-expansion;
@@ -987,6 +1115,31 @@ The defaults are:
 
 `LengthEvaluationLimits` separately owns assigned and intermediate values
 during maximum admission and original-problem replay.
+
+For example,
+
+```text
+(if x <= 2 then x else 5) <= 3
+```
+
+has two raw alternatives. The false alternative is contradictory only after
+raw admission; the retained box is `[[2]]`, with three visits, three unique
+assignments, and three applicable assignments. Replacing the guard with
+`x = 0`, the true arm with `1`, and the false arm with `x` produces three raw
+alternatives because the complemented equality has two strict cases.
+
+The guarded two-input fixture
+
+```text
+y <= 2
+(if x <= 1 then max(x,y) else x monus y) <= 2
+```
+
+has four raw alternatives and retains exactly `[[4,2]]`: one box, 15 visits,
+15 unique assignments, and 12 applicable assignments. The result is not
+widened to another hull, and exhaustive replay of the original condition—not
+the generated guard rules—decides which of those 15 assignments are
+applicable.
 
 For example, the scalar precondition
 
@@ -1035,8 +1188,16 @@ six public projections:
 Constructors are private. Each receipt internally retains an algorithm schema
 tag, boxes, visits, unique count, applicable count, and exact
 finite-spine/provider-law basis; box count is derived from the boxes. The
-schema-tag values and byte projections are deliberately private and are not a
-caller persistence or compatibility contract.
+current private scalar and product schema bytes are, respectively:
+
+```text
+finite-list-spine-length/guarded-recursive-piecewise-affine-finite-union-precondition-domain-establishment/v1
+finite-binary-product-spine-lengths/guarded-recursive-piecewise-affine-finite-union-precondition-domain-establishment/v1
+```
+
+They replaced the previous private algorithm discriminators when guarded
+conditionals became part of current coverage. No projection exposes them, and
+they are not a caller persistence, migration, or compatibility contract.
 
 Recursive cases, guards, rules, limits, boxes, and replay sets enter neither
 the checked problem nor query fingerprint. A query wrapper emits no command,
@@ -1053,7 +1214,9 @@ checked model; or authorize candidate pruning.
 
 See the dated
 [current applicable-domain surface reset report](reports/2026-08-15-current-length-applicable-domain-surface.md)
-for the public reset and the historical
+for the public reset, the current
+[guarded conditional applicable-domain report](reports/2026-08-15-guarded-conditional-length-applicable-domain.md)
+for this extension, and the historical
 [recursive piecewise-affine report](reports/2026-08-15-recursive-piecewise-affine-length-applicable-domain.md)
 for the algorithm checkpoint that preceded it.
 
@@ -1564,6 +1727,41 @@ spawn has a same-UID namespace race, and neither the loader nor shared
 libraries are measured. Descendant cleanup is best effort after the direct
 child exits.
 
+#### Resource acquisition and descriptor-child handoff
+
+Every resource-producing action in the shared Process owner remains masked
+from acquisition through publication to its deadline controller. The worker
+publishes one terminal `Either` through one completion cell as its final
+effect. Ordinary work may still run restored, while the dedicated resource
+path lets an acquisition restore only interruptible regions whose cleanup it
+already owns. An asynchronous exception therefore cannot land after a handle
+or child has been returned but before that value becomes visible to the
+controller.
+
+Cancellation, deadline expiry, or an exception in the waiting controller
+kills the worker, joins by reading that same terminal completion, and rolls
+back any successfully acquired value before returning or rethrowing. A failed
+final control check likewise rolls back the published value. There is no
+second completion signal that can lag behind an already visible resource.
+
+All three native descriptor launch strategies—the sealed descriptor launch,
+its effective-ID sibling, and the execve-check sibling—then share one
+`DescriptorCreated` handoff. Acquisition and result publication occur masked.
+One deliberately restored post-acquisition checkpoint remains protected by
+the raw child's rollback action; the consumer is entered masked and receives a
+restorer which it uses for initialization only after installing the next
+cleanup owner.
+Allocation failure cleans the raw child and its three standard-stream handles.
+After opaque `Z3SMTLibProcess` allocation succeeds, that process is the sole
+owner and an initialization exception closes it. No asynchronous boundary can
+leave the resource ownerless or make both cleanup paths own it.
+
+This is package-private lifecycle hardening. It changes no launch selector,
+execution policy, process observation, ready-worker/query-run identity,
+protocol, behavioral receipt, or public API. The exact mask, rollback, and
+test characterization is recorded in the
+[descriptor spawn resource-ownership report](reports/2026-08-15-descriptor-spawn-resource-ownership.md).
+
 The three descriptor-bound launches described next are one pipeline in that
 module, `openDescriptorBoundProcessWith`, instantiated by a
 `DescriptorBoundLaunchPolicy` value per launch. The spine — open the source
@@ -1627,9 +1825,11 @@ descriptor launch uses additive identities and is never selected implicitly.
 Non-Linux builds admit the pure policy but fail closed when a live opener would
 need the unavailable native mechanism.
 
-The mechanism, rollback boundary, compatibility identities, and adversarial
-replacement characterization are recorded in the
-[descriptor-bound Z3 main-image launch report](reports/2026-08-15-descriptor-bound-z3-main-image-launch.md).
+The mechanism, image-staging boundary, identities, and adversarial replacement
+characterization are recorded in the
+[descriptor-bound Z3 main-image launch report](reports/2026-08-15-descriptor-bound-z3-main-image-launch.md);
+the common current ownership handoff is recorded separately in the
+[descriptor spawn resource-ownership report](reports/2026-08-15-descriptor-spawn-resource-ownership.md).
 
 #### Effective-ID executable-access descriptor launch
 
@@ -1639,7 +1839,7 @@ pass an effective-credential VFS execute-access check. The closed public
 classifier is
 `LengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunch`; the existing
 `lengthSMTLibExecutionExecutableLaunchStrategy` projection distinguishes all
-three strategies without revealing a path, digest, descriptor, access result,
+four strategies without revealing a path, digest, descriptor, access result,
 or process observation:
 
 ```haskell
@@ -1692,12 +1892,13 @@ batch therefore still performs no source, access-check, staging, or process
 IO.
 
 The third policy has domain-separated execution, process, ready-worker, and
-fresh/shared/scoped scalar and binary-product run identities. Both established
-strategies retain their literal identities. No query, protocol, contract,
+fresh/shared/scoped scalar and binary-product run identities. Its two
+predecessors retain their literal identities. No query, protocol, contract,
 behavioral receipt, or evidence schema changes. Linux 6.14's distinct
-`AT_EXECVE_CHECK` facility is intentionally not selected opportunistically;
-adopting that stronger and differently scoped operation would require a new
-versioned strategy and identity.
+`AT_EXECVE_CHECK` facility is never selected opportunistically; callers obtain
+that stronger and differently scoped operation only through the fourth
+explicit selector described under
+[`Internal.SMTLib.Z3.Execution` and `Semantic.Length.SMTLib.Execution`](#execve-check-executable-access-launch).
 
 The precise lifecycle, failure mapping, kernel-source references, authority
 limits, and characterization matrix are recorded in the
@@ -2019,6 +2220,51 @@ are unchanged, although their existing composition transitively binds the new
 session, concrete-encoding, and candidate identities. See the
 [ground constraint-discharge report](reports/2026-08-13-length-ground-constraint-discharge.md).
 
+### `Semantic.Length.CounterexampleBank`
+
+`Language.Haskell.Synthesis.Semantic.Length.CounterexampleBank` is the curated
+public surface for candidate-independent scalar and binary-product bank scopes
+and bounded replay-input stores. `Language.Haskell.Djex` re-exports it. Scope,
+bank, sample, origin, limits, statistics, error, schema-subject, and
+target-subject families remain nominally separate across the two domains; the
+package-private module shares only their strict bounded kernel and construction
+edge.
+
+The scalar scope schema is
+`djex-length-counterexample-bank-scope/v1`; the product schema is
+`djex-length-spine-pair-counterexample-bank-scope/v1`. Each scope composes the
+complete domain-appropriate inventory/provider-law fingerprint, the exact
+solver-neutral session-policy fingerprint, the exact contract fingerprint,
+and a new target fingerprint. Target normalization alpha-normalizes lexical
+binders by positional slots and free variables by first occurrence while
+preserving flexible versus rigid class. The final scope records explicit
+candidate, query/execution, preference, receipt, and verdict exclusions in its
+canonical identity.
+
+Problem sealing constructs and retains the scope only after contract
+revalidation and complete problem fingerprinting; construction failure maps to
+the new nominal counterexample-bank scope fingerprint part. A sealed SMT-LIB
+query retains that same problem and exposes a read-only scope projector. The
+scope is not part of the complete-problem or query fingerprint and does not
+alter canonical query bytes. Its constituent facts are already exact checked
+authorities; the separate composition exists to permit sharing across
+candidates without confusing their distinct problem/query keys.
+
+The public banks are immutable and opaque. Limit builders, default limits,
+empty construction, bounded insertion, explicit attempt recording, sample and
+statistics projections, and the two scope-match functions are the only
+mutation-shaped operations. `lengthCounterexampleBankMatchesScope` and its
+product sibling compare the complete scope fingerprint alone; they do not
+record an attempt or validate a stored vector. The SMT-LIB operations which
+associate the store with fresh query replay remain outside this module. See
+[Candidate-independent counterexample-bank scopes and bounded stores](#candidate-independent-counterexample-bank-scopes-and-bounded-stores)
+for the exact inclusion, retention, eviction, statistics, and authority rules,
+the
+[nominal bank report](reports/2026-08-16-nominal-length-counterexample-bank-foundation.md)
+for the storage characterization, and the
+[query-replay bridge report](reports/2026-08-16-length-counterexample-bank-query-replay-bridge.md)
+for the association boundary.
+
 ### `Semantic.Length.SMTLib`
 
 #### The canonical query and raw-input replay
@@ -2039,6 +2285,43 @@ observation, and gives `unsat` no authority. The additive entrance changes no
 SMT translation, checked-problem, query, execution, response, or protocol
 identity/schema version. See the
 [query-owned raw-input replay report](reports/2026-08-14-query-owned-length-input-replay.md).
+
+#### Counterexample-bank query replay
+
+The nominal scalar operation
+`recordLengthSMTLibQueryCounterexampleInBank` and product operation
+`recordLengthSpinePairSMTLibQueryCounterexampleInBank` accept an opaque
+validated counterexample, a coarse origin, and a bank. They first require the
+bank to match the current query's candidate-independent scope, then admit one
+bank replay attempt. Only after that admission do they project the old
+receipt's inputs and run ordinary exact query-owned replay. An ordinary miss
+does not enter the store. A fresh hit delegates insertion to the bounded bank
+kernel, which alone owns validation, input-only duplicate promotion, MRU
+ordering, tail eviction, and storage statistics.
+
+The returned pair always carries the authoritative bank state. Scope mismatch
+or attempt-cap refusal occurs before replay and returns the original bank.
+Once replay has begun, evaluation or association rejection, a miss, and
+insertion rejection all retain the attempt-charged successor. Success returns
+that recorded successor together with the newly minted current-query receipt;
+the bank itself stores only inputs and the caller's non-attesting origin.
+
+`replayLengthSMTLibCounterexampleBankSample` and its nominal product sibling
+operate on one exact opaque retained sample. Their precedence is scope match,
+full sample membership, attempt admission, then current-query replay. The first
+three refusals leave the bank unchanged; any replay result returns the charged
+successor. A hit is a fresh current-query receipt and a miss is ordinary
+`Nothing`. This operation performs the bounded exact-membership scan, but no
+whole-bank replay traversal, promotion, reinsertion, origin rewrite, or
+storage-statistic mutation beyond the replay-attempt count.
+
+Both bridges are pure and solver-independent. They do not issue SMT-LIB,
+consume a model or status, operate a live worker, choose a candidate or sample,
+schedule another synthesis lane, own bank lifetime, persist state, or change
+Leant. They add no receipt reuse, proof, verdict, or pruning authority and
+change no problem, query, execution, response, protocol, or solver identity.
+See the
+[counterexample-bank query-replay report](reports/2026-08-16-length-counterexample-bank-query-replay-bridge.md).
 
 #### The all-zero origin probe
 
@@ -2092,7 +2375,7 @@ execution, process, worker, or live-observation version or canonical bytes
 change. The new v1 tag belongs only to the opaque bounded receipt. See the
 [bounded input-box validation report](reports/2026-08-14-bounded-length-input-box-validation.md).
 
-#### Current recursive piecewise-affine coverage policy
+#### Current guarded recursive piecewise-affine coverage policy
 
 `Semantic.Length.Evaluate` exposes only the complete current applicable-domain
 analysis. The direct scalar and product functions are
@@ -2115,23 +2398,29 @@ behavioral problem; association is the final possible failure.
 Internally, formula leaves retain the ordered semantic progression from
 direct and positive-affine consequences through relational, strict,
 positive-literal quotient, root extrema, root monus, Boolean finite-union,
-atomic branching, and recursive piecewise-affine fallback. Those stages are
-private implementation structure, not independently selectable contracts.
-The recursive stage runs atomic-first and opens an extrema/monus relation only
-after the atomic scanner returns its singleton ignored result.
+atomic branching, and guarded recursive piecewise-affine fallback. Those
+stages are private implementation structure, not independently selectable
+contracts. The recursive stage runs atomic-first and opens an
+extrema/monus/conditional relation only after the atomic scanner returns its
+singleton ignored result.
 
-Minimum, maximum, and monus recursively use exact two-way cases with the
-first child owning ties. Child cases are left-first, descendant guards precede
-the current selector, and relation rules follow selectors. Signed affine
-cases transfer negative terms across the inequality before entering the
-unchanged natural-coefficient, synchronous, rule-once closure. Quotient,
-modulo, conditionals, result references, out-of-range variables, zero scales,
-and unsupported descendants are not admitted by the recursive grammar,
-although an earlier private atomic stage may already have handled the whole
-leaf exactly.
+Minimum, maximum, and monus recursively use exact two-way cases with the first
+child owning ties. `LengthIf` uses exact positive-condition/true-arm cases
+before negative-condition/false-arm cases. Both guard polarities and both arms
+must be completely supported, even when one arm is syntactically unreachable;
+otherwise the whole fallback atom remains ignored. Within an admitted
+conditional, guard DNF precedes selected-arm alternatives, condition rules
+precede arm guards, and descendant guards precede enclosing selectors and the
+final relation. Signed affine cases transfer negative terms across the
+inequality before entering the unchanged natural-coefficient, synchronous,
+rule-once closure. Quotient, modulo, result references, out-of-range variables,
+zero scales, and unsupported descendants are not admitted by the recursive
+grammar, although an earlier private atomic stage may already have handled the
+whole leaf exactly.
 
-Raw DNF by atomic-alternative counting precedes every Boolean and guard
-cleanup. Original literal sets are then canonicalized and re-expanded before
+Raw DNF by atomic, conditional-guard, selected-arm, and selector-alternative
+counting precedes every Boolean and guard cleanup, including contradiction.
+Original literal sets are then canonicalized and re-expanded before
 per-branch rule and closure work. All live branches must be bounded. Their
 boxes are reduced to a lexicographically ordered componentwise-maximal
 antichain without a hull. Box visits count overlap; a bounded union
@@ -2149,15 +2438,17 @@ Each current receipt exposes inclusive maximum boxes, derived box count, raw
 assignment visits, unique assignments, applicable assignments, and the exact
 finite-spine/provider-law basis through the six short scalar or `SpinePair`
 projections. Constructors and embedded receipt-schema bytes remain private.
+The private scalar and product bytes were reset to the current guarded-
+recursive algorithm and are neither persistence nor compatibility contracts.
 The earlier public ladder and tag projections were deleted without migration:
 Djex is experimental and promises neither stability nor backward
 compatibility.
 
 For the full selector grammar, closure order, cap precedence, fixtures, and
 authority limits, see
-[Current recursive piecewise-affine applicable-domain validation](#current-recursive-piecewise-affine-applicable-domain-validation)
+[Current guarded recursive piecewise-affine applicable-domain validation](#current-guarded-recursive-piecewise-affine-applicable-domain-validation)
 and the dated
-[current applicable-domain surface reset report](reports/2026-08-15-current-length-applicable-domain-surface.md).
+[guarded conditional applicable-domain report](reports/2026-08-15-guarded-conditional-length-applicable-domain.md).
 
 #### Finite binary product spine domains
 
@@ -2458,9 +2749,17 @@ cannot execute the already-hashed descriptor, and the digest excludes the
 dynamic loader and shared libraries. Stdout remains FIFO ordered; the first
 stderr byte poisons the worker while the reader continues discarding a finite
 flood so teardown cannot deadlock. Absolute monotonic deadlines and explicit
-cancellation gate each operation. Cleanup closes stdin, polls the direct child
-without blocking a non-threaded runtime, then applies bounded TERM/KILL stages
-and bounded reader/handle cleanup. Descendant cleanup remains best effort.
+cancellation gate each operation. Resource-producing acquisitions stay masked
+through publication to a single terminal completion cell; cancellation or
+deadline loss joins that completion and rolls back any returned value. The
+three native descriptor strategies share one masked raw-child handoff: raw
+cleanup owns the restored checkpoint, process allocation accepts ownership
+while masked, and only then may restored initialization run under process
+cleanup. Cleanup closes stdin, polls the direct child without blocking a
+non-threaded runtime, then applies bounded TERM/KILL stages and bounded reader/
+handle cleanup. Descendant cleanup remains best effort. See the
+[descriptor spawn resource-ownership report](reports/2026-08-15-descriptor-spawn-resource-ownership.md)
+for the exact ownership transition and interruption characterization.
 
 #### The capability probe and ready-worker identity
 

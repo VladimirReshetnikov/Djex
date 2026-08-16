@@ -30,8 +30,14 @@ import Control.Concurrent.MVar
   )
 import Control.Exception
   ( Exception
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+  , MaskingState (MaskedInterruptible)
+#endif
   , bracket
   , finally
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+  , getMaskingState
+#endif
   , onException
   , throwIO
   , try
@@ -80,7 +86,14 @@ import System.Directory
   )
 import System.FilePath ((</>), takeFileName)
 import qualified System.Info as SystemInfo
-import System.IO (hClose, openTempFile)
+import System.IO
+  ( hClose
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+  , Handle
+  , hIsClosed
+#endif
+  , openTempFile
+  )
 import System.IO.Error (tryIOError)
 import System.Timeout (timeout)
 
@@ -117,6 +130,10 @@ import qualified Language.Haskell.Synthesis.Internal.SMTLib.Stream
   as SMTLibStream
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
   as Z3Execution
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+import qualified Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process
+  as Z3Process
+#endif
 import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Execution
   as PublicExecution
 import qualified Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live
@@ -187,6 +204,10 @@ descriptorBoundProcessTests = testGroup
 #ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
   [ testCase "publish exact legacy and sealed-image strengths"
       assertDescriptorBoundStrengths
+  , testCase "close the exec-status handle on every read exit"
+      assertDescriptorSpawnExecStatusHandleOwnership
+  , testCase "rollback a completed spawn interrupted at its masked handoff"
+      assertDescriptorSpawnAcquiredHandoffOwnership
   , testCase
       "execute the sealed bytes after replacing the path and source inode"
       assertDescriptorBoundSealedImage
@@ -356,6 +377,106 @@ assertDescriptorBoundStrengths = do
     "djex-length-z3-raw-process/v2"
   Process.lengthSMTLibDescriptorBoundProcessSchemaTag @?=
     "djex-length-z3-descriptor-bound-sealed-main-image-process/v1"
+
+assertDescriptorSpawnExecStatusHandleOwnership :: IO ()
+assertDescriptorSpawnExecStatusHandleOwnership = do
+  withTemporaryStatusHandle $ \statusHandle -> do
+    bytes <- Z3Process.readZ3SMTLibDescriptorSpawnExecStatusWith
+      (\_ -> pure BS.empty) statusHandle
+    bytes @?= BS.empty
+    hIsClosed statusHandle >>= (@?= True)
+
+  withTemporaryStatusHandle $ \statusHandle -> do
+    attempted <- tryIOError $
+      Z3Process.readZ3SMTLibDescriptorSpawnExecStatusWith
+        (\_ -> ioError $ userError "synthetic exec-status read failure")
+        statusHandle
+    case attempted of
+      Left _ -> pure ()
+      Right () -> assertFailure "exec-status read failure was not propagated"
+    hIsClosed statusHandle >>= (@?= True)
+
+  withTemporaryStatusHandle $ \statusHandle -> do
+    entered <- newEmptyMVar
+    release <- newEmptyMVar
+    outcome <- newEmptyMVar
+    worker <- forkIO $ do
+      attempted <- try
+        (Z3Process.readZ3SMTLibDescriptorSpawnExecStatusWith
+          (\_ -> putMVar entered () >> takeMVar release)
+          statusHandle)
+        :: IO (Either LiveAsynchronousCallbackException ByteString)
+      putMVar outcome attempted
+    _ <- expectWithin "exec-status read entrance" 3000000 $ takeMVar entered
+    throwTo worker LiveAsynchronousCallbackException
+    attempted <- expectWithin "interrupted exec-status read" 3000000
+      $ takeMVar outcome
+    case attempted of
+      Left failure -> failure @?= LiveAsynchronousCallbackException
+      Right _ -> assertFailure "interrupted exec-status read returned"
+    hIsClosed statusHandle >>= (@?= True)
+
+assertDescriptorSpawnAcquiredHandoffOwnership :: IO ()
+assertDescriptorSpawnAcquiredHandoffOwnership = do
+  temporaryRoot <- getTemporaryDirectory
+  cancellation <- Z3Process.newZ3SMTLibProcessCancellation
+  deadline <- expectRight =<<
+    Z3Process.z3SMTLibProcessDeadlineAfterMilliseconds 3000
+  observedMask <- newEmptyMVar
+  acquiredPair <- newEmptyMVar
+  entered <- newEmptyMVar
+  release <- newEmptyMVar
+  outcome <- newEmptyMVar
+  consumerEntered <- newIORef False
+  let cleanup (path, handle) = do
+        ignoreIOError $ hClose handle
+        ignoreIOError $ removeFile path
+      acquire = do
+        state <- getMaskingState
+        putMVar observedMask state
+        pair <- openTempFile temporaryRoot "djex-z3-acquired"
+        putMVar acquiredPair pair
+        pure pair
+  worker <- forkIO $ do
+    attempted <- try
+      (Z3Process.handoffZ3SMTLibProcessAcquiredWith
+        (Z3Process.runBeforeZ3SMTLibProcessDeadlineMaskedAction
+          cancellation deadline acquire cleanup)
+        cleanup
+        (putMVar entered () >> takeMVar release)
+        (\_ _ -> writeIORef consumerEntered True >> pure (Right ())))
+      :: IO
+          (Either
+            LiveAsynchronousCallbackException
+            (Either Z3Process.Z3SMTLibProcessError ()))
+    putMVar outcome attempted
+  pair@(path, acquiredHandle) <-
+    expectWithin "descriptor worker acquisition" 3000000 $ takeMVar acquiredPair
+  flip finally (cleanup pair) $ do
+    maskingState <- expectWithin "descriptor worker masking state" 3000000
+      $ takeMVar observedMask
+    maskingState @?= MaskedInterruptible
+    _ <- expectWithin "descriptor acquired-handoff entrance" 3000000
+      $ takeMVar entered
+    throwTo worker LiveAsynchronousCallbackException
+    attempted <- expectWithin "interrupted descriptor acquired handoff" 3000000
+      $ takeMVar outcome
+    case attempted of
+      Left failure -> failure @?= LiveAsynchronousCallbackException
+      Right _ -> assertFailure "interrupted acquired handoff returned"
+    hIsClosed acquiredHandle >>= (@?= True)
+    doesPathExist path >>= (@?= False)
+    readIORef consumerEntered >>= (@?= False)
+
+withTemporaryStatusHandle :: (Handle -> IO result) -> IO result
+withTemporaryStatusHandle use = do
+  temporaryRoot <- getTemporaryDirectory
+  bracket
+    (openTempFile temporaryRoot "djex-z3-exec-status")
+    (\(path, handle) -> do
+      ignoreIOError $ hClose handle
+      ignoreIOError $ removeFile path)
+    (use . snd)
 
 assertEffectiveIDDescriptorBoundStrengths :: IO ()
 assertEffectiveIDDescriptorBoundStrengths = do

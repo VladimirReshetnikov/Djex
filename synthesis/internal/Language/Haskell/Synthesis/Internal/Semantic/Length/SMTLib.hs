@@ -36,11 +36,16 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   , lengthSMTLibQueryInputValueRequestBytes
   , lengthSMTLibQueryFingerprint
   , lengthSMTLibQueryBehavioralProblem
+  , lengthSMTLibQueryCounterexampleBankScope
   , LengthSMTLibIntegerBinding (..)
   , LengthSMTLibModelError (..)
   , validateLengthSMTLibCounterexample
   , LengthSMTLibInputReplayError (..)
   , replayLengthSMTLibCounterexampleInputs
+  , LengthSMTLibCounterexampleBankRecordError (..)
+  , recordLengthSMTLibQueryCounterexampleInBank
+  , LengthSMTLibCounterexampleBankSampleReplayError (..)
+  , replayLengthSMTLibCounterexampleBankSample
   , probeLengthSMTLibCounterexampleAtOrigin
   , LengthSMTLibCounterexampleSimplificationError (..)
   , simplifyLengthSMTLibQueryCounterexample
@@ -59,10 +64,15 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   , lengthSpinePairSMTLibQueryInputValueRequestBytes
   , lengthSpinePairSMTLibQueryFingerprint
   , lengthSpinePairSMTLibQueryBehavioralProblem
+  , lengthSpinePairSMTLibQueryCounterexampleBankScope
   , LengthSpinePairSMTLibModelError (..)
   , validateLengthSpinePairSMTLibCounterexample
   , LengthSpinePairSMTLibInputReplayError (..)
   , replayLengthSpinePairSMTLibCounterexampleInputs
+  , LengthSpinePairSMTLibCounterexampleBankRecordError (..)
+  , recordLengthSpinePairSMTLibQueryCounterexampleInBank
+  , LengthSpinePairSMTLibCounterexampleBankSampleReplayError (..)
+  , replayLengthSpinePairSMTLibCounterexampleBankSample
   , probeLengthSpinePairSMTLibCounterexampleAtOrigin
   , LengthSpinePairSMTLibCounterexampleSimplificationError (..)
   , simplifyLengthSpinePairSMTLibQueryCounterexample
@@ -129,6 +139,8 @@ import Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , ValidatedLengthSpinePairCounterexample
   , ValidatedLengthSpinePairCounterexampleSimplification
   , ValidatedLengthSpinePairInputBox
+  , validatedLengthCounterexampleInputs
+  , validatedLengthSpinePairCounterexampleInputs
   , validateLengthProblemApplicableDomain
   , validateLengthProblemInputBox
   , validateLengthProblemCounterexample
@@ -142,11 +154,35 @@ import Language.Haskell.Synthesis.Semantic.Length.Problem
   ( CheckedLengthProblem
   , CheckedLengthSpinePairProblem
   , checkedLengthProblemBehavioralProblem
+  , checkedLengthProblemCounterexampleBankScope
   , checkedLengthProblemCounterexampleCondition
   , checkedLengthProblemInputCount
   , checkedLengthSpinePairProblemBehavioralProblem
+  , checkedLengthSpinePairProblemCounterexampleBankScope
   , checkedLengthSpinePairProblemCounterexampleCondition
   , checkedLengthSpinePairProblemInputCount
+  )
+import Language.Haskell.Synthesis.Semantic.Length.CounterexampleBank
+  ( LengthCounterexampleBank
+  , LengthCounterexampleBankError
+  , LengthCounterexampleBankOrigin
+  , LengthCounterexampleBankSample
+  , LengthCounterexampleBankScope
+  , LengthSpinePairCounterexampleBank
+  , LengthSpinePairCounterexampleBankError
+  , LengthSpinePairCounterexampleBankOrigin
+  , LengthSpinePairCounterexampleBankSample
+  , LengthSpinePairCounterexampleBankScope
+  , insertLengthCounterexampleBankSample
+  , insertLengthSpinePairCounterexampleBankSample
+  , lengthCounterexampleBankMatchesScope
+  , lengthCounterexampleBankSampleInputs
+  , lengthCounterexampleBankSamples
+  , lengthSpinePairCounterexampleBankMatchesScope
+  , lengthSpinePairCounterexampleBankSampleInputs
+  , lengthSpinePairCounterexampleBankSamples
+  , recordLengthCounterexampleBankReplayAttempt
+  , recordLengthSpinePairCounterexampleBankReplayAttempt
   )
 import Language.Haskell.Synthesis.Semantic.Problem
   ( BehavioralEvidence
@@ -476,6 +512,16 @@ lengthSMTLibQueryBehavioralProblem
 lengthSMTLibQueryBehavioralProblem (LengthSMTLibQuery problem _ _) =
   checkedLengthProblemBehavioralProblem problem
 
+-- | Project the candidate-independent replay-input scope retained by this
+-- query's exact checked problem.  Query translation and execution identity do
+-- not enter the scope.
+lengthSMTLibQueryCounterexampleBankScope
+  :: LengthSMTLibQuery identity local
+  -> LengthCounterexampleBankScope identity
+lengthSMTLibQueryCounterexampleBankScope
+    (LengthSMTLibQuery problem _ _) =
+  checkedLengthProblemCounterexampleBankScope problem
+
 -- | Translate and seal the solver-neutral bad state retained by one exact
 -- checked binary-product problem.  Its substituted formula already contains
 -- only compact input variables, so the canonical program requests inputs and
@@ -565,6 +611,13 @@ lengthSpinePairSMTLibQueryBehavioralProblem
 lengthSpinePairSMTLibQueryBehavioralProblem
     (LengthSpinePairSMTLibQuery problem _ _) =
   checkedLengthSpinePairProblemBehavioralProblem problem
+
+lengthSpinePairSMTLibQueryCounterexampleBankScope
+  :: LengthSpinePairSMTLibQuery identity local
+  -> LengthSpinePairCounterexampleBankScope identity
+lengthSpinePairSMTLibQueryCounterexampleBankScope
+    (LengthSpinePairSMTLibQuery problem _ _) =
+  checkedLengthSpinePairProblemCounterexampleBankScope problem
 
 -- | One parser-decoded integer associated with its exact returned symbol.
 -- Construction is intentionally public: this value is untrusted input and
@@ -660,6 +713,132 @@ replayLengthSMTLibCounterexampleInputs evaluationLimits query inputs = do
     (Left . LengthSMTLibInputReplayAssociationRejected)
     Right
     . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
+
+-- | Why one already validated scalar counterexample could not be freshly
+-- reproduced and recorded through the exact query/bank association boundary.
+-- Scope mismatch is deliberately sanitized; neither an old receipt nor a
+-- caller-supplied origin carries verdict or association authority.
+data LengthSMTLibCounterexampleBankRecordError
+  = LengthSMTLibCounterexampleBankRecordScopeMismatch
+  | LengthSMTLibCounterexampleBankRecordAttemptRejected
+      !LengthCounterexampleBankError
+  | LengthSMTLibCounterexampleBankRecordInputReplayRejected
+      !LengthSMTLibInputReplayError
+  | LengthSMTLibCounterexampleBankRecordCounterexampleNotReproduced
+  | LengthSMTLibCounterexampleBankRecordInsertionRejected
+      !LengthCounterexampleBankError
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSMTLibCounterexampleBankRecordError
+
+-- | Revalidate one opaque counterexample receipt through the exact checked
+-- problem owned by the current query before recording only its freshly
+-- reproduced inputs in a same-scope bank.
+--
+-- A scope or attempt-admission failure returns the original bank.  Once an
+-- attempt is admitted, every result returns the charged successor: replay
+-- rejection, an ordinary non-counterexample, and insertion rejection never
+-- roll back real replay work.  Callers must therefore thread the returned
+-- bank even on failure.  Successful recording returns the fresh
+-- candidate-specific receipt, while the bank still retains no receipt,
+-- verdict, solver operation, or solver-status authority.  The origin remains
+-- only the caller's coarse label.
+recordLengthSMTLibQueryCounterexampleInBank
+  :: LengthEvaluationLimits
+  -> LengthSMTLibQuery identity local
+  -> LengthCounterexampleBankOrigin
+  -> ValidatedLengthCounterexample
+  -> LengthCounterexampleBank identity
+  -> ( LengthCounterexampleBank identity
+     , Either LengthSMTLibCounterexampleBankRecordError
+         ValidatedLengthCounterexample
+     )
+recordLengthSMTLibQueryCounterexampleInBank evaluationLimits query origin
+    counterexample bank
+  | not $ lengthCounterexampleBankMatchesScope
+      (lengthSMTLibQueryCounterexampleBankScope query) bank =
+      (bank, Left LengthSMTLibCounterexampleBankRecordScopeMismatch)
+  | otherwise = case recordLengthCounterexampleBankReplayAttempt bank of
+      Left failure ->
+        ( bank
+        , Left $ LengthSMTLibCounterexampleBankRecordAttemptRejected failure
+        )
+      Right charged -> case replayLengthSMTLibCounterexampleInputs
+          evaluationLimits query
+          (validatedLengthCounterexampleInputs counterexample) of
+        Left failure ->
+          ( charged
+          , Left $ LengthSMTLibCounterexampleBankRecordInputReplayRejected
+              failure
+          )
+        Right Nothing ->
+          ( charged
+          , Left
+              LengthSMTLibCounterexampleBankRecordCounterexampleNotReproduced
+          )
+        Right (Just fresh) -> case insertLengthCounterexampleBankSample
+            origin (validatedLengthCounterexampleInputs fresh) charged of
+          Left failure ->
+            ( charged
+            , Left $ LengthSMTLibCounterexampleBankRecordInsertionRejected
+                failure
+            )
+          Right recorded -> (recorded, Right fresh)
+
+-- | Why one detached opaque scalar sample could not be replayed through the
+-- exact current bank and query association chain.
+data LengthSMTLibCounterexampleBankSampleReplayError
+  = LengthSMTLibCounterexampleBankSampleReplayScopeMismatch
+  | LengthSMTLibCounterexampleBankSampleReplaySampleNotRetained
+  | LengthSMTLibCounterexampleBankSampleReplayAttemptRejected
+      !LengthCounterexampleBankError
+  | LengthSMTLibCounterexampleBankSampleReplayInputRejected
+      !LengthSMTLibInputReplayError
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSMTLibCounterexampleBankSampleReplayError
+
+-- | Replay one exact sample currently retained by a same-scope bank against
+-- the checked problem owned by this query.
+--
+-- Full opaque-sample membership is checked before an attempt is charged, so
+-- a detached sample cannot borrow another bank's scope or budget.  Scope,
+-- membership, and attempt failures return the unchanged bank.  After
+-- admission, replay rejection, an ordinary miss, or a hit returns the charged
+-- successor and callers must thread it.  A hit is fresh candidate-specific
+-- evidence from the current query; the stored sample itself remains an input
+-- vector without verdict authority.  This primitive performs no traversal,
+-- promotion, reinsertion, origin rewrite, solver operation, or status use.
+replayLengthSMTLibCounterexampleBankSample
+  :: LengthEvaluationLimits
+  -> LengthSMTLibQuery identity local
+  -> LengthCounterexampleBankSample
+  -> LengthCounterexampleBank identity
+  -> ( LengthCounterexampleBank identity
+     , Either LengthSMTLibCounterexampleBankSampleReplayError
+         (Maybe ValidatedLengthCounterexample)
+     )
+replayLengthSMTLibCounterexampleBankSample evaluationLimits query sample bank
+  | not $ lengthCounterexampleBankMatchesScope
+      (lengthSMTLibQueryCounterexampleBankScope query) bank =
+      (bank, Left LengthSMTLibCounterexampleBankSampleReplayScopeMismatch)
+  | sample `notElem` lengthCounterexampleBankSamples bank =
+      (bank, Left LengthSMTLibCounterexampleBankSampleReplaySampleNotRetained)
+  | otherwise = case recordLengthCounterexampleBankReplayAttempt bank of
+      Left failure ->
+        ( bank
+        , Left $ LengthSMTLibCounterexampleBankSampleReplayAttemptRejected
+            failure
+        )
+      Right charged -> case replayLengthSMTLibCounterexampleInputs
+          evaluationLimits query
+          (lengthCounterexampleBankSampleInputs sample) of
+        Left failure ->
+          ( charged
+          , Left $ LengthSMTLibCounterexampleBankSampleReplayInputRejected
+              failure
+          )
+        Right result -> (charged, Right result)
 
 -- | Probe the canonical all-zero assignment for the compact modeled inputs
 -- privately retained by this exact query.  The caller supplies neither arity,
@@ -901,6 +1080,136 @@ replayLengthSpinePairSMTLibCounterexampleInputs evaluationLimits query
     Right
     . replayBehavioralEvidence
         (lengthSpinePairSMTLibQueryBehavioralProblem query)
+
+-- | Nominal binary-product counterpart of
+-- 'LengthSMTLibCounterexampleBankRecordError'.
+data LengthSpinePairSMTLibCounterexampleBankRecordError
+  = LengthSpinePairSMTLibCounterexampleBankRecordScopeMismatch
+  | LengthSpinePairSMTLibCounterexampleBankRecordAttemptRejected
+      !LengthSpinePairCounterexampleBankError
+  | LengthSpinePairSMTLibCounterexampleBankRecordInputReplayRejected
+      !LengthSpinePairSMTLibInputReplayError
+  | LengthSpinePairSMTLibCounterexampleBankRecordCounterexampleNotReproduced
+  | LengthSpinePairSMTLibCounterexampleBankRecordInsertionRejected
+      !LengthSpinePairCounterexampleBankError
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSpinePairSMTLibCounterexampleBankRecordError
+
+-- | Freshly reproduce one nominal product counterexample through the current
+-- exact product query before its inputs may enter a same-scope product bank.
+-- The state-threading, attempt charging, origin-label, and no-verdict
+-- boundaries are exactly the scalar contract above.
+recordLengthSpinePairSMTLibQueryCounterexampleInBank
+  :: LengthEvaluationLimits
+  -> LengthSpinePairSMTLibQuery identity local
+  -> LengthSpinePairCounterexampleBankOrigin
+  -> ValidatedLengthSpinePairCounterexample
+  -> LengthSpinePairCounterexampleBank identity
+  -> ( LengthSpinePairCounterexampleBank identity
+     , Either LengthSpinePairSMTLibCounterexampleBankRecordError
+         ValidatedLengthSpinePairCounterexample
+     )
+recordLengthSpinePairSMTLibQueryCounterexampleInBank evaluationLimits query
+    origin counterexample bank
+  | not $ lengthSpinePairCounterexampleBankMatchesScope
+      (lengthSpinePairSMTLibQueryCounterexampleBankScope query) bank =
+      ( bank
+      , Left LengthSpinePairSMTLibCounterexampleBankRecordScopeMismatch
+      )
+  | otherwise = case
+      recordLengthSpinePairCounterexampleBankReplayAttempt bank of
+        Left failure ->
+          ( bank
+          , Left
+              $ LengthSpinePairSMTLibCounterexampleBankRecordAttemptRejected
+                  failure
+          )
+        Right charged -> case
+            replayLengthSpinePairSMTLibCounterexampleInputs
+              evaluationLimits query
+              (validatedLengthSpinePairCounterexampleInputs counterexample) of
+          Left failure ->
+            ( charged
+            , Left
+                $ LengthSpinePairSMTLibCounterexampleBankRecordInputReplayRejected
+                    failure
+            )
+          Right Nothing ->
+            ( charged
+            , Left
+                LengthSpinePairSMTLibCounterexampleBankRecordCounterexampleNotReproduced
+            )
+          Right (Just fresh) -> case
+              insertLengthSpinePairCounterexampleBankSample
+                origin
+                (validatedLengthSpinePairCounterexampleInputs fresh)
+                charged of
+            Left failure ->
+              ( charged
+              , Left
+                  $ LengthSpinePairSMTLibCounterexampleBankRecordInsertionRejected
+                      failure
+              )
+            Right recorded -> (recorded, Right fresh)
+
+-- | Nominal binary-product counterpart of
+-- 'LengthSMTLibCounterexampleBankSampleReplayError'.
+data LengthSpinePairSMTLibCounterexampleBankSampleReplayError
+  = LengthSpinePairSMTLibCounterexampleBankSampleReplayScopeMismatch
+  | LengthSpinePairSMTLibCounterexampleBankSampleReplaySampleNotRetained
+  | LengthSpinePairSMTLibCounterexampleBankSampleReplayAttemptRejected
+      !LengthSpinePairCounterexampleBankError
+  | LengthSpinePairSMTLibCounterexampleBankSampleReplayInputRejected
+      !LengthSpinePairSMTLibInputReplayError
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData LengthSpinePairSMTLibCounterexampleBankSampleReplayError
+
+-- | Replay one exact currently retained product sample through a same-scope
+-- current product query.  It mints only fresh candidate-specific product
+-- evidence and otherwise preserves the scalar primitive's membership,
+-- attempt-state, no-promotion, and no-solver-authority contract.
+replayLengthSpinePairSMTLibCounterexampleBankSample
+  :: LengthEvaluationLimits
+  -> LengthSpinePairSMTLibQuery identity local
+  -> LengthSpinePairCounterexampleBankSample
+  -> LengthSpinePairCounterexampleBank identity
+  -> ( LengthSpinePairCounterexampleBank identity
+     , Either LengthSpinePairSMTLibCounterexampleBankSampleReplayError
+         (Maybe ValidatedLengthSpinePairCounterexample)
+     )
+replayLengthSpinePairSMTLibCounterexampleBankSample evaluationLimits query
+    sample bank
+  | not $ lengthSpinePairCounterexampleBankMatchesScope
+      (lengthSpinePairSMTLibQueryCounterexampleBankScope query) bank =
+      ( bank
+      , Left LengthSpinePairSMTLibCounterexampleBankSampleReplayScopeMismatch
+      )
+  | sample `notElem` lengthSpinePairCounterexampleBankSamples bank =
+      ( bank
+      , Left
+          LengthSpinePairSMTLibCounterexampleBankSampleReplaySampleNotRetained
+      )
+  | otherwise = case
+      recordLengthSpinePairCounterexampleBankReplayAttempt bank of
+        Left failure ->
+          ( bank
+          , Left
+              $ LengthSpinePairSMTLibCounterexampleBankSampleReplayAttemptRejected
+                  failure
+          )
+        Right charged -> case
+            replayLengthSpinePairSMTLibCounterexampleInputs
+              evaluationLimits query
+              (lengthSpinePairCounterexampleBankSampleInputs sample) of
+          Left failure ->
+            ( charged
+            , Left
+                $ LengthSpinePairSMTLibCounterexampleBankSampleReplayInputRejected
+                    failure
+            )
+          Right result -> (charged, Right result)
 
 -- | Query-owned all-zero probe for the product problem's compact modeled
 -- inputs.  A miss is ordinary @Nothing@ and supplies no positive evidence.

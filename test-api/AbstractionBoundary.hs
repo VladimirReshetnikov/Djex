@@ -88,6 +88,7 @@ import Language.Haskell.Synthesis.KindInference
 import Language.Haskell.Synthesis.Name (ModuleName, Name)
 import Language.Haskell.Synthesis.Query
 import Language.Haskell.Synthesis.Semantic.Length
+import Language.Haskell.Synthesis.Semantic.Length.CounterexampleBank
 import Language.Haskell.Synthesis.Semantic.Length.Evaluate
 import Language.Haskell.Synthesis.Semantic.Length.Problem
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib
@@ -151,7 +152,19 @@ $(do
           , "PublicDjex.LengthCandidateAuthorization"
           ]
         hiddenValues =
-          [ "LengthSMTLibExecutionConfig"
+          [ "LengthCounterexampleBankScope"
+          , "LengthCounterexampleBankLimits"
+          , "LengthCounterexampleBankOrigin"
+          , "LengthCounterexampleBankSample"
+          , "LengthCounterexampleBankStats"
+          , "LengthCounterexampleBank"
+          , "LengthSpinePairCounterexampleBankScope"
+          , "LengthSpinePairCounterexampleBankLimits"
+          , "LengthSpinePairCounterexampleBankOrigin"
+          , "LengthSpinePairCounterexampleBankSample"
+          , "LengthSpinePairCounterexampleBankStats"
+          , "LengthSpinePairCounterexampleBank"
+          , "LengthSMTLibExecutionConfig"
           , "LengthSMTLibLiveSession"
           , "LengthSMTLibLiveUsableWorkBudget"
           , "LengthSMTLibLiveUsableWorkDeadline"
@@ -282,6 +295,8 @@ newtype LengthAnnotationProbe = LengthAnnotationProbe Int
 newtype OtherLengthAnnotationProbe = OtherLengthAnnotationProbe Int
 newtype LengthLocalProbe = LengthLocalProbe Int
 newtype OtherLengthLocalProbe = OtherLengthLocalProbe Int
+newtype BankIdentityProbe = BankIdentityProbe Int
+newtype OtherBankIdentityProbe = OtherBankIdentityProbe Int
 data OtherCheckedLengthInterpretationPolicy
 newtype LiveEpochProbe = LiveEpochProbe Int
 newtype OtherLiveEpochProbe = OtherLiveEpochProbe Int
@@ -375,6 +390,66 @@ forbiddenConstructionAttempts =
   , noGeneric @LengthInputBoxLimits "LengthInputBoxLimits"
   , noGeneric @LengthBooleanFiniteUnionLimits
       "LengthBooleanFiniteUnionLimits"
+  , noGeneric @(LengthCounterexampleBankScope BankIdentityProbe)
+      "LengthCounterexampleBankScope"
+  , noGeneric @LengthCounterexampleBankLimits
+      "LengthCounterexampleBankLimits"
+  , noGeneric @LengthCounterexampleBankOrigin
+      "LengthCounterexampleBankOrigin"
+  , noGeneric @LengthCounterexampleBankSample
+      "LengthCounterexampleBankSample"
+  , noGeneric @LengthCounterexampleBankStats
+      "LengthCounterexampleBankStats"
+  , noGeneric @(LengthCounterexampleBank BankIdentityProbe)
+      "LengthCounterexampleBank"
+  , noGeneric @(LengthSpinePairCounterexampleBankScope BankIdentityProbe)
+      "LengthSpinePairCounterexampleBankScope"
+  , noGeneric @LengthSpinePairCounterexampleBankLimits
+      "LengthSpinePairCounterexampleBankLimits"
+  , noGeneric @LengthSpinePairCounterexampleBankOrigin
+      "LengthSpinePairCounterexampleBankOrigin"
+  , noGeneric @LengthSpinePairCounterexampleBankSample
+      "LengthSpinePairCounterexampleBankSample"
+  , noGeneric @LengthSpinePairCounterexampleBankStats
+      "LengthSpinePairCounterexampleBankStats"
+  , noGeneric @(LengthSpinePairCounterexampleBank BankIdentityProbe)
+      "LengthSpinePairCounterexampleBank"
+  , ( "LengthCounterexampleBankScope identity unexpectedly permits Coercible"
+    , forbiddenLengthCounterexampleBankScopeIdentityCoercion `seq` ()
+    )
+  , ( "LengthCounterexampleBank identity unexpectedly permits Coercible"
+    , forbiddenLengthCounterexampleBankIdentityCoercion `seq` ()
+    )
+  , ( "LengthSpinePairCounterexampleBankScope identity unexpectedly permits Coercible"
+    , forbiddenLengthSpinePairCounterexampleBankScopeIdentityCoercion `seq` ()
+    )
+  , ( "LengthSpinePairCounterexampleBank identity unexpectedly permits Coercible"
+    , forbiddenLengthSpinePairCounterexampleBankIdentityCoercion `seq` ()
+    )
+  , ( "Scalar and product counterexample-bank scopes unexpectedly permit Coercible"
+    , forbiddenLengthCounterexampleBankScopeDomainCoercion `seq` ()
+    )
+  , ( "Scalar and product counterexample-bank limits unexpectedly permit Coercible"
+    , forbiddenLengthCounterexampleBankLimitsDomainCoercion `seq` ()
+    )
+  , ( "Scalar and product counterexample-bank origins unexpectedly permit Coercible"
+    , forbiddenLengthCounterexampleBankOriginDomainCoercion `seq` ()
+    )
+  , ( "Scalar and product counterexample-bank samples unexpectedly permit Coercible"
+    , forbiddenLengthCounterexampleBankSampleDomainCoercion `seq` ()
+    )
+  , ( "Scalar and product counterexample-bank stats unexpectedly permit Coercible"
+    , forbiddenLengthCounterexampleBankStatsDomainCoercion `seq` ()
+    )
+  , ( "Scalar and product counterexample banks unexpectedly permit Coercible"
+    , forbiddenLengthCounterexampleBankDomainCoercion `seq` ()
+    )
+  , ( "LengthCounterexampleBankSample unexpectedly coerces to evidence"
+    , forbiddenLengthCounterexampleBankSampleEvidenceCoercion `seq` ()
+    )
+  , ( "LengthSpinePairCounterexampleBankSample unexpectedly coerces to evidence"
+    , forbiddenLengthSpinePairCounterexampleBankSampleEvidenceCoercion `seq` ()
+    )
   , noGeneric @ValidatedLengthCounterexample
       "ValidatedLengthCounterexample"
   , ( "ValidatedLengthCounterexample constructor became public"
@@ -1423,6 +1498,66 @@ forbiddenValidatedLengthApplicableDomainCoercion
   :: ValidatedLengthApplicableDomain
   -> ValidatedLengthSpinePairApplicableDomain
 forbiddenValidatedLengthApplicableDomainCoercion = coerce
+
+forbiddenLengthCounterexampleBankScopeIdentityCoercion
+  :: LengthCounterexampleBankScope BankIdentityProbe
+  -> LengthCounterexampleBankScope OtherBankIdentityProbe
+forbiddenLengthCounterexampleBankScopeIdentityCoercion = coerce
+
+forbiddenLengthCounterexampleBankIdentityCoercion
+  :: LengthCounterexampleBank BankIdentityProbe
+  -> LengthCounterexampleBank OtherBankIdentityProbe
+forbiddenLengthCounterexampleBankIdentityCoercion = coerce
+
+forbiddenLengthSpinePairCounterexampleBankScopeIdentityCoercion
+  :: LengthSpinePairCounterexampleBankScope BankIdentityProbe
+  -> LengthSpinePairCounterexampleBankScope OtherBankIdentityProbe
+forbiddenLengthSpinePairCounterexampleBankScopeIdentityCoercion = coerce
+
+forbiddenLengthSpinePairCounterexampleBankIdentityCoercion
+  :: LengthSpinePairCounterexampleBank BankIdentityProbe
+  -> LengthSpinePairCounterexampleBank OtherBankIdentityProbe
+forbiddenLengthSpinePairCounterexampleBankIdentityCoercion = coerce
+
+forbiddenLengthCounterexampleBankScopeDomainCoercion
+  :: LengthCounterexampleBankScope BankIdentityProbe
+  -> LengthSpinePairCounterexampleBankScope BankIdentityProbe
+forbiddenLengthCounterexampleBankScopeDomainCoercion = coerce
+
+forbiddenLengthCounterexampleBankLimitsDomainCoercion
+  :: LengthCounterexampleBankLimits
+  -> LengthSpinePairCounterexampleBankLimits
+forbiddenLengthCounterexampleBankLimitsDomainCoercion = coerce
+
+forbiddenLengthCounterexampleBankOriginDomainCoercion
+  :: LengthCounterexampleBankOrigin
+  -> LengthSpinePairCounterexampleBankOrigin
+forbiddenLengthCounterexampleBankOriginDomainCoercion = coerce
+
+forbiddenLengthCounterexampleBankSampleDomainCoercion
+  :: LengthCounterexampleBankSample
+  -> LengthSpinePairCounterexampleBankSample
+forbiddenLengthCounterexampleBankSampleDomainCoercion = coerce
+
+forbiddenLengthCounterexampleBankStatsDomainCoercion
+  :: LengthCounterexampleBankStats
+  -> LengthSpinePairCounterexampleBankStats
+forbiddenLengthCounterexampleBankStatsDomainCoercion = coerce
+
+forbiddenLengthCounterexampleBankDomainCoercion
+  :: LengthCounterexampleBank BankIdentityProbe
+  -> LengthSpinePairCounterexampleBank BankIdentityProbe
+forbiddenLengthCounterexampleBankDomainCoercion = coerce
+
+forbiddenLengthCounterexampleBankSampleEvidenceCoercion
+  :: LengthCounterexampleBankSample
+  -> ValidatedLengthCounterexample
+forbiddenLengthCounterexampleBankSampleEvidenceCoercion = coerce
+
+forbiddenLengthSpinePairCounterexampleBankSampleEvidenceCoercion
+  :: LengthSpinePairCounterexampleBankSample
+  -> ValidatedLengthSpinePairCounterexample
+forbiddenLengthSpinePairCounterexampleBankSampleEvidenceCoercion = coerce
 
 forbiddenBoundedRawArtifactCoercion
   :: BoundedRawArtifact ArtifactKindProbe

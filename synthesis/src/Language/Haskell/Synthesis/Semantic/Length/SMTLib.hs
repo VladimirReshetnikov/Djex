@@ -59,11 +59,16 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib
   , lengthSMTLibQueryInputValueRequestBytes
   , lengthSMTLibQueryFingerprint
   , lengthSMTLibQueryBehavioralProblem
+  , lengthSMTLibQueryCounterexampleBankScope
   , LengthSMTLibIntegerBinding (..)
   , LengthSMTLibModelError (..)
   , validateLengthSMTLibCounterexample
   , LengthSMTLibInputReplayError (..)
   , replayLengthSMTLibCounterexampleInputs
+  , LengthSMTLibCounterexampleBankRecordError (..)
+  , recordLengthSMTLibQueryCounterexampleInBank
+  , LengthSMTLibCounterexampleBankSampleReplayError (..)
+  , replayLengthSMTLibCounterexampleBankSample
   , probeLengthSMTLibCounterexampleAtOrigin
   , LengthSMTLibCounterexampleSimplificationError (..)
   , simplifyLengthSMTLibQueryCounterexample
@@ -82,10 +87,15 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib
   , lengthSpinePairSMTLibQueryInputValueRequestBytes
   , lengthSpinePairSMTLibQueryFingerprint
   , lengthSpinePairSMTLibQueryBehavioralProblem
+  , lengthSpinePairSMTLibQueryCounterexampleBankScope
   , LengthSpinePairSMTLibModelError (..)
   , validateLengthSpinePairSMTLibCounterexample
   , LengthSpinePairSMTLibInputReplayError (..)
   , replayLengthSpinePairSMTLibCounterexampleInputs
+  , LengthSpinePairSMTLibCounterexampleBankRecordError (..)
+  , recordLengthSpinePairSMTLibQueryCounterexampleInBank
+  , LengthSpinePairSMTLibCounterexampleBankSampleReplayError (..)
+  , replayLengthSpinePairSMTLibCounterexampleBankSample
   , probeLengthSpinePairSMTLibCounterexampleAtOrigin
   , LengthSpinePairSMTLibCounterexampleSimplificationError (..)
   , simplifyLengthSpinePairSMTLibQueryCounterexample

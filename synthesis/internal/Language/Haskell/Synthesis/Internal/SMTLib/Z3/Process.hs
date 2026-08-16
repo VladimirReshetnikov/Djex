@@ -80,6 +80,11 @@ module Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process
   , openZ3SMTLibDescriptorBoundProcess
   , openZ3SMTLibDescriptorBoundProcessWithPreExecHook
   , z3SMTLibProcessUsesDescriptorBoundExecutableLaunch
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+  , readZ3SMTLibDescriptorSpawnExecStatusWith
+  , runBeforeZ3SMTLibProcessDeadlineMaskedAction
+  , handoffZ3SMTLibProcessAcquiredWith
+#endif
   , Z3SMTLibEffectiveIDExecutableAccessCheckResult (..)
   , openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
   , openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
@@ -953,7 +958,9 @@ cancelZ3SMTLibProcess (Z3SMTLibProcessCancellation cancelled) =
 -- failure interrupts and joins that thread before returning.  If the action
 -- produced a value but lost the final cancellation/deadline check, the supplied
 -- rollback is run on that value before it is discarded.  Exception payloads
--- from either callback are never retained.  Completion of interruption and
+-- from either callback are never retained.  The worker publishes its one
+-- completion as its final effect, so no acquired value can become visible
+-- before a separate thread-completion signal.  Completion of interruption and
 -- rollback is intentionally joined; its latency therefore depends on the
 -- interruptibility of these closed, package-private allocation actions rather
 -- than claiming a bound for arbitrary 'IO'.
@@ -964,44 +971,62 @@ runBeforeZ3SMTLibProcessDeadline
   -> (value -> IO ())
   -> IO (Either Z3SMTLibProcessError value)
 runBeforeZ3SMTLibProcessDeadline cancellation deadline action rollback =
+  runBeforeZ3SMTLibProcessDeadlineWithWorkerMask cancellation deadline
+    (\unmask -> unmask action) rollback
+
+-- Keep a resource-producing action masked until its result has been published
+-- to the controller.  The action may still restore its own explicitly owned
+-- interruptible regions, but an asynchronous exception cannot land between
+-- its return and publication and thereby discard the acquired value.
+runBeforeZ3SMTLibProcessDeadlineMaskedAction
+  :: Z3SMTLibProcessCancellation
+  -> Z3SMTLibProcessDeadline
+  -> IO value
+  -> (value -> IO ())
+  -> IO (Either Z3SMTLibProcessError value)
+runBeforeZ3SMTLibProcessDeadlineMaskedAction cancellation deadline action
+    rollback =
+  runBeforeZ3SMTLibProcessDeadlineWithWorkerMask cancellation deadline
+    (const action) rollback
+
+runBeforeZ3SMTLibProcessDeadlineWithWorkerMask
+  :: Z3SMTLibProcessCancellation
+  -> Z3SMTLibProcessDeadline
+  -> ((IO value -> IO value) -> IO value)
+  -> (value -> IO ())
+  -> IO (Either Z3SMTLibProcessError value)
+runBeforeZ3SMTLibProcessDeadlineWithWorkerMask cancellation deadline runAction
+    rollback =
   mask $ \restore -> do
     initial <- checkCancellationDeadline
       Z3SMTLibProcessDeadlinePhase cancellation deadline
     case initial of
       Left failure -> pure $ Left failure
       Right () -> do
-        outcome <- newEmptyTMVarIO
-        done <- newEmptyTMVarIO
+        completion <- newEmptyTMVarIO
         thread <- forkIOWithUnmask $ \unmask ->
-          (tryAny (unmask action) >>= atomically . putTMVar outcome)
-          `finally` atomically (putTMVar done ())
-        let await = waitBeforeDeadline cancellation deadline outcome
-            producedValue = do
-              observed <- atomically $ tryReadTMVar outcome
-              pure $ case observed of
-                Just (Right value) -> Just value
-                _ -> Nothing
-            rollbackProduced = do
-              produced <- producedValue
-              case produced of
-                Nothing -> pure ()
-                Just value -> void $ tryAny $ rollback value
+          mask_ $ do
+            attempted <- tryAny $ runAction unmask
+            atomically $ putTMVar completion attempted
+        let await = waitBeforeDeadline cancellation deadline completion
+            rollbackAttempted attempted = case attempted of
+              Left _ -> pure ()
+              Right value -> void $ tryAny $ rollback value
             stopJoinRollback = do
               killThread thread
-              atomically $ readTMVar done
-              rollbackProduced
+              attempted <- atomically $ readTMVar completion
+              rollbackAttempted attempted
         result <- restore await `onException` stopJoinRollback
         case result of
           Left failure -> do
             stopJoinRollback
             pure $ Left failure
           Right attempted -> do
-            atomically $ readTMVar done
             finalControl <- checkCancellationDeadline
               Z3SMTLibProcessDeadlinePhase cancellation deadline
             case finalControl of
               Left failure -> do
-                rollbackProduced
+                rollbackAttempted attempted
                 pure $ Left failure
               Right () -> case attempted of
                 Left _ -> pure $ Left $ processError
@@ -1278,7 +1303,7 @@ openZ3SMTLibProcess limits cancellation deadline profile workingDirectory =
                   Right status -> status
                   Left _ -> incompleteCleanupStatus
             atomically $ void $ tryPutTMVar rollbackStatus cleanup
-    controlledCreate <- runBeforeZ3SMTLibProcessDeadline
+    controlledCreate <- runBeforeZ3SMTLibProcessDeadlineMaskedAction
       cancellation deadline (tryIOError $ createProcess specification)
       rollbackCreated
     case controlledCreate of
@@ -1489,9 +1514,10 @@ openDescriptorBoundProcessWith policy limits cancellation deadline profile
     initial <- checkCancellationDeadline
       Z3SMTLibProcessSnapshotPhase cancellation deadline
     let withOpenedSource continue = do
-          controlledOpen <- restore $ runBeforeZ3SMTLibProcessDeadline
-            cancellation deadline openSourceDescriptor
-            rollbackOpenedDescriptor
+          controlledOpen <- restore
+            $ runBeforeZ3SMTLibProcessDeadlineMaskedAction
+                cancellation deadline openSourceDescriptor
+                rollbackOpenedDescriptor
           case controlledOpen of
             Left failure -> pure $ Left failure
             Right (Left failure) -> pure $ Left failure
@@ -1554,7 +1580,8 @@ openDescriptorBoundProcessWith policy limits cancellation deadline profile
   createAndSealImage sourceDescriptor sourceMetadata
       canonicalWorkingDirectory workingDirectoryMetadata =
     mask $ \restoreImage -> do
-      controlledImage <- restoreImage $ runBeforeZ3SMTLibProcessDeadline
+      controlledImage <- restoreImage $
+        runBeforeZ3SMTLibProcessDeadlineMaskedAction
         cancellation deadline createStagedDescriptor rollbackOpenedDescriptor
       case controlledImage of
         Left failure -> pure $ Left failure
@@ -1635,24 +1662,10 @@ openDescriptorBoundProcessWith policy limits cancellation deadline profile
                           Right () -> spawnStagedImage snapshot
                             stagedDescriptor canonicalWorkingDirectory
 
-  spawnStagedImage snapshot stagedDescriptor canonicalWorkingDirectory = do
-    rollbackStatus <- newEmptyTMVarIO
-    let rollbackAttempt attempted = case attempted of
-          Left _ -> pure ()
-          Right created -> do
-            cleanup <- cleanupDescriptorCreated limits created
-            atomically $ void $ tryPutTMVar rollbackStatus cleanup
-    controlledSpawn <- runBeforeZ3SMTLibProcessDeadline cancellation deadline
-      (nativeDescriptorSpawn limits profile stagedDescriptor
-        workingDirectoryFd $ launchStrategy policy)
-      rollbackAttempt
-    case controlledSpawn of
-      Left failure -> do
-        cleanup <- atomically $ tryReadTMVar rollbackStatus
-        pure $ Left $ maybe failure (`attachCleanup` failure) cleanup
-      Right (Left failure) -> pure $ Left failure
-      Right (Right created) -> finishDescriptorCreated limits cancellation
-        deadline snapshot canonicalWorkingDirectory created
+  spawnStagedImage snapshot stagedDescriptor canonicalWorkingDirectory =
+    spawnAndFinishDescriptorCreated limits cancellation deadline profile
+      stagedDescriptor workingDirectoryFd (launchStrategy policy) snapshot
+      canonicalWorkingDirectory
 
 -- | Run one effective-ID access checker on a borrowed descriptor under the
 -- cancellation and deadline, mapping its verdict, or any exception it
@@ -1725,6 +1738,28 @@ admitInOrder (admission : rest) = do
   case admitted of
     Left failure -> pure $ Left failure
     Right () -> admitInOrder rest
+
+-- | Acquire one resource while masked, expose one deterministic restored
+-- handoff checkpoint under its rollback owner, then let the consumer accept
+-- ownership while still masked.  The consumer receives the monomorphic
+-- restorer for use only after it has installed its next cleanup owner.
+handoffZ3SMTLibProcessAcquiredWith
+  :: IO (Either failure resource)
+  -> (resource -> IO ())
+  -> IO ()
+  -> ( (IO (Either failure result) -> IO (Either failure result))
+       -> resource
+       -> IO (Either failure result)
+     )
+  -> IO (Either failure result)
+handoffZ3SMTLibProcessAcquiredWith acquire rollback postAcquire consume =
+  mask $ \restore -> do
+    acquired <- acquire
+    case acquired of
+      Left failure -> pure $ Left failure
+      Right resource -> do
+        restore postAcquire `onException` rollback resource
+        consume restore resource
 
 data DescriptorCreated = DescriptorCreated
   !Handle !Handle !Handle !ProcessHandle !Integer
@@ -1960,9 +1995,12 @@ nativeDescriptorSpawn limits profile executableDescriptor
             case converted of
               Left failure -> pure $ Left failure
               Right (created, statusHandle) -> do
-                handshake <- restore (tryIOError $ BS.hGetSome statusHandle 1)
+                handshake <- restore
+                  (readZ3SMTLibDescriptorSpawnExecStatusWith
+                    (\statusStream ->
+                      tryIOError $ BS.hGetSome statusStream 1)
+                    statusHandle)
                   `onException` void (cleanupDescriptorCreated limits created)
-                _ <- tryIOError $ hClose statusHandle
                 case handshake of
                   Right bytes | BS.null bytes -> pure $ Right created
                   _ -> do
@@ -1970,6 +2008,19 @@ nativeDescriptorSpawn limits profile executableDescriptor
                     pure $ Left $ attachCleanup cleanup $ processError
                       Z3SMTLibProcessSpawnPhase
                       Z3SMTLibProcessDescriptorBoundExecFailed Nothing
+
+-- | Run the descriptor-spawn exec-status read while retaining ownership of
+-- the parent status handle on every exit.  The read is restored to the
+-- caller's incoming masking state, but handle closure is masked.  The native
+-- launch path wraps this helper in its separate child/stdio cleanup handler.
+readZ3SMTLibDescriptorSpawnExecStatusWith
+  :: (Handle -> IO result)
+  -> Handle
+  -> IO result
+readZ3SMTLibDescriptorSpawnExecStatusWith readStatus statusHandle =
+  mask $ \restoreRead ->
+    restoreRead (readStatus statusHandle)
+      `finally` void (tryIOError $ hClose statusHandle)
 
 convertDescriptorPipes
   :: Z3SMTLibProcessLimits
@@ -2033,15 +2084,59 @@ cleanupDescriptorCreated limits
   cleanupAcquired limits (Just input) (Just output) (Just errorOutput)
     handle (Just pid) []
 
-finishDescriptorCreated
+spawnAndFinishDescriptorCreated
   :: Z3SMTLibProcessLimits
+  -> Z3SMTLibProcessCancellation
+  -> Z3SMTLibProcessDeadline
+  -> Z3.Z3SMTLibExecutionProfile
+  -> Fd
+  -> Fd
+  -> ProcessExecutableLaunchStrategy
+  -> Z3SMTLibExecutableSnapshot
+  -> FilePath
+  -> IO (Either Z3SMTLibProcessError Z3SMTLibProcess)
+spawnAndFinishDescriptorCreated limits cancellation deadline profile
+    executableDescriptor workingDirectoryDescriptor strategy snapshot
+    canonicalWorkingDirectory = handoffZ3SMTLibProcessAcquiredWith
+      acquire
+      (void . cleanupDescriptorCreated limits)
+      (pure ())
+      consume
+ where
+  acquire = do
+    rollbackStatus <- newEmptyTMVarIO
+    let rollbackAttempt attempted = case attempted of
+          Left _ -> pure ()
+          Right created -> do
+            cleanup <- cleanupDescriptorCreated limits created
+            atomically $ void $ tryPutTMVar rollbackStatus cleanup
+    controlled <- runBeforeZ3SMTLibProcessDeadlineMaskedAction
+      cancellation deadline
+      (nativeDescriptorSpawn limits profile executableDescriptor
+        workingDirectoryDescriptor strategy)
+      rollbackAttempt
+    case controlled of
+      Left failure -> do
+        cleanup <- atomically $ tryReadTMVar rollbackStatus
+        pure $ Left $ maybe failure (`attachCleanup` failure) cleanup
+      Right (Left failure) -> pure $ Left failure
+      Right (Right created) -> pure $ Right created
+
+  consume restoreInitialize = finishDescriptorCreated restoreInitialize
+    limits cancellation deadline snapshot canonicalWorkingDirectory
+
+finishDescriptorCreated
+  :: ( IO (Either Z3SMTLibProcessError Z3SMTLibProcess)
+       -> IO (Either Z3SMTLibProcessError Z3SMTLibProcess)
+     )
+  -> Z3SMTLibProcessLimits
   -> Z3SMTLibProcessCancellation
   -> Z3SMTLibProcessDeadline
   -> Z3SMTLibExecutableSnapshot
   -> FilePath
   -> DescriptorCreated
   -> IO (Either Z3SMTLibProcessError Z3SMTLibProcess)
-finishDescriptorCreated limits cancellation deadline snapshot
+finishDescriptorCreated restoreInitialize limits cancellation deadline snapshot
     canonicalWorkingDirectory
     created@(DescriptorCreated input output errorOutput handle pid strategy) = do
   allocated <- tryAny $ allocateDescriptorProcess limits deadline input output
@@ -2066,7 +2161,8 @@ finishDescriptorCreated limits cancellation deadline snapshot
                     case ready of
                       Left failure -> closeAfterOpenFailure process failure
                       Right () -> pure $ Right process
-      initialize `onException` void (closeZ3SMTLibProcess process)
+      restoreInitialize initialize
+        `onException` void (closeZ3SMTLibProcess process)
 
 allocateDescriptorProcess
   :: Z3SMTLibProcessLimits

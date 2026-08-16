@@ -462,50 +462,18 @@ providerInstantiationPremises
     -> ProviderInstantiationPremises
 providerInstantiationPremises
         symbolPrefix translator fidelityTranslator schemes candidates =
-    ProviderInstantiationPremises premises applications
+    providerPremisesWith symbolPrefix translator fidelityTranslator schemes
+        (take maxInstantiationAxiomsPerScheme)
+        vectorsFor
   where
-    retained = take maxProviderInstantiationPremises $ concatMap specialize schemes
-    entries =
-        [ (Symbol $ symbolPrefix ++ show index, provider, formula, arguments)
-        | (index, (provider, formula, arguments)) <-
-            zip [0 :: Int ..] retained
-        ]
-    premises =
-        [ (synthetic, formula)
-        | (synthetic, _, formula, _) <- entries
-        ]
-    applications = Map.fromList
-        [ (synthetic, (provider, arguments))
-        | (synthetic, provider, _, arguments) <- entries
-        ]
-
-    specialize (provider, schemeFormula) = case schemeSourceFromFormula
-            schemeFormula >>= instantiationScheme of
-        Nothing -> []
-        Just scheme -> take maxInstantiationAxiomsPerScheme
-            [ (provider, formula, map third tuple)
-            | tuple <- take maxInstantiationAttempts $
-                sequence $ replicate (length $ schemeBinders scheme)
-                    providerCandidates
-            , Right instantiated <-
-                [instantiateSchemeBody scheme $ map second tuple]
-            , Right formula <- [translator instantiated]
-            , retainsProviderInstantiationFidelity
-                fidelityTranslator scheme (map second tuple)
-            ]
-      where
-        providerCandidates =
-            [ (candidateType, visibleArgument)
-            | (candidateProvider, candidateType, visibleArgument) <- candidates
-            , candidateProvider == provider
-            ]
-
-    schemeSourceFromFormula formula = case formula of
-        PVar symbol -> opaqueSymbolSource symbol
-        _ -> Nothing
-
-    second (value, _) = value
-    third (_, value) = value
+    vectorsFor provider scheme =
+        take maxInstantiationAttempts $
+            sequence $ replicate (length $ schemeBinders scheme)
+                [ (candidateType, visibleArgument)
+                | (candidateProvider, candidateType, visibleArgument) <-
+                    candidates
+                , candidateProvider == provider
+                ]
 
 -- | Build direct provider-local premises from complete ordered assignments.
 --
@@ -530,6 +498,41 @@ providerInstantiationAssignmentPremises
     -> ProviderInstantiationPremises
 providerInstantiationAssignmentPremises
         symbolPrefix translator fidelityTranslator schemes assignments =
+    providerPremisesWith symbolPrefix translator fidelityTranslator schemes id
+        vectorsFor
+  where
+    vectorsFor provider scheme =
+        [ assignment
+        | (assignmentProvider, assignment) <- assignments
+        , assignmentProvider == provider
+        , length assignment == length (schemeBinders scheme)
+        ]
+
+-- The two provider-premise families differ only in how a scheme's argument
+-- vectors are enumerated (a bounded Cartesian window over per-provider
+-- candidates, or the caller's checked complete assignments) and in whether a
+-- per-scheme cap applies afterwards.  Everything else is shared here: each
+-- vector is instantiated into the scheme body, translated, and kept only if it
+-- survives the fidelity check; the retained specializations receive
+-- synthetic premise symbols in order, and the visible arguments travel beside
+-- them into the application table.
+providerPremisesWith
+    :: String
+    -> (SharedType.Type String -> Either String Formula)
+    -> Maybe ProviderInstantiationFidelity
+    -> [(Symbol, Formula)]
+    -> ([( Symbol, Formula, [SharedGenerated.VisibleTypeArgument])]
+        -> [( Symbol, Formula, [SharedGenerated.VisibleTypeArgument])])
+       -- per-scheme cap on the retained specializations
+    -> (Symbol -> InstantiationScheme
+        -> [[( SharedType.Type String
+             , SharedGenerated.VisibleTypeArgument
+             )]])
+       -- argument vectors, each type paired with its visible argument
+    -> ProviderInstantiationPremises
+providerPremisesWith
+        symbolPrefix translator fidelityTranslator schemes retainPerScheme
+        vectorsFor =
     ProviderInstantiationPremises premises applications
   where
     retained = take maxProviderInstantiationPremises $
@@ -551,16 +554,14 @@ providerInstantiationAssignmentPremises
     specialize (provider, schemeFormula) = case schemeSourceFromFormula
             schemeFormula >>= instantiationScheme of
         Nothing -> []
-        Just scheme ->
-            [ (provider, formula, map snd assignment)
-            | (assignmentProvider, assignment) <- assignments
-            , assignmentProvider == provider
-            , length assignment == length (schemeBinders scheme)
+        Just scheme -> retainPerScheme
+            [ (provider, formula, map snd vector)
+            | vector <- vectorsFor provider scheme
             , Right instantiated <-
-                [instantiateSchemeBody scheme $ map fst assignment]
+                [instantiateSchemeBody scheme $ map fst vector]
             , Right formula <- [translator instantiated]
             , retainsProviderInstantiationFidelity
-                fidelityTranslator scheme (map fst assignment)
+                fidelityTranslator scheme (map fst vector)
             ]
 
     schemeSourceFromFormula formula = case formula of

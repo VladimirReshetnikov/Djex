@@ -1,6 +1,8 @@
 {-# LANGUAGE DeriveGeneric #-}
 
--- | Shared lexical alpha-normalization machinery.
+-- | Shared lexical alpha-normalization machinery, and the two binder-aware
+-- 'Type' walks that the canonical forms and first-order solvers built on it
+-- all share: 'eraseVacuousForalls' and 'rewriteTypeVariables'.
 --
 -- Explicit forall syntax uses binder positions: declaration order is part of
 -- the type, while spelling is not. Instance declarations have a different

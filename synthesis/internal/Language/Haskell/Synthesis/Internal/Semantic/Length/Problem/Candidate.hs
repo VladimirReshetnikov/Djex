@@ -845,6 +845,9 @@ checkedLengthSpinePairProblemBehavioralProblem
 checkedLengthSpinePairProblemBehavioralProblem
     (CheckedLengthSpinePairProblem _ _ _ _ _ problem _) = problem
 
+-- | Product-domain sibling of the candidate-independent replay-input scope:
+-- sealed solely from the exact session, revalidated contract, and normalized
+-- target, never from a candidate-specific field of this problem.
 checkedLengthSpinePairProblemCounterexampleBankScope
   :: CheckedLengthSpinePairProblem identity local
   -> LengthSpinePairCounterexampleBankScope identity

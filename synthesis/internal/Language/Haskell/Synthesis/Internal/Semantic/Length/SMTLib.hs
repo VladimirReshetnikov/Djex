@@ -612,6 +612,9 @@ lengthSpinePairSMTLibQueryBehavioralProblem
     (LengthSpinePairSMTLibQuery problem _ _) =
   checkedLengthSpinePairProblemBehavioralProblem problem
 
+-- | Project the candidate-independent replay-input scope retained by this
+-- product query's exact checked problem.  Query translation and execution
+-- identity do not enter the scope.
 lengthSpinePairSMTLibQueryCounterexampleBankScope
   :: LengthSpinePairSMTLibQuery identity local
   -> LengthSpinePairCounterexampleBankScope identity

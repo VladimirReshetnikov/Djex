@@ -135,6 +135,7 @@ lengthTests = testGroup "finite-list-spine-length/v1"
   , associatedCertificateCandidateTests
   , problemReplayTests
   , counterexampleBankTests
+  , counterexampleBankBridgeTests
   , counterexampleSimplificationTests
   , inputBoxValidationTests
   , applicableDomainValidationTests
@@ -7788,6 +7789,569 @@ pairBankStats bank =
      , LengthBank.lengthSpinePairCounterexampleBankStatsReplayAttemptCount stats
      )
 
+counterexampleBankBridgeTests :: TestTree
+counterexampleBankBridgeTests = testGroup
+  "counterexample-bank SMT-LIB association and replay bridge"
+  [ testCase
+      "A. record fresh scalar inputs and return a query-owned receipt" $ do
+      ((zeroProblem, zeroQuery), _) <-
+        scalarCounterexampleBankBridgeFixture successorLengthContract
+      oldReceipt <- validatedLengthCounterexampleAt zeroProblem [3]
+      let origin =
+            LengthBank.lengthCounterexampleBankSolverIndependentReplayOrigin
+          empty = LengthBank.emptyLengthCounterexampleBank
+            LengthBank.defaultLengthCounterexampleBankLimits
+            $ SMTLib.lengthSMTLibQueryCounterexampleBankScope zeroQuery
+          (recorded, outcome) =
+            SMTLib.recordLengthSMTLibQueryCounterexampleInBank
+              Evaluate.defaultLengthEvaluationLimits zeroQuery origin
+              oldReceipt empty
+      fresh <- expectRight outcome
+      Evaluate.validatedLengthCounterexampleInputs fresh @?= [3]
+      Evaluate.validatedLengthCounterexampleResult fresh @?= 0
+      Evaluate.validatedLengthCounterexampleBasis fresh @?=
+        Evaluate.ProviderIndependentFiniteSpineModel
+      case LengthBank.lengthCounterexampleBankSamples recorded of
+        [sample] -> do
+          LengthBank.lengthCounterexampleBankSampleInputs sample @?= [3]
+          LengthBank.lengthCounterexampleBankSampleOrigin sample @?= origin
+        samples -> assertFailure $ "unexpected scalar bridge bank: " ++
+          show samples
+      scalarBankStats recorded @?=
+        (1, scalarBankEncodedBytes recorded, 1, 0, 0, 1)
+
+  , testCase
+      "B. mint a current scalar receipt or miss from foreign same-scope evidence" $
+      do
+        ((zeroProblem, _), (_, identityQuery)) <-
+          scalarCounterexampleBankBridgeFixture successorLengthContract
+        oldReceipt <- validatedLengthCounterexampleAt zeroProblem [3]
+        let origin = LengthBank.lengthCounterexampleBankLiveModelReplayOrigin
+            empty = LengthBank.emptyLengthCounterexampleBank
+              LengthBank.defaultLengthCounterexampleBankLimits
+              $ SMTLib.lengthSMTLibQueryCounterexampleBankScope identityQuery
+            (recorded, outcome) =
+              SMTLib.recordLengthSMTLibQueryCounterexampleInBank
+                Evaluate.defaultLengthEvaluationLimits identityQuery origin
+                oldReceipt empty
+        fresh <- expectRight outcome
+        Evaluate.validatedLengthCounterexampleInputs fresh @?= [3]
+        Evaluate.validatedLengthCounterexampleResult oldReceipt @?= 0
+        Evaluate.validatedLengthCounterexampleResult fresh @?= 3
+        Evaluate.validatedLengthCounterexampleBasis fresh @?=
+          Evaluate.ProviderIndependentFiniteSpineModel
+        map LengthBank.lengthCounterexampleBankSampleInputs
+            (LengthBank.lengthCounterexampleBankSamples recorded) @?= [[3]]
+        scalarBankStats recorded @?=
+          (1, scalarBankEncodedBytes recorded, 1, 0, 0, 1)
+
+        ((missProblem, _), (_, missQuery)) <-
+          scalarCounterexampleBankBridgeFixture identityLengthContract
+        missReceipt <- validatedLengthCounterexampleAt missProblem [3]
+        let missEmpty = LengthBank.emptyLengthCounterexampleBank
+              LengthBank.defaultLengthCounterexampleBankLimits
+              $ SMTLib.lengthSMTLibQueryCounterexampleBankScope missQuery
+        (missBank, missOutcome) <- evaluateWithin $ force $
+          SMTLib.recordLengthSMTLibQueryCounterexampleInBank
+            Evaluate.defaultLengthEvaluationLimits missQuery
+            (error "scalar record miss demanded origin")
+            missReceipt missEmpty
+        missOutcome @?= Left
+          SMTLib.LengthSMTLibCounterexampleBankRecordCounterexampleNotReproduced
+        LengthBank.lengthCounterexampleBankSamples missBank @?= []
+        scalarBankStats missBank @?= (0, 0, 0, 0, 0, 1)
+
+  , testCase
+      "C. give scalar record scope and attempt admission strict precedence" $ do
+      ((zeroProblem, zeroQuery), _) <-
+        scalarCounterexampleBankBridgeFixture successorLengthContract
+      ((_, foreignQuery), _) <-
+        scalarCounterexampleBankBridgeFixture identityLengthContract
+      let ordinaryEmpty = LengthBank.emptyLengthCounterexampleBank
+            LengthBank.defaultLengthCounterexampleBankLimits
+            $ LengthProblem.checkedLengthProblemCounterexampleBankScope
+                zeroProblem
+      (scopeBank, scopeOutcome) <- evaluateWithin $ force $
+        SMTLib.recordLengthSMTLibQueryCounterexampleInBank
+          (error "scope mismatch demanded scalar evaluation limits")
+          foreignQuery
+          (error "scope mismatch demanded scalar origin")
+          (error "scope mismatch demanded scalar receipt")
+          ordinaryEmpty
+      scopeOutcome @?= Left
+        SMTLib.LengthSMTLibCounterexampleBankRecordScopeMismatch
+      LengthBank.lengthCounterexampleBankSamples scopeBank @?= []
+      scalarBankStats scopeBank @?= (0, 0, 0, 0, 0, 0)
+
+      cappedLimits <- expectRight
+        $ LengthBank.mkLengthCounterexampleBankLimits 1 1 8 4096 0
+      let capped = LengthBank.emptyLengthCounterexampleBank cappedLimits
+            $ SMTLib.lengthSMTLibQueryCounterexampleBankScope zeroQuery
+      (attemptBank, attemptOutcome) <- evaluateWithin $ force $
+        SMTLib.recordLengthSMTLibQueryCounterexampleInBank
+          (error "attempt cap demanded scalar evaluation limits")
+          zeroQuery
+          (error "attempt cap demanded scalar origin")
+          (error "attempt cap demanded scalar receipt")
+          capped
+      attemptOutcome @?= Left
+        (SMTLib.LengthSMTLibCounterexampleBankRecordAttemptRejected
+          $ LengthBank.LengthCounterexampleBankReplayAttemptLimitExceeded 0 1)
+      LengthBank.lengthCounterexampleBankSamples attemptBank @?= []
+      scalarBankStats attemptBank @?= (0, 0, 0, 0, 0, 0)
+
+  , testCase
+      "D. retain a charged scalar bank after admitted replay rejection" $ do
+      ((zeroProblem, zeroQuery), _) <-
+        scalarCounterexampleBankBridgeFixture successorLengthContract
+      receipt <- validatedLengthCounterexampleAt zeroProblem [3]
+      let empty = LengthBank.emptyLengthCounterexampleBank
+            LengthBank.defaultLengthCounterexampleBankLimits
+            $ SMTLib.lengthSMTLibQueryCounterexampleBankScope zeroQuery
+          (charged, outcome) =
+            SMTLib.recordLengthSMTLibQueryCounterexampleInBank
+              (evaluationLimitsWith 1 8) zeroQuery
+              (error "replay rejection demanded scalar origin")
+              receipt empty
+          evaluationFailure =
+            Evaluate.LengthEvaluationValueBitLimitExceeded
+              (Evaluate.LengthProblemInputValue 0) 1 2
+      outcome @?= Left
+        (SMTLib.LengthSMTLibCounterexampleBankRecordInputReplayRejected
+          $ SMTLib.LengthSMTLibInputReplayEvaluationRejected evaluationFailure)
+      LengthBank.lengthCounterexampleBankSamples charged @?= []
+      scalarBankStats charged @?= (0, 0, 0, 0, 0, 1)
+
+  , testCase
+      "E. replay before scalar insertion caps and preserve charged state" $ do
+      ((zeroProblem, zeroQuery), _) <-
+        scalarCounterexampleBankBridgeFixture successorLengthContract
+      receipt <- validatedLengthCounterexampleAt zeroProblem [3]
+      entryLimits <- expectRight
+        $ LengthBank.mkLengthCounterexampleBankLimits 0 1 8 4096 1
+      widthLimits <- expectRight
+        $ LengthBank.mkLengthCounterexampleBankLimits 1 0 8 4096 1
+      bitLimits <- expectRight
+        $ LengthBank.mkLengthCounterexampleBankLimits 1 1 1 4096 1
+      byteLimits <- expectRight
+        $ LengthBank.mkLengthCounterexampleBankLimits 1 1 8 0 1
+      let scope = SMTLib.lengthSMTLibQueryCounterexampleBankScope zeroQuery
+          check limits origin expected = do
+            let empty = LengthBank.emptyLengthCounterexampleBank limits scope
+            (charged, outcome) <- evaluateWithin $ force $
+              SMTLib.recordLengthSMTLibQueryCounterexampleInBank
+                Evaluate.defaultLengthEvaluationLimits zeroQuery origin
+                receipt empty
+            outcome @?= Left
+              (SMTLib.LengthSMTLibCounterexampleBankRecordInsertionRejected
+                expected)
+            LengthBank.lengthCounterexampleBankSamples charged @?= []
+            scalarBankStats charged @?= (0, 0, 0, 0, 0, 1)
+      check entryLimits
+        (error "zero-entry insertion demanded scalar origin")
+        $ LengthBank.LengthCounterexampleBankEntryLimitExceeded 0 1
+      check widthLimits
+        (error "width rejection demanded scalar origin")
+        $ LengthBank.LengthCounterexampleBankSampleWidthLimitExceeded 0 1
+      check bitLimits
+        (error "natural-bit rejection demanded scalar origin")
+        $ LengthBank.LengthCounterexampleBankNaturalBitLimitExceeded 0 1 2
+      check byteLimits
+        (error "encoded-byte rejection demanded scalar origin")
+        $ LengthBank.LengthCounterexampleBankSampleEncodedByteLimitExceeded 0 1
+
+  , testCase
+      "F. delegate duplicate promotion and MRU accounting to scalar insertion" $
+      do
+        ((zeroProblem, zeroQuery), _) <-
+          scalarCounterexampleBankBridgeFixture successorLengthContract
+        firstReceipt <- validatedLengthCounterexampleAt zeroProblem [2]
+        secondReceipt <- validatedLengthCounterexampleAt zeroProblem [3]
+        limits <- expectRight
+          $ LengthBank.mkLengthCounterexampleBankLimits 2 1 8 4096 3
+        let scope = SMTLib.lengthSMTLibQueryCounterexampleBankScope zeroQuery
+            empty = LengthBank.emptyLengthCounterexampleBank limits scope
+            live = LengthBank.lengthCounterexampleBankLiveModelReplayOrigin
+            independent =
+              LengthBank.lengthCounterexampleBankSolverIndependentReplayOrigin
+            simplified =
+              LengthBank.lengthCounterexampleBankSimplificationReplayOrigin
+            record origin receipt bank =
+              SMTLib.recordLengthSMTLibQueryCounterexampleInBank
+                Evaluate.defaultLengthEvaluationLimits zeroQuery origin
+                receipt bank
+        (first, firstOutcome) <- pure $ record live firstReceipt empty
+        _ <- expectRight firstOutcome
+        (second, secondOutcome) <- pure
+          $ record independent secondReceipt first
+        _ <- expectRight secondOutcome
+        (promoted, promotedOutcome) <- pure
+          $ record simplified firstReceipt second
+        _ <- expectRight promotedOutcome
+        map LengthBank.lengthCounterexampleBankSampleInputs
+            (LengthBank.lengthCounterexampleBankSamples promoted) @?=
+          [[2], [3]]
+        map LengthBank.lengthCounterexampleBankSampleOrigin
+            (LengthBank.lengthCounterexampleBankSamples promoted) @?=
+          [simplified, independent]
+        scalarBankStats promoted @?=
+          (2, scalarBankEncodedBytes promoted, 3, 1, 0, 3)
+
+  , testCase
+      "G. replay one exact scalar sample with membership and charged semantics" $
+      do
+        ((zeroProblem, zeroQuery), (_, identityQuery)) <-
+          scalarCounterexampleBankBridgeFixture successorLengthContract
+        oldReceipt <- validatedLengthCounterexampleAt zeroProblem [3]
+        let live = LengthBank.lengthCounterexampleBankLiveModelReplayOrigin
+            independent =
+              LengthBank.lengthCounterexampleBankSolverIndependentReplayOrigin
+            scope = SMTLib.lengthSMTLibQueryCounterexampleBankScope zeroQuery
+            empty = LengthBank.emptyLengthCounterexampleBank
+              LengthBank.defaultLengthCounterexampleBankLimits scope
+            (recorded, recordedOutcome) =
+              SMTLib.recordLengthSMTLibQueryCounterexampleInBank
+                Evaluate.defaultLengthEvaluationLimits zeroQuery live
+                oldReceipt empty
+        _ <- expectRight recordedOutcome
+        sample <- case LengthBank.lengthCounterexampleBankSamples recorded of
+          [value] -> pure value
+          values -> assertFailure
+            ("unexpected recorded scalar samples: " ++ show values) >>
+            error "unreachable"
+        let beforeSamples = LengthBank.lengthCounterexampleBankSamples recorded
+            (replayed, replayOutcome) =
+              SMTLib.replayLengthSMTLibCounterexampleBankSample
+                Evaluate.defaultLengthEvaluationLimits identityQuery sample
+                recorded
+        fresh <- expectCounterexample replayOutcome
+        Evaluate.validatedLengthCounterexampleInputs fresh @?= [3]
+        Evaluate.validatedLengthCounterexampleResult oldReceipt @?= 0
+        Evaluate.validatedLengthCounterexampleResult fresh @?= 3
+        LengthBank.lengthCounterexampleBankSamples replayed @?= beforeSamples
+        scalarBankStats recorded @?=
+          (1, scalarBankEncodedBytes recorded, 1, 0, 0, 1)
+        scalarBankStats replayed @?=
+          (1, scalarBankEncodedBytes replayed, 1, 0, 0, 2)
+
+        ((_, foreignQuery), _) <-
+          scalarCounterexampleBankBridgeFixture identityLengthContract
+        (scopeBank, scopeOutcome) <- evaluateWithin $ force $
+          SMTLib.replayLengthSMTLibCounterexampleBankSample
+            (error "sample scope mismatch demanded scalar evaluation limits")
+            foreignQuery
+            (error "sample scope mismatch demanded scalar sample")
+            recorded
+        scopeOutcome @?= Left
+          SMTLib.LengthSMTLibCounterexampleBankSampleReplayScopeMismatch
+        scalarBankStats scopeBank @?= scalarBankStats recorded
+
+        cappedLimits <- expectRight
+          $ LengthBank.mkLengthCounterexampleBankLimits 1 1 8 4096 0
+        liveBank <- expectRight
+          $ LengthBank.insertLengthCounterexampleBankSample live [3]
+          $ LengthBank.emptyLengthCounterexampleBank cappedLimits scope
+        independentBank <- expectRight
+          $ LengthBank.insertLengthCounterexampleBankSample independent [3]
+          $ LengthBank.emptyLengthCounterexampleBank cappedLimits scope
+        liveSample <- case LengthBank.lengthCounterexampleBankSamples liveBank of
+          [value] -> pure value
+          values -> assertFailure
+            ("unexpected live-origin scalar samples: " ++ show values) >>
+            error "unreachable"
+        independentSample <- case
+            LengthBank.lengthCounterexampleBankSamples independentBank of
+          [value] -> pure value
+          values -> assertFailure
+            ("unexpected independent-origin scalar samples: " ++ show values) >>
+            error "unreachable"
+        (memberBank, memberOutcome) <- evaluateWithin $ force $
+          SMTLib.replayLengthSMTLibCounterexampleBankSample
+            (error "foreign sample demanded scalar evaluation limits")
+            zeroQuery liveSample independentBank
+        memberOutcome @?= Left
+          SMTLib.LengthSMTLibCounterexampleBankSampleReplaySampleNotRetained
+        scalarBankStats memberBank @?=
+          (1, scalarBankEncodedBytes memberBank, 1, 0, 0, 0)
+        (attemptBank, attemptOutcome) <- evaluateWithin $ force $
+          SMTLib.replayLengthSMTLibCounterexampleBankSample
+            (error "sample attempt cap demanded scalar evaluation limits")
+            zeroQuery independentSample independentBank
+        attemptOutcome @?= Left
+          (SMTLib.LengthSMTLibCounterexampleBankSampleReplayAttemptRejected
+            $ LengthBank.LengthCounterexampleBankReplayAttemptLimitExceeded
+                0 1)
+        scalarBankStats attemptBank @?=
+          (1, scalarBankEncodedBytes attemptBank, 1, 0, 0, 0)
+
+        ((_, _), (identityProblem, identityMissQuery)) <-
+          scalarCounterexampleBankBridgeFixture identityLengthContract
+        let missScope =
+              LengthProblem.checkedLengthProblemCounterexampleBankScope
+                identityProblem
+            missEmpty = LengthBank.emptyLengthCounterexampleBank
+              LengthBank.defaultLengthCounterexampleBankLimits missScope
+        missStored <- expectRight
+          $ LengthBank.insertLengthCounterexampleBankSample live [3] missEmpty
+        missSample <- case
+            LengthBank.lengthCounterexampleBankSamples missStored of
+          [value] -> pure value
+          values -> assertFailure
+            ("unexpected scalar miss samples: " ++ show values) >>
+            error "unreachable"
+        let (missBank, missOutcome) =
+              SMTLib.replayLengthSMTLibCounterexampleBankSample
+                Evaluate.defaultLengthEvaluationLimits identityMissQuery
+                missSample missStored
+        missOutcome @?= Right Nothing
+        LengthBank.lengthCounterexampleBankSamples missBank @?=
+          LengthBank.lengthCounterexampleBankSamples missStored
+        scalarBankStats missBank @?=
+          (1, scalarBankEncodedBytes missBank, 1, 0, 0, 1)
+
+        inputStored <- expectRight
+          $ LengthBank.insertLengthCounterexampleBankSample live [3] empty
+        inputSample <- case
+            LengthBank.lengthCounterexampleBankSamples inputStored of
+          [value] -> pure value
+          values -> assertFailure
+            ("unexpected scalar input-error samples: " ++ show values) >>
+            error "unreachable"
+        let (inputBank, inputOutcome) =
+              SMTLib.replayLengthSMTLibCounterexampleBankSample
+                (evaluationLimitsWith 1 8) zeroQuery inputSample inputStored
+            inputFailure = Evaluate.LengthEvaluationValueBitLimitExceeded
+              (Evaluate.LengthProblemInputValue 0) 1 2
+        inputOutcome @?= Left
+          (SMTLib.LengthSMTLibCounterexampleBankSampleReplayInputRejected
+            $ SMTLib.LengthSMTLibInputReplayEvaluationRejected inputFailure)
+        LengthBank.lengthCounterexampleBankSamples inputBank @?=
+          LengthBank.lengthCounterexampleBankSamples inputStored
+        scalarBankStats inputBank @?=
+          (1, scalarBankEncodedBytes inputBank, 1, 0, 0, 1)
+
+  , testCase
+      "H. preserve nominal product receipts, gates, and charged sample replay" $
+      do
+        ((zeroInputProblem, zeroInputQuery), (_, inputZeroQuery)) <-
+          pairCounterexampleBankBridgeFixture
+            firstSuccessorSpinePairContract
+        oldReceipt <- validatedLengthSpinePairCounterexampleAt
+          zeroInputProblem [3]
+        let live =
+              LengthBank.lengthSpinePairCounterexampleBankLiveModelReplayOrigin
+            independent =
+              LengthBank.lengthSpinePairCounterexampleBankSolverIndependentReplayOrigin
+            scope =
+              SMTLib.lengthSpinePairSMTLibQueryCounterexampleBankScope
+                inputZeroQuery
+            empty = LengthBank.emptyLengthSpinePairCounterexampleBank
+              LengthBank.defaultLengthSpinePairCounterexampleBankLimits scope
+            (recorded, recordOutcome) =
+              SMTLib.recordLengthSpinePairSMTLibQueryCounterexampleInBank
+                Evaluate.defaultLengthEvaluationLimits inputZeroQuery live
+                oldReceipt empty
+        fresh <- expectRight recordOutcome
+        Evaluate.validatedLengthSpinePairCounterexampleInputs fresh @?= [3]
+        Evaluate.validatedLengthSpinePairCounterexampleResult oldReceipt @?=
+          Length.LengthSpinePair 0 3
+        Evaluate.validatedLengthSpinePairCounterexampleResult fresh @?=
+          Length.LengthSpinePair 3 0
+        Evaluate.validatedLengthSpinePairCounterexampleBasis fresh @?=
+          Evaluate.ProviderIndependentFiniteSpineModel
+        pairBankStats recorded @?=
+          (1, pairBankEncodedBytes recorded, 1, 0, 0, 1)
+        sample <- case
+            LengthBank.lengthSpinePairCounterexampleBankSamples recorded of
+          [value] -> pure value
+          values -> assertFailure
+            ("unexpected recorded product samples: " ++ show values) >>
+            error "unreachable"
+        let recordedSamples =
+              LengthBank.lengthSpinePairCounterexampleBankSamples recorded
+            (replayed, replayOutcome) =
+              SMTLib.replayLengthSpinePairSMTLibCounterexampleBankSample
+                Evaluate.defaultLengthEvaluationLimits zeroInputQuery sample
+                recorded
+        replayFresh <- expectCounterexample replayOutcome
+        Evaluate.validatedLengthSpinePairCounterexampleResult replayFresh @?=
+          Length.LengthSpinePair 0 3
+        LengthBank.lengthSpinePairCounterexampleBankSamples replayed @?=
+          recordedSamples
+        pairBankStats replayed @?=
+          (1, pairBankEncodedBytes replayed, 1, 0, 0, 2)
+
+        let (inputBank, inputOutcome) =
+              SMTLib.replayLengthSpinePairSMTLibCounterexampleBankSample
+                (evaluationLimitsWith 1 8) inputZeroQuery sample replayed
+            inputFailure =
+              Evaluate.LengthSpinePairEvaluationValueBitLimitExceeded
+                (Evaluate.LengthSpinePairProblemInputValue 0) 1 2
+        inputOutcome @?= Left
+          (SMTLib.LengthSpinePairSMTLibCounterexampleBankSampleReplayInputRejected
+            $ SMTLib.LengthSpinePairSMTLibInputReplayEvaluationRejected
+                inputFailure)
+        LengthBank.lengthSpinePairCounterexampleBankSamples inputBank @?=
+          recordedSamples
+        pairBankStats inputBank @?=
+          (1, pairBankEncodedBytes inputBank, 1, 0, 0, 3)
+
+        let recordInputEmpty =
+              LengthBank.emptyLengthSpinePairCounterexampleBank
+                LengthBank.defaultLengthSpinePairCounterexampleBankLimits
+                scope
+            (recordInputBank, recordInputOutcome) =
+              SMTLib.recordLengthSpinePairSMTLibQueryCounterexampleInBank
+                (evaluationLimitsWith 1 8) inputZeroQuery
+                (error "record input rejection demanded product origin")
+                oldReceipt recordInputEmpty
+        recordInputOutcome @?= Left
+          (SMTLib.LengthSpinePairSMTLibCounterexampleBankRecordInputReplayRejected
+            $ SMTLib.LengthSpinePairSMTLibInputReplayEvaluationRejected
+                inputFailure)
+        pairBankStats recordInputBank @?= (0, 0, 0, 0, 0, 1)
+
+        ((missProblem, _), (_, missQuery)) <-
+          pairCounterexampleBankBridgeFixture
+          firstIdentitySpinePairContract
+        missReceipt <- validatedLengthSpinePairCounterexampleAt missProblem [3]
+        let missScope =
+              SMTLib.lengthSpinePairSMTLibQueryCounterexampleBankScope
+                missQuery
+            missEmpty = LengthBank.emptyLengthSpinePairCounterexampleBank
+              LengthBank.defaultLengthSpinePairCounterexampleBankLimits
+              missScope
+        (recordMissBank, recordMissOutcome) <- evaluateWithin $ force $
+          SMTLib.recordLengthSpinePairSMTLibQueryCounterexampleInBank
+            Evaluate.defaultLengthEvaluationLimits missQuery
+            (error "product record miss demanded origin")
+            missReceipt missEmpty
+        recordMissOutcome @?= Left
+          SMTLib.LengthSpinePairSMTLibCounterexampleBankRecordCounterexampleNotReproduced
+        LengthBank.lengthSpinePairCounterexampleBankSamples recordMissBank @?=
+          []
+        pairBankStats recordMissBank @?= (0, 0, 0, 0, 0, 1)
+
+        missStored <- expectRight
+          $ LengthBank.insertLengthSpinePairCounterexampleBankSample
+              live [3] missEmpty
+        missSample <- case
+            LengthBank.lengthSpinePairCounterexampleBankSamples missStored of
+          [value] -> pure value
+          values -> assertFailure
+            ("unexpected product miss samples: " ++ show values) >>
+            error "unreachable"
+        let (missBank, missOutcome) =
+              SMTLib.replayLengthSpinePairSMTLibCounterexampleBankSample
+                Evaluate.defaultLengthEvaluationLimits missQuery missSample
+                missStored
+        missOutcome @?= Right Nothing
+        pairBankStats missBank @?=
+          (1, pairBankEncodedBytes missBank, 1, 0, 0, 1)
+
+        (recordScopeBank, recordScopeOutcome) <- evaluateWithin $ force $
+          SMTLib.recordLengthSpinePairSMTLibQueryCounterexampleInBank
+            (error "record scope mismatch demanded product evaluation limits")
+            missQuery
+            (error "record scope mismatch demanded product origin")
+            (error "record scope mismatch demanded product receipt")
+            recorded
+        recordScopeOutcome @?= Left
+          SMTLib.LengthSpinePairSMTLibCounterexampleBankRecordScopeMismatch
+        LengthBank.lengthSpinePairCounterexampleBankSamples recordScopeBank @?=
+          recordedSamples
+        pairBankStats recordScopeBank @?= pairBankStats recorded
+
+        (sampleScopeBank, sampleScopeOutcome) <- evaluateWithin $ force $
+          SMTLib.replayLengthSpinePairSMTLibCounterexampleBankSample
+            (error "sample scope mismatch demanded product evaluation limits")
+            missQuery
+            (error "sample scope mismatch demanded product sample")
+            recorded
+        sampleScopeOutcome @?= Left
+          SMTLib.LengthSpinePairSMTLibCounterexampleBankSampleReplayScopeMismatch
+        LengthBank.lengthSpinePairCounterexampleBankSamples sampleScopeBank @?=
+          recordedSamples
+        pairBankStats sampleScopeBank @?= pairBankStats recorded
+
+        entryLimits <- expectRight
+          $ LengthBank.mkLengthSpinePairCounterexampleBankLimits
+              0 1 8 4096 1
+        let noEntries = LengthBank.emptyLengthSpinePairCounterexampleBank
+              entryLimits scope
+        (entryBank, entryOutcome) <- evaluateWithin $ force $
+          SMTLib.recordLengthSpinePairSMTLibQueryCounterexampleInBank
+            Evaluate.defaultLengthEvaluationLimits inputZeroQuery
+            (error "zero-entry insertion demanded product origin")
+            oldReceipt noEntries
+        entryOutcome @?= Left
+          (SMTLib.LengthSpinePairSMTLibCounterexampleBankRecordInsertionRejected
+            $ LengthBank.LengthSpinePairCounterexampleBankEntryLimitExceeded
+                0 1)
+        pairBankStats entryBank @?= (0, 0, 0, 0, 0, 1)
+
+        cappedLimits <- expectRight
+          $ LengthBank.mkLengthSpinePairCounterexampleBankLimits
+              1 1 8 4096 0
+        capped <- expectRight
+          $ LengthBank.insertLengthSpinePairCounterexampleBankSample live [3]
+          $ LengthBank.emptyLengthSpinePairCounterexampleBank
+              cappedLimits scope
+        independentCapped <- expectRight
+          $ LengthBank.insertLengthSpinePairCounterexampleBankSample
+              independent [3]
+          $ LengthBank.emptyLengthSpinePairCounterexampleBank
+              cappedLimits scope
+        cappedSample <- case
+            LengthBank.lengthSpinePairCounterexampleBankSamples capped of
+          [value] -> pure value
+          values -> assertFailure
+            ("unexpected capped product samples: " ++ show values) >>
+            error "unreachable"
+        independentCappedSample <- case
+            LengthBank.lengthSpinePairCounterexampleBankSamples
+              independentCapped of
+          [value] -> pure value
+          values -> assertFailure
+            ("unexpected independent capped product samples: " ++
+              show values) >>
+            error "unreachable"
+
+        (memberBank, memberOutcome) <- evaluateWithin $ force $
+          SMTLib.replayLengthSpinePairSMTLibCounterexampleBankSample
+            (error "foreign sample demanded product evaluation limits")
+            inputZeroQuery cappedSample independentCapped
+        memberOutcome @?= Left
+          SMTLib.LengthSpinePairSMTLibCounterexampleBankSampleReplaySampleNotRetained
+        pairBankStats memberBank @?=
+          (1, pairBankEncodedBytes memberBank, 1, 0, 0, 0)
+
+        (recordAttemptBank, recordAttemptOutcome) <- evaluateWithin $ force $
+          SMTLib.recordLengthSpinePairSMTLibQueryCounterexampleInBank
+            (error "record attempt cap demanded product evaluation limits")
+            inputZeroQuery
+            (error "record attempt cap demanded product origin")
+            (error "record attempt cap demanded product receipt")
+            independentCapped
+        recordAttemptOutcome @?= Left
+          (SMTLib.LengthSpinePairSMTLibCounterexampleBankRecordAttemptRejected
+            $ LengthBank.LengthSpinePairCounterexampleBankReplayAttemptLimitExceeded
+                0 1)
+        pairBankStats recordAttemptBank @?=
+          ( 1, pairBankEncodedBytes recordAttemptBank, 1, 0, 0, 0 )
+
+        (sampleAttemptBank, sampleAttemptOutcome) <- evaluateWithin $ force $
+          SMTLib.replayLengthSpinePairSMTLibCounterexampleBankSample
+            (error "sample attempt cap demanded product evaluation limits")
+            inputZeroQuery independentCappedSample independentCapped
+        sampleAttemptOutcome @?= Left
+          (SMTLib.LengthSpinePairSMTLibCounterexampleBankSampleReplayAttemptRejected
+            $ LengthBank.LengthSpinePairCounterexampleBankReplayAttemptLimitExceeded
+                0 1)
+        pairBankStats sampleAttemptBank @?=
+          (1, pairBankEncodedBytes sampleAttemptBank, 1, 0, 0, 0)
+  ]
+
 counterexampleSimplificationTests :: TestTree
 counterexampleSimplificationTests = testGroup
   "query-owned bounded counterexample simplification"
@@ -14129,6 +14693,16 @@ identityLengthContract = contractWith
     (Length.LengthVariable Length.LengthResult)
     (Length.LengthVariable $ Length.LengthInput 0))
 
+successorLengthContract :: Length.LengthContractSource
+successorLengthContract = contractWith
+  (Length.LengthTruth True)
+  (Length.LengthEqual
+    (Length.LengthVariable Length.LengthResult)
+    (Length.LengthSum
+      [ Length.LengthVariable $ Length.LengthInput 0
+      , Length.LengthLiteral 1
+      ]))
+
 trivialLengthContract :: Length.LengthContractSource
 trivialLengthContract = contractWith
   (Length.LengthTruth True) (Length.LengthTruth True)
@@ -14145,6 +14719,23 @@ contractWith precondition postcondition = Length.LengthContractSource
 trivialSpinePairContract :: Length.LengthSpinePairContractSource
 trivialSpinePairContract = spinePairContractWith
   (Length.LengthTruth True) (Length.LengthTruth True)
+
+firstIdentitySpinePairContract :: Length.LengthSpinePairContractSource
+firstIdentitySpinePairContract = spinePairContractWith
+  (Length.LengthTruth True)
+  (Length.LengthEqual
+    (pairResultVariable Length.LengthSpinePairFirst)
+    (Length.LengthVariable $ Length.LengthSpinePairInput 0))
+
+firstSuccessorSpinePairContract :: Length.LengthSpinePairContractSource
+firstSuccessorSpinePairContract = spinePairContractWith
+  (Length.LengthTruth True)
+  (Length.LengthEqual
+    (pairResultVariable Length.LengthSpinePairFirst)
+    (Length.LengthSum
+      [ Length.LengthVariable $ Length.LengthSpinePairInput 0
+      , Length.LengthLiteral 1
+      ]))
 
 spinePairContractWith
   :: Length.LengthFormula Length.LengthSpinePairContractVariable
@@ -14915,6 +15506,70 @@ adversarialZeroAndInputSpinePairGraph = sealAdversarialGraph
                 (Djex.termNodeId 2)
         )
       ]
+
+type AdversarialCheckedLengthProblem =
+  LengthProblem.CheckedLengthProblem AdversarialIdentity AdversarialLocal
+
+type AdversarialLengthSMTLibQuery =
+  SMTLib.LengthSMTLibQuery AdversarialIdentity AdversarialLocal
+
+type AdversarialCheckedLengthSpinePairProblem =
+  LengthProblem.CheckedLengthSpinePairProblem
+    AdversarialIdentity AdversarialLocal
+
+type AdversarialLengthSpinePairSMTLibQuery =
+  SMTLib.LengthSpinePairSMTLibQuery AdversarialIdentity AdversarialLocal
+
+scalarCounterexampleBankBridgeFixture
+  :: Length.LengthContractSource
+  -> IO
+      ( (AdversarialCheckedLengthProblem, AdversarialLengthSMTLibQuery)
+      , (AdversarialCheckedLengthProblem, AdversarialLengthSMTLibQuery)
+      )
+scalarCounterexampleBankBridgeFixture contractSource = do
+  session <- adversarialLengthSession [] []
+  contract <- adversarialLengthContract session
+    (FunctionType adversarialClosedList adversarialClosedList)
+    contractSource
+  zeroGraph <- adversarialConstantZeroGraph
+  identityGraph <- sealAdversarialGraph
+    $ adversarialIdentityGraphSource adversarialClosedList
+  zeroProblem <- sealAdversarialLengthProblem session contract zeroGraph
+  identityProblem <- sealAdversarialLengthProblem session contract identityGraph
+  zeroQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits zeroProblem
+  identityQuery <- expectRight $ SMTLib.sealLengthSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits identityProblem
+  pure ((zeroProblem, zeroQuery), (identityProblem, identityQuery))
+
+pairCounterexampleBankBridgeFixture
+  :: Length.LengthSpinePairContractSource
+  -> IO
+      ( ( AdversarialCheckedLengthSpinePairProblem
+        , AdversarialLengthSpinePairSMTLibQuery
+        )
+      , ( AdversarialCheckedLengthSpinePairProblem
+        , AdversarialLengthSpinePairSMTLibQuery
+        )
+      )
+pairCounterexampleBankBridgeFixture contractSource = do
+  session <- adversarialLengthSession [] []
+  contract <- adversarialLengthSpinePairContract session
+    adversarialInputSpinePairTarget contractSource
+  zeroInputGraph <- adversarialZeroAndInputSpinePairGraph
+  inputZeroGraph <- adversarialInputAndZeroSpinePairGraph
+  zeroInputProblem <- sealAdversarialLengthSpinePairProblem
+    session contract zeroInputGraph
+  inputZeroProblem <- sealAdversarialLengthSpinePairProblem
+    session contract inputZeroGraph
+  zeroInputQuery <- expectRight $ SMTLib.sealLengthSpinePairSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits zeroInputProblem
+  inputZeroQuery <- expectRight $ SMTLib.sealLengthSpinePairSMTLibQuery
+    SMTLib.defaultLengthSMTLibLimits inputZeroProblem
+  pure
+    ( (zeroInputProblem, zeroInputQuery)
+    , (inputZeroProblem, inputZeroQuery)
+    )
 
 sealAdversarialLengthProblem
   :: LengthProblem.CheckedLengthSession AdversarialIdentity ()

@@ -268,6 +268,48 @@ projectionSignatures =
   (LengthSMTLib.lengthSpinePairSMTLibQueryCounterexampleBankScope
     :: LengthSMTLib.LengthSpinePairSMTLibQuery Int ()
     -> LengthBank.LengthSpinePairCounterexampleBankScope Int) `seq`
+  (LengthSMTLib.recordLengthSMTLibQueryCounterexampleInBank
+    :: LengthEvaluate.LengthEvaluationLimits
+    -> LengthSMTLib.LengthSMTLibQuery Int ()
+    -> LengthBank.LengthCounterexampleBankOrigin
+    -> LengthEvaluate.ValidatedLengthCounterexample
+    -> LengthBank.LengthCounterexampleBank Int
+    -> ( LengthBank.LengthCounterexampleBank Int
+       , Either
+          LengthSMTLib.LengthSMTLibCounterexampleBankRecordError
+          LengthEvaluate.ValidatedLengthCounterexample
+       )) `seq`
+  (LengthSMTLib.replayLengthSMTLibCounterexampleBankSample
+    :: LengthEvaluate.LengthEvaluationLimits
+    -> LengthSMTLib.LengthSMTLibQuery Int ()
+    -> LengthBank.LengthCounterexampleBankSample
+    -> LengthBank.LengthCounterexampleBank Int
+    -> ( LengthBank.LengthCounterexampleBank Int
+       , Either
+          LengthSMTLib.LengthSMTLibCounterexampleBankSampleReplayError
+          (Maybe LengthEvaluate.ValidatedLengthCounterexample)
+       )) `seq`
+  (LengthSMTLib.recordLengthSpinePairSMTLibQueryCounterexampleInBank
+    :: LengthEvaluate.LengthEvaluationLimits
+    -> LengthSMTLib.LengthSpinePairSMTLibQuery Int ()
+    -> LengthBank.LengthSpinePairCounterexampleBankOrigin
+    -> LengthEvaluate.ValidatedLengthSpinePairCounterexample
+    -> LengthBank.LengthSpinePairCounterexampleBank Int
+    -> ( LengthBank.LengthSpinePairCounterexampleBank Int
+       , Either
+          LengthSMTLib.LengthSpinePairSMTLibCounterexampleBankRecordError
+          LengthEvaluate.ValidatedLengthSpinePairCounterexample
+       )) `seq`
+  (LengthSMTLib.replayLengthSpinePairSMTLibCounterexampleBankSample
+    :: LengthEvaluate.LengthEvaluationLimits
+    -> LengthSMTLib.LengthSpinePairSMTLibQuery Int ()
+    -> LengthBank.LengthSpinePairCounterexampleBankSample
+    -> LengthBank.LengthSpinePairCounterexampleBank Int
+    -> ( LengthBank.LengthSpinePairCounterexampleBank Int
+       , Either
+          LengthSMTLib.LengthSpinePairSMTLibCounterexampleBankSampleReplayError
+          (Maybe LengthEvaluate.ValidatedLengthSpinePairCounterexample)
+       )) `seq`
   (LengthBank.lengthCounterexampleBankScopeFingerprint
     :: LengthBank.LengthCounterexampleBankScope Int
     -> Fingerprint.Fingerprint

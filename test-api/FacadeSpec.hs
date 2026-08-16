@@ -951,6 +951,29 @@ facadeTests = testGroup "public Djex facade"
             -> Either LengthCounterexampleBankError
                 (LengthCounterexampleBank Int)
           scalarAttempt = recordLengthCounterexampleBankReplayAttempt
+          scalarBridgeRecord
+            :: LengthEvaluationLimits
+            -> LengthSMTLibQuery Int ExferenceLocal
+            -> LengthCounterexampleBankOrigin
+            -> ValidatedLengthCounterexample
+            -> LengthCounterexampleBank Int
+            -> ( LengthCounterexampleBank Int
+               , Either LengthSMTLibCounterexampleBankRecordError
+                   ValidatedLengthCounterexample
+               )
+          scalarBridgeRecord =
+            recordLengthSMTLibQueryCounterexampleInBank
+          scalarBridgeReplay
+            :: LengthEvaluationLimits
+            -> LengthSMTLibQuery Int ExferenceLocal
+            -> LengthCounterexampleBankSample
+            -> LengthCounterexampleBank Int
+            -> ( LengthCounterexampleBank Int
+               , Either LengthSMTLibCounterexampleBankSampleReplayError
+                   (Maybe ValidatedLengthCounterexample)
+               )
+          scalarBridgeReplay =
+            replayLengthSMTLibCounterexampleBankSample
           scalarBankScope
             :: LengthCounterexampleBank Int
             -> LengthCounterexampleBankScope Int
@@ -1028,6 +1051,30 @@ facadeTests = testGroup "public Djex facade"
             -> Either LengthSpinePairCounterexampleBankError
                 (LengthSpinePairCounterexampleBank Int)
           pairAttempt = recordLengthSpinePairCounterexampleBankReplayAttempt
+          pairBridgeRecord
+            :: LengthEvaluationLimits
+            -> LengthSpinePairSMTLibQuery Int ExferenceLocal
+            -> LengthSpinePairCounterexampleBankOrigin
+            -> ValidatedLengthSpinePairCounterexample
+            -> LengthSpinePairCounterexampleBank Int
+            -> ( LengthSpinePairCounterexampleBank Int
+               , Either LengthSpinePairSMTLibCounterexampleBankRecordError
+                   ValidatedLengthSpinePairCounterexample
+               )
+          pairBridgeRecord =
+            recordLengthSpinePairSMTLibQueryCounterexampleInBank
+          pairBridgeReplay
+            :: LengthEvaluationLimits
+            -> LengthSpinePairSMTLibQuery Int ExferenceLocal
+            -> LengthSpinePairCounterexampleBankSample
+            -> LengthSpinePairCounterexampleBank Int
+            -> ( LengthSpinePairCounterexampleBank Int
+               , Either
+                   LengthSpinePairSMTLibCounterexampleBankSampleReplayError
+                   (Maybe ValidatedLengthSpinePairCounterexample)
+               )
+          pairBridgeReplay =
+            replayLengthSpinePairSMTLibCounterexampleBankSample
           pairBankScope
             :: LengthSpinePairCounterexampleBank Int
             -> LengthSpinePairCounterexampleBankScope Int
@@ -1080,23 +1127,121 @@ facadeTests = testGroup "public Djex facade"
                 0 1
             , LengthSpinePairCounterexampleBankReplayAttemptLimitExceeded 0 1
             ]
+          scalarRecordErrors
+            :: [LengthSMTLibCounterexampleBankRecordError]
+          scalarRecordErrors =
+            [ LengthSMTLibCounterexampleBankRecordScopeMismatch
+            , LengthSMTLibCounterexampleBankRecordAttemptRejected
+                $ LengthCounterexampleBankReplayAttemptLimitExceeded 0 1
+            , LengthSMTLibCounterexampleBankRecordInputReplayRejected
+                $ LengthSMTLibInputReplayAssociationRejected
+                    ReplayDomainMismatch
+            , LengthSMTLibCounterexampleBankRecordCounterexampleNotReproduced
+            , LengthSMTLibCounterexampleBankRecordInsertionRejected
+                $ LengthCounterexampleBankEntryLimitExceeded 0 1
+            ]
+          scalarSampleReplayErrors
+            :: [LengthSMTLibCounterexampleBankSampleReplayError]
+          scalarSampleReplayErrors =
+            [ LengthSMTLibCounterexampleBankSampleReplayScopeMismatch
+            , LengthSMTLibCounterexampleBankSampleReplaySampleNotRetained
+            , LengthSMTLibCounterexampleBankSampleReplayAttemptRejected
+                $ LengthCounterexampleBankReplayAttemptLimitExceeded 0 1
+            , LengthSMTLibCounterexampleBankSampleReplayInputRejected
+                $ LengthSMTLibInputReplayAssociationRejected
+                    ReplayDomainMismatch
+            ]
+          pairRecordErrors
+            :: [LengthSpinePairSMTLibCounterexampleBankRecordError]
+          pairRecordErrors =
+            [ LengthSpinePairSMTLibCounterexampleBankRecordScopeMismatch
+            , LengthSpinePairSMTLibCounterexampleBankRecordAttemptRejected
+                $ LengthSpinePairCounterexampleBankReplayAttemptLimitExceeded
+                    0 1
+            , LengthSpinePairSMTLibCounterexampleBankRecordInputReplayRejected
+                $ LengthSpinePairSMTLibInputReplayAssociationRejected
+                    ReplayDomainMismatch
+            , LengthSpinePairSMTLibCounterexampleBankRecordCounterexampleNotReproduced
+            , LengthSpinePairSMTLibCounterexampleBankRecordInsertionRejected
+                $ LengthSpinePairCounterexampleBankEntryLimitExceeded 0 1
+            ]
+          pairSampleReplayErrors
+            :: [LengthSpinePairSMTLibCounterexampleBankSampleReplayError]
+          pairSampleReplayErrors =
+            [ LengthSpinePairSMTLibCounterexampleBankSampleReplayScopeMismatch
+            , LengthSpinePairSMTLibCounterexampleBankSampleReplaySampleNotRetained
+            , LengthSpinePairSMTLibCounterexampleBankSampleReplayAttemptRejected
+                $ LengthSpinePairCounterexampleBankReplayAttemptLimitExceeded
+                    0 1
+            , LengthSpinePairSMTLibCounterexampleBankSampleReplayInputRejected
+                $ LengthSpinePairSMTLibInputReplayAssociationRejected
+                    ReplayDomainMismatch
+            ]
+          classifyScalarRecordError failure = case failure of
+            LengthSMTLibCounterexampleBankRecordScopeMismatch -> "scope"
+            LengthSMTLibCounterexampleBankRecordAttemptRejected{} -> "attempt"
+            LengthSMTLibCounterexampleBankRecordInputReplayRejected{} ->
+              "input"
+            LengthSMTLibCounterexampleBankRecordCounterexampleNotReproduced ->
+              "miss"
+            LengthSMTLibCounterexampleBankRecordInsertionRejected{} ->
+              "insert"
+          classifyScalarSampleReplayError failure = case failure of
+            LengthSMTLibCounterexampleBankSampleReplayScopeMismatch -> "scope"
+            LengthSMTLibCounterexampleBankSampleReplaySampleNotRetained ->
+              "member"
+            LengthSMTLibCounterexampleBankSampleReplayAttemptRejected{} ->
+              "attempt"
+            LengthSMTLibCounterexampleBankSampleReplayInputRejected{} ->
+              "input"
+          classifyPairRecordError failure = case failure of
+            LengthSpinePairSMTLibCounterexampleBankRecordScopeMismatch ->
+              "scope"
+            LengthSpinePairSMTLibCounterexampleBankRecordAttemptRejected{} ->
+              "attempt"
+            LengthSpinePairSMTLibCounterexampleBankRecordInputReplayRejected{} ->
+              "input"
+            LengthSpinePairSMTLibCounterexampleBankRecordCounterexampleNotReproduced ->
+              "miss"
+            LengthSpinePairSMTLibCounterexampleBankRecordInsertionRejected{} ->
+              "insert"
+          classifyPairSampleReplayError failure = case failure of
+            LengthSpinePairSMTLibCounterexampleBankSampleReplayScopeMismatch ->
+              "scope"
+            LengthSpinePairSMTLibCounterexampleBankSampleReplaySampleNotRetained ->
+              "member"
+            LengthSpinePairSMTLibCounterexampleBankSampleReplayAttemptRejected{} ->
+              "attempt"
+            LengthSpinePairSMTLibCounterexampleBankSampleReplayInputRejected{} ->
+              "input"
       scalarProblemScope `seq` scalarQueryScope `seq`
         scalarScopeFingerprint `seq` scalarTargetFingerprint `seq`
         scalarEmpty `seq` scalarMatches `seq` scalarInsert `seq`
-        scalarAttempt `seq` scalarBankScope `seq` scalarBankLimits `seq`
+        scalarAttempt `seq` scalarBridgeRecord `seq` scalarBridgeReplay `seq`
+        scalarBankScope `seq` scalarBankLimits `seq`
         scalarSamples `seq` scalarStats `seq` scalarSampleInputs `seq`
         scalarSampleOrigin `seq` scalarSampleBytes `seq`
         pairProblemScope `seq` pairQueryScope `seq`
         pairScopeFingerprint `seq` pairTargetFingerprint `seq`
         pairEmpty `seq` pairMatches `seq` pairInsert `seq` pairAttempt `seq`
+        pairBridgeRecord `seq` pairBridgeReplay `seq`
         pairBankScope `seq` pairBankLimits `seq` pairSamples `seq`
         pairStats `seq` pairSampleInputs `seq` pairSampleOrigin `seq`
         pairSampleBytes `seq` scalarStatsProjections `seq`
         pairStatsProjections `seq` scalarErrors `seq` pairErrors `seq`
+        scalarRecordErrors `seq` scalarSampleReplayErrors `seq`
+        pairRecordErrors `seq` pairSampleReplayErrors `seq`
         (rnf :: LengthCounterexampleBankScope Int -> ()) `seq`
         (rnf :: LengthCounterexampleBank Int -> ()) `seq`
         (rnf :: LengthSpinePairCounterexampleBankScope Int -> ()) `seq`
         (rnf :: LengthSpinePairCounterexampleBank Int -> ()) `seq`
+        (rnf :: LengthSMTLibCounterexampleBankRecordError -> ()) `seq`
+        (rnf :: LengthSMTLibCounterexampleBankSampleReplayError -> ()) `seq`
+        (rnf :: LengthSpinePairSMTLibCounterexampleBankRecordError -> ())
+          `seq`
+        (rnf
+          :: LengthSpinePairSMTLibCounterexampleBankSampleReplayError -> ())
+          `seq`
         pure ()
       map ($ defaultLengthCounterexampleBankLimits)
         [ lengthCounterexampleBankEntryLimit
@@ -1148,6 +1293,14 @@ facadeTests = testGroup "public Djex facade"
             lengthSpinePairCounterexampleBankSolverIndependentReplayOrigin &&
           lengthSpinePairCounterexampleBankSolverIndependentReplayOrigin /=
             lengthSpinePairCounterexampleBankSimplificationReplayOrigin
+      map classifyScalarRecordError scalarRecordErrors @?=
+        ["scope", "attempt", "input", "miss", "insert"]
+      map classifyScalarSampleReplayError scalarSampleReplayErrors @?=
+        ["scope", "member", "attempt", "input"]
+      map classifyPairRecordError pairRecordErrors @?=
+        ["scope", "attempt", "input", "miss", "insert"]
+      map classifyPairSampleReplayError pairSampleReplayErrors @?=
+        ["scope", "member", "attempt", "input"]
   , testCase "exports atomic finite-spine candidate problems" $ do
       let sealer
             :: LengthProblemLimits

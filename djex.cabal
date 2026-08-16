@@ -156,6 +156,7 @@ Library
     Language.Haskell.Synthesis.Search
     Language.Haskell.Synthesis.Selection
     Language.Haskell.Synthesis.Semantic.Length
+    Language.Haskell.Synthesis.Semantic.Length.CounterexampleBank
     Language.Haskell.Synthesis.Semantic.Length.Evaluate
     Language.Haskell.Synthesis.Semantic.Length.Problem
     Language.Haskell.Synthesis.Semantic.Length.SMTLib
@@ -250,6 +251,7 @@ Library
     Language.Haskell.Synthesis.Internal.Fingerprint.Type
     Language.Haskell.Synthesis.Internal.InstanceHead
     Language.Haskell.Synthesis.Internal.Semantic.Length
+    Language.Haskell.Synthesis.Internal.Semantic.Length.CounterexampleBank
     Language.Haskell.Synthesis.Internal.Semantic.Length.Problem
     Language.Haskell.Synthesis.Internal.Semantic.Length.Problem.Candidate
     Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib

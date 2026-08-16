@@ -36,6 +36,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   , lengthSMTLibQueryInputValueRequestBytes
   , lengthSMTLibQueryFingerprint
   , lengthSMTLibQueryBehavioralProblem
+  , lengthSMTLibQueryCounterexampleBankScope
   , LengthSMTLibIntegerBinding (..)
   , LengthSMTLibModelError (..)
   , validateLengthSMTLibCounterexample
@@ -59,6 +60,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   , lengthSpinePairSMTLibQueryInputValueRequestBytes
   , lengthSpinePairSMTLibQueryFingerprint
   , lengthSpinePairSMTLibQueryBehavioralProblem
+  , lengthSpinePairSMTLibQueryCounterexampleBankScope
   , LengthSpinePairSMTLibModelError (..)
   , validateLengthSpinePairSMTLibCounterexample
   , LengthSpinePairSMTLibInputReplayError (..)
@@ -142,11 +144,17 @@ import Language.Haskell.Synthesis.Semantic.Length.Problem
   ( CheckedLengthProblem
   , CheckedLengthSpinePairProblem
   , checkedLengthProblemBehavioralProblem
+  , checkedLengthProblemCounterexampleBankScope
   , checkedLengthProblemCounterexampleCondition
   , checkedLengthProblemInputCount
   , checkedLengthSpinePairProblemBehavioralProblem
+  , checkedLengthSpinePairProblemCounterexampleBankScope
   , checkedLengthSpinePairProblemCounterexampleCondition
   , checkedLengthSpinePairProblemInputCount
+  )
+import Language.Haskell.Synthesis.Semantic.Length.CounterexampleBank
+  ( LengthCounterexampleBankScope
+  , LengthSpinePairCounterexampleBankScope
   )
 import Language.Haskell.Synthesis.Semantic.Problem
   ( BehavioralEvidence
@@ -451,6 +459,16 @@ lengthSMTLibQueryBehavioralProblem
 lengthSMTLibQueryBehavioralProblem (LengthSMTLibQuery problem _ _) =
   checkedLengthProblemBehavioralProblem problem
 
+-- | Project the candidate-independent replay-input scope retained by this
+-- query's exact checked problem.  Query translation and execution identity do
+-- not enter the scope.
+lengthSMTLibQueryCounterexampleBankScope
+  :: LengthSMTLibQuery identity local
+  -> LengthCounterexampleBankScope identity
+lengthSMTLibQueryCounterexampleBankScope
+    (LengthSMTLibQuery problem _ _) =
+  checkedLengthProblemCounterexampleBankScope problem
+
 -- | Translate and seal the solver-neutral bad state retained by one exact
 -- checked binary-product problem.  Its substituted formula already contains
 -- only compact input variables, so the canonical program requests inputs and
@@ -529,6 +547,13 @@ lengthSpinePairSMTLibQueryBehavioralProblem
 lengthSpinePairSMTLibQueryBehavioralProblem
     (LengthSpinePairSMTLibQuery problem _ _) =
   checkedLengthSpinePairProblemBehavioralProblem problem
+
+lengthSpinePairSMTLibQueryCounterexampleBankScope
+  :: LengthSpinePairSMTLibQuery identity local
+  -> LengthSpinePairCounterexampleBankScope identity
+lengthSpinePairSMTLibQueryCounterexampleBankScope
+    (LengthSpinePairSMTLibQuery problem _ _) =
+  checkedLengthSpinePairProblemCounterexampleBankScope problem
 
 -- | One parser-decoded integer associated with its exact returned symbol.
 -- Construction is intentionally public: this value is untrusted input and

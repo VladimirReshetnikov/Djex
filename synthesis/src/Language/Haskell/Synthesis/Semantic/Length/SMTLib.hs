@@ -59,6 +59,7 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib
   , lengthSMTLibQueryInputValueRequestBytes
   , lengthSMTLibQueryFingerprint
   , lengthSMTLibQueryBehavioralProblem
+  , lengthSMTLibQueryCounterexampleBankScope
   , LengthSMTLibIntegerBinding (..)
   , LengthSMTLibModelError (..)
   , validateLengthSMTLibCounterexample
@@ -82,6 +83,7 @@ module Language.Haskell.Synthesis.Semantic.Length.SMTLib
   , lengthSpinePairSMTLibQueryInputValueRequestBytes
   , lengthSpinePairSMTLibQueryFingerprint
   , lengthSpinePairSMTLibQueryBehavioralProblem
+  , lengthSpinePairSMTLibQueryCounterexampleBankScope
   , LengthSpinePairSMTLibModelError (..)
   , validateLengthSpinePairSMTLibCounterexample
   , LengthSpinePairSMTLibInputReplayError (..)

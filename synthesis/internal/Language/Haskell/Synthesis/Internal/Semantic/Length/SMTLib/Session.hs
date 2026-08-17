@@ -154,7 +154,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Char (intToDigit, ord)
 import Data.List (nub)
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Set as Set
 import Data.Set (Set)
 import Data.Word (Word64, Word8)
@@ -1777,7 +1777,7 @@ acquireLengthSMTLibQueryGate
   :: LengthSMTLibReadyWorker epoch
   -> LengthSMTLibProcessDeadline
   -> IO (Either LengthSMTLibQueryRunFailure ())
-acquireLengthSMTLibQueryGate worker deadline = mask $ \_ -> loop
+acquireLengthSMTLibQueryGate worker deadline = mask $ const loop
  where
   maximumQueries = readyQueryMaximumQueries $ readyWorkerQueryPolicy worker
   process = readyWorkerProcess worker
@@ -2860,7 +2860,7 @@ acquireLengthSpinePairSMTLibQueryGate
   :: LengthSMTLibReadyWorker epoch
   -> LengthSMTLibProcessDeadline
   -> IO (Either LengthSpinePairSMTLibQueryRunFailure ())
-acquireLengthSpinePairSMTLibQueryGate worker deadline = mask $ \_ -> loop
+acquireLengthSpinePairSMTLibQueryGate worker deadline = mask $ const loop
  where
   maximumQueries = readyQueryMaximumQueries $ readyWorkerQueryPolicy worker
   process = readyWorkerProcess worker
@@ -3991,9 +3991,8 @@ withLengthSMTLibReadyWorkerWithDeadlinePolicy deadlinePolicy config use =
         Left failure -> do
           rollback <- readTVarIO rolledBackWorkspace
           let cleanup = emptyCleanup
-                { lengthSMTLibSessionWorkspaceCleanupStatus = case rollback of
-                    Nothing -> LengthSMTLibSessionWorkspaceNotAllocated
-                    Just status -> status
+                { lengthSMTLibSessionWorkspaceCleanupStatus =
+                    fromMaybe LengthSMTLibSessionWorkspaceNotAllocated rollback
                 }
           pure $ Left $ scopeError
             (LengthSMTLibSessionDeadlineFailure failure) cleanup

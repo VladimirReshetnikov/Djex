@@ -143,7 +143,7 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validateLengthSpinePairProblemApplicableDomain
   ) where
 
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, fromMaybe)
 import Control.DeepSeq (NFData (rnf))
 import Control.Monad (foldM, unless)
 import qualified Data.Map.Strict as Map
@@ -3080,9 +3080,7 @@ strictRelationalPositiveAffineQuotientRootExtremaMonusAtomicBranchingRecursivePi
   case predecessorBranches of
     [RelationalPositiveAffineClauseIgnored]
       | hasRecursivePiecewiseAffineOperation formula ->
-          case recursiveFormulaBranches formula of
-            Just branches -> branches
-            Nothing -> predecessorBranches
+          fromMaybe predecessorBranches (recursiveFormulaBranches formula)
     _ -> predecessorBranches
  where
   predecessorBranches =

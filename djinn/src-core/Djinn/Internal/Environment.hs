@@ -34,6 +34,7 @@ module Djinn.Internal.Environment (
     validateEnvironment
     ) where
 
+import Control.Monad (void)
 import Data.Bifunctor (first)
 import Data.List (find)
 import qualified Data.Map.Strict as Map
@@ -879,7 +880,7 @@ sealPreparedEnvironment expansion = do
     -- Djinn uses Haskell-98 kind defaulting, so every parameter must have a
     -- ground kind. Check that backend-specific requirement at sealing while
     -- retaining the neutral index's generalized-kind vocabulary.
-    mapM_ (fmap (const ()) . projectPreparedSynthesisClass) $
+    mapM_ (void . projectPreparedSynthesisClass) $
         SharedClass.preparedClasses classIndex
     -- Force each retained projection so it cannot keep the transient
     -- expanded declaration product alive through an unevaluated selector.
@@ -1491,7 +1492,7 @@ projectDeclaration assumptions pair = case pair of
         kinds <- requiredClassKinds assumptions sharedName parameters
         return $ ProjectedClass
             (name, (zip parameters kinds, methods))
-    _ -> Left $ DjinnEnvironmentValidationError $
+    _ -> Left $ DjinnEnvironmentValidationError
         "internal shared declaration projection changed shape"
 
 requiredTypeKind

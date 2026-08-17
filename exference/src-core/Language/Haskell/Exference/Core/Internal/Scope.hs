@@ -23,6 +23,7 @@ module Language.Haskell.Exference.Core.Internal.Scope
   )
 where
 
+import Control.Monad (void)
 import Control.DeepSeq (NFData (..))
 import Data.Foldable (traverse_)
 import qualified Data.IntMap.Strict as IntMap
@@ -182,7 +183,7 @@ validateScopeParentGraph
   :: IntMap.IntMap (Maybe Int)
   -> Either ScopeInvariantError ()
 validateScopeParentGraph parents =
-  traverse_ (fmap (const ()) . walkParentChain resolve) (IntMap.keys parents)
+  traverse_ (void . walkParentChain resolve) (IntMap.keys parents)
   where
     resolve scopeId = case IntMap.lookup scopeId parents of
       Nothing -> Nothing

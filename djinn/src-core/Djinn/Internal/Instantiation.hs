@@ -42,6 +42,7 @@ module Djinn.Internal.Instantiation
     , eliminateInstantiationEvidence
     ) where
 
+import Control.Monad (replicateM)
 import Data.List (sort, sortOn)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -468,7 +469,7 @@ providerInstantiationPremises
   where
     vectorsFor provider scheme =
         take maxInstantiationAttempts $
-            sequence $ replicate (length $ schemeBinders scheme)
+            replicateM (length $ schemeBinders scheme)
                 [ (candidateType, visibleArgument)
                 | (candidateProvider, candidateType, visibleArgument) <-
                     candidates
@@ -864,7 +865,7 @@ historicalCandidateTuples
     -> [[SharedType.Type String]]
 historicalCandidateTuples historicalCandidates wideCandidates arity
     | arity <= maxCartesianInstantiationBinders =
-        sequence $ replicate arity historicalCandidates
+        replicateM arity historicalCandidates
     | otherwise = fairCandidateTuplesWith False wideCandidates arity
 
 -- Loaded declarations can be late in a standard session. Draw from both ends
@@ -889,7 +890,7 @@ fairCandidateTuplesWith recentFirst candidates arity =
         [ orderedSelections arity candidates
         , orderedSelections arity $ reverse candidates
         ]
-    , sequence $ replicate arity candidates
+    , replicateM arity candidates
     ]
 
 candidateWindows :: Int -> [value] -> [[value]]

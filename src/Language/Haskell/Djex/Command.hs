@@ -47,7 +47,7 @@ module Language.Haskell.Djex.Command
   , runtimeFailure
   ) where
 
-import Control.Monad (when)
+import Control.Monad (unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
 import Data.Bifunctor (first)
@@ -431,7 +431,7 @@ presentAllExference options fieldSelectors results = do
   case outcome of
     Left failure -> renderFailure "DJEX_EXF_RENDER" failure
     Right (progress, foundAny) -> do
-      when (not foundAny) $ reportNoExferenceResult progress
+      unless foundAny $ reportNoExferenceResult progress
       reportTruncation progress
       pure ExitSuccess
  where

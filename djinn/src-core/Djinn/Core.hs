@@ -59,7 +59,7 @@ module Djinn.Core (
     QueryOutcome(..), QueryReport(..), inhabit
     ) where
 
-import Control.Monad (foldM, unless)
+import Control.Monad (foldM, unless, void)
 import Data.Bifunctor (first)
 import Data.List (intercalate, mapAccumL)
 import qualified Data.List as List
@@ -1240,7 +1240,7 @@ prepareProviderInstantiationCandidates prepared rawCandidates = do
             elaboratePreparedSynthesisTypes prepared [(KStar, source)]
         checked <- case elaborated of
             [one] -> Right one
-            _ -> Left $ DjinnInternalQueryFailure $
+            _ -> Left $ DjinnInternalQueryFailure
                 "provider candidate elaboration changed batch shape"
         unless (Set.null $ SharedType.freeVariables checked) $
             Left $ DjinnInstantiationCandidateFailure $
@@ -1444,7 +1444,7 @@ prepareProviderInstantiationAssignments prepared evidence = do
             elaboratePreparedSynthesisTypes prepared [(binderKind, source)]
         checked <- case elaborated of
             [one] -> Right one
-            _ -> Left $ DjinnInternalQueryFailure $
+            _ -> Left $ DjinnInternalQueryFailure
                 "provider assignment elaboration changed batch shape"
         unless (Set.null $ SharedType.freeVariables checked) $
             Left $ DjinnInstantiationAssignmentFailure $
@@ -2453,7 +2453,7 @@ searchPreparedFormulaPlan options candidateLimit target externalEnv
                         diagnosticProof : _ -> do
                             internalFailure
                                 "generated an invalid self-reference proof" $
-                                () <$ checkProofWithEvidence
+                                void $ checkProofWithEvidence
                                     diagnosticEnv form diagnosticProof
                             return UnrealizableWithoutSelfReference
                         [] -> return Unrealizable
@@ -2606,7 +2606,7 @@ resultToGeneratedReport result = case SharedSearch.batchProgress search of
         generatedReportCandidates = SharedSearch.batchCandidates search,
         generatedReportEvidence = SharedQuery.resultEvidence result
         }
-    SharedSearch.Continuing -> Left $
+    SharedSearch.Continuing -> Left
         "internal Djinn result invariant: proof search returned a continuing batch"
   where
     search = SharedQuery.resultSearch result

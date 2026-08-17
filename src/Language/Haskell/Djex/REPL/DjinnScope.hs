@@ -600,7 +600,7 @@ typeReferences = go 0
       concatMap constraintTypeReferences constraints ++ go 0 body'
 
 constraintTypeReferences :: Constraint (Type String) -> [(Name, Int)]
-constraintTypeReferences = concatMap (typeReferences) . constraintArguments
+constraintTypeReferences = concatMap typeReferences . constraintArguments
 
 -- A class and an ordinary type share Haskell's source namespace, but they do
 -- not satisfy the same backend obligation: a datatype cannot resolve a class

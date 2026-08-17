@@ -23,7 +23,7 @@ import Control.Exception
   , evaluate
   , handleJust
   )
-import Control.Monad (forM_, when)
+import Control.Monad (forM_, unless, void, when)
 import Data.Char (isSpace)
 import Data.Foldable (toList)
 import Data.List (intercalate, isPrefixOf)
@@ -763,7 +763,7 @@ runExferenceInteractive sourceName typeSource state = case runtimeState of
     (exferenceRuntimeSession runtime, exferenceRuntimeScope runtime)
 
 ignoreExit :: IO ExitCode -> IO ()
-ignoreExit action = action >> pure ()
+ignoreExit action = void action
 
 showExpressionType
   :: FilePath
@@ -1545,7 +1545,7 @@ browseState Nothing state = forSelectedBackends state $ \selectedBackend ->
           ExferenceType.defaultVariableName
           (scopeBrowseNames context)
           $ exferenceSessionEnvironment session
-        when (not $ null $ exferenceSessionOmissions session) $ putStrLn
+        unless (null $ exferenceSessionOmissions session) $ putStrLn
           "-- Some loaded capabilities are not searchable; use :show omissions."
       _ -> putStrLn "Exference is unavailable."
  where

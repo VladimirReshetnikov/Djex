@@ -17,7 +17,7 @@ module Language.Haskell.Exference.Core.Internal.Polytype
   )
 where
 
-import Control.Monad (guard)
+import Control.Monad (guard, replicateM)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
@@ -309,7 +309,7 @@ candidateProviderInstantiations rawCandidates source =
           | candidate <- rawCandidates
           , isVisibleTypeCandidate candidate
           ]
-    arguments <- sequence $ replicate (length orderedBinders) candidates
+    arguments <- replicateM (length orderedBinders) candidates
     (instantiated, instantiatedConstraints) <- maybe [] pure
       $ instantiateLeadingForallsAt isVisibleTypeCandidate arguments normalized
     pure GroundProviderInstantiation

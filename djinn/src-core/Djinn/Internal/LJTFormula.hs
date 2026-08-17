@@ -105,7 +105,7 @@ x <-> y = (x:->y) & (y:->x)
 x & y = Conj [x, y]
 
 (|:) :: Formula -> Formula -> Formula
-x |: y = Disj [((ConsDesc "Left" 1), x), ((ConsDesc "Right" 1), y)]
+x |: y = Disj [(ConsDesc "Left" 1, x), (ConsDesc "Right" 1, y)]
 
 -- | Intuitionistic negation: the implication from the formula to 'false'.
 fnot :: Formula -> Formula

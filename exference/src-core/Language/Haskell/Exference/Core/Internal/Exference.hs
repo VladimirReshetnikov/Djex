@@ -2184,12 +2184,12 @@ stateStep allocators multiPM allowConstrs h
                       [] -> True
                       [_] -> True
                       _ -> False
-            unless (any applicable deconstructors) $ mzero
+            unless (any applicable deconstructors) mzero
             priorDonations <- gets nodeAggregateDonations
             let globalName = functionName binding
                 alreadyDonated = maybe False (S.member globalName)
                   $ M.lookup var priorDonations
-            when (alreadyDonated) $ mzero
+            when alreadyDonated mzero
             scopedBindings <- gets
               (scopeGetAllBindings scopeId . nodeProvidedScopes)
             -- Avoid adding a byte-for-byte equivalent scalar which is already
@@ -2201,7 +2201,7 @@ stateStep allocators multiPM allowConstrs h
                   null (varPParameters scoped) &&
                     SharedTypeAtom.alphaTypeKey
                       (varPResult scoped) == aggregateKey
-            when (any sameAggregate scopedBindings) $ mzero
+            when (any sameAggregate scopedBindings) mzero
             modify $ \node -> node
               { nodeAggregateDonations = M.insertWith S.union var
                   (S.singleton globalName) $ nodeAggregateDonations node }

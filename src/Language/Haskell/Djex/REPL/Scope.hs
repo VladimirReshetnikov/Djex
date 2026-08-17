@@ -31,6 +31,7 @@ module Language.Haskell.Djex.REPL.Scope
   , workspaceRecordProjections
   ) where
 
+import Data.Foldable (traverse_)
 import Control.Monad (when)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict (StateT, get, modify, runStateT)
@@ -423,7 +424,7 @@ parseScopeImport source = case
     HSE.parseImportDeclWithMode importParseMode source of
   HSE.ParseOk declaration -> do
     _ <- importModuleName declaration
-    _ <- traverse checkedHseModuleName $ HSE.importAs declaration
+    _ <- traverse_ checkedHseModuleName $ HSE.importAs declaration
     Right declaration
   HSE.ParseFailed location message -> Left $ scopeDiagnostic
     "DJEX_REPL_IMPORT_PARSE" "cannot parse import declaration"

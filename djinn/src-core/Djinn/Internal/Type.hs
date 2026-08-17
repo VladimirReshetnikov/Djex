@@ -13,6 +13,7 @@ module Djinn.Internal.Type
   , fromSynthesisType
   ) where
 
+import Control.Monad (void)
 import qualified Data.Set as Set
 
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
@@ -134,8 +135,8 @@ normalizeSynthesisType source = do
  where
   validateSupported typeExpression = case typeExpression of
     SharedType.TypeVariable variable ->
-      () <$ checkedDjinnTypeVariable variable
-    SharedType.TypeConstructor name -> () <$ djinnTypeConstructorSymbol name
+      void (checkedDjinnTypeVariable variable)
+    SharedType.TypeConstructor name -> void (djinnTypeConstructorSymbol name)
     SharedType.TypeApplication function argument ->
       validateSupported function >> validateSupported argument
     SharedType.FunctionType parameter result ->
@@ -175,9 +176,9 @@ sealSynthesisSignature source = do
   -- nested rank-N contexts as productive as the historical prenex context.
   validateSignature typeExpression = case typeExpression of
     SharedType.TypeVariable variable ->
-      () <$ checkedDjinnTypeVariable variable
+      void (checkedDjinnTypeVariable variable)
     SharedType.TypeConstructor name ->
-      () <$ djinnTypeConstructorSymbol name
+      void (djinnTypeConstructorSymbol name)
     SharedType.TypeApplication function argument ->
       validateSignature function >> validateSignature argument
     SharedType.FunctionType parameter result ->

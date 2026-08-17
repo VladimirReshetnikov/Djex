@@ -45,7 +45,7 @@ module Language.Haskell.Exference.Core.Declaration
 
 import Data.Maybe (catMaybes)
 import Control.DeepSeq (NFData)
-import Control.Monad (foldM)
+import Control.Monad (foldM, void)
 import Data.Bifunctor (first)
 import Data.List (find, sort)
 import qualified Data.Map.Strict as Map
@@ -312,7 +312,7 @@ erasePreparedSynthesisAnnotations
   -> PreparedSynthesisInventory ()
 erasePreparedSynthesisAnnotations
     (PreparedSynthesisInventory prepared backend schemes) =
-  PreparedSynthesisInventory (fmap (const ()) prepared) backend schemes
+  PreparedSynthesisInventory (void prepared) backend schemes
 
 -- Attach alias-aware recursion flags derived by the canonical core lowerer to
 -- the opaque prepared inventory. Every concrete datatype must have one backend
@@ -369,7 +369,7 @@ prepareSearchEnvironment expansion = do
   -- Renaming variables and erasing annotations cannot change a nominal
   -- datatype edge, so the shared pre-normalization SCC set is exact here.
   let normalized = map
-        (normalizeDeclarationVariables . fmap (const ()))
+        (normalizeDeclarationVariables . void)
         $ SharedTypeSynonym.inventoryExpansionDeclarations expansion
       recursiveNames =
         SharedTypeSynonym.inventoryExpansionRecursiveDataTypeNames expansion
@@ -400,7 +400,7 @@ prepareFunctionSchemes expansion backend =
       Right () -> Right schemes
  where
   normalized = map
-    (normalizeDeclarationVariables . fmap (const ()))
+    (normalizeDeclarationVariables . void)
     $ SharedTypeSynonym.inventoryExpansionDeclarations expansion
 
   retain schemes declaration = case declaration of

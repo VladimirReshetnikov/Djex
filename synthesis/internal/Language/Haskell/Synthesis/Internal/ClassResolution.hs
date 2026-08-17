@@ -62,7 +62,7 @@ module Language.Haskell.Synthesis.Internal.ClassResolution
   ) where
 
 import Control.DeepSeq (NFData (rnf))
-import Control.Monad (foldM, guard, unless, when)
+import Control.Monad (foldM, guard, unless, when, zipWithM)
 import Data.Graph (SCC (..), stronglyConnComp)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
@@ -485,8 +485,8 @@ sealClassResolutionEnvironment limits inventory = do
   classes <- mapM (prepareClass assumptions classArities) rawClasses
   let classMap = Map.fromList
         [(resolutionClassName source, source) | source <- classes]
-  instances <- mapM (uncurry $ prepareInstance assumptions classArities)
-    $ zip [0 ..] rawInstances
+  instances <- zipWithM
+    (prepareInstance assumptions classArities) [0 ..] rawInstances
   rejectDuplicateHeads instances
   rejectOverlappingHeads limits instances
   rejectSuperclassCycles classes
@@ -867,7 +867,7 @@ prepareConstraintStructure limits aliases lookupArity source = do
   unless (supplied == expected)
     $ Left $ ClassResolutionConstraintArityMismatch
       name expected supplied
-  arguments <- mapM (uncurry prepareArgument) $ zip [0 ..] rawArguments
+  arguments <- zipWithM prepareArgument [0 ..] rawArguments
   pure $ Constraint name arguments
  where
   name = constraintClass source

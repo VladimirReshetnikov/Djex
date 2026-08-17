@@ -49,7 +49,7 @@ import Data.Graph (SCC(..), stronglyConnComp)
 import Data.List (intercalate, isSuffixOf, sortOn)
 import qualified Data.Map.Lazy as LazyMap
 import qualified Data.Map.Strict as Map
-import Data.Maybe (listToMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import qualified Data.Set as Set
 import Numeric.Natural (Natural)
 
@@ -158,9 +158,8 @@ rememberRecursiveComponent definitions name
     -- The preparation invariant indexes every admitted recursive head.  The
     -- head itself is a collision-free singleton fallback for defensive
     -- package-internal callers should that invariant ever change.
-    component = case formulaDefinitionRecursiveComponent name definitions of
-        Just preparedComponent -> preparedComponent
-        Nothing -> name
+    component =
+        fromMaybe name (formulaDefinitionRecursiveComponent name definitions)
 
 resumeExpansionArgument
     :: ExpansionPath -> ExpansionPath -> ExpansionPath

@@ -283,7 +283,7 @@ cabal test synthesis-tests --test-show-details=direct
 The complete package integration matrix is:
 
 ```console
-cabal test all --test-show-details=direct
+cabal test all -j1 --test-show-details=direct
 ```
 
 See [the architecture guide](../docs/architecture.md) for dependency and

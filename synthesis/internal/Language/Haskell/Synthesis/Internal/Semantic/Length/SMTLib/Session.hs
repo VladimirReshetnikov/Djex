@@ -2841,7 +2841,7 @@ runLengthSpinePairSMTLibReadyWorkerQuery evaluationLimits worker query =
           Right reservation -> do
             executed <- restore
               (executeReservedLengthSpinePairSMTLibQueryRun worker reservation)
-              `onException` abandonLengthSpinePairSMTLibQueryWorker worker
+              `onException` abandonLengthSMTLibQueryWorker worker
             case executed of
               Left failure -> spendLengthSpinePairSMTLibQueryWorker worker failure
               Right run -> do
@@ -3062,20 +3062,9 @@ spendLengthSpinePairSMTLibQueryWorker
   -> LengthSpinePairSMTLibQueryRunFailure
   -> IO (Either LengthSpinePairSMTLibQueryRunError value)
 spendLengthSpinePairSMTLibQueryWorker worker failure = do
-  cleanup <- abandonLengthSpinePairSMTLibQueryWorker worker
+  cleanup <- abandonLengthSMTLibQueryWorker worker
   pure $ Left $ LengthSpinePairSMTLibQueryRunError failure $ Just cleanup
 
-abandonLengthSpinePairSMTLibQueryWorker
-  :: LengthSMTLibReadyWorker epoch
-  -> IO LengthSMTLibProcessCleanupStatus
-abandonLengthSpinePairSMTLibQueryWorker worker = do
-  atomically $ do
-    QueryLeaseState _ ordinal used _ stdoutCount stderrCount <-
-      readTVar $ readyWorkerQueryState worker
-    writeTVar (readyWorkerQueryState worker) $ QueryLeaseState
-      QueryLeaseSpent ordinal used Nothing stdoutCount stderrCount
-  cancelLengthSMTLibProcess $ readyWorkerCancellation worker
-  closeLengthSMTLibProcess $ readyWorkerProcess worker
 
 spinePairQueryProcessFailure
   :: LengthSMTLibProcessError
@@ -3593,7 +3582,7 @@ spinePairQueryRunIdentitySuffixFields evaluationLimits outcome
     stdoutStart stdoutEnd stderrStart stderrEnd transcriptCount =
   [ spinePairQueryDecodedOutcomeField outcome
   , spinePairQueryReplayField evaluationLimits outcome
-  , spinePairQueryTransportCommitField stdoutStart stdoutEnd stderrStart stderrEnd
+  , queryTransportCommitField stdoutStart stdoutEnd stderrStart stderrEnd
       transcriptCount
   ]
 
@@ -3624,7 +3613,7 @@ spinePairQueryRunIdentityMaximumSuffixFields evaluationLimits stdoutMaximum
           , "validated-counterexample"
           ]
       ]
-  , spinePairQueryTransportCommitField stdoutMaximum stdoutMaximum
+  , queryTransportCommitField stdoutMaximum stdoutMaximum
       stderrMaximum stderrMaximum transcriptMaximum
   ]
 
@@ -3632,7 +3621,7 @@ spinePairQueryDecodedOutcomeField
   :: ReplayedLengthSpinePairSMTLibQueryOutcome
   -> FingerprintField
 spinePairQueryDecodedOutcomeField outcome = tagged "decoded-branch"
-  [ spinePairSolverStatusField $ replayedLengthSpinePairSMTLibQueryStatus outcome
+  [ solverStatusField $ replayedLengthSpinePairSMTLibQueryStatus outcome
   , FingerprintBytes $ ascii valuesTag
   ]
  where
@@ -3680,31 +3669,7 @@ replayedLengthSpinePairSMTLibQueryStatus outcome = case outcome of
   ReplayedLengthSpinePairSMTLibUnsatisfiable -> SolverUnsatisfiable
   ReplayedLengthSpinePairSMTLibUnknown -> SolverUnknown
 
-spinePairQueryTransportCommitField
-  :: Natural
-  -> Natural
-  -> Natural
-  -> Natural
-  -> Natural
-  -> FingerprintField
-spinePairQueryTransportCommitField stdoutStart stdoutEnd stderrStart stderrEnd
-    transcriptCount = tagged "transport-commit"
-  [ FingerprintNatural stdoutStart
-  , FingerprintNatural stdoutEnd
-  , FingerprintNatural stderrStart
-  , FingerprintNatural stderrEnd
-  , FingerprintNatural transcriptCount
-  , FingerprintBytes $ ascii
-      "stdout-delta-equals-exact-transcript/no-stderr-at-commit/v1"
-  , FingerprintBytes $ ascii
-      "worker-open/queues-empty-final-snapshot-before-query-commit/late-predecessor-whitespace-adopted-and-charged-to-next-query/other-late-output-poisons/v1"
-  ]
 
-spinePairSolverStatusField :: SolverStatus -> FingerprintField
-spinePairSolverStatusField status = FingerprintBytes $ ascii $ case status of
-  SolverSatisfiable -> "satisfiable"
-  SolverUnsatisfiable -> "unsatisfiable"
-  SolverUnknown -> "unknown"
 
 spinePairQueryProtocolWriteKindField
   :: LengthSpinePairSMTLibProtocolWriteKind

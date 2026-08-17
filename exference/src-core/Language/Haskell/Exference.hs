@@ -23,6 +23,7 @@ where
 
 
 
+import Data.Either (fromRight)
 import Data.Maybe ( listToMaybe )
 
 import Language.Haskell.Exference.Core hiding ( findExpressions )
@@ -42,7 +43,7 @@ import Language.Haskell.Exference.Core.ExferenceStats
 -- yields the empty list, indistinguishable from a search without results;
 -- 'findExpressionsEither' retains the error.
 findExpressions :: ExferenceInput -> [ExferenceOutputElement]
-findExpressions = either (const []) id . Core.findExpressionsEither
+findExpressions = fromRight [] . Core.findExpressionsEither
 
 -- | Return the first raw search result, without applying a presentation
 -- policy or comparing candidate ratings.

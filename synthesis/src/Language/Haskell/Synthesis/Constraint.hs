@@ -1,5 +1,3 @@
-{-# LANGUAGE DeriveFoldable #-}
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveTraversable #-}
 
 -- | Backend-independent class-constraint syntax.
@@ -20,6 +18,7 @@ module Language.Haskell.Synthesis.Constraint
   , validateConstraint
   ) where
 
+import Data.Maybe (isNothing)
 import Control.DeepSeq (NFData (rnf))
 import Language.Haskell.Synthesis.Collection (observedListLength)
 import Language.Haskell.Synthesis.Name
@@ -123,7 +122,7 @@ showsConstraintWithName showClassName showArgument precedence
 validateConstraintClassName :: Name -> Either ConstraintError ()
 validateConstraintClassName name
   | nameLexicalClass name == ConstructorLike
-  , nameSpecial name == Nothing = Right ()
+  , isNothing (nameSpecial name) = Right ()
   | otherwise = Left $ InvalidConstraintClass name
 
 -- | Validate the backend-independent part of a constraint.  Type arguments

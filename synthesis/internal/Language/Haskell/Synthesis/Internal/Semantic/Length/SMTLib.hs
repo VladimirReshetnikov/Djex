@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE EmptyDataDecls #-}
 {-# LANGUAGE RoleAnnotations #-}
@@ -83,7 +82,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   ) where
 
 import Control.DeepSeq (NFData (rnf))
-import Control.Monad (foldM)
+import Control.Monad (foldM, unless, when)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import Data.Word (Word8)
@@ -666,9 +665,8 @@ validateLengthSMTLibCounterexample evaluationLimits query rawBindings = do
   let symbols = lengthSMTLibQueryInputSymbols query
       expected = length symbols
       observed = observedListLength expected rawBindings
-  if observed == expected
-    then pure ()
-    else Left $ LengthSMTLibBindingArityMismatch expected observed
+  unless (observed == expected)
+    $ Left $ LengthSMTLibBindingArityMismatch expected observed
   let maximumSymbolBytes = fromIntegral $ maximum
         $ 0 : map length symbols
       expectedSymbols = Map.fromList $ zip symbols [0 :: Int ..]
@@ -1032,9 +1030,8 @@ validateLengthSpinePairSMTLibCounterexample evaluationLimits query
   let symbols = lengthSpinePairSMTLibQueryInputSymbols query
       expected = length symbols
       observed = observedListLength expected rawBindings
-  if observed == expected
-    then pure ()
-    else Left $ LengthSpinePairSMTLibBindingArityMismatch expected observed
+  unless (observed == expected)
+    $ Left $ LengthSpinePairSMTLibBindingArityMismatch expected observed
   let maximumSymbolBytes = fromIntegral $ maximum
         $ 0 : map length symbols
       expectedSymbols = Map.fromList $ zip symbols [0 :: Int ..]
@@ -1382,9 +1379,8 @@ decodeBinding maximumBytes expected decoded
   case Map.lookup symbol expected of
     Nothing -> Left $ LengthSMTLibUnknownInputSymbol bindingIndex symbol
     Just _ -> pure ()
-  if Map.member symbol decoded
-    then Left $ LengthSMTLibDuplicateInputSymbol bindingIndex symbol
-    else pure ()
+  when (Map.member symbol decoded)
+    $ Left $ LengthSMTLibDuplicateInputSymbol bindingIndex symbol
   if rawValue < 0
     then Left $ LengthSMTLibNegativeInputValue bindingIndex symbol rawValue
     else pure $ Map.insert symbol (fromInteger rawValue) decoded
@@ -1425,10 +1421,9 @@ decodeSpinePairBinding maximumBytes expected decoded
     Nothing -> Left $ LengthSpinePairSMTLibUnknownInputSymbol
       bindingIndex symbol
     Just _ -> pure ()
-  if Map.member symbol decoded
-    then Left $ LengthSpinePairSMTLibDuplicateInputSymbol
+  when (Map.member symbol decoded)
+    $ Left $ LengthSpinePairSMTLibDuplicateInputSymbol
       bindingIndex symbol
-    else pure ()
   if rawValue < 0
     then Left $ LengthSpinePairSMTLibNegativeInputValue
       bindingIndex symbol rawValue
@@ -1612,9 +1607,7 @@ translateEuclideanProjection
       (QFLIAIntegerExpression, SMTTranslationState)
 translateEuclideanProjection limits inputCount state projection numeralSite
     zeroError divisor expression = do
-  if divisor == 0
-    then Left zeroError
-    else pure ()
+  when (divisor == 0) $ Left zeroError
   checkNumeral limits numeralSite divisor
   let (ordinal, quotient, remainder, reserved) =
         reserveEuclideanWitness projection state

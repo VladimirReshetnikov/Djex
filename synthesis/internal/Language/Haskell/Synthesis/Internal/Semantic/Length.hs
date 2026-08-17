@@ -113,7 +113,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length
   ) where
 
 import Control.DeepSeq (NFData (rnf))
-import Control.Monad (foldM)
+import Control.Monad (foldM, unless, when)
 import Data.Bifunctor (first)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
@@ -680,16 +680,13 @@ sealLengthContext limits inventory
       Right (declaredParameters, declaredConstructors)
     _ -> Left $ LengthSpineTypeIsNotData typeName
   let parameterCount = observedListLength 1 parameters
-  if parameterCount == 1
-    then pure ()
-    else Left $ LengthSpineParameterArityMismatch typeName parameterCount
+  unless (parameterCount == 1)
+    $ Left $ LengthSpineParameterArityMismatch typeName parameterCount
   let constructorCount = observedListLength 2 constructors
-  if constructorCount == 2
-    then pure ()
-    else Left $ LengthSpineConstructorArityMismatch typeName constructorCount
-  if zeroName == stepName
-    then Left $ LengthSpineConstructorsMustDiffer zeroName
-    else pure ()
+  unless (constructorCount == 2)
+    $ Left $ LengthSpineConstructorArityMismatch typeName constructorCount
+  when (zeroName == stepName)
+    $ Left $ LengthSpineConstructorsMustDiffer zeroName
   zeroConstructor <- case List.find ((== zeroName) . constructorName) constructors of
     Nothing -> Left $ LengthSpineZeroConstructorMissing zeroName
     Just constructor -> Right constructor
@@ -698,14 +695,12 @@ sealLengthContext limits inventory
     Just constructor -> Right constructor
   let zeroFields = constructorFields zeroConstructor
       zeroFieldCount = observedListLength 0 zeroFields
-  if zeroFieldCount == 0
-    then pure ()
-    else Left $ LengthSpineZeroFieldArityMismatch zeroName zeroFieldCount
+  unless (zeroFieldCount == 0)
+    $ Left $ LengthSpineZeroFieldArityMismatch zeroName zeroFieldCount
   let stepFields = constructorFields stepConstructor
       stepFieldCount = observedListLength 2 stepFields
-  if stepFieldCount == 2
-    then pure ()
-    else Left $ LengthSpineStepFieldArityMismatch stepName stepFieldCount
+  unless (stepFieldCount == 2)
+    $ Left $ LengthSpineStepFieldArityMismatch stepName stepFieldCount
   parameter <- case parameters of
     [TypeParameter variable _] -> Right variable
     _ -> Left $ LengthSpineParameterArityMismatch typeName parameterCount
@@ -1161,26 +1156,23 @@ sealLengthContractInContextWithRoles limits inventory model suppliedRoles
   let (inputs, result) = functionSpine body
       maximumInputs = lengthContractInputLimit limits
       observedInputs = observedListLength maximumInputs inputs
-  if observedInputs > maximumInputs
-    then Left $ LengthContractInputLimitExceeded
+  when (observedInputs > maximumInputs)
+    $ Left $ LengthContractInputLimitExceeded
       maximumInputs observedInputs
-    else pure ()
   roles <- case suppliedRoles of
     Nothing -> Right $ replicate (length inputs) LengthObservedSpine
     Just rawRoles -> do
       let observedRoles = observedListLength maximumInputs rawRoles
-      if observedRoles > maximumInputs
-        then Left $ LengthContractTargetArgumentRoleLimitExceeded
+      when (observedRoles > maximumInputs)
+        $ Left $ LengthContractTargetArgumentRoleLimitExceeded
           maximumInputs observedRoles
-        else pure ()
       if observedRoles == length inputs
         then Right rawRoles
         else Left $ LengthContractTargetArgumentRoleArityMismatch
           (length inputs) observedRoles
   mapM_ requireObservedInput $ zip3 [0 ..] roles inputs
-  if isModeledSpine model result
-    then pure ()
-    else Left $ LengthContractResultIsNotList result
+  unless (isModeledSpine model result)
+    $ Left $ LengthContractResultIsNotList result
   let inputCount = length $ filter (== LengthObservedSpine) roles
       contractReference phase variable = case variable of
         LengthResult
@@ -1315,18 +1307,16 @@ sealLengthSpinePairContractInContextWithRoles limits inventory model
   let (inputs, result) = functionSpine body
       maximumInputs = lengthContractInputLimit limits
       observedInputs = observedListLength maximumInputs inputs
-  if observedInputs > maximumInputs
-    then Left $ LengthSpinePairContractInputLimitExceeded
+  when (observedInputs > maximumInputs)
+    $ Left $ LengthSpinePairContractInputLimitExceeded
       maximumInputs observedInputs
-    else pure ()
   roles <- case suppliedRoles of
     Nothing -> Right $ replicate (length inputs) LengthObservedSpine
     Just rawRoles -> do
       let observedRoles = observedListLength maximumInputs rawRoles
-      if observedRoles > maximumInputs
-        then Left $ LengthSpinePairContractTargetArgumentRoleLimitExceeded
+      when (observedRoles > maximumInputs)
+        $ Left $ LengthSpinePairContractTargetArgumentRoleLimitExceeded
           maximumInputs observedRoles
-        else pure ()
       if observedRoles == length inputs
         then Right rawRoles
         else Left $ LengthSpinePairContractTargetArgumentRoleArityMismatch
@@ -1416,10 +1406,9 @@ sealLengthProviderInventoryInContext limits
     (CheckedLengthContext inventory model) sources = do
   let maximumSummaries = lengthProviderSummaryLimit limits
       observedSummaries = observedListLength maximumSummaries sources
-  if observedSummaries > maximumSummaries
-    then Left $ LengthProviderSummaryLimitExceeded
+  when (observedSummaries > maximumSummaries)
+    $ Left $ LengthProviderSummaryLimitExceeded
       maximumSummaries observedSummaries
-    else pure ()
   (summaries, _, _) <- foldM sealOne
     (Map.empty, 0, emptySyntaxUsage)
     $ zip [0 ..] sources
@@ -1472,10 +1461,9 @@ sealLengthProviderSummary limits inventory model
   let roles = lengthProviderArgumentRoles source
       maximumArguments = lengthProviderArgumentLimit limits
       observedRoles = observedListLength maximumArguments roles
-  if observedRoles > maximumArguments
-    then Left $ LengthProviderArgumentLimitExceeded
+  when (observedRoles > maximumArguments)
+    $ Left $ LengthProviderArgumentLimitExceeded
       maximumArguments observedRoles
-    else pure ()
   _ <- first LengthProviderSchemeBoundError
     $ observeTypeWithin limits 0 $ lengthProviderScheme source
   suppliedScheme <- first LengthProviderSchemeTypeError
@@ -1505,12 +1493,10 @@ sealLengthProviderSummary limits inventory model
   let (arguments, result) = functionSpine body
       argumentCount = length arguments
       roleCount = length roles
-  if roleCount == argumentCount
-    then pure ()
-    else Left $ LengthProviderRoleArityMismatch argumentCount roleCount
-  if isModeledSpine model result
-    then pure ()
-    else Left $ LengthProviderResultIsNotList result
+  unless (roleCount == argumentCount)
+    $ Left $ LengthProviderRoleArityMismatch argumentCount roleCount
+  unless (isModeledSpine model result)
+    $ Left $ LengthProviderResultIsNotList result
   mapM_ requireSpineList $ zip3 [0 ..] roles arguments
   let indexedRoles = zip [0 ..] roles
       providerReference (LengthProviderArgument position) =
@@ -1713,9 +1699,7 @@ normalizeLengthExpression limits checkVariable usage source = do
       normalized <- normalizeScale limits checkedFactor normalizedExpression
       pure (normalized, afterExpression)
     LengthQuotient divisor expression -> do
-      if divisor == 0
-        then Left LengthQuotientDivisorZero
-        else pure ()
+      when (divisor == 0) $ Left LengthQuotientDivisorZero
       checkedDivisor <- validateLiteral limits divisor
       (normalizedExpression, afterExpression) <- normalizeLengthExpression
         limits checkVariable afterNode expression
@@ -1724,9 +1708,7 @@ normalizeLengthExpression limits checkVariable usage source = do
         , afterExpression
         )
     LengthModulo divisor expression -> do
-      if divisor == 0
-        then Left LengthModuloDivisorZero
-        else pure ()
+      when (divisor == 0) $ Left LengthModuloDivisorZero
       checkedDivisor <- validateLiteral limits divisor
       (normalizedExpression, afterExpression) <- normalizeLengthExpression
         limits checkVariable afterNode expression

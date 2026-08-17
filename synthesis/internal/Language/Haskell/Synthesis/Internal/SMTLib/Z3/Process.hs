@@ -108,6 +108,7 @@ module Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process
   , closeZ3SMTLibProcess
   ) where
 
+import Data.Maybe (isNothing)
 import Control.Concurrent
   ( ThreadId
   , forkIO
@@ -143,6 +144,7 @@ import Control.Concurrent.STM
   , readTQueue
   , readTMVar
   , readTVar
+  , readTVarIO
   , retry
   , takeTMVar
   , tryPutTMVar
@@ -1232,7 +1234,7 @@ z3SMTLibProcessObservedStdoutBytes
   :: Z3SMTLibProcess
   -> IO Natural
 z3SMTLibProcessObservedStdoutBytes process =
-  atomically $ readTVar $ processStdoutCount process
+  readTVarIO $ processStdoutCount process
 
 -- | Total stderr bytes observed so far, saturating at
 -- 'z3SMTLibProcessStderrByteLimit' plus one.  Any nonzero value means the
@@ -1241,7 +1243,7 @@ z3SMTLibProcessObservedStderrBytes
   :: Z3SMTLibProcess
   -> IO Natural
 z3SMTLibProcessObservedStderrBytes process =
-  atomically $ readTVar $ processStderrCount process
+  readTVarIO $ processStderrCount process
 
 -- | Open one raw Z3 process by the portable path-snapshot launch: the
 -- working directory must be an absolute, existing, empty directory, the
@@ -2576,9 +2578,9 @@ stdoutReader process = loop
   Z3SMTLibProcessLimits _ maximumBytes _ chunk _ _ _ =
     processLimits process
   loop = do
-    lifecycle <- atomically $ readTVar $ processLifecycle process
+    lifecycle <- readTVarIO $ processLifecycle process
     when (lifecycle == ProcessOpen) $ do
-      count <- atomically $ readTVar $ processStdoutCount process
+      count <- readTVarIO $ processStdoutCount process
       received <- tryIOError $ BS.hGetSome (processOutput process)
         $ boundedReadSize chunk maximumBytes count
       case received of
@@ -2621,7 +2623,7 @@ stderrReader process = loop
   Z3SMTLibProcessLimits _ _ maximumBytes chunk _ _ _ =
     processLimits process
   loop = do
-    count <- atomically $ readTVar $ processStderrCount process
+    count <- readTVarIO $ processStderrCount process
     let request
           | count > maximumBytes = chunk
           | otherwise = boundedReadSize chunk maximumBytes count
@@ -2883,7 +2885,7 @@ closeZ3SMTLibProcess process = mask_ $ do
 
 cleanupProcess :: Z3SMTLibProcess -> IO Z3SMTLibProcessCleanupStatus
 cleanupProcess process = do
-  threads <- atomically $ readTVar $ processThreads process
+  threads <- readTVarIO $ processThreads process
   status <- cleanupAcquired
     (processLimits process)
     (Just $ processInput process)
@@ -2941,7 +2943,7 @@ cleanupAcquired limits input output errorOutput handle groupIdentifier threads =
         totalFailures = signalFailures + closeFailures
           + if readersStopped then 0 else 1
         finalEscalation
-          | exitCode == Nothing || not readersStopped =
+          | isNothing exitCode || not readersStopped =
               Z3SMTLibProcessCleanupIncomplete
           | otherwise = escalation
     pure Z3SMTLibProcessCleanupStatus
@@ -3168,7 +3170,7 @@ waitControlled process cancellation deadline phase action = go
                 case finalControl of
                   Left failure -> pure $ Left failure
                   Right () -> do
-                    poisoned <- atomically $ readTVar $ processPoison process
+                    poisoned <- readTVarIO $ processPoison process
                     pure $ case poisoned of
                       Just failure -> Left failure
                       Nothing -> value
@@ -3243,7 +3245,7 @@ checkCancellationDeadline
 checkCancellationDeadline phase
     (Z3SMTLibProcessCancellation cancelled)
     (Z3SMTLibProcessDeadline deadline) = do
-  isCancelled <- atomically $ readTVar cancelled
+  isCancelled <- readTVarIO cancelled
   if isCancelled
     then pure $ Left $ processError phase Z3SMTLibProcessCancelled Nothing
     else do
@@ -3275,7 +3277,7 @@ rejectWrite
   -> Z3SMTLibProcessError
   -> IO (Either Z3SMTLibProcessError value)
 rejectWrite process failure = do
-  terminal <- atomically $ readTVar $ processStdoutTerminal process
+  terminal <- readTVarIO $ processStdoutTerminal process
   case terminal of
     Just known | known == failure -> pure $ Left failure
     _ -> poisonOperation process failure

@@ -43,6 +43,7 @@ module Language.Haskell.Exference.Core.Declaration
   , fromSynthesisEnvironmentWithClassMethods
   ) where
 
+import Data.Maybe (catMaybes)
 import Control.DeepSeq (NFData)
 import Control.Monad (foldM)
 import Data.Bifunctor (first)
@@ -376,7 +377,7 @@ prepareSearchEnvironment expansion = do
     $ mapM (prepareSearchDeclaration recursiveNames) normalized
   fmap fst $ lowerSynthesisDeclarations IncludeDerivedBindings
     fromSynthesisClassDeclarationWithMethods
-    [declaration | Just declaration <- prepared]
+    (catMaybes prepared)
 
 -- Retain only exact ordinary-value schemes, after the same alias expansion
 -- and declaration-local variable normalization used by the backend lowerer.

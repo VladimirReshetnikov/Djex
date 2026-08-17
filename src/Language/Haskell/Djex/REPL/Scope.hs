@@ -1,4 +1,3 @@
-{-# LANGUAGE NamedFieldPuns #-}
 
 -- | Pure, transactional name-scope management for the Djex REPL.
 --
@@ -32,13 +31,14 @@ module Language.Haskell.Djex.REPL.Scope
   , workspaceRecordProjections
   ) where
 
+import Control.Monad (when)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict (StateT, get, modify, runStateT)
 import Data.Char (isSpace)
 import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (isJust, mapMaybe)
 import qualified Data.Set as Set
 import Data.Set (Set)
 
@@ -473,7 +473,7 @@ compileScope inventory workspace entries = do
     , replScopeQualifiedSurfaces = qualified
     , replScopeAliases = aliases
     , replScopeCurrentModule = current
-    , replScopeHasImplicitPrelude = maybe False (const True) implicit
+    , replScopeHasImplicitPrelude = isJust implicit
     }
 
 data ScopeContribution = ScopeContribution
@@ -824,13 +824,12 @@ buildModuleViewCached index modules stack target = do
   case Map.lookup moduleName cached of
     Just view -> pure view
     Nothing -> do
-      if moduleName `elem` stack
-        then lift $ Left $ withSource (workspaceModulePath target)
+      when (moduleName `elem` stack)
+        $ lift $ Left $ withSource (workspaceModulePath target)
           $ scopeDiagnostic "DJEX_REPL_IMPORT_CYCLE"
               "cannot construct a scope through an import cycle"
               $ intercalate " -> "
               $ map SharedName.renderModuleName $ reverse $ moduleName : stack
-        else pure ()
       (moduleHead, pragmas, sourceImports) <- lift $ moduleParts target
       imports <- traverse
         (resolveSourceImport index modules (workspaceModulePath target)

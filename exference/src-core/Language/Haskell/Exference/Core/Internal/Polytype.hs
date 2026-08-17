@@ -18,7 +18,6 @@ module Language.Haskell.Exference.Core.Internal.Polytype
 where
 
 import Control.Monad (guard)
-import Data.Foldable (toList)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
@@ -442,5 +441,5 @@ isVisibleTypeCandidate source =
 
 isGroundMonotype :: HsType -> Bool
 isGroundMonotype typeExpression =
-  null (toList typeExpression)
+  null typeExpression
     && not (SharedType.containsForall typeExpression)

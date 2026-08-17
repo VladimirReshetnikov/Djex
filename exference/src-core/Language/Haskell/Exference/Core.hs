@@ -43,6 +43,7 @@ module Language.Haskell.Exference.Core
   )
 where
 
+import Data.Either (fromRight)
 import qualified Language.Haskell.Exference.Core.Internal.Exference as E
 import qualified Language.Haskell.Exference.Core.Internal.Options as O
 import qualified Language.Haskell.Exference.Core.Candidate as C
@@ -59,7 +60,7 @@ import qualified Language.Haskell.Exference.Core.Score as Score
 -- input yields the empty list, indistinguishable from a search without
 -- results; prefer 'findExpressionsEither'.
 findExpressions :: E.ExferenceInput -> [E.ExferenceOutputElement]
-findExpressions = either (const []) id . findExpressionsEither
+findExpressions = fromRight [] . findExpressionsEither
 
 -- | Validate an input once and run the search, returning every solution in
 -- discovery order (all chunks concatenated) or the exact
@@ -76,7 +77,7 @@ findExpressionsEither input = do
 -- list; prefer 'findExpressionsChunkedEither'.
 findExpressionsChunked :: E.ExferenceInput
                    -> [[E.ExferenceOutputElement]]
-findExpressionsChunked = either (const []) id . findExpressionsChunkedEither
+findExpressionsChunked = fromRight [] . findExpressionsChunkedEither
 
 -- | Validate an input and retain the historical chunk grouping without
 -- erasing the exact 'E.ExferenceInputError'.
@@ -91,7 +92,7 @@ findExpressionsChunkedEither = fmap (map E.chunkElements) . runSearch
 -- 'findExpressionsWithStatsEither'.
 findExpressionsWithStats :: E.ExferenceInput
                          -> [E.ExferenceChunkElement]
-findExpressionsWithStats = either (const []) id . findExpressionsWithStatsEither
+findExpressionsWithStats = fromRight [] . findExpressionsWithStatsEither
 
 -- | Validate an input without discarding either the error or the operational
 -- completion/pruning information carried by its chunks.

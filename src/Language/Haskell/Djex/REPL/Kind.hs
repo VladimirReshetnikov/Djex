@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 
 -- | Scoped, non-evaluating kind inspection for the shared REPL.
 --

@@ -31,6 +31,7 @@ module Language.Haskell.Synthesis.Diagnostic
   , renderDiagnostic
   ) where
 
+import Data.Maybe (maybeToList)
 import Control.DeepSeq (NFData (rnf))
 import Data.List (intercalate)
 import qualified Data.List as List
@@ -292,7 +293,7 @@ renderLocation value =
     parts -> intercalate ":" parts ++ ": "
   where
     locationParts =
-      maybe [] (: []) (diagnosticSource value) ++
+      maybeToList (diagnosticSource value) ++
       maybe [] ((: []) . renderSpan) (diagnosticSpan value)
 
 renderSpan :: SourceSpan -> String

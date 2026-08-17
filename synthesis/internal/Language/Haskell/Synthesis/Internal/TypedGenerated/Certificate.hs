@@ -49,7 +49,7 @@ module Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate
   ) where
 
 import Control.DeepSeq (NFData (rnf))
-import Control.Monad (unless)
+import Control.Monad (unless, when)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
@@ -366,9 +366,8 @@ sealTypeApplicationCertificateTable
 sealTypeApplicationCertificateTable limits sources = do
   let maximumEntries = maximumTypeApplicationCertificates limits
       observedEntries = observedListLength maximumEntries sources
-  if observedEntries <= maximumEntries
-    then pure ()
-    else Left $ TypeApplicationCertificateEntryLimitExceeded
+  unless (observedEntries <= maximumEntries)
+    $ Left $ TypeApplicationCertificateEntryLimitExceeded
       maximumEntries observedEntries
   checkDuplicateIds Set.empty sources
   plans <- mapM (sealCertificatePlan limits) sources
@@ -402,25 +401,21 @@ sealCertificatePlan limits source = do
       selections = typeApplicationCertificateSourceSelections source
       maximumSelections = maximumTypeApplicationCertificateSelections limits
       observedSelections = observedListLength maximumSelections selections
-  if observedSelections <= maximumSelections
-    then pure ()
-    else Left $ TypeApplicationCertificateSelectionLimitExceeded
+  unless (observedSelections <= maximumSelections)
+    $ Left $ TypeApplicationCertificateSelectionLimitExceeded
       certificate maximumSelections observedSelections
   normalizedScheme <- observeAndNormalizeInputType limits
     (TypeApplicationCertificateSchemeType certificate)
     $ typeApplicationCertificateSourceScheme source
   let binderCount = observedLeadingBinderCount
         maximumSelections normalizedScheme
-  if binderCount == 0
-    then Left $ TypeApplicationCertificateHasNoLeadingBinder certificate
-    else pure ()
-  if binderCount <= maximumSelections
-    then pure ()
-    else Left $ TypeApplicationCertificateTelescopeLimitExceeded
+  when (binderCount == 0)
+    $ Left $ TypeApplicationCertificateHasNoLeadingBinder certificate
+  unless (binderCount <= maximumSelections)
+    $ Left $ TypeApplicationCertificateTelescopeLimitExceeded
       certificate maximumSelections $ maximumSelections + 1
-  if observedSelections == binderCount
-    then pure ()
-    else Left $ TypeApplicationCertificateSelectionArityMismatch
+  unless (observedSelections == binderCount)
+    $ Left $ TypeApplicationCertificateSelectionArityMismatch
       certificate binderCount observedSelections
   normalizedSelections <- sequence
     [ observeAndNormalizeInputType limits
@@ -534,9 +529,8 @@ replaySelections limits certificate initial selections =
           maximumTypeApplicationCertificateObligations limits
         remainingObligations = maximumObligations - obligationCount
         observedAdded = observedListLength remainingObligations obligations
-    if observedAdded <= remainingObligations
-      then pure ()
-      else Left $ TypeApplicationCertificateObligationLimitExceeded
+    unless (observedAdded <= remainingObligations)
+      $ Left $ TypeApplicationCertificateObligationLimitExceeded
         certificate maximumObligations $ maximumObligations + 1
     mapM_ (observeObligation slot) $ zip [0 ..] obligations
     -- Substitution can newly saturate a partial arrow or tuple constructor.

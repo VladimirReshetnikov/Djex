@@ -31,7 +31,7 @@ module Language.Haskell.Djex.REPL.Workspace
 
 import Control.DeepSeq (force)
 import Control.Exception (evaluate)
-import Data.Either (partitionEithers)
+import Data.Either (fromRight, partitionEithers)
 import qualified Data.Foldable as Foldable
 import Data.List (intercalate, sort)
 import Data.List.NonEmpty (NonEmpty (..))
@@ -1053,7 +1053,7 @@ removalPath source
   | null source = pure Nothing
   | otherwise = do
       inspected <- tryIOError $ doesPathExist source
-      if either (const False) id inspected
+      if fromRight False inspected
         then either (const Nothing) Just <$> tryIOError (canonicalizePath source)
         else if isAbsolute source || looksLikePath source
           then either (const Nothing) (Just . normalise)

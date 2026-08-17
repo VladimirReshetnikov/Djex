@@ -35,7 +35,7 @@ module Language.Haskell.Djex.REPL.DjinnScope
 import Data.Either (partitionEithers)
 import Data.List (partition)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (isJust, mapMaybe)
+import Data.Maybe (isJust, isNothing, mapMaybe)
 import qualified Data.Set as Set
 import Data.Void (Void, absurd)
 
@@ -560,7 +560,7 @@ stubUnknownReferences inferredKinds declarations =
     [ (name, arity)
     | (name, arity) <- Map.toList arities
     , not $ name `Set.member` defined
-    , not $ isJust $ nameSpecial name
+    , isNothing (nameSpecial name)
     ]
   (omissions, stubs) = partitionEithers
     [ case checkDeclaration stub of

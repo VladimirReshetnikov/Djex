@@ -1271,12 +1271,12 @@ structuralAssignmentFaithful definitions insideExact path source = case source o
     ExpansionVar{} -> pure True
     ExpansionCon{} -> applicationFaithful
     ExpansionApp{} -> applicationFaithful
-    ExpansionTuple types -> all id <$> mapM current types
-    ExpansionArrow argument result -> all id <$>
+    ExpansionTuple types -> and <$> mapM current types
+    ExpansionArrow argument result -> and <$>
         mapM current [argument, result]
-    -- Opaque-forall identity contains the complete substituted source type.
+    -- Opaque-forandentity contains the complete substituted source type.
     ExpansionForall{} -> pure True
-    ExpansionUnion constructors -> all id <$> mapM current
+    ExpansionUnion constructors -> and <$> mapM current
         [field | (_, fields) <- constructors, field <- fields]
     ExpansionAbstract{} -> pure True
   where

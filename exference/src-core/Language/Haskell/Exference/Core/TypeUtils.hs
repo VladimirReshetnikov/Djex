@@ -29,6 +29,7 @@ where
 
 
 
+import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
 import qualified Data.IntSet as IntSet
 
@@ -70,7 +71,7 @@ maximumFlexibleId typeExpression
 -- including a negative-only domain; use 'maximumFlexibleId' to distinguish a
 -- ground type from a real @TypeVar (-1)@.
 largestId :: HsType -> TVarId
-largestId = maybe (-1) id . maximumFlexibleId
+largestId = fromMaybe (-1) . maximumFlexibleId
 {-# DEPRECATED largestId "Use maximumFlexibleId; every Int is a valid TVarId." #-}
 
 -- | Whether any argument of a constraint has a free flexible variable (see

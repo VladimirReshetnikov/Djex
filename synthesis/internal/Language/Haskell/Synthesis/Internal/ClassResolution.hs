@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE RoleAnnotations #-}
 
 -- | Package-private class-resolution authority with explicit admission,
@@ -63,7 +62,7 @@ module Language.Haskell.Synthesis.Internal.ClassResolution
   ) where
 
 import Control.DeepSeq (NFData (rnf))
-import Control.Monad (foldM, guard)
+import Control.Monad (foldM, guard, unless, when)
 import Data.Graph (SCC (..), stronglyConnComp)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
@@ -443,24 +442,21 @@ sealClassResolutionEnvironment limits inventory = do
       declarationMaximum = maximumClassResolutionDeclarations limits
       observedDeclarations = observedListLength
         declarationMaximum rawDeclarations
-  if observedDeclarations > declarationMaximum
-    then Left $ ClassResolutionDeclarationLimitExceeded
+  when (observedDeclarations > declarationMaximum)
+    $ Left $ ClassResolutionDeclarationLimitExceeded
       declarationMaximum observedDeclarations
-    else pure ()
   let classMaximum = maximumClassResolutionClasses limits
       instanceMaximum = maximumClassResolutionInstances limits
       observedClasses = observedDeclarationCount
         classMaximum isClassDeclaration rawDeclarations
       observedInstances = observedDeclarationCount
         instanceMaximum isInstanceDeclaration rawDeclarations
-  if observedClasses > classMaximum
-    then Left $ ClassResolutionClassLimitExceeded
+  when (observedClasses > classMaximum)
+    $ Left $ ClassResolutionClassLimitExceeded
       classMaximum observedClasses
-    else pure ()
-  if observedInstances > instanceMaximum
-    then Left $ ClassResolutionInstanceLimitExceeded
+  when (observedInstances > instanceMaximum)
+    $ Left $ ClassResolutionInstanceLimitExceeded
       instanceMaximum observedInstances
-    else pure ()
   -- Inspect each class arity directly from the already checked declaration
   -- stream before 'prepareClassIndex' pairs it with retained kind metadata.
   -- This keeps a wide parameter spine behind the resolver's own width gate.
@@ -582,10 +578,9 @@ sealClassResolutionEnvironment limits inventory = do
     let kinds = typeConstructorKinds source
         maximumKinds = maximumClassResolutionTypeConstructorKinds limits
         observedKinds = Map.size kinds
-    if observedKinds > maximumKinds
-      then Left $ ClassResolutionTypeConstructorKindLimitExceeded
+    when (observedKinds > maximumKinds)
+      $ Left $ ClassResolutionTypeConstructorKindLimitExceeded
         maximumKinds observedKinds
-      else pure ()
     mapM_ (uncurry $ observeKind . ClassResolutionTypeConstructorKind)
       $ Map.toAscList kinds
 
@@ -869,9 +864,8 @@ prepareConstraintStructure limits aliases lookupArity source = do
     Nothing -> Left $ UnknownClassResolutionClass name
     Just arity -> Right arity
   let supplied = observedListLength expected rawArguments
-  if supplied == expected
-    then pure ()
-    else Left $ ClassResolutionConstraintArityMismatch
+  unless (supplied == expected)
+    $ Left $ ClassResolutionConstraintArityMismatch
       name expected supplied
   arguments <- mapM (uncurry prepareArgument) $ zip [0 ..] rawArguments
   pure $ Constraint name arguments
@@ -1350,14 +1344,12 @@ resolveConstraint environment@(CheckedClassResolutionEnvironment limits _ _ _
             observedBeyond maximumAllowed
               | maximumAllowed == maxBound = maxBound
               | otherwise = maximumAllowed + 1
-        if exceeded depth maximumDepth
-          then Left $ ClassResolutionProofDepthLimitExceeded
+        when (exceeded depth maximumDepth)
+          $ Left $ ClassResolutionProofDepthLimitExceeded
             maximumDepth $ observedBeyond maximumDepth
-          else pure ()
-        if exceeded proofCount maximumProofs
-          then Left $ ClassResolutionProofNodeLimitExceeded
+        when (exceeded proofCount maximumProofs)
+          $ Left $ ClassResolutionProofNodeLimitExceeded
             maximumProofs $ observedBeyond maximumProofs
-          else pure ()
         let observedDepth = depth + 1
             observedProofs = proofCount + 1
         (children, finalCount) <- resolvePrerequisiteSources

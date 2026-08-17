@@ -143,6 +143,7 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validateLengthSpinePairProblemApplicableDomain
   ) where
 
+import Data.Maybe (catMaybes)
 import Control.DeepSeq (NFData (rnf))
 import Control.Monad (foldM, unless)
 import qualified Data.Map.Strict as Map
@@ -2188,7 +2189,7 @@ booleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainMaximum
           inputCount inputPosition)
         $ canonicalBooleanFiniteUnionBranches rawFormulaBranches
   closed <- mapM closeBranch $ zip [0 ..] branches
-  let liveBounds = [bounds | Just bounds <- closed]
+  let liveBounds = catMaybes closed
   case firstMissingInput liveBounds of
     Just missing -> pure $ Left
       $ LengthApplicableDomainInputUpperBoundMissing missing

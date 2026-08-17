@@ -1,6 +1,4 @@
 {-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE TupleSections #-}
-{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE MonadComprehensions #-}
 
 -- | The Exference search engine proper: the priority-queue-driven best-first
@@ -116,12 +114,12 @@ import qualified Data.Set as S
 import qualified Data.Sequence as Seq
 import qualified Data.List as L
 
-import Data.Maybe ( maybeToList, listToMaybe )
-import Control.Monad ( mzero, forM )
+import Data.Maybe (fromMaybe, listToMaybe, maybeToList)
+import Control.Monad ( mzero, forM, unless, when )
 import Control.Applicative ( (<|>) )
 import Data.List ( find, partition, sortBy, unfoldr )
 import Data.Monoid ( Any(..) )
-import Data.Foldable ( toList, traverse_ )
+import Data.Foldable ( traverse_ )
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Numeric.Natural (Natural)
 import Control.Monad.Trans.Class ( lift )
@@ -592,7 +590,7 @@ findEngineBatchesWith allocators
       && null (SharedType.typeConstraints source)
   closedContextFreeForall _ = False
   groundMonotype source =
-    null (toList source) && not (SharedType.containsForall source)
+    null source && not (SharedType.containsForall source)
 
   rootClassEnvironment = mkQueryClassEnv sClassEnv []
   preparedCheckContext = prepareExpressionCheckContextWithSchemes
@@ -2186,16 +2184,12 @@ stateStep allocators multiPM allowConstrs h
                       [] -> True
                       [_] -> True
                       _ -> False
-            if any applicable deconstructors
-              then pure ()
-              else mzero
+            unless (any applicable deconstructors) $ mzero
             priorDonations <- gets nodeAggregateDonations
             let globalName = functionName binding
                 alreadyDonated = maybe False (S.member globalName)
                   $ M.lookup var priorDonations
-            if alreadyDonated
-              then mzero
-              else pure ()
+            when (alreadyDonated) $ mzero
             scopedBindings <- gets
               (scopeGetAllBindings scopeId . nodeProvidedScopes)
             -- Avoid adding a byte-for-byte equivalent scalar which is already
@@ -2207,9 +2201,7 @@ stateStep allocators multiPM allowConstrs h
                   null (varPParameters scoped) &&
                     SharedTypeAtom.alphaTypeKey
                       (varPResult scoped) == aggregateKey
-            if any sameAggregate scopedBindings
-              then mzero
-              else pure ()
+            when (any sameAggregate scopedBindings) $ mzero
             modify $ \node -> node
               { nodeAggregateDonations = M.insertWith S.union var
                   (S.singleton globalName) $ nodeAggregateDonations node }
@@ -2477,7 +2469,7 @@ addScopePatternMatch allocators multiPM goalType vid sid tupleMode givens
           -- Preserve the historical first-applicable deconstructor policy.
           selectDeconstructor [] = defaultHandleRest
           selectDeconstructor (deconstructor : remaining) =
-            maybe (selectDeconstructor remaining) id $ mapFunc deconstructor
+            fromMaybe (selectDeconstructor remaining) $ mapFunc deconstructor
 
           -- Sealing guarantees that every field variable occurs in the
           -- datatype head. 'unifyRight' gives that head a temporary tagged

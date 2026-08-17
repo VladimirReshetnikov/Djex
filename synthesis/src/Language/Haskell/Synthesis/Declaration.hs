@@ -1,5 +1,3 @@
-{-# LANGUAGE DeriveFoldable #-}
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
 
@@ -24,6 +22,7 @@ module Language.Haskell.Synthesis.Declaration
   , groundDeclarationKinds
   ) where
 
+import Data.Maybe (isNothing)
 import Control.DeepSeq (NFData)
 import Control.Monad (unless)
 import Data.Foldable (toList)
@@ -481,7 +480,7 @@ isConstructorName name =
 
 isValueName :: Name -> Bool
 isValueName name = nameLexicalClass name == VariableLike &&
-  nameSpecial name == Nothing && nameSpelling name /= Just "_"
+  isNothing (nameSpecial name) && nameSpelling name /= Just "_"
 
 validateDistinct
   :: Ord value

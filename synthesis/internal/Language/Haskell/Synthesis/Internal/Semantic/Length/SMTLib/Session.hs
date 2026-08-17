@@ -134,6 +134,7 @@ import Control.Concurrent.STM
   , putTMVar
   , readTMVar
   , readTVar
+  , readTVarIO
   , takeTMVar
   , tryTakeTMVar
   , writeTVar
@@ -1001,7 +1002,7 @@ checkLengthSMTLibSessionScopedUsableWorkDeadline
   if current /= owner
     then pure $ Left LengthSMTLibSessionUsableWorkScopeUnavailable
     else do
-      mode <- atomically $ readTVar state
+      mode <- readTVarIO state
       case mode of
         LengthSMTLibSessionScopedUsableWorkClosed -> pure $ Left
           LengthSMTLibSessionUsableWorkScopeUnavailable
@@ -1801,7 +1802,7 @@ acquireLengthSMTLibQueryGate worker deadline = mask $ \_ -> loop
               Right () -> Right <$> readTMVar gate
         case observed of
           Left processFailure -> do
-            state <- atomically $ readTVar stateVariable
+            state <- readTVarIO stateVariable
             pure $ Left $ queryGateProcessFailure state processFailure
           Right (Left failure) -> pure $ Left failure
           Right (Right ()) -> do
@@ -1850,7 +1851,7 @@ prepareLengthSMTLibQueryRun
         (PreparedLengthSMTLibQueryRun epoch identity local))
 prepareLengthSMTLibQueryRun evaluationLimits worker query deadline = do
   state@(QueryLeaseState _ ordinal used inFlight _ _) <-
-    atomically $ readTVar $ readyWorkerQueryState worker
+    readTVarIO $ readyWorkerQueryState worker
   case queryLeaseAdmission maximumQueries state of
     Left failure -> pure $ Left (False, failure)
     Right () | isJust inFlight -> pure
@@ -2884,7 +2885,7 @@ acquireLengthSpinePairSMTLibQueryGate worker deadline = mask $ \_ -> loop
               Right () -> Right <$> readTMVar gate
         case observed of
           Left processFailure -> do
-            state <- atomically $ readTVar stateVariable
+            state <- readTVarIO stateVariable
             pure $ Left $ spinePairQueryGateProcessFailure state processFailure
           Right (Left failure) -> pure $ Left failure
           Right (Right ()) -> do
@@ -2933,7 +2934,7 @@ prepareLengthSpinePairSMTLibQueryRun
         (PreparedLengthSpinePairSMTLibQueryRun epoch identity local))
 prepareLengthSpinePairSMTLibQueryRun evaluationLimits worker query deadline = do
   state@(QueryLeaseState _ ordinal used inFlight _ _) <-
-    atomically $ readTVar $ readyWorkerQueryState worker
+    readTVarIO $ readyWorkerQueryState worker
   case spinePairQueryLeaseAdmission maximumQueries state of
     Left failure -> pure $ Left (False, failure)
     Right () | isJust inFlight -> pure
@@ -3988,7 +3989,7 @@ withLengthSMTLibReadyWorkerWithDeadlinePolicy deadlinePolicy config use =
               >>= recordCleanup rolledBackWorkspace
       case allocated of
         Left failure -> do
-          rollback <- atomically $ readTVar rolledBackWorkspace
+          rollback <- readTVarIO rolledBackWorkspace
           let cleanup = emptyCleanup
                 { lengthSMTLibSessionWorkspaceCleanupStatus = case rollback of
                     Nothing -> LengthSMTLibSessionWorkspaceNotAllocated
@@ -4053,7 +4054,7 @@ withLengthSMTLibReadyWorkerWithDeadlinePolicy deadlinePolicy config use =
                 `onException` protectWorkspace
               case controlled of
                 Left failure -> do
-                  rolledBack <- atomically $ readTVar rolledBackInspection
+                  rolledBack <- readTVarIO rolledBackInspection
                   workspaceCleanup <- case rolledBack of
                     Nothing -> cleanupWorkspace sessionLimits workspace
                     Just cleanup -> pure cleanup
@@ -4073,7 +4074,7 @@ withLengthSMTLibReadyWorkerWithDeadlinePolicy deadlinePolicy config use =
                 `onException` protectWorkspace
               case controlled of
                 Left failure -> do
-                  rolledBack <- atomically $ readTVar rolledBackInspection
+                  rolledBack <- readTVarIO rolledBackInspection
                   workspaceCleanup <- case rolledBack of
                     Nothing -> cleanupWorkspace sessionLimits workspace
                     Just cleanup -> pure cleanup

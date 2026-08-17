@@ -8,6 +8,7 @@
 module Language.Haskell.Synthesis.Internal.Semantic.Length.CounterexampleBank
 where
 
+import Control.Monad (when)
 import Control.DeepSeq (NFData (rnf), force)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
@@ -400,9 +401,8 @@ insertBankKernelSample origin rawInputs
       samples stats) = do
   -- Capacity is checked before origin or input demand.  In particular, a
   -- zero-entry bank rejects a poisoned/cyclic sample without touching it.
-  if maximumEntries <= 0
-    then Left $ BankKernelEntryLimitExceeded maximumEntries 1
-    else pure ()
+  when (maximumEntries <= 0)
+    $ Left $ BankKernelEntryLimitExceeded maximumEntries 1
   sample <- validateBankKernelSample limits origin rawInputs
   let inputs = bankKernelSampleInputs sample
       duplicate = any ((== inputs) . bankKernelSampleInputs) samples
@@ -453,10 +453,9 @@ validateBankKernelSample
 validateBankKernelSample (BankKernelLimits _ maximumWidth maximumBits
     maximumBytes _) origin rawInputs = do
   let observedWidth = observedListLength maximumWidth rawInputs
-  if observedWidth > maximumWidth
-    then Left $ BankKernelSampleWidthLimitExceeded
+  when (observedWidth > maximumWidth)
+    $ Left $ BankKernelSampleWidthLimitExceeded
       maximumWidth observedWidth
-    else pure ()
   (inputs, encodedElements) <- retainElements 0 rawInputs
   let encodedBytes = 1
         + encodedVariableNaturalByteCount (fromIntegral observedWidth)
@@ -471,10 +470,9 @@ validateBankKernelSample (BankKernelLimits _ maximumWidth maximumBits
   retainElements !_ [] = Right ([], 0)
   retainElements !index (value : remaining) = do
     let observedBits = observedNaturalBits maximumBits value
-    if observedBits > maximumBits
-      then Left $ BankKernelNaturalBitLimitExceeded
+    when (observedBits > maximumBits)
+      $ Left $ BankKernelNaturalBitLimitExceeded
         index maximumBits observedBits
-      else pure ()
     let magnitudeBytes = max 1
           $ (fromIntegral observedBits + 7) `quot` 8
         encodedValueBytes = encodedVariableNaturalByteCount magnitudeBytes

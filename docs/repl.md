@@ -1228,7 +1228,9 @@ Late argument validation retains the command's diagnostic family:
 `DJEX_REPL_SHOW`, `DJEX_REPL_INFO`, and `DJEX_REPL_HISTORY`, respectively;
 an unknown `:help` subject is a `DJEX_REPL_COMMAND` error.
 `DJEX_REPL_SETTING` is reserved for `:set` and `:unset`, including an invalid
-sign form.
+sign form.  A query that runs out its `timeout` budget reports
+`DJEX_SEARCH_TIMEOUT` and leaves the session intact, like any other
+recoverable diagnostic; it is a bounded stop, never a verdict about the type.
 
 Failures needed before the loop can exist, such as failure to build the
 standard Djinn session or validate a requested history path, make `runRepl`

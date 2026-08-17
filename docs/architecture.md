@@ -783,6 +783,29 @@ freshly linked `djex`, `djinn`, and `exference` tools, so another component
 must not replace one of those executables while a suite is using it. Focused
 library-only test targets may still run concurrently.
 
+Two practical notes about reading the result:
+
+- `cabal test all` stops at the **first** failing suite and never reaches the
+  ones after it. A single red suite therefore looks like a much larger outage
+  than it is. When something fails, re-run the suites individually (or pass
+  `--keep-going`) before drawing conclusions about scope.
+- `synthesis-length-tests` is the only suite that is **not** expected to be
+  fully green off Linux. Seven of its 366 cases exercise the descriptor-bound
+  Z3 launch strategies, whose real implementation is Linux-only:
+
+  | Case | What it wants |
+  |---|---|
+  | `fail closed before demanding unsupported-platform inputs` (×3, one per launch strategy) | the non-Linux stub to refuse *before* it asks for a workspace descriptor; the stubs currently ask first, so the assertion fires |
+  | `bind sealed-launch scalar and pair identities under scoped authority` | a live descriptor-bound launch |
+  | `bind effective-ID scalar and pair identities under scoped authority` | the same, via the effective-ID strategy |
+  | `preserve scalar/pair wire bytes and statuses across sealed launches` | wire bytes from a real sealed launch |
+  | `seal exact initial and conditional value writes` | the same launch path |
+
+  On Linux the suite is 366/366. On Windows it is 359/366, and those seven are
+  the baseline rather than a regression --- confirm against a pristine checkout
+  before treating any of them as new. The refusals are still closed refusals;
+  the disagreement is about *when* the stub gives up, not whether it does.
+
 See [the library API guide](library-api.md) for runnable examples and
 [the synthesis API map](../synthesis/README.md) for the shared modules. The
 [2026-07-27 unification review](reports/2026-07-27-unification-review.md)

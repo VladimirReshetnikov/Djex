@@ -25,6 +25,7 @@ module Language.Haskell.Djex.Djinn
   , DjinnLocal
   , DjinnType
   , QueryOptions (..)
+  , Strategy (..)
   , defaultQueryOptions
   , DjinnRequest
   , mkDjinnRequest
@@ -76,6 +77,7 @@ import Language.Haskell.Djex.Djinn.Internal.Request
   , DjinnType
   , DjinnTypeVariable
   , QueryOptions (..)
+  , Strategy (..)
   , defaultQueryOptions
   , djinnRequestQuery
   , mkDjinnRequest

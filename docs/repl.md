@@ -924,7 +924,7 @@ Use any of these forms:
 ```
 
 Bare `:set` also prints an informational `targets = ...` line beside the
-seventeen settings; the target set is workspace state owned by `:load`, not a
+twenty settings; the target set is workspace state owned by `:load`, not a
 setting, so `:set targets`/`:unset targets` are rejected.
 
 Boolean values also accept `true`/`false` and `yes`/`no`. The compact
@@ -945,8 +945,10 @@ is reproduced by `:set prompt "djex[%b]> "`, not by the unquoted spelling.
 | `render` | `definition`, `expression` | `definition` | Shared presentation |
 | `qualification` | `none`, `identifiers`, `full` | `full` | Shared presentation |
 | `prompt` | Text, or a Haskell string literal; `%b` expands to the active selection | `"djex[%b]> "` | Interactive UI |
+| `timeout` | Non-negative integer seconds; `0` means no budget | `0` | Shared search |
 | `candidate-limit` | Positive integer | `200` | Djinn |
 | `choice-budget` | Non-negative integer; `0` means unbounded | `0` | Djinn |
+| `djinn-strategy` | `depth-first`, `interleave` | `depth-first` | Djinn |
 | `djinn-axioms` | Boolean | Off | Djinn |
 | `allow-unused` | Boolean | Off | Exference |
 | `allow-constraints` | Boolean | Off | Exference |
@@ -955,7 +957,36 @@ is reproduced by `:set prompt "djex[%b]> "`, not by the unquoted spelling.
 | `max-steps` | Positive integer | `65536` | Exference |
 | `max-queue` | Non-negative integer or `unbounded` | `8192` | Exference |
 | `max-depth` | Finite non-negative number or `unbounded` | `unbounded` | Exference |
+| `heuristic` | `NAME VALUE`: a weight name and a finite non-negative number | The thirteen built-in weights | Exference |
 | `fix` | Boolean | Off | Exference load policy |
+
+`timeout` is the only wall-clock bound in the REPL: the engines otherwise
+stop on step, queue, depth, choice-point and candidate bounds, which are
+machine-independent but say nothing about how long a query runs. The budget
+covers one backend run end to end -- request construction, search, selection,
+rendering and reporting -- because both engines produce results lazily and in
+different places. Under `backend both` and `:compare` each backend run gets
+its own fresh budget. An expired budget reports `[DJEX_SEARCH_TIMEOUT]` and
+abandons the search where it stands: with `select = all` the candidates
+already printed stay printed, and no query is ever reported as answered on a
+budget stop. It does not apply to `:load`, `:eval`, `:type` or the package
+commands, and Ctrl+C still interrupts anything.
+
+`djinn-strategy` chooses how the prover explores its choice points.
+`depth-first` is the historical order; `interleave` alternates between
+branches, so an expensive dead end cannot starve a cheap alternative. The
+choice reorders candidates and changes how a `choice-budget` is spent; it
+never changes which types are inhabited, and `depth-first` remains the
+measured-faster default (see `djinn/docs/reports/2026-07-10-search-budget.md`).
+
+`heuristic` assigns one Exference ranking weight at a time and reports all
+thirteen: `:set heuristic goalVar 3.5` retunes one weight, `:show settings`
+prints them all as `name=value`, and `:unset heuristic` restores every one.
+The name and the value are separated by whitespace rather than `=`, because
+the `:set` grammar gives the first `=` to the setting name. Names are matched
+case-insensitively and exactly; `:help set` lists them. Weights must be
+finite and non-negative, since search-option validation would otherwise
+reject the query.
 
 The interactive default is `select = first`, unlike the one-shot command's
 global-best default. It makes an exploratory prompt responsive and preserves

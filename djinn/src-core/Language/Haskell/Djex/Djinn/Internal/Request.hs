@@ -9,6 +9,7 @@
 -- witness and diagnostic provenance remain inseparable inside this module.
 module Language.Haskell.Djex.Djinn.Internal.Request
   ( QueryOptions (..)
+  , Strategy (..)
   , defaultQueryOptions
   , DjinnRequest
   , DjinnTypeVariable
@@ -33,6 +34,7 @@ import Djinn.Internal.Type
   )
 import Djinn.Core
   ( QueryOptions (..)
+  , Strategy (..)
   , defaultQueryOptions
   )
 import qualified Djinn.Core as Core

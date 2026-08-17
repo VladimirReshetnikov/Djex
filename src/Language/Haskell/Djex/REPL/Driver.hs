@@ -33,6 +33,7 @@ import System.Console.Haskeline
   )
 import System.Console.Haskeline.History (historyLines)
 
+import Language.Haskell.Djex.Command (heuristicNames, searchStrategyNames)
 import Language.Haskell.Djex.REPL.Command
   ( CompletionDomain (..)
   , backendNames
@@ -219,8 +220,11 @@ candidatesFor completions previous word = case previous of
     (Right "set", []) -> settingNames
       ++ map ('+' :) booleanSettingNames
       ++ map ('-' :) booleanSettingNames
-    (Right "set", [setting])
-      | map toLower setting == "backend" -> backendNames
+    (Right "set", [setting]) -> case map toLower setting of
+      "backend" -> backendNames
+      "djinn-strategy" -> searchStrategyNames
+      "heuristic" -> heuristicNames
+      _ -> []
     (Right "unset", []) -> settingNames
     _ -> []
 

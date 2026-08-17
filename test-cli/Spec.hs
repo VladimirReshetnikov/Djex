@@ -64,6 +64,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplSharedSession
   , testCase "REPL setting signs and diagnostics follow their command domains"
       testReplSettingSignsAndDiagnostics
+  , testCase "REPL search settings retune the budget, strategy, and weights"
+      testReplSearchSettings
   , testCase "REPL shares Church rank-N and impredicative queries"
       testReplRankNQueries
   , testCase "REPL retains safe Djinn rank-N axioms"
@@ -541,6 +543,68 @@ testReplSharedSession = withTemporaryEnvironment [] $ \directory -> do
   assertBool "successful shared session emitted an error" $
     not $ "error" `isInfixOf` map toLower errors
 
+-- The wall-clock budget, the Djinn strategy, and the Exference weights are
+-- the search settings whose values reach an engine rather than presentation.
+-- Every assertion here is deterministic: the budget is exercised through its
+-- reports and its effect on a query that finishes well inside it, never by
+-- racing a slow search against a clock.
+testReplSearchSettings :: Assertion
+testReplSearchSettings = withTemporaryEnvironment [] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":show settings"
+    , ":set timeout 5"
+    , ":set timeout"
+    , ":set timeout -1"
+    , ":set timeout abc"
+    , ":set djinn-strategy interleave"
+    , ":set djinn-strategy wat"
+    , ":set heuristic goalVar 3.5"
+    , ":set heuristic goalCons 2.25"
+    , ":set heuristic nosuch 1"
+    , ":set heuristic goalVar -1"
+    , ":show settings"
+    , "a -> a"
+    , ":unset timeout"
+    , ":unset djinn-strategy"
+    , ":unset heuristic"
+    , ":show settings"
+    , ":help set"
+    ]
+  assertEqual "search-setting REPL exit" ExitSuccess exitCode
+  assertContains "the budget starts disabled" "timeout = 0" output
+  assertContains "the historical strategy is the default"
+    "djinn-strategy = depth-first" output
+  assertContains "every weight is reported" "heuristic = goalVar=4.0" output
+  assertContains "a budget is retained" "timeout = 5" output
+  assertContains "an interleaving strategy is retained"
+    "djinn-strategy = interleave" output
+  assertContains "a named weight is assigned" "goalVar=3.5" output
+  assertContains "a second weight assignment is retained"
+    "goalCons=2.25" output
+  assertContains "a query still answers under a budget"
+    "djexResult a = a" output
+  assertEqual "every rejected search value is a setting diagnostic" 6
+    $ countOccurrences "[DJEX_REPL_SETTING]" errors
+  assertContains "a valueless budget is rejected like any other setting"
+    "setting timeout requires a value" errors
+  assertContains "a negative budget is rejected"
+    "timeout must be a non-negative whole number of seconds" errors
+  assertContains "an unparsable budget is rejected"
+    "timeout must be a non-negative whole number of seconds" errors
+  assertContains "an unknown strategy is rejected"
+    "djinn-strategy must be depth-first or interleave" errors
+  assertContains "an unknown weight name is rejected"
+    "heuristic name must be one of" errors
+  assertContains "a negative weight is rejected"
+    "heuristic goalVar must be a finite non-negative number" errors
+  assertContains "resetting restores the disabled budget" "timeout = 0" output
+  assertContains "resetting restores the historical strategy"
+    "djinn-strategy = depth-first" output
+  assertContains "resetting restores every weight" "goalVar=4.0" output
+  assertContains "setting help lists the weight names"
+    "heuristic weights: goalVar" output
+  assertNoCallStack errors
+
 testReplSettingSignsAndDiagnostics :: Assertion
 testReplSettingSignsAndDiagnostics = withTemporaryEnvironment [] $ \directory -> do
   let nonBooleanSettings =
@@ -550,12 +614,15 @@ testReplSettingSignsAndDiagnostics = withTemporaryEnvironment [] $ \directory ->
         , "render"
         , "qualification"
         , "prompt"
+        , "timeout"
         , "candidate-limit"
         , "choice-budget"
+        , "djinn-strategy"
         , "constraint-deferral-steps"
         , "max-steps"
         , "max-queue"
         , "max-depth"
+        , "heuristic"
         ]
       signedSettings = zipWith
         (\sign setting -> ":set " ++ [sign] ++ setting)

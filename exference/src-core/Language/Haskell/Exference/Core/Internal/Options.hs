@@ -11,6 +11,7 @@ module Language.Haskell.Exference.Core.Internal.Options
   , ExferenceOptions (..)
   , defaultExferenceOptions
   , heuristicFields
+  , heuristicAssignments
   ) where
 
 import Language.Haskell.Exference.Core.Score (Penalty)
@@ -101,4 +102,34 @@ heuristicFields config =
   , ("functionGoalTransform", heuristics_functionGoalTransform config)
   , ("unusedVar", heuristics_unusedVar config)
   , ("solutionLength", heuristics_solutionLength config)
+  ]
+
+-- | Every heuristic weight paired with its field name and an assignment, in
+-- the declaration order of 'heuristicFields'; a frontend that sets one weight
+-- by name resolves it here.
+-- Keep this beside 'heuristicFields' so a heuristic field cannot gain a
+-- reader without also gaining a writer.
+heuristicAssignments
+  :: [( String
+      , Penalty -> ExferenceHeuristicsConfig -> ExferenceHeuristicsConfig )]
+heuristicAssignments =
+  [ ("goalVar", \value config -> config {heuristics_goalVar = value})
+  , ("goalCons", \value config -> config {heuristics_goalCons = value})
+  , ("goalArrow", \value config -> config {heuristics_goalArrow = value})
+  , ("goalApp", \value config -> config {heuristics_goalApp = value})
+  , ("stepProvidedGood"
+    , \value config -> config {heuristics_stepProvidedGood = value})
+  , ("stepProvidedBad"
+    , \value config -> config {heuristics_stepProvidedBad = value})
+  , ("stepEnvGood", \value config -> config {heuristics_stepEnvGood = value})
+  , ("stepEnvBad", \value config -> config {heuristics_stepEnvBad = value})
+  , ("tempUnusedVarPenalty"
+    , \value config -> config {heuristics_tempUnusedVarPenalty = value})
+  , ("tempMultiVarUsePenalty"
+    , \value config -> config {heuristics_tempMultiVarUsePenalty = value})
+  , ("functionGoalTransform"
+    , \value config -> config {heuristics_functionGoalTransform = value})
+  , ("unusedVar", \value config -> config {heuristics_unusedVar = value})
+  , ("solutionLength"
+    , \value config -> config {heuristics_solutionLength = value})
   ]

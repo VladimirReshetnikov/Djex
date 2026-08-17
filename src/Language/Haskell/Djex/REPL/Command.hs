@@ -38,6 +38,7 @@ import Data.List (intercalate, isPrefixOf)
 import Text.Read (readMaybe)
 
 import Language.Haskell.Djex (Backend (..))
+import Language.Haskell.Djex.Command (heuristicNames)
 import Language.Haskell.Djex.Package
   ( PackageInstallMode
   , parsePackageInstall
@@ -159,8 +160,10 @@ data ReplSetting
   | RenderingSetting
   | QualificationSetting
   | PromptSetting
+  | QueryTimeoutSetting
   | CandidateLimitSetting
   | ChoiceBudgetSetting
+  | DjinnStrategySetting
   | DjinnAxiomsSetting
   | AllowUnusedSetting
   | AllowConstraintsSetting
@@ -169,6 +172,7 @@ data ReplSetting
   | MaximumStepsSetting
   | MaximumQueueSetting
   | MaximumDepthSetting
+  | HeuristicSetting
   | FixSetting
   deriving (Bounded, Enum, Eq, Show)
 
@@ -182,8 +186,10 @@ replSettingName setting = case setting of
   RenderingSetting -> "render"
   QualificationSetting -> "qualification"
   PromptSetting -> "prompt"
+  QueryTimeoutSetting -> "timeout"
   CandidateLimitSetting -> "candidate-limit"
   ChoiceBudgetSetting -> "choice-budget"
+  DjinnStrategySetting -> "djinn-strategy"
   DjinnAxiomsSetting -> "djinn-axioms"
   AllowUnusedSetting -> "allow-unused"
   AllowConstraintsSetting -> "allow-constraints"
@@ -192,6 +198,7 @@ replSettingName setting = case setting of
   MaximumStepsSetting -> "max-steps"
   MaximumQueueSetting -> "max-queue"
   MaximumDepthSetting -> "max-depth"
+  HeuristicSetting -> "heuristic"
   FixSetting -> "fix"
 
 -- | Whether a setting accepts GHCi-style @+NAME@ and @-NAME@ forms.
@@ -667,6 +674,7 @@ setDetails =
   [ "  settings: " ++ intercalate ", " settingNames
   , "  booleans also accept :set +NAME and :set -NAME"
   , "  sign forms are rejected for non-boolean settings"
+  , "  heuristic weights: " ++ intercalate ", " heuristicNames
   ]
 
 typeDetails :: [String]

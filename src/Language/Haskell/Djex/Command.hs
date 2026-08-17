@@ -12,6 +12,7 @@ module Language.Haskell.Djex.Command
   , defaultResultTargetSpelling
   , parseResultTarget
   , parseSelectionMode
+  , parseSearchStrategy
   , parseRenderMode
   , parseQualification
   , positiveInt
@@ -19,7 +20,12 @@ module Language.Haskell.Djex.Command
   , nonNegativeInteger
   , boundedNonNegativeInt
   , boundedPenalty
+  , parseHeuristicAssignment
+  , heuristicNames
+  , renderHeuristics
   , selectionModeName
+  , searchStrategyName
+  , searchStrategyNames
   , renderModeName
   , qualificationName
   , renderBounded
@@ -31,6 +37,11 @@ module Language.Haskell.Djex.Command
   , executeExferenceCommandInScope
   , presentDjinn
   , presentExference
+  , QueryTimeout
+  , noQueryTimeout
+  , parseQueryTimeout
+  , renderQueryTimeout
+  , withinQueryTimeout
   , diagnosticFailure
   , emitDiagnostic
   , runtimeFailure
@@ -43,10 +54,13 @@ import Data.Bifunctor (first)
 import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
 import System.Exit (ExitCode (ExitFailure, ExitSuccess))
+import System.Timeout (timeout)
 import System.IO (hFlush, hPutStrLn, stderr, stdout)
 import Text.Read (readMaybe)
 
 import Language.Haskell.Djex
+import Language.Haskell.Exference.Core.Internal.Options
+  (heuristicAssignments, heuristicFields)
 import Language.Haskell.Djex.Exference.HaskellSrc
   ( ExferenceQueryScope
   , parseExferenceRequestWithCheckedTarget
@@ -96,6 +110,13 @@ parseSelectionMode subject source = case normalize source of
   "best" -> Right SelectBest
   "all" -> Right SelectAll
   _ -> Left $ subject ++ " must be first, best, or all"
+
+-- | Parse a Djinn search-strategy setting with a caller-owned option name.
+parseSearchStrategy :: String -> String -> Either String Strategy
+parseSearchStrategy subject source = case normalize source of
+  "depth-first" -> Right DepthFirst
+  "interleave" -> Right Interleave
+  _ -> Left $ subject ++ " must be depth-first or interleave"
 
 -- | Parse a result-rendering setting with a caller-owned option name.
 parseRenderMode :: String -> String -> Either String RenderMode
@@ -161,6 +182,43 @@ boundedPenalty subject source = case readMaybe $ trim source of
   _ -> Left $ subject
     ++ " must be a finite non-negative number or unbounded"
 
+-- | Parse one @NAME VALUE@ heuristic assignment with a caller-owned option
+-- name, resolving the weight through the table that lives beside the record
+-- it writes.  The two words are separated by whitespace rather than @=@,
+-- because the enclosing @:set@ grammar already gives the first @=@ to the
+-- setting name.  Names are matched case-insensitively and exactly; the
+-- weight must be finite and non-negative, as search-option validation would
+-- otherwise reject the whole query.
+parseHeuristicAssignment
+  :: String -> String
+  -> Either String
+      (ExferenceHeuristicsConfig -> ExferenceHeuristicsConfig)
+parseHeuristicAssignment subject source = case words (trim source) of
+  [name, weight] -> case filter (named name) heuristicAssignments of
+    (_, assign) : _ -> do
+      value <- weightOf (subject ++ " " ++ name) weight
+      Right $ assign value
+    [] -> Left $ subject ++ " name must be one of "
+      ++ intercalate ", " heuristicNames
+  _ -> Left $ subject ++ " expects NAME VALUE, for example goalVar 4.0"
+ where
+  named wanted (name, _) = normalize wanted == normalize name
+  weightOf owner weight = case readMaybe weight of
+    Just value
+      | value >= 0
+      , not $ isNaN value || isInfinite value -> Right $ Penalty value
+    _ -> Left $ owner ++ " must be a finite non-negative number"
+
+-- | Every heuristic weight name, for completion and diagnostics.
+heuristicNames :: [String]
+heuristicNames = map fst heuristicAssignments
+
+-- | Every heuristic weight as @name=value@ in declaration order: the whole
+-- configuration is one setting, so its report shows every weight.
+renderHeuristics :: ExferenceHeuristicsConfig -> String
+renderHeuristics config = unwords
+  [ name ++ "=" ++ show weight | (name, weight) <- heuristicFields config ]
+
 -- | The setting spelling of a selection mode, as accepted by
 -- 'parseSelectionMode'; a lookahead mode renders as @best-lookahead=N@,
 -- which that parser does not accept.
@@ -169,6 +227,16 @@ selectionModeName SelectFirst = "first"
 selectionModeName SelectBest = "best"
 selectionModeName (SelectBestLookahead count) = "best-lookahead=" ++ show count
 selectionModeName SelectAll = "all"
+
+-- | The setting spelling of a search strategy, as accepted by
+-- 'parseSearchStrategy'.
+searchStrategyName :: Strategy -> String
+searchStrategyName DepthFirst = "depth-first"
+searchStrategyName Interleave = "interleave"
+
+-- | Every search-strategy spelling, for value completion.
+searchStrategyNames :: [String]
+searchStrategyNames = map searchStrategyName [DepthFirst, Interleave]
 
 -- | The setting spelling of a render mode, as accepted by
 -- 'parseRenderMode'.
@@ -454,6 +522,60 @@ reportNoExferenceResult progress = emitDiagnostic
 
 reportTruncation :: Maybe Progress -> IO ()
 reportTruncation = mapM_ emitDiagnostic . progressTruncationDiagnostic
+
+-- | An optional per-query wall-clock budget in whole seconds.
+-- 'noQueryTimeout' runs a query to completion, as every release before this
+-- setting did.
+newtype QueryTimeout = QueryTimeout (Maybe Int)
+  deriving (Eq, Show)
+
+-- | Search without a wall-clock budget.
+noQueryTimeout :: QueryTimeout
+noQueryTimeout = QueryTimeout Nothing
+
+-- | Parse a wall-clock query budget in whole seconds with a caller-owned
+-- option name; @0@ is no budget.  A value whose microsecond form would not
+-- fit in an 'Int' is rejected rather than silently wrapped.
+parseQueryTimeout :: String -> String -> Either String QueryTimeout
+parseQueryTimeout subject source = case readMaybe $ trim source of
+  Just seconds
+    | seconds >= 0
+    , seconds <= toInteger (maxBound :: Int) `div` microsecondsPerSecond ->
+        Right $ QueryTimeout
+          $ if seconds == 0 then Nothing else Just $ fromInteger seconds
+  _ -> Left $ subject ++ " must be a non-negative whole number of seconds"
+
+-- | The setting spelling of a query budget, as accepted by
+-- 'parseQueryTimeout'.
+renderQueryTimeout :: QueryTimeout -> String
+renderQueryTimeout (QueryTimeout seconds) = maybe "0" show seconds
+
+microsecondsPerSecond :: Integer
+microsecondsPerSecond = 1000000
+
+-- | Run one command under a wall-clock budget.  Without a budget the action
+-- runs unchanged, so laziness, output interleaving and Ctrl+C behaviour stay
+-- exactly what they were before the setting existed.  Both engines produce
+-- their results lazily, in different places -- Djinn searches when its result
+-- is matched, Exference when the rendered candidates are printed -- so the
+-- budget covers the whole command rather than the search function alone.
+-- An expired budget abandons the search where it stands and reports a
+-- bounded stop; whatever the engines had already printed stays printed, and
+-- the query is never reported as answered.
+withinQueryTimeout :: QueryTimeout -> IO ExitCode -> IO ExitCode
+withinQueryTimeout (QueryTimeout Nothing) action = action
+withinQueryTimeout (QueryTimeout (Just seconds)) action = do
+  finished <- timeout
+    (fromInteger $ toInteger seconds * microsecondsPerSecond) action
+  case finished of
+    Just code -> pure code
+    Nothing -> do
+      emitDiagnostic $ contextualDiagnostic Error "DJEX_SEARCH_TIMEOUT"
+        "the search did not finish within the query budget"
+        $ "budget " ++ show seconds
+          ++ "s; ':set timeout N' chooses another budget and ':set timeout 0'"
+          ++ " searches without one"
+      pure runtimeFailure
 
 -- | Print one structured diagnostic and return the command's runtime failure.
 diagnosticFailure :: Diagnostic -> IO ExitCode

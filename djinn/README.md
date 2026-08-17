@@ -797,7 +797,10 @@ rule: while `+multi` enumerates an exact atomic binary endomorphism suffix
 `A -> A -> A`, the oldest three same-domain proofs rotate round-robin so one
 cohort member's descendants cannot starve the other cohort members. Evidence
 after that bounded cohort remains on the ordinary depth-first tail; the
-`Interleave` strategy can also alternate into that tail.
+`Interleave` strategy can also alternate into that tail. The shared Djex REPL
+exposes the choice as `:set djinn-strategy depth-first|interleave`, with
+`depth-first` unchanged as the default; it reorders candidates and changes how
+a choice-point budget is spent, never which types are inhabited.
 
 Each selected proof term is normalized (`nf`), checked against the requested
 formula by an independent unification-based type checker (`ProofCheck`),

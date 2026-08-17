@@ -41,7 +41,7 @@ module Djinn.Core (
     -- * Queries
     Context, mkContext, resolveContext, resolveInstanceMethods,
     resolvePreparedContext, resolvePreparedInstanceMethods,
-    QueryOptions(..), defaultQueryOptions,
+    QueryOptions(..), defaultQueryOptions, Strategy(..),
     DjinnCandidateDetails(..), DjinnCandidate,
     DjinnTermGraphTypeVariable, DjinnTermGraphType,
     DjinnTermGraphAbsence(..), DjinnTypedCandidate,
@@ -641,7 +641,13 @@ data QueryOptions = QueryOptions {
     optionCutoff :: Int,
     -- | Choice-point budget; 'Nothing' keeps the search a complete
     -- decision procedure.
-    optionBudget :: Maybe Integer
+    optionBudget :: Maybe Integer,
+    -- | How the proof search explores its choice points.  'DepthFirst' is
+    -- the historical order; 'Interleave' alternates between branches so an
+    -- expensive dead end cannot starve a cheap alternative.  The choice
+    -- reorders candidates and changes how a budget is spent; it never
+    -- changes which formulas are provable.
+    optionStrategy :: Strategy
     }
     deriving (Eq, Show)
 
@@ -652,7 +658,8 @@ defaultQueryOptions = QueryOptions {
     optionAlternatives = False,
     optionSorted = True,
     optionCutoff = 200,
-    optionBudget = Nothing
+    optionBudget = Nothing,
+    optionStrategy = DepthFirst
     }
 
 -- | Ranking information retained with every checked Djinn candidate.
@@ -2409,6 +2416,7 @@ searchPreparedFormulaPlan options candidateLimit target externalEnv
         internalEnv = proofBindings proofEnv
         mode = (defaultSearchMode
                     (optionAlternatives options || optionSorted options)) {
+            searchStrategy = optionStrategy options,
             searchBudget = optionBudget options
             }
         internalFailure what = first $

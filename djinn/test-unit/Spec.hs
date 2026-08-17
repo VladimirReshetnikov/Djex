@@ -27,7 +27,9 @@ import Djinn.Core (
     inhabit, inhabitGenerated, inhabitResult,
     inhabitGeneratedPrepared, inhabitResultPrepared,
     inhabitSynthesisResultPrepared, inhabitTypedSynthesisResultPrepared,
+    generatedReportCandidates,
     kArrow, kStar, optionAlternatives, optionBudget, optionCutoff, optionSorted,
+    optionStrategy,
     fromSynthesisDeclaration, fromSynthesisEnvironment,
     fromSynthesisKind, fromSynthesisType,
     mkContext, parseContextualHType, parseHKind, parseHType,
@@ -158,6 +160,7 @@ tests =
     , ("prove empty goals from contradictions", testEmptyGoalContradiction)
     , ("reject non-theorems", testNonTheorems)
     , ("honor search budgets and strategies", testSearchModes)
+    , ("carry a query search strategy", testQueryOptionsStrategy)
     , ("prefer distinct evidence across adjacent curried domains",
           testDistinctCurriedArguments)
     , ("rotate fairly across three repeated-domain proofs",
@@ -6046,6 +6049,27 @@ testSearchModes = do
         null $ searchProofs $ run fair peirce
     assertEqual "interleaved search finds the same pick-3 proof set"
         (sort full) (sort $ searchProofs $ run fair pick3)
+
+-- A query carries the strategy the prover has always accepted: the default
+-- stays the historical depth-first order, and the alternative reaches search
+-- without changing which formulas are inhabited.
+testQueryOptionsStrategy :: IO ()
+testQueryOptionsStrategy = do
+    assertEqual "a query defaults to the historical strategy"
+        DepthFirst (optionStrategy defaultQueryOptions)
+    let goal = HTArrow (HTVar "a") (HTArrow (HTVar "a") (HTVar "a"))
+        spellings strategy = sort $ map show $ either (const []) id
+            (generatedReportCandidates <$> inhabitGenerated
+                defaultQueryOptions
+                    { optionAlternatives = True
+                    , optionSorted = False
+                    , optionStrategy = strategy
+                    }
+                standardEnvironment [] "pick" goal)
+    assertEqual "both strategies inhabit the same query"
+        (spellings DepthFirst) (spellings Interleave)
+    assertBool "a strategy reaches search rather than being ignored" $
+        not $ null $ spellings Interleave
 
 -- A curried premise with repeated domains used to exhaust the complete
 -- subtree for its first atom proof before trying a second proof at the next

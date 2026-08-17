@@ -136,7 +136,9 @@ silently discarded.
 <!-- Maintainers: the rank-N/impredicative rule families and their numeric
 bounds are canonical in docs/rank-n.md; this section is a summary rendering.
 Change a rule or bound there first, then re-check this section, the README's
-Unified command section, docs/library-api.md, and the codebase walkthrough. -->
+Unified command section, docs/library-api.md, and the joint Djex/Leant
+codebase walkthrough (docs/Djex_Leant_Codebase_Walkthrough/ in the Leant
+repository). -->
 
 The shared parser enables `RankNTypes` and `ImpredicativeTypes`. Quantification
 may therefore occur below arrows and type constructors, including a list of

@@ -298,7 +298,8 @@ an expression with real GHC.
 <!-- Maintainers: the rank-N/impredicative rule families and their numeric
 bounds are canonical in docs/rank-n.md. This section, docs/repl.md, and
 docs/library-api.md carry summaries; change a rule or bound in docs/rank-n.md
-first and then re-check the three summaries and the codebase walkthrough. -->
+first and then re-check the three summaries and the joint Djex/Leant codebase
+walkthrough (docs/Djex_Leant_Codebase_Walkthrough/ in the Leant repository). -->
 Rank-N and impredicative support uses deliberately bounded, backend-specific
 rule families. Djinn can introduce a `forall` (with or without a validated
 class context) in positive positions and eliminate a hypothesis-side

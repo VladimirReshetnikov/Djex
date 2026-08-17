@@ -59,7 +59,7 @@ module Djinn.Core (
     QueryOutcome(..), QueryReport(..), inhabit
     ) where
 
-import Control.Monad (foldM, unless, void)
+import Control.Monad (foldM, unless, void, when)
 import Data.Bifunctor (first)
 import Data.List (intercalate, mapAccumL)
 import qualified Data.List as List
@@ -1207,11 +1207,10 @@ prepareProviderInstantiationCandidates prepared rawCandidates = do
             SharedQuery.maximumProviderInstantiationCandidates
         observed = SharedCollection.observedListLength
             maximumCandidates rawCandidates
-    if observed > maximumCandidates
-        then Left $ DjinnInstantiationCandidateFailure $
+    when (observed > maximumCandidates)
+        $ Left $ DjinnInstantiationCandidateFailure $
             "provider instantiation candidate count exceeds " ++
                 show maximumCandidates
-        else return ()
     (_, retained) <- foldM validateCandidate (Map.empty, []) $
         zip [0 :: Int ..] rawCandidates
     return $ reverse retained
@@ -1282,11 +1281,10 @@ prepareProviderInstantiationAssignments prepared evidence = do
                 map KindedProviderInstantiationAssignment assignments
         observed = SharedCollection.observedListLength
             maximumAssignments rawAssignments
-    if observed > maximumAssignments
-        then Left $ DjinnInstantiationAssignmentFailure $
+    when (observed > maximumAssignments)
+        $ Left $ DjinnInstantiationAssignmentFailure $
             "provider instantiation assignment count exceeds " ++
                 show maximumAssignments
-        else return ()
     (_, _, retained) <- foldM validateAssignment
         (Map.empty, Map.empty, []) $
         zip [0 :: Int ..] rawAssignments
@@ -1332,11 +1330,10 @@ prepareProviderInstantiationAssignments prepared evidence = do
                         )
             assignmentLabel =
                 "provider instantiation assignment #" ++ show index ++ ": "
-        if observedArguments > maximumArguments
-            then Left $ DjinnInstantiationAssignmentFailure $
+        when (observedArguments > maximumArguments)
+            $ Left $ DjinnInstantiationAssignmentFailure $
                 assignmentLabel ++ "argument count exceeds " ++
                     show maximumArguments
-            else return ()
         let providerLabel = assignmentLabel ++ "provider " ++
                 SharedName.renderCanonical providerName ++ ": "
         providerSpelling <- first

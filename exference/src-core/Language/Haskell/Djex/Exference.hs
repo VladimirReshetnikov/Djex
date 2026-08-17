@@ -94,7 +94,7 @@ import Control.Exception
   , fromException
   , tryJust
   )
-import Control.Monad (foldM, unless)
+import Control.Monad (foldM, unless, when)
 import Data.Bifunctor (first)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
@@ -858,17 +858,16 @@ prepareProviderInstantiationAssignments session evidence
             )
         label = "provider instantiation assignment #" ++
           show assignmentIndex ++ " for " ++ renderCanonical provider
-    if argumentCount == 0
-      then Left $ shownErrorDiagnostic
+    when (argumentCount == 0)
+      $ Left $ shownErrorDiagnostic
         "DJEX_EXF_ASSIGNMENT_ARITY"
         "Exference provider instantiation assignment is empty"
         label
-      else if argumentCount > maximumProviderInstantiationArguments
-        then Left $ shownErrorDiagnostic
-          "DJEX_EXF_ASSIGNMENT_ARGUMENT_LIMIT"
-          "too many Exference provider instantiation arguments"
-          (label, maximumProviderInstantiationArguments, argumentCount)
-        else pure ()
+    when (argumentCount > maximumProviderInstantiationArguments)
+      $ Left $ shownErrorDiagnostic
+        "DJEX_EXF_ASSIGNMENT_ARGUMENT_LIMIT"
+        "too many Exference provider instantiation arguments"
+        (label, maximumProviderInstantiationArguments, argumentCount)
     scheme <- case CoreInternal.exferenceEnvironmentBindingScheme
         provider searchEnvironment of
       Nothing -> Left $ contextualDiagnostic Error

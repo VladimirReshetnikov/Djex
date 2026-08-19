@@ -199,6 +199,14 @@ diagnostic. A common parse or kind error is reported once. The historical
 backend parsers remain the compatibility fallback when the shared source
 runtime, or a requested Djinn scope projection, is unavailable.
 
+### Quantified subtrees and provider-local evidence
+
+A frontend may hand either engine a finite list of closed types, or ordered
+type vectors, for a named polymorphic provider; both engines bound the lists,
+re-check every kind, and replay the choice independently. The paragraphs below
+say how each relation is admitted, what each engine compiles it into, and
+which bounded instantiation families run beside it.
+
 The two search projections share `TypeAtom` for quantified subtrees. Its
 retained source tree supports rendering and capture-avoiding substitution of
 free variables; its cached lexical alpha key owns equality and ordering.
@@ -300,6 +308,8 @@ result, ordering, diagnostics, and finite-budget behavior. The nonempty public
 entrances remain distinct: an assignment is never flattened into the legacy
 scalar pool, and kinded evidence is never silently stripped of its kinds.
 
+### What Djinn compiles provider evidence into
+
 Djinn compiles each retained scalar specialization or exact vector into a
 direct specialized premise for that loaded polymorphic provider. The
 evidence-enriched structural and nominal plans also contain the historical
@@ -332,6 +342,8 @@ into the corresponding visible application of the real provider. A
 target-named specialization is available only to the self-reference diagnostic
 search.
 
+### What Exference does with provider evidence
+
 Exference instead keeps the checked relation in its query state and consults it
 only from exact retained-global lookup. A productive exact assignment vector
 receives one leading visible lane so exact-spelling deduplication cannot discard
@@ -344,6 +356,8 @@ binders, whereas the scalar pool route requires a completely vacuous prefix.
 Scoped values never consult either map. These are finite evidence-directed
 typing rules, not permission for ordinary unification to decompose a polytype
 or a claim of general impredicative inference.
+
+### Djinn's four instantiation-axiom families
 
 Djinn has four bounded instantiation-axiom families. The historical
 query-local family instantiates up to six leading binders at variables,
@@ -389,6 +403,8 @@ Structure surrounding those opaque quantifiers retains its ordinary form,
 which permits impredicative values such as
 `[(forall a. a -> a)]` without claiming general higher-rank subsumption.
 
+### Bounded recursion and nominal transport
+
 Djinn's formula compiler applies a similarly bounded rule to recursive
 datatypes classified by the prepared inventory expansion. It derives
 alias-normalized recursive SCC identity from the same graph used for definition
@@ -402,6 +418,8 @@ identity. Every translation that encounters recursive structure is marked
 incomplete, so its empty proof stream cannot become negative evidence. An
 unrelated recursive SCC does not weaken a complete translation for a query
 which never reaches it.
+
+### The Exference runtime and the REPL command table
 
 The Exference runtime is deliberately richer than a bare session. Source
 targets, ratings, prompt scope, and command policy are not recoverable from its

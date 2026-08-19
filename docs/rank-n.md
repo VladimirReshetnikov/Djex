@@ -21,7 +21,7 @@ non-inhabitation. The bounds themselves (six leading binders, 512 tuples per
 scheme, sixteen retained axioms per scheme, 64 in total, 512 quintuple
 selections per orientation, exhaustive through eleven independent sites) are
 stated where each rule is described and restated in the architecture guide's
-[Djinn instantiation section](architecture.md#shared-interactive-frontend).
+[Djinn instantiation section](architecture.md#djinns-four-instantiation-axiom-families).
 
 ---
 

@@ -451,7 +451,8 @@ source attribution and strictness contract; backend caches remain lazy.
 
 The one-import `Language.Haskell.Djex` surface reexports the complete
 neutral declaration, environment, inventory, kind-inference,
-synonym-elaboration, and type-rendering vocabulary. `DjinnEnvironment`,
+synonym-elaboration, and type-rendering vocabulary, together with the checked
+semantic Length and SMT-LIB live surface. `DjinnEnvironment`,
 `DjinnInventory`, `DjinnTypeVariable`, `DjinnLocal`, and `DjinnType` make
 every Djinn adapter signature nameable without depending on a hidden backend
 alias, and both stable environment aliases use `Void` for explicit kind
@@ -895,7 +896,8 @@ because Haskell has no corresponding unary tuple constructor.
 The `exference` compatibility executable is a six-line launcher for
 `Language.Haskell.Exference.CLI`, the compatibility orchestrator at this
 boundary: it loads and seals one session, parses every requested type
-through `parseExferenceRequest`, selects shared candidates, and renders
+through the same `parseExferenceRequest…` entry points as the checked
+adapter, selects shared candidates, and renders
 their generated expression bodies. The compatibility command,
 `djex exference`, and the shared `djex` REPL obtain their session policy from
 the same frontend operation. They exclude `Data.Function.fix`,

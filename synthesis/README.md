@@ -1,7 +1,8 @@
 # Shared synthesis foundation
 
-`synthesis/src` is the parser- and backend-independent layer of the single
-`djex` library. It defines the source vocabulary, checked environment and kind
+`synthesis/src` (public modules) together with `synthesis/internal`
+(package-private ones) is the parser- and backend-independent layer of the
+single `djex` library. It defines the source vocabulary, checked environment and kind
 authorities, query/result protocol, generated-code grammar, and presentation
 policies shared by Djinn and Exference.
 
@@ -198,6 +199,7 @@ and the
 | `Language.Haskell.Synthesis.Internal.SMTLib.Lexical` | Schema-free owner of the exact SMT-LIB whitespace predicate, the canonical `[HT, LF, CR, SP]` fingerprint order, and the shared bare-delimiter, printable, string-character, and quoted-symbol-character byte classes consumed by parsing, framing, causal accounting, boundary draining, and domain plans. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.QFLIA` | Domain-neutral typed QF_LIA integer, Boolean, and command syntax with one exact logic spelling, canonical rendering, and matching structural fingerprint-field projections; it owns no domain translation, naming, limits, solver, or replay policy. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Response` | Domain-neutral bounded SMT-LIB response lexer and S-expression parser with productive total, depth, node, token, and numeral limits. |
+| `Language.Haskell.Synthesis.Internal.SMTLib.Stream` | Package-private incremental framing of one SMT-LIB response across chunks, with bounded trivia, frame, and depth limits, package-owned 32-byte-nonce `echo` sentinels, and exact charged-byte reporting for the cumulative cursor above it. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Response.Standard` | Canonical solver-status bytes, bounded standard check-response decoding, and shared `unsupported`/solver-error classification without process or semantic authority. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution` | Domain-neutral admitted Z3 launch profile, mechanical startup/reset facts, configured argv, and flat launch fingerprint-field slice without process or domain-schema authority. |
 | `Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process` | Domain-neutral opaque direct-process runtime owning pre-spawn observation, masked resource-result publication, rollback-protected descriptor-child ownership handoff, pipes, FIFO events, cancellation/deadlines, and bounded cleanup while exposing only associated schema-free observation and limit fields to a domain facade. |
@@ -237,7 +239,8 @@ The complete module-by-module narrative of the Length contract, its SMT-LIB
 translation, and the Z3 live stack — schema versions, sealing order, replay
 gates, framing, protocol, session, and process ownership — lives in the
 [semantic foundations reference](../docs/semantic-foundations.md#length-module-narrative);
-this map keeps only the table above and the invariants below.
+this map keeps the tables above, the short cross-cutting notes between them,
+and the invariant conventions below.
 
 ### Small shared utilities
 
@@ -246,6 +249,7 @@ this map keeps only the table above and the invariants below.
 | `Language.Haskell.Synthesis.Collection` | Stable distinctness, duplicate summaries, optional observations, and finite transitive closure. |
 | `Language.Haskell.Synthesis.Count` | Exact `Natural` counts and explicit saturation at historical `Int` boundaries. |
 | `Language.Haskell.Synthesis.Fresh` | Deterministic collision-skipping selection and allocation for total or exhaustible generators and caller-owned reservation stores. |
+| `Language.Haskell.Synthesis.Internal.Alpha` | Lexical alpha-normalization, the two binder-aware `Type` walks the canonical forms share, and the one first-order structural equation solver (`solveTypeEquations`) behind instance-head overlap, context-free scheme matching, and class-resolution overlap. |
 
 The private `Language.Haskell.Synthesis.Internal.InstanceHead` module owns the
 canonical, alpha-normal comparison key used to detect duplicate instance

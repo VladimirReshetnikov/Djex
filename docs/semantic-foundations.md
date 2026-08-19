@@ -5,14 +5,13 @@ identities, ground class resolution, and the finite list-spine Length
 behavioral domain with its SMT-LIB/Z3 live stack. The [README](../README.md)
 gives the one-paragraph orientation and the
 [architecture guide](architecture.md) the ownership map; this document is
-the specification, kept verbatim from where it used to sit inline in the
-README.*
+the specification, moved out of the README and maintained here since.*
 
 ## What this stratum is, in one screen
 
 Beside the two search engines, Djex carries a backend-neutral layer that
 never runs a search. It answers a different question: given a candidate the
-engines already produced and Lean or GHC already type-checked, *what can be
+engines already produced and independently type-checked, *what can be
 said about its behavior*, and *what identity does that claim attach to*?
 
 - **Typed candidate identities** make the answer attachable. Every candidate
@@ -59,6 +58,10 @@ was reached.
   - [Query-owned bounded counterexample simplification](#query-owned-bounded-counterexample-simplification)
   - [Bounded input-box validation](#bounded-input-box-validation)
   - [Current guarded recursive piecewise-affine applicable-domain validation](#current-guarded-recursive-piecewise-affine-applicable-domain-validation)
+    - [Private ordered analysis and atomic-first fallback](#private-ordered-analysis-and-atomic-first-fallback)
+    - [Guarded `LengthIf` expansion](#guarded-lengthif-expansion)
+    - [Boolean admission, boxes, and replay](#boolean-admission-boxes-and-replay)
+    - [Receipts and authority](#receipts-and-authority)
   - [Finite binary product spine lengths, offline and live SMT replay](#finite-binary-product-spine-lengths-offline-and-live-smt-replay)
     - [Offline product SMT queries and replay](#offline-product-smt-queries-and-replay)
     - [Live product queries](#live-product-queries)
@@ -707,10 +710,11 @@ is fresh evidence minted through the current query. The exact-sample path scans
 the bounded retained set for full membership, but neither path automatically
 replays any other sample or runs a solver.
 
-No bank is wired into live Z3 execution, candidate scheduling,
-persistent/session state, or Leant. The foundation and the additive query
-association remain storage and replay mechanics without proof or pruning
-authority. Their frozen characterizations are recorded in the
+Inside Djex no bank is wired into live Z3 execution, candidate scheduling,
+or session state; the only consumer is Leant's ranking-side command-local
+bank, which threads one bank through a filter command's batches. The
+foundation and the additive query association remain storage and replay
+mechanics without proof or pruning authority. Their frozen characterizations are recorded in the
 [nominal Length counterexample-bank report](reports/2026-08-16-nominal-length-counterexample-bank-foundation.md)
 and the
 [counterexample-bank query-replay report](reports/2026-08-16-length-counterexample-bank-query-replay-bridge.md).
@@ -1366,7 +1370,8 @@ earlier transaction independently of that count.
 The shared readiness transcript establishes only the exact common QF_LIA,
 reset, status, input-valuation, framing, and transport profile needed by both
 query shapes. It supplies no scalar authority to a product query. Product
-execution instead has a distinct protocol plan and phase machine, nominal
+execution instead has its own nominal plan, receiver, and decoded types and a
+distinct phase-machine schema tag over the one shared phase machine, nominal
 query-run schema and fingerprint role, public observation and failure types,
 and `FiniteBinaryProductSpineLengthsV1` evidence association. A values-policy
 `sat` run cannot succeed until the returned input symbols have been decoded
@@ -1387,8 +1392,9 @@ and the subsequent
 then the
 [live binary-product Length/Z3 report](reports/2026-08-14-live-binary-product-spine-z3.md).
 Leant now consumes this product observation through its nominal canonical-
-`Prod` handoff, product-specific ranking and presentation path, and startup
-configuration versions 4 and 6. Scalar and product behavioral authority remain
+`Prod` handoff and its product-specific ranking and presentation path,
+selected by the `rankingDomain` field of its versionless startup
+configuration. Scalar and product behavioral authority remain
 separate across that downstream integration.
 
 #### Shared live usable-work budget
@@ -2519,9 +2525,9 @@ under its explicit provider basis.
 
 #### Live product runs and the shared ordinal space
 
-The product query now also has bounded query-specific response decoding, a
-distinct package-private protocol plan and phase machine, a nominal product
-query-run identity, and a public live observation/failure/replay surface. It
+The product query now also has bounded query-specific response decoding, its
+own nominal package-private protocol plan over the shared phase machine, a
+nominal product query-run identity, and a public live observation/failure/replay surface. It
 reuses the scoped worker only after that worker's four-write probe has
 established the common QF_LIA/reset/status/input-valuation transport profile.
 That readiness fact supplies no scalar problem, observation, or evidence
@@ -2548,8 +2554,8 @@ and the
 followed by the
 [live binary-product Length/Z3 report](reports/2026-08-14-live-binary-product-spine-z3.md).
 Leant now consumes the product facade through its exact canonical-`Prod`
-handoff, nominal pair ranking and presentation, and startup configuration
-versions 4 and 6. That downstream integration does not convert pair evidence
+handoff and its nominal pair ranking and presentation, selected by the
+`rankingDomain` field of its versionless startup configuration. That downstream integration does not convert pair evidence
 to scalar authority.
 
 #### Euclidean witnesses and the shared typed QF_LIA plan
@@ -2602,8 +2608,8 @@ should not be cached by query identity alone.
 ### `Semantic.Length.SMTLib.Response`
 
 `Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response` is the matching
-pure response boundary. It retains at most 65,536 bytes before parsing, so
-cyclic or infinite lazy input is rejected productively, then enforces separate
+pure response boundary. It retains at most the configured total (65,536 bytes by default) before
+parsing, so cyclic or infinite lazy input is rejected productively, then enforces separate
 list-depth, S-expression-node, source-token-byte, and integer-width limits. The
 shared package-private response lexer handles comments, doubled-quote strings,
 quoted symbols, and all standard atom categories while importing the exact

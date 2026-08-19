@@ -18,7 +18,8 @@ historical review notes rather than as the current API guide; the
 | Path | Responsibility |
 | --- | --- |
 | `synthesis/src/` | Shared names, types, declarations, environments, kind inference, diagnostics, generated code, and query/result envelopes. |
-| `synthesis/internal/` | Package-private fingerprints, protocol machinery, and shared implementation invariants. |
+| `synthesis/internal/` | Package-private shared machinery: alpha normalization and the one first-order equation solver (`Internal.Alpha`), ground class resolution, typed-candidate/certificate/fingerprint internals, and the Length contract, SMT-LIB protocol, and Z3 process layers behind the public `Semantic.*` facades. |
+| `synthesis/cbits/` | Linux-only C shim for descriptor-bound Z3 launches; compiled into the library only `if os(linux)`. |
 | `djinn/src-core/` | Djinn's checked adapter, logical translation, LJT proof search, and proof checking. |
 | `djinn/src-internal/` | Package-private Djinn implementation modules shared by the library and focused tests. |
 | `djinn/src-frontend/` | Historical `Djinn` API and compatibility Haskeline REPL. |
@@ -170,7 +171,7 @@ synthesis engine and not a mutable union environment:
 
 ```text
 REPL state
-  |-- Djex source query parser
+  |-- last parsed query
   |     `-- one resolved, kind-checked shared Type plus source metadata
   |-- Djinn runtime
   |     |-- immutable standard-session fallback and axiom policy
@@ -183,7 +184,7 @@ REPL state
   |     `-- diagnostics from the latest load attempt
   |-- visible record-selector presentation map
   |-- active backend selection and last query
-  |-- shared result, presentation, and prompt settings
+  |-- shared result, presentation, prompt, and query-timeout settings
   |-- backend-specific search settings
   `-- active script-inclusion stack
 ```
@@ -426,7 +427,8 @@ resolves Cabal from `PATH`, constructs fixed argv prefixes for `fetch` and
 project-independent `install`, with an explicit library mode, streams inherited
 process output, and normalizes launch, interrupt, and exit reporting. Targets
 follow an explicit `--` separator and never pass through a shell. Child stdin
-and unrelated file descriptors are closed. A dedicated process group plus
+is a pipe the parent closes immediately, so the child reads EOF rather than
+the terminal, and unrelated file descriptors are closed. A dedicated process group plus
 Windows job support bounds ordinary descendant cleanup on interruption. The
 operation is intentionally outside `ReplState`: it can mutate Cabal's cache,
 store, and package environment
@@ -688,8 +690,9 @@ will never change.
 
 New code should start with:
 
-- `Language.Haskell.Djex` for the shared vocabulary, backend metadata, and both
-  checked parser-neutral adapters;
+- `Language.Haskell.Djex` for the shared vocabulary, backend metadata, both
+  checked parser-neutral adapters, and the checked semantic Length and
+  SMT-LIB live surface;
 - `Language.Haskell.Djex.REPL` when an application wants to launch the shared
   terminal session without spawning `djex`;
 - `Language.Haskell.Djex.Djinn` or
@@ -737,22 +740,34 @@ private checked-request/session owners for both adapters, the shared REPL's
 command and Haskeline workers, and the historical Djinn formula and REPL
 workers. Downstream code cannot import them through a `djex` dependency.
 
-The converse also holds: a module named `.Internal.` may live under
-`synthesis/src/` rather than `synthesis/internal/` when the shared source
-tier itself consumes it — `Language.Haskell.Synthesis.Internal.InstanceHead`
-sits beside its `Environment` consumer for exactly this reason. Directory
-placement documents dependency direction; Cabal visibility, not the path,
-decides whether a module is private.
+Public `synthesis/src/` modules routinely import private
+`synthesis/internal/` ones — `Internal.Alpha`, `Internal.Fingerprint`, and
+every `Semantic.*` facade over the Length internals — so consumption by the
+source tier is the ordinary case, not an exception. One private module,
+`Language.Haskell.Synthesis.Internal.InstanceHead`, nonetheless sits under
+`synthesis/src/` beside its sole consumer `Environment`; it is still an
+`Other-Module`. Directory placement documents dependency direction; Cabal
+visibility, not the path, decides whether a module is private.
 
 ## Test boundaries
 
 The package has sixteen test suites:
 
-- shared-foundation, facade integration, downstream API, and merged CLI suites;
-- semantic Length, structural fingerprint, certificate, and term-graph
-  fingerprint suites over the shared foundation;
-- Djinn unit, property, frontend-import, and CLI suites;
-- Exference unit, private-engine, frontend-import, and CLI suites.
+- shared foundation (`synthesis-tests`), facade integration (`djex-tests`),
+  downstream API (`djex-api-tests`), and merged CLI (`djex-cli-tests`);
+- semantic Length (`synthesis-length-tests`), structural fingerprint
+  (`synthesis-fingerprint-tests`), certificate
+  (`synthesis-certificate-tests`), and term-graph fingerprint
+  (`synthesis-term-graph-fingerprint-tests`) over the shared foundation;
+- Djinn unit (`djinn-tests`), property (`djinn-property-tests`),
+  frontend-import (`djinn-frontend-api-tests`), and CLI (`djinn-cli-tests`);
+- Exference unit (`exference-tests`), private engine
+  (`exference-engine-tests`), frontend-import
+  (`exference-frontend-api-tests`), and CLI (`exference-cli-tests`).
+
+Run one with `cabal test NAME`. `cabal test all` stops at the first failing
+suite, so on a platform with known environmental failures (see below) run the
+suites individually to see the whole picture.
 
 `exference-engine-tests` compiles the parser-neutral Exference core and a
 test-only seam as home modules. This preserves finite-identifier, queue

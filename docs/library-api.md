@@ -53,7 +53,7 @@ build-depends: djex
 | Explicit prenex polymorphism | Yes at the checked request edge | Yes |
 | Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through singleton, pairwise, triple, quadruple, and capped quintuple occurrence frontiers; historical context-free hypothesis instantiation at variable and guarded-quantified candidates; a positive-only query-correlated tail requiring a result-relevant quantified choice and an exact query-subtree result while excluding historical logical formulas; an established positive-only query-closed family adding closed, forall-free query subtrees while requiring at least one per tuple; separate per-use loaded-scheme instantiation at query/value-signature candidates; exact externally established provider-assignment vectors; and positive-only nominal transport through reachable parameterized datatype applications | Contextual quantified-goal introduction with lexical givens and escape-checked skolems; scoped-provider instantiation; closed visible instantiation selected by monomorphic instance heads or, for fully vacuous scoped and retained global providers, checked query monotypes and polytypes; exact externally established provider-assignment vectors; and guarded context-free shallow quantified-provider subsumption |
 | Type-class participation | Validates contexts; synthesizes only dictionary-independent terms | Resolves givens, superclasses, and instances |
-| Main controls | Candidate and choice-point limits | Step, queue, depth, constraint, and pattern controls |
+| Main controls | Candidate limit, choice-point budget, and search strategy | Step, queue, depth, constraint, and pattern controls, plus thirteen heuristic weights |
 
 Neither backend guesses the other's semantics. One-shot commands and checked
 library calls select an engine explicitly; the shared REPL stores an explicit
@@ -777,10 +777,12 @@ exferenceDefinitions = do
 `runExferenceQuery` returns a lazy sequence of result batches. Selection is a
 separate presentation policy, so a caller can take the first candidate, retain
 all globally best candidates, use bounded lookahead, or stream every admissible
-candidate without changing search semantics.  `selectPreferredQueryResults`
-adds a preferred tier on top of the same policies: candidates satisfying a
-caller predicate (typically constraint-free candidates) outrank the rest
-without discarding them.
+candidate without changing search semantics.  `selectPreferredQueryResults
+lookahead rank admissible preferred` adds a preferred tier to the
+`SelectBestLookahead` policy — it takes a batch lookahead rather than a
+`SelectionMode`: candidates satisfying the caller's `preferred` predicate
+(typically constraint-free ones) outrank the rest, and the globally minimal
+fallback is retained only until the first preferred candidate appears.
 
 Exference first discharges an exact local given, including a variable-bearing
 given such as `C a`, before deciding whether an obligation must be deferred. It

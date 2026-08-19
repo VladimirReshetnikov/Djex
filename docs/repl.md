@@ -422,7 +422,9 @@ result is not upgraded to Djinn's proof-backed non-inhabitation evidence.
 Exact aliases win; otherwise any nonempty, unique prefix of a canonical
 command is accepted. For example, `:q` is `:quit`, `:s` is deliberately
 `:set`, and `:sy` is `:synth`. Tab completion offers commands, backend names,
-settings, `:show` subjects, and paths where appropriate. Argument completion
+settings (including the `+NAME`/`-NAME` Boolean forms and the accepted values
+of `backend`, `djinn-strategy`, and `heuristic`), `:show` subjects, and paths
+where appropriate. Argument completion
 uses the same command descriptor as parsing, so exact aliases and accepted
 unique prefixes behave like the canonical command; `:module` completion also
 preserves a typed `+`, `-`, or `*` marker. Completion follows the loaded
@@ -929,6 +931,10 @@ Bare `:set` also prints an informational `targets = ...` line beside the
 twenty settings; the target set is workspace state owned by `:load`, not a
 setting, so `:set targets`/`:unset targets` are rejected.
 
+A bare `:set NAME` is not a getter: it is rejected as `setting NAME requires
+a value` (or `requires on or off` for a Boolean). Read current values with
+bare `:set` or `:show settings`.
+
 Boolean values also accept `true`/`false` and `yes`/`no`. The compact
 `+NAME`/`-NAME` forms are available only for the boolean settings listed below;
 using a sign with a non-boolean setting is rejected before value parsing and
@@ -938,6 +944,9 @@ transactional behavior.
 A bare `prompt` value is trimmed like any other setting value, so trailing
 whitespace survives only through the Haskell string-literal form: the default
 is reproduced by `:set prompt "djex[%b]> "`, not by the unquoted spelling.
+Because `:set` gives the first `=` to the *setting name*, a prompt containing
+`=` must also use the quoted `:set prompt="djex => "` form; the unquoted
+spelling is rejected as an unknown setting.
 
 | Setting | Accepted values | Default | Owner |
 | --- | --- | --- | --- |
@@ -964,10 +973,10 @@ is reproduced by `:set prompt "djex[%b]> "`, not by the unquoted spelling.
 
 `timeout` is the only wall-clock bound in the REPL: the engines otherwise
 stop on step, queue, depth, choice-point and candidate bounds, which are
-machine-independent but say nothing about how long a query runs. The budget
-covers one backend run end to end -- request construction, search, selection,
-rendering and reporting -- because both engines produce results lazily and in
-different places. Under `backend both` and `:compare` each backend run gets
+machine-independent but say nothing about how long a query runs. The budget starts once the checked request exists and covers search,
+selection, rendering and reporting -- all of it, because both engines produce
+results lazily and in different places. Parsing and request validation happen
+before the clock starts. Under `backend both` and `:compare` each backend run gets
 its own fresh budget. An expired budget reports `[DJEX_SEARCH_TIMEOUT]` and
 abandons the search where it stands: with `select = all` the candidates
 already printed stay printed, and no query is ever reported as answered on a
@@ -998,8 +1007,10 @@ selection use the same checked presentation path as the one-shot frontend,
 including residual-constraint reporting and truncation or evidence messages.
 
 Changing a setting affects subsequent queries but does not mutate a sealed
-backend session, except for `fix`, whose meaning belongs to Exference session
-construction and therefore transactionally rebuilds the current workspace.
+backend session, with two exceptions whose meaning belongs to session
+construction: `fix` transactionally rebuilds the Exference workspace, and
+`djinn-axioms` transactionally reprojects the Djinn session. Both keep the
+previous session if the rebuild fails.
 `:unset` restores the built-in value, not the corresponding startup option;
 thus `:unset backend` returns to `djinn` even if the session started with
 `--backend both`.

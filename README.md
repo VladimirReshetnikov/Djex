@@ -123,30 +123,32 @@ governing rule is that solver output is never trusted directly — only
 independent replay of a candidate against the exact checked problem produces
 evidence, and raw solver status has no proof or pruning authority. The
 complete specification is
-[docs/semantic-foundations.md](docs/semantic-foundations.md). The strongest of
-four closed live Z3 launch profiles adds descriptor-bound Linux 6.14
-executable checks; its narrow authority is recorded in the
-[execve-check descriptor-bound launch report](docs/reports/2026-08-15-execve-check-descriptor-bound-z3-launch.md).
-The current finite applicable-domain analysis also covers fully supported
-guarded `LengthIf` expressions without replacing exact replay or widening
-incomparable boxes; see the
-[guarded conditional report](docs/reports/2026-08-15-guarded-conditional-length-applicable-domain.md).
-All native descriptor launch profiles transfer an acquired child through one
-masked, rollback-protected owner boundary, detailed in the
-[descriptor spawn resource-ownership report](docs/reports/2026-08-15-descriptor-spawn-resource-ownership.md).
-Checked scalar and binary-product Length problems now also retain nominal,
-candidate-independent counterexample-bank scopes, and pure queries project
-those same scopes. The accompanying bounded newest-first banks store only
-natural input vectors and coarse origins: a scope match authorizes attempting
-fresh replay, never a verdict, receipt, proof, or pruning decision. Explicit
-query-owned operations can now freshly reproduce one receipt before recording
-its inputs in a same-scope bank, or replay one exact retained sample against a
-later same-scope query. Every hit is a new receipt from the current query, and
-every begun replay returns the charged successor bank even on a miss or
-failure. These pure operations still provide no automatic traversal, solver
-execution, candidate scheduling, persistent state, or Leant behavior. See the
-[Length counterexample-bank query-replay report](docs/reports/2026-08-16-length-counterexample-bank-query-replay-bridge.md).
+[docs/semantic-foundations.md](docs/semantic-foundations.md).
 
+The most recent additions, each with the report recording its exact authority:
+
+- **Descriptor-bound Z3 launches.** The strongest of four closed live launch
+  profiles adds descriptor-bound Linux 6.14 executable checks
+  ([execve-check descriptor-bound launch report](docs/reports/2026-08-15-execve-check-descriptor-bound-z3-launch.md));
+  every native descriptor profile hands the acquired child through one
+  masked, rollback-protected owner boundary
+  ([descriptor spawn resource-ownership report](docs/reports/2026-08-15-descriptor-spawn-resource-ownership.md)).
+- **Guarded conditionals in applicable-domain analysis.** The finite
+  applicable-domain analysis covers fully supported guarded `LengthIf`
+  expressions without replacing exact replay or widening incomparable boxes
+  ([guarded conditional report](docs/reports/2026-08-15-guarded-conditional-length-applicable-domain.md)).
+- **Counterexample banks.** Checked scalar and binary-product Length problems
+  retain nominal, candidate-independent bank scopes, and queries project the
+  same scopes. A bank stores only natural input vectors and coarse origins,
+  newest first; a scope match authorizes *attempting* a fresh replay, never a
+  verdict, receipt, proof, or pruning decision. Query-owned operations record
+  one freshly reproduced receipt's inputs into a same-scope bank or replay one
+  retained sample against a later same-scope query; every hit is a new receipt
+  from the current query, and every begun replay returns the charged successor
+  bank even on a miss. Inside Djex these pure operations drive no traversal,
+  solver execution, scheduling, or persistent state; Leant's ranking owns the
+  only consumer
+  ([Length counterexample-bank query-replay report](docs/reports/2026-08-16-length-counterexample-bank-query-replay-bridge.md)).
 
 ## Building
 

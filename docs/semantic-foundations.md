@@ -770,6 +770,17 @@ decoded integer bindings only for that query's input symbols and independently
 replays them against the retained problem; raw model text and even `unsat`
 remain heuristic observations, never pruning permission or proof.
 
+Internally the scalar and product translation boundaries are one
+implementation with two vocabularies: queries are sealed by one shared plan
+builder and one shared fingerprint builder (parameterized only by the
+domain's role string, schema tag, and logic constant), and raw solver models
+are decoded by one shared reader parameterized by the domain's model-error
+constructors. The nominal separation survives at every entrance: the product
+sealer maps the shared error vocabulary onto its own nominal query errors at
+the boundary, and each domain's query, fingerprint subject, and model-error
+types remain distinct, so scalar and product artifacts still cannot be
+confused for one another.
+
 `replayLengthSMTLibCounterexampleInputs` is the query-owned entrance for a
 caller that already has source-ordered natural inputs. The caller supplies only
 `[Natural]`: the sealed query owns the checked problem, modeled-input arity,

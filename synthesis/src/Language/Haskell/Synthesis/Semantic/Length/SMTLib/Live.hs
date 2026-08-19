@@ -92,8 +92,6 @@ import Numeric.Natural (Natural)
 import Language.Haskell.Synthesis.Fingerprint (Fingerprint)
 import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   as Protocol
-import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol.SpinePair
-  as SpinePairProtocol
 import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Response
   as Response
 import qualified Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session
@@ -985,7 +983,7 @@ queryFailure failure = case failure of
   Session.LengthSMTLibQueryLimitExceeded limit observed ->
     LengthSMTLibLiveQueryLimitExceeded limit observed
   Session.LengthSMTLibQueryProtocolPlanFailure plan ->
-    queryProtocolPlanFailure plan
+    queryProtocolPlanFailureWith scalarLiveQueryVocabulary plan
   Session.LengthSMTLibQueryProcessStdoutCapacityTooSmall {} ->
     LengthSMTLibLiveQueryResourceLimitExceeded
   Session.LengthSMTLibQueryBarrierCollision ->
@@ -993,9 +991,9 @@ queryFailure failure = case failure of
   Session.LengthSMTLibQueryDeadlineFailure _ ->
     LengthSMTLibLiveQueryDeadlineExceeded
   Session.LengthSMTLibQueryProcessFailure process ->
-    queryProcessFailure process
+    queryProcessFailureWith scalarLiveQueryVocabulary process
   Session.LengthSMTLibQueryProtocolFailure protocol ->
-    queryProtocolFailure protocol
+    queryProtocolFailureWith scalarLiveQueryVocabulary protocol
   Session.LengthSMTLibQueryTranscriptAccountingMismatch {} ->
     LengthSMTLibLiveQueryTransportFailed
   Session.LengthSMTLibQueryStderrAccountingMismatch {} ->
@@ -1011,46 +1009,109 @@ queryFailure failure = case failure of
   Session.LengthSMTLibQueryInternalFailure ->
     LengthSMTLibLiveQueryInternalFailure
 
-queryProcessFailure
-  :: Process.LengthSMTLibProcessError
-  -> LengthSMTLibLiveQueryFailure
-queryProcessFailure failure = case Process.lengthSMTLibProcessErrorClass failure of
-  Process.LengthSMTLibProcessCancelled ->
-    LengthSMTLibLiveQuerySessionUnavailable
-  Process.LengthSMTLibProcessClosed ->
-    LengthSMTLibLiveQuerySessionUnavailable
-  Process.LengthSMTLibProcessDeadlineExceeded ->
-    LengthSMTLibLiveQueryDeadlineExceeded
-  Process.LengthSMTLibProcessNonPositiveLimit ->
-    LengthSMTLibLiveQueryResourceLimitExceeded
-  Process.LengthSMTLibProcessLimitConversionOverflow ->
-    LengthSMTLibLiveQueryResourceLimitExceeded
-  Process.LengthSMTLibProcessExecutableByteLimitExceeded ->
-    LengthSMTLibLiveQueryResourceLimitExceeded
-  Process.LengthSMTLibProcessStdoutByteLimitExceeded ->
-    LengthSMTLibLiveQueryResourceLimitExceeded
-  Process.LengthSMTLibProcessInternalFailure ->
-    LengthSMTLibLiveQueryInternalFailure
-  _ -> LengthSMTLibLiveQueryTransportFailed
+-- | How one domain spells the query-owned live failures that the shared
+-- process, protocol-plan, and protocol errors map onto.  The three source
+-- error types are shared between the scalar and product transports, so the
+-- three mappers below run once over either record; the top-level run
+-- failures stay per-domain because those sums are nominal.
+data LiveQueryFailureVocabulary failure = LiveQueryFailureVocabulary
+  { liveQuerySessionUnavailable :: failure
+  , liveQueryDeadlineExceeded :: failure
+  , liveQueryResourceLimitExceeded :: failure
+  , liveQueryInternalFailure :: failure
+  , liveQueryTransportFailed :: failure
+  , liveQueryConfigurationRejected :: failure
+  , liveQueryProtocolRejected :: failure
+  }
 
-queryProtocolPlanFailure
-  :: Protocol.LengthSMTLibProtocolPlanError
-  -> LengthSMTLibLiveQueryFailure
-queryProtocolPlanFailure failure = case failure of
+scalarLiveQueryVocabulary
+  :: LiveQueryFailureVocabulary LengthSMTLibLiveQueryFailure
+scalarLiveQueryVocabulary = LiveQueryFailureVocabulary
+  { liveQuerySessionUnavailable = LengthSMTLibLiveQuerySessionUnavailable
+  , liveQueryDeadlineExceeded = LengthSMTLibLiveQueryDeadlineExceeded
+  , liveQueryResourceLimitExceeded =
+      LengthSMTLibLiveQueryResourceLimitExceeded
+  , liveQueryInternalFailure = LengthSMTLibLiveQueryInternalFailure
+  , liveQueryTransportFailed = LengthSMTLibLiveQueryTransportFailed
+  , liveQueryConfigurationRejected =
+      LengthSMTLibLiveQueryConfigurationRejected
+  , liveQueryProtocolRejected = LengthSMTLibLiveQueryProtocolRejected
+  }
+
+spinePairLiveQueryVocabulary
+  :: LiveQueryFailureVocabulary LengthSpinePairSMTLibLiveQueryFailure
+spinePairLiveQueryVocabulary = LiveQueryFailureVocabulary
+  { liveQuerySessionUnavailable =
+      LengthSpinePairSMTLibLiveQuerySessionUnavailable
+  , liveQueryDeadlineExceeded = LengthSpinePairSMTLibLiveQueryDeadlineExceeded
+  , liveQueryResourceLimitExceeded =
+      LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
+  , liveQueryInternalFailure = LengthSpinePairSMTLibLiveQueryInternalFailure
+  , liveQueryTransportFailed = LengthSpinePairSMTLibLiveQueryTransportFailed
+  , liveQueryConfigurationRejected =
+      LengthSpinePairSMTLibLiveQueryConfigurationRejected
+  , liveQueryProtocolRejected =
+      LengthSpinePairSMTLibLiveQueryProtocolRejected
+  }
+
+queryProcessFailureWith
+  :: LiveQueryFailureVocabulary failure
+  -> Process.LengthSMTLibProcessError
+  -> failure
+queryProcessFailureWith vocabulary failure =
+  case Process.lengthSMTLibProcessErrorClass failure of
+    Process.LengthSMTLibProcessCancelled ->
+      liveQuerySessionUnavailable vocabulary
+    Process.LengthSMTLibProcessClosed ->
+      liveQuerySessionUnavailable vocabulary
+    Process.LengthSMTLibProcessDeadlineExceeded ->
+      liveQueryDeadlineExceeded vocabulary
+    Process.LengthSMTLibProcessNonPositiveLimit ->
+      liveQueryResourceLimitExceeded vocabulary
+    Process.LengthSMTLibProcessLimitConversionOverflow ->
+      liveQueryResourceLimitExceeded vocabulary
+    Process.LengthSMTLibProcessExecutableByteLimitExceeded ->
+      liveQueryResourceLimitExceeded vocabulary
+    Process.LengthSMTLibProcessStdoutByteLimitExceeded ->
+      liveQueryResourceLimitExceeded vocabulary
+    Process.LengthSMTLibProcessInternalFailure ->
+      liveQueryInternalFailure vocabulary
+    _ -> liveQueryTransportFailed vocabulary
+
+queryProtocolPlanFailureWith
+  :: LiveQueryFailureVocabulary failure
+  -> Protocol.LengthSMTLibProtocolPlanError
+  -> failure
+queryProtocolPlanFailureWith vocabulary failure = case failure of
   Protocol.LengthSMTLibProtocolRequiredLimitTooSmall {} ->
-    LengthSMTLibLiveQueryConfigurationRejected
+    liveQueryConfigurationRejected vocabulary
   Protocol.LengthSMTLibProtocolMinimumStdoutByteLimitExceeded {} ->
-    LengthSMTLibLiveQueryResourceLimitExceeded
+    liveQueryResourceLimitExceeded vocabulary
   Protocol.LengthSMTLibProtocolPlanFingerprintByteLimitExceeded {} ->
-    LengthSMTLibLiveQueryResourceLimitExceeded
+    liveQueryResourceLimitExceeded vocabulary
   Protocol.LengthSMTLibProtocolBarrierNonceError {} ->
-    LengthSMTLibLiveQueryInternalFailure
+    liveQueryInternalFailure vocabulary
   Protocol.LengthSMTLibProtocolMissingInputValueBarrierNonce ->
-    LengthSMTLibLiveQueryInternalFailure
+    liveQueryInternalFailure vocabulary
   Protocol.LengthSMTLibProtocolUnexpectedInputValueBarrierNonce ->
-    LengthSMTLibLiveQueryInternalFailure
+    liveQueryInternalFailure vocabulary
   Protocol.LengthSMTLibProtocolRepeatedBarrierNonce ->
-    LengthSMTLibLiveQueryInternalFailure
+    liveQueryInternalFailure vocabulary
+
+queryProtocolFailureWith
+  :: LiveQueryFailureVocabulary failure
+  -> Protocol.LengthSMTLibProtocolError
+  -> failure
+queryProtocolFailureWith vocabulary failure = case failure of
+  Protocol.LengthSMTLibProtocolCumulativeStdoutByteLimitExceeded {} ->
+    liveQueryResourceLimitExceeded vocabulary
+  Protocol.LengthSMTLibProtocolFramingFailure _ framing
+    | streamFramingLimitFailure framing ->
+        liveQueryResourceLimitExceeded vocabulary
+  Protocol.LengthSMTLibProtocolResponseFailure _ response
+    | responseLimitFailure response ->
+        liveQueryResourceLimitExceeded vocabulary
+  _ -> liveQueryProtocolRejected vocabulary
 
 sessionCapabilityFailure
   :: Capability.LengthSMTLibCapabilityError
@@ -1063,20 +1124,6 @@ sessionCapabilityFailure failure = case failure of
         LengthSMTLibLiveSessionResourceLimitExceeded
   _ -> LengthSMTLibLiveSessionCapabilityRejected
 
-queryProtocolFailure
-  :: Protocol.LengthSMTLibProtocolError
-  -> LengthSMTLibLiveQueryFailure
-queryProtocolFailure failure = case failure of
-  Protocol.LengthSMTLibProtocolCumulativeStdoutByteLimitExceeded {} ->
-    LengthSMTLibLiveQueryResourceLimitExceeded
-  Protocol.LengthSMTLibProtocolFramingFailure _ framing
-    | streamFramingLimitFailure framing ->
-        LengthSMTLibLiveQueryResourceLimitExceeded
-  Protocol.LengthSMTLibProtocolResponseFailure _ response
-    | responseLimitFailure response ->
-        LengthSMTLibLiveQueryResourceLimitExceeded
-  _ -> LengthSMTLibLiveQueryProtocolRejected
-
 spinePairQueryFailure
   :: Session.LengthSpinePairSMTLibQueryRunFailure
   -> LengthSpinePairSMTLibLiveQueryFailure
@@ -1088,7 +1135,7 @@ spinePairQueryFailure failure = case failure of
   Session.LengthSpinePairSMTLibQueryLimitExceeded limit observed ->
     LengthSpinePairSMTLibLiveQueryLimitExceeded limit observed
   Session.LengthSpinePairSMTLibQueryProtocolPlanFailure plan ->
-    spinePairQueryProtocolPlanFailure plan
+    queryProtocolPlanFailureWith spinePairLiveQueryVocabulary plan
   Session.LengthSpinePairSMTLibQueryProcessStdoutCapacityTooSmall {} ->
     LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
   Session.LengthSpinePairSMTLibQueryBarrierCollision ->
@@ -1096,9 +1143,9 @@ spinePairQueryFailure failure = case failure of
   Session.LengthSpinePairSMTLibQueryDeadlineFailure _ ->
     LengthSpinePairSMTLibLiveQueryDeadlineExceeded
   Session.LengthSpinePairSMTLibQueryProcessFailure process ->
-    spinePairQueryProcessFailure process
+    queryProcessFailureWith spinePairLiveQueryVocabulary process
   Session.LengthSpinePairSMTLibQueryProtocolFailure protocol ->
-    spinePairQueryProtocolFailure protocol
+    queryProtocolFailureWith spinePairLiveQueryVocabulary protocol
   Session.LengthSpinePairSMTLibQueryTranscriptAccountingMismatch {} ->
     LengthSpinePairSMTLibLiveQueryTransportFailed
   Session.LengthSpinePairSMTLibQueryStderrAccountingMismatch {} ->
@@ -1113,62 +1160,6 @@ spinePairQueryFailure failure = case failure of
     LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
   Session.LengthSpinePairSMTLibQueryInternalFailure ->
     LengthSpinePairSMTLibLiveQueryInternalFailure
-
-spinePairQueryProcessFailure
-  :: Process.LengthSMTLibProcessError
-  -> LengthSpinePairSMTLibLiveQueryFailure
-spinePairQueryProcessFailure failure =
-  case Process.lengthSMTLibProcessErrorClass failure of
-    Process.LengthSMTLibProcessCancelled ->
-      LengthSpinePairSMTLibLiveQuerySessionUnavailable
-    Process.LengthSMTLibProcessClosed ->
-      LengthSpinePairSMTLibLiveQuerySessionUnavailable
-    Process.LengthSMTLibProcessDeadlineExceeded ->
-      LengthSpinePairSMTLibLiveQueryDeadlineExceeded
-    Process.LengthSMTLibProcessNonPositiveLimit ->
-      LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
-    Process.LengthSMTLibProcessLimitConversionOverflow ->
-      LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
-    Process.LengthSMTLibProcessExecutableByteLimitExceeded ->
-      LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
-    Process.LengthSMTLibProcessStdoutByteLimitExceeded ->
-      LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
-    Process.LengthSMTLibProcessInternalFailure ->
-      LengthSpinePairSMTLibLiveQueryInternalFailure
-    _ -> LengthSpinePairSMTLibLiveQueryTransportFailed
-
-spinePairQueryProtocolPlanFailure
-  :: SpinePairProtocol.LengthSpinePairSMTLibProtocolPlanError
-  -> LengthSpinePairSMTLibLiveQueryFailure
-spinePairQueryProtocolPlanFailure failure = case failure of
-  SpinePairProtocol.LengthSMTLibProtocolRequiredLimitTooSmall {} ->
-    LengthSpinePairSMTLibLiveQueryConfigurationRejected
-  SpinePairProtocol.LengthSMTLibProtocolMinimumStdoutByteLimitExceeded {} ->
-    LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
-  SpinePairProtocol.LengthSMTLibProtocolPlanFingerprintByteLimitExceeded {} ->
-    LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
-  SpinePairProtocol.LengthSMTLibProtocolBarrierNonceError {} ->
-    LengthSpinePairSMTLibLiveQueryInternalFailure
-  SpinePairProtocol.LengthSMTLibProtocolMissingInputValueBarrierNonce ->
-    LengthSpinePairSMTLibLiveQueryInternalFailure
-  SpinePairProtocol.LengthSMTLibProtocolUnexpectedInputValueBarrierNonce ->
-    LengthSpinePairSMTLibLiveQueryInternalFailure
-  SpinePairProtocol.LengthSMTLibProtocolRepeatedBarrierNonce ->
-    LengthSpinePairSMTLibLiveQueryInternalFailure
-
-spinePairQueryProtocolFailure
-  :: SpinePairProtocol.LengthSpinePairSMTLibProtocolError
-  -> LengthSpinePairSMTLibLiveQueryFailure
-spinePairQueryProtocolFailure failure = case failure of
-  SpinePairProtocol.LengthSMTLibProtocolCumulativeStdoutByteLimitExceeded {} ->
-    LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
-  SpinePairProtocol.LengthSMTLibProtocolFramingFailure _ framing
-    | streamFramingLimitFailure framing ->
-        LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
-  SpinePairProtocol.LengthSMTLibProtocolResponseFailure _ response
-    | responseLimitFailure response ->
-        LengthSpinePairSMTLibLiveQueryResourceLimitExceeded
-  _ -> LengthSpinePairSMTLibLiveQueryProtocolRejected
 
 streamFramingLimitFailure :: Stream.SMTLibStreamFramingError -> Bool
 streamFramingLimitFailure failure = case failure of

@@ -168,30 +168,9 @@ sealLengthCounterexampleBankScope session contract = do
         $ checkedLengthSessionLimits session
   target <- buildScalarTargetFingerprint maximumBytes
     $ checkedLengthContractTarget contract
-  scope <- buildFingerprintWithin maximumBytes FingerprintBuilder
-    { fingerprintBuilderVersion = 1
-    , fingerprintBuilderRole = lengthCounterexampleBankScopeSchemaTag
-    , fingerprintBuilderFields =
-        [ tagged "dialect"
-            [FingerprintBytes $ ascii "finite-list-spine-length/v1"]
-        , tagged "scope-schema"
-            [FingerprintBytes lengthCounterexampleBankScopeSchemaTag]
-        , tagged "complete-session-inventory-and-provider-law-basis"
-            [FingerprintBytes $ fingerprintCanonicalBytes inventory]
-        , tagged "solver-neutral-interpretation-model-policy"
-            [FingerprintBytes $ fingerprintCanonicalBytes policy]
-        , tagged "exact-contract"
-            [FingerprintBytes $ fingerprintCanonicalBytes contractFingerprint]
-        , tagged "exact-normalized-target"
-            [FingerprintBytes $ fingerprintCanonicalBytes target]
-        , tagged "explicit-exclusions"
-            [ FingerprintBytes $ ascii "no-candidate-graph-result-or-condition"
-            , FingerprintBytes $ ascii "no-candidate-used-provider-subset"
-            , FingerprintBytes $ ascii "no-query-solver-or-execution-identity"
-            , FingerprintBytes $ ascii "no-preferences-receipts-or-verdicts"
-            ]
-        ]
-    }
+  scope <- buildScopeFingerprint maximumBytes
+    "finite-list-spine-length/v1" lengthCounterexampleBankScopeSchemaTag
+    inventory policy contractFingerprint target
   pure $ LengthCounterexampleBankScope
     inventory policy contractFingerprint target scope
 
@@ -227,19 +206,36 @@ sealLengthSpinePairCounterexampleBankScopeWithInventory session inventory
         $ checkedLengthSessionLimits session
   target <- buildSpinePairTargetFingerprint maximumBytes
     $ checkedLengthSpinePairContractTarget contract
-  scope <- buildFingerprintWithin maximumBytes FingerprintBuilder
+  scope <- buildScopeFingerprint maximumBytes
+    "finite-binary-product-spine-lengths/v1"
+    lengthSpinePairCounterexampleBankScopeSchemaTag
+    inventory policy contractFingerprint target
+  pure $ LengthSpinePairCounterexampleBankScope
+    inventory policy contractFingerprint target scope
+
+-- | One shared scope-fingerprint builder for both bank dialects.  The
+-- domain contributes its dialect string, its scope schema tag (also the
+-- builder role), and the four already-built constituent fingerprints; the
+-- field order and the explicit-exclusions block are identical by
+-- construction, so scalar and product scope bytes differ exactly where
+-- their vocabularies differ.
+buildScopeFingerprint
+  :: Natural
+  -> String
+  -> [Word8]
+  -> Fingerprint inventorySubject
+  -> Fingerprint policySubject
+  -> Fingerprint contractSubject
+  -> Fingerprint targetSubject
+  -> Either FingerprintLimitError (Fingerprint scopeSubject)
+buildScopeFingerprint maximumBytes dialect schemaTag inventory policy
+    contractFingerprint target =
+  buildFingerprintWithin maximumBytes FingerprintBuilder
     { fingerprintBuilderVersion = 1
-    , fingerprintBuilderRole =
-        lengthSpinePairCounterexampleBankScopeSchemaTag
+    , fingerprintBuilderRole = schemaTag
     , fingerprintBuilderFields =
-        [ tagged "dialect"
-            [ FingerprintBytes $ ascii
-                "finite-binary-product-spine-lengths/v1"
-            ]
-        , tagged "scope-schema"
-            [ FingerprintBytes
-                lengthSpinePairCounterexampleBankScopeSchemaTag
-            ]
+        [ tagged "dialect" [FingerprintBytes $ ascii dialect]
+        , tagged "scope-schema" [FingerprintBytes schemaTag]
         , tagged "complete-session-inventory-and-provider-law-basis"
             [FingerprintBytes $ fingerprintCanonicalBytes inventory]
         , tagged "solver-neutral-interpretation-model-policy"
@@ -256,8 +252,6 @@ sealLengthSpinePairCounterexampleBankScopeWithInventory session inventory
             ]
         ]
     }
-  pure $ LengthSpinePairCounterexampleBankScope
-    inventory policy contractFingerprint target scope
 
 buildScalarTargetFingerprint
   :: Ord identity

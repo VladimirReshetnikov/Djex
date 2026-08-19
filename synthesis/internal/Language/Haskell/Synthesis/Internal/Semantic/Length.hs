@@ -503,6 +503,21 @@ defaultLengthLimitSource = LengthLimitSource
 defaultLengthLimits :: LengthLimits
 defaultLengthLimits = LengthLimits 4096 8 1024 32 64 256 16 256 65536
 
+-- | The nine validated bounds, in 'LengthLimitField' order.  Each is read
+-- where the structure it bounds is observed, so exceeding one is a
+-- productive refusal rather than a partial result:
+--
+-- * 'lengthTypeNodeLimit' bounds the constructors of one observed type
+--   ('observeTypeWithin');
+-- * 'lengthContractInputLimit' bounds a contract's modeled input roles;
+-- * 'lengthSyntaxNodeLimit' bounds the nodes of one Length expression or
+--   formula, and 'lengthFormulaClauseLimit' its clauses;
+-- * 'lengthCollectionWidthLimit' bounds any one observed list;
+-- * 'lengthProviderSummaryLimit' bounds the retained provider summaries and
+--   'lengthProviderArgumentLimit' the argument roles of one provider;
+-- * 'lengthLiteralBitLimit' bounds a numeric literal's magnitude; and
+-- * 'lengthFingerprintByteLimit' bounds every canonical fingerprint this
+--   layer builds.
 lengthTypeNodeLimit, lengthContractInputLimit, lengthSyntaxNodeLimit,
   lengthFormulaClauseLimit, lengthCollectionWidthLimit,
   lengthProviderSummaryLimit, lengthProviderArgumentLimit,

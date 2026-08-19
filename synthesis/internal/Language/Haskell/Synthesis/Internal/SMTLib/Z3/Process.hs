@@ -976,10 +976,11 @@ runBeforeZ3SMTLibProcessDeadline cancellation deadline action rollback =
   runBeforeZ3SMTLibProcessDeadlineWithWorkerMask cancellation deadline
     (\unmask -> unmask action) rollback
 
--- Keep a resource-producing action masked until its result has been published
--- to the controller.  The action may still restore its own explicitly owned
--- interruptible regions, but an asynchronous exception cannot land between
--- its return and publication and thereby discard the acquired value.
+-- | Keep a resource-producing action masked until its result has been
+-- published to the controller.  The action may still restore its own
+-- explicitly owned interruptible regions, but an asynchronous exception
+-- cannot land between its return and publication and thereby discard the
+-- acquired value.
 runBeforeZ3SMTLibProcessDeadlineMaskedAction
   :: Z3SMTLibProcessCancellation
   -> Z3SMTLibProcessDeadline

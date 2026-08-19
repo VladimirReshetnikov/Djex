@@ -40,6 +40,7 @@ import Language.Haskell.Synthesis.Internal.Alpha
   , BinderSlotPolicy (PositionalBinderSlots)
   , alphaNormalizeTypeWith
   , eraseVacuousForalls
+  , replaceFreeTypeVariable
   )
 import Language.Haskell.Synthesis.Type
   ( FreshVariableAllocator
@@ -251,7 +252,7 @@ isLeadingForallInstantiation source selected result =
         ForallType (selectedBinder : remainingBinders) constraints body ->
           let selectedType = prepareInstantiationType
                 SelectedInstantiationBound normalizedSelected
-              instantiate = replaceInstantiationVariable
+              instantiate = replaceFreeTypeVariable
                 selectedBinder selectedType
               instantiatedConstraints = map (fmap instantiate) constraints
               instantiatedBody = instantiate body
@@ -284,32 +285,6 @@ prepareInstantiationType boundVariable = fmap convert
   convert variable = case variable of
     AlphaBoundVariable scope slot -> boundVariable scope slot
     AlphaFreeVariable free -> InstantiationFree free
-
-replaceInstantiationVariable
-  :: Eq variable
-  => variable
-  -> Type variable
-  -> Type variable
-  -> Type variable
-replaceInstantiationVariable selected replacement source = case source of
-  TypeVariable variable
-    | variable == selected -> replacement
-    | otherwise -> source
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (replaceInstantiationVariable selected replacement function)
-    (replaceInstantiationVariable selected replacement argument)
-  FunctionType parameter result -> FunctionType
-    (replaceInstantiationVariable selected replacement parameter)
-    (replaceInstantiationVariable selected replacement result)
-  TupleType boxity elements -> TupleType boxity
-    $ map (replaceInstantiationVariable selected replacement) elements
-  ForallType variables constraints body
-    | selected `elem` variables -> source
-    | otherwise -> ForallType variables
-        (map (fmap $ replaceInstantiationVariable selected replacement)
-          constraints)
-        (replaceInstantiationVariable selected replacement body)
 
 closeAlphaType
   :: Ord variable

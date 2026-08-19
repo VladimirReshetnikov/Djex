@@ -63,6 +63,7 @@ import Language.Haskell.Synthesis.Internal.Alpha
   , BinderSlotPolicy (PositionalBinderSlots)
   , alphaNormalizeTypeWith
   , eraseVacuousForalls
+  , replaceFreeTypeVariable
   )
 import Language.Haskell.Synthesis.Name (Name)
 import Language.Haskell.Synthesis.Type
@@ -564,7 +565,7 @@ consumeSelection selected = consume []
   consume outerContexts (ForallType [] contexts body) =
     consume (outerContexts ++ contexts) body
   consume outerContexts (ForallType (binder : remaining) contexts body) =
-    let substitute = replaceVariable binder selected
+    let substitute = replaceFreeTypeVariable binder selected
         instantiatedContexts = map (fmap substitute) contexts
         instantiatedBody = substitute body
     in if not $ null remaining
@@ -600,31 +601,6 @@ peelBinderlessContexts
 peelBinderlessContexts contexts (ForallType [] nested body) =
   peelBinderlessContexts (contexts ++ nested) body
 peelBinderlessContexts contexts body = (contexts, body)
-
-replaceVariable
-  :: Eq variable
-  => variable
-  -> Type variable
-  -> Type variable
-  -> Type variable
-replaceVariable selected replacement source = case source of
-  TypeVariable variable
-    | variable == selected -> replacement
-    | otherwise -> source
-  TypeConstructor { } -> source
-  TypeApplication function argument -> TypeApplication
-    (replaceVariable selected replacement function)
-    (replaceVariable selected replacement argument)
-  FunctionType parameter result -> FunctionType
-    (replaceVariable selected replacement parameter)
-    (replaceVariable selected replacement result)
-  TupleType boxity elements -> TupleType boxity
-    $ map (replaceVariable selected replacement) elements
-  ForallType binders constraints body
-    | selected `elem` binders -> source
-    | otherwise -> ForallType binders
-        (map (fmap $ replaceVariable selected replacement) constraints)
-        (replaceVariable selected replacement body)
 
 -- | Match an independent checker's final observations against one structural
 -- replay.  The matcher performs its own bounded normalization of every

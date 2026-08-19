@@ -19,6 +19,7 @@ module Language.Haskell.Synthesis.Internal.Alpha
   , eraseVacuousForalls
   , ForallRewrite (..)
   , rewriteTypeVariables
+  , replaceFreeTypeVariable
   , EquationPolicy (..)
   , ForallEquations (..)
   , EquationSolution (..)
@@ -235,6 +236,33 @@ rewriteTypeVariables foralls atVariable = go
       OpaqueForalls -> source
       ThroughForalls ->
         ForallType binders (map (fmap go) constraints) (go body)
+
+-- | Replace every free occurrence of one variable by a type, stopping at any
+-- forall that rebinds that variable so its bound occurrences stay bound.
+-- This is the binder-aware instantiation step shared by type-atom
+-- specialization and certificate selection replay: the caller guarantees
+-- that no binder the walk passes through captures a free variable of the
+-- replacement (typically the replacement is closed or uses fresh names).
+replaceFreeTypeVariable
+  :: Eq variable
+  => variable
+  -> Type variable
+  -> Type variable
+  -> Type variable
+replaceFreeTypeVariable selected replacement = go
+ where
+  go source = case source of
+    TypeVariable variable
+      | variable == selected -> replacement
+      | otherwise -> source
+    TypeConstructor{} -> source
+    TypeApplication function argument ->
+      TypeApplication (go function) (go argument)
+    FunctionType parameter result -> FunctionType (go parameter) (go result)
+    TupleType boxity elements -> TupleType boxity $ map go elements
+    ForallType binders constraints body
+      | selected `elem` binders -> source
+      | otherwise -> ForallType binders (map (fmap go) constraints) (go body)
 
 -- First-order equation solving ---------------------------------------------
 

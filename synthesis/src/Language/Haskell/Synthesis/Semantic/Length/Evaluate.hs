@@ -1299,7 +1299,7 @@ evaluateLengthSpinePairContractAssignment
   -> LengthSpinePairContractAssignment
   -> Either LengthSpinePairEvaluationError LengthContractEvaluation
 evaluateLengthSpinePairContractAssignment limits contract assignment = do
-  inputs <- exactSpinePairAssignment
+  inputs <- exactAssignment
     LengthSpinePairContractAssignmentArityMismatch
     (checkedLengthSpinePairContractInputCount contract)
     $ lengthSpinePairContractAssignmentInputs assignment
@@ -3622,7 +3622,7 @@ replayLengthSpinePairProblemAssignment
       LengthSpinePairEvaluationError
       LengthSpinePairProblemAssignmentReplay
 replayLengthSpinePairProblemAssignment limits problem assignment = do
-  inputs <- exactSpinePairAssignment
+  inputs <- exactAssignment
     LengthSpinePairProblemAssignmentArityMismatch
     (checkedLengthSpinePairProblemInputCount problem)
     $ lengthProblemAssignmentInputs assignment
@@ -3688,30 +3688,34 @@ exactInputBoxBounds
   :: Int
   -> [Natural]
   -> Either LengthInputBoxValidationError [Natural]
-exactInputBoxBounds expected maximums =
-  let observed = observedListLength expected maximums
-  in if observed == expected
-      then Right maximums
-      else Left $ LengthInputBoxBoundsArityMismatch expected observed
+exactInputBoxBounds = exactAssignment LengthInputBoxBoundsArityMismatch
 
 inputBoxAssignmentCount
   :: LengthInputBoxLimits
   -> [Natural]
   -> Either LengthInputBoxValidationError Natural
-inputBoxAssignmentCount limits = go 1
+inputBoxAssignmentCount =
+  inputBoxAssignmentCountWith LengthInputBoxAssignmentLimitExceeded
+
+-- Count the assignments of one inclusive-maximum box, productively: the
+-- running product stops at the caller's limit plus one and becomes the
+-- caller's limit error, so a huge box is refused before it is enumerated.
+inputBoxAssignmentCountWith
+  :: (Natural -> Natural -> failure)
+  -> LengthInputBoxLimits
+  -> [Natural]
+  -> Either failure Natural
+inputBoxAssignmentCountWith limitExceeded limits = go 1
  where
   maximumAssignments = lengthInputBoxAssignmentLimit limits
-  exceeded = maximumAssignments + 1
+  exceeded = limitExceeded maximumAssignments (maximumAssignments + 1)
 
   go !total []
     | total <= maximumAssignments = Right total
-    | otherwise = Left $ LengthInputBoxAssignmentLimitExceeded
-        maximumAssignments exceeded
+    | otherwise = Left exceeded
   go !total (maximumValue : remaining)
-    | total > maximumAssignments = Left
-        $ LengthInputBoxAssignmentLimitExceeded maximumAssignments exceeded
-    | factor > 0 && total > maximumAssignments `quot` factor = Left
-        $ LengthInputBoxAssignmentLimitExceeded maximumAssignments exceeded
+    | total > maximumAssignments = Left exceeded
+    | factor > 0 && total > maximumAssignments `quot` factor = Left exceeded
     | otherwise = go (total * factor) remaining
    where
     factor = maximumValue + 1
@@ -3740,7 +3744,15 @@ nextInputBoxAssignment
   :: [Natural]
   -> [Natural]
   -> Either LengthInputBoxValidationError (Maybe [Natural])
-nextInputBoxAssignment maximums values =
+nextInputBoxAssignment =
+  nextInputBoxAssignmentWith LengthInputBoxInternalEnumerationInvariant
+
+nextInputBoxAssignmentWith
+  :: failure
+  -> [Natural]
+  -> [Natural]
+  -> Either failure (Maybe [Natural])
+nextInputBoxAssignmentWith invariant maximums values =
   fmap (fmap reverse) $ advance (reverse maximums) (reverse values)
  where
   advance [] [] = Right Nothing
@@ -3753,41 +3765,21 @@ nextInputBoxAssignment maximums values =
   -- Both lists are exact-arity values constructed at checked boundaries.  The
   -- defensive mismatch branch nevertheless fails closed rather than treating
   -- an impossible truncation as successful completion.
-  advance _ _ = Left LengthInputBoxInternalEnumerationInvariant
+  advance _ _ = Left invariant
 
 exactSpinePairInputBoxBounds
   :: Int
   -> [Natural]
   -> Either LengthSpinePairInputBoxValidationError [Natural]
-exactSpinePairInputBoxBounds expected maximums =
-  let observed = observedListLength expected maximums
-  in if observed == expected
-      then Right maximums
-      else Left $ LengthSpinePairInputBoxBoundsArityMismatch expected observed
+exactSpinePairInputBoxBounds =
+  exactAssignment LengthSpinePairInputBoxBoundsArityMismatch
 
 spinePairInputBoxAssignmentCount
   :: LengthInputBoxLimits
   -> [Natural]
   -> Either LengthSpinePairInputBoxValidationError Natural
-spinePairInputBoxAssignmentCount limits = go 1
- where
-  maximumAssignments = lengthInputBoxAssignmentLimit limits
-  exceeded = maximumAssignments + 1
-
-  go !total []
-    | total <= maximumAssignments = Right total
-    | otherwise = Left $ LengthSpinePairInputBoxAssignmentLimitExceeded
-        maximumAssignments exceeded
-  go !total (maximumValue : remaining)
-    | total > maximumAssignments = Left
-        $ LengthSpinePairInputBoxAssignmentLimitExceeded
-            maximumAssignments exceeded
-    | factor > 0 && total > maximumAssignments `quot` factor = Left
-        $ LengthSpinePairInputBoxAssignmentLimitExceeded
-            maximumAssignments exceeded
-    | otherwise = go (total * factor) remaining
-   where
-    factor = maximumValue + 1
+spinePairInputBoxAssignmentCount =
+  inputBoxAssignmentCountWith LengthSpinePairInputBoxAssignmentLimitExceeded
 
 nextSpinePairInputBoxAssignment
   :: [Natural]
@@ -3795,35 +3787,19 @@ nextSpinePairInputBoxAssignment
   -> Either
       LengthSpinePairInputBoxValidationError
       (Maybe [Natural])
-nextSpinePairInputBoxAssignment maximums values =
-  fmap (fmap reverse) $ advance (reverse maximums) (reverse values)
- where
-  advance [] [] = Right Nothing
-  advance (maximumValue : remainingMaximums)
-      (value : remainingValues)
-    | value < maximumValue = Right $ Just $ value + 1 : remainingValues
-    | otherwise = do
-        following <- advance remainingMaximums remainingValues
-        pure $ fmap (0 :) following
-  advance _ _ = Left LengthSpinePairInputBoxInternalEnumerationInvariant
+nextSpinePairInputBoxAssignment =
+  nextInputBoxAssignmentWith LengthSpinePairInputBoxInternalEnumerationInvariant
 
+-- Accept a list of exactly the expected length, observing at most one
+-- element past it; any mismatch becomes the caller's arity error.  Both
+-- domains, the input-box bound vectors, and the provider assignments share
+-- this one check.
 exactAssignment
-  :: (Int -> Int -> LengthEvaluationError)
+  :: (Int -> Int -> failure)
   -> Int
   -> [value]
-  -> Either LengthEvaluationError [value]
+  -> Either failure [value]
 exactAssignment mismatch expected values =
-  let observed = observedListLength expected values
-  in if observed == expected
-      then Right values
-      else Left $ mismatch expected observed
-
-exactSpinePairAssignment
-  :: (Int -> Int -> LengthSpinePairEvaluationError)
-  -> Int
-  -> [value]
-  -> Either LengthSpinePairEvaluationError [value]
-exactSpinePairAssignment mismatch expected values =
   let observed = observedListLength expected values
   in if observed == expected
       then Right values
@@ -3834,183 +3810,174 @@ checkSpinePairAssignedValue
   -> LengthSpinePairEvaluationValueSite
   -> Natural
   -> Either LengthSpinePairEvaluationError ()
-checkSpinePairAssignedValue limits site value =
-  checkSpinePairValueWithin site
-    (lengthAssignmentValueBitLimit limits) value
+checkSpinePairAssignedValue limits site =
+  checkValueWithin LengthSpinePairEvaluationValueBitLimitExceeded site
+    (lengthAssignmentValueBitLimit limits)
 
-checkSpinePairIntermediate
-  :: LengthEvaluationLimits
-  -> Natural
-  -> Either LengthSpinePairEvaluationError Natural
-checkSpinePairIntermediate limits value = value <$ checkSpinePairValueWithin
-  LengthSpinePairIntermediateValue
-  (lengthIntermediateValueBitLimit limits) value
-
-checkSpinePairValueWithin
-  :: LengthSpinePairEvaluationValueSite
-  -> Int
-  -> Natural
-  -> Either LengthSpinePairEvaluationError ()
-checkSpinePairValueWithin site maximumBits value =
-  let observedBits = observedNaturalBits maximumBits value
-  in unless (observedBits <= maximumBits) $ Left
-      $ LengthSpinePairEvaluationValueBitLimitExceeded
-          site maximumBits observedBits
-
-evaluateSpinePairExpression
-  :: LengthEvaluationLimits
-  -> (variable -> Either LengthSpinePairEvaluationError Natural)
-  -> LengthExpression variable
-  -> Either LengthSpinePairEvaluationError Natural
-evaluateSpinePairExpression limits lookupVariable source = case source of
-  LengthVariable variable -> lookupVariable variable
-  LengthLiteral value -> checkSpinePairIntermediate limits value
-  LengthSum terms -> foldM add 0 terms
-  LengthScale factor expression -> do
-    value <- evaluateSpinePairExpression limits lookupVariable expression
-    checkSpinePairIntermediate limits $ factor * value
-  LengthQuotient divisor expression
-    | divisor == 0 -> Left
-        LengthSpinePairEvaluationInternalQuotientDivisorZero
-    | otherwise -> do
-        value <- evaluateSpinePairExpression limits lookupVariable expression
-        checkSpinePairIntermediate limits $ value `quot` divisor
-  LengthModulo divisor expression
-    | divisor == 0 -> Left LengthSpinePairEvaluationInternalModuloDivisorZero
-    | otherwise -> do
-        value <- evaluateSpinePairExpression limits lookupVariable expression
-        checkSpinePairIntermediate limits $ value `mod` divisor
-  LengthMonus left right -> do
-    leftValue <- evaluateSpinePairExpression limits lookupVariable left
-    rightValue <- evaluateSpinePairExpression limits lookupVariable right
-    checkSpinePairIntermediate limits $ leftValue `monus` rightValue
-  LengthMinimum left right -> binary min left right
-  LengthMaximum left right -> binary max left right
-  LengthIf condition whenTrue whenFalse -> do
-    selected <- evaluateSpinePairFormula limits lookupVariable condition
-    evaluateSpinePairExpression limits lookupVariable
-      $ if selected then whenTrue else whenFalse
- where
-  add total term = do
-    value <- evaluateSpinePairExpression limits lookupVariable term
-    checkSpinePairIntermediate limits $ total + value
-
-  binary operation left right = do
-    leftValue <- evaluateSpinePairExpression limits lookupVariable left
-    rightValue <- evaluateSpinePairExpression limits lookupVariable right
-    checkSpinePairIntermediate limits $ operation leftValue rightValue
-
-evaluateSpinePairFormula
-  :: LengthEvaluationLimits
-  -> (variable -> Either LengthSpinePairEvaluationError Natural)
-  -> LengthFormula variable
-  -> Either LengthSpinePairEvaluationError Bool
-evaluateSpinePairFormula limits lookupVariable source = case source of
-  LengthTruth value -> Right value
-  LengthEqual left right -> compareWith (==) left right
-  LengthAtMost left right -> compareWith (<=) left right
-  LengthNot formula -> not <$>
-    evaluateSpinePairFormula limits lookupVariable formula
-  LengthAll formulas -> allM formulas
- where
-  compareWith relation left right = do
-    leftValue <- evaluateSpinePairExpression limits lookupVariable left
-    rightValue <- evaluateSpinePairExpression limits lookupVariable right
-    pure $ relation leftValue rightValue
-
-  allM [] = Right True
-  allM (formula : remaining) = do
-    value <- evaluateSpinePairFormula limits lookupVariable formula
-    if value then allM remaining else Right False
+-- The binary-product evaluation-error vocabulary, for the shared
+-- expression and formula evaluators.
+spinePairEvaluationErrors :: EvaluationErrors LengthSpinePairEvaluationError
+spinePairEvaluationErrors = EvaluationErrors
+  { evaluationQuotientDivisorZero =
+      LengthSpinePairEvaluationInternalQuotientDivisorZero
+  , evaluationModuloDivisorZero =
+      LengthSpinePairEvaluationInternalModuloDivisorZero
+  , evaluationIntermediateBitLimitExceeded =
+      LengthSpinePairEvaluationValueBitLimitExceeded
+        LengthSpinePairIntermediateValue
+  }
 
 checkAssignedValue
   :: LengthEvaluationLimits
   -> LengthEvaluationValueSite
   -> Natural
   -> Either LengthEvaluationError ()
-checkAssignedValue limits site value =
-  checkValueWithin site (lengthAssignmentValueBitLimit limits) value
+checkAssignedValue limits site =
+  checkValueWithin LengthEvaluationValueBitLimitExceeded site
+    (lengthAssignmentValueBitLimit limits)
 
-checkIntermediate
-  :: LengthEvaluationLimits
-  -> Natural
-  -> Either LengthEvaluationError Natural
-checkIntermediate limits value = value <$ checkValueWithin
-  LengthIntermediateValue (lengthIntermediateValueBitLimit limits) value
-
+-- Refuse a value whose magnitude exceeds the bit bound, reporting the
+-- caller's site through the caller's error constructor.
 checkValueWithin
-  :: LengthEvaluationValueSite
+  :: (site -> Int -> Int -> failure)
+  -> site
   -> Int
   -> Natural
-  -> Either LengthEvaluationError ()
-checkValueWithin site maximumBits value =
+  -> Either failure ()
+checkValueWithin bitLimitExceeded site maximumBits value =
   let observedBits = observedNaturalBits maximumBits value
   in unless (observedBits <= maximumBits) $ Left
-      $ LengthEvaluationValueBitLimitExceeded
-          site maximumBits observedBits
+      $ bitLimitExceeded site maximumBits observedBits
+
+-- The scalar evaluation-error vocabulary, for the shared expression and
+-- formula evaluators.
+scalarEvaluationErrors :: EvaluationErrors LengthEvaluationError
+scalarEvaluationErrors = EvaluationErrors
+  { evaluationQuotientDivisorZero = LengthEvaluationInternalQuotientDivisorZero
+  , evaluationModuloDivisorZero = LengthEvaluationInternalModuloDivisorZero
+  , evaluationIntermediateBitLimitExceeded =
+      LengthEvaluationValueBitLimitExceeded LengthIntermediateValue
+  }
+
+-- What the shared expression and formula evaluators need to spell in a
+-- domain's own error type: the two internal divisor-zero failures and the
+-- intermediate-value bit-limit failure.  Both domains evaluate the same
+-- 'LengthExpression' and 'LengthFormula' syntax under the same limits.
+data EvaluationErrors failure = EvaluationErrors
+  { evaluationQuotientDivisorZero :: failure
+  , evaluationModuloDivisorZero :: failure
+  , evaluationIntermediateBitLimitExceeded :: Int -> Int -> failure
+    -- ^ maximum bits, observed bits
+  }
+
+checkIntermediate
+  :: EvaluationErrors failure
+  -> LengthEvaluationLimits
+  -> Natural
+  -> Either failure Natural
+checkIntermediate errors limits value =
+  let maximumBits = lengthIntermediateValueBitLimit limits
+      observedBits = observedNaturalBits maximumBits value
+  in if observedBits <= maximumBits
+      then Right value
+      else Left $ evaluationIntermediateBitLimitExceeded errors
+        maximumBits observedBits
 
 evaluateExpression
   :: LengthEvaluationLimits
   -> (variable -> Either LengthEvaluationError Natural)
   -> LengthExpression variable
   -> Either LengthEvaluationError Natural
-evaluateExpression limits lookupVariable source = case source of
-  LengthVariable variable -> lookupVariable variable
-  LengthLiteral value -> checkIntermediate limits value
-  LengthSum terms -> foldM add 0 terms
-  LengthScale factor expression -> do
-    value <- evaluateExpression limits lookupVariable expression
-    checkIntermediate limits $ factor * value
-  LengthQuotient divisor expression
-    | divisor == 0 -> Left LengthEvaluationInternalQuotientDivisorZero
-    | otherwise -> do
-        value <- evaluateExpression limits lookupVariable expression
-        checkIntermediate limits $ value `quot` divisor
-  LengthModulo divisor expression
-    | divisor == 0 -> Left LengthEvaluationInternalModuloDivisorZero
-    | otherwise -> do
-        value <- evaluateExpression limits lookupVariable expression
-        checkIntermediate limits $ value `mod` divisor
-  LengthMonus left right -> do
-    leftValue <- evaluateExpression limits lookupVariable left
-    rightValue <- evaluateExpression limits lookupVariable right
-    checkIntermediate limits $ leftValue `monus` rightValue
-  LengthMinimum left right -> binary min left right
-  LengthMaximum left right -> binary max left right
-  LengthIf condition whenTrue whenFalse -> do
-    selected <- evaluateFormula limits lookupVariable condition
-    evaluateExpression limits lookupVariable
-      $ if selected then whenTrue else whenFalse
- where
-  add total term = do
-    value <- evaluateExpression limits lookupVariable term
-    checkIntermediate limits $ total + value
-
-  binary operation left right = do
-    leftValue <- evaluateExpression limits lookupVariable left
-    rightValue <- evaluateExpression limits lookupVariable right
-    checkIntermediate limits $ operation leftValue rightValue
+evaluateExpression = evaluateExpressionWith scalarEvaluationErrors
 
 evaluateFormula
   :: LengthEvaluationLimits
   -> (variable -> Either LengthEvaluationError Natural)
   -> LengthFormula variable
   -> Either LengthEvaluationError Bool
-evaluateFormula limits lookupVariable source = case source of
+evaluateFormula = evaluateFormulaWith scalarEvaluationErrors
+
+evaluateSpinePairExpression
+  :: LengthEvaluationLimits
+  -> (variable -> Either LengthSpinePairEvaluationError Natural)
+  -> LengthExpression variable
+  -> Either LengthSpinePairEvaluationError Natural
+evaluateSpinePairExpression = evaluateExpressionWith spinePairEvaluationErrors
+
+evaluateSpinePairFormula
+  :: LengthEvaluationLimits
+  -> (variable -> Either LengthSpinePairEvaluationError Natural)
+  -> LengthFormula variable
+  -> Either LengthSpinePairEvaluationError Bool
+evaluateSpinePairFormula = evaluateFormulaWith spinePairEvaluationErrors
+
+evaluateExpressionWith
+  :: EvaluationErrors failure
+  -> LengthEvaluationLimits
+  -> (variable -> Either failure Natural)
+  -> LengthExpression variable
+  -> Either failure Natural
+evaluateExpressionWith errors limits lookupVariable source = case source of
+  LengthVariable variable -> lookupVariable variable
+  LengthLiteral value -> intermediate value
+  LengthSum terms -> foldM add 0 terms
+  LengthScale factor expression -> do
+    value <- evaluate expression
+    intermediate $ factor * value
+  LengthQuotient divisor expression
+    | divisor == 0 -> Left $ evaluationQuotientDivisorZero errors
+    | otherwise -> do
+        value <- evaluate expression
+        intermediate $ value `quot` divisor
+  LengthModulo divisor expression
+    | divisor == 0 -> Left $ evaluationModuloDivisorZero errors
+    | otherwise -> do
+        value <- evaluate expression
+        intermediate $ value `mod` divisor
+  LengthMonus left right -> do
+    leftValue <- evaluate left
+    rightValue <- evaluate right
+    intermediate $ leftValue `monus` rightValue
+  LengthMinimum left right -> binary min left right
+  LengthMaximum left right -> binary max left right
+  LengthIf condition whenTrue whenFalse -> do
+    selected <- evaluateFormulaWith errors limits lookupVariable condition
+    evaluate $ if selected then whenTrue else whenFalse
+ where
+  evaluate = evaluateExpressionWith errors limits lookupVariable
+  intermediate = checkIntermediate errors limits
+
+  add total term = do
+    value <- evaluate term
+    intermediate $ total + value
+
+  binary operation left right = do
+    leftValue <- evaluate left
+    rightValue <- evaluate right
+    intermediate $ operation leftValue rightValue
+
+evaluateFormulaWith
+  :: EvaluationErrors failure
+  -> LengthEvaluationLimits
+  -> (variable -> Either failure Natural)
+  -> LengthFormula variable
+  -> Either failure Bool
+evaluateFormulaWith errors limits lookupVariable source = case source of
   LengthTruth value -> Right value
   LengthEqual left right -> compareWith (==) left right
   LengthAtMost left right -> compareWith (<=) left right
-  LengthNot formula -> not <$> evaluateFormula limits lookupVariable formula
+  LengthNot formula -> not <$> evaluateFormulaWith errors limits lookupVariable
+    formula
   LengthAll formulas -> allM formulas
  where
   compareWith relation left right = do
-    leftValue <- evaluateExpression limits lookupVariable left
-    rightValue <- evaluateExpression limits lookupVariable right
+    leftValue <- evaluateExpressionWith errors limits lookupVariable left
+    rightValue <- evaluateExpressionWith errors limits lookupVariable right
     pure $ relation leftValue rightValue
 
   allM [] = Right True
   allM (formula : remaining) = do
-    value <- evaluateFormula limits lookupVariable formula
+    value <- evaluateFormulaWith errors limits lookupVariable formula
     if value then allM remaining else Right False
 
 monus :: Natural -> Natural -> Natural

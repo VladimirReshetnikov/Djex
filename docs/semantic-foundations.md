@@ -1962,6 +1962,11 @@ ordinal, cancels the lease, and closes the process; plan, capacity,
 identity-admission, and query-count rejections before reservation remain
 non-mutating.
 
+Both domains run one private pipeline (`runQueryRunDomain` over a
+`QueryRunDomain` record naming the plan sealer, replay validator, identity
+role prefix, schema tags, and the product run's two explicit reuse fields);
+each public entrance rebuilds its nominal failure and run types at the
+boundary, so the shared flow cannot present a product receipt as a scalar one.
 Successful scalar and product query runs retain separate opaque nominal
 reversible identities over the common ready worker, their domain-specific plan,
 ordinal, spent markers, absolute deadline, exact segmented transcript, decoded

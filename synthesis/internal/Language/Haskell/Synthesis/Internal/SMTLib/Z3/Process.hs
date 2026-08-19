@@ -1840,9 +1840,8 @@ copyExecutableToStagedImage
   -> Fd
   -> Fd
   -> IO (Either Z3SMTLibProcessError (ByteString, Natural))
-copyExecutableToStagedImage
-    (Z3SMTLibProcessLimits maximumBytes _ _ chunk _ _ _)
-    cancellation deadline sourceDescriptor stagedDescriptor = do
+copyExecutableToStagedImage limits cancellation deadline sourceDescriptor
+    stagedDescriptor = do
   attempted <- tryIOError $ bracket
     (duplicateDescriptorHandle sourceDescriptor)
     hClose
@@ -1852,36 +1851,12 @@ copyExecutableToStagedImage
       $ \stagedHandle -> do
         hSetBinaryMode sourceHandle True
         hSetBinaryMode stagedHandle True
-        go sourceHandle stagedHandle SHA256.init 0
+        hashHandleWithin limits cancellation deadline sourceHandle
+          (BS.hPut stagedHandle) (hFlush stagedHandle)
   pure $ case attempted of
     Left _ -> Left $ processError Z3SMTLibProcessSnapshotPhase
       Z3SMTLibProcessDescriptorBoundStagingFailed Nothing
     Right result -> result
- where
-  go sourceHandle stagedHandle !context !count = do
-    controlled <- checkCancellationDeadline
-      Z3SMTLibProcessSnapshotPhase cancellation deadline
-    case controlled of
-      Left failure -> pure $ Left failure
-      Right () -> do
-        let request = boundedReadSize chunk maximumBytes count
-        bytes <- BS.hGetSome sourceHandle request
-        if BS.null bytes
-          then do
-            hFlush stagedHandle
-            let digest = SHA256.finalize context
-            _ <- evaluate $ BS.length digest
-            pure $ Right (digest, count)
-          else do
-            let observed = count + fromIntegral (BS.length bytes)
-            if observed > maximumBytes
-              then pure $ Left $ processError Z3SMTLibProcessSnapshotPhase
-                Z3SMTLibProcessExecutableByteLimitExceeded
-                (Just $ maximumBytes + 1)
-              else do
-                BS.hPut stagedHandle bytes
-                go sourceHandle stagedHandle
-                  (SHA256.update context bytes) observed
 
 duplicateDescriptorHandle :: Fd -> IO Handle
 duplicateDescriptorHandle descriptor = mask_ $ do
@@ -2508,17 +2483,34 @@ hashExecutable
   -> Z3SMTLibProcessDeadline
   -> FilePath
   -> IO (Either Z3SMTLibProcessError (ByteString, Natural))
-hashExecutable (Z3SMTLibProcessLimits maximumBytes _ _ chunk _ _ _)
-    cancellation deadline path = do
+hashExecutable limits cancellation deadline path = do
   attempted <- tryIOError $ withBinaryFile path ReadMode $ \handle -> do
     hSetBinaryMode handle True
-    go handle SHA256.init 0
+    hashHandleWithin limits cancellation deadline handle
+      (const $ pure ()) (pure ())
   pure $ case attempted of
     Left _ -> Left $ processError Z3SMTLibProcessSnapshotPhase
       Z3SMTLibProcessExecutableUnavailable Nothing
     Right result -> result
+
+-- | Stream one binary handle through SHA-256 under the executable byte
+-- limit, re-checking cancellation and the deadline before every bounded
+-- read.  @sink@ receives every admitted chunk (the staged-image copy writes
+-- it through; plain hashing ignores it) and @finish@ runs once the source
+-- is exhausted, before the digest is forced.  The result is the digest and
+-- the exact byte count; one byte past the limit fails the snapshot phase.
+hashHandleWithin
+  :: Z3SMTLibProcessLimits
+  -> Z3SMTLibProcessCancellation
+  -> Z3SMTLibProcessDeadline
+  -> Handle
+  -> (ByteString -> IO ())
+  -> IO ()
+  -> IO (Either Z3SMTLibProcessError (ByteString, Natural))
+hashHandleWithin (Z3SMTLibProcessLimits maximumBytes _ _ chunk _ _ _)
+    cancellation deadline handle sink finish = go SHA256.init 0
  where
-  go handle !context !count = do
+  go !context !count = do
     controlled <- checkCancellationDeadline
       Z3SMTLibProcessSnapshotPhase cancellation deadline
     case controlled of
@@ -2528,6 +2520,7 @@ hashExecutable (Z3SMTLibProcessLimits maximumBytes _ _ chunk _ _ _)
         bytes <- BS.hGetSome handle request
         if BS.null bytes
           then do
+            finish
             let digest = SHA256.finalize context
             _ <- evaluate $ BS.length digest
             pure $ Right (digest, count)
@@ -2538,7 +2531,9 @@ hashExecutable (Z3SMTLibProcessLimits maximumBytes _ _ chunk _ _ _)
                 Z3SMTLibProcessSnapshotPhase
                 Z3SMTLibProcessExecutableByteLimitExceeded
                 (Just $ maximumBytes + 1)
-              else go handle (SHA256.update context bytes) observed
+              else do
+                sink bytes
+                go (SHA256.update context bytes) observed
 
 configureHandles
   :: Z3SMTLibProcess

@@ -443,7 +443,7 @@ occursUnder foralls variable = go
     TupleType _ elements -> any go elements
     ForallType{} -> case foralls of
       OpaqueForalls -> False
-      ThroughForalls -> any (== variable) source
+      ThroughForalls -> variable `elem` source
 
 forallRewriteOf :: ForallEquations variable -> ForallRewrite
 forallRewriteOf foralls = case foralls of

@@ -115,7 +115,7 @@ import qualified Data.Sequence as Seq
 import qualified Data.List as L
 
 import Data.Maybe (fromMaybe, listToMaybe, maybeToList)
-import Control.Monad ( mzero, forM, unless, when )
+import Control.Monad ( mzero, forM, unless, void, when )
 import Control.Applicative ( (<|>) )
 import Data.List ( find, partition, sortBy, unfoldr )
 import Data.Monoid ( Any(..) )
@@ -1245,7 +1245,7 @@ prepareExferenceInput input = do
 
 -- | Compatibility projection retaining the established validation API.
 validateExferenceInput :: ExferenceInput -> Either ExferenceInputError ()
-validateExferenceInput input = () <$ prepareExferenceInput input
+validateExferenceInput input = void $ prepareExferenceInput input
 
 -- | Seal a reusable environment after validating everything independent of a
 -- particular query.  The abstract result can subsequently be paired with many
@@ -1358,7 +1358,7 @@ validateExferenceQuery
   -> ExferenceQuery
   -> Either ExferenceInputError ()
 validateExferenceQuery environment query =
-  () <$ prepareExferenceQuery environment query
+  void $ prepareExferenceQuery environment query
 
 -- | Validate every search-control field once and retain the exact accepted
 -- record for later preparation. This remains package-private; public core

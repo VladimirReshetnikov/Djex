@@ -62,7 +62,7 @@ module Language.Haskell.Synthesis.Internal.ClassResolution
   ) where
 
 import Control.DeepSeq (NFData (rnf))
-import Control.Monad (foldM, guard, unless, when, zipWithM)
+import Control.Monad (foldM, guard, unless, void, when, zipWithM)
 import Data.Graph (SCC (..), stronglyConnComp)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
@@ -907,7 +907,7 @@ validateConstraintKinds
   -> Either (ClassResolutionConstraintError variable) ()
 validateConstraintKinds assumptions source =
   either (Left . IllKindedClassResolutionConstraint) Right
-    $ () <$ checkClassApplicationKinds assumptions
+    $ void $ checkClassApplicationKinds assumptions
         (constraintClass source) (constraintArguments source)
 
 firstTypeSynonym :: Set Name -> Type variable -> Maybe Name

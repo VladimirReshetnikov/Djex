@@ -26,7 +26,7 @@ module Language.Haskell.Synthesis.TypeAtom
   ) where
 
 import Control.DeepSeq (NFData)
-import Control.Monad (foldM)
+import Control.Monad (foldM_)
 import Data.Bifunctor (first)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
@@ -160,7 +160,7 @@ mapTypeAtomVariables convert atom = do
   -- binder list, but misses cross-scope capture.  Require the representation
   -- projection to preserve every distinct nominal identity before rebuilding
   -- the lexical tree.
-  _ <- foldM rememberTarget Map.empty
+  foldM_ rememberTarget Map.empty
     $ Set.toAscList $ foldMap Set.singleton $ atomSource atom
   mkTypeAtom $ fmap convert $ atomSource atom
  where

@@ -35,7 +35,7 @@ module Djinn.Internal.ProofCheck.Evidence
     , checkedProofTypeUnconstrainedCount
     ) where
 
-import Control.Monad (replicateM, unless, when)
+import Control.Monad (replicateM, unless, when, zipWithM_)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict
     ( StateT, evalStateT, get, gets, modify, put )
@@ -317,7 +317,7 @@ unifyLists description first second = do
     unless (length first == length second) $ failCheck $
         description ++ " arity mismatch: " ++
         show (length first) ++ " vs " ++ show (length second)
-    sequence_ $ zipWith unify first second
+    zipWithM_ unify first second
 
 bind :: Natural -> ProofType -> Check ()
 bind index proofType = do

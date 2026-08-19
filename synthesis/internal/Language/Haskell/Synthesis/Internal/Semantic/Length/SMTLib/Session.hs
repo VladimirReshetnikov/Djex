@@ -2856,12 +2856,11 @@ queryRunTranscriptMaximumFieldByteCount maximumBytes maximumEpochs =
             [naturalFieldByteCount maximumBytes]
         , sequenceFieldByteCount $ replicateNatural maximumEpochs
             $ taggedFieldByteCount "write-epoch"
-                [ maximum
-                    [ fingerprintFieldByteCount $ queryProtocolWriteKindField
-                        LengthSMTLibProtocolInitialQueryWrite
-                    , fingerprintFieldByteCount $ queryProtocolWriteKindField
-                        LengthSMTLibProtocolInputValueWrite
-                    ]
+                [ max
+                    (fingerprintFieldByteCount $ queryProtocolWriteKindField
+                      LengthSMTLibProtocolInitialQueryWrite)
+                    (fingerprintFieldByteCount $ queryProtocolWriteKindField
+                      LengthSMTLibProtocolInputValueWrite)
                 , naturalFieldByteCount maximumBytes
                 ]
         ]

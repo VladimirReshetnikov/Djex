@@ -78,7 +78,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
 import Control.DeepSeq (NFData (rnf))
 import Data.Bifunctor (first)
 import Data.List (genericLength)
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, isNothing)
 import Data.Word (Word8)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
@@ -872,9 +872,9 @@ terminalObservation plan status = case status of
   SolverSatisfiable -> SatisfiableObservation
     $ if planArtifactPolicy plan ==
           LengthSMTLibInputValuesAfterSatisfiable
-        && not (isJust
-          $ protocolIdentityQueryInputValueRequestBytes (planIdentity plan)
-          $ planQuery plan)
+        && isNothing
+          (protocolIdentityQueryInputValueRequestBytes (planIdentity plan)
+            $ planQuery plan)
       then Just []
       else Nothing
   SolverUnsatisfiable -> UnsatisfiableObservation ()

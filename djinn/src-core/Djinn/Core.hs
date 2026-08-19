@@ -61,6 +61,7 @@ module Djinn.Core (
 
 import Control.Monad (foldM, unless, void, when)
 import Data.Bifunctor (first)
+import Data.Either (fromRight)
 import Data.List (intercalate, mapAccumL)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
@@ -1519,9 +1520,8 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
     visibleArgument source = case
             checkPreparedSynthesisTypesKinds prepared [(KStar, source)] of
         Left _ -> Nothing
-        Right () -> Just $ either
-            (const SharedGenerated.inferredVisibleTypeArgument)
-            id
+        Right () -> Just
+            $ fromRight SharedGenerated.inferredVisibleTypeArgument
             $ SharedGenerated.specifiedVisibleTypeArgument source
     structuralTranslator = checkedTranslator $
         preparedEnvironmentSynthesisFormulaTranslator prepared

@@ -161,7 +161,7 @@ import Control.Exception
   , onException
   , try
   )
-import Control.Monad (void, when)
+import Control.Monad (join, void, when)
 import qualified Crypto.Hash.SHA256 as SHA256
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
@@ -3206,7 +3206,7 @@ waitWriteControlled process cancellation deadline phase action = do
     case terminal of
       Just failure -> pure $ Left failure
       Nothing -> Right <$> action
-  pure $ result >>= id
+  pure $ join result
 
 cancellationSTM
   :: Z3SMTLibProcessCancellation

@@ -662,19 +662,8 @@ validateLengthSMTLibCounterexample
           FiniteListSpineLengthV1
           ValidatedLengthCounterexample))
 validateLengthSMTLibCounterexample evaluationLimits query rawBindings = do
-  let symbols = lengthSMTLibQueryInputSymbols query
-      expected = length symbols
-      observed = observedListLength expected rawBindings
-  unless (observed == expected)
-    $ Left $ LengthSMTLibBindingArityMismatch expected observed
-  let maximumSymbolBytes = fromIntegral $ maximum
-        $ 0 : map length symbols
-      expectedSymbols = Map.fromList $ zip symbols [0 :: Int ..]
-  decoded <- foldM
-    (decodeBinding maximumSymbolBytes expectedSymbols)
-    Map.empty
-    $ zip [0 :: Int ..] rawBindings
-  ordered <- mapM (lookupDecoded decoded) symbols
+  ordered <- decodeModelInputs scalarModelErrors
+    (lengthSMTLibQueryInputSymbols query) rawBindings
   either (Left . LengthSMTLibCounterexampleReplayRejected) Right
     $ validateLengthProblemCounterexample evaluationLimits
         (queryProblem query)
@@ -1027,19 +1016,8 @@ validateLengthSpinePairSMTLibCounterexample
           ValidatedLengthSpinePairCounterexample))
 validateLengthSpinePairSMTLibCounterexample evaluationLimits query
     rawBindings = do
-  let symbols = lengthSpinePairSMTLibQueryInputSymbols query
-      expected = length symbols
-      observed = observedListLength expected rawBindings
-  unless (observed == expected)
-    $ Left $ LengthSpinePairSMTLibBindingArityMismatch expected observed
-  let maximumSymbolBytes = fromIntegral $ maximum
-        $ 0 : map length symbols
-      expectedSymbols = Map.fromList $ zip symbols [0 :: Int ..]
-  decoded <- foldM
-    (decodeSpinePairBinding maximumSymbolBytes expectedSymbols)
-    Map.empty
-    $ zip [0 :: Int ..] rawBindings
-  ordered <- mapM (lookupSpinePairDecoded decoded) symbols
+  ordered <- decodeModelInputs spinePairModelErrors
+    (lengthSpinePairSMTLibQueryInputSymbols query) rawBindings
   either
     (Left . LengthSpinePairSMTLibCounterexampleReplayRejected)
     Right
@@ -1367,87 +1345,104 @@ spinePairQueryProblem
   -> CheckedLengthSpinePairProblem identity local
 spinePairQueryProblem (LengthSpinePairSMTLibQuery problem _ _) = problem
 
+-- | How one domain spells the structural rejections of a solver model:
+-- the binding count, the per-symbol byte bound, and the four symbol-level
+-- rejections.  Both model-error types have exactly these constructors, so
+-- the decoder below runs once over either record.
+data ModelDecodeErrors failure = ModelDecodeErrors
+  { modelBindingArityMismatch :: Int -> Int -> failure
+  , modelBindingSymbolByteLimitExceeded :: Int -> Natural -> Natural -> failure
+  , modelUnknownInputSymbol :: Int -> [Word8] -> failure
+  , modelDuplicateInputSymbol :: Int -> [Word8] -> failure
+  , modelNegativeInputValue :: Int -> [Word8] -> Integer -> failure
+  , modelMissingInputSymbol :: [Word8] -> failure
+  }
+
+scalarModelErrors :: ModelDecodeErrors LengthSMTLibModelError
+scalarModelErrors = ModelDecodeErrors
+  { modelBindingArityMismatch = LengthSMTLibBindingArityMismatch
+  , modelBindingSymbolByteLimitExceeded =
+      LengthSMTLibBindingSymbolByteLimitExceeded
+  , modelUnknownInputSymbol = LengthSMTLibUnknownInputSymbol
+  , modelDuplicateInputSymbol = LengthSMTLibDuplicateInputSymbol
+  , modelNegativeInputValue = LengthSMTLibNegativeInputValue
+  , modelMissingInputSymbol = LengthSMTLibMissingInputSymbol
+  }
+
+spinePairModelErrors :: ModelDecodeErrors LengthSpinePairSMTLibModelError
+spinePairModelErrors = ModelDecodeErrors
+  { modelBindingArityMismatch = LengthSpinePairSMTLibBindingArityMismatch
+  , modelBindingSymbolByteLimitExceeded =
+      LengthSpinePairSMTLibBindingSymbolByteLimitExceeded
+  , modelUnknownInputSymbol = LengthSpinePairSMTLibUnknownInputSymbol
+  , modelDuplicateInputSymbol = LengthSpinePairSMTLibDuplicateInputSymbol
+  , modelNegativeInputValue = LengthSpinePairSMTLibNegativeInputValue
+  , modelMissingInputSymbol = LengthSpinePairSMTLibMissingInputSymbol
+  }
+
+-- | Decode exactly the tracked input symbols from a raw solver model and
+-- return their natural values in source order: the binding count must match
+-- the symbol count, every binding symbol must be one of the tracked symbols
+-- (checked within the longest tracked symbol's byte length), no symbol may
+-- bind twice or to a negative value, and no tracked symbol may be missing.
+decodeModelInputs
+  :: ModelDecodeErrors failure
+  -> [[Word8]]
+  -> [LengthSMTLibIntegerBinding]
+  -> Either failure [Natural]
+decodeModelInputs errors symbols rawBindings = do
+  let expected = length symbols
+      observed = observedListLength expected rawBindings
+  unless (observed == expected)
+    $ Left $ modelBindingArityMismatch errors expected observed
+  let maximumSymbolBytes = fromIntegral $ maximum
+        $ 0 : map length symbols
+      expectedSymbols = Map.fromList $ zip symbols [0 :: Int ..]
+  decoded <- foldM
+    (decodeBinding errors maximumSymbolBytes expectedSymbols)
+    Map.empty
+    $ zip [0 :: Int ..] rawBindings
+  mapM (lookupDecoded errors decoded) symbols
+
 decodeBinding
-  :: Natural
+  :: ModelDecodeErrors failure
+  -> Natural
   -> Map [Word8] Int
   -> Map [Word8] Natural
   -> (Int, LengthSMTLibIntegerBinding)
-  -> Either LengthSMTLibModelError (Map [Word8] Natural)
-decodeBinding maximumBytes expected decoded
+  -> Either failure (Map [Word8] Natural)
+decodeBinding errors maximumBytes expected decoded
     (bindingIndex, LengthSMTLibIntegerBinding rawSymbol rawValue) = do
-  symbol <- retainModelSymbol bindingIndex maximumBytes rawSymbol
+  symbol <- retainModelSymbol errors bindingIndex maximumBytes rawSymbol
   case Map.lookup symbol expected of
-    Nothing -> Left $ LengthSMTLibUnknownInputSymbol bindingIndex symbol
+    Nothing -> Left $ modelUnknownInputSymbol errors bindingIndex symbol
     Just _ -> pure ()
   when (Map.member symbol decoded)
-    $ Left $ LengthSMTLibDuplicateInputSymbol bindingIndex symbol
+    $ Left $ modelDuplicateInputSymbol errors bindingIndex symbol
   if rawValue < 0
-    then Left $ LengthSMTLibNegativeInputValue bindingIndex symbol rawValue
+    then Left $ modelNegativeInputValue errors bindingIndex symbol rawValue
     else pure $ Map.insert symbol (fromInteger rawValue) decoded
 
 lookupDecoded
-  :: Map [Word8] Natural
+  :: ModelDecodeErrors failure
+  -> Map [Word8] Natural
   -> [Word8]
-  -> Either LengthSMTLibModelError Natural
-lookupDecoded decoded symbol = case Map.lookup symbol decoded of
-  Nothing -> Left $ LengthSMTLibMissingInputSymbol symbol
+  -> Either failure Natural
+lookupDecoded errors decoded symbol = case Map.lookup symbol decoded of
+  Nothing -> Left $ modelMissingInputSymbol errors symbol
   Just value -> Right value
 
 retainModelSymbol
-  :: Int
+  :: ModelDecodeErrors failure
+  -> Int
   -> Natural
   -> [Word8]
-  -> Either LengthSMTLibModelError [Word8]
-retainModelSymbol bindingIndex maximumBytes = go maximumBytes
+  -> Either failure [Word8]
+retainModelSymbol errors bindingIndex maximumBytes = go maximumBytes
  where
   go _ [] = Right []
-  go 0 (_ : _) = Left $ LengthSMTLibBindingSymbolByteLimitExceeded
+  go 0 (_ : _) = Left $ modelBindingSymbolByteLimitExceeded errors
     bindingIndex maximumBytes (maximumBytes + 1)
-  go remaining (byte : bytes) =
-    (byte :) <$> go (remaining - 1) bytes
-
-decodeSpinePairBinding
-  :: Natural
-  -> Map [Word8] Int
-  -> Map [Word8] Natural
-  -> (Int, LengthSMTLibIntegerBinding)
-  -> Either
-      LengthSpinePairSMTLibModelError
-      (Map [Word8] Natural)
-decodeSpinePairBinding maximumBytes expected decoded
-    (bindingIndex, LengthSMTLibIntegerBinding rawSymbol rawValue) = do
-  symbol <- retainSpinePairModelSymbol bindingIndex maximumBytes rawSymbol
-  case Map.lookup symbol expected of
-    Nothing -> Left $ LengthSpinePairSMTLibUnknownInputSymbol
-      bindingIndex symbol
-    Just _ -> pure ()
-  when (Map.member symbol decoded)
-    $ Left $ LengthSpinePairSMTLibDuplicateInputSymbol
-      bindingIndex symbol
-  if rawValue < 0
-    then Left $ LengthSpinePairSMTLibNegativeInputValue
-      bindingIndex symbol rawValue
-    else pure $ Map.insert symbol (fromInteger rawValue) decoded
-
-lookupSpinePairDecoded
-  :: Map [Word8] Natural
-  -> [Word8]
-  -> Either LengthSpinePairSMTLibModelError Natural
-lookupSpinePairDecoded decoded symbol = case Map.lookup symbol decoded of
-  Nothing -> Left $ LengthSpinePairSMTLibMissingInputSymbol symbol
-  Just value -> Right value
-
-retainSpinePairModelSymbol
-  :: Int
-  -> Natural
-  -> [Word8]
-  -> Either LengthSpinePairSMTLibModelError [Word8]
-retainSpinePairModelSymbol bindingIndex maximumBytes = go maximumBytes
- where
-  go _ [] = Right []
-  go 0 (_ : _) = Left
-    $ LengthSpinePairSMTLibBindingSymbolByteLimitExceeded
-        bindingIndex maximumBytes (maximumBytes + 1)
   go remaining (byte : bytes) =
     (byte :) <$> go (remaining - 1) bytes
 

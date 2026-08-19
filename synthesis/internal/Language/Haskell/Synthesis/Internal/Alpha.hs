@@ -1,8 +1,10 @@
 {-# LANGUAGE DeriveGeneric #-}
 
--- | Shared lexical alpha-normalization machinery, and the two binder-aware
--- 'Type' walks that the canonical forms and first-order solvers built on it
--- all share: 'eraseVacuousForalls' and 'rewriteTypeVariables'.
+-- | Shared lexical alpha-normalization machinery, the two binder-aware
+-- 'Type' walks that the canonical forms built on it all share
+-- ('eraseVacuousForalls' and 'rewriteTypeVariables'), and the one first-order
+-- structural equation solver ('solveTypeEquations') behind instance-head
+-- overlap, context-free scheme matching, and class-resolution overlap.
 --
 -- Explicit forall syntax uses binder positions: declaration order is part of
 -- the type, while spelling is not. Instance declarations have a different
@@ -17,6 +19,15 @@ module Language.Haskell.Synthesis.Internal.Alpha
   , eraseVacuousForalls
   , ForallRewrite (..)
   , rewriteTypeVariables
+  , EquationPolicy (..)
+  , ForallEquations (..)
+  , EquationSolution (..)
+  , emptyEquationSolution
+  , solveTypeEquations
+  , zonkSolution
+  , constraintEquations
+  , constraintListEquations
+  , zipExactly
   ) where
 
 import Control.DeepSeq (NFData)
@@ -224,3 +235,247 @@ rewriteTypeVariables foralls atVariable = go
       OpaqueForalls -> source
       ThroughForalls ->
         ForallType binders (map (fmap go) constraints) (go body)
+
+-- First-order equation solving ---------------------------------------------
+
+-- | What a first-order structural solver may bind, and how it treats
+-- foralls.  Three solvers share 'solveTypeEquations': instance-head overlap
+-- binds either side's instance variables and pairs nested forall binders,
+-- context-free scheme matching binds only the source's prefix binders and
+-- pairs nested binders, and class-resolution overlap binds either side's
+-- binders while treating every forall as an opaque atom.
+data EquationPolicy variable = EquationPolicy
+  { equationBinding
+      :: Type variable -> Type variable -> Maybe (variable, Type variable)
+    -- ^ Given the two zonked, unequal sides of one equation, the
+    -- metavariable to bind and its replacement, or 'Nothing' when neither
+    -- side is a bindable variable.  A symmetric policy inspects both sides;
+    -- a one-way policy inspects only the pattern side.
+  , equationForalls :: ForallEquations variable
+  }
+
+-- | How equations between two foralls are solved.
+data ForallEquations variable
+  = OpaqueForallEquations
+    -- ^ A forall is an atom: two foralls must be equal, a variable is never
+    -- substituted inside one, and the occurs check does not look inside one.
+  | PairedForallEquations (Natural -> variable) (variable -> Bool)
+    -- ^ Two foralls with the same binder count are opened together: each
+    -- binder pair is renamed to one fresh skolem (the first function, given a
+    -- fresh ordinal), their contexts must have the same length and classes,
+    -- and the renamed bodies and context arguments become equations.  The
+    -- second function recognizes those skolems, which no binding may
+    -- capture: a metavariable quantified outside the comparison may capture a
+    -- whole closed forall but never a skolem exposed by opening one.
+
+-- | Accumulated bindings and the next fresh skolem ordinal.
+data EquationSolution variable = EquationSolution
+  { solutionSubstitutions :: !(Map variable (Type variable))
+  , solutionNextSkolem :: !Natural
+  }
+
+-- | No bindings and skolem ordinals from zero.
+emptyEquationSolution :: EquationSolution variable
+emptyEquationSolution = EquationSolution Map.empty 0
+
+-- | Solve a list of type equations by first-order structural decomposition
+-- under the policy, extending the supplied solution.  Both sides of every
+-- equation are zonked before inspection; a binding first passes the occurs
+-- check and the policy's skolem check, is substituted into the remaining
+-- equations and into every earlier binding, and is then recorded.
+-- Constructors must be the same name; applications, arrows, and same-boxity
+-- tuples decompose positionally; foralls follow 'ForallEquations'.
+-- 'Nothing' is a structural mismatch.
+solveTypeEquations
+  :: Ord variable
+  => EquationPolicy variable
+  -> [(Type variable, Type variable)]
+  -> EquationSolution variable
+  -> Maybe (EquationSolution variable)
+solveTypeEquations policy = go
+ where
+  foralls = forallRewriteOf $ equationForalls policy
+
+  go [] solution = Just solution
+  go ((rawLeft, rawRight) : equations) solution
+    | left == right = go equations solution
+    | Just (variable, replacement) <- equationBinding policy left right =
+        bind variable replacement
+    | TypeConstructor leftName <- left
+    , TypeConstructor rightName <- right
+    , leftName == rightName = go equations solution
+    | TypeApplication leftFunction leftArgument <- left
+    , TypeApplication rightFunction rightArgument <- right =
+        go
+          ((leftFunction, rightFunction) :
+            (leftArgument, rightArgument) : equations)
+          solution
+    | FunctionType leftParameter leftResult <- left
+    , FunctionType rightParameter rightResult <- right =
+        go
+          ((leftParameter, rightParameter) :
+            (leftResult, rightResult) : equations)
+          solution
+    | TupleType leftBoxity leftElements <- left
+    , TupleType rightBoxity rightElements <- right
+    , leftBoxity == rightBoxity
+    , Just elementEquations <- zipExactly leftElements rightElements =
+        go (elementEquations ++ equations) solution
+    | ForallType leftBinders leftConstraints leftBody <- left
+    , ForallType rightBinders rightConstraints rightBody <- right
+    , PairedForallEquations skolem _ <- equationForalls policy
+    , Just (openedEquations, openedSolution) <- openForalls skolem
+        leftBinders leftConstraints leftBody
+        rightBinders rightConstraints rightBody solution =
+        go (openedEquations ++ equations) openedSolution
+    | otherwise = Nothing
+   where
+    substitutions = solutionSubstitutions solution
+    left = zonkSolutionWith foralls substitutions rawLeft
+    right = zonkSolutionWith foralls substitutions rawRight
+
+    bind variable replacement
+      | occursUnder foralls variable replacement = Nothing
+      | capturesPairedSkolem replacement = Nothing
+      | otherwise = go
+          [ ( substituteVariable foralls variable replacement equationLeft
+            , substituteVariable foralls variable replacement equationRight
+            )
+          | (equationLeft, equationRight) <- equations
+          ]
+          solution
+            { solutionSubstitutions = Map.insert variable replacement
+                $ Map.map (substituteVariable foralls variable replacement)
+                  substitutions
+            }
+
+  capturesPairedSkolem replacement = case equationForalls policy of
+    OpaqueForallEquations -> False
+    PairedForallEquations _ isSkolem -> any isSkolem replacement
+
+-- | Open two foralls together: pair their binders with fresh skolems, turn
+-- their contexts into equations, and return the body equation first.
+openForalls
+  :: Ord variable
+  => (Natural -> variable)
+  -> [variable]
+  -> [Constraint (Type variable)]
+  -> Type variable
+  -> [variable]
+  -> [Constraint (Type variable)]
+  -> Type variable
+  -> EquationSolution variable
+  -> Maybe ([(Type variable, Type variable)], EquationSolution variable)
+openForalls skolem leftBinders leftConstraints leftBody
+    rightBinders rightConstraints rightBody solution = do
+  (leftRenaming, rightRenaming, nextSkolem) <-
+    pairBinders (solutionNextSkolem solution) leftBinders rightBinders
+  contextEquations <- constraintListEquations
+    (map (fmap $ renameVariables leftRenaming) leftConstraints)
+    (map (fmap $ renameVariables rightRenaming) rightConstraints)
+  pure
+    ( ( renameVariables leftRenaming leftBody
+      , renameVariables rightRenaming rightBody
+      ) : contextEquations
+    , solution { solutionNextSkolem = nextSkolem }
+    )
+ where
+  pairBinders next [] [] = Just (Map.empty, Map.empty, next)
+  pairBinders next (left : leftRest) (right : rightRest) = do
+    (leftRenaming, rightRenaming, finalNext) <-
+      pairBinders (next + 1) leftRest rightRest
+    let paired = skolem next
+    pure
+      ( Map.insert left paired leftRenaming
+      , Map.insert right paired rightRenaming
+      , finalNext
+      )
+  pairBinders _ _ _ = Nothing
+
+  renameVariables renaming = fmap $ \variable ->
+    Map.findWithDefault variable variable renaming
+
+-- | Apply the solution's bindings everywhere, repeatedly, under the
+-- policy's forall treatment.
+zonkSolution
+  :: Ord variable
+  => EquationPolicy variable
+  -> EquationSolution variable
+  -> Type variable
+  -> Type variable
+zonkSolution policy =
+  zonkSolutionWith (forallRewriteOf $ equationForalls policy)
+    . solutionSubstitutions
+
+zonkSolutionWith
+  :: Ord variable
+  => ForallRewrite
+  -> Map variable (Type variable)
+  -> Type variable
+  -> Type variable
+zonkSolutionWith foralls substitutions =
+  rewriteTypeVariables foralls $ \variable ->
+    case Map.lookup variable substitutions of
+      Nothing -> TypeVariable variable
+      Just replacement -> zonkSolutionWith foralls substitutions replacement
+
+substituteVariable
+  :: Eq variable
+  => ForallRewrite
+  -> variable
+  -> Type variable
+  -> Type variable
+  -> Type variable
+substituteVariable foralls variable replacement =
+  rewriteTypeVariables foralls $ \candidate ->
+    if candidate == variable then replacement else TypeVariable candidate
+
+-- Whether the variable occurs in the type, looking inside foralls only when
+-- substitution does.
+occursUnder :: Eq variable => ForallRewrite -> variable -> Type variable -> Bool
+occursUnder foralls variable = go
+ where
+  go source = case source of
+    TypeVariable candidate -> candidate == variable
+    TypeConstructor{} -> False
+    TypeApplication function argument -> go function || go argument
+    FunctionType parameter result -> go parameter || go result
+    TupleType _ elements -> any go elements
+    ForallType{} -> case foralls of
+      OpaqueForalls -> False
+      ThroughForalls -> any (== variable) source
+
+forallRewriteOf :: ForallEquations variable -> ForallRewrite
+forallRewriteOf foralls = case foralls of
+  OpaqueForallEquations -> OpaqueForalls
+  PairedForallEquations{} -> ThroughForalls
+
+-- | Equations between the arguments of two constraints of the same class
+-- and arity; 'Nothing' when the classes or arities differ.
+constraintEquations
+  :: Constraint (Type variable)
+  -> Constraint (Type variable)
+  -> Maybe [(Type variable, Type variable)]
+constraintEquations (Constraint leftClass leftArguments)
+    (Constraint rightClass rightArguments)
+  | leftClass /= rightClass = Nothing
+  | otherwise = zipExactly leftArguments rightArguments
+
+-- | 'constraintEquations' over two contexts of the same length, in order.
+constraintListEquations
+  :: [Constraint (Type variable)]
+  -> [Constraint (Type variable)]
+  -> Maybe [(Type variable, Type variable)]
+constraintListEquations [] [] = Just []
+constraintListEquations (left : leftRest) (right : rightRest) = do
+  equations <- constraintEquations left right
+  rest <- constraintListEquations leftRest rightRest
+  pure $ equations ++ rest
+constraintListEquations _ _ = Nothing
+
+-- | Pair two lists positionally; 'Nothing' when their lengths differ.
+zipExactly :: [left] -> [right] -> Maybe [(left, right)]
+zipExactly [] [] = Just []
+zipExactly (left : leftRest) (right : rightRest) =
+  ((left, right) :) <$> zipExactly leftRest rightRest
+zipExactly _ _ = Nothing

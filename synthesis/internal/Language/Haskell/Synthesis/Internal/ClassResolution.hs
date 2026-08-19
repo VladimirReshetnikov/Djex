@@ -81,8 +81,13 @@ import qualified Language.Haskell.Synthesis.Kind as Kind
 import Language.Haskell.Synthesis.KindInference
 import Language.Haskell.Synthesis.Name
 import Language.Haskell.Synthesis.Internal.Alpha
-  ( ForallRewrite (OpaqueForalls)
+  ( EquationPolicy (..)
+  , ForallEquations (..)
+  , ForallRewrite (OpaqueForalls)
+  , emptyEquationSolution
   , rewriteTypeVariables
+  , solveTypeEquations
+  , zipExactly
   )
 import Language.Haskell.Synthesis.Type
 import Language.Haskell.Synthesis.TypedGenerated
@@ -1027,10 +1032,6 @@ data ResolutionOverlapVariable variable
   | RigidResolutionVariable !variable
   deriving (Eq, Ord)
 
-type ResolutionOverlapSubstitutions variable =
-  Map (ResolutionOverlapVariable variable)
-    (Type (ResolutionOverlapVariable variable))
-
 resolutionHeadsOverlap
   :: Ord variable
   => ResolutionInstance variable
@@ -1042,7 +1043,9 @@ resolutionHeadsOverlap left right
       (constraintArguments $ preparedHead LeftResolutionBinder left)
       (constraintArguments $ preparedHead RightResolutionBinder right) of
     Nothing -> False
-    Just equations -> case solveResolutionOverlap equations Map.empty of
+    Just equations -> case
+        solveTypeEquations resolutionOverlapPolicy equations
+          emptyEquationSolution of
       Nothing -> False
       Just _ -> True
  where
@@ -1060,110 +1063,24 @@ resolutionHeadsOverlap left right
       | variable `Set.member` binders = side variable
       | otherwise = RigidResolutionVariable variable
 
-  zipExactly [] [] = Just []
-  zipExactly (leftType : leftRest) (rightType : rightRest) =
-    ((leftType, rightType) :) <$> zipExactly leftRest rightRest
-  zipExactly _ _ = Nothing
-
-solveResolutionOverlap
-  :: Ord variable
-  => [( Type (ResolutionOverlapVariable variable)
-      , Type (ResolutionOverlapVariable variable)
-      )]
-  -> ResolutionOverlapSubstitutions variable
-  -> Maybe (ResolutionOverlapSubstitutions variable)
-solveResolutionOverlap [] substitutions = Just substitutions
-solveResolutionOverlap ((rawLeft, rawRight) : equations) substitutions
-  | left == right = solveResolutionOverlap equations substitutions
-  | TypeVariable variable <- left
-  , resolutionOverlapBindable variable = bind variable right
-  | TypeVariable variable <- right
-  , resolutionOverlapBindable variable = bind variable left
-  | TypeConstructor leftName <- left
-  , TypeConstructor rightName <- right
-  , leftName == rightName = solveResolutionOverlap equations substitutions
-  | TypeApplication leftFunction leftArgument <- left
-  , TypeApplication rightFunction rightArgument <- right =
-      solveResolutionOverlap
-        ((leftFunction, rightFunction) :
-          (leftArgument, rightArgument) : equations)
-        substitutions
-  | FunctionType leftParameter leftResult <- left
-  , FunctionType rightParameter rightResult <- right =
-      solveResolutionOverlap
-        ((leftParameter, rightParameter) :
-          (leftResult, rightResult) : equations)
-        substitutions
-  | TupleType leftBoxity leftElements <- left
-  , TupleType rightBoxity rightElements <- right
-  , leftBoxity == rightBoxity
-  , Just elementEquations <- zipExactly leftElements rightElements =
-      solveResolutionOverlap (elementEquations ++ equations) substitutions
-  | otherwise = Nothing
- where
-  left = zonkResolutionOverlap substitutions rawLeft
-  right = zonkResolutionOverlap substitutions rawRight
-
-  bind variable replacement
-    | resolutionOverlapOccurs variable replacement = Nothing
-    | otherwise = solveResolutionOverlap
-        [ ( substituteResolutionOverlap variable replacement equationLeft
-          , substituteResolutionOverlap variable replacement equationRight
-          )
-        | (equationLeft, equationRight) <- equations
-        ]
-        $ Map.insert variable replacement
-        $ Map.map (substituteResolutionOverlap variable replacement)
-          substitutions
-
-  zipExactly [] [] = Just []
-  zipExactly (leftType : leftRest) (rightType : rightRest) =
-    ((leftType, rightType) :) <$> zipExactly leftRest rightRest
-  zipExactly _ _ = Nothing
+-- Either side's instance binders may be bound; a rigid variable never is.
+-- Foralls stay opaque atoms here, exactly as in the runtime matcher.
+resolutionOverlapPolicy :: EquationPolicy (ResolutionOverlapVariable variable)
+resolutionOverlapPolicy = EquationPolicy
+  { equationBinding = \left right -> case (left, right) of
+      (TypeVariable variable, _)
+        | resolutionOverlapBindable variable -> Just (variable, right)
+      (_, TypeVariable variable)
+        | resolutionOverlapBindable variable -> Just (variable, left)
+      _ -> Nothing
+  , equationForalls = OpaqueForallEquations
+  }
 
 resolutionOverlapBindable :: ResolutionOverlapVariable variable -> Bool
 resolutionOverlapBindable variable = case variable of
   LeftResolutionBinder{} -> True
   RightResolutionBinder{} -> True
   RigidResolutionVariable{} -> False
-
-resolutionOverlapOccurs
-  :: Eq variable
-  => ResolutionOverlapVariable variable
-  -> Type (ResolutionOverlapVariable variable)
-  -> Bool
-resolutionOverlapOccurs variable source = case source of
-  TypeVariable candidate -> variable == candidate
-  TypeConstructor{} -> False
-  TypeApplication function argument ->
-    resolutionOverlapOccurs variable function ||
-      resolutionOverlapOccurs variable argument
-  FunctionType parameter result ->
-    resolutionOverlapOccurs variable parameter ||
-      resolutionOverlapOccurs variable result
-  TupleType _ elements -> any (resolutionOverlapOccurs variable) elements
-  ForallType{} -> False
-
-substituteResolutionOverlap
-  :: Eq variable
-  => ResolutionOverlapVariable variable
-  -> Type (ResolutionOverlapVariable variable)
-  -> Type (ResolutionOverlapVariable variable)
-  -> Type (ResolutionOverlapVariable variable)
-substituteResolutionOverlap variable replacement =
-  rewriteTypeVariables OpaqueForalls $ \candidate ->
-    if candidate == variable then replacement else TypeVariable candidate
-
-zonkResolutionOverlap
-  :: Ord variable
-  => ResolutionOverlapSubstitutions variable
-  -> Type (ResolutionOverlapVariable variable)
-  -> Type (ResolutionOverlapVariable variable)
-zonkResolutionOverlap substitutions =
-  rewriteTypeVariables OpaqueForalls $ \variable ->
-    case Map.lookup variable substitutions of
-      Nothing -> TypeVariable variable
-      Just replacement -> zonkResolutionOverlap substitutions replacement
 
 rejectSuperclassCycles
   :: [ResolutionClass variable]
@@ -1203,8 +1120,17 @@ completeInstance limits assumptions aliases classArities classes source =
     (ClassResolutionInstanceHead ordinal)
     $ UnknownClassResolutionClass $ constraintClass headConstraint
   Just owner -> do
-    substitutions <- zipExactly (resolutionClassParameters owner)
-      $ constraintArguments headConstraint
+    let parameters = resolutionClassParameters owner
+        arguments = constraintArguments headConstraint
+    substitutions <- maybe
+      (Left $ InvalidClassResolutionEnvironmentConstraint
+        (ClassResolutionInstanceHead ordinal)
+        $ ClassResolutionConstraintArityMismatch
+            (constraintClass headConstraint)
+            (length parameters)
+            (observedListLength (length parameters) arguments))
+      Right
+      $ zipExactly parameters arguments
     let rawDirectSuperclasses = map
           (fmap $ canonicalizeType .
             substituteFirstOrder (Map.fromList substitutions))
@@ -1227,20 +1153,6 @@ completeInstance limits assumptions aliases classArities classes source =
  where
   ordinal = resolutionInstanceOrdinal source
   headConstraint = resolutionInstanceHead source
-
-  zipExactly [] [] = Right []
-  zipExactly (left : leftRest) (right : rightRest) =
-    ((left, right) :) <$> zipExactly leftRest rightRest
-  zipExactly _ _ = Left $ InvalidClassResolutionEnvironmentConstraint
-    (ClassResolutionInstanceHead ordinal)
-    $ ClassResolutionConstraintArityMismatch
-        (constraintClass headConstraint)
-        (length $ resolutionClassParameters $ classes Map.!
-          constraintClass headConstraint)
-        (observedListLength
-          (length $ resolutionClassParameters $ classes Map.!
-            constraintClass headConstraint)
-          $ constraintArguments headConstraint)
 
 distinctConstraintsWithin
   :: Ord variable
@@ -1402,11 +1314,6 @@ matchInstance source goal = do
  where
   headConstraint = resolutionInstanceHead source
   binders = resolutionInstanceBinderSet source
-
-  zipExactly [] [] = Just []
-  zipExactly (left : leftRest) (right : rightRest) =
-    ((left, right) :) <$> zipExactly leftRest rightRest
-  zipExactly _ _ = Nothing
 
   matchEquation substitutions (rawPattern, rawTarget) =
     matchType substitutions

@@ -251,7 +251,13 @@ The private `Language.Haskell.Synthesis.Internal.InstanceHead` module owns the
 canonical, alpha-normal comparison key used to detect duplicate instance
 heads. Saturated function and tuple applications share that key with their
 structural forms, while public indexes and diagnostics retain the original
-source head rather than exposing or substituting the private key.
+source head rather than exposing or substituting the private key. Its overlap
+check, the context-free scheme matcher behind `TypeInstantiation`, and
+class-resolution overlap all run the one first-order equation solver in
+`Language.Haskell.Synthesis.Internal.Alpha` (`solveTypeEquations`), each under
+its own `EquationPolicy`: symmetric binding with nested forall binders paired
+to fresh skolems, one-way binding of the source's prefix binders with the
+same pairing, and symmetric binding with every forall opaque.
 
 ## Invariant conventions
 

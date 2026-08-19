@@ -10,13 +10,9 @@ module Language.Haskell.Synthesis.Internal.InstanceHead
   , instanceHeadKey
   , repeatedInstanceHeadsInFirstRepetitionOrder
   , overlappingInstanceHeadPairsInSourceOrder
-  , constraintListEquations
-  , zipExactly
   ) where
 
 import Control.DeepSeq (NFData)
-import qualified Data.Map.Strict as Map
-import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC.Generics (Generic)
@@ -25,7 +21,12 @@ import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Internal.Alpha
   ( AlphaVariable (..)
   , BinderSlotPolicy (FirstOccurrenceBinderSlots)
+  , EquationPolicy (..)
+  , ForallEquations (..)
   , alphaNormalizeConstraintWithOuter
+  , constraintEquations
+  , emptyEquationSolution
+  , solveTypeEquations
   )
 import Language.Haskell.Synthesis.Type
 
@@ -160,264 +161,33 @@ preparedHeadsOverlap
 preparedHeadsOverlap leftHead rightHead = case constraintEquations
     (preparedCanonicalHead leftHead) (preparedCanonicalHead rightHead) of
   Nothing -> False
-  Just equations -> case solveOverlap equations emptyOverlapSolverState of
+  Just equations -> case
+      solveTypeEquations overlapPolicy equations emptyEquationSolution of
     Nothing -> False
     Just _ -> True
 
-constraintEquations
-  :: Constraint (Type variable)
-  -> Constraint (Type variable)
-  -> Maybe [(Type variable, Type variable)]
-constraintEquations (Constraint leftClass leftArguments)
-    (Constraint rightClass rightArguments)
-  | leftClass /= rightClass = Nothing
-  | otherwise = zipExactly leftArguments rightArguments
-
--- | Argument equations for two same-length constraint lists whose classes
--- agree pairwise; 'Nothing' on any length or class mismatch.
-constraintListEquations
-  :: [Constraint (Type variable)]
-  -> [Constraint (Type variable)]
-  -> Maybe [(Type variable, Type variable)]
-constraintListEquations [] [] = Just []
-constraintListEquations (left : leftRest) (right : rightRest) = do
-  equations <- constraintEquations left right
-  rest <- constraintListEquations leftRest rightRest
-  pure $ equations ++ rest
-constraintListEquations _ _ = Nothing
-
--- | Zip two lists, or 'Nothing' when their lengths differ.
-zipExactly :: [left] -> [right] -> Maybe [(left, right)]
-zipExactly [] [] = Just []
-zipExactly (left : leftRest) (right : rightRest) =
-  ((left, right) :) <$> zipExactly leftRest rightRest
-zipExactly _ _ = Nothing
-
-type OverlapSubstitutions typeVariable =
-  Map (OverlapVariable typeVariable) (Type (OverlapVariable typeVariable))
-
-data OverlapSolverState typeVariable = OverlapSolverState
-  { overlapSubstitutions :: OverlapSubstitutions typeVariable
-  , nextPairedForallSkolem :: !Natural
+-- Overlap is symmetric and spans every argument in a multi-parameter head, so
+-- it is solved as one equation system rather than argument by argument:
+-- per-argument matching would incorrectly classify @C a a@ and @C Int Bool@
+-- as overlapping.  Either side's implicitly quantified instance variables may
+-- be bound; nested forall binders are paired with fresh shared skolems.
+overlapPolicy :: EquationPolicy (OverlapVariable typeVariable)
+overlapPolicy = EquationPolicy
+  { equationBinding = \left right -> case (left, right) of
+      (TypeVariable variable, _) | isBindable variable -> Just (variable, right)
+      (_, TypeVariable variable) | isBindable variable -> Just (variable, left)
+      _ -> Nothing
+  , equationForalls = PairedForallEquations PairedForallSkolem isPairedSkolem
   }
-
-emptyOverlapSolverState :: OverlapSolverState typeVariable
-emptyOverlapSolverState = OverlapSolverState Map.empty 0
-
--- A small first-order unifier is kept here because overlap is symmetric and
--- spans every argument in a multi-parameter head. Per-argument matching would
--- incorrectly classify @C a a@ and @C Int Bool@ as overlapping.
-solveOverlap
-  :: Ord typeVariable
-  => [( Type (OverlapVariable typeVariable)
-      , Type (OverlapVariable typeVariable)
-      )]
-  -> OverlapSolverState typeVariable
-  -> Maybe (OverlapSolverState typeVariable)
-solveOverlap [] state = Just state
-solveOverlap ((rawLeft, rawRight) : equations) state
-  | left == right = solveOverlap equations state
-  | TypeVariable variable <- left
-  , isBindable variable = bind variable right
-  | TypeVariable variable <- right
-  , isBindable variable = bind variable left
-  | TypeConstructor leftName <- left
-  , TypeConstructor rightName <- right
-  , leftName == rightName = solveOverlap equations state
-  | TypeApplication leftFunction leftArgument <- left
-  , TypeApplication rightFunction rightArgument <- right =
-      solveOverlap
-        ((leftFunction, rightFunction) :
-          (leftArgument, rightArgument) : equations)
-        state
-  | FunctionType leftParameter leftResult <- left
-  , FunctionType rightParameter rightResult <- right =
-      solveOverlap
-        ((leftParameter, rightParameter) :
-          (leftResult, rightResult) : equations)
-        state
-  | TupleType leftBoxity leftElements <- left
-  , TupleType rightBoxity rightElements <- right
-  , leftBoxity == rightBoxity
-  , Just elementEquations <- zipExactly leftElements rightElements =
-      solveOverlap (elementEquations ++ equations) state
-  | ForallType leftBinders leftConstraints leftBody <- left
-  , ForallType rightBinders rightConstraints rightBody <- right
-  , Just (openedEquations, openedState) <- openForalls
-      leftBinders leftConstraints leftBody
-      rightBinders rightConstraints rightBody state =
-      solveOverlap (openedEquations ++ equations) openedState
-  | otherwise = Nothing
  where
-  substitutions = overlapSubstitutions state
-  left = zonkOverlap substitutions rawLeft
-  right = zonkOverlap substitutions rawRight
+  isBindable variable = case variable of
+    BindableInstanceVariable{} -> True
+    LexicalForallVariable{} -> False
+    PairedForallSkolem{} -> False
+    FreeInstanceVariable{} -> False
 
-  bind variable replacement
-    | occursInOverlap variable replacement = Nothing
-    -- A metavariable quantified outside this comparison may capture a whole
-    -- closed forall, but never a skolem exposed by opening one of its bodies.
-    | containsPairedForallSkolem replacement = Nothing
-    | otherwise = solveOverlap
-        [ ( substituteOverlap variable replacement equationLeft
-          , substituteOverlap variable replacement equationRight
-          )
-        | (equationLeft, equationRight) <- equations
-        ]
-        state
-          { overlapSubstitutions = Map.insert variable replacement
-              $ Map.map (substituteOverlap variable replacement) substitutions
-          }
-
-openForalls
-  :: Ord typeVariable
-  => [OverlapVariable typeVariable]
-  -> [Constraint (Type (OverlapVariable typeVariable))]
-  -> Type (OverlapVariable typeVariable)
-  -> [OverlapVariable typeVariable]
-  -> [Constraint (Type (OverlapVariable typeVariable))]
-  -> Type (OverlapVariable typeVariable)
-  -> OverlapSolverState typeVariable
-  -> Maybe
-      ( [( Type (OverlapVariable typeVariable)
-         , Type (OverlapVariable typeVariable)
-         )]
-      , OverlapSolverState typeVariable
-      )
-openForalls leftBinders leftConstraints leftBody
-    rightBinders rightConstraints rightBody state = do
-  (leftRenaming, rightRenaming, nextSkolem) <- pairBinders
-    (nextPairedForallSkolem state) leftBinders rightBinders
-  contextEquations <- constraintListEquations
-    (map (fmap $ renameOverlapVariables leftRenaming) leftConstraints)
-    (map (fmap $ renameOverlapVariables rightRenaming) rightConstraints)
-  pure
-    ( ( renameOverlapVariables leftRenaming leftBody
-      , renameOverlapVariables rightRenaming rightBody
-      ) : contextEquations
-    , state { nextPairedForallSkolem = nextSkolem }
-    )
-
-pairBinders
-  :: Ord typeVariable
-  => Natural
-  -> [OverlapVariable typeVariable]
-  -> [OverlapVariable typeVariable]
-  -> Maybe
-      ( Map (OverlapVariable typeVariable) (OverlapVariable typeVariable)
-      , Map (OverlapVariable typeVariable) (OverlapVariable typeVariable)
-      , Natural
-      )
-pairBinders next [] [] = Just (Map.empty, Map.empty, next)
-pairBinders next (left : leftRest) (right : rightRest) = do
-  (leftRenaming, rightRenaming, finalNext) <-
-    pairBinders (next + 1) leftRest rightRest
-  let skolem = PairedForallSkolem next
-  pure
-    ( Map.insert left skolem leftRenaming
-    , Map.insert right skolem rightRenaming
-    , finalNext
-    )
-pairBinders _ _ _ = Nothing
-
-renameOverlapVariables
-  :: Ord typeVariable
-  => Map (OverlapVariable typeVariable) (OverlapVariable typeVariable)
-  -> Type (OverlapVariable typeVariable)
-  -> Type (OverlapVariable typeVariable)
-renameOverlapVariables renaming = fmap $ \variable ->
-  Map.findWithDefault variable variable renaming
-
-isBindable :: OverlapVariable typeVariable -> Bool
-isBindable variable = case variable of
-  BindableInstanceVariable{} -> True
-  LexicalForallVariable{} -> False
-  PairedForallSkolem{} -> False
-  FreeInstanceVariable{} -> False
-
-containsPairedForallSkolem
-  :: Type (OverlapVariable typeVariable)
-  -> Bool
-containsPairedForallSkolem source = case source of
-  TypeVariable PairedForallSkolem{} -> True
-  TypeVariable{} -> False
-  TypeConstructor{} -> False
-  TypeApplication function argument ->
-    containsPairedForallSkolem function
-      || containsPairedForallSkolem argument
-  FunctionType parameter result ->
-    containsPairedForallSkolem parameter
-      || containsPairedForallSkolem result
-  TupleType _ elements -> any containsPairedForallSkolem elements
-  ForallType binders constraints body ->
-    any isPairedForallSkolem binders
-      || any (any containsPairedForallSkolem . constraintArguments) constraints
-      || containsPairedForallSkolem body
- where
-  isPairedForallSkolem PairedForallSkolem{} = True
-  isPairedForallSkolem _ = False
-
-occursInOverlap
-  :: Eq typeVariable
-  => OverlapVariable typeVariable
-  -> Type (OverlapVariable typeVariable)
-  -> Bool
-occursInOverlap variable source = case source of
-  TypeVariable candidate -> variable == candidate
-  TypeConstructor{} -> False
-  TypeApplication function argument ->
-    occursInOverlap variable function || occursInOverlap variable argument
-  FunctionType parameter result ->
-    occursInOverlap variable parameter || occursInOverlap variable result
-  TupleType _ elements -> any (occursInOverlap variable) elements
-  ForallType _ constraints body ->
-    any (any (occursInOverlap variable) . constraintArguments) constraints
-      || occursInOverlap variable body
-
-substituteOverlap
-  :: Eq typeVariable
-  => OverlapVariable typeVariable
-  -> Type (OverlapVariable typeVariable)
-  -> Type (OverlapVariable typeVariable)
-  -> Type (OverlapVariable typeVariable)
-substituteOverlap variable replacement source = case source of
-  TypeVariable candidate
-    | variable == candidate -> replacement
-    | otherwise -> source
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (substituteOverlap variable replacement function)
-    (substituteOverlap variable replacement argument)
-  FunctionType parameter result -> FunctionType
-    (substituteOverlap variable replacement parameter)
-    (substituteOverlap variable replacement result)
-  TupleType boxity elements -> TupleType boxity
-    $ map (substituteOverlap variable replacement) elements
-  ForallType binders constraints body -> ForallType binders
-    (map (fmap $ substituteOverlap variable replacement) constraints)
-    $ substituteOverlap variable replacement body
-
-zonkOverlap
-  :: Ord typeVariable
-  => OverlapSubstitutions typeVariable
-  -> Type (OverlapVariable typeVariable)
-  -> Type (OverlapVariable typeVariable)
-zonkOverlap substitutions source = case source of
-  TypeVariable variable -> case Map.lookup variable substitutions of
-    Nothing -> source
-    Just replacement -> zonkOverlap substitutions replacement
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (zonkOverlap substitutions function)
-    (zonkOverlap substitutions argument)
-  FunctionType parameter result -> FunctionType
-    (zonkOverlap substitutions parameter)
-    (zonkOverlap substitutions result)
-  TupleType boxity elements -> TupleType boxity
-    $ map (zonkOverlap substitutions) elements
-  ForallType binders constraints body -> ForallType binders
-    (map (fmap $ zonkOverlap substitutions) constraints)
-    $ zonkOverlap substitutions body
+  isPairedSkolem PairedForallSkolem{} = True
+  isPairedSkolem _ = False
 
 canonicalizeInstanceHead
   :: Ord typeVariable

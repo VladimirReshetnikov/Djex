@@ -17,7 +17,15 @@ number of *deliberately bounded* rules — a `forall` may be introduced here,
 eliminated there, instantiated at these candidates and no others — and every
 one of them is positive-only beyond the historical structural core: reaching a
 bound makes an empty search **inconclusive**, never a proof of
-non-inhabitation. The bounds themselves (six leading binders, 512 tuples per
+non-inhabitation.
+
+Two words recur below. A rule is *positive-only* when it can only add
+candidates to a search, so its running out of candidates says nothing about
+whether the goal is inhabited. A search is *inconclusive* when it ended under
+such a rule with no result: the evidence is then `NoEvidence` rather than
+`ProvedUninhabitable` for Djinn, and Exference simply returns nothing. Only Djinn's
+historical structural core — the complete LJT fragment with no bounded rule
+involved — can turn an empty search into a proof of non-inhabitation. The bounds themselves (six leading binders, 512 tuples per
 scheme, sixteen retained axioms per scheme, 64 in total, 512 quintuple
 selections per orientation, exhaustive through eleven independent sites) are
 stated where each rule is described and restated in the architecture guide's

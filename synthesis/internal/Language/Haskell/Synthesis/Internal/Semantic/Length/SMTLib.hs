@@ -439,29 +439,11 @@ sealLengthSMTLibQuery
   -> CheckedLengthProblem identity local
   -> Either LengthSMTLibQueryError (LengthSMTLibQuery identity local)
 sealLengthSMTLibQuery limits problem = do
-  let inputCount = checkedLengthProblemInputCount problem
-      symbols = inputSymbolsForCount inputCount
-      valueRequest = inputValueRequestForSymbols symbols
-  (condition, translation) <- translateFormula limits inputCount
-    emptySMTTranslationState
-    $ checkedLengthProblemCounterexampleCondition problem
-  let witnesses = orderedEuclideanWitnesses translation
-      witnessSymbols = concatMap euclideanWitnessSymbols witnesses
-  let checkCommands = fixedPreamble
-        ++ map QFLIADeclareInteger symbols
-        ++ map QFLIADeclareInteger witnessSymbols
-        ++ map (QFLIAAssert . nonnegative . QFLIAIntegerSymbol) symbols
-        ++ concatMap euclideanWitnessCommands witnesses
-        ++ [QFLIAAssert condition, QFLIACheckSatisfiable]
-      plan = LengthSMTLibPlan
-        symbols condition checkCommands valueRequest witnesses
-  checkBytes <- retainCommand limits LengthSMTLibCheckCommand
-    $ renderQFLIACommands checkCommands
-  valueRequestBytes <- case valueRequest of
-    Nothing -> Right Nothing
-    Just command -> Just <$> retainCommand limits
-      LengthSMTLibInputValueRequest (renderQFLIACommand command)
-  fingerprint <- buildQueryFingerprint limits problem plan
+  (plan, checkBytes, valueRequestBytes) <- sealQueryPlan limits
+    (checkedLengthProblemInputCount problem)
+    (checkedLengthProblemCounterexampleCondition problem)
+  fingerprint <- buildQueryFingerprint scalarQueryFingerprintVocabulary
+    limits (checkedLengthProblemBehavioralProblem problem) plan
     checkBytes valueRequestBytes
   pure $ LengthSMTLibQuery problem checkBytes fingerprint
 
@@ -531,32 +513,12 @@ sealLengthSpinePairSMTLibQuery
   -> Either
       LengthSpinePairSMTLibQueryError
       (LengthSpinePairSMTLibQuery identity local)
-sealLengthSpinePairSMTLibQuery limits problem = do
-  let inputCount = checkedLengthSpinePairProblemInputCount problem
-      symbols = inputSymbolsForCount inputCount
-      valueRequest = inputValueRequestForSymbols symbols
-  (condition, translation) <- mapSpinePairQueryFailure
-    $ translateFormula limits inputCount emptySMTTranslationState
-    $ checkedLengthSpinePairProblemCounterexampleCondition problem
-  let witnesses = orderedEuclideanWitnesses translation
-      witnessSymbols = concatMap euclideanWitnessSymbols witnesses
-      checkCommands = fixedPreamble
-        ++ map QFLIADeclareInteger symbols
-        ++ map QFLIADeclareInteger witnessSymbols
-        ++ map (QFLIAAssert . nonnegative . QFLIAIntegerSymbol) symbols
-        ++ concatMap euclideanWitnessCommands witnesses
-        ++ [QFLIAAssert condition, QFLIACheckSatisfiable]
-      plan = LengthSMTLibPlan
-        symbols condition checkCommands valueRequest witnesses
-  checkBytes <- mapSpinePairQueryFailure
-    $ retainCommand limits LengthSMTLibCheckCommand
-    $ renderQFLIACommands checkCommands
-  valueRequestBytes <- case valueRequest of
-    Nothing -> Right Nothing
-    Just command -> Just <$> mapSpinePairQueryFailure
-      (retainCommand limits LengthSMTLibInputValueRequest
-        $ renderQFLIACommand command)
-  fingerprint <- buildSpinePairQueryFingerprint limits problem plan
+sealLengthSpinePairSMTLibQuery limits problem = mapSpinePairQueryFailure $ do
+  (plan, checkBytes, valueRequestBytes) <- sealQueryPlan limits
+    (checkedLengthSpinePairProblemInputCount problem)
+    (checkedLengthSpinePairProblemCounterexampleCondition problem)
+  fingerprint <- buildQueryFingerprint spinePairQueryFingerprintVocabulary
+    limits (checkedLengthSpinePairProblemBehavioralProblem problem) plan
     checkBytes valueRequestBytes
   pure $ LengthSpinePairSMTLibQuery problem checkBytes fingerprint
 
@@ -1711,15 +1673,74 @@ mapSpinePairQueryFailure = either (Left . go) Right
       LengthSpinePairSMTLibFingerprintByteLimitExceeded
         maximumLimit observed
 
-buildQueryFingerprint
+-- | Translate one checked problem's counterexample condition into the typed
+-- plan, the retained check-program bytes, and the retained input-value
+-- request bytes.  Both domains seal the same input-only QF_LIA program from
+-- the same formula language; only the fingerprint vocabulary and the error
+-- spelling differ, and the product sealer maps the scalar errors at its
+-- boundary.
+sealQueryPlan
   :: LengthSMTLibLimits
-  -> CheckedLengthProblem identity local
+  -> Int
+  -> LengthFormula LengthContractVariable
+  -> Either LengthSMTLibQueryError (LengthSMTLibPlan, [Word8], Maybe [Word8])
+sealQueryPlan limits inputCount counterexampleCondition = do
+  let symbols = inputSymbolsForCount inputCount
+      valueRequest = inputValueRequestForSymbols symbols
+  (condition, translation) <- translateFormula limits inputCount
+    emptySMTTranslationState counterexampleCondition
+  let witnesses = orderedEuclideanWitnesses translation
+      witnessSymbols = concatMap euclideanWitnessSymbols witnesses
+      checkCommands = fixedPreamble
+        ++ map QFLIADeclareInteger symbols
+        ++ map QFLIADeclareInteger witnessSymbols
+        ++ map (QFLIAAssert . nonnegative . QFLIAIntegerSymbol) symbols
+        ++ concatMap euclideanWitnessCommands witnesses
+        ++ [QFLIAAssert condition, QFLIACheckSatisfiable]
+      plan = LengthSMTLibPlan
+        symbols condition checkCommands valueRequest witnesses
+  checkBytes <- retainCommand limits LengthSMTLibCheckCommand
+    $ renderQFLIACommands checkCommands
+  valueRequestBytes <- case valueRequest of
+    Nothing -> Right Nothing
+    Just command -> Just <$> retainCommand limits
+      LengthSMTLibInputValueRequest (renderQFLIACommand command)
+  pure (plan, checkBytes, valueRequestBytes)
+
+-- | The three bytes strings that make a query fingerprint domain-specific:
+-- its role, its schema tag, and its logic.  Every other field is computed
+-- identically from the behavioral problem, the plan, and the retained bytes.
+data QueryFingerprintVocabulary = QueryFingerprintVocabulary
+  { queryFingerprintRole :: [Word8]
+  , queryFingerprintSchemaTag :: [Word8]
+  , queryFingerprintLogic :: [Word8]
+  }
+
+scalarQueryFingerprintVocabulary :: QueryFingerprintVocabulary
+scalarQueryFingerprintVocabulary = QueryFingerprintVocabulary
+  { queryFingerprintRole = ascii "finite-list-spine-length/z3-qf-lia-query"
+  , queryFingerprintSchemaTag = lengthSMTLibQuerySchemaTag
+  , queryFingerprintLogic = lengthSMTLibQueryLogic
+  }
+
+spinePairQueryFingerprintVocabulary :: QueryFingerprintVocabulary
+spinePairQueryFingerprintVocabulary = QueryFingerprintVocabulary
+  { queryFingerprintRole =
+      ascii "finite-binary-product-spine-lengths/z3-qf-lia-query"
+  , queryFingerprintSchemaTag = lengthSpinePairSMTLibQuerySchemaTag
+  , queryFingerprintLogic = lengthSpinePairSMTLibQueryLogic
+  }
+
+buildQueryFingerprint
+  :: QueryFingerprintVocabulary
+  -> LengthSMTLibLimits
+  -> BehavioralProblem domain
   -> LengthSMTLibPlan
   -> [Word8]
   -> Maybe [Word8]
-  -> Either LengthSMTLibQueryError
-      (Fingerprint LengthSMTLibQueryFingerprintSubject)
-buildQueryFingerprint limits problem plan checkBytes valueRequestBytes =
+  -> Either LengthSMTLibQueryError (Fingerprint subject)
+buildQueryFingerprint vocabulary limits behavioral plan checkBytes
+    valueRequestBytes =
   case buildFingerprintWithin
       (lengthSMTLibFingerprintByteLimit limits) builder of
     Left FingerprintLimitExceeded
@@ -1729,72 +1750,13 @@ buildQueryFingerprint limits problem plan checkBytes valueRequestBytes =
           maximumBytes observedBytes
     Right fingerprint -> Right fingerprint
  where
-  behavioral = checkedLengthProblemBehavioralProblem problem
   builder = FingerprintBuilder
     { fingerprintBuilderVersion = 1
-    , fingerprintBuilderRole = ascii
-        "finite-list-spine-length/z3-qf-lia-query"
-    , fingerprintBuilderFields =
-        [ tagged "schema" [FingerprintBytes lengthSMTLibQuerySchemaTag]
-        , tagged "logic" [FingerprintBytes lengthSMTLibQueryLogic]
-        , tagged "fixed-options"
-            [ FingerprintBytes $ ascii ":produce-models=true"
-            , FingerprintBytes $ ascii ":random-seed=1"
-            ]
-        , tagged "problem-domain"
-            [FingerprintBytes $ behavioralProblemDomain behavioral]
-        , tagged "problem-inventory"
-            [ FingerprintBytes $ fingerprintCanonicalBytes
-                $ behavioralProblemInventoryFingerprint behavioral
-            ]
-        , tagged "problem-encoding"
-            [ FingerprintBytes $ fingerprintCanonicalBytes
-                $ behavioralProblemEncodingFingerprint behavioral
-            ]
-        , tagged "problem-candidate"
-            [ FingerprintBytes $ fingerprintCanonicalBytes
-                $ behavioralProblemCandidateFingerprint behavioral
-            ]
-        , tagged "complete-problem"
-            [ FingerprintBytes $ fingerprintCanonicalBytes
-                $ behavioralProblemFingerprint behavioral
-            ]
-        , tagged "typed-plan" [planField plan]
-        , tagged "check-command" [FingerprintBytes checkBytes]
-        , tagged "input-value-request" [case valueRequestBytes of
-            Nothing -> tagged "absent" []
-            Just bytes -> tagged "present" [FingerprintBytes bytes]]
-        ]
-    }
-
-buildSpinePairQueryFingerprint
-  :: LengthSMTLibLimits
-  -> CheckedLengthSpinePairProblem identity local
-  -> LengthSMTLibPlan
-  -> [Word8]
-  -> Maybe [Word8]
-  -> Either LengthSpinePairSMTLibQueryError
-      (Fingerprint LengthSpinePairSMTLibQueryFingerprintSubject)
-buildSpinePairQueryFingerprint limits problem plan checkBytes
-    valueRequestBytes =
-  case buildFingerprintWithin
-      (lengthSMTLibFingerprintByteLimit limits) builder of
-    Left FingerprintLimitExceeded
-        { fingerprintMaximumBytes = maximumBytes
-        , fingerprintObservedBytesAtLeast = observedBytes
-        } -> Left $ LengthSpinePairSMTLibFingerprintByteLimitExceeded
-          maximumBytes observedBytes
-    Right fingerprint -> Right fingerprint
- where
-  behavioral = checkedLengthSpinePairProblemBehavioralProblem problem
-  builder = FingerprintBuilder
-    { fingerprintBuilderVersion = 1
-    , fingerprintBuilderRole = ascii
-        "finite-binary-product-spine-lengths/z3-qf-lia-query"
+    , fingerprintBuilderRole = queryFingerprintRole vocabulary
     , fingerprintBuilderFields =
         [ tagged "schema"
-            [FingerprintBytes lengthSpinePairSMTLibQuerySchemaTag]
-        , tagged "logic" [FingerprintBytes lengthSpinePairSMTLibQueryLogic]
+            [FingerprintBytes $ queryFingerprintSchemaTag vocabulary]
+        , tagged "logic" [FingerprintBytes $ queryFingerprintLogic vocabulary]
         , tagged "fixed-options"
             [ FingerprintBytes $ ascii ":produce-models=true"
             , FingerprintBytes $ ascii ":random-seed=1"

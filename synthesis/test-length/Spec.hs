@@ -1037,6 +1037,53 @@ mkBudgetLiveExecution executable hostDeadline = expectRight
         hostDeadline
     }
 
+-- | Shared plain-deadline core of the internal budgeted-worker fixtures:
+-- the launch flavor contributes only its session-config maker.
+withInternalBudgetedWorkerVia
+  :: (FilePath -> Int -> IO SMTLibSession.LengthSMTLibSessionConfig)
+  -> String
+  -> Int
+  -> Int
+  -> (forall epoch.
+      FilePath
+      -> SMTLibSession.LengthSMTLibReadyWorker epoch
+      -> IO result)
+  -> IO
+      (Either
+        SMTLibSession.LengthSMTLibSessionError
+        (Either SMTLibSession.LengthSMTLibSessionScopeError result))
+withInternalBudgetedWorkerVia mkConfig mode budgetMilliseconds hostDeadline
+    use =
+  SMTLibLiveSpec.withFakeZ3Mode mode $ \executable _ -> do
+    config <- mkConfig executable hostDeadline
+    SMTLibSession.withLengthSMTLibSessionUsableWorkDeadlineForBudgetedSession
+      budgetMilliseconds $ \deadline ->
+        SMTLibSession.withLengthSMTLibReadyWorkerUnderDeadline deadline config
+          $ use executable
+
+-- | Scoped-deadline sibling of 'withInternalBudgetedWorkerVia'.
+withInternalScopedBudgetedWorkerVia
+  :: (FilePath -> Int -> IO SMTLibSession.LengthSMTLibSessionConfig)
+  -> String
+  -> Int
+  -> Int
+  -> (forall epoch.
+      FilePath
+      -> SMTLibSession.LengthSMTLibReadyWorker epoch
+      -> IO result)
+  -> IO
+      (Either
+        SMTLibSession.LengthSMTLibSessionError
+        (Either SMTLibSession.LengthSMTLibSessionScopeError result))
+withInternalScopedBudgetedWorkerVia mkConfig mode budgetMilliseconds
+    hostDeadline use =
+  SMTLibLiveSpec.withFakeZ3Mode mode $ \executable _ -> do
+    config <- mkConfig executable hostDeadline
+    SMTLibSession.withLengthSMTLibSessionScopedUsableWorkDeadlineForBudgetedSession
+      budgetMilliseconds $ \deadline ->
+        SMTLibSession.withLengthSMTLibReadyWorkerUnderScopedDeadline
+          deadline config $ use executable
+
 withInternalBudgetedWorker
   :: String
   -> Int
@@ -1049,13 +1096,8 @@ withInternalBudgetedWorker
       (Either
         SMTLibSession.LengthSMTLibSessionError
         (Either SMTLibSession.LengthSMTLibSessionScopeError result))
-withInternalBudgetedWorker mode budgetMilliseconds hostDeadline use =
-  SMTLibLiveSpec.withFakeZ3Mode mode $ \executable _ -> do
-    config <- mkInternalBudgetSessionConfig executable hostDeadline
-    SMTLibSession.withLengthSMTLibSessionUsableWorkDeadlineForBudgetedSession
-      budgetMilliseconds $ \deadline ->
-        SMTLibSession.withLengthSMTLibReadyWorkerUnderDeadline deadline config
-          $ use executable
+withInternalBudgetedWorker =
+  withInternalBudgetedWorkerVia mkInternalBudgetSessionConfig
 
 withInternalScopedBudgetedWorker
   :: String
@@ -1069,13 +1111,8 @@ withInternalScopedBudgetedWorker
       (Either
         SMTLibSession.LengthSMTLibSessionError
         (Either SMTLibSession.LengthSMTLibSessionScopeError result))
-withInternalScopedBudgetedWorker mode budgetMilliseconds hostDeadline use =
-  SMTLibLiveSpec.withFakeZ3Mode mode $ \executable _ -> do
-    config <- mkInternalBudgetSessionConfig executable hostDeadline
-    SMTLibSession.withLengthSMTLibSessionScopedUsableWorkDeadlineForBudgetedSession
-      budgetMilliseconds $ \deadline ->
-        SMTLibSession.withLengthSMTLibReadyWorkerUnderScopedDeadline
-          deadline config $ use executable
+withInternalScopedBudgetedWorker =
+  withInternalScopedBudgetedWorkerVia mkInternalBudgetSessionConfig
 
 withInternalDescriptorBoundScopedBudgetedWorker
   :: String
@@ -1089,15 +1126,9 @@ withInternalDescriptorBoundScopedBudgetedWorker
       (Either
         SMTLibSession.LengthSMTLibSessionError
         (Either SMTLibSession.LengthSMTLibSessionScopeError result))
-withInternalDescriptorBoundScopedBudgetedWorker
-    mode budgetMilliseconds hostDeadline use =
-  SMTLibLiveSpec.withFakeZ3Mode mode $ \executable _ -> do
-    config <- mkInternalDescriptorBoundBudgetSessionConfig
-      executable hostDeadline
-    SMTLibSession.withLengthSMTLibSessionScopedUsableWorkDeadlineForBudgetedSession
-      budgetMilliseconds $ \deadline ->
-        SMTLibSession.withLengthSMTLibReadyWorkerUnderScopedDeadline
-          deadline config $ use executable
+withInternalDescriptorBoundScopedBudgetedWorker =
+  withInternalScopedBudgetedWorkerVia
+    mkInternalDescriptorBoundBudgetSessionConfig
 
 withInternalEffectiveIDDescriptorBoundScopedBudgetedWorker
   :: String
@@ -1111,15 +1142,9 @@ withInternalEffectiveIDDescriptorBoundScopedBudgetedWorker
       (Either
         SMTLibSession.LengthSMTLibSessionError
         (Either SMTLibSession.LengthSMTLibSessionScopeError result))
-withInternalEffectiveIDDescriptorBoundScopedBudgetedWorker
-    mode budgetMilliseconds hostDeadline use =
-  SMTLibLiveSpec.withFakeZ3Mode mode $ \executable _ -> do
-    config <- mkInternalEffectiveIDDescriptorBoundBudgetSessionConfig
-      executable hostDeadline
-    SMTLibSession.withLengthSMTLibSessionScopedUsableWorkDeadlineForBudgetedSession
-      budgetMilliseconds $ \deadline ->
-        SMTLibSession.withLengthSMTLibReadyWorkerUnderScopedDeadline
-          deadline config $ use executable
+withInternalEffectiveIDDescriptorBoundScopedBudgetedWorker =
+  withInternalScopedBudgetedWorkerVia
+    mkInternalEffectiveIDDescriptorBoundBudgetSessionConfig
 
 withInternalExecveCheckDescriptorBoundBudgetedWorker
   :: String
@@ -1133,15 +1158,9 @@ withInternalExecveCheckDescriptorBoundBudgetedWorker
       (Either
         SMTLibSession.LengthSMTLibSessionError
         (Either SMTLibSession.LengthSMTLibSessionScopeError result))
-withInternalExecveCheckDescriptorBoundBudgetedWorker
-    mode budgetMilliseconds hostDeadline use =
-  SMTLibLiveSpec.withFakeZ3Mode mode $ \executable _ -> do
-    config <- mkInternalExecveCheckDescriptorBoundBudgetSessionConfig
-      executable hostDeadline
-    SMTLibSession.withLengthSMTLibSessionUsableWorkDeadlineForBudgetedSession
-      budgetMilliseconds $ \deadline ->
-        SMTLibSession.withLengthSMTLibReadyWorkerUnderDeadline
-          deadline config $ use executable
+withInternalExecveCheckDescriptorBoundBudgetedWorker =
+  withInternalBudgetedWorkerVia
+    mkInternalExecveCheckDescriptorBoundBudgetSessionConfig
 
 withInternalExecveCheckDescriptorBoundScopedBudgetedWorker
   :: String
@@ -1155,15 +1174,9 @@ withInternalExecveCheckDescriptorBoundScopedBudgetedWorker
       (Either
         SMTLibSession.LengthSMTLibSessionError
         (Either SMTLibSession.LengthSMTLibSessionScopeError result))
-withInternalExecveCheckDescriptorBoundScopedBudgetedWorker
-    mode budgetMilliseconds hostDeadline use =
-  SMTLibLiveSpec.withFakeZ3Mode mode $ \executable _ -> do
-    config <- mkInternalExecveCheckDescriptorBoundBudgetSessionConfig
-      executable hostDeadline
-    SMTLibSession.withLengthSMTLibSessionScopedUsableWorkDeadlineForBudgetedSession
-      budgetMilliseconds $ \deadline ->
-        SMTLibSession.withLengthSMTLibReadyWorkerUnderScopedDeadline
-          deadline config $ use executable
+withInternalExecveCheckDescriptorBoundScopedBudgetedWorker =
+  withInternalScopedBudgetedWorkerVia
+    mkInternalExecveCheckDescriptorBoundBudgetSessionConfig
 
 mkInternalBudgetSessionConfig
   :: FilePath

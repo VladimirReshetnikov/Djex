@@ -11,10 +11,10 @@
 # those should stay at zero.
 #
 # Deliberately NOT ignored, so they stay visible as future work: `Use
-# lambda-case`, `Replace case with maybe`, `Use shows`, `Use fmap` and
-# `Use <$>`.  Each is a real readability question rather than a decided one,
-# and the first two need a LANGUAGE pragma per module, so they are worth
-# taking file by file rather than silencing wholesale.
+# lambda-case`, `Replace case with maybe`, `Use fmap` and `Use <$>`.  Each
+# is a real readability question rather than a decided one, and the first
+# two need a LANGUAGE pragma per module, so they are worth taking file by
+# file rather than silencing wholesale.
 
 - ignore:
     name: Use ++
@@ -60,6 +60,30 @@
 
 - ignore:
     name: Unused LANGUAGE pragma
-    within: Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Z3.Process
+    within: Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process
     # ForeignFunctionInterface is needed by the descriptor-bound launch code
     # inside a Linux-only CPP block, which hlint does not see on Windows.
+
+- ignore:
+    name: Move guards forward
+    # Comprehension guard order is evaluation order.  The flagged sites sit
+    # in scope collection and engine node expansion, where the order chooses
+    # how much work each candidate costs before it is discarded; hlint's
+    # reorder is not behavior-neutral there.
+
+- ignore:
+    name: Use shows
+    within:
+      - Djinn.Internal.HTypes
+      - Djinn.Internal.LJTFormula
+    # These are precedence-explicit showsPrec printers: `showsPrec 0` sits
+    # in a column beside `showsPrec 1`/`showsPrec 2`/`showsPrec 3`, and the
+    # written-out precedence is the information.  A bare `shows` outside a
+    # printer still gets the hint.
+
+- ignore:
+    name: Use fewer imports
+    within: Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process
+    # Control.Exception is imported twice on purpose: `bracket` is used only
+    # by the POSIX-only workspace and staging code, so its import lives in
+    # the same `#ifndef mingw32_HOST_OS` block as those uses.

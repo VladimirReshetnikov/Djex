@@ -770,8 +770,14 @@ decoded integer bindings only for that query's input symbols and independently
 replays them against the retained problem; raw model text and even `unsat`
 remain heuristic observations, never pruning permission or proof.
 
-Internally the scalar and product translation boundaries are one
-implementation with two vocabularies: queries are sealed by one shared plan
+Internally the scalar and product halves of this layer are one
+implementation with two vocabularies.  The solver-independent evaluation
+core runs the counterexample, finite input-box, simplification, and
+applicable-domain families once over a private per-domain record with a
+shared three-way replay view; the query-owned operations (model
+validation, input replay, the origin probe, bank recording and
+retained-sample replay, and the validation associations) run once over a
+private query-surface record.  The same holds at the translation boundary: queries are sealed by one shared plan
 builder and one shared fingerprint builder (parameterized only by the
 domain's role string, schema tag, and logic constant), and raw solver models
 are decoded by one shared reader parameterized by the domain's model-error

@@ -286,7 +286,7 @@ tests = testGroup "Exference private engine boundaries"
         $ findExpressionsWithIdentifierCapacitiesEither
             (IdentifierCapacities 100 100 100 100) input
       assertBool "an older result meta captured a nested skolem"
-        $ null $ concatMap E.chunkElements chunks
+        $ all (null . E.chunkElements) chunks
   , testCase "bare provider foralls cross the checked result boundary" $ do
       let unit = TypeTuple Boxed []
           vacuousUnit = TypeForall [] [] unit
@@ -300,13 +300,13 @@ tests = testGroup "Exference private engine boundaries"
             (IdentifierCapacities 100 100 100 100) input
       assertBool
         "forall a. a was mistaken for opaque forwarding at a flexible use"
-        $ not $ null $ concatMap E.chunkElements chunks
+        $ not $ all (null . E.chunkElements) chunks
       wrappedChunks <- expectRight
         $ findExpressionsWithIdentifierCapacitiesEither
             (IdentifierCapacities 100 100 100 100)
             (input {E.input_goalType = TypeArrow polymorphic vacuousUnit})
       assertBool "a vacuous forall wrapper suppressed provider instantiation"
-        $ not $ null $ concatMap E.chunkElements wrappedChunks
+        $ not $ all (null . E.chunkElements) wrappedChunks
       let wrappedOccurrence = ExpLambda 1 polymorphic
             $ ExpVar 1 $ TypeForall [] [] $ TypeVar 2
       checkExpression (mkQueryClassEnv emptyStaticClassEnv []) [] []
@@ -686,7 +686,7 @@ tests = testGroup "Exference private engine boundaries"
       finalChunk <- lastChunk "empty elimination" chunks
       E.chunkStatus finalChunk @?= E.SearchStatus E.SearchExhausted 0 0
       assertBool "empty elimination required a non-escaping flexible ID"
-        $ not $ null $ concatMap E.chunkElements chunks
+        $ not $ all (null . E.chunkElements) chunks
   , testCase "empty deconstructors do not suppress provider use" $ do
       let integer = TypeCons $ name "Int"
           monomorphic = TypeArrow integer integer
@@ -708,7 +708,7 @@ tests = testGroup "Exference private engine boundaries"
             -- branch alone therefore cannot make this assertion pass.
             assertBool
               ("constructorless Int suppressed provider " ++ show provider)
-              $ not $ null $ concatMap E.chunkElements chunks
+              $ not $ all (null . E.chunkElements) chunks
       mapM_ assertProviderRemainsUsable [monomorphic, polymorphic]
   , testCase "scope identifier collisions are operational truncations" $ do
       chunk <- lastCapacityChunk

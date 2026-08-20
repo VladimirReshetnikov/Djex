@@ -18,7 +18,8 @@ import Data.List(isPrefixOf, intercalate)
 import Data.Version(showVersion)
 import Text.ParserCombinators.ReadP
 import Control.Exception(evaluate)
-import Control.Monad(when)
+import Control.Monad (void, when)
+import Data.Maybe (fromMaybe)
 import System.Exit(exitWith, ExitCode(..))
 import System.Environment(getArgs)
 import System.IO(hPutStrLn, stderr)
@@ -167,7 +168,7 @@ stateFromSession initializeSession session = State {
     sorted = optionSorted defaults,
     debug = False,
     cutOff = optionCutoff defaults,
-    budget = maybe unlimitedBudget id $ optionBudget defaults,
+    budget = fromMaybe unlimitedBudget $ optionBudget defaults,
     commandFailed = False
     }
   where
@@ -176,7 +177,7 @@ stateFromSession initializeSession session = State {
 welcome :: State -> IO (String, State)
 welcome state = do
     putStrLn $ "Welcome to Djinn " ++ version ++ "."
-    putStrLn $ "Type :h to get help."
+    putStrLn "Type :h to get help."
     return ("Djinn> ", state)
 
 eval :: State -> String -> IO (Bool, State)
@@ -213,7 +214,7 @@ pPrefix s = do
     cs <- look
     let w = takeWhile (\ c -> isAlpha c || c == '-') cs
     if isPrefix w s then
-        string w >> return ()
+        void (string w)
      else
         pfail
 
@@ -658,7 +659,7 @@ pSetFlag :: ReadP Cmd
 pSetFlag = do
     val <- (do schar '+'; return True) +++ (do schar '-'; return False)
     f <- foldr (+++) pfail [ do pPrefix s; return (set val) | (s, _, _, set) <- options ]
-    return $ Set $ f
+    return $ Set f
 
 pSetVal :: ReadP Cmd
 pSetVal = pCutoff +++ pBudget
@@ -681,20 +682,20 @@ pNumericSetting name = do
     return (read digits)
 
 helpText :: String
-helpText = "\
-\Djinn is a program that generates Haskell code from a type.\n\
-\Given a type the program will deduce an expression of this type,\n\
-\if one exists.  If the Djinn says the type is not realizable it is\n\
-\because there is no (total) expression of the given type.\n\
-\Djinn only knows about tuples, ->, and some data types in the\n\
-\initial environment (use :environment for a list).\n\
-\\n\
-\Caveat emptor: Treat the generated expression as a candidate.  It may\n\
-\need supporting declarations and still belongs in your compile/test loop.\n\
-\\n\
-\Send any comments and feedback to https://github.com/VladimirReshetnikov/Djex/issues\n\
-\\n\
-\Commands (may be abbreviated):\n\
+helpText = "\
+\Djinn is a program that generates Haskell code from a type.\n\
+\Given a type the program will deduce an expression of this type,\n\
+\if one exists.  If the Djinn says the type is not realizable it is\n\
+\because there is no (total) expression of the given type.\n\
+\Djinn only knows about tuples, ->, and some data types in the\n\
+\initial environment (use :environment for a list).\n\
+\\n\
+\Caveat emptor: Treat the generated expression as a candidate.  It may\n\
+\need supporting declarations and still belongs in your compile/test loop.\n\
+\\n\
+\Send any comments and feedback to https://github.com/VladimirReshetnikov/Djex/issues\n\
+\\n\
+\Commands (may be abbreviated):\n\
 \"
 
 getSettings :: State -> String

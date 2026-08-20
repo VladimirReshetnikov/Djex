@@ -14,7 +14,7 @@ module Language.Haskell.Exference.ClassEnvFromHaskellSrc
   )
 where
 
-import Control.Monad (forM, when)
+import Control.Monad (forM, unless, when)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Lazy (evalStateT, get)
 import Control.Monad.Trans.Except (runExceptT, throwE, withExceptT)
@@ -433,7 +433,7 @@ getInstances resolverFor classes typeDeclarations modules = sequence $ do
         variables <- convDataTypeVarIndex <$> lift get
         let undeclared = Set.fromList (Map.elems variables)
               Set.\\ declaredIds
-        when (not $ Set.null undeclared) $ throwE
+        unless (Set.null undeclared) $ throwE
           $ "instance uses variables outside its explicit forall: "
           ++ show (Set.toAscList undeclared)
     pure $ HsInstance prerequisites headConstraint

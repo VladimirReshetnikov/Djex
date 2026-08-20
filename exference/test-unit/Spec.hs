@@ -4,7 +4,7 @@ module Main (main) where
 
 import Control.DeepSeq (force)
 import Control.Exception (SomeException, bracket, evaluate, try)
-import Control.Monad (forM_)
+import Control.Monad (forM_, void)
 import Data.Monoid (Any (..))
 import Data.Bifunctor (first)
 import Data.Either (rights)
@@ -2981,15 +2981,13 @@ tests = testGroup "Exference"
                   , exferenceHeuristics = invalidHeuristics
                   })
                 query
-              preparedInput input = ()
-                <$ findExpressionsWithStatsEither input
-              preparedQuery value = ()
-                <$ findQueryResultsInEnvironmentEither
+              preparedInput input = void (findExpressionsWithStatsEither input)
+              preparedQuery value = void (findQueryResultsInEnvironmentEither
                     target
                     (emptyExferenceSourceTypeVariableHints
                       $ queryGoalType value)
                     environment
-                    value
+                    value)
           validateExferenceInput identityInput @?=
             preparedInput identityInput
           validateExferenceInput invalidInput @?= preparedInput invalidInput
@@ -3307,14 +3305,11 @@ tests = testGroup "Exference"
                 penultimateEnvironment
                 twoBinderQuery
           validateExferenceQuery penultimateEnvironment twoBinderQuery @?=
-            (() <$ boundarySearch)
+            (void boundarySearch)
           boundaryResults <- expectRight boundarySearch
           assertBool "the retained boundary plan produced no candidate"
             $ not
-            $ null
-            $ concatMap
-                (SharedSearch.batchCandidates . SharedQuery.resultSearch)
-                boundaryResults
+            $ all (null . SharedSearch.batchCandidates . SharedQuery.resultSearch) boundaryResults
       , testCase "legacy validation preserves compound-error precedence" $ do
           let duplicateName = name "duplicate"
               binding = FunctionBinding (TypeVar 0) duplicateName 0 [] []
@@ -7203,7 +7198,7 @@ tests = testGroup "Exference"
                     ]
               SharedTypeSynonym.preparedInventory
                   (preparedSynthesisWitness neutral) @?=
-                fmap (const ()) inventory
+                void inventory
               environmentFunctions backend @?= sourceFunctions projection
               environmentDeconstructors backend @?=
                 sourceDeconstructors projection
@@ -7706,7 +7701,7 @@ tests = testGroup "Exference"
                     $ SharedInventory.inventoryEnvironment annotated
               SharedTypeSynonym.preparedInventory
                   (preparedSynthesisWitness neutral) @?=
-                fmap (const ()) annotated
+                void annotated
               environmentFunctions backend @?= sourceFunctions projection
               environmentDeconstructors backend @?=
                 sourceDeconstructors projection
@@ -8474,7 +8469,7 @@ tests = testGroup "Exference"
             (withContext "while parsing an Exference query"
               $ withCode "EXF001"
               $ diagnostic "invalid type")
-            @?= "error [EXF001]: invalid type\n\
+            @?= "error [EXF001]: invalid type\n\
                 \  context: while parsing an Exference query"
       , testCase "current HSE parses and elaborates constrained types" $
           case parseTypePure "Eq a => a -> a" of
@@ -9031,7 +9026,7 @@ tests = testGroup "Exference"
           converted <- expectRight
             $ generatedExpressionToHaskellSrc options expression
           unwords (words $ HSE.prettyPrint converted) @?=
-            "function @(forall a0_0 . Fixture.C a0_0 => \
+            "function @(forall a0_0 . Fixture.C a0_0 => \
             \(forall a1_0 . a1_0 -> a1_0) -> a0_0)"
           case converted of
             HSE.App _ _
@@ -9223,7 +9218,7 @@ tests = testGroup "Exference"
             case HSE.parseExp $ HSE.prettyPrint converted of
               HSE.ParseOk reparsed ->
                 assertEqual (label ++ " changed after pretty-printing")
-                  (fmap (const ()) converted) (fmap (const ()) reparsed)
+                  (void converted) (void reparsed)
               failure -> fail $ label ++ " no longer parses: " ++ show failure
       , testCase "symbolic type constructors use a legal binder fallback" $ do
           symbolic <- expectRight $ mkQualifiedName [] ":+:"

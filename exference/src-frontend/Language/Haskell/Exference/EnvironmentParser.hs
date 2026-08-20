@@ -1,6 +1,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MonadComprehensions #-}
-{-# LANGUAGE TypeOperators #-}
+
 
 -- | The complete Exference source-environment loader.  It parses Haskell
 -- modules, rating files, and visibility manifests (from paths, directories,
@@ -90,7 +90,7 @@ import Data.List ( intercalate, sort, sortOn, isSuffixOf )
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.Either ( lefts, rights )
-import Data.Maybe ( maybeToList )
+import Data.Maybe (fromMaybe, isNothing, maybeToList)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Writer.Strict (WriterT, runWriterT, tell)
 import System.Directory ( listDirectory )
@@ -472,7 +472,7 @@ parseTypeVisibilitySource path source =
           $ "invalid type name " ++ show nameSource ++ ": "
             ++ SharedName.renderNameError failure
         Right parsed
-          | SharedName.nameModule parsed == Nothing ->
+          | isNothing (SharedName.nameModule parsed) ->
               Left $ lineDiagnostic lineNumber line
                 $ "type name " ++ show nameSource
                   ++ " must be module-qualified"
@@ -608,7 +608,7 @@ parseTypeVisibilitySources sources@((primaryPath, _) : _) = do
       Nothing -> Right $ Just TypeVisibilityManifest
         { typeVisibilityManifestSource = primaryPath
         , typeVisibilityManifestEntries = M.fromList
-            [(typeVisibilityName entry, entry) | entry <- entries]
+            [ (typeVisibilityName entry, entry) | entry <- entries]
         }
 
 applyTypeVisibilityManifest
@@ -1089,13 +1089,13 @@ unsupportedVocabularyOccurrences = concatMap unsupportedModule
         ++ concatMap (unsupportedBinder KindedClassBinder)
           (snd $ splitDeclHead rawHead)
         ++ concatMap unsupportedDependency dependencies
-        ++ concatMap unsupportedClassDecl (maybe [] id declarations)
+        ++ concatMap unsupportedClassDecl (fromMaybe [] declarations)
     HSE.InstDecl _ overlap rule declarations ->
       maybe [] unsupportedOverlap overlap
         ++ concatMap (unsupportedBinder KindedInstanceBinder)
-            (maybe [] (maybe [] id . instRuleVariables) (splitInstRule rule))
+            (maybe [] (fromMaybe [] . instRuleVariables) (splitInstRule rule))
         ++ unsupportedInstanceRule rule
-        ++ concatMap unsupportedInstanceDecl (maybe [] id declarations)
+        ++ concatMap unsupportedInstanceDecl (fromMaybe [] declarations)
     _ -> []
 
   instRuleVariables (variables, _, _, _) = variables
@@ -1384,7 +1384,7 @@ cyclicModuleImportDiagnostics modules = case
     HSE.Module _ _ _ imports _ ->
       [ source
       | declaration <- imports
-      , HSE.importPkg declaration == Nothing
+      , isNothing (HSE.importPkg declaration)
       , not $ HSE.importSrc declaration
       , let HSE.ModuleName _ source = HSE.importModule declaration
       ]
@@ -1403,7 +1403,7 @@ cyclicModuleImportDiagnostics modules = case
       Just (HSE.Module _ _ _ imports _) -> case
           [ HSE.srcInfoSpan $ HSE.importAnn declaration
           | declaration <- imports
-          , HSE.importPkg declaration == Nothing
+          , isNothing (HSE.importPkg declaration)
           , not $ HSE.importSrc declaration
           , let HSE.ModuleName _ imported = HSE.importModule declaration
           , imported == target

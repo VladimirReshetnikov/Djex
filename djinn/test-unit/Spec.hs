@@ -1,5 +1,6 @@
 module Main (main) where
 
+import Control.Monad (void)
 import Control.Exception (evaluate)
 import Data.List (isInfixOf, isPrefixOf, isSuffixOf, nub, sort)
 import qualified Data.Map.Strict as Map
@@ -1409,8 +1410,7 @@ testRankNTypeAtoms = do
     -- the bounded axiom available.  The older quantified choice above remains
     -- first, while multi-result collection reaches the additive closed tail.
     localClosedVacuous <- runStableQuery closedSession
-        "instantiateVacuousHypothesisAtClosedMonotype" $
-        "MonoClosed -> (forall hidden. MonoToken) -> MonoToken"
+        "instantiateVacuousHypothesisAtClosedMonotype" "MonoClosed -> (forall hidden. MonoToken) -> MonoToken"
     localClosedVacuousRendered <- renderStableCandidates localClosedVacuous
     assertBool
         ("a query-local vacuous scheme lost its closed monotype choice: "
@@ -1467,8 +1467,7 @@ testRankNTypeAtoms = do
         [ valueDeclaration "ambiguousMonoToken" $
             SharedType.ForallType ["chosen"] [] tokenType
         ]
-    nominalEmptySession <- sealDjinnSessionFrom stableSession $
-        [ SharedDeclaration.DataTypeDeclaration () nominalEmptyName [] []
+    nominalEmptySession <- sealDjinnSessionFrom stableSession [ SharedDeclaration.DataTypeDeclaration () nominalEmptyName [] []
         , valueDeclaration "vacuousEmptyProvider" $
             SharedType.ForallType ["chosen"] [] nominalEmptyType
         ]
@@ -1507,8 +1506,7 @@ testRankNTypeAtoms = do
                 tokenType
     mixedKindSession <- sealDjinnSessionFrom stableSession $
         closedDeclarations ++
-        [ SharedDeclaration.AbstractTypeDeclaration () higherKindName $
-            unaryKind
+        [ SharedDeclaration.AbstractTypeDeclaration () higherKindName unaryKind
         , abstractClosed higherKindArgumentName
         , valueDeclaration "mixedKindAmbiguousMonoToken" mixedKindProvider
         ]
@@ -6245,7 +6243,7 @@ testCheckedProofSearchEnvironment = do
     let duplicate = Symbol "given"
         environment = [(duplicate, atomA), (duplicate, atomB)]
         mode = defaultSearchMode False
-        checked = fmap (const ()) $
+        checked = void $
             proveWithModeChecked mode environment atomA
     assertEqual "search and proof checking share the duplicate diagnostic"
         (checkProof environment atomA $ Var duplicate)
@@ -6738,8 +6736,7 @@ testCheckedProofEvidenceParity = do
                 [], atomA :-> (atomA |: atomB),
                 Lam identity $
                     Apply (Cinj leftConstructor 2) (Var identity),
-                Left $
-                    "injection index 2 is outside a sum with 2 alternatives")
+                Left "injection index 2 is outside a sum with 2 alternatives")
             , ("unsupported legacy selector",
                 [(identity, atomA)], atomA, Xsel 0 1 $ Var identity,
                 Left "legacy Xsel has no proof-type semantics")
@@ -6759,8 +6756,8 @@ testCheckedProofEvidenceParity = do
         assertEqual
             (description ++ " changed the historical checker result or error")
             (checkProof environment expected term)
-            (() <$ ProofEvidence.checkProofWithEvidence
-                environment expected term)
+            (void (ProofEvidence.checkProofWithEvidence
+                environment expected term))
 
 type ValidatedTestCandidate =
     CheckedCandidate.ValidatedCandidate DjinnCandidateDetails
@@ -7010,8 +7007,7 @@ testValidatedCandidateProjectionLaziness = do
             [SharedGenerated.Bind "argument"] $
             SharedGenerated.Local "argument"
         details = DjinnCandidateDetails 0 1
-        poisonedEvidence = error $
-            "compatibility projection forced checked proof evidence"
+        poisonedEvidence = error "compatibility projection forced checked proof evidence"
     checked <- expectRight $ CheckedCandidate.checkCandidateProofWith
         (\() -> Right poisonedEvidence) ()
     candidate <- expectRight $ CheckedCandidate.convertCheckedCandidate
@@ -7046,8 +7042,7 @@ testValidatedTypedProjectionLaziness = do
             [SharedGenerated.Bind "argument"] $
             SharedGenerated.Local "argument"
         details = DjinnCandidateDetails 0 1
-        poisonedEvidence = error $
-            "typed projection forced checked proof evidence"
+        poisonedEvidence = error "typed projection forced checked proof evidence"
     checked <- expectRight $ CheckedCandidate.checkCandidateProofWith
         (\() -> Right poisonedEvidence) ()
     candidate <- expectRight $ CheckedCandidate.convertCheckedCandidate

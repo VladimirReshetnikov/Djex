@@ -2377,7 +2377,7 @@ testReplDjinnRecursiveHigherKind = withTemporaryEnvironment
     ("Fix Maybe remains well-kinded and constructible: " ++ output ++ errors)
     2 $ countOccurrences "\\_ -> Fix Nothing" output
   assertContains "recursive Fix reports its deliberate elimination boundary"
-    ("Fix: recursive datatype; constructors are introduction-only in Djinn")
+    "Fix: recursive datatype; constructors are introduction-only in Djinn"
     output
   assertBool "recursive kind loss forced the standard-environment fallback" $
     not $ "Djinn falls back to its standard checked environment" `isInfixOf`
@@ -2444,7 +2444,7 @@ testReplDjinnAliasRecursiveRecord = withTemporaryEnvironment
     ("alias-hidden recursion lost its visible selector: " ++ output ++ errors)
     "payload" output
   assertContains "alias-hidden recursion reports its elimination boundary"
-    ("Rec: recursive datatype; constructors are introduction-only in Djinn")
+    "Rec: recursive datatype; constructors are introduction-only in Djinn"
     output
   assertNoCallStack errors
 
@@ -2470,7 +2470,7 @@ testReplDjinnHiddenRecursiveSelector = withTemporaryEnvironment
     ]
   assertEqual "hidden recursive selector REPL exit" ExitSuccess exitCode
   assertContains "the recursive record keeps its honest elimination boundary"
-    ("Rec: recursive datatype; constructors are introduction-only in Djinn")
+    "Rec: recursive datatype; constructors are introduction-only in Djinn"
     output
   assertBool "an unimported recursive selector entered Djinn search" $
     not $ "hiddenResult" `isInfixOf` output

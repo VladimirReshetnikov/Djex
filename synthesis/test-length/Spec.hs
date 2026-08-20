@@ -3,6 +3,8 @@
 
 module Main (main) where
 
+import Data.Maybe (fromMaybe)
+import Control.Monad (void, when)
 import Control.Concurrent (forkIO, myThreadId, threadDelay, throwTo)
 import Control.Concurrent.MVar
   ( newEmptyMVar
@@ -230,21 +232,19 @@ assertLiveUsableWorkBudgetValidation = do
       microsecondsOverflow)
     $ SMTLibLive.mkLengthSMTLibLiveUsableWorkBudget
         (source microsecondsOverflow)
-  if nanosecondsOverflowInteger <= toInteger (maxBound :: Int)
-    then do
+  when (nanosecondsOverflowInteger <= toInteger (maxBound :: Int)) $ do
       let nanosecondsOverflow = fromInteger nanosecondsOverflowInteger
       assertBudgetValidationFailure
         (SMTLibLive.LengthSMTLibLiveUsableWorkBudgetMicrosecondsOverflow
           nanosecondsOverflow)
         $ SMTLibLive.mkLengthSMTLibLiveUsableWorkBudget
             (source nanosecondsOverflow)
-    else pure ()
   one <- mkLiveUsableWorkBudget 1
   two <- mkLiveUsableWorkBudget 2
   assertBool "validated usable-work budgets lost their exact ordering"
     $ one < two
-  evaluate (force sourceOne) >> pure ()
-  evaluate (force one) >> pure ()
+  void (evaluate (force sourceOne))
+  void (evaluate (force one))
  where
  sourceOne = SMTLibLive.LengthSMTLibLiveUsableWorkBudgetSource 1
 
@@ -2283,10 +2283,8 @@ assertLiveFacadeErrorShowSanitized requireValue executable events failures = do
     $ any (BS.isInfixOf symbol) bytePayloads
   assertBool "fake trace omitted dynamic quoted marker responses"
     $ not $ null markers
-  if requireValue
-    then assertBool "stale fake trace omitted its raw valuation"
+  when requireValue $ assertBool "stale fake trace omitted its raw valuation"
       $ any (BS.isInfixOf valuation) bytePayloads
-    else pure ()
   let fixedForbidden =
         [ ("executable path", executable)
         , ("generated SMT symbol", BSC.unpack symbol)
@@ -7413,7 +7411,7 @@ counterexampleBankTests = testGroup
           poisonThird = [0, 0, error "scalar excess element was forced"]
       admitted <- expectRight
         $ LengthBank.insertLengthCounterexampleBankSample origin [0, 3] empty
-      evaluate (force admitted) >> pure ()
+      void (evaluate (force admitted))
       cyclicResult <- evaluateWithin
         $ LengthBank.insertLengthCounterexampleBankSample origin cyclic admitted
       assertLeft
@@ -7492,7 +7490,7 @@ counterexampleBankTests = testGroup
       admitted <- expectRight
         $ LengthBank.insertLengthSpinePairCounterexampleBankSample
             origin [0, 7] empty
-      evaluate (force admitted) >> pure ()
+      void (evaluate (force admitted))
       cyclicResult <- evaluateWithin
         $ LengthBank.insertLengthSpinePairCounterexampleBankSample
             origin cyclic admitted
@@ -7599,7 +7597,7 @@ counterexampleBankTests = testGroup
       assertLeft
         (LengthBank.LengthCounterexampleBankReplayAttemptLimitExceeded 2 3)
         attemptResult
-      evaluate (force secondAttempt) >> pure ()
+      void (evaluate (force secondAttempt))
   , testCase
       "promote exact product inputs and evict the deterministic oldest tail" $
       do
@@ -7665,7 +7663,7 @@ counterexampleBankTests = testGroup
           (LengthBank.LengthSpinePairCounterexampleBankReplayAttemptLimitExceeded
             2 3)
           attemptResult
-        evaluate (force secondAttempt) >> pure ()
+        void (evaluate (force secondAttempt))
   , testCase
       "evict scalar and product tails at the exact aggregate byte cap" $ do
       scalarProblem <- adversarialConstantZeroProblem trivialLengthContract
@@ -10727,8 +10725,7 @@ smtLibTests = testGroup
         $ seal defaults
             { SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverResourceLimit = 0 }
       let word32Maximum = 4294967295 :: Integer
-      if toInteger (maxBound :: Int) >= word32Maximum
-        then do
+      when (toInteger (maxBound :: Int) >= word32Maximum) $ do
           let maximumInt = fromInteger word32Maximum
           assertLeft
             (fieldError
@@ -10741,9 +10738,7 @@ smtLibTests = testGroup
             { SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverResourceLimit =
                 maximumInt }
           pure ()
-        else pure ()
-      if toInteger (maxBound :: Int) > word32Maximum
-        then do
+      when (toInteger (maxBound :: Int) > word32Maximum) $ do
           let aboveMaximumInt = fromInteger $ word32Maximum + 1
           assertLeft
             (fieldError SMTLibExecution.LengthSMTLibExecutionSolverResourceLimit
@@ -10751,7 +10746,6 @@ smtLibTests = testGroup
             $ seal defaults
                 { SMTLibExecution.lengthSMTLibExecutionConfigSourceSolverResourceLimit =
                     aboveMaximumInt }
-        else pure ()
       assertLeft
         (SMTLibExecution.LengthSMTLibExecutionHostDeadlineMarginTooSmall
           1000 1099 100)
@@ -10838,7 +10832,7 @@ smtLibTests = testGroup
                 responseIntegers }
         ]
       assertBool "a retained policy field was absent from private identity"
-        $ all (/= baseline) changed
+        $ notElem baseline changed
       assertBool "distinct retained field values shared private identity"
         $ length (nub $ baseline : changed) == length changed + 1
       let widerAdmission = SMTLibExecution.mkLengthSMTLibExecutionLimits
@@ -11392,7 +11386,7 @@ smtLibTests = testGroup
             , "(<= (djex_nat_monus djex_length_input_0 1) 100)"
             , "(<= (djex_nat_min djex_length_input_0 2) 100)"
             , "(<= (djex_nat_max djex_length_input_0 3) 100)"
-            , "(<= (ite (<= djex_length_input_0 4) \
+            , "(<= (ite (<= djex_length_input_0 4) \
                 \djex_length_input_0 1) 100)"
             , "(= djex_length_input_0 5)"
             , "(not (= djex_length_input_0 6))"
@@ -11581,7 +11575,7 @@ smtLibTests = testGroup
             $ SMTLibResponse.parseLengthSMTLibInputValueResponse
                 SMTLibResponse.defaultLengthSMTLibResponseLimits query
                 $ asciiBytes
-                  "((|djex_length_input_1| 7)\n\
+                  "((|djex_length_input_1| 7)\n\
                   \ (djex_length_input_0 3))"
           bindings @?=
             [smtIntegerBinding first 3, smtIntegerBinding second 7]
@@ -11999,7 +11993,7 @@ smtLibProtocolTests = testGroup
           asciiBytes "\n"
       valueReceiver <- expectProtocolWrite
         SMTLibProtocol.LengthSMTLibProtocolInputValueWrite
-        (maybe [] id expectedValue) checkAction
+        (fromMaybe [] expectedValue) checkAction
       SMTLibProtocol.lengthSMTLibProtocolReceiverPhase valueReceiver @?=
         SMTLibProtocol.LengthSMTLibProtocolInputValuePhase
       let rawValues = protocolValueFrame query [3]
@@ -12071,7 +12065,7 @@ smtLibProtocolTests = testGroup
           asciiBytes "\n"
       valueReceiver <- expectSpinePairProtocolWrite
         SMTLibSpinePairProtocol.LengthSMTLibProtocolInputValueWrite
-        (maybe [] id
+        (fromMaybe []
           $ SMTLibSpinePairProtocol.lengthSpinePairSMTLibProtocolInputValueWriteBytes
               pairPlan)
         valueAction
@@ -12348,7 +12342,7 @@ smtLibProtocolTests = testGroup
           asciiBytes "\n"
       valueReceiver <- expectProtocolWrite
         SMTLibProtocol.LengthSMTLibProtocolInputValueWrite
-        (maybe [] id $ SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes
+        (fromMaybe [] $ SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes
           plan)
         valueAction
       assertLeft
@@ -12423,7 +12417,7 @@ smtLibProtocolTests = testGroup
             map SMTLibProtocol.lengthSMTLibProtocolPlanFingerprint changed
           fingerprints = baselineFingerprint : changedFingerprints
       assertBool "a semantic protocol-plan input was absent from identity"
-        $ all (/= baselineFingerprint) changedFingerprints
+        $ notElem baselineFingerprint changedFingerprints
       assertBool "distinct protocol plans shared a private complete key"
         $ length (nub fingerprints) == length fingerprints
   , testCase "enforce exact cumulative accounting and value-phase barriers" $ do
@@ -12455,7 +12449,7 @@ smtLibProtocolTests = testGroup
         $ SMTLibProtocol.feedLengthSMTLibProtocol exactInitial checkTranscript
       exactValue <- expectProtocolWrite
         SMTLibProtocol.LengthSMTLibProtocolInputValueWrite
-        (maybe [] id $ SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes
+        (fromMaybe [] $ SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes
           exactPlan)
         exactValueAction
       exactDecoded <- expectProtocolComplete =<< expectRight
@@ -12479,7 +12473,7 @@ smtLibProtocolTests = testGroup
             overflowingInitial checkTranscript
       overflowingValue <- expectProtocolWrite
         SMTLibProtocol.LengthSMTLibProtocolInputValueWrite
-        (maybe [] id $ SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes
+        (fromMaybe [] $ SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes
           exactPlan)
         overflowingAction
       assertLeft
@@ -12492,7 +12486,7 @@ smtLibProtocolTests = testGroup
         $ SMTLibProtocol.feedLengthSMTLibProtocol cyclicInitial checkTranscript
       cyclicValue <- expectProtocolWrite
         SMTLibProtocol.LengthSMTLibProtocolInputValueWrite
-        (maybe [] id $ SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes
+        (fromMaybe [] $ SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes
           exactPlan)
         cyclicAction
       let cyclicWhitespace = 32 : cyclicWhitespace
@@ -12533,7 +12527,7 @@ smtLibProtocolTests = testGroup
         $ SMTLibProtocol.feedLengthSMTLibProtocol defaultInitial checkTranscript
       defaultValue <- expectProtocolWrite
         SMTLibProtocol.LengthSMTLibProtocolInputValueWrite
-        (maybe [] id $ SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes
+        (fromMaybe [] $ SMTLibProtocol.lengthSMTLibProtocolInputValueWriteBytes
           defaultPlan)
         defaultValueAction
       assertLeft

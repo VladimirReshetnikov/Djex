@@ -2,6 +2,7 @@
 
 module Main (main) where
 
+import Control.Monad (when)
 import qualified AssociationSpec
 import qualified TypedCandidateSpec
 import Control.DeepSeq (force)
@@ -355,10 +356,8 @@ namespaceTests = testGroup "canonical namespaces"
         $ TypeVariable $ RigidVariable "right"
       leftStep <- expectOne $ checkedTypeApplicationCertificateSteps left
       rightStep <- expectOne $ checkedTypeApplicationCertificateSteps right
-      if checkedTypeApplicationCertificateStepSelected leftStep ==
-          checkedTypeApplicationCertificateStepSelected rightStep
-        then assertFailure "distinct nominal free variables collapsed"
-        else pure ()
+      when (checkedTypeApplicationCertificateStepSelected leftStep ==
+          checkedTypeApplicationCertificateStepSelected rightStep) $ assertFailure "distinct nominal free variables collapsed"
   , testCase "keep source and selected binders in disjoint namespaces" $ do
       let same = FlexibleVariable "same"
           selected = ForallType [same] [] $ TypeVariable same

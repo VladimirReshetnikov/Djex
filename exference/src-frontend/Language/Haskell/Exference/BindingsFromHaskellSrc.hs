@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections #-}
+
 
 -- | Extraction of search bindings from parsed haskell-src-exts modules:
 -- 'FunctionBinding's from top-level type signatures and foreign imports,
@@ -316,13 +316,13 @@ extractDataDeclarationWithResolver resolver tDeclMap slot moduleName declaration
       -- its parameters must remain free for search-time unification.  Each
       -- constructor value is polymorphic independently; quantify only after
       -- assembling its complete field-to-result arrow.
-      return $ ( [ functionBindingFromType
-                    (loweredConstructorName constructor) 0
-                    $ forallify
-                    $ SharedType.functionType
-                        (loweredConstructorFields constructor)
-                        rtype
-                 | constructor <- consDatas
+      return ( [ functionBindingFromType
+                  (loweredConstructorName constructor) 0
+                  $ forallify
+                  $ SharedType.functionType
+                      (loweredConstructorFields constructor)
+                      rtype
+               | constructor <- consDatas
                  ]
                  ++ [ functionBindingFromType selector 0
                         $ forallify $ TypeArrow rtype fieldType

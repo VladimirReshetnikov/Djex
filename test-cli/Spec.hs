@@ -76,6 +76,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplLoadedPolymorphicValue
   , testCase "REPL reports a shared both-mode parse failure once"
       testReplSharedParseFailure
+  , testCase "REPL owns and repeats structured where-clause queries"
+      testReplWhereGrammar
   , testCase "REPL multiline, repeat, and command errors recover"
       testReplInputRecovery
   , testCase "REPL bare input handles Haskell line comments"
@@ -853,6 +855,39 @@ testReplSharedParseFailure = withTemporaryEnvironment [] $ \directory -> do
   assertBool "a backend ran after the common parser failed" $
     not $ "-- Djinn" `isInfixOf` output
       && not ("-- Exference" `isInfixOf` output)
+  assertNoCallStack errors
+
+testReplWhereGrammar :: Assertion
+testReplWhereGrammar = withTemporaryEnvironment [] $ \directory -> do
+  let secretClause = "length result == length arg0 + 31337"
+  (exitCode, output, errors) <- runRepl directory
+    [ ":help synth"
+    , ":synth --where"
+    , ":synth --where -- a -> a"
+    , ":synth --where 0 == 0 --"
+    , ":synth --where 0 == 0 --x a -> a"
+    , ":synth --wherever a -> a"
+    , ":synth --where " ++ secretClause ++ " -- [a] -> [a]"
+    , ":"
+    , ":compare --where length result == 0 -- [a]"
+    , ":djinn --where length result == 0 -- [a]"
+    , ":exference --where length result == 0 -- [a]"
+    , ":synth a -> a"
+    ]
+  assertEqual "structured where-clause REPL exit" ExitSuccess exitCode
+  assertContains "synthesis help publishes the concise form"
+    ":synth [--where CLAUSE --] TYPE" output
+  assertContains "synthesis help uses ordinary Haskell notation"
+    ":synth --where length result == length arg0 -- [a] -> [a]" output
+  assertEqual "outer where grammar rejects four structural failures" 4
+    $ countOccurrences "[DJEX_REPL_COMMAND]" errors
+  assertEqual "a longer lookalike remains ordinary type source" 1
+    $ countOccurrences "[DJEX_TYPE_PARSE]" errors
+  assertEqual "all synthesis routes and repeat retain the structured query" 5
+    $ countOccurrences "[DJEX_REPL_LENGTH_WHERE_UNAVAILABLE]" errors
+  assertBool "the opaque clause leaked through the unavailable diagnostic"
+    $ not $ "31337" `isInfixOf` errors
+  assertContains "ordinary synthesis remains unchanged" "djexResult a = a" output
   assertNoCallStack errors
 
 testReplInputRecovery :: Assertion

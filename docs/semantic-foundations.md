@@ -405,11 +405,11 @@ result enters the same sealing pipeline as any hand-built contract source.
 
 ### Host-language REPL surfaces (roadmap)
 
-The bounded `len(...)` grammar is the current source-level library boundary,
-not the intended primary interactive notation. The next surface checkpoint
-adds two small host-language adapters which both elaborate to this exact
-opaque source and therefore preserve its normalization, fingerprints, limits,
-replay rules, and authority boundaries:
+The bounded compact `len(...)` grammar remains a source-level compatibility
+boundary, not the primary interactive notation. Djex now also exposes
+`parseHaskellLengthWhereSource`, which produces the same opaque source with
+the same normalization, fingerprints, limits, replay rules, and authority
+boundaries. The corresponding Leant adapter remains planned:
 
 ```text
 -- Djex / Haskell
@@ -419,7 +419,7 @@ replay rules, and authority boundaries:
 :synth --where List.length result = List.length arg0 -- List a -> List a
 ```
 
-The adapters are nominally separate parsers. Djex uses Haskell application,
+The host adapters are nominally separate parsers. Djex uses Haskell application,
 projection, equality/inequality, `div`, and `mod` notation; Leant uses
 `List.length`, Lean projections, and Lean relations. Neither frontend executes
 the displayed expression, accepts arbitrary host code, or defines a second
@@ -435,11 +435,12 @@ still independent: a safe activated policy makes this a one-line query; an
 unconfigured session needs one policy-activation line first. Missing policy
 or ambiguity fails before solver IO.
 
-Djex's standalone REPL and Leant's REPL are both first-class consumers. Djex
-REPL support is scheduled with the Leant shorthand, before new `--law`,
-`--example`, typed-sketch, or additional domain syntax. The current explicit
-Leant form and direct `parseLengthWhereSource` API remain available while the
-host-native adapters acquire parity tests and help text.
+Djex's standalone REPL and Leant's REPL are both first-class consumers. Djex's
+outer structured query grammar and Haskell parser have landed; checked target
+defaults, execution-policy activation, and Exference assessment are the next
+runtime checkpoints. They remain ahead of new `--law`, `--example`,
+typed-sketch, or additional domain syntax. The current explicit Leant form and
+direct `parseLengthWhereSource` compatibility API remain available.
 
 ### Provider summaries as a trust boundary
 

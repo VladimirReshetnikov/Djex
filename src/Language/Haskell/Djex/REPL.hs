@@ -145,7 +145,7 @@ data ReplState = ReplState
   , exferenceSearchOptions :: ExferenceOptions
   , promptTemplate :: String
   , queryTimeout :: QueryTimeout
-  , lastQuery :: Maybe (ReplBackend, String)
+  , lastQuery :: Maybe ReplSynthesisQuery
   , scriptStack :: [FilePath]
   }
 
@@ -530,8 +530,7 @@ executeSource sourceName state history source = case parseReplInput source of
     (sourceName ++ ": " ++ failure)
     >> pure (ContinueRepl state)
   Right ReplNoInput -> pure $ ContinueRepl state
-  Right (ReplQuery target typeSource) ->
-    runQuery sourceName target typeSource state
+  Right (ReplQuery query) -> runQuery sourceName query state
   Right (ReplImport importSource) -> ContinueRepl
     <$> addImportToScope sourceName importSource state
   Right (ReplCommand command) -> runCommand sourceName history command state
@@ -566,8 +565,6 @@ runCommand sourceName history command state = case command of
       Right () -> getCurrentDirectory >>= putStrLn >> continue state
   ChangeModules change modules -> changeModuleScope change modules state
     >>= continue
-  CompareBackends typeSource ->
-    runQuery sourceName (ExplicitBackends BothBackends) typeSource state
   DownloadPackages packages ->
     runPackageOperation DownloadOperation packages >> continue state
   EditFile requested -> editTargetFile requested state >> continue state
@@ -598,8 +595,7 @@ runCommand sourceName history command state = case command of
   RepeatQuery -> case lastQuery state of
     Nothing -> replFailure "DJEX_REPL_HISTORY" "no query to repeat"
         "run a type query before using :" >> continue state
-    Just (selected, typeSource) ->
-      runResolvedQuery sourceName selected typeSource state
+    Just query -> runResolvedQuery sourceName query state
   RunScript path -> runScript path history state
   RunShell shellCommand -> runShellCommand shellCommand >> continue state
   SetOption source -> setOption source state >>= continue
@@ -617,35 +613,37 @@ runCommand sourceName history command state = case command of
 
 runQuery
   :: FilePath
-  -> ReplQueryTarget
-  -> String
+  -> ReplSynthesisQuery
   -> ReplState
   -> IO (ReplStep ReplState)
-runQuery sourceName target typeSource state =
-  runResolvedQuery sourceName selected typeSource state
+runQuery sourceName query state =
+  runResolvedQuery sourceName resolved state
  where
-  selected = case target of
+  selected = case replQueryTarget query of
     ActiveBackends -> activeBackends state
     ExplicitBackends backends -> backends
+  resolved = query {replQueryTarget = ExplicitBackends selected}
 
 runResolvedQuery
   :: FilePath
-  -> ReplBackend
-  -> String
+  -> ReplSynthesisQuery
   -> ReplState
   -> IO (ReplStep ReplState)
-runResolvedQuery sourceName selected typeSource state = do
-  case sharedRuntime of
-    Just (session, context)
-      | sharedProjectionAvailable -> case parseSourceTypeInScope
-          (exferenceSessionInventory session)
-          (scopeExferenceQueryScope context) sourceName typeSource of
-        Left failure -> emitDiagnostic failure
-        Right parsed -> runParsedSelection session parsed
-    _ -> runLegacySelection
+runResolvedQuery sourceName query state = do
+  case replQueryWhereSource query of
+    Just _ -> replFailure "DJEX_REPL_LENGTH_WHERE_UNAVAILABLE"
+      "behavioral where-clause execution is not active"
+      ("the bounded host-native clause was retained without parsing; " ++
+        "use an unconstrained query until the checked runtime lands")
+    Nothing -> runUnconstrained
   pure $ ContinueRepl state
-    { lastQuery = Just (selected, typeSource) }
+    { lastQuery = Just resolved }
  where
+  selected = case replQueryTarget query of
+    ActiveBackends -> activeBackends state
+    ExplicitBackends backends -> backends
+  resolved = query {replQueryTarget = ExplicitBackends selected}
+  typeSource = replQueryTypeSource query
   runtime = exferenceRuntime state
   sharedRuntime =
     (,) <$> exferenceRuntimeSession runtime <*> exferenceRuntimeScope runtime
@@ -654,6 +652,15 @@ runResolvedQuery sourceName selected typeSource state = do
     _ -> case djinnProjection $ djinnRuntime state of
       Just _ -> True
       Nothing -> False
+
+  runUnconstrained = case sharedRuntime of
+    Just (session, context)
+      | sharedProjectionAvailable -> case parseSourceTypeInScope
+          (exferenceSessionInventory session)
+          (scopeExferenceQueryScope context) sourceName typeSource of
+        Left failure -> emitDiagnostic failure
+        Right parsed -> runParsedSelection session parsed
+    _ -> runLegacySelection
 
   runParsedSelection session parsed = case selected of
     OneBackend selectedBackend ->

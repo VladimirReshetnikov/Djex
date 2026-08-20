@@ -108,13 +108,14 @@ Backend commands distinguish persistent selection from one-query routing:
 Entering `:` repeats the last type with the backend selection recorded for
 that query; current rendering and search settings are used for the repeat.
 
-## Behavioral constraint roadmap
+## Behavioral constraint activation roadmap
 
-The standalone REPL does not yet parse behavioral constraints. Its current
-surface is still `:synth TYPE`; the bounded `len(...)` Length parser is a
-library component, and Leant is currently its only interactive consumer.
-Giving the Haskell REPL its own first-class constraint entrance is the next
-surface checkpoint, before additional law/example syntaxes or typed sketches.
+The standalone REPL recognizes a leading exact
+`--where CLAUSE -- TYPE`, preserves ordinary `:synth TYPE`, retains the raw
+clause in query history, and repeats the complete structured query with `:`.
+It deliberately does not parse or execute the clause yet: until checked
+runtime authority lands, a valid constrained query fails closed with
+`DJEX_REPL_LENGTH_WHERE_UNAVAILABLE` and does not echo the source.
 
 The intended common-case form uses ordinary Haskell expression notation:
 
@@ -123,13 +124,14 @@ The intended common-case form uses ordinary Haskell expression notation:
 :synth --where length (fst result) + length (snd result) == 2 * length arg0 -- [a] -> ([a], [a])
 ```
 
-Those examples are a roadmap, not accepted commands yet. The frontend will
-parse a small, bounded Haskell-shaped formula language and lower it to the
-same normalized natural-number Length contract used by the library. It will
-recognize `length x` rather than exposing the internal `len(x)` spelling, use
-Haskell equality and inequality notation (`==` and `/=`), and use Haskell
-application syntax for `min`, `max`, `div`, and `mod`. It will not evaluate an
-arbitrary Haskell expression or inherit runtime `Int` overflow semantics.
+Those examples are accepted by the outer grammar and shown by `:help synth`,
+but are not successful behavioral queries yet. The additive
+`parseHaskellLengthWhereSource` library entrance already parses the bounded
+Haskell-shaped formula and lowers it to the same normalized natural-number
+Length contract as the compact parser. It recognizes `length x`, Haskell
+equality and inequality (`==` and `/=`), and prefix or backticked `div` and
+`mod`; it never evaluates arbitrary Haskell or inherits runtime `Int` overflow
+semantics.
 
 For an unambiguous built-in-list query, omitted options have conservative
 defaults:
@@ -146,8 +148,9 @@ defaults:
 Anything ambiguous or outside that built-in profile fails closed and directs
 the user to an explicit checked contract. In particular, the frontend will not
 infer a custom spine, provider law, modeled argument, executable path, or Z3
-authority from a formula. `:help synth` will show the accepted grammar,
-resolved defaults, and both scalar and pair examples when the surface lands.
+authority from a formula. `:help synth` already shows the accepted outer
+grammar and scalar/pair examples; it will describe resolved runtime defaults
+when activation lands.
 Leant's matching frontend will use `List.length`, Lean relations, and Lean
 projection notation while lowering to the same checked contract vocabulary.
 

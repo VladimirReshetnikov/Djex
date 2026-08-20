@@ -246,10 +246,12 @@ an expression with real GHC.
 ### Behavioral constraints in the Djex REPL
 
 Djex already owns the checked Length-contract, replay, SMT-LIB, and Z3
-foundation, but the standalone `djex` REPL does not yet accept a behavioral
-clause: today its synthesis entrance remains `:synth TYPE`. Adding that REPL
-surface is a near-term cross-repository milestone, not a reason to route
-Haskell users through Leant.
+foundation. The standalone `djex` REPL now recognizes the bounded outer form
+`--where CLAUSE -- TYPE`, retains the clause opaquely, and preserves ordinary
+`:synth TYPE`. Behavioral execution is the next runtime checkpoint: until it
+lands, a structurally valid constrained query fails closed with
+`DJEX_REPL_LENGTH_WHERE_UNAVAILABLE` before parsing the clause or running a
+backend. Haskell users will not need to route this workflow through Leant.
 
 The planned common-case spelling is deliberately Haskell-shaped and short:
 
@@ -258,9 +260,10 @@ The planned common-case spelling is deliberately Haskell-shaped and short:
 :synth --where length (fst result) + length (snd result) == 2 * length arg0 -- [a] -> ([a], [a])
 ```
 
-These two lines are examples of the planned interface, not commands accepted
-by the current release. For an unambiguous built-in-list target, `--where`
-will itself request filtering, the model will default to Haskell `[]`/`(:)`,
+These two lines are accepted by the outer command grammar and shown by
+`:help synth`, but they do not yet run behavioral assessment. For an
+unambiguous built-in-list target, `--where` will itself request filtering, the
+model will default to Haskell `[]`/`(:)`,
 the scalar or pair result domain will follow the host expression and checked
 target, and every eligible list input will be observed in source order. A
 missing or ambiguous default must fail closed and point to the explicit
@@ -268,12 +271,13 @@ contract form; it must never guess a custom datatype, provider law, or solver
 authority. A configured safe execution policy keeps the query to one line;
 otherwise policy activation plus the query should take two lines.
 
-This host notation will lower to the existing bounded, normalized Length AST;
-it will not execute arbitrary Haskell. The current `len(arg0)` parser remains
-a low-level library/compatibility surface while the REPL gains discoverable
-`length arg0`, Haskell comparison notation, and examples in `:help synth`.
+The additive `parseHaskellLengthWhereSource` library entrance already lowers
+this host notation to the existing bounded, normalized Length AST; it does not
+execute arbitrary Haskell. The existing `len(arg0)` parser remains a low-level
+library/compatibility surface, while the REPL grammar and help use discoverable
+`length arg0` and Haskell comparison notation.
 Leant will receive the corresponding Lean-shaped shorthand in the same
-surface milestone. See the [REPL guide](docs/repl.md#behavioral-constraint-roadmap)
+surface milestone. See the [REPL guide](docs/repl.md#behavioral-constraint-activation-roadmap)
 and the [semantic foundation](docs/semantic-foundations.md#host-language-repl-surfaces-roadmap).
 
 <!-- Maintainers: the rank-N/impredicative rule families and their numeric

@@ -8,6 +8,7 @@ module Language.Haskell.Djex.REPL.Command
   ( ReplBackend (..)
   , replBackendName
   , ReplQueryTarget (..)
+  , ReplSynthesisQuery (..)
   , ReplInput (..)
   , ReplCommand (..)
   , ModuleChange (..)
@@ -65,24 +66,35 @@ data ReplQueryTarget
   | ExplicitBackends ReplBackend
   deriving (Eq, Show)
 
+-- | One synthesis request before the frontend resolves 'ActiveBackends'.
+--
+-- The optional where clause remains raw bounded input until the runtime has
+-- established backend, target, and execution authority.  It is never parsed
+-- merely by recognizing the outer REPL command.
+data ReplSynthesisQuery = ReplSynthesisQuery
+  { replQueryTarget :: ReplQueryTarget
+  , replQueryWhereSource :: Maybe String
+  , replQueryTypeSource :: String
+  }
+  deriving (Eq, Show)
+
 -- | One complete logical input after explicit multiline collection.
 data ReplInput
   = ReplNoInput
-  | ReplQuery ReplQueryTarget String
+  | ReplQuery ReplSynthesisQuery
   | ReplImport String
   | ReplCommand ReplCommand
   deriving (Eq, Show)
 
 -- | A parsed colon command with its already validated arguments. The
--- synthesis commands @:synth@, @:djinn@, and @:exference@ are not included:
--- they parse to 'ReplQuery' instead.
+-- synthesis commands @:synth@, @:djinn@, @:exference@, and @:compare@ are not
+-- included: they parse to 'ReplQuery' instead.
 data ReplCommand
   = AddEnvironment [FilePath]
   | Browse (Maybe String)
   | ChangeBackend (Maybe String)
   | ChangeDirectory FilePath
   | ChangeModules ModuleChange [String]
-  | CompareBackends String
   | DownloadPackages [String]
   | EditFile (Maybe FilePath)
   | Evaluate String
@@ -145,6 +157,7 @@ data CompletionDomain
   | CommandCompletion
   | IdentifierCompletion
   | TypeIdentifierCompletion
+  | SynthesisCompletion
   | ModuleCompletion
   | ModuleContextCompletion
   | PathCompletion
@@ -248,7 +261,11 @@ parseReplInput source
   | ':' : commandSource <- rawInput = parseColon commandSource
   | null input = Right ReplNoInput
   | isImport input = Right $ ReplImport input
-  | otherwise = Right $ ReplQuery ActiveBackends input
+  | otherwise = Right $ ReplQuery ReplSynthesisQuery
+      { replQueryTarget = ActiveBackends
+      , replQueryWhereSource = Nothing
+      , replQueryTypeSource = input
+      }
  where
   -- Colon commands own their argument grammar: shell text, prompts, and paths
   -- may contain a literal @--@. Bare Haskell input instead follows Djinn's
@@ -389,13 +406,13 @@ commandDescriptors =
   , commandWith PathCompletion []
       "cd" [] "DIR" "change the process working directory"
       $ fmap (ReplCommand . ChangeDirectory) . pathArgument "a directory"
-  , commandWith TypeIdentifierCompletion []
-      "compare" [] "TYPE" "synthesize with both backends"
-      $ fmap (ReplCommand . CompareBackends) . required "a type"
-  , commandWith TypeIdentifierCompletion []
-      "djinn" [] "TYPE" "synthesize once with Djinn"
-      $ fmap (ReplQuery $ ExplicitBackends $ OneBackend DjinnBackend)
-          . required "a type"
+  , commandWith SynthesisCompletion synthesisDetails
+      "compare" [] synthesisArguments "synthesize with both backends"
+      $ parseSynthesisArguments $ ExplicitBackends BothBackends
+  , commandWith SynthesisCompletion synthesisDetails
+      "djinn" [] synthesisArguments "synthesize once with Djinn"
+      $ parseSynthesisArguments
+          $ ExplicitBackends $ OneBackend DjinnBackend
   , commandWith NoCompletion packageDetails
       "download" ["dl"] "CABAL_TARGET ..."
       "ask Cabal to fetch targets and dependencies into its source cache"
@@ -406,10 +423,10 @@ commandDescriptors =
   , commandWith IdentifierCompletion evalDetails "eval" [] "EXPRESSION"
       "evaluate a Haskell expression with real GHC"
       $ fmap (ReplCommand . Evaluate) . required "a Haskell expression"
-  , commandWith TypeIdentifierCompletion []
-      "exference" [] "TYPE" "synthesize once with Exference"
-      $ fmap (ReplQuery $ ExplicitBackends $ OneBackend ExferenceBackend)
-          . required "a type"
+  , commandWith SynthesisCompletion synthesisDetails
+      "exference" [] synthesisArguments "synthesize once with Exference"
+      $ parseSynthesisArguments
+          $ ExplicitBackends $ OneBackend ExferenceBackend
   , commandWith CommandCompletion []
       "help" ["h", "?"] "[COMMAND]" "show command help"
       $ Right . ReplCommand . Help . optionalText
@@ -452,9 +469,10 @@ commandDescriptors =
       ("[" ++ intercalate "|" showNames ++ "]")
       "inspect REPL and backend state"
       $ Right . ReplCommand . ShowState . optionalText
-  , commandWith TypeIdentifierCompletion []
-      "synth" ["sy"] "TYPE" "synthesize with the active backend(s)"
-      $ fmap (ReplQuery ActiveBackends) . required "a type"
+  , commandWith SynthesisCompletion synthesisDetails
+      "synth" ["sy"] synthesisArguments
+      "synthesize with the active backend(s)"
+      $ parseSynthesisArguments ActiveBackends
   , commandWith IdentifierCompletion typeDetails "type" ["t"] "[+d] EXPRESSION"
       "infer the type of a Haskell expression in the current module scope"
       $ fmap ReplCommand . parseTypeInspection
@@ -683,6 +701,21 @@ typeDetails =
   , "  the obsolete +v mode is no longer accepted"
   ]
 
+synthesisArguments :: String
+synthesisArguments = "[--where CLAUSE --] TYPE"
+
+synthesisDetails :: [String]
+synthesisDetails =
+  [ "  common case: :synth --where length result == length arg0 -- [a] -> [a]"
+  , "  pair result: length (fst result) + length (snd result)"
+      ++ " == 2 * length arg0"
+  , "  --where is recognized only as the first exact option and requires"
+      ++ " a standalone --"
+  , "  the host-native clause is retained opaquely until runtime authority"
+      ++ " is established"
+  , "  behavioral execution is not active yet; constrained requests fail closed"
+  ]
+
 descriptorUsage :: CommandDescriptor -> String
 descriptorUsage descriptor = ':' : usageName
   ++ case descriptorArguments descriptor of
@@ -704,6 +737,49 @@ required description source
   | otherwise = Right value
  where
   value = trim source
+
+parseSynthesisArguments
+  :: ReplQueryTarget
+  -> String
+  -> Either String ReplInput
+parseSynthesisArguments target source = case splitHead source of
+  ("--where", afterWhere) -> do
+    (clause, typeSource) <- splitWhereClause afterWhere
+    pure $ ReplQuery ReplSynthesisQuery
+      { replQueryTarget = target
+      , replQueryWhereSource = Just clause
+      , replQueryTypeSource = typeSource
+      }
+  _ -> do
+    typeSource <- required "a type" source
+    pure $ ReplQuery ReplSynthesisQuery
+      { replQueryTarget = target
+      , replQueryWhereSource = Nothing
+      , replQueryTypeSource = typeSource
+      }
+
+splitWhereClause :: String -> Either String (String, String)
+splitWhereClause source = case standaloneSeparator source of
+  Nothing -> Left "expected a standalone -- after the --where clause"
+  Just offset -> do
+    clause <- required "a nonempty --where clause" $ take offset source
+    typeSource <- required "a type after the --where separator"
+      $ drop (offset + 2) source
+    pure (clause, typeSource)
+
+standaloneSeparator :: String -> Maybe Int
+standaloneSeparator = go 0 True
+ where
+  go _ _ [] = Nothing
+  go offset leftBoundary ('-' : '-' : after)
+    | leftBoundary
+    , separatorRightBoundary after = Just offset
+    | otherwise = go (offset + 1) False $ '-' : after
+  go offset _ (character : rest) =
+    go (offset + 1) (isSpace character) rest
+
+  separatorRightBoundary [] = True
+  separatorRightBoundary (character : _) = isSpace character
 
 optionalText :: String -> Maybe String
 optionalText source = case trim source of

@@ -77,6 +77,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC.Generics (Generic)
+import Data.Word (Word8)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Candidate
@@ -3071,46 +3072,9 @@ buildCandidateFingerprint
   -> Either FingerprintLimitError
       (Fingerprint
         (CandidateFingerprintSubject FiniteListSpineLengthV1))
-buildCandidateFingerprint session authority graph =
-  buildFingerprintWithin maximumBytes FingerprintBuilder
-    { fingerprintBuilderVersion = case authority of
-        LengthPlainCandidateAuthority -> 1
-        LengthOpaqueAssociatedCertificateAuthority -> 2
-        LengthGroundDischargedAssociatedCertificateAuthority -> 3
-    , fingerprintBuilderRole = ascii
-        "finite-list-spine-length/typed-candidate"
-    , fingerprintBuilderFields =
-        [ tagged "dialect"
-            [FingerprintBytes finiteListSpineLengthDomainTag]
-        , tagged "shared-typed-term-graph"
-            [FingerprintBytes $ fingerprintCanonicalBytes graph]
-        , tagged "candidate-authority" $
-            [ FingerprintBytes $ ascii "engine-owned-association/v1"
-            , FingerprintBytes $ ascii "empty-residual-constraints/v1"
-            , FingerprintBytes $ ascii "candidate-only-no-batch-status/v1"
-            ] ++ associatedAuthority
-        ]
-    }
- where
-  associatedAuthority = case authority of
-    LengthPlainCandidateAuthority -> []
-    LengthOpaqueAssociatedCertificateAuthority ->
-      [ FingerprintBytes $ ascii "opaque-associated-certificate/v1"
-      , FingerprintBytes $ ascii "activated-obligations-empty/v1"
-      ]
-    LengthGroundDischargedAssociatedCertificateAuthority ->
-      [ FingerprintBytes $ ascii "opaque-associated-certificate/v1"
-      , FingerprintBytes $ ascii "independent-ground-class-discharge/v1"
-      , FingerprintBytes $ ascii "inventory-bound-discharge-receipts/v1"
-      , FingerprintBytes $ ascii
-          "provider-law-uniform-over-dictionary-evidence/v1"
-      , FingerprintBytes $ ascii "occurrence-specific-final-provider/v1"
-      , FingerprintBytes $ ascii "protected-certified-function-prefix/v1"
-      , FingerprintBytes $ ascii
-          "static-discharge-without-givens-or-z3/v1"
-      ]
-  maximumBytes = fromIntegral $ lengthFingerprintByteLimit
-    $ checkedLengthSessionLimits session
+buildCandidateFingerprint = buildCandidateFingerprintWith
+  "finite-list-spine-length/typed-candidate"
+  finiteListSpineLengthDomainTag
 
 buildSpinePairCandidateFingerprint
   :: CheckedLengthSession identity annotation
@@ -3119,17 +3083,30 @@ buildSpinePairCandidateFingerprint
   -> Either FingerprintLimitError
       (Fingerprint
         (CandidateFingerprintSubject FiniteBinaryProductSpineLengthsV1))
-buildSpinePairCandidateFingerprint session authority graph =
+buildSpinePairCandidateFingerprint = buildCandidateFingerprintWith
+  "finite-binary-product-spine-lengths/typed-candidate"
+  finiteBinaryProductSpineLengthsDomainTag
+
+-- | One shared candidate-fingerprint builder: the domain contributes its
+-- role and dialect tag, and everything else -- the authority-selected
+-- version, the shared typed term graph, and the exact candidate-authority
+-- byte vocabulary -- is identical by construction.
+buildCandidateFingerprintWith
+  :: String
+  -> [Word8]
+  -> CheckedLengthSession identity annotation
+  -> LengthCandidateAuthority
+  -> Fingerprint TermGraphFingerprintSubject
+  -> Either FingerprintLimitError (Fingerprint subject)
+buildCandidateFingerprintWith role dialectTag session authority graph =
   buildFingerprintWithin maximumBytes FingerprintBuilder
     { fingerprintBuilderVersion = case authority of
         LengthPlainCandidateAuthority -> 1
         LengthOpaqueAssociatedCertificateAuthority -> 2
         LengthGroundDischargedAssociatedCertificateAuthority -> 3
-    , fingerprintBuilderRole = ascii
-        "finite-binary-product-spine-lengths/typed-candidate"
+    , fingerprintBuilderRole = ascii role
     , fingerprintBuilderFields =
-        [ tagged "dialect"
-            [FingerprintBytes finiteBinaryProductSpineLengthsDomainTag]
+        [ tagged "dialect" [FingerprintBytes dialectTag]
         , tagged "shared-typed-term-graph"
             [FingerprintBytes $ fingerprintCanonicalBytes graph]
         , tagged "candidate-authority" $
@@ -3169,27 +3146,11 @@ buildCompleteProblemFingerprint
   -> Either FingerprintLimitError
       (Fingerprint
         (ProblemFingerprintSubject FiniteListSpineLengthV1))
-buildCompleteProblemFingerprint session encoding candidate =
-  buildFingerprintWithin maximumBytes FingerprintBuilder
-    { fingerprintBuilderVersion = 1
-    , fingerprintBuilderRole = ascii
-        "finite-list-spine-length/behavioral-problem"
-    , fingerprintBuilderFields =
-        [ tagged "dialect"
-            [FingerprintBytes finiteListSpineLengthDomainTag]
-        , tagged "inventory"
-            [ FingerprintBytes $ fingerprintCanonicalBytes
-                $ lengthSessionInventoryFingerprint session
-            ]
-        , tagged "encoding"
-            [FingerprintBytes $ fingerprintCanonicalBytes encoding]
-        , tagged "candidate"
-            [FingerprintBytes $ fingerprintCanonicalBytes candidate]
-        ]
-    }
- where
-  maximumBytes = fromIntegral $ lengthFingerprintByteLimit
-    $ checkedLengthSessionLimits session
+buildCompleteProblemFingerprint session =
+  buildCompleteProblemFingerprintWith
+    "finite-list-spine-length/behavioral-problem"
+    finiteListSpineLengthDomainTag
+    session (lengthSessionInventoryFingerprint session)
 
 buildSpinePairCompleteProblemFingerprint
   :: CheckedLengthSession identity annotation
@@ -3202,14 +3163,30 @@ buildSpinePairCompleteProblemFingerprint
   -> Either FingerprintLimitError
       (Fingerprint
         (ProblemFingerprintSubject FiniteBinaryProductSpineLengthsV1))
-buildSpinePairCompleteProblemFingerprint session inventory encoding candidate =
+buildSpinePairCompleteProblemFingerprint =
+  buildCompleteProblemFingerprintWith
+    "finite-binary-product-spine-lengths/behavioral-problem"
+    finiteBinaryProductSpineLengthsDomainTag
+
+-- | One shared behavioral-problem fingerprint builder over the domain's
+-- role, dialect tag, and four constituent fingerprints.  The scalar wrapper
+-- supplies the session-owned inventory fingerprint; the product wrapper
+-- receives its structurally derived product inventory explicitly.
+buildCompleteProblemFingerprintWith
+  :: String
+  -> [Word8]
+  -> CheckedLengthSession identity annotation
+  -> Fingerprint inventorySubject
+  -> Fingerprint encodingSubject
+  -> Fingerprint candidateSubject
+  -> Either FingerprintLimitError (Fingerprint subject)
+buildCompleteProblemFingerprintWith role dialectTag session inventory
+    encoding candidate =
   buildFingerprintWithin maximumBytes FingerprintBuilder
     { fingerprintBuilderVersion = 1
-    , fingerprintBuilderRole = ascii
-        "finite-binary-product-spine-lengths/behavioral-problem"
+    , fingerprintBuilderRole = ascii role
     , fingerprintBuilderFields =
-        [ tagged "dialect"
-            [FingerprintBytes finiteBinaryProductSpineLengthsDomainTag]
+        [ tagged "dialect" [FingerprintBytes dialectTag]
         , tagged "inventory"
             [FingerprintBytes $ fingerprintCanonicalBytes inventory]
         , tagged "encoding"
@@ -3221,3 +3198,4 @@ buildSpinePairCompleteProblemFingerprint session inventory encoding candidate =
  where
   maximumBytes = fromIntegral $ lengthFingerprintByteLimit
     $ checkedLengthSessionLimits session
+

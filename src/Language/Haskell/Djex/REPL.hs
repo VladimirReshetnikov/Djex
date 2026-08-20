@@ -601,7 +601,7 @@ runCommand sourceName history command state = case command of
   RepeatQuery -> case lastQuery state of
     Nothing -> replFailure "DJEX_REPL_HISTORY" "no query to repeat"
         "run a type query before using :" >> continue state
-    Just query -> runResolvedQuery sourceName query state
+    Just query -> runQuery sourceName query state
   RunScript path -> runScript path history state
   RunShell shellCommand -> runShellCommand shellCommand >> continue state
   SetOption source -> setOption source state >>= continue
@@ -622,20 +622,7 @@ runQuery
   -> ReplSynthesisQuery
   -> ReplState
   -> IO (ReplStep ReplState)
-runQuery sourceName query state =
-  runResolvedQuery sourceName resolved state
- where
-  selected = case replQueryTarget query of
-    ActiveBackends -> activeBackends state
-    ExplicitBackends backends -> backends
-  resolved = query {replQueryTarget = ExplicitBackends selected}
-
-runResolvedQuery
-  :: FilePath
-  -> ReplSynthesisQuery
-  -> ReplState
-  -> IO (ReplStep ReplState)
-runResolvedQuery sourceName query state = do
+runQuery sourceName query state = do
   case replQueryWhereSource query of
     Just clause -> runLengthWhere clause
     Nothing -> runUnconstrained
@@ -776,7 +763,7 @@ projectParsedTypeToDjinn state = mapTypeNames projectName
   projectName name = Map.findWithDefault name name promptNames
 
 -- The legacy runners remain the fallback when no shared source inventory is
--- available. With a loaded workspace, 'runResolvedQuery' parses once above
+-- available. With a loaded workspace, 'runQuery' parses once above
 -- and feeds the exact checked type to both engines.
 
 runDjinnInteractive :: FilePath -> String -> ReplState -> IO ()

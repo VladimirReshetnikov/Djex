@@ -1,8 +1,8 @@
 {-# LANGUAGE DeriveGeneric #-}
 
 -- | The raw search-environment records of the Exference engine: flat
--- 'FunctionBinding's built from opened prenex signatures, datatype
--- 'DeconstructorBinding's for pattern matching, and the 'EnvDictionary'
+-- t'FunctionBinding's built from opened prenex signatures, datatype
+-- t'DeconstructorBinding's for pattern matching, and the t'EnvDictionary'
 -- that bundles them with the sealed class environment.  The validators here
 -- (identities, ratings, syntax, deconstructor shape) are the single policy
 -- shared by search-environment sealing and independent expression checking.
@@ -123,7 +123,7 @@ mapFunctionBindingTypes transform binding = binding
   , functionParameters = map transform $ functionParameters binding
   }
 
--- | One data constructor of a 'DeconstructorBinding': its name and its
+-- | One data constructor of a t'DeconstructorBinding': its name and its
 -- field types in declaration order.
 data ConstructorBinding = ConstructorBinding
   { constructorName :: QualifiedName
@@ -359,7 +359,7 @@ validateEnvironmentBindingSyntax environment =
 
 -- | Every independently stored search-capability type. Class and instance
 -- assumptions are deliberately excluded because they belong to
--- 'StaticClassEnv', not to these binding records.
+-- t'StaticClassEnv', not to these binding records.
 environmentBindingTypes :: EnvDictionary -> [HsType]
 environmentBindingTypes environment =
   concatMap functionBindingTypes (environmentFunctions environment)
@@ -372,7 +372,7 @@ environmentBindingTypes environment =
 -- Function constraints are followed by class superclasses and then instance
 -- heads/prerequisites. Keeping this projection beside t'EnvDictionary' gives
 -- search sealing and independent expression checking the same complete view;
--- neither has to assume that nominal 'StaticClassEnv' validation also enforces
+-- neither has to assume that nominal t'StaticClassEnv' validation also enforces
 -- its own rank restrictions.
 environmentConstraints
   :: EnvDictionary

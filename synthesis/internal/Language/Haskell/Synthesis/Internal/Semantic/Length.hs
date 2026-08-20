@@ -489,7 +489,7 @@ instance NFData LengthLimits where
     rnf literalBits `seq`
     rnf fingerprintBytes
 
--- | Which bound of a 'LengthLimitSource' a limit diagnostic refers to, in
+-- | Which bound of a t'LengthLimitSource' a limit diagnostic refers to, in
 -- the source record's field order.
 data LengthLimitField
   = LengthTypeNodes
@@ -512,7 +512,7 @@ data LengthLimitError = NegativeLengthLimit LengthLimitField Int
 
 instance NFData LengthLimitError
 
--- | Validate every field of a 'LengthLimitSource', checking them in field
+-- | Validate every field of a t'LengthLimitSource', checking them in field
 -- order and reporting the first negative one.  All nonnegative values are
 -- accepted unchanged.
 mkLengthLimits :: LengthLimitSource -> Either LengthLimitError LengthLimits

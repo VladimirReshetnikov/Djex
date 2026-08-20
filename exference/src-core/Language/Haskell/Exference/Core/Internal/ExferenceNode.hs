@@ -1,8 +1,8 @@
 {-# LANGUAGE DeriveGeneric #-}
 
 
--- | The state of one Exference search branch: the 'SearchNode' record with
--- its pending 'TGoal's, lexical 'Scopes' of 'VarPBinding's, use counts, and
+-- | The state of one Exference search branch: the t'SearchNode' record with
+-- its pending t'TGoal's, lexical 'Scopes' of t'VarPBinding's, use counts, and
 -- rigid, identifier, and depth bookkeeping, plus the substitution and
 -- goal-construction helpers over it.  Scope structure itself is delegated to
 -- "Language.Haskell.Exference.Core.Internal.Scope"; the engine in
@@ -57,7 +57,7 @@ import GHC.Generics
 
 -- | A term variable (or expression hole) paired with its type.  Goals carry
 -- one as the hole to fill; 'splitBinding' turns one into the scoped
--- 'VarPBinding' form.
+-- t'VarPBinding' form.
 data VarBinding = VarBinding {-# UNPACK #-} !TVarId HsType
  deriving (Generic)
 
@@ -93,7 +93,7 @@ varPBindingApplySubsts substitutions binding =
 -- "Language.Haskell.Exference.Core.Internal.Scope".
 type ScopeId = Scope.ScopeId
 
--- | The lexical-scope forest of a search node, holding one 'VarPBinding'
+-- | The lexical-scope forest of a search node, holding one t'VarPBinding'
 -- per locally bound term variable.
 type Scopes = Scope.Scopes VarPBinding
 
@@ -203,7 +203,7 @@ data SearchNode = SearchNode
   , nodeFunctionSchemes :: Map.Map QualifiedName HsType
     -- ^ Exact specified leading-forall schemes retained by the checked stable
     -- inventory.  Compatibility inputs deliberately leave this empty because
-    -- their flattened 'FunctionBinding' values cannot prove binder order.
+    -- their flattened t'FunctionBinding' values cannot prove binder order.
   , nodeVisibleTypeCandidates :: [HsType]
     -- ^ Closed query subtrees proven to occupy proper-type positions.  These
     -- may explicitly instantiate a context-free foreign scheme whose binder
@@ -249,7 +249,7 @@ instance NFData TupleGoalMode
 instance NFData TGoal
 instance NFData SearchNode
 
--- | Split a binding's type at its arrow chain into a scoped 'VarPBinding'
+-- | Split a binding's type at its arrow chain into a scoped t'VarPBinding'
 -- with no previously exposed parameters; see 'splitBindingWithParameters'.
 splitBinding :: VarBinding -> VarPBinding
 splitBinding = splitBindingWithParameters []

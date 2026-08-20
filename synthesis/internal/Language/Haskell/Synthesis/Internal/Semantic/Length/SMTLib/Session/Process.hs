@@ -479,7 +479,7 @@ checkLengthSMTLibProcessDeadline
     Right () -> Right ()
 
 -- | The monotonic clock reading, in nanoseconds, against which every
--- 'LengthSMTLibProcessDeadline' is measured.
+-- t'LengthSMTLibProcessDeadline' is measured.
 lengthSMTLibProcessMonotonicTimeNanoseconds :: IO Word64
 lengthSMTLibProcessMonotonicTimeNanoseconds =
   Z3Process.z3SMTLibProcessMonotonicTimeNanoseconds

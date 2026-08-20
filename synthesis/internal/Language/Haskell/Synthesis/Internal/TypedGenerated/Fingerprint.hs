@@ -3,7 +3,7 @@
 
 -- | Private canonical identity for shared checked typed term graphs.
 --
--- The input is re-sealed with 'sharedTypeStructure': 'TermGraph' deliberately
+-- The input is re-sealed with 'sharedTypeStructure': t'TermGraph' deliberately
 -- does not retain the caller-supplied type checker which originally admitted
 -- it.  Only that fresh shared check may produce an identity bearing this
 -- module's nominal subject.

@@ -4,8 +4,8 @@
 --
 
 -- | The object language of the LJT prover: propositional 'Formula's over
--- 'Symbol' atoms, and the untyped proof 'Term's the search produces.  A
--- 'Symbol' names both proof variables and atoms; an opaque type atom
+-- t'Symbol' atoms, and the untyped proof 'Term's the search produces.  A
+-- t'Symbol' names both proof variables and atoms; an opaque type atom
 -- additionally seals a shared source type with alpha-normal identity.
 -- "Djinn.Internal.LJT" re-exports this module and searches over it, while
 -- "Djinn.Internal.TypeFormula" compiles source types into these formulae.
@@ -158,7 +158,7 @@ instance Show Formula where
 ------------------------------
 
 -- | A proof term of the LJT calculus: an untyped lambda calculus over
--- 'Symbol' variables extended with constants for building and splitting
+-- t'Symbol' variables extended with constants for building and splitting
 -- n-tuples ('Ctuple', 'Csplit'), injecting into and case-analysing
 -- constructor-tagged sums ('Cinj', 'Ccases'), and a legacy tuple selector.
 -- Constants take their operands through ordinary 'Apply' spines.

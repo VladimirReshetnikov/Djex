@@ -11,7 +11,7 @@
 -- re-associate a checked node or manufacture checked evidence.
 --
 -- Rank-N Haskell types selected as opaque logical atoms retain their exact
--- source trees through 'Symbol'.  Application nodes therefore preserve every
+-- source trees through t'Symbol'.  Application nodes therefore preserve every
 -- source, intermediate, and result type which the LJT checker itself knows.
 -- The LJT 'Term' language has no visible-type-application node and receives no
 -- selected visible-argument vector from @Djinn.Internal.Instantiation@, so this

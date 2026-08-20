@@ -271,7 +271,7 @@ inferSharedVariableKinds assumptions sharedVariables types = do
 -- allocated up front for joint kind inference, but cycles consisting only of
 -- synonym expansion remain invalid.
 --
--- Accepting an opaque 'Environment' makes structural declaration validity and
+-- Accepting an opaque t'Environment' makes structural declaration validity and
 -- namespace uniqueness preconditions of this operation rather than a second,
 -- subtly different validation path. Use
 -- 'Language.Haskell.Synthesis.Environment.mkEnvironment' before crossing this
@@ -303,7 +303,7 @@ inferDeclarationKindsWith policy =
 -- | Fully configurable environment kind inference.
 --
 -- Structural validity and namespace uniqueness are already guaranteed by the
--- opaque 'Environment'; this operation owns dependency analysis, nominal
+-- opaque t'Environment'; this operation owns dependency analysis, nominal
 -- resolution, unification, and class-kind finalization.
 inferDeclarationKindsWithClassPolicy
   :: Ord variable

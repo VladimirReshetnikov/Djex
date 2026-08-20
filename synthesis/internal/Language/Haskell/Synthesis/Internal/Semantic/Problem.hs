@@ -331,7 +331,7 @@ associateSolverObservation = AssociatedSolverObservation
 -- | Bind a raw behavioral report to the exact problem it was produced for.
 -- Like 'associateSolverObservation', this confers no evidence: an
 -- established or counterexample claim stays a heuristic hint until a
--- domain verifier independently produces 'BehavioralEvidence'.
+-- domain verifier independently produces t'BehavioralEvidence'.
 associateBehavioralObservation
   :: BehavioralProblem domain
   -> BehavioralObservation

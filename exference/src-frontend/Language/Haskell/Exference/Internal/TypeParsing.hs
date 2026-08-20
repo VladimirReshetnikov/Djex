@@ -42,8 +42,8 @@ import qualified Language.Haskell.Synthesis.Environment as Environment
 import qualified Language.Haskell.Synthesis.Inventory as Inventory
 
 -- | Parse a source type with HSE and hand the syntax tree to a conversion
--- action. A parse failure becomes an error 'Diagnostic' at the HSE
--- location; a conversion failure becomes an error 'Diagnostic' spanning
+-- action. A parse failure becomes an error t'Diagnostic' at the HSE
+-- location; a conversion failure becomes an error t'Diagnostic' spanning
 -- the whole input text in the parse mode's file name.
 parseHaskellSrcType
   :: Monad m

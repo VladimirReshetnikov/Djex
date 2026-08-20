@@ -547,7 +547,7 @@ data LengthSMTLibExecutionPolicyFingerprintSubject
 -- | Complete reversible canonical key of the sealed policy, built under a
 -- strategy-specific role and schema tag from the protocol tag, every Z3
 -- launch fact including the exact path and any expected digest, and the
--- artifact and response policy.  'Eq' on 'LengthSMTLibExecutionConfig'
+-- artifact and response policy.  'Eq' on t'LengthSMTLibExecutionConfig'
 -- compares only this key.
 lengthSMTLibExecutionPolicyFingerprint
   :: LengthSMTLibExecutionConfig

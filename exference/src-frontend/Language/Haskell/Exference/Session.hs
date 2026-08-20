@@ -4,7 +4,7 @@
 -- New applications should normally use @loadExferenceSession@ from
 -- "Language.Haskell.Djex.Exference.HaskellSrc".
 -- This explicit bridge exists for the historical CLI, programmatic frontend
--- fixtures, and migrations that already own a 'CheckedSourceEnvironment'.
+-- fixtures, and migrations that already own a t'CheckedSourceEnvironment'.
 module Language.Haskell.Exference.Session
   ( mkExferenceSession
   , mkExferenceSessionWithPolicy
@@ -37,7 +37,7 @@ mkExferenceSession = mkExferenceSessionWithPolicy
 -- inventory crosses into the session, so no lowering is repeated and no
 -- parser-specific representation is retained. Policy exclusions remove
 -- bindings from the search; a rating override naming no retained binding
--- is rejected with a 'Diagnostic'.
+-- is rejected with a t'Diagnostic'.
 mkExferenceSessionWithPolicy
   :: ExferenceSessionPolicy
   -> CheckedSourceEnvironment

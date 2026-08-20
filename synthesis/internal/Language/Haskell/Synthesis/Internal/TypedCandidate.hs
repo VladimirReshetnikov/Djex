@@ -169,7 +169,7 @@ mkCertificateAssociatedTypedCandidate compatibility graph =
 -- The callbacks and every payload remain non-strict until selected by the
 -- hidden outer branch.  This shape makes correct package-private use direct;
 -- it does not prevent a trusted caller from retaining an observation or
--- constructing a differently paired 'TypedCandidate'.
+-- constructing a differently paired t'TypedCandidate'.
 foldTypedCandidateGraph
   :: (candidate -> failure -> result)
   -> (candidate -> TermGraph (Type variable) local -> result)

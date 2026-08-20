@@ -91,7 +91,7 @@ unifyShared rawLeft rawRight = do
 
 {-# INLINE unifyOffset #-}
 -- | 'unifyDisjoint' against a right-hand type whose free flexible variables
--- are first shifted by the offset carried in the 'HsTypeOffset'.  The second
+-- are first shifted by the offset carried in the t'HsTypeOffset'.  The second
 -- returned substitution is keyed by, and applies to, the shifted right type;
 -- an offset that would overflow a 'TVarId' yields 'Nothing'.
 unifyOffset :: HsType -> HsTypeOffset -> Maybe (Substs, Substs)
@@ -472,7 +472,7 @@ unifyRight :: HsType -> HsType -> Maybe Substs
 unifyRight left right = unifyRightEqs [TypeEq left right]
 
 {-# INLINE unifyRightEqs #-}
--- | Solve several 'TypeEq' equations simultaneously in the manner of
+-- | Solve several t'TypeEq' equations simultaneously in the manner of
 -- 'unifyRight': flexible variables on every left side stay fixed, and the
 -- single returned substitution binds only flexible variables of the right
 -- sides, which all share one namespace.  Any structurally invalid input or an
@@ -509,7 +509,7 @@ projectRightSubstitutions equations substitutions = do
 
 {-# INLINE unifyRightOffset #-}
 -- | 'unifyRight' against a right-hand type whose free flexible variables are
--- first shifted by the offset carried in the 'HsTypeOffset'.  The returned
+-- first shifted by the offset carried in the t'HsTypeOffset'.  The returned
 -- substitution is keyed by, and applies to, the shifted right type; an offset
 -- that would overflow a 'TVarId' yields 'Nothing'.
 unifyRightOffset :: HsType -> HsTypeOffset -> Maybe Substs

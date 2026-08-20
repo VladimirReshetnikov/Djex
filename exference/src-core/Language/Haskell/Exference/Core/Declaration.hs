@@ -92,7 +92,7 @@ type SynthesisDeclaration = SharedDeclaration.Declaration
   SynthesisVariable Void DeclarationMetadata
 
 -- | A sealed shared environment of 'SynthesisDeclaration's; the checked
--- counterpart of 'EnvDictionary' (see 'toSynthesisEnvironment' and
+-- counterpart of t'EnvDictionary' (see 'toSynthesisEnvironment' and
 -- 'fromSynthesisEnvironment').
 type SynthesisEnvironment = SharedEnvironment.Environment
   SynthesisVariable Void DeclarationMetadata
@@ -297,7 +297,7 @@ preparedSynthesisBackend
 
 -- | Exact alias-expanded, declaration-normalized schemes corresponding to
 -- ordinary value bindings in the prepared backend.  Unlike
--- 'FunctionBinding', this sidecar retains specified leading binder order for
+-- t'FunctionBinding', this sidecar retains specified leading binder order for
 -- checked visible type application.
 preparedSynthesisSchemes
   :: PreparedSynthesisInventory annotation
@@ -700,7 +700,7 @@ toSynthesisInstanceDeclaration declaration = checked $
 
 -- | Lower a shared instance declaration to Exference's instance rule.  The
 -- declaration's binder list must be exactly the free variables of its head
--- and prerequisites and all of them flexible, because 'HsInstance'
+-- and prerequisites and all of them flexible, because t'HsInstance'
 -- quantifies implicitly; anything else fails with 'NonImplicitInstanceForall'.
 fromSynthesisInstanceDeclaration
   :: SynthesisDeclaration

@@ -20,7 +20,7 @@
 -- checked compatibility projection. Repeated references are rejected because
 -- legacy tree erasure would otherwise duplicate one source occurrence
 -- identity into several surface uses. Explicit 'TypedLet' nodes represent
--- semantic sharing. Consumers of a sealed 'TermGraph' therefore do not need
+-- semantic sharing. Consumers of a sealed t'TermGraph' therefore do not need
 -- their own graph walk or type recovery pass.
 module Language.Haskell.Synthesis.TypedGenerated
   ( TermNodeId
@@ -322,7 +322,7 @@ instance NFData ty => NFData (ApplicationWitness ty)
 --
 -- A missing certificate is permitted for compatibility while backends are
 -- migrated.  Source-sensitive provider specializations should always retain
--- the exact 'CertificateId'; later query sealing will make that relationship
+-- the exact t'CertificateId'; later query sealing will make that relationship
 -- mandatory for certificate-owned occurrences.
 data TypeApplicationWitness ty = TypeApplicationWitness
   { typeApplicationSource :: ty
@@ -353,7 +353,7 @@ data TypedPattern ty local = TypedPattern
 
 instance (NFData ty, NFData local) => NFData (TypedPattern ty local)
 
--- | The shape of one 'TypedPattern': a binder, a wildcard, a constructor or
+-- | The shape of one t'TypedPattern': a binder, a wildcard, a constructor or
 -- tuple pattern over typed sub-patterns, or an as-pattern.  'TypedBind' and
 -- 'TypedAs' introduce a local whose identity must be unique across the sealed
 -- graph.
@@ -367,7 +367,7 @@ data TypedPatternNode ty local
 
 instance (NFData ty, NFData local) => NFData (TypedPatternNode ty local)
 
--- | One typed term node stored under a separate 'TermNodeId'.
+-- | One typed term node stored under a separate t'TermNodeId'.
 data TermNode ty local = TermNode
   { termNodeType :: ty
   , termNodeForm :: TermNodeForm ty local
@@ -379,7 +379,7 @@ instance (NFData ty, NFData local) => NFData (TermNode ty local)
 -- | Typed counterparts of every current compatibility expression form.
 --
 -- Locals, globals, holes, and pattern sites carry stable occurrence identity.
--- Search-created structural nodes use their containing 'TermNodeId'.
+-- Search-created structural nodes use their containing t'TermNodeId'.
 data TermNodeForm ty local
   = TypedLocal !OccurrenceId local
   | TypedGlobal !OccurrenceId Name

@@ -200,7 +200,7 @@ data GraphCertificateUse variable = GraphCertificateUse
 -- | Build the structural table, match independent checker observations, seal
 -- the raw graph, and derive one exhaustive occurrence association atomically.
 --
--- The supplied 'TypeStructure' remains authoritative for all ordinary graph
+-- The supplied t'TypeStructure' remains authoritative for all ordinary graph
 -- typing and constructor schemas.  Its visible-application predicate is
 -- relaxed only for a witness carrying a certificate handle; this function's
 -- subsequent plan comparison is the sole route by which such a graph can be

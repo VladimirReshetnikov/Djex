@@ -4,7 +4,7 @@
 --
 
 -- | A minimal line-oriented read-eval-print loop over Haskeline.  The
--- 'REPL' record supplies the init, eval, and exit callbacks and 'repl' runs
+-- t'REPL' record supplies the init, eval, and exit callbacks and 'repl' runs
 -- them until quit or EOF; the module knows nothing about Djinn commands, and
 -- "Djinn" is the frontend that instantiates it.
 module Djinn.Internal.REPL (REPL(..), repl) where
@@ -21,7 +21,7 @@ data REPL s = REPL {
     repl_exit :: s -> IO ()
     }
 
--- | Drive a 'REPL' under Haskeline until 'repl_eval' asks to quit or input
+-- | Drive a t'REPL' under Haskeline until 'repl_eval' asks to quit or input
 -- ends (EOF), running 'repl_exit' in either case.  A keyboard interrupt
 -- prints @Interrupted.@ and continues with the state from before the
 -- interrupted line.

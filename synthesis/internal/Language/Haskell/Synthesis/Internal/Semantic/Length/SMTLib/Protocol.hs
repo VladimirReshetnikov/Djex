@@ -19,7 +19,7 @@
 --
 -- This module also owns the complete phase machine, framing validation, and
 -- fingerprint construction shared with the nominal binary-product plan.  A
--- 'LengthSMTLibProtocolIdentity' record carries everything that
+-- t'LengthSMTLibProtocolIdentity' record carries everything that
 -- distinguishes one protocol domain: its schema tags, plan fingerprint role,
 -- domain-specific fingerprint fields, and the exact query projections.  The
 -- scalar identity lives here; the product identity and its nominally

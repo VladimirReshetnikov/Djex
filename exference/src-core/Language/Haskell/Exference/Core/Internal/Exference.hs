@@ -2,7 +2,7 @@
 {-# LANGUAGE MonadComprehensions #-}
 
 -- | The Exference search engine proper: the priority-queue-driven best-first
--- search over 'SearchNode's, the validation of inputs, environments,
+-- search over t'SearchNode's, the validation of inputs, environments,
 -- queries, and options, and the result projections in both the historical
 -- chunk API and the shared query envelope.  Every public entrance validates
 -- once and hands the raw lazy engine a sealed artifact whose constructor is
@@ -130,8 +130,8 @@ import Control.Monad.Trans.State.Lazy
 
 -- | The historical all-in-one search input: goal, environment, and search
 -- limits in a single record.  It is validated by 'prepareExferenceInput'
--- before any search runs; the newer split API uses 'ExferenceEnvironment'
--- and 'ExferenceQuery' instead.
+-- before any search runs; the newer split API uses t'ExferenceEnvironment'
+-- and t'ExferenceQuery' instead.
 data ExferenceInput = ExferenceInput
   { input_goalType    :: HsType                 -- ^ try to find a expression
                                                 -- of this type
@@ -346,7 +346,7 @@ data SearchCompletion
     -- conclusive.
   deriving (Eq, Show)
 
--- | Historical progress summary attached to every 'ExferenceChunkElement':
+-- | Historical progress summary attached to every t'ExferenceChunkElement':
 -- the completion state plus running totals of nodes discarded by the queue
 -- and depth bounds so far.
 data SearchStatus = SearchStatus
@@ -803,7 +803,7 @@ findExpressions :: CheckedExferenceQuery -> [ExferenceChunkElement]
 findExpressions = findExpressionsWithAllocators defaultSearchAllocators
 
 -- | 'findExpressions' with explicit search allocators.  Every engine batch is
--- projected to one 'ExferenceChunkElement', so the batch and candidate order
+-- projected to one t'ExferenceChunkElement', so the batch and candidate order
 -- are preserved and exact counts saturate to machine integers.
 findExpressionsWithAllocators
   :: SearchAllocators
@@ -1261,7 +1261,7 @@ mkExferenceEnvironment environment = do
 
 -- | Seal a stable environment together with the exact specified schemes from
 -- the same checked declaration inventory.  The ordinary compatibility
--- constructor cannot recover binder order from a flattened 'FunctionBinding'
+-- constructor cannot recover binder order from a flattened t'FunctionBinding'
 -- and therefore leaves this map empty.  This Cabal-private entrance is used by
 -- the parser-neutral Djex session, which owns that provenance already.
 mkExferenceEnvironmentWithSchemes
@@ -1785,7 +1785,7 @@ typeComplexity h = complexity
   complexity (TypeApp function argument) = sumScores
     [heuristics_goalApp h, complexity function, complexity argument]
   -- Reproduce the former left-associated tuple-constructor application one
-  -- node at a time. 'Penalty' addition saturates and Double addition is not
+  -- node at a time. t'Penalty' addition saturates and Double addition is not
   -- associative, so multiplying/grouping equal weights can alter queue order.
   complexity (TypeTuple _ elements) = L.foldl' applyElement
     (heuristics_goalCons h) elements

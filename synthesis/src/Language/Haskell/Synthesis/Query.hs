@@ -129,7 +129,7 @@ maximumProviderInstantiationCandidates = 32
 -- | One externally established complete leading-binder assignment for an
 -- exact named provider.
 --
--- Unlike 'ProviderInstantiationCandidate', whose type contributes to a
+-- Unlike t'ProviderInstantiationCandidate', whose type contributes to a
 -- provider-local pool, this value retains the caller's argument order and
 -- correlation. A richer frontend can therefore preserve the complete choice
 -- established by one source-language instance head without asking a backend
@@ -149,7 +149,7 @@ instance NFData variable =>
 -- | One externally established complete assignment whose exact leading-binder
 -- ground kinds are also known to the caller.
 --
--- The unkinded 'ProviderInstantiationAssignment' remains the compatibility
+-- The unkinded t'ProviderInstantiationAssignment' remains the compatibility
 -- boundary: adapters infer every constrained position from the retained body
 -- and default a vacuous position to @Type@. This richer form lets a frontend
 -- preserve source kind facts for those otherwise unconstrained positions.

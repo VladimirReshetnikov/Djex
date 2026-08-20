@@ -258,7 +258,7 @@ data LengthSMTLibLimitField = LengthSMTLibNumeralBits
 
 instance NFData LengthSMTLibLimitField
 
--- | Failure to seal 'LengthSMTLibLimitSource': the named field carried the
+-- | Failure to seal t'LengthSMTLibLimitSource': the named field carried the
 -- retained negative value.
 data LengthSMTLibLimitError = NegativeLengthSMTLibLimit
   !LengthSMTLibLimitField !Int

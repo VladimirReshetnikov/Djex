@@ -2,10 +2,10 @@
 -- authoritative lowering from Djex's neutral environment into proof-search
 -- indexes.
 --
--- The raw 'Environment' is Djinn's historical table of type definitions,
+-- The raw t'Environment' is Djinn's historical table of type definitions,
 -- axioms, and classes; 'validateEnvironment' checks it as a whole, and the
 -- @prepare*@ operations turn it (or a shared synthesis environment) into a
--- sealed 'PreparedEnvironment' whose formula translators, premises, and
+-- sealed t'PreparedEnvironment' whose formula translators, premises, and
 -- class lookups "Djinn.Core" searches against.
 module Djinn.Internal.Environment (
     TypeDefinition, Axiom, ClassDefinition, Environment(..),

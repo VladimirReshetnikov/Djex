@@ -6,9 +6,9 @@
 -- | The core type vocabulary of the Exference engine.  'HsType' is the shared
 -- Djex type tree over 'SynthesisVariable's identified by 'TVarId'; the
 -- pattern synonyms retain the historical constructor names without a second
--- representation.  The module also owns substitutions, 'HsConstraint's, the
--- validated 'StaticClassEnv' with its instance completion, the per-query
--- 'QueryClassEnv', and the compatibility renderers for types and constraints.
+-- representation.  The module also owns substitutions, t'HsConstraint's, the
+-- validated t'StaticClassEnv' with its instance completion, the per-query
+-- t'QueryClassEnv', and the compatibility renderers for types and constraints.
 module Language.Haskell.Exference.Core.Types
   ( TVarId
   , module Language.Haskell.Exference.Core.Name
@@ -287,7 +287,7 @@ data HsTypeOffset = HsTypeOffset !HsType {-# UNPACK #-} !Int
 -- which also binds it to the exact canonical goal whose IDs it describes.
 type TypeVarIndex = M.Map String Int
 
--- | A type class declaration as stored in a 'StaticClassEnv': its name, its
+-- | A type class declaration as stored in a t'StaticClassEnv': its name, its
 -- parameter variables, and the superclass constraints over those parameters.
 -- 'mkStaticClassEnv' checks that the parameters are non-negative and
 -- distinct and that superclass constraints mention only declared parameters.
@@ -328,7 +328,7 @@ pattern HsConstraint className arguments =
 {-# COMPLETE HsConstraint #-}
 
 -- | The class name of a constraint.
--- 'QualifiedName' guarantees general lexical validity; the
+-- t'QualifiedName' guarantees general lexical validity; the
 -- checked type and environment boundaries additionally enforce that the name
 -- occupies the class namespace.
 constraint_tclass :: HsConstraint -> QualifiedName
@@ -808,7 +808,7 @@ validateClassName name = case SharedConstraint.validateConstraintClassName
   Left _ -> Left $ InvalidClassName name
   Right () -> Right ()
 
--- | A 'StaticClassEnv' extended with the constraints a query may assume
+-- | A t'StaticClassEnv' extended with the constraints a query may assume
 -- (for example from the goal's context), together with their superclass
 -- closure.  Build it with 'mkQueryClassEnv' and extend it with
 -- 'addQueryClassEnv'.

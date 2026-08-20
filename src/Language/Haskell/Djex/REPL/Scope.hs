@@ -173,7 +173,7 @@ scopeCurrentModule :: ReplScope -> Maybe ModuleName
 scopeCurrentModule = replScopeCurrentModule
 
 -- | Project the prompt's exact type namespace once for every scoped parser.
--- Keeping this beside 'ReplScope' prevents synthesis queries and @:type@
+-- Keeping this beside t'ReplScope' prevents synthesis queries and @:type@
 -- annotations from drifting to subtly different import/qualification rules.
 scopeExferenceQueryScope :: ReplScope -> ExferenceQueryScope
 scopeExferenceQueryScope context = ExferenceQueryScope

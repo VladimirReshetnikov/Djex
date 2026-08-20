@@ -113,7 +113,7 @@ instance Show LengthSMTLibResponseLimits where
 instance NFData LengthSMTLibResponseLimits where
   rnf (LengthSMTLibResponseLimits parserLimits) = rnf parserLimits
 
--- | Names the signed field of 'LengthSMTLibResponseLimitSource' that
+-- | Names the signed field of t'LengthSMTLibResponseLimitSource' that
 -- 'mkLengthSMTLibResponseLimits' rejected.  Only the nesting depth and the
 -- integer bit limit are signed and can fail validation.
 data LengthSMTLibResponseLimitField

@@ -25,7 +25,7 @@
 --
 -- Solver status remains an observation.  In particular, @unsat@ is relative to
 -- the checked encoding and every status is restricted to
--- 'HeuristicRankingOnly'.  Only optional 'BehavioralEvidence' has survived
+-- 'HeuristicRankingOnly'.  Only optional t'BehavioralEvidence' has survived
 -- independent domain replay against the exact query problem.  The matching
 -- public replay gate checks complete query identity before inspecting it.
 --
@@ -197,7 +197,7 @@ mkLengthSMTLibLiveUsableWorkBudget
 -- | Retained v1 generative, opaque shared absolute deadline.  Its constructor
 -- and clock value cannot cross the public boundary, but the rank-N phantom
 -- alone does not stop a returned action closure or forked thread from retaining
--- and using the token.  Prefer 'LengthSMTLibLiveScopedUsableWorkDeadline' when
+-- and using the token.  Prefer t'LengthSMTLibLiveScopedUsableWorkDeadline' when
 -- runtime non-escape is required.
 data LengthSMTLibLiveUsableWorkDeadline budget =
   LengthSMTLibLiveUsableWorkDeadline

@@ -182,7 +182,7 @@ closedVisibleTypeVariableSpelling variable =
 -- as @\@_@. A specified argument retains a canonical, structurally validated,
 -- lexically closed type. Bound variables are alpha-normalized independently
 -- of their source spellings, so quantified arguments do not depend on a type
--- variable scope carried by the enclosing 'FunctionClause'.
+-- variable scope carried by the enclosing t'FunctionClause'.
 data VisibleTypeArgument
   = InferredVisibleTypeArgument
   | SpecifiedVisibleTypeArgument

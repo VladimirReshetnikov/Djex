@@ -5,9 +5,9 @@
 -- | The complete Exference source-environment loader.  It parses Haskell
 -- modules, rating files, and visibility manifests (from paths, directories,
 -- or in-memory snapshots), runs the binding, synonym, and class extractors,
--- applies ratings, and seals everything as a 'CheckedSourceEnvironment'
+-- applies ratings, and seals everything as a t'CheckedSourceEnvironment'
 -- backed by one prepared shared inventory; every fatal phase is an
--- 'EnvironmentLoadError' and non-fatal messages travel in the 'LoadReport'.
+-- 'EnvironmentLoadError' and non-fatal messages travel in the t'LoadReport'.
 module Language.Haskell.Exference.EnvironmentParser
   ( SourceBinding (..)
   , sourceBindingFunction
@@ -774,7 +774,7 @@ abstractTypeVisibilityInventory manifest abstractNames inventory =
       $ "type visibility kinds are inconsistent with the source inventory: "
           ++ show failure) NonEmpty.:| []
 
--- | Validate a raw 'SourceEnvironment' into a 'CheckedSourceEnvironment':
+-- | Validate a raw t'SourceEnvironment' into a t'CheckedSourceEnvironment':
 -- seal and kind-check its declarations as a shared inventory, prepare
 -- synonym expansion, and reconcile the lowered backend with the source
 -- order and ratings of the bindings. The 'sourceTypeNames' cache is
@@ -1718,7 +1718,7 @@ methodBindingExtraction (SourcedExtraction slot result) = case result of
 -- qualified name (spelled as for 'parseQualifiedName') and a finite
 -- 'Double' penalty, returned in file order without duplicate resolution.
 -- The first malformed pair, non-numeric or non-finite rating, or trailing
--- unpaired name is reported as an error 'Diagnostic'.
+-- unpaired name is reported as an error t'Diagnostic'.
 parseRatings :: String -> Either Diagnostic [(QualifiedName, Penalty)]
 parseRatings = go . words
   where
@@ -1814,7 +1814,7 @@ environmentFromModuleM modulePath = environmentFromFilesM [modulePath] []
 -- | Load and seal one source module together with one rating file. This is
 -- 'environmentFromFiles' applied to a single module path and a single
 -- rating path; unreadable or malformed ratings only produce warnings in the
--- 'LoadReport'.
+-- t'LoadReport'.
 environmentFromModuleAndRatings
   :: FilePath
   -> FilePath

@@ -1,9 +1,9 @@
--- | Stateful primitives for extending a 'SearchNode' inside one search
+-- | Stateful primitives for extending a t'SearchNode' inside one search
 -- branch: allocating holes, tracked variables, and fresh flexible
 -- namespaces, opening child scopes, recording variable uses, and applying
 -- substitutions.  Each runs in @StateT SearchNode SearchBranches@ and turns
 -- identifier or scope-ID exhaustion into a truncated branch through the
--- supplied 'SearchAllocators' rather than an error.
+-- supplied t'SearchAllocators' rather than an error.
 module Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
   ( builderAddScope
   , builderApplySubst

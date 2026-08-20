@@ -1,7 +1,7 @@
 {-# LANGUAGE MonadComprehensions #-}
 
 -- | Type synonym declarations and synonym-aware type conversion for the
--- Exference source frontend.  'HsTypeDecl' and the 'TypeDeclMap' index come
+-- Exference source frontend.  t'HsTypeDecl' and the 'TypeDeclMap' index come
 -- from parsed modules via 'getTypeDecls'; 'applyTypeDecls' expands
 -- saturated synonym applications, and the @convertType*@ and @parseType*@
 -- entry points wrap "Language.Haskell.Exference.TypeFromHaskellSrc" with
@@ -313,7 +313,7 @@ convertTypeInternalWithResolver resolver defModuleName declMap t = do
 
 -- | Parse a type from source text with the given HSE parse mode and convert
 -- it with 'convertType'. Parse and conversion failures are reported as
--- located 'Diagnostic's, as described for 'parseHaskellSrcType'.
+-- located t'Diagnostic's, as described for 'parseHaskellSrcType'.
 parseType
   :: (Monad m)
   => Map QualifiedName HsTypeClass

@@ -418,7 +418,7 @@ instance NFData LengthCounterexampleBasis
 -- problem's fingerprinted semantic encoding.  Its explicit basis records any
 -- assumed provider laws; it is not evidence about an unverified provider
 -- implementation or source-language realization.  Its enclosing
--- 'BehavioralEvidence' can reveal this value only after replay against the
+-- t'BehavioralEvidence' can reveal this value only after replay against the
 -- same complete problem identity succeeds.
 data ValidatedLengthCounterexample = ValidatedLengthCounterexampleReceipt
   ![Natural]
@@ -511,7 +511,7 @@ data LengthInputBoxLimitField = LengthInputBoxMaximumInputs
 
 instance NFData LengthInputBoxLimitField
 
--- | Failure to seal 'LengthInputBoxLimitSource': the named field carried the
+-- | Failure to seal t'LengthInputBoxLimitSource': the named field carried the
 -- retained negative value.
 data LengthInputBoxLimitError = NegativeLengthInputBoxLimit
   !LengthInputBoxLimitField !Int
@@ -713,7 +713,7 @@ instance NFData LengthInputBoxValidationError
 --
 -- This sum carries authority only through its payloads.  Its public
 -- constructors are classification conveniences: callers still cannot forge a
--- 'BehavioralEvidence', 'ValidatedLengthCounterexample', or
+-- t'BehavioralEvidence', 'ValidatedLengthCounterexample', or
 -- 'ValidatedLengthInputBox'.
 data LengthInputBoxValidation counterexample validated
   = LengthInputBoxCounterexample counterexample
@@ -1723,7 +1723,7 @@ validateLengthSpinePairProblemCounterexample =
 -- | Deterministically seek a strictly smaller scalar counterexample inside
 -- the anchor's componentwise dominated box.
 --
--- Admission reuses 'LengthInputBoxLimits'.  Target width is considered before
+-- Admission reuses t'LengthInputBoxLimits'.  Target width is considered before
 -- the anchor arity, values are checked left-to-right under the current replay
 -- limits, and the complete Cartesian product is admitted before the anchor is
 -- revalidated.  Width or product misses conservatively return @Right Nothing@.

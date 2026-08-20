@@ -619,7 +619,7 @@ lengthSMTLibSessionWorkspaceSchemaTag =
 
 -- | Identifies which session limit a 'LengthSMTLibSessionConfigError' refers
 -- to.  Constructor order matches the field order of
--- 'LengthSMTLibSessionLimitSource' and the order in which
+-- t'LengthSMTLibSessionLimitSource' and the order in which
 -- 'mkLengthSMTLibSessionLimits' validates the fields.
 data LengthSMTLibSessionLimitField
   = LengthSMTLibSessionOpenerDeadlineMilliseconds
@@ -831,7 +831,7 @@ data LengthSMTLibSessionCleanupStatus = LengthSMTLibSessionCleanupStatus
 -- workspace allocation, capability planning and probing, process launch,
 -- barrier derivation, ready-point transcript accounting, identity fingerprint
 -- sizing, final cleanup, and scoped-deadline admission.  It is paired with
--- the cleanup outcome in 'LengthSMTLibSessionScopeError'.
+-- the cleanup outcome in t'LengthSMTLibSessionScopeError'.
 data LengthSMTLibSessionError
   = LengthSMTLibSessionDeadlineFailure !LengthSMTLibProcessError
   | LengthSMTLibSessionWorkspaceFailure !LengthSMTLibSessionWorkspaceFailure
@@ -1265,7 +1265,7 @@ type LengthSpinePairSMTLibQueryRunObservation = SolverObservation
   ()
 
 -- | One committed spine-pair query run on the shared ready worker, with the
--- same shape as 'LengthSMTLibQueryRun': ordinal, replayed observation,
+-- same shape as t'LengthSMTLibQueryRun': ordinal, replayed observation,
 -- private identity fingerprint, transcript SHA-256, and the cumulative stdout
 -- and stderr boundaries of the run.  Ordinals are drawn from the same lease as
 -- scalar runs; only the @lengthSpinePairSMTLibQueryRun*@ projections are

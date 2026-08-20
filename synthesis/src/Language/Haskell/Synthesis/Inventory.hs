@@ -4,7 +4,7 @@
 -- | One structurally and kind-checked source inventory.
 --
 -- Frontends should retain this value through query elaboration rather than
--- sealing an 'Environment' and then discarding the kind assumptions computed
+-- sealing an t'Environment' and then discarding the kind assumptions computed
 -- from the same declarations. Backend search indexes remain lowerings of the
 -- checked environment.
 module Language.Haskell.Synthesis.Inventory

@@ -922,7 +922,7 @@ checkZ3SMTLibProcessDeadline (Z3SMTLibProcessDeadline deadline) = do
     else Right ()
 
 -- | The monotonic clock reading ('getMonotonicTimeNSec'), in nanoseconds,
--- against which every 'Z3SMTLibProcessDeadline' is measured.
+-- against which every t'Z3SMTLibProcessDeadline' is measured.
 z3SMTLibProcessMonotonicTimeNanoseconds :: IO Word64
 z3SMTLibProcessMonotonicTimeNanoseconds = getMonotonicTimeNSec
 

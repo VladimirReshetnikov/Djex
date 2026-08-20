@@ -10,7 +10,7 @@
 -- explicit "Language.Haskell.Djex.Exference.HaskellSrc" boundary in the same
 -- library.
 --
--- The checked workflow is to seal an 'ExferenceEnvironment' with
+-- The checked workflow is to seal an t'ExferenceEnvironment' with
 -- 'mkExferenceSession', construct an opaque 'ExferenceRequest', and pass both
 -- to 'runExferenceQuery'. The returned batches use Djex's shared query and
 -- search envelopes, while candidates, metrics, and rendering remain

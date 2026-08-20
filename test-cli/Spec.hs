@@ -3816,6 +3816,11 @@ withTemporaryEnvironment files action = bracket create removePathForcibly use
       let file = path </> name
       createDirectoryIfMissing True $ parentDirectory file
       writeFile file contents
+    -- The REPL refuses group- or other-writable startup files (and their
+    -- directories), and the ambient umask decides what the tree above was
+    -- created with.  Tighten the whole fixture on POSIX so the trust check
+    -- observes the intended ownership regardless of the machine's umask.
+    when (os /= "mingw32") $ callProcess "chmod" ["-R", "go-w", path]
     action path
 
 -- One nested source tree exercises each admission spelling without making the

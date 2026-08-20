@@ -152,49 +152,53 @@ assessReplLengthWhereCandidate
   -> IO ReplLengthWhereCandidateAssessment
 assessReplLengthWhereCandidate resolution liveSession candidate =
   case resolution of
-    ReplLengthWhereScalarResolution session contract ->
-      case sealLengthTypedCandidateProblemInSession
-          defaultLengthProblemLimits session contract candidate of
-        Left failure -> pure $ ReplLengthWhereCandidateUnassessed
-          $ ReplLengthWhereScalarProblemRejected failure
-        Right problem -> case sealLengthSMTLibQuery
-            defaultLengthSMTLibLimits problem of
-          Left failure -> pure $ ReplLengthWhereCandidateUnassessed
-            $ ReplLengthWhereScalarQueryRejected failure
-          Right query -> do
-            observed <- runLengthSMTLibLiveQuery
-              defaultLengthEvaluationLimits liveSession query
-            pure $ case observed of
-              Left failure -> ReplLengthWhereCandidateUnassessed
-                $ ReplLengthWhereScalarLiveQueryRejected failure
-              Right observation -> case
-                  replayLengthSMTLibLiveQueryObservation query observation of
-                Left failure -> ReplLengthWhereCandidateUnassessed
-                  $ ReplLengthWhereScalarObservationRejected failure
-                Right Nothing -> ReplLengthWhereCandidateRetained
-                Right (Just _) -> ReplLengthWhereCandidateRefuted
-    ReplLengthWhereBinaryProductResolution session contract ->
-      case sealLengthSpinePairTypedCandidateProblemInSession
-          defaultLengthProblemLimits session contract candidate of
-        Left failure -> pure $ ReplLengthWhereCandidateUnassessed
-          $ ReplLengthWhereBinaryProductProblemRejected failure
-        Right problem -> case sealLengthSpinePairSMTLibQuery
-            defaultLengthSMTLibLimits problem of
-          Left failure -> pure $ ReplLengthWhereCandidateUnassessed
-            $ ReplLengthWhereBinaryProductQueryRejected failure
-          Right query -> do
-            observed <- runLengthSpinePairSMTLibLiveQuery
-              defaultLengthEvaluationLimits liveSession query
-            pure $ case observed of
-              Left failure -> ReplLengthWhereCandidateUnassessed
-                $ ReplLengthWhereBinaryProductLiveQueryRejected failure
-              Right observation -> case
-                  replayLengthSpinePairSMTLibLiveQueryObservation
-                    query observation of
-                Left failure -> ReplLengthWhereCandidateUnassessed
-                  $ ReplLengthWhereBinaryProductObservationRejected failure
-                Right Nothing -> ReplLengthWhereCandidateRetained
-                Right (Just _) -> ReplLengthWhereCandidateRefuted
+    ReplLengthWhereScalarResolution session contract -> assessWith
+      (first ReplLengthWhereScalarProblemRejected
+        $ sealLengthTypedCandidateProblemInSession
+            defaultLengthProblemLimits session contract candidate)
+      (first ReplLengthWhereScalarQueryRejected
+        . sealLengthSMTLibQuery defaultLengthSMTLibLimits)
+      (fmap (first ReplLengthWhereScalarLiveQueryRejected)
+        . runLengthSMTLibLiveQuery defaultLengthEvaluationLimits liveSession)
+      (\query -> first ReplLengthWhereScalarObservationRejected
+        . replayLengthSMTLibLiveQueryObservation query)
+    ReplLengthWhereBinaryProductResolution session contract -> assessWith
+      (first ReplLengthWhereBinaryProductProblemRejected
+        $ sealLengthSpinePairTypedCandidateProblemInSession
+            defaultLengthProblemLimits session contract candidate)
+      (first ReplLengthWhereBinaryProductQueryRejected
+        . sealLengthSpinePairSMTLibQuery defaultLengthSMTLibLimits)
+      (fmap (first ReplLengthWhereBinaryProductLiveQueryRejected)
+        . runLengthSpinePairSMTLibLiveQuery
+            defaultLengthEvaluationLimits liveSession)
+      (\query -> first ReplLengthWhereBinaryProductObservationRejected
+        . replayLengthSpinePairSMTLibLiveQueryObservation query)
+
+-- | The one domain-neutral gate order: sealed problem, sealed query, live
+-- observation, then independent replay.  The stages arrive already wrapped
+-- into the closed failure vocabulary, so this pipeline is the sole authority
+-- for the retention rule: only a freshly replayed counterexample refutes,
+-- and every failure keeps the candidate unassessed.
+assessWith
+  :: Either ReplLengthWhereCandidateAssessmentFailure problem
+  -> (problem
+      -> Either ReplLengthWhereCandidateAssessmentFailure query)
+  -> (query
+      -> IO (Either ReplLengthWhereCandidateAssessmentFailure observation))
+  -> (query
+      -> observation
+      -> Either ReplLengthWhereCandidateAssessmentFailure
+           (Maybe counterexample))
+  -> IO ReplLengthWhereCandidateAssessment
+assessWith sealedProblem sealQuery runLive replay =
+  case sealedProblem >>= sealQuery of
+    Left failure -> pure $ ReplLengthWhereCandidateUnassessed failure
+    Right query -> do
+      observed <- runLive query
+      pure $ case observed >>= replay query of
+        Left failure -> ReplLengthWhereCandidateUnassessed failure
+        Right Nothing -> ReplLengthWhereCandidateRetained
+        Right (Just _) -> ReplLengthWhereCandidateRefuted
 
 -- | Stable diagnostic name of the selected built-in profile.
 replLengthWhereResolutionProfile :: ReplLengthWhereResolution -> String

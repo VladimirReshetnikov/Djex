@@ -28,6 +28,7 @@ module Language.Haskell.Synthesis.Semantic.Length.Where
 import qualified Data.ByteString as BS
 import Data.ByteString (ByteString)
 import qualified Data.List as List
+import Data.Maybe (fromMaybe)
 import Data.Word (Word8)
 import Numeric.Natural (Natural)
 
@@ -660,9 +661,8 @@ sumExpression offset left right state = do
   sumTermValue = parsedTermValue
 
 sumTerms :: ParsedExpression -> [ParsedSumTerm]
-sumTerms expression = case parsedExpressionSumTerms expression of
-  Just terms -> terms
-  Nothing -> [ParsedSumTerm expression]
+sumTerms expression = fromMaybe [ParsedSumTerm expression]
+  $ parsedExpressionSumTerms expression
 
 monusExpression
   :: Natural
@@ -812,12 +812,10 @@ extremumExpression isMinimum offset left right =
   termValue term = (parsedTermValue term, parsedTermOffsets term)
 
 extremumTerms :: Bool -> ParsedExpression -> [ParsedSumTerm]
-extremumTerms isMinimum expression =
-  case if isMinimum
+extremumTerms isMinimum expression = fromMaybe [ParsedSumTerm expression]
+  $ if isMinimum
       then parsedExpressionMinimumTerms expression
-      else parsedExpressionMaximumTerms expression of
-    Just terms -> terms
-    Nothing -> [ParsedSumTerm expression]
+      else parsedExpressionMaximumTerms expression
 
 parsedTermValue
   :: ParsedSumTerm

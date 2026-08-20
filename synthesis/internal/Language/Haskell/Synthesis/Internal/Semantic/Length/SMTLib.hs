@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE EmptyDataDecls #-}
 {-# LANGUAGE RoleAnnotations #-}
@@ -83,7 +82,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib
   ) where
 
 import Control.DeepSeq (NFData (rnf))
-import Control.Monad (foldM)
+import Control.Monad (foldM, unless, when)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import Data.Word (Word8)
@@ -252,17 +251,23 @@ instance NFData LengthSMTLibLimits where
   rnf (LengthSMTLibLimits commands fingerprint numerals) =
     rnf commands `seq` rnf fingerprint `seq` rnf numerals
 
+-- | Identity of the one signed query bound that sealing can reject.  The
+-- two byte caps are 'Natural' and therefore have no field here.
 data LengthSMTLibLimitField = LengthSMTLibNumeralBits
   deriving (Bounded, Enum, Eq, Ord, Show, Generic)
 
 instance NFData LengthSMTLibLimitField
 
+-- | Failure to seal 'LengthSMTLibLimitSource': the named field carried the
+-- retained negative value.
 data LengthSMTLibLimitError = NegativeLengthSMTLibLimit
   !LengthSMTLibLimitField !Int
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData LengthSMTLibLimitError
 
+-- | Seal raw query limits.  Only a negative numeral bit limit is rejected;
+-- both byte caps are retained as given, zero included.
 mkLengthSMTLibLimits
   :: LengthSMTLibLimitSource
   -> Either LengthSMTLibLimitError LengthSMTLibLimits
@@ -276,6 +281,8 @@ mkLengthSMTLibLimits source
  where
   numeralBits = lengthSMTLibLimitSourceNumeralBits source
 
+-- | The documented default query bounds: 65,536 command bytes, 262,144
+-- fingerprint bytes, and 4,096 numeral bits.
 defaultLengthSMTLibLimitSource :: LengthSMTLibLimitSource
 defaultLengthSMTLibLimitSource = LengthSMTLibLimitSource
   { lengthSMTLibLimitSourceCommandBytes = 65536
@@ -283,15 +290,22 @@ defaultLengthSMTLibLimitSource = LengthSMTLibLimitSource
   , lengthSMTLibLimitSourceNumeralBits = 4096
   }
 
+-- | Validated form of 'defaultLengthSMTLibLimitSource'.
 defaultLengthSMTLibLimits :: LengthSMTLibLimits
 defaultLengthSMTLibLimits = LengthSMTLibLimits 65536 262144 4096
 
+-- | Maximum rendered byte length admitted for each command artifact
+-- separately: the check program and the optional input value request.
 lengthSMTLibCommandByteLimit :: LengthSMTLibLimits -> Natural
 lengthSMTLibCommandByteLimit (LengthSMTLibLimits value _ _) = value
 
+-- | Maximum number of bytes the complete query fingerprint builder may
+-- consume.
 lengthSMTLibFingerprintByteLimit :: LengthSMTLibLimits -> Natural
 lengthSMTLibFingerprintByteLimit (LengthSMTLibLimits _ value _) = value
 
+-- | Maximum bit width of any natural numeral rendered into the query; a
+-- wider literal, scale, or divisor fails at its 'LengthSMTLibNumeralSite'.
 lengthSMTLibNumeralBitLimit :: LengthSMTLibLimits -> Int
 lengthSMTLibNumeralBitLimit (LengthSMTLibLimits _ _ value) = value
 
@@ -425,42 +439,31 @@ sealLengthSMTLibQuery
   -> CheckedLengthProblem identity local
   -> Either LengthSMTLibQueryError (LengthSMTLibQuery identity local)
 sealLengthSMTLibQuery limits problem = do
-  let inputCount = checkedLengthProblemInputCount problem
-      symbols = inputSymbolsForCount inputCount
-      valueRequest = inputValueRequestForSymbols symbols
-  (condition, translation) <- translateFormula limits inputCount
-    emptySMTTranslationState
-    $ checkedLengthProblemCounterexampleCondition problem
-  let witnesses = orderedEuclideanWitnesses translation
-      witnessSymbols = concatMap euclideanWitnessSymbols witnesses
-  let checkCommands = fixedPreamble
-        ++ map QFLIADeclareInteger symbols
-        ++ map QFLIADeclareInteger witnessSymbols
-        ++ map (QFLIAAssert . nonnegative . QFLIAIntegerSymbol) symbols
-        ++ concatMap euclideanWitnessCommands witnesses
-        ++ [QFLIAAssert condition, QFLIACheckSatisfiable]
-      plan = LengthSMTLibPlan
-        symbols condition checkCommands valueRequest witnesses
-  checkBytes <- retainCommand limits LengthSMTLibCheckCommand
-    $ renderQFLIACommands checkCommands
-  valueRequestBytes <- case valueRequest of
-    Nothing -> Right Nothing
-    Just command -> Just <$> retainCommand limits
-      LengthSMTLibInputValueRequest (renderQFLIACommand command)
-  fingerprint <- buildQueryFingerprint limits problem plan
+  (plan, checkBytes, valueRequestBytes) <- sealQueryPlan limits
+    (checkedLengthProblemInputCount problem)
+    (checkedLengthProblemCounterexampleCondition problem)
+  fingerprint <- buildQueryFingerprint scalarQueryFingerprintVocabulary
+    limits (checkedLengthProblemBehavioralProblem problem) plan
     checkBytes valueRequestBytes
   pure $ LengthSMTLibQuery problem checkBytes fingerprint
 
+-- | Canonical solver symbols for the modeled inputs, in source position
+-- order, recomputed from the sealed problem arity.
 lengthSMTLibQueryInputSymbols
   :: LengthSMTLibQuery identity local
   -> [[Word8]]
 lengthSMTLibQueryInputSymbols = fst . lengthSMTLibQueryInputArtifacts
 
+-- | Rendered bytes of the bounded check program: preamble, declarations,
+-- nonnegativity and witness assertions, the bad-state assertion, and the
+-- satisfiability check.
 lengthSMTLibQueryCheckBytes
   :: LengthSMTLibQuery identity local
   -> [Word8]
 lengthSMTLibQueryCheckBytes (LengthSMTLibQuery _ bytes _) = bytes
 
+-- | Rendered value request for every input symbol, or 'Nothing' for a
+-- nullary problem, which has nothing to request.
 lengthSMTLibQueryInputValueRequestBytes
   :: LengthSMTLibQuery identity local
   -> Maybe [Word8]
@@ -475,12 +478,15 @@ lengthSMTLibQueryInputArtifacts (LengthSMTLibQuery problem _ _) =
         $ checkedLengthProblemInputCount problem
   in (symbols, fmap renderQFLIACommand $ inputValueRequestForSymbols symbols)
 
+-- | Complete structural identity of translator schema, typed plan, exact
+-- problem, and rendered request bytes.
 lengthSMTLibQueryFingerprint
   :: LengthSMTLibQuery identity local
   -> Fingerprint LengthSMTLibQueryFingerprintSubject
 lengthSMTLibQueryFingerprint (LengthSMTLibQuery _ _ fingerprint) =
   fingerprint
 
+-- | Generic behavioral envelope of the checked problem this query encodes.
 lengthSMTLibQueryBehavioralProblem
   :: LengthSMTLibQuery identity local
   -> BehavioralProblem FiniteListSpineLengthV1
@@ -507,47 +513,33 @@ sealLengthSpinePairSMTLibQuery
   -> Either
       LengthSpinePairSMTLibQueryError
       (LengthSpinePairSMTLibQuery identity local)
-sealLengthSpinePairSMTLibQuery limits problem = do
-  let inputCount = checkedLengthSpinePairProblemInputCount problem
-      symbols = inputSymbolsForCount inputCount
-      valueRequest = inputValueRequestForSymbols symbols
-  (condition, translation) <- mapSpinePairQueryFailure
-    $ translateFormula limits inputCount emptySMTTranslationState
-    $ checkedLengthSpinePairProblemCounterexampleCondition problem
-  let witnesses = orderedEuclideanWitnesses translation
-      witnessSymbols = concatMap euclideanWitnessSymbols witnesses
-      checkCommands = fixedPreamble
-        ++ map QFLIADeclareInteger symbols
-        ++ map QFLIADeclareInteger witnessSymbols
-        ++ map (QFLIAAssert . nonnegative . QFLIAIntegerSymbol) symbols
-        ++ concatMap euclideanWitnessCommands witnesses
-        ++ [QFLIAAssert condition, QFLIACheckSatisfiable]
-      plan = LengthSMTLibPlan
-        symbols condition checkCommands valueRequest witnesses
-  checkBytes <- mapSpinePairQueryFailure
-    $ retainCommand limits LengthSMTLibCheckCommand
-    $ renderQFLIACommands checkCommands
-  valueRequestBytes <- case valueRequest of
-    Nothing -> Right Nothing
-    Just command -> Just <$> mapSpinePairQueryFailure
-      (retainCommand limits LengthSMTLibInputValueRequest
-        $ renderQFLIACommand command)
-  fingerprint <- buildSpinePairQueryFingerprint limits problem plan
+sealLengthSpinePairSMTLibQuery limits problem = mapSpinePairQueryFailure $ do
+  (plan, checkBytes, valueRequestBytes) <- sealQueryPlan limits
+    (checkedLengthSpinePairProblemInputCount problem)
+    (checkedLengthSpinePairProblemCounterexampleCondition problem)
+  fingerprint <- buildQueryFingerprint spinePairQueryFingerprintVocabulary
+    limits (checkedLengthSpinePairProblemBehavioralProblem problem) plan
     checkBytes valueRequestBytes
   pure $ LengthSpinePairSMTLibQuery problem checkBytes fingerprint
 
+-- | Canonical solver symbols for the compact modeled inputs, in source
+-- position order, recomputed from the sealed product problem arity.
 lengthSpinePairSMTLibQueryInputSymbols
   :: LengthSpinePairSMTLibQuery identity local
   -> [[Word8]]
 lengthSpinePairSMTLibQueryInputSymbols =
   fst . lengthSpinePairSMTLibQueryInputArtifacts
 
+-- | Rendered bytes of the bounded input-only check program; neither modeled
+-- result component appears as a solver binding.
 lengthSpinePairSMTLibQueryCheckBytes
   :: LengthSpinePairSMTLibQuery identity local
   -> [Word8]
 lengthSpinePairSMTLibQueryCheckBytes
     (LengthSpinePairSMTLibQuery _ bytes _) = bytes
 
+-- | Rendered value request for every input symbol, or 'Nothing' for a
+-- nullary problem, which has nothing to request.
 lengthSpinePairSMTLibQueryInputValueRequestBytes
   :: LengthSpinePairSMTLibQuery identity local
   -> Maybe [Word8]
@@ -563,12 +555,17 @@ lengthSpinePairSMTLibQueryInputArtifacts
         $ checkedLengthSpinePairProblemInputCount problem
   in (symbols, fmap renderQFLIACommand $ inputValueRequestForSymbols symbols)
 
+-- | Complete structural identity of the product translator schema, typed
+-- plan, exact product problem, and rendered request bytes.  It never
+-- coincides with a scalar query fingerprint even for identical bytes.
 lengthSpinePairSMTLibQueryFingerprint
   :: LengthSpinePairSMTLibQuery identity local
   -> Fingerprint LengthSpinePairSMTLibQueryFingerprintSubject
 lengthSpinePairSMTLibQueryFingerprint
     (LengthSpinePairSMTLibQuery _ _ fingerprint) = fingerprint
 
+-- | Generic behavioral envelope of the checked product problem this query
+-- encodes.
 lengthSpinePairSMTLibQueryBehavioralProblem
   :: LengthSpinePairSMTLibQuery identity local
   -> BehavioralProblem FiniteBinaryProductSpineLengthsV1
@@ -576,6 +573,9 @@ lengthSpinePairSMTLibQueryBehavioralProblem
     (LengthSpinePairSMTLibQuery problem _ _) =
   checkedLengthSpinePairProblemBehavioralProblem problem
 
+-- | Project the candidate-independent replay-input scope retained by this
+-- product query's exact checked problem.  Query translation and execution
+-- identity do not enter the scope.
 lengthSpinePairSMTLibQueryCounterexampleBankScope
   :: LengthSpinePairSMTLibQuery identity local
   -> LengthSpinePairCounterexampleBankScope identity
@@ -623,25 +623,9 @@ validateLengthSMTLibCounterexample
         (BehavioralEvidence
           FiniteListSpineLengthV1
           ValidatedLengthCounterexample))
-validateLengthSMTLibCounterexample evaluationLimits query rawBindings = do
-  let symbols = lengthSMTLibQueryInputSymbols query
-      expected = length symbols
-      observed = observedListLength expected rawBindings
-  if observed == expected
-    then pure ()
-    else Left $ LengthSMTLibBindingArityMismatch expected observed
-  let maximumSymbolBytes = fromIntegral $ maximum
-        $ 0 : map length symbols
-      expectedSymbols = Map.fromList $ zip symbols [0 :: Int ..]
-  decoded <- foldM
-    (decodeBinding maximumSymbolBytes expectedSymbols)
-    Map.empty
-    $ zip [0 :: Int ..] rawBindings
-  ordered <- mapM (lookupDecoded decoded) symbols
-  either (Left . LengthSMTLibCounterexampleReplayRejected) Right
-    $ validateLengthProblemCounterexample evaluationLimits
-        (queryProblem query)
-        $ LengthProblemAssignment ordered
+validateLengthSMTLibCounterexample =
+  validateQueryModelWith scalarQuerySurface scalarModelErrors
+    LengthSMTLibCounterexampleReplayRejected
 
 -- | Why direct input replay against a sealed query was rejected.  Evaluation
 -- failures describe only bounded concrete replay; association failures expose
@@ -664,19 +648,10 @@ replayLengthSMTLibCounterexampleInputs
   -> [Natural]
   -> Either LengthSMTLibInputReplayError
       (Maybe ValidatedLengthCounterexample)
-replayLengthSMTLibCounterexampleInputs evaluationLimits query inputs = do
-  evidence <- either
-    (Left . LengthSMTLibInputReplayEvaluationRejected)
-    Right
-    $ validateLengthProblemCounterexample evaluationLimits
-        (queryProblem query)
-        $ LengthProblemAssignment inputs
-  traverse replay evidence
- where
-  replay = either
-    (Left . LengthSMTLibInputReplayAssociationRejected)
-    Right
-    . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
+replayLengthSMTLibCounterexampleInputs =
+  replayQueryCounterexampleInputsWith scalarQuerySurface
+    LengthSMTLibInputReplayEvaluationRejected
+    LengthSMTLibInputReplayAssociationRejected
 
 -- | Why one already validated scalar counterexample could not be freshly
 -- reproduced and recorded through the exact query/bank association boundary.
@@ -717,37 +692,14 @@ recordLengthSMTLibQueryCounterexampleInBank
      , Either LengthSMTLibCounterexampleBankRecordError
          ValidatedLengthCounterexample
      )
-recordLengthSMTLibQueryCounterexampleInBank evaluationLimits query origin
-    counterexample bank
-  | not $ lengthCounterexampleBankMatchesScope
-      (lengthSMTLibQueryCounterexampleBankScope query) bank =
-      (bank, Left LengthSMTLibCounterexampleBankRecordScopeMismatch)
-  | otherwise = case recordLengthCounterexampleBankReplayAttempt bank of
-      Left failure ->
-        ( bank
-        , Left $ LengthSMTLibCounterexampleBankRecordAttemptRejected failure
-        )
-      Right charged -> case replayLengthSMTLibCounterexampleInputs
-          evaluationLimits query
-          (validatedLengthCounterexampleInputs counterexample) of
-        Left failure ->
-          ( charged
-          , Left $ LengthSMTLibCounterexampleBankRecordInputReplayRejected
-              failure
-          )
-        Right Nothing ->
-          ( charged
-          , Left
-              LengthSMTLibCounterexampleBankRecordCounterexampleNotReproduced
-          )
-        Right (Just fresh) -> case insertLengthCounterexampleBankSample
-            origin (validatedLengthCounterexampleInputs fresh) charged of
-          Left failure ->
-            ( charged
-            , Left $ LengthSMTLibCounterexampleBankRecordInsertionRejected
-                failure
-            )
-          Right recorded -> (recorded, Right fresh)
+recordLengthSMTLibQueryCounterexampleInBank =
+  recordQueryCounterexampleInBankWith scalarQuerySurface
+    replayLengthSMTLibCounterexampleInputs
+    LengthSMTLibCounterexampleBankRecordScopeMismatch
+    LengthSMTLibCounterexampleBankRecordAttemptRejected
+    LengthSMTLibCounterexampleBankRecordInputReplayRejected
+    LengthSMTLibCounterexampleBankRecordCounterexampleNotReproduced
+    LengthSMTLibCounterexampleBankRecordInsertionRejected
 
 -- | Why one detached opaque scalar sample could not be replayed through the
 -- exact current bank and query association chain.
@@ -782,27 +734,13 @@ replayLengthSMTLibCounterexampleBankSample
      , Either LengthSMTLibCounterexampleBankSampleReplayError
          (Maybe ValidatedLengthCounterexample)
      )
-replayLengthSMTLibCounterexampleBankSample evaluationLimits query sample bank
-  | not $ lengthCounterexampleBankMatchesScope
-      (lengthSMTLibQueryCounterexampleBankScope query) bank =
-      (bank, Left LengthSMTLibCounterexampleBankSampleReplayScopeMismatch)
-  | sample `notElem` lengthCounterexampleBankSamples bank =
-      (bank, Left LengthSMTLibCounterexampleBankSampleReplaySampleNotRetained)
-  | otherwise = case recordLengthCounterexampleBankReplayAttempt bank of
-      Left failure ->
-        ( bank
-        , Left $ LengthSMTLibCounterexampleBankSampleReplayAttemptRejected
-            failure
-        )
-      Right charged -> case replayLengthSMTLibCounterexampleInputs
-          evaluationLimits query
-          (lengthCounterexampleBankSampleInputs sample) of
-        Left failure ->
-          ( charged
-          , Left $ LengthSMTLibCounterexampleBankSampleReplayInputRejected
-              failure
-          )
-        Right result -> (charged, Right result)
+replayLengthSMTLibCounterexampleBankSample =
+  replayQueryCounterexampleBankSampleWith scalarQuerySurface
+    replayLengthSMTLibCounterexampleInputs
+    LengthSMTLibCounterexampleBankSampleReplayScopeMismatch
+    LengthSMTLibCounterexampleBankSampleReplaySampleNotRetained
+    LengthSMTLibCounterexampleBankSampleReplayAttemptRejected
+    LengthSMTLibCounterexampleBankSampleReplayInputRejected
 
 -- | Probe the canonical all-zero assignment for the compact modeled inputs
 -- privately retained by this exact query.  The caller supplies neither arity,
@@ -814,9 +752,10 @@ probeLengthSMTLibCounterexampleAtOrigin
   -> LengthSMTLibQuery identity local
   -> Either LengthSMTLibInputReplayError
       (Maybe ValidatedLengthCounterexample)
-probeLengthSMTLibCounterexampleAtOrigin evaluationLimits query =
-  replayLengthSMTLibCounterexampleInputs evaluationLimits query
-    $ replicate (checkedLengthProblemInputCount $ queryProblem query) 0
+probeLengthSMTLibCounterexampleAtOrigin =
+  probeQueryCounterexampleAtOriginWith scalarQuerySurface
+    LengthSMTLibInputReplayEvaluationRejected
+    LengthSMTLibInputReplayAssociationRejected
 
 -- | Fail-closed query-owned scalar simplification error.  The nested domain
 -- error preserves bounded replay detail; association failure reveals only the
@@ -845,20 +784,14 @@ simplifyLengthSMTLibQueryCounterexample
   -> ValidatedLengthCounterexample
   -> Either LengthSMTLibCounterexampleSimplificationError
       (Maybe ValidatedLengthCounterexampleSimplification)
-simplifyLengthSMTLibQueryCounterexample evaluationLimits inputBoxLimits query
-    counterexample = do
-  evidence <- either
-    (Left . LengthSMTLibCounterexampleSimplificationRejected)
-    Right
-    $ simplifyLengthProblemCounterexample evaluationLimits inputBoxLimits
-        (queryProblem query) counterexample
-  traverse replay evidence
- where
-  replay = either
-    (Left .
-      LengthSMTLibCounterexampleSimplificationAssociationRejected)
-    Right
-    . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
+simplifyLengthSMTLibQueryCounterexample evaluationLimits inputBoxLimits
+    query counterexample =
+  traverseQueryEvidenceWith scalarQuerySurface
+    LengthSMTLibCounterexampleSimplificationRejected
+    LengthSMTLibCounterexampleSimplificationAssociationRejected
+    (\problem -> simplifyLengthProblemCounterexample evaluationLimits
+      inputBoxLimits problem counterexample)
+    query
 
 -- | Why exhaustive finite-box validation through a sealed query failed.
 -- Validation failures come only from the solver-independent Length verifier;
@@ -891,25 +824,13 @@ validateLengthSMTLibQueryInputBox
         ValidatedLengthCounterexample
         ValidatedLengthInputBox)
 validateLengthSMTLibQueryInputBox evaluationLimits inputBoxLimits query
-    maximums = do
-  validation <- either
-    (Left . LengthSMTLibInputBoxValidationRejected)
-    Right
-    $ validateLengthProblemInputBox evaluationLimits inputBoxLimits
-        (queryProblem query) maximums
-  case validation of
-    LengthInputBoxCounterexample evidence ->
-      LengthInputBoxCounterexample <$> replay evidence
-    LengthInputBoxValidated evidence ->
-      LengthInputBoxValidated <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteListSpineLengthV1 receipt
-    -> Either LengthSMTLibInputBoxValidationError receipt
-  replay = either
-    (Left . LengthSMTLibInputBoxValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
+    maximums =
+  validateQueryInputBoxWith scalarQuerySurface
+    LengthSMTLibInputBoxValidationRejected
+    LengthSMTLibInputBoxValidationAssociationRejected
+    (\problem -> validateLengthProblemInputBox evaluationLimits
+      inputBoxLimits problem maximums)
+    query
 
 -- | Why current applicable-domain validation through one exact scalar query
 -- failed. Semantic inapplicability remains a successful result; failures are
@@ -936,28 +857,12 @@ validateLengthSMTLibQueryApplicableDomain
         ValidatedLengthCounterexample
         ValidatedLengthApplicableDomain)
 validateLengthSMTLibQueryApplicableDomain
-    evaluationLimits inputBoxLimits unionLimits query = do
-  validation <- either
-    (Left . LengthSMTLibApplicableDomainValidationRejected)
-    Right
-    $ validateLengthProblemApplicableDomain
-        evaluationLimits inputBoxLimits unionLimits
-        $ queryProblem query
-  case validation of
-    LengthApplicableDomainInapplicable inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
-    LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteListSpineLengthV1 receipt
-    -> Either LengthSMTLibApplicableDomainValidationError receipt
-  replay = either
-    (Left . LengthSMTLibApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence (lengthSMTLibQueryBehavioralProblem query)
+    evaluationLimits inputBoxLimits unionLimits =
+  validateQueryApplicableDomainWith scalarQuerySurface
+    LengthSMTLibApplicableDomainValidationRejected
+    LengthSMTLibApplicableDomainValidationAssociationRejected
+    (validateLengthProblemApplicableDomain
+      evaluationLimits inputBoxLimits unionLimits)
 
 -- | Structural model rejection or independent product replay failure.
 -- Parser-decoded bindings remain the shared, authority-free input type, while
@@ -988,28 +893,9 @@ validateLengthSpinePairSMTLibCounterexample
         (BehavioralEvidence
           FiniteBinaryProductSpineLengthsV1
           ValidatedLengthSpinePairCounterexample))
-validateLengthSpinePairSMTLibCounterexample evaluationLimits query
-    rawBindings = do
-  let symbols = lengthSpinePairSMTLibQueryInputSymbols query
-      expected = length symbols
-      observed = observedListLength expected rawBindings
-  if observed == expected
-    then pure ()
-    else Left $ LengthSpinePairSMTLibBindingArityMismatch expected observed
-  let maximumSymbolBytes = fromIntegral $ maximum
-        $ 0 : map length symbols
-      expectedSymbols = Map.fromList $ zip symbols [0 :: Int ..]
-  decoded <- foldM
-    (decodeSpinePairBinding maximumSymbolBytes expectedSymbols)
-    Map.empty
-    $ zip [0 :: Int ..] rawBindings
-  ordered <- mapM (lookupSpinePairDecoded decoded) symbols
-  either
-    (Left . LengthSpinePairSMTLibCounterexampleReplayRejected)
-    Right
-    $ validateLengthSpinePairProblemCounterexample evaluationLimits
-        (spinePairQueryProblem query)
-        $ LengthProblemAssignment ordered
+validateLengthSpinePairSMTLibCounterexample =
+  validateQueryModelWith spinePairQuerySurface spinePairModelErrors
+    LengthSpinePairSMTLibCounterexampleReplayRejected
 
 -- | Why query-owned direct input replay was rejected for the product domain.
 data LengthSpinePairSMTLibInputReplayError
@@ -1029,21 +915,10 @@ replayLengthSpinePairSMTLibCounterexampleInputs
   -> [Natural]
   -> Either LengthSpinePairSMTLibInputReplayError
       (Maybe ValidatedLengthSpinePairCounterexample)
-replayLengthSpinePairSMTLibCounterexampleInputs evaluationLimits query
-    inputs = do
-  evidence <- either
-    (Left . LengthSpinePairSMTLibInputReplayEvaluationRejected)
-    Right
-    $ validateLengthSpinePairProblemCounterexample evaluationLimits
-        (spinePairQueryProblem query)
-        $ LengthProblemAssignment inputs
-  traverse replay evidence
- where
-  replay = either
-    (Left . LengthSpinePairSMTLibInputReplayAssociationRejected)
-    Right
-    . replayBehavioralEvidence
-        (lengthSpinePairSMTLibQueryBehavioralProblem query)
+replayLengthSpinePairSMTLibCounterexampleInputs =
+  replayQueryCounterexampleInputsWith spinePairQuerySurface
+    LengthSpinePairSMTLibInputReplayEvaluationRejected
+    LengthSpinePairSMTLibInputReplayAssociationRejected
 
 -- | Nominal binary-product counterpart of
 -- 'LengthSMTLibCounterexampleBankRecordError'.
@@ -1074,48 +949,14 @@ recordLengthSpinePairSMTLibQueryCounterexampleInBank
      , Either LengthSpinePairSMTLibCounterexampleBankRecordError
          ValidatedLengthSpinePairCounterexample
      )
-recordLengthSpinePairSMTLibQueryCounterexampleInBank evaluationLimits query
-    origin counterexample bank
-  | not $ lengthSpinePairCounterexampleBankMatchesScope
-      (lengthSpinePairSMTLibQueryCounterexampleBankScope query) bank =
-      ( bank
-      , Left LengthSpinePairSMTLibCounterexampleBankRecordScopeMismatch
-      )
-  | otherwise = case
-      recordLengthSpinePairCounterexampleBankReplayAttempt bank of
-        Left failure ->
-          ( bank
-          , Left
-              $ LengthSpinePairSMTLibCounterexampleBankRecordAttemptRejected
-                  failure
-          )
-        Right charged -> case
-            replayLengthSpinePairSMTLibCounterexampleInputs
-              evaluationLimits query
-              (validatedLengthSpinePairCounterexampleInputs counterexample) of
-          Left failure ->
-            ( charged
-            , Left
-                $ LengthSpinePairSMTLibCounterexampleBankRecordInputReplayRejected
-                    failure
-            )
-          Right Nothing ->
-            ( charged
-            , Left
-                LengthSpinePairSMTLibCounterexampleBankRecordCounterexampleNotReproduced
-            )
-          Right (Just fresh) -> case
-              insertLengthSpinePairCounterexampleBankSample
-                origin
-                (validatedLengthSpinePairCounterexampleInputs fresh)
-                charged of
-            Left failure ->
-              ( charged
-              , Left
-                  $ LengthSpinePairSMTLibCounterexampleBankRecordInsertionRejected
-                      failure
-              )
-            Right recorded -> (recorded, Right fresh)
+recordLengthSpinePairSMTLibQueryCounterexampleInBank =
+  recordQueryCounterexampleInBankWith spinePairQuerySurface
+    replayLengthSpinePairSMTLibCounterexampleInputs
+    LengthSpinePairSMTLibCounterexampleBankRecordScopeMismatch
+    LengthSpinePairSMTLibCounterexampleBankRecordAttemptRejected
+    LengthSpinePairSMTLibCounterexampleBankRecordInputReplayRejected
+    LengthSpinePairSMTLibCounterexampleBankRecordCounterexampleNotReproduced
+    LengthSpinePairSMTLibCounterexampleBankRecordInsertionRejected
 
 -- | Nominal binary-product counterpart of
 -- 'LengthSMTLibCounterexampleBankSampleReplayError'.
@@ -1143,37 +984,13 @@ replayLengthSpinePairSMTLibCounterexampleBankSample
      , Either LengthSpinePairSMTLibCounterexampleBankSampleReplayError
          (Maybe ValidatedLengthSpinePairCounterexample)
      )
-replayLengthSpinePairSMTLibCounterexampleBankSample evaluationLimits query
-    sample bank
-  | not $ lengthSpinePairCounterexampleBankMatchesScope
-      (lengthSpinePairSMTLibQueryCounterexampleBankScope query) bank =
-      ( bank
-      , Left LengthSpinePairSMTLibCounterexampleBankSampleReplayScopeMismatch
-      )
-  | sample `notElem` lengthSpinePairCounterexampleBankSamples bank =
-      ( bank
-      , Left
-          LengthSpinePairSMTLibCounterexampleBankSampleReplaySampleNotRetained
-      )
-  | otherwise = case
-      recordLengthSpinePairCounterexampleBankReplayAttempt bank of
-        Left failure ->
-          ( bank
-          , Left
-              $ LengthSpinePairSMTLibCounterexampleBankSampleReplayAttemptRejected
-                  failure
-          )
-        Right charged -> case
-            replayLengthSpinePairSMTLibCounterexampleInputs
-              evaluationLimits query
-              (lengthSpinePairCounterexampleBankSampleInputs sample) of
-          Left failure ->
-            ( charged
-            , Left
-                $ LengthSpinePairSMTLibCounterexampleBankSampleReplayInputRejected
-                    failure
-            )
-          Right result -> (charged, Right result)
+replayLengthSpinePairSMTLibCounterexampleBankSample =
+  replayQueryCounterexampleBankSampleWith spinePairQuerySurface
+    replayLengthSpinePairSMTLibCounterexampleInputs
+    LengthSpinePairSMTLibCounterexampleBankSampleReplayScopeMismatch
+    LengthSpinePairSMTLibCounterexampleBankSampleReplaySampleNotRetained
+    LengthSpinePairSMTLibCounterexampleBankSampleReplayAttemptRejected
+    LengthSpinePairSMTLibCounterexampleBankSampleReplayInputRejected
 
 -- | Query-owned all-zero probe for the product problem's compact modeled
 -- inputs.  A miss is ordinary @Nothing@ and supplies no positive evidence.
@@ -1182,12 +999,10 @@ probeLengthSpinePairSMTLibCounterexampleAtOrigin
   -> LengthSpinePairSMTLibQuery identity local
   -> Either LengthSpinePairSMTLibInputReplayError
       (Maybe ValidatedLengthSpinePairCounterexample)
-probeLengthSpinePairSMTLibCounterexampleAtOrigin evaluationLimits query =
-  replayLengthSpinePairSMTLibCounterexampleInputs evaluationLimits query
-    $ replicate
-        (checkedLengthSpinePairProblemInputCount
-          $ spinePairQueryProblem query)
-        0
+probeLengthSpinePairSMTLibCounterexampleAtOrigin =
+  probeQueryCounterexampleAtOriginWith spinePairQuerySurface
+    LengthSpinePairSMTLibInputReplayEvaluationRejected
+    LengthSpinePairSMTLibInputReplayAssociationRejected
 
 -- | Nominal product-domain failure for query-owned bounded counterexample
 -- simplification.
@@ -1212,21 +1027,13 @@ simplifyLengthSpinePairSMTLibQueryCounterexample
   -> Either LengthSpinePairSMTLibCounterexampleSimplificationError
       (Maybe ValidatedLengthSpinePairCounterexampleSimplification)
 simplifyLengthSpinePairSMTLibQueryCounterexample evaluationLimits
-    inputBoxLimits query counterexample = do
-  evidence <- either
-    (Left . LengthSpinePairSMTLibCounterexampleSimplificationRejected)
-    Right
-    $ simplifyLengthSpinePairProblemCounterexample
-        evaluationLimits inputBoxLimits
-        (spinePairQueryProblem query) counterexample
-  traverse replay evidence
- where
-  replay = either
-    (Left .
-      LengthSpinePairSMTLibCounterexampleSimplificationAssociationRejected)
-    Right
-    . replayBehavioralEvidence
-        (lengthSpinePairSMTLibQueryBehavioralProblem query)
+    inputBoxLimits query counterexample =
+  traverseQueryEvidenceWith spinePairQuerySurface
+    LengthSpinePairSMTLibCounterexampleSimplificationRejected
+    LengthSpinePairSMTLibCounterexampleSimplificationAssociationRejected
+    (\problem -> simplifyLengthSpinePairProblemCounterexample
+      evaluationLimits inputBoxLimits problem counterexample)
+    query
 
 -- | Why exhaustive finite-box validation through a product query failed.
 data LengthSpinePairSMTLibInputBoxValidationError
@@ -1251,26 +1058,13 @@ validateLengthSpinePairSMTLibQueryInputBox
         ValidatedLengthSpinePairCounterexample
         ValidatedLengthSpinePairInputBox)
 validateLengthSpinePairSMTLibQueryInputBox evaluationLimits inputBoxLimits
-    query maximums = do
-  validation <- either
-    (Left . LengthSpinePairSMTLibInputBoxValidationRejected)
-    Right
-    $ validateLengthSpinePairProblemInputBox evaluationLimits inputBoxLimits
-        (spinePairQueryProblem query) maximums
-  case validation of
-    LengthInputBoxCounterexample evidence ->
-      LengthInputBoxCounterexample <$> replay evidence
-    LengthInputBoxValidated evidence ->
-      LengthInputBoxValidated <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteBinaryProductSpineLengthsV1 receipt
-    -> Either LengthSpinePairSMTLibInputBoxValidationError receipt
-  replay = either
-    (Left . LengthSpinePairSMTLibInputBoxValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence
-        (lengthSpinePairSMTLibQueryBehavioralProblem query)
+    query maximums =
+  validateQueryInputBoxWith spinePairQuerySurface
+    LengthSpinePairSMTLibInputBoxValidationRejected
+    LengthSpinePairSMTLibInputBoxValidationAssociationRejected
+    (\problem -> validateLengthSpinePairProblemInputBox evaluationLimits
+      inputBoxLimits problem maximums)
+    query
 
 -- | Nominal product-domain failure for current query-owned applicable-domain
 -- validation.
@@ -1296,30 +1090,292 @@ validateLengthSpinePairSMTLibQueryApplicableDomain
         ValidatedLengthSpinePairCounterexample
         ValidatedLengthSpinePairApplicableDomain)
 validateLengthSpinePairSMTLibQueryApplicableDomain
-    evaluationLimits inputBoxLimits unionLimits query = do
-  validation <- either
-    (Left . LengthSpinePairSMTLibApplicableDomainValidationRejected)
-    Right
-    $ validateLengthSpinePairProblemApplicableDomain
-        evaluationLimits inputBoxLimits unionLimits
-        $ spinePairQueryProblem query
+    evaluationLimits inputBoxLimits unionLimits =
+  validateQueryApplicableDomainWith spinePairQuerySurface
+    LengthSpinePairSMTLibApplicableDomainValidationRejected
+    LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected
+    (validateLengthSpinePairProblemApplicableDomain
+      evaluationLimits inputBoxLimits unionLimits)
+
+-- Shared query-owned operation core ------------------------------------------
+
+-- | Everything the query-owned operations need from one domain: the sealed
+-- query's problem, behavioral association, and symbol projections, the
+-- solver-independent counterexample validator, and the same-scope
+-- counterexample-bank vocabulary.  Every public entrance below is an
+-- instance of one of the shared cores over this record plus its own nominal
+-- error constructors, so scalar and product artifacts keep their distinct
+-- types while the control flow lives once.
+data QuerySurface query problem domainTag evalError counterexample bank
+    sample origin bankError
+  = QuerySurface
+  { surfaceProblem :: query -> problem
+  , surfaceBehavioral :: query -> BehavioralProblem domainTag
+  , surfaceInputSymbols :: query -> [[Word8]]
+  , surfaceProblemInputCount :: problem -> Int
+  , surfaceValidateCounterexample
+      :: LengthEvaluationLimits -> problem -> LengthProblemAssignment
+      -> Either evalError
+          (Maybe (BehavioralEvidence domainTag counterexample))
+  , surfaceCounterexampleInputs :: counterexample -> [Natural]
+  , surfaceBankMatches :: query -> bank -> Bool
+  , surfaceBankRecordAttempt :: bank -> Either bankError bank
+  , surfaceBankInsert :: origin -> [Natural] -> bank -> Either bankError bank
+  , surfaceBankSamples :: bank -> [sample]
+  , surfaceBankSampleInputs :: sample -> [Natural]
+  }
+
+scalarQuerySurface
+  :: QuerySurface
+      (LengthSMTLibQuery identity local)
+      (CheckedLengthProblem identity local)
+      FiniteListSpineLengthV1
+      LengthEvaluationError
+      ValidatedLengthCounterexample
+      (LengthCounterexampleBank identity)
+      LengthCounterexampleBankSample
+      LengthCounterexampleBankOrigin
+      LengthCounterexampleBankError
+scalarQuerySurface = QuerySurface
+  { surfaceProblem = queryProblem
+  , surfaceBehavioral = lengthSMTLibQueryBehavioralProblem
+  , surfaceInputSymbols = lengthSMTLibQueryInputSymbols
+  , surfaceProblemInputCount = checkedLengthProblemInputCount
+  , surfaceValidateCounterexample = validateLengthProblemCounterexample
+  , surfaceCounterexampleInputs = validatedLengthCounterexampleInputs
+  , surfaceBankMatches = lengthCounterexampleBankMatchesScope
+      . lengthSMTLibQueryCounterexampleBankScope
+  , surfaceBankRecordAttempt = recordLengthCounterexampleBankReplayAttempt
+  , surfaceBankInsert = insertLengthCounterexampleBankSample
+  , surfaceBankSamples = lengthCounterexampleBankSamples
+  , surfaceBankSampleInputs = lengthCounterexampleBankSampleInputs
+  }
+
+spinePairQuerySurface
+  :: QuerySurface
+      (LengthSpinePairSMTLibQuery identity local)
+      (CheckedLengthSpinePairProblem identity local)
+      FiniteBinaryProductSpineLengthsV1
+      LengthSpinePairEvaluationError
+      ValidatedLengthSpinePairCounterexample
+      (LengthSpinePairCounterexampleBank identity)
+      LengthSpinePairCounterexampleBankSample
+      LengthSpinePairCounterexampleBankOrigin
+      LengthSpinePairCounterexampleBankError
+spinePairQuerySurface = QuerySurface
+  { surfaceProblem = spinePairQueryProblem
+  , surfaceBehavioral = lengthSpinePairSMTLibQueryBehavioralProblem
+  , surfaceInputSymbols = lengthSpinePairSMTLibQueryInputSymbols
+  , surfaceProblemInputCount = checkedLengthSpinePairProblemInputCount
+  , surfaceValidateCounterexample =
+      validateLengthSpinePairProblemCounterexample
+  , surfaceCounterexampleInputs =
+      validatedLengthSpinePairCounterexampleInputs
+  , surfaceBankMatches = lengthSpinePairCounterexampleBankMatchesScope
+      . lengthSpinePairSMTLibQueryCounterexampleBankScope
+  , surfaceBankRecordAttempt =
+      recordLengthSpinePairCounterexampleBankReplayAttempt
+  , surfaceBankInsert = insertLengthSpinePairCounterexampleBankSample
+  , surfaceBankSamples = lengthSpinePairCounterexampleBankSamples
+  , surfaceBankSampleInputs =
+      lengthSpinePairCounterexampleBankSampleInputs
+  }
+
+-- | Decode a raw model's tracked symbols and independently replay them
+-- against the query's checked problem.
+validateQueryModelWith
+  :: QuerySurface query problem domainTag evalError counterexample bank
+      sample origin bankError
+  -> ModelDecodeErrors modelError
+  -> (evalError -> modelError)
+  -> LengthEvaluationLimits
+  -> query
+  -> [LengthSMTLibIntegerBinding]
+  -> Either modelError
+      (Maybe (BehavioralEvidence domainTag counterexample))
+validateQueryModelWith surface modelErrors replayRejected evaluationLimits
+    query rawBindings = do
+  ordered <- decodeModelInputs modelErrors
+    (surfaceInputSymbols surface query) rawBindings
+  either (Left . replayRejected) Right
+    $ surfaceValidateCounterexample surface evaluationLimits
+        (surfaceProblem surface query)
+        $ LengthProblemAssignment ordered
+
+-- | Run one solver-independent operation against the query's problem and
+-- re-associate any produced evidence with that exact behavioral problem.
+traverseQueryEvidenceWith
+  :: QuerySurface query problem domainTag evalError counterexample bank
+      sample origin bankError
+  -> (innerError -> failure)
+  -> (ReplayMismatch -> failure)
+  -> (problem
+      -> Either innerError (Maybe (BehavioralEvidence domainTag receipt)))
+  -> query
+  -> Either failure (Maybe receipt)
+traverseQueryEvidenceWith surface wrapInner wrapAssociation run query = do
+  evidence <- either (Left . wrapInner) Right
+    $ run $ surfaceProblem surface query
+  traverse
+    (either (Left . wrapAssociation) Right
+      . replayBehavioralEvidence (surfaceBehavioral surface query))
+    evidence
+
+replayQueryCounterexampleInputsWith
+  :: QuerySurface query problem domainTag evalError counterexample bank
+      sample origin bankError
+  -> (evalError -> failure)
+  -> (ReplayMismatch -> failure)
+  -> LengthEvaluationLimits
+  -> query
+  -> [Natural]
+  -> Either failure (Maybe counterexample)
+replayQueryCounterexampleInputsWith surface wrapEvaluation wrapAssociation
+    evaluationLimits query inputs =
+  traverseQueryEvidenceWith surface wrapEvaluation wrapAssociation
+    (\problem -> surfaceValidateCounterexample surface evaluationLimits
+      problem $ LengthProblemAssignment inputs)
+    query
+
+probeQueryCounterexampleAtOriginWith
+  :: QuerySurface query problem domainTag evalError counterexample bank
+      sample origin bankError
+  -> (evalError -> failure)
+  -> (ReplayMismatch -> failure)
+  -> LengthEvaluationLimits
+  -> query
+  -> Either failure (Maybe counterexample)
+probeQueryCounterexampleAtOriginWith surface wrapEvaluation wrapAssociation
+    evaluationLimits query =
+  replayQueryCounterexampleInputsWith surface wrapEvaluation wrapAssociation
+    evaluationLimits query
+    $ replicate
+        (surfaceProblemInputCount surface $ surfaceProblem surface query) 0
+
+-- | Validate a finite input box through the query's problem and associate
+-- either arm's evidence.
+validateQueryInputBoxWith
+  :: QuerySurface query problem domainTag evalError counterexample bank
+      sample origin bankError
+  -> (innerError -> failure)
+  -> (ReplayMismatch -> failure)
+  -> (problem
+      -> Either innerError
+          (LengthInputBoxValidation
+            (BehavioralEvidence domainTag counterexample)
+            (BehavioralEvidence domainTag validated)))
+  -> query
+  -> Either failure (LengthInputBoxValidation counterexample validated)
+validateQueryInputBoxWith surface wrapInner wrapAssociation run query = do
+  validation <- either (Left . wrapInner) Right
+    $ run $ surfaceProblem surface query
+  case validation of
+    LengthInputBoxCounterexample evidence ->
+      LengthInputBoxCounterexample <$> either
+        (Left . wrapAssociation) Right
+        (replayBehavioralEvidence (surfaceBehavioral surface query) evidence)
+    LengthInputBoxValidated evidence ->
+      LengthInputBoxValidated <$> either
+        (Left . wrapAssociation) Right
+        (replayBehavioralEvidence (surfaceBehavioral surface query) evidence)
+
+-- | Validate the applicable domain through the query's problem; semantic
+-- inapplicability passes through, and either evidence arm is associated.
+validateQueryApplicableDomainWith
+  :: QuerySurface query problem domainTag evalError counterexample bank
+      sample origin bankError
+  -> (innerError -> failure)
+  -> (ReplayMismatch -> failure)
+  -> (problem
+      -> Either innerError
+          (LengthApplicableDomainValidation
+            (BehavioralEvidence domainTag counterexample)
+            (BehavioralEvidence domainTag established)))
+  -> query
+  -> Either failure
+      (LengthApplicableDomainValidation counterexample established)
+validateQueryApplicableDomainWith surface wrapInner wrapAssociation run
+    query = do
+  validation <- either (Left . wrapInner) Right
+    $ run $ surfaceProblem surface query
   case validation of
     LengthApplicableDomainInapplicable inapplicability -> Right
       $ LengthApplicableDomainInapplicable inapplicability
     LengthApplicableDomainCounterexample evidence ->
-      LengthApplicableDomainCounterexample <$> replay evidence
+      LengthApplicableDomainCounterexample <$> either
+        (Left . wrapAssociation) Right
+        (replayBehavioralEvidence (surfaceBehavioral surface query) evidence)
     LengthApplicableDomainEstablished evidence ->
-      LengthApplicableDomainEstablished <$> replay evidence
- where
-  replay
-    :: BehavioralEvidence FiniteBinaryProductSpineLengthsV1 receipt
-    -> Either LengthSpinePairSMTLibApplicableDomainValidationError receipt
-  replay = either
-    (Left .
-      LengthSpinePairSMTLibApplicableDomainValidationAssociationRejected)
-    Right
-    . replayBehavioralEvidence
-        (lengthSpinePairSMTLibQueryBehavioralProblem query)
+      LengthApplicableDomainEstablished <$> either
+        (Left . wrapAssociation) Right
+        (replayBehavioralEvidence (surfaceBehavioral surface query) evidence)
+
+-- | Freshly reproduce one counterexample through the current query and
+-- record only its inputs in a same-scope bank; every result after attempt
+-- admission returns the charged successor bank.
+recordQueryCounterexampleInBankWith
+  :: QuerySurface query problem domainTag evalError counterexample bank
+      sample origin bankError
+  -> (LengthEvaluationLimits -> query -> [Natural]
+      -> Either replayError (Maybe counterexample))
+  -> failure
+  -> (bankError -> failure)
+  -> (replayError -> failure)
+  -> failure
+  -> (bankError -> failure)
+  -> LengthEvaluationLimits
+  -> query
+  -> origin
+  -> counterexample
+  -> bank
+  -> (bank, Either failure counterexample)
+recordQueryCounterexampleInBankWith surface replayInputs scopeMismatch
+    attemptRejected replayRejected notReproduced insertionRejected
+    evaluationLimits query origin counterexample bank
+  | not $ surfaceBankMatches surface query bank =
+      (bank, Left scopeMismatch)
+  | otherwise = case surfaceBankRecordAttempt surface bank of
+      Left failure -> (bank, Left $ attemptRejected failure)
+      Right charged -> case replayInputs evaluationLimits query
+          (surfaceCounterexampleInputs surface counterexample) of
+        Left failure -> (charged, Left $ replayRejected failure)
+        Right Nothing -> (charged, Left notReproduced)
+        Right (Just fresh) -> case surfaceBankInsert surface
+            origin (surfaceCounterexampleInputs surface fresh) charged of
+          Left failure -> (charged, Left $ insertionRejected failure)
+          Right recorded -> (recorded, Right fresh)
+
+-- | Replay one currently retained same-scope sample through the query;
+-- scope, membership, and attempt failures return the unchanged bank, and
+-- everything after admission returns the charged successor.
+replayQueryCounterexampleBankSampleWith
+  :: Eq sample
+  => QuerySurface query problem domainTag evalError counterexample bank
+      sample origin bankError
+  -> (LengthEvaluationLimits -> query -> [Natural]
+      -> Either replayError (Maybe counterexample))
+  -> failure
+  -> failure
+  -> (bankError -> failure)
+  -> (replayError -> failure)
+  -> LengthEvaluationLimits
+  -> query
+  -> sample
+  -> bank
+  -> (bank, Either failure (Maybe counterexample))
+replayQueryCounterexampleBankSampleWith surface replayInputs scopeMismatch
+    sampleNotRetained attemptRejected replayRejected
+    evaluationLimits query sample bank
+  | not $ surfaceBankMatches surface query bank =
+      (bank, Left scopeMismatch)
+  | sample `notElem` surfaceBankSamples surface bank =
+      (bank, Left sampleNotRetained)
+  | otherwise = case surfaceBankRecordAttempt surface bank of
+      Left failure -> (bank, Left $ attemptRejected failure)
+      Right charged -> case replayInputs evaluationLimits query
+          (surfaceBankSampleInputs surface sample) of
+        Left failure -> (charged, Left $ replayRejected failure)
+        Right result -> (charged, Right result)
 
 queryProblem
   :: LengthSMTLibQuery identity local
@@ -1331,89 +1387,104 @@ spinePairQueryProblem
   -> CheckedLengthSpinePairProblem identity local
 spinePairQueryProblem (LengthSpinePairSMTLibQuery problem _ _) = problem
 
+-- | How one domain spells the structural rejections of a solver model:
+-- the binding count, the per-symbol byte bound, and the four symbol-level
+-- rejections.  Both model-error types have exactly these constructors, so
+-- the decoder below runs once over either record.
+data ModelDecodeErrors failure = ModelDecodeErrors
+  { modelBindingArityMismatch :: Int -> Int -> failure
+  , modelBindingSymbolByteLimitExceeded :: Int -> Natural -> Natural -> failure
+  , modelUnknownInputSymbol :: Int -> [Word8] -> failure
+  , modelDuplicateInputSymbol :: Int -> [Word8] -> failure
+  , modelNegativeInputValue :: Int -> [Word8] -> Integer -> failure
+  , modelMissingInputSymbol :: [Word8] -> failure
+  }
+
+scalarModelErrors :: ModelDecodeErrors LengthSMTLibModelError
+scalarModelErrors = ModelDecodeErrors
+  { modelBindingArityMismatch = LengthSMTLibBindingArityMismatch
+  , modelBindingSymbolByteLimitExceeded =
+      LengthSMTLibBindingSymbolByteLimitExceeded
+  , modelUnknownInputSymbol = LengthSMTLibUnknownInputSymbol
+  , modelDuplicateInputSymbol = LengthSMTLibDuplicateInputSymbol
+  , modelNegativeInputValue = LengthSMTLibNegativeInputValue
+  , modelMissingInputSymbol = LengthSMTLibMissingInputSymbol
+  }
+
+spinePairModelErrors :: ModelDecodeErrors LengthSpinePairSMTLibModelError
+spinePairModelErrors = ModelDecodeErrors
+  { modelBindingArityMismatch = LengthSpinePairSMTLibBindingArityMismatch
+  , modelBindingSymbolByteLimitExceeded =
+      LengthSpinePairSMTLibBindingSymbolByteLimitExceeded
+  , modelUnknownInputSymbol = LengthSpinePairSMTLibUnknownInputSymbol
+  , modelDuplicateInputSymbol = LengthSpinePairSMTLibDuplicateInputSymbol
+  , modelNegativeInputValue = LengthSpinePairSMTLibNegativeInputValue
+  , modelMissingInputSymbol = LengthSpinePairSMTLibMissingInputSymbol
+  }
+
+-- | Decode exactly the tracked input symbols from a raw solver model and
+-- return their natural values in source order: the binding count must match
+-- the symbol count, every binding symbol must be one of the tracked symbols
+-- (checked within the longest tracked symbol's byte length), no symbol may
+-- bind twice or to a negative value, and no tracked symbol may be missing.
+decodeModelInputs
+  :: ModelDecodeErrors failure
+  -> [[Word8]]
+  -> [LengthSMTLibIntegerBinding]
+  -> Either failure [Natural]
+decodeModelInputs errors symbols rawBindings = do
+  let expected = length symbols
+      observed = observedListLength expected rawBindings
+  unless (observed == expected)
+    $ Left $ modelBindingArityMismatch errors expected observed
+  let maximumSymbolBytes = fromIntegral $ maximum
+        $ 0 : map length symbols
+      expectedSymbols = Map.fromList $ zip symbols [0 :: Int ..]
+  decoded <- foldM
+    (decodeBinding errors maximumSymbolBytes expectedSymbols)
+    Map.empty
+    $ zip [0 :: Int ..] rawBindings
+  mapM (lookupDecoded errors decoded) symbols
+
 decodeBinding
-  :: Natural
+  :: ModelDecodeErrors failure
+  -> Natural
   -> Map [Word8] Int
   -> Map [Word8] Natural
   -> (Int, LengthSMTLibIntegerBinding)
-  -> Either LengthSMTLibModelError (Map [Word8] Natural)
-decodeBinding maximumBytes expected decoded
+  -> Either failure (Map [Word8] Natural)
+decodeBinding errors maximumBytes expected decoded
     (bindingIndex, LengthSMTLibIntegerBinding rawSymbol rawValue) = do
-  symbol <- retainModelSymbol bindingIndex maximumBytes rawSymbol
+  symbol <- retainModelSymbol errors bindingIndex maximumBytes rawSymbol
   case Map.lookup symbol expected of
-    Nothing -> Left $ LengthSMTLibUnknownInputSymbol bindingIndex symbol
+    Nothing -> Left $ modelUnknownInputSymbol errors bindingIndex symbol
     Just _ -> pure ()
-  if Map.member symbol decoded
-    then Left $ LengthSMTLibDuplicateInputSymbol bindingIndex symbol
-    else pure ()
+  when (Map.member symbol decoded)
+    $ Left $ modelDuplicateInputSymbol errors bindingIndex symbol
   if rawValue < 0
-    then Left $ LengthSMTLibNegativeInputValue bindingIndex symbol rawValue
+    then Left $ modelNegativeInputValue errors bindingIndex symbol rawValue
     else pure $ Map.insert symbol (fromInteger rawValue) decoded
 
 lookupDecoded
-  :: Map [Word8] Natural
+  :: ModelDecodeErrors failure
+  -> Map [Word8] Natural
   -> [Word8]
-  -> Either LengthSMTLibModelError Natural
-lookupDecoded decoded symbol = case Map.lookup symbol decoded of
-  Nothing -> Left $ LengthSMTLibMissingInputSymbol symbol
+  -> Either failure Natural
+lookupDecoded errors decoded symbol = case Map.lookup symbol decoded of
+  Nothing -> Left $ modelMissingInputSymbol errors symbol
   Just value -> Right value
 
 retainModelSymbol
-  :: Int
+  :: ModelDecodeErrors failure
+  -> Int
   -> Natural
   -> [Word8]
-  -> Either LengthSMTLibModelError [Word8]
-retainModelSymbol bindingIndex maximumBytes = go maximumBytes
+  -> Either failure [Word8]
+retainModelSymbol errors bindingIndex maximumBytes = go maximumBytes
  where
   go _ [] = Right []
-  go 0 (_ : _) = Left $ LengthSMTLibBindingSymbolByteLimitExceeded
+  go 0 (_ : _) = Left $ modelBindingSymbolByteLimitExceeded errors
     bindingIndex maximumBytes (maximumBytes + 1)
-  go remaining (byte : bytes) =
-    (byte :) <$> go (remaining - 1) bytes
-
-decodeSpinePairBinding
-  :: Natural
-  -> Map [Word8] Int
-  -> Map [Word8] Natural
-  -> (Int, LengthSMTLibIntegerBinding)
-  -> Either
-      LengthSpinePairSMTLibModelError
-      (Map [Word8] Natural)
-decodeSpinePairBinding maximumBytes expected decoded
-    (bindingIndex, LengthSMTLibIntegerBinding rawSymbol rawValue) = do
-  symbol <- retainSpinePairModelSymbol bindingIndex maximumBytes rawSymbol
-  case Map.lookup symbol expected of
-    Nothing -> Left $ LengthSpinePairSMTLibUnknownInputSymbol
-      bindingIndex symbol
-    Just _ -> pure ()
-  if Map.member symbol decoded
-    then Left $ LengthSpinePairSMTLibDuplicateInputSymbol
-      bindingIndex symbol
-    else pure ()
-  if rawValue < 0
-    then Left $ LengthSpinePairSMTLibNegativeInputValue
-      bindingIndex symbol rawValue
-    else pure $ Map.insert symbol (fromInteger rawValue) decoded
-
-lookupSpinePairDecoded
-  :: Map [Word8] Natural
-  -> [Word8]
-  -> Either LengthSpinePairSMTLibModelError Natural
-lookupSpinePairDecoded decoded symbol = case Map.lookup symbol decoded of
-  Nothing -> Left $ LengthSpinePairSMTLibMissingInputSymbol symbol
-  Just value -> Right value
-
-retainSpinePairModelSymbol
-  :: Int
-  -> Natural
-  -> [Word8]
-  -> Either LengthSpinePairSMTLibModelError [Word8]
-retainSpinePairModelSymbol bindingIndex maximumBytes = go maximumBytes
- where
-  go _ [] = Right []
-  go 0 (_ : _) = Left
-    $ LengthSpinePairSMTLibBindingSymbolByteLimitExceeded
-        bindingIndex maximumBytes (maximumBytes + 1)
   go remaining (byte : bytes) =
     (byte :) <$> go (remaining - 1) bytes
 
@@ -1573,9 +1644,7 @@ translateEuclideanProjection
       (QFLIAIntegerExpression, SMTTranslationState)
 translateEuclideanProjection limits inputCount state projection numeralSite
     zeroError divisor expression = do
-  if divisor == 0
-    then Left zeroError
-    else pure ()
+  when (divisor == 0) $ Left zeroError
   checkNumeral limits numeralSite divisor
   let (ordinal, quotient, remainder, reserved) =
         reserveEuclideanWitness projection state
@@ -1684,15 +1753,74 @@ mapSpinePairQueryFailure = either (Left . go) Right
       LengthSpinePairSMTLibFingerprintByteLimitExceeded
         maximumLimit observed
 
-buildQueryFingerprint
+-- | Translate one checked problem's counterexample condition into the typed
+-- plan, the retained check-program bytes, and the retained input-value
+-- request bytes.  Both domains seal the same input-only QF_LIA program from
+-- the same formula language; only the fingerprint vocabulary and the error
+-- spelling differ, and the product sealer maps the scalar errors at its
+-- boundary.
+sealQueryPlan
   :: LengthSMTLibLimits
-  -> CheckedLengthProblem identity local
+  -> Int
+  -> LengthFormula LengthContractVariable
+  -> Either LengthSMTLibQueryError (LengthSMTLibPlan, [Word8], Maybe [Word8])
+sealQueryPlan limits inputCount counterexampleCondition = do
+  let symbols = inputSymbolsForCount inputCount
+      valueRequest = inputValueRequestForSymbols symbols
+  (condition, translation) <- translateFormula limits inputCount
+    emptySMTTranslationState counterexampleCondition
+  let witnesses = orderedEuclideanWitnesses translation
+      witnessSymbols = concatMap euclideanWitnessSymbols witnesses
+      checkCommands = fixedPreamble
+        ++ map QFLIADeclareInteger symbols
+        ++ map QFLIADeclareInteger witnessSymbols
+        ++ map (QFLIAAssert . nonnegative . QFLIAIntegerSymbol) symbols
+        ++ concatMap euclideanWitnessCommands witnesses
+        ++ [QFLIAAssert condition, QFLIACheckSatisfiable]
+      plan = LengthSMTLibPlan
+        symbols condition checkCommands valueRequest witnesses
+  checkBytes <- retainCommand limits LengthSMTLibCheckCommand
+    $ renderQFLIACommands checkCommands
+  valueRequestBytes <- case valueRequest of
+    Nothing -> Right Nothing
+    Just command -> Just <$> retainCommand limits
+      LengthSMTLibInputValueRequest (renderQFLIACommand command)
+  pure (plan, checkBytes, valueRequestBytes)
+
+-- | The three bytes strings that make a query fingerprint domain-specific:
+-- its role, its schema tag, and its logic.  Every other field is computed
+-- identically from the behavioral problem, the plan, and the retained bytes.
+data QueryFingerprintVocabulary = QueryFingerprintVocabulary
+  { queryFingerprintRole :: [Word8]
+  , queryFingerprintSchemaTag :: [Word8]
+  , queryFingerprintLogic :: [Word8]
+  }
+
+scalarQueryFingerprintVocabulary :: QueryFingerprintVocabulary
+scalarQueryFingerprintVocabulary = QueryFingerprintVocabulary
+  { queryFingerprintRole = ascii "finite-list-spine-length/z3-qf-lia-query"
+  , queryFingerprintSchemaTag = lengthSMTLibQuerySchemaTag
+  , queryFingerprintLogic = lengthSMTLibQueryLogic
+  }
+
+spinePairQueryFingerprintVocabulary :: QueryFingerprintVocabulary
+spinePairQueryFingerprintVocabulary = QueryFingerprintVocabulary
+  { queryFingerprintRole =
+      ascii "finite-binary-product-spine-lengths/z3-qf-lia-query"
+  , queryFingerprintSchemaTag = lengthSpinePairSMTLibQuerySchemaTag
+  , queryFingerprintLogic = lengthSpinePairSMTLibQueryLogic
+  }
+
+buildQueryFingerprint
+  :: QueryFingerprintVocabulary
+  -> LengthSMTLibLimits
+  -> BehavioralProblem domain
   -> LengthSMTLibPlan
   -> [Word8]
   -> Maybe [Word8]
-  -> Either LengthSMTLibQueryError
-      (Fingerprint LengthSMTLibQueryFingerprintSubject)
-buildQueryFingerprint limits problem plan checkBytes valueRequestBytes =
+  -> Either LengthSMTLibQueryError (Fingerprint subject)
+buildQueryFingerprint vocabulary limits behavioral plan checkBytes
+    valueRequestBytes =
   case buildFingerprintWithin
       (lengthSMTLibFingerprintByteLimit limits) builder of
     Left FingerprintLimitExceeded
@@ -1702,72 +1830,13 @@ buildQueryFingerprint limits problem plan checkBytes valueRequestBytes =
           maximumBytes observedBytes
     Right fingerprint -> Right fingerprint
  where
-  behavioral = checkedLengthProblemBehavioralProblem problem
   builder = FingerprintBuilder
     { fingerprintBuilderVersion = 1
-    , fingerprintBuilderRole = ascii
-        "finite-list-spine-length/z3-qf-lia-query"
-    , fingerprintBuilderFields =
-        [ tagged "schema" [FingerprintBytes lengthSMTLibQuerySchemaTag]
-        , tagged "logic" [FingerprintBytes lengthSMTLibQueryLogic]
-        , tagged "fixed-options"
-            [ FingerprintBytes $ ascii ":produce-models=true"
-            , FingerprintBytes $ ascii ":random-seed=1"
-            ]
-        , tagged "problem-domain"
-            [FingerprintBytes $ behavioralProblemDomain behavioral]
-        , tagged "problem-inventory"
-            [ FingerprintBytes $ fingerprintCanonicalBytes
-                $ behavioralProblemInventoryFingerprint behavioral
-            ]
-        , tagged "problem-encoding"
-            [ FingerprintBytes $ fingerprintCanonicalBytes
-                $ behavioralProblemEncodingFingerprint behavioral
-            ]
-        , tagged "problem-candidate"
-            [ FingerprintBytes $ fingerprintCanonicalBytes
-                $ behavioralProblemCandidateFingerprint behavioral
-            ]
-        , tagged "complete-problem"
-            [ FingerprintBytes $ fingerprintCanonicalBytes
-                $ behavioralProblemFingerprint behavioral
-            ]
-        , tagged "typed-plan" [planField plan]
-        , tagged "check-command" [FingerprintBytes checkBytes]
-        , tagged "input-value-request" [case valueRequestBytes of
-            Nothing -> tagged "absent" []
-            Just bytes -> tagged "present" [FingerprintBytes bytes]]
-        ]
-    }
-
-buildSpinePairQueryFingerprint
-  :: LengthSMTLibLimits
-  -> CheckedLengthSpinePairProblem identity local
-  -> LengthSMTLibPlan
-  -> [Word8]
-  -> Maybe [Word8]
-  -> Either LengthSpinePairSMTLibQueryError
-      (Fingerprint LengthSpinePairSMTLibQueryFingerprintSubject)
-buildSpinePairQueryFingerprint limits problem plan checkBytes
-    valueRequestBytes =
-  case buildFingerprintWithin
-      (lengthSMTLibFingerprintByteLimit limits) builder of
-    Left FingerprintLimitExceeded
-        { fingerprintMaximumBytes = maximumBytes
-        , fingerprintObservedBytesAtLeast = observedBytes
-        } -> Left $ LengthSpinePairSMTLibFingerprintByteLimitExceeded
-          maximumBytes observedBytes
-    Right fingerprint -> Right fingerprint
- where
-  behavioral = checkedLengthSpinePairProblemBehavioralProblem problem
-  builder = FingerprintBuilder
-    { fingerprintBuilderVersion = 1
-    , fingerprintBuilderRole = ascii
-        "finite-binary-product-spine-lengths/z3-qf-lia-query"
+    , fingerprintBuilderRole = queryFingerprintRole vocabulary
     , fingerprintBuilderFields =
         [ tagged "schema"
-            [FingerprintBytes lengthSpinePairSMTLibQuerySchemaTag]
-        , tagged "logic" [FingerprintBytes lengthSpinePairSMTLibQueryLogic]
+            [FingerprintBytes $ queryFingerprintSchemaTag vocabulary]
+        , tagged "logic" [FingerprintBytes $ queryFingerprintLogic vocabulary]
         , tagged "fixed-options"
             [ FingerprintBytes $ ascii ":produce-models=true"
             , FingerprintBytes $ ascii ":random-seed=1"

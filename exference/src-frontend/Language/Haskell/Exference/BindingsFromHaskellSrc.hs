@@ -1,5 +1,11 @@
-{-# LANGUAGE TupleSections #-}
 
+
+-- | Extraction of search bindings from parsed haskell-src-exts modules:
+-- 'FunctionBinding's from top-level type signatures and foreign imports,
+-- constructor and record-selector bindings plus 'DeconstructorBinding's from
+-- data declarations, and the list of declared data type names.  Each
+-- extractor comes in string-error, located, and source-slot-batched forms;
+-- "Language.Haskell.Exference.EnvironmentParser" consumes the batched ones.
 module Language.Haskell.Exference.BindingsFromHaskellSrc
   ( getDecls
   , getDeclsLocated
@@ -49,6 +55,11 @@ data LoweredConstructor = LoweredConstructor
   }
 
 
+-- | Extract a 'FunctionBinding' for every name in every top-level type
+-- signature and foreign import of the given modules, resolving names with
+-- the unique-global 'legacyTypeResolver' built from the data type list and
+-- class map. Failures are reported as plain messages; use
+-- 'getDeclsLocated' to keep the source span of the offending signature.
 getDecls
   :: Monad m
   => [QualifiedName]
@@ -305,13 +316,13 @@ extractDataDeclarationWithResolver resolver tDeclMap slot moduleName declaration
       -- its parameters must remain free for search-time unification.  Each
       -- constructor value is polymorphic independently; quantify only after
       -- assembling its complete field-to-result arrow.
-      return $ ( [ functionBindingFromType
-                    (loweredConstructorName constructor) 0
-                    $ forallify
-                    $ SharedType.functionType
-                        (loweredConstructorFields constructor)
-                        rtype
-                 | constructor <- consDatas
+      return ( [ functionBindingFromType
+                  (loweredConstructorName constructor) 0
+                  $ forallify
+                  $ SharedType.functionType
+                      (loweredConstructorFields constructor)
+                      rtype
+               | constructor <- consDatas
                  ]
                  ++ [ functionBindingFromType selector 0
                         $ forallify $ TypeArrow rtype fieldType

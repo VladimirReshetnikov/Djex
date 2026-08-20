@@ -38,8 +38,14 @@ import Djinn.Internal.Type
   , toSynthesisType
   )
 
+-- | A data constructor in Djinn's compatibility AST: its name paired with
+-- its field types in order.
 type Constructor = (HSymbol, [HType])
 
+-- | A top-level declaration accepted by 'Djinn.Core.declare': a type
+-- synonym, data type, or abstract type (each with its parameter names or
+-- kind), a class with its parameters and method signatures, or a free
+-- function assumption.
 data Declaration
   = TypeSynonym HSymbol [HSymbol] HType
   | DataType HSymbol [HSymbol] [Constructor]
@@ -48,6 +54,9 @@ data Declaration
   | Function HSymbol HType
   deriving (Eq, Show)
 
+-- | The shared-IR declaration Djinn exchanges with the synthesis library:
+-- type variables are Djinn symbols, kind variables are 'Int's, and no
+-- annotation is carried.
 type SynthesisDeclaration =
   SharedDeclaration.Declaration HSymbol Int ()
 
@@ -63,6 +72,11 @@ data DjinnDeclarationNameRole
   | FunctionOwner
   deriving (Eq, Show)
 
+-- | Why a declaration could not cross between Djinn's compatibility AST and
+-- the shared IR in either direction: an unparsable or role-inappropriate
+-- name, a type conversion failure, a shared-side validation failure, or a
+-- shared feature (explicit parameter kinds, superclasses, instances, or a
+-- non-canonical @()@ owner) that Djinn does not represent.
 data SynthesisDeclarationError
   = InvalidDjinnDeclarationName HSymbol SharedName.NameError
   | UnsupportedDjinnDeclarationName
@@ -88,6 +102,11 @@ isDjinnDeclarationName role name = case role of
   MethodOwner -> isVarId name || isVarOperator name
   FunctionOwner -> isQualifiedVarId name || isVarOperator name
 
+-- | Convert a Djinn declaration into the shared IR, checking every name
+-- against its 'DjinnDeclarationNameRole' and validating the result with
+-- 'SharedDeclaration.validateDeclaration'.  The canonical unit declaration
+-- maps to the shared boxed 0-tuple; any other declaration mentioning @()@ is
+-- rejected.
 toSynthesisDeclaration
   :: Declaration
   -> Either SynthesisDeclarationError SynthesisDeclaration
@@ -152,6 +171,11 @@ toSynthesisDeclaration declaration = do
       | isDjinnDeclarationName role sourceName -> Right name
       | otherwise -> Left $ UnsupportedDjinnDeclarationName role name
 
+-- | Inverse of 'toSynthesisDeclaration': validate a shared declaration and
+-- project it back into Djinn's compatibility AST.  Instances, class
+-- superclasses, and explicitly kinded type parameters have no Djinn form and
+-- are reported as errors; the shared unit type maps to
+-- 'canonicalUnitDeclaration'.
 fromSynthesisDeclaration
   :: SynthesisDeclaration
   -> Either SynthesisDeclarationError Declaration
@@ -228,6 +252,8 @@ djinnDeclarationSymbol role name = case djinnDeclarationSpelling name of
 canonicalUnitDeclaration :: Declaration
 canonicalUnitDeclaration = DataType "()" [] [("()", [])]
 
+-- | The spelling Djinn's compatibility AST stores for a shared name,
+-- independent of any declaration role, or 'Nothing' when it has none.
 -- Symbolic value names are stored without prefix parentheses in Djinn's
 -- compatibility AST.  Identifiers use their canonical (possibly qualified)
 -- spelling; built-ins have no declaration-owner spelling here.

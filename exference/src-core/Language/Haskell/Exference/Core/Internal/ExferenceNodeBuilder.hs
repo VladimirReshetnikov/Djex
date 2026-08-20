@@ -1,3 +1,9 @@
+-- | Stateful primitives for extending a 'SearchNode' inside one search
+-- branch: allocating holes, tracked variables, and fresh flexible
+-- namespaces, opening child scopes, recording variable uses, and applying
+-- substitutions.  Each runs in @StateT SearchNode SearchBranches@ and turns
+-- identifier or scope-ID exhaustion into a truncated branch through the
+-- supplied 'SearchAllocators' rather than an error.
 module Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
   ( builderAddScope
   , builderApplySubst
@@ -21,14 +27,14 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Lazy (StateT, gets, modify)
 import qualified Data.IntMap.Strict as IntMap
 
--- Allocate an expression hole without treating it as a variable introduced
+-- | Allocate an expression hole without treating it as a variable introduced
 -- into scope. The returned identifier is the value before the increment.
 builderAllocHole
   :: SearchAllocators
   -> StateT SearchNode SearchBranches TVarId
 builderAllocHole = builderAllocTermIdentifier
 
--- Allocate a variable whose usage must be tracked by the search heuristic.
+-- | Allocate a variable whose usage must be tracked by the search heuristic.
 builderAllocVar
   :: SearchAllocators
   -> StateT SearchNode SearchBranches TVarId
@@ -49,6 +55,10 @@ builderAllocTermIdentifier allocators = do
       modify $ \node -> node {nodeNextVarId = following}
       pure identifier
 
+-- | Count one more use of a tracked variable in 'nodeVarUses'.  The variable
+-- must have been allocated with 'builderAllocVar' (or otherwise registered);
+-- an untracked identifier is an internal invariant violation and raises an
+-- error.
 builderRecordVarUse :: Monad m => TVarId -> StateT SearchNode m ()
 builderRecordVarUse vid = do
   usage <- gets (IntMap.lookup vid . nodeVarUses)
@@ -72,7 +82,7 @@ builderFreshenTVarNamespace allocators identifiers = do
       modify (\node -> node {nodeFlexibleIds = nextSupply}) >> pure renaming
     Nothing -> lift $ truncateBranch BranchIdentifierSpaceExhausted
 
--- Take the current scope, add a child scope, and return its identifier.
+-- | Take the current scope, add a child scope, and return its identifier.
 builderAddScope
   :: SearchAllocators
   -> ScopeId
@@ -88,7 +98,7 @@ builderAddScope allocators parentId = do
       modify $ \node -> node {nodeProvidedScopes = newScopes}
       pure newId
 
--- Apply substitutions to goals and scopes. Constraint goals are handled by
+-- | Apply substitutions to goals and scopes. Constraint goals are handled by
 -- the caller because their admissibility depends on the search branch.
 builderApplySubst
   :: Substs

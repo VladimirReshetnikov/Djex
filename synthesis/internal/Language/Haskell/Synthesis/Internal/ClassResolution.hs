@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE RoleAnnotations #-}
 
 -- | Package-private class-resolution authority with explicit admission,
@@ -63,7 +62,7 @@ module Language.Haskell.Synthesis.Internal.ClassResolution
   ) where
 
 import Control.DeepSeq (NFData (rnf))
-import Control.Monad (foldM, guard)
+import Control.Monad (foldM, guard, unless, void, when, zipWithM)
 import Data.Graph (SCC (..), stronglyConnComp)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
@@ -81,6 +80,15 @@ import Language.Haskell.Synthesis.Inventory
 import qualified Language.Haskell.Synthesis.Kind as Kind
 import Language.Haskell.Synthesis.KindInference
 import Language.Haskell.Synthesis.Name
+import Language.Haskell.Synthesis.Internal.Alpha
+  ( EquationPolicy (..)
+  , ForallEquations (..)
+  , ForallRewrite (OpaqueForalls)
+  , emptyEquationSolution
+  , rewriteTypeVariables
+  , solveTypeEquations
+  , zipExactly
+  )
 import Language.Haskell.Synthesis.Type
 import Language.Haskell.Synthesis.TypedGenerated
   ( TypeStructure (observeTypeWithin)
@@ -105,6 +113,10 @@ data ClassResolutionLimitField
 instance NFData ClassResolutionLimitField where
   rnf value = value `seq` ()
 
+-- | Rejection of a limit table by 'mkClassResolutionLimits': the named
+-- field was supplied with the recorded negative value.  Fields are checked
+-- in 'ClassResolutionLimitField' order and only the first offender is
+-- reported.
 data ClassResolutionLimitError
   = NegativeClassResolutionLimit !ClassResolutionLimitField !Int
   deriving (Eq, Ord, Show)
@@ -113,8 +125,12 @@ instance NFData ClassResolutionLimitError where
   rnf (NegativeClassResolutionLimit field value) =
     rnf field `seq` rnf value
 
--- 'Generic' is deliberately absent.  The constructor is hidden so callers
--- cannot bypass nonnegative validation or silently reorder limit fields.
+-- | The validated, nonnegative bound table consulted by
+-- 'sealClassResolutionEnvironment' and every discharge or replay against the
+-- sealed environment; construct it with 'mkClassResolutionLimits' or use
+-- 'defaultClassResolutionLimits'.  'Generic' is deliberately absent.  The
+-- constructor is hidden so callers cannot bypass nonnegative validation or
+-- silently reorder limit fields.
 data ClassResolutionLimits = ClassResolutionLimits
   !Int !Int !Int !Int !Int !Int !Int !Int !Int !Int
   deriving (Eq, Ord, Show)
@@ -127,6 +143,10 @@ instance NFData ClassResolutionLimits where
       rnf kindNodes `seq` rnf overlapComparisons `seq` rnf depth `seq`
       rnf proofs
 
+-- | Validate ten limits, supplied in 'ClassResolutionLimitField' order
+-- (declarations, classes, instances, type-constructor kinds, collection
+-- width, type nodes, kind nodes, overlap comparisons, proof depth, proof
+-- nodes).  The first negative argument is reported; zero is accepted.
 mkClassResolutionLimits
   :: Int
   -> Int
@@ -164,42 +184,64 @@ defaultClassResolutionLimits :: ClassResolutionLimits
 defaultClassResolutionLimits = ClassResolutionLimits
   32768 4096 16384 32768 256 4096 256 262144 256 4096
 
+-- | Maximum number of declarations the sealed inventory environment may
+-- contain; sealing counts them up to this bound and rejects any excess.
 maximumClassResolutionDeclarations :: ClassResolutionLimits -> Int
 maximumClassResolutionDeclarations
     (ClassResolutionLimits value _ _ _ _ _ _ _ _ _) = value
 
+-- | Maximum number of class declarations admitted while sealing.
 maximumClassResolutionClasses :: ClassResolutionLimits -> Int
 maximumClassResolutionClasses
     (ClassResolutionLimits _ value _ _ _ _ _ _ _ _) = value
 
+-- | Maximum number of instance declarations admitted while sealing.
 maximumClassResolutionInstances :: ClassResolutionLimits -> Int
 maximumClassResolutionInstances
     (ClassResolutionLimits _ _ value _ _ _ _ _ _ _) = value
 
+-- | Maximum size of the inventory's type-constructor kind table retained by
+-- the sealed environment.
 maximumClassResolutionTypeConstructorKinds :: ClassResolutionLimits -> Int
 maximumClassResolutionTypeConstructorKinds
     (ClassResolutionLimits _ _ _ value _ _ _ _ _ _) = value
 
+-- | Maximum width of every declaration-owned list (class parameters,
+-- superclasses, instance binders, and raw or completed prerequisites; see
+-- 'ClassResolutionCollectionSite') and of every collection inside a
+-- constraint argument type.
 maximumClassResolutionCollectionWidth :: ClassResolutionLimits -> Int
 maximumClassResolutionCollectionWidth
     (ClassResolutionLimits _ _ _ _ value _ _ _ _ _) = value
 
+-- | Maximum node count of any single constraint argument type, whether it
+-- comes from a retained declaration or from a query.
 maximumClassResolutionTypeNodes :: ClassResolutionLimits -> Int
 maximumClassResolutionTypeNodes
     (ClassResolutionLimits _ _ _ _ _ value _ _ _ _) = value
 
+-- | Maximum node count of any single retained kind tree (a type-constructor
+-- kind or a class-parameter kind; see 'ClassResolutionKindSite').
 maximumClassResolutionKindNodes :: ClassResolutionLimits -> Int
 maximumClassResolutionKindNodes
     (ClassResolutionLimits _ _ _ _ _ _ value _ _ _) = value
 
+-- | Maximum number of pairwise same-class instance-head overlap checks
+-- performed across one sealing pass.
 maximumClassResolutionOverlapComparisons :: ClassResolutionLimits -> Int
 maximumClassResolutionOverlapComparisons
     (ClassResolutionLimits _ _ _ _ _ _ _ value _ _) = value
 
+-- | Maximum instance-nesting depth of one proof search; a query whose
+-- prerequisites would nest deeper fails with
+-- 'ClassResolutionProofDepthLimitExceeded'.
 maximumClassResolutionProofDepth :: ClassResolutionLimits -> Int
 maximumClassResolutionProofDepth
     (ClassResolutionLimits _ _ _ _ _ _ _ _ value _) = value
 
+-- | Maximum number of instance applications (proof nodes) one query may
+-- perform in total; exceeding it fails with
+-- 'ClassResolutionProofNodeLimitExceeded'.
 maximumClassResolutionProofNodes :: ClassResolutionLimits -> Int
 maximumClassResolutionProofNodes
     (ClassResolutionLimits _ _ _ _ _ _ _ _ _ value) = value
@@ -289,6 +331,11 @@ instance NFData variable => NFData (ClassResolutionConstraintError variable) whe
     ClassResolutionConstraintForallUnsupported ordinal -> rnf ordinal
     IllKindedClassResolutionConstraint cause -> rnf cause
 
+-- | Why 'sealClassResolutionEnvironment' refused an inventory: an exceeded
+-- admission or retention bound (each carrying the maximum and the observed
+-- count), a malformed retained constraint at a named site, a duplicate or
+-- overlapping instance head, a superclass cycle, or an instance
+-- prerequisite that grows relative to its head.
 data ClassResolutionEnvironmentError variable
   = ClassResolutionDeclarationLimitExceeded !Int !Int
   | ClassResolutionClassLimitExceeded !Int !Int
@@ -361,8 +408,13 @@ instance NFData variable => NFData (ResolutionInstance variable) where
     rnf ordinal `seq` rnf binders `seq` rnf binderSet `seq`
       rnf prerequisites `seq` rnf headConstraint
 
--- 'Generic' and the constructor are intentionally absent: the list, maps,
--- assumptions, alias set, and limits must all derive from one sealing pass.
+-- | A closed declared-class environment produced by
+-- 'sealClassResolutionEnvironment': the limits it was sealed under, the
+-- kind assumptions, the type-synonym names, and the checked classes and
+-- completed instances that 'dischargeGroundConstraint' and
+-- 'replayCheckedConstraintDischarge' consult.  'Generic' and the constructor
+-- are intentionally absent: the list, maps, assumptions, alias set, and
+-- limits must all derive from one sealing pass.
 data CheckedClassResolutionEnvironment variable =
   CheckedClassResolutionEnvironment
     !ClassResolutionLimits
@@ -395,24 +447,21 @@ sealClassResolutionEnvironment limits inventory = do
       declarationMaximum = maximumClassResolutionDeclarations limits
       observedDeclarations = observedListLength
         declarationMaximum rawDeclarations
-  if observedDeclarations > declarationMaximum
-    then Left $ ClassResolutionDeclarationLimitExceeded
+  when (observedDeclarations > declarationMaximum)
+    $ Left $ ClassResolutionDeclarationLimitExceeded
       declarationMaximum observedDeclarations
-    else pure ()
   let classMaximum = maximumClassResolutionClasses limits
       instanceMaximum = maximumClassResolutionInstances limits
       observedClasses = observedDeclarationCount
         classMaximum isClassDeclaration rawDeclarations
       observedInstances = observedDeclarationCount
         instanceMaximum isInstanceDeclaration rawDeclarations
-  if observedClasses > classMaximum
-    then Left $ ClassResolutionClassLimitExceeded
+  when (observedClasses > classMaximum)
+    $ Left $ ClassResolutionClassLimitExceeded
       classMaximum observedClasses
-    else pure ()
-  if observedInstances > instanceMaximum
-    then Left $ ClassResolutionInstanceLimitExceeded
+  when (observedInstances > instanceMaximum)
+    $ Left $ ClassResolutionInstanceLimitExceeded
       instanceMaximum observedInstances
-    else pure ()
   -- Inspect each class arity directly from the already checked declaration
   -- stream before 'prepareClassIndex' pairs it with retained kind metadata.
   -- This keeps a wide parameter spine behind the resolver's own width gate.
@@ -441,8 +490,8 @@ sealClassResolutionEnvironment limits inventory = do
   classes <- mapM (prepareClass assumptions classArities) rawClasses
   let classMap = Map.fromList
         [(resolutionClassName source, source) | source <- classes]
-  instances <- mapM (uncurry $ prepareInstance assumptions classArities)
-    $ zip [0 ..] rawInstances
+  instances <- zipWithM
+    (prepareInstance assumptions classArities) [0 ..] rawInstances
   rejectDuplicateHeads instances
   rejectOverlappingHeads limits instances
   rejectSuperclassCycles classes
@@ -534,10 +583,9 @@ sealClassResolutionEnvironment limits inventory = do
     let kinds = typeConstructorKinds source
         maximumKinds = maximumClassResolutionTypeConstructorKinds limits
         observedKinds = Map.size kinds
-    if observedKinds > maximumKinds
-      then Left $ ClassResolutionTypeConstructorKindLimitExceeded
+    when (observedKinds > maximumKinds)
+      $ Left $ ClassResolutionTypeConstructorKindLimitExceeded
         maximumKinds observedKinds
-      else pure ()
     mapM_ (uncurry $ observeKind . ClassResolutionTypeConstructorKind)
       $ Map.toAscList kinds
 
@@ -600,6 +648,9 @@ instance NFData variable => NFData (ClassResolutionProof variable) where
   rnf (ClassResolutionProof goal headConstraint prerequisites) =
     rnf goal `seq` rnf headConstraint `seq` rnf prerequisites
 
+-- | The canonical ground constraint this proof node establishes.  At the
+-- root it is the prepared query goal; in a prerequisite it is the
+-- instantiated prerequisite constraint.
 classResolutionProofGoal
   :: ClassResolutionProof variable
   -> Constraint (Type variable)
@@ -614,6 +665,10 @@ classResolutionProofInstanceHead
 classResolutionProofInstanceHead (ClassResolutionProof _ headConstraint _) =
   headConstraint
 
+-- | Sub-proofs for the selected instance's completed prerequisites, one per
+-- prerequisite in the instance's completed prerequisite order.  Every
+-- prerequisite of the chosen instance is proved; the list is empty for a
+-- prerequisite-free instance.
 classResolutionProofPrerequisites
   :: ClassResolutionProof variable
   -> [ClassResolutionProof variable]
@@ -632,6 +687,10 @@ instance NFData variable => NFData (CheckedConstraintDischarge variable) where
   rnf (CheckedConstraintDischarge environment goal proof) =
     rnf environment `seq` rnf goal `seq` rnf proof
 
+-- | The canonical ground goal this receipt discharges, in the checked
+-- environment's variable namespace.  It is the prepared form of the query
+-- (normalized, alias-free, kind-checked), and it is what
+-- 'replayCheckedConstraintDischarge' compares a replay goal against.
 checkedConstraintDischargeGoal
   :: CheckedConstraintDischarge variable
   -> Constraint (Type variable)
@@ -717,6 +776,11 @@ retypeGroundConstraint
 retypeGroundConstraint = traverse $ traverse $ \variable ->
   Left $ ClassResolutionGroundConstraintHasFreeVariables [variable]
 
+-- | Why 'replayCheckedConstraintDischarge' refused to release a proof: the
+-- receipt was issued against a different checked environment, the replay
+-- goal failed the same preparation the original query passed, or the
+-- prepared replay goal differs from the retained goal (expected, then
+-- actual).  The environment check runs before the goal is inspected.
 data ClassResolutionReplayMismatch variable
   = ClassResolutionReplayEnvironmentMismatch
   | ClassResolutionReplayGoalRejected
@@ -805,11 +869,10 @@ prepareConstraintStructure limits aliases lookupArity source = do
     Nothing -> Left $ UnknownClassResolutionClass name
     Just arity -> Right arity
   let supplied = observedListLength expected rawArguments
-  if supplied == expected
-    then pure ()
-    else Left $ ClassResolutionConstraintArityMismatch
+  unless (supplied == expected)
+    $ Left $ ClassResolutionConstraintArityMismatch
       name expected supplied
-  arguments <- mapM (uncurry prepareArgument) $ zip [0 ..] rawArguments
+  arguments <- zipWithM prepareArgument [0 ..] rawArguments
   pure $ Constraint name arguments
  where
   name = constraintClass source
@@ -844,7 +907,7 @@ validateConstraintKinds
   -> Either (ClassResolutionConstraintError variable) ()
 validateConstraintKinds assumptions source =
   either (Left . IllKindedClassResolutionConstraint) Right
-    $ () <$ checkClassApplicationKinds assumptions
+    $ void $ checkClassApplicationKinds assumptions
         (constraintClass source) (constraintArguments source)
 
 firstTypeSynonym :: Set Name -> Type variable -> Maybe Name
@@ -969,10 +1032,6 @@ data ResolutionOverlapVariable variable
   | RigidResolutionVariable !variable
   deriving (Eq, Ord)
 
-type ResolutionOverlapSubstitutions variable =
-  Map (ResolutionOverlapVariable variable)
-    (Type (ResolutionOverlapVariable variable))
-
 resolutionHeadsOverlap
   :: Ord variable
   => ResolutionInstance variable
@@ -984,7 +1043,9 @@ resolutionHeadsOverlap left right
       (constraintArguments $ preparedHead LeftResolutionBinder left)
       (constraintArguments $ preparedHead RightResolutionBinder right) of
     Nothing -> False
-    Just equations -> case solveResolutionOverlap equations Map.empty of
+    Just equations -> case
+        solveTypeEquations resolutionOverlapPolicy equations
+          emptyEquationSolution of
       Nothing -> False
       Just _ -> True
  where
@@ -1002,130 +1063,24 @@ resolutionHeadsOverlap left right
       | variable `Set.member` binders = side variable
       | otherwise = RigidResolutionVariable variable
 
-  zipExactly [] [] = Just []
-  zipExactly (leftType : leftRest) (rightType : rightRest) =
-    ((leftType, rightType) :) <$> zipExactly leftRest rightRest
-  zipExactly _ _ = Nothing
-
-solveResolutionOverlap
-  :: Ord variable
-  => [( Type (ResolutionOverlapVariable variable)
-      , Type (ResolutionOverlapVariable variable)
-      )]
-  -> ResolutionOverlapSubstitutions variable
-  -> Maybe (ResolutionOverlapSubstitutions variable)
-solveResolutionOverlap [] substitutions = Just substitutions
-solveResolutionOverlap ((rawLeft, rawRight) : equations) substitutions
-  | left == right = solveResolutionOverlap equations substitutions
-  | TypeVariable variable <- left
-  , resolutionOverlapBindable variable = bind variable right
-  | TypeVariable variable <- right
-  , resolutionOverlapBindable variable = bind variable left
-  | TypeConstructor leftName <- left
-  , TypeConstructor rightName <- right
-  , leftName == rightName = solveResolutionOverlap equations substitutions
-  | TypeApplication leftFunction leftArgument <- left
-  , TypeApplication rightFunction rightArgument <- right =
-      solveResolutionOverlap
-        ((leftFunction, rightFunction) :
-          (leftArgument, rightArgument) : equations)
-        substitutions
-  | FunctionType leftParameter leftResult <- left
-  , FunctionType rightParameter rightResult <- right =
-      solveResolutionOverlap
-        ((leftParameter, rightParameter) :
-          (leftResult, rightResult) : equations)
-        substitutions
-  | TupleType leftBoxity leftElements <- left
-  , TupleType rightBoxity rightElements <- right
-  , leftBoxity == rightBoxity
-  , Just elementEquations <- zipExactly leftElements rightElements =
-      solveResolutionOverlap (elementEquations ++ equations) substitutions
-  | otherwise = Nothing
- where
-  left = zonkResolutionOverlap substitutions rawLeft
-  right = zonkResolutionOverlap substitutions rawRight
-
-  bind variable replacement
-    | resolutionOverlapOccurs variable replacement = Nothing
-    | otherwise = solveResolutionOverlap
-        [ ( substituteResolutionOverlap variable replacement equationLeft
-          , substituteResolutionOverlap variable replacement equationRight
-          )
-        | (equationLeft, equationRight) <- equations
-        ]
-        $ Map.insert variable replacement
-        $ Map.map (substituteResolutionOverlap variable replacement)
-          substitutions
-
-  zipExactly [] [] = Just []
-  zipExactly (leftType : leftRest) (rightType : rightRest) =
-    ((leftType, rightType) :) <$> zipExactly leftRest rightRest
-  zipExactly _ _ = Nothing
+-- Either side's instance binders may be bound; a rigid variable never is.
+-- Foralls stay opaque atoms here, exactly as in the runtime matcher.
+resolutionOverlapPolicy :: EquationPolicy (ResolutionOverlapVariable variable)
+resolutionOverlapPolicy = EquationPolicy
+  { equationBinding = \left right -> case (left, right) of
+      (TypeVariable variable, _)
+        | resolutionOverlapBindable variable -> Just (variable, right)
+      (_, TypeVariable variable)
+        | resolutionOverlapBindable variable -> Just (variable, left)
+      _ -> Nothing
+  , equationForalls = OpaqueForallEquations
+  }
 
 resolutionOverlapBindable :: ResolutionOverlapVariable variable -> Bool
 resolutionOverlapBindable variable = case variable of
   LeftResolutionBinder{} -> True
   RightResolutionBinder{} -> True
   RigidResolutionVariable{} -> False
-
-resolutionOverlapOccurs
-  :: Eq variable
-  => ResolutionOverlapVariable variable
-  -> Type (ResolutionOverlapVariable variable)
-  -> Bool
-resolutionOverlapOccurs variable source = case source of
-  TypeVariable candidate -> variable == candidate
-  TypeConstructor{} -> False
-  TypeApplication function argument ->
-    resolutionOverlapOccurs variable function ||
-      resolutionOverlapOccurs variable argument
-  FunctionType parameter result ->
-    resolutionOverlapOccurs variable parameter ||
-      resolutionOverlapOccurs variable result
-  TupleType _ elements -> any (resolutionOverlapOccurs variable) elements
-  ForallType{} -> False
-
-substituteResolutionOverlap
-  :: Eq variable
-  => ResolutionOverlapVariable variable
-  -> Type (ResolutionOverlapVariable variable)
-  -> Type (ResolutionOverlapVariable variable)
-  -> Type (ResolutionOverlapVariable variable)
-substituteResolutionOverlap variable replacement source = case source of
-  TypeVariable candidate
-    | candidate == variable -> replacement
-    | otherwise -> source
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (substituteResolutionOverlap variable replacement function)
-    (substituteResolutionOverlap variable replacement argument)
-  FunctionType parameter result -> FunctionType
-    (substituteResolutionOverlap variable replacement parameter)
-    (substituteResolutionOverlap variable replacement result)
-  TupleType boxity elements -> TupleType boxity
-    $ map (substituteResolutionOverlap variable replacement) elements
-  ForallType{} -> source
-
-zonkResolutionOverlap
-  :: Ord variable
-  => ResolutionOverlapSubstitutions variable
-  -> Type (ResolutionOverlapVariable variable)
-  -> Type (ResolutionOverlapVariable variable)
-zonkResolutionOverlap substitutions source = case source of
-  TypeVariable variable -> case Map.lookup variable substitutions of
-    Nothing -> source
-    Just replacement -> zonkResolutionOverlap substitutions replacement
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (zonkResolutionOverlap substitutions function)
-    (zonkResolutionOverlap substitutions argument)
-  FunctionType parameter result -> FunctionType
-    (zonkResolutionOverlap substitutions parameter)
-    (zonkResolutionOverlap substitutions result)
-  TupleType boxity elements -> TupleType boxity
-    $ map (zonkResolutionOverlap substitutions) elements
-  ForallType{} -> source
 
 rejectSuperclassCycles
   :: [ResolutionClass variable]
@@ -1165,8 +1120,17 @@ completeInstance limits assumptions aliases classArities classes source =
     (ClassResolutionInstanceHead ordinal)
     $ UnknownClassResolutionClass $ constraintClass headConstraint
   Just owner -> do
-    substitutions <- zipExactly (resolutionClassParameters owner)
-      $ constraintArguments headConstraint
+    let parameters = resolutionClassParameters owner
+        arguments = constraintArguments headConstraint
+    substitutions <- maybe
+      (Left $ InvalidClassResolutionEnvironmentConstraint
+        (ClassResolutionInstanceHead ordinal)
+        $ ClassResolutionConstraintArityMismatch
+            (constraintClass headConstraint)
+            (length parameters)
+            (observedListLength (length parameters) arguments))
+      Right
+      $ zipExactly parameters arguments
     let rawDirectSuperclasses = map
           (fmap $ canonicalizeType .
             substituteFirstOrder (Map.fromList substitutions))
@@ -1189,20 +1153,6 @@ completeInstance limits assumptions aliases classArities classes source =
  where
   ordinal = resolutionInstanceOrdinal source
   headConstraint = resolutionInstanceHead source
-
-  zipExactly [] [] = Right []
-  zipExactly (left : leftRest) (right : rightRest) =
-    ((left, right) :) <$> zipExactly leftRest rightRest
-  zipExactly _ _ = Left $ InvalidClassResolutionEnvironmentConstraint
-    (ClassResolutionInstanceHead ordinal)
-    $ ClassResolutionConstraintArityMismatch
-        (constraintClass headConstraint)
-        (length $ resolutionClassParameters $ classes Map.!
-          constraintClass headConstraint)
-        (observedListLength
-          (length $ resolutionClassParameters $ classes Map.!
-            constraintClass headConstraint)
-          $ constraintArguments headConstraint)
 
 distinctConstraintsWithin
   :: Ord variable
@@ -1230,18 +1180,9 @@ substituteFirstOrder
   => Map variable (Type variable)
   -> Type variable
   -> Type variable
-substituteFirstOrder substitutions source = case source of
-  TypeVariable variable -> Map.findWithDefault source variable substitutions
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (substituteFirstOrder substitutions function)
-    (substituteFirstOrder substitutions argument)
-  FunctionType parameter result -> FunctionType
-    (substituteFirstOrder substitutions parameter)
-    (substituteFirstOrder substitutions result)
-  TupleType boxity elements -> TupleType boxity
-    $ map (substituteFirstOrder substitutions) elements
-  ForallType{} -> source
+substituteFirstOrder substitutions =
+  rewriteTypeVariables OpaqueForalls $ \variable ->
+    Map.findWithDefault (TypeVariable variable) variable substitutions
 
 rejectExpandingPrerequisites
   :: Ord variable
@@ -1315,14 +1256,12 @@ resolveConstraint environment@(CheckedClassResolutionEnvironment limits _ _ _
             observedBeyond maximumAllowed
               | maximumAllowed == maxBound = maxBound
               | otherwise = maximumAllowed + 1
-        if exceeded depth maximumDepth
-          then Left $ ClassResolutionProofDepthLimitExceeded
+        when (exceeded depth maximumDepth)
+          $ Left $ ClassResolutionProofDepthLimitExceeded
             maximumDepth $ observedBeyond maximumDepth
-          else pure ()
-        if exceeded proofCount maximumProofs
-          then Left $ ClassResolutionProofNodeLimitExceeded
+        when (exceeded proofCount maximumProofs)
+          $ Left $ ClassResolutionProofNodeLimitExceeded
             maximumProofs $ observedBeyond maximumProofs
-          else pure ()
         let observedDepth = depth + 1
             observedProofs = proofCount + 1
         (children, finalCount) <- resolvePrerequisiteSources
@@ -1375,11 +1314,6 @@ matchInstance source goal = do
  where
   headConstraint = resolutionInstanceHead source
   binders = resolutionInstanceBinderSet source
-
-  zipExactly [] [] = Just []
-  zipExactly (left : leftRest) (right : rightRest) =
-    ((left, right) :) <$> zipExactly leftRest rightRest
-  zipExactly _ _ = Nothing
 
   matchEquation substitutions (rawPattern, rawTarget) =
     matchType substitutions

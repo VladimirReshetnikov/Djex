@@ -2,6 +2,13 @@
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
 --
+
+-- | The object language of the LJT prover: propositional 'Formula's over
+-- 'Symbol' atoms, and the untyped proof 'Term's the search produces.  A
+-- 'Symbol' names both proof variables and atoms; an opaque type atom
+-- additionally seals a shared source type with alpha-normal identity.
+-- "Djinn.Internal.LJT" re-exports this module and searches over it, while
+-- "Djinn.Internal.TypeFormula" compiles source types into these formulae.
 module Djinn.Internal.LJTFormula (
     Symbol(Symbol), opaqueTypeSymbol, opaqueSymbolSource, symbolSpelling,
     Formula(..), (<->), (&), (|:), fnot, false, true,
@@ -23,6 +30,8 @@ infix  2 <->
 infixl 3 |:
 infixl 4 &
 
+-- | A name in the LJT calculus, used both for proof variables and for
+-- propositional atoms.
 -- Proof variables and ordinary historical atoms retain their source spelling.
 -- An opaque type atom additionally carries the exact shared source tree for
 -- display and an alpha-normal key for logical identity. Keeping those roles in
@@ -70,9 +79,16 @@ symbolSpelling symbol = case symbol of
 instance Show Symbol where
     show = symbolSpelling
 
+-- | A data constructor as seen by the prover: its name and its arity.
+-- Disjunction alternatives, injections, and case eliminators are tagged with
+-- one so proofs can be lowered back to named Haskell constructors.
 data ConsDesc = ConsDesc String Int     -- name and arity
      deriving (Eq, Ord, Show)
 
+-- | An intuitionistic propositional formula: an n-ary conjunction (@Conj []@
+-- is 'true'), a constructor-tagged disjunction, a nominally distinct empty
+-- type ('Empty', logically false), an implication, or an atom.  Implication
+-- @:->@ associates to the right.
 data Formula
         = Conj [Formula]
         | Disj [(ConsDesc, Formula)]
@@ -89,18 +105,21 @@ x <-> y = (x:->y) & (y:->x)
 x & y = Conj [x, y]
 
 (|:) :: Formula -> Formula -> Formula
-x |: y = Disj [((ConsDesc "Left" 1), x), ((ConsDesc "Right" 1), y)]
+x |: y = Disj [(ConsDesc "Left" 1, x), (ConsDesc "Right" 1, y)]
 
+-- | Intuitionistic negation: the implication from the formula to 'false'.
 fnot :: Formula -> Formula
 fnot x = x :-> false
 
+-- | Falsity, represented as the empty type named @Void@.
 false :: Formula
 false = Empty $ Symbol "Void"
 
+-- | Truth, represented as the empty conjunction.
 true :: Formula
 true = Conj []
 
--- Every symbol occurring in a formula: propositional atoms and the nominal
+-- | Every symbol occurring in a formula: propositional atoms and the nominal
 -- tags of empty types. Freshness machinery reserves all of them. An opaque
 -- type symbol is structurally disjoint from every generated spelling, so it
 -- cannot collide with a proof binder even when its rendered text does.
@@ -138,6 +157,11 @@ instance Show Formula where
 
 ------------------------------
 
+-- | A proof term of the LJT calculus: an untyped lambda calculus over
+-- 'Symbol' variables extended with constants for building and splitting
+-- n-tuples ('Ctuple', 'Csplit'), injecting into and case-analysing
+-- constructor-tagged sums ('Cinj', 'Ccases'), and a legacy tuple selector.
+-- Constants take their operands through ordinary 'Apply' spines.
 data Term
         = Var Symbol
         | Lam Symbol Term
@@ -166,6 +190,7 @@ instance Show Term where
         showParen (p > 0) $
             showString ("sel_" ++ show i ++ "_" ++ show n ++ " ") . showsPrec 2 e
 
+-- | Apply a term to a list of arguments in order (left-nested 'Apply').
 applys :: Term -> [Term] -> Term
 applys = foldl' Apply
 

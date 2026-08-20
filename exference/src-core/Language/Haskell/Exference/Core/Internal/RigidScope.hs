@@ -27,12 +27,18 @@ import Control.DeepSeq (NFData (..))
 import Language.Haskell.Exference.Core.Types
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
+-- | A rejected substitution: the flexible variable whose image mentions a
+-- rigid constant of a scope opened after that variable was already alive.
+-- 'validateRigidSubstitutions' reports the smallest such rigid ID.
 data RigidEscape = RigidEscape
   { escapingFlexibleVariable :: !TVarId
   , escapingRigidVariable :: !TVarId
   }
   deriving (Eq, Show)
 
+-- | The scope discipline of one search branch or check: for each flexible
+-- variable, the rigid IDs it may not be solved to mention, plus the set of
+-- every rigid ID owned by a scope opened dynamically in this branch.
 data RigidScope = RigidScope
   (IntMap.IntMap IntSet.IntSet)
   IntSet.IntSet
@@ -51,6 +57,8 @@ instance NFData RigidScope where
     rnf (IntMap.toAscList restrictions)
       `seq` rnf (IntSet.toAscList owned)
 
+-- | The scope with no restrictions and no owned rigid IDs, as held before any
+-- nested forall has been opened.
 emptyRigidScope :: RigidScope
 emptyRigidScope = RigidScope IntMap.empty IntSet.empty
 

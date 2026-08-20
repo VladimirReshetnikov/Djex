@@ -23,6 +23,9 @@ import GHC.Generics (Generic)
 
 import Language.Haskell.Exference.Core.Types
 
+-- | One deferred class obligation paired with the local given constraints
+-- that were in scope where it arose.  Only those givens (on top of the root
+-- class environment) may be used to discharge it.
 data ScopedConstraint = ScopedConstraint
   { scopedConstraintGivens :: [HsConstraint]
   , scopedConstraintObligation :: HsConstraint
@@ -67,5 +70,6 @@ resolveScopedConstraints solver rootEnvironment = fmap concat . traverse resolve
     scopedConstraints givens
       <$> solver (addQueryClassEnv givens rootEnvironment) [obligation]
 
+-- | Drop the local givens and keep only the obligations, in the same order.
 scopedConstraintObligations :: [ScopedConstraint] -> [HsConstraint]
 scopedConstraintObligations = map scopedConstraintObligation

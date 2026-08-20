@@ -31,7 +31,7 @@ module Language.Haskell.Djex.REPL.Workspace
 
 import Control.DeepSeq (force)
 import Control.Exception (evaluate)
-import Data.Either (partitionEithers)
+import Data.Either (fromRight, partitionEithers)
 import qualified Data.Foldable as Foldable
 import Data.List (intercalate, sort)
 import Data.List.NonEmpty (NonEmpty (..))
@@ -259,12 +259,16 @@ workspaceUnresolvedImportsWithSources workspace =
   loadedNames = Set.fromList
     $ map parsedModuleName $ workspaceModules workspace
 
+-- | The module name declared by the module header, or @Main@ when the file
+-- has none.
 workspaceModuleName :: WorkspaceModule -> String
 workspaceModuleName = parsedModuleName
 
+-- | The canonical path of the source file the module was parsed from.
 workspaceModulePath :: WorkspaceModule -> FilePath
 workspaceModulePath = parsedModulePath
 
+-- | The parsed HSE syntax tree of the module.
 workspaceModuleSyntax
   :: WorkspaceModule
   -> HSE.Module HSE.SrcSpanInfo
@@ -281,6 +285,10 @@ workspaceTargetDisplay target = starPrefix ++ base
     Just name | locatorKind locator == ModuleNameTarget -> name
     _ -> locatorPath locator
 
+-- | The canonical source files supplied directly by a target as of the
+-- last workspace snapshot: exactly one for a file or named-module target,
+-- and every discovered source file, in deterministic order, for a
+-- directory target. Modules pulled in only as dependencies are excluded.
 workspaceTargetModuleFiles :: WorkspaceTarget -> [FilePath]
 workspaceTargetModuleFiles = targetSourceFiles
 
@@ -1045,7 +1053,7 @@ removalPath source
   | null source = pure Nothing
   | otherwise = do
       inspected <- tryIOError $ doesPathExist source
-      if either (const False) id inspected
+      if fromRight False inspected
         then either (const Nothing) Just <$> tryIOError (canonicalizePath source)
         else if isAbsolute source || looksLikePath source
           then either (const Nothing) (Just . normalise)

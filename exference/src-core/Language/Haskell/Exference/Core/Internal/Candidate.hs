@@ -1,5 +1,11 @@
 {-# LANGUAGE DeriveGeneric #-}
 
+-- | The Exference result payload and its type-variable naming hints.  An
+-- 'ExferenceCandidate' is the shared 'Candidate' carrying a checked function
+-- clause plus 'ExferenceCandidateDetails'; 'projectValidatedCandidate' is
+-- how the engine builds one once every result check has passed.  The
+-- opaque source-spelling witnesses seal frontend spellings against a
+-- canonical goal so search and rendering can trust them without rechecking.
 module Language.Haskell.Exference.Core.Internal.Candidate
   ( ExferenceCandidateDetails (..)
   , ExferenceTypeVariableHints
@@ -47,6 +53,10 @@ import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
+-- | Preferred source spellings for the type variables of a result, keyed by
+-- flexible or rigid variable.  'typeVariableHintsWithPlan' gives each rigid
+-- skolem the spelling of the goal variable it instantiates; the map is a
+-- rendering hint only.
 type ExferenceTypeVariableHints = Map.Map SynthesisVariable String
 
 -- | Detached, lexically checked frontend spellings in source-map order.
@@ -233,6 +243,10 @@ type ExferenceCandidate =
   Candidate HsType ExferenceCandidateDetails
     (Generated.FunctionClause TVarId)
 
+-- | Project a fully checked search result into the shared candidate form: a
+-- function clause for the target with unused pattern binders replaced by
+-- wildcards, its residual constraints, and normalized statistics plus naming
+-- hints as details.
 -- The engine calls this only after input, typing, scope, completeness, and
 -- generated-syntax checks.  Keeping it in an Internal module makes that
 -- precondition unavailable as an unchecked public escape hatch.

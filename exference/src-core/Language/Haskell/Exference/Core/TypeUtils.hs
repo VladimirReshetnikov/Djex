@@ -1,3 +1,9 @@
+-- | Structural utilities over Exference's 'HsType': flexible-variable
+-- renumbering and bounds, forall quantification and alpha-normalization,
+-- arrow-chain splitting, and forall/head queries.  Many are thin
+-- compatibility names over "Language.Haskell.Synthesis.Type"; the class-
+-- environment names in the export list are re-exported from
+-- "Language.Haskell.Exference.Core.Types" for historical callers.
 module Language.Haskell.Exference.Core.TypeUtils
   ( incVarIds
   , maximumFlexibleId
@@ -23,6 +29,7 @@ where
 
 
 
+import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
 import qualified Data.IntSet as IntSet
 
@@ -64,9 +71,12 @@ maximumFlexibleId typeExpression
 -- including a negative-only domain; use 'maximumFlexibleId' to distinguish a
 -- ground type from a real @TypeVar (-1)@.
 largestId :: HsType -> TVarId
-largestId = maybe (-1) id . maximumFlexibleId
+largestId = fromMaybe (-1) . maximumFlexibleId
 {-# DEPRECATED largestId "Use maximumFlexibleId; every Int is a valid TVarId." #-}
 
+-- | Whether any argument of a constraint has a free flexible variable (see
+-- 'freeVars'); rigid constants do not count.  The constraint solver defers
+-- such constraints instead of resolving them against instances.
 constraintContainsVariables :: HsConstraint -> Bool
 constraintContainsVariables =
   any (not . S.null . freeVars) . constraint_params
@@ -185,6 +195,8 @@ containsForall = SharedType.containsForall
 containsNestedForall :: HsType -> Bool
 containsNestedForall = SharedType.containsNestedForall
 
+-- | Whether explicit quantification occurs at any depth inside any argument
+-- of a constraint; the per-argument test is 'containsForall'.
 constraintContainsForall :: HsConstraint -> Bool
 constraintContainsForall = SharedType.constraintContainsForall
 

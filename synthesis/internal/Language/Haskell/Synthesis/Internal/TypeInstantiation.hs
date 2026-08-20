@@ -26,15 +26,17 @@ import Data.Set (Set)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
-import Language.Haskell.Synthesis.Constraint (Constraint (..))
-import Language.Haskell.Synthesis.Internal.InstanceHead
-  ( constraintListEquations
-  , zipExactly
-  )
 import Language.Haskell.Synthesis.Internal.Alpha
   ( AlphaVariable (..)
   , BinderSlotPolicy (PositionalBinderSlots)
+  , EquationPolicy (..)
+  , EquationSolution (..)
+  , ForallEquations (..)
   , alphaNormalizeTypeWith
+  , emptyEquationSolution
+  , eraseVacuousForalls
+  , solveTypeEquations
+  , zonkSolution
   )
 import Language.Haskell.Synthesis.Type
   ( Type (..)
@@ -99,13 +101,19 @@ matchContextFreeScheme rawSource rawActual = do
   (binderCount, patternBody) <- preparePattern alphaSource
   let actualBody = fmap actualVariable alphaActual
   solved <- maybe (Left ContextFreeSchemeShapeMismatch) Right
-    $ solveEquations [(patternBody, actualBody)] emptySolverState
-  let substitutions = solverSubstitutions solved
-      selection slot = ContextFreeSchemeSelection . zonk substitutions
-        <$> Map.lookup slot substitutions
+    $ solveTypeEquations matchPolicy [(patternBody, actualBody)]
+        emptyEquationSolution
+  let selection slot =
+        ContextFreeSchemeSelection . zonkSolution matchPolicy solved
+          <$> Map.lookup (InstantiationBindable slot)
+                (solutionSubstitutions solved)
   pure $ ContextFreeSchemeMatch
     [selection slot | slot <- naturalPrefix binderCount]
 
+-- | One entry per binder of the source's complete leading forall prefix, in
+-- source binder order (outer forall first): @Just@ the inferred selection for
+-- a binder the match solved, or @Nothing@ for a vacuous prefix binder that
+-- the source body never mentions.
 contextFreeSchemeSelections
   :: ContextFreeSchemeMatch variable
   -> [Maybe (ContextFreeSchemeSelection variable)]
@@ -144,16 +152,21 @@ data InstantiationVariable variable
 
 instance NFData variable => NFData (InstantiationVariable variable)
 
-type Substitutions variable =
-  Map Natural (Type (InstantiationVariable variable))
-
-data SolverState variable = SolverState
-  { solverSubstitutions :: !(Substitutions variable)
-  , solverNextPairedSkolem :: !Natural
+-- Deliberately smaller than a unifier: only the source's prefix binders may
+-- be solved, every actual-side variable stays a constant, and nested forall
+-- binders are paired with fresh private skolems.
+matchPolicy :: EquationPolicy (InstantiationVariable variable)
+matchPolicy = EquationPolicy
+  { equationBinding = \patternType actualType -> case patternType of
+      TypeVariable variable@InstantiationBindable{} ->
+        Just (variable, actualType)
+      _ -> Nothing
+  , equationForalls =
+      PairedForallEquations InstantiationPairedSkolem isPairedSkolem
   }
-
-emptySolverState :: SolverState variable
-emptySolverState = SolverState Map.empty 0
+ where
+  isPairedSkolem InstantiationPairedSkolem{} = True
+  isPairedSkolem _ = False
 
 preparePattern
   :: Ord variable
@@ -191,203 +204,8 @@ actualVariable variable = case variable of
   AlphaBoundVariable scope slot -> InstantiationActualLexical scope slot
   AlphaFreeVariable free -> InstantiationFree free
 
-solveEquations
-  :: Ord variable
-  => [( Type (InstantiationVariable variable)
-      , Type (InstantiationVariable variable)
-      )]
-  -> SolverState variable
-  -> Maybe (SolverState variable)
-solveEquations [] state = Just state
-solveEquations ((rawPattern, rawActual) : equations) state
-  | patternType == actualType = solveEquations equations state
-  | TypeVariable (InstantiationBindable slot) <- patternType =
-      bind slot actualType
-  | TypeConstructor patternName <- patternType
-  , TypeConstructor actualName <- actualType
-  , patternName == actualName = solveEquations equations state
-  | TypeApplication patternFunction patternArgument <- patternType
-  , TypeApplication actualFunction actualArgument <- actualType =
-      solveEquations
-        ((patternFunction, actualFunction) :
-          (patternArgument, actualArgument) : equations)
-        state
-  | FunctionType patternParameter patternResult <- patternType
-  , FunctionType actualParameter actualResult <- actualType =
-      solveEquations
-        ((patternParameter, actualParameter) :
-          (patternResult, actualResult) : equations)
-        state
-  | TupleType patternBoxity patternFields <- patternType
-  , TupleType actualBoxity actualFields <- actualType
-  , patternBoxity == actualBoxity
-  , Just fieldEquations <- zipExactly patternFields actualFields =
-      solveEquations (fieldEquations ++ equations) state
-  | ForallType patternBinders patternConstraints patternBody <- patternType
-  , ForallType actualBinders actualConstraints actualBody <- actualType
-  , Just (openedEquations, openedState) <- openForalls
-      patternBinders patternConstraints patternBody
-      actualBinders actualConstraints actualBody state =
-      solveEquations (openedEquations ++ equations) openedState
-  | otherwise = Nothing
- where
-  substitutions = solverSubstitutions state
-  patternType = zonk substitutions rawPattern
-  actualType = zonk substitutions rawActual
-
-  bind slot replacement
-    | occursIn slot replacement = Nothing
-    | containsPairedSkolem replacement = Nothing
-    | otherwise = solveEquations
-        [ ( substitute slot replacement patternEquation
-          , substitute slot replacement actualEquation
-          )
-        | (patternEquation, actualEquation) <- equations
-        ]
-        state
-          { solverSubstitutions = Map.insert slot replacement
-              $ Map.map (substitute slot replacement) substitutions
-          }
-
-openForalls
-  :: Ord variable
-  => [InstantiationVariable variable]
-  -> [Constraint (Type (InstantiationVariable variable))]
-  -> Type (InstantiationVariable variable)
-  -> [InstantiationVariable variable]
-  -> [Constraint (Type (InstantiationVariable variable))]
-  -> Type (InstantiationVariable variable)
-  -> SolverState variable
-  -> Maybe
-      ( [( Type (InstantiationVariable variable)
-         , Type (InstantiationVariable variable)
-         )]
-      , SolverState variable
-      )
-openForalls patternBinders patternConstraints patternBody
-    actualBinders actualConstraints actualBody state = do
-  (patternRenaming, actualRenaming, nextSkolem) <- pairBinders
-    (solverNextPairedSkolem state) patternBinders actualBinders
-  constraintEquations <- constraintListEquations
-    (map (fmap $ renameType patternRenaming) patternConstraints)
-    (map (fmap $ renameType actualRenaming) actualConstraints)
-  pure
-    ( ( renameType patternRenaming patternBody
-      , renameType actualRenaming actualBody
-      ) : constraintEquations
-    , state {solverNextPairedSkolem = nextSkolem}
-    )
-
-pairBinders
-  :: Ord variable
-  => Natural
-  -> [InstantiationVariable variable]
-  -> [InstantiationVariable variable]
-  -> Maybe
-      ( Map (InstantiationVariable variable)
-          (InstantiationVariable variable)
-      , Map (InstantiationVariable variable)
-          (InstantiationVariable variable)
-      , Natural
-      )
-pairBinders next [] [] = Just (Map.empty, Map.empty, next)
-pairBinders next (patternBinder : patternRest)
-    (actualBinder : actualRest) = do
-  (patternRenaming, actualRenaming, finalNext) <- pairBinders
-    (next + 1) patternRest actualRest
-  let skolem = InstantiationPairedSkolem next
-  pure
-    ( Map.insert patternBinder skolem patternRenaming
-    , Map.insert actualBinder skolem actualRenaming
-    , finalNext
-    )
-pairBinders _ _ _ = Nothing
-
-renameType
-  :: Ord variable
-  => Map variable variable
-  -> Type variable
-  -> Type variable
-renameType renaming = fmap $ rename renaming
-
-rename :: Ord variable => Map variable variable -> variable -> variable
-rename renaming variable = Map.findWithDefault variable variable renaming
-
-zonk
-  :: Ord variable
-  => Substitutions variable
-  -> Type (InstantiationVariable variable)
-  -> Type (InstantiationVariable variable)
-zonk substitutions source = case source of
-  TypeVariable (InstantiationBindable slot) -> case Map.lookup slot substitutions of
-    Nothing -> source
-    Just replacement -> zonk substitutions replacement
-  TypeVariable{} -> source
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (zonk substitutions function) (zonk substitutions argument)
-  FunctionType parameter result -> FunctionType
-    (zonk substitutions parameter) (zonk substitutions result)
-  TupleType boxity fields -> TupleType boxity $ map (zonk substitutions) fields
-  ForallType binders constraints body -> ForallType binders
-    (map (fmap $ zonk substitutions) constraints)
-    $ zonk substitutions body
-
-substitute
-  :: Eq variable
-  => Natural
-  -> Type (InstantiationVariable variable)
-  -> Type (InstantiationVariable variable)
-  -> Type (InstantiationVariable variable)
-substitute selected replacement source = case source of
-  TypeVariable (InstantiationBindable slot)
-    | slot == selected -> replacement
-    | otherwise -> source
-  TypeVariable{} -> source
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (substitute selected replacement function)
-    (substitute selected replacement argument)
-  FunctionType parameter result -> FunctionType
-    (substitute selected replacement parameter)
-    (substitute selected replacement result)
-  TupleType boxity fields -> TupleType boxity
-    $ map (substitute selected replacement) fields
-  ForallType binders constraints body -> ForallType binders
-    (map (fmap $ substitute selected replacement) constraints)
-    $ substitute selected replacement body
-
-occursIn
-  :: Eq variable
-  => Natural
-  -> Type (InstantiationVariable variable)
-  -> Bool
-occursIn slot = any (== InstantiationBindable slot)
-
-containsPairedSkolem
-  :: Type (InstantiationVariable variable)
-  -> Bool
-containsPairedSkolem = any isPaired
- where
-  isPaired InstantiationPairedSkolem{} = True
-  isPaired _ = False
-
 canonicalInstantiationForm :: Type variable -> Type variable
-canonicalInstantiationForm source = case source of
-  TypeVariable{} -> source
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (canonicalInstantiationForm function)
-    (canonicalInstantiationForm argument)
-  FunctionType parameter result -> FunctionType
-    (canonicalInstantiationForm parameter)
-    (canonicalInstantiationForm result)
-  TupleType boxity fields -> TupleType boxity
-    $ map canonicalInstantiationForm fields
-  ForallType [] [] body -> canonicalInstantiationForm body
-  ForallType binders constraints body -> ForallType binders
-    (map (fmap canonicalInstantiationForm) constraints)
-    $ canonicalInstantiationForm body
+canonicalInstantiationForm = eraseVacuousForalls
 
 naturalPrefix :: Natural -> [Natural]
 naturalPrefix count = naturalPrefixFrom 0 count

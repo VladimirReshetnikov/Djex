@@ -134,6 +134,7 @@ import Control.Concurrent.STM
   , putTMVar
   , readTMVar
   , readTVar
+  , readTVarIO
   , takeTMVar
   , tryTakeTMVar
   , writeTVar
@@ -148,12 +149,13 @@ import Control.Exception
   , try
   )
 import qualified Crypto.Hash.SHA256 as SHA256
+import Data.Bifunctor (bimap)
 import Data.Bits (shiftR)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Char (intToDigit, ord)
 import Data.List (nub)
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Set as Set
 import Data.Set (Set)
 import Data.Word (Word64, Word8)
@@ -210,12 +212,13 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Execution
   , retainLengthSMTLibPostLaunchExecutionPolicy
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
-  ( LengthSMTLibProtocolDecoded
-  , LengthSMTLibProtocolError (..)
+  ( LengthSMTLibProtocolError (..)
   , LengthSMTLibProtocolLimits
-  , LengthSMTLibProtocolPlan
   , LengthSMTLibProtocolPlanError
+  , LengthSMTLibProtocolPlanFingerprintSubject
   , LengthSMTLibProtocolWriteKind (..)
+  , LengthSMTLibQueryProtocolDecoded
+  , LengthSMTLibQueryProtocolPlan
   , feedLengthSMTLibProtocol
   , finishLengthSMTLibProtocol
   , lengthSMTLibProtocolCumulativeStdoutByteLimit
@@ -231,23 +234,11 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol
   , startLengthSMTLibProtocol
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Protocol.SpinePair
-  ( LengthSpinePairSMTLibProtocolDecoded
-  , LengthSpinePairSMTLibProtocolError
-  , LengthSpinePairSMTLibProtocolPlan
+  ( LengthSpinePairSMTLibProtocolError
   , LengthSpinePairSMTLibProtocolPlanError
-  , LengthSpinePairSMTLibProtocolWriteKind
+  , LengthSpinePairSMTLibProtocolPlanFingerprintSubject
   , defaultLengthSpinePairSMTLibProtocolLimits
-  , feedLengthSpinePairSMTLibProtocol
-  , finishLengthSpinePairSMTLibProtocol
-  , lengthSpinePairSMTLibProtocolInputValueWriteBytes
-  , lengthSpinePairSMTLibProtocolPlanArtifactPolicy
-  , lengthSpinePairSMTLibProtocolPlanCumulativeStdoutByteLimit
-  , lengthSpinePairSMTLibProtocolPlanFingerprint
-  , lengthSpinePairSMTLibProtocolPlanMinimumStdoutByteCount
-  , lengthSpinePairSMTLibProtocolPlanQuery
-  , lengthSpinePairSMTLibProtocolDecodedObservation
   , sealLengthSpinePairSMTLibProtocolPlan
-  , startLengthSpinePairSMTLibProtocol
   )
 import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Capability
   ( LengthSMTLibCapabilityError (..)
@@ -341,7 +332,8 @@ import Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , lengthIntermediateValueBitLimit
   )
 import Language.Haskell.Synthesis.Semantic.Length.SMTLib
-  ( LengthSMTLibModelError
+  ( LengthSMTLibIntegerBinding
+  , LengthSMTLibModelError
   , LengthSMTLibQuery
   , LengthSpinePairSMTLibModelError
   , LengthSpinePairSMTLibQuery
@@ -359,6 +351,9 @@ import Language.Haskell.Synthesis.Semantic.Observation
 import Language.Haskell.Synthesis.Semantic.Problem
   ( BehavioralEvidence )
 
+-- | Schema tag of the scoped worker-session layer, bound as the first field
+-- of every ready-worker identity fingerprint ahead of the launch-specific
+-- ready-worker tag.
 lengthSMTLibSessionSchemaTag :: [Word8]
 lengthSMTLibSessionSchemaTag =
   ascii "djex-length-z3-scoped-worker-session/v3"
@@ -370,6 +365,10 @@ lengthSMTLibCausalDriverSchemaTag :: [Word8]
 lengthSMTLibCausalDriverSchemaTag = ascii
   "djex-length-z3-causal-byte-stream-driver/v1"
 
+-- | Ready-worker identity schema tag for the portable pre-spawn
+-- pathname-snapshot launch.  Descriptor-bound launches bind their own
+-- sibling tags, so this value appears in a ready-worker identity only when
+-- the process was spawned directly from its pathname.
 lengthSMTLibReadyWorkerSchemaTag :: [Word8]
 lengthSMTLibReadyWorkerSchemaTag =
   ascii "djex-length-z3-capability-probed-ready-worker/v4"
@@ -404,10 +403,17 @@ lengthSMTLibSessionEpochSchemaTag :: [Word8]
 lengthSMTLibSessionEpochSchemaTag =
   ascii "os-entropy-512/split-public-label-secret-barrier-seed/v3"
 
+-- | Schema tag for per-query barrier derivation.  Each query barrier is
+-- HMAC-SHA256 under the secret session seed over this tag, a one-byte role
+-- (check or input-value), and the big-endian 64-bit query ordinal; the tag is
+-- also bound in the query-allocation field of every query-run identity.
 lengthSMTLibQueryBarrierSchemaTag :: [Word8]
 lengthSMTLibQueryBarrierSchemaTag = ascii
   "hmac-sha256/secret-seed/fixed-role/u64be-ordinal/v1"
 
+-- | Query-run identity schema tag for a scalar run on a portable
+-- pathname-snapshot worker under the fresh-per-query deadline policy.
+-- Budgeted, scoped, and descriptor-bound workers bind their own sibling tags.
 lengthSMTLibQueryRunSchemaTag :: [Word8]
 lengthSMTLibQueryRunSchemaTag = ascii
   "djex-length-z3-capability-probed-pre-spawn-pathname-snapshot-worker-query-run/v1"
@@ -590,6 +596,11 @@ lengthSpinePairSMTLibDescriptorBoundExecveCheckExecutableAccessScopedBudgetedQue
     , "scoped-shared-usable-work-deadline/v1"
     ]
 
+-- | Platform-specific schema tag for the fresh working directory, bound in
+-- the ready-worker identity next to the workspace path.  It names how the
+-- directory is created and verified (an exclusive POSIX 0700 directory
+-- tracked through an open descriptor, or a Windows path-only observation) and
+-- that cleanup only ever removes it as an empty directory.
 lengthSMTLibSessionWorkspaceSchemaTag :: [Word8]
 #ifndef mingw32_HOST_OS
 lengthSMTLibSessionWorkspaceSchemaTag =
@@ -605,6 +616,10 @@ lengthSMTLibSessionWorkspaceSchemaTag =
     ]
 #endif
 
+-- | Identifies which session limit a 'LengthSMTLibSessionConfigError' refers
+-- to.  Constructor order matches the field order of
+-- 'LengthSMTLibSessionLimitSource' and the order in which
+-- 'mkLengthSMTLibSessionLimits' validates the fields.
 data LengthSMTLibSessionLimitField
   = LengthSMTLibSessionOpenerDeadlineMilliseconds
   | LengthSMTLibSessionWorkspaceAllocationAttempts
@@ -613,6 +628,12 @@ data LengthSMTLibSessionLimitField
   | LengthSMTLibSessionQueryRunIdentityFingerprintBytes
   deriving (Bounded, Enum, Eq, Ord, Show)
 
+-- | Raw, unvalidated session limits: the opener deadline in milliseconds,
+-- how many exclusive workspace-creation attempts may collide before
+-- allocation gives up, the maximum number of queries one worker admits
+-- (shared between scalar and spine-pair runs), and the byte caps for the
+-- ready-worker identity fingerprint and for each query-run identity
+-- fingerprint.  Validate with 'mkLengthSMTLibSessionLimits'.
 data LengthSMTLibSessionLimitSource = LengthSMTLibSessionLimitSource
   { lengthSMTLibSessionLimitSourceOpenerDeadlineMilliseconds :: !Natural
   , lengthSMTLibSessionLimitSourceWorkspaceAllocationAttempts :: !Natural
@@ -630,6 +651,11 @@ instance NFData LengthSMTLibSessionLimitSource where
     rnf (lengthSMTLibSessionLimitSourceIdentityFingerprintBytes source) `seq`
     rnf (lengthSMTLibSessionLimitSourceQueryRunIdentityFingerprintBytes source)
 
+-- | Default raw limits: a 5000 ms opener deadline, 8 workspace-allocation
+-- attempts, 64 queries per worker, 262144 ready-identity fingerprint bytes,
+-- and 2097152 query-run identity fingerprint bytes.
+-- 'mkLengthSMTLibSessionLimits' accepts these values and yields the same
+-- limits as 'defaultLengthSMTLibSessionLimits'.
 defaultLengthSMTLibSessionLimitSource :: LengthSMTLibSessionLimitSource
 defaultLengthSMTLibSessionLimitSource = LengthSMTLibSessionLimitSource
   { lengthSMTLibSessionLimitSourceOpenerDeadlineMilliseconds = 5000
@@ -639,6 +665,10 @@ defaultLengthSMTLibSessionLimitSource = LengthSMTLibSessionLimitSource
   , lengthSMTLibSessionLimitSourceQueryRunIdentityFingerprintBytes = 2097152
   }
 
+-- | Validated session limits accepted by 'sealLengthSMTLibSessionConfig'.
+-- Every limit is positive and the opener deadline is retained as an 'Int'
+-- millisecond count.  The constructor is private; obtain a value through
+-- 'mkLengthSMTLibSessionLimits' or 'defaultLengthSMTLibSessionLimits'.
 data LengthSMTLibSessionLimits = LengthSMTLibSessionLimits
   !Int !Natural !Natural !Natural !Natural
 
@@ -647,6 +677,12 @@ instance NFData LengthSMTLibSessionLimits where
     rnf deadline `seq` rnf attempts `seq` rnf queries `seq` rnf identity `seq`
     rnf runIdentity
 
+-- | Why 'mkLengthSMTLibSessionLimits' or 'sealLengthSMTLibSessionConfig'
+-- rejected its inputs: a zero limit, a limit too large for its runtime
+-- representation, capability limits that cannot admit even a fixed-nonce
+-- four-stage plan, or a process stdout limit below the minimum capability
+-- output.  Limit failures carry the field and its raw value; the stdout
+-- failure carries the configured maximum and the required minimum.
 data LengthSMTLibSessionConfigError
   = LengthSMTLibSessionNonPositiveLimit
       !LengthSMTLibSessionLimitField !Natural
@@ -657,6 +693,11 @@ data LengthSMTLibSessionConfigError
   | LengthSMTLibSessionProcessStdoutAdmissionTooSmall !Natural !Natural
   deriving (Eq, Ord, Show)
 
+-- | Validate raw session limits in field order, reporting the first failing
+-- field.  Every limit must be positive; in addition the opener deadline must
+-- not exceed one thousandth of the largest 'Int' and the query maximum must
+-- fit a 'Word64', otherwise a 'LengthSMTLibSessionLimitConversionOverflow'
+-- names the field.
 mkLengthSMTLibSessionLimits
   :: LengthSMTLibSessionLimitSource
   -> Either LengthSMTLibSessionConfigError LengthSMTLibSessionLimits
@@ -688,10 +729,18 @@ mkLengthSMTLibSessionLimits source = do
       then Left $ LengthSMTLibSessionLimitConversionOverflow field retained
       else Right $ fromIntegral retained
 
+-- | The validated form of 'defaultLengthSMTLibSessionLimitSource': a 5000 ms
+-- opener deadline, 8 workspace-allocation attempts, 64 queries per worker,
+-- and 262144 / 2097152-byte caps on the ready-worker and query-run identity
+-- fingerprints.
 defaultLengthSMTLibSessionLimits :: LengthSMTLibSessionLimits
 defaultLengthSMTLibSessionLimits =
   LengthSMTLibSessionLimits 5000 8 64 262144 2097152
 
+-- | Sealed inputs for opening one worker: session, process, capability, and
+-- protocol limits together with the execution configuration.  Only
+-- 'sealLengthSMTLibSessionConfig' constructs it, so a value has already
+-- passed the capability-admission and stdout-capacity preflight.
 data LengthSMTLibSessionConfig = LengthSMTLibSessionConfig
   !LengthSMTLibSessionLimits
   !LengthSMTLibProcessLimits
@@ -727,6 +776,13 @@ sealLengthSMTLibSessionConfig session process capability protocol execution = do
     Right _ -> Right $ LengthSMTLibSessionConfig
       session process capability protocol execution
 
+-- | Why the fresh working directory could not be allocated, verified, or
+-- removed.  Allocation failures cover the temporary-directory lookup, OS
+-- entropy, exhausted collision retries, and directory creation; the
+-- postcondition failure means the directory did not verify as the owned,
+-- empty, non-symlink directory that was created; the last two describe
+-- cleanup (removal failed, or the child process was not confirmed released
+-- so the pathname was retained).
 data LengthSMTLibSessionWorkspaceFailure
   = LengthSMTLibSessionTemporaryDirectoryUnavailable
   | LengthSMTLibSessionTemporaryDirectoryNotAbsolute
@@ -739,6 +795,13 @@ data LengthSMTLibSessionWorkspaceFailure
   | LengthSMTLibSessionWorkspaceProcessCleanupIncomplete
   deriving (Eq, Ord, Show)
 
+-- | Final disposition of the workspace directory.
+-- 'LengthSMTLibSessionWorkspaceRemoved' is the only successful outcome once a
+-- directory exists; 'LengthSMTLibSessionWorkspaceRetained' means the pathname
+-- was deliberately left in place for the stated reason (for example while the
+-- child's release was unconfirmed), and
+-- 'LengthSMTLibSessionWorkspaceCleanupIncomplete' means removal or descriptor
+-- release itself failed.
 data LengthSMTLibSessionWorkspaceCleanupStatus
   = LengthSMTLibSessionWorkspaceNotAllocated
   | LengthSMTLibSessionWorkspaceRemoved !Natural
@@ -748,6 +811,12 @@ data LengthSMTLibSessionWorkspaceCleanupStatus
       !LengthSMTLibSessionWorkspaceFailure
   deriving (Eq, Ord, Show)
 
+-- | Combined cleanup outcome of one worker scope: the process cleanup status
+-- when a process was opened, whether process cleanup threw, and the
+-- workspace disposition.  A scope whose callback returned normally still
+-- fails with 'LengthSMTLibSessionCleanupFailure' unless the process closed
+-- without escalation or failures, its readers stopped, and the workspace was
+-- removed.
 data LengthSMTLibSessionCleanupStatus = LengthSMTLibSessionCleanupStatus
   { lengthSMTLibSessionProcessCleanupStatus
       :: !(Maybe LengthSMTLibProcessCleanupStatus)
@@ -757,6 +826,11 @@ data LengthSMTLibSessionCleanupStatus = LengthSMTLibSessionCleanupStatus
   }
   deriving (Eq, Ord, Show)
 
+-- | Primary failure of a worker scope, from the opener deadline through
+-- workspace allocation, capability planning and probing, process launch,
+-- barrier derivation, ready-point transcript accounting, identity fingerprint
+-- sizing, final cleanup, and scoped-deadline admission.  It is paired with
+-- the cleanup outcome in 'LengthSMTLibSessionScopeError'.
 data LengthSMTLibSessionError
   = LengthSMTLibSessionDeadlineFailure !LengthSMTLibProcessError
   | LengthSMTLibSessionWorkspaceFailure !LengthSMTLibSessionWorkspaceFailure
@@ -771,6 +845,10 @@ data LengthSMTLibSessionError
   | LengthSMTLibSessionUsableWorkScopeUnavailable
   deriving (Eq, Ord, Show)
 
+-- | What a worker scope returns on failure: the primary
+-- 'LengthSMTLibSessionError' and the cleanup status reached before
+-- returning.  Callback exceptions are not converted into this type; they are
+-- rethrown after cleanup has been started.
 data LengthSMTLibSessionScopeError = LengthSMTLibSessionScopeError
   { lengthSMTLibSessionScopePrimaryError :: !LengthSMTLibSessionError
   , lengthSMTLibSessionScopeCleanupStatus :: !LengthSMTLibSessionCleanupStatus
@@ -915,7 +993,7 @@ checkLengthSMTLibSessionScopedUsableWorkDeadline
   if current /= owner
     then pure $ Left LengthSMTLibSessionUsableWorkScopeUnavailable
     else do
-      mode <- atomically $ readTVar state
+      mode <- readTVarIO state
       case mode of
         LengthSMTLibSessionScopedUsableWorkClosed -> pure $ Left
           LengthSMTLibSessionUsableWorkScopeUnavailable
@@ -1034,6 +1112,12 @@ effectiveLengthSMTLibDeadlineAfterMilliseconds policy localMilliseconds =
             Right localDeadline -> Right
               $ effectiveLengthSMTLibQueryDeadline policy localDeadline
 
+-- | Primary reason a scalar query run failed, from lease admission (worker
+-- closing or spent, query maximum reached) through protocol planning,
+-- barrier reservation, deadline, process, protocol, transcript and stderr
+-- accounting, counterexample replay, and run-identity sizing.  These are
+-- package-private diagnostics and may retain bounded child bytes or integer
+-- values.
 data LengthSMTLibQueryRunFailure
   = LengthSMTLibQueryWorkerClosing
   | LengthSMTLibQueryWorkerSpent
@@ -1054,6 +1138,10 @@ data LengthSMTLibQueryRunFailure
   | LengthSMTLibQueryInternalFailure
   deriving (Eq, Ord, Show)
 
+-- | Failure returned by 'runLengthSMTLibReadyWorkerQuery': the primary
+-- failure plus the process cleanup status when the failure spent the worker
+-- (its lease closed and the process cancelled and closed).  The status is
+-- 'Nothing' when the worker remains usable for further queries.
 data LengthSMTLibQueryRunError = LengthSMTLibQueryRunError
   { lengthSMTLibQueryRunPrimaryFailure :: !LengthSMTLibQueryRunFailure
   , lengthSMTLibQueryRunProcessCleanupStatus
@@ -1075,6 +1163,8 @@ data QueryLeaseState = QueryLeaseState
   !Natural
   !Natural
 
+-- | Phantom fingerprint subject of a scalar query-run identity, keeping it
+-- distinct from ready-worker and spine-pair run fingerprints.
 data LengthSMTLibQueryRunIdentitySubject
 
 -- | One successfully delimited live query and its independent Length replay.
@@ -1094,6 +1184,13 @@ type LengthSMTLibQueryRunObservation = SolverObservation
   ()
   ()
 
+-- | One committed scalar query run: its zero-based ordinal in the worker's
+-- lease, the replayed status-indexed observation, its private identity
+-- fingerprint, the SHA-256 of the causal transcript, and the cumulative
+-- stdout and stderr byte boundaries at which it started and ended.  All
+-- three phantoms are nominal, tying the run to its worker epoch and to the
+-- query's identity and local scopes; only the @lengthSMTLibQueryRun*@
+-- projections are exported.
 data LengthSMTLibQueryRun epoch identity local = LengthSMTLibQueryRun
   !Natural
   !LengthSMTLibQueryRunObservation
@@ -1139,6 +1236,10 @@ data LengthSpinePairSMTLibQueryRunFailure
   | LengthSpinePairSMTLibQueryInternalFailure
   deriving (Eq, Ord, Show)
 
+-- | Failure returned by 'runLengthSpinePairSMTLibReadyWorkerQuery': the
+-- primary failure plus the process cleanup status when the failure spent the
+-- shared worker (its lease closed and the process cancelled and closed).  The
+-- status is 'Nothing' when the worker remains usable.
 data LengthSpinePairSMTLibQueryRunError = LengthSpinePairSMTLibQueryRunError
   { lengthSpinePairSMTLibQueryRunPrimaryFailure
       :: !LengthSpinePairSMTLibQueryRunFailure
@@ -1147,8 +1248,13 @@ data LengthSpinePairSMTLibQueryRunError = LengthSpinePairSMTLibQueryRunError
   }
   deriving (Eq, Ord, Show)
 
+-- | Phantom fingerprint subject of a spine-pair query-run identity, keeping
+-- it distinct from scalar run and ready-worker fingerprints.
 data LengthSpinePairSMTLibQueryRunIdentitySubject
 
+-- | Binary-product sibling of 'LengthSMTLibQueryRunObservation': a strict
+-- status-indexed observation whose satisfiable branch alone may carry
+-- independently replayed spine-pair counterexample evidence.
 type LengthSpinePairSMTLibQueryRunObservation = SolverObservation
   (Maybe
     (BehavioralEvidence
@@ -1157,6 +1263,12 @@ type LengthSpinePairSMTLibQueryRunObservation = SolverObservation
   ()
   ()
 
+-- | One committed spine-pair query run on the shared ready worker, with the
+-- same shape as 'LengthSMTLibQueryRun': ordinal, replayed observation,
+-- private identity fingerprint, transcript SHA-256, and the cumulative stdout
+-- and stderr boundaries of the run.  Ordinals are drawn from the same lease as
+-- scalar runs; only the @lengthSpinePairSMTLibQueryRun*@ projections are
+-- exported.
 data LengthSpinePairSMTLibQueryRun epoch identity local =
   LengthSpinePairSMTLibQueryRun
     !Natural
@@ -1178,6 +1290,8 @@ instance NFData
     rnf digest `seq` rnf stdoutStart `seq` rnf stdoutEnd `seq` rnf stderrStart
       `seq` rnf stderrEnd
 
+-- | Phantom fingerprint subject of a ready-worker identity, keeping it
+-- distinct from query-run fingerprints.
 data LengthSMTLibReadyWorkerIdentitySubject
 
 -- | Exact policy the worker itself still needs after capability admission.
@@ -1234,6 +1348,13 @@ retainLengthSMTLibReadyWorkerQueryPolicyUnderScopedDeadline
         maximumQueries runIdentityLimit protocolLimits postLaunchExecution
         $ LengthSMTLibScopedSharedUsableWorkDeadline milliseconds deadline
 
+-- | One capability-probed, ready Z3 worker lent to the callback of
+-- 'withLengthSMTLibReadyWorker' or one of its deadline variants.  It owns the
+-- process, its cancellation, the retained query policy, the ready identity,
+-- the barrier seed, and the serial query lease shared by scalar and
+-- spine-pair runs; the nominal @epoch@ phantom keeps a worker from escaping
+-- its scope at the type level.  Fields are private; use the
+-- @lengthSMTLibReadyWorker*@ projections.
 data LengthSMTLibReadyWorker epoch = LengthSMTLibReadyWorker
   { readyWorkerProcess :: !LengthSMTLibProcess
   , readyWorkerCancellation :: !LengthSMTLibProcessCancellation
@@ -1251,11 +1372,21 @@ data LengthSMTLibReadyWorker epoch = LengthSMTLibReadyWorker
 
 type role LengthSMTLibReadyWorker nominal
 
+-- | The private, reversible ready-worker identity computed at the ready
+-- point.  It binds the session and launch schema tags, the execution policy,
+-- the process observation, the executable snapshot strength, the capability
+-- outcome and its exact transcript, the session-epoch commitment, the
+-- workspace, protocol and session limits, and the output counts observed at
+-- ready commit; under a shared usable-work deadline it additionally wraps
+-- that legacy identity with the deadline policy.
 lengthSMTLibReadyWorkerIdentityFingerprint
   :: LengthSMTLibReadyWorker epoch
   -> Fingerprint LengthSMTLibReadyWorkerIdentitySubject
 lengthSMTLibReadyWorkerIdentityFingerprint = readyWorkerIdentity
 
+-- | The ready-worker identity as a tagged fingerprint field, ready to embed
+-- in a dependent fingerprint.  Every query-run identity built on this worker
+-- includes exactly this field.
 lengthSMTLibReadyWorkerIdentityFingerprintField
   :: LengthSMTLibReadyWorker epoch
   -> FingerprintField
@@ -1263,6 +1394,11 @@ lengthSMTLibReadyWorkerIdentityFingerprintField worker = FingerprintTag
   (ascii "capability-probed-ready-worker-identity")
   [FingerprintBytes $ fingerprintCanonicalBytes $ readyWorkerIdentity worker]
 
+-- | SHA-256 digest of the solver executable image observed at launch: for
+-- the portable launch, the file at the configured pathname read before
+-- spawning; for descriptor-bound launches, the bytes copied into the sealed
+-- image that was executed.  The digest covers the main image only, not the
+-- dynamic loader or shared libraries.
 lengthSMTLibReadyWorkerExecutableSHA256
   :: LengthSMTLibReadyWorker epoch
   -> ByteString
@@ -1270,6 +1406,8 @@ lengthSMTLibReadyWorkerExecutableSHA256 =
   lengthSMTLibExecutableSnapshotSHA256 .
     lengthSMTLibProcessSnapshot . readyWorkerProcess
 
+-- | Byte count of the same executable snapshot whose digest
+-- 'lengthSMTLibReadyWorkerExecutableSHA256' reports.
 lengthSMTLibReadyWorkerExecutableByteCount
   :: LengthSMTLibReadyWorker epoch
   -> Natural
@@ -1277,6 +1415,11 @@ lengthSMTLibReadyWorkerExecutableByteCount =
   lengthSMTLibExecutableSnapshotByteCount .
     lengthSMTLibProcessSnapshot . readyWorkerProcess
 
+-- | Tag naming how strongly the executable digest is bound to the running
+-- process, chosen from the process launch strategy: the descriptor-bound
+-- execve-check tag first, then the effective-ID descriptor-bound tag, then
+-- the plain descriptor-bound tag, otherwise the portable pathname-snapshot
+-- tag.  The same tag is bound in the ready-worker identity.
 lengthSMTLibReadyWorkerExecutableSnapshotStrengthTag
   :: LengthSMTLibReadyWorker epoch
   -> ByteString
@@ -1292,11 +1435,18 @@ lengthSMTLibReadyWorkerExecutableSnapshotStrengthTag worker
       lengthSMTLibDescriptorBoundExecutableLaunchStrengthTag
   | otherwise = lengthSMTLibExecutableSnapshotStrengthTag
 
+-- | SHA-256 of the complete causal stdout transcript of the readiness
+-- capability probe: the inherited predecessor whitespace followed by every
+-- write epoch's bytes, in order.
 lengthSMTLibReadyWorkerCapabilityTranscriptSHA256
   :: LengthSMTLibReadyWorker epoch
   -> ByteString
 lengthSMTLibReadyWorkerCapabilityTranscriptSHA256 = readyWorkerTranscriptDigest
 
+-- | Byte count of the readiness capability transcript.  It equals the total
+-- stdout byte count observed at the ready commit point, because readiness
+-- fails with 'LengthSMTLibSessionTranscriptAccountingMismatch' whenever the
+-- transcript count and that boundary differ.
 lengthSMTLibReadyWorkerCapabilityTranscriptByteCount
   :: LengthSMTLibReadyWorker epoch
   -> Natural
@@ -1305,39 +1455,65 @@ lengthSMTLibReadyWorkerCapabilityTranscriptByteCount
 lengthSMTLibReadyWorkerCapabilityTranscriptByteCount =
   readyWorkerStdoutAtCommit
 
+-- | Total stdout bytes the process had produced when the worker was
+-- committed ready.  It equals
+-- 'lengthSMTLibReadyWorkerCapabilityTranscriptByteCount' and is the stdout
+-- start boundary of the first query run.
 lengthSMTLibReadyWorkerObservedStdoutBytes
   :: LengthSMTLibReadyWorker epoch
   -> Natural
 lengthSMTLibReadyWorkerObservedStdoutBytes = readyWorkerStdoutAtCommit
 
+-- | Total stderr bytes observed when the worker was committed ready, and the
+-- stderr start boundary of the first query run.  This is a point-in-time
+-- reader observation, not proof that the child never writes to stderr.
 lengthSMTLibReadyWorkerObservedStderrBytes
   :: LengthSMTLibReadyWorker epoch
   -> Natural
 lengthSMTLibReadyWorkerObservedStderrBytes = readyWorkerStderrAtCommit
 
+-- | Absolute path of the fresh, exclusively created directory the solver
+-- process was started in.  It is bound in the ready-worker identity, and
+-- scope cleanup removes it only after re-verifying that the pathname still
+-- names the directory the scope created, and only when it is empty.
 lengthSMTLibReadyWorkerWorkingDirectory
   :: LengthSMTLibReadyWorker epoch
   -> FilePath
 lengthSMTLibReadyWorkerWorkingDirectory = readyWorkerWorkspace
 
+-- | Zero-based ordinal of this run in its worker's serial query lease.
+-- Ordinals are shared between scalar and spine-pair runs on the same worker
+-- and increase by one per reserved run.
 lengthSMTLibQueryRunOrdinal
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunOrdinal
     (LengthSMTLibQueryRun value _ _ _ _ _ _ _) = value
 
+-- | The retained solver observation: satisfiable (carrying independently
+-- replayed counterexample evidence exactly when the artifact policy requested
+-- input values), unsatisfiable, or unknown.  No branch asserts solver
+-- soundness.
 lengthSMTLibQueryRunObservation
   :: LengthSMTLibQueryRun epoch identity local
   -> LengthSMTLibQueryRunObservation
 lengthSMTLibQueryRunObservation
     (LengthSMTLibQueryRun _ observation _ _ _ _ _ _) = observation
 
+-- | Private, reversible identity of the run.  It binds the run schema tag,
+-- the executable authority, the ready-worker identity, the query allocation
+-- (ordinal, both spent barrier markers, and the seed commitment), the
+-- protocol plan, the effective deadline and its selection, the exact causal
+-- transcript, the decoded outcome and replay policy, and the transport
+-- commit boundaries.
 lengthSMTLibQueryRunIdentityFingerprint
   :: LengthSMTLibQueryRun epoch identity local
   -> Fingerprint LengthSMTLibQueryRunIdentitySubject
 lengthSMTLibQueryRunIdentityFingerprint
     (LengthSMTLibQueryRun _ _ value _ _ _ _ _) = value
 
+-- | The run identity as a tagged fingerprint field for embedding in a
+-- dependent fingerprint.
 lengthSMTLibQueryRunIdentityFingerprintField
   :: LengthSMTLibQueryRun epoch identity local
   -> FingerprintField
@@ -1345,12 +1521,18 @@ lengthSMTLibQueryRunIdentityFingerprintField run = tagged "query-run-identity"
   [FingerprintBytes $ fingerprintCanonicalBytes
     $ lengthSMTLibQueryRunIdentityFingerprint run]
 
+-- | SHA-256 of the exact causal stdout transcript of this run: the inherited
+-- predecessor whitespace followed by every write epoch's bytes, in order.
 lengthSMTLibQueryRunTranscriptSHA256
   :: LengthSMTLibQueryRun epoch identity local
   -> ByteString
 lengthSMTLibQueryRunTranscriptSHA256
     (LengthSMTLibQueryRun _ _ _ value _ _ _ _) = value
 
+-- | Byte count of the run's causal transcript, computed as the difference
+-- between its stdout end and start boundaries.  A run is constructed only
+-- after accounting proved that this difference equals the transcript's own
+-- byte count, so the subtraction cannot underflow.
 lengthSMTLibQueryRunTranscriptByteCount
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
@@ -1361,48 +1543,71 @@ lengthSMTLibQueryRunTranscriptByteCount
     (LengthSMTLibQueryRun _ _ _ _ stdoutStart stdoutEnd _ _) =
       stdoutEnd - stdoutStart
 
+-- | Cumulative process stdout byte count at which this run's transport
+-- began: the previous committed run's end boundary, or the ready-commit count
+-- for the first run.
 lengthSMTLibQueryRunStdoutStart
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunStdoutStart
     (LengthSMTLibQueryRun _ _ _ _ value _ _ _) = value
 
+-- | Cumulative process stdout byte count observed at the run's final
+-- boundary.  It exceeds the start by exactly the transcript byte count and
+-- becomes the start boundary of the next committed run.
 lengthSMTLibQueryRunStdoutEnd
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunStdoutEnd
     (LengthSMTLibQueryRun _ _ _ _ _ value _ _) = value
 
+-- | Cumulative process stderr byte count when this run's transport began.
 lengthSMTLibQueryRunStderrStart
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunStderrStart
     (LengthSMTLibQueryRun _ _ _ _ _ _ value _) = value
 
+-- | Cumulative process stderr byte count at the run's final boundary.  For a
+-- committed run it always equals the start, because any stderr byte observed
+-- during the run fails accounting instead of producing a run.
 lengthSMTLibQueryRunStderrEnd
   :: LengthSMTLibQueryRun epoch identity local
   -> Natural
 lengthSMTLibQueryRunStderrEnd
     (LengthSMTLibQueryRun _ _ _ _ _ _ _ value) = value
 
+-- | Zero-based ordinal of this run in the shared worker's serial query lease;
+-- scalar and spine-pair runs draw ordinals from the same counter.
 lengthSpinePairSMTLibQueryRunOrdinal
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> Natural
 lengthSpinePairSMTLibQueryRunOrdinal
     (LengthSpinePairSMTLibQueryRun value _ _ _ _ _ _ _) = value
 
+-- | The retained solver observation of the product query: satisfiable
+-- (carrying independently replayed spine-pair counterexample evidence exactly
+-- when the artifact policy requested input values), unsatisfiable, or
+-- unknown.  No branch asserts solver soundness.
 lengthSpinePairSMTLibQueryRunObservation
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> LengthSpinePairSMTLibQueryRunObservation
 lengthSpinePairSMTLibQueryRunObservation
     (LengthSpinePairSMTLibQueryRun _ observation _ _ _ _ _ _) = observation
 
+-- | Private, reversible identity of the spine-pair run, the product-domain
+-- sibling of 'lengthSMTLibQueryRunIdentityFingerprint'.  It embeds the
+-- shared ready-worker identity, the query allocation, the spine-pair
+-- protocol plan, the effective deadline, the exact causal transcript, and
+-- the decoded outcome, replay policy, and transport commit boundaries.
 lengthSpinePairSMTLibQueryRunIdentityFingerprint
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> Fingerprint LengthSpinePairSMTLibQueryRunIdentitySubject
 lengthSpinePairSMTLibQueryRunIdentityFingerprint
     (LengthSpinePairSMTLibQueryRun _ _ value _ _ _ _ _) = value
 
+-- | The spine-pair run identity as a tagged fingerprint field for embedding
+-- in a dependent fingerprint.
 lengthSpinePairSMTLibQueryRunIdentityFingerprintField
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> FingerprintField
@@ -1411,12 +1616,18 @@ lengthSpinePairSMTLibQueryRunIdentityFingerprintField run =
     [FingerprintBytes $ fingerprintCanonicalBytes
       $ lengthSpinePairSMTLibQueryRunIdentityFingerprint run]
 
+-- | SHA-256 of the exact causal stdout transcript of this run: the inherited
+-- predecessor whitespace followed by every write epoch's bytes, in order.
 lengthSpinePairSMTLibQueryRunTranscriptSHA256
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> ByteString
 lengthSpinePairSMTLibQueryRunTranscriptSHA256
     (LengthSpinePairSMTLibQueryRun _ _ _ value _ _ _ _) = value
 
+-- | Byte count of the run's causal transcript, computed as the difference
+-- between its stdout end and start boundaries.  A run is constructed only
+-- after accounting proved that this difference equals the transcript's own
+-- byte count, so the subtraction cannot underflow.
 lengthSpinePairSMTLibQueryRunTranscriptByteCount
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> Natural
@@ -1424,82 +1635,217 @@ lengthSpinePairSMTLibQueryRunTranscriptByteCount
     (LengthSpinePairSMTLibQueryRun _ _ _ _ stdoutStart stdoutEnd _ _) =
       stdoutEnd - stdoutStart
 
+-- | Cumulative process stdout byte count at which this run's transport
+-- began: the previous committed run's end boundary (of either domain), or
+-- the ready-commit count for the first run.
 lengthSpinePairSMTLibQueryRunStdoutStart
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> Natural
 lengthSpinePairSMTLibQueryRunStdoutStart
     (LengthSpinePairSMTLibQueryRun _ _ _ _ value _ _ _) = value
 
+-- | Cumulative process stdout byte count observed at the run's final
+-- boundary.  It exceeds the start by exactly the transcript byte count and
+-- becomes the start boundary of the next committed run.
 lengthSpinePairSMTLibQueryRunStdoutEnd
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> Natural
 lengthSpinePairSMTLibQueryRunStdoutEnd
     (LengthSpinePairSMTLibQueryRun _ _ _ _ _ value _ _) = value
 
+-- | Cumulative process stderr byte count when this run's transport began.
 lengthSpinePairSMTLibQueryRunStderrStart
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> Natural
 lengthSpinePairSMTLibQueryRunStderrStart
     (LengthSpinePairSMTLibQueryRun _ _ _ _ _ _ value _) = value
 
+-- | Cumulative process stderr byte count at the run's final boundary.  For a
+-- committed run it always equals the start, because any stderr byte observed
+-- during the run fails accounting instead of producing a run.
 lengthSpinePairSMTLibQueryRunStderrEnd
   :: LengthSpinePairSMTLibQueryRun epoch identity local
   -> Natural
 lengthSpinePairSMTLibQueryRunStderrEnd
     (LengthSpinePairSMTLibQueryRun _ _ _ _ _ _ _ value) = value
 
-data PreparedLengthSMTLibQueryRun epoch identity local =
-  PreparedLengthSMTLibQueryRun
+-- Query runs ---------------------------------------------------------------
+--
+-- The scalar and binary-product query-run pipelines are one pipeline.  Both
+-- domains take the same gate, prepare, reserve, execute, and commit path
+-- against the same ready worker and the same shared ordinal lease; they
+-- differ only in the nominal query, evidence, and model-error vocabulary,
+-- the protocol plan they seal, the identity role and schema tags they bind,
+-- and the two explicit capability-reuse fields the product run carries.  A
+-- 'QueryRunDomain' names exactly those differences; 'runQueryRunDomain' is
+-- the shared flow, spoken over the private 'QueryRunFailure' vocabulary and
+-- the private 'QueryRunRecord', and each public entrance translates both
+-- back into its domain's nominal failure and run types at the boundary.
+
+-- | What distinguishes one domain's query run from the other's.
+data QueryRunDomain planSubject runSubject query evidenceFamily counterexample
+    modelError =
+  QueryRunDomain
+    { queryDomainRolePrefix :: String
+      -- ^ the domain segment every run-identity and replay role starts with
+    , queryDomainReplayRole :: [Word8]
+      -- ^ the independent-replay role bound in the run identity
+    , queryDomainSchemaTag :: QueryRunLaunch -> QueryRunDeadlineKind -> [Word8]
+      -- ^ the run schema tag for the worker's launch and deadline policy
+    , queryDomainProtocolLimits
+        :: LengthSMTLibReadyWorkerQueryPolicy -> LengthSMTLibProtocolLimits
+      -- ^ the protocol limits the plan is sealed under: the worker's own for
+      -- the scalar profile it was admitted with, the product defaults for
+      -- the product run which only reuses the worker as transport
+    , queryDomainSealPlan
+        :: LengthSMTLibProtocolLimits
+        -> LengthSMTLibPostLaunchExecutionPolicy
+        -> query
+        -> [Word8]
+        -> Maybe [Word8]
+        -> Either
+            LengthSMTLibProtocolPlanError
+            (LengthSMTLibQueryProtocolPlan planSubject query)
+    , queryDomainInputValueRequestBytes :: query -> Maybe [Word8]
+    , queryDomainValidateCounterexample
+        :: LengthEvaluationLimits
+        -> query
+        -> [LengthSMTLibIntegerBinding]
+        -> Either modelError
+            (Maybe (BehavioralEvidence evidenceFamily counterexample))
+      -- ^ the domain's independent replay of decoded bindings
+    , queryDomainCapabilityReuseFields :: [FingerprintField]
+      -- ^ identity fields spliced after the executable authority; empty for
+      -- the scalar run, the explicit common-QF_LIA reuse statement for the
+      -- product run
+    , queryDomainQueryAllocationPrefix :: Natural -> [FingerprintField]
+      -- ^ identity fields spliced at the head of the @query-allocation@
+      -- group, given the session's query budget; empty for the scalar run
+    }
+
+-- | The shared private failure vocabulary of the pipeline, parameterized by
+-- the domain's nominal model-error type.  Each public entrance maps it onto
+-- its domain's nominal failure constructors.
+data QueryRunFailure modelError
+  = QueryWorkerClosing
+  | QueryWorkerSpent
+  | QueryLimitExceeded !Natural !Natural
+  | QueryProtocolPlanFailure !LengthSMTLibProtocolPlanError
+  | QueryProcessStdoutCapacityTooSmall !Natural !Natural
+  | QueryBarrierCollision
+  | QueryDeadlineFailure !LengthSMTLibProcessError
+  | QueryProcessFailure !LengthSMTLibProcessError
+  | QueryProtocolFailure !LengthSMTLibProtocolError
+  | QueryTranscriptAccountingMismatch !Natural !Natural
+  | QueryStderrAccountingMismatch !Natural !Natural
+  | QueryModelFailure !modelError
+  | QueryModelNotCounterexample
+  | QueryRunIdentityAdmissionTooSmall !Natural !Natural
+  | QueryRunIdentityFingerprintByteLimitExceeded !Natural !Natural
+  | QueryInternalFailure
+
+-- | The primary failure plus the process cleanup status when the failure
+-- spent the worker.
+data QueryRunError modelError =
+  QueryRunError
+    !(QueryRunFailure modelError)
+    !(Maybe LengthSMTLibProcessCleanupStatus)
+
+-- | The status-indexed observation of one committed run in either domain.
+type QueryRunObservation evidenceFamily counterexample =
+  SolverObservation
+    (Maybe (BehavioralEvidence evidenceFamily counterexample)) () ()
+
+-- | One committed run before it is wrapped in its domain's nominal run type:
+-- ordinal, replayed observation, private identity fingerprint, transcript
+-- SHA-256, and the cumulative stdout and stderr boundaries.
+data QueryRunRecord runSubject evidenceFamily counterexample = QueryRunRecord
+  !Natural
+  !(QueryRunObservation evidenceFamily counterexample)
+  !(Fingerprint runSubject)
+  !ByteString
+  !Natural
+  !Natural
+  !Natural
+  !Natural
+
+queryRunRecordOrdinal
+  :: QueryRunRecord runSubject evidenceFamily counterexample -> Natural
+queryRunRecordOrdinal (QueryRunRecord value _ _ _ _ _ _ _) = value
+
+queryRunRecordStdoutStart
+  :: QueryRunRecord runSubject evidenceFamily counterexample -> Natural
+queryRunRecordStdoutStart (QueryRunRecord _ _ _ _ value _ _ _) = value
+
+queryRunRecordStdoutEnd
+  :: QueryRunRecord runSubject evidenceFamily counterexample -> Natural
+queryRunRecordStdoutEnd (QueryRunRecord _ _ _ _ _ value _ _) = value
+
+queryRunRecordStderrStart
+  :: QueryRunRecord runSubject evidenceFamily counterexample -> Natural
+queryRunRecordStderrStart (QueryRunRecord _ _ _ _ _ _ value _) = value
+
+queryRunRecordStderrEnd
+  :: QueryRunRecord runSubject evidenceFamily counterexample -> Natural
+queryRunRecordStderrEnd (QueryRunRecord _ _ _ _ _ _ _ value) = value
+
+
+-- Everything a reserved ordinal needs to run: its ordinal, both barrier
+-- markers, the sealed plan, and the evaluation limits and deadline it was
+-- admitted under.
+data PreparedQueryRun planSubject query =
+  PreparedQueryRun
     !Natural
     !ByteString
     !ByteString
-    !(LengthSMTLibProtocolPlan identity local)
+    !(LengthSMTLibQueryProtocolPlan planSubject query)
     !LengthEvaluationLimits
     !LengthSMTLibProcessDeadline
 
-type role PreparedLengthSMTLibQueryRun nominal nominal nominal
+type role PreparedQueryRun nominal nominal
 
 -- The last-committed accounting anchors are read from the lease state in the
 -- same STM transaction which burns the ordinal and both marker roles.  Only
 -- this receipt can cross the execution boundary; a merely prepared plan has
 -- no transport-commit anchor.
-data ReservedLengthSMTLibQueryRun epoch identity local =
-  ReservedLengthSMTLibQueryRun
-    !(PreparedLengthSMTLibQueryRun epoch identity local)
+data ReservedQueryRun planSubject query =
+  ReservedQueryRun
+    !(PreparedQueryRun planSubject query)
     !Natural
     !Natural
 
-type role ReservedLengthSMTLibQueryRun nominal nominal nominal
+type role ReservedQueryRun nominal nominal
 
--- | Execute one serial, ordinal-bound query against a scoped ready worker.
--- The returned value is a live syntactic observation with independently
--- replayed counterexample evidence when the configured artifact policy asks
--- for a satisfiable model.  It is neither executable-image attestation nor a
--- proof that an unsatisfiable or unknown solver status is sound.
-runLengthSMTLibReadyWorkerQuery
-  :: forall epoch identity local.
-     LengthEvaluationLimits
+-- The one query-run pipeline behind 'runLengthSMTLibReadyWorkerQuery' and
+-- 'runLengthSpinePairSMTLibReadyWorkerQuery': deadline selection, the query
+-- gate, preparation, reservation, execution, and commit are identical for
+-- both domains; the 'QueryRunDomain' supplies what differs.
+runQueryRunDomain
+  :: (NFData modelError, NFData counterexample)
+  => QueryRunDomain planSubject runSubject query evidenceFamily counterexample
+      modelError
+  -> LengthEvaluationLimits
   -> LengthSMTLibReadyWorker epoch
-  -> LengthSMTLibQuery identity local
+  -> query
   -> IO
       (Either
-        LengthSMTLibQueryRunError
-        (LengthSMTLibQueryRun epoch identity local))
-runLengthSMTLibReadyWorkerQuery evaluationLimits worker query =
+        (QueryRunError modelError)
+        (QueryRunRecord runSubject evidenceFamily counterexample))
+runQueryRunDomain domain evaluationLimits worker query =
   mask $ \restore -> do
     deadlineResult <- effectiveLengthSMTLibDeadlineAfterMilliseconds
       (readyQueryUsableWorkDeadlinePolicy $ readyWorkerQueryPolicy worker)
       $ lengthSMTLibPostLaunchHostDeadlineMilliseconds postLaunchExecution
     case deadlineResult of
       Left failure -> pure $ queryRunLeft
-        $ LengthSMTLibQueryDeadlineFailure failure
+        $ QueryDeadlineFailure failure
       Right (LengthSMTLibEffectiveDeadline _ deadline) -> do
-        acquired <- acquireLengthSMTLibQueryGate worker deadline
+        acquired <- acquireQueryGate worker deadline
         case acquired of
-          Left failure@LengthSMTLibQueryProcessFailure {} ->
-            spendLengthSMTLibQueryWorker worker failure
-          Left failure@LengthSMTLibQueryInternalFailure ->
-            spendLengthSMTLibQueryWorker worker failure
+          Left failure@QueryProcessFailure {} ->
+            spendQueryWorker worker failure
+          Left failure@QueryInternalFailure ->
+            spendQueryWorker worker failure
           Left failure -> pure $ queryRunLeft failure
           Right () -> finally
             (runWithGate restore deadline)
@@ -1509,45 +1855,45 @@ runLengthSMTLibReadyWorkerQuery evaluationLimits worker query =
     $ readyWorkerQueryPolicy worker
 
   runWithGate restore deadline = do
-    prepared <- prepareLengthSMTLibQueryRun
+    prepared <- prepareQueryRun domain
       evaluationLimits worker query deadline
     case prepared of
       Left (mustSpend, failure)
-        | mustSpend -> spendLengthSMTLibQueryWorker worker failure
+        | mustSpend -> spendQueryWorker worker failure
         | otherwise -> pure $ queryRunLeft failure
       Right preparation -> do
-        reserved <- reservePreparedLengthSMTLibQueryRun worker preparation
+        reserved <- reserveQueryRun worker preparation
         case reserved of
-          Left LengthSMTLibQueryBarrierCollision ->
-            spendLengthSMTLibQueryWorker worker
-              LengthSMTLibQueryBarrierCollision
-          Left LengthSMTLibQueryInternalFailure ->
-            spendLengthSMTLibQueryWorker worker
-              LengthSMTLibQueryInternalFailure
+          Left QueryBarrierCollision ->
+            spendQueryWorker worker
+              QueryBarrierCollision
+          Left QueryInternalFailure ->
+            spendQueryWorker worker
+              QueryInternalFailure
           Left failure -> pure $ queryRunLeft failure
           Right reservation -> do
             executed <- restore
-              (executeReservedLengthSMTLibQueryRun worker reservation)
-              `onException` abandonLengthSMTLibQueryWorker worker
+              (executeQueryRun domain worker reservation)
+              `onException` abandonQueryWorker worker
             case executed of
-              Left failure -> spendLengthSMTLibQueryWorker worker failure
+              Left failure -> spendQueryWorker worker failure
               Right run -> do
-                committed <- commitLengthSMTLibQueryRun worker reservation run
+                committed <- commitQueryRun worker reservation run
                 if committed
                   then pure $ Right run
-                  else spendLengthSMTLibQueryWorker worker
-                    LengthSMTLibQueryInternalFailure
+                  else spendQueryWorker worker
+                    QueryInternalFailure
 
 queryRunLeft
-  :: LengthSMTLibQueryRunFailure
-  -> Either LengthSMTLibQueryRunError value
-queryRunLeft failure = Left $ LengthSMTLibQueryRunError failure Nothing
+  :: QueryRunFailure modelError
+  -> Either (QueryRunError modelError) value
+queryRunLeft failure = Left $ QueryRunError failure Nothing
 
-acquireLengthSMTLibQueryGate
+acquireQueryGate
   :: LengthSMTLibReadyWorker epoch
   -> LengthSMTLibProcessDeadline
-  -> IO (Either LengthSMTLibQueryRunFailure ())
-acquireLengthSMTLibQueryGate worker deadline = mask $ \_ -> loop
+  -> IO (Either (QueryRunFailure modelError) ())
+acquireQueryGate worker deadline = mask $ const loop
  where
   maximumQueries = readyQueryMaximumQueries $ readyWorkerQueryPolicy worker
   process = readyWorkerProcess worker
@@ -1572,7 +1918,7 @@ acquireLengthSMTLibQueryGate worker deadline = mask $ \_ -> loop
               Right () -> Right <$> readTMVar gate
         case observed of
           Left processFailure -> do
-            state <- atomically $ readTVar stateVariable
+            state <- readTVarIO stateVariable
             pure $ Left $ queryGateProcessFailure state processFailure
           Right (Left failure) -> pure $ Left failure
           Right (Right ()) -> do
@@ -1591,41 +1937,43 @@ acquireLengthSMTLibQueryGate worker deadline = mask $ \_ -> loop
 queryLeaseAdmission
   :: Natural
   -> QueryLeaseState
-  -> Either LengthSMTLibQueryRunFailure ()
+  -> Either (QueryRunFailure modelError) ()
 queryLeaseAdmission maximumQueries
     (QueryLeaseState mode nextOrdinal _ _ _ _) = case mode of
-  QueryLeaseClosing -> Left LengthSMTLibQueryWorkerClosing
-  QueryLeaseSpent -> Left LengthSMTLibQueryWorkerSpent
+  QueryLeaseClosing -> Left QueryWorkerClosing
+  QueryLeaseSpent -> Left QueryWorkerSpent
   QueryLeaseAccepting
     | nextOrdinal >= maximumQueries -> Left
-        $ LengthSMTLibQueryLimitExceeded maximumQueries (maximumQueries + 1)
+        $ QueryLimitExceeded maximumQueries (maximumQueries + 1)
     | otherwise -> Right ()
 
 queryGateProcessFailure
   :: QueryLeaseState
   -> LengthSMTLibProcessError
-  -> LengthSMTLibQueryRunFailure
+  -> QueryRunFailure modelError
 queryGateProcessFailure (QueryLeaseState mode _ _ _ _ _) failure = case mode of
-  QueryLeaseClosing -> LengthSMTLibQueryWorkerClosing
-  QueryLeaseSpent -> LengthSMTLibQueryWorkerSpent
+  QueryLeaseClosing -> QueryWorkerClosing
+  QueryLeaseSpent -> QueryWorkerSpent
   _ -> queryProcessFailure failure
 
-prepareLengthSMTLibQueryRun
-  :: LengthEvaluationLimits
+prepareQueryRun
+  :: QueryRunDomain planSubject runSubject query evidenceFamily counterexample
+      modelError
+  -> LengthEvaluationLimits
   -> LengthSMTLibReadyWorker epoch
-  -> LengthSMTLibQuery identity local
+  -> query
   -> LengthSMTLibProcessDeadline
   -> IO
       (Either
-        (Bool, LengthSMTLibQueryRunFailure)
-        (PreparedLengthSMTLibQueryRun epoch identity local))
-prepareLengthSMTLibQueryRun evaluationLimits worker query deadline = do
+        (Bool, QueryRunFailure modelError)
+        (PreparedQueryRun planSubject query))
+prepareQueryRun domain evaluationLimits worker query deadline = do
   state@(QueryLeaseState _ ordinal used inFlight _ _) <-
-    atomically $ readTVar $ readyWorkerQueryState worker
+    readTVarIO $ readyWorkerQueryState worker
   case queryLeaseAdmission maximumQueries state of
     Left failure -> pure $ Left (False, failure)
     Right () | isJust inFlight -> pure
-      $ Left (True, LengthSMTLibQueryInternalFailure)
+      $ Left (True, QueryInternalFailure)
     Right () -> do
       controlled <- waitLengthSMTLibProcessControl process
         (readyWorkerCancellation worker) deadline LengthSMTLibProcessQueryPhase
@@ -1640,7 +1988,7 @@ prepareLengthSMTLibQueryRun evaluationLimits worker query deadline = do
  where
   policy = readyWorkerQueryPolicy worker
   maximumQueries = readyQueryMaximumQueries policy
-  protocolLimits = readyQueryProtocolLimits policy
+  protocolLimits = queryDomainProtocolLimits domain policy
   postLaunchExecution = readyQueryPostLaunchExecution policy
   process = readyWorkerProcess worker
   processLimits = lengthSMTLibProcessLimits process
@@ -1655,18 +2003,18 @@ prepareLengthSMTLibQueryRun evaluationLimits worker query deadline = do
         needsValueBarrier =
           lengthSMTLibPostLaunchArtifactPolicy postLaunchExecution ==
             LengthSMTLibInputValuesAfterSatisfiable &&
-          isJust (lengthSMTLibQueryInputValueRequestBytes query)
+          isJust (queryDomainInputValueRequestBytes domain query)
         valueNonce
           | needsValueBarrier = Just $ BS.unpack valueBarrier
           | otherwise = Nothing
-    case sealLengthSMTLibProtocolPlan protocolLimits postLaunchExecution query
+    case queryDomainSealPlan domain protocolLimits postLaunchExecution query
         (BS.unpack checkBarrier) valueNonce of
       Left failure -> pure $ Left
-        (False, LengthSMTLibQueryProtocolPlanFailure failure)
+        (False, QueryProtocolPlanFailure failure)
       Right plan
         | Set.member checkBarrier used || Set.member valueBarrier used ||
             checkBarrier == valueBarrier -> pure
-              $ Left (True, LengthSMTLibQueryBarrierCollision)
+              $ Left (True, QueryBarrierCollision)
         | otherwise -> do
             observedStdout <- lengthSMTLibProcessObservedStdoutBytes process
             let required = lengthSMTLibProtocolPlanMinimumStdoutByteCount plan
@@ -1675,25 +2023,25 @@ prepareLengthSMTLibQueryRun evaluationLimits worker query deadline = do
                   | otherwise = transportMaximum - observedStdout
             if required > remaining
               then pure $ Left (False,
-                LengthSMTLibQueryProcessStdoutCapacityTooSmall
+                QueryProcessStdoutCapacityTooSmall
                   remaining required)
-              else case admitLengthSMTLibQueryRunIdentity
+              else case admitQueryRunIdentity domain
                   worker plan
                   evaluationLimits ordinal deadline
                   checkBarrier valueBarrier of
                 Left failure -> pure $ Left (False, failure)
-                Right () -> pure $ Right $ PreparedLengthSMTLibQueryRun
+                Right () -> pure $ Right $ PreparedQueryRun
                   ordinal checkBarrier valueBarrier plan evaluationLimits deadline
 
-reservePreparedLengthSMTLibQueryRun
+reserveQueryRun
   :: LengthSMTLibReadyWorker epoch
-  -> PreparedLengthSMTLibQueryRun epoch identity local
+  -> PreparedQueryRun planSubject query
   -> IO
       (Either
-        LengthSMTLibQueryRunFailure
-        (ReservedLengthSMTLibQueryRun epoch identity local))
-reservePreparedLengthSMTLibQueryRun worker
-    preparation@(PreparedLengthSMTLibQueryRun
+        (QueryRunFailure modelError)
+        (ReservedQueryRun planSubject query))
+reserveQueryRun worker
+    preparation@(PreparedQueryRun
       ordinal checkBarrier valueBarrier _ _ _) = atomically $ do
   state@(QueryLeaseState mode nextOrdinal used inFlight stdoutCount stderrCount) <-
     readTVar $ readyWorkerQueryState worker
@@ -1701,28 +2049,28 @@ reservePreparedLengthSMTLibQueryRun worker
     Left failure -> pure $ Left failure
     Right ()
       | mode /= QueryLeaseAccepting || nextOrdinal /= ordinal ||
-          isJust inFlight -> pure $ Left LengthSMTLibQueryInternalFailure
+          isJust inFlight -> pure $ Left QueryInternalFailure
       | Set.member checkBarrier used || Set.member valueBarrier used ||
           checkBarrier == valueBarrier -> pure
-            $ Left LengthSMTLibQueryBarrierCollision
+            $ Left QueryBarrierCollision
       | otherwise -> do
           writeTVar (readyWorkerQueryState worker) $ QueryLeaseState
             QueryLeaseAccepting (ordinal + 1)
             (Set.insert valueBarrier $ Set.insert checkBarrier used)
             (Just ordinal) stdoutCount stderrCount
-          pure $ Right $ ReservedLengthSMTLibQueryRun
+          pure $ Right $ ReservedQueryRun
             preparation stdoutCount stderrCount
  where
   maximumQueries = readyQueryMaximumQueries $ readyWorkerQueryPolicy worker
 
-commitLengthSMTLibQueryRun
+commitQueryRun
   :: LengthSMTLibReadyWorker epoch
-  -> ReservedLengthSMTLibQueryRun epoch identity local
-  -> LengthSMTLibQueryRun epoch identity local
+  -> ReservedQueryRun planSubject query
+  -> QueryRunRecord runSubject evidenceFamily counterexample
   -> IO Bool
-commitLengthSMTLibQueryRun worker
-    (ReservedLengthSMTLibQueryRun
-      (PreparedLengthSMTLibQueryRun ordinal _ _ _ _ _)
+commitQueryRun worker
+    (ReservedQueryRun
+      (PreparedQueryRun ordinal _ _ _ _ _)
       stdoutStart stderrStart)
     run =
   atomically $ do
@@ -1732,30 +2080,30 @@ commitLengthSMTLibQueryRun worker
     if inFlight /= Just ordinal || nextOrdinal /= ordinal + 1 ||
         mode == QueryLeaseSpent ||
         stateStdoutStart /= stdoutStart || stateStderrStart /= stderrStart ||
-        lengthSMTLibQueryRunOrdinal run /= ordinal ||
-        lengthSMTLibQueryRunStdoutStart run /= stdoutStart ||
-        lengthSMTLibQueryRunStderrStart run /= stderrStart
+        queryRunRecordOrdinal run /= ordinal ||
+        queryRunRecordStdoutStart run /= stdoutStart ||
+        queryRunRecordStderrStart run /= stderrStart
       then pure False
       else do
         writeTVar (readyWorkerQueryState worker) $ QueryLeaseState
           mode nextOrdinal used Nothing stdoutEnd stderrEnd
         pure True
  where
-  stdoutEnd = lengthSMTLibQueryRunStdoutEnd run
-  stderrEnd = lengthSMTLibQueryRunStderrEnd run
+  stdoutEnd = queryRunRecordStdoutEnd run
+  stderrEnd = queryRunRecordStderrEnd run
 
-spendLengthSMTLibQueryWorker
+spendQueryWorker
   :: LengthSMTLibReadyWorker epoch
-  -> LengthSMTLibQueryRunFailure
-  -> IO (Either LengthSMTLibQueryRunError value)
-spendLengthSMTLibQueryWorker worker failure = do
-  cleanup <- abandonLengthSMTLibQueryWorker worker
-  pure $ Left $ LengthSMTLibQueryRunError failure $ Just cleanup
+  -> QueryRunFailure modelError
+  -> IO (Either (QueryRunError modelError) value)
+spendQueryWorker worker failure = do
+  cleanup <- abandonQueryWorker worker
+  pure $ Left $ QueryRunError failure $ Just cleanup
 
-abandonLengthSMTLibQueryWorker
+abandonQueryWorker
   :: LengthSMTLibReadyWorker epoch
   -> IO LengthSMTLibProcessCleanupStatus
-abandonLengthSMTLibQueryWorker worker = do
+abandonQueryWorker worker = do
   atomically $ do
     QueryLeaseState _ ordinal used _ stdoutCount stderrCount <-
       readTVar $ readyWorkerQueryState worker
@@ -1766,55 +2114,58 @@ abandonLengthSMTLibQueryWorker worker = do
 
 queryProcessFailure
   :: LengthSMTLibProcessError
-  -> LengthSMTLibQueryRunFailure
+  -> QueryRunFailure modelError
 queryProcessFailure failure
   | lengthSMTLibProcessErrorClass failure ==
       LengthSMTLibProcessDeadlineExceeded =
-        LengthSMTLibQueryDeadlineFailure failure
-  | otherwise = LengthSMTLibQueryProcessFailure failure
+        QueryDeadlineFailure failure
+  | otherwise = QueryProcessFailure failure
 
-executeReservedLengthSMTLibQueryRun
-  :: LengthSMTLibReadyWorker epoch
-  -> ReservedLengthSMTLibQueryRun epoch identity local
+executeQueryRun
+  :: (NFData modelError, NFData counterexample)
+  => QueryRunDomain planSubject runSubject query evidenceFamily counterexample
+      modelError
+  -> LengthSMTLibReadyWorker epoch
+  -> ReservedQueryRun planSubject query
   -> IO
       (Either
-        LengthSMTLibQueryRunFailure
-        (LengthSMTLibQueryRun epoch identity local))
-executeReservedLengthSMTLibQueryRun worker
-    (ReservedLengthSMTLibQueryRun
-      (PreparedLengthSMTLibQueryRun ordinal checkBarrier valueBarrier plan
+        (QueryRunFailure modelError)
+        (QueryRunRecord runSubject evidenceFamily counterexample))
+executeQueryRun domain worker
+    (ReservedQueryRun
+      (PreparedQueryRun ordinal checkBarrier valueBarrier plan
         evaluationLimits deadline)
       stdoutStart stderrStart) = do
   driven <- driveProtocolQuery worker deadline plan
   case driven of
     Left failure -> pure $ Left failure
     Right (decoded, transcript) -> do
-      firstBoundary <- observeLengthSMTLibQueryBoundary worker deadline
+      firstBoundary <- observeQueryBoundary worker deadline
       case firstBoundary of
         Left failure -> pure $ Left failure
         Right (stdoutEnd, stderrEnd) ->
-          case validateLengthSMTLibQueryAccounting
+          case validateQueryAccounting
               transcript stdoutStart stdoutEnd stderrStart stderrEnd of
             Left failure -> pure $ Left failure
             Right () -> do
-              replayed <- replayLengthSMTLibQuery
+              replayed <- replayQuery domain
                 evaluationLimits worker plan deadline decoded
               case replayed of
                 Left failure -> pure $ Left failure
                 Right outcome -> do
                   committedBoundary <-
-                    observeLengthSMTLibQueryBoundary worker deadline
+                    observeQueryBoundary worker deadline
                   case committedBoundary of
                     Left failure -> pure $ Left failure
                     Right (stdoutCommitted, stderrCommitted)
                       | stdoutCommitted /= stdoutEnd -> pure $ Left
-                          $ LengthSMTLibQueryTranscriptAccountingMismatch
+                          $ QueryTranscriptAccountingMismatch
                               (smtLibCausalTranscriptByteCount transcript)
                               (stdoutCommitted -| stdoutStart)
                       | stderrCommitted /= stderrEnd -> pure $ Left
-                          $ LengthSMTLibQueryStderrAccountingMismatch
+                          $ QueryStderrAccountingMismatch
                               stderrStart stderrCommitted
-                      | otherwise -> case buildLengthSMTLibQueryRunIdentity
+                      | otherwise -> case buildQueryRunIdentity domain
                           worker plan evaluationLimits ordinal deadline
                           checkBarrier valueBarrier outcome transcript
                           stdoutStart stdoutCommitted stderrStart stderrCommitted of
@@ -1823,21 +2174,21 @@ executeReservedLengthSMTLibQueryRun worker
                           let transcriptBytes = causalTranscriptBytes transcript
                               transcriptDigest = SHA256.hash transcriptBytes
                           finalBoundary <-
-                            observeLengthSMTLibQueryBoundary worker deadline
+                            observeQueryBoundary worker deadline
                           pure $ case finalBoundary of
                             Left failure -> Left failure
                             Right (stdoutFinal, stderrFinal)
                               | stdoutFinal /= stdoutCommitted -> Left
-                                  $ LengthSMTLibQueryTranscriptAccountingMismatch
+                                  $ QueryTranscriptAccountingMismatch
                                       (smtLibCausalTranscriptByteCount
                                         transcript)
                                       (stdoutFinal -| stdoutStart)
                               | stderrFinal /= stderrCommitted -> Left
-                                  $ LengthSMTLibQueryStderrAccountingMismatch
+                                  $ QueryStderrAccountingMismatch
                                       stderrStart stderrFinal
-                              | otherwise -> Right $ LengthSMTLibQueryRun
+                              | otherwise -> Right $ QueryRunRecord
                                   ordinal
-                                  (replayedLengthSMTLibQueryObservation outcome)
+                                  (replayedQueryObservation outcome)
                                   identity
                                   transcriptDigest
                                   stdoutStart stdoutFinal
@@ -1846,11 +2197,11 @@ executeReservedLengthSMTLibQueryRun worker
 driveProtocolQuery
   :: LengthSMTLibReadyWorker epoch
   -> LengthSMTLibProcessDeadline
-  -> LengthSMTLibProtocolPlan identity local
+  -> LengthSMTLibQueryProtocolPlan planSubject query
   -> IO
       (Either
-        LengthSMTLibQueryRunFailure
-        ( LengthSMTLibProtocolDecoded identity local
+        (QueryRunFailure modelError)
+        ( LengthSMTLibQueryProtocolDecoded planSubject query
         , SMTLibCausalTranscript LengthSMTLibProtocolWriteKind
         ))
 driveProtocolQuery worker deadline plan = do
@@ -1871,18 +2222,18 @@ driveProtocolQuery worker deadline plan = do
     SMTLibCausalTransportFailure processFailure ->
       queryProcessFailure processFailure
     SMTLibCausalMachineFailure protocolFailure ->
-      LengthSMTLibQueryProtocolFailure protocolFailure
+      QueryProtocolFailure protocolFailure
     SMTLibCausalCumulativeOutputByteLimitExceeded maximumBytes observed ->
-      LengthSMTLibQueryProtocolFailure
+      QueryProtocolFailure
         $ LengthSMTLibProtocolCumulativeStdoutByteLimitExceeded
             maximumBytes observed
-    SMTLibCausalInternalFailure -> LengthSMTLibQueryInternalFailure
+    SMTLibCausalInternalFailure -> QueryInternalFailure
 
-observeLengthSMTLibQueryBoundary
+observeQueryBoundary
   :: LengthSMTLibReadyWorker epoch
   -> LengthSMTLibProcessDeadline
-  -> IO (Either LengthSMTLibQueryRunFailure (Natural, Natural))
-observeLengthSMTLibQueryBoundary worker deadline = do
+  -> IO (Either (QueryRunFailure modelError) (Natural, Natural))
+observeQueryBoundary worker deadline = do
   ready <- checkLengthSMTLibProcessReady
     (readyWorkerProcess worker) (readyWorkerCancellation worker) deadline
   case ready of
@@ -1894,36 +2245,39 @@ observeLengthSMTLibQueryBoundary worker deadline = do
         $ readyWorkerProcess worker
       pure $ Right (stdoutCount, stderrCount)
 
-validateLengthSMTLibQueryAccounting
+validateQueryAccounting
   :: SMTLibCausalTranscript kind
   -> Natural
   -> Natural
   -> Natural
   -> Natural
-  -> Either LengthSMTLibQueryRunFailure ()
-validateLengthSMTLibQueryAccounting transcript stdoutStart stdoutEnd
+  -> Either (QueryRunFailure modelError) ()
+validateQueryAccounting transcript stdoutStart stdoutEnd
     stderrStart stderrEnd
-  | stdoutEnd < stdoutStart = Left LengthSMTLibQueryInternalFailure
+  | stdoutEnd < stdoutStart = Left QueryInternalFailure
   | transcriptCount /= stdoutEnd - stdoutStart = Left
-      $ LengthSMTLibQueryTranscriptAccountingMismatch
+      $ QueryTranscriptAccountingMismatch
           transcriptCount (stdoutEnd - stdoutStart)
   | stderrEnd /= stderrStart = Left
-      $ LengthSMTLibQueryStderrAccountingMismatch stderrStart stderrEnd
+      $ QueryStderrAccountingMismatch stderrStart stderrEnd
   | otherwise = Right ()
  where
   transcriptCount = smtLibCausalTranscriptByteCount transcript
 
-replayLengthSMTLibQuery
-  :: LengthEvaluationLimits
+replayQuery
+  :: (NFData modelError, NFData counterexample)
+  => QueryRunDomain planSubject runSubject query evidenceFamily counterexample
+      modelError
+  -> LengthEvaluationLimits
   -> LengthSMTLibReadyWorker epoch
-  -> LengthSMTLibProtocolPlan identity local
+  -> LengthSMTLibQueryProtocolPlan planSubject query
   -> LengthSMTLibProcessDeadline
-  -> LengthSMTLibProtocolDecoded identity local
+  -> LengthSMTLibQueryProtocolDecoded planSubject query
   -> IO
       (Either
-        LengthSMTLibQueryRunFailure
-        ReplayedLengthSMTLibQueryOutcome)
-replayLengthSMTLibQuery evaluationLimits worker plan deadline decoded =
+        (QueryRunFailure modelError)
+        (ReplayedQueryOutcome evidenceFamily counterexample))
+replayQuery domain evaluationLimits worker plan deadline decoded =
   case ( lengthSMTLibProtocolDecodedObservation decoded
        , lengthSMTLibProtocolPlanArtifactPolicy plan) of
     ( SatisfiableObservation (Just values)
@@ -1931,26 +2285,27 @@ replayLengthSMTLibQuery evaluationLimits worker plan deadline decoded =
       replayed <- runBeforeLengthSMTLibProcessDeadline
         (readyWorkerCancellation worker) deadline
         (evaluate $ force
-          $ validateLengthSMTLibCounterexample evaluationLimits query values)
+          $ queryDomainValidateCounterexample domain evaluationLimits query
+              values)
         (const $ pure ())
       pure $ case replayed of
         Left failure -> Left $ queryProcessFailure failure
-        Right (Left failure) -> Left $ LengthSMTLibQueryModelFailure failure
-        Right (Right Nothing) -> Left LengthSMTLibQueryModelNotCounterexample
+        Right (Left failure) -> Left $ QueryModelFailure failure
+        Right (Right Nothing) -> Left QueryModelNotCounterexample
         Right (Right (Just evidence)) -> Right $ case values of
-          [] -> ReplayedLengthSMTLibSatisfiableVacuous evidence
-          _ : _ -> ReplayedLengthSMTLibSatisfiableFramed evidence
+          [] -> ReplayedSatisfiableVacuous evidence
+          _ : _ -> ReplayedSatisfiableFramed evidence
     ( SatisfiableObservation Nothing
       , LengthSMTLibInputValuesAfterSatisfiable) ->
-      pure $ Left LengthSMTLibQueryInternalFailure
+      pure $ Left QueryInternalFailure
     (SatisfiableObservation Nothing, LengthSMTLibStatusOnly) ->
-      pure $ Right ReplayedLengthSMTLibSatisfiableStatusOnly
+      pure $ Right ReplayedSatisfiableStatusOnly
     (SatisfiableObservation (Just _), LengthSMTLibStatusOnly) ->
-      pure $ Left LengthSMTLibQueryInternalFailure
+      pure $ Left QueryInternalFailure
     (UnsatisfiableObservation (), _) ->
-      pure $ Right ReplayedLengthSMTLibUnsatisfiable
+      pure $ Right ReplayedUnsatisfiable
     (UnknownObservation (), _) ->
-      pure $ Right ReplayedLengthSMTLibUnknown
+      pure $ Right ReplayedUnknown
  where
   query = lengthSMTLibProtocolPlanQuery plan
 
@@ -1958,95 +2313,95 @@ replayLengthSMTLibQuery evaluationLimits worker plan deadline decoded =
 -- transient owner prevents decoded status/value classification from being
 -- paired independently with replay evidence while the unchanged v1 identity
 -- fields are built.
-data ReplayedLengthSMTLibQueryOutcome
-  = ReplayedLengthSMTLibSatisfiableStatusOnly
-  | ReplayedLengthSMTLibSatisfiableVacuous
-      !(BehavioralEvidence
-        FiniteListSpineLengthV1
-        ValidatedLengthCounterexample)
-  | ReplayedLengthSMTLibSatisfiableFramed
-      !(BehavioralEvidence
-        FiniteListSpineLengthV1
-        ValidatedLengthCounterexample)
-  | ReplayedLengthSMTLibUnsatisfiable
-  | ReplayedLengthSMTLibUnknown
+data ReplayedQueryOutcome evidenceFamily counterexample
+  = ReplayedSatisfiableStatusOnly
+  | ReplayedSatisfiableVacuous
+      !(BehavioralEvidence evidenceFamily counterexample)
+  | ReplayedSatisfiableFramed
+      !(BehavioralEvidence evidenceFamily counterexample)
+  | ReplayedUnsatisfiable
+  | ReplayedUnknown
 
 -- Generic 'SolverObservation' artifacts remain lazy. Constructing the final
 -- strict run owner separately forces only the satisfiable 'Maybe' spine, as
 -- the former strict evidence field did, without adding a global payload bang.
-replayedLengthSMTLibQueryObservation
-  :: ReplayedLengthSMTLibQueryOutcome
-  -> LengthSMTLibQueryRunObservation
-replayedLengthSMTLibQueryObservation outcome = case outcome of
-  ReplayedLengthSMTLibSatisfiableStatusOnly ->
+replayedQueryObservation
+  :: ReplayedQueryOutcome evidenceFamily counterexample
+  -> QueryRunObservation evidenceFamily counterexample
+replayedQueryObservation outcome = case outcome of
+  ReplayedSatisfiableStatusOnly ->
     let evidence = Nothing
     in evidence `seq` SatisfiableObservation evidence
-  ReplayedLengthSMTLibSatisfiableVacuous retained ->
+  ReplayedSatisfiableVacuous retained ->
     let evidence = Just retained
     in evidence `seq` SatisfiableObservation evidence
-  ReplayedLengthSMTLibSatisfiableFramed retained ->
+  ReplayedSatisfiableFramed retained ->
     let evidence = Just retained
     in evidence `seq` SatisfiableObservation evidence
-  ReplayedLengthSMTLibUnsatisfiable -> UnsatisfiableObservation ()
-  ReplayedLengthSMTLibUnknown -> UnknownObservation ()
+  ReplayedUnsatisfiable -> UnsatisfiableObservation ()
+  ReplayedUnknown -> UnknownObservation ()
 
 (-|) :: Natural -> Natural -> Natural
 left -| right
   | left < right = 0
   | otherwise = left - right
 
-buildLengthSMTLibQueryRunIdentity
-  :: LengthSMTLibReadyWorker epoch
-  -> LengthSMTLibProtocolPlan identity local
+buildQueryRunIdentity
+  :: QueryRunDomain planSubject runSubject query evidenceFamily counterexample
+      modelError
+  -> LengthSMTLibReadyWorker epoch
+  -> LengthSMTLibQueryProtocolPlan planSubject query
   -> LengthEvaluationLimits
   -> Natural
   -> LengthSMTLibProcessDeadline
   -> ByteString
   -> ByteString
-  -> ReplayedLengthSMTLibQueryOutcome
+  -> ReplayedQueryOutcome evidenceFamily counterexample
   -> SMTLibCausalTranscript LengthSMTLibProtocolWriteKind
   -> Natural
   -> Natural
   -> Natural
   -> Natural
   -> Either
-      LengthSMTLibQueryRunFailure
-      (Fingerprint LengthSMTLibQueryRunIdentitySubject)
-buildLengthSMTLibQueryRunIdentity worker plan evaluationLimits ordinal deadline
+      (QueryRunFailure modelError)
+      (Fingerprint runSubject)
+buildQueryRunIdentity domain worker plan evaluationLimits ordinal deadline
     checkBarrier valueBarrier outcome transcript
     stdoutStart stdoutEnd stderrStart stderrEnd =
   case buildFingerprintWithin maximumBytes FingerprintBuilder
       { fingerprintBuilderVersion = 1
-      , fingerprintBuilderRole = queryRunFingerprintRoleForWorker worker
+      , fingerprintBuilderRole = queryRunFingerprintRoleForWorker domain worker
       , fingerprintBuilderFields =
-          queryRunIdentityPrefixFields worker plan ordinal deadline
+          queryRunIdentityPrefixFields domain worker plan ordinal deadline
             checkBarrier valueBarrier ++
           [queryRunTranscriptField transcript] ++
-          queryRunIdentitySuffixFields evaluationLimits outcome
+          queryRunIdentitySuffixFields domain evaluationLimits outcome
             stdoutStart stdoutEnd stderrStart stderrEnd
             (smtLibCausalTranscriptByteCount transcript)
       } of
     Left (FingerprintLimitExceeded fingerprintMaximum observed) -> Left
-      $ LengthSMTLibQueryRunIdentityFingerprintByteLimitExceeded
+      $ QueryRunIdentityFingerprintByteLimitExceeded
           fingerprintMaximum observed
     Right identity -> Right identity
  where
   maximumBytes = readyQueryRunIdentityFingerprintByteLimit
     $ readyWorkerQueryPolicy worker
 
-admitLengthSMTLibQueryRunIdentity
-  :: LengthSMTLibReadyWorker epoch
-  -> LengthSMTLibProtocolPlan identity local
+admitQueryRunIdentity
+  :: QueryRunDomain planSubject runSubject query evidenceFamily counterexample
+      modelError
+  -> LengthSMTLibReadyWorker epoch
+  -> LengthSMTLibQueryProtocolPlan planSubject query
   -> LengthEvaluationLimits
   -> Natural
   -> LengthSMTLibProcessDeadline
   -> ByteString
   -> ByteString
-  -> Either LengthSMTLibQueryRunFailure ()
-admitLengthSMTLibQueryRunIdentity worker plan evaluationLimits
+  -> Either (QueryRunFailure modelError) ()
+admitQueryRunIdentity domain worker plan evaluationLimits
     ordinal deadline checkBarrier valueBarrier
   | requiredMaximum > maximumBytes = Left
-      $ LengthSMTLibQueryRunIdentityAdmissionTooSmall
+      $ QueryRunIdentityAdmissionTooSmall
           maximumBytes requiredMaximum
   | otherwise = Right ()
  where
@@ -2059,130 +2414,104 @@ admitLengthSMTLibQueryRunIdentity worker plan evaluationLimits
     then 2
     else 1
   prefixCounts = map fingerprintFieldByteCount
-    $ queryRunIdentityPrefixFields worker plan ordinal deadline
+    $ queryRunIdentityPrefixFields domain worker plan ordinal deadline
         checkBarrier valueBarrier
   transcriptCount = queryRunTranscriptMaximumFieldByteCount
     transcriptMaximum epochMaximum
   suffixCounts = map fingerprintFieldByteCount
-    $ queryRunIdentityMaximumSuffixFields evaluationLimits
+    $ queryRunIdentityMaximumSuffixFields domain evaluationLimits
         (lengthSMTLibProcessStdoutByteLimit processLimits)
         (lengthSMTLibProcessStderrByteLimit processLimits)
         transcriptMaximum
   requiredMaximum = fingerprintBuilderByteCount
-    (queryRunFingerprintRoleForWorker worker)
+    (queryRunFingerprintRoleForWorker domain worker)
     $ prefixCounts ++ transcriptCount : suffixCounts
 
-queryRunFingerprintRole :: [Word8]
-queryRunFingerprintRole = ascii
-  "finite-list-spine-length/z3-live-query-run"
+-- How the worker was launched and which usable-work deadline policy it
+-- runs under: the two axes every run-identity role and schema tag is keyed
+-- by.
+data QueryRunLaunch
+  = PathnameSnapshotLaunch
+  | DescriptorBoundLaunch
+  | DescriptorBoundEffectiveIDLaunch
+  | DescriptorBoundExecveCheckLaunch
 
-budgetedQueryRunFingerprintRole :: [Word8]
-budgetedQueryRunFingerprintRole = ascii
-  "finite-list-spine-length/z3-live-query-run/shared-usable-work-deadline"
+data QueryRunDeadlineKind
+  = FreshPerQueryDeadline
+  | SharedUsableWorkDeadline
+  | ScopedSharedUsableWorkDeadline
 
-scopedBudgetedQueryRunFingerprintRole :: [Word8]
-scopedBudgetedQueryRunFingerprintRole = ascii $ concat
-  [ "finite-list-spine-length/z3-live-query-run/"
-  , "scoped-shared-usable-work-deadline/v2"
-  ]
+queryRunLaunch :: LengthSMTLibReadyWorker epoch -> QueryRunLaunch
+queryRunLaunch worker
+  | workerUsesDescriptorBoundExecveCheckExecutableAccessLaunch worker =
+      DescriptorBoundExecveCheckLaunch
+  | workerUsesDescriptorBoundEffectiveIDExecutableAccessLaunch worker =
+      DescriptorBoundEffectiveIDLaunch
+  | workerUsesDescriptorBoundExecutableLaunch worker = DescriptorBoundLaunch
+  | otherwise = PathnameSnapshotLaunch
 
+queryRunDeadlineKind :: LengthSMTLibReadyWorker epoch -> QueryRunDeadlineKind
+queryRunDeadlineKind worker =
+  case readyQueryUsableWorkDeadlinePolicy $ readyWorkerQueryPolicy worker of
+    LengthSMTLibFreshPerQueryDeadline -> FreshPerQueryDeadline
+    LengthSMTLibSharedUsableWorkDeadline {} -> SharedUsableWorkDeadline
+    LengthSMTLibScopedSharedUsableWorkDeadline {} ->
+      ScopedSharedUsableWorkDeadline
+
+-- The run-identity fingerprint role: the domain's role prefix, the shared
+-- @z3-live-query-run@ segment, and a suffix keyed by launch and deadline
+-- policy.  The historical pathname-snapshot, fresh-per-query role has no
+-- suffix at all.
 queryRunFingerprintRoleForWorker
-  :: LengthSMTLibReadyWorker epoch
+  :: QueryRunDomain planSubject runSubject query evidenceFamily counterexample
+      modelError
+  -> LengthSMTLibReadyWorker epoch
   -> [Word8]
-queryRunFingerprintRoleForWorker worker =
-  if workerUsesDescriptorBoundExecveCheckExecutableAccessLaunch worker
-    then ascii $ case readyQueryUsableWorkDeadlinePolicy
-        $ readyWorkerQueryPolicy worker of
-      LengthSMTLibFreshPerQueryDeadline -> concat
-        [ "finite-list-spine-length/z3-live-query-run/"
-        , "execve-check-executable-access-sealed-main-image/v1"
-        ]
-      LengthSMTLibSharedUsableWorkDeadline {} -> concat
-        [ "finite-list-spine-length/z3-live-query-run/"
-        , "execve-check-executable-access-sealed-main-image/"
-        , "shared-usable-work-deadline/v1"
-        ]
-      LengthSMTLibScopedSharedUsableWorkDeadline {} -> concat
-        [ "finite-list-spine-length/z3-live-query-run/"
-        , "execve-check-executable-access-sealed-main-image/"
+queryRunFingerprintRoleForWorker domain worker = ascii
+  $ queryDomainRolePrefix domain ++ "/z3-live-query-run" ++ suffix
+ where
+  suffix = case (queryRunLaunch worker, queryRunDeadlineKind worker) of
+    (PathnameSnapshotLaunch, FreshPerQueryDeadline) -> ""
+    (PathnameSnapshotLaunch, SharedUsableWorkDeadline) ->
+      "/shared-usable-work-deadline"
+    (PathnameSnapshotLaunch, ScopedSharedUsableWorkDeadline) ->
+      "/scoped-shared-usable-work-deadline/v2"
+    (DescriptorBoundLaunch, FreshPerQueryDeadline) -> "/sealed-main-image/v1"
+    (DescriptorBoundLaunch, SharedUsableWorkDeadline) ->
+      "/sealed-main-image/shared-usable-work-deadline/v1"
+    (DescriptorBoundLaunch, ScopedSharedUsableWorkDeadline) ->
+      "/sealed-main-image/scoped-shared-usable-work-deadline/v1"
+    (DescriptorBoundEffectiveIDLaunch, FreshPerQueryDeadline) ->
+      "/effective-id-executable-access-sealed-main-image/v1"
+    (DescriptorBoundEffectiveIDLaunch, SharedUsableWorkDeadline) -> concat
+      [ "/effective-id-executable-access-sealed-main-image/"
+      , "shared-usable-work-deadline/v1"
+      ]
+    (DescriptorBoundEffectiveIDLaunch, ScopedSharedUsableWorkDeadline) ->
+      concat
+        [ "/effective-id-executable-access-sealed-main-image/"
         , "scoped-shared-usable-work-deadline/v1"
         ]
-  else if workerUsesDescriptorBoundEffectiveIDExecutableAccessLaunch worker
-    then ascii $ case readyQueryUsableWorkDeadlinePolicy
-        $ readyWorkerQueryPolicy worker of
-      LengthSMTLibFreshPerQueryDeadline -> concat
-        [ "finite-list-spine-length/z3-live-query-run/"
-        , "effective-id-executable-access-sealed-main-image/v1"
-        ]
-      LengthSMTLibSharedUsableWorkDeadline {} -> concat
-        [ "finite-list-spine-length/z3-live-query-run/"
-        , "effective-id-executable-access-sealed-main-image/"
-        , "shared-usable-work-deadline/v1"
-        ]
-      LengthSMTLibScopedSharedUsableWorkDeadline {} -> concat
-        [ "finite-list-spine-length/z3-live-query-run/"
-        , "effective-id-executable-access-sealed-main-image/"
+    (DescriptorBoundExecveCheckLaunch, FreshPerQueryDeadline) ->
+      "/execve-check-executable-access-sealed-main-image/v1"
+    (DescriptorBoundExecveCheckLaunch, SharedUsableWorkDeadline) -> concat
+      [ "/execve-check-executable-access-sealed-main-image/"
+      , "shared-usable-work-deadline/v1"
+      ]
+    (DescriptorBoundExecveCheckLaunch, ScopedSharedUsableWorkDeadline) ->
+      concat
+        [ "/execve-check-executable-access-sealed-main-image/"
         , "scoped-shared-usable-work-deadline/v1"
         ]
-  else if workerUsesDescriptorBoundExecutableLaunch worker
-    then ascii $ case readyQueryUsableWorkDeadlinePolicy
-        $ readyWorkerQueryPolicy worker of
-      LengthSMTLibFreshPerQueryDeadline ->
-        "finite-list-spine-length/z3-live-query-run/sealed-main-image/v1"
-      LengthSMTLibSharedUsableWorkDeadline {} -> concat
-        [ "finite-list-spine-length/z3-live-query-run/sealed-main-image/"
-        , "shared-usable-work-deadline/v1"
-        ]
-      LengthSMTLibScopedSharedUsableWorkDeadline {} -> concat
-        [ "finite-list-spine-length/z3-live-query-run/sealed-main-image/"
-        , "scoped-shared-usable-work-deadline/v1"
-        ]
-    else case readyQueryUsableWorkDeadlinePolicy
-        $ readyWorkerQueryPolicy worker of
-      LengthSMTLibFreshPerQueryDeadline -> queryRunFingerprintRole
-      LengthSMTLibSharedUsableWorkDeadline {} ->
-        budgetedQueryRunFingerprintRole
-      LengthSMTLibScopedSharedUsableWorkDeadline {} ->
-        scopedBudgetedQueryRunFingerprintRole
 
 queryRunSchemaTagForWorker
-  :: LengthSMTLibReadyWorker epoch
+  :: QueryRunDomain planSubject runSubject query evidenceFamily counterexample
+      modelError
+  -> LengthSMTLibReadyWorker epoch
   -> [Word8]
-queryRunSchemaTagForWorker worker =
-  if workerUsesDescriptorBoundExecveCheckExecutableAccessLaunch worker
-    then case readyQueryUsableWorkDeadlinePolicy
-        $ readyWorkerQueryPolicy worker of
-      LengthSMTLibFreshPerQueryDeadline ->
-        lengthSMTLibDescriptorBoundExecveCheckExecutableAccessQueryRunSchemaTag
-      LengthSMTLibSharedUsableWorkDeadline {} ->
-        lengthSMTLibDescriptorBoundExecveCheckExecutableAccessBudgetedQueryRunSchemaTag
-      LengthSMTLibScopedSharedUsableWorkDeadline {} ->
-        lengthSMTLibDescriptorBoundExecveCheckExecutableAccessScopedBudgetedQueryRunSchemaTag
-  else if workerUsesDescriptorBoundEffectiveIDExecutableAccessLaunch worker
-    then case readyQueryUsableWorkDeadlinePolicy
-        $ readyWorkerQueryPolicy worker of
-      LengthSMTLibFreshPerQueryDeadline ->
-        lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessQueryRunSchemaTag
-      LengthSMTLibSharedUsableWorkDeadline {} ->
-        lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessBudgetedQueryRunSchemaTag
-      LengthSMTLibScopedSharedUsableWorkDeadline {} ->
-        lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessScopedBudgetedQueryRunSchemaTag
-  else if workerUsesDescriptorBoundExecutableLaunch worker
-    then case readyQueryUsableWorkDeadlinePolicy
-        $ readyWorkerQueryPolicy worker of
-      LengthSMTLibFreshPerQueryDeadline ->
-        lengthSMTLibDescriptorBoundQueryRunSchemaTag
-      LengthSMTLibSharedUsableWorkDeadline {} ->
-        lengthSMTLibDescriptorBoundBudgetedQueryRunSchemaTag
-      LengthSMTLibScopedSharedUsableWorkDeadline {} ->
-        lengthSMTLibDescriptorBoundScopedBudgetedQueryRunSchemaTag
-    else case readyQueryUsableWorkDeadlinePolicy
-        $ readyWorkerQueryPolicy worker of
-      LengthSMTLibFreshPerQueryDeadline -> lengthSMTLibQueryRunSchemaTag
-      LengthSMTLibSharedUsableWorkDeadline {} ->
-        lengthSMTLibBudgetedQueryRunSchemaTag
-      LengthSMTLibScopedSharedUsableWorkDeadline {} ->
-        lengthSMTLibScopedBudgetedQueryRunSchemaTag
+queryRunSchemaTagForWorker domain worker =
+  queryDomainSchemaTag domain (queryRunLaunch worker)
+    (queryRunDeadlineKind worker)
 
 workerUsesDescriptorBoundExecutableLaunch
   :: LengthSMTLibReadyWorker epoch
@@ -2247,22 +2576,27 @@ queryExecutableAuthorityField worker = FingerprintBytes $ ascii $
     ]
 
 queryRunIdentityPrefixFields
-  :: LengthSMTLibReadyWorker epoch
-  -> LengthSMTLibProtocolPlan identity local
+  :: QueryRunDomain planSubject runSubject query evidenceFamily counterexample
+      modelError
+  -> LengthSMTLibReadyWorker epoch
+  -> LengthSMTLibQueryProtocolPlan planSubject query
   -> Natural
   -> LengthSMTLibProcessDeadline
   -> ByteString
   -> ByteString
   -> [FingerprintField]
-queryRunIdentityPrefixFields worker plan ordinal deadline
+queryRunIdentityPrefixFields domain worker plan ordinal deadline
     checkBarrier valueBarrier =
-  [ FingerprintBytes $ queryRunSchemaTagForWorker worker
+  [ FingerprintBytes $ queryRunSchemaTagForWorker domain worker
   , tagged "authority"
       [queryExecutableAuthorityField worker]
-  , lengthSMTLibReadyWorkerIdentityFingerprintField worker
+  ] ++ queryDomainCapabilityReuseFields domain ++
+  [ lengthSMTLibReadyWorkerIdentityFingerprintField worker
   , tagged "query-allocation"
-      [ FingerprintBytes lengthSMTLibQueryBarrierSchemaTag
-      , FingerprintBytes $ ascii
+      $ FingerprintBytes lengthSMTLibQueryBarrierSchemaTag
+      : queryDomainQueryAllocationPrefix domain
+          (readyQueryMaximumQueries $ readyWorkerQueryPolicy worker) ++
+      [ FingerprintBytes $ ascii
           "zero-based-u64be/reserve-both-roles/burn-on-live-failure/v1"
       , FingerprintNatural ordinal
       , FingerprintBytes $ BS.unpack $ encodeWord64BE ordinalWord
@@ -2371,29 +2705,33 @@ queryRunTranscriptEpochLayout epoch = tagged "write-epoch"
   ]
 
 queryRunIdentitySuffixFields
-  :: LengthEvaluationLimits
-  -> ReplayedLengthSMTLibQueryOutcome
+  :: QueryRunDomain planSubject runSubject query evidenceFamily counterexample
+      modelError
+  -> LengthEvaluationLimits
+  -> ReplayedQueryOutcome evidenceFamily counterexample
   -> Natural
   -> Natural
   -> Natural
   -> Natural
   -> Natural
   -> [FingerprintField]
-queryRunIdentitySuffixFields evaluationLimits outcome
+queryRunIdentitySuffixFields domain evaluationLimits outcome
     stdoutStart stdoutEnd stderrStart stderrEnd transcriptCount =
   [ queryDecodedOutcomeField outcome
-  , queryReplayField evaluationLimits outcome
+  , queryReplayField domain evaluationLimits outcome
   , queryTransportCommitField stdoutStart stdoutEnd stderrStart stderrEnd
       transcriptCount
   ]
 
 queryRunIdentityMaximumSuffixFields
-  :: LengthEvaluationLimits
+  :: QueryRunDomain planSubject runSubject query evidenceFamily counterexample
+      modelError
+  -> LengthEvaluationLimits
   -> Natural
   -> Natural
   -> Natural
   -> [FingerprintField]
-queryRunIdentityMaximumSuffixFields evaluationLimits stdoutMaximum
+queryRunIdentityMaximumSuffixFields domain evaluationLimits stdoutMaximum
     stderrMaximum transcriptMaximum =
   [ tagged "decoded-branch"
       [ longestField $ map (FingerprintBytes . ascii)
@@ -2402,8 +2740,7 @@ queryRunIdentityMaximumSuffixFields evaluationLimits stdoutMaximum
           ["absent", "vacuous-zero-input", "framed-input-values"]
       ]
   , tagged "independent-replay"
-      [ FingerprintBytes $ ascii
-          "finite-list-spine-length/counterexample-replay/v1"
+      [ FingerprintBytes $ queryDomainReplayRole domain
       , FingerprintNatural $ fromIntegral
           $ lengthAssignmentValueBitLimit evaluationLimits
       , FingerprintNatural $ fromIntegral
@@ -2419,10 +2756,10 @@ queryRunIdentityMaximumSuffixFields evaluationLimits stdoutMaximum
   ]
 
 queryDecodedOutcomeField
-  :: ReplayedLengthSMTLibQueryOutcome
+  :: ReplayedQueryOutcome evidenceFamily counterexample
   -> FingerprintField
 queryDecodedOutcomeField outcome = tagged "decoded-branch"
-  [ solverStatusField $ replayedLengthSMTLibQueryStatus outcome
+  [ solverStatusField $ replayedQueryStatus outcome
   , FingerprintBytes $ ascii valuesTag
   ]
  where
@@ -2432,20 +2769,21 @@ queryDecodedOutcomeField outcome = tagged "decoded-branch"
   -- frame distinction while sealing identity, before successful run
   -- construction releases that parsed representation.
   valuesTag = case outcome of
-    ReplayedLengthSMTLibSatisfiableStatusOnly -> "absent"
-    ReplayedLengthSMTLibSatisfiableVacuous{} -> "vacuous-zero-input"
-    ReplayedLengthSMTLibSatisfiableFramed{} -> "framed-input-values"
-    ReplayedLengthSMTLibUnsatisfiable -> "absent"
-    ReplayedLengthSMTLibUnknown -> "absent"
+    ReplayedSatisfiableStatusOnly -> "absent"
+    ReplayedSatisfiableVacuous{} -> "vacuous-zero-input"
+    ReplayedSatisfiableFramed{} -> "framed-input-values"
+    ReplayedUnsatisfiable -> "absent"
+    ReplayedUnknown -> "absent"
 
 queryReplayField
-  :: LengthEvaluationLimits
-  -> ReplayedLengthSMTLibQueryOutcome
+  :: QueryRunDomain planSubject runSubject query evidenceFamily counterexample
+      modelError
+  -> LengthEvaluationLimits
+  -> ReplayedQueryOutcome evidenceFamily counterexample
   -> FingerprintField
-queryReplayField evaluationLimits outcome = tagged
+queryReplayField domain evaluationLimits outcome = tagged
   "independent-replay"
-  [ FingerprintBytes $ ascii
-      "finite-list-spine-length/counterexample-replay/v1"
+  [ FingerprintBytes $ queryDomainReplayRole domain
   , FingerprintNatural $ fromIntegral
       $ lengthAssignmentValueBitLimit evaluationLimits
   , FingerprintNatural $ fromIntegral
@@ -2454,21 +2792,21 @@ queryReplayField evaluationLimits outcome = tagged
   ]
  where
   replayTag = case outcome of
-    ReplayedLengthSMTLibSatisfiableStatusOnly -> "not-requested-policy"
-    ReplayedLengthSMTLibSatisfiableVacuous{} -> "validated-counterexample"
-    ReplayedLengthSMTLibSatisfiableFramed{} -> "validated-counterexample"
-    ReplayedLengthSMTLibUnsatisfiable -> "not-applicable-status"
-    ReplayedLengthSMTLibUnknown -> "not-applicable-status"
+    ReplayedSatisfiableStatusOnly -> "not-requested-policy"
+    ReplayedSatisfiableVacuous{} -> "validated-counterexample"
+    ReplayedSatisfiableFramed{} -> "validated-counterexample"
+    ReplayedUnsatisfiable -> "not-applicable-status"
+    ReplayedUnknown -> "not-applicable-status"
 
-replayedLengthSMTLibQueryStatus
-  :: ReplayedLengthSMTLibQueryOutcome
+replayedQueryStatus
+  :: ReplayedQueryOutcome evidenceFamily counterexample
   -> SolverStatus
-replayedLengthSMTLibQueryStatus outcome = case outcome of
-  ReplayedLengthSMTLibSatisfiableStatusOnly -> SolverSatisfiable
-  ReplayedLengthSMTLibSatisfiableVacuous{} -> SolverSatisfiable
-  ReplayedLengthSMTLibSatisfiableFramed{} -> SolverSatisfiable
-  ReplayedLengthSMTLibUnsatisfiable -> SolverUnsatisfiable
-  ReplayedLengthSMTLibUnknown -> SolverUnknown
+replayedQueryStatus outcome = case outcome of
+  ReplayedSatisfiableStatusOnly -> SolverSatisfiable
+  ReplayedSatisfiableVacuous{} -> SolverSatisfiable
+  ReplayedSatisfiableFramed{} -> SolverSatisfiable
+  ReplayedUnsatisfiable -> SolverUnsatisfiable
+  ReplayedUnknown -> SolverUnknown
 
 queryTransportCommitField
   :: Natural
@@ -2518,12 +2856,11 @@ queryRunTranscriptMaximumFieldByteCount maximumBytes maximumEpochs =
             [naturalFieldByteCount maximumBytes]
         , sequenceFieldByteCount $ replicateNatural maximumEpochs
             $ taggedFieldByteCount "write-epoch"
-                [ maximum
-                    [ fingerprintFieldByteCount $ queryProtocolWriteKindField
-                        LengthSMTLibProtocolInitialQueryWrite
-                    , fingerprintFieldByteCount $ queryProtocolWriteKindField
-                        LengthSMTLibProtocolInputValueWrite
-                    ]
+                [ max
+                    (fingerprintFieldByteCount $ queryProtocolWriteKindField
+                      LengthSMTLibProtocolInitialQueryWrite)
+                    (fingerprintFieldByteCount $ queryProtocolWriteKindField
+                      LengthSMTLibProtocolInputValueWrite)
                 , naturalFieldByteCount maximumBytes
                 ]
         ]
@@ -2531,37 +2868,123 @@ queryRunTranscriptMaximumFieldByteCount maximumBytes maximumEpochs =
         [bytesFieldByteCount maximumBytes]
     ]
 
-data PreparedLengthSpinePairSMTLibQueryRun epoch identity local =
-  PreparedLengthSpinePairSMTLibQueryRun
-    !Natural
-    !ByteString
-    !ByteString
-    !(LengthSpinePairSMTLibProtocolPlan identity local)
-    !LengthEvaluationLimits
-    !LengthSMTLibProcessDeadline
+-- The scalar domain -----------------------------------------------------------
 
-type role PreparedLengthSpinePairSMTLibQueryRun nominal nominal nominal
-
--- The last-committed accounting anchors are read from the lease state in the
--- same STM transaction which burns the ordinal and both marker roles.  Only
--- this receipt can cross the execution boundary; a merely prepared plan has
--- no transport-commit anchor.
-data ReservedLengthSpinePairSMTLibQueryRun epoch identity local =
-  ReservedLengthSpinePairSMTLibQueryRun
-    !(PreparedLengthSpinePairSMTLibQueryRun epoch identity local)
-    !Natural
-    !Natural
-
-type role ReservedLengthSpinePairSMTLibQueryRun nominal nominal nominal
-
--- | Execute one nominal binary-product query in the shared serial ordinal space.
+-- | Execute one serial, ordinal-bound query against a scoped ready worker.
 -- The returned value is a live syntactic observation with independently
 -- replayed counterexample evidence when the configured artifact policy asks
 -- for a satisfiable model.  It is neither executable-image attestation nor a
 -- proof that an unsatisfiable or unknown solver status is sound.
+runLengthSMTLibReadyWorkerQuery
+  :: LengthEvaluationLimits
+  -> LengthSMTLibReadyWorker epoch
+  -> LengthSMTLibQuery identity local
+  -> IO
+      (Either
+        LengthSMTLibQueryRunError
+        (LengthSMTLibQueryRun epoch identity local))
+runLengthSMTLibReadyWorkerQuery evaluationLimits worker query =
+  bimap scalarQueryRunError scalarQueryRun
+    <$> runQueryRunDomain scalarQueryRunDomain evaluationLimits worker query
+
+scalarQueryRunDomain
+  :: QueryRunDomain
+      LengthSMTLibProtocolPlanFingerprintSubject
+      LengthSMTLibQueryRunIdentitySubject
+      (LengthSMTLibQuery identity local)
+      FiniteListSpineLengthV1
+      ValidatedLengthCounterexample
+      LengthSMTLibModelError
+scalarQueryRunDomain = QueryRunDomain
+  { queryDomainRolePrefix = "finite-list-spine-length"
+  , queryDomainReplayRole = ascii
+      "finite-list-spine-length/counterexample-replay/v1"
+  , queryDomainSchemaTag = \launch deadline -> case (launch, deadline) of
+      (PathnameSnapshotLaunch, FreshPerQueryDeadline) ->
+        lengthSMTLibQueryRunSchemaTag
+      (PathnameSnapshotLaunch, SharedUsableWorkDeadline) ->
+        lengthSMTLibBudgetedQueryRunSchemaTag
+      (PathnameSnapshotLaunch, ScopedSharedUsableWorkDeadline) ->
+        lengthSMTLibScopedBudgetedQueryRunSchemaTag
+      (DescriptorBoundLaunch, FreshPerQueryDeadline) ->
+        lengthSMTLibDescriptorBoundQueryRunSchemaTag
+      (DescriptorBoundLaunch, SharedUsableWorkDeadline) ->
+        lengthSMTLibDescriptorBoundBudgetedQueryRunSchemaTag
+      (DescriptorBoundLaunch, ScopedSharedUsableWorkDeadline) ->
+        lengthSMTLibDescriptorBoundScopedBudgetedQueryRunSchemaTag
+      (DescriptorBoundEffectiveIDLaunch, FreshPerQueryDeadline) ->
+        lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessQueryRunSchemaTag
+      (DescriptorBoundEffectiveIDLaunch, SharedUsableWorkDeadline) ->
+        lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessBudgetedQueryRunSchemaTag
+      (DescriptorBoundEffectiveIDLaunch, ScopedSharedUsableWorkDeadline) ->
+        lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessScopedBudgetedQueryRunSchemaTag
+      (DescriptorBoundExecveCheckLaunch, FreshPerQueryDeadline) ->
+        lengthSMTLibDescriptorBoundExecveCheckExecutableAccessQueryRunSchemaTag
+      (DescriptorBoundExecveCheckLaunch, SharedUsableWorkDeadline) ->
+        lengthSMTLibDescriptorBoundExecveCheckExecutableAccessBudgetedQueryRunSchemaTag
+      (DescriptorBoundExecveCheckLaunch, ScopedSharedUsableWorkDeadline) ->
+        lengthSMTLibDescriptorBoundExecveCheckExecutableAccessScopedBudgetedQueryRunSchemaTag
+  , queryDomainProtocolLimits = readyQueryProtocolLimits
+  , queryDomainSealPlan = sealLengthSMTLibProtocolPlan
+  , queryDomainInputValueRequestBytes =
+      lengthSMTLibQueryInputValueRequestBytes
+  , queryDomainValidateCounterexample = validateLengthSMTLibCounterexample
+  , queryDomainCapabilityReuseFields = []
+  , queryDomainQueryAllocationPrefix = const []
+  }
+
+scalarQueryRun
+  :: QueryRunRecord
+      LengthSMTLibQueryRunIdentitySubject
+      FiniteListSpineLengthV1
+      ValidatedLengthCounterexample
+  -> LengthSMTLibQueryRun epoch identity local
+scalarQueryRun (QueryRunRecord ordinal observation identity digest
+    stdoutStart stdoutEnd stderrStart stderrEnd) =
+  LengthSMTLibQueryRun ordinal observation identity digest
+    stdoutStart stdoutEnd stderrStart stderrEnd
+
+scalarQueryRunError
+  :: QueryRunError LengthSMTLibModelError -> LengthSMTLibQueryRunError
+scalarQueryRunError (QueryRunError failure cleanup) =
+  LengthSMTLibQueryRunError (scalarQueryRunFailure failure) cleanup
+
+scalarQueryRunFailure
+  :: QueryRunFailure LengthSMTLibModelError -> LengthSMTLibQueryRunFailure
+scalarQueryRunFailure failure = case failure of
+  QueryWorkerClosing -> LengthSMTLibQueryWorkerClosing
+  QueryWorkerSpent -> LengthSMTLibQueryWorkerSpent
+  QueryLimitExceeded maximumQueries observed ->
+    LengthSMTLibQueryLimitExceeded maximumQueries observed
+  QueryProtocolPlanFailure nested ->
+    LengthSMTLibQueryProtocolPlanFailure nested
+  QueryProcessStdoutCapacityTooSmall remaining required ->
+    LengthSMTLibQueryProcessStdoutCapacityTooSmall remaining required
+  QueryBarrierCollision -> LengthSMTLibQueryBarrierCollision
+  QueryDeadlineFailure nested -> LengthSMTLibQueryDeadlineFailure nested
+  QueryProcessFailure nested -> LengthSMTLibQueryProcessFailure nested
+  QueryProtocolFailure nested -> LengthSMTLibQueryProtocolFailure nested
+  QueryTranscriptAccountingMismatch expected observed ->
+    LengthSMTLibQueryTranscriptAccountingMismatch expected observed
+  QueryStderrAccountingMismatch expected observed ->
+    LengthSMTLibQueryStderrAccountingMismatch expected observed
+  QueryModelFailure nested -> LengthSMTLibQueryModelFailure nested
+  QueryModelNotCounterexample -> LengthSMTLibQueryModelNotCounterexample
+  QueryRunIdentityAdmissionTooSmall maximumBytes required ->
+    LengthSMTLibQueryRunIdentityAdmissionTooSmall maximumBytes required
+  QueryRunIdentityFingerprintByteLimitExceeded maximumBytes observed ->
+    LengthSMTLibQueryRunIdentityFingerprintByteLimitExceeded
+      maximumBytes observed
+  QueryInternalFailure -> LengthSMTLibQueryInternalFailure
+
+-- The binary-product domain --------------------------------------------------
+
+-- | Execute one nominal binary-product query in the shared serial ordinal
+-- space.  The worker is reused only as the exact common QF_LIA input-value
+-- transport it was admitted as; the product run binds that reuse explicitly
+-- in its identity and takes no scalar behavioral authority from it.
 runLengthSpinePairSMTLibReadyWorkerQuery
-  :: forall epoch identity local.
-     LengthEvaluationLimits
+  :: LengthEvaluationLimits
   -> LengthSMTLibReadyWorker epoch
   -> LengthSpinePairSMTLibQuery identity local
   -> IO
@@ -2569,947 +2992,126 @@ runLengthSpinePairSMTLibReadyWorkerQuery
         LengthSpinePairSMTLibQueryRunError
         (LengthSpinePairSMTLibQueryRun epoch identity local))
 runLengthSpinePairSMTLibReadyWorkerQuery evaluationLimits worker query =
-  mask $ \restore -> do
-    deadlineResult <- effectiveLengthSMTLibDeadlineAfterMilliseconds
-      (readyQueryUsableWorkDeadlinePolicy $ readyWorkerQueryPolicy worker)
-      $ lengthSMTLibPostLaunchHostDeadlineMilliseconds postLaunchExecution
-    case deadlineResult of
-      Left failure -> pure $ spinePairQueryRunLeft
-        $ LengthSpinePairSMTLibQueryDeadlineFailure failure
-      Right (LengthSMTLibEffectiveDeadline _ deadline) -> do
-        acquired <- acquireLengthSpinePairSMTLibQueryGate worker deadline
-        case acquired of
-          Left failure@LengthSpinePairSMTLibQueryProcessFailure {} ->
-            spendLengthSpinePairSMTLibQueryWorker worker failure
-          Left failure@LengthSpinePairSMTLibQueryInternalFailure ->
-            spendLengthSpinePairSMTLibQueryWorker worker failure
-          Left failure -> pure $ spinePairQueryRunLeft failure
-          Right () -> finally
-            (runWithGate restore deadline)
-            (atomically $ putTMVar (readyWorkerQueryGate worker) ())
- where
-  postLaunchExecution = readyQueryPostLaunchExecution
-    $ readyWorkerQueryPolicy worker
+  bimap spinePairQueryRunError spinePairQueryRun
+    <$> runQueryRunDomain spinePairQueryRunDomain evaluationLimits worker
+          query
 
-  runWithGate restore deadline = do
-    prepared <- prepareLengthSpinePairSMTLibQueryRun
-      evaluationLimits worker query deadline
-    case prepared of
-      Left (mustSpend, failure)
-        | mustSpend -> spendLengthSpinePairSMTLibQueryWorker worker failure
-        | otherwise -> pure $ spinePairQueryRunLeft failure
-      Right preparation -> do
-        reserved <- reservePreparedLengthSpinePairSMTLibQueryRun worker preparation
-        case reserved of
-          Left LengthSpinePairSMTLibQueryBarrierCollision ->
-            spendLengthSpinePairSMTLibQueryWorker worker
-              LengthSpinePairSMTLibQueryBarrierCollision
-          Left LengthSpinePairSMTLibQueryInternalFailure ->
-            spendLengthSpinePairSMTLibQueryWorker worker
-              LengthSpinePairSMTLibQueryInternalFailure
-          Left failure -> pure $ spinePairQueryRunLeft failure
-          Right reservation -> do
-            executed <- restore
-              (executeReservedLengthSpinePairSMTLibQueryRun worker reservation)
-              `onException` abandonLengthSpinePairSMTLibQueryWorker worker
-            case executed of
-              Left failure -> spendLengthSpinePairSMTLibQueryWorker worker failure
-              Right run -> do
-                committed <- commitLengthSpinePairSMTLibQueryRun worker reservation run
-                if committed
-                  then pure $ Right run
-                  else spendLengthSpinePairSMTLibQueryWorker worker
-                    LengthSpinePairSMTLibQueryInternalFailure
-
-spinePairQueryRunLeft
-  :: LengthSpinePairSMTLibQueryRunFailure
-  -> Either LengthSpinePairSMTLibQueryRunError value
-spinePairQueryRunLeft failure = Left $ LengthSpinePairSMTLibQueryRunError failure Nothing
-
-acquireLengthSpinePairSMTLibQueryGate
-  :: LengthSMTLibReadyWorker epoch
-  -> LengthSMTLibProcessDeadline
-  -> IO (Either LengthSpinePairSMTLibQueryRunFailure ())
-acquireLengthSpinePairSMTLibQueryGate worker deadline = mask $ \_ -> loop
- where
-  maximumQueries = readyQueryMaximumQueries $ readyWorkerQueryPolicy worker
-  process = readyWorkerProcess worker
-  cancellation = readyWorkerCancellation worker
-  stateVariable = readyWorkerQueryState worker
-  gate = readyWorkerQueryGate worker
-
-  loop = do
-    initial <- atomically $ spinePairQueryLeaseAdmission maximumQueries
-      <$> readTVar stateVariable
-    case initial of
-      Left failure -> pure $ Left failure
-      Right () -> do
-        -- The controlled action only observes the token.  Destructive
-        -- acquisition happens later under masking because waitControlled has
-        -- a deliberate post-action cancellation/deadline precedence check.
-        observed <- waitLengthSMTLibProcessControl process cancellation deadline
-          LengthSMTLibProcessQueryPhase $ do
-            state <- readTVar stateVariable
-            case spinePairQueryLeaseAdmission maximumQueries state of
-              Left failure -> pure $ Left failure
-              Right () -> Right <$> readTMVar gate
-        case observed of
-          Left processFailure -> do
-            state <- atomically $ readTVar stateVariable
-            pure $ Left $ spinePairQueryGateProcessFailure state processFailure
-          Right (Left failure) -> pure $ Left failure
-          Right (Right ()) -> do
-            claimed <- atomically $ do
-              state <- readTVar stateVariable
-              case spinePairQueryLeaseAdmission maximumQueries state of
-                Left failure -> pure $ Left failure
-                Right () -> do
-                  token <- tryTakeTMVar gate
-                  pure $ Right token
-            case claimed of
-              Left failure -> pure $ Left failure
-              Right Nothing -> loop
-              Right (Just ()) -> pure $ Right ()
-
-spinePairQueryLeaseAdmission
-  :: Natural
-  -> QueryLeaseState
-  -> Either LengthSpinePairSMTLibQueryRunFailure ()
-spinePairQueryLeaseAdmission maximumQueries
-    (QueryLeaseState mode nextOrdinal _ _ _ _) = case mode of
-  QueryLeaseClosing -> Left LengthSpinePairSMTLibQueryWorkerClosing
-  QueryLeaseSpent -> Left LengthSpinePairSMTLibQueryWorkerSpent
-  QueryLeaseAccepting
-    | nextOrdinal >= maximumQueries -> Left
-        $ LengthSpinePairSMTLibQueryLimitExceeded maximumQueries (maximumQueries + 1)
-    | otherwise -> Right ()
-
-spinePairQueryGateProcessFailure
-  :: QueryLeaseState
-  -> LengthSMTLibProcessError
-  -> LengthSpinePairSMTLibQueryRunFailure
-spinePairQueryGateProcessFailure (QueryLeaseState mode _ _ _ _ _) failure = case mode of
-  QueryLeaseClosing -> LengthSpinePairSMTLibQueryWorkerClosing
-  QueryLeaseSpent -> LengthSpinePairSMTLibQueryWorkerSpent
-  _ -> spinePairQueryProcessFailure failure
-
-prepareLengthSpinePairSMTLibQueryRun
-  :: LengthEvaluationLimits
-  -> LengthSMTLibReadyWorker epoch
-  -> LengthSpinePairSMTLibQuery identity local
-  -> LengthSMTLibProcessDeadline
-  -> IO
-      (Either
-        (Bool, LengthSpinePairSMTLibQueryRunFailure)
-        (PreparedLengthSpinePairSMTLibQueryRun epoch identity local))
-prepareLengthSpinePairSMTLibQueryRun evaluationLimits worker query deadline = do
-  state@(QueryLeaseState _ ordinal used inFlight _ _) <-
-    atomically $ readTVar $ readyWorkerQueryState worker
-  case spinePairQueryLeaseAdmission maximumQueries state of
-    Left failure -> pure $ Left (False, failure)
-    Right () | isJust inFlight -> pure
-      $ Left (True, LengthSpinePairSMTLibQueryInternalFailure)
-    Right () -> do
-      controlled <- waitLengthSMTLibProcessControl process
-        (readyWorkerCancellation worker) deadline LengthSMTLibProcessQueryPhase
-        $ pure ()
-      case controlled of
-        Left failure -> pure $ Left
-          ( lengthSMTLibProcessErrorClass failure /=
-              LengthSMTLibProcessDeadlineExceeded
-          , spinePairQueryProcessFailure failure
-          )
-        Right () -> prepareControlled ordinal used
- where
-  policy = readyWorkerQueryPolicy worker
-  maximumQueries = readyQueryMaximumQueries policy
-  protocolLimits = defaultLengthSpinePairSMTLibProtocolLimits
-  postLaunchExecution = readyQueryPostLaunchExecution policy
-  process = readyWorkerProcess worker
-  processLimits = lengthSMTLibProcessLimits process
-  transportMaximum = lengthSMTLibProcessStdoutByteLimit processLimits
-
-  prepareControlled ordinal used = do
-    let ordinalWord = fromIntegral ordinal
-        checkBarrier = deriveQueryBarrier
-          (readyWorkerBarrierSeed worker) ordinalWord queryCheckBarrierRole
-        valueBarrier = deriveQueryBarrier
-          (readyWorkerBarrierSeed worker) ordinalWord queryValueBarrierRole
-        needsValueBarrier =
-          lengthSMTLibPostLaunchArtifactPolicy postLaunchExecution ==
-            LengthSMTLibInputValuesAfterSatisfiable &&
-          isJust (lengthSpinePairSMTLibQueryInputValueRequestBytes query)
-        valueNonce
-          | needsValueBarrier = Just $ BS.unpack valueBarrier
-          | otherwise = Nothing
-    case sealLengthSpinePairSMTLibProtocolPlan protocolLimits postLaunchExecution query
-        (BS.unpack checkBarrier) valueNonce of
-      Left failure -> pure $ Left
-        (False, LengthSpinePairSMTLibQueryProtocolPlanFailure failure)
-      Right plan
-        | Set.member checkBarrier used || Set.member valueBarrier used ||
-            checkBarrier == valueBarrier -> pure
-              $ Left (True, LengthSpinePairSMTLibQueryBarrierCollision)
-        | otherwise -> do
-            observedStdout <- lengthSMTLibProcessObservedStdoutBytes process
-            let required = lengthSpinePairSMTLibProtocolPlanMinimumStdoutByteCount plan
-                remaining
-                  | observedStdout >= transportMaximum = 0
-                  | otherwise = transportMaximum - observedStdout
-            if required > remaining
-              then pure $ Left (False,
-                LengthSpinePairSMTLibQueryProcessStdoutCapacityTooSmall
-                  remaining required)
-              else case admitLengthSpinePairSMTLibQueryRunIdentity
-                  worker plan
-                  evaluationLimits ordinal deadline
-                  checkBarrier valueBarrier of
-                Left failure -> pure $ Left (False, failure)
-                Right () -> pure $ Right $ PreparedLengthSpinePairSMTLibQueryRun
-                  ordinal checkBarrier valueBarrier plan evaluationLimits deadline
-
-reservePreparedLengthSpinePairSMTLibQueryRun
-  :: LengthSMTLibReadyWorker epoch
-  -> PreparedLengthSpinePairSMTLibQueryRun epoch identity local
-  -> IO
-      (Either
-        LengthSpinePairSMTLibQueryRunFailure
-        (ReservedLengthSpinePairSMTLibQueryRun epoch identity local))
-reservePreparedLengthSpinePairSMTLibQueryRun worker
-    preparation@(PreparedLengthSpinePairSMTLibQueryRun
-      ordinal checkBarrier valueBarrier _ _ _) = atomically $ do
-  state@(QueryLeaseState mode nextOrdinal used inFlight stdoutCount stderrCount) <-
-    readTVar $ readyWorkerQueryState worker
-  case spinePairQueryLeaseAdmission maximumQueries state of
-    Left failure -> pure $ Left failure
-    Right ()
-      | mode /= QueryLeaseAccepting || nextOrdinal /= ordinal ||
-          isJust inFlight -> pure $ Left LengthSpinePairSMTLibQueryInternalFailure
-      | Set.member checkBarrier used || Set.member valueBarrier used ||
-          checkBarrier == valueBarrier -> pure
-            $ Left LengthSpinePairSMTLibQueryBarrierCollision
-      | otherwise -> do
-          writeTVar (readyWorkerQueryState worker) $ QueryLeaseState
-            QueryLeaseAccepting (ordinal + 1)
-            (Set.insert valueBarrier $ Set.insert checkBarrier used)
-            (Just ordinal) stdoutCount stderrCount
-          pure $ Right $ ReservedLengthSpinePairSMTLibQueryRun
-            preparation stdoutCount stderrCount
- where
-  maximumQueries = readyQueryMaximumQueries $ readyWorkerQueryPolicy worker
-
-commitLengthSpinePairSMTLibQueryRun
-  :: LengthSMTLibReadyWorker epoch
-  -> ReservedLengthSpinePairSMTLibQueryRun epoch identity local
-  -> LengthSpinePairSMTLibQueryRun epoch identity local
-  -> IO Bool
-commitLengthSpinePairSMTLibQueryRun worker
-    (ReservedLengthSpinePairSMTLibQueryRun
-      (PreparedLengthSpinePairSMTLibQueryRun ordinal _ _ _ _ _)
-      stdoutStart stderrStart)
-    run =
-  atomically $ do
-    QueryLeaseState mode nextOrdinal used inFlight
-        stateStdoutStart stateStderrStart <-
-      readTVar $ readyWorkerQueryState worker
-    if inFlight /= Just ordinal || nextOrdinal /= ordinal + 1 ||
-        mode == QueryLeaseSpent ||
-        stateStdoutStart /= stdoutStart || stateStderrStart /= stderrStart ||
-        lengthSpinePairSMTLibQueryRunOrdinal run /= ordinal ||
-        lengthSpinePairSMTLibQueryRunStdoutStart run /= stdoutStart ||
-        lengthSpinePairSMTLibQueryRunStderrStart run /= stderrStart
-      then pure False
-      else do
-        writeTVar (readyWorkerQueryState worker) $ QueryLeaseState
-          mode nextOrdinal used Nothing stdoutEnd stderrEnd
-        pure True
- where
-  stdoutEnd = lengthSpinePairSMTLibQueryRunStdoutEnd run
-  stderrEnd = lengthSpinePairSMTLibQueryRunStderrEnd run
-
-spendLengthSpinePairSMTLibQueryWorker
-  :: LengthSMTLibReadyWorker epoch
-  -> LengthSpinePairSMTLibQueryRunFailure
-  -> IO (Either LengthSpinePairSMTLibQueryRunError value)
-spendLengthSpinePairSMTLibQueryWorker worker failure = do
-  cleanup <- abandonLengthSpinePairSMTLibQueryWorker worker
-  pure $ Left $ LengthSpinePairSMTLibQueryRunError failure $ Just cleanup
-
-abandonLengthSpinePairSMTLibQueryWorker
-  :: LengthSMTLibReadyWorker epoch
-  -> IO LengthSMTLibProcessCleanupStatus
-abandonLengthSpinePairSMTLibQueryWorker worker = do
-  atomically $ do
-    QueryLeaseState _ ordinal used _ stdoutCount stderrCount <-
-      readTVar $ readyWorkerQueryState worker
-    writeTVar (readyWorkerQueryState worker) $ QueryLeaseState
-      QueryLeaseSpent ordinal used Nothing stdoutCount stderrCount
-  cancelLengthSMTLibProcess $ readyWorkerCancellation worker
-  closeLengthSMTLibProcess $ readyWorkerProcess worker
-
-spinePairQueryProcessFailure
-  :: LengthSMTLibProcessError
-  -> LengthSpinePairSMTLibQueryRunFailure
-spinePairQueryProcessFailure failure
-  | lengthSMTLibProcessErrorClass failure ==
-      LengthSMTLibProcessDeadlineExceeded =
-        LengthSpinePairSMTLibQueryDeadlineFailure failure
-  | otherwise = LengthSpinePairSMTLibQueryProcessFailure failure
-
-executeReservedLengthSpinePairSMTLibQueryRun
-  :: LengthSMTLibReadyWorker epoch
-  -> ReservedLengthSpinePairSMTLibQueryRun epoch identity local
-  -> IO
-      (Either
-        LengthSpinePairSMTLibQueryRunFailure
-        (LengthSpinePairSMTLibQueryRun epoch identity local))
-executeReservedLengthSpinePairSMTLibQueryRun worker
-    (ReservedLengthSpinePairSMTLibQueryRun
-      (PreparedLengthSpinePairSMTLibQueryRun ordinal checkBarrier valueBarrier plan
-        evaluationLimits deadline)
-      stdoutStart stderrStart) = do
-  driven <- driveSpinePairProtocolQuery worker deadline plan
-  case driven of
-    Left failure -> pure $ Left failure
-    Right (decoded, transcript) -> do
-      firstBoundary <- observeLengthSpinePairSMTLibQueryBoundary worker deadline
-      case firstBoundary of
-        Left failure -> pure $ Left failure
-        Right (stdoutEnd, stderrEnd) ->
-          case validateLengthSpinePairSMTLibQueryAccounting
-              transcript stdoutStart stdoutEnd stderrStart stderrEnd of
-            Left failure -> pure $ Left failure
-            Right () -> do
-              replayed <- replayLengthSpinePairSMTLibQuery
-                evaluationLimits worker plan deadline decoded
-              case replayed of
-                Left failure -> pure $ Left failure
-                Right outcome -> do
-                  committedBoundary <-
-                    observeLengthSpinePairSMTLibQueryBoundary worker deadline
-                  case committedBoundary of
-                    Left failure -> pure $ Left failure
-                    Right (stdoutCommitted, stderrCommitted)
-                      | stdoutCommitted /= stdoutEnd -> pure $ Left
-                          $ LengthSpinePairSMTLibQueryTranscriptAccountingMismatch
-                              (smtLibCausalTranscriptByteCount transcript)
-                              (stdoutCommitted -| stdoutStart)
-                      | stderrCommitted /= stderrEnd -> pure $ Left
-                          $ LengthSpinePairSMTLibQueryStderrAccountingMismatch
-                              stderrStart stderrCommitted
-                      | otherwise -> case buildLengthSpinePairSMTLibQueryRunIdentity
-                          worker plan evaluationLimits ordinal deadline
-                          checkBarrier valueBarrier outcome transcript
-                          stdoutStart stdoutCommitted stderrStart stderrCommitted of
-                        Left failure -> pure $ Left failure
-                        Right identity -> do
-                          let transcriptBytes = causalTranscriptBytes transcript
-                              transcriptDigest = SHA256.hash transcriptBytes
-                          finalBoundary <-
-                            observeLengthSpinePairSMTLibQueryBoundary worker deadline
-                          pure $ case finalBoundary of
-                            Left failure -> Left failure
-                            Right (stdoutFinal, stderrFinal)
-                              | stdoutFinal /= stdoutCommitted -> Left
-                                  $ LengthSpinePairSMTLibQueryTranscriptAccountingMismatch
-                                      (smtLibCausalTranscriptByteCount
-                                        transcript)
-                                      (stdoutFinal -| stdoutStart)
-                              | stderrFinal /= stderrCommitted -> Left
-                                  $ LengthSpinePairSMTLibQueryStderrAccountingMismatch
-                                      stderrStart stderrFinal
-                              | otherwise -> Right $ LengthSpinePairSMTLibQueryRun
-                                  ordinal
-                                  (replayedLengthSpinePairSMTLibQueryObservation outcome)
-                                  identity
-                                  transcriptDigest
-                                  stdoutStart stdoutFinal
-                                  stderrStart stderrFinal
-
-driveSpinePairProtocolQuery
-  :: LengthSMTLibReadyWorker epoch
-  -> LengthSMTLibProcessDeadline
-  -> LengthSpinePairSMTLibProtocolPlan identity local
-  -> IO
-      (Either
-        LengthSpinePairSMTLibQueryRunFailure
-        ( LengthSpinePairSMTLibProtocolDecoded identity local
-        , SMTLibCausalTranscript LengthSpinePairSMTLibProtocolWriteKind
-        ))
-driveSpinePairProtocolQuery worker deadline plan = do
-  driven <- driveSMTLibCausalActions
-    SMTLibCausalAdoptPredecessorWhitespace
-    (lengthSpinePairSMTLibProtocolPlanCumulativeStdoutByteLimit plan)
-    feedLengthSpinePairSMTLibProtocol finishLengthSpinePairSMTLibProtocol
-    LengthSMTLibProtocolUnexpectedPostBarrierByte
-    lengthSMTLibCausalTransportOps
-    (lengthSMTLibCausalTransport
-      (readyWorkerProcess worker) (readyWorkerCancellation worker) deadline)
-    $ startLengthSpinePairSMTLibProtocol plan
-  pure $ case driven of
-    Left failure -> Left $ mapFailure failure
-    Right value -> Right value
- where
-  mapFailure failure = case failure of
-    SMTLibCausalTransportFailure processFailure ->
-      spinePairQueryProcessFailure processFailure
-    SMTLibCausalMachineFailure protocolFailure ->
-      LengthSpinePairSMTLibQueryProtocolFailure protocolFailure
-    SMTLibCausalCumulativeOutputByteLimitExceeded maximumBytes observed ->
-      LengthSpinePairSMTLibQueryProtocolFailure
-        $ LengthSMTLibProtocolCumulativeStdoutByteLimitExceeded
-            maximumBytes observed
-    SMTLibCausalInternalFailure -> LengthSpinePairSMTLibQueryInternalFailure
-
-observeLengthSpinePairSMTLibQueryBoundary
-  :: LengthSMTLibReadyWorker epoch
-  -> LengthSMTLibProcessDeadline
-  -> IO (Either LengthSpinePairSMTLibQueryRunFailure (Natural, Natural))
-observeLengthSpinePairSMTLibQueryBoundary worker deadline = do
-  ready <- checkLengthSMTLibProcessReady
-    (readyWorkerProcess worker) (readyWorkerCancellation worker) deadline
-  case ready of
-    Left failure -> pure $ Left $ spinePairQueryProcessFailure failure
-    Right () -> do
-      stdoutCount <- lengthSMTLibProcessObservedStdoutBytes
-        $ readyWorkerProcess worker
-      stderrCount <- lengthSMTLibProcessObservedStderrBytes
-        $ readyWorkerProcess worker
-      pure $ Right (stdoutCount, stderrCount)
-
-validateLengthSpinePairSMTLibQueryAccounting
-  :: SMTLibCausalTranscript kind
-  -> Natural
-  -> Natural
-  -> Natural
-  -> Natural
-  -> Either LengthSpinePairSMTLibQueryRunFailure ()
-validateLengthSpinePairSMTLibQueryAccounting transcript stdoutStart stdoutEnd
-    stderrStart stderrEnd
-  | stdoutEnd < stdoutStart = Left LengthSpinePairSMTLibQueryInternalFailure
-  | transcriptCount /= stdoutEnd - stdoutStart = Left
-      $ LengthSpinePairSMTLibQueryTranscriptAccountingMismatch
-          transcriptCount (stdoutEnd - stdoutStart)
-  | stderrEnd /= stderrStart = Left
-      $ LengthSpinePairSMTLibQueryStderrAccountingMismatch stderrStart stderrEnd
-  | otherwise = Right ()
- where
-  transcriptCount = smtLibCausalTranscriptByteCount transcript
-
-replayLengthSpinePairSMTLibQuery
-  :: LengthEvaluationLimits
-  -> LengthSMTLibReadyWorker epoch
-  -> LengthSpinePairSMTLibProtocolPlan identity local
-  -> LengthSMTLibProcessDeadline
-  -> LengthSpinePairSMTLibProtocolDecoded identity local
-  -> IO
-      (Either
-        LengthSpinePairSMTLibQueryRunFailure
-        ReplayedLengthSpinePairSMTLibQueryOutcome)
-replayLengthSpinePairSMTLibQuery evaluationLimits worker plan deadline decoded =
-  case ( lengthSpinePairSMTLibProtocolDecodedObservation decoded
-       , lengthSpinePairSMTLibProtocolPlanArtifactPolicy plan) of
-    ( SatisfiableObservation (Just values)
-      , LengthSMTLibInputValuesAfterSatisfiable) -> do
-      replayed <- runBeforeLengthSMTLibProcessDeadline
-        (readyWorkerCancellation worker) deadline
-        (evaluate $ force
-          $ validateLengthSpinePairSMTLibCounterexample evaluationLimits query values)
-        (const $ pure ())
-      pure $ case replayed of
-        Left failure -> Left $ spinePairQueryProcessFailure failure
-        Right (Left failure) -> Left $ LengthSpinePairSMTLibQueryModelFailure failure
-        Right (Right Nothing) -> Left LengthSpinePairSMTLibQueryModelNotCounterexample
-        Right (Right (Just evidence)) -> Right $ case values of
-          [] -> ReplayedLengthSpinePairSMTLibSatisfiableVacuous evidence
-          _ : _ -> ReplayedLengthSpinePairSMTLibSatisfiableFramed evidence
-    ( SatisfiableObservation Nothing
-      , LengthSMTLibInputValuesAfterSatisfiable) ->
-      pure $ Left LengthSpinePairSMTLibQueryInternalFailure
-    (SatisfiableObservation Nothing, LengthSMTLibStatusOnly) ->
-      pure $ Right ReplayedLengthSpinePairSMTLibSatisfiableStatusOnly
-    (SatisfiableObservation (Just _), LengthSMTLibStatusOnly) ->
-      pure $ Left LengthSpinePairSMTLibQueryInternalFailure
-    (UnsatisfiableObservation (), _) ->
-      pure $ Right ReplayedLengthSpinePairSMTLibUnsatisfiable
-    (UnknownObservation (), _) ->
-      pure $ Right ReplayedLengthSpinePairSMTLibUnknown
- where
-  query = lengthSpinePairSMTLibProtocolPlanQuery plan
-
--- | The five successful identity branches after independent replay. This one
--- transient owner prevents decoded status/value classification from being
--- paired independently with replay evidence while the unchanged v1 identity
--- fields are built.
-data ReplayedLengthSpinePairSMTLibQueryOutcome
-  = ReplayedLengthSpinePairSMTLibSatisfiableStatusOnly
-  | ReplayedLengthSpinePairSMTLibSatisfiableVacuous
-      !(BehavioralEvidence
-        FiniteBinaryProductSpineLengthsV1
-        ValidatedLengthSpinePairCounterexample)
-  | ReplayedLengthSpinePairSMTLibSatisfiableFramed
-      !(BehavioralEvidence
-        FiniteBinaryProductSpineLengthsV1
-        ValidatedLengthSpinePairCounterexample)
-  | ReplayedLengthSpinePairSMTLibUnsatisfiable
-  | ReplayedLengthSpinePairSMTLibUnknown
-
--- Generic 'SolverObservation' artifacts remain lazy. Constructing the final
--- strict run owner separately forces only the satisfiable 'Maybe' spine, as
--- the former strict evidence field did, without adding a global payload bang.
-replayedLengthSpinePairSMTLibQueryObservation
-  :: ReplayedLengthSpinePairSMTLibQueryOutcome
-  -> LengthSpinePairSMTLibQueryRunObservation
-replayedLengthSpinePairSMTLibQueryObservation outcome = case outcome of
-  ReplayedLengthSpinePairSMTLibSatisfiableStatusOnly ->
-    let evidence = Nothing
-    in evidence `seq` SatisfiableObservation evidence
-  ReplayedLengthSpinePairSMTLibSatisfiableVacuous retained ->
-    let evidence = Just retained
-    in evidence `seq` SatisfiableObservation evidence
-  ReplayedLengthSpinePairSMTLibSatisfiableFramed retained ->
-    let evidence = Just retained
-    in evidence `seq` SatisfiableObservation evidence
-  ReplayedLengthSpinePairSMTLibUnsatisfiable -> UnsatisfiableObservation ()
-  ReplayedLengthSpinePairSMTLibUnknown -> UnknownObservation ()
-
-buildLengthSpinePairSMTLibQueryRunIdentity
-  :: LengthSMTLibReadyWorker epoch
-  -> LengthSpinePairSMTLibProtocolPlan identity local
-  -> LengthEvaluationLimits
-  -> Natural
-  -> LengthSMTLibProcessDeadline
-  -> ByteString
-  -> ByteString
-  -> ReplayedLengthSpinePairSMTLibQueryOutcome
-  -> SMTLibCausalTranscript LengthSpinePairSMTLibProtocolWriteKind
-  -> Natural
-  -> Natural
-  -> Natural
-  -> Natural
-  -> Either
-      LengthSpinePairSMTLibQueryRunFailure
-      (Fingerprint LengthSpinePairSMTLibQueryRunIdentitySubject)
-buildLengthSpinePairSMTLibQueryRunIdentity worker plan evaluationLimits ordinal deadline
-    checkBarrier valueBarrier outcome transcript
-    stdoutStart stdoutEnd stderrStart stderrEnd =
-  case buildFingerprintWithin maximumBytes FingerprintBuilder
-      { fingerprintBuilderVersion = 1
-      , fingerprintBuilderRole = spinePairQueryRunFingerprintRoleForWorker worker
-      , fingerprintBuilderFields =
-          spinePairQueryRunIdentityPrefixFields worker plan ordinal deadline
-            checkBarrier valueBarrier ++
-          [spinePairQueryRunTranscriptField transcript] ++
-          spinePairQueryRunIdentitySuffixFields evaluationLimits outcome
-            stdoutStart stdoutEnd stderrStart stderrEnd
-            (smtLibCausalTranscriptByteCount transcript)
-      } of
-    Left (FingerprintLimitExceeded fingerprintMaximum observed) -> Left
-      $ LengthSpinePairSMTLibQueryRunIdentityFingerprintByteLimitExceeded
-          fingerprintMaximum observed
-    Right identity -> Right identity
- where
-  maximumBytes = readyQueryRunIdentityFingerprintByteLimit
-    $ readyWorkerQueryPolicy worker
-
-admitLengthSpinePairSMTLibQueryRunIdentity
-  :: LengthSMTLibReadyWorker epoch
-  -> LengthSpinePairSMTLibProtocolPlan identity local
-  -> LengthEvaluationLimits
-  -> Natural
-  -> LengthSMTLibProcessDeadline
-  -> ByteString
-  -> ByteString
-  -> Either LengthSpinePairSMTLibQueryRunFailure ()
-admitLengthSpinePairSMTLibQueryRunIdentity worker plan evaluationLimits
-    ordinal deadline checkBarrier valueBarrier
-  | requiredMaximum > maximumBytes = Left
-      $ LengthSpinePairSMTLibQueryRunIdentityAdmissionTooSmall
-          maximumBytes requiredMaximum
-  | otherwise = Right ()
- where
-  maximumBytes = readyQueryRunIdentityFingerprintByteLimit
-    $ readyWorkerQueryPolicy worker
-  processLimits = lengthSMTLibProcessLimits $ readyWorkerProcess worker
-  transcriptMaximum =
-    lengthSpinePairSMTLibProtocolPlanCumulativeStdoutByteLimit plan
-  epochMaximum = if isJust $ lengthSpinePairSMTLibProtocolInputValueWriteBytes plan
-    then 2
-    else 1
-  prefixCounts = map fingerprintFieldByteCount
-    $ spinePairQueryRunIdentityPrefixFields worker plan ordinal deadline
-        checkBarrier valueBarrier
-  transcriptCount = spinePairQueryRunTranscriptMaximumFieldByteCount
-    transcriptMaximum epochMaximum
-  suffixCounts = map fingerprintFieldByteCount
-    $ spinePairQueryRunIdentityMaximumSuffixFields evaluationLimits
-        (lengthSMTLibProcessStdoutByteLimit processLimits)
-        (lengthSMTLibProcessStderrByteLimit processLimits)
-        transcriptMaximum
-  requiredMaximum = fingerprintBuilderByteCount
-    (spinePairQueryRunFingerprintRoleForWorker worker)
-    $ prefixCounts ++ transcriptCount : suffixCounts
-
-spinePairQueryRunFingerprintRole :: [Word8]
-spinePairQueryRunFingerprintRole = ascii
-  "finite-binary-product-spine-lengths/z3-live-query-run"
-
-budgetedSpinePairQueryRunFingerprintRole :: [Word8]
-budgetedSpinePairQueryRunFingerprintRole = ascii $ concat
-  [ "finite-binary-product-spine-lengths/z3-live-query-run/"
-  , "shared-usable-work-deadline"
-  ]
-
-scopedBudgetedSpinePairQueryRunFingerprintRole :: [Word8]
-scopedBudgetedSpinePairQueryRunFingerprintRole = ascii $ concat
-  [ "finite-binary-product-spine-lengths/z3-live-query-run/"
-  , "scoped-shared-usable-work-deadline/v2"
-  ]
-
-spinePairQueryRunFingerprintRoleForWorker
-  :: LengthSMTLibReadyWorker epoch
-  -> [Word8]
-spinePairQueryRunFingerprintRoleForWorker worker =
-  if workerUsesDescriptorBoundExecveCheckExecutableAccessLaunch worker
-    then ascii $ case readyQueryUsableWorkDeadlinePolicy
-        $ readyWorkerQueryPolicy worker of
-      LengthSMTLibFreshPerQueryDeadline -> concat
-        [ "finite-binary-product-spine-lengths/z3-live-query-run/"
-        , "execve-check-executable-access-sealed-main-image/v1"
-        ]
-      LengthSMTLibSharedUsableWorkDeadline {} -> concat
-        [ "finite-binary-product-spine-lengths/z3-live-query-run/"
-        , "execve-check-executable-access-sealed-main-image/"
-        , "shared-usable-work-deadline/v1"
-        ]
-      LengthSMTLibScopedSharedUsableWorkDeadline {} -> concat
-        [ "finite-binary-product-spine-lengths/z3-live-query-run/"
-        , "execve-check-executable-access-sealed-main-image/"
-        , "scoped-shared-usable-work-deadline/v1"
-        ]
-  else if workerUsesDescriptorBoundEffectiveIDExecutableAccessLaunch worker
-    then ascii $ case readyQueryUsableWorkDeadlinePolicy
-        $ readyWorkerQueryPolicy worker of
-      LengthSMTLibFreshPerQueryDeadline -> concat
-        [ "finite-binary-product-spine-lengths/z3-live-query-run/"
-        , "effective-id-executable-access-sealed-main-image/v1"
-        ]
-      LengthSMTLibSharedUsableWorkDeadline {} -> concat
-        [ "finite-binary-product-spine-lengths/z3-live-query-run/"
-        , "effective-id-executable-access-sealed-main-image/"
-        , "shared-usable-work-deadline/v1"
-        ]
-      LengthSMTLibScopedSharedUsableWorkDeadline {} -> concat
-        [ "finite-binary-product-spine-lengths/z3-live-query-run/"
-        , "effective-id-executable-access-sealed-main-image/"
-        , "scoped-shared-usable-work-deadline/v1"
-        ]
-  else if workerUsesDescriptorBoundExecutableLaunch worker
-    then ascii $ case readyQueryUsableWorkDeadlinePolicy
-        $ readyWorkerQueryPolicy worker of
-      LengthSMTLibFreshPerQueryDeadline -> concat
-        [ "finite-binary-product-spine-lengths/z3-live-query-run/"
-        , "sealed-main-image/v1"
-        ]
-      LengthSMTLibSharedUsableWorkDeadline {} -> concat
-        [ "finite-binary-product-spine-lengths/z3-live-query-run/"
-        , "sealed-main-image/shared-usable-work-deadline/v1"
-        ]
-      LengthSMTLibScopedSharedUsableWorkDeadline {} -> concat
-        [ "finite-binary-product-spine-lengths/z3-live-query-run/"
-        , "sealed-main-image/scoped-shared-usable-work-deadline/v1"
-        ]
-    else case readyQueryUsableWorkDeadlinePolicy
-        $ readyWorkerQueryPolicy worker of
-      LengthSMTLibFreshPerQueryDeadline -> spinePairQueryRunFingerprintRole
-      LengthSMTLibSharedUsableWorkDeadline {} ->
-        budgetedSpinePairQueryRunFingerprintRole
-      LengthSMTLibScopedSharedUsableWorkDeadline {} ->
-        scopedBudgetedSpinePairQueryRunFingerprintRole
-
-spinePairQueryRunSchemaTagForWorker
-  :: LengthSMTLibReadyWorker epoch
-  -> [Word8]
-spinePairQueryRunSchemaTagForWorker worker =
-  if workerUsesDescriptorBoundExecveCheckExecutableAccessLaunch worker
-    then case readyQueryUsableWorkDeadlinePolicy
-        $ readyWorkerQueryPolicy worker of
-      LengthSMTLibFreshPerQueryDeadline ->
-        lengthSpinePairSMTLibDescriptorBoundExecveCheckExecutableAccessQueryRunSchemaTag
-      LengthSMTLibSharedUsableWorkDeadline {} ->
-        lengthSpinePairSMTLibDescriptorBoundExecveCheckExecutableAccessBudgetedQueryRunSchemaTag
-      LengthSMTLibScopedSharedUsableWorkDeadline {} ->
-        lengthSpinePairSMTLibDescriptorBoundExecveCheckExecutableAccessScopedBudgetedQueryRunSchemaTag
-  else if workerUsesDescriptorBoundEffectiveIDExecutableAccessLaunch worker
-    then case readyQueryUsableWorkDeadlinePolicy
-        $ readyWorkerQueryPolicy worker of
-      LengthSMTLibFreshPerQueryDeadline ->
-        lengthSpinePairSMTLibDescriptorBoundEffectiveIDExecutableAccessQueryRunSchemaTag
-      LengthSMTLibSharedUsableWorkDeadline {} ->
-        lengthSpinePairSMTLibDescriptorBoundEffectiveIDExecutableAccessBudgetedQueryRunSchemaTag
-      LengthSMTLibScopedSharedUsableWorkDeadline {} ->
-        lengthSpinePairSMTLibDescriptorBoundEffectiveIDExecutableAccessScopedBudgetedQueryRunSchemaTag
-  else if workerUsesDescriptorBoundExecutableLaunch worker
-    then case readyQueryUsableWorkDeadlinePolicy
-        $ readyWorkerQueryPolicy worker of
-      LengthSMTLibFreshPerQueryDeadline ->
-        lengthSpinePairSMTLibDescriptorBoundQueryRunSchemaTag
-      LengthSMTLibSharedUsableWorkDeadline {} ->
-        lengthSpinePairSMTLibDescriptorBoundBudgetedQueryRunSchemaTag
-      LengthSMTLibScopedSharedUsableWorkDeadline {} ->
-        lengthSpinePairSMTLibDescriptorBoundScopedBudgetedQueryRunSchemaTag
-    else case readyQueryUsableWorkDeadlinePolicy
-        $ readyWorkerQueryPolicy worker of
-      LengthSMTLibFreshPerQueryDeadline ->
+spinePairQueryRunDomain
+  :: QueryRunDomain
+      LengthSpinePairSMTLibProtocolPlanFingerprintSubject
+      LengthSpinePairSMTLibQueryRunIdentitySubject
+      (LengthSpinePairSMTLibQuery identity local)
+      FiniteBinaryProductSpineLengthsV1
+      ValidatedLengthSpinePairCounterexample
+      LengthSpinePairSMTLibModelError
+spinePairQueryRunDomain = QueryRunDomain
+  { queryDomainRolePrefix = "finite-binary-product-spine-lengths"
+  , queryDomainReplayRole = ascii
+      "finite-binary-product-spine-lengths/counterexample-replay/v1"
+  , queryDomainSchemaTag = \launch deadline -> case (launch, deadline) of
+      (PathnameSnapshotLaunch, FreshPerQueryDeadline) ->
         lengthSpinePairSMTLibQueryRunSchemaTag
-      LengthSMTLibSharedUsableWorkDeadline {} ->
+      (PathnameSnapshotLaunch, SharedUsableWorkDeadline) ->
         lengthSpinePairSMTLibBudgetedQueryRunSchemaTag
-      LengthSMTLibScopedSharedUsableWorkDeadline {} ->
+      (PathnameSnapshotLaunch, ScopedSharedUsableWorkDeadline) ->
         lengthSpinePairSMTLibScopedBudgetedQueryRunSchemaTag
-
-spinePairQueryRunIdentityPrefixFields
-  :: LengthSMTLibReadyWorker epoch
-  -> LengthSpinePairSMTLibProtocolPlan identity local
-  -> Natural
-  -> LengthSMTLibProcessDeadline
-  -> ByteString
-  -> ByteString
-  -> [FingerprintField]
-spinePairQueryRunIdentityPrefixFields worker plan ordinal deadline
-    checkBarrier valueBarrier =
-  [ FingerprintBytes $ spinePairQueryRunSchemaTagForWorker worker
-  , tagged "authority"
-      [queryExecutableAuthorityField worker]
-  , tagged "common-qf-lia-readiness-capability-reuse"
+      (DescriptorBoundLaunch, FreshPerQueryDeadline) ->
+        lengthSpinePairSMTLibDescriptorBoundQueryRunSchemaTag
+      (DescriptorBoundLaunch, SharedUsableWorkDeadline) ->
+        lengthSpinePairSMTLibDescriptorBoundBudgetedQueryRunSchemaTag
+      (DescriptorBoundLaunch, ScopedSharedUsableWorkDeadline) ->
+        lengthSpinePairSMTLibDescriptorBoundScopedBudgetedQueryRunSchemaTag
+      (DescriptorBoundEffectiveIDLaunch, FreshPerQueryDeadline) ->
+        lengthSpinePairSMTLibDescriptorBoundEffectiveIDExecutableAccessQueryRunSchemaTag
+      (DescriptorBoundEffectiveIDLaunch, SharedUsableWorkDeadline) ->
+        lengthSpinePairSMTLibDescriptorBoundEffectiveIDExecutableAccessBudgetedQueryRunSchemaTag
+      (DescriptorBoundEffectiveIDLaunch, ScopedSharedUsableWorkDeadline) ->
+        lengthSpinePairSMTLibDescriptorBoundEffectiveIDExecutableAccessScopedBudgetedQueryRunSchemaTag
+      (DescriptorBoundExecveCheckLaunch, FreshPerQueryDeadline) ->
+        lengthSpinePairSMTLibDescriptorBoundExecveCheckExecutableAccessQueryRunSchemaTag
+      (DescriptorBoundExecveCheckLaunch, SharedUsableWorkDeadline) ->
+        lengthSpinePairSMTLibDescriptorBoundExecveCheckExecutableAccessBudgetedQueryRunSchemaTag
+      (DescriptorBoundExecveCheckLaunch, ScopedSharedUsableWorkDeadline) ->
+        lengthSpinePairSMTLibDescriptorBoundExecveCheckExecutableAccessScopedBudgetedQueryRunSchemaTag
+  , queryDomainProtocolLimits =
+      const defaultLengthSpinePairSMTLibProtocolLimits
+  , queryDomainSealPlan = sealLengthSpinePairSMTLibProtocolPlan
+  , queryDomainInputValueRequestBytes =
+      lengthSpinePairSMTLibQueryInputValueRequestBytes
+  , queryDomainValidateCounterexample =
+      validateLengthSpinePairSMTLibCounterexample
+  , queryDomainCapabilityReuseFields =
+      [ tagged "common-qf-lia-readiness-capability-reuse"
+          [ FingerprintBytes $ ascii $ concat
+              [ "reuse-scalar-named-ready-worker-only-as-exact-common-"
+              , "qf-lia-input-value-transport-profile/"
+              , "no-scalar-behavioral-authority/v1"
+              ]
+          , FingerprintBytes lengthSpinePairSMTLibQuerySchemaTag
+          , FingerprintBytes lengthSpinePairSMTLibQueryLogic
+          ]
+      ]
+  , queryDomainQueryAllocationPrefix = \maximumQueries ->
       [ FingerprintBytes $ ascii $ concat
-          [ "reuse-scalar-named-ready-worker-only-as-exact-common-"
-          , "qf-lia-input-value-transport-profile/"
-          , "no-scalar-behavioral-authority/v1"
-      ]
-      , FingerprintBytes lengthSpinePairSMTLibQuerySchemaTag
-      , FingerprintBytes lengthSpinePairSMTLibQueryLogic
-      ]
-  , lengthSMTLibReadyWorkerIdentityFingerprintField worker
-  , tagged "query-allocation"
-      [ FingerprintBytes lengthSMTLibQueryBarrierSchemaTag
-      , FingerprintBytes $ ascii $ concat
           [ "one-shared-zero-based-ordinal-and-session-configured-query-"
           , "budget-across-"
           , "scalar-and-binary-product-runs/v1"
           ]
-      , FingerprintNatural $ readyQueryMaximumQueries
-          $ readyWorkerQueryPolicy worker
-      , FingerprintBytes $ ascii
-          "zero-based-u64be/reserve-both-roles/burn-on-live-failure/v1"
-      , FingerprintNatural ordinal
-      , FingerprintBytes $ BS.unpack $ encodeWord64BE ordinalWord
-      , tagged "check-role-spent-marker"
-          [FingerprintBytes $ BS.unpack checkBarrier]
-      , tagged "input-value-role-spent-marker"
-          [FingerprintBytes $ BS.unpack valueBarrier]
-      , FingerprintBytes $ BS.unpack
-          $ barrierSeedCommitment $ readyWorkerBarrierSeed worker
+      , FingerprintNatural maximumQueries
       ]
-  , tagged "protocol-plan"
-      [ FingerprintBytes $ fingerprintCanonicalBytes
-          $ lengthSpinePairSMTLibProtocolPlanFingerprint plan
-      ]
-  ] ++ queryDeadlineIdentityFields worker deadline
- where
-  -- Session-limit admission proves every runnable ordinal fits the chosen
-  -- wire representation. Keep the Natural lease ordinal authoritative and
-  -- derive its fixed-width encoding only at this identity edge.
-  ordinalWord = fromIntegral ordinal
+  }
 
-spinePairQueryRunTranscriptField
-  :: SMTLibCausalTranscript LengthSpinePairSMTLibProtocolWriteKind
-  -> FingerprintField
-spinePairQueryRunTranscriptField transcript = tagged "causal-transcript"
-  [ FingerprintBytes lengthSMTLibCausalDriverSchemaTag
-  , FingerprintBytes $ ascii
-      "predecessor-whitespace-observed-and-owned-by-successor/v1"
-  , tagged "segment-layout"
-      [ tagged "inherited-predecessor-whitespace"
-          [FingerprintNatural $ byteCountBytes inherited]
-      , FingerprintSequence $ map spinePairQueryRunTranscriptEpochLayout epochs
-      ]
-  , tagged "exact-bytes"
-      [FingerprintBytes $ BS.unpack $ causalTranscriptBytes transcript]
-  ]
- where
-  inherited = smtLibCausalTranscriptInheritedBytes transcript
-  epochs = smtLibCausalTranscriptEpochs transcript
+spinePairQueryRun
+  :: QueryRunRecord
+      LengthSpinePairSMTLibQueryRunIdentitySubject
+      FiniteBinaryProductSpineLengthsV1
+      ValidatedLengthSpinePairCounterexample
+  -> LengthSpinePairSMTLibQueryRun epoch identity local
+spinePairQueryRun (QueryRunRecord ordinal observation identity digest
+    stdoutStart stdoutEnd stderrStart stderrEnd) =
+  LengthSpinePairSMTLibQueryRun ordinal observation identity digest
+    stdoutStart stdoutEnd stderrStart stderrEnd
 
-spinePairQueryRunTranscriptEpochLayout
-  :: SMTLibCausalTranscriptEpoch LengthSpinePairSMTLibProtocolWriteKind
-  -> FingerprintField
-spinePairQueryRunTranscriptEpochLayout epoch = tagged "write-epoch"
-  [ spinePairQueryProtocolWriteKindField
-      $ smtLibCausalTranscriptEpochKind epoch
-  , FingerprintNatural $ byteCountBytes
-      $ smtLibCausalTranscriptEpochBytes epoch
-  ]
+spinePairQueryRunError
+  :: QueryRunError LengthSpinePairSMTLibModelError
+  -> LengthSpinePairSMTLibQueryRunError
+spinePairQueryRunError (QueryRunError failure cleanup) =
+  LengthSpinePairSMTLibQueryRunError
+    (spinePairQueryRunFailure failure) cleanup
 
-spinePairQueryRunIdentitySuffixFields
-  :: LengthEvaluationLimits
-  -> ReplayedLengthSpinePairSMTLibQueryOutcome
-  -> Natural
-  -> Natural
-  -> Natural
-  -> Natural
-  -> Natural
-  -> [FingerprintField]
-spinePairQueryRunIdentitySuffixFields evaluationLimits outcome
-    stdoutStart stdoutEnd stderrStart stderrEnd transcriptCount =
-  [ spinePairQueryDecodedOutcomeField outcome
-  , spinePairQueryReplayField evaluationLimits outcome
-  , spinePairQueryTransportCommitField stdoutStart stdoutEnd stderrStart stderrEnd
-      transcriptCount
-  ]
-
-spinePairQueryRunIdentityMaximumSuffixFields
-  :: LengthEvaluationLimits
-  -> Natural
-  -> Natural
-  -> Natural
-  -> [FingerprintField]
-spinePairQueryRunIdentityMaximumSuffixFields evaluationLimits stdoutMaximum
-    stderrMaximum transcriptMaximum =
-  [ tagged "decoded-branch"
-      [ longestField $ map (FingerprintBytes . ascii)
-          ["satisfiable", "unsatisfiable", "unknown"]
-      , longestField $ map (FingerprintBytes . ascii)
-          ["absent", "vacuous-zero-input", "framed-input-values"]
-      ]
-  , tagged "independent-replay"
-      [ FingerprintBytes $ ascii
-          "finite-binary-product-spine-lengths/counterexample-replay/v1"
-      , FingerprintNatural $ fromIntegral
-          $ lengthAssignmentValueBitLimit evaluationLimits
-      , FingerprintNatural $ fromIntegral
-          $ lengthIntermediateValueBitLimit evaluationLimits
-      , longestField $ map (FingerprintBytes . ascii)
-          [ "not-applicable-status"
-          , "not-requested-policy"
-          , "validated-counterexample"
-          ]
-      ]
-  , spinePairQueryTransportCommitField stdoutMaximum stdoutMaximum
-      stderrMaximum stderrMaximum transcriptMaximum
-  ]
-
-spinePairQueryDecodedOutcomeField
-  :: ReplayedLengthSpinePairSMTLibQueryOutcome
-  -> FingerprintField
-spinePairQueryDecodedOutcomeField outcome = tagged "decoded-branch"
-  [ spinePairSolverStatusField $ replayedLengthSpinePairSMTLibQueryStatus outcome
-  , FingerprintBytes $ ascii valuesTag
-  ]
- where
-  -- The v1 protocol never emits @get-value@ for a zero-input query, while the
-  -- query-aware decoder requires exact arity for every emitted nonempty
-  -- request.  The decoded binding spine therefore preserves the former raw
-  -- frame distinction while sealing identity, before successful run
-  -- construction releases that parsed representation.
-  valuesTag = case outcome of
-    ReplayedLengthSpinePairSMTLibSatisfiableStatusOnly -> "absent"
-    ReplayedLengthSpinePairSMTLibSatisfiableVacuous{} -> "vacuous-zero-input"
-    ReplayedLengthSpinePairSMTLibSatisfiableFramed{} -> "framed-input-values"
-    ReplayedLengthSpinePairSMTLibUnsatisfiable -> "absent"
-    ReplayedLengthSpinePairSMTLibUnknown -> "absent"
-
-spinePairQueryReplayField
-  :: LengthEvaluationLimits
-  -> ReplayedLengthSpinePairSMTLibQueryOutcome
-  -> FingerprintField
-spinePairQueryReplayField evaluationLimits outcome = tagged
-  "independent-replay"
-  [ FingerprintBytes $ ascii
-      "finite-binary-product-spine-lengths/counterexample-replay/v1"
-  , FingerprintNatural $ fromIntegral
-      $ lengthAssignmentValueBitLimit evaluationLimits
-  , FingerprintNatural $ fromIntegral
-      $ lengthIntermediateValueBitLimit evaluationLimits
-  , FingerprintBytes $ ascii replayTag
-  ]
- where
-  replayTag = case outcome of
-    ReplayedLengthSpinePairSMTLibSatisfiableStatusOnly -> "not-requested-policy"
-    ReplayedLengthSpinePairSMTLibSatisfiableVacuous{} -> "validated-counterexample"
-    ReplayedLengthSpinePairSMTLibSatisfiableFramed{} -> "validated-counterexample"
-    ReplayedLengthSpinePairSMTLibUnsatisfiable -> "not-applicable-status"
-    ReplayedLengthSpinePairSMTLibUnknown -> "not-applicable-status"
-
-replayedLengthSpinePairSMTLibQueryStatus
-  :: ReplayedLengthSpinePairSMTLibQueryOutcome
-  -> SolverStatus
-replayedLengthSpinePairSMTLibQueryStatus outcome = case outcome of
-  ReplayedLengthSpinePairSMTLibSatisfiableStatusOnly -> SolverSatisfiable
-  ReplayedLengthSpinePairSMTLibSatisfiableVacuous{} -> SolverSatisfiable
-  ReplayedLengthSpinePairSMTLibSatisfiableFramed{} -> SolverSatisfiable
-  ReplayedLengthSpinePairSMTLibUnsatisfiable -> SolverUnsatisfiable
-  ReplayedLengthSpinePairSMTLibUnknown -> SolverUnknown
-
-spinePairQueryTransportCommitField
-  :: Natural
-  -> Natural
-  -> Natural
-  -> Natural
-  -> Natural
-  -> FingerprintField
-spinePairQueryTransportCommitField stdoutStart stdoutEnd stderrStart stderrEnd
-    transcriptCount = tagged "transport-commit"
-  [ FingerprintNatural stdoutStart
-  , FingerprintNatural stdoutEnd
-  , FingerprintNatural stderrStart
-  , FingerprintNatural stderrEnd
-  , FingerprintNatural transcriptCount
-  , FingerprintBytes $ ascii
-      "stdout-delta-equals-exact-transcript/no-stderr-at-commit/v1"
-  , FingerprintBytes $ ascii
-      "worker-open/queues-empty-final-snapshot-before-query-commit/late-predecessor-whitespace-adopted-and-charged-to-next-query/other-late-output-poisons/v1"
-  ]
-
-spinePairSolverStatusField :: SolverStatus -> FingerprintField
-spinePairSolverStatusField status = FingerprintBytes $ ascii $ case status of
-  SolverSatisfiable -> "satisfiable"
-  SolverUnsatisfiable -> "unsatisfiable"
-  SolverUnknown -> "unknown"
-
-spinePairQueryProtocolWriteKindField
-  :: LengthSpinePairSMTLibProtocolWriteKind
-  -> FingerprintField
-spinePairQueryProtocolWriteKindField kind = FingerprintBytes $ ascii $ case kind of
-  LengthSMTLibProtocolInitialQueryWrite -> "initial-query"
-  LengthSMTLibProtocolInputValueWrite -> "input-value"
-
-spinePairQueryRunTranscriptMaximumFieldByteCount
-  :: Natural
-  -> Natural
-  -> Natural
-spinePairQueryRunTranscriptMaximumFieldByteCount maximumBytes maximumEpochs =
-  taggedFieldByteCount "causal-transcript"
-    [ bytesFieldByteCount
-        $ fromIntegral $ length lengthSMTLibCausalDriverSchemaTag
-    , bytesFieldByteCount $ stringByteCount
-        "predecessor-whitespace-observed-and-owned-by-successor/v1"
-    , taggedFieldByteCount "segment-layout"
-        [ taggedFieldByteCount "inherited-predecessor-whitespace"
-            [naturalFieldByteCount maximumBytes]
-        , sequenceFieldByteCount $ replicateNatural maximumEpochs
-            $ taggedFieldByteCount "write-epoch"
-                [ maximum
-                    [ fingerprintFieldByteCount $ spinePairQueryProtocolWriteKindField
-                        LengthSMTLibProtocolInitialQueryWrite
-                    , fingerprintFieldByteCount $ spinePairQueryProtocolWriteKindField
-                        LengthSMTLibProtocolInputValueWrite
-                    ]
-                , naturalFieldByteCount maximumBytes
-                ]
-        ]
-    , taggedFieldByteCount "exact-bytes"
-        [bytesFieldByteCount maximumBytes]
-    ]
+spinePairQueryRunFailure
+  :: QueryRunFailure LengthSpinePairSMTLibModelError
+  -> LengthSpinePairSMTLibQueryRunFailure
+spinePairQueryRunFailure failure = case failure of
+  QueryWorkerClosing -> LengthSpinePairSMTLibQueryWorkerClosing
+  QueryWorkerSpent -> LengthSpinePairSMTLibQueryWorkerSpent
+  QueryLimitExceeded maximumQueries observed ->
+    LengthSpinePairSMTLibQueryLimitExceeded maximumQueries observed
+  QueryProtocolPlanFailure nested ->
+    LengthSpinePairSMTLibQueryProtocolPlanFailure nested
+  QueryProcessStdoutCapacityTooSmall remaining required ->
+    LengthSpinePairSMTLibQueryProcessStdoutCapacityTooSmall remaining required
+  QueryBarrierCollision -> LengthSpinePairSMTLibQueryBarrierCollision
+  QueryDeadlineFailure nested ->
+    LengthSpinePairSMTLibQueryDeadlineFailure nested
+  QueryProcessFailure nested ->
+    LengthSpinePairSMTLibQueryProcessFailure nested
+  QueryProtocolFailure nested ->
+    LengthSpinePairSMTLibQueryProtocolFailure nested
+  QueryTranscriptAccountingMismatch expected observed ->
+    LengthSpinePairSMTLibQueryTranscriptAccountingMismatch expected observed
+  QueryStderrAccountingMismatch expected observed ->
+    LengthSpinePairSMTLibQueryStderrAccountingMismatch expected observed
+  QueryModelFailure nested -> LengthSpinePairSMTLibQueryModelFailure nested
+  QueryModelNotCounterexample ->
+    LengthSpinePairSMTLibQueryModelNotCounterexample
+  QueryRunIdentityAdmissionTooSmall maximumBytes required ->
+    LengthSpinePairSMTLibQueryRunIdentityAdmissionTooSmall
+      maximumBytes required
+  QueryRunIdentityFingerprintByteLimitExceeded maximumBytes observed ->
+    LengthSpinePairSMTLibQueryRunIdentityFingerprintByteLimitExceeded
+      maximumBytes observed
+  QueryInternalFailure -> LengthSpinePairSMTLibQueryInternalFailure
 
 
 fingerprintBuilderByteCount :: [Word8] -> [Natural] -> Natural
@@ -3699,6 +3301,13 @@ withLengthSMTLibReadyWorker
 withLengthSMTLibReadyWorker = withLengthSMTLibReadyWorkerWithDeadlinePolicy
   LengthSMTLibFreshPerQueryDeadline
 
+-- | Open, probe, lend, and close one worker as 'withLengthSMTLibReadyWorker'
+-- does, but under an already captured shared usable-work deadline.  The
+-- effective opener deadline and every query deadline become the earlier of
+-- their fresh local deadline and the shared one (the shared deadline wins a
+-- tie); expiry is checked once more just before the callback runs and again
+-- as soon as it returns, before the final readiness and cleanup windows, and
+-- the worker and run identities record the shared-deadline policy.
 withLengthSMTLibReadyWorkerUnderDeadline
   :: forall budget result. LengthSMTLibSessionUsableWorkDeadline budget
   -> LengthSMTLibSessionConfig
@@ -3752,11 +3361,10 @@ withLengthSMTLibReadyWorkerWithDeadlinePolicy deadlinePolicy config use =
               >>= recordCleanup rolledBackWorkspace
       case allocated of
         Left failure -> do
-          rollback <- atomically $ readTVar rolledBackWorkspace
+          rollback <- readTVarIO rolledBackWorkspace
           let cleanup = emptyCleanup
-                { lengthSMTLibSessionWorkspaceCleanupStatus = case rollback of
-                    Nothing -> LengthSMTLibSessionWorkspaceNotAllocated
-                    Just status -> status
+                { lengthSMTLibSessionWorkspaceCleanupStatus =
+                    fromMaybe LengthSMTLibSessionWorkspaceNotAllocated rollback
                 }
           pure $ Left $ scopeError
             (LengthSMTLibSessionDeadlineFailure failure) cleanup
@@ -3817,7 +3425,7 @@ withLengthSMTLibReadyWorkerWithDeadlinePolicy deadlinePolicy config use =
                 `onException` protectWorkspace
               case controlled of
                 Left failure -> do
-                  rolledBack <- atomically $ readTVar rolledBackInspection
+                  rolledBack <- readTVarIO rolledBackInspection
                   workspaceCleanup <- case rolledBack of
                     Nothing -> cleanupWorkspace sessionLimits workspace
                     Just cleanup -> pure cleanup
@@ -3837,7 +3445,7 @@ withLengthSMTLibReadyWorkerWithDeadlinePolicy deadlinePolicy config use =
                 `onException` protectWorkspace
               case controlled of
                 Left failure -> do
-                  rolledBack <- atomically $ readTVar rolledBackInspection
+                  rolledBack <- readTVarIO rolledBackInspection
                   workspaceCleanup <- case rolledBack of
                     Nothing -> cleanupWorkspace sessionLimits workspace
                     Just cleanup -> pure cleanup

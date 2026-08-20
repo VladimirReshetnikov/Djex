@@ -19,6 +19,7 @@ import Language.Haskell.Synthesis.Constraint (Constraint (..))
 import Language.Haskell.Synthesis.Internal.Fingerprint
   ( FingerprintField (..)
   )
+import Language.Haskell.Synthesis.Internal.Alpha (eraseVacuousForalls)
 import Language.Haskell.Synthesis.Name (Boxity (..))
 import Language.Haskell.Synthesis.Type (Type (..), canonicalizeType)
 
@@ -29,20 +30,6 @@ import Language.Haskell.Synthesis.Type (Type (..), canonicalizeType)
 -- structure without assigning any identity to free variables.
 canonicalTypeFingerprintForm :: Type variable -> Type variable
 canonicalTypeFingerprintForm = eraseVacuousForalls . canonicalizeType
- where
-  eraseVacuousForalls source = case source of
-    TypeVariable{} -> source
-    TypeConstructor{} -> source
-    TypeApplication function argument -> TypeApplication
-      (eraseVacuousForalls function) (eraseVacuousForalls argument)
-    FunctionType parameter result -> FunctionType
-      (eraseVacuousForalls parameter) (eraseVacuousForalls result)
-    TupleType boxity fields -> TupleType boxity
-      $ map eraseVacuousForalls fields
-    ForallType [] [] body -> eraseVacuousForalls body
-    ForallType binders constraints body -> ForallType binders
-      (map (fmap eraseVacuousForalls) constraints)
-      (eraseVacuousForalls body)
 
 -- | Encode one already-normalized shared type.  The caller owns variable
 -- identity because closed schemes, query-wide free variables, and other
@@ -76,6 +63,9 @@ typeFingerprintField variableField source = case source of
     , typeFingerprintField variableField body
     ]
 
+-- | Encode one class constraint as a @constraint@-tagged field holding the
+-- class name followed by the argument types in order, each encoded with
+-- 'typeFingerprintField' under the caller's variable policy.
 constraintFingerprintField
   :: (variable -> FingerprintField)
   -> Constraint (Type variable)
@@ -86,14 +76,20 @@ constraintFingerprintField variableField
   , FingerprintSequence $ map (typeFingerprintField variableField) arguments
   ]
 
+-- | Encode tuple boxity as the ASCII byte field @boxed@ or @unboxed@.
 boxityFingerprintField :: Boxity -> FingerprintField
 boxityFingerprintField boxity = FingerprintBytes $ asciiFingerprintBytes $
   case boxity of
     Boxed -> "boxed"
     Unboxed -> "unboxed"
 
+-- | Build a 'FingerprintTag' whose tag is the ASCII encoding of the given
+-- string and whose payload is the given field sequence.
 taggedFingerprintField :: String -> [FingerprintField] -> FingerprintField
 taggedFingerprintField tag = FingerprintTag $ asciiFingerprintBytes tag
 
+-- | Encode a string one byte per character by truncating each code point to
+-- eight bits.  Intended for the ASCII tags and labels used in fingerprint
+-- fields; non-ASCII characters are not preserved faithfully.
 asciiFingerprintBytes :: String -> [Word8]
 asciiFingerprintBytes = map $ fromIntegral . ord

@@ -42,6 +42,10 @@ data BranchTruncation
   = BranchIdentifierSpaceExhausted
   deriving (Eq, Show)
 
+-- | The nondeterminism monad of one search step: a lazy list of sibling
+-- branches, each either a value or a 'BranchTruncation'.  Its 'Alternative'
+-- instance concatenates sibling branches left to right, and @empty@ is the
+-- failed branch.
 -- ExceptT supplies the desired bind semantics, but its standard Alternative
 -- instance treats errors as recoverable and is left-biased.  Search needs the
 -- historical list union instead: both successful and truncated siblings must
@@ -56,15 +60,22 @@ instance Alternative SearchBranches where
 
 instance MonadPlus SearchBranches
 
+-- | Observe every branch in order, truncated siblings included; the list is
+-- as lazy as the underlying computation.
 runSearchBranches :: SearchBranches a -> [Either BranchTruncation a]
 runSearchBranches (SearchBranches branches) = runExceptT branches
 
+-- | Fork into one successful branch per list element, in list order.
 chooseBranches :: [a] -> SearchBranches a
 chooseBranches = SearchBranches . lift
 
+-- | Continue with the value if present; otherwise fail this branch silently
+-- (it produces no successor and no truncation record).
 maybeBranch :: Maybe a -> SearchBranches a
 maybeBranch = maybe empty pure
 
+-- | Abandon this branch while recording why, so the step's caller can see
+-- that a resource limit, not the search calculus, discarded it.
 truncateBranch :: BranchTruncation -> SearchBranches a
 truncateBranch = SearchBranches . throwE
 
@@ -94,6 +105,9 @@ data SearchAllocators = SearchAllocators
           (Scope.ScopeId, Scope.Scopes binding)
   }
 
+-- | The production allocators: sequential term identifiers over the whole
+-- 'Int' domain, 'allocateNamespace' for flexible namespaces, the checked
+-- nested rigid plan allocator, and 'Scope.addScope' for scopes.
 defaultSearchAllocators :: SearchAllocators
 defaultSearchAllocators = SearchAllocators
   { searchAllocateTermIdentifier = allocateTermIdentifier

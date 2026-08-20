@@ -18,7 +18,8 @@ historical review notes rather than as the current API guide; the
 | Path | Responsibility |
 | --- | --- |
 | `synthesis/src/` | Shared names, types, declarations, environments, kind inference, diagnostics, generated code, and query/result envelopes. |
-| `synthesis/internal/` | Package-private fingerprints, protocol machinery, and shared implementation invariants. |
+| `synthesis/internal/` | Package-private shared machinery: alpha normalization and the one first-order equation solver (`Internal.Alpha`), ground class resolution, typed-candidate/certificate/fingerprint internals, and the Length contract, SMT-LIB protocol, and Z3 process layers behind the public `Semantic.*` facades. |
+| `synthesis/cbits/` | Linux-only C shim for descriptor-bound Z3 launches; compiled into the library only `if os(linux)`. |
 | `djinn/src-core/` | Djinn's checked adapter, logical translation, LJT proof search, and proof checking. |
 | `djinn/src-internal/` | Package-private Djinn implementation modules shared by the library and focused tests. |
 | `djinn/src-frontend/` | Historical `Djinn` API and compatibility Haskeline REPL. |
@@ -170,7 +171,7 @@ synthesis engine and not a mutable union environment:
 
 ```text
 REPL state
-  |-- Djex source query parser
+  |-- last parsed query
   |     `-- one resolved, kind-checked shared Type plus source metadata
   |-- Djinn runtime
   |     |-- immutable standard-session fallback and axiom policy
@@ -183,7 +184,7 @@ REPL state
   |     `-- diagnostics from the latest load attempt
   |-- visible record-selector presentation map
   |-- active backend selection and last query
-  |-- shared result, presentation, and prompt settings
+  |-- shared result, presentation, prompt, and query-timeout settings
   |-- backend-specific search settings
   `-- active script-inclusion stack
 ```
@@ -197,6 +198,14 @@ second backend when the first backend's lowering or search reports a
 diagnostic. A common parse or kind error is reported once. The historical
 backend parsers remain the compatibility fallback when the shared source
 runtime, or a requested Djinn scope projection, is unavailable.
+
+### Quantified subtrees and provider-local evidence
+
+A frontend may hand either engine a finite list of closed types, or ordered
+type vectors, for a named polymorphic provider; both engines bound the lists,
+re-check every kind, and replay the choice independently. The paragraphs below
+say how each relation is admitted, what each engine compiles it into, and
+which bounded instantiation families run beside it.
 
 The two search projections share `TypeAtom` for quantified subtrees. Its
 retained source tree supports rendering and capture-avoiding substitution of
@@ -299,6 +308,8 @@ result, ordering, diagnostics, and finite-budget behavior. The nonempty public
 entrances remain distinct: an assignment is never flattened into the legacy
 scalar pool, and kinded evidence is never silently stripped of its kinds.
 
+### What Djinn compiles provider evidence into
+
 Djinn compiles each retained scalar specialization or exact vector into a
 direct specialized premise for that loaded polymorphic provider. The
 evidence-enriched structural and nominal plans also contain the historical
@@ -331,6 +342,8 @@ into the corresponding visible application of the real provider. A
 target-named specialization is available only to the self-reference diagnostic
 search.
 
+### What Exference does with provider evidence
+
 Exference instead keeps the checked relation in its query state and consults it
 only from exact retained-global lookup. A productive exact assignment vector
 receives one leading visible lane so exact-spelling deduplication cannot discard
@@ -343,6 +356,8 @@ binders, whereas the scalar pool route requires a completely vacuous prefix.
 Scoped values never consult either map. These are finite evidence-directed
 typing rules, not permission for ordinary unification to decompose a polytype
 or a claim of general impredicative inference.
+
+### Djinn's four instantiation-axiom families
 
 Djinn has four bounded instantiation-axiom families. The historical
 query-local family instantiates up to six leading binders at variables,
@@ -388,6 +403,8 @@ Structure surrounding those opaque quantifiers retains its ordinary form,
 which permits impredicative values such as
 `[(forall a. a -> a)]` without claiming general higher-rank subsumption.
 
+### Bounded recursion and nominal transport
+
 Djinn's formula compiler applies a similarly bounded rule to recursive
 datatypes classified by the prepared inventory expansion. It derives
 alias-normalized recursive SCC identity from the same graph used for definition
@@ -401,6 +418,8 @@ identity. Every translation that encounters recursive structure is marked
 incomplete, so its empty proof stream cannot become negative evidence. An
 unrelated recursive SCC does not weaken a complete translation for a query
 which never reaches it.
+
+### The Exference runtime and the REPL command table
 
 The Exference runtime is deliberately richer than a bare session. Source
 targets, ratings, prompt scope, and command policy are not recoverable from its
@@ -426,7 +445,8 @@ resolves Cabal from `PATH`, constructs fixed argv prefixes for `fetch` and
 project-independent `install`, with an explicit library mode, streams inherited
 process output, and normalizes launch, interrupt, and exit reporting. Targets
 follow an explicit `--` separator and never pass through a shell. Child stdin
-and unrelated file descriptors are closed. A dedicated process group plus
+is a pipe the parent closes immediately, so the child reads EOF rather than
+the terminal, and unrelated file descriptors are closed. A dedicated process group plus
 Windows job support bounds ordinary descendant cleanup on interruption. The
 operation is intentionally outside `ReplState`: it can mutate Cabal's cache,
 store, and package environment
@@ -688,8 +708,9 @@ will never change.
 
 New code should start with:
 
-- `Language.Haskell.Djex` for the shared vocabulary, backend metadata, and both
-  checked parser-neutral adapters;
+- `Language.Haskell.Djex` for the shared vocabulary, backend metadata, both
+  checked parser-neutral adapters, and the checked semantic Length and
+  SMT-LIB live surface;
 - `Language.Haskell.Djex.REPL` when an application wants to launch the shared
   terminal session without spawning `djex`;
 - `Language.Haskell.Djex.Djinn` or
@@ -737,22 +758,34 @@ private checked-request/session owners for both adapters, the shared REPL's
 command and Haskeline workers, and the historical Djinn formula and REPL
 workers. Downstream code cannot import them through a `djex` dependency.
 
-The converse also holds: a module named `.Internal.` may live under
-`synthesis/src/` rather than `synthesis/internal/` when the shared source
-tier itself consumes it — `Language.Haskell.Synthesis.Internal.InstanceHead`
-sits beside its `Environment` consumer for exactly this reason. Directory
-placement documents dependency direction; Cabal visibility, not the path,
-decides whether a module is private.
+Public `synthesis/src/` modules routinely import private
+`synthesis/internal/` ones — `Internal.Alpha`, `Internal.Fingerprint`, and
+every `Semantic.*` facade over the Length internals — so consumption by the
+source tier is the ordinary case, not an exception. One private module,
+`Language.Haskell.Synthesis.Internal.InstanceHead`, nonetheless sits under
+`synthesis/src/` beside its sole consumer `Environment`; it is still an
+`Other-Module`. Directory placement documents dependency direction; Cabal
+visibility, not the path, decides whether a module is private.
 
 ## Test boundaries
 
 The package has sixteen test suites:
 
-- shared-foundation, facade integration, downstream API, and merged CLI suites;
-- semantic Length, structural fingerprint, certificate, and term-graph
-  fingerprint suites over the shared foundation;
-- Djinn unit, property, frontend-import, and CLI suites;
-- Exference unit, private-engine, frontend-import, and CLI suites.
+- shared foundation (`synthesis-tests`), facade integration (`djex-tests`),
+  downstream API (`djex-api-tests`), and merged CLI (`djex-cli-tests`);
+- semantic Length (`synthesis-length-tests`), structural fingerprint
+  (`synthesis-fingerprint-tests`), certificate
+  (`synthesis-certificate-tests`), and term-graph fingerprint
+  (`synthesis-term-graph-fingerprint-tests`) over the shared foundation;
+- Djinn unit (`djinn-tests`), property (`djinn-property-tests`),
+  frontend-import (`djinn-frontend-api-tests`), and CLI (`djinn-cli-tests`);
+- Exference unit (`exference-tests`), private engine
+  (`exference-engine-tests`), frontend-import
+  (`exference-frontend-api-tests`), and CLI (`exference-cli-tests`).
+
+Run one with `cabal test NAME`. `cabal test all` stops at the first failing
+suite, so on a platform with known environmental failures (see below) run the
+suites individually to see the whole picture.
 
 `exference-engine-tests` compiles the parser-neutral Exference core and a
 test-only seam as home modules. This preserves finite-identifier, queue
@@ -782,6 +815,29 @@ The serial whole-tree run is intentional: subprocess CLI suites consume the
 freshly linked `djex`, `djinn`, and `exference` tools, so another component
 must not replace one of those executables while a suite is using it. Focused
 library-only test targets may still run concurrently.
+
+Two practical notes about reading the result:
+
+- `cabal test all` stops at the **first** failing suite and never reaches the
+  ones after it. A single red suite therefore looks like a much larger outage
+  than it is. When something fails, re-run the suites individually (or pass
+  `--keep-going`) before drawing conclusions about scope.
+- `synthesis-length-tests` is the only suite that is **not** expected to be
+  fully green off Linux. Seven of its 366 cases exercise the descriptor-bound
+  Z3 launch strategies, whose real implementation is Linux-only:
+
+  | Case | What it wants |
+  |---|---|
+  | `fail closed before demanding unsupported-platform inputs` (×3, one per launch strategy) | the non-Linux stub to refuse *before* it asks for a workspace descriptor; the stubs currently ask first, so the assertion fires |
+  | `bind sealed-launch scalar and pair identities under scoped authority` | a live descriptor-bound launch |
+  | `bind effective-ID scalar and pair identities under scoped authority` | the same, via the effective-ID strategy |
+  | `preserve scalar/pair wire bytes and statuses across sealed launches` | wire bytes from a real sealed launch |
+  | `seal exact initial and conditional value writes` | the same launch path |
+
+  On Linux the suite is 366/366. On Windows it is 359/366, and those seven are
+  the baseline rather than a regression --- confirm against a pristine checkout
+  before treating any of them as new. The refusals are still closed refusals;
+  the disagreement is about *when* the stub gives up, not whether it does.
 
 See [the library API guide](library-api.md) for runnable examples and
 [the synthesis API map](../synthesis/README.md) for the shared modules. The

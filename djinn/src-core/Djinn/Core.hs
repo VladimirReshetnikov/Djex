@@ -41,7 +41,7 @@ module Djinn.Core (
     -- * Queries
     Context, mkContext, resolveContext, resolveInstanceMethods,
     resolvePreparedContext, resolvePreparedInstanceMethods,
-    QueryOptions(..), defaultQueryOptions,
+    QueryOptions(..), defaultQueryOptions, Strategy(..),
     DjinnCandidateDetails(..), DjinnCandidate,
     DjinnTermGraphTypeVariable, DjinnTermGraphType,
     DjinnTermGraphAbsence(..), DjinnTypedCandidate,
@@ -59,8 +59,9 @@ module Djinn.Core (
     QueryOutcome(..), QueryReport(..), inhabit
     ) where
 
-import Control.Monad (foldM, unless)
+import Control.Monad (foldM, unless, void, when)
 import Data.Bifunctor (first)
+import Data.Either (fromRight)
 import Data.List (intercalate, mapAccumL)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
@@ -641,7 +642,13 @@ data QueryOptions = QueryOptions {
     optionCutoff :: Int,
     -- | Choice-point budget; 'Nothing' keeps the search a complete
     -- decision procedure.
-    optionBudget :: Maybe Integer
+    optionBudget :: Maybe Integer,
+    -- | How the proof search explores its choice points.  'DepthFirst' is
+    -- the historical order; 'Interleave' alternates between branches so an
+    -- expensive dead end cannot starve a cheap alternative.  The choice
+    -- reorders candidates and changes how a budget is spent; it never
+    -- changes which formulas are provable.
+    optionStrategy :: Strategy
     }
     deriving (Eq, Show)
 
@@ -652,7 +659,8 @@ defaultQueryOptions = QueryOptions {
     optionAlternatives = False,
     optionSorted = True,
     optionCutoff = 200,
-    optionBudget = Nothing
+    optionBudget = Nothing,
+    optionStrategy = DepthFirst
     }
 
 -- | Ranking information retained with every checked Djinn candidate.
@@ -758,6 +766,10 @@ data GeneratedQueryReport = GeneratedQueryReport {
     }
     deriving (Eq, Show)
 
+-- | The logical verdict of a compatibility 'inhabit' query, mirroring the
+-- backend-independent evidence classification with the candidates already
+-- rendered as Haskell.  Only 'Realized' carries clauses; the other
+-- constructors distinguish a proved-uninhabitable goal from an undecided one.
 data QueryOutcome
     -- | Rendered Haskell clauses, best candidate first, de-duplicated.
     = Realized [String]
@@ -771,6 +783,9 @@ data QueryOutcome
     | Undecided
     deriving (Eq, Show)
 
+-- | The result of a successful 'inhabit' call: the translated formula, the
+-- search completion status, the scope-checked candidate clauses, and the
+-- rendered 'QueryOutcome' derived from them.
 data QueryReport = QueryReport {
     -- | The intuitionistic formula the goal type translated to.
     reportFormula :: String,
@@ -784,6 +799,8 @@ data QueryReport = QueryReport {
     -- compatibility strings in 'Realized' are derived from these values.
     reportGeneratedClauses ::
         [SharedGenerated.FunctionClause HSymbol],
+    -- | The verdict; 'Realized' holds the rendering of
+    -- 'reportGeneratedClauses'.
     reportOutcome :: QueryOutcome
     }
     deriving (Show)
@@ -1191,11 +1208,10 @@ prepareProviderInstantiationCandidates prepared rawCandidates = do
             SharedQuery.maximumProviderInstantiationCandidates
         observed = SharedCollection.observedListLength
             maximumCandidates rawCandidates
-    if observed > maximumCandidates
-        then Left $ DjinnInstantiationCandidateFailure $
+    when (observed > maximumCandidates)
+        $ Left $ DjinnInstantiationCandidateFailure $
             "provider instantiation candidate count exceeds " ++
                 show maximumCandidates
-        else return ()
     (_, retained) <- foldM validateCandidate (Map.empty, []) $
         zip [0 :: Int ..] rawCandidates
     return $ reverse retained
@@ -1224,7 +1240,7 @@ prepareProviderInstantiationCandidates prepared rawCandidates = do
             elaboratePreparedSynthesisTypes prepared [(KStar, source)]
         checked <- case elaborated of
             [one] -> Right one
-            _ -> Left $ DjinnInternalQueryFailure $
+            _ -> Left $ DjinnInternalQueryFailure
                 "provider candidate elaboration changed batch shape"
         unless (Set.null $ SharedType.freeVariables checked) $
             Left $ DjinnInstantiationCandidateFailure $
@@ -1266,11 +1282,10 @@ prepareProviderInstantiationAssignments prepared evidence = do
                 map KindedProviderInstantiationAssignment assignments
         observed = SharedCollection.observedListLength
             maximumAssignments rawAssignments
-    if observed > maximumAssignments
-        then Left $ DjinnInstantiationAssignmentFailure $
+    when (observed > maximumAssignments)
+        $ Left $ DjinnInstantiationAssignmentFailure $
             "provider instantiation assignment count exceeds " ++
                 show maximumAssignments
-        else return ()
     (_, _, retained) <- foldM validateAssignment
         (Map.empty, Map.empty, []) $
         zip [0 :: Int ..] rawAssignments
@@ -1316,11 +1331,10 @@ prepareProviderInstantiationAssignments prepared evidence = do
                         )
             assignmentLabel =
                 "provider instantiation assignment #" ++ show index ++ ": "
-        if observedArguments > maximumArguments
-            then Left $ DjinnInstantiationAssignmentFailure $
+        when (observedArguments > maximumArguments)
+            $ Left $ DjinnInstantiationAssignmentFailure $
                 assignmentLabel ++ "argument count exceeds " ++
                     show maximumArguments
-            else return ()
         let providerLabel = assignmentLabel ++ "provider " ++
                 SharedName.renderCanonical providerName ++ ": "
         providerSpelling <- first
@@ -1428,7 +1442,7 @@ prepareProviderInstantiationAssignments prepared evidence = do
             elaboratePreparedSynthesisTypes prepared [(binderKind, source)]
         checked <- case elaborated of
             [one] -> Right one
-            _ -> Left $ DjinnInternalQueryFailure $
+            _ -> Left $ DjinnInternalQueryFailure
                 "provider assignment elaboration changed batch shape"
         unless (Set.null $ SharedType.freeVariables checked) $
             Left $ DjinnInstantiationAssignmentFailure $
@@ -1506,9 +1520,8 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
     visibleArgument source = case
             checkPreparedSynthesisTypesKinds prepared [(KStar, source)] of
         Left _ -> Nothing
-        Right () -> Just $ either
-            (const SharedGenerated.inferredVisibleTypeArgument)
-            id
+        Right () -> Just
+            $ fromRight SharedGenerated.inferredVisibleTypeArgument
             $ SharedGenerated.specifiedVisibleTypeArgument source
     structuralTranslator = checkedTranslator $
         preparedEnvironmentSynthesisFormulaTranslator prepared
@@ -2400,6 +2413,7 @@ searchPreparedFormulaPlan options candidateLimit target externalEnv
         internalEnv = proofBindings proofEnv
         mode = (defaultSearchMode
                     (optionAlternatives options || optionSorted options)) {
+            searchStrategy = optionStrategy options,
             searchBudget = optionBudget options
             }
         internalFailure what = first $
@@ -2436,7 +2450,7 @@ searchPreparedFormulaPlan options candidateLimit target externalEnv
                         diagnosticProof : _ -> do
                             internalFailure
                                 "generated an invalid self-reference proof" $
-                                () <$ checkProofWithEvidence
+                                void $ checkProofWithEvidence
                                     diagnosticEnv form diagnosticProof
                             return UnrealizableWithoutSelfReference
                         [] -> return Unrealizable
@@ -2589,7 +2603,7 @@ resultToGeneratedReport result = case SharedSearch.batchProgress search of
         generatedReportCandidates = SharedSearch.batchCandidates search,
         generatedReportEvidence = SharedQuery.resultEvidence result
         }
-    SharedSearch.Continuing -> Left $
+    SharedSearch.Continuing -> Left
         "internal Djinn result invariant: proof search returned a continuing batch"
   where
     search = SharedQuery.resultSearch result

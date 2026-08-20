@@ -142,35 +142,51 @@ lengthSpinePairSMTLibProtocolPostBarrierSchemaTag =
 type LengthSpinePairSMTLibProtocolLimitSource =
   LengthSMTLibProtocolLimitSource
 
+-- | Retained pure-protocol bounds for a product plan; the same type as the
+-- scalar 'LengthSMTLibProtocolLimits', so one value may seal plans of either
+-- domain.
 type LengthSpinePairSMTLibProtocolLimits = LengthSMTLibProtocolLimits
 
+-- | Retain raw product-protocol bounds without validation, exactly as
+-- 'mkLengthSMTLibProtocolLimits' does for the scalar plan.
 mkLengthSpinePairSMTLibProtocolLimits
   :: LengthSpinePairSMTLibProtocolLimitSource
   -> LengthSpinePairSMTLibProtocolLimits
 mkLengthSpinePairSMTLibProtocolLimits = mkLengthSMTLibProtocolLimits
 
+-- | The scalar default raw bounds: default per-frame stream limits, a
+-- 512 KiB cumulative stdout cap, and a 256 KiB plan fingerprint bound.
 defaultLengthSpinePairSMTLibProtocolLimitSource
   :: LengthSpinePairSMTLibProtocolLimitSource
 defaultLengthSpinePairSMTLibProtocolLimitSource =
   defaultLengthSMTLibProtocolLimitSource
 
+-- | 'defaultLengthSpinePairSMTLibProtocolLimitSource' retained through
+-- 'mkLengthSpinePairSMTLibProtocolLimits'.
 defaultLengthSpinePairSMTLibProtocolLimits
   :: LengthSpinePairSMTLibProtocolLimits
 defaultLengthSpinePairSMTLibProtocolLimits =
   defaultLengthSMTLibProtocolLimits
 
+-- | Per-frame framing limits (total bytes, retained frame bytes, nesting
+-- depth) applied afresh to each expected product response frame.
 lengthSpinePairSMTLibProtocolStreamLimits
   :: LengthSpinePairSMTLibProtocolLimits
   -> SMTLibStreamLimits
 lengthSpinePairSMTLibProtocolStreamLimits =
   lengthSMTLibProtocolStreamLimits
 
+-- | Maximum stdout bytes one product transaction may consume across all its
+-- frames and accepted post-barrier whitespace; sealing rejects a cap below
+-- the plan's smallest complete transcript.
 lengthSpinePairSMTLibProtocolCumulativeStdoutByteLimit
   :: LengthSpinePairSMTLibProtocolLimits
   -> Natural
 lengthSpinePairSMTLibProtocolCumulativeStdoutByteLimit =
   lengthSMTLibProtocolCumulativeStdoutByteLimit
 
+-- | Admission-only cap on the canonical byte size of a sealed product plan
+-- fingerprint; it is not itself a fingerprint field.
 lengthSpinePairSMTLibProtocolPlanFingerprintByteLimit
   :: LengthSpinePairSMTLibProtocolLimits
   -> Natural
@@ -180,6 +196,9 @@ lengthSpinePairSMTLibProtocolPlanFingerprintByteLimit =
 -- | Plan admission failures share the scalar vocabulary.
 type LengthSpinePairSMTLibProtocolPlanError = LengthSMTLibProtocolPlanError
 
+-- | Uninhabited phantom subject of a binary-product plan fingerprint.  It is
+-- distinct from the scalar 'LengthSMTLibProtocolPlanFingerprintSubject', so
+-- product and scalar plan fingerprints never unify.
 data LengthSpinePairSMTLibProtocolPlanFingerprintSubject
 
 -- | The binary-product plan is the shared machine at the product query and
@@ -245,18 +264,28 @@ sealLengthSpinePairSMTLibProtocolPlan
 sealLengthSpinePairSMTLibProtocolPlan =
   sealLengthSMTLibQueryProtocolPlan spinePairProtocolIdentity
 
+-- | Exact bytes of the product plan's first write: the Z3 query reset
+-- prefix, the product query's canonical check commands, then the
+-- status-barrier echo command.  Rendered on demand from the retained plan.
 lengthSpinePairSMTLibProtocolInitialWriteBytes
   :: LengthSpinePairSMTLibProtocolPlan identity local
   -> [Word8]
 lengthSpinePairSMTLibProtocolInitialWriteBytes =
   lengthSMTLibProtocolInitialWriteBytes
 
+-- | Exact bytes of the conditional second write: the product query's
+-- @get-value@ request followed by the value-barrier echo command.  'Nothing'
+-- when the plan carries no value barrier or the query has no input symbols.
 lengthSpinePairSMTLibProtocolInputValueWriteBytes
   :: LengthSpinePairSMTLibProtocolPlan identity local
   -> Maybe [Word8]
 lengthSpinePairSMTLibProtocolInputValueWriteBytes =
   lengthSMTLibProtocolInputValueWriteBytes
 
+-- | Complete reversible identity of the sealed product plan.  Beyond the
+-- shared plan fields it binds the product schema tags, the
+-- @common-qf-lia-readiness-capability-reuse@ fields, and the product
+-- query-schema prefix, under the product fingerprint subject.
 lengthSpinePairSMTLibProtocolPlanFingerprint
   :: LengthSpinePairSMTLibProtocolPlan identity local
   -> Fingerprint LengthSpinePairSMTLibProtocolPlanFingerprintSubject
@@ -301,6 +330,8 @@ type LengthSpinePairSMTLibProtocolReceiver identity local =
     LengthSpinePairSMTLibProtocolPlanFingerprintSubject
     (LengthSpinePairSMTLibQuery identity local)
 
+-- | Name of the response frame this product receiver is waiting for; the
+-- phase vocabulary is shared with the scalar protocol.
 lengthSpinePairSMTLibProtocolReceiverPhase
   :: LengthSpinePairSMTLibProtocolReceiver identity local
   -> LengthSMTLibProtocolPhase
@@ -320,6 +351,10 @@ startLengthSpinePairSMTLibProtocol
   -> LengthSpinePairSMTLibProtocolAction identity local
 startLengthSpinePairSMTLibProtocol = startLengthSMTLibProtocol
 
+-- | Feed one chunk of stdout bytes to a product receiver.  The phase machine
+-- is the shared one: a completed frame is decoded with the product
+-- input-value parser, barriers are matched exactly, and only bounded SMT-LIB
+-- whitespace may follow an accepted barrier before the next action.
 feedLengthSpinePairSMTLibProtocol
   :: LengthSpinePairSMTLibProtocolReceiver identity local
   -> [Word8]
@@ -350,6 +385,9 @@ type LengthSpinePairSMTLibProtocolDecoded identity local =
 type LengthSpinePairSMTLibProtocolObservation =
   LengthSMTLibProtocolObservation
 
+-- | The status-indexed observation decoded by a completed product
+-- transaction.  It is a syntactic protocol result only and grants no
+-- semantic authority to the status or bindings.
 lengthSpinePairSMTLibProtocolDecodedObservation
   :: LengthSpinePairSMTLibProtocolDecoded identity local
   -> LengthSpinePairSMTLibProtocolObservation

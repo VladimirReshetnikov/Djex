@@ -50,6 +50,8 @@ concatSMTLibCausalBoundaryWhitespace =
   . BS.concat
   . map smtLibCausalBoundaryWhitespaceBytes
 
+-- | Project the admitted bytes; every byte satisfies 'isSMTLibWhitespaceByte'.
+-- Forcing the result may evaluate a lazily retained concatenation.
 smtLibCausalBoundaryWhitespaceBytes
   :: SMTLibCausalBoundaryWhitespace
   -> ByteString

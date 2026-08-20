@@ -35,7 +35,7 @@ module Language.Haskell.Djex.REPL.DjinnScope
 import Data.Either (partitionEithers)
 import Data.List (partition)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (isJust, mapMaybe)
+import Data.Maybe (isJust, isNothing, mapMaybe)
 import qualified Data.Set as Set
 import Data.Void (Void, absurd)
 
@@ -101,6 +101,8 @@ data DjinnScopeOmission = DjinnScopeOmission
   }
   deriving (Eq, Show)
 
+-- | Render one omission as a single @subject: reason@ line for the
+-- @:show omissions@ report.
 renderDjinnScopeOmission :: DjinnScopeOmission -> String
 renderDjinnScopeOmission omission =
   djinnOmissionSubject omission ++ ": " ++ djinnOmissionReason omission
@@ -558,7 +560,7 @@ stubUnknownReferences inferredKinds declarations =
     [ (name, arity)
     | (name, arity) <- Map.toList arities
     , not $ name `Set.member` defined
-    , not $ isJust $ nameSpecial name
+    , isNothing (nameSpecial name)
     ]
   (omissions, stubs) = partitionEithers
     [ case checkDeclaration stub of
@@ -598,7 +600,7 @@ typeReferences = go 0
       concatMap constraintTypeReferences constraints ++ go 0 body'
 
 constraintTypeReferences :: Constraint (Type String) -> [(Name, Int)]
-constraintTypeReferences = concatMap (typeReferences) . constraintArguments
+constraintTypeReferences = concatMap typeReferences . constraintArguments
 
 -- A class and an ordinary type share Haskell's source namespace, but they do
 -- not satisfy the same backend obligation: a datatype cannot resolve a class

@@ -6,6 +6,10 @@ Description:
   Djex combines the Djinn intuitionistic theorem prover and the Exference
   heuristic polymorphic-expression search engine behind a shared,
   parser-independent synthesis foundation and one library contract.
+  A separate checked semantic stratum adds typed candidate identities with
+  sealed term graphs, behavioral Length contracts over list spines, and a
+  replay-verified SMT-LIB/Z3 live stack in which raw solver output never
+  carries proof or pruning authority.
 Category:      Language
 License:       BSD-3-Clause
 License-Files:
@@ -375,7 +379,7 @@ Test-Suite djex-cli-tests
   Build-Tool-Depends: djex:djex, djex:djex-fake-cabal
 
 Test-Suite synthesis-tests
-  import:           tasty-hunit-test, tasty-quickcheck-dep, containers-dep, deepseq-dep
+  import:           tasty-hunit-test, tasty-quickcheck-dep, containers-dep, deepseq-dep, transformers-dep
   Type:             exitcode-stdio-1.0
   Main-Is:          Spec.hs
   Hs-Source-Dirs:
@@ -390,6 +394,7 @@ Test-Suite synthesis-tests
     SMTLibLexicalSpec
     SMTLibStandardResponseSpec
     SMTLibStreamSpec
+    Language.Haskell.Synthesis.Internal.Alpha
     Language.Haskell.Synthesis.Internal.ClassResolution
     Language.Haskell.Synthesis.Internal.SMTLib.Causal
     Language.Haskell.Synthesis.Internal.SMTLib.Causal.BoundaryWhitespace

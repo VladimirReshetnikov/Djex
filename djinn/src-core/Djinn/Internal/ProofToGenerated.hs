@@ -13,7 +13,7 @@ module Djinn.Internal.ProofToGenerated
 import Control.Monad (foldM, zipWithM)
 import Control.Monad.Trans.State.Strict (evalState, state)
 import Data.List ((\\))
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Numeric.Natural (Natural)
@@ -482,7 +482,7 @@ unqualifiedValueGlobals :: Expression -> Set.Set HSymbol
 unqualifiedValueGlobals expression = Set.fromList
   [ spelling
   | name <- Generated.expressionGlobals expression
-  , Name.nameModule name == Nothing
+  , isNothing (Name.nameModule name)
   , Name.nameLexicalClass name == Name.VariableLike
   , Just spelling <- [Name.nameSpelling name]
   ]

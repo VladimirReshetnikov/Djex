@@ -1,0 +1,65 @@
+# hlint policy for Djex.
+#
+# Run it with
+#   hlint src synthesis/src synthesis/internal djinn/src-core \
+#         djinn/src-internal exference/src-core
+#
+# The families below were reported by hlint 3.10, assessed once, and dismissed
+# for the stated reason.  The genuine simplifications from the same pass --
+# dead LANGUAGE pragmas, readTVarIO, the `when` guard ladders across the
+# validator families, and the standard Maybe/Either idioms -- were applied, so
+# those should stay at zero.
+#
+# Deliberately NOT ignored, so they stay visible as future work: `Use
+# lambda-case`, `Replace case with maybe`, `Use shows`, `Use fmap` and
+# `Use <$>`.  Each is a real readability question rather than a decided one,
+# and the first two need a LANGUAGE pragma per module, so they are worth
+# taking file by file rather than silencing wholesale.
+
+- ignore:
+    name: Use ++
+    # Every one of these is a fingerprint identity string split across lines,
+    # as in `concat ["schema-tag-", "continued/v1"]`.  The shape also extends
+    # to three fragments, and churning identity bytes is exactly what the
+    # fingerprint suites exist to catch.
+
+- ignore:
+    name: Use newtype instead of data
+    # These wrap seal and receipt types whose laziness the tests pin: a
+    # newtype is forced when its contents are, a data wrapper is not.
+
+- ignore:
+    name: Use camelCase
+    # Exported names; renaming them is a public API change.
+
+- ignore:
+    name: Eta reduce
+    # The explicit argument names carry the Haddock parameter documentation.
+
+- ignore:
+    name: Hoist not
+    # `any (not . p) xs` asks the question the code is asking; the hoisted
+    # form is the same length and says it backwards.
+
+- ignore:
+    name: Use infix
+
+- ignore:
+    name: Use record patterns
+
+- ignore:
+    name: Use tuple-section
+
+- ignore:
+    name: Avoid lambda
+
+- ignore:
+    name: Use first
+- ignore:
+    name: Use second
+
+- ignore:
+    name: Unused LANGUAGE pragma
+    within: Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Z3.Process
+    # ForeignFunctionInterface is needed by the descriptor-bound launch code
+    # inside a Linux-only CPP block, which hlint does not see on Windows.

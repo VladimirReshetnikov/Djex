@@ -497,28 +497,38 @@ patternBindingSites pattern = case pattern of
   TuplePattern elements -> concatMap patternBindingSites elements
   As local nested -> Just local : patternBindingSites nested
 
+-- | Collect observations over an expression in left-to-right structural
+-- order: @onPattern@ contributes at every pattern position and @onNode@ at
+-- every expression node, interleaved as the source reads (a lambda's
+-- patterns before its body; a let's pattern, then its binding, then its
+-- body; a case's scrutinee, then each alternative's pattern and body).
+-- Duplicates are retained.  The whole-tree observers below are its
+-- instances; scope-sensitive analyses keep their own recursion.
+collectExpression
+  :: (Pattern local -> [a])
+  -> (Expression local -> [a])
+  -> Expression local
+  -> [a]
+collectExpression onPattern onNode = go
+ where
+  go expression = onNode expression ++ case expression of
+    Lambda patterns body -> concatMap onPattern patterns ++ go body
+    Apply function argument -> go function ++ go argument
+    VisibleTypeApplication function _ -> go function
+    Tuple elements -> concatMap go elements
+    Let pattern binding body -> onPattern pattern ++ go binding ++ go body
+    Case scrutinee alternatives ->
+      go scrutinee ++ concat
+        [ onPattern pattern ++ go body | (pattern, body) <- alternatives ]
+    Local{} -> []
+    Global{} -> []
+    Hole{} -> []
+
 -- | Observe binding sites introduced anywhere in an expression, in
 -- left-to-right structural order.  Ordinary local occurrences and holes are
 -- uses rather than binding sites and therefore do not contribute.
 expressionBindingSites :: Expression local -> [Maybe local]
-expressionBindingSites expression = case expression of
-  Local{} -> []
-  Global{} -> []
-  Lambda patterns body ->
-    concatMap patternBindingSites patterns ++ expressionBindingSites body
-  Apply function argument ->
-    expressionBindingSites function ++ expressionBindingSites argument
-  VisibleTypeApplication function _ -> expressionBindingSites function
-  Tuple elements -> concatMap expressionBindingSites elements
-  Hole{} -> []
-  Let pattern binding body ->
-    patternBindingSites pattern ++ expressionBindingSites binding
-      ++ expressionBindingSites body
-  Case scrutinee alternatives ->
-    expressionBindingSites scrutinee ++ concat
-      [ patternBindingSites pattern ++ expressionBindingSites body
-      | (pattern, body) <- alternatives
-      ]
+expressionBindingSites = collectExpression patternBindingSites (const [])
 
 -- | Observe all binding sites in a complete generated definition.
 functionClauseBindingSites :: FunctionClause local -> [Maybe local]
@@ -1893,38 +1903,15 @@ expressionLocals = toList
 -- their binders. Keeping this independent of local-allocation order also lets
 -- an ordinary occurrence precede a hole with the same identity safely.
 expressionHoles :: Expression local -> [local]
-expressionHoles expression = case expression of
-  Local{} -> []
-  Global{} -> []
-  Lambda _ body -> expressionHoles body
-  Apply function argument ->
-    expressionHoles function ++ expressionHoles argument
-  VisibleTypeApplication function _ -> expressionHoles function
-  Tuple elements -> concatMap expressionHoles elements
-  Hole local -> [local]
-  Let _ binding body ->
-    expressionHoles binding ++ expressionHoles body
-  Case scrutinee alternatives ->
-    expressionHoles scrutinee ++ concat
-      [ expressionHoles body | (_, body) <- alternatives ]
+expressionHoles = collectExpression (const []) hole
+ where
+  hole (Hole local) = [local]
+  hole _ = []
 
 -- | Collect every referenced global and pattern constructor in left-to-right
 -- structural order, retaining duplicates.
 expressionGlobals :: Expression local -> [Name]
-expressionGlobals expression = case expression of
-  Local{} -> []
-  Global name -> [name]
-  Lambda patterns body ->
-    concatMap patternGlobals patterns ++ expressionGlobals body
-  Apply function argument ->
-    expressionGlobals function ++ expressionGlobals argument
-  VisibleTypeApplication function _ -> expressionGlobals function
-  Tuple elements -> concatMap expressionGlobals elements
-  Hole{} -> []
-  Let pattern binding body ->
-    patternGlobals pattern ++ expressionGlobals binding ++ expressionGlobals body
-  Case scrutinee alternatives ->
-    expressionGlobals scrutinee ++ concat
-      [ patternGlobals pattern ++ expressionGlobals body
-      | (pattern, body) <- alternatives
-      ]
+expressionGlobals = collectExpression patternGlobals global
+ where
+  global (Global name) = [name]
+  global _ = []

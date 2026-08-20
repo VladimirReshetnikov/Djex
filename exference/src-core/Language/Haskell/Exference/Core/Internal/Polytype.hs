@@ -17,8 +17,7 @@ module Language.Haskell.Exference.Core.Internal.Polytype
   )
 where
 
-import Control.Monad (guard)
-import Data.Foldable (toList)
+import Control.Monad (guard, replicateM)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
@@ -310,7 +309,7 @@ candidateProviderInstantiations rawCandidates source =
           | candidate <- rawCandidates
           , isVisibleTypeCandidate candidate
           ]
-    arguments <- sequence $ replicate (length orderedBinders) candidates
+    arguments <- replicateM (length orderedBinders) candidates
     (instantiated, instantiatedConstraints) <- maybe [] pure
       $ instantiateLeadingForallsAt isVisibleTypeCandidate arguments normalized
     pure GroundProviderInstantiation
@@ -423,6 +422,9 @@ substituteClosedVariables substitutions source = case source of
       (map (fmap $ substituteClosedVariables visible) constraints)
       (substituteClosedVariables visible body)
 
+-- | Whether a query subtree may serve as a visible type argument: it must be
+-- a ground monotype, or a closed forall-rooted type with no constraints
+-- anywhere in its tree.
 -- Query-derived visible arguments stay deliberately narrower than arbitrary
 -- closed types. A quantified candidate must be the complete forall-rooted type
 -- observed in a proper-type position, and every context in its tree must be
@@ -439,5 +441,5 @@ isVisibleTypeCandidate source =
 
 isGroundMonotype :: HsType -> Bool
 isGroundMonotype typeExpression =
-  null (toList typeExpression)
+  null typeExpression
     && not (SharedType.containsForall typeExpression)

@@ -21,6 +21,7 @@ module Language.Haskell.Exference.Core.Internal.Testing
   )
 where
 
+import Control.Monad (void)
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import qualified Data.PQueue.Prio.Max as Q
@@ -142,8 +143,8 @@ singleOptionValidationStrictnessForTesting
 singleOptionValidationStrictnessForTesting
     target sourceHints environment query = do
   checkedOptions <- E.checkExferenceOptions $ E.querySearchOptions query
-  () <$ E.findQueryResultsInEnvironmentWithCheckedOptions
-    target sourceHints environment poisonedQuery checkedOptions
+  void (E.findQueryResultsInEnvironmentWithCheckedOptions
+    target sourceHints environment poisonedQuery checkedOptions)
  where
   poisonedQuery = query
     { E.querySearchOptions =

@@ -14,6 +14,11 @@ module Language.Haskell.Synthesis.Internal.SMTLib.Causal
 import Control.DeepSeq (NFData (rnf))
 import Data.Word (Word8)
 
+-- | One step demanded by a pure causal SMT-LIB machine: write the exact bytes
+-- (tagged with a domain @kind@) and then feed the response to the receiver;
+-- keep feeding response bytes to the receiver for the preceding write; or
+-- stop with the machine's decoded outcome.  A driver must complete a write's
+-- transport before feeding its receiver.
 data SMTLibCausalAction kind receiver outcome
   = SMTLibCausalWrite !kind [Word8] !receiver
   | SMTLibCausalAwait !receiver

@@ -34,13 +34,17 @@ import Language.Haskell.Exference.Core.Types
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 
+-- | One equation @left ~ right@ for 'unifyRightEqs'.  The first type is the
+-- pattern side whose flexible variables stay fixed; only flexible variables
+-- of the second type may be bound.
 data TypeEq = TypeEq !HsType !HsType
 
--- | Backward-compatible name for 'unifyDisjoint'.
 {-# INLINE unify #-}
+-- | Backward-compatible name for 'unifyDisjoint'.
 unify :: HsType -> HsType -> Maybe (Substs, Substs)
 unify = unifyDisjoint
 
+{-# INLINE unifyDisjoint #-}
 -- | Unify types whose flexible identifiers belong to independent namespaces.
 -- Returns one substitution per input. In the symmetric case, substituting the
 -- right-hand (second) type will be preferred.
@@ -52,7 +56,6 @@ unify = unifyDisjoint
 -- unify C v = ([], [v => C])
 -- unify v w = ([], [w => v])
 -- @
-{-# INLINE unifyDisjoint #-}
 unifyDisjoint :: HsType -> HsType -> Maybe (Substs, Substs)
 unifyDisjoint rawLeft rawRight = do
   left <- canonicalUnificationType rawLeft
@@ -63,11 +66,11 @@ unifyDisjoint rawLeft rawRight = do
     [(taggedLeft, taggedRight)] Map.empty
   projectTagged left right substitutions
 
+{-# INLINE unifyShared #-}
 -- | Unify types whose flexible identifiers already belong to one shared
 -- namespace. Equal identifiers on the two sides denote the same metavariable,
 -- so the occurs check spans both inputs. Use 'unifyDisjoint' instead when each
 -- input has an independent namespace and therefore needs its own substitution.
-{-# INLINE unifyShared #-}
 unifyShared :: HsType -> HsType -> Maybe Substs
 unifyShared rawLeft rawRight = do
   left <- canonicalUnificationType rawLeft
@@ -87,6 +90,10 @@ unifyShared rawLeft rawRight = do
   pure $ IntMap.fromList $ catMaybes projected
 
 {-# INLINE unifyOffset #-}
+-- | 'unifyDisjoint' against a right-hand type whose free flexible variables
+-- are first shifted by the offset carried in the 'HsTypeOffset'.  The second
+-- returned substitution is keyed by, and applies to, the shifted right type;
+-- an offset that would overflow a 'TVarId' yields 'Nothing'.
 unifyOffset :: HsType -> HsTypeOffset -> Maybe (Substs, Substs)
 unifyOffset left (HsTypeOffset right offset) =
   checkedOffsetType offset right >>= unifyDisjoint left
@@ -458,13 +465,18 @@ allocateRightVariables leftVariables rightVariables = fst
   <$> allocateCanonicalIdentifiers rightVariables
         (supplyFromIdentifiers leftVariables)
 
+{-# INLINE unifyRight #-}
 -- | Treat flexible variables in the first parameter as rigid pattern
 -- identities and return bindings only for variables in the second parameter.
-{-# INLINE unifyRight #-}
 unifyRight :: HsType -> HsType -> Maybe Substs
 unifyRight left right = unifyRightEqs [TypeEq left right]
 
 {-# INLINE unifyRightEqs #-}
+-- | Solve several 'TypeEq' equations simultaneously in the manner of
+-- 'unifyRight': flexible variables on every left side stay fixed, and the
+-- single returned substitution binds only flexible variables of the right
+-- sides, which all share one namespace.  Any structurally invalid input or an
+-- unsolvable equation yields 'Nothing'.
 unifyRightEqs :: [TypeEq] -> Maybe Substs
 unifyRightEqs rawEquations = do
   equations <- mapM canonicalEquation rawEquations
@@ -496,6 +508,10 @@ projectRightSubstitutions equations substitutions = do
     (\(TypeEq _ right) -> freeVars right) equations
 
 {-# INLINE unifyRightOffset #-}
+-- | 'unifyRight' against a right-hand type whose free flexible variables are
+-- first shifted by the offset carried in the 'HsTypeOffset'.  The returned
+-- substitution is keyed by, and applies to, the shifted right type; an offset
+-- that would overflow a 'TVarId' yields 'Nothing'.
 unifyRightOffset :: HsType -> HsTypeOffset -> Maybe Substs
 unifyRightOffset left (HsTypeOffset right offset) =
   checkedOffsetType offset right >>= unifyRight left

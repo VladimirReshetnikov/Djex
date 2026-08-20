@@ -1,8 +1,12 @@
---
--- Transactional validation of editable Djinn declarations, plus the
+-- | Transactional validation of editable Djinn declarations, plus the
 -- authoritative lowering from Djex's neutral environment into proof-search
 -- indexes.
 --
+-- The raw 'Environment' is Djinn's historical table of type definitions,
+-- axioms, and classes; 'validateEnvironment' checks it as a whole, and the
+-- @prepare*@ operations turn it (or a shared synthesis environment) into a
+-- sealed 'PreparedEnvironment' whose formula translators, premises, and
+-- class lookups "Djinn.Core" searches against.
 module Djinn.Internal.Environment (
     TypeDefinition, Axiom, ClassDefinition, Environment(..),
     PreparedEnvironment, prepareEnvironment, prepareSynthesisEnvironment,
@@ -67,10 +71,22 @@ import Djinn.Internal.Type
     )
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
+-- | A type-level entry of the raw environment: the type name with its
+-- parameter names, its body, and its kind.  A data type stores its
+-- constructors as an 'HTUnion' body, an abstract type stores an
+-- 'HTAbstract' body with no parameters, and any other body is a synonym.
 type TypeDefinition = (HSymbol, ([HSymbol], HType, HKind))
+-- | A free function assumption (or class method signature): a value name
+-- paired with its type.
 type Axiom = (HSymbol, HType)
+-- | A class entry of the raw environment: the class name with its kinded
+-- parameters and its method signatures.
 type ClassDefinition = (HSymbol, ([(HSymbol, HKind)], [Axiom]))
 
+-- | Djinn's raw compatibility environment: the declared types, function
+-- assumptions, and classes.  Its constructor is exported, so a value is not
+-- guaranteed valid until sealed by 'prepareEnvironment' (or checked by
+-- 'validateEnvironment').
 data Environment = Environment {
     envTypes :: [TypeDefinition],
     envFunctions :: [Axiom],
@@ -182,14 +198,25 @@ synthesisValueSymbol role description name = maybe
     Right
     $ djinnDeclarationSymbol role name
 
+-- | The shared structural environment Djinn exchanges with the synthesis
+-- library, instantiated like 'SynthesisDeclaration' (symbol type variables,
+-- 'Int' kind variables, no annotation).
 type SynthesisEnvironment =
     SharedEnvironment.Environment HSymbol Int ()
 
+-- | The kind-checked shared inventory sealed from a 'SynthesisEnvironment';
+-- every kind in it is ground.
 type SynthesisInventory = SharedInventory.Inventory HSymbol ()
 
 type PreparedSynthesisInventory =
     SharedTypeSynonym.PreparedInventory HSymbol ()
 
+-- | Why an environment could not be converted, sealed, or edited: a
+-- per-declaration adapter failure, a shared structural, inventory, or synonym
+-- expansion failure, unsupported datatype recursion, a premise translation
+-- failure at sealing, a missing or unresolved kind in the inferred
+-- assumptions, an ill-formed abstract type entry, an edit naming an unknown
+-- or protected (@()@) declaration, or a raw compatibility validation message.
 data SynthesisEnvironmentError
     = SynthesisEnvironmentDeclarationError SynthesisDeclarationError
     | InvalidSynthesisEnvironment
@@ -212,6 +239,10 @@ data SynthesisEnvironmentError
     | DjinnEnvironmentValidationError String
     deriving (Eq, Show)
 
+-- | Convert every raw declaration through 'toSynthesisDeclaration' and seal
+-- the shared structural environment, without kind inference.  Types with an
+-- 'HTAbstract' body are normalized first; the shared validator rejects
+-- duplicate and otherwise ill-formed declarations.
 toSynthesisEnvironment
     :: Environment
     -> Either SynthesisEnvironmentError SynthesisEnvironment
@@ -848,7 +879,7 @@ sealPreparedEnvironment expansion = do
     -- Djinn uses Haskell-98 kind defaulting, so every parameter must have a
     -- ground kind. Check that backend-specific requirement at sealing while
     -- retaining the neutral index's generalized-kind vocabulary.
-    mapM_ (fmap (const ()) . projectPreparedSynthesisClass) $
+    mapM_ projectPreparedSynthesisClass $
         SharedClass.preparedClasses classIndex
     -- Force each retained projection so it cannot keep the transient
     -- expanded declaration product alive through an unevaluated selector.
@@ -1011,6 +1042,8 @@ preparedEnvironmentWitness
         (PreparedEnvironment prepared _ _ _ _ _ _ _ _) =
     prepared
 
+-- | The sealed shared inventory (environment plus inferred kind assumptions)
+-- that every other prepared index was derived from.
 preparedEnvironmentInventory :: PreparedEnvironment -> SynthesisInventory
 preparedEnvironmentInventory =
     SharedTypeSynonym.preparedInventory .
@@ -1147,6 +1180,10 @@ checkPreparedSynthesisTypesKinds prepared expectedTypes = do
         <$> checkedGroundHKind expected
         <*> first show (normalizeSynthesisType source)
 
+-- | The historical exact premise for each function assumption, in
+-- declaration order: the structural translation in which every quantified
+-- subtree is left opaque, keyed by the function's proof symbol.  The rank-N
+-- views live in 'preparedEnvironmentPolarizedFunctionPremises' instead.
 preparedEnvironmentFunctionPremises
     :: PreparedEnvironment
     -> [(Symbol, Formula)]
@@ -1454,7 +1491,7 @@ projectDeclaration assumptions pair = case pair of
         kinds <- requiredClassKinds assumptions sharedName parameters
         return $ ProjectedClass
             (name, (zip parameters kinds, methods))
-    _ -> Left $ DjinnEnvironmentValidationError $
+    _ -> Left $ DjinnEnvironmentValidationError
         "internal shared declaration projection changed shape"
 
 requiredTypeKind

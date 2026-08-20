@@ -30,6 +30,9 @@ import Numeric.Natural (Natural)
 import qualified Language.Haskell.Synthesis.Fresh as SharedFresh
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
+-- | The set of 'Int' identifiers already reserved in one namespace.  Fresh
+-- allocation never returns a member, and identifiers are only ever added,
+-- never released.
 newtype IdentifierSupply = IdentifierSupply IntSet.IntSet
   deriving (Eq, Show)
 
@@ -39,6 +42,7 @@ instance NFData IdentifierSupply where
 -- | Compatibility name for the generic supply where it tracks flexible IDs.
 type FlexibleIdSupply = IdentifierSupply
 
+-- | A supply in which exactly the given identifiers are reserved.
 supplyFromIdentifiers :: Foldable collection => collection Int -> IdentifierSupply
 supplyFromIdentifiers = IdentifierSupply . foldr IntSet.insert IntSet.empty
 
@@ -58,15 +62,20 @@ identifierSupplySize (IdentifierSupply identifiers) =
 reservedIdentifierSet :: IdentifierSupply -> IntSet.IntSet
 reservedIdentifierSet (IdentifierSupply identifiers) = identifiers
 
+-- | Whether an identifier is already reserved in the supply.
 identifierIsReserved :: Int -> IdentifierSupply -> Bool
 identifierIsReserved identifier (IdentifierSupply reserved) =
   IntSet.member identifier reserved
 
+-- | The greatest reserved identifier, or 'Nothing' for an empty supply.
+-- The historical fast path allocates one above this value.
 maximumReservedIdentifier :: IdentifierSupply -> Maybe Int
 maximumReservedIdentifier (IdentifierSupply reserved)
   | IntSet.null reserved = Nothing
   | otherwise = Just $ IntSet.findMax reserved
 
+-- | Mark every given identifier as reserved; already reserved identifiers
+-- are unaffected.
 reserveIdentifiers
   :: Foldable collection
   => collection Int

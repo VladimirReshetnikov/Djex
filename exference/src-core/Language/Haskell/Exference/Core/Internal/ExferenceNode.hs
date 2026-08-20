@@ -1,6 +1,12 @@
 {-# LANGUAGE DeriveGeneric #-}
 
 
+-- | The state of one Exference search branch: the 'SearchNode' record with
+-- its pending 'TGoal's, lexical 'Scopes' of 'VarPBinding's, use counts, and
+-- rigid, identifier, and depth bookkeeping, plus the substitution and
+-- goal-construction helpers over it.  Scope structure itself is delegated to
+-- "Language.Haskell.Exference.Core.Internal.Scope"; the engine in
+-- "Language.Haskell.Exference.Core.Internal.Exference" steps these nodes.
 module Language.Haskell.Exference.Core.Internal.ExferenceNode
   ( SearchNode (..)
   , ForallGoalMode (..)
@@ -49,6 +55,9 @@ import Numeric.Natural (Natural)
 import Control.DeepSeq
 import GHC.Generics
 
+-- | A term variable (or expression hole) paired with its type.  Goals carry
+-- one as the hole to fill; 'splitBinding' turns one into the scoped
+-- 'VarPBinding' form.
 data VarBinding = VarBinding {-# UNPACK #-} !TVarId HsType
  deriving (Generic)
 
@@ -80,15 +89,24 @@ varPBindingApplySubsts substitutions binding =
     (VarBinding (varPVariable binding)
       $ snd $ applySubsts substitutions $ varPResult binding)
 
+-- | An opaque reference to one lexical scope of a search node; see
+-- "Language.Haskell.Exference.Core.Internal.Scope".
 type ScopeId = Scope.ScopeId
+
+-- | The lexical-scope forest of a search node, holding one 'VarPBinding'
+-- per locally bound term variable.
 type Scopes = Scope.Scopes VarPBinding
 
+-- | The root scope ID every fresh search starts from; the initial goal is
+-- placed in this scope.
 initialScopeId :: ScopeId
 initialScopeId = Scope.initialScopeId
 
+-- | The scope forest of a fresh search node: only the empty root scope.
 initialScopes :: Scopes
 initialScopes = Scope.initialScopes
 
+-- | Every binding visible from a scope, innermost scope first.
 -- Search state is assembled exclusively through the checked 'Scope' API, so
 -- failure here means an internal representation invariant was violated.  Keep
 -- that exceptional boundary local instead of threading an impossible error
@@ -96,10 +114,16 @@ initialScopes = Scope.initialScopes
 scopeGetAllBindings :: ScopeId -> Scopes -> [VarPBinding]
 scopeGetAllBindings sid = requireValidScopes . Scope.scopeGetAllBindings sid
 
+-- | Apply a substitution to every binding in every scope, re-splitting each
+-- result type so newly exposed arrows become parameters; scope identity and
+-- ancestry are unchanged.
 scopesApplySubsts :: Substs -> Scopes -> Scopes
 scopesApplySubsts substs =
   Scope.scopesMapBindings (varPBindingApplySubsts substs)
 
+-- | Prepend a binding to an existing scope, so it is returned before the
+-- scope's earlier bindings by 'scopeGetAllBindings'.  A stale or unknown
+-- scope ID is an internal invariant violation and raises an error.
 scopesAddPBinding :: ScopeId -> VarPBinding -> Scopes -> Scopes
 scopesAddPBinding sid binding =
   requireValidScopes . Scope.scopesAddBinding sid binding
@@ -143,6 +167,9 @@ data TGoal = TGoal
   }
   deriving Generic
 
+-- | Apply a substitution to a goal's hole type and its local given
+-- constraints; the scope and modes are untouched, and an empty substitution
+-- returns the goal unchanged.
 goalApplySubst :: Substs -> TGoal -> TGoal
 goalApplySubst ss | IntMap.null ss = id
                   | otherwise      = \goal -> goal
@@ -153,6 +180,9 @@ goalApplySubst ss | IntMap.null ss = id
                           $ goalGivenConstraints goal
                       }
 
+-- | Make one goal per hole binding, all in the given scope and sharing the
+-- given local constraints, in the default 'TryForallIntroduction' and
+-- 'AllowTupleTree' modes.  The output order follows the input order.
 mkGoals :: ScopeId
         -> [HsConstraint]
         -> [VarBinding]
@@ -160,6 +190,10 @@ mkGoals :: ScopeId
 mkGoals sid givens = map
   (\binding -> TGoal binding sid TryForallIntroduction AllowTupleTree givens)
 
+-- | One state of the proof search: the pending goals, the scoped class
+-- obligations, the lexical scopes and per-variable use counts, the
+-- environment available to this branch, the partial expression built so far,
+-- and the identifier, rigid-scope, and depth bookkeeping needed to extend it.
 data SearchNode = SearchNode
   { nodeGoals           :: Seq TGoal
   , nodeConstraintGoals :: [ScopedConstraint]
@@ -215,6 +249,8 @@ instance NFData TupleGoalMode
 instance NFData TGoal
 instance NFData SearchNode
 
+-- | Split a binding's type at its arrow chain into a scoped 'VarPBinding'
+-- with no previously exposed parameters; see 'splitBindingWithParameters'.
 splitBinding :: VarBinding -> VarPBinding
 splitBinding = splitBindingWithParameters []
 

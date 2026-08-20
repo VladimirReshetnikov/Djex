@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 
 -- | Scoped, non-evaluating kind inspection for the shared REPL.
 --
@@ -93,6 +92,11 @@ data InspectionKind
   | InspectionFunction InspectionKind InspectionKind
   deriving (Eq, Show)
 
+-- | The result of one @:kind@ query, as produced by 'inspectKind' and
+-- rendered by 'renderKindInspection': the trimmed source text, its
+-- inferred kind, the type to display (the parsed type itself, or its
+-- synonym normal form under @:kind!@), and the source spellings of its
+-- type variables.
 data KindInspection = KindInspection
   { inspectionSource :: String
   , inspectionKind :: InspectionKind

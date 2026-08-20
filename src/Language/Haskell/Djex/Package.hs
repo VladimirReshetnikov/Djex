@@ -61,6 +61,8 @@ data PackageInstallMode
   | InstallLibraries
   deriving (Eq, Show)
 
+-- | The @djex@ subcommand word naming a package operation, used in usage
+-- and failure messages; the install mode does not affect it.
 packageOperationName :: PackageOperation -> String
 packageOperationName DownloadOperation = "download"
 packageOperationName (InstallOperation _) = "install"

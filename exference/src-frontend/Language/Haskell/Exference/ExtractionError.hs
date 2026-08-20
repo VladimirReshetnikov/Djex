@@ -34,6 +34,10 @@ import Language.Haskell.Synthesis.Diagnostic
   , withOptionalLocation
   )
 
+-- | An extraction failure: the exact historical message paired with the
+-- source location of the failing declaration, if it had a representable
+-- one. Only the message takes part in the string-typed compatibility
+-- projections.
 data ExtractionError = ExtractionError
   { extractionErrorLocation :: Maybe SourceLocation
   , extractionErrorMessage :: String
@@ -71,6 +75,9 @@ flattenSourcedExtraction sourced = case sourcedExtractionResult sourced of
 extractionError :: String -> ExtractionError
 extractionError = ExtractionError Nothing
 
+-- | A failure located at the given HSE span, converted through
+-- 'srcSpanInfoLocation'; the location is dropped when the span has no
+-- representable coordinates.
 extractionErrorAt :: SrcSpanInfo -> String -> ExtractionError
 extractionErrorAt info = ExtractionError (srcSpanInfoLocation info)
 

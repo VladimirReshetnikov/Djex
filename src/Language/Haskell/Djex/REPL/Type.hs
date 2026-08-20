@@ -862,6 +862,10 @@ normalizeResult context constraints result = case applySubstsChecked renaming
     "DJEX_REPL_TYPE_NORMALIZE" "cannot normalize inferred type variables"
     "capture-avoiding substitution changed the result envelope"
 
+-- | Render a @:type@ result as Haskell source: the constraints as a
+-- @C => @ or @(C1, C2) => @ prefix when present, followed by the type,
+-- with names qualified as requested and type variables spelled by
+-- 'defaultVariableName'.
 renderInferredType :: Qualification -> InferredExpression -> String
 renderInferredType qualification result = contextPrefix
   ++ renderTypeWithQualification qualification defaultVariableName

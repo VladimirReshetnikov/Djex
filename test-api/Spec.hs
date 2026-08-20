@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternSynonyms #-}
+
 
 module Main (main) where
 

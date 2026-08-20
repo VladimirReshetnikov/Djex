@@ -1,8 +1,12 @@
 {-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE TupleSections #-}
-{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE MonadComprehensions #-}
 
+-- | The Exference search engine proper: the priority-queue-driven best-first
+-- search over 'SearchNode's, the validation of inputs, environments,
+-- queries, and options, and the result projections in both the historical
+-- chunk API and the shared query envelope.  Every public entrance validates
+-- once and hands the raw lazy engine a sealed artifact whose constructor is
+-- private, so nothing unchecked reaches 'stateStep'.
 module Language.Haskell.Exference.Core.Internal.Exference
   ( findExpressions
   , findExpressionsWithAllocators
@@ -110,12 +114,12 @@ import qualified Data.Set as S
 import qualified Data.Sequence as Seq
 import qualified Data.List as L
 
-import Data.Maybe ( maybeToList, listToMaybe )
-import Control.Monad ( mzero, forM )
+import Data.Maybe (fromMaybe, listToMaybe, maybeToList)
+import Control.Monad ( mzero, forM, unless, void, when )
 import Control.Applicative ( (<|>) )
 import Data.List ( find, partition, sortBy, unfoldr )
 import Data.Monoid ( Any(..) )
-import Data.Foldable ( toList, traverse_ )
+import Data.Foldable ( traverse_ )
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Numeric.Natural (Natural)
 import Control.Monad.Trans.Class ( lift )
@@ -124,6 +128,10 @@ import Control.Monad.Trans.State.Lazy
   , execStateT, runStateT
   )
 
+-- | The historical all-in-one search input: goal, environment, and search
+-- limits in a single record.  It is validated by 'prepareExferenceInput'
+-- before any search runs; the newer split API uses 'ExferenceEnvironment'
+-- and 'ExferenceQuery' instead.
 data ExferenceInput = ExferenceInput
   { input_goalType    :: HsType                 -- ^ try to find a expression
                                                 -- of this type
@@ -194,6 +202,10 @@ data CheckedExferenceQuery = CheckedExferenceQuery
   !(M.Map QualifiedName [[HsType]])
   !RigidInstantiationPlan
 
+-- | Why an input, environment, query, or option set was rejected before any
+-- search ran.  Validation reports the first failure in the historical guard
+-- order; 'isExferenceOptionError' separates option failures from goal and
+-- environment failures.
 data ExferenceInputError
   = NestedForallInGoal HsType
   | NestedForallInBinding QualifiedName HsType
@@ -309,7 +321,14 @@ renderExferenceInputError failure = case failure of
   sourceConstraint constraint =
     "(" ++ showHsConstraint M.empty constraint ++ ")"
 
+-- | One historical search result: the checked expression, the type-class
+-- constraints left unresolved for it, and the statistics of the step that
+-- produced it.
 type ExferenceOutputElement = (Expression, [HsConstraint], ExferenceStats)
+
+-- | How far the search had progressed when a chunk was emitted.  Only
+-- 'SearchExhausted' makes the absence of a result conclusive; every other
+-- terminal value records a bound or namespace limit that discarded work.
 data SearchCompletion
   = SearchRunning
     -- ^ Retained search nodes remain after this chunk.
@@ -327,6 +346,9 @@ data SearchCompletion
     -- conclusive.
   deriving (Eq, Show)
 
+-- | Historical progress summary attached to every 'ExferenceChunkElement':
+-- the completion state plus running totals of nodes discarded by the queue
+-- and depth bounds so far.
 data SearchStatus = SearchStatus
   { searchCompletion :: SearchCompletion
   -- These historical counters cannot represent every exact engine total.
@@ -336,6 +358,10 @@ data SearchStatus = SearchStatus
   }
   deriving (Eq, Show)
 
+-- | The historical per-step output of 'findExpressions': the search status
+-- after the step, the cumulative usage count of every environment binding,
+-- and the solutions found in that step (often none).  It is a saturating
+-- projection of the exact engine batch produced by the shared search API.
 data ExferenceChunkElement = ExferenceChunkElement
   { chunkStatus :: SearchStatus
   -- Historical compatibility metadata remains machine-sized. Engine-produced
@@ -564,7 +590,7 @@ findEngineBatchesWith allocators
       && null (SharedType.typeConstraints source)
   closedContextFreeForall _ = False
   groundMonotype source =
-    null (toList source) && not (SharedType.containsForall source)
+    null source && not (SharedType.containsForall source)
 
   rootClassEnvironment = mkQueryClassEnv sClassEnv []
   preparedCheckContext = prepareExpressionCheckContextWithSchemes
@@ -776,6 +802,9 @@ restoreScheduledNode (ScheduledNode nextGoal node) = node
 findExpressions :: CheckedExferenceQuery -> [ExferenceChunkElement]
 findExpressions = findExpressionsWithAllocators defaultSearchAllocators
 
+-- | 'findExpressions' with explicit search allocators.  Every engine batch is
+-- projected to one 'ExferenceChunkElement', so the batch and candidate order
+-- are preserved and exact counts saturate to machine integers.
 findExpressionsWithAllocators
   :: SearchAllocators
   -> CheckedExferenceQuery
@@ -877,6 +906,9 @@ findTypedQueryResultsInEnvironmentWithCheckedOptions =
   findTypedQueryResultsInEnvironmentWithCheckedOptionsAndEvidence
     M.empty M.empty
 
+-- | Historical projection of
+-- 'findTypedQueryResultsInEnvironmentWithCheckedOptions': the same lazy
+-- trace with the typed graph result dropped from every candidate.
 findQueryResultsInEnvironmentWithCheckedOptions
   :: SharedGenerated.DefinitionName
   -> ExferenceSourceTypeVariableHints
@@ -934,6 +966,8 @@ findTypedQueryResultsInEnvironmentWithCheckedOptionsAndEvidence
   findTypedQueryResultsWithCheckedOptionsAndAllocators
     defaultSearchAllocators candidates assignments
 
+-- | 'findTypedQueryResultsInEnvironmentEither' with explicit search
+-- allocators; the query's search options are checked here first.
 -- The allocator-parametric form is an internal test seam for exercising
 -- finite identifier exhaustion.  Keeping preparation here guarantees that
 -- production and those tests share the exact one-validation result path.
@@ -950,6 +984,8 @@ findTypedQueryResultsWithAllocators
   findTypedQueryResultsWithCheckedOptionsAndAllocators
     allocators' M.empty M.empty target sourceHints environment query checkedOptions
 
+-- | Historical projection of 'findTypedQueryResultsWithAllocators': the same
+-- lazy trace with the typed graph result dropped from every candidate.
 findQueryResultsWithAllocators
   :: SearchAllocators
   -> SharedGenerated.DefinitionName
@@ -1160,6 +1196,10 @@ compatibilityProjectionStrictnessForTesting =
       candidate : _ -> candidate
       [] -> error "compatibility projection lost a present candidate"
 
+-- | Whether unresolved type-class constraints are tolerated at the given
+-- step: always when constrained results were requested, and otherwise only
+-- while the step number has not exceeded the configured warm-up stop step
+-- (the stop step itself is still relaxed).
 constraintsRelaxedAtStep :: Bool -> Int -> Int -> Bool
 constraintsRelaxedAtStep allowConstraints stopStep currentStep =
   allowConstraints || currentStep <= stopStep
@@ -1205,7 +1245,7 @@ prepareExferenceInput input = do
 
 -- | Compatibility projection retaining the established validation API.
 validateExferenceInput :: ExferenceInput -> Either ExferenceInputError ()
-validateExferenceInput input = () <$ prepareExferenceInput input
+validateExferenceInput input = void $ prepareExferenceInput input
 
 -- | Seal a reusable environment after validating everything independent of a
 -- particular query.  The abstract result can subsequently be paired with many
@@ -1318,7 +1358,7 @@ validateExferenceQuery
   -> ExferenceQuery
   -> Either ExferenceInputError ()
 validateExferenceQuery environment query =
-  () <$ prepareExferenceQuery environment query
+  void $ prepareExferenceQuery environment query
 
 -- | Validate every search-control field once and retain the exact accepted
 -- record for later preparation. This remains package-private; public core
@@ -1703,6 +1743,9 @@ maximumPQueueSize = fromIntegral (maxBound :: Int)
 queueSizeNatural :: Q.MaxPQueue priority value -> Natural
 queueSizeNatural = fromIntegral . Q.size
 
+-- | Turn the exact queue-pruned and depth-pruned totals into truncation
+-- reasons, omitting each reason whose count is zero.  The queue reason, when
+-- present, precedes the depth reason.
 naturalPruningReasons
   :: Natural
   -> Natural
@@ -1726,8 +1769,10 @@ rateGoals h = sumScores . fmap rateGoal
   where
     rateGoal (TGoal (VarBinding _ t) _ _ _ _) = typeComplexity h t
 
--- These weights are historically chosen defaults; none has been derived from
--- measurement.
+-- | Heuristic penalty of a goal type: the configured per-node weights summed
+-- over the type's structure, with nested @forall@ types counted as single
+-- atoms.  These weights are historically chosen defaults; none has been
+-- derived from measurement.
 typeComplexity :: ExferenceHeuristicsConfig -> HsType -> Penalty
 typeComplexity h = complexity
  where
@@ -2139,16 +2184,12 @@ stateStep allocators multiPM allowConstrs h
                       [] -> True
                       [_] -> True
                       _ -> False
-            if any applicable deconstructors
-              then pure ()
-              else mzero
+            unless (any applicable deconstructors) mzero
             priorDonations <- gets nodeAggregateDonations
             let globalName = functionName binding
                 alreadyDonated = maybe False (S.member globalName)
                   $ M.lookup var priorDonations
-            if alreadyDonated
-              then mzero
-              else pure ()
+            when alreadyDonated mzero
             scopedBindings <- gets
               (scopeGetAllBindings scopeId . nodeProvidedScopes)
             -- Avoid adding a byte-for-byte equivalent scalar which is already
@@ -2160,9 +2201,7 @@ stateStep allocators multiPM allowConstrs h
                   null (varPParameters scoped) &&
                     SharedTypeAtom.alphaTypeKey
                       (varPResult scoped) == aggregateKey
-            if any sameAggregate scopedBindings
-              then mzero
-              else pure ()
+            when (any sameAggregate scopedBindings) mzero
             modify $ \node -> node
               { nodeAggregateDonations = M.insertWith S.union var
                   (S.singleton globalName) $ nodeAggregateDonations node }
@@ -2430,7 +2469,7 @@ addScopePatternMatch allocators multiPM goalType vid sid tupleMode givens
           -- Preserve the historical first-applicable deconstructor policy.
           selectDeconstructor [] = defaultHandleRest
           selectDeconstructor (deconstructor : remaining) =
-            maybe (selectDeconstructor remaining) id $ mapFunc deconstructor
+            fromMaybe (selectDeconstructor remaining) $ mapFunc deconstructor
 
           -- Sealing guarantees that every field variable occurs in the
           -- datatype head. 'unifyRight' gives that head a temporary tagged

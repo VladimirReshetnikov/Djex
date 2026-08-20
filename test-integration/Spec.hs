@@ -2,6 +2,8 @@
 
 module Main (main) where
 
+import Data.Maybe (isJust)
+import Control.Monad (void)
 import Control.Exception
   ( AsyncException (ThreadKilled)
   , SomeException
@@ -1298,7 +1300,7 @@ tests = testGroup "Djex facade"
       checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
       session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
       exferenceSessionInventory session @?=
-        fmap (const ()) (checkedSourceInventory checked)
+        void (checkedSourceInventory checked)
       exferenceSessionOmissions session @?= []
       exferenceSessionDiagnostics session @?= []
       target <- expectRight $ mkIdentifier "identity"
@@ -1897,13 +1899,13 @@ tests = testGroup "Djex facade"
           declarations =
             [AbstractTypeDeclaration () tokenName ProperTypeKind]
           poisonedCandidates =
-            (error "Exference entered an over-limit evidence element")
+            error "Exference entered an over-limit evidence element"
               : poisonedCandidates
           poisonedAssignments =
-            (error "Exference entered an over-limit assignment element")
+            error "Exference entered an over-limit assignment element"
               : poisonedAssignments
           poisonedKindedAssignments =
-            (error "Exference entered an over-limit kinded assignment element")
+            error "Exference entered an over-limit kinded assignment element"
               : poisonedKindedAssignments
       environment <- expectRight
         (mkEnvironment declarations :: Either
@@ -1952,10 +1954,10 @@ tests = testGroup "Djex facade"
             , ValueDeclaration $ ValueSignature () providerName providerType
             ]
           poisonedArguments =
-            (error "Exference entered an over-limit assignment argument")
+            error "Exference entered an over-limit assignment argument"
               : poisonedArguments
           poisonedKindedArguments =
-            (error "Exference entered an over-limit kinded assignment argument")
+            error "Exference entered an over-limit kinded assignment argument"
               : poisonedKindedArguments
           assignment arguments = ProviderInstantiationAssignment
             { providerInstantiationAssignmentProvider = providerName
@@ -4077,7 +4079,7 @@ tests = testGroup "Djex facade"
         $ ExferenceCompatibility.mkExferenceSession checked
       let neutralEnvironment :: ExferenceEnvironment
           neutralEnvironment = inventoryEnvironment
-            $ fmap (const ()) $ checkedSourceInventory checked
+            $ void $ checkedSourceInventory checked
       neutralSession <- expectRight $ mkExferenceSession neutralEnvironment
       checkedTarget <- expectRight $ mkDefinitionName target
       let variableType = TypeVariable $ FlexibleVariable 0
@@ -4285,7 +4287,7 @@ tests = testGroup "Djex facade"
           diagnosticCode failure @?= Just "DJEX_EXF_SYNONYM"
           diagnosticSource failure @?= Just canonicalSourceName
           assertBool "deferred synonym failure lost its source range"
-            $ diagnosticSpan failure /= Nothing
+            $ isJust (diagnosticSpan failure)
         Right _ -> fail "an unsaturated synonym reached Exference search"
   , testCase "apply exact exclusions to a neutral Exference session" $ do
       bindingName <- expectRight $ parseName "Fixture.identity"
@@ -4765,7 +4767,7 @@ tests = testGroup "Djex facade"
       session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
       environmentDeclarations
           (exferenceSessionEnvironment session) @?=
-        map (fmap $ const ())
+        map (void)
           (environmentDeclarations
             $ inventoryEnvironment $ checkedSourceInventory checked)
       exferenceSessionOmissions session @?= []

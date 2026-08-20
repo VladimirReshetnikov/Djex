@@ -24,11 +24,17 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length.SMTLib.Session.Proces
 import Language.Haskell.Synthesis.Internal.SMTLib.Causal.Driver
   ( SMTLibCausalTransportOps (..) )
 
+-- | An opaque handle binding one raw Length Z3 process to the cancellation
+-- token and absolute deadline under which the causal driver may operate on
+-- it.  Every driver operation dispatched through
+-- 'lengthSMTLibCausalTransportOps' uses exactly these three authorities.
 data LengthSMTLibCausalTransport = LengthSMTLibCausalTransport
   LengthSMTLibProcess
   LengthSMTLibProcessCancellation
   LengthSMTLibProcessDeadline
 
+-- | Bind a process to the cancellation token and deadline for one driven
+-- causal transaction.  The handle borrows the process; it does not close it.
 lengthSMTLibCausalTransport
   :: LengthSMTLibProcess
   -> LengthSMTLibProcessCancellation
@@ -36,6 +42,11 @@ lengthSMTLibCausalTransport
   -> LengthSMTLibCausalTransport
 lengthSMTLibCausalTransport = LengthSMTLibCausalTransport
 
+-- | The causal-driver operations for a Length transport: readiness check,
+-- boundary-whitespace drain, exact write, and next stdout chunk are the raw
+-- process operations of the same name applied to the handle's process,
+-- cancellation, and deadline, and the EOF predicate recognizes exactly the
+-- 'LengthSMTLibProcessStdoutEOF' failure class.
 lengthSMTLibCausalTransportOps
   :: SMTLibCausalTransportOps
       LengthSMTLibCausalTransport LengthSMTLibProcessError

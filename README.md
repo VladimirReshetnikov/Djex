@@ -90,85 +90,28 @@ the two engines continue converging.
 ### Where each invariant is recorded
 
 Every rule mentioned in this README has a dated report recording its exact
-design and trust boundary; the passage below cites the ones behind the
-components above, and the complete chronological list is the
+design and trust boundary. The table below cites the ones behind the
+components above, newest rule first within each family; the complete
+chronological list, including reports not cited here, is the
 [reports index](docs/reports/README.md). Readers who only want to use Djex
 can skip ahead to [Building](#building).
 
-Exference's finite recursive-pattern rule
-is recorded in the
-[2026-07-31 bounded recursive elimination report](docs/reports/2026-07-31-bounded-recursive-elimination.md).
-Its impredicative-field follow-up and checked wildcard projection are recorded
-in the
-[2026-08-01 impredicative recursive projection report](docs/reports/2026-08-01-impredicative-recursive-projection.md).
-Djinn's complementary bounded recursive-constructor rule is recorded in the
-[2026-08-01 bounded recursive introduction report](docs/reports/2026-08-01-bounded-djinn-recursive-introduction.md).
-Djinn's widened bounded hypothesis-instantiation rule is recorded in the
-[2026-08-01 four-binder instantiation report](docs/reports/2026-08-01-four-binder-instantiation.md).
-The shared five-binder successor across Djinn, Exference, and exact provider
-evidence is recorded in the
-[2026-08-09 five-binder instantiation report](docs/reports/2026-08-09-five-binder-instantiation.md).
-The shared six-binder successor preserves the same finite schedules and moves
-the conservative boundary to seven in the
-[2026-08-10 six-binder instantiation report](docs/reports/2026-08-10-six-binder-instantiation.md).
-Its per-occurrence instantiation of loaded polymorphic values and closed source
-monotypes is recorded in the
-[2026-08-01 loaded polymorphic values report](docs/reports/2026-08-01-loaded-polymorphic-djinn-values.md).
-The separate positive-only extension which instantiates query-local hypotheses
-at closed monotypes already present in the requested type is recorded in the
-[2026-08-09 query-local closed-monotype report](docs/reports/2026-08-09-query-local-closed-monotype-instantiation.md).
-The complementary query-correlated guarded-impredicative tail, which fairly
-selects a multi-binder tuple only when its complete specialized body already
-occurs in the checked request, is recorded in the
-[2026-08-09 query-correlated guarded-impredicative report](docs/reports/2026-08-09-query-correlated-guarded-impredicative-instantiation.md).
-The checked provider-local instantiation evidence shared by the stable Djinn
-and Exference adapters is recorded in the
-[2026-08-05 provider-local instantiation evidence report](docs/reports/2026-08-05-provider-local-instantiation-evidence.md).
-Its exact ordered-vector extension, which preserves correlations between the
-leading binders selected by one external proof, and its later kind-aware form,
-which retains caller-attested positional ground kinds even for vacuous binders,
-are recorded in the
-[2026-08-05 exact provider-instantiation assignment report](docs/reports/2026-08-05-exact-provider-instantiation-assignments.md).
-Djinn's complementary nominal view of reachable parameterized datatypes is
-recorded in the
-[2026-08-01 nominal parametric-data transport report](docs/reports/2026-08-01-nominal-parametric-data-transport.md).
-Djinn's capped quintic extension of its bounded rank-N plan family is recorded
-in the
-[2026-08-06 quintic rank-N frontiers report](docs/reports/2026-08-06-quintic-rank-n-frontiers.md),
-following the
-[2026-08-06 quartic rank-N frontiers report](docs/reports/2026-08-06-quartic-rank-n-frontiers.md),
-the
-[2026-08-01 triple rank-N frontiers report](docs/reports/2026-08-01-triple-rank-n-frontiers.md)
-and the
-[2026-07-31 pairwise rank-N frontiers report](docs/reports/2026-07-31-pairwise-rank-n-frontiers.md).
-Its later proof-enumeration work is recorded in the
-[oldest-first evidence report](docs/reports/2026-08-05-oldest-first-evidence.md)
-and the
-[repeated-domain fairness report](docs/reports/2026-08-05-repeated-domain-evidence-fairness.md).
-Contextual goal introduction and its
-lexical evidence boundary are recorded in the
-[2026-07-29 contextual rank-N report](docs/reports/2026-07-29-contextual-rank-n-introduction.md).
-The bounded generated-term and Exference provider-use extension is recorded in
-the
-[2026-07-29 visible type application report](docs/reports/2026-07-29-visible-type-application.md).
-Its closed-polytype extension to scoped providers in both engines is recorded
-in the
-[2026-08-01 scoped closed-polytype application report](docs/reports/2026-08-01-scoped-closed-polytype-applications.md).
-The preceding context-free Exference rule and Djinn quantified-wrapper
-follow-up are recorded in the
-[2026-07-29 forall-introduction report](docs/reports/2026-07-29-exference-forall-introduction.md).
-Earlier work is recorded in the
-[hypothesis-instantiation report](docs/reports/2026-07-29-hypothesis-instantiation.md),
-[rank-N inference review](docs/reports/2026-07-28-rank-n-inference-review.md),
-[2026-07-27 source-semantics follow-up](docs/reports/2026-07-27-source-semantics-follow-up.md),
-and
-[unification review](docs/reports/2026-07-27-unification-review.md).
-The earlier [post-merge code review](docs/reports/2026-07-21-post-merge-code-review.md),
-[final convergence review](docs/reports/2026-07-17-final-convergence-review.md),
-and [checker-boundary follow-up](docs/reports/2026-07-17-checker-boundary-follow-up.md)
-record the larger strictness, compatibility, and raw-checker migrations that
-preceded it. The complete chronological list, including reports not cited
-above, is in the [reports index](docs/reports/README.md).
+| Rule family | Engine | Reports (newest first) |
+| --- | --- | --- |
+| Bounded binder instantiation: six leading binders (conservative boundary at seven), five, then four | both, with exact provider evidence | [six-binder](docs/reports/2026-08-10-six-binder-instantiation.md) · [five-binder](docs/reports/2026-08-09-five-binder-instantiation.md) · [four-binder](docs/reports/2026-08-01-four-binder-instantiation.md) |
+| Per-occurrence instantiation of loaded polymorphic values and closed source monotypes | Djinn | [loaded polymorphic values](docs/reports/2026-08-01-loaded-polymorphic-djinn-values.md) |
+| Positive-only instantiation of query-local hypotheses at closed monotypes already in the request | Djinn | [query-local closed monotypes](docs/reports/2026-08-09-query-local-closed-monotype-instantiation.md) |
+| Query-correlated guarded-impredicative tail, selecting a multi-binder tuple only when its specialized body already occurs in the request | Djinn | [query-correlated guarded impredicativity](docs/reports/2026-08-09-query-correlated-guarded-impredicative-instantiation.md) |
+| Checked provider-local instantiation evidence, its ordered-vector extension, and the kind-aware form retaining attested ground kinds | both | [exact provider assignments](docs/reports/2026-08-05-exact-provider-instantiation-assignments.md) · [provider-local evidence](docs/reports/2026-08-05-provider-local-instantiation-evidence.md) |
+| Finite recursive-pattern elimination, its impredicative-field follow-up, and checked wildcard projection | Exference | [impredicative recursive projection](docs/reports/2026-08-01-impredicative-recursive-projection.md) · [bounded recursive elimination](docs/reports/2026-07-31-bounded-recursive-elimination.md) |
+| Bounded recursive-constructor introduction and the nominal view of reachable parameterized datatypes | Djinn | [bounded recursive introduction](docs/reports/2026-08-01-bounded-djinn-recursive-introduction.md) · [nominal parametric-data transport](docs/reports/2026-08-01-nominal-parametric-data-transport.md) |
+| Rank-N plan family: capped quintic, quartic, triple, and pairwise occurrence frontiers | Djinn | [quintic](docs/reports/2026-08-06-quintic-rank-n-frontiers.md) · [quartic](docs/reports/2026-08-06-quartic-rank-n-frontiers.md) · [triple](docs/reports/2026-08-01-triple-rank-n-frontiers.md) · [pairwise](docs/reports/2026-07-31-pairwise-rank-n-frontiers.md) |
+| Proof enumeration order: oldest-first evidence and repeated-domain fairness | Djinn | [oldest-first evidence](docs/reports/2026-08-05-oldest-first-evidence.md) · [repeated-domain fairness](docs/reports/2026-08-05-repeated-domain-evidence-fairness.md) |
+| Contextual goal introduction and its lexical evidence boundary | Exference | [contextual rank-N introduction](docs/reports/2026-07-29-contextual-rank-n-introduction.md) |
+| Visible type application in generated terms and provider use, and its closed-polytype extension to scoped providers | both | [scoped closed-polytype applications](docs/reports/2026-08-01-scoped-closed-polytype-applications.md) · [visible type application](docs/reports/2026-07-29-visible-type-application.md) |
+| Context-free forall introduction and the Djinn quantified-wrapper follow-up | both | [forall introduction](docs/reports/2026-07-29-exference-forall-introduction.md) |
+| Earlier groundwork: hypothesis instantiation, the rank-N inference review, source semantics, unification | both | [hypothesis instantiation](docs/reports/2026-07-29-hypothesis-instantiation.md) · [rank-N inference review](docs/reports/2026-07-28-rank-n-inference-review.md) · [source-semantics follow-up](docs/reports/2026-07-27-source-semantics-follow-up.md) · [unification review](docs/reports/2026-07-27-unification-review.md) |
+| The strictness, compatibility, and raw-checker migrations that preceded all of it | both | [post-merge code review](docs/reports/2026-07-21-post-merge-code-review.md) · [final convergence review](docs/reports/2026-07-17-final-convergence-review.md) · [checker-boundary follow-up](docs/reports/2026-07-17-checker-boundary-follow-up.md) |
 
 ## The semantic stratum
 
@@ -180,30 +123,32 @@ governing rule is that solver output is never trusted directly — only
 independent replay of a candidate against the exact checked problem produces
 evidence, and raw solver status has no proof or pruning authority. The
 complete specification is
-[docs/semantic-foundations.md](docs/semantic-foundations.md). The strongest of
-four closed live Z3 launch profiles adds descriptor-bound Linux 6.14
-executable checks; its narrow authority is recorded in the
-[execve-check descriptor-bound launch report](docs/reports/2026-08-15-execve-check-descriptor-bound-z3-launch.md).
-The current finite applicable-domain analysis also covers fully supported
-guarded `LengthIf` expressions without replacing exact replay or widening
-incomparable boxes; see the
-[guarded conditional report](docs/reports/2026-08-15-guarded-conditional-length-applicable-domain.md).
-All native descriptor launch profiles transfer an acquired child through one
-masked, rollback-protected owner boundary, detailed in the
-[descriptor spawn resource-ownership report](docs/reports/2026-08-15-descriptor-spawn-resource-ownership.md).
-Checked scalar and binary-product Length problems now also retain nominal,
-candidate-independent counterexample-bank scopes, and pure queries project
-those same scopes. The accompanying bounded newest-first banks store only
-natural input vectors and coarse origins: a scope match authorizes attempting
-fresh replay, never a verdict, receipt, proof, or pruning decision. Explicit
-query-owned operations can now freshly reproduce one receipt before recording
-its inputs in a same-scope bank, or replay one exact retained sample against a
-later same-scope query. Every hit is a new receipt from the current query, and
-every begun replay returns the charged successor bank even on a miss or
-failure. These pure operations still provide no automatic traversal, solver
-execution, candidate scheduling, persistent state, or Leant behavior. See the
-[Length counterexample-bank query-replay report](docs/reports/2026-08-16-length-counterexample-bank-query-replay-bridge.md).
+[docs/semantic-foundations.md](docs/semantic-foundations.md).
 
+The most recent additions, each with the report recording its exact authority:
+
+- **Descriptor-bound Z3 launches.** The strongest of four closed live launch
+  profiles adds descriptor-bound Linux 6.14 executable checks
+  ([execve-check descriptor-bound launch report](docs/reports/2026-08-15-execve-check-descriptor-bound-z3-launch.md));
+  every native descriptor profile hands the acquired child through one
+  masked, rollback-protected owner boundary
+  ([descriptor spawn resource-ownership report](docs/reports/2026-08-15-descriptor-spawn-resource-ownership.md)).
+- **Guarded conditionals in applicable-domain analysis.** The finite
+  applicable-domain analysis covers fully supported guarded `LengthIf`
+  expressions without replacing exact replay or widening incomparable boxes
+  ([guarded conditional report](docs/reports/2026-08-15-guarded-conditional-length-applicable-domain.md)).
+- **Counterexample banks.** Checked scalar and binary-product Length problems
+  retain nominal, candidate-independent bank scopes, and queries project the
+  same scopes. A bank stores only natural input vectors and coarse origins,
+  newest first; a scope match authorizes *attempting* a fresh replay, never a
+  verdict, receipt, proof, or pruning decision. Query-owned operations record
+  one freshly reproduced receipt's inputs into a same-scope bank or replay one
+  retained sample against a later same-scope query; every hit is a new receipt
+  from the current query, and every begun replay returns the charged successor
+  bank even on a miss. Inside Djex these pure operations drive no traversal,
+  solver execution, scheduling, or persistent state; Leant's ranking owns the
+  only consumer
+  ([Length counterexample-bank query-replay report](docs/reports/2026-08-16-length-counterexample-bank-query-replay-bridge.md)).
 
 ## Building
 
@@ -298,7 +243,8 @@ an expression with real GHC.
 <!-- Maintainers: the rank-N/impredicative rule families and their numeric
 bounds are canonical in docs/rank-n.md. This section, docs/repl.md, and
 docs/library-api.md carry summaries; change a rule or bound in docs/rank-n.md
-first and then re-check the three summaries and the codebase walkthrough. -->
+first and then re-check the three summaries and the joint Djex/Leant codebase
+walkthrough (docs/Djex_Leant_Codebase_Walkthrough/ in the Leant repository). -->
 Rank-N and impredicative support uses deliberately bounded, backend-specific
 rule families. Djinn can introduce a `forall` (with or without a validated
 class context) in positive positions and eliminate a hypothesis-side
@@ -450,7 +396,8 @@ source attribution and strictness contract; backend caches remain lazy.
 
 The one-import `Language.Haskell.Djex` surface reexports the complete
 neutral declaration, environment, inventory, kind-inference,
-synonym-elaboration, and type-rendering vocabulary. `DjinnEnvironment`,
+synonym-elaboration, and type-rendering vocabulary, together with the checked
+semantic Length and SMT-LIB live surface. `DjinnEnvironment`,
 `DjinnInventory`, `DjinnTypeVariable`, `DjinnLocal`, and `DjinnType` make
 every Djinn adapter signature nameable without depending on a hidden backend
 alias, and both stable environment aliases use `Void` for explicit kind
@@ -894,7 +841,8 @@ because Haskell has no corresponding unary tuple constructor.
 The `exference` compatibility executable is a six-line launcher for
 `Language.Haskell.Exference.CLI`, the compatibility orchestrator at this
 boundary: it loads and seals one session, parses every requested type
-through `parseExferenceRequest`, selects shared candidates, and renders
+through the same `parseExferenceRequest…` entry points as the checked
+adapter, selects shared candidates, and renders
 their generated expression bodies. The compatibility command,
 `djex exference`, and the shared `djex` REPL obtain their session policy from
 the same frontend operation. They exclude `Data.Function.fix`,

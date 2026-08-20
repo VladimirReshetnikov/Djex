@@ -1,5 +1,3 @@
-{-# LANGUAGE DeriveFoldable #-}
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
 
@@ -28,7 +26,7 @@ module Language.Haskell.Synthesis.TypeAtom
   ) where
 
 import Control.DeepSeq (NFData)
-import Control.Monad (foldM)
+import Control.Monad (foldM_)
 import Data.Bifunctor (first)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
@@ -41,6 +39,8 @@ import Language.Haskell.Synthesis.Internal.Alpha
   ( AlphaVariable (..)
   , BinderSlotPolicy (PositionalBinderSlots)
   , alphaNormalizeTypeWith
+  , eraseVacuousForalls
+  , replaceFreeTypeVariable
   )
 import Language.Haskell.Synthesis.Type
   ( FreshVariableAllocator
@@ -161,7 +161,7 @@ mapTypeAtomVariables convert atom = do
   -- binder list, but misses cross-scope capture.  Require the representation
   -- projection to preserve every distinct nominal identity before rebuilding
   -- the lexical tree.
-  _ <- foldM rememberTarget Map.empty
+  foldM_ rememberTarget Map.empty
     $ Set.toAscList $ foldMap Set.singleton $ atomSource atom
   mkTypeAtom $ fmap convert $ atomSource atom
  where
@@ -252,7 +252,7 @@ isLeadingForallInstantiation source selected result =
         ForallType (selectedBinder : remainingBinders) constraints body ->
           let selectedType = prepareInstantiationType
                 SelectedInstantiationBound normalizedSelected
-              instantiate = replaceInstantiationVariable
+              instantiate = replaceFreeTypeVariable
                 selectedBinder selectedType
               instantiatedConstraints = map (fmap instantiate) constraints
               instantiatedBody = instantiate body
@@ -286,32 +286,6 @@ prepareInstantiationType boundVariable = fmap convert
     AlphaBoundVariable scope slot -> boundVariable scope slot
     AlphaFreeVariable free -> InstantiationFree free
 
-replaceInstantiationVariable
-  :: Eq variable
-  => variable
-  -> Type variable
-  -> Type variable
-  -> Type variable
-replaceInstantiationVariable selected replacement source = case source of
-  TypeVariable variable
-    | variable == selected -> replacement
-    | otherwise -> source
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (replaceInstantiationVariable selected replacement function)
-    (replaceInstantiationVariable selected replacement argument)
-  FunctionType parameter result -> FunctionType
-    (replaceInstantiationVariable selected replacement parameter)
-    (replaceInstantiationVariable selected replacement result)
-  TupleType boxity elements -> TupleType boxity
-    $ map (replaceInstantiationVariable selected replacement) elements
-  ForallType variables constraints body
-    | selected `elem` variables -> source
-    | otherwise -> ForallType variables
-        (map (fmap $ replaceInstantiationVariable selected replacement)
-          constraints)
-        (replaceInstantiationVariable selected replacement body)
-
 closeAlphaType
   :: Ord variable
   => Type variable
@@ -329,22 +303,7 @@ sealTypeAtom source = TypeAtom source
   $ TypeAtomKey $ alphaNormalizeTypeWith PositionalBinderSlots source
 
 -- Text rendering intentionally elides a forall with no binders or context.
--- Erasing those no-op nodes here gives sealed atoms a genuine textual
--- round-trip instead of retaining invisible structure.
-eraseVacuousForalls :: Type variable -> Type variable
-eraseVacuousForalls source = case source of
-  TypeVariable{} -> source
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (eraseVacuousForalls function) (eraseVacuousForalls argument)
-  FunctionType parameter result -> FunctionType
-    (eraseVacuousForalls parameter) (eraseVacuousForalls result)
-  TupleType boxity elements -> TupleType boxity
-    $ map eraseVacuousForalls elements
-  ForallType [] [] body -> eraseVacuousForalls body
-  ForallType variables constraints body -> ForallType variables
-    (map (fmap eraseVacuousForalls) constraints)
-    (eraseVacuousForalls body)
-
+-- Erasing those no-op nodes gives sealed atoms a genuine textual round-trip
+-- instead of retaining invisible structure.
 atomCanonicalForm :: Type variable -> Type variable
 atomCanonicalForm = eraseVacuousForalls . canonicalizeType

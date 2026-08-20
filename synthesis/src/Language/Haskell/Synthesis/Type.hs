@@ -1,5 +1,3 @@
-{-# LANGUAGE DeriveFoldable #-}
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
 
@@ -56,6 +54,7 @@ module Language.Haskell.Synthesis.Type
   , mapTypeNames
   ) where
 
+import Data.Maybe (isJust)
 import Control.DeepSeq (NFData)
 import Control.Monad (foldM, unless, void)
 import Control.Monad.Trans.Class (lift)
@@ -446,7 +445,7 @@ firstForallType typeExpression = case typeExpression of
 
 -- | Whether explicit quantification occurs anywhere in a type.
 containsForall :: Type variable -> Bool
-containsForall = maybe False (const True) . firstForallType
+containsForall = isJust . firstForallType
 
 -- | Whether explicit quantification occurs in any argument of a constraint.
 --

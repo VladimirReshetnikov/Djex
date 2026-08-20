@@ -24,12 +24,20 @@ import Language.Haskell.Exference.EnvironmentParser
   )
 import Language.Haskell.Synthesis.Diagnostic (Diagnostic)
 
+-- | Seal a checked HSE source environment into an t'ExferenceSession' under
+-- 'defaultExferenceSessionPolicy'.
 mkExferenceSession
   :: CheckedSourceEnvironment
   -> Either Diagnostic ExferenceSession
 mkExferenceSession = mkExferenceSessionWithPolicy
   defaultExferenceSessionPolicy
 
+-- | Seal a checked HSE source environment into an t'ExferenceSession' under
+-- an explicit policy. Only the environment's annotation-free prepared
+-- inventory crosses into the session, so no lowering is repeated and no
+-- parser-specific representation is retained. Policy exclusions remove
+-- bindings from the search; a rating override naming no retained binding
+-- is rejected with a 'Diagnostic'.
 mkExferenceSessionWithPolicy
   :: ExferenceSessionPolicy
   -> CheckedSourceEnvironment

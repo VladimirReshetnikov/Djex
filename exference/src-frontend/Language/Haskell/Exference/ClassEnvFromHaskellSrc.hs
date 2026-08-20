@@ -1,3 +1,9 @@
+-- | Construction of the Exference class environment from parsed
+-- haskell-src-exts modules: class declarations, their superclass contexts
+-- and method signatures, and instance declarations are collected into one
+-- transactional 'LoadedClassEnvironment' holding the sealed 'StaticClassEnv'
+-- and per-module method bindings.  A failed class or instance phase is a
+-- 'ClassEnvironmentLoadError' rather than a silently dropped declaration.
 module Language.Haskell.Exference.ClassEnvFromHaskellSrc
   ( ClassEnvironmentLoadError (..)
   , ClassMethodDeclaration (..)
@@ -8,7 +14,7 @@ module Language.Haskell.Exference.ClassEnvFromHaskellSrc
   )
 where
 
-import Control.Monad (forM, when)
+import Control.Monad (forM, unless)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Lazy (evalStateT, get)
 import Control.Monad.Trans.Except (runExceptT, throwE, withExceptT)
@@ -427,7 +433,7 @@ getInstances resolverFor classes typeDeclarations modules = sequence $ do
         variables <- convDataTypeVarIndex <$> lift get
         let undeclared = Set.fromList (Map.elems variables)
               Set.\\ declaredIds
-        when (not $ Set.null undeclared) $ throwE
+        unless (Set.null undeclared) $ throwE
           $ "instance uses variables outside its explicit forall: "
           ++ show (Set.toAscList undeclared)
     pure $ HsInstance prerequisites headConstraint

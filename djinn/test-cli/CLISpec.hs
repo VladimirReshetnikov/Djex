@@ -1,5 +1,6 @@
 module Main (main) where
 
+import Data.Maybe (fromMaybe)
 import CLIAssertions (assertContains, countOccurrences)
 import Control.Exception (bracket)
 import Data.Char (isSpace)
@@ -69,7 +70,7 @@ testDefaultSettings = do
     output <- runSession [":help", ":quit"]
     let defaults = defaultQueryOptions
         setting enabled name = (if enabled then "+" else "-") ++ name
-        defaultBudget = maybe 0 id $ optionBudget defaults
+        defaultBudget = fromMaybe 0 $ optionBudget defaults
     assertContains "multi follows the public default"
         (setting (optionAlternatives defaults) "multi") output
     assertContains "sorting follows the public default"

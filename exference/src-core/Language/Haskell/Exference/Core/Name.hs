@@ -130,9 +130,14 @@ mkBoxedTupleName :: Int -> Either QualifiedNameError QualifiedName
 mkBoxedTupleName arity =
   mapLeft InvalidQualifiedName $ Shared.tupleName Shared.Boxed arity
 
+-- | The module qualifier of an ordinary name; 'Nothing' for an unqualified
+-- name and for every structural name (lists, tuples, cons, the function
+-- constructor).
 qualifiedNameModule :: QualifiedName -> Maybe Shared.ModuleName
 qualifiedNameModule = Shared.nameModule
 
+-- | The unqualified occurrence view of a name: identifier, operator, or
+-- special structural constructor, with the module qualifier stripped.
 qualifiedNameOccurrence :: QualifiedName -> Shared.Occurrence
 qualifiedNameOccurrence = Shared.nameOccurrence
 

@@ -1,7 +1,10 @@
---
--- Haskell identifier and operator syntax shared by parsers and printers,
+-- | Haskell identifier and operator syntax shared by parsers and printers,
 -- plus the token-level ReadP helpers shared by every Djinn parser.
 --
+-- The identifier predicates and renderers are thin views over the shared
+-- "Language.Haskell.Synthesis.Name" vocabulary, and 'stripLineComments' is
+-- re-exported from the shared frontend lexer used by both REPLs, so Djinn
+-- keeps no second definition of what a valid name is.
 module Djinn.Internal.HIdentifier (
     pVarId, pConId, pQualifiedVarId, pQualifiedConId,
     pParenthesizedVarOp,
@@ -25,14 +28,16 @@ import Language.Haskell.Synthesis.Name (
     parseName, renderCanonical, renderNameError, renderPrefix)
 import Text.ParserCombinators.ReadP
 
--- Match a single token after skipping leading white space.
+-- | Match a single token after skipping leading white space.
 schar :: Char -> ReadP ()
 schar c = skipSpaces >> char c >> return ()
 
+-- | Match a literal string after skipping leading white space, without any
+-- token-boundary check (see 'skeyword' for alphabetic keywords).
 sstring :: String -> ReadP ()
 sstring s = skipSpaces >> string s >> return ()
 
--- Match an alphabetic keyword as a complete token.  'sstring' deliberately
+-- | Match an alphabetic keyword as a complete token.  'sstring' deliberately
 -- remains boundary-free for punctuation such as @::@ and @->@; declaration
 -- parsers use this stricter helper so @typeFoo@ cannot mean @type Foo@.
 skeyword :: String -> ReadP ()
@@ -46,6 +51,7 @@ skeyword keyword
             next : _ | isIdentifierCharacter next -> pfail
             _ -> return ()
 
+-- | Run a parser between @(@ and @)@, each preceded by optional white space.
 pParen :: ReadP a -> ReadP a
 pParen p = do
     schar '('
@@ -53,18 +59,32 @@ pParen p = do
     schar ')'
     return e
 
+-- | Parse an unqualified variable identifier token (see 'isVarId') after
+-- skipping white space; the token is the maximal run of identifier
+-- characters, so a qualified name is not split.
 pVarId :: ReadP String
 pVarId = pValidated isVarId isIdentifierCharacter
 
+-- | Parse an unqualified constructor identifier token (see 'isConId') after
+-- skipping white space.
 pConId :: ReadP String
 pConId = pValidated isConId isIdentifierCharacter
 
+-- | Parse a possibly qualified variable identifier token (see
+-- 'isQualifiedVarId'), taking the maximal run of identifier characters and
+-- dots.
 pQualifiedVarId :: ReadP String
 pQualifiedVarId = pValidated isQualifiedVarId isQualifiedCharacter
 
+-- | Parse a possibly qualified constructor identifier token (see
+-- 'isQualifiedConId'), taking the maximal run of identifier characters and
+-- dots.
 pQualifiedConId :: ReadP String
 pQualifiedConId = pValidated isQualifiedConId isQualifiedCharacter
 
+-- | Parse a variable operator written in prefix form, such as @(+)@, and
+-- return the bare operator spelling without the parentheses (see
+-- 'isVarOperator').
 pParenthesizedVarOp :: ReadP String
 pParenthesizedVarOp = do
     skipSpaces
@@ -81,12 +101,18 @@ pValidated valid character = do
     token <- munch1 character
     if valid token then return token else pfail
 
+-- | Whether a string is exactly an unqualified, non-reserved variable
+-- identifier (lower-case or underscore initial).
 isVarId :: String -> Bool
 isVarId = isJust . unqualifiedIdentifier VariableLike
 
+-- | Whether a string is exactly an unqualified, non-reserved constructor
+-- identifier (upper-case initial).
 isConId :: String -> Bool
 isConId = isJust . unqualifiedIdentifier ConstructorLike
 
+-- | Whether a string is exactly a variable identifier, with or without a
+-- module qualifier.
 -- These predicates historically accept both qualified and unqualified
 -- identifiers despite their names.  Requiring canonical rendering preserves
 -- their exact token semantics: unlike 'parseName', they do not trim outer
@@ -94,12 +120,19 @@ isConId = isJust . unqualifiedIdentifier ConstructorLike
 isQualifiedVarId :: String -> Bool
 isQualifiedVarId = isJust . qualifiedIdentifier VariableLike
 
+-- | Whether a string is exactly a constructor identifier, with or without a
+-- module qualifier; see 'isQualifiedVarId' for the token semantics.
 isQualifiedConId :: String -> Bool
 isQualifiedConId = isJust . qualifiedIdentifier ConstructorLike
 
+-- | Whether a string is a bare, unqualified, non-reserved variable operator,
+-- i.e. one made of operator characters and not starting with @:@.
 isVarOperator :: String -> Bool
 isVarOperator = isJust . variableOperator
 
+-- | Render a value name for prefix position: variable identifiers are
+-- returned as they are and variable operators are wrapped in parentheses,
+-- e.g. @+@ becomes @(+)@; any other string is returned unchanged.
 renderVarName :: String -> String
 renderVarName source =
     case qualifiedIdentifier VariableLike source of

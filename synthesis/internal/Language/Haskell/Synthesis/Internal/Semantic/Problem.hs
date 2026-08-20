@@ -70,11 +70,16 @@ import Language.Haskell.Synthesis.Semantic.Observation
   , solverObservationStatus
   )
 
+-- | Subject of the complete behavioral problem fingerprint for one domain.
+--
 -- These subjects are intentionally distinct even when their exact bytes
 -- happen to agree.  'Fingerprint' gives its subject a nominal role.
 data ProblemFingerprintSubject domain
+-- | Subject of the exact source-inventory fingerprint for one domain.
 data InventoryFingerprintSubject domain
+-- | Subject of the exact encoding fingerprint for one domain.
 data EncodingFingerprintSubject domain
+-- | Subject of the exact candidate fingerprint for one domain.
 data CandidateFingerprintSubject domain
 
 -- | An exact domain-owned behavioral problem identity.
@@ -114,27 +119,34 @@ mkBehavioralProblem
   -> BehavioralProblem domain
 mkBehavioralProblem = BehavioralProblem
 
+-- | The exact runtime domain tag; it is the first component compared at
+-- replay.
 behavioralProblemDomain :: BehavioralProblem domain -> [Word8]
 behavioralProblemDomain (BehavioralProblem domain _ _ _ _) = domain
 
+-- | Identity of the exact source inventory the problem was built against.
 behavioralProblemInventoryFingerprint
   :: BehavioralProblem domain
   -> Fingerprint (InventoryFingerprintSubject domain)
 behavioralProblemInventoryFingerprint
     (BehavioralProblem _ inventory _ _ _) = inventory
 
+-- | Identity of the exact encoding the problem was built with.
 behavioralProblemEncodingFingerprint
   :: BehavioralProblem domain
   -> Fingerprint (EncodingFingerprintSubject domain)
 behavioralProblemEncodingFingerprint
     (BehavioralProblem _ _ encoding _ _) = encoding
 
+-- | Identity of the exact candidate the problem is about.
 behavioralProblemCandidateFingerprint
   :: BehavioralProblem domain
   -> Fingerprint (CandidateFingerprintSubject domain)
 behavioralProblemCandidateFingerprint
     (BehavioralProblem _ _ _ candidate _) = candidate
 
+-- | Identity of the complete problem; it is the last component compared at
+-- replay.
 behavioralProblemFingerprint
   :: BehavioralProblem domain
   -> Fingerprint (ProblemFingerprintSubject domain)
@@ -161,9 +173,11 @@ mkRawArtifactLimits = RawArtifactLimits
 defaultRawArtifactLimits :: RawArtifactLimits
 defaultRawArtifactLimits = RawArtifactLimits 64 65536
 
+-- | Maximum retained length of the backend format tag, in bytes.
 rawArtifactFormatByteLimit :: RawArtifactLimits -> Natural
 rawArtifactFormatByteLimit (RawArtifactLimits formatBytes _) = formatBytes
 
+-- | Maximum retained length of the artifact payload, in bytes.
 rawArtifactPayloadByteLimit :: RawArtifactLimits -> Natural
 rawArtifactPayloadByteLimit (RawArtifactLimits _ payloadBytes) = payloadBytes
 
@@ -209,9 +223,12 @@ mkBoundedRawArtifact (RawArtifactLimits formatLimit payloadLimit)
   payload <- observeBytes RawArtifactPayload payloadLimit rawPayload
   pure $ BoundedRawArtifact format payload
 
+-- | The retained backend format tag, already observed within its bound.
 boundedRawArtifactFormat :: BoundedRawArtifact kind -> [Word8]
 boundedRawArtifactFormat (BoundedRawArtifact format _) = format
 
+-- | The retained raw payload bytes, already observed within their bound.
+-- They carry no authority; see 'RawObservationUse'.
 boundedRawArtifactBytes :: BoundedRawArtifact kind -> [Word8]
 boundedRawArtifactBytes (BoundedRawArtifact _ payload) = payload
 
@@ -296,6 +313,8 @@ instance NFData (AssociatedObservation domain observation) where
     AssociatedBehavioralObservation problem observation ->
       rnf problem `seq` rnf observation
 
+-- | Bind a raw solver report to the exact problem it was produced for.  The
+-- association is immutable and grants only 'HeuristicRankingOnly' use.
 associateSolverObservation
   :: BehavioralProblem domain
   -> SolverObservation
@@ -309,6 +328,10 @@ associateSolverObservation
         (BoundedRawArtifact unknown))
 associateSolverObservation = AssociatedSolverObservation
 
+-- | Bind a raw behavioral report to the exact problem it was produced for.
+-- Like 'associateSolverObservation', this confers no evidence: an
+-- established or counterexample claim stays a heuristic hint until a
+-- domain verifier independently produces 'BehavioralEvidence'.
 associateBehavioralObservation
   :: BehavioralProblem domain
   -> BehavioralObservation
@@ -343,30 +366,35 @@ associatedObservationProblem associated = case associated of
   AssociatedSolverObservation problem _ -> problem
   AssociatedBehavioralObservation problem _ -> problem
 
+-- | Domain tag of the problem the observation was associated with.
 associatedObservationDomain
   :: AssociatedObservation domain observation
   -> [Word8]
 associatedObservationDomain =
   behavioralProblemDomain . associatedObservationProblem
 
+-- | Inventory identity of the problem the observation was associated with.
 associatedObservationInventoryFingerprint
   :: AssociatedObservation domain observation
   -> Fingerprint (InventoryFingerprintSubject domain)
 associatedObservationInventoryFingerprint =
   behavioralProblemInventoryFingerprint . associatedObservationProblem
 
+-- | Encoding identity of the problem the observation was associated with.
 associatedObservationEncodingFingerprint
   :: AssociatedObservation domain observation
   -> Fingerprint (EncodingFingerprintSubject domain)
 associatedObservationEncodingFingerprint =
   behavioralProblemEncodingFingerprint . associatedObservationProblem
 
+-- | Candidate identity of the problem the observation was associated with.
 associatedObservationCandidateFingerprint
   :: AssociatedObservation domain observation
   -> Fingerprint (CandidateFingerprintSubject domain)
 associatedObservationCandidateFingerprint =
   behavioralProblemCandidateFingerprint . associatedObservationProblem
 
+-- | Complete problem identity the observation was associated with.
 associatedObservationProblemFingerprint
   :: AssociatedObservation domain observation
   -> Fingerprint (ProblemFingerprintSubject domain)
@@ -389,6 +417,8 @@ associatedObservationResultStrength associated = case associated of
     BehaviorBoundedObservation{} -> RawBehaviorBoundedValidation
     BehaviorUnknownObservation{} -> RawBehaviorUnknown
 
+-- | The search use granted to an associated raw observation.  This is always
+-- 'HeuristicRankingOnly', regardless of the observation's family or status.
 associatedObservationUse
   :: AssociatedObservation domain observation
   -> RawObservationUse
@@ -410,6 +440,9 @@ data ReplayMismatch
 instance NFData ReplayMismatch where
   rnf mismatch = mismatch `seq` ()
 
+-- | Release the raw observation only if its associated problem matches the
+-- expected one component by component, in the order documented on
+-- 'ReplayMismatch'.  The first differing component is reported.
 replayAssociatedObservation
   :: BehavioralProblem domain
   -> AssociatedObservation domain observation
@@ -456,34 +489,42 @@ mapBehavioralEvidenceReceipt
 mapBehavioralEvidenceReceipt strengthen (BehavioralEvidence problem receipt) =
   BehavioralEvidence problem $ strengthen receipt
 
+-- | Domain tag of the problem the evidence is bound to.
 behavioralEvidenceDomain :: BehavioralEvidence domain receipt -> [Word8]
 behavioralEvidenceDomain (BehavioralEvidence problem _) =
   behavioralProblemDomain problem
 
+-- | Inventory identity of the problem the evidence is bound to.
 behavioralEvidenceInventoryFingerprint
   :: BehavioralEvidence domain receipt
   -> Fingerprint (InventoryFingerprintSubject domain)
 behavioralEvidenceInventoryFingerprint (BehavioralEvidence problem _) =
   behavioralProblemInventoryFingerprint problem
 
+-- | Encoding identity of the problem the evidence is bound to.
 behavioralEvidenceEncodingFingerprint
   :: BehavioralEvidence domain receipt
   -> Fingerprint (EncodingFingerprintSubject domain)
 behavioralEvidenceEncodingFingerprint (BehavioralEvidence problem _) =
   behavioralProblemEncodingFingerprint problem
 
+-- | Candidate identity of the problem the evidence is bound to.
 behavioralEvidenceCandidateFingerprint
   :: BehavioralEvidence domain receipt
   -> Fingerprint (CandidateFingerprintSubject domain)
 behavioralEvidenceCandidateFingerprint (BehavioralEvidence problem _) =
   behavioralProblemCandidateFingerprint problem
 
+-- | Complete problem identity the evidence is bound to.
 behavioralEvidenceProblemFingerprint
   :: BehavioralEvidence domain receipt
   -> Fingerprint (ProblemFingerprintSubject domain)
 behavioralEvidenceProblemFingerprint (BehavioralEvidence problem _) =
   behavioralProblemFingerprint problem
 
+-- | Release the receipt only if the evidence's problem matches the expected
+-- one under the same component-by-component comparison as
+-- 'replayAssociatedObservation'.
 replayBehavioralEvidence
   :: BehavioralProblem domain
   -> BehavioralEvidence domain receipt

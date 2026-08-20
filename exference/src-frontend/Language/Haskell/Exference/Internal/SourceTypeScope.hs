@@ -429,6 +429,10 @@ importSpecOccurrences spec = case spec of
     HSE.TypeNamespace _ -> True
     HSE.PatternNamespace _ -> False
 
+-- | The number of class parameters of every class declared in the given
+-- modules, keyed by the class name qualified with its declaring module.
+-- Names that fail to convert are skipped; a class declared twice keeps the
+-- arity of its last occurrence.
 sourceClassArities
   :: [Module SrcSpanInfo]
   -> M.Map QualifiedName Int

@@ -9,6 +9,7 @@
 -- witness and diagnostic provenance remain inseparable inside this module.
 module Language.Haskell.Djex.Djinn.Internal.Request
   ( QueryOptions (..)
+  , Strategy (..)
   , defaultQueryOptions
   , DjinnRequest
   , DjinnTypeVariable
@@ -24,6 +25,7 @@ module Language.Haskell.Djex.Djinn.Internal.Request
   , validateDjinnTarget
   ) where
 
+import Control.Monad (void)
 import Data.Bifunctor (first)
 
 import Djinn.Internal.Type
@@ -33,6 +35,7 @@ import Djinn.Internal.Type
   )
 import Djinn.Core
   ( QueryOptions (..)
+  , Strategy (..)
   , defaultQueryOptions
   )
 import qualified Djinn.Core as Core
@@ -234,7 +237,7 @@ preflightRequestType
   :: RequestTypeSite
   -> DjinnType
   -> Either Diagnostic ()
-preflightRequestType site = fmap (const ()) . first
+preflightRequestType site = void . first
   (loweringFailure $ requestTypeSiteLabel site)
   . sealSynthesisSignature
 

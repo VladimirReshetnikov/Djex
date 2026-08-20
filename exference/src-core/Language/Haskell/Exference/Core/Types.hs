@@ -1,9 +1,14 @@
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MonadComprehensions #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
 
+-- | The core type vocabulary of the Exference engine.  'HsType' is the shared
+-- Djex type tree over 'SynthesisVariable's identified by 'TVarId'; the
+-- pattern synonyms retain the historical constructor names without a second
+-- representation.  The module also owns substitutions, 'HsConstraint's, the
+-- validated 'StaticClassEnv' with its instance completion, the per-query
+-- 'QueryClassEnv', and the compatibility renderers for types and constraints.
 module Language.Haskell.Exference.Core.Types
   ( TVarId
   , module Language.Haskell.Exference.Core.Name
@@ -110,7 +115,13 @@ import GHC.Generics
 
 
 
+-- | Numeric identity of a type variable in Exference's search
+-- representation.  The same identity space is used for flexible search
+-- variables ('TypeVar') and rigid constants ('TypeConstant'); which kind a
+-- given identity denotes is carried by the enclosing 'SynthesisVariable'.
 type TVarId = Int
+-- | A shared type variable tagged as flexible or rigid, identified by a
+-- 'TVarId'.  This is the variable type of 'HsType'.
 type SynthesisVariable = SharedType.Variable TVarId
 
 -- | Exference now searches the same type tree used at the neutral Djex
@@ -177,6 +188,11 @@ pattern TypeForallNative variables constraints body =
 flexibleBinderList :: [SynthesisVariable] -> Maybe [TVarId]
 flexibleBinderList = traverse SharedType.flexibleVariableIdentity
 
+-- | Why a type or constraint was rejected at Exference's checked type
+-- boundary ('toSynthesisType', 'fromSynthesisType', 'toSynthesisConstraint',
+-- 'fromSynthesisConstraint'): a shared structural type error, a shared
+-- constraint error, or a forall binding a rigid variable, which Exference
+-- does not accept as a lexical binder.
 data SynthesisTypeError
   = InvalidSynthesisType (SharedType.TypeError SynthesisVariable)
   | InvalidSynthesisConstraint SharedConstraint.ConstraintError
@@ -185,7 +201,13 @@ data SynthesisTypeError
 
 instance NFData SynthesisTypeError
 
+-- | A single-variable substitution: replace the free flexible variable with
+-- the given identity by the given type.  Applied by 'applySubst' and
+-- 'applySubstChecked'.
 data Subst  = Subst {-# UNPACK #-} !TVarId !HsType
+-- | A simultaneous substitution of free flexible variables, keyed by
+-- 'TVarId'.  Substitutions and unifiers ('applySubsts',
+-- "Language.Haskell.Exference.Core.Unify") exchange this form.
 type Substs = IntMap.IntMap HsType
 
 -- | A checked substitution can fail when alpha-renaming exhausts Exference's
@@ -248,8 +270,15 @@ ensureFlexibleForallBinders = traverse_ checkBinder
     Nothing -> Right ()
     Just identifier -> Left $ RigidForallBinder identifier
 
+-- | A type paired with an offset to add to each of its free flexible variable
+-- identities before use.  'unifyOffset' and 'unifyRightOffset' consume it to
+-- move the type into a namespace disjoint from the other unification side.
 data HsTypeOffset = HsTypeOffset !HsType {-# UNPACK #-} !Int
 
+-- | Compatibility map from a source type-variable spelling to the 'TVarId' it
+-- was assigned, used as rendering hints by 'showHsType' and
+-- 'showHsConstraint'.
+--
 -- Source locations do not belong in variable identity. Keeping only the
 -- spelling also decouples conversion and historical rendering from a
 -- particular parser AST. This raw spelling-oriented compatibility map is not
@@ -258,6 +287,10 @@ data HsTypeOffset = HsTypeOffset !HsType {-# UNPACK #-} !Int
 -- which also binds it to the exact canonical goal whose IDs it describes.
 type TypeVarIndex = M.Map String Int
 
+-- | A type class declaration as stored in a 'StaticClassEnv': its name, its
+-- parameter variables, and the superclass constraints over those parameters.
+-- 'mkStaticClassEnv' checks that the parameters are non-negative and
+-- distinct and that superclass constraints mention only declared parameters.
 data HsTypeClass = HsTypeClass
   { tclass_name :: QualifiedName
   , tclass_params :: [TVarId]
@@ -265,6 +298,9 @@ data HsTypeClass = HsTypeClass
   }
   deriving (Eq, Ord, Show, Generic)
 
+-- | An instance rule: a head constraint together with the prerequisite
+-- constraints it requires.  Every free variable of the head and
+-- prerequisites is implicitly quantified (see 'instanceConstraintVariables').
 data HsInstance = HsInstance
   { instance_constraints :: [HsConstraint]
   , instance_head :: HsConstraint
@@ -291,12 +327,14 @@ pattern HsConstraint className arguments =
 
 {-# COMPLETE HsConstraint #-}
 
+-- | The class name of a constraint.
 -- 'QualifiedName' guarantees general lexical validity; the
 -- checked type and environment boundaries additionally enforce that the name
 -- occupies the class namespace.
 constraint_tclass :: HsConstraint -> QualifiedName
 constraint_tclass = SharedConstraint.constraintClass
 
+-- | The type arguments of a constraint, in source order.
 constraint_params :: HsConstraint -> [HsType]
 constraint_params = SharedConstraint.constraintArguments
 
@@ -401,6 +439,11 @@ renderClassEnvError failure = case failure of
     | (left, right) <- pairs
     ] ++ "]"
 
+-- | A validated, sealed class environment: class declarations by name, the
+-- explicit source instances, and a per-class index of instances whose
+-- prerequisites have been completed with the superclass dictionaries.
+-- Construct it with 'mkStaticClassEnv' or 'emptyStaticClassEnv'.
+--
 -- Positional fields are deliberate.  Exported record labels would let a
 -- downstream caller update the declarations or either derived index and
 -- bypass 'mkStaticClassEnv'. Source instances remain separate because the
@@ -411,12 +454,18 @@ data StaticClassEnv = StaticClassEnv
   !(M.Map QualifiedName [HsInstance])
   deriving (Eq, Show)
 
+-- | The class declarations of the environment, keyed by class name.
 sClassEnv_tclasses :: StaticClassEnv -> M.Map QualifiedName HsTypeClass
 sClassEnv_tclasses (StaticClassEnv classes _ _) = classes
 
+-- | The instances exactly as supplied to 'mkStaticClassEnv', in source order
+-- and without superclass completion.
 sClassEnv_explicitInstances :: StaticClassEnv -> [HsInstance]
 sClassEnv_explicitInstances (StaticClassEnv _ instances _) = instances
 
+-- | The resolution rules used by the constraint solver: every instance,
+-- completed by 'inflateInstances' with its direct superclass prerequisites,
+-- indexed by the class of its head.
 sClassEnv_instances :: StaticClassEnv -> M.Map QualifiedName [HsInstance]
 sClassEnv_instances (StaticClassEnv _ _ instances) = instances
 
@@ -716,14 +765,9 @@ validateConstraintInTable
   -> ConstraintSite
   -> HsConstraint
   -> Either ClassEnvError ()
-validateConstraintInTable table site constraint = do
-  validateConstraintClass constraint
-  case M.lookup name table of
-    Nothing -> Left $ UnknownConstraintClass site name
-    Just declaration -> validateConstraintArity site constraint declaration
-      >> validateConstraintArguments site constraint
-  where
-    name = constraint_tclass constraint
+validateConstraintInTable table site constraint =
+  validateConstraintHeader table site constraint
+    >> validateConstraintArguments site constraint
 
 validateConstraintArity
   :: ConstraintSite
@@ -764,6 +808,11 @@ validateClassName name = case SharedConstraint.validateConstraintClassName
   Left _ -> Left $ InvalidClassName name
   Right () -> Right ()
 
+-- | A 'StaticClassEnv' extended with the constraints a query may assume
+-- (for example from the goal's context), together with their superclass
+-- closure.  Build it with 'mkQueryClassEnv' and extend it with
+-- 'addQueryClassEnv'.
+--
 -- This representation is sealed for the same reason: assumed constraints and
 -- their superclass closure must be updated together by 'addQueryClassEnv'.
 data QueryClassEnv = QueryClassEnv
@@ -771,12 +820,18 @@ data QueryClassEnv = QueryClassEnv
   !(S.Set HsConstraint)
   !(S.Set HsConstraint)
 
+-- | The underlying static class environment.
 qClassEnv_env :: QueryClassEnv -> StaticClassEnv
 qClassEnv_env (QueryClassEnv environment _ _) = environment
 
+-- | The assumed constraints as added, canonicalized but without their
+-- superclass closure.
 qClassEnv_constraints :: QueryClassEnv -> S.Set HsConstraint
 qClassEnv_constraints (QueryClassEnv _ constraints _) = constraints
 
+-- | The assumed constraints together with every superclass constraint they
+-- transitively imply, as computed by 'inflateHsConstraints'; this is a
+-- superset of 'qClassEnv_constraints'.
 qClassEnv_inflatedConstraints :: QueryClassEnv -> S.Set HsConstraint
 qClassEnv_inflatedConstraints (QueryClassEnv _ _ constraints) = constraints
 
@@ -794,6 +849,9 @@ instance NFData QueryClassEnv where
   rnf (QueryClassEnv environment constraints inflatedConstraints) =
     rnf environment `seq` rnf constraints `seq` rnf inflatedConstraints
 
+-- | Render a type as Haskell source with fully qualified names, spelling
+-- variables by the supplied source-name hints where available and by
+-- 'defaultVariableName' otherwise; see 'showHsTypeWithQualification'.
 showHsType :: TypeVarIndex -> HsType -> String
 showHsType = showHsTypeWithQualification FullyQualified
 
@@ -815,6 +873,9 @@ showHsTypeWithQualification qualification sourceNames source = case
 -- instance Read HsType where
 --   readsPrec _ = maybeToList . parseType
 
+-- | Render a constraint as Haskell source with fully qualified names, using
+-- the same variable-naming plan as 'showHsType': source-name hints are
+-- honoured first and remaining variables receive fresh default spellings.
 showHsConstraint :: TypeVarIndex
                  -> HsConstraint
                  -> String
@@ -823,6 +884,9 @@ showHsConstraint sourceNames source = case
   (scopedSource, renderVariable) ->
     SharedRender.renderConstraint renderVariable scopedSource
 
+-- | The default rendered spelling of a variable that has no source-name
+-- hint: 'showVar' of its identity for a flexible variable, and the same
+-- prefixed with @C@ for a rigid one.
 defaultVariableName :: SynthesisVariable -> String
 defaultVariableName variable = case variable of
   SharedType.FlexibleVariable identifier -> showVar identifier
@@ -985,13 +1049,21 @@ validSourceVariableName spelling
 instance Show QueryClassEnv where
   show (QueryClassEnv _ cs _) = "(QueryClassEnv _ " ++ show cs ++ " _)"
 
+-- | Whether the flexible variable with the given identity occurs free in the
+-- type; see 'freeVars'.
 containsVar :: TVarId -> HsType -> Bool
 containsVar i = S.member i . freeVars
 
+-- | Build a query environment over a static class environment with the given
+-- initially assumed constraints; equivalent to 'addQueryClassEnv' on an
+-- environment with no assumptions.
 mkQueryClassEnv :: StaticClassEnv -> [HsConstraint] -> QueryClassEnv
 mkQueryClassEnv sClassEnv constrs = addQueryClassEnv constrs
   $ QueryClassEnv sClassEnv S.empty S.empty
 
+-- | Add further assumed constraints.  They are canonicalized, unioned with
+-- the existing assumptions, and the superclass closure
+-- ('qClassEnv_inflatedConstraints') is recomputed for the whole set.
 addQueryClassEnv :: [HsConstraint] -> QueryClassEnv -> QueryClassEnv
 addQueryClassEnv constrs env = QueryClassEnv
   (qClassEnv_env env) csSet inflated
@@ -1063,14 +1135,17 @@ constraintApplySubstsChecked substitutions constraint
             $ map canonicalizeSubstitutionResult substituted
         )
 
+{-# INLINE constraintApplySubsts #-}
 -- | Compatibility wrapper around 'constraintApplySubstsChecked'.  It throws a
 -- descriptive exception only if capture avoidance would require a fresh
 -- variable after every 'Int' identity has been reserved.
-{-# INLINE constraintApplySubsts #-}
 constraintApplySubsts :: Substs -> HsConstraint -> (Any, HsConstraint)
 constraintApplySubsts substitutions = checkedSubstitution
   "constraintApplySubsts" . constraintApplySubstsChecked substitutions
 
+-- | Default source spelling of a flexible variable identity: @v0@ for 0,
+-- single letters @a@ to @z@ for 1 to 26, @t@ followed by @i - 27@ above that,
+-- and @vn@ followed by the magnitude for negative identities.
 showVar :: TVarId -> String
 showVar 0 = "v0"
 showVar i
@@ -1185,6 +1260,8 @@ checkedSubstitution operation = either failure id
     ++ ": capture-avoiding substitution failed: "
     ++ show substitutionError
 
+-- | The identities of the flexible variables occurring free in a type.
+-- Rigid constants and forall-bound variables are excluded.
 freeVars :: HsType -> S.Set TVarId
 freeVars typeExpression = S.fromList
   [ identifier

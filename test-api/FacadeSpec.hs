@@ -2,6 +2,7 @@
 
 module FacadeSpec (facadeTests) where
 
+import Control.Monad (when)
 import Control.DeepSeq (rnf)
 import Data.Either (isRight)
 import qualified Data.Set as Set
@@ -355,14 +356,12 @@ facadeTests = testGroup "public Djex facade"
         (LengthSMTLibLiveUsableWorkBudgetMicrosecondsOverflow
           microsecondsOverflow)
         $ mkLengthSMTLibLiveUsableWorkBudget (source microsecondsOverflow)
-      if nanosecondsOverflowInteger <= toInteger (maxBound :: Int)
-        then do
+      when (nanosecondsOverflowInteger <= toInteger (maxBound :: Int)) $ do
           let nanosecondsOverflow = fromInteger nanosecondsOverflowInteger
           assertBudgetFailure
             (LengthSMTLibLiveUsableWorkBudgetMicrosecondsOverflow
               nanosecondsOverflow)
             $ mkLengthSMTLibLiveUsableWorkBudget (source nanosecondsOverflow)
-        else pure ()
       (defaultLengthSMTLibLiveSessionMaximumQueries :: Natural) @?= 64
       [ LengthSMTLibLiveSessionDeadlineExceeded
         , LengthSMTLibLiveSessionWorkspaceUnavailable
@@ -1880,7 +1879,7 @@ facadeTests = testGroup "public Djex facade"
           ("finite-list-spine-length/bounded-input-box-validation/v1" :: String)
       lengthCounterexampleSimplificationSchemaTag @?=
         map (fromIntegral . fromEnum)
-          ("finite-list-spine-length/\
+          ("finite-list-spine-length/\
             \bounded-counterexample-simplification/v1" :: String)
       (LengthInputBoxCounterexample () :: LengthInputBoxValidation () ()) @?=
         LengthInputBoxCounterexample ()
@@ -2356,11 +2355,11 @@ facadeTests = testGroup "public Djex facade"
         LengthSpinePair 2 3
       lengthSpinePairInputBoxValidationSchemaTag @?=
         map (fromIntegral . fromEnum)
-          ("finite-binary-product-spine-lengths/\
+          ("finite-binary-product-spine-lengths/\
             \bounded-input-box-validation/v1" :: String)
       lengthSpinePairCounterexampleSimplificationSchemaTag @?=
         map (fromIntegral . fromEnum)
-          ("finite-binary-product-spine-lengths/\
+          ("finite-binary-product-spine-lengths/\
             \bounded-counterexample-simplification/v1" :: String)
       lengthSpinePairSMTLibQuerySchemaTag @?=
         map (fromIntegral . fromEnum)

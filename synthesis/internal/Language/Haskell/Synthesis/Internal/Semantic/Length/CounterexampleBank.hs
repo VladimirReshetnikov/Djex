@@ -8,6 +8,7 @@
 module Language.Haskell.Synthesis.Internal.Semantic.Length.CounterexampleBank
 where
 
+import Control.Monad (when)
 import Control.DeepSeq (NFData (rnf), force)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
@@ -167,30 +168,9 @@ sealLengthCounterexampleBankScope session contract = do
         $ checkedLengthSessionLimits session
   target <- buildScalarTargetFingerprint maximumBytes
     $ checkedLengthContractTarget contract
-  scope <- buildFingerprintWithin maximumBytes FingerprintBuilder
-    { fingerprintBuilderVersion = 1
-    , fingerprintBuilderRole = lengthCounterexampleBankScopeSchemaTag
-    , fingerprintBuilderFields =
-        [ tagged "dialect"
-            [FingerprintBytes $ ascii "finite-list-spine-length/v1"]
-        , tagged "scope-schema"
-            [FingerprintBytes lengthCounterexampleBankScopeSchemaTag]
-        , tagged "complete-session-inventory-and-provider-law-basis"
-            [FingerprintBytes $ fingerprintCanonicalBytes inventory]
-        , tagged "solver-neutral-interpretation-model-policy"
-            [FingerprintBytes $ fingerprintCanonicalBytes policy]
-        , tagged "exact-contract"
-            [FingerprintBytes $ fingerprintCanonicalBytes contractFingerprint]
-        , tagged "exact-normalized-target"
-            [FingerprintBytes $ fingerprintCanonicalBytes target]
-        , tagged "explicit-exclusions"
-            [ FingerprintBytes $ ascii "no-candidate-graph-result-or-condition"
-            , FingerprintBytes $ ascii "no-candidate-used-provider-subset"
-            , FingerprintBytes $ ascii "no-query-solver-or-execution-identity"
-            , FingerprintBytes $ ascii "no-preferences-receipts-or-verdicts"
-            ]
-        ]
-    }
+  scope <- buildScopeFingerprint maximumBytes
+    "finite-list-spine-length/v1" lengthCounterexampleBankScopeSchemaTag
+    inventory policy contractFingerprint target
   pure $ LengthCounterexampleBankScope
     inventory policy contractFingerprint target scope
 
@@ -226,19 +206,36 @@ sealLengthSpinePairCounterexampleBankScopeWithInventory session inventory
         $ checkedLengthSessionLimits session
   target <- buildSpinePairTargetFingerprint maximumBytes
     $ checkedLengthSpinePairContractTarget contract
-  scope <- buildFingerprintWithin maximumBytes FingerprintBuilder
+  scope <- buildScopeFingerprint maximumBytes
+    "finite-binary-product-spine-lengths/v1"
+    lengthSpinePairCounterexampleBankScopeSchemaTag
+    inventory policy contractFingerprint target
+  pure $ LengthSpinePairCounterexampleBankScope
+    inventory policy contractFingerprint target scope
+
+-- | One shared scope-fingerprint builder for both bank dialects.  The
+-- domain contributes its dialect string, its scope schema tag (also the
+-- builder role), and the four already-built constituent fingerprints; the
+-- field order and the explicit-exclusions block are identical by
+-- construction, so scalar and product scope bytes differ exactly where
+-- their vocabularies differ.
+buildScopeFingerprint
+  :: Natural
+  -> String
+  -> [Word8]
+  -> Fingerprint inventorySubject
+  -> Fingerprint policySubject
+  -> Fingerprint contractSubject
+  -> Fingerprint targetSubject
+  -> Either FingerprintLimitError (Fingerprint scopeSubject)
+buildScopeFingerprint maximumBytes dialect schemaTag inventory policy
+    contractFingerprint target =
+  buildFingerprintWithin maximumBytes FingerprintBuilder
     { fingerprintBuilderVersion = 1
-    , fingerprintBuilderRole =
-        lengthSpinePairCounterexampleBankScopeSchemaTag
+    , fingerprintBuilderRole = schemaTag
     , fingerprintBuilderFields =
-        [ tagged "dialect"
-            [ FingerprintBytes $ ascii
-                "finite-binary-product-spine-lengths/v1"
-            ]
-        , tagged "scope-schema"
-            [ FingerprintBytes
-                lengthSpinePairCounterexampleBankScopeSchemaTag
-            ]
+        [ tagged "dialect" [FingerprintBytes $ ascii dialect]
+        , tagged "scope-schema" [FingerprintBytes schemaTag]
         , tagged "complete-session-inventory-and-provider-law-basis"
             [FingerprintBytes $ fingerprintCanonicalBytes inventory]
         , tagged "solver-neutral-interpretation-model-policy"
@@ -255,8 +252,6 @@ sealLengthSpinePairCounterexampleBankScopeWithInventory session inventory
             ]
         ]
     }
-  pure $ LengthSpinePairCounterexampleBankScope
-    inventory policy contractFingerprint target scope
 
 buildScalarTargetFingerprint
   :: Ord identity
@@ -400,9 +395,8 @@ insertBankKernelSample origin rawInputs
       samples stats) = do
   -- Capacity is checked before origin or input demand.  In particular, a
   -- zero-entry bank rejects a poisoned/cyclic sample without touching it.
-  if maximumEntries <= 0
-    then Left $ BankKernelEntryLimitExceeded maximumEntries 1
-    else pure ()
+  when (maximumEntries <= 0)
+    $ Left $ BankKernelEntryLimitExceeded maximumEntries 1
   sample <- validateBankKernelSample limits origin rawInputs
   let inputs = bankKernelSampleInputs sample
       duplicate = any ((== inputs) . bankKernelSampleInputs) samples
@@ -453,10 +447,9 @@ validateBankKernelSample
 validateBankKernelSample (BankKernelLimits _ maximumWidth maximumBits
     maximumBytes _) origin rawInputs = do
   let observedWidth = observedListLength maximumWidth rawInputs
-  if observedWidth > maximumWidth
-    then Left $ BankKernelSampleWidthLimitExceeded
+  when (observedWidth > maximumWidth)
+    $ Left $ BankKernelSampleWidthLimitExceeded
       maximumWidth observedWidth
-    else pure ()
   (inputs, encodedElements) <- retainElements 0 rawInputs
   let encodedBytes = 1
         + encodedVariableNaturalByteCount (fromIntegral observedWidth)
@@ -471,10 +464,9 @@ validateBankKernelSample (BankKernelLimits _ maximumWidth maximumBits
   retainElements !_ [] = Right ([], 0)
   retainElements !index (value : remaining) = do
     let observedBits = observedNaturalBits maximumBits value
-    if observedBits > maximumBits
-      then Left $ BankKernelNaturalBitLimitExceeded
+    when (observedBits > maximumBits)
+      $ Left $ BankKernelNaturalBitLimitExceeded
         index maximumBits observedBits
-      else pure ()
     let magnitudeBytes = max 1
           $ (fromIntegral observedBits + 7) `quot` 8
         encodedValueBytes = encodedVariableNaturalByteCount magnitudeBytes

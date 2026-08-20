@@ -1,3 +1,9 @@
+-- | Direct structural conversion of generated expressions and function
+-- clauses into haskell-src-exts syntax trees, with no render/parse round
+-- trip.  The shared "Language.Haskell.Synthesis.Generated" forms are
+-- checked for scope and syntax first; the Exference-expression entry points
+-- lower the search tree to that shared form and pass through the same
+-- checks, so a partial tree with free locals is rejected explicitly.
 module Language.Haskell.Exference.ExpressionToHaskellSrc
   ( HaskellSrcConversionError (..)
   , generatedExpressionToHaskellSrc

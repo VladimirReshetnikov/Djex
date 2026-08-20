@@ -2,6 +2,12 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
+-- | Exference's numeric score carriers: the signed 'Penalty' used for
+-- heuristics, ratings, and depth limits, and the queue-key 'Priority'.
+-- Both wrap a raw 'Double' with a total 'Ord' even for NaN, and the
+-- exported arithmetic saturates within the finite domain, so search never
+-- has to reason about overflow or a broken queue ordering; the finiteness
+-- predicates are what checked boundaries use to reject malformed input.
 module Language.Haskell.Exference.Core.Score
   ( Penalty (..)
   , Priority (..)
@@ -70,9 +76,14 @@ instance Show Priority where
 isFiniteScore :: Penalty -> Bool
 isFiniteScore (Penalty value) = not $ isNaN value || isInfinite value
 
+-- | Whether a value is a valid penalty: finite and non-negative.  This is
+-- the check applied to query heuristics and depth limits at the checked
+-- search boundary; use 'isFiniteScore' where signed ratings are allowed.
 isFinitePenalty :: Penalty -> Bool
 isFinitePenalty score = penaltyValue score >= 0 && isFiniteScore score
 
+-- | Whether a priority has a finite raw representation (neither NaN nor an
+-- infinity); the sign is unconstrained.
 isFinitePriority :: Priority -> Bool
 isFinitePriority (Priority value) = not $ isNaN value || isInfinite value
 
@@ -113,6 +124,9 @@ normalizePriority = saturatingPriority . priorityValue
 priorityFromPenalty :: Penalty -> Priority
 priorityFromPenalty = saturatingPriority . penaltyValue
 
+-- | The largest finite penalty, i.e. the value at which the saturating
+-- operations ('addScore', 'multiplyScore', 'normalizePenalty') clamp
+-- overflow and to which 'normalizePenalty' maps NaN.
 maxPenalty :: Penalty
 maxPenalty = Penalty maxFiniteDouble
 

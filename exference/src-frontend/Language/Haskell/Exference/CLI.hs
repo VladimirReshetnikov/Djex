@@ -1,5 +1,11 @@
 {-# LANGUAGE MultiWayIf #-}
 
+-- | The @exference@ command-line tool: GetOpt flag parsing, loading and
+-- sealing the source environment into an 'ExferenceSession', running each
+-- @--input@ query through the checked request API of
+-- "Language.Haskell.Djex.Exference" (and its @HaskellSrc@ parsing adapter),
+-- and presenting the selected results.  It carries the historical CLI
+-- heuristics profile, which deliberately differs from the library default.
 module Language.Haskell.Exference.CLI (main) where
 
 import Control.Monad (forM_, unless, when)
@@ -164,6 +170,11 @@ mainOpts arguments = case getOpt (ReturnInOrder Input) options arguments of
         (flags, [source | Input source <- flags])
   (_, _, errors) -> Left $ concat errors ++ fullUsageInfo
 
+-- | Entry point of the @exference@ command-line tool. Parses the process
+-- arguments; with no flags or @--help@ it prints usage, with @--version@
+-- the version, and otherwise loads the source environment, seals a session,
+-- and answers every @--input@ query in order. Usage and load errors are
+-- reported on stderr and terminate the process with a failure exit code.
 main :: IO ()
 main = do
   hSetBuffering stdout LineBuffering

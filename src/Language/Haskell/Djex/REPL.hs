@@ -23,7 +23,7 @@ import Control.Exception
   , evaluate
   , handleJust
   )
-import Control.Monad (forM_, when)
+import Control.Monad (forM_, unless, void, when)
 import Data.Char (isSpace)
 import Data.Foldable (toList)
 import Data.List (intercalate, isPrefixOf)
@@ -144,6 +144,7 @@ data ReplState = ReplState
   , djinnSearchOptions :: QueryOptions
   , exferenceSearchOptions :: ExferenceOptions
   , promptTemplate :: String
+  , queryTimeout :: QueryTimeout
   , lastQuery :: Maybe (ReplBackend, String)
   , scriptStack :: [FilePath]
   }
@@ -291,6 +292,7 @@ runRepl options = case standardDjinnSession of
                 , djinnSearchOptions = defaultQueryOptions
                 , exferenceSearchOptions = defaultExferenceOptions
                 , promptTemplate = defaultPromptTemplate
+                , queryTimeout = noQueryTimeout
                 , lastQuery = Nothing
                 , scriptStack = []
                 }
@@ -689,22 +691,24 @@ runResolvedQuery sourceName selected typeSource state = do
           (presentation state) (djinnSearchOptions state)
       } of
     Left failure -> emitDiagnostic failure
-    Right request -> case runDjinnQuery (currentDjinnSession state) request of
-      Left failure -> emitDiagnostic failure
-      Right result -> ignoreExit $ presentDjinn
-        (presentation state)
-        (maybe noFieldSelectors djinnProjectionFieldSelectors
-          $ djinnProjection $ djinnRuntime state)
-        result
+    Right request -> ignoreExit $ withinQueryTimeout (queryTimeout state)
+      $ case runDjinnQuery (currentDjinnSession state) request of
+        Left failure -> diagnosticFailure failure
+        Right result -> presentDjinn
+          (presentation state)
+          (maybe noFieldSelectors djinnProjectionFieldSelectors
+            $ djinnProjection $ djinnRuntime state)
+          result
 
   runParsedExference session parsed = case
       mkExferenceRequestWithCheckedTargetFromParsed
         (exferenceSearchOptions state) (resultTarget state) parsed of
     Left failure -> emitDiagnostic failure
-    Right request -> case runExferenceQuery session request of
-      Left failure -> emitDiagnostic failure
-      Right results -> ignoreExit $ presentExference
-        (presentation state) (scopeFieldSelectors state) results
+    Right request -> ignoreExit $ withinQueryTimeout (queryTimeout state)
+      $ case runExferenceQuery session request of
+        Left failure -> diagnosticFailure failure
+        Right results -> presentExference
+          (presentation state) (scopeFieldSelectors state) results
 
 projectParsedTypeToDjinn
   :: ReplState
@@ -724,6 +728,7 @@ projectParsedTypeToDjinn state = mapTypeNames projectName
 
 runDjinnInteractive :: FilePath -> String -> ReplState -> IO ()
 runDjinnInteractive sourceName typeSource state = ignoreExit
+  $ withinQueryTimeout (queryTimeout state)
   $ executeDjinnCommand
       (presentation state)
       (maybe noFieldSelectors djinnProjectionFieldSelectors
@@ -737,6 +742,7 @@ runDjinnInteractive sourceName typeSource state = ignoreExit
 runExferenceInteractive :: FilePath -> String -> ReplState -> IO ()
 runExferenceInteractive sourceName typeSource state = case runtimeState of
   (Just session, Just context) -> ignoreExit
+    $ withinQueryTimeout (queryTimeout state)
     $ executeExferenceCommandInScope
         (presentation state)
         (scopeFieldSelectors state)
@@ -757,7 +763,7 @@ runExferenceInteractive sourceName typeSource state = case runtimeState of
     (exferenceRuntimeSession runtime, exferenceRuntimeScope runtime)
 
 ignoreExit :: IO ExitCode -> IO ()
-ignoreExit action = action >> pure ()
+ignoreExit action = void action
 
 showExpressionType
   :: FilePath
@@ -1188,6 +1194,11 @@ settingBehavior setting = case setting of
     (\value state -> state {promptTemplate = value})
     defaultPromptTemplate
     show
+  QueryTimeoutSetting -> fieldSetting setting parseQueryTimeout
+    queryTimeout
+    (\value state -> state {queryTimeout = value})
+    noQueryTimeout
+    renderQueryTimeout
   CandidateLimitSetting -> fieldSetting setting positiveInt
     (optionCutoff . djinnSearchOptions)
     (\value -> onDjinnOptions $ \options -> options {optionCutoff = value})
@@ -1198,6 +1209,11 @@ settingBehavior setting = case setting of
     (\value -> onDjinnOptions $ \options -> options {optionBudget = value})
     (optionBudget defaultQueryOptions)
     (maybe "0" show)
+  DjinnStrategySetting -> fieldSetting setting parseSearchStrategy
+    (optionStrategy . djinnSearchOptions)
+    (\value -> onDjinnOptions $ \options -> options {optionStrategy = value})
+    (optionStrategy defaultQueryOptions)
+    searchStrategyName
   -- Axiom projection changes the sealed Djinn session, so applying or
   -- resetting it reprojects the scope instead of updating a plain field.
   DjinnAxiomsSetting -> SettingBehavior
@@ -1229,6 +1245,18 @@ settingBehavior setting = case setting of
     exferenceMaximumQueueSize
     (\value options -> options {exferenceMaximumQueueSize = value})
     renderBounded
+  -- One setting owns the whole weight vector: an assignment names one
+  -- weight, so applying it needs the weights the session already has, which
+  -- the uniform field shape cannot supply.
+  HeuristicSetting -> SettingBehavior
+    { settingApply = requiredValue setting $ \source -> do
+        assign <- parseHeuristicAssignment (replSettingName setting) source
+        Right $ pure . onExferenceOptions (onHeuristics assign)
+    , settingReset = pure . onExferenceOptions
+        (onHeuristics $ const $ exferenceHeuristics defaultExferenceOptions)
+    , settingRender =
+        renderHeuristics . exferenceHeuristics . exferenceSearchOptions
+    }
   MaximumDepthSetting -> exferenceFieldSetting setting boundedPenalty
     exferenceMaximumDepth
     (\value options -> options {exferenceMaximumDepth = value})
@@ -1332,6 +1360,12 @@ exferenceBooleanSetting setting get set = SettingBehavior
 onDjinnOptions :: (QueryOptions -> QueryOptions) -> ReplState -> ReplState
 onDjinnOptions update state =
   state {djinnSearchOptions = update $ djinnSearchOptions state}
+
+onHeuristics
+  :: (ExferenceHeuristicsConfig -> ExferenceHeuristicsConfig)
+  -> ExferenceOptions -> ExferenceOptions
+onHeuristics update options =
+  options {exferenceHeuristics = update $ exferenceHeuristics options}
 
 onExferenceOptions
   :: (ExferenceOptions -> ExferenceOptions) -> ReplState -> ReplState
@@ -1511,7 +1545,7 @@ browseState Nothing state = forSelectedBackends state $ \selectedBackend ->
           ExferenceType.defaultVariableName
           (scopeBrowseNames context)
           $ exferenceSessionEnvironment session
-        when (not $ null $ exferenceSessionOmissions session) $ putStrLn
+        unless (null $ exferenceSessionOmissions session) $ putStrLn
           "-- Some loaded capabilities are not searchable; use :show omissions."
       _ -> putStrLn "Exference is unavailable."
  where

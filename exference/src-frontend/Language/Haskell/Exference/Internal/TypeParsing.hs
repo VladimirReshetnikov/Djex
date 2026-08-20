@@ -41,6 +41,10 @@ import qualified Language.Haskell.Synthesis.Declaration as Declaration
 import qualified Language.Haskell.Synthesis.Environment as Environment
 import qualified Language.Haskell.Synthesis.Inventory as Inventory
 
+-- | Parse a source type with HSE and hand the syntax tree to a conversion
+-- action. A parse failure becomes an error 'Diagnostic' at the HSE
+-- location; a conversion failure becomes an error 'Diagnostic' spanning
+-- the whole input text in the parse mode's file name.
 parseHaskellSrcType
   :: Monad m
   => (Type SrcSpanInfo -> ExceptT String m result)
@@ -59,6 +63,10 @@ parseHaskellSrcType convert mode source = case
     withLocation (HSE.parseFilename mode) (sourceTextSpan source)
       $ diagnostic Error message
 
+-- | Parse a source type and convert it nominally with
+-- 'convertTypeNoDeclWithResolver', so type synonyms stay unexpanded. The
+-- optional module name is the current module: an unqualified name resolves
+-- to that module's own visible declaration before any other candidate.
 parseTypeWithResolver
   :: Monad m
   => TypeResolver

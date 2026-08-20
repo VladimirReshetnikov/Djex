@@ -1,7 +1,13 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MonadComprehensions #-}
-{-# LANGUAGE TypeOperators #-}
 
+
+-- | The complete Exference source-environment loader.  It parses Haskell
+-- modules, rating files, and visibility manifests (from paths, directories,
+-- or in-memory snapshots), runs the binding, synonym, and class extractors,
+-- applies ratings, and seals everything as a 'CheckedSourceEnvironment'
+-- backed by one prepared shared inventory; every fatal phase is an
+-- 'EnvironmentLoadError' and non-fatal messages travel in the 'LoadReport'.
 module Language.Haskell.Exference.EnvironmentParser
   ( SourceBinding (..)
   , sourceBindingFunction
@@ -84,7 +90,7 @@ import Data.List ( intercalate, sort, sortOn, isSuffixOf )
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.Either ( lefts, rights )
-import Data.Maybe ( maybeToList )
+import Data.Maybe (fromMaybe, isNothing, maybeToList)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Writer.Strict (WriterT, runWriterT, tell)
 import System.Directory ( listDirectory )
@@ -129,6 +135,8 @@ data SourceBinding
   | SourceClassMethod QualifiedName FunctionBinding
   deriving (Show)
 
+-- | The flat function projection of a 'SourceBinding', dropping the owning
+-- class of a 'SourceClassMethod'.
 sourceBindingFunction :: SourceBinding -> FunctionBinding
 sourceBindingFunction binding = case binding of
   SourceFunction function -> function
@@ -464,7 +472,7 @@ parseTypeVisibilitySource path source =
           $ "invalid type name " ++ show nameSource ++ ": "
             ++ SharedName.renderNameError failure
         Right parsed
-          | SharedName.nameModule parsed == Nothing ->
+          | isNothing (SharedName.nameModule parsed) ->
               Left $ lineDiagnostic lineNumber line
                 $ "type name " ++ show nameSource
                   ++ " must be module-qualified"
@@ -600,7 +608,7 @@ parseTypeVisibilitySources sources@((primaryPath, _) : _) = do
       Nothing -> Right $ Just TypeVisibilityManifest
         { typeVisibilityManifestSource = primaryPath
         , typeVisibilityManifestEntries = M.fromList
-            [(typeVisibilityName entry, entry) | entry <- entries]
+            [ (typeVisibilityName entry, entry) | entry <- entries]
         }
 
 applyTypeVisibilityManifest
@@ -766,6 +774,11 @@ abstractTypeVisibilityInventory manifest abstractNames inventory =
       $ "type visibility kinds are inconsistent with the source inventory: "
           ++ show failure) NonEmpty.:| []
 
+-- | Validate a raw 'SourceEnvironment' into a 'CheckedSourceEnvironment':
+-- seal and kind-check its declarations as a shared inventory, prepare
+-- synonym expansion, and reconcile the lowered backend with the source
+-- order and ratings of the bindings. The 'sourceTypeNames' cache is
+-- ignored; every failure is an 'InvalidSourceInventory'.
 checkSourceEnvironment
   :: SourceEnvironment
   -> Either EnvironmentLoadError CheckedSourceEnvironment
@@ -1076,13 +1089,13 @@ unsupportedVocabularyOccurrences = concatMap unsupportedModule
         ++ concatMap (unsupportedBinder KindedClassBinder)
           (snd $ splitDeclHead rawHead)
         ++ concatMap unsupportedDependency dependencies
-        ++ concatMap unsupportedClassDecl (maybe [] id declarations)
+        ++ concatMap unsupportedClassDecl (fromMaybe [] declarations)
     HSE.InstDecl _ overlap rule declarations ->
       maybe [] unsupportedOverlap overlap
         ++ concatMap (unsupportedBinder KindedInstanceBinder)
-            (maybe [] (maybe [] id . instRuleVariables) (splitInstRule rule))
+            (maybe [] (fromMaybe [] . instRuleVariables) (splitInstRule rule))
         ++ unsupportedInstanceRule rule
-        ++ concatMap unsupportedInstanceDecl (maybe [] id declarations)
+        ++ concatMap unsupportedInstanceDecl (fromMaybe [] declarations)
     _ -> []
 
   instRuleVariables (variables, _, _, _) = variables
@@ -1371,7 +1384,7 @@ cyclicModuleImportDiagnostics modules = case
     HSE.Module _ _ _ imports _ ->
       [ source
       | declaration <- imports
-      , HSE.importPkg declaration == Nothing
+      , isNothing (HSE.importPkg declaration)
       , not $ HSE.importSrc declaration
       , let HSE.ModuleName _ source = HSE.importModule declaration
       ]
@@ -1390,7 +1403,7 @@ cyclicModuleImportDiagnostics modules = case
       Just (HSE.Module _ _ _ imports _) -> case
           [ HSE.srcInfoSpan $ HSE.importAnn declaration
           | declaration <- imports
-          , HSE.importPkg declaration == Nothing
+          , isNothing (HSE.importPkg declaration)
           , not $ HSE.importSrc declaration
           , let HSE.ModuleName _ imported = HSE.importModule declaration
           , imported == target
@@ -1701,6 +1714,11 @@ methodBindingExtraction (SourcedExtraction slot result) = case result of
     | ClassMethodDeclaration owner binding <- methods
     ] [] []
 
+-- | Parse the contents of a rating file: whitespace-separated pairs of a
+-- qualified name (spelled as for 'parseQualifiedName') and a finite
+-- 'Double' penalty, returned in file order without duplicate resolution.
+-- The first malformed pair, non-numeric or non-finite rating, or trailing
+-- unpaired name is reported as an error 'Diagnostic'.
 parseRatings :: String -> Either Diagnostic [(QualifiedName, Penalty)]
 parseRatings = go . words
   where
@@ -1793,6 +1811,10 @@ environmentFromModuleM
   -> Loader (Either EnvironmentLoadError CheckedSourceEnvironment)
 environmentFromModuleM modulePath = environmentFromFilesM [modulePath] []
 
+-- | Load and seal one source module together with one rating file. This is
+-- 'environmentFromFiles' applied to a single module path and a single
+-- rating path; unreadable or malformed ratings only produce warnings in the
+-- 'LoadReport'.
 environmentFromModuleAndRatings
   :: FilePath
   -> FilePath
@@ -1901,6 +1923,12 @@ finishEnvironmentLoadWith checkEnvironment environmentResult loadRatings =
         (concat $ rights ratingResults) environment
 
 
+-- | Load and seal an environment directory: every @.hs@ file becomes a
+-- source module, every @.ratings@ file a rating file, and every
+-- @.visibility@ file part of one type visibility manifest, each group
+-- processed in sorted file-name order. An unreadable directory fails with
+-- 'EnvironmentDirectoryReadError'; the environment is checked with
+-- 'checkSourceEnvironmentWithTypeVisibility' when a manifest is present.
 environmentFromPath
   :: FilePath
   -> IO (LoadReport CheckedSourceEnvironment)

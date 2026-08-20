@@ -9,6 +9,7 @@ module Djinn.Internal.ProofCheck
     , checkProof
     ) where
 
+import Control.Monad (void)
 import Djinn.Internal.LJTFormula (Formula, Symbol, Term)
 import qualified Djinn.Internal.ProofCheck.Evidence as Evidence
 
@@ -22,4 +23,4 @@ checkProofEnvironment = Evidence.checkProofEnvironment
 -- path: errors and success are not recomputed by a compatibility-only pass.
 checkProof :: [(Symbol, Formula)] -> Formula -> Term -> Either String ()
 checkProof environment expected term =
-    () <$ Evidence.checkProofWithEvidence environment expected term
+    void (Evidence.checkProofWithEvidence environment expected term)

@@ -1,5 +1,10 @@
 {-# LANGUAGE DeriveGeneric #-}
 
+-- | Operational measurements attached to Exference search output: the
+-- per-candidate 'ExferenceStats', the cumulative 'BindingUsages' counts, and
+-- the per-batch 'ExferenceBatchMetadata' with its pruning totals.  These are
+-- plain data with exact 'Natural' totals; rendering belongs to presentation
+-- boundaries, not to this module.
 module Language.Haskell.Exference.Core.ExferenceStats
   ( ExferenceStats (..)
   , BindingUsages
@@ -33,6 +38,10 @@ data ExferenceBatchMetadata = ExferenceBatchMetadata
 
 instance NFData ExferenceBatchMetadata
 
+-- | Per-candidate search measurements: the number of search steps completed
+-- when the candidate was found, its final heuristic complexity rating (lower
+-- ranks ahead), and the search-queue size immediately after the producing
+-- step.
 data ExferenceStats = ExferenceStats
   { exference_steps :: Int
   , exference_complexityRating :: Penalty

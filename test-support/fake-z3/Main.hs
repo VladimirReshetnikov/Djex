@@ -16,7 +16,7 @@
 module Main (main) where
 
 import Control.Concurrent (threadDelay)
-import Control.Monad (forM, forM_, forever)
+import Control.Monad (forM, forM_, forever, when)
 import Data.Bits ((.&.), shiftR)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
@@ -267,9 +267,7 @@ handleCommand trace mode state command
     handleGetValue trace mode state command
   | command == "(reset)" = do
     recordCommand trace "reset"
-    if mode == UnsolicitedResetSuccess
-      then emitResponse trace mode "success\n"
-      else pure ()
+    when (mode == UnsolicitedResetSuccess) $ emitResponse trace mode "success\n"
     pure (True, resetWorkerScope state)
   | command == probeZeroAssertion = do
     recordCommand trace "probe-assert-zero"
@@ -343,9 +341,7 @@ handleCheckSatisfiable trace mode state
           recordQueryHang trace ordinal "status"
           hangForever
         else do
-          if mode == QueryDelay300Milliseconds
-            then threadDelay 300000
-            else pure ()
+          when (mode == QueryDelay300Milliseconds) $ threadDelay 300000
           emitResponse trace mode $ status <> "\n"
           pure (True, nextState)
 

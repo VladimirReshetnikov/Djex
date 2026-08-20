@@ -5,6 +5,13 @@
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
 --
+
+-- | Djinn's historical compatibility AST for kinds and types, with its ReadP
+-- parsers, its formula translation, and the legacy clause view of proof
+-- terms.  'HKind' and 'HType' are views over the shared Djex kind and
+-- source-type trees rather than second recursive representations; bundled
+-- pattern synonyms keep the old @HKind(..)@ and @HType(..)@ syntax, with a
+-- narrow fallback layer for declaration-only and constructor-sensitive forms.
 module Djinn.Internal.HTypes(
         HKind(KStar, KArrow, KVar),
         HType(HTApp, HTVar, HTCon, HTTuple, HTArrow, HTForall,
@@ -36,6 +43,8 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 
+-- | Djinn's raw name spelling: type constructors, type variables, value
+-- names, and proof symbols are all plain strings in the compatibility AST.
 type HSymbol = String
 
 -- | Djinn's historical kind vocabulary over the common Djex kind tree.
@@ -285,10 +294,14 @@ sharedConstructorName sourceName = case SharedName.parseName sourceName of
     Right name -> Just name
     Left _ -> Nothing
 
+-- | Whether a type is a data-declaration body ('HTUnion') rather than an
+-- ordinary type expression.
 isHTUnion :: HType -> Bool
 isHTUnion (HTUnion _) = True
 isHTUnion _ = False
 
+-- | The body of Djinn's built-in @Not@ synonym: the type @x -> Void@ for the
+-- given variable name.
 htNot :: HSymbol -> HType
 htNot x = HTArrow (HTVar x) (HTCon "Void")
 
@@ -358,6 +371,9 @@ pHType' = do
     skipSpaces
     return t
 
+-- | Parse a complete Djinn type: an explicit @forall@ (with optional
+-- context), a bare context followed by a type, or a right-associative arrow
+-- type over applications of atoms.  Trailing white space is not consumed.
 pHType :: ReadP HType
 pHType = pHExplicitForall +++ pHConstrainedType +++ pHArrowType
 
@@ -397,6 +413,8 @@ pHContext = do
     sstring "=>"
     return contexts
 
+-- | Parse one class constraint: a constructor-identifier class name applied
+-- to zero or more type atoms.
 pHConstraint :: ReadP (Constraint HType)
 pHConstraint = do
     className <- pHSymbol True
@@ -405,6 +423,9 @@ pHConstraint = do
         Right name -> return $ Constraint name arguments
         Left _ -> pfail
 
+-- | Parse the right-hand side of a @data@ declaration, @|@-separated
+-- constructors each applied to type atoms, into an 'HTUnion'.  An empty
+-- alternative list is accepted and yields an empty union.
 pHDataType :: ReadP HType
 pHDataType = do
     let con = do
@@ -414,6 +435,9 @@ pHDataType = do
     cts <- maximalSepBy con (schar '|')
     return $ HTUnion cts
 
+-- | Parse an atomic type: a variable, a possibly qualified constructor
+-- (including prefix @(->)@), a list type @[t]@, a parenthesized tuple or
+-- type, or the unit type @()@.
 pHTAtom :: ReadP HType
 pHTAtom = pHTVar +++ pHTCon +++ pHTList +++ pParen pHTTuple +++ pParen pHType +++ pUnit
 
@@ -433,6 +457,8 @@ pHTCon = fmap HTCon pQualifiedConId
 pHTVar :: ReadP HType
 pHTVar = fmap HTVar (pHSymbol False)
 
+-- | Parse an unqualified identifier token: a constructor identifier when the
+-- flag is 'True', a variable identifier when it is 'False'.
 pHSymbol :: Bool -> ReadP HSymbol
 pHSymbol True = pConId
 pHSymbol False = pVarId
@@ -456,6 +482,8 @@ pHTList = do
     schar ']'
     return $ HTApp (HTCon "[]") t
 
+-- | Parse a kind: @*@ and parenthesized kinds joined by right-associative
+-- @->@.
 pHKind :: ReadP HKind
 pHKind = do
     ts <- maximalSepBy1 pHKindA (sstring "->")
@@ -540,16 +568,25 @@ hTApp a b = HTApp a b
 -------------------------------
 
 
+-- | Render a value name for prefix position, parenthesizing variable
+-- operators (an alias of 'renderVarName').
 prHSymbolOp :: HSymbol -> String
 prHSymbolOp = renderVarName
 
 -------------------------------
 
 
+-- | Convert and simplify a proof term into the legacy 'HExpr' view, going
+-- through the shared generated expression.  Fails when the term is
+-- ill-formed or the simplified output uses a form the legacy view cannot
+-- represent.
 termToHExpr :: Term -> Either String HExpr
 termToHExpr term =
     termToGeneratedExpression term >>= fromGeneratedExpression
 
+-- | Convert a proof term into a legacy clause defining the given name.  An
+-- outermost lambda's patterns become the clause's argument patterns; any
+-- other body yields a clause with no patterns.
 termToHClause :: HSymbol -> Term -> Either String HClause
 termToHClause name term = do
     expression <- termToGeneratedExpression term

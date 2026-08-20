@@ -1,4 +1,3 @@
-{-# LANGUAGE NamedFieldPuns #-}
 
 -- | Pure, transactional name-scope management for the Djex REPL.
 --
@@ -32,13 +31,15 @@ module Language.Haskell.Djex.REPL.Scope
   , workspaceRecordProjections
   ) where
 
+import Data.Foldable (traverse_)
+import Control.Monad (when)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict (StateT, get, modify, runStateT)
 import Data.Char (isSpace)
 import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (isJust, mapMaybe)
 import qualified Data.Set as Set
 import Data.Set (Set)
 
@@ -107,6 +108,12 @@ data ScopeNamespace
   | AnyScope
   deriving (Eq, Ord, Show)
 
+-- | The validated prompt name scope: the ordered module-context and import
+-- entries together with the name surfaces they admit (unqualified at the
+-- prompt, visible to backend search, and per written qualifier), the
+-- qualifier aliases, and the current module. Construct it only through
+-- 'scopeFromWorkspace' and the transactional update functions.
+--
 -- The separate projections are intentional. A qualified import adds bindings
 -- to backend search, but it must not make a type constructor legal bare at the
 -- prompt. Keeping both sets avoids recreating that distinction downstream.
@@ -121,6 +128,7 @@ data ReplScope = ReplScope
   }
   deriving (Eq, Show)
 
+-- | The module-context and import entries of the scope, in prompt order.
 scopeEntries :: ReplScope -> [ScopeEntry]
 scopeEntries = replScopeEntries
 
@@ -416,7 +424,7 @@ parseScopeImport source = case
     HSE.parseImportDeclWithMode importParseMode source of
   HSE.ParseOk declaration -> do
     _ <- importModuleName declaration
-    _ <- traverse checkedHseModuleName $ HSE.importAs declaration
+    traverse_ checkedHseModuleName $ HSE.importAs declaration
     Right declaration
   HSE.ParseFailed location message -> Left $ scopeDiagnostic
     "DJEX_REPL_IMPORT_PARSE" "cannot parse import declaration"
@@ -466,7 +474,7 @@ compileScope inventory workspace entries = do
     , replScopeQualifiedSurfaces = qualified
     , replScopeAliases = aliases
     , replScopeCurrentModule = current
-    , replScopeHasImplicitPrelude = maybe False (const True) implicit
+    , replScopeHasImplicitPrelude = isJust implicit
     }
 
 data ScopeContribution = ScopeContribution
@@ -817,13 +825,12 @@ buildModuleViewCached index modules stack target = do
   case Map.lookup moduleName cached of
     Just view -> pure view
     Nothing -> do
-      if moduleName `elem` stack
-        then lift $ Left $ withSource (workspaceModulePath target)
+      when (moduleName `elem` stack)
+        $ lift $ Left $ withSource (workspaceModulePath target)
           $ scopeDiagnostic "DJEX_REPL_IMPORT_CYCLE"
               "cannot construct a scope through an import cycle"
               $ intercalate " -> "
               $ map SharedName.renderModuleName $ reverse $ moduleName : stack
-        else pure ()
       (moduleHead, pragmas, sourceImports) <- lift $ moduleParts target
       imports <- traverse
         (resolveSourceImport index modules (workspaceModulePath target)

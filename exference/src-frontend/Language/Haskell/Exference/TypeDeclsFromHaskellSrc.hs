@@ -1,5 +1,11 @@
 {-# LANGUAGE MonadComprehensions #-}
 
+-- | Type synonym declarations and synonym-aware type conversion for the
+-- Exference source frontend.  'HsTypeDecl' and the 'TypeDeclMap' index come
+-- from parsed modules via 'getTypeDecls'; 'applyTypeDecls' expands
+-- saturated synonym applications, and the @convertType*@ and @parseType*@
+-- entry points wrap "Language.Haskell.Exference.TypeFromHaskellSrc" with
+-- that expansion, forall normalization, and inventory-based kind checking.
 module Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( HsTypeDecl (..)
   , TypeDeclMap
@@ -75,12 +81,18 @@ import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 
 
 
+-- | A type synonym declaration in the historical frontend vocabulary: the
+-- qualified synonym name, its parameter variable IDs in declaration order,
+-- and its right-hand side, in which the parameters occur as type
+-- variables.
 data HsTypeDecl = HsTypeDecl
   { tdecl_name :: QualifiedName
   , tdecl_params :: [TVarId]
   , tdecl_result :: HsType
   } deriving (Eq, Show) -- (Data, Show, Generic, Typeable)
 
+-- | Synonym declarations indexed by name for expansion. Build it with
+-- 'uniqueTypeDeclMap', which omits every name declared more than once.
 type TypeDeclMap = Map QualifiedName HsTypeDecl
 
 -- | Build the legacy synonym-expansion index without choosing an arbitrary
@@ -96,6 +108,9 @@ uniqueTypeDeclMap declarations = M.fromList
       ]
   ]
 
+-- | Lift a frontend synonym declaration into the checked shared
+-- declaration IR, treating every parameter as a flexible variable; an
+-- unrepresentable body is a 'SynthesisDeclarationError'.
 toSynthesisTypeDeclaration
   :: HsTypeDecl
   -> Either SynthesisDeclarationError SynthesisDeclaration
@@ -104,6 +119,10 @@ toSynthesisTypeDeclaration declaration = toSynthesisTypeSynonym
   (tdecl_params declaration)
   (tdecl_result declaration)
 
+-- | Inverse of 'toSynthesisTypeDeclaration': lower a checked shared type
+-- synonym declaration back to the frontend record. Any other declaration
+-- kind, an explicitly kinded or rigid parameter, or an unrepresentable
+-- body is a 'SynthesisDeclarationError'.
 fromSynthesisTypeDeclaration
   :: SynthesisDeclaration
   -> Either SynthesisDeclarationError HsTypeDecl
@@ -111,6 +130,11 @@ fromSynthesisTypeDeclaration declaration = do
   (name, parameters, body) <- fromSynthesisTypeSynonym declaration
   Right $ HsTypeDecl name parameters body
 
+-- | Expand every saturated application of a successfully converted synonym
+-- in the type, capture-avoidingly and transitively. Failed declarations in
+-- the map are skipped, leaving their applications as ordinary constructors.
+-- Unsaturated applications, cyclic synonyms, and duplicate parameters are
+-- reported as messages.
 applyTypeDecls :: Map QualifiedName (Either String HsTypeDecl)
                -> HsType 
                -> Either String HsType
@@ -151,6 +175,11 @@ applyTypeDecls declarations source = do
       "invalid fresh type synonym binder " ++ show replacement
         ++ " for " ++ show old
 
+-- | Extract every top-level type synonym declaration of the given modules,
+-- in module and source order, resolving names with the unique-global lookup
+-- over the given data type names. Each result is either the converted
+-- declaration (validated for saturation and cycles against the others) or
+-- a plain failure message; use 'getTypeDeclsLocated' to keep source spans.
 getTypeDecls :: Monad m
              => [QualifiedName]
              -> [Module SrcSpanInfo]
@@ -220,6 +249,10 @@ getTypeDeclsLocatedWithResolvers resolverFor modules = do
   -- later conversion error with an earlier cycle or saturation error.
   return $ map (either Left validate) rawList
 
+-- | Convert one source type in a fresh type-variable namespace, expand the
+-- given synonyms, and alpha-normalize its explicit @forall@ binders. This
+-- is 'convertTypeNoDecl' followed by 'applyTypeDecls'; the returned index
+-- holds the source spelling hints of the type's own variables.
 convertType :: Monad m
             => Map QualifiedName HsTypeClass
             -> Maybe (ModuleName SrcSpanInfo)
@@ -248,6 +281,9 @@ convertTypeWithResolver resolver mn declMap t = do
     $ TypeUtils.alphaNormalizeForalls IntSet.empty expanded
   return (normalized, index)
 
+-- | Stateful counterpart of 'convertType': convert one source type inside
+-- an existing 'ConversionT' scope, expand the given synonyms, and normalize
+-- @forall@ binders against the IDs the scope had already reserved.
 convertTypeInternal
   :: Monad m
   => Map QualifiedName HsTypeClass
@@ -275,6 +311,9 @@ convertTypeInternalWithResolver resolver defModuleName declMap t = do
   expanded <- either throwE pure $ applyTypeDecls (M.map Right declMap) ty
   normalizeConvertedForalls ambientVariables expanded
 
+-- | Parse a type from source text with the given HSE parse mode and convert
+-- it with 'convertType'. Parse and conversion failures are reported as
+-- located 'Diagnostic's, as described for 'parseHaskellSrcType'.
 parseType
   :: (Monad m)
   => Map QualifiedName HsTypeClass

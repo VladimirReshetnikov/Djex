@@ -77,6 +77,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC.Generics (Generic)
+import Data.Word (Word8)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Candidate
@@ -764,17 +765,21 @@ instance NFData (CheckedLengthSpinePairProblem identity local) where
     rnf (behavioralProblemEncodingFingerprint problem) `seq` rnf problem `seq`
     rnf scope
 
+-- | Normalized symbolic lengths computed for both components of the
+-- candidate's product result.
 checkedLengthSpinePairCandidateResult
   :: CheckedLengthSpinePairCandidate identity local
   -> LengthSpinePair (LengthExpression LengthContractVariable)
 checkedLengthSpinePairCandidateResult
     (CheckedLengthSpinePairCandidate result _ _) = result
 
+-- | Exact provider laws reached by lazy interpretation, in name order.
 checkedLengthSpinePairCandidateUsedProviders
   :: CheckedLengthSpinePairCandidate identity local -> [Name]
 checkedLengthSpinePairCandidateUsedProviders
     (CheckedLengthSpinePairCandidate _ providers _) = providers
 
+-- | Product-domain-wrapped candidate-only identity.
 checkedLengthSpinePairCandidateFingerprint
   :: CheckedLengthSpinePairCandidate identity local
   -> Fingerprint
@@ -782,35 +787,49 @@ checkedLengthSpinePairCandidateFingerprint
 checkedLengthSpinePairCandidateFingerprint
     (CheckedLengthSpinePairCandidate _ _ candidate) = candidate
 
+-- | Recover the interpreted product candidate receipt retained by the
+-- problem.
 checkedLengthSpinePairProblemCandidate
   :: CheckedLengthSpinePairProblem identity local
   -> CheckedLengthSpinePairCandidate identity local
 checkedLengthSpinePairProblemCandidate
     (CheckedLengthSpinePairProblem candidate _ _ _ _ _ _) = candidate
 
+-- | Number of compact source-ordered observed-spine inputs admitted by the
+-- sealed product contract, retained redundantly with the fingerprinted
+-- contract so a model decoder can reject missing or extra assignments.
 checkedLengthSpinePairProblemInputCount
   :: CheckedLengthSpinePairProblem identity local -> Int
 checkedLengthSpinePairProblemInputCount
     (CheckedLengthSpinePairProblem _ inputCount _ _ _ _ _) = inputCount
 
+-- | Normalized product contract precondition retained for ordered concrete
+-- replay.
 checkedLengthSpinePairProblemPrecondition
   :: CheckedLengthSpinePairProblem identity local
   -> LengthFormula LengthSpinePairContractVariable
 checkedLengthSpinePairProblemPrecondition
     (CheckedLengthSpinePairProblem _ _ precondition _ _ _ _) = precondition
 
+-- | Normalized product contract postcondition before candidate-result
+-- substitution.  Concrete replay evaluates this only after the precondition
+-- succeeds and binds both 'LengthSpinePairResult' components to the results
+-- computed from the checked candidate.
 checkedLengthSpinePairProblemPostcondition
   :: CheckedLengthSpinePairProblem identity local
   -> LengthFormula LengthSpinePairContractVariable
 checkedLengthSpinePairProblemPostcondition
     (CheckedLengthSpinePairProblem _ _ _ postcondition _ _ _) = postcondition
 
+-- | Solver-neutral bad-state formula: precondition and negated postcondition
+-- with both result components substituted, so only input variables remain.
 checkedLengthSpinePairProblemCounterexampleCondition
   :: CheckedLengthSpinePairProblem identity local
   -> LengthFormula LengthContractVariable
 checkedLengthSpinePairProblemCounterexampleCondition
     (CheckedLengthSpinePairProblem _ _ _ _ condition _ _) = condition
 
+-- | Concrete identity of contract, policy, used laws, results, and bad state.
 checkedLengthSpinePairProblemEncodingFingerprint
   :: CheckedLengthSpinePairProblem identity local
   -> Fingerprint
@@ -819,12 +838,17 @@ checkedLengthSpinePairProblemEncodingFingerprint
     (CheckedLengthSpinePairProblem _ _ _ _ _ problem _) =
   behavioralProblemEncodingFingerprint problem
 
+-- | Generic domain/inventory/encoding/candidate/problem envelope for the
+-- product domain.
 checkedLengthSpinePairProblemBehavioralProblem
   :: CheckedLengthSpinePairProblem identity local
   -> BehavioralProblem FiniteBinaryProductSpineLengthsV1
 checkedLengthSpinePairProblemBehavioralProblem
     (CheckedLengthSpinePairProblem _ _ _ _ _ problem _) = problem
 
+-- | Product-domain sibling of the candidate-independent replay-input scope:
+-- sealed solely from the exact session, revalidated contract, and normalized
+-- target, never from a candidate-specific field of this problem.
 checkedLengthSpinePairProblemCounterexampleBankScope
   :: CheckedLengthSpinePairProblem identity local
   -> LengthSpinePairCounterexampleBankScope identity
@@ -915,6 +939,10 @@ sealLengthTypedCandidateProblemInSession
 sealLengthTypedCandidateProblemInSession =
   sealLengthTypedCandidateProblemWithMode LengthSessionPolicyProblemSealer
 
+-- | Product-domain sibling of 'sealLengthTypedCandidateProblem'.  The
+-- candidate is interpreted to a binary spine pair, both components are
+-- normalized and substituted into the bad-state formula, and a contract with
+-- an unobserved target argument is rejected before any revalidation.
 sealLengthSpinePairTypedCandidateProblem
   :: (Ord identity, Ord local)
   => LengthProblemLimits
@@ -930,6 +958,9 @@ sealLengthSpinePairTypedCandidateProblem
 sealLengthSpinePairTypedCandidateProblem =
   sealLengthSpinePairTypedCandidateProblemWithMode LengthLegacyProblemSealer
 
+-- | Product-domain sibling of 'sealRoleAwareLengthTypedCandidateProblem'.
+-- A mixed contract requires a session sealed for mixed opaque-target
+-- semantics, and the contract's mixedness must match the session's policy.
 sealRoleAwareLengthSpinePairTypedCandidateProblem
   :: (Ord identity, Ord local)
   => LengthProblemLimits
@@ -945,6 +976,10 @@ sealRoleAwareLengthSpinePairTypedCandidateProblem
 sealRoleAwareLengthSpinePairTypedCandidateProblem =
   sealLengthSpinePairTypedCandidateProblemWithMode LengthRoleAwareProblemSealer
 
+-- | Product-domain sibling of
+-- 'sealExactSpineCaseLengthTypedCandidateProblem'.  The session must have
+-- been sealed with the exact zero/step case policy; the legacy and role-aware
+-- product sealers instead require a session that rejects cases.
 sealExactSpineCaseLengthSpinePairTypedCandidateProblem
   :: (Ord identity, Ord local)
   => LengthProblemLimits
@@ -961,6 +996,10 @@ sealExactSpineCaseLengthSpinePairTypedCandidateProblem =
   sealLengthSpinePairTypedCandidateProblemWithMode
     LengthExactSpineCaseProblemSealer
 
+-- | Product-domain sibling of 'sealLengthTypedCandidateProblemInSession'.
+-- The session's own case policy is required, and an explicitly associated
+-- target-role vector must equal the contract's roles, order and arity
+-- included, before the contract is resealed through the session.
 sealLengthSpinePairTypedCandidateProblemInSession
   :: (Ord identity, Ord local)
   => LengthProblemLimits
@@ -3033,46 +3072,9 @@ buildCandidateFingerprint
   -> Either FingerprintLimitError
       (Fingerprint
         (CandidateFingerprintSubject FiniteListSpineLengthV1))
-buildCandidateFingerprint session authority graph =
-  buildFingerprintWithin maximumBytes FingerprintBuilder
-    { fingerprintBuilderVersion = case authority of
-        LengthPlainCandidateAuthority -> 1
-        LengthOpaqueAssociatedCertificateAuthority -> 2
-        LengthGroundDischargedAssociatedCertificateAuthority -> 3
-    , fingerprintBuilderRole = ascii
-        "finite-list-spine-length/typed-candidate"
-    , fingerprintBuilderFields =
-        [ tagged "dialect"
-            [FingerprintBytes finiteListSpineLengthDomainTag]
-        , tagged "shared-typed-term-graph"
-            [FingerprintBytes $ fingerprintCanonicalBytes graph]
-        , tagged "candidate-authority" $
-            [ FingerprintBytes $ ascii "engine-owned-association/v1"
-            , FingerprintBytes $ ascii "empty-residual-constraints/v1"
-            , FingerprintBytes $ ascii "candidate-only-no-batch-status/v1"
-            ] ++ associatedAuthority
-        ]
-    }
- where
-  associatedAuthority = case authority of
-    LengthPlainCandidateAuthority -> []
-    LengthOpaqueAssociatedCertificateAuthority ->
-      [ FingerprintBytes $ ascii "opaque-associated-certificate/v1"
-      , FingerprintBytes $ ascii "activated-obligations-empty/v1"
-      ]
-    LengthGroundDischargedAssociatedCertificateAuthority ->
-      [ FingerprintBytes $ ascii "opaque-associated-certificate/v1"
-      , FingerprintBytes $ ascii "independent-ground-class-discharge/v1"
-      , FingerprintBytes $ ascii "inventory-bound-discharge-receipts/v1"
-      , FingerprintBytes $ ascii
-          "provider-law-uniform-over-dictionary-evidence/v1"
-      , FingerprintBytes $ ascii "occurrence-specific-final-provider/v1"
-      , FingerprintBytes $ ascii "protected-certified-function-prefix/v1"
-      , FingerprintBytes $ ascii
-          "static-discharge-without-givens-or-z3/v1"
-      ]
-  maximumBytes = fromIntegral $ lengthFingerprintByteLimit
-    $ checkedLengthSessionLimits session
+buildCandidateFingerprint = buildCandidateFingerprintWith
+  "finite-list-spine-length/typed-candidate"
+  finiteListSpineLengthDomainTag
 
 buildSpinePairCandidateFingerprint
   :: CheckedLengthSession identity annotation
@@ -3081,17 +3083,30 @@ buildSpinePairCandidateFingerprint
   -> Either FingerprintLimitError
       (Fingerprint
         (CandidateFingerprintSubject FiniteBinaryProductSpineLengthsV1))
-buildSpinePairCandidateFingerprint session authority graph =
+buildSpinePairCandidateFingerprint = buildCandidateFingerprintWith
+  "finite-binary-product-spine-lengths/typed-candidate"
+  finiteBinaryProductSpineLengthsDomainTag
+
+-- | One shared candidate-fingerprint builder: the domain contributes its
+-- role and dialect tag, and everything else -- the authority-selected
+-- version, the shared typed term graph, and the exact candidate-authority
+-- byte vocabulary -- is identical by construction.
+buildCandidateFingerprintWith
+  :: String
+  -> [Word8]
+  -> CheckedLengthSession identity annotation
+  -> LengthCandidateAuthority
+  -> Fingerprint TermGraphFingerprintSubject
+  -> Either FingerprintLimitError (Fingerprint subject)
+buildCandidateFingerprintWith role dialectTag session authority graph =
   buildFingerprintWithin maximumBytes FingerprintBuilder
     { fingerprintBuilderVersion = case authority of
         LengthPlainCandidateAuthority -> 1
         LengthOpaqueAssociatedCertificateAuthority -> 2
         LengthGroundDischargedAssociatedCertificateAuthority -> 3
-    , fingerprintBuilderRole = ascii
-        "finite-binary-product-spine-lengths/typed-candidate"
+    , fingerprintBuilderRole = ascii role
     , fingerprintBuilderFields =
-        [ tagged "dialect"
-            [FingerprintBytes finiteBinaryProductSpineLengthsDomainTag]
+        [ tagged "dialect" [FingerprintBytes dialectTag]
         , tagged "shared-typed-term-graph"
             [FingerprintBytes $ fingerprintCanonicalBytes graph]
         , tagged "candidate-authority" $
@@ -3131,27 +3146,11 @@ buildCompleteProblemFingerprint
   -> Either FingerprintLimitError
       (Fingerprint
         (ProblemFingerprintSubject FiniteListSpineLengthV1))
-buildCompleteProblemFingerprint session encoding candidate =
-  buildFingerprintWithin maximumBytes FingerprintBuilder
-    { fingerprintBuilderVersion = 1
-    , fingerprintBuilderRole = ascii
-        "finite-list-spine-length/behavioral-problem"
-    , fingerprintBuilderFields =
-        [ tagged "dialect"
-            [FingerprintBytes finiteListSpineLengthDomainTag]
-        , tagged "inventory"
-            [ FingerprintBytes $ fingerprintCanonicalBytes
-                $ lengthSessionInventoryFingerprint session
-            ]
-        , tagged "encoding"
-            [FingerprintBytes $ fingerprintCanonicalBytes encoding]
-        , tagged "candidate"
-            [FingerprintBytes $ fingerprintCanonicalBytes candidate]
-        ]
-    }
- where
-  maximumBytes = fromIntegral $ lengthFingerprintByteLimit
-    $ checkedLengthSessionLimits session
+buildCompleteProblemFingerprint session =
+  buildCompleteProblemFingerprintWith
+    "finite-list-spine-length/behavioral-problem"
+    finiteListSpineLengthDomainTag
+    session (lengthSessionInventoryFingerprint session)
 
 buildSpinePairCompleteProblemFingerprint
   :: CheckedLengthSession identity annotation
@@ -3164,14 +3163,30 @@ buildSpinePairCompleteProblemFingerprint
   -> Either FingerprintLimitError
       (Fingerprint
         (ProblemFingerprintSubject FiniteBinaryProductSpineLengthsV1))
-buildSpinePairCompleteProblemFingerprint session inventory encoding candidate =
+buildSpinePairCompleteProblemFingerprint =
+  buildCompleteProblemFingerprintWith
+    "finite-binary-product-spine-lengths/behavioral-problem"
+    finiteBinaryProductSpineLengthsDomainTag
+
+-- | One shared behavioral-problem fingerprint builder over the domain's
+-- role, dialect tag, and four constituent fingerprints.  The scalar wrapper
+-- supplies the session-owned inventory fingerprint; the product wrapper
+-- receives its structurally derived product inventory explicitly.
+buildCompleteProblemFingerprintWith
+  :: String
+  -> [Word8]
+  -> CheckedLengthSession identity annotation
+  -> Fingerprint inventorySubject
+  -> Fingerprint encodingSubject
+  -> Fingerprint candidateSubject
+  -> Either FingerprintLimitError (Fingerprint subject)
+buildCompleteProblemFingerprintWith role dialectTag session inventory
+    encoding candidate =
   buildFingerprintWithin maximumBytes FingerprintBuilder
     { fingerprintBuilderVersion = 1
-    , fingerprintBuilderRole = ascii
-        "finite-binary-product-spine-lengths/behavioral-problem"
+    , fingerprintBuilderRole = ascii role
     , fingerprintBuilderFields =
-        [ tagged "dialect"
-            [FingerprintBytes finiteBinaryProductSpineLengthsDomainTag]
+        [ tagged "dialect" [FingerprintBytes dialectTag]
         , tagged "inventory"
             [FingerprintBytes $ fingerprintCanonicalBytes inventory]
         , tagged "encoding"
@@ -3183,3 +3198,4 @@ buildSpinePairCompleteProblemFingerprint session inventory encoding candidate =
  where
   maximumBytes = fromIntegral $ lengthFingerprintByteLimit
     $ checkedLengthSessionLimits session
+

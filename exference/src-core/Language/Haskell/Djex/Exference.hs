@@ -94,7 +94,7 @@ import Control.Exception
   , fromException
   , tryJust
   )
-import Control.Monad (foldM)
+import Control.Monad (foldM, unless, when)
 import Data.Bifunctor (first)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
@@ -791,9 +791,8 @@ prepareProviderInstantiationCandidates session rawCandidates
         (renderCanonical provider)
     elaborated <- first (candidateElaborationFailure provider)
       $ Session.elaborateSessionGoal session candidateType
-    if CorePolytype.isVisibleTypeCandidate elaborated
-      then pure ()
-      else Left $ shownErrorDiagnostic
+    unless (CorePolytype.isVisibleTypeCandidate elaborated)
+      $ Left $ shownErrorDiagnostic
         "DJEX_EXF_CANDIDATE_TYPE"
         "invalid Exference provider instantiation candidate type"
         (provider, elaborated)
@@ -859,17 +858,16 @@ prepareProviderInstantiationAssignments session evidence
             )
         label = "provider instantiation assignment #" ++
           show assignmentIndex ++ " for " ++ renderCanonical provider
-    if argumentCount == 0
-      then Left $ shownErrorDiagnostic
+    when (argumentCount == 0)
+      $ Left $ shownErrorDiagnostic
         "DJEX_EXF_ASSIGNMENT_ARITY"
         "Exference provider instantiation assignment is empty"
         label
-      else if argumentCount > maximumProviderInstantiationArguments
-        then Left $ shownErrorDiagnostic
-          "DJEX_EXF_ASSIGNMENT_ARGUMENT_LIMIT"
-          "too many Exference provider instantiation arguments"
-          (label, maximumProviderInstantiationArguments, argumentCount)
-        else pure ()
+    when (argumentCount > maximumProviderInstantiationArguments)
+      $ Left $ shownErrorDiagnostic
+        "DJEX_EXF_ASSIGNMENT_ARGUMENT_LIMIT"
+        "too many Exference provider instantiation arguments"
+        (label, maximumProviderInstantiationArguments, argumentCount)
     scheme <- case CoreInternal.exferenceEnvironmentBindingScheme
         provider searchEnvironment of
       Nothing -> Left $ contextualDiagnostic Error
@@ -879,15 +877,11 @@ prepareProviderInstantiationAssignments session evidence
       Just retainedScheme -> Right retainedScheme
     let (binders, constraints, schemeBody) =
           SharedType.splitLeadingForalls scheme
-    if length binders == argumentCount
-      then pure ()
-      else Left $ shownErrorDiagnostic
+    unless (length binders == argumentCount) $ Left $ shownErrorDiagnostic
         "DJEX_EXF_ASSIGNMENT_ARITY"
         "Exference provider instantiation assignment has the wrong arity"
         (label, length binders, argumentCount)
-    if null constraints
-      then pure ()
-      else Left $ shownErrorDiagnostic
+    unless (null constraints) $ Left $ shownErrorDiagnostic
         "DJEX_EXF_ASSIGNMENT_CONTEXT"
         "Exference provider instantiation assignment targets a contextual scheme"
         (label, constraints)
@@ -953,9 +947,8 @@ prepareProviderInstantiationAssignments session evidence
   prepareArgument label (argumentIndex, binderKind, source) = do
     elaborated <- first (assignmentElaborationFailure label argumentIndex)
       $ Session.elaborateSessionTypeAtKind session binderKind source
-    if Set.null (SharedType.freeVariables elaborated)
-      then pure ()
-      else Left $ shownErrorDiagnostic
+    unless (Set.null (SharedType.freeVariables elaborated))
+      $ Left $ shownErrorDiagnostic
         "DJEX_EXF_ASSIGNMENT_TYPE"
         "Exference provider instantiation argument is not closed"
         (label, argumentIndex, elaborated)

@@ -136,7 +136,9 @@ silently discarded.
 <!-- Maintainers: the rank-N/impredicative rule families and their numeric
 bounds are canonical in docs/rank-n.md; this section is a summary rendering.
 Change a rule or bound there first, then re-check this section, the README's
-Unified command section, docs/library-api.md, and the codebase walkthrough. -->
+Unified command section, docs/library-api.md, and the joint Djex/Leant
+codebase walkthrough (docs/Djex_Leant_Codebase_Walkthrough/ in the Leant
+repository). -->
 
 The shared parser enables `RankNTypes` and `ImpredicativeTypes`. Quantification
 may therefore occur below arrows and type constructors, including a list of
@@ -420,7 +422,9 @@ result is not upgraded to Djinn's proof-backed non-inhabitation evidence.
 Exact aliases win; otherwise any nonempty, unique prefix of a canonical
 command is accepted. For example, `:q` is `:quit`, `:s` is deliberately
 `:set`, and `:sy` is `:synth`. Tab completion offers commands, backend names,
-settings, `:show` subjects, and paths where appropriate. Argument completion
+settings (including the `+NAME`/`-NAME` Boolean forms and the accepted values
+of `backend`, `djinn-strategy`, and `heuristic`), `:show` subjects, and paths
+where appropriate. Argument completion
 uses the same command descriptor as parsing, so exact aliases and accepted
 unique prefixes behave like the canonical command; `:module` completion also
 preserves a typed `+`, `-`, or `*` marker. Completion follows the loaded
@@ -924,8 +928,12 @@ Use any of these forms:
 ```
 
 Bare `:set` also prints an informational `targets = ...` line beside the
-seventeen settings; the target set is workspace state owned by `:load`, not a
+twenty settings; the target set is workspace state owned by `:load`, not a
 setting, so `:set targets`/`:unset targets` are rejected.
+
+A bare `:set NAME` is not a getter: it is rejected as `setting NAME requires
+a value` (or `requires on or off` for a Boolean). Read current values with
+bare `:set` or `:show settings`.
 
 Boolean values also accept `true`/`false` and `yes`/`no`. The compact
 `+NAME`/`-NAME` forms are available only for the boolean settings listed below;
@@ -936,6 +944,9 @@ transactional behavior.
 A bare `prompt` value is trimmed like any other setting value, so trailing
 whitespace survives only through the Haskell string-literal form: the default
 is reproduced by `:set prompt "djex[%b]> "`, not by the unquoted spelling.
+Because `:set` gives the first `=` to the *setting name*, a prompt containing
+`=` must also use the quoted `:set prompt="djex => "` form; the unquoted
+spelling is rejected as an unknown setting.
 
 | Setting | Accepted values | Default | Owner |
 | --- | --- | --- | --- |
@@ -945,8 +956,10 @@ is reproduced by `:set prompt "djex[%b]> "`, not by the unquoted spelling.
 | `render` | `definition`, `expression` | `definition` | Shared presentation |
 | `qualification` | `none`, `identifiers`, `full` | `full` | Shared presentation |
 | `prompt` | Text, or a Haskell string literal; `%b` expands to the active selection | `"djex[%b]> "` | Interactive UI |
+| `timeout` | Non-negative integer seconds; `0` means no budget | `0` | Shared search |
 | `candidate-limit` | Positive integer | `200` | Djinn |
 | `choice-budget` | Non-negative integer; `0` means unbounded | `0` | Djinn |
+| `djinn-strategy` | `depth-first`, `interleave` | `depth-first` | Djinn |
 | `djinn-axioms` | Boolean | Off | Djinn |
 | `allow-unused` | Boolean | Off | Exference |
 | `allow-constraints` | Boolean | Off | Exference |
@@ -955,7 +968,36 @@ is reproduced by `:set prompt "djex[%b]> "`, not by the unquoted spelling.
 | `max-steps` | Positive integer | `65536` | Exference |
 | `max-queue` | Non-negative integer or `unbounded` | `8192` | Exference |
 | `max-depth` | Finite non-negative number or `unbounded` | `unbounded` | Exference |
+| `heuristic` | `NAME VALUE`: a weight name and a finite non-negative number | The thirteen built-in weights | Exference |
 | `fix` | Boolean | Off | Exference load policy |
+
+`timeout` is the only wall-clock bound in the REPL: the engines otherwise
+stop on step, queue, depth, choice-point and candidate bounds, which are
+machine-independent but say nothing about how long a query runs. The budget starts once the checked request exists and covers search,
+selection, rendering and reporting -- all of it, because both engines produce
+results lazily and in different places. Parsing and request validation happen
+before the clock starts. Under `backend both` and `:compare` each backend run gets
+its own fresh budget. An expired budget reports `[DJEX_SEARCH_TIMEOUT]` and
+abandons the search where it stands: with `select = all` the candidates
+already printed stay printed, and no query is ever reported as answered on a
+budget stop. It does not apply to `:load`, `:eval`, `:type` or the package
+commands, and Ctrl+C still interrupts anything.
+
+`djinn-strategy` chooses how the prover explores its choice points.
+`depth-first` is the historical order; `interleave` alternates between
+branches, so an expensive dead end cannot starve a cheap alternative. The
+choice reorders candidates and changes how a `choice-budget` is spent; it
+never changes which types are inhabited, and `depth-first` remains the
+measured-faster default (see `djinn/docs/reports/2026-07-10-search-budget.md`).
+
+`heuristic` assigns one Exference ranking weight at a time and reports all
+thirteen: `:set heuristic goalVar 3.5` retunes one weight, `:show settings`
+prints them all as `name=value`, and `:unset heuristic` restores every one.
+The name and the value are separated by whitespace rather than `=`, because
+the `:set` grammar gives the first `=` to the setting name. Names are matched
+case-insensitively and exactly; `:help set` lists them. Weights must be
+finite and non-negative, since search-option validation would otherwise
+reject the query.
 
 The interactive default is `select = first`, unlike the one-shot command's
 global-best default. It makes an exploratory prompt responsive and preserves
@@ -965,8 +1007,10 @@ selection use the same checked presentation path as the one-shot frontend,
 including residual-constraint reporting and truncation or evidence messages.
 
 Changing a setting affects subsequent queries but does not mutate a sealed
-backend session, except for `fix`, whose meaning belongs to Exference session
-construction and therefore transactionally rebuilds the current workspace.
+backend session, with two exceptions whose meaning belongs to session
+construction: `fix` transactionally rebuilds the Exference workspace, and
+`djinn-axioms` transactionally reprojects the Djinn session. Both keep the
+previous session if the rebuild fails.
 `:unset` restores the built-in value, not the corresponding startup option;
 thus `:unset backend` returns to `djinn` even if the session started with
 `--backend both`.
@@ -1195,7 +1239,9 @@ Late argument validation retains the command's diagnostic family:
 `DJEX_REPL_SHOW`, `DJEX_REPL_INFO`, and `DJEX_REPL_HISTORY`, respectively;
 an unknown `:help` subject is a `DJEX_REPL_COMMAND` error.
 `DJEX_REPL_SETTING` is reserved for `:set` and `:unset`, including an invalid
-sign form.
+sign form.  A query that runs out its `timeout` budget reports
+`DJEX_SEARCH_TIMEOUT` and leaves the session intact, like any other
+recoverable diagnostic; it is a bounded stop, never a verdict about the type.
 
 Failures needed before the loop can exist, such as failure to build the
 standard Djinn session or validate a requested history path, make `runRepl`

@@ -667,17 +667,28 @@ canonicalHoleSlot
   :: Ord local
   => local
   -> FingerprintM identity local Natural
-canonicalHoleSlot local = do
+canonicalHoleSlot = canonicalSlotIn fingerprintHoleSlots fingerprintNextHoleSlot
+  $ \slots next state ->
+    state {fingerprintHoleSlots = slots, fingerprintNextHoleSlot = next}
+
+-- Allocate or reuse the canonical slot of one key in a slot table, numbering
+-- fresh keys in first-observation order.  The flexible, rigid and hole
+-- tables differ only in which state fields they read and write.
+canonicalSlotIn
+  :: Ord key
+  => (FingerprintState identity local -> Map key Natural)
+  -> (FingerprintState identity local -> Natural)
+  -> (Map key Natural -> Natural
+      -> FingerprintState identity local -> FingerprintState identity local)
+  -> key
+  -> FingerprintM identity local Natural
+canonicalSlotIn slots nextSlot store key = do
   state <- get
-  case Map.lookup local $ fingerprintHoleSlots state of
+  case Map.lookup key $ slots state of
     Just slot -> pure slot
     Nothing -> do
-      let slot = fingerprintNextHoleSlot state
-      put state
-        { fingerprintHoleSlots = Map.insert local slot
-            $ fingerprintHoleSlots state
-        , fingerprintNextHoleSlot = slot + 1
-        }
+      let slot = nextSlot state
+      put $ store (Map.insert key slot $ slots state) (slot + 1) state
       pure slot
 
 fingerprintType
@@ -707,35 +718,19 @@ canonicalFlexibleSlot
   :: Ord identity
   => identity
   -> FingerprintM identity local Natural
-canonicalFlexibleSlot identity = do
-  state <- get
-  case Map.lookup identity $ fingerprintFlexibleSlots state of
-    Just slot -> pure slot
-    Nothing -> do
-      let slot = fingerprintNextFlexibleSlot state
-      put state
-        { fingerprintFlexibleSlots = Map.insert identity slot
-            $ fingerprintFlexibleSlots state
-        , fingerprintNextFlexibleSlot = slot + 1
-        }
-      pure slot
+canonicalFlexibleSlot =
+  canonicalSlotIn fingerprintFlexibleSlots fingerprintNextFlexibleSlot
+    $ \slots next state -> state
+      {fingerprintFlexibleSlots = slots, fingerprintNextFlexibleSlot = next}
 
 canonicalRigidSlot
   :: Ord identity
   => identity
   -> FingerprintM identity local Natural
-canonicalRigidSlot identity = do
-  state <- get
-  case Map.lookup identity $ fingerprintRigidSlots state of
-    Just slot -> pure slot
-    Nothing -> do
-      let slot = fingerprintNextRigidSlot state
-      put state
-        { fingerprintRigidSlots = Map.insert identity slot
-            $ fingerprintRigidSlots state
-        , fingerprintNextRigidSlot = slot + 1
-        }
-      pure slot
+canonicalRigidSlot =
+  canonicalSlotIn fingerprintRigidSlots fingerprintNextRigidSlot
+    $ \slots next state ->
+      state {fingerprintRigidSlots = slots, fingerprintNextRigidSlot = next}
 
 canonicalTypeVariableField :: CanonicalTypeVariable -> FingerprintField
 canonicalTypeVariableField variable = case variable of

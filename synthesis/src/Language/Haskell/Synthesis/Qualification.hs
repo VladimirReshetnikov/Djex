@@ -13,6 +13,7 @@ module Language.Haskell.Synthesis.Qualification
   , emittedIdentifier
   ) where
 
+import Data.Maybe (isNothing)
 import Control.DeepSeq (NFData)
 import GHC.Generics (Generic)
 
@@ -83,5 +84,5 @@ emittedNameModule qualification name = case qualification of
 emittedIdentifier :: Qualification -> Name -> Maybe String
 emittedIdentifier qualification name = case nameOccurrence name of
   IdentifierOccurrence VariableLike spelling
-    | emittedNameModule qualification name == Nothing -> Just spelling
+    | isNothing (emittedNameModule qualification name) -> Just spelling
   _ -> Nothing

@@ -54,7 +54,8 @@ import Language.Haskell.Synthesis.Internal.SMTLib.Lexical
   ( isSMTLibBareDelimiterByte
   , isSMTLibQuotedSymbolCharacterByte
   , isSMTLibStringCharacterByte
-  , isSMTLibWhitespaceByte )
+  , isSMTLibWhitespaceByte
+  , retainExactByteCount )
 
 -- | Lexical and charged-byte accounting policy bound by higher protocol and
 -- future live-session identities.  V2 adds the exact completion count without
@@ -63,6 +64,8 @@ smtLibStreamFramingSchemaTag :: [Word8]
 smtLibStreamFramingSchemaTag =
   ascii "djex-smtlib2-stream-framing/v2"
 
+-- | Exact number of nonce bytes 'mkSMTLibEchoSentinel' requires (256 bits);
+-- any other length is rejected with 'SMTLibEchoSentinelNonceLengthMismatch'.
 smtLibEchoSentinelNonceByteCount :: Natural
 smtLibEchoSentinelNonceByteCount = 32
 
@@ -78,6 +81,9 @@ instance Eq SMTLibEchoSentinel where
 instance NFData SMTLibEchoSentinel where
   rnf (SMTLibEchoSentinel response) = rnf response
 
+-- | Why 'mkSMTLibEchoSentinel' rejected a nonce.  The mismatch carries the
+-- expected count followed by the observed count, which stops at expected
+-- plus one for over-long input.
 data SMTLibEchoSentinelError
   = SMTLibEchoSentinelNonceLengthMismatch !Natural !Natural
   deriving (Eq, Ord, Show, Generic)
@@ -98,10 +104,15 @@ mkSMTLibEchoSentinel rawNonce = do
       response = doubleQuote : content ++ [doubleQuote]
   pure $ SMTLibEchoSentinel response
 
+-- | Exact @echo@ command bytes to send for this sentinel: the response
+-- string wrapped in @(echo ...)@ and terminated by a single line feed.
 smtLibEchoSentinelCommandBytes :: SMTLibEchoSentinel -> [Word8]
 smtLibEchoSentinelCommandBytes (SMTLibEchoSentinel response) =
   ascii "(echo " ++ response ++ [closeParen, lineFeed]
 
+-- | Exact frame bytes the solver must echo back, including the surrounding
+-- double quotes.  A frame equal to these bytes satisfies
+-- 'isExactSMTLibEchoSentinelResponse'.
 smtLibEchoSentinelResponseBytes :: SMTLibEchoSentinel -> [Word8]
 smtLibEchoSentinelResponseBytes (SMTLibEchoSentinel response) = response
 
@@ -131,6 +142,9 @@ data SMTLibStreamLimitSource = SMTLibStreamLimitSource
 
 instance NFData SMTLibStreamLimitSource
 
+-- | Retained framing bounds, in the order total bytes, frame bytes, nesting
+-- depth.  Constructed only through 'mkSMTLibStreamLimits' and read back
+-- through the three @smtLibStream...Limit@ projections.
 data SMTLibStreamLimits = SMTLibStreamLimits
   !Natural !Natural !Natural
   deriving (Eq, Ord, Show)
@@ -139,12 +153,16 @@ instance NFData SMTLibStreamLimits where
   rnf (SMTLibStreamLimits total frame depth) =
     rnf total `seq` rnf frame `seq` rnf depth
 
+-- | Retain the three source bounds verbatim; no validation is performed, so
+-- any 'Natural' values are accepted.
 mkSMTLibStreamLimits :: SMTLibStreamLimitSource -> SMTLibStreamLimits
 mkSMTLibStreamLimits source = SMTLibStreamLimits
   (smtLibStreamLimitSourceTotalBytes source)
   (smtLibStreamLimitSourceFrameBytes source)
   (smtLibStreamLimitSourceNestingDepth source)
 
+-- | Default raw bounds: 131072 total bytes, 65536 retained frame bytes, and
+-- a nesting depth of 64.
 defaultSMTLibStreamLimitSource :: SMTLibStreamLimitSource
 defaultSMTLibStreamLimitSource = SMTLibStreamLimitSource
   { smtLibStreamLimitSourceTotalBytes = 131072
@@ -152,16 +170,25 @@ defaultSMTLibStreamLimitSource = SMTLibStreamLimitSource
   , smtLibStreamLimitSourceNestingDepth = 64
   }
 
+-- | 'defaultSMTLibStreamLimitSource' retained through
+-- 'mkSMTLibStreamLimits'.
 defaultSMTLibStreamLimits :: SMTLibStreamLimits
 defaultSMTLibStreamLimits =
   mkSMTLibStreamLimits defaultSMTLibStreamLimitSource
 
+-- | Maximum number of bytes one frame may charge, counting discarded leading
+-- trivia as well as retained frame bytes; the framer fails with
+-- 'SMTLibStreamTotalByteLimitExceeded' on the first byte past it.
 smtLibStreamTotalByteLimit :: SMTLibStreamLimits -> Natural
 smtLibStreamTotalByteLimit (SMTLibStreamLimits value _ _) = value
 
+-- | Maximum number of retained expression bytes in one frame; the framer
+-- fails with 'SMTLibStreamFrameByteLimitExceeded' on the first byte past it.
 smtLibStreamFrameByteLimit :: SMTLibStreamLimits -> Natural
 smtLibStreamFrameByteLimit (SMTLibStreamLimits _ value _) = value
 
+-- | Maximum number of simultaneously open parenthesised lists; opening one
+-- more fails with 'SMTLibStreamNestingDepthLimitExceeded'.
 smtLibStreamNestingDepthLimit :: SMTLibStreamLimits -> Natural
 smtLibStreamNestingDepthLimit (SMTLibStreamLimits _ _ value) = value
 
@@ -235,6 +262,9 @@ instance NFData SMTLibStreamFramer where
     rnf frame `seq`
     rnf bytes
 
+-- | Fresh framer for one expected response frame: nothing consumed, no open
+-- lists, no retained bytes.  Feed chunks with 'feedSMTLibStreamFramer' and
+-- resolve end of input with 'finishSMTLibStreamFramer'.
 startSMTLibStreamFramer :: SMTLibStreamLimits -> SMTLibStreamFramer
 startSMTLibStreamFramer limits = SMTLibStreamFramer
   { streamLimits = limits
@@ -300,6 +330,8 @@ finishSMTLibStreamFramer framer = case streamMode framer of
     | insideList framer -> unterminatedList framer
     | otherwise -> Right Nothing
 
+-- | Number of bytes charged so far against the total bound, including
+-- discarded leading trivia; a completion lookahead byte is not counted.
 smtLibStreamFramerConsumedBytes :: SMTLibStreamFramer -> Natural
 smtLibStreamFramerConsumedBytes = streamConsumed
 
@@ -539,18 +571,8 @@ unterminatedList framer = case streamOpenLists framer of
 retainExactNonce
   :: [Word8]
   -> Either SMTLibEchoSentinelError [Word8]
-retainExactNonce = go 0 []
- where
-  expected = smtLibEchoSentinelNonceByteCount
-  go !observed reversed []
-    | observed == expected = Right $ reverse reversed
-    | otherwise = Left $ SMTLibEchoSentinelNonceLengthMismatch
-        expected observed
-  go !observed _ (_ : _)
-    | observed == expected = Left $
-        SMTLibEchoSentinelNonceLengthMismatch expected (expected + 1)
-  go !observed reversed (byte : bytes) =
-    go (observed + 1) (byte : reversed) bytes
+retainExactNonce = retainExactByteCount smtLibEchoSentinelNonceByteCount
+  SMTLibEchoSentinelNonceLengthMismatch
 
 hexadecimalByte :: Word8 -> [Word8]
 hexadecimalByte byte =

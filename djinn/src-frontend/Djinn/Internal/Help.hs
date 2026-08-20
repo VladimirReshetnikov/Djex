@@ -1,8 +1,14 @@
+-- | The long-form help text of the historical @djinn@ frontend: a
+-- command-by-command explanation with worked examples, further examples,
+-- and the theory note on LJT.  It is a single string constant that "Djinn"
+-- prints after the command summary for @:verbose-help@ (or @:verboseHelp@).
 module Djinn.Internal.Help (verboseHelp) where
 
 import Data.Version (showVersion)
 import Paths_djex (version)
 
+-- | The long-form explanation of every REPL command, with examples, that
+-- @:verboseHelp@ prints after the regular command summary.
 verboseHelp :: String
 verboseHelp = "\
 \\n\

@@ -780,17 +780,8 @@ freshenSynonymBody
   -> Set variable
   -> Type variable
   -> Expansion variable (Type variable)
-freshenSynonymBody fresh protected source = do
-  reserved <- get
-  result <- case freshenTypeBindersAwayFrom
-      fresh reserved protected source of
-    Left (FreshVariableSupplyExhausted binder) ->
-      lift $ Left $ FreshVariableUnavailable binder
-    Left (FreshVariableAlreadyReserved binder candidate) ->
-      lift $ Left $ FreshVariableCollision binder candidate
-    Right freshened -> pure freshened
-  put $ reserved `Set.union` typeVariables result
-  pure result
+freshenSynonymBody fresh protected source = underExpansionSupply $ \reserved ->
+  freshenTypeBindersAwayFrom fresh reserved protected source
 
 substitute
   :: Ord variable
@@ -798,18 +789,27 @@ substitute
   -> Map variable (Type variable)
   -> Type variable
   -> Expansion variable (Type variable)
-substitute fresh substitutions source = do
+substitute fresh substitutions source = underExpansionSupply $ \reserved ->
+  substituteTypeVariables fresh reserved substitutions source
+
+-- | Run one capture-avoiding 'Type' primitive under the expansion supply.
+-- The primitive sees every identity currently reserved, its allocator
+-- failures become expansion errors, and every binder it allocated is fed
+-- back into the wider synonym-expansion supply: the shared primitives own a
+-- local supply, and later instantiations must preserve the historical
+-- deterministic freshness sequence.
+underExpansionSupply
+  :: Ord variable
+  => (Set variable -> Either (SubstitutionError variable) (Type variable))
+  -> Expansion variable (Type variable)
+underExpansionSupply primitive = do
   reserved <- get
-  result <- case substituteTypeVariables
-      fresh reserved substitutions source of
+  result <- case primitive reserved of
     Left (FreshVariableSupplyExhausted binder) ->
       lift $ Left $ FreshVariableUnavailable binder
     Left (FreshVariableAlreadyReserved binder candidate) ->
       lift $ Left $ FreshVariableCollision binder candidate
-    Right substituted -> pure substituted
-  -- The shared primitive owns a local supply. Feed every allocated binder
-  -- back into the wider synonym-expansion supply so later instantiations
-  -- preserve the historical deterministic freshness sequence.
+    Right value -> pure value
   put $ reserved `Set.union` typeVariables result
   pure result
 

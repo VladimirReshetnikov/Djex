@@ -63,18 +63,25 @@ instance NFData SMTLibCausalStreamPolicy where
   rnf (SMTLibCausalStreamPolicy stream cumulative) =
     rnf stream `seq` rnf cumulative
 
+-- | Pair a per-frame framer policy with a transaction-wide byte maximum.  No
+-- validation is performed; every cursor started from the policy caps its
+-- framer's total bound at the budget remaining under the cumulative maximum.
 mkSMTLibCausalStreamPolicy
   :: SMTLibStreamLimits
   -> Natural
   -> SMTLibCausalStreamPolicy
 mkSMTLibCausalStreamPolicy = SMTLibCausalStreamPolicy
 
+-- | The configured per-frame limits (total, frame, and nesting-depth bounds)
+-- applied to each frame before the cumulative budget narrows the total.
 smtLibCausalStreamPolicyStreamLimits
   :: SMTLibCausalStreamPolicy
   -> SMTLibStreamLimits
 smtLibCausalStreamPolicyStreamLimits
     (SMTLibCausalStreamPolicy value _) = value
 
+-- | The maximum number of bytes one whole transaction may charge across all
+-- of its frames and boundary whitespace.
 smtLibCausalStreamPolicyCumulativeByteLimit
   :: SMTLibCausalStreamPolicy
   -> Natural
@@ -108,9 +115,13 @@ data SMTLibCausalStreamStep
   = SMTLibCausalStreamPending SMTLibCausalStreamCursor
   | SMTLibCausalStreamComplete SMTLibCausalStreamCompletedFrame
 
--- All fields deliberately remain lazy.  The underlying framing step also
--- leaves frame bytes, charged count, and untouched tail lazy; opening this
--- transient continuation must not move parsing or boundary demand earlier.
+-- | One completed frame together with the policy it was charged under, its
+-- absolute end offset, and the untouched tail that followed it; the tail and
+-- offset are reachable only through 'continueSMTLibCausalStreamCompletedFrame'
+-- or 'consumeSMTLibCausalStreamBoundaryWhitespace'.  All fields deliberately
+-- remain lazy.  The underlying framing step also leaves frame bytes, charged
+-- count, and untouched tail lazy; opening this transient continuation must
+-- not move parsing or boundary demand earlier.
 data SMTLibCausalStreamCompletedFrame = SMTLibCausalStreamCompletedFrame
   [Word8]
   SMTLibCausalStreamPolicy
@@ -127,6 +138,9 @@ instance NFData SMTLibCausalStreamBoundary where
   rnf (SMTLibCausalStreamBoundary policy offset) =
     rnf policy `seq` rnf offset
 
+-- | Begin a transaction's first frame at absolute offset zero.  The cursor's
+-- framer uses the configured frame and nesting bounds with its total bound
+-- reduced to the cumulative maximum when that is smaller.
 startSMTLibCausalStreamCursor
   :: SMTLibCausalStreamPolicy
   -> SMTLibCausalStreamCursor
@@ -154,6 +168,11 @@ startCursorAtOffset policy frameStart = SMTLibCausalStreamCursor
         smtLibStreamNestingDepthLimit configured
     }
 
+-- | Feed one finite or cyclic lazy byte chunk to the in-progress frame.  The
+-- result is either the advanced cursor (frame still open) or the first
+-- completed top-level frame with its absolute end and untouched tail; a total
+-- byte overrun is reported as cumulative failure only when the remaining
+-- transaction budget was strictly smaller than the configured frame total.
 feedSMTLibCausalStreamCursor
   :: SMTLibCausalStreamCursor
   -> [Word8]
@@ -168,6 +187,9 @@ feedSMTLibCausalStreamCursor cursor bytes = case
     $ SMTLibCausalStreamCompletedFrame frame
         (cursorPolicy cursor) (cursorFrameStart cursor + consumed) tailBytes
 
+-- | Resolve EOF on an in-progress frame through 'finishSMTLibStreamFramer':
+-- @Just@ a frame that EOF lexically closes, @Nothing@ for clean trivia, or a
+-- framing failure classified under this cursor's policy.
 finishSMTLibCausalStreamCursor
   :: SMTLibCausalStreamCursor
   -> Either SMTLibCausalStreamFailure (Maybe [Word8])
@@ -175,6 +197,8 @@ finishSMTLibCausalStreamCursor cursor = first
   (classifyFramingFailure cursor)
   $ finishSMTLibStreamFramer $ cursorFramer cursor
 
+-- | The retained bytes of the completed frame, without leading trivia or the
+-- untouched tail.
 smtLibCausalStreamCompletedFrameBytes
   :: SMTLibCausalStreamCompletedFrame
   -> [Word8]
@@ -213,6 +237,9 @@ consumeSMTLibCausalStreamBoundaryWhitespace
     | otherwise = Left $
         SMTLibCausalStreamUnexpectedBoundaryByte consumed byte
 
+-- | Begin the next write's first frame at the validated boundary's absolute
+-- offset and under its policy, so the new frame's total bound is capped at
+-- the budget remaining after every byte charged so far in the transaction.
 startSMTLibCausalStreamCursorAtBoundary
   :: SMTLibCausalStreamBoundary
   -> SMTLibCausalStreamCursor

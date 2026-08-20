@@ -140,8 +140,8 @@ prepareOverlapHead
   -> PreparedOverlapHead typeVariable
 prepareOverlapHead source (outerVariables, sourceHead) = PreparedOverlapHead
   sourceHead
-  $ fmap (fmap prepareVariable)
-  $ canonicalizeInstanceHead outerVariables sourceHead
+  $ fmap prepareVariable
+      <$> canonicalizeInstanceHead outerVariables sourceHead
  where
   -- Reuse the exact alpha identity used for duplicate instance heads. In
   -- particular, commuting forall binders receive slots by first occurrence

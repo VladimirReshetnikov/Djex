@@ -939,8 +939,8 @@ sealPreparedEnvironment expansion = do
                 ": constrained premises are unsupported"
         implicit <- first
             ((("function " ++ prHSymbolOp name ++ ": ") ++) . show) $
-            fmap fst $ SharedType.implicitizeLeadingForalls
-                (const (Nothing :: Maybe ())) freshBinder mempty sourceType
+            (fst <$> SharedType.implicitizeLeadingForalls
+                (const (Nothing :: Maybe ())) freshBinder mempty sourceType)
         let (_, _, body) = SharedType.splitLeadingForalls implicit
         plans <- first (("function " ++ prHSymbolOp name ++ ": ") ++) $
             compilePolarizedSynthesisFormulaPlans namespace NegativeFormula

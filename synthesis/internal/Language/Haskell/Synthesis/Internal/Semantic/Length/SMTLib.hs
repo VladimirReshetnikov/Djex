@@ -476,7 +476,7 @@ lengthSMTLibQueryInputArtifacts
 lengthSMTLibQueryInputArtifacts (LengthSMTLibQuery problem _ _) =
   let symbols = inputSymbolsForCount
         $ checkedLengthProblemInputCount problem
-  in (symbols, fmap renderQFLIACommand $ inputValueRequestForSymbols symbols)
+  in (symbols, renderQFLIACommand <$> inputValueRequestForSymbols symbols)
 
 -- | Complete structural identity of translator schema, typed plan, exact
 -- problem, and rendered request bytes.
@@ -553,7 +553,7 @@ lengthSpinePairSMTLibQueryInputArtifacts
     (LengthSpinePairSMTLibQuery problem _ _) =
   let symbols = inputSymbolsForCount
         $ checkedLengthSpinePairProblemInputCount problem
-  in (symbols, fmap renderQFLIACommand $ inputValueRequestForSymbols symbols)
+  in (symbols, renderQFLIACommand <$> inputValueRequestForSymbols symbols)
 
 -- | Complete structural identity of the product translator schema, typed
 -- plan, exact product problem, and rendered request bytes.  It never

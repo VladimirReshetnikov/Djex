@@ -159,9 +159,8 @@ prepareDjinnRequest lookupClassArity request =
       rawContextual
     contextual <- normalizeMonotype RequestGoal rawContextual
     implicit <- first signatureLoweringFailure
-      $ fmap fst
-      $ SharedType.implicitizeLeadingForalls
-          (const (Nothing :: Maybe ())) freshVariable mempty contextual
+      $ (fst <$> SharedType.implicitizeLeadingForalls
+          (const (Nothing :: Maybe ())) freshVariable mempty contextual)
     let (_, embeddedContexts, body) =
           SharedType.splitLeadingForalls implicit
     contexts <- traverse prepareContext embeddedContexts

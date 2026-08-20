@@ -439,7 +439,7 @@ mapDeclarationKindVariables convert declaration = case declaration of
  where
   convertParameter parameter = TypeParameter
     (parameterVariable parameter)
-    (fmap (fmap convert) $ parameterKind parameter)
+    (fmap convert <$> parameterKind parameter)
 
 -- | Ground every explicit declaration kind without changing source-type
 -- variables, annotations, or declaration shape.

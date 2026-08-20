@@ -119,7 +119,7 @@ scopeGetAllBindings
   -> Scopes binding
   -> Either ScopeInvariantError [binding]
 scopeGetAllBindings (ScopeId startId) (Scopes _ scopeMap) =
-  fmap (concatMap snd) $ walkParentChain resolve startId
+  concatMap snd <$> walkParentChain resolve startId
   where
     resolve scopeId = case IntMap.lookup scopeId scopeMap of
       Nothing -> Nothing

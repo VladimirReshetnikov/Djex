@@ -3747,7 +3747,7 @@ nextInputBoxAssignmentWith
   -> [Natural]
   -> Either failure (Maybe [Natural])
 nextInputBoxAssignmentWith invariant maximums values =
-  fmap (fmap reverse) $ advance (reverse maximums) (reverse values)
+  fmap reverse <$> advance (reverse maximums) (reverse values)
  where
   advance [] [] = Right Nothing
   advance (maximumValue : remainingMaximums)

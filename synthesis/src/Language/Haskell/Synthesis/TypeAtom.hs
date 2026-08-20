@@ -163,7 +163,7 @@ mapTypeAtomVariables convert atom = do
   -- the lexical tree.
   foldM_ rememberTarget Map.empty
     $ Set.toAscList $ foldMap Set.singleton $ atomSource atom
-  mkTypeAtom $ fmap convert $ atomSource atom
+  mkTypeAtom $ (convert <$> atomSource atom)
  where
   rememberTarget seen source =
     let target = convert source

@@ -219,8 +219,8 @@ allocateRigidInstantiations
   -> IdentifierSupply
   -> Maybe ([(TVarId, TVarId)], IdentifierSupply)
 allocateRigidInstantiations binders initialSupply =
-  fmap (\(pairs, supply) -> (reverse pairs, supply))
-  $ foldM allocate ([], initialSupply) binders
+  (\(pairs, supply) -> (reverse pairs, supply))
+    <$> foldM allocate ([], initialSupply) binders
  where
   allocate (instantiations, supply) binder = do
     (identifier, nextSupply) <- allocateFreshNonNegativeIdentifier supply

@@ -375,7 +375,7 @@ prepareSearchEnvironment expansion = do
         SharedTypeSynonym.inventoryExpansionRecursiveDataTypeNames expansion
   prepared <- first SynthesisEnvironmentDeclarationError
     $ mapM (prepareSearchDeclaration recursiveNames) normalized
-  fmap fst $ lowerSynthesisDeclarations IncludeDerivedBindings
+  fst <$> lowerSynthesisDeclarations IncludeDerivedBindings
     fromSynthesisClassDeclarationWithMethods
     (catMaybes prepared)
 
@@ -525,8 +525,8 @@ implicitizeExferenceForalls
   -> Either SynthesisDeclarationError
       (SharedType.Type SynthesisVariable)
 implicitizeExferenceForalls outerVariables source =
-  first lowerError $ fmap fst $ SharedType.implicitizeLeadingForalls
-    rejectRigidBinder freshSynthesisVariable outerVariables source
+  first lowerError $ (fst <$> SharedType.implicitizeLeadingForalls
+    rejectRigidBinder freshSynthesisVariable outerVariables source)
  where
   rejectRigidBinder = SharedType.rigidVariableIdentity
 

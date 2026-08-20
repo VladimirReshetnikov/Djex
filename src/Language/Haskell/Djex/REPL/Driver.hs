@@ -145,8 +145,8 @@ completeDjexFilename
   :: (String, String)
   -> IO (String, [Completion])
 completeDjexFilename = completeQuotedWord (Just '\\') "\"" listSafeFiles
-  $ completeWord Nothing " \t\n\"" $ \path ->
-      map quoteInitialPath <$> listSafeFiles path
+  $ completeWord Nothing " \t\n\""
+  $ fmap (map quoteInitialPath) . listSafeFiles
  where
   listSafeFiles path = filter (not . any isControl . replacement)
     <$> listFiles path

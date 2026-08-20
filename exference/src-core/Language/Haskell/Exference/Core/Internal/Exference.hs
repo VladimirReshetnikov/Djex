@@ -549,7 +549,7 @@ findEngineBatchesWith allocators
     SharedType.FunctionType parameter result ->
       boxedTupleArities parameter ++ boxedTupleArities result
     SharedType.TupleType boxity elements ->
-      [length elements | boxity == SynthesisName.Boxed] ++
+      [ length elements | boxity == SynthesisName.Boxed] ++
         concatMap boxedTupleArities elements
     SharedType.ForallType _ contexts body ->
       concatMap
@@ -577,7 +577,7 @@ findEngineBatchesWith allocators
     TypeTuple _ elements ->
       concatMap (properSubtrees True) elements ++ [source]
     TypeForallNative _ _ body ->
-      properSubtrees False body ++ [source | retainQuantified]
+      properSubtrees False body ++ [ source | retainQuantified]
     TypeApp{} -> [source]
     _ -> [source]
   visibleTypeCandidate source =
@@ -1890,7 +1890,7 @@ stateStep allocators multiPM allowConstrs h
         , nodeLastStepBinding = Nothing
         }
       let substs = IntMap.fromList
-            [(binder, TypeConstant rigid) | (binder, rigid) <- instantiations]
+            [ (binder, TypeConstant rigid) | (binder, rigid) <- instantiations]
       modify $ \node -> node
         { nodeGoals = TGoal
             (VarBinding var $ snd $ applySubsts substs t)
@@ -1921,8 +1921,8 @@ stateStep allocators multiPM allowConstrs h
           alive <- gets $ reservedIdentifierSet . nodeFlexibleIds
           let rigids = map snd instantiations
               substitutions = IntMap.fromList
-                [(binder, TypeConstant rigid)
-                | (binder, rigid) <- instantiations]
+                [ (binder, TypeConstant rigid)
+                 | (binder, rigid) <- instantiations]
               openedContexts = map
                 (snd . constraintApplySubsts substitutions) contexts
           modify $ \node -> node
@@ -2506,7 +2506,7 @@ addScopePatternMatch allocators multiPM goalType vid sid tupleMode givens
               <$ unifyRight vtResult matchParam
           mapFunc (DeconstructorBinding matchParam
                     [ConstructorBinding matchId matchRs] recursive) =
-            fmap mapFunc1 $ unifyRight vtResult matchParam
+            mapFunc1 <$> unifyRight vtResult matchParam
            where
             mapFunc1 substs = do
               vars <- forM matchRs $ \_ ->
@@ -2546,7 +2546,7 @@ addScopePatternMatch allocators multiPM goalType vid sid tupleMode givens
                   (reverse newBinds ++ bindingRest)
           mapFunc (DeconstructorBinding matchParam
               matchers@(_ : _) recursive)
-            | multiPM = fmap mapFunc2 $ unifyRight vtResult matchParam
+            | multiPM = mapFunc2 <$> unifyRight vtResult matchParam
            where
             mapFunc2 substs = do
               -- The case expression evaluates its scrutinee once. Its

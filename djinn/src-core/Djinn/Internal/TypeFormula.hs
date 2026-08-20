@@ -1102,8 +1102,8 @@ substituteExpansionAtom replacements atom = do
         freshAtomVariable Set.empty sharedReplacements atom
   where
     convertReplacement (variable, replacement) =
-        fmap (\converted -> (variable, converted))
-            $ expansionSourceType replacement
+        (\converted -> (variable, converted))
+          <$> expansionSourceType replacement
 
     freshAtomVariable reserved variable = Just $ choose (variable ++ "'")
       where

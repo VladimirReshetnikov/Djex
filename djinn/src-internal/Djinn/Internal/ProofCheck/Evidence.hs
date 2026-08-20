@@ -122,7 +122,7 @@ checkedProofTypeExactFormula checkedType = case checkedType of
     CheckedAtom symbol -> Just $ PVar symbol
   where
     exactAlternative (constructor, branch) =
-        fmap ((,) constructor) $ checkedProofTypeExactFormula branch
+        (,) constructor <$> checkedProofTypeExactFormula branch
 
 -- | Whether this checked type contains any explicitly unconstrained identity.
 checkedProofTypeHasUnconstrained :: CheckedProofType -> Bool

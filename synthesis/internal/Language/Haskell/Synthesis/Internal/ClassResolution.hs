@@ -1052,9 +1052,9 @@ resolutionHeadsOverlap left right
   leftHead = resolutionInstanceHead left
   rightHead = resolutionInstanceHead right
 
-  preparedHead side source = fmap
-    (prepareType side $ resolutionInstanceBinderSet source)
-    $ resolutionInstanceHead source
+  preparedHead side source =
+    prepareType side (resolutionInstanceBinderSet source)
+      <$> resolutionInstanceHead source
 
   prepareType side binders =
     fmap tag . constructorApplicationForm . canonicalizeType

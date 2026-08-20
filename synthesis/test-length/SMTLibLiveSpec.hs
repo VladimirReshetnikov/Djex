@@ -22,7 +22,10 @@ module SMTLibLiveSpec
   , withLiveQueryWorkerLimits
   ) where
 
-import Control.Concurrent (forkIO, myThreadId, threadDelay, throwTo)
+import Control.Concurrent (forkIO, myThreadId, throwTo)
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
+import Control.Concurrent (threadDelay)
+#endif
 import Control.Concurrent.MVar
   ( newEmptyMVar
   , putMVar
@@ -134,9 +137,9 @@ import qualified Language.Haskell.Synthesis.Internal.SMTLib.Causal.StdoutChunk
   as SMTLibStdoutChunk
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Stream
   as SMTLibStream
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Z3.Execution
   as Z3Execution
-#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
 import qualified Language.Haskell.Synthesis.Internal.SMTLib.Z3.Process
   as Z3Process
 #endif
@@ -3398,6 +3401,7 @@ readFakeZ3Events :: FilePath -> IO [FakeZ3Event]
 readFakeZ3Events executable =
   expectRight . parseFakeZ3Events =<< BS.readFile (fakeZ3EventPath executable)
 
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
 -- The exec-status pipe closes when the kernel has installed the staged image,
 -- before the newly scheduled child necessarily reaches its first user-space
 -- write.  Under aggregate-suite load, wait for the complete start record
@@ -3417,6 +3421,7 @@ readFakeZ3EventsAfterStart executable = do
           | any ((== "start") . fakeZ3EventTag) events -> pure events
         _ -> threadDelay 5000 >> waitForStart
       Left _ -> threadDelay 5000 >> waitForStart
+#endif
 
 parseFakeZ3Events :: ByteString -> Either String [FakeZ3Event]
 parseFakeZ3Events bytes

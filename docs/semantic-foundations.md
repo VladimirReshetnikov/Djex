@@ -436,11 +436,13 @@ unconfigured session needs one policy-activation line first. Missing policy
 or ambiguity fails before solver IO.
 
 Djex's standalone REPL and Leant's REPL are both first-class consumers. Djex's
-outer structured query grammar and Haskell parser have landed; checked target
-defaults, execution-policy activation, and Exference assessment are the next
-runtime checkpoints. They remain ahead of new `--law`, `--example`,
-typed-sketch, or additional domain syntax. The current explicit Leant form and
-direct `parseLengthWhereSource` compatibility API remain available.
+outer structured query grammar, Haskell parser, and pure `:set length-z3`
+policy sealing have landed; checked target defaults, live policy use, and
+Exference assessment are the next runtime checkpoints. The stored policy
+performs no filesystem or process IO and grants no solver authority. These
+checkpoints remain ahead of new `--law`, `--example`, typed-sketch, or
+additional domain syntax. The current explicit Leant form and direct
+`parseLengthWhereSource` compatibility API remain available.
 
 ### Provider summaries as a trust boundary
 

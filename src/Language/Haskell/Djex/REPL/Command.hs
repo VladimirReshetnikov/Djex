@@ -174,6 +174,7 @@ data ReplSetting
   | QualificationSetting
   | PromptSetting
   | QueryTimeoutSetting
+  | LengthZ3Setting
   | CandidateLimitSetting
   | ChoiceBudgetSetting
   | DjinnStrategySetting
@@ -200,6 +201,7 @@ replSettingName setting = case setting of
   QualificationSetting -> "qualification"
   PromptSetting -> "prompt"
   QueryTimeoutSetting -> "timeout"
+  LengthZ3Setting -> "length-z3"
   CandidateLimitSetting -> "candidate-limit"
   ChoiceBudgetSetting -> "choice-budget"
   DjinnStrategySetting -> "djinn-strategy"
@@ -692,6 +694,7 @@ setDetails =
   [ "  settings: " ++ intercalate ", " settingNames
   , "  booleans also accept :set +NAME and :set -NAME"
   , "  sign forms are rejected for non-boolean settings"
+  , "  Length/Z3 policy: :set length-z3 /absolute/path/to/z3 [SHA256HEX]"
   , "  heuristic weights: " ++ intercalate ", " heuristicNames
   ]
 

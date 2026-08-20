@@ -142,8 +142,9 @@ defaults:
   target, which must agree;
 - all eligible list-valued source arguments are observed in source order,
   including arguments not mentioned by the formula;
-- an existing safe session execution policy is reused. If none exists, one
-  short policy-activation command is required before the query.
+- an existing safe session execution policy is reused. If none exists,
+  `:set length-z3 /absolute/path/to/z3 [SHA256HEX]` activates one; `.djexrc`
+  may supply it once for subsequent one-line requests.
 
 Anything ambiguous or outside that built-in profile fails closed and directs
 the user to an explicit checked contract. In particular, the frontend will not
@@ -151,6 +152,13 @@ infer a custom spine, provider law, modeled argument, executable path, or Z3
 authority from a formula. `:help synth` already shows the accepted outer
 grammar and scalar/pair examples; it will describe resolved runtime defaults
 when activation lands.
+
+`:set length-z3` already seals the finite launch/response policy without
+filesystem or process IO. Linux selects the descriptor-bound launch profile;
+other platforms select the portable path-snapshot profile. `:show settings`
+reports only active/inactive, launch strategy, and pinned/unpinned status, and
+`:unset length-z3` removes the policy. The setting is deliberately inert until
+the checked target resolver and Exference assessment path consume it.
 Leant's matching frontend will use `List.length`, Lean relations, and Lean
 projection notation while lowering to the same checked contract vocabulary.
 

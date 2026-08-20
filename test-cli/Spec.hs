@@ -66,6 +66,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplSettingSignsAndDiagnostics
   , testCase "REPL search settings retune the budget, strategy, and weights"
       testReplSearchSettings
+  , testCase "REPL seals Length Z3 policy without executable IO"
+      testReplLengthZ3Setting
   , testCase "REPL shares Church rank-N and impredicative queries"
       testReplRankNQueries
   , testCase "REPL retains safe Djinn rank-N axioms"
@@ -607,6 +609,50 @@ testReplSearchSettings = withTemporaryEnvironment [] $ \directory -> do
     "heuristic weights: goalVar" output
   assertNoCallStack errors
 
+testReplLengthZ3Setting :: Assertion
+testReplLengthZ3Setting = withTemporaryEnvironment [] $ \directory -> do
+  let missingPath = directory ++ "/missing-private-z3"
+      digest = concat $ replicate 32 "a7"
+  (exitCode, output, errors) <- runRepl directory
+    [ ":show settings"
+    , ":set length-z3"
+    , ":set length-z3 relative-z3"
+    , ":set length-z3 /missing/z3 xyz"
+    , ":set length-z3 " ++ missingPath ++ " " ++ digest
+    , ":show settings"
+    , ":synth --where length result == 424242 -- [a]"
+    , ":unset length-z3"
+    , ":show settings"
+    , ":help set"
+    ]
+  assertEqual "Length/Z3 setting REPL exit" ExitSuccess exitCode
+  assertEqual "Length/Z3 policy starts and resets inactive" 2
+    $ countOccurrences "length-z3 = inactive" output
+  assertContains "pure admission accepts a missing pinned executable"
+    "length-z3 = active (" output
+  assertContains "the display reveals only digest presence" ", pinned)" output
+  assertContains "setting help publishes the explicit policy form"
+    ":set length-z3 /absolute/path/to/z3 [SHA256HEX]" output
+  assertEqual "each malformed policy is a setting diagnostic" 3
+    $ countOccurrences "[DJEX_REPL_SETTING]" errors
+  assertContains "a valueless Length/Z3 policy is rejected uniformly"
+    "setting length-z3 requires a value" errors
+  assertContains "a relative executable is rejected by the sealed policy"
+    "LengthSMTLibExecutionExecutablePathNotAbsolute" errors
+  assertContains "a malformed digest has one sanitized refusal"
+    "length-z3 SHA-256 must be exactly 64 hexadecimal digits" errors
+  assertContains "a stored policy remains inert before runtime activation"
+    "[DJEX_REPL_LENGTH_WHERE_UNAVAILABLE]" errors
+  assertBool "the inert policy path parsed or echoed its where clause"
+    $ not $ "424242" `isInfixOf` errors
+  assertBool "the sealed policy display leaked its executable path"
+    $ not $ "missing-private-z3" `isInfixOf` output
+  assertBool "the sealed policy diagnostics leaked its executable path"
+    $ not $ "relative-z3" `isInfixOf` errors
+  assertBool "the sealed policy display leaked its digest"
+    $ not $ digest `isInfixOf` output
+  assertNoCallStack errors
+
 testReplSettingSignsAndDiagnostics :: Assertion
 testReplSettingSignsAndDiagnostics = withTemporaryEnvironment [] $ \directory -> do
   let nonBooleanSettings =
@@ -617,6 +663,7 @@ testReplSettingSignsAndDiagnostics = withTemporaryEnvironment [] $ \directory ->
         , "qualification"
         , "prompt"
         , "timeout"
+        , "length-z3"
         , "candidate-limit"
         , "choice-budget"
         , "djinn-strategy"

@@ -271,6 +271,20 @@ contract form; it must never guess a custom datatype, provider law, or solver
 authority. A configured safe execution policy keeps the query to one line;
 otherwise policy activation plus the query should take two lines.
 
+The REPL now admits that policy explicitly and without touching the
+filesystem:
+
+```text
+:set length-z3 /absolute/path/to/z3 [SHA256HEX]
+```
+
+On Linux the sealed default is descriptor-bound; other platforms retain the
+portable path-snapshot policy. `:show settings` reveals only active/inactive,
+launch strategy, and pinned/unpinned status. The live runtime still fails
+closed until target resolution and Exference assessment land, so configuring
+this setting does not yet run Z3. Put it in `.djexrc` to keep normal queries
+one-line once activation is complete.
+
 The additive `parseHaskellLengthWhereSource` library entrance already lowers
 this host notation to the existing bounded, normalized Length AST; it does not
 execute arbitrary Haskell. The existing `len(arg0)` parser remains a low-level

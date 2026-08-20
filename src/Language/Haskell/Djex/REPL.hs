@@ -24,7 +24,7 @@ import Control.Exception
   , handleJust
   )
 import Control.Monad (forM_, unless, void, when)
-import Data.Char (isSpace)
+import Data.Char (digitToInt, isHexDigit, isSpace)
 import Data.Foldable (toList)
 import Data.List (intercalate, isPrefixOf)
 import Data.List.NonEmpty (NonEmpty)
@@ -33,6 +33,7 @@ import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import qualified Data.Set as Set
 import Data.Version (showVersion)
 import Data.Void (Void)
+import Data.Word (Word8)
 import System.Directory
   ( Permissions (readable, searchable, writable)
   , canonicalizePath
@@ -145,6 +146,7 @@ data ReplState = ReplState
   , exferenceSearchOptions :: ExferenceOptions
   , promptTemplate :: String
   , queryTimeout :: QueryTimeout
+  , lengthSMTLibExecutionConfig :: Maybe LengthSMTLibExecutionConfig
   , lastQuery :: Maybe ReplSynthesisQuery
   , scriptStack :: [FilePath]
   }
@@ -293,6 +295,7 @@ runRepl options = case standardDjinnSession of
                 , exferenceSearchOptions = defaultExferenceOptions
                 , promptTemplate = defaultPromptTemplate
                 , queryTimeout = noQueryTimeout
+                , lengthSMTLibExecutionConfig = Nothing
                 , lastQuery = Nothing
                 , scriptStack = []
                 }
@@ -1206,6 +1209,16 @@ settingBehavior setting = case setting of
     (\value state -> state {queryTimeout = value})
     noQueryTimeout
     renderQueryTimeout
+  LengthZ3Setting -> SettingBehavior
+    { settingApply = requiredValue setting $ \source -> do
+        config <- parseLengthZ3ExecutionConfig source
+        Right $ pure . \state -> state
+          {lengthSMTLibExecutionConfig = Just config}
+    , settingReset = pure . \state -> state
+        {lengthSMTLibExecutionConfig = Nothing}
+    , settingRender = maybe "inactive" renderLengthZ3ExecutionConfig
+        . lengthSMTLibExecutionConfig
+    }
   CandidateLimitSetting -> fieldSetting setting positiveInt
     (optionCutoff . djinnSearchOptions)
     (\value -> onDjinnOptions $ \options -> options {optionCutoff = value})
@@ -1298,6 +1311,69 @@ parseChoiceBudget :: String -> String -> Either String (Maybe Integer)
 parseChoiceBudget name source = do
   budget <- nonNegativeInteger name source
   Right $ if budget == 0 then Nothing else Just budget
+
+-- | Seal one explicit executable policy without consulting the filesystem.
+-- The live Length boundary will later bind and inspect the selected image;
+-- merely storing this value grants no solver or counterexample authority.
+parseLengthZ3ExecutionConfig
+  :: String
+  -> Either String LengthSMTLibExecutionConfig
+parseLengthZ3ExecutionConfig source = case words source of
+  [path] -> seal path Nothing
+  [path, digestSource] -> do
+    digest <- parseExpectedSHA256 digestSource
+    seal path $ Just digest
+  _ -> Left
+    "length-z3 expects an absolute executable path and optional SHA-256 hex"
+ where
+  seal path digest = case buildLengthZ3ExecutionConfig
+      defaultLengthSMTLibExecutionLimits
+      $ defaultLengthSMTLibExecutionConfigSource path digest of
+    Left failure -> Left $ "invalid Length/Z3 execution policy: " ++ show failure
+    Right config -> Right config
+
+buildLengthZ3ExecutionConfig
+  :: LengthSMTLibExecutionLimits
+  -> LengthSMTLibExecutionConfigSource
+  -> Either LengthSMTLibExecutionConfigError LengthSMTLibExecutionConfig
+#if defined(linux_HOST_OS)
+buildLengthZ3ExecutionConfig = mkLengthSMTLibDescriptorBoundExecutionConfig
+#else
+buildLengthZ3ExecutionConfig = mkLengthSMTLibExecutionConfig
+#endif
+
+parseExpectedSHA256 :: String -> Either String [Word8]
+parseExpectedSHA256 source = case splitAt 64 source of
+  (digits, [])
+    | length digits == 64
+    , all isHexDigit digits
+    , Just digest <- decode digits -> Right digest
+  _ -> Left "length-z3 SHA-256 must be exactly 64 hexadecimal digits"
+ where
+  decode [] = Just []
+  decode (high : low : remaining) =
+    (fromIntegral (digitToInt high * 16 + digitToInt low) :)
+      <$> decode remaining
+  decode _ = Nothing
+
+renderLengthZ3ExecutionConfig :: LengthSMTLibExecutionConfig -> String
+renderLengthZ3ExecutionConfig config = "active ("
+  ++ strategyName (lengthSMTLibExecutionExecutableLaunchStrategy config)
+  ++ ", " ++ digestName
+      (lengthSMTLibExecutionExecutableDigestExpectation config)
+  ++ ")"
+ where
+  strategyName strategy = case strategy of
+    LengthSMTLibPathSnapshotThenDirectSpawn -> "path-snapshot"
+    LengthSMTLibDescriptorBoundExecutableLaunch -> "descriptor-bound"
+    LengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunch ->
+      "descriptor-bound-effective-id"
+    LengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunch ->
+      "descriptor-bound-execve-check"
+
+  digestName expectation = case expectation of
+    LengthSMTLibExecutableDigestExpectationAbsent -> "unpinned"
+    LengthSMTLibExecutableDigestExpectationPresent -> "pinned"
 
 -- | The common setting shape: parse a required value, store it in a state
 -- field, restore a built-in default, and render the current value.

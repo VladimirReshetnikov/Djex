@@ -390,7 +390,7 @@ comparisons rejected.  Admission is fail-closed and sanitized: a hard
 validation, then left-to-right parsing whose closed error vocabulary
 carries byte offsets but never source bytes.
 
-The module exposes two parser entrances over this one grammar core, and
+The module exposes three parser entrances over this one grammar core, and
 they differ only in spelling.  `parseLengthWhereSource` accepts the
 compact form above.  `parseHaskellLengthWhereSource` accepts the same
 formulas in Haskell notation: application-style `length arg0` and
@@ -398,12 +398,14 @@ formulas in Haskell notation: application-style `length arg0` and
 the binary-product projections), the Haskell relations `==`, `/=`, `<=`,
 `>=`, `<`, and `>`, prefix or backticked `div` and `mod` with the same
 direct-positive-literal divisor rule, and application-style `min`/`max`
-whose arguments are literals or parenthesized expressions.  Each mode
-rejects the other's spellings (`=`, `!=`, `/`, and `%` are unknown
-tokens in the Haskell mode), so no source is ambiguous between them.
-The Haskell entrance is a surface parser, not a Haskell evaluator: both
-entrances share the byte, nesting, and ASCII admission bounds and the
-offsets-only error vocabulary, and both construct the same opaque
+whose arguments are literals or parenthesized expressions.
+`parseLeanLengthWhereSource` instead accepts `List.length arg0`, scalar
+`List.length result`, and binary-product `List.length result.1` / `.2`,
+with `=`, `!=`, `/`, `%`, and application-style `min`/`max`. Each mode
+rejects the other modes' distinctive spellings, so no source is ambiguous.
+The host entrances are surface parsers, not host-language evaluators: all
+three entrances share the byte, nesting, and ASCII admission bounds and the
+offsets-only error vocabulary, and all construct the same opaque
 `LengthWhereSource`, so elaboration, normalization, fingerprints, and
 replay downstream cannot observe which spelling admitted a formula.
 
@@ -424,9 +426,10 @@ result enters the same sealing pipeline as any hand-built contract source.
 
 The bounded compact `len(...)` grammar remains a source-level compatibility
 boundary, not the primary interactive notation. Djex now also exposes
-`parseHaskellLengthWhereSource`, which produces the same opaque source with
-the same normalization, fingerprints, limits, replay rules, and authority
-boundaries. The corresponding Leant adapter remains planned:
+`parseHaskellLengthWhereSource` and `parseLeanLengthWhereSource`, which
+produce the same opaque source with the same normalization, fingerprints,
+limits, replay rules, and authority boundaries. Djex's Haskell REPL is active;
+the Leant command adapter is the remaining surface wiring:
 
 ```text
 -- Djex / Haskell
@@ -469,8 +472,8 @@ can refute a candidate; every status-only or failed assessment retains it.
 Djinn-only constrained queries remain unavailable because Djinn does not yet
 retain a matching source-typed graph, and Both mode never compensates by
 running it unconstrained. The current explicit Leant form and the direct
-`parseLengthWhereSource` and `parseHaskellLengthWhereSource` APIs remain
-available beside the REPL surfaces.
+`parseLengthWhereSource`, `parseHaskellLengthWhereSource`, and
+`parseLeanLengthWhereSource` APIs remain available beside the REPL surfaces.
 
 ### Provider summaries as a trust boundary
 

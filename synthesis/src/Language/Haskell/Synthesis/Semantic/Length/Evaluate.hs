@@ -2433,16 +2433,8 @@ nextBooleanFiniteUnionAssignment
   :: [Natural]
   -> [Natural]
   -> Either BooleanFiniteUnionEnumerationError (Maybe [Natural])
-nextBooleanFiniteUnionAssignment maximums values =
-  fmap (fmap reverse) $ advance (reverse maximums) (reverse values)
- where
-  advance [] [] = Right Nothing
-  advance (maximumValue : remainingMaximums)
-      (value : remainingValues)
-    | value < maximumValue = Right $ Just $ value + 1 : remainingValues
-    | otherwise = fmap (fmap (0 :))
-        $ advance remainingMaximums remainingValues
-  advance _ _ = Left BooleanFiniteUnionInternalEnumerationInvariant
+nextBooleanFiniteUnionAssignment =
+  nextInputBoxAssignmentWith BooleanFiniteUnionInternalEnumerationInvariant
 
 data RelationalPositiveAffineClauseCoverage
   = RelationalPositiveAffineClauseIgnored

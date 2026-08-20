@@ -45,6 +45,7 @@ these tiers explicitly.
   specification is [docs/semantic-foundations.md](docs/semantic-foundations.md)
 - [Building](#building)
 - [Unified command](#unified-command)
+  - [Behavioral constraints in the Djex REPL](#behavioral-constraints-in-the-djex-repl)
 - [Query boundary](#query-boundary)
   - [Shared query surface](#shared-query-surface)
   - [Djinn sessions and requests](#djinn-sessions-and-requests)
@@ -241,6 +242,39 @@ startup files, history, completion, and `:{`/`:}` input. Bare input is
 deliberately still a requested result type, not a Haskell expression; the
 explicit `:eval` command is the separate boundary that compiles and executes
 an expression with real GHC.
+
+### Behavioral constraints in the Djex REPL
+
+Djex already owns the checked Length-contract, replay, SMT-LIB, and Z3
+foundation, but the standalone `djex` REPL does not yet accept a behavioral
+clause: today its synthesis entrance remains `:synth TYPE`. Adding that REPL
+surface is a near-term cross-repository milestone, not a reason to route
+Haskell users through Leant.
+
+The planned common-case spelling is deliberately Haskell-shaped and short:
+
+```text
+:synth --where length result == length arg0 -- [a] -> [a]
+:synth --where length (fst result) + length (snd result) == 2 * length arg0 -- [a] -> ([a], [a])
+```
+
+These two lines are examples of the planned interface, not commands accepted
+by the current release. For an unambiguous built-in-list target, `--where`
+will itself request filtering, the model will default to Haskell `[]`/`(:)`,
+the scalar or pair result domain will follow the host expression and checked
+target, and every eligible list input will be observed in source order. A
+missing or ambiguous default must fail closed and point to the explicit
+contract form; it must never guess a custom datatype, provider law, or solver
+authority. A configured safe execution policy keeps the query to one line;
+otherwise policy activation plus the query should take two lines.
+
+This host notation will lower to the existing bounded, normalized Length AST;
+it will not execute arbitrary Haskell. The current `len(arg0)` parser remains
+a low-level library/compatibility surface while the REPL gains discoverable
+`length arg0`, Haskell comparison notation, and examples in `:help synth`.
+Leant will receive the corresponding Lean-shaped shorthand in the same
+surface milestone. See the [REPL guide](docs/repl.md#behavioral-constraint-roadmap)
+and the [semantic foundation](docs/semantic-foundations.md#host-language-repl-surfaces-roadmap).
 
 <!-- Maintainers: the rank-N/impredicative rule families and their numeric
 bounds are canonical in docs/rank-n.md. This section, docs/repl.md, and

@@ -108,6 +108,49 @@ Backend commands distinguish persistent selection from one-query routing:
 Entering `:` repeats the last type with the backend selection recorded for
 that query; current rendering and search settings are used for the repeat.
 
+## Behavioral constraint roadmap
+
+The standalone REPL does not yet parse behavioral constraints. Its current
+surface is still `:synth TYPE`; the bounded `len(...)` Length parser is a
+library component, and Leant is currently its only interactive consumer.
+Giving the Haskell REPL its own first-class constraint entrance is the next
+surface checkpoint, before additional law/example syntaxes or typed sketches.
+
+The intended common-case form uses ordinary Haskell expression notation:
+
+```text
+:synth --where length result == length arg0 -- [a] -> [a]
+:synth --where length (fst result) + length (snd result) == 2 * length arg0 -- [a] -> ([a], [a])
+```
+
+Those examples are a roadmap, not accepted commands yet. The frontend will
+parse a small, bounded Haskell-shaped formula language and lower it to the
+same normalized natural-number Length contract used by the library. It will
+recognize `length x` rather than exposing the internal `len(x)` spelling, use
+Haskell equality and inequality notation (`==` and `/=`), and use Haskell
+application syntax for `min`, `max`, `div`, and `mod`. It will not evaluate an
+arbitrary Haskell expression or inherit runtime `Int` overflow semantics.
+
+For an unambiguous built-in-list query, omitted options have conservative
+defaults:
+
+- `--where` is an explicit request for filter behavior;
+- the spine model is the checked Haskell `[]`/`(:)` model;
+- scalar versus pair output follows both the result expression and checked
+  target, which must agree;
+- all eligible list-valued source arguments are observed in source order,
+  including arguments not mentioned by the formula;
+- an existing safe session execution policy is reused. If none exists, one
+  short policy-activation command is required before the query.
+
+Anything ambiguous or outside that built-in profile fails closed and directs
+the user to an explicit checked contract. In particular, the frontend will not
+infer a custom spine, provider law, modeled argument, executable path, or Z3
+authority from a formula. `:help synth` will show the accepted grammar,
+resolved defaults, and both scalar and pair examples when the surface lands.
+Leant's matching frontend will use `List.length`, Lean relations, and Lean
+projection notation while lowering to the same checked contract vocabulary.
+
 Both engines see the same loaded workspace and the same parsed query. Djex
 parses the type once against the loaded source inventory and prompt module
 context, which control unqualified source names and the declarations available

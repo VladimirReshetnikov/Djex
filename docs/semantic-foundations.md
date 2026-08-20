@@ -403,6 +403,44 @@ roles supplied.  Nothing here is a checked contract, behavioral receipt,
 or inference of a spine model, role, provider law, or solver policy; the
 result enters the same sealing pipeline as any hand-built contract source.
 
+### Host-language REPL surfaces (roadmap)
+
+The bounded `len(...)` grammar is the current source-level library boundary,
+not the intended primary interactive notation. The next surface checkpoint
+adds two small host-language adapters which both elaborate to this exact
+opaque source and therefore preserve its normalization, fingerprints, limits,
+replay rules, and authority boundaries:
+
+```text
+-- Djex / Haskell
+:synth --where length result == length arg0 -- [a] -> [a]
+
+-- Leant / Lean
+:synth --where List.length result = List.length arg0 -- List a -> List a
+```
+
+The adapters are nominally separate parsers. Djex uses Haskell application,
+projection, equality/inequality, `div`, and `mod` notation; Leant uses
+`List.length`, Lean projections, and Lean relations. Neither frontend executes
+the displayed expression, accepts arbitrary host code, or defines a second
+behavioral semantics.
+
+In the built-in list case, omission is intentionally useful but bounded:
+`--where` explicitly selects filtering, the host's standard list model is the
+default, the scalar/product domain must agree with both expression and target,
+and every eligible list input is observed in physical source order rather than
+being guessed from formula references. Ambiguous shapes and custom datatypes
+require the existing explicit contract/model path. Execution permission is
+still independent: a safe activated policy makes this a one-line query; an
+unconfigured session needs one policy-activation line first. Missing policy
+or ambiguity fails before solver IO.
+
+Djex's standalone REPL and Leant's REPL are both first-class consumers. Djex
+REPL support is scheduled with the Leant shorthand, before new `--law`,
+`--example`, typed-sketch, or additional domain syntax. The current explicit
+Leant form and direct `parseLengthWhereSource` API remain available while the
+host-native adapters acquire parity tests and help text.
+
 ### Provider summaries as a trust boundary
 
 Provider summaries are an explicit trust boundary. A provider name must resolve

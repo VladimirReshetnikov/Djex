@@ -143,6 +143,7 @@ module Language.Haskell.Synthesis.Semantic.Length.Evaluate
   , validateLengthSpinePairProblemApplicableDomain
   ) where
 
+import Control.Applicative ((<|>))
 import Data.Maybe (catMaybes, fromMaybe)
 import Control.DeepSeq (NFData (rnf))
 import Control.Monad (foldM, unless)
@@ -2442,6 +2443,16 @@ data RelationalPositiveAffineClauseCoverage
       ![RelationalPositiveAffineRule]
   | RelationalPositiveAffineClauseContradiction
 
+-- Shared by the three coverage analyses below: a fully summarized rule
+-- list becomes coverage, and any unsupported constituent conservatively
+-- ignores the clause.
+relationalCoverageFromRules
+  :: Maybe [RelationalPositiveAffineRule]
+  -> RelationalPositiveAffineClauseCoverage
+relationalCoverageFromRules = maybe
+  RelationalPositiveAffineClauseIgnored
+  RelationalPositiveAffineClauseRules
+
 data RelationalPositiveAffineClosure
   = RelationalPositiveAffineClosureBounds !(Map.Map Natural Natural)
   | RelationalPositiveAffineClosureContradiction
@@ -2547,9 +2558,7 @@ strictRelationalPositiveAffineQuotientClauseCoverage
     LengthQuotient _ _ -> True
     _ -> False
 
-  rulesOrIgnored ruleCandidates = case sequence ruleCandidates of
-    Nothing -> RelationalPositiveAffineClauseIgnored
-    Just rules -> RelationalPositiveAffineClauseRules rules
+  rulesOrIgnored = relationalCoverageFromRules . sequence
 
   summarize = summarizeRelationalPositiveAffineExpression
     inputCount inputPosition
@@ -2620,9 +2629,7 @@ strictRelationalPositiveAffineQuotientRootExtremaClauseCoverage
     LengthMaximum _ _ -> True
     _ -> False
 
-  rulesOrIgnored ruleCandidates = case ruleCandidates of
-    Nothing -> RelationalPositiveAffineClauseIgnored
-    Just rules -> RelationalPositiveAffineClauseRules rules
+  rulesOrIgnored = relationalCoverageFromRules
 
   summarize = summarizeRelationalPositiveAffineExpression
     inputCount inputPosition
@@ -2727,9 +2734,7 @@ strictRelationalPositiveAffineQuotientRootExtremaMonusClauseCoverage
     LengthMonus _ _ -> True
     _ -> False
 
-  rulesOrIgnored ruleCandidates = case ruleCandidates of
-    Nothing -> RelationalPositiveAffineClauseIgnored
-    Just rules -> RelationalPositiveAffineClauseRules rules
+  rulesOrIgnored = relationalCoverageFromRules
 
   summarize = summarizeRelationalPositiveAffineExpression
     inputCount inputPosition
@@ -2870,9 +2875,7 @@ strictRelationalPositiveAffineQuotientRootExtremaMonusAtomicBranchingClauseBranc
     strictRelationalPositiveAffineQuotientRootExtremaMonusClauseCoverage
       inputCount inputPosition formula
 
-  orElse first second = case first of
-    Just result -> Just result
-    Nothing -> second
+  orElse = (<|>)
 
   summarize = summarizeRelationalPositiveAffineExpression
     inputCount inputPosition

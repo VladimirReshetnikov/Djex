@@ -209,9 +209,8 @@ runExference options = case
     exferenceCommandSessionPolicy (exferenceAllowFix options) of
   Left failure -> diagnosticFailure failure
   Right policy -> do
-    environmentPath <- case exferenceEnvironment options of
-      Just path -> pure path
-      Nothing -> defaultExferenceEnvironmentPath
+    environmentPath <- maybe defaultExferenceEnvironmentPath pure
+      $ exferenceEnvironment options
     report <- loadExferenceSessionWithPolicy policy environmentPath
     -- The compatibility loader records progress counters as Info. A one-shot
     -- compiler-like command stays quiet on success while retaining warnings

@@ -51,7 +51,9 @@ import qualified Data.ByteString.Char8 as BSC
 import Data.Char (ord)
 import Data.IORef
   ( IORef
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
   , modifyIORef'
+#endif
   , newIORef
   , readIORef
   , writeIORef
@@ -66,7 +68,9 @@ import System.Directory
   ( canonicalizePath
   , copyFile
   , createDirectory
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
   , createFileLink
+#endif
   , createDirectoryLink
   , doesDirectoryExist
   , doesFileExist
@@ -80,7 +84,9 @@ import System.Directory
   , removeFile
   , removePathForcibly
   , renameDirectory
+#ifdef DJEX_HAVE_DESCRIPTOR_BOUND_Z3_LAUNCH
   , renameFile
+#endif
   , setOwnerExecutable
   , setPermissions
   )

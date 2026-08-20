@@ -3167,9 +3167,7 @@ waitControlled process cancellation deadline phase action = go
                   Left failure -> pure $ Left failure
                   Right () -> do
                     poisoned <- readTVarIO $ processPoison process
-                    pure $ case poisoned of
-                      Just failure -> Left failure
-                      Nothing -> value
+                    pure $ maybe value Left poisoned
 
 -- | Wait for one package-private, non-owning STM admission observation under
 -- the same process, cancellation, poison, lifecycle, and absolute-deadline

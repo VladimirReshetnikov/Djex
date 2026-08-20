@@ -16,6 +16,7 @@ module Djinn.Internal.HIdentifier (
     ) where
 
 import Data.Char (isAlpha)
+import Control.Applicative ((<|>))
 import Data.Maybe (isJust)
 -- Keep the historical Internal-module export, while the shared frontend owns
 -- the lexer used by both REPLs.
@@ -134,12 +135,8 @@ isVarOperator = isJust . variableOperator
 -- returned as they are and variable operators are wrapped in parentheses,
 -- e.g. @+@ becomes @(+)@; any other string is returned unchanged.
 renderVarName :: String -> String
-renderVarName source =
-    case qualifiedIdentifier VariableLike source of
-        Just name -> renderPrefix name
-        Nothing -> case variableOperator source of
-            Just name -> renderPrefix name
-            Nothing -> source
+renderVarName source = maybe source renderPrefix
+    $ qualifiedIdentifier VariableLike source <|> variableOperator source
 
 -- | Recover Djinn's proof-symbol spelling from a structural name.
 -- Unqualified ordinary operators are stored bare; qualified operators and

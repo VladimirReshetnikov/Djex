@@ -1032,10 +1032,8 @@ renderVariableFallback
   :: M.Map SourceRenderVariable SynthesisVariable
   -> SourceRenderVariable
   -> String
-renderVariableFallback originalVariables variable = case
-    M.lookup variable originalVariables of
-  Just original -> defaultVariableName original
-  Nothing -> "v0"
+renderVariableFallback originalVariables variable =
+  maybe "v0" defaultVariableName $ M.lookup variable originalVariables
 
 validSourceVariableName :: String -> Maybe String
 validSourceVariableName spelling

@@ -2,6 +2,7 @@
 
 module LengthWhereSpec (lengthWhereTests) where
 
+import Data.Maybe (catMaybes)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import Data.List (isInfixOf)
@@ -52,7 +53,7 @@ lengthWhereSourceOpacityCharacterized =
         [ "Where." ++ constructorBase
         , "Djex." ++ constructorBase
         ]
-      case [name | Just name <- visibleConstructors] of
+      case catMaybes visibleConstructors of
         [] -> pure ()
         visible -> fail $ "public LengthWhereSource constructors: " ++
           show visible
@@ -376,10 +377,10 @@ identityTests = testGroup "semantic identity"
       pair @?= pairSource
         (Length.LengthEqual pairFirst
           $ Length.LengthSum [pairInput0, Length.LengthLiteral 1])
-  , testCase "preserve checked contract, problem, query, and SMT bytes" $
+  , testCase "preserve checked contract, problem, query, and SMT bytes"
       assertCheckedPipelineParity
   , testCase
-      "preserve checked pair contract, problem, query, and SMT bytes" $
+      "preserve checked pair contract, problem, query, and SMT bytes"
       assertCheckedPairPipelineParity
   ]
 

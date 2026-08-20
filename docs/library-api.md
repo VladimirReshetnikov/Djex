@@ -1136,7 +1136,12 @@ resource-bounded and fail-closed:
    evidence.
 2. `sealLengthContractInSession` checks a length law — precondition and
    postcondition over compact observed inputs and the result — into a
-   `CheckedLengthContract`.
+   `CheckedLengthContract`. The passive source it consumes can be written
+   directly, or parsed from the bounded ASCII where-clause syntax
+   (`parseLengthWhereSource` then `elaborateLengthWhereSource` in
+   `Semantic.Length.Where`, both re-exported by the facade), which lowers
+   observed physical `argN` references onto the same source vocabulary
+   without granting any checking authority.
 3. `sealLengthTypedCandidateProblem` associates one engine-owned
    `TypedCandidate` with that contract, symbolically interpreting the
    candidate's sealed term graph into a `CheckedLengthProblem`. At this exact

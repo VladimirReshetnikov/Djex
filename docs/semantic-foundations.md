@@ -420,7 +420,7 @@ roles supplied.  Nothing here is a checked contract, behavioral receipt,
 or inference of a spine model, role, provider law, or solver policy; the
 result enters the same sealing pipeline as any hand-built contract source.
 
-### Host-language REPL surfaces (roadmap)
+### Host-language REPL surfaces
 
 The bounded compact `len(...)` grammar remains a source-level compatibility
 boundary, not the primary interactive notation. Djex now also exposes
@@ -440,13 +440,15 @@ The host adapters are nominally separate parsers. Djex uses Haskell application,
 projection, equality/inequality, `div`, and `mod` notation; Leant uses
 `List.length`, Lean projections, and Lean relations. Neither frontend executes
 the displayed expression, accepts arbitrary host code, or defines a second
-behavioral semantics. The Djex half has landed in two layers:
+behavioral semantics. The Djex half has landed end to end:
 `parseHaskellLengthWhereSource` (previous section) admits exactly the
 Haskell-shaped spelling and lowers it to the same opaque source, and the
 standalone REPL already parses the `--where CLAUSE -- TYPE` envelope with
-Haskell-shaped help examples and a pure `:set length-z3` policy seal.
-Constrained queries stay inert there until checked runtime activation lands,
-so the remaining Djex work is runtime, not surface grammar.
+Haskell-shaped help examples and a pure `:set length-z3` policy seal. Once that
+policy is active, the REPL resolves one conservative built-in profile, searches
+typed Exference candidates, opens one live Length session, and applies the
+existing problem/query/observation/replay pipeline before selection and
+rendering.
 
 In the built-in list case, omission is intentionally useful but bounded:
 `--where` explicitly selects filtering, the host's standard list model is the
@@ -459,15 +461,14 @@ unconfigured session needs one policy-activation line first. Missing policy
 or ambiguity fails before solver IO.
 
 Djex's standalone REPL and Leant's REPL are both first-class consumers. Djex's
-outer structured query grammar, Haskell parser, and pure `:set length-z3`
-policy sealing have landed. The REPL also expands the Exference target, observes
-every structural list argument, distinguishes scalar-list from boxed
-list-pair results, elaborates the clause, and seals the exact-zero/step
-built-in-list session and contract. Live policy use and Exference candidate
-assessment are the next runtime checkpoints. The stored policy performs no
-filesystem or process IO and grants no solver authority. These checkpoints
-remain ahead of new `--law`, `--example`, typed-sketch, or additional domain
-syntax. The current explicit Leant form and the direct
+outer structured query grammar, Haskell parser, pure policy seal, conservative
+profile resolver, and Exference assessment path have landed. The stored policy
+performs no filesystem or process IO at setting time and grants no solver
+verdict rejection authority. Only exact independent replay of a returned model
+can refute a candidate; every status-only or failed assessment retains it.
+Djinn-only constrained queries remain unavailable because Djinn does not yet
+retain a matching source-typed graph, and Both mode never compensates by
+running it unconstrained. The current explicit Leant form and the direct
 `parseLengthWhereSource` and `parseHaskellLengthWhereSource` APIs remain
 available beside the REPL surfaces.
 

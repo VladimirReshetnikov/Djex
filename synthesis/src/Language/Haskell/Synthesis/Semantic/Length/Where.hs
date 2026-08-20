@@ -308,10 +308,7 @@ parseRelation state = case peekToken state of
   Token offset TokenAtLeast -> pure (offset, RelationAtLeast, advance state)
   Token offset TokenGreaterThan ->
     pure (offset, RelationGreaterThan, advance state)
-  Token offset TokenEnd ->
-    Left $ LengthWhereUnexpectedEnd offset LengthWhereRelationExpected
-  Token offset _ ->
-    Left $ LengthWhereUnexpectedToken offset LengthWhereRelationExpected
+  token -> unexpectedToken LengthWhereRelationExpected token
 
 parseSum
   :: Natural
@@ -380,10 +377,7 @@ parseAtom depth state = case peekToken state of
     afterClose <- consumeExact LengthWhereRightParenthesisExpected
       TokenRightParenthesis afterInside
     pure (inside, afterClose)
-  Token offset TokenEnd ->
-    Left $ LengthWhereUnexpectedEnd offset LengthWhereExpressionExpected
-  Token offset _ ->
-    Left $ LengthWhereUnexpectedToken offset LengthWhereExpressionExpected
+  token -> unexpectedToken LengthWhereExpressionExpected token
 
 parseLengthReference
   :: Natural
@@ -449,10 +443,7 @@ parseHaskellLengthArgument depth state = case peekToken state of
     afterClose <- consumeExact LengthWhereRightParenthesisExpected
       TokenRightParenthesis afterReference
     nested `seq` pure (reference, afterClose)
-  Token offset TokenEnd ->
-    Left $ LengthWhereUnexpectedEnd offset LengthWhereReferenceExpected
-  Token offset _ ->
-    Left $ LengthWhereUnexpectedToken offset LengthWhereReferenceExpected
+  token -> unexpectedToken LengthWhereReferenceExpected token
 
 parseHaskellPairProjection
   :: LengthSpinePairComponent
@@ -461,10 +452,7 @@ parseHaskellPairProjection
 parseHaskellPairProjection component state = case peekToken state of
   Token _ TokenResult ->
     pure (LengthWherePairResult component, advance state)
-  Token offset TokenEnd ->
-    Left $ LengthWhereUnexpectedEnd offset LengthWhereReferenceExpected
-  Token offset _ ->
-    Left $ LengthWhereUnexpectedToken offset LengthWhereReferenceExpected
+  token -> unexpectedToken LengthWhereReferenceExpected token
 
 parseReference
   :: ParserState
@@ -483,15 +471,9 @@ parseReference state = case peekToken state of
         ( LengthWherePairResult LengthSpinePairSecond
         , advance $ advance $ advance state
         )
-      Token offset TokenEnd ->
-        Left $ LengthWhereUnexpectedEnd offset LengthWhereReferenceExpected
-      Token offset _ ->
-        Left $ LengthWhereUnexpectedToken offset LengthWhereReferenceExpected
+      token -> unexpectedToken LengthWhereReferenceExpected token
     _ -> pure (LengthWhereScalarResult, advance state)
-  Token offset TokenEnd ->
-    Left $ LengthWhereUnexpectedEnd offset LengthWhereReferenceExpected
-  Token offset _ ->
-    Left $ LengthWhereUnexpectedToken offset LengthWhereReferenceExpected
+  token -> unexpectedToken LengthWhereReferenceExpected token
 
 parseExtremum
   :: Bool
@@ -563,10 +545,7 @@ parseHaskellFunctionArgument
 parseHaskellFunctionArgument depth state = case peekToken state of
   Token _ (TokenNatural _) -> parseAtom depth state
   Token _ TokenLeftParenthesis -> parseAtom depth state
-  Token offset TokenEnd ->
-    Left $ LengthWhereUnexpectedEnd offset LengthWhereExpressionExpected
-  Token offset _ ->
-    Left $ LengthWhereUnexpectedToken offset LengthWhereExpressionExpected
+  token -> unexpectedToken LengthWhereExpressionExpected token
 
 productExpression
   :: Natural
@@ -1279,8 +1258,15 @@ consumeExact
   -> Either LengthWhereParseError ParserState
 consumeExact expected wanted state = case peekToken state of
   Token _ actual | sameToken actual wanted -> Right $ advance state
-  Token offset TokenEnd -> Left $ LengthWhereUnexpectedEnd offset expected
-  Token offset _ -> Left $ LengthWhereUnexpectedToken offset expected
+  token -> unexpectedToken expected token
+
+unexpectedToken
+  :: LengthWhereExpected
+  -> Token
+  -> Either LengthWhereParseError a
+unexpectedToken expected (Token offset kind) = Left $ case kind of
+  TokenEnd -> LengthWhereUnexpectedEnd offset expected
+  _ -> LengthWhereUnexpectedToken offset expected
 
 sameToken :: TokenKind -> TokenKind -> Bool
 sameToken left right = case (left, right) of

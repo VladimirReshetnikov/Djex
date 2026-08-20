@@ -171,8 +171,9 @@ session-open or launch failure stops the constrained request.
 Djinn-only constrained requests fail closed because Djinn does not yet retain
 the required source-typed candidate graph. Both mode reports that limitation
 and runs only the constrained Exference lane, never an unconstrained Djinn lane.
-Leant's matching frontend will use `List.length`, Lean relations, and Lean
-projection notation while lowering to the same checked contract vocabulary.
+Leant's matching frontend now uses `List.length`, Lean relations, and Lean
+projection notation while lowering to the same checked contract vocabulary:
+`:synth --where List.length result = List.length arg0 -- TYPE`.
 
 Both engines see the same loaded workspace and the same parsed query. Djex
 parses the type once against the loaded source inventory and prompt module

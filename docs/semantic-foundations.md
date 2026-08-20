@@ -428,12 +428,12 @@ The bounded compact `len(...)` grammar remains a source-level compatibility
 boundary, not the primary interactive notation. Djex now also exposes
 `parseHaskellLengthWhereSource` and `parseLeanLengthWhereSource`, which
 produce the same opaque source with the same normalization, fingerprints,
-limits, replay rules, and authority boundaries. Djex's Haskell REPL is active;
-the Leant command adapter is the remaining surface wiring:
+limits, replay rules, and authority boundaries. Both host REPL adapters are
+active:
 
 ```text
 -- Djex / Haskell
-:synth --where length result == length arg0 -- [a] -> [a]
+:exference --where length result == length arg0 -- [a] -> [a]
 
 -- Leant / Lean
 :synth --where List.length result = List.length arg0 -- List a -> List a
@@ -451,7 +451,9 @@ Haskell-shaped help examples and a pure `:set length-z3` policy seal. Once that
 policy is active, the REPL resolves one conservative built-in profile, searches
 typed Exference candidates, opens one live Length session, and applies the
 existing problem/query/observation/replay pipeline before selection and
-rendering.
+rendering. Leant's concise command derives only exact built-in-`List` input
+roles and scalar/canonical-`Prod` result defaults after Lean translation, then
+uses its existing command-local filter context and scheduler.
 
 In the built-in list case, omission is intentionally useful but bounded:
 `--where` explicitly selects filtering, the host's standard list model is the
@@ -471,7 +473,7 @@ verdict rejection authority. Only exact independent replay of a returned model
 can refute a candidate; every status-only or failed assessment retains it.
 Djinn-only constrained queries remain unavailable because Djinn does not yet
 retain a matching source-typed graph, and Both mode never compensates by
-running it unconstrained. The current explicit Leant form and the direct
+running it unconstrained. The concise and explicit Leant forms and the direct
 `parseLengthWhereSource`, `parseHaskellLengthWhereSource`, and
 `parseLeanLengthWhereSource` APIs remain available beside the REPL surfaces.
 

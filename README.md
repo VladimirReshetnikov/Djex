@@ -287,9 +287,10 @@ this host notation to the existing bounded, normalized Length AST; it does not
 execute arbitrary Haskell. The existing `len(arg0)` parser remains a low-level
 library/compatibility surface, while the REPL grammar and help use discoverable
 `length arg0` and Haskell comparison notation. The sibling
-`parseLeanLengthWhereSource` entrance already admits `List.length`; Leant will
-wire that parser to its concise command defaults in its next surface
-checkpoint. See the [REPL guide](docs/repl.md#behavioral-constraints)
+`parseLeanLengthWhereSource` entrance admits `List.length`; Leant now wires it
+to `:synth --where List.length result = List.length arg0 -- TYPE` with
+conservative checked-target defaults. See the
+[REPL guide](docs/repl.md#behavioral-constraints)
 and the [semantic foundation](docs/semantic-foundations.md#host-language-repl-surfaces).
 
 <!-- Maintainers: the rank-N/impredicative rule families and their numeric

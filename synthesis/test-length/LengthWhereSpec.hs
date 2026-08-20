@@ -78,6 +78,7 @@ lengthWhereTests = testGroup "bounded Length where syntax"
   , arithmeticTests
   , divisorTests
   , haskellSurfaceTests
+  , leanSurfaceTests
   , roleTests
   , byteAndOffsetTests
   , resourceTests
@@ -212,6 +213,101 @@ haskellSurfaceTests = testGroup "Haskell-shaped surface"
   , testCase "re-export the Haskell parser through the facade" $ do
       source <- case Djex.parseHaskellLengthWhereSource Djex.defaultLengthLimits
           (ascii "length result == 0") of
+        Left failure -> assertFailure (show failure) >> error "unreachable"
+        Right value -> pure value
+      Djex.elaborateLengthWhereSource Djex.LengthWhereScalar [] source @?=
+        Right (Djex.LengthWhereScalarContractSource []
+          $ scalarSource $ Length.LengthEqual result
+              (Length.LengthLiteral 0))
+  ]
+
+leanSurfaceTests :: TestTree
+leanSurfaceTests = testGroup "Lean-shaped surface"
+  [ testCase "lower List.length and Lean relations" $ do
+      assertLeanScalar observedOne "List.length result = List.length arg0"
+        $ Length.LengthEqual result input0
+      assertLeanScalar observedOne "List.length result != List.length arg0"
+        $ Length.LengthNot $ Length.LengthEqual result input0
+      assertLeanScalar observedOne "List.length result <= List.length arg0"
+        $ Length.LengthAtMost result input0
+      assertLeanScalar observedOne "List.length result < List.length arg0"
+        $ Length.LengthNot $ Length.LengthAtMost input0 result
+      assertLeanScalar observedOne "List.length result >= List.length arg0"
+        $ Length.LengthAtMost input0 result
+      assertLeanScalar observedOne "List.length result > List.length arg0"
+        $ Length.LengthNot $ Length.LengthAtMost result input0
+  , testCase "lower Lean arithmetic and prefix extrema" $ do
+      assertLeanScalar observedThree
+        ("List.length result = List.length arg0 + 2 * List.length arg1 " ++
+          "- List.length arg2 / 3 % 2")
+        (Length.LengthEqual result
+          $ Length.LengthMonus
+              (Length.LengthSum
+                [ input0
+                , Length.LengthScale 2 input1
+                ])
+              (Length.LengthModulo 2 $ Length.LengthQuotient 3 input2))
+      assertLeanScalar observedTwo
+        ("List.length result = min (List.length arg1) " ++
+          "(max (List.length arg0) 3)")
+        (Length.LengthEqual result
+          $ Length.LengthMinimum input1
+              (Length.LengthMaximum input0 $ Length.LengthLiteral 3))
+  , testCase "lower numeric product projections" $
+      assertLeanPair observedOne
+        ("List.length result.1 + List.length result.2 " ++
+          "= 2 * List.length arg0")
+        (Length.LengthEqual
+          (Length.LengthSum [pairFirst, pairSecond])
+          (Length.LengthScale 2 pairInput0))
+  , testCase "admit parenthesized reference arguments" $ do
+      assertLeanScalar observedOne
+        "List.length (result) = List.length (arg0)"
+        $ Length.LengthEqual result input0
+      assertLeanPair [] "List.length (result.1) = List.length (result.2)"
+        $ Length.LengthEqual pairFirst pairSecond
+  , testCase "reject compact, Haskell, and malformed Lean spellings" $ do
+      assertLeanParseError "len(result)=len(arg0)"
+        $ Where.LengthWhereUnexpectedToken 0
+            Where.LengthWhereExpressionExpected
+      assertLeanParseError "length result == length arg0"
+        $ Where.LengthWhereUnexpectedToken 0
+            Where.LengthWhereExpressionExpected
+      assertLeanParseError "List.length result == List.length arg0"
+        $ Where.LengthWhereUnexpectedToken 19
+            Where.LengthWhereRelationExpected
+      assertLeanParseError "List.length result.first = 0"
+        $ Where.LengthWhereUnexpectedToken 19
+            Where.LengthWhereReferenceExpected
+      assertLeanParseError "List.length result.3 = 0"
+        $ Where.LengthWhereUnexpectedToken 19
+            Where.LengthWhereReferenceExpected
+  , testCase "share emitted resource limits and source offsets" $ do
+      assertLeanParseErrorUnder (limitsWithSyntax 2 32 64 256) "0!=0"
+        $ Where.LengthWhereSyntaxLimitExceeded
+            Where.LengthWhereSyntaxNodes 2 3 1
+      assertLeanParseError "List.length arg8 = 0"
+        $ Where.LengthWhereSyntaxLimitExceeded
+            Where.LengthWherePhysicalArgumentIndex 7 8 12
+      case Where.parseLeanLengthWhereSource defaultLimits
+          (BS.pack [0x30, 0x3d, 0x30, 0x20, 0x80]) of
+        Left failure -> failure @?= Where.LengthWhereNonAsciiByte 4
+        Right _ -> assertFailure "accepted non-ASCII Lean-shaped source"
+  , testCase "produce the same scalar and pair contract sources" $ do
+      compactScalar <- scalarContract defaultLimits observedOne
+        "len(result)=len(arg0)+min(len(arg0),1)"
+      leanScalar <- leanScalarContract observedOne
+        "List.length result = List.length arg0 + min (List.length arg0) 1"
+      leanScalar @?= compactScalar
+      compactPair <- pairContract defaultLimits observedOne
+        "len(result.first)+len(result.second)=2*len(arg0)"
+      leanPair <- leanPairContract observedOne
+        ("List.length result.1 + List.length result.2 " ++
+          "= 2 * List.length arg0")
+      leanPair @?= compactPair
+  , testCase "re-export the Lean parser through the facade" $ do
+      source <- case Djex.parseLeanLengthWhereSource Djex.defaultLengthLimits
+          (ascii "List.length result = 0") of
         Left failure -> assertFailure (show failure) >> error "unreachable"
         Right value -> pure value
       Djex.elaborateLengthWhereSource Djex.LengthWhereScalar [] source @?=
@@ -678,6 +774,83 @@ haskellPairContract roles source = do
       assertSeals defaultLimits Where.LengthWhereBinaryProduct roles parsed
       pure contract
     Right _ -> assertFailure "Haskell pair elaboration returned scalar source"
+      >> error "unreachable"
+
+parseLeanOK :: String -> IO Where.LengthWhereSource
+parseLeanOK source =
+  case Where.parseLeanLengthWhereSource defaultLimits (ascii source) of
+    Left failure -> assertFailure
+      ("unexpected Lean-shaped where rejection: " ++ show failure)
+        >> error "unreachable"
+    Right parsed -> pure parsed
+
+assertLeanParseError
+  :: String -> Where.LengthWhereParseError -> Assertion
+assertLeanParseError = assertLeanParseErrorUnder defaultLimits
+
+assertLeanParseErrorUnder
+  :: Length.LengthLimits
+  -> String
+  -> Where.LengthWhereParseError
+  -> Assertion
+assertLeanParseErrorUnder limits source expected =
+  case Where.parseLeanLengthWhereSource limits (ascii source) of
+    Left actual -> actual @?= expected
+    Right _ -> assertFailure "expected Lean-shaped Length.Where rejection"
+
+assertLeanScalar
+  :: [Length.LengthTargetArgumentRole]
+  -> String
+  -> Length.LengthFormula Length.LengthContractVariable
+  -> Assertion
+assertLeanScalar roles source expected = do
+  parsed <- parseLeanOK source
+  Where.elaborateLengthWhereSource Where.LengthWhereScalar roles parsed @?=
+    Right (Where.LengthWhereScalarContractSource roles $ scalarSource expected)
+  assertSeals defaultLimits Where.LengthWhereScalar roles parsed
+
+assertLeanPair
+  :: [Length.LengthTargetArgumentRole]
+  -> String
+  -> Length.LengthFormula Length.LengthSpinePairContractVariable
+  -> Assertion
+assertLeanPair roles source expected = do
+  parsed <- parseLeanOK source
+  Where.elaborateLengthWhereSource Where.LengthWhereBinaryProduct roles parsed
+    @?= Right (Where.LengthWhereBinaryProductContractSource roles
+      $ pairSource expected)
+  assertSeals defaultLimits Where.LengthWhereBinaryProduct roles parsed
+
+leanScalarContract
+  :: [Length.LengthTargetArgumentRole]
+  -> String
+  -> IO Length.LengthContractSource
+leanScalarContract roles source = do
+  parsed <- parseLeanOK source
+  case Where.elaborateLengthWhereSource Where.LengthWhereScalar roles parsed of
+    Left failure -> assertFailure (show failure) >> error "unreachable"
+    Right (Where.LengthWhereScalarContractSource returnedRoles contract) -> do
+      returnedRoles @?= roles
+      assertSeals defaultLimits Where.LengthWhereScalar roles parsed
+      pure contract
+    Right _ -> assertFailure "Lean scalar elaboration returned pair source"
+      >> error "unreachable"
+
+leanPairContract
+  :: [Length.LengthTargetArgumentRole]
+  -> String
+  -> IO Length.LengthSpinePairContractSource
+leanPairContract roles source = do
+  parsed <- parseLeanOK source
+  case Where.elaborateLengthWhereSource
+      Where.LengthWhereBinaryProduct roles parsed of
+    Left failure -> assertFailure (show failure) >> error "unreachable"
+    Right (Where.LengthWhereBinaryProductContractSource returnedRoles
+        contract) -> do
+      returnedRoles @?= roles
+      assertSeals defaultLimits Where.LengthWhereBinaryProduct roles parsed
+      pure contract
+    Right _ -> assertFailure "Lean pair elaboration returned scalar source"
       >> error "unreachable"
 
 assertParseError :: String -> Where.LengthWhereParseError -> Assertion

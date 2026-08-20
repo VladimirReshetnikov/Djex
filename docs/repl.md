@@ -108,27 +108,27 @@ Backend commands distinguish persistent selection from one-query routing:
 Entering `:` repeats the last type with the backend selection recorded for
 that query; current rendering and search settings are used for the repeat.
 
-## Behavioral constraint activation roadmap
+## Behavioral constraints
 
 The standalone REPL recognizes a leading exact
 `--where CLAUSE -- TYPE`, preserves ordinary `:synth TYPE`, retains the raw
-clause in query history, and repeats the complete structured query with `:`.
-Merely recognizing the command does not parse or execute the clause: until
-checked runtime authority is configured, a valid constrained query fails
-before clause parsing. Once `length-z3` is set, Djex parses the bounded clause
-and seals the checked built-in-list target profile, but still fails closed
-before backend or solver execution while Exference assessment is pending.
+clause only in query history, and repeats the complete structured query with
+`:`. Until checked runtime authority is configured, a valid constrained query
+fails before clause parsing. Once `length-z3` is set, Djex parses the bounded
+clause, seals the checked built-in-list target profile, generates typed
+Exference candidates, and checks them through one live Length/Z3 session.
 
 The intended common-case form uses ordinary Haskell expression notation:
 
 ```text
-:synth --where length result == length arg0 -- [a] -> [a]
-:synth --where length (fst result) + length (snd result) == 2 * length arg0 -- [a] -> ([a], [a])
+:exference --where length result == length arg0 -- [a] -> [a]
+:exference --where length (fst result) + length (snd result) == 2 * length arg0 -- [a] -> ([a], [a])
 ```
 
-Those examples are accepted by the outer grammar and shown by `:help synth`,
-but are not successful behavioral queries yet. The additive
-`parseHaskellLengthWhereSource` library entrance already parses the bounded
+With `length-z3` in `.djexrc`, each example is a one-line behavioral query.
+Otherwise precede it with
+`:set length-z3 /absolute/path/to/z3 [SHA256HEX]`. The additive
+`parseHaskellLengthWhereSource` library entrance parses the bounded
 Haskell-shaped formula and lowers it to the same normalized natural-number
 Length contract as the compact parser. It recognizes `length x`, Haskell
 equality and inequality (`==` and `/=`), and prefix or backticked `div` and
@@ -154,13 +154,23 @@ infer a custom spine, provider law, modeled argument, executable path, or Z3
 authority from a formula. `:help synth` shows the accepted outer grammar,
 resolved profile defaults, and scalar/pair examples.
 
-`:set length-z3` already seals the finite launch/response policy without
-filesystem or process IO. Linux selects the descriptor-bound launch profile;
-other platforms select the portable path-snapshot profile. `:show settings`
-reports only active/inactive, launch strategy, and pinned/unpinned status, and
-`:unset length-z3` removes the policy. Target/profile resolution consumes the
-setting only as an authorization gate; no executable is inspected or launched
-until the pending Exference assessment path is active.
+`:set length-z3` seals the finite launch/response policy without filesystem or
+process IO. Linux selects the descriptor-bound launch profile; other platforms
+select the portable path-snapshot profile. `:show settings` reports only
+active/inactive, launch strategy, and pinned/unpinned status, and
+`:unset length-z3` removes the policy. The executable is first inspected and
+launched after clause and target resolution, inside the established query
+timeout.
+
+Every typed Exference candidate is sealed into the exact scalar or pair
+problem, translated, checked, and independently replayed. Only a fresh replayed
+counterexample removes the candidate. `unsat`, `unknown`, status-only `sat`,
+problem/query failures, and replay failures do not create negative evidence;
+per-candidate failures retain the candidate with a sanitized warning. A
+session-open or launch failure stops the constrained request.
+Djinn-only constrained requests fail closed because Djinn does not yet retain
+the required source-typed candidate graph. Both mode reports that limitation
+and runs only the constrained Exference lane, never an unconstrained Djinn lane.
 Leant's matching frontend will use `List.length`, Lean relations, and Lean
 projection notation while lowering to the same checked contract vocabulary.
 

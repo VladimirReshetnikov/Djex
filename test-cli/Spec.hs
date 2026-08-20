@@ -82,6 +82,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplWhereGrammar
   , testCase "REPL resolves conservative built-in Length where profiles"
       testReplLengthWhereResolution
+  , testCase "REPL filters Exference candidates through live Length replay"
+      testReplLengthWhereRuntime
   , testCase "REPL multiline, repeat, and command errors recover"
       testReplInputRecovery
   , testCase "REPL bare input handles Haskell line comments"
@@ -643,9 +645,9 @@ testReplLengthZ3Setting = withTemporaryEnvironment [] $ \directory -> do
     "LengthSMTLibExecutionExecutablePathNotAbsolute" errors
   assertContains "a malformed digest has one sanitized refusal"
     "length-z3 SHA-256 must be exactly 64 hexadecimal digits" errors
-  assertContains "a stored policy remains inert before runtime activation"
-    "[DJEX_REPL_LENGTH_WHERE_RUNTIME_UNAVAILABLE]" errors
-  assertBool "the inert policy path parsed or echoed its where clause"
+  assertContains "a stored missing policy reaches only the sealed live opener"
+    "[DJEX_REPL_LENGTH_WHERE_SESSION]" errors
+  assertBool "the live policy failure parsed or echoed its where clause"
     $ not $ "424242" `isInfixOf` errors
   assertBool "the sealed policy display leaked its executable path"
     $ not $ "missing-private-z3" `isInfixOf` output
@@ -965,16 +967,8 @@ testReplLengthWhereResolution = withTemporaryEnvironment
     , ":djinn --where length result = 271828 -- [a]"
     ]
   assertEqual "Length where resolution REPL exit" ExitSuccess exitCode
-  assertEqual "five conservative profiles resolve without running a backend" 5
-    $ countOccurrences
-        "[DJEX_REPL_LENGTH_WHERE_RUNTIME_UNAVAILABLE]" errors
-  assertEqual "three scalar profiles observe one list input" 3
-    $ countOccurrences
-        "list-scalar-exact-cases with 1 observed list input(s)" errors
-  assertContains "a constant result constraint may observe no input"
-    "list-scalar-exact-cases with 0 observed list input(s)" errors
-  assertContains "boxed list pairs select the nominal product profile"
-    "list-binary-product-exact-cases with 1 observed list input(s)" errors
+  assertEqual "five conservative profiles reach the sealed live boundary" 5
+    $ countOccurrences "[DJEX_REPL_LENGTH_WHERE_SESSION]" errors
   assertEqual "five target/profile mismatches fail at resolution" 5
     $ countOccurrences "[DJEX_REPL_LENGTH_WHERE_TARGET]" errors
   assertContains "pair result syntax is rejected for a scalar result"
@@ -995,6 +989,65 @@ testReplLengthWhereResolution = withTemporaryEnvironment
     $ not $ "314159" `isInfixOf` errors
   assertBool "a Djinn-refused clause was parsed or echoed"
     $ not $ "271828" `isInfixOf` errors
+  assertNoCallStack errors
+
+testReplLengthWhereRuntime :: Assertion
+testReplLengthWhereRuntime = withCompiledFakeZ3s
+    ("query-unsat", "healthy")
+    $ \directory (unsatisfiableExecutable, healthyExecutable) -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":set length-z3 " ++ unsatisfiableExecutable
+    , ":set target scalarKept"
+    , ":exference --where length result == length arg0 -- [a] -> [a]"
+    , ":set target pairKept"
+    , ":exference --where length (fst result) >= 0 -- [a] -> ([a], [a])"
+    , ":set target bothKept"
+    , ":compare --where length result == length arg0 -- [a] -> [a]"
+    , ":set length-z3 " ++ healthyExecutable
+    , ":set max-steps 4"
+    , ":set target impossible"
+    , ":exference --where length result > length result -- [a] -> [a]"
+    ]
+  assertEqual "live Length where REPL exit" ExitSuccess exitCode
+  let sessionFailures = countOccurrences
+        "[DJEX_REPL_LENGTH_WHERE_SESSION]" errors
+  if sessionFailures == 0
+    then do
+      assertContains "scalar replay retains the exact identity"
+        "scalarKept a = a" output
+      assertContains "a tautological pair contract retains one pair candidate"
+        "pairKept" output
+      assertBool "an impossible postcondition retained a candidate"
+        $ not $ "impossible" `isInfixOf` output
+      assertContains "a fully refuted search reports no surviving candidate"
+        "[DJEX_EXF_NO_RESULT]" errors
+      assertContains "both mode labels the unsupported backend" "-- Djinn" output
+      assertContains "both mode labels its constrained backend"
+        "-- Exference" output
+      assertContains "both mode still presents the constrained Exference result"
+        "bothKept a = a" output
+      assertContains "both mode reports Djinn without running it unconstrained"
+        "[DJEX_REPL_LENGTH_WHERE_DJINN_UNAVAILABLE]" errors
+      assertBool "a candidate unexpectedly escaped behavioral assessment"
+        $ not $ "DJEX_REPL_LENGTH_WHERE_CANDIDATE_UNASSESSED"
+            `isInfixOf` errors
+      unsatisfiableEventsExist <- doesFileExist
+        $ unsatisfiableExecutable ++ ".events"
+      healthyEventsExist <- doesFileExist $ healthyExecutable ++ ".events"
+      assertBool "the status-only fake Z3 worker was never launched"
+        unsatisfiableEventsExist
+      assertBool "the counterexample fake Z3 worker was never launched"
+        healthyEventsExist
+    else do
+      assertEqual "an unsupported sealed-launch host fails every query closed"
+        4 sessionFailures
+      assertContains "the launch refusal remains closed and typed"
+        "LengthSMTLibLiveSession" errors
+      assertBool "a candidate was emitted without a live replay session"
+        $ all (`notElem` words output)
+            ["scalarKept", "pairKept", "impossible", "bothKept"]
+  assertBool "the runtime diagnostic echoed a behavioral clause"
+    $ not $ "length result > length result" `isInfixOf` errors
   assertNoCallStack errors
 
 testReplInputRecovery :: Assertion
@@ -3815,6 +3868,33 @@ fakeCabalFileName :: FilePath
 fakeCabalFileName
   | os == "mingw32" = "cabal.exe"
   | otherwise = "cabal"
+
+-- Copy the compiled protocol fixture under one of its closed behavior names.
+-- The production launcher supplies that exact configured path as argv[0], so
+-- neither PATH nor an inherited environment variable controls its responses.
+withCompiledFakeZ3s
+  :: (String, String)
+  -> (FilePath -> (FilePath, FilePath) -> IO result)
+  -> IO result
+withCompiledFakeZ3s (firstMode, secondMode) action =
+    withTemporaryEnvironment [] $ \root -> do
+  source <- findExecutable "djex-fake-z3" >>= maybe
+    (fail "cannot locate the djex-fake-z3 test build tool")
+    canonicalizePath
+  first <- copyFixture source root firstMode
+  second <- copyFixture source root secondMode
+  action root (first, second)
+ where
+  copyFixture source root mode = do
+    let executable = root </> fakeZ3FileName mode
+    copyFile source executable
+    permissions <- getPermissions executable
+    setPermissions executable $ setOwnerExecutable True permissions
+    pure executable
+
+fakeZ3FileName :: String -> FilePath
+fakeZ3FileName mode =
+  "djex-fake-z3-" ++ mode ++ if os == "mingw32" then ".exe" else ""
 
 -- The unlaunchable-interpreter scenario is inherently a script: it needs a
 -- file that resolution accepts but launching rejects.

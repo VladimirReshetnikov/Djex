@@ -247,53 +247,50 @@ an expression with real GHC.
 
 Djex already owns the checked Length-contract, replay, SMT-LIB, and Z3
 foundation. The standalone `djex` REPL now recognizes the bounded outer form
-`--where CLAUSE -- TYPE`, retains the clause opaquely, and preserves ordinary
-`:synth TYPE`. Without an activated policy, a constrained query fails before
-parsing the clause. With one, Djex parses the bounded clause, elaborates the
-checked target, and seals the conservative built-in-list profile, then stops
-with `DJEX_REPL_LENGTH_WHERE_RUNTIME_UNAVAILABLE` before running a backend or
-solver. Haskell users will not need to route this workflow through Leant.
+`--where CLAUSE -- TYPE`, preserves ordinary `:synth TYPE`, and filters typed
+Exference candidates through the checked built-in-list Length model. Haskell
+users do not need to route this workflow through Leant.
 
-The planned common-case spelling is deliberately Haskell-shaped and short:
+Put an absolute Z3 path in `.djexrc` and the common case is one line:
 
 ```text
-:synth --where length result == length arg0 -- [a] -> [a]
-:synth --where length (fst result) + length (snd result) == 2 * length arg0 -- [a] -> ([a], [a])
+:exference --where length result == length arg0 -- [a] -> [a]
+:exference --where length (fst result) + length (snd result) == 2 * length arg0 -- [a] -> ([a], [a])
 ```
 
-These two lines are accepted by the outer command grammar and shown by
-`:help synth`, but they do not yet run behavioral assessment. For an
-unambiguous built-in-list target, `--where` itself requests filtering, the
-model defaults to Haskell `[]`/`(:)`, the scalar or pair result domain follows
-the host expression and checked target, and every eligible list input is
-observed in source order. A missing or ambiguous default must fail closed and
-point to the explicit
-contract form; it must never guess a custom datatype, provider law, or solver
-authority. A configured safe execution policy keeps the query to one line;
-otherwise policy activation plus the query should take two lines.
-
-The REPL now admits that policy explicitly and without touching the
-filesystem:
+Without that startup setting, activate the policy explicitly and use two
+lines:
 
 ```text
 :set length-z3 /absolute/path/to/z3 [SHA256HEX]
+:exference --where length result == length arg0 -- [a] -> [a]
 ```
 
-On Linux the sealed default is descriptor-bound; other platforms retain the
+For an unambiguous target, `--where` requests filtering, the model defaults to
+Haskell `[]`/`(:)`, scalar versus pair follows both the result spelling and the
+checked target, and every eligible list input is observed in source order.
+Ambiguous targets, custom datatypes, and provider-dependent candidates are not
+silently guessed: an unavailable assessment retains the candidate with a
+closed warning. Only a counterexample independently replayed against the exact
+candidate removes it; `unsat`, `unknown`, or an unassociated `sat` status is
+never rejection authority.
+
+Djinn currently lacks the required source-typed candidate graph, so a
+Djinn-only constrained query fails closed. `:compare --where ...` labels Djinn
+as unavailable and filters only Exference; it never runs Djinn unconstrained.
+On Linux the sealed Z3 default is descriptor-bound; other platforms use the
 portable path-snapshot policy. `:show settings` reveals only active/inactive,
-launch strategy, and pinned/unpinned status. The live runtime still fails
-closed until Exference candidate assessment lands, so configuring this setting
-does not yet run Z3. Put it in `.djexrc` to keep normal queries one-line once
-activation is complete.
+launch strategy, and pinned/unpinned status.
 
 The additive `parseHaskellLengthWhereSource` library entrance already lowers
 this host notation to the existing bounded, normalized Length AST; it does not
 execute arbitrary Haskell. The existing `len(arg0)` parser remains a low-level
 library/compatibility surface, while the REPL grammar and help use discoverable
-`length arg0` and Haskell comparison notation.
-Leant will receive the corresponding Lean-shaped shorthand in the same
-surface milestone. See the [REPL guide](docs/repl.md#behavioral-constraint-activation-roadmap)
-and the [semantic foundation](docs/semantic-foundations.md#host-language-repl-surfaces-roadmap).
+`length arg0` and Haskell comparison notation. The sibling
+`parseLeanLengthWhereSource` entrance already admits `List.length`; Leant will
+wire that parser to its concise command defaults in its next surface
+checkpoint. See the [REPL guide](docs/repl.md#behavioral-constraints)
+and the [semantic foundation](docs/semantic-foundations.md#host-language-repl-surfaces).
 
 <!-- Maintainers: the rank-N/impredicative rule families and their numeric
 bounds are canonical in docs/rank-n.md. This section, docs/repl.md, and

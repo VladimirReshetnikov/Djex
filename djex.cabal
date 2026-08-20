@@ -377,7 +377,10 @@ Test-Suite djex-cli-tests
   Main-Is:        Spec.hs
   Hs-Source-Dirs: test-cli
   Build-Depends:    djex
-  Build-Tool-Depends: djex:djex, djex:djex-fake-cabal
+  Build-Tool-Depends:
+    djex:djex,
+    djex:djex-fake-cabal,
+    djex:djex-fake-z3
 
 Test-Suite synthesis-tests
   import:           tasty-hunit-test, tasty-quickcheck-dep, containers-dep, deepseq-dep, transformers-dep

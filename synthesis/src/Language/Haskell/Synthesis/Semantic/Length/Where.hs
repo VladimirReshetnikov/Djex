@@ -22,6 +22,7 @@ module Language.Haskell.Synthesis.Semantic.Length.Where
   , LengthWhereElaborationError (..)
   , parseLengthWhereSource
   , parseHaskellLengthWhereSource
+  , parseLeanLengthWhereSource
   , elaborateLengthWhereSource
   ) where
 
@@ -147,6 +148,7 @@ data LengthWhereReference
 data LengthWhereSurfaceSyntax
   = LengthWhereCompactSyntax
   | LengthWhereHaskellSyntax
+  | LengthWhereLeanSyntax
   deriving (Eq)
 
 data Token = Token !Natural !TokenKind
@@ -226,6 +228,20 @@ parseHaskellLengthWhereSource
   -> Either LengthWhereParseError LengthWhereSource
 parseHaskellLengthWhereSource =
   parseLengthWhereSourceWith LengthWhereHaskellSyntax
+
+-- | Parse one bounded Lean-shaped Length postcondition.
+--
+-- This is a semantic surface parser, not a Lean evaluator.  It accepts
+-- @List.length arg0@, scalar @List.length result@, and product projections
+-- such as @List.length result.1@, then constructs the exact same opaque source
+-- as 'parseLengthWhereSource'.  It grants no model, role, solver, or execution
+-- authority.
+parseLeanLengthWhereSource
+  :: LengthLimits
+  -> ByteString
+  -> Either LengthWhereParseError LengthWhereSource
+parseLeanLengthWhereSource =
+  parseLengthWhereSourceWith LengthWhereLeanSyntax
 
 parseLengthWhereSourceWith
   :: LengthWhereSurfaceSyntax
@@ -391,6 +407,8 @@ parseLengthReference depth offset state =
       parseCompactLengthReference depth offset state
     LengthWhereHaskellSyntax ->
       parseHaskellLengthReference depth offset state
+    LengthWhereLeanSyntax ->
+      parseLeanLengthReference depth offset state
 
 parseCompactLengthReference
   :: Natural
@@ -455,6 +473,54 @@ parseHaskellPairProjection component state = case peekToken state of
     pure (LengthWherePairResult component, advance state)
   token -> unexpectedToken LengthWhereReferenceExpected token
 
+parseLeanLengthReference
+  :: Natural
+  -> Natural
+  -> ParserState
+  -> Either LengthWhereParseError (ParsedExpression, ParserState)
+parseLeanLengthReference depth offset state = do
+  (reference, afterReference) <- parseLeanLengthArgument depth state
+  pure
+    ( withReferences [reference]
+        $ compoundExpression offset (LengthVariable reference) []
+    , afterReference
+    )
+
+parseLeanLengthArgument
+  :: Natural
+  -> ParserState
+  -> Either LengthWhereParseError (LengthWhereReference, ParserState)
+parseLeanLengthArgument depth state = case peekToken state of
+  Token offset (TokenArgument digits) -> do
+    index <- parsePhysicalArgument offset digits state
+    pure (LengthWherePhysicalArgument index, advance state)
+  Token _ TokenResult -> parseLeanResultReference $ advance state
+  Token offset TokenLeftParenthesis -> do
+    nested <- enterNesting offset depth
+    (reference, afterReference) <- parseLeanLengthArgument nested
+      $ advance state
+    afterClose <- consumeExact LengthWhereRightParenthesisExpected
+      TokenRightParenthesis afterReference
+    nested `seq` pure (reference, afterClose)
+  token -> unexpectedToken LengthWhereReferenceExpected token
+
+parseLeanResultReference
+  :: ParserState
+  -> Either LengthWhereParseError (LengthWhereReference, ParserState)
+parseLeanResultReference state = case peekToken state of
+  Token _ TokenDot -> case peekToken $ advance state of
+    Token _ (TokenNatural digits)
+      | digits == ascii "1" -> pure
+          ( LengthWherePairResult LengthSpinePairFirst
+          , advance $ advance state
+          )
+      | digits == ascii "2" -> pure
+          ( LengthWherePairResult LengthSpinePairSecond
+          , advance $ advance state
+          )
+    token -> unexpectedToken LengthWhereReferenceExpected token
+  _ -> pure (LengthWhereScalarResult, state)
+
 parseReference
   :: ParserState
   -> Either LengthWhereParseError (LengthWhereReference, ParserState)
@@ -487,6 +553,8 @@ parseExtremum isMinimum depth offset state =
     LengthWhereCompactSyntax ->
       parseCompactExtremum isMinimum depth offset state
     LengthWhereHaskellSyntax ->
+      parseHaskellExtremum isMinimum depth offset state
+    LengthWhereLeanSyntax ->
       parseHaskellExtremum isMinimum depth offset state
 
 parseCompactExtremum
@@ -1144,6 +1212,9 @@ tokenize surfaceSyntax source = go 0
         in Token (fromIntegral offset)
              (TokenNatural $ BS.take (end - offset) $ BS.drop offset source)
            : go end
+    | surfaceSyntax == LengthWhereLeanSyntax
+    , leanLengthAt offset =
+        Token (fromIntegral offset) TokenLen : go (offset + leanLengthSize)
     | asciiIdentifierStart (BS.index source offset) =
         let end = spanWhile asciiIdentifierContinue offset
             spelling = BS.take (end - offset) $ BS.drop offset source
@@ -1152,6 +1223,13 @@ tokenize surfaceSyntax source = go 0
     | otherwise = symbolToken offset
 
   skipWhitespace = spanWhile asciiWhitespace
+
+  leanLengthSpelling = ascii "List.length"
+  leanLengthSize = BS.length leanLengthSpelling
+  leanLengthAt position =
+    leanLengthSpelling `BS.isPrefixOf` BS.drop position source
+      && let end = position + leanLengthSize
+         in end >= size || not (asciiIdentifierContinue $ BS.index source end)
 
   spanWhile predicate = advanceWhile
    where
@@ -1175,6 +1253,8 @@ tokenize surfaceSyntax source = go 0
       (LengthWhereHaskellSyntax, 0x2f, Just 0x3d) -> two TokenNotEqual
       (LengthWhereHaskellSyntax, 0x3d, Just 0x3d) -> two TokenEqual
       (LengthWhereHaskellSyntax, 0x21, Just 0x3d) -> two TokenUnknown
+      (LengthWhereLeanSyntax, 0x21, Just 0x3d) -> two TokenNotEqual
+      (LengthWhereLeanSyntax, 0x3d, Just 0x3d) -> two TokenUnknown
       (LengthWhereHaskellSyntax, 0x60, _)
         | BS.take 5 remaining == ascii "`div`" -> five TokenDivide
         | BS.take 5 remaining == ascii "`mod`" -> five TokenModulo
@@ -1190,6 +1270,9 @@ tokenize surfaceSyntax source = go 0
       (LengthWhereCompactSyntax, 0x2f, _) -> one TokenDivide
       (LengthWhereCompactSyntax, 0x25, _) -> one TokenModulo
       (LengthWhereCompactSyntax, 0x3d, _) -> one TokenEqual
+      (LengthWhereLeanSyntax, 0x2f, _) -> one TokenDivide
+      (LengthWhereLeanSyntax, 0x25, _) -> one TokenModulo
+      (LengthWhereLeanSyntax, 0x3d, _) -> one TokenEqual
       (LengthWhereHaskellSyntax, 0x2f, _) -> one TokenUnknown
       (LengthWhereHaskellSyntax, 0x25, _) -> one TokenUnknown
       (LengthWhereHaskellSyntax, 0x3d, _) -> one TokenUnknown
@@ -1218,12 +1301,15 @@ identifierToken surfaceSyntax spelling
   lengthName = case surfaceSyntax of
     LengthWhereCompactSyntax -> ascii "len"
     LengthWhereHaskellSyntax -> ascii "length"
+    LengthWhereLeanSyntax -> ascii "List.length"
   firstName = case surfaceSyntax of
     LengthWhereCompactSyntax -> ascii "first"
     LengthWhereHaskellSyntax -> ascii "fst"
+    LengthWhereLeanSyntax -> ascii "first"
   secondName = case surfaceSyntax of
     LengthWhereCompactSyntax -> ascii "second"
     LengthWhereHaskellSyntax -> ascii "snd"
+    LengthWhereLeanSyntax -> ascii "second"
 
 ascii :: String -> ByteString
 ascii = BS.pack . map (fromIntegral . fromEnum)

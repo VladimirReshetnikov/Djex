@@ -36,6 +36,7 @@ module Language.Haskell.Djex.Command
   , executeExferenceCommand
   , executeExferenceCommandInScope
   , presentDjinn
+  , presentAssessedExference
   , presentExference
   , QueryTimeout
   , noQueryTimeout
@@ -386,14 +387,8 @@ presentExference
 presentExference options fieldSelectors results
   | presentationSelection options == SelectAll =
       presentAllExference options fieldSelectors results
-presentExference options fieldSelectors results = case traverse
-    (renderExferenceBlock options) candidates of
-  Left failure -> renderFailure "DJEX_EXF_RENDER" failure
-  Right rendered -> do
-    printCandidates rendered
-    when (null candidates) $ reportNoExferenceResult progress
-    reportTruncation progress
-    pure ExitSuccess
+presentExference options fieldSelectors results =
+  presentExferenceSelection options fieldSelectors selection
  where
   -- When record selectors are in scope, a first-candidate request looks a
   -- few results ahead and shows the one whose selector-normalized spelling
@@ -411,6 +406,55 @@ presentExference options fieldSelectors results = case traverse
       (exferenceCandidateComplexity . exferenceCandidateMetrics)
       (const True)
       results
+
+-- | Check typed Exference candidates effectfully before selecting, rendering,
+-- and reporting them through the established presentation policy.
+--
+-- The admission action runs exactly once for every candidate the policy
+-- inspects. Rejected candidates cannot participate in ranking. 'SelectAll'
+-- retains the existing one-pass output behavior instead of materializing the
+-- complete admitted trace.
+presentAssessedExference
+  :: PresentationOptions
+  -> FieldSelectors
+  -> (ExferenceTypedCandidate -> IO Bool)
+  -> [ExferenceTypedResult]
+  -> IO ExitCode
+presentAssessedExference options fieldSelectors admit results
+  | presentationSelection options == SelectAll =
+      presentAllAssessedExference options fieldSelectors admit results
+presentAssessedExference options fieldSelectors admit results = do
+  selected <- case presentationSelection options of
+    SelectFirst
+      | not $ Map.null fieldSelectors -> selectQueryResultsM
+          (SelectBestLookahead simplificationLookahead)
+          (expressionSize . functionClauseExpression
+            . projectFieldSelectors fieldSelectors . candidateOutput
+            . typedCandidateCompatibility)
+          admit
+          results
+    mode -> selectQueryResultsM mode
+      (exferenceCandidateComplexity . exferenceCandidateMetrics
+        . typedCandidateCompatibility)
+      admit
+      results
+  presentExferenceSelection options fieldSelectors
+    $ fmap typedCandidateCompatibility selected
+
+presentExferenceSelection
+  :: PresentationOptions
+  -> FieldSelectors
+  -> Selection ExferenceCandidate
+  -> IO ExitCode
+presentExferenceSelection options fieldSelectors selection = case traverse
+    (renderExferenceBlock options) candidates of
+  Left failure -> renderFailure "DJEX_EXF_RENDER" failure
+  Right rendered -> do
+    printCandidates rendered
+    when (null candidates) $ reportNoExferenceResult progress
+    reportTruncation progress
+    pure ExitSuccess
+ where
   picked = case presentationSelection options of
     SelectFirst -> take 1 $ selectionCandidates selection
     _ -> selectionCandidates selection
@@ -443,6 +487,36 @@ presentAllExference options fieldSelectors results = do
       putStrLn rendered
       hFlush stdout
     pure True
+
+presentAllAssessedExference
+  :: PresentationOptions
+  -> FieldSelectors
+  -> (ExferenceTypedCandidate -> IO Bool)
+  -> [ExferenceTypedResult]
+  -> IO ExitCode
+presentAllAssessedExference options fieldSelectors admit results = do
+  outcome <- runExceptT $ foldAllQueryResultsM
+    (const True) printOne False results
+  case outcome of
+    Left failure -> renderFailure "DJEX_EXF_RENDER" failure
+    Right (progress, foundAny) -> do
+      unless foundAny $ reportNoExferenceResult progress
+      reportTruncation progress
+      pure ExitSuccess
+ where
+  printOne printed typedCandidate = do
+    admitted <- liftIO $ admit typedCandidate
+    if not admitted
+      then pure printed
+      else do
+        rendered <- ExceptT $ pure $ renderExferenceBlock options
+          $ fmap (projectFieldSelectors fieldSelectors)
+          $ typedCandidateCompatibility typedCandidate
+        liftIO $ do
+          when printed $ putStrLn "\n-- or\n"
+          putStrLn rendered
+          hFlush stdout
+        pure True
 
 renderDjinn
   :: PresentationOptions

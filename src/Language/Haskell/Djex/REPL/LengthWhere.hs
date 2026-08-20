@@ -17,6 +17,9 @@ module Language.Haskell.Djex.REPL.LengthWhere
   , resolveReplLengthWhereSource
   ) where
 
+import Control.Monad (when)
+import Data.Bifunctor (first)
+
 import Language.Haskell.Djex.Exference
   ( ExferenceInventory
   , ExferenceLocal
@@ -221,31 +224,25 @@ resolveReplLengthWhereSource inventory target source = do
       (parameters, result) = functionSpine body
       maximumArguments = lengthContractInputLimit defaultLengthLimits
       observedArguments = observedListLength maximumArguments parameters
-  if observedArguments > maximumArguments
-    then Left $ ReplLengthWherePhysicalArgumentLimitExceeded
+  when (observedArguments > maximumArguments)
+    $ Left $ ReplLengthWherePhysicalArgumentLimitExceeded
       maximumArguments observedArguments
-    else pure ()
   let roles = map argumentRole parameters
   domain <- resultDomain result
-  session <- case sealExactSpineCaseLengthSession
-      defaultLengthLimits roles inventory BuiltinListSpine [] of
-    Left failure -> Left $ ReplLengthWhereSessionRejected failure
-    Right checked -> Right checked
-  contractSource <- case elaborateLengthWhereSource domain roles source of
-    Left failure -> Left $ ReplLengthWhereElaborationRejected failure
-    Right checked -> Right checked
+  session <- first ReplLengthWhereSessionRejected
+    $ sealExactSpineCaseLengthSession
+      defaultLengthLimits roles inventory BuiltinListSpine []
+  contractSource <- first ReplLengthWhereElaborationRejected
+    $ elaborateLengthWhereSource domain roles source
   case contractSource of
     LengthWhereScalarContractSource _ contract ->
-      case sealLengthContractInSession session target contract of
-        Left failure -> Left $ ReplLengthWhereScalarContractRejected failure
-        Right checked -> Right
-          $ ReplLengthWhereScalarResolution session checked
+      ReplLengthWhereScalarResolution session
+        <$> first ReplLengthWhereScalarContractRejected
+          (sealLengthContractInSession session target contract)
     LengthWhereBinaryProductContractSource _ contract ->
-      case sealLengthSpinePairContractInSession session target contract of
-        Left failure -> Left
-          $ ReplLengthWhereBinaryProductContractRejected failure
-        Right checked -> Right
-          $ ReplLengthWhereBinaryProductResolution session checked
+      ReplLengthWhereBinaryProductResolution session
+        <$> first ReplLengthWhereBinaryProductContractRejected
+          (sealLengthSpinePairContractInSession session target contract)
 
 argumentRole :: ExferenceType -> LengthTargetArgumentRole
 argumentRole argument

@@ -37,7 +37,9 @@ stated where each rule is described and restated in the architecture guide's
 
 - [Djinn: introduction, elimination, and guarded impredicativity](#djinn-introduction-elimination-and-guarded-impredicativity)
   - [The query-correlated tail](#the-query-correlated-tail)
-  - [Query-closed and loaded families; Exference introduction and elimination](#query-closed-and-loaded-families-exference-introduction-and-elimination)
+  - [Query-closed and loaded families](#query-closed-and-loaded-families)
+  - [Exference: introduction and elimination](#exference-introduction-and-elimination)
+  - [Visible type application from providers](#visible-type-application-from-providers)
 - [Provider instantiation evidence from a frontend](#provider-instantiation-evidence-from-a-frontend)
   - [Vacuous binders and higher-kinded evidence](#vacuous-binders-and-higher-kinded-evidence)
   - [The boxed-pair exception and existential observation](#the-boxed-pair-exception-and-existential-observation)
@@ -73,7 +75,7 @@ an excluded bridge. The fair producer observes at most 512 raw tuples per
 scheme; the family builder separately charges at most 512 eligible attempts,
 sixteen retained axioms per scheme, and 64 retained axioms in total.
 
-### Query-closed and loaded families; Exference introduction and elimination
+### Query-closed and loaded families
 
 The established query-closed positive-only family revisits only schemes
 embedded on the hypothesis side of the requested goal. It adds closed,
@@ -88,7 +90,11 @@ substituted body is kind-checked, so a closed higher-kinded constructor is
 admitted only when its complete use has kind `Type`. The query-correlated,
 query-closed, and loaded extensions are bounded and positive-only; a missed
 non-target retained loaded scheme makes the result inconclusive rather than
-proving non-inhabitation. Exference can introduce a nested
+ proving non-inhabitation.
+
+### Exference: introduction and elimination
+
+Exference can introduce a nested
 `forall`, with or without class contexts, once ordinary search exposes it as a
 goal, for example as a callback argument or an arrow result. It opens the
 complete leading chain with branch-local fresh rigid constants and treats each
@@ -104,6 +110,9 @@ also eliminate the complete leading `forall` chain of a scoped value at a
 monomorphic use site, freshly and
 independently for each occurrence; direct contexts become ordinary proof
 obligations.
+
+### Visible type application from providers
+
 For an instantiable scoped or retained global provider, a separate bounded
 branch can make the choice visible. A direct constraint may select its complete
 leading binder prefix from an explicit ground instance head, producing an
@@ -328,13 +337,16 @@ triple, quadruple, and bounded quintuple of sites. Quintuple-opaque plans begin
 at ten sites and quintuple-open plans begin at eleven. Each orientation retains
 at most 512 selections, alternated stably from both source-order edges, so the
 new layer contributes at most 1,024 formula views on larger inputs.
+
 Opening nested occurrences also opens the union of their enclosing chains.
 Loaded functions expose those sound views together, so a reusable premise can
 be consumed at different views in one proof. All 252 five-site selections at
 ten sites and all 462 at eleven fit below the cap, making the family exhaustive
 for eleven independent sites without a general power-set search. Twelve sites
 expose the next central boundary: a proof requiring exactly six open and six
-opaque occurrences may remain inconclusive. After that complete structural
+opaque occurrences may remain inconclusive.
+
+After that complete structural
 no-axiom prefix, bounded instantiation plans cover many omitted middle subsets,
 but chains beyond six binders, constrained chains, and candidates outside the
 finite query/value-signature vocabulary stay out of reach. Each structural or
@@ -343,6 +355,7 @@ five-, and six-binder historical query-local tuple selection fairly mixes source
 repeated, sparse, and Cartesian shapes while one- through three-binder schemes
 retain their historical order. The appended loaded-value family uses the same
 tuple shapes while alternating both ends of its source-ordered candidate list.
+
 The established query-closed structural and optional nominal plans keep their
 position after those loaded and provider plans. They schedule the combined
 historical and closed-query pool and retain only tuples containing a closed
@@ -353,6 +366,7 @@ both families contribute axioms, allowing one proof to compose their instances
 without duplicating either single-family plan. Every added plan contributes
 candidates but no negative evidence. Those caps lose completeness only, never
 soundness.
+
 The nominal parametric-datatype plans obey the same caps and add no negative
 evidence. An incomplete primary premise also makes negative evidence
 conservative for the whole query. The examples use the same

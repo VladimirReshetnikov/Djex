@@ -988,55 +988,8 @@ traverseFormula
   :: (source -> Either failure target)
   -> LengthFormula source
   -> Either failure (LengthFormula target)
-traverseFormula convert source = case source of
-  LengthTruth value -> Right $ LengthTruth value
-  LengthEqual left right -> LengthEqual
-    <$> traverseExpression convert left
-    <*> traverseExpression convert right
-  LengthAtMost left right -> LengthAtMost
-    <$> traverseExpression convert left
-    <*> traverseExpression convert right
-  LengthNot formula -> LengthNot <$> traverseFormula convert formula
-  LengthAll formulas -> LengthAll <$> traverseList
-    (traverseFormula convert) formulas
-
-traverseExpression
-  :: (source -> Either failure target)
-  -> LengthExpression source
-  -> Either failure (LengthExpression target)
-traverseExpression convert source = case source of
-  LengthVariable variable -> LengthVariable <$> convert variable
-  LengthLiteral value -> Right $ LengthLiteral value
-  LengthSum expressions -> LengthSum <$> traverseList
-    (traverseExpression convert) expressions
-  LengthScale factor expression -> LengthScale factor
-    <$> traverseExpression convert expression
-  LengthQuotient divisor expression -> LengthQuotient divisor
-    <$> traverseExpression convert expression
-  LengthModulo divisor expression -> LengthModulo divisor
-    <$> traverseExpression convert expression
-  LengthMonus left right -> LengthMonus
-    <$> traverseExpression convert left
-    <*> traverseExpression convert right
-  LengthMinimum left right -> LengthMinimum
-    <$> traverseExpression convert left
-    <*> traverseExpression convert right
-  LengthMaximum left right -> LengthMaximum
-    <$> traverseExpression convert left
-    <*> traverseExpression convert right
-  LengthIf condition trueBranch falseBranch -> LengthIf
-    <$> traverseFormula convert condition
-    <*> traverseExpression convert trueBranch
-    <*> traverseExpression convert falseBranch
-
-traverseList
-  :: (source -> Either failure target)
-  -> [source]
-  -> Either failure [target]
-traverseList _ [] = Right []
-traverseList convert (value : remaining) = (:)
-  <$> convert value
-  <*> traverseList convert remaining
+traverseFormula convert =
+  Internal.rewriteLengthFormula (fmap LengthVariable . convert)
 
 traverseList_
   :: (source -> Either failure target)

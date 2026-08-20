@@ -117,6 +117,8 @@ import Language.Haskell.Synthesis.Internal.Semantic.Length
   , LengthContractSource (..)
   , LengthContractVariable (..)
   , LengthExpression (..)
+  , rewriteLengthExpression
+  , mapLengthFormulaVariables
   , LengthFormula (..)
   , LengthSpinePair (..)
   , LengthSpinePairComponent (..)
@@ -2746,34 +2748,16 @@ substituteProviderExpression
   :: Map Natural (LengthExpression LengthContractVariable)
   -> LengthExpression LengthProviderVariable
   -> Either Natural (LengthExpression LengthContractVariable)
-substituteProviderExpression replacements = go
+substituteProviderExpression replacements =
+  rewriteLengthExpression atVariable
  where
   -- Return a replacement tree verbatim. Repeated references therefore share
   -- it instead of copying it before the immediately following bounded
   -- normalization walk.
-  go source = case source of
-    LengthVariable (LengthProviderArgument position) -> case
-        Map.lookup position replacements of
+  atVariable (LengthProviderArgument position) =
+    case Map.lookup position replacements of
       Nothing -> Left position
       Just expression -> Right expression
-    LengthLiteral value -> Right $ LengthLiteral value
-    LengthSum terms -> LengthSum <$> mapM go terms
-    LengthScale factor expression -> LengthScale factor <$> go expression
-    LengthQuotient divisor expression ->
-      LengthQuotient divisor <$> go expression
-    LengthModulo divisor expression -> LengthModulo divisor <$> go expression
-    LengthMonus left right -> LengthMonus <$> go left <*> go right
-    LengthMinimum left right -> LengthMinimum <$> go left <*> go right
-    LengthMaximum left right -> LengthMaximum <$> go left <*> go right
-    LengthIf condition trueBranch falseBranch -> LengthIf
-      <$> goFormula condition <*> go trueBranch <*> go falseBranch
-
-  goFormula source = case source of
-    LengthTruth value -> Right $ LengthTruth value
-    LengthEqual left right -> LengthEqual <$> go left <*> go right
-    LengthAtMost left right -> LengthAtMost <$> go left <*> go right
-    LengthNot formula -> LengthNot <$> goFormula formula
-    LengthAll formulas -> LengthAll <$> mapM goFormula formulas
 
 spendEvaluation
   :: InterpretationContext identity local annotation
@@ -2803,74 +2787,25 @@ substituteResultFormula
   :: LengthExpression LengthContractVariable
   -> LengthFormula LengthContractVariable
   -> LengthFormula LengthContractVariable
-substituteResultFormula result = goFormula
+substituteResultFormula result = mapLengthFormulaVariables atVariable
  where
   -- As with provider substitution, repeated result references share the
   -- normalized tree until the joint-budget normalization walk consumes them.
-  goExpression source = case source of
-    LengthVariable LengthResult -> result
-    LengthVariable variable -> LengthVariable variable
-    LengthLiteral value -> LengthLiteral value
-    LengthSum terms -> LengthSum $ map goExpression terms
-    LengthScale factor expression -> LengthScale factor $ goExpression expression
-    LengthQuotient divisor expression ->
-      LengthQuotient divisor $ goExpression expression
-    LengthModulo divisor expression ->
-      LengthModulo divisor $ goExpression expression
-    LengthMonus left right -> LengthMonus
-      (goExpression left) (goExpression right)
-    LengthMinimum left right -> LengthMinimum
-      (goExpression left) (goExpression right)
-    LengthMaximum left right -> LengthMaximum
-      (goExpression left) (goExpression right)
-    LengthIf condition trueBranch falseBranch -> LengthIf
-      (goFormula condition) (goExpression trueBranch) (goExpression falseBranch)
-
-  goFormula source = case source of
-    LengthTruth value -> LengthTruth value
-    LengthEqual left right -> LengthEqual
-      (goExpression left) (goExpression right)
-    LengthAtMost left right -> LengthAtMost
-      (goExpression left) (goExpression right)
-    LengthNot formula -> LengthNot $ goFormula formula
-    LengthAll formulas -> LengthAll $ map goFormula formulas
+  atVariable LengthResult = result
+  atVariable variable = LengthVariable variable
 
 substituteSpinePairResultFormula
   :: LengthSpinePair (LengthExpression LengthContractVariable)
   -> LengthFormula LengthSpinePairContractVariable
   -> LengthFormula LengthContractVariable
-substituteSpinePairResultFormula result = goFormula
+substituteSpinePairResultFormula result =
+  mapLengthFormulaVariables atVariable
  where
-  goExpression source = case source of
-    LengthVariable variable -> case variable of
-      LengthSpinePairInput position -> LengthVariable $ LengthInput position
-      LengthSpinePairResult component -> case component of
-        LengthSpinePairFirst -> lengthSpinePairFirst result
-        LengthSpinePairSecond -> lengthSpinePairSecond result
-    LengthLiteral value -> LengthLiteral value
-    LengthSum terms -> LengthSum $ map goExpression terms
-    LengthScale factor expression -> LengthScale factor $ goExpression expression
-    LengthQuotient divisor expression ->
-      LengthQuotient divisor $ goExpression expression
-    LengthModulo divisor expression ->
-      LengthModulo divisor $ goExpression expression
-    LengthMonus left right -> LengthMonus
-      (goExpression left) (goExpression right)
-    LengthMinimum left right -> LengthMinimum
-      (goExpression left) (goExpression right)
-    LengthMaximum left right -> LengthMaximum
-      (goExpression left) (goExpression right)
-    LengthIf condition trueBranch falseBranch -> LengthIf
-      (goFormula condition) (goExpression trueBranch) (goExpression falseBranch)
-
-  goFormula source = case source of
-    LengthTruth value -> LengthTruth value
-    LengthEqual left right -> LengthEqual
-      (goExpression left) (goExpression right)
-    LengthAtMost left right -> LengthAtMost
-      (goExpression left) (goExpression right)
-    LengthNot formula -> LengthNot $ goFormula formula
-    LengthAll formulas -> LengthAll $ map goFormula formulas
+  atVariable variable = case variable of
+    LengthSpinePairInput position -> LengthVariable $ LengthInput position
+    LengthSpinePairResult component -> case component of
+      LengthSpinePairFirst -> lengthSpinePairFirst result
+      LengthSpinePairSecond -> lengthSpinePairSecond result
 
 mapFingerprintFailure
   :: LengthProblemFingerprintPart

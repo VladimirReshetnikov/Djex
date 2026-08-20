@@ -14,6 +14,9 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length
   , finiteBinaryProductSpineLengthsDomainTag
   , LengthExpression (..)
   , LengthFormula (..)
+  , rewriteLengthExpression
+  , rewriteLengthFormula
+  , mapLengthFormulaVariables
   , LengthContractVariable (..)
   , LengthContractSource (..)
   , LengthSpinePair (..)
@@ -114,6 +117,7 @@ module Language.Haskell.Synthesis.Internal.Semantic.Length
 
 import Control.DeepSeq (NFData (rnf))
 import Control.Monad (foldM, unless, when)
+import Data.Functor.Identity (Identity (..))
 import Data.Bifunctor (first)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
@@ -249,6 +253,63 @@ data LengthFormula variable
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData variable => NFData (LengthFormula variable)
+
+-- | Rewrite every variable occurrence of a length expression through the
+-- applicative handler, rebuilding all structural nodes and descending into
+-- conditional guards.  The handler returns a whole replacement expression,
+-- so substitutions can share one replacement tree verbatim across repeated
+-- references; a variable-to-variable conversion wraps its result back in
+-- 'LengthVariable'.  Candidate sealing's provider and result substitutions
+-- and the where-clause elaborator's reference conversion are instances.
+rewriteLengthExpression
+  :: Applicative f
+  => (source -> f (LengthExpression target))
+  -> LengthExpression source
+  -> f (LengthExpression target)
+rewriteLengthExpression atVariable = go
+ where
+  go source = case source of
+    LengthVariable variable -> atVariable variable
+    LengthLiteral value -> pure $ LengthLiteral value
+    LengthSum terms -> LengthSum <$> traverse go terms
+    LengthScale factor expression -> LengthScale factor <$> go expression
+    LengthQuotient divisor expression ->
+      LengthQuotient divisor <$> go expression
+    LengthModulo divisor expression -> LengthModulo divisor <$> go expression
+    LengthMonus left right -> LengthMonus <$> go left <*> go right
+    LengthMinimum left right -> LengthMinimum <$> go left <*> go right
+    LengthMaximum left right -> LengthMaximum <$> go left <*> go right
+    LengthIf condition trueBranch falseBranch -> LengthIf
+      <$> rewriteLengthFormula atVariable condition
+      <*> go trueBranch
+      <*> go falseBranch
+
+-- | Formula-level sibling of 'rewriteLengthExpression'.
+rewriteLengthFormula
+  :: Applicative f
+  => (source -> f (LengthExpression target))
+  -> LengthFormula source
+  -> f (LengthFormula target)
+rewriteLengthFormula atVariable = go
+ where
+  go source = case source of
+    LengthTruth value -> pure $ LengthTruth value
+    LengthEqual left right -> LengthEqual
+      <$> rewriteLengthExpression atVariable left
+      <*> rewriteLengthExpression atVariable right
+    LengthAtMost left right -> LengthAtMost
+      <$> rewriteLengthExpression atVariable left
+      <*> rewriteLengthExpression atVariable right
+    LengthNot formula -> LengthNot <$> go formula
+    LengthAll formulas -> LengthAll <$> traverse go formulas
+
+-- | Pure variable-to-expression substitution over one formula.
+mapLengthFormulaVariables
+  :: (source -> LengthExpression target)
+  -> LengthFormula source
+  -> LengthFormula target
+mapLengthFormulaVariables atVariable =
+  runIdentity . rewriteLengthFormula (Identity . atVariable)
 
 -- | Variables admitted by a scalar contract.  'LengthInput' indexes observed
 -- spine arguments compactly from zero in source order; 'LengthResult' names

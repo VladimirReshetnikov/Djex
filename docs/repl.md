@@ -151,7 +151,8 @@ Church booleans:
 Both engines open the leading quantifiers of the query itself. They also expose
 deliberately bounded rank-N rule families:
 
-- Djinn introduces a `forall`, including one with a validated class context,
+- **Djinn: introduction, and guarded impredicative elimination.** Djinn
+  introduces a `forall`, including one with a validated class context,
   in a positive formula position. Arrow results, tuples, and datatype structure
   preserve polarity; crossing an arrow parameter reverses it. Context methods
   are not LJT premises, so the body must be dictionary-independent. Djinn also
@@ -164,7 +165,8 @@ deliberately bounded rank-N rule families:
   impredicative instantiation. Inferable evidence stays implicit; if a selected
   binder is vacuous, Djinn retains the shortest visible prefix and can preserve
   a query-supplied closed quantified choice.
-- A separate positive-only query-correlated Djinn family fairly revisits the
+- **Djinn: the query-correlated positive-only tail.** A separate
+  positive-only query-correlated Djinn family fairly revisits the
   same finite variable and guarded-quantified vocabulary. A retained tuple must
   pair a quantified candidate with a binder occurring free in the scheme body
   and specialize that complete body to an alpha-equivalent subtree of the
@@ -173,14 +175,16 @@ deliberately bounded rank-N rule families:
   at most 512 raw tuples per scheme; the builder separately charges at most 512
   eligible attempts per family, sixteen retained axioms per scheme, and 64 per
   family.
-- The established query-closed positive-only Djinn family revisits only
+- **Djinn: the query-closed positive-only family.** The established
+  query-closed positive-only Djinn family revisits only
   hypothesis schemes embedded in the requested goal. It adds closed,
   forall-free monotype subtrees already present in that elaborated goal and
   retains only tuples containing at least one such candidate. A tuple may mix
   those closed candidates with the historical variables, skolems,
   premise-scope names, and guarded quantified subtrees without changing the
   historical family's order.
-- Djinn retains context-free schemes for loaded values, including implicitly
+- **Djinn: loaded-value schemes (opt-in value axioms).** Djinn retains
+  context-free schemes for loaded values, including implicitly
   quantified free signature variables, in a separate appended family. That
   family adds closed, forall-free subtrees of the checked query and loaded
   value signatures to its candidates. Closed higher-kinded constructors are
@@ -190,7 +194,8 @@ deliberately bounded rank-N rule families:
   inconclusive. In the shared
   `djex` REPL, ordinary workspace values enter this family only after
   `:set djinn-axioms on`; value axioms remain off by default.
-- Exference can introduce a nested `forall`, with or without class contexts,
+- **Exference: nested introduction with branch-local givens.** Exference
+  can introduce a nested `forall`, with or without class contexts,
   when it reaches an active goal such as a callback argument or arrow result.
   It opens the complete leading chain with branch-local fresh rigids. Each
   substituted context is a lexical given for that body only, and each deferred
@@ -198,7 +203,9 @@ deliberately bounded rank-N rule families:
   instances can therefore discharge body work without evidence leaking into a
   sibling goal. Flexible variables from an older scope may not be solved
   directly or indirectly to those rigids, so skolems cannot escape.
-- Exference instantiates the complete leading `forall` chain of a scoped value
+- **Exference: elimination, forwarding, and impredicative binder
+  solutions.** Exference instantiates the complete leading `forall` chain
+  of a scoped value
   freshly at each monomorphic use. Its direct contexts become proof
   obligations. Exact polymorphic forwarding takes priority. A context-free
   quantified provider with no free flexible variables may also be forwarded to
@@ -206,7 +213,8 @@ deliberately bounded rank-N rule families:
   without solving ambient inference variables; a provider binder may be solved
   impredicatively with a quantified subtree the requested scheme itself
   supplies.
-- An instantiable scoped or retained global provider has an additional bounded
+- **Visible type application from providers.** An instantiable scoped or
+  retained global provider has an additional bounded
   visible branch. A matching explicit ground instance head may determine its
   complete leading binder prefix and emit `provider @Int`. A context-free
   provider with no free flexible variables whose leading binders are fully

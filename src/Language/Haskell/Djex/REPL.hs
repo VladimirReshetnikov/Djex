@@ -675,7 +675,8 @@ runQuery sourceName query state = do
               "Length/Z3 execution policy is not active"
               ("use :set length-z3 /absolute/path/to/z3 [SHA256HEX] " ++
                 "before this query")
-            Just _ -> case parseHaskellLengthWhereSource defaultLengthLimits
+            Just execution -> case parseHaskellLengthWhereSource
+                defaultLengthLimits
                 $ utf8 clause of
               Left failure -> replFailure "DJEX_REPL_LENGTH_WHERE_CLAUSE"
                 "behavioral where clause was rejected" $ show failure
@@ -683,13 +684,52 @@ runQuery sourceName query state = do
                   (exferenceSessionInventory session) elaborated whereSource of
                 Left failure -> replFailure "DJEX_REPL_LENGTH_WHERE_TARGET"
                   "behavioral target profile was rejected" $ show failure
-                Right resolution -> replFailure
-                  "DJEX_REPL_LENGTH_WHERE_RUNTIME_UNAVAILABLE"
-                  "checked behavioral target resolved; execution is not active"
-                  (replLengthWhereResolutionProfile resolution ++
-                    " with " ++ show
-                      (replLengthWhereResolutionObservedInputCount resolution)
-                    ++ " observed list input(s); no backend or solver ran")
+                Right resolution -> runResolvedLengthWhere
+                  session parsed execution resolution
+
+  runResolvedLengthWhere session parsed execution resolution = case
+      mkExferenceRequestWithCheckedTargetFromParsed
+        (exferenceSearchOptions state) (resultTarget state) parsed of
+    Left failure -> emitDiagnostic failure
+    Right request -> do
+      when (selected == BothBackends) $ do
+        labelBackend True DjinnBackend
+        emitDiagnostic $ contextualDiagnostic Warning
+          "DJEX_REPL_LENGTH_WHERE_DJINN_UNAVAILABLE"
+          "Djinn behavioral candidates are not available"
+          "the constrained command continues with Exference only"
+        labelBackend True ExferenceBackend
+      ignoreExit $ withinQueryTimeout (queryTimeout state) $ case
+          runExferenceTypedQuery session request of
+        Left failure -> diagnosticFailure failure
+        Right results -> do
+          opened <- withLengthSMTLibLiveSession execution $ \liveSession ->
+            presentAssessedExference
+              (presentation state)
+              (scopeFieldSelectors state)
+              (admitLengthWhereCandidate resolution liveSession)
+              results
+          case opened of
+            Left failure -> do
+              emitDiagnostic $ contextualDiagnostic Error
+                "DJEX_REPL_LENGTH_WHERE_SESSION"
+                "Length/Z3 session could not be opened"
+                $ show failure
+              pure runtimeFailure
+            Right exitCode -> pure exitCode
+
+  admitLengthWhereCandidate resolution liveSession candidate = do
+    assessment <- assessReplLengthWhereCandidate
+      resolution liveSession candidate
+    case assessment of
+      ReplLengthWhereCandidateRefuted -> pure False
+      ReplLengthWhereCandidateRetained -> pure True
+      ReplLengthWhereCandidateUnassessed failure -> do
+        emitDiagnostic $ contextualDiagnostic Warning
+          "DJEX_REPL_LENGTH_WHERE_CANDIDATE_UNASSESSED"
+          "candidate was retained because behavioral assessment was unavailable"
+          $ show failure
+        pure True
 
   utf8 = LazyByteString.toStrict
     . ByteStringBuilder.toLazyByteString

@@ -9,6 +9,9 @@
 module Language.Haskell.Djex.REPL.LengthWhere
   ( ReplLengthWhereResolution (..)
   , ReplLengthWhereResolutionError (..)
+  , ReplLengthWhereCandidateAssessment (..)
+  , ReplLengthWhereCandidateAssessmentFailure (..)
+  , assessReplLengthWhereCandidate
   , replLengthWhereResolutionProfile
   , replLengthWhereResolutionObservedInputCount
   , resolveReplLengthWhereSource
@@ -17,8 +20,10 @@ module Language.Haskell.Djex.REPL.LengthWhere
 import Language.Haskell.Djex.Exference
   ( ExferenceInventory
   , ExferenceLocal
+  , ExferenceTermGraphAbsence
   , ExferenceType
   , ExferenceTypeVariable
+  , ExferenceTypedCandidate
   )
 import Language.Haskell.Synthesis.Collection (observedListLength)
 import Language.Haskell.Synthesis.Name (Boxity (Boxed), listName)
@@ -36,10 +41,35 @@ import Language.Haskell.Synthesis.Semantic.Length
   )
 import Language.Haskell.Synthesis.Semantic.Length.Problem
   ( CheckedLengthSession
+  , LengthProblemError
+  , LengthSpinePairProblemError
   , LengthSessionError
+  , defaultLengthProblemLimits
   , sealExactSpineCaseLengthSession
   , sealLengthContractInSession
+  , sealLengthSpinePairTypedCandidateProblemInSession
   , sealLengthSpinePairContractInSession
+  , sealLengthTypedCandidateProblemInSession
+  )
+import Language.Haskell.Synthesis.Semantic.Length.Evaluate
+  ( defaultLengthEvaluationLimits )
+import Language.Haskell.Synthesis.Semantic.Length.SMTLib
+  ( LengthSMTLibQueryError
+  , LengthSpinePairSMTLibQueryError
+  , defaultLengthSMTLibLimits
+  , sealLengthSMTLibQuery
+  , sealLengthSpinePairSMTLibQuery
+  )
+import Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live
+  ( LengthSMTLibLiveObservationReplayError
+  , LengthSMTLibLiveQueryError
+  , LengthSMTLibLiveSession
+  , LengthSpinePairSMTLibLiveObservationReplayError
+  , LengthSpinePairSMTLibLiveQueryError
+  , replayLengthSMTLibLiveQueryObservation
+  , replayLengthSpinePairSMTLibLiveQueryObservation
+  , runLengthSMTLibLiveQuery
+  , runLengthSpinePairSMTLibLiveQuery
   )
 import Language.Haskell.Synthesis.Semantic.Length.Where
   ( LengthWhereContractSource (..)
@@ -77,6 +107,91 @@ data ReplLengthWhereResolutionError
   | ReplLengthWhereBinaryProductContractRejected
       !(LengthSpinePairContractError ExferenceTypeVariable)
   deriving (Eq, Show)
+
+-- | Candidate-specific failures retain the candidate instead of granting a
+-- false refutation. Every payload comes from an existing closed, bounded
+-- Length boundary; no constructor retains the user's clause or solver bytes.
+data ReplLengthWhereCandidateAssessmentFailure
+  = ReplLengthWhereScalarProblemRejected
+      !(LengthProblemError
+          ExferenceTermGraphAbsence ExferenceLocal ExferenceLocal)
+  | ReplLengthWhereBinaryProductProblemRejected
+      !(LengthSpinePairProblemError
+          ExferenceTermGraphAbsence ExferenceLocal ExferenceLocal)
+  | ReplLengthWhereScalarQueryRejected !LengthSMTLibQueryError
+  | ReplLengthWhereBinaryProductQueryRejected
+      !LengthSpinePairSMTLibQueryError
+  | ReplLengthWhereScalarLiveQueryRejected !LengthSMTLibLiveQueryError
+  | ReplLengthWhereBinaryProductLiveQueryRejected
+      !LengthSpinePairSMTLibLiveQueryError
+  | ReplLengthWhereScalarObservationRejected
+      !LengthSMTLibLiveObservationReplayError
+  | ReplLengthWhereBinaryProductObservationRejected
+      !LengthSpinePairSMTLibLiveObservationReplayError
+  deriving (Eq, Show)
+
+-- | Result of checking one exact typed candidate against the resolved clause.
+data ReplLengthWhereCandidateAssessment
+  = ReplLengthWhereCandidateRetained
+  | ReplLengthWhereCandidateRefuted
+  | ReplLengthWhereCandidateUnassessed
+      !ReplLengthWhereCandidateAssessmentFailure
+  deriving (Eq, Show)
+
+-- | Run the existing problem, query, live-observation, and independent replay
+-- gates for one typed Exference candidate. Only a freshly replayed
+-- counterexample refutes; every failure and every evidence-free status keeps
+-- the candidate.
+assessReplLengthWhereCandidate
+  :: ReplLengthWhereResolution
+  -> LengthSMTLibLiveSession epoch
+  -> ExferenceTypedCandidate
+  -> IO ReplLengthWhereCandidateAssessment
+assessReplLengthWhereCandidate resolution liveSession candidate =
+  case resolution of
+    ReplLengthWhereScalarResolution session contract ->
+      case sealLengthTypedCandidateProblemInSession
+          defaultLengthProblemLimits session contract candidate of
+        Left failure -> pure $ ReplLengthWhereCandidateUnassessed
+          $ ReplLengthWhereScalarProblemRejected failure
+        Right problem -> case sealLengthSMTLibQuery
+            defaultLengthSMTLibLimits problem of
+          Left failure -> pure $ ReplLengthWhereCandidateUnassessed
+            $ ReplLengthWhereScalarQueryRejected failure
+          Right query -> do
+            observed <- runLengthSMTLibLiveQuery
+              defaultLengthEvaluationLimits liveSession query
+            pure $ case observed of
+              Left failure -> ReplLengthWhereCandidateUnassessed
+                $ ReplLengthWhereScalarLiveQueryRejected failure
+              Right observation -> case
+                  replayLengthSMTLibLiveQueryObservation query observation of
+                Left failure -> ReplLengthWhereCandidateUnassessed
+                  $ ReplLengthWhereScalarObservationRejected failure
+                Right Nothing -> ReplLengthWhereCandidateRetained
+                Right (Just _) -> ReplLengthWhereCandidateRefuted
+    ReplLengthWhereBinaryProductResolution session contract ->
+      case sealLengthSpinePairTypedCandidateProblemInSession
+          defaultLengthProblemLimits session contract candidate of
+        Left failure -> pure $ ReplLengthWhereCandidateUnassessed
+          $ ReplLengthWhereBinaryProductProblemRejected failure
+        Right problem -> case sealLengthSpinePairSMTLibQuery
+            defaultLengthSMTLibLimits problem of
+          Left failure -> pure $ ReplLengthWhereCandidateUnassessed
+            $ ReplLengthWhereBinaryProductQueryRejected failure
+          Right query -> do
+            observed <- runLengthSpinePairSMTLibLiveQuery
+              defaultLengthEvaluationLimits liveSession query
+            pure $ case observed of
+              Left failure -> ReplLengthWhereCandidateUnassessed
+                $ ReplLengthWhereBinaryProductLiveQueryRejected failure
+              Right observation -> case
+                  replayLengthSpinePairSMTLibLiveQueryObservation
+                    query observation of
+                Left failure -> ReplLengthWhereCandidateUnassessed
+                  $ ReplLengthWhereBinaryProductObservationRejected failure
+                Right Nothing -> ReplLengthWhereCandidateRetained
+                Right (Just _) -> ReplLengthWhereCandidateRefuted
 
 -- | Stable diagnostic name of the selected built-in profile.
 replLengthWhereResolutionProfile :: ReplLengthWhereResolution -> String

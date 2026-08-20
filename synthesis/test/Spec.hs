@@ -4799,6 +4799,22 @@ selectionTests = testGroup "result selection"
             odd results
       selection @?= Selection (Just Continuing) [3]
       observeProgress (selectionProgress selection) @?= ObservedContinuing
+  , testCase "monadic first checks once in order and leaves suffixes lazy" $ do
+      checked <- newIORef []
+      let results =
+            [ queryResult Continuing [2 :: Int, 3,
+                error "monadic first forced the candidate suffix"]
+            , error "monadic first forced the result suffix"
+            ]
+          admit candidate = do
+            modifyIORef' checked (candidate :)
+            pure $ odd candidate
+      selection <- selectQueryResultsM SelectFirst
+        (\_ -> error "monadic first evaluated its unused rank" :: Int)
+        admit results
+      selection @?= Selection (Just Continuing) [3]
+      seen <- reverse <$> readIORef checked
+      seen @?= [2, 3]
   , testCase "all preserves order and streams without forcing final progress" $ do
       let streaming = selectQueryResults SelectAll
             (\_ -> error "SelectAll evaluated its unused rank function" :: Int)
@@ -4836,6 +4852,54 @@ selectionTests = testGroup "result selection"
             | otherwise = Right candidate
       foldAllQueryResultsM (const True) stop 0 poisoned @?=
         (Left "stop" :: Either String (Maybe Progress, Int))
+  , testCase "monadic selection matches every pure finite policy" $ do
+      let terminal = Completed $ truncated CandidateLimitReached
+          results =
+            [ queryResult Continuing
+                [(3 :: Int, "first"), (2, "inadmissible")]
+            , queryResult Continuing [(1, "second"), (1, "third")]
+            , queryResult terminal [(4, "last")]
+            ]
+          rank = fst
+          admissible = (/= "inadmissible") . snd
+          modes =
+            [ SelectFirst
+            , SelectBest
+            , SelectBestLookahead 2
+            , SelectAll
+            ]
+      forM_ modes $ \mode -> do
+        selected <- selectQueryResultsM mode rank
+          (pure . admissible) results
+        selected @?= selectQueryResults mode rank admissible results
+  , testCase "monadic lookahead stops at its exact batch boundary" $ do
+      checked <- newIORef []
+      let terminal = Completed Finished
+          results =
+            [ queryResult Continuing [8 :: Int, 5]
+            , queryResult Continuing [6]
+            , queryResult Continuing [4]
+            , queryResult Continuing [4]
+            , queryResult terminal []
+            , error "monadic lookahead inspected beyond its batch budget"
+            ]
+          admit candidate = modifyIORef' checked (candidate :) >> pure True
+      selection <- selectQueryResultsM (SelectBestLookahead 2) id
+        admit results
+      selection @?= Selection (Just terminal) [4, 4]
+      seen <- reverse <$> readIORef checked
+      seen @?= [8, 5, 6, 4, 4]
+  , testCase "monadic all short-circuits at its first failed check" $ do
+      let results =
+            [ queryResult Continuing
+                [1 :: Int, 3, error "monadic all forced a failed tail"]
+            , error "monadic all forced a later result"
+            ]
+          admit candidate
+            | candidate == 3 = Left "stop"
+            | otherwise = Right True
+      selectQueryResultsM SelectAll id admit results @?=
+        (Left "stop" :: Either String (Selection Int))
   , testCase "best keeps every globally minimal admissible candidate" $ do
       let terminal = Completed $ truncated CandidateLimitReached
           results =

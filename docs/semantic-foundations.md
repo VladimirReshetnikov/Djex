@@ -45,6 +45,7 @@ was reached.
   - [Checked type instantiation](#checked-type-instantiation)
 - [Checked ground class-resolution foundation](#checked-ground-class-resolution-foundation)
 - [Finite list-spine length contracts](#finite-list-spine-length-contracts)
+  - [Bounded where-clause surface syntax](#bounded-where-clause-surface-syntax)
   - [Provider summaries as a trust boundary](#provider-summaries-as-a-trust-boundary)
   - [Split contract, inventory, and session identities](#split-contract-inventory-and-session-identities)
   - [Sealing typed-candidate problems and provider associations](#sealing-typed-candidate-problems-and-provider-associations)
@@ -372,6 +373,34 @@ together with its checked spine model. The model can be the versioned Haskell
 one binary payload/recursive constructor. Contracts and provider inventories
 sealed through that context remain opaque values available from the curated
 `Language.Haskell.Djex` facade.
+
+### Bounded where-clause surface syntax
+
+`Language.Haskell.Synthesis.Semantic.Length.Where` (re-exported from the
+facade) is an optional bounded ASCII front door onto the same passive
+contract vocabulary.  Its grammar is one relation between two arithmetic
+expressions: natural literals, `len(argN)` physical target-argument
+references, `len(result)` in the scalar domain or `len(result.first)` /
+`len(result.second)` in the binary-product domain, `+`, truncated `-`,
+`*`, `/` and `%` with a direct positive literal divisor, `min`/`max`, and
+parentheses, related by `=`, `!=`, `<=`, `>=`, `<`, or `>` with chained
+comparisons rejected.  Admission is fail-closed and sanitized: a hard
+16,384-byte source bound and 64-deep nesting bound, whole-source ASCII
+validation, then left-to-right parsing whose closed error vocabulary
+carries byte offsets but never source bytes.
+
+The two stages deliberately split authority.  `parseLengthWhereSource`
+returns an opaque `LengthWhereSource` that retains the admitting
+`LengthLimits` (so elaboration cannot be paired with a more permissive
+boundary) and no source text.  `elaborateLengthWhereSource` then requires
+the caller's explicit `LengthWhereDomain` and complete source-ordered
+target-argument role vector, maps only explicitly observed physical
+arguments onto the compact input indices of the checked vocabulary, and
+returns a `LengthWhereContractSource` wrapping the ordinary passive
+`LengthContractSource` or `LengthSpinePairContractSource` beside the exact
+roles supplied.  Nothing here is a checked contract, behavioral receipt,
+or inference of a spine model, role, provider law, or solver policy; the
+result enters the same sealing pipeline as any hand-built contract source.
 
 ### Provider summaries as a trust boundary
 

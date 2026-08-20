@@ -118,7 +118,9 @@ can skip ahead to [Building](#building).
 Beside the two engines, Djex carries a backend-neutral checked layer for
 *behavioral* claims: typed candidate identities with sealed term graphs and
 canonical fingerprints, a ground class-resolution foundation, and the finite
-list-spine Length contract dialect with its SMT-LIB/Z3 live stack. Its
+list-spine Length contract dialect -- with an optional bounded ASCII
+where-clause surface syntax onto its passive contract sources -- and its
+SMT-LIB/Z3 live stack. Its
 governing rule is that solver output is never trusted directly — only
 independent replay of a candidate against the exact checked problem produces
 evidence, and raw solver status has no proof or pruning authority. The

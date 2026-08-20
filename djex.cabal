@@ -164,6 +164,7 @@ Library
     Language.Haskell.Synthesis.Semantic.Length.SMTLib.Live
     Language.Haskell.Synthesis.Semantic.Length.SMTLib.Observation
     Language.Haskell.Synthesis.Semantic.Length.SMTLib.Response
+    Language.Haskell.Synthesis.Semantic.Length.Where
     Language.Haskell.Synthesis.Semantic.Observation
     Language.Haskell.Synthesis.Semantic.Problem
     Language.Haskell.Synthesis.Type

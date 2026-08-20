@@ -1808,14 +1808,91 @@ validateLengthSpinePairProblemInputBox
 validateLengthSpinePairProblemInputBox =
   validateProblemInputBoxWith spinePairEvaluationDomain
 
--- | Shared scalar implementation of the current bounded finite-union
--- validation. The analysis and receipt constructor are private inputs;
+-- | How one domain spells the applicable-domain rejections: the input
+-- limit, the four preparation caps, the three enumeration caps, and the
+-- two evaluation rejections.  Everything else in the shared core below --
+-- admission, preparation, enumeration, replay, and evidence construction
+-- -- has one order for both domains.
+data ApplicableDomainVocabulary evalError adError
+  = ApplicableDomainVocabulary
+  { applicableProblemInputLimitExceeded :: Int -> Int -> adError
+  , applicableGeneratedBranchLimitExceeded :: Int -> Int -> adError
+  , applicableRuleLimitExceeded :: Int -> Int -> Int -> adError
+  , applicableClosureInspectionLimitExceeded :: Int -> Int -> Int -> adError
+  , applicableRetainedBoxLimitExceeded :: Int -> Int -> adError
+  , applicableAssignmentVisitLimitExceeded :: Int -> Int -> adError
+  , applicableAssignmentLimitExceeded :: Natural -> Natural -> adError
+  , applicableInternalEnumerationInvariant :: adError
+  , applicableMaximumValueRejected :: Int -> Int -> evalError -> adError
+  , applicableAssignmentEvaluationRejected
+      :: Natural -> evalError -> adError
+  }
+
+scalarApplicableDomainVocabulary
+  :: ApplicableDomainVocabulary
+      LengthEvaluationError
+      LengthApplicableDomainValidationError
+scalarApplicableDomainVocabulary = ApplicableDomainVocabulary
+  { applicableProblemInputLimitExceeded =
+      LengthApplicableDomainProblemInputLimitExceeded
+  , applicableGeneratedBranchLimitExceeded =
+      LengthApplicableDomainGeneratedBranchLimitExceeded
+  , applicableRuleLimitExceeded = LengthApplicableDomainRuleLimitExceeded
+  , applicableClosureInspectionLimitExceeded =
+      LengthApplicableDomainClosureInspectionLimitExceeded
+  , applicableRetainedBoxLimitExceeded =
+      LengthApplicableDomainRetainedBoxLimitExceeded
+  , applicableAssignmentVisitLimitExceeded =
+      LengthApplicableDomainAssignmentVisitLimitExceeded
+  , applicableAssignmentLimitExceeded =
+      LengthApplicableDomainAssignmentLimitExceeded
+  , applicableInternalEnumerationInvariant =
+      LengthApplicableDomainInternalEnumerationInvariant
+  , applicableMaximumValueRejected =
+      LengthApplicableDomainMaximumValueRejected
+  , applicableAssignmentEvaluationRejected =
+      LengthApplicableDomainAssignmentEvaluationRejected
+  }
+
+spinePairApplicableDomainVocabulary
+  :: ApplicableDomainVocabulary
+      LengthSpinePairEvaluationError
+      LengthSpinePairApplicableDomainValidationError
+spinePairApplicableDomainVocabulary = ApplicableDomainVocabulary
+  { applicableProblemInputLimitExceeded =
+      LengthSpinePairApplicableDomainProblemInputLimitExceeded
+  , applicableGeneratedBranchLimitExceeded =
+      LengthSpinePairApplicableDomainGeneratedBranchLimitExceeded
+  , applicableRuleLimitExceeded =
+      LengthSpinePairApplicableDomainRuleLimitExceeded
+  , applicableClosureInspectionLimitExceeded =
+      LengthSpinePairApplicableDomainClosureInspectionLimitExceeded
+  , applicableRetainedBoxLimitExceeded =
+      LengthSpinePairApplicableDomainRetainedBoxLimitExceeded
+  , applicableAssignmentVisitLimitExceeded =
+      LengthSpinePairApplicableDomainAssignmentVisitLimitExceeded
+  , applicableAssignmentLimitExceeded =
+      LengthSpinePairApplicableDomainAssignmentLimitExceeded
+  , applicableInternalEnumerationInvariant =
+      LengthSpinePairApplicableDomainInternalEnumerationInvariant
+  , applicableMaximumValueRejected =
+      LengthSpinePairApplicableDomainMaximumValueRejected
+  , applicableAssignmentEvaluationRejected =
+      LengthSpinePairApplicableDomainAssignmentEvaluationRejected
+  }
+
+-- | Shared implementation of the current bounded finite-union validation.
+-- The domain contributes its evaluation record, its rejection vocabulary,
+-- its precondition coverage analysis (already closed over the domain's
+-- contract-variable input positions), and its receipt constructor;
 -- admission, enumeration, replay, and evidence construction have one order.
-validateLengthProblemApplicableDomainWith
-  :: (LengthBooleanFiniteUnionLimits
+validateProblemApplicableDomainCore
+  :: ProblemEvaluationDomain problem domainTag evalError counterexample
+      boxError boxReceipt simpError simpReceipt
+  -> ApplicableDomainVocabulary evalError adError
+  -> (problem
+      -> LengthBooleanFiniteUnionLimits
       -> Int
-      -> (LengthContractVariable -> Maybe Natural)
-      -> LengthFormula LengthContractVariable
       -> Either
           BooleanFiniteUnionPreparationError
           (Either LengthApplicableDomainInapplicability [[Natural]]))
@@ -1824,23 +1901,21 @@ validateLengthProblemApplicableDomainWith
   -> LengthEvaluationLimits
   -> LengthInputBoxLimits
   -> LengthBooleanFiniteUnionLimits
-  -> CheckedLengthProblem identity local
-  -> Either LengthApplicableDomainValidationError
+  -> problem
+  -> Either adError
       (LengthApplicableDomainValidation
-        (BehavioralEvidence FiniteListSpineLengthV1 ValidatedLengthCounterexample)
-        (BehavioralEvidence FiniteListSpineLengthV1 receipt))
-validateLengthProblemApplicableDomainWith maximumBoxesFor mkReceipt
+        (BehavioralEvidence domainTag counterexample)
+        (BehavioralEvidence domainTag receipt))
+validateProblemApplicableDomainCore domain vocabulary coverageFor mkReceipt
     evaluationLimits inputBoxLimits unionLimits problem = do
-  let inputCount = checkedLengthProblemInputCount problem
+  let inputCount = domainProblemInputCount domain problem
       maximumInputs = lengthInputBoxInputLimit inputBoxLimits
   if inputCount <= maximumInputs
     then pure ()
-    else Left $ LengthApplicableDomainProblemInputLimitExceeded
+    else Left $ applicableProblemInputLimitExceeded vocabulary
       maximumInputs inputCount
   coverage <- either (Left . preparationError) Right
-    $ maximumBoxesFor
-        unionLimits inputCount scalarInputPosition
-        $ checkedLengthProblemPrecondition problem
+    $ coverageFor problem unionLimits inputCount
   case coverage of
     Left inapplicability -> Right
       $ LengthApplicableDomainInapplicable inapplicability
@@ -1853,185 +1928,74 @@ validateLengthProblemApplicableDomainWith maximumBoxesFor mkReceipt
         $ enumerateBooleanFiniteUnionAssignments inputBoxLimits boxes
       replay boxes visits assignmentCount 0 0 $ Set.toAscList assignments
  where
-  scalarInputPosition variable = case variable of
-    LengthInput position -> Just position
-    LengthResult -> Nothing
-
   preparationError failure = case failure of
     BooleanFiniteUnionGeneratedBranchLimitExceeded limit observed ->
-      LengthApplicableDomainGeneratedBranchLimitExceeded limit observed
+      applicableGeneratedBranchLimitExceeded vocabulary limit observed
     BooleanFiniteUnionRuleLimitExceeded branch limit observed ->
-      LengthApplicableDomainRuleLimitExceeded branch limit observed
+      applicableRuleLimitExceeded vocabulary branch limit observed
     BooleanFiniteUnionClosureInspectionLimitExceeded branch limit observed ->
-      LengthApplicableDomainClosureInspectionLimitExceeded
+      applicableClosureInspectionLimitExceeded vocabulary
         branch limit observed
     BooleanFiniteUnionRetainedBoxLimitExceeded limit observed ->
-      LengthApplicableDomainRetainedBoxLimitExceeded limit observed
+      applicableRetainedBoxLimitExceeded vocabulary limit observed
 
   enumerationError failure = case failure of
     BooleanFiniteUnionAssignmentVisitLimitExceeded limit observed ->
-      LengthApplicableDomainAssignmentVisitLimitExceeded limit observed
+      applicableAssignmentVisitLimitExceeded vocabulary limit observed
     BooleanFiniteUnionAssignmentLimitExceeded limit observed ->
-      LengthApplicableDomainAssignmentLimitExceeded limit observed
+      applicableAssignmentLimitExceeded vocabulary limit observed
     BooleanFiniteUnionInternalEnumerationInvariant ->
-      LengthApplicableDomainInternalEnumerationInvariant
+      applicableInternalEnumerationInvariant vocabulary
 
   checkBox (boxIndex, maximums) =
     mapM_ (checkMaximum boxIndex) $ zip [0 ..] maximums
 
   checkMaximum boxIndex (inputIndex, maximumValue) = either
-    (Left . LengthApplicableDomainMaximumValueRejected
-      boxIndex inputIndex)
+    (Left . applicableMaximumValueRejected vocabulary boxIndex inputIndex)
     Right
-    $ checkAssignedValue evaluationLimits
-        (LengthProblemInputValue inputIndex) maximumValue
+    $ domainCheckInputValue domain evaluationLimits inputIndex maximumValue
 
   replay boxes visits assignmentCount !ordinal !applicable assignments =
     case assignments of
       []
         | ordinal /= assignmentCount ->
-            Left LengthApplicableDomainInternalEnumerationInvariant
+            Left $ applicableInternalEnumerationInvariant vocabulary
         | otherwise ->
             let receipt =
                   mkReceipt
                     boxes visits assignmentCount applicable
-                    $ problemBasis problem
+                    $ domainProblemBasis domain problem
             in Right $ LengthApplicableDomainEstablished
               $ mkBehavioralEvidence
-                  (checkedLengthProblemBehavioralProblem problem) receipt
+                  (domainBehavioralProblem domain problem) receipt
       inputs : remaining -> do
         assignmentReplay <- either
-          (Left . LengthApplicableDomainAssignmentEvaluationRejected ordinal)
+          (Left . applicableAssignmentEvaluationRejected vocabulary ordinal)
           Right
-          $ replayLengthProblemAssignment evaluationLimits problem
+          $ domainReplayAssignment domain evaluationLimits problem
           $ LengthProblemAssignment inputs
         case assignmentReplay of
-          LengthProblemPostconditionViolated receipt -> Right
+          ReplayPostconditionViolated receipt -> Right
             $ LengthApplicableDomainCounterexample
             $ mkBehavioralEvidence
-                (checkedLengthProblemBehavioralProblem problem) receipt
-          LengthProblemPreconditionNotMet ->
+                (domainBehavioralProblem domain problem) receipt
+          ReplayPreconditionNotMet ->
             replay boxes visits assignmentCount (ordinal + 1) applicable
               remaining
-          LengthProblemPostconditionSatisfied ->
+          ReplayPostconditionSatisfied ->
             replay boxes visits assignmentCount (ordinal + 1)
               (applicable + 1) remaining
 
--- | Nominal binary-product sibling of
--- 'validateLengthProblemApplicableDomainWith'.
-validateLengthSpinePairProblemApplicableDomainWith
-  :: (LengthBooleanFiniteUnionLimits
-      -> Int
-      -> (LengthSpinePairContractVariable -> Maybe Natural)
-      -> LengthFormula LengthSpinePairContractVariable
-      -> Either
-          BooleanFiniteUnionPreparationError
-          (Either LengthApplicableDomainInapplicability [[Natural]]))
-  -> ([[Natural]] -> Natural -> Natural -> Natural
-      -> LengthCounterexampleBasis -> receipt)
-  -> LengthEvaluationLimits
-  -> LengthInputBoxLimits
-  -> LengthBooleanFiniteUnionLimits
-  -> CheckedLengthSpinePairProblem identity local
-  -> Either LengthSpinePairApplicableDomainValidationError
-      (LengthApplicableDomainValidation
-        (BehavioralEvidence FiniteBinaryProductSpineLengthsV1 ValidatedLengthSpinePairCounterexample)
-        (BehavioralEvidence FiniteBinaryProductSpineLengthsV1 receipt))
-validateLengthSpinePairProblemApplicableDomainWith maximumBoxesFor mkReceipt
-    evaluationLimits inputBoxLimits unionLimits problem = do
-  let inputCount = checkedLengthSpinePairProblemInputCount problem
-      maximumInputs = lengthInputBoxInputLimit inputBoxLimits
-  if inputCount <= maximumInputs
-    then pure ()
-    else Left $ LengthSpinePairApplicableDomainProblemInputLimitExceeded
-      maximumInputs inputCount
-  coverage <- either (Left . preparationError) Right
-    $ maximumBoxesFor
-        unionLimits inputCount spinePairInputPosition
-        $ checkedLengthSpinePairProblemPrecondition problem
-  case coverage of
-    Left inapplicability -> Right
-      $ LengthApplicableDomainInapplicable inapplicability
-    Right boxes -> do
-      mapM_ checkBox $ zip [0 ..] boxes
-      visits <- either (Left . enumerationError) Right
-        $ booleanFiniteUnionAssignmentVisitCount unionLimits boxes
-      (assignmentCount, assignments) <- either
-        (Left . enumerationError) Right
-        $ enumerateBooleanFiniteUnionAssignments inputBoxLimits boxes
-      replay boxes visits assignmentCount 0 0 $ Set.toAscList assignments
- where
-  spinePairInputPosition variable = case variable of
-    LengthSpinePairInput position -> Just position
-    LengthSpinePairResult _ -> Nothing
+scalarContractInputPosition :: LengthContractVariable -> Maybe Natural
+scalarContractInputPosition variable = case variable of
+  LengthInput position -> Just position
+  LengthResult -> Nothing
 
-  preparationError failure = case failure of
-    BooleanFiniteUnionGeneratedBranchLimitExceeded limit observed ->
-      LengthSpinePairApplicableDomainGeneratedBranchLimitExceeded
-        limit observed
-    BooleanFiniteUnionRuleLimitExceeded branch limit observed ->
-      LengthSpinePairApplicableDomainRuleLimitExceeded
-        branch limit observed
-    BooleanFiniteUnionClosureInspectionLimitExceeded branch limit observed ->
-      LengthSpinePairApplicableDomainClosureInspectionLimitExceeded
-        branch limit observed
-    BooleanFiniteUnionRetainedBoxLimitExceeded limit observed ->
-      LengthSpinePairApplicableDomainRetainedBoxLimitExceeded
-        limit observed
-
-  enumerationError failure = case failure of
-    BooleanFiniteUnionAssignmentVisitLimitExceeded limit observed ->
-      LengthSpinePairApplicableDomainAssignmentVisitLimitExceeded
-        limit observed
-    BooleanFiniteUnionAssignmentLimitExceeded limit observed ->
-      LengthSpinePairApplicableDomainAssignmentLimitExceeded limit observed
-    BooleanFiniteUnionInternalEnumerationInvariant ->
-      LengthSpinePairApplicableDomainInternalEnumerationInvariant
-
-  checkBox (boxIndex, maximums) =
-    mapM_ (checkMaximum boxIndex) $ zip [0 ..] maximums
-
-  checkMaximum boxIndex (inputIndex, maximumValue) = either
-    (Left . LengthSpinePairApplicableDomainMaximumValueRejected
-      boxIndex inputIndex)
-    Right
-    $ checkSpinePairAssignedValue evaluationLimits
-        (LengthSpinePairProblemInputValue inputIndex) maximumValue
-
-  replay boxes visits assignmentCount !ordinal !applicable assignments =
-    case assignments of
-      []
-        | ordinal /= assignmentCount -> Left
-            LengthSpinePairApplicableDomainInternalEnumerationInvariant
-        | otherwise ->
-            let receipt =
-                  mkReceipt
-                    boxes visits assignmentCount applicable
-                    $ spinePairProblemBasis problem
-            in Right $ LengthApplicableDomainEstablished
-              $ mkBehavioralEvidence
-                  (checkedLengthSpinePairProblemBehavioralProblem problem)
-                  receipt
-      inputs : remaining -> do
-        assignmentReplay <- either
-          (Left .
-            LengthSpinePairApplicableDomainAssignmentEvaluationRejected
-              ordinal)
-          Right
-          $ replayLengthSpinePairProblemAssignment evaluationLimits problem
-          $ LengthProblemAssignment inputs
-        case assignmentReplay of
-          LengthSpinePairProblemPostconditionViolated receipt -> Right
-            $ LengthApplicableDomainCounterexample
-            $ mkBehavioralEvidence
-                (checkedLengthSpinePairProblemBehavioralProblem problem)
-                receipt
-          LengthSpinePairProblemPreconditionNotMet ->
-            replay boxes visits assignmentCount (ordinal + 1) applicable
-              remaining
-          LengthSpinePairProblemPostconditionSatisfied ->
-            replay boxes visits assignmentCount (ordinal + 1) (applicable + 1)
-              remaining
+spinePairContractInputPosition
+  :: LengthSpinePairContractVariable -> Maybe Natural
+spinePairContractInputPosition variable = case variable of
+  LengthSpinePairInput position -> Just position
+  LengthSpinePairResult _ -> Nothing
 
 -- | Validate the complete applicable input domain of one exact scalar
 -- problem with the current bounded guarded recursive piecewise-affine
@@ -2050,13 +2014,16 @@ validateLengthProblemApplicableDomain
         (BehavioralEvidence
           FiniteListSpineLengthV1
           ValidatedLengthApplicableDomain))
-validateLengthProblemApplicableDomain
-    evaluationLimits inputBoxLimits unionLimits problem =
-  validateLengthProblemApplicableDomainWith
-    booleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainMaximumBoxes
+validateLengthProblemApplicableDomain =
+  validateProblemApplicableDomainCore
+    scalarEvaluationDomain
+    scalarApplicableDomainVocabulary
+    (\problem unionLimits inputCount ->
+      booleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainMaximumBoxes
+        unionLimits inputCount scalarContractInputPosition
+        $ checkedLengthProblemPrecondition problem)
     (ValidatedLengthApplicableDomainReceipt
       lengthApplicableDomainValidationSchemaTag)
-    evaluationLimits inputBoxLimits unionLimits problem
 
 -- | Nominal binary-product sibling of current applicable-domain validation.
 -- It shares every operational cap and precedence while producing only fresh
@@ -2074,13 +2041,16 @@ validateLengthSpinePairProblemApplicableDomain
         (BehavioralEvidence
           FiniteBinaryProductSpineLengthsV1
           ValidatedLengthSpinePairApplicableDomain))
-validateLengthSpinePairProblemApplicableDomain
-    evaluationLimits inputBoxLimits unionLimits problem =
-  validateLengthSpinePairProblemApplicableDomainWith
-    booleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainMaximumBoxes
+validateLengthSpinePairProblemApplicableDomain =
+  validateProblemApplicableDomainCore
+    spinePairEvaluationDomain
+    spinePairApplicableDomainVocabulary
+    (\problem unionLimits inputCount ->
+      booleanFiniteUnionAtomicBranchingRecursivePiecewiseAffineApplicableDomainMaximumBoxes
+        unionLimits inputCount spinePairContractInputPosition
+        $ checkedLengthSpinePairProblemPrecondition problem)
     (ValidatedLengthSpinePairApplicableDomainReceipt
       lengthSpinePairApplicableDomainValidationSchemaTag)
-    evaluationLimits inputBoxLimits unionLimits problem
 
 data BooleanFiniteUnionPolarity
   = BooleanFiniteUnionPositive

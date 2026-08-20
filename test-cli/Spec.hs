@@ -80,6 +80,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplSharedParseFailure
   , testCase "REPL owns and repeats structured where-clause queries"
       testReplWhereGrammar
+  , testCase "REPL resolves conservative built-in Length where profiles"
+      testReplLengthWhereResolution
   , testCase "REPL multiline, repeat, and command errors recover"
       testReplInputRecovery
   , testCase "REPL bare input handles Haskell line comments"
@@ -620,7 +622,7 @@ testReplLengthZ3Setting = withTemporaryEnvironment [] $ \directory -> do
     , ":set length-z3 /missing/z3 xyz"
     , ":set length-z3 " ++ missingPath ++ " " ++ digest
     , ":show settings"
-    , ":synth --where length result == 424242 -- [a]"
+    , ":exference --where length result == 424242 -- [a]"
     , ":unset length-z3"
     , ":show settings"
     , ":help set"
@@ -642,7 +644,7 @@ testReplLengthZ3Setting = withTemporaryEnvironment [] $ \directory -> do
   assertContains "a malformed digest has one sanitized refusal"
     "length-z3 SHA-256 must be exactly 64 hexadecimal digits" errors
   assertContains "a stored policy remains inert before runtime activation"
-    "[DJEX_REPL_LENGTH_WHERE_UNAVAILABLE]" errors
+    "[DJEX_REPL_LENGTH_WHERE_RUNTIME_UNAVAILABLE]" errors
   assertBool "the inert policy path parsed or echoed its where clause"
     $ not $ "424242" `isInfixOf` errors
   assertBool "the sealed policy display leaked its executable path"
@@ -930,11 +932,69 @@ testReplWhereGrammar = withTemporaryEnvironment [] $ \directory -> do
     $ countOccurrences "[DJEX_REPL_COMMAND]" errors
   assertEqual "a longer lookalike remains ordinary type source" 1
     $ countOccurrences "[DJEX_TYPE_PARSE]" errors
-  assertEqual "all synthesis routes and repeat retain the structured query" 5
-    $ countOccurrences "[DJEX_REPL_LENGTH_WHERE_UNAVAILABLE]" errors
+  assertEqual "Djinn routes fail closed before policy or clause parsing" 3
+    $ countOccurrences "[DJEX_REPL_LENGTH_WHERE_BACKEND]" errors
+  assertEqual "Exference-capable routes require explicit policy first" 2
+    $ countOccurrences "[DJEX_REPL_LENGTH_WHERE_POLICY]" errors
   assertBool "the opaque clause leaked through the unavailable diagnostic"
     $ not $ "31337" `isInfixOf` errors
   assertContains "ordinary synthesis remains unchanged" "djexResult a = a" output
+  assertNoCallStack errors
+
+testReplLengthWhereResolution :: Assertion
+testReplLengthWhereResolution = withTemporaryEnvironment
+    [("Aliases.hs", unlines
+      [ "module Aliases (Items) where"
+      , "type Items value = [value]"
+      ])] $ \directory -> do
+  let list9 = concat $ replicate 9 "[a] -> "
+  (exitCode, _, errors) <- runRepl directory
+    [ "import Aliases"
+    , ":set length-z3 /missing/z3"
+    , ":exference --where length result == length arg0 -- [a] -> [a]"
+    , ":exference --where length result == length arg0 -- Items a -> Items a"
+    , ":exference --where length result == length arg1 -- b -> [a] -> [a]"
+    , ":exference --where length (fst result) + length (snd result) == length arg0 -- [a] -> ([a], [a])"
+    , ":exference --where length result == 0 -- b -> [a]"
+    , ":exference --where length (fst result) == 0 -- [a]"
+    , ":exference --where length result == 0 -- ([a], [a])"
+    , ":exference --where length arg0 == 0 -- b -> [a]"
+    , ":exference --where length result == 0 -- [a] -> b"
+    , ":exference --where length result == 0 -- " ++ list9 ++ "[a]"
+    , ":exference --where length result = 314159 -- [a]"
+    , ":djinn --where length result = 271828 -- [a]"
+    ]
+  assertEqual "Length where resolution REPL exit" ExitSuccess exitCode
+  assertEqual "five conservative profiles resolve without running a backend" 5
+    $ countOccurrences
+        "[DJEX_REPL_LENGTH_WHERE_RUNTIME_UNAVAILABLE]" errors
+  assertEqual "three scalar profiles observe one list input" 3
+    $ countOccurrences
+        "list-scalar-exact-cases with 1 observed list input(s)" errors
+  assertContains "a constant result constraint may observe no input"
+    "list-scalar-exact-cases with 0 observed list input(s)" errors
+  assertContains "boxed list pairs select the nominal product profile"
+    "list-binary-product-exact-cases with 1 observed list input(s)" errors
+  assertEqual "five target/profile mismatches fail at resolution" 5
+    $ countOccurrences "[DJEX_REPL_LENGTH_WHERE_TARGET]" errors
+  assertContains "pair result syntax is rejected for a scalar result"
+    "LengthWhereScalarDomainPairResult" errors
+  assertContains "scalar result syntax is rejected for a pair result"
+    "LengthWhereBinaryProductDomainScalarResult" errors
+  assertContains "non-list arrows remain explicitly unobserved"
+    "LengthWherePhysicalArgumentNotObserved 0" errors
+  assertContains "non-list results do not acquire a guessed model"
+    "ReplLengthWhereUnsupportedResult" errors
+  assertContains "the complete physical arrow vector is bounded"
+    "ReplLengthWherePhysicalArgumentLimitExceeded 8 9" errors
+  assertEqual "the active policy admits exactly one malformed clause refusal" 1
+    $ countOccurrences "[DJEX_REPL_LENGTH_WHERE_CLAUSE]" errors
+  assertEqual "Djinn refusal wins before malformed clause parsing" 1
+    $ countOccurrences "[DJEX_REPL_LENGTH_WHERE_BACKEND]" errors
+  assertBool "a malformed clause leaked through its closed diagnostic"
+    $ not $ "314159" `isInfixOf` errors
+  assertBool "a Djinn-refused clause was parsed or echoed"
+    $ not $ "271828" `isInfixOf` errors
   assertNoCallStack errors
 
 testReplInputRecovery :: Assertion

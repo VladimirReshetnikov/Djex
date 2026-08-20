@@ -437,12 +437,15 @@ or ambiguity fails before solver IO.
 
 Djex's standalone REPL and Leant's REPL are both first-class consumers. Djex's
 outer structured query grammar, Haskell parser, and pure `:set length-z3`
-policy sealing have landed; checked target defaults, live policy use, and
-Exference assessment are the next runtime checkpoints. The stored policy
-performs no filesystem or process IO and grants no solver authority. These
-checkpoints remain ahead of new `--law`, `--example`, typed-sketch, or
-additional domain syntax. The current explicit Leant form and direct
-`parseLengthWhereSource` compatibility API remain available.
+policy sealing have landed. The REPL also expands the Exference target, observes
+every structural list argument, distinguishes scalar-list from boxed
+list-pair results, elaborates the clause, and seals the exact-zero/step
+built-in-list session and contract. Live policy use and Exference candidate
+assessment are the next runtime checkpoints. The stored policy performs no
+filesystem or process IO and grants no solver authority. These checkpoints
+remain ahead of new `--law`, `--example`, typed-sketch, or additional domain
+syntax. The current explicit Leant form and direct `parseLengthWhereSource`
+compatibility API remain available.
 
 ### Provider summaries as a trust boundary
 

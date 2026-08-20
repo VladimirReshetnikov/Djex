@@ -24,6 +24,8 @@ import Control.Exception
   , handleJust
   )
 import Control.Monad (forM_, unless, void, when)
+import qualified Data.ByteString.Builder as ByteStringBuilder
+import qualified Data.ByteString.Lazy as LazyByteString
 import Data.Char (digitToInt, isHexDigit, isSpace)
 import Data.Foldable (toList)
 import Data.List (intercalate, isPrefixOf)
@@ -95,6 +97,7 @@ import Language.Haskell.Djex.REPL.DjinnScope
 import Language.Haskell.Djex.REPL.Driver
 import Language.Haskell.Djex.REPL.Eval
 import Language.Haskell.Djex.REPL.Kind
+import Language.Haskell.Djex.REPL.LengthWhere
 import Language.Haskell.Djex.REPL.Scope
 import Language.Haskell.Djex.REPL.Type
 import Language.Haskell.Djex.REPL.Workspace
@@ -634,10 +637,7 @@ runResolvedQuery
   -> IO (ReplStep ReplState)
 runResolvedQuery sourceName query state = do
   case replQueryWhereSource query of
-    Just _ -> replFailure "DJEX_REPL_LENGTH_WHERE_UNAVAILABLE"
-      "behavioral where-clause execution is not active"
-      ("the bounded host-native clause was retained without parsing; " ++
-        "use an unconstrained query until the checked runtime lands")
+    Just clause -> runLengthWhere clause
     Nothing -> runUnconstrained
   pure $ ContinueRepl state
     { lastQuery = Just resolved }
@@ -664,6 +664,49 @@ runResolvedQuery sourceName query state = do
         Left failure -> emitDiagnostic failure
         Right parsed -> runParsedSelection session parsed
     _ -> runLegacySelection
+
+  runLengthWhere clause = case sharedRuntime of
+    Nothing -> replFailure "DJEX_REPL_LENGTH_WHERE_SCOPE"
+      "checked behavioral target scope is unavailable"
+      "load a valid source workspace before using --where"
+    Just (session, context) -> case parseSourceTypeInScope
+        (exferenceSessionInventory session)
+        (scopeExferenceQueryScope context) sourceName typeSource of
+      Left failure -> emitDiagnostic failure
+      Right parsed -> case ExferenceSession.elaborateSessionGoal session
+          $ parsedSourceType parsed of
+        Left failure -> replFailure "DJEX_REPL_LENGTH_WHERE_TARGET"
+          "behavioral target elaboration failed" $ show failure
+        Right elaborated -> case selected of
+          OneBackend DjinnBackend ->
+            replFailure "DJEX_REPL_LENGTH_WHERE_BACKEND"
+              "Djinn behavioral candidates are not available"
+              ("use :exference or a both-backend request; Djinn will not run " ++
+                "unconstrained under --where")
+          _ -> case lengthSMTLibExecutionConfig state of
+            Nothing -> replFailure "DJEX_REPL_LENGTH_WHERE_POLICY"
+              "Length/Z3 execution policy is not active"
+              ("use :set length-z3 /absolute/path/to/z3 [SHA256HEX] " ++
+                "before this query")
+            Just _ -> case parseHaskellLengthWhereSource defaultLengthLimits
+                $ utf8 clause of
+              Left failure -> replFailure "DJEX_REPL_LENGTH_WHERE_CLAUSE"
+                "behavioral where clause was rejected" $ show failure
+              Right whereSource -> case resolveReplLengthWhereSource
+                  (exferenceSessionInventory session) elaborated whereSource of
+                Left failure -> replFailure "DJEX_REPL_LENGTH_WHERE_TARGET"
+                  "behavioral target profile was rejected" $ show failure
+                Right resolution -> replFailure
+                  "DJEX_REPL_LENGTH_WHERE_RUNTIME_UNAVAILABLE"
+                  "checked behavioral target resolved; execution is not active"
+                  (replLengthWhereResolutionProfile resolution ++
+                    " with " ++ show
+                      (replLengthWhereResolutionObservedInputCount resolution)
+                    ++ " observed list input(s); no backend or solver ran")
+
+  utf8 = LazyByteString.toStrict
+    . ByteStringBuilder.toLazyByteString
+    . ByteStringBuilder.stringUtf8
 
   runParsedSelection session parsed = case selected of
     OneBackend selectedBackend ->

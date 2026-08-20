@@ -55,6 +55,7 @@ was reached.
   - [Checked problems and candidate keys](#checked-problems-and-candidate-keys)
   - [Candidate-independent counterexample-bank scopes and bounded stores](#candidate-independent-counterexample-bank-scopes-and-bounded-stores)
   - [Spine exposure and bounded concrete evaluation](#spine-exposure-and-bounded-concrete-evaluation)
+  - [The versioned identity families at a glance](#the-versioned-identity-families-at-a-glance)
   - [Offline SMT-LIB queries, replay, and origin probes](#offline-smt-lib-queries-replay-and-origin-probes)
   - [Query-owned bounded counterexample simplification](#query-owned-bounded-counterexample-simplification)
   - [Bounded input-box validation](#bounded-input-box-validation)
@@ -787,6 +788,38 @@ language with bottoms or effects. This is not universal behavioral evidence or
 permission to prune other candidates. The Z3 execution facade can rank or
 challenge candidates, but raw solver output is not trusted evidence without
 this independent replay.
+
+### The versioned identity families at a glance
+
+Every layer of the Z3 stack seals its own nominal, versioned identity, and
+the prose below cites those versions where each layer is described.  This
+table collects the load-bearing top-level families in one place -- the exact
+role string is the identity, and a version above `v1` records a deliberate
+compatibility break in that family's own history.  Component tags nested
+inside these identities (entropy schemes, cleanup disciplines, deadline
+coverage clauses) carry their own versions and are documented beside their
+owners.
+
+| Identity family | Current role tag | Sealed in |
+| --- | --- | --- |
+| Checked scalar query schema | `djex-length-z3-qf-lia-smtlib2/v2` | `Internal...Length.SMTLib` |
+| Checked product query schema | `djex-length-spine-pair-z3-qf-lia-smtlib2/v1` | `Internal...Length.SMTLib` |
+| Protocol plan | `djex-length-z3-smtlib2-protocol-plan/v1` (and the `spine-pair` sibling) | `Internal...SMTLib.Protocol` |
+| Protocol phase machine | `djex-length-z3-smtlib2-protocol-phase-machine/v1` (and the `spine-pair` sibling) | `Internal...SMTLib.Protocol` |
+| Session protocol | `djex-length-z3-smtlib2-session-protocol/v1` | `Internal...SMTLib.Execution` |
+| Stream framing | `djex-smtlib2-stream-framing/v2` | `Internal.SMTLib.Stream` |
+| Response decoder | `djex-length-z3-smtlib2-response/v1` | `Internal...SMTLib.Response` |
+| Causal byte-stream driver | `djex-length-z3-causal-byte-stream-driver/v1` | `Internal...SMTLib.Session` |
+| Raw process | `djex-length-z3-raw-process/v2` | `Internal...SMTLib.Session.Process` |
+| Descriptor-bound process | `djex-length-z3-descriptor-bound-sealed-main-image-process/v1` | `Internal...SMTLib.Session.Process` |
+| Execution policy | `djex-length-z3-smtlib2-execution-policy/v2`, plus one `/descriptor-bound-.../v1` schema per access-checked launch | `Internal...SMTLib.Execution` |
+| Ready worker | `djex-length-z3-capability-probed-ready-worker/v4`, plus one `sealed-main-image` role per descriptor-bound launch at `v1` | `Internal...SMTLib.Session` |
+| Scoped worker session | `djex-length-z3-scoped-worker-session/v3` | `Internal...SMTLib.Session` |
+| Query run | `djex-length-z3-capability-probed-pre-spawn-pathname-snapshot-worker-query-run/v1` (and the `spine-pair` and `sealed-main-image` siblings) | `Internal...SMTLib.Session` |
+| Shared usable-work deadline | `djex-length-z3-shared-usable-work-deadline/v1` | `Internal...SMTLib.Session` |
+| Scoped usable-work deadline | `djex-length-z3-scoped-shared-usable-work-deadline/v2` | `Internal...SMTLib.Session` |
+| Barrier seed commitment | `djex-length-z3-barrier-seed-commitment/v1` | `Internal...SMTLib.Session` |
+| Counterexample-bank scopes | `djex-length-counterexample-bank-scope/v1` and `djex-length-spine-pair-counterexample-bank-scope/v1` | `Semantic.Length.CounterexampleBank` |
 
 ### Offline SMT-LIB queries, replay, and origin probes
 

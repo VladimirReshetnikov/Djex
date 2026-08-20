@@ -102,7 +102,7 @@ foldAllQueryResultsM admissible consume = go Nothing
 -- first admitted candidate without demanding its candidate or result suffix.
 -- Both best modes inspect only through the same batch boundary as their pure
 -- siblings.  'SelectAll' necessarily completes every candidate check before
--- it can return its pure 'Selection'; streaming consumers should instead use
+-- it can return its pure t'Selection'; streaming consumers should instead use
 -- 'foldAllQueryResultsM'.
 selectQueryResultsM
   :: (Monad action, Ord rank)

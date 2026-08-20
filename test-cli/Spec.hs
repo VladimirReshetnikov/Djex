@@ -66,6 +66,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplSettingSignsAndDiagnostics
   , testCase "REPL search settings retune the budget, strategy, and weights"
       testReplSearchSettings
+  , testCase "REPL both-mode jobs preserve deterministic serial output"
+      testReplParallelBoth
   , testCase "REPL seals Length Z3 policy without executable IO"
       testReplLengthZ3Setting
   , testCase "REPL shares Church rank-N and impredicative queries"
@@ -564,6 +566,10 @@ testReplSearchSettings = withTemporaryEnvironment [] $ \directory -> do
     , ":set timeout"
     , ":set timeout -1"
     , ":set timeout abc"
+    , ":set jobs 1"
+    , ":set jobs"
+    , ":set jobs 0"
+    , ":set jobs abc"
     , ":set djinn-strategy interleave"
     , ":set djinn-strategy wat"
     , ":set heuristic goalVar 3.5"
@@ -573,6 +579,7 @@ testReplSearchSettings = withTemporaryEnvironment [] $ \directory -> do
     , ":show settings"
     , "a -> a"
     , ":unset timeout"
+    , ":unset jobs"
     , ":unset djinn-strategy"
     , ":unset heuristic"
     , ":show settings"
@@ -584,6 +591,7 @@ testReplSearchSettings = withTemporaryEnvironment [] $ \directory -> do
     "djinn-strategy = depth-first" output
   assertContains "every weight is reported" "heuristic = goalVar=4.0" output
   assertContains "a budget is retained" "timeout = 5" output
+  assertContains "one search worker is retained" "jobs = 1" output
   assertContains "an interleaving strategy is retained"
     "djinn-strategy = interleave" output
   assertContains "a named weight is assigned" "goalVar=3.5" output
@@ -591,7 +599,7 @@ testReplSearchSettings = withTemporaryEnvironment [] $ \directory -> do
     "goalCons=2.25" output
   assertContains "a query still answers under a budget"
     "djexResult a = a" output
-  assertEqual "every rejected search value is a setting diagnostic" 6
+  assertEqual "every rejected search value is a setting diagnostic" 9
     $ countOccurrences "[DJEX_REPL_SETTING]" errors
   assertContains "a valueless budget is rejected like any other setting"
     "setting timeout requires a value" errors
@@ -599,6 +607,12 @@ testReplSearchSettings = withTemporaryEnvironment [] $ \directory -> do
     "timeout must be a non-negative whole number of seconds" errors
   assertContains "an unparsable budget is rejected"
     "timeout must be a non-negative whole number of seconds" errors
+  assertContains "a valueless worker count is rejected"
+    "setting jobs requires a value" errors
+  assertContains "a zero worker count is rejected"
+    "jobs must be a positive integer" errors
+  assertContains "an unparsable worker count is rejected"
+    "jobs must be a positive integer" errors
   assertContains "an unknown strategy is rejected"
     "djinn-strategy must be depth-first or interleave" errors
   assertContains "an unknown weight name is rejected"
@@ -606,11 +620,44 @@ testReplSearchSettings = withTemporaryEnvironment [] $ \directory -> do
   assertContains "a negative weight is rejected"
     "heuristic goalVar must be a finite non-negative number" errors
   assertContains "resetting restores the disabled budget" "timeout = 0" output
+  assertContains "the worker default starts and resets at two" "jobs = 2" output
   assertContains "resetting restores the historical strategy"
     "djinn-strategy = depth-first" output
   assertContains "resetting restores every weight" "goalVar=4.0" output
   assertContains "setting help lists the weight names"
     "heuristic weights: goalVar" output
+  assertNoCallStack errors
+
+testReplParallelBoth :: Assertion
+testReplParallelBoth = withTemporaryEnvironment [] $ \directory -> do
+  let run jobs = runRepl directory
+        [ ":set render expression"
+        , ":set qualification none"
+        , ":set candidate-limit 3"
+        , ":set max-steps 16"
+        , ":set jobs " ++ show (jobs :: Int)
+        , ":compare a -> a"
+        , ":set select all"
+        , ":compare a -> a"
+        , ":set select first"
+        , ":set timeout 5"
+        , ":compare a -> a"
+        ]
+      expectedLabels = concat $ replicate 3 ["-- Djinn", "-- Exference"]
+  serial <- run 1
+  parallel <- run 2
+  repeated <- run 2
+  assertEqual "jobs=2 preserves the complete jobs=1 transcript" serial parallel
+  assertEqual "parallel transcript is repeatable" parallel repeated
+  let (exitCode, output, errors) = parallel
+      backendLabels = concatMap labelInLine $ lines output
+      labelInLine line
+        | "-- Djinn" `isInfixOf` line = ["-- Djinn"]
+        | "-- Exference" `isInfixOf` line = ["-- Exference"]
+        | otherwise = []
+  assertEqual "parallel both-mode exit" ExitSuccess exitCode
+  assertEqual "every comparison keeps Djinn before Exference"
+    expectedLabels backendLabels
   assertNoCallStack errors
 
 testReplLengthZ3Setting :: Assertion
@@ -667,6 +714,7 @@ testReplSettingSignsAndDiagnostics = withTemporaryEnvironment [] $ \directory ->
         , "qualification"
         , "prompt"
         , "timeout"
+        , "jobs"
         , "length-z3"
         , "candidate-limit"
         , "choice-budget"

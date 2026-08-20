@@ -66,8 +66,9 @@ common build-settings
   -- compiler identity; this is the base API line bundled with that toolchain.
   Build-Depends:    base == 4.21.2.*
 
--- All three search commands remain serial, but callers may explicitly tune
--- ordinary RTS resource limits when a large search needs them.
+-- The historical standalone commands remain serial.  The shared djex REPL
+-- may overlap its independent Djinn and Exference lanes; every executable
+-- still accepts explicit RTS resource limits for large searches.
 common search-executable
   import:      build-settings
   Ghc-Options: -rtsopts
@@ -79,6 +80,9 @@ common containers-dep
 
 common deepseq-dep
   Build-Depends: deepseq >= 1.4 && < 1.6
+
+common async-dep
+  Build-Depends: async >= 2.2.6 && < 2.3
 
 common directory-dep
   Build-Depends: directory >= 1.3 && < 1.4
@@ -121,7 +125,7 @@ common cli-test
 -- the shared foundation, both engines, source loading, and both compatibility
 -- APIs through one dependency and one version contract.
 Library
-  import:           build-settings, containers-dep, deepseq-dep, directory-dep, haskell-src-exts-dep, transformers-dep
+  import:           build-settings, async-dep, containers-dep, deepseq-dep, directory-dep, haskell-src-exts-dep, transformers-dep
   Hs-Source-Dirs:
     src
     synthesis/src
@@ -234,6 +238,7 @@ Library
     Djinn.Internal.Type
     Djinn.Internal.TypeFormula
     Language.Haskell.Djex.Command
+    Language.Haskell.Djex.Command.Output
     Language.Haskell.Djex.Internal.DependencyGraph
     Language.Haskell.Djex.Internal.ImplicitPrelude
     Language.Haskell.Djex.Package
@@ -244,6 +249,7 @@ Library
     Language.Haskell.Djex.REPL.Eval
     Language.Haskell.Djex.REPL.Kind
     Language.Haskell.Djex.REPL.LengthWhere
+    Language.Haskell.Djex.REPL.Parallel
     Language.Haskell.Djex.REPL.Scope
     Language.Haskell.Djex.REPL.Type
     Language.Haskell.Djex.REPL.Workspace
@@ -336,6 +342,7 @@ Executable djex
   import:         search-executable
   Main-Is:        Main.hs
   Hs-Source-Dirs: app
+  Ghc-Options:    -threaded -with-rtsopts=-N2
   Build-Depends:    djex
 
 -- Test-only stand-in for the real Cabal executable. The CLI suites copy it
@@ -381,6 +388,18 @@ Test-Suite djex-cli-tests
     djex:djex,
     djex:djex-fake-cabal,
     djex:djex-fake-z3
+
+Test-Suite djex-parallel-tests
+  import:         tasty-hunit-test, async-dep, deepseq-dep
+  Type:           exitcode-stdio-1.0
+  Main-Is:        Spec.hs
+  Hs-Source-Dirs:
+    test-parallel
+    src
+  Other-Modules:
+    Language.Haskell.Djex.Command.Output
+    Language.Haskell.Djex.REPL.Parallel
+  Ghc-Options:    -threaded -with-rtsopts=-N2
 
 Test-Suite synthesis-tests
   import:           tasty-hunit-test, tasty-quickcheck-dep, containers-dep, deepseq-dep, transformers-dep
@@ -582,6 +601,15 @@ Benchmark djinn-bench
   Other-Modules:  Corpus
   Hs-Source-Dirs: djinn/bench
   Build-Depends:  djex
+
+Benchmark djex-parallel-bench
+  import:         build-settings, deepseq-dep, directory-dep
+  Type:           exitcode-stdio-1.0
+  Main-Is:        Main.hs
+  Hs-Source-Dirs: bench-parallel
+  Ghc-Options:    -threaded -rtsopts -with-rtsopts=-N2
+  Build-Depends:  process >= 1.6 && < 1.7
+  Build-Tool-Depends: djex:djex
 
 Test-Suite djinn-cli-tests
   import:         cli-test

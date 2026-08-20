@@ -76,6 +76,7 @@ import System.Posix.User (getRealUserID)
 
 import Language.Haskell.Djex
 import Language.Haskell.Djex.Command
+import Language.Haskell.Djex.Command.Output (replayCommandOutput)
 import Language.Haskell.Djex.Exference.HaskellSrc
   ( ExferenceSessionLoadReport (..)
   , defaultExferenceEnvironmentPath
@@ -98,6 +99,10 @@ import Language.Haskell.Djex.REPL.Driver
 import Language.Haskell.Djex.REPL.Eval
 import Language.Haskell.Djex.REPL.Kind
 import Language.Haskell.Djex.REPL.LengthWhere
+import Language.Haskell.Djex.REPL.Parallel
+  ( parallelPairEligible
+  , runParallelPairOrdered
+  )
 import Language.Haskell.Djex.REPL.Scope
 import Language.Haskell.Djex.REPL.Type
 import Language.Haskell.Djex.REPL.Workspace
@@ -149,6 +154,7 @@ data ReplState = ReplState
   , exferenceSearchOptions :: ExferenceOptions
   , promptTemplate :: String
   , queryTimeout :: QueryTimeout
+  , searchJobs :: Int
   , lengthSMTLibExecutionConfig :: Maybe LengthSMTLibExecutionConfig
   , lastQuery :: Maybe ReplSynthesisQuery
   , scriptStack :: [FilePath]
@@ -298,6 +304,7 @@ runRepl options = case standardDjinnSession of
                 , exferenceSearchOptions = defaultExferenceOptions
                 , promptTemplate = defaultPromptTemplate
                 , queryTimeout = noQueryTimeout
+                , searchJobs = defaultSearchJobs
                 , lengthSMTLibExecutionConfig = Nothing
                 , lastQuery = Nothing
                 , scriptStack = []
@@ -328,6 +335,12 @@ runRepl options = case standardDjinnSession of
 
 defaultPromptTemplate :: String
 defaultPromptTemplate = "djex[%b]> "
+
+-- Two independent backends are the only coarse-grained worker lanes in this
+-- checkpoint. Larger positive values are retained for forward-compatible job
+-- budgets, while this runner consumes at most two.
+defaultSearchJobs :: Int
+defaultSearchJobs = 2
 
 -- | Run @.djexrc@ from the home directory and then the current directory
 -- through the ordinary script machinery, following GHCi's trust boundary for
@@ -738,9 +751,31 @@ runQuery sourceName query state = do
   runParsedSelection session parsed = case selected of
     OneBackend selectedBackend ->
       runParsedBackend False session parsed selectedBackend
+    BothBackends
+      | parallelBackendPairEligible ->
+          runParsedBackendsParallel session parsed
     BothBackends -> do
       runParsedBackend True session parsed DjinnBackend
       runParsedBackend True session parsed ExferenceBackend
+
+  -- Timed commands retain their established whole-presentation timer and
+  -- SelectAll retains one-pass streaming. The strict buffered worker path is
+  -- therefore limited to the ordinary non-streaming case.
+  parallelBackendPairEligible =
+    parallelPairEligible
+      (searchJobs state)
+      (queryTimeout state /= noQueryTimeout)
+      (presentationSelection (presentation state) == SelectAll)
+
+  runParsedBackendsParallel session parsed = do
+    labelBackend True DjinnBackend
+    runParallelPairOrdered
+      (pure $ prepareParsedDjinn parsed)
+      (pure $ prepareParsedExference session parsed)
+      (ignoreExit . replayCommandOutput)
+      (\output -> do
+        labelBackend True ExferenceBackend
+        ignoreExit $ replayCommandOutput output)
 
   runLegacySelection = case selected of
     OneBackend selectedBackend -> runLegacyBackend False selectedBackend
@@ -762,6 +797,31 @@ runQuery sourceName query state = do
     case selectedBackend of
       DjinnBackend -> runParsedDjinn parsed
       ExferenceBackend -> runParsedExference session parsed
+
+  prepareParsedDjinn parsed = case mkDjinnRequest QueryRequest
+      { requestTarget = resultTarget state
+      , requestGoal = projectParsedTypeToDjinn state parsed
+      , requestContexts = []
+      , requestOptions = prepareDjinnQueryOptions
+          (presentation state) (djinnSearchOptions state)
+      } of
+    Left failure -> prepareDiagnosticFailure failure
+    Right request -> case runDjinnQuery (currentDjinnSession state) request of
+      Left failure -> prepareDiagnosticFailure failure
+      Right result -> prepareDjinnPresentation
+        (presentation state)
+        (maybe noFieldSelectors djinnProjectionFieldSelectors
+          $ djinnProjection $ djinnRuntime state)
+        result
+
+  prepareParsedExference session parsed = case
+      mkExferenceRequestWithCheckedTargetFromParsed
+        (exferenceSearchOptions state) (resultTarget state) parsed of
+    Left failure -> prepareDiagnosticFailure failure
+    Right request -> case runExferenceQuery session request of
+      Left failure -> prepareDiagnosticFailure failure
+      Right results -> prepareExferencePresentation
+        (presentation state) (scopeFieldSelectors state) results
 
   runParsedDjinn parsed = case mkDjinnRequest QueryRequest
       { requestTarget = resultTarget state
@@ -1279,6 +1339,11 @@ settingBehavior setting = case setting of
     (\value state -> state {queryTimeout = value})
     noQueryTimeout
     renderQueryTimeout
+  SearchJobsSetting -> fieldSetting setting positiveInt
+    searchJobs
+    (\value state -> state {searchJobs = value})
+    defaultSearchJobs
+    show
   LengthZ3Setting -> SettingBehavior
     { settingApply = requiredValue setting $ \source -> do
         config <- parseLengthZ3ExecutionConfig source

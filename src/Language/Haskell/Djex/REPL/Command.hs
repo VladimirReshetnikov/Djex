@@ -174,6 +174,7 @@ data ReplSetting
   | QualificationSetting
   | PromptSetting
   | QueryTimeoutSetting
+  | SearchJobsSetting
   | LengthZ3Setting
   | CandidateLimitSetting
   | ChoiceBudgetSetting
@@ -201,6 +202,7 @@ replSettingName setting = case setting of
   QualificationSetting -> "qualification"
   PromptSetting -> "prompt"
   QueryTimeoutSetting -> "timeout"
+  SearchJobsSetting -> "jobs"
   LengthZ3Setting -> "length-z3"
   CandidateLimitSetting -> "candidate-limit"
   ChoiceBudgetSetting -> "choice-budget"

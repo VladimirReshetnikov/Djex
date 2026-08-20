@@ -35,6 +35,9 @@ module Language.Haskell.Djex.Command
   , executeDjinnCommand
   , executeExferenceCommand
   , executeExferenceCommandInScope
+  , prepareDjinnPresentation
+  , prepareExferencePresentation
+  , prepareDiagnosticFailure
   , presentDjinn
   , presentAssessedExference
   , presentExference
@@ -60,6 +63,11 @@ import System.IO (hFlush, hPutStrLn, stderr, stdout)
 import Text.Read (readMaybe)
 
 import Language.Haskell.Djex
+import Language.Haskell.Djex.Command.Output
+  ( CommandOutput (..)
+  , CommandOutputEvent (..)
+  , replayCommandOutput
+  )
 import Language.Haskell.Exference.Core.Internal.Options
   (heuristicAssignments, heuristicFields)
 import Language.Haskell.Djex.Exference.HaskellSrc
@@ -358,14 +366,25 @@ presentDjinn
   -> FieldSelectors
   -> DjinnResult
   -> IO ExitCode
-presentDjinn options fieldSelectors result = case
+presentDjinn options fieldSelectors =
+  replayCommandOutput . prepareDjinnPresentation options fieldSelectors
+
+-- | Select and render one Djinn result without touching process handles.
+-- Fully forcing this plan performs exactly the work demanded by the existing
+-- selection policy and makes it safe to move that work to a search worker.
+prepareDjinnPresentation
+  :: PresentationOptions
+  -> FieldSelectors
+  -> DjinnResult
+  -> CommandOutput
+prepareDjinnPresentation options fieldSelectors result = case
     traverse (renderDjinn options) candidates of
-  Left failure -> renderFailure "DJEX_DJINN_RENDER" failure
-  Right rendered -> do
-    printCandidates rendered
-    reportDjinnOutcome evidence progress
-    reportTruncation progress
-    pure ExitSuccess
+  Left failure -> prepareRenderFailure "DJEX_DJINN_RENDER" failure
+  Right rendered -> successfulPresentation
+    (candidateOutputEvents rendered)
+    $ map diagnosticOutputEvent
+      $ djinnOutcomeDiagnostics evidence progress
+        ++ maybe [] pure (progressTruncationDiagnostic progress)
  where
   evidence = resultEvidence result
   selection = selectQueryResults
@@ -387,25 +406,8 @@ presentExference
 presentExference options fieldSelectors results
   | presentationSelection options == SelectAll =
       presentAllExference options fieldSelectors results
-presentExference options fieldSelectors results =
-  presentExferenceSelection options fieldSelectors selection
- where
-  -- When record selectors are in scope, a first-candidate request looks a
-  -- few results ahead and shows the one whose selector-normalized spelling
-  -- is smallest: search order distinguishes deconstruct-and-rebuild
-  -- spellings that presentation renders identically simple or not at all.
-  selection = case presentationSelection options of
-    SelectFirst
-      | not $ Map.null fieldSelectors -> selectQueryResults
-          (SelectBestLookahead simplificationLookahead)
-          (expressionSize . functionClauseExpression
-            . projectFieldSelectors fieldSelectors . candidateOutput)
-          (const True)
-          results
-    mode -> selectQueryResults mode
-      (exferenceCandidateComplexity . exferenceCandidateMetrics)
-      (const True)
-      results
+presentExference options fieldSelectors results = replayCommandOutput
+  $ prepareExferencePresentation options fieldSelectors results
 
 -- | Check typed Exference candidates effectfully before selecting, rendering,
 -- and reporting them through the established presentation policy.
@@ -446,14 +448,50 @@ presentExferenceSelection
   -> FieldSelectors
   -> Selection ExferenceCandidate
   -> IO ExitCode
-presentExferenceSelection options fieldSelectors selection = case traverse
+presentExferenceSelection options fieldSelectors =
+  replayCommandOutput . prepareExferenceSelection options fieldSelectors
+
+-- | Select and render a non-streaming Exference result sequence without
+-- touching process handles.  The caller must retain the streaming presenter
+-- for 'SelectAll'.
+prepareExferencePresentation
+  :: PresentationOptions
+  -> FieldSelectors
+  -> [ExferenceResult]
+  -> CommandOutput
+prepareExferencePresentation options fieldSelectors results =
+  prepareExferenceSelection options fieldSelectors selection
+ where
+  -- When record selectors are in scope, a first-candidate request looks a
+  -- few results ahead and shows the one whose selector-normalized spelling
+  -- is smallest: search order distinguishes deconstruct-and-rebuild
+  -- spellings that presentation renders identically simple or not at all.
+  selection = case presentationSelection options of
+    SelectFirst
+      | not $ Map.null fieldSelectors -> selectQueryResults
+          (SelectBestLookahead simplificationLookahead)
+          (expressionSize . functionClauseExpression
+            . projectFieldSelectors fieldSelectors . candidateOutput)
+          (const True)
+          results
+    mode -> selectQueryResults mode
+      (exferenceCandidateComplexity . exferenceCandidateMetrics)
+      (const True)
+      results
+
+prepareExferenceSelection
+  :: PresentationOptions
+  -> FieldSelectors
+  -> Selection ExferenceCandidate
+  -> CommandOutput
+prepareExferenceSelection options fieldSelectors selection = case traverse
     (renderExferenceBlock options) candidates of
-  Left failure -> renderFailure "DJEX_EXF_RENDER" failure
-  Right rendered -> do
-    printCandidates rendered
-    when (null candidates) $ reportNoExferenceResult progress
-    reportTruncation progress
-    pure ExitSuccess
+  Left failure -> prepareRenderFailure "DJEX_EXF_RENDER" failure
+  Right rendered -> successfulPresentation
+    (candidateOutputEvents rendered)
+    $ map diagnosticOutputEvent
+      $ (if null candidates then [noExferenceResultDiagnostic progress] else [])
+        ++ maybe [] pure (progressTruncationDiagnostic progress)
  where
   picked = case presentationSelection options of
     SelectFirst -> take 1 $ selectionCandidates selection
@@ -567,27 +605,28 @@ data ExferenceBlockRenderError
   | ExferenceConstraintRenderError ExferenceResidualRenderError
   deriving (Eq, Show)
 
-printCandidates :: [String] -> IO ()
-printCandidates [] = pure ()
-printCandidates rendered = putStrLn $ intercalate "\n\n-- or\n\n" rendered
-
-reportDjinnOutcome :: QueryEvidence -> Maybe Progress -> IO ()
-reportDjinnOutcome ValidatedCandidates _ = pure ()
-reportDjinnOutcome ProvedUninhabitable _ = emitDiagnostic
-  $ codedDiagnostic Info "DJEX_DJINN_UNINHABITABLE"
+djinnOutcomeDiagnostics :: QueryEvidence -> Maybe Progress -> [Diagnostic]
+djinnOutcomeDiagnostics ValidatedCandidates _ = []
+djinnOutcomeDiagnostics ProvedUninhabitable _ =
+  [ codedDiagnostic Info "DJEX_DJINN_UNINHABITABLE"
       "Djinn proved that the requested type has no inhabitant"
-reportDjinnOutcome RequiresTargetReference _ = emitDiagnostic
-  $ codedDiagnostic Info "DJEX_DJINN_TARGET_REFERENCE"
+  ]
+djinnOutcomeDiagnostics RequiresTargetReference _ =
+  [ codedDiagnostic Info "DJEX_DJINN_TARGET_REFERENCE"
       "Djinn found no safe inhabitant without referring to the generated target"
-reportDjinnOutcome NoEvidence progress = emitDiagnostic
-  $ contextualDiagnostic Info "DJEX_DJINN_UNDECIDED"
+  ]
+djinnOutcomeDiagnostics NoEvidence progress =
+  [ contextualDiagnostic Info "DJEX_DJINN_UNDECIDED"
       "Djinn established no inhabitation result"
       (maybe "no search batch" show progress)
+  ]
 
 reportNoExferenceResult :: Maybe Progress -> IO ()
-reportNoExferenceResult progress = emitDiagnostic
-  $ contextualDiagnostic Info "DJEX_EXF_NO_RESULT" message
-      (maybe "no search batch" show progress)
+reportNoExferenceResult = emitDiagnostic . noExferenceResultDiagnostic
+
+noExferenceResultDiagnostic :: Maybe Progress -> Diagnostic
+noExferenceResultDiagnostic progress = contextualDiagnostic
+  Info "DJEX_EXF_NO_RESULT" message $ maybe "no search batch" show progress
  where
   message = case observeProgress progress of
     ObservedFinished ->
@@ -596,6 +635,31 @@ reportNoExferenceResult progress = emitDiagnostic
 
 reportTruncation :: Maybe Progress -> IO ()
 reportTruncation = mapM_ emitDiagnostic . progressTruncationDiagnostic
+
+candidateOutputEvents :: [String] -> [CommandOutputEvent]
+candidateOutputEvents [] = []
+candidateOutputEvents rendered =
+  [CommandStandardOutputLine $ intercalate "\n\n-- or\n\n" rendered]
+
+diagnosticOutputEvent :: Diagnostic -> CommandOutputEvent
+diagnosticOutputEvent = CommandStandardErrorLine . renderDiagnostic
+
+successfulPresentation
+  :: [CommandOutputEvent]
+  -> [CommandOutputEvent]
+  -> CommandOutput
+successfulPresentation output diagnostics =
+  CommandOutput (output ++ diagnostics) ExitSuccess
+
+-- | Prepare one ordinary checked-query failure without touching stderr.
+prepareDiagnosticFailure :: Diagnostic -> CommandOutput
+prepareDiagnosticFailure failure =
+  CommandOutput [diagnosticOutputEvent failure] runtimeFailure
+
+prepareRenderFailure :: Show failure => String -> failure -> CommandOutput
+prepareRenderFailure code failure = prepareDiagnosticFailure
+  $ contextualDiagnostic Error code
+      "cannot present the checked search result" $ show failure
 
 -- | An optional per-query wall-clock budget in whole seconds.
 -- 'noQueryTimeout' runs a query to completion, as every release before this

@@ -492,6 +492,41 @@ not caches or class-resolution policy; each seals its own independent
 projection of the loaded declarations. In particular, an empty Exference
 result is not upgraded to Djinn's proof-backed non-inhabitation evidence.
 
+## Paired-backend concurrency
+
+An ordinary unconstrained `:compare TYPE`, or bare `TYPE` while the active
+backend is `both`, starts the Djinn and Exference work together when the shared
+parsed route is available, `jobs >= 2`, `timeout = 0`, and `select` is `first`
+or `best`. The default is `jobs = 2`, so this common case needs no setup:
+
+```text
+:compare a -> a
+```
+
+Use `:set jobs 1` to restore the exact sequential execution path and reduce
+peak resource pressure; `:unset jobs` restores the default `2`. `jobs` accepts
+any positive integer. Values above two do not create more work in this
+checkpoint because a comparison has only one Djinn lane and one Exference
+lane.
+
+Each worker fully evaluates the finite presentation plan demanded by the
+selection policy---including its selected search prefix, rendering, and
+diagnostics---without touching stdout or stderr. The owning REPL thread then
+replays the Djinn plan followed by the Exference plan. Output bytes and section
+order therefore do not depend on which backend finishes first, and an ordinary
+diagnostic from either backend does not cancel the other. Scoped worker
+ownership cancels and joins unfinished work if a worker, consumer, or caller
+raises an exception.
+
+The concurrency boundary is intentionally narrow. A nonzero `timeout` keeps
+the established serial whole-presentation timers, `select = all` keeps
+one-pass serial streaming, and behavioral `--where`/Z3 queries keep their
+checked serial path. Running both live search heaps at once can make peak
+memory approach their sum; `jobs = 1` is the resource fallback even on a
+multi-core runtime. This is backend-level overlap only: neither individual
+search algorithm is internally parallel. A legacy-parser fallback is serial
+as well.
+
 ## Commands
 
 Exact aliases win; otherwise any nonempty, unique prefix of a canonical
@@ -1003,7 +1038,7 @@ Use any of these forms:
 ```
 
 Bare `:set` also prints an informational `targets = ...` line beside the
-twenty settings; the target set is workspace state owned by `:load`, not a
+twenty-two settings; the target set is workspace state owned by `:load`, not a
 setting, so `:set targets`/`:unset targets` are rejected.
 
 A bare `:set NAME` is not a getter: it is rejected as `setting NAME requires
@@ -1032,6 +1067,8 @@ spelling is rejected as an unknown setting.
 | `qualification` | `none`, `identifiers`, `full` | `full` | Shared presentation |
 | `prompt` | Text, or a Haskell string literal; `%b` expands to the active selection | `"djex[%b]> "` | Interactive UI |
 | `timeout` | Non-negative integer seconds; `0` means no budget | `0` | Shared search |
+| `jobs` | Positive integer; the current both-backend scheduler uses at most two | `2` | Shared search scheduling |
+| `length-z3` | Absolute executable path and optional SHA-256 hex digest | Inactive | Behavioral verification |
 | `candidate-limit` | Positive integer | `200` | Djinn |
 | `choice-budget` | Non-negative integer; `0` means unbounded | `0` | Djinn |
 | `djinn-strategy` | `depth-first`, `interleave` | `depth-first` | Djinn |
@@ -1045,6 +1082,11 @@ spelling is rejected as an unknown setting.
 | `max-depth` | Finite non-negative number or `unbounded` | `unbounded` | Exference |
 | `heuristic` | `NAME VALUE`: a weight name and a finite non-negative number | The thirteen built-in weights | Exference |
 | `fix` | Boolean | Off | Exference load policy |
+
+`jobs` controls only eligible both-backend REPL queries. `jobs = 1` selects
+the exact serial path; `jobs >= 2` permits the two backend workers described in
+[Paired-backend concurrency](#paired-backend-concurrency). It does not alter a
+single-backend search or increase its internal parallelism.
 
 `timeout` is the only wall-clock bound in the REPL: the engines otherwise
 stop on step, queue, depth, choice-point and candidate bounds, which are
@@ -1365,6 +1407,13 @@ working-directory changes, and requested evaluation, editor, shell, and Cabal
 package commands. Applications needing custom transport or mutable
 caller-owned state should embed the checked adapters documented in [the
 library API guide](library-api.md) instead.
+
+The public `ReplOptions` record is unchanged and has no capability or worker
+field. Its private interactive `jobs` setting still defaults to `2`, but an
+embedded launcher neither enables the threaded RTS nor changes the host's
+capability count. The packaged `djex` executable is built threaded with a
+default of two capabilities; an embedding application owns its own RTS build
+and capability policy.
 
 ## Relationship to the historical frontends
 

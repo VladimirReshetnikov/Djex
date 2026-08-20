@@ -66,6 +66,30 @@ the same evidence semantics. Exference resolves nominal evidence. Djinn checks
 class existence, arity, and kinds, then deliberately withholds class methods
 from its propositional proof environment.
 
+### Concurrency boundary
+
+The checked Djinn and Exference adapter calls remain synchronous, and this
+checkpoint adds no public jobs, scheduler, session, query, or result API. A
+library application that wants concurrent checked calls continues to own that
+policy and must keep presentation and effects ordered itself.
+
+Only the shared terminal REPL has an internal paired-backend scheduler. Its
+positive `jobs` setting defaults to `2`; `jobs = 1` is the exact serial and
+lower-peak-memory fallback. It overlaps one Djinn and one Exference worker only
+for unconstrained `both`/`:compare` queries on the shared parsed route, with
+`timeout = 0` and a non-streaming `select` policy. Timed, `select = all`,
+behavioral Length/Z3, and legacy-parser queries remain serial. Workers strictly
+prepare private output plans, and the REPL owner always replays Djinn before
+Exference.
+
+The packaged `djex` executable enables the threaded RTS and defaults to two
+capabilities. Calling `runRepl` or `runArguments` from the library does not
+change the host program's RTS capabilities or runtime defaults; the embedding
+component owns those choices. Parallel heaps may make peak memory approach the
+sum of the individual searches, so a service should retain its own admission
+and resource controls rather than assuming the REPL setting is a general
+library scheduler.
+
 ## Embed the shared terminal REPL
 
 Import the interactive launcher separately from the main facade:
@@ -94,6 +118,11 @@ runProjectRepl = runRepl defaultReplOptions
 `Language.Haskell.Djex` when constructing those values. `defaultReplOptions`
 starts on Djinn, loads the installed source workspace with the command-safe
 no-fix policy, and keeps history only for the process lifetime.
+
+`ReplOptions` intentionally has no jobs or RTS-capability field. When the
+interactive loop is running, `:set jobs N` changes its private paired-backend
+policy and `:unset jobs` restores `2`; this does not mutate either sealed
+backend session.
 
 `runRepl` returns an `ExitCode` and does not terminate the host application.
 EOF and `:quit` are successful. Individual query, setting, shell, script,

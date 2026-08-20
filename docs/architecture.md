@@ -184,7 +184,7 @@ REPL state
   |     `-- diagnostics from the latest load attempt
   |-- visible record-selector presentation map
   |-- active backend selection and last query
-  |-- shared result, presentation, prompt, and query-timeout settings
+  |-- shared result, presentation, prompt, query-timeout, and search-job settings
   |-- backend-specific search settings
   `-- active script-inclusion stack
 ```
@@ -198,6 +198,39 @@ second backend when the first backend's lowering or search reports a
 diagnostic. A common parse or kind error is reported once. The historical
 backend parsers remain the compatibility fallback when the shared source
 runtime, or a requested Djinn scope projection, is unavailable.
+
+### Deterministic backend-pair scheduler
+
+The first parallel seam is deliberately above both engines. For an
+unconstrained both-backend query on the shared parsed route, private REPL
+scheduling may start one Djinn worker and one Exference worker when
+`jobs >= 2`, no wall-clock timeout is active, and presentation is not
+`SelectAll`. A positive `jobs` setting defaults to two; one selects the exact
+pre-checkpoint serial control path. Larger values are accepted, but the present
+scheduler has only these two lanes. The historical parser fallback remains
+serial.
+
+Workers do not own process handles. Each produces and fully forces a private
+`CommandOutput` plan containing ordered stdout, stderr, and flush events plus
+the exit status. The parent observes and replays the Djinn plan before the
+Exference plan regardless of completion order. Consequently the new overlap
+does not change the established labelled transcript or let ordinary backend
+diagnostics cancel independent work. Structured `withAsync` scopes provide
+masked worker creation and cancel-and-wait cleanup for exceptions and caller
+interruption.
+
+The boundary preserves laziness instead of forcing a complete backend trace:
+the worker forces only the finite presentation demanded by `SelectFirst` or
+`SelectBest`. `SelectAll` retains its one-pass streaming presenter, timed
+queries retain their whole-presentation timeout boundary, and behavioral
+Length/Z3 assessment retains its checked serial lifecycle. All three therefore
+bypass the pair scheduler. Running two independent heaps can raise peak memory
+from approximately the larger backend footprint toward their sum, so
+`jobs = 1` is also the documented resource fallback.
+
+This is coarse-grained frontend concurrency, not parallel Djinn proof search
+or parallel Exference queue traversal. The checked adapter APIs and immutable
+sessions remain synchronous and unchanged.
 
 ### Quantified subtrees and provider-local evidence
 
@@ -769,10 +802,11 @@ visibility, not the path, decides whether a module is private.
 
 ## Test boundaries
 
-The package has sixteen test suites:
+The package has seventeen test suites:
 
 - shared foundation (`synthesis-tests`), facade integration (`djex-tests`),
-  downstream API (`djex-api-tests`), and merged CLI (`djex-cli-tests`);
+  downstream API (`djex-api-tests`), merged CLI (`djex-cli-tests`), and the
+  deterministic scheduler/strict-output suite (`djex-parallel-tests`);
 - semantic Length (`synthesis-length-tests`), structural fingerprint
   (`synthesis-fingerprint-tests`), certificate
   (`synthesis-certificate-tests`), and term-graph fingerprint
@@ -800,8 +834,11 @@ same boxed-pair and partial-`Either` evidence through both engines, renders all
 four definitions, and type-checks the combined fixture with GHC.
 
 The downstream API suite also compiles deliberately rejected probes to protect
-opaque-constructor boundaries. Benchmarks are separate Cabal components and are
-not run by `cabal test all`.
+opaque-constructor boundaries. `djex-parallel-tests` uses synchronization
+barriers rather than timing guesses to pin simultaneous start, stable
+left-to-right observation, failure isolation, exception cleanup, caller
+cancellation, and strict worker output. Benchmarks are separate Cabal
+components and are not run by `cabal test all`.
 
 Run the complete supported validation from the repository root:
 
@@ -816,28 +853,25 @@ freshly linked `djex`, `djinn`, and `exference` tools, so another component
 must not replace one of those executables while a suite is using it. Focused
 library-only test targets may still run concurrently.
 
+The separate `djex-parallel-bench` component runs a fixed number of alternating
+end-to-end serial/parallel comparison pairs. It requires exact transcript
+equality before timing and for every measured pair, and reports medians and
+95th percentiles rather than making a broad speedup claim. See the
+[dated scheduler report](reports/2026-08-20-deterministic-parallel-backend-search.md)
+for its workload, controls, and current observations.
+
 Two practical notes about reading the result:
 
 - `cabal test all` stops at the **first** failing suite and never reaches the
   ones after it. A single red suite therefore looks like a much larger outage
   than it is. When something fails, re-run the suites individually (or pass
   `--keep-going`) before drawing conclusions about scope.
-- `synthesis-length-tests` is the only suite that is **not** expected to be
-  fully green off Linux. Seven of its 366 cases exercise the descriptor-bound
-  Z3 launch strategies, whose real implementation is Linux-only:
-
-  | Case | What it wants |
-  |---|---|
-  | `fail closed before demanding unsupported-platform inputs` (×3, one per launch strategy) | the non-Linux stub to refuse *before* it asks for a workspace descriptor; the stubs currently ask first, so the assertion fires |
-  | `bind sealed-launch scalar and pair identities under scoped authority` | a live descriptor-bound launch |
-  | `bind effective-ID scalar and pair identities under scoped authority` | the same, via the effective-ID strategy |
-  | `preserve scalar/pair wire bytes and statuses across sealed launches` | wire bytes from a real sealed launch |
-  | `seal exact initial and conditional value writes` | the same launch path |
-
-  On Linux the suite is 366/366. On Windows it is 359/366, and those seven are
-  the baseline rather than a regression --- confirm against a pristine checkout
-  before treating any of them as new. The refusals are still closed refusals;
-  the disagreement is about *when* the stub gives up, not whether it does.
+- `synthesis-length-tests` includes descriptor-bound Z3 launch mechanisms
+  whose real implementations are Linux-specific. The current Linux gate is
+  456/456. On another platform, inspect the current fail-closed launch results
+  and compare them with a pristine checkout on that same platform rather than
+  relying on a frozen cross-platform pass count; the suite and its launch
+  coverage evolve independently of this scheduler checkpoint.
 
 See [the library API guide](library-api.md) for runnable examples and
 [the synthesis API map](../synthesis/README.md) for the shared modules. The

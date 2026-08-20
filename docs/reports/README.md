@@ -117,3 +117,4 @@ Reports are listed oldest first.
 - 2026-08-15 — [Guarded conditional Length applicable-domain validation](2026-08-15-guarded-conditional-length-applicable-domain.md)
 - 2026-08-16 — [Nominal Length counterexample-bank foundation](2026-08-16-nominal-length-counterexample-bank-foundation.md)
 - 2026-08-16 — [Length counterexample-bank query-replay bridge](2026-08-16-length-counterexample-bank-query-replay-bridge.md)
+- 2026-08-20 — [Deterministic parallel backend search](2026-08-20-deterministic-parallel-backend-search.md)

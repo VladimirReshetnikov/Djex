@@ -45,6 +45,7 @@ these tiers explicitly.
   specification is [docs/semantic-foundations.md](docs/semantic-foundations.md)
 - [Building](#building)
 - [Unified command](#unified-command)
+  - [Paired-backend concurrency](#paired-backend-concurrency)
   - [Behavioral constraints in the Djex REPL](#behavioral-constraints-in-the-djex-repl)
 - [Query boundary](#query-boundary)
   - [Shared query surface](#shared-query-surface)
@@ -99,6 +100,7 @@ can skip ahead to [Building](#building).
 
 | Rule family | Engine | Reports (newest first) |
 | --- | --- | --- |
+| Deterministic paired-backend REPL concurrency with an exact serial fallback | both | [parallel backend search](docs/reports/2026-08-20-deterministic-parallel-backend-search.md) |
 | Bounded binder instantiation: six leading binders (conservative boundary at seven), five, then four | both, with exact provider evidence | [six-binder](docs/reports/2026-08-10-six-binder-instantiation.md) · [five-binder](docs/reports/2026-08-09-five-binder-instantiation.md) · [four-binder](docs/reports/2026-08-01-four-binder-instantiation.md) |
 | Per-occurrence instantiation of loaded polymorphic values and closed source monotypes | Djinn | [loaded polymorphic values](docs/reports/2026-08-01-loaded-polymorphic-djinn-values.md) |
 | Positive-only instantiation of query-local hypotheses at closed monotypes already in the request | Djinn | [query-local closed monotypes](docs/reports/2026-08-09-query-local-closed-monotype-instantiation.md) |
@@ -207,16 +209,24 @@ cabal run djinn
 cabal run exference -- --first "a -> a"
 cabal bench djinn-bench
 cabal bench exference-bench
+cabal bench djex-parallel-bench
 ```
 
-All three executables are serial and accept explicit caller-supplied `+RTS`
-resource tuning, for example `+RTS -K64m -RTS`; none starts one capability
-per core or inherits a fixed multi-gigabyte heap hint.
+The shared `djex` executable is threaded and starts with two RTS capabilities;
+callers can override that default, for example with `+RTS -N1 -K64m -RTS`.
+The historical `djinn` and `exference` executables remain serial. No
+executable automatically scales its capability count to all detected cores or
+inherits a fixed multi-gigabyte heap hint.
 
 The Exference benchmark uses parser-free, explicitly step- and queue-bounded
 core fixtures. For an optimization-sensitive comparison of the search
 engine, build its whole local dependency graph consistently with
 `cabal bench exference-bench --enable-optimization=2`.
+
+Likewise, record paired-backend release timings with
+`cabal bench djex-parallel-bench --enable-optimization=2`. The benchmark uses
+five fixed alternating sample pairs by default and refuses unequal serial and
+parallel transcripts.
 
 The backend subdirectories are source roots, not independent Cabal packages;
 run package commands from the repository root.
@@ -242,6 +252,30 @@ startup files, history, completion, and `:{`/`:}` input. Bare input is
 deliberately still a requested result type, not a Haskell expression; the
 explicit `:eval` command is the separate boundary that compiles and executes
 an expression with real GHC.
+
+### Paired-backend concurrency
+
+The common shared-parser case needs no setup: `:compare TYPE`, or a bare `TYPE`
+under `:backend both`, starts Djinn and Exference concurrently. The
+positive-integer `jobs` setting defaults to `2`; use `:set jobs 1` for the
+exact serial and lower-peak-memory path, and `:unset jobs` to restore `2`.
+Values above two are accepted for forward compatibility, although this
+checkpoint has only two backend lanes.
+
+Concurrency applies only to unconstrained both-backend queries with
+`timeout = 0` and `select` set to `first` or `best`. Timed queries,
+`select = all`, and behavioral `--where`/Z3 queries keep their established
+serial paths. Each worker strictly prepares its selected output away from the
+terminal; the parent always replays the complete Djinn section before the
+Exference section, so completion order cannot change stdout or stderr. Running
+the two search heaps together can make peak memory approach their sum.
+
+The fixed-sample `djex-parallel-bench` checks exact serial/parallel transcript
+equality before reporting end-to-end timings. Its current measured result is
+a modest workload-specific improvement on two capabilities, not a general
+speedup guarantee; see the
+[parallel-search report](docs/reports/2026-08-20-deterministic-parallel-backend-search.md)
+and the [REPL guide](docs/repl.md#paired-backend-concurrency).
 
 ### Behavioral constraints in the Djex REPL
 

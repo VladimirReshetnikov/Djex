@@ -14,7 +14,7 @@ module Language.Haskell.Exference.ClassEnvFromHaskellSrc
   )
 where
 
-import Control.Monad (forM, unless, when)
+import Control.Monad (forM, unless)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Lazy (evalStateT, get)
 import Control.Monad.Trans.Except (runExceptT, throwE, withExceptT)

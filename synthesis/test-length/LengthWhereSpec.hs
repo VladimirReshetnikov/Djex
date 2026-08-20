@@ -77,12 +77,147 @@ lengthWhereTests = testGroup "bounded Length where syntax"
   [ relationTests
   , arithmeticTests
   , divisorTests
+  , haskellSurfaceTests
   , roleTests
   , byteAndOffsetTests
   , resourceTests
   , refusalTests
   , identityTests
   , publicSurfaceTests
+  ]
+
+haskellSurfaceTests :: TestTree
+haskellSurfaceTests = testGroup "Haskell-shaped surface"
+  [ testCase "lower ordinary length application and Haskell relations" $ do
+      assertHaskellScalar observedOne "length result == length arg0"
+        $ Length.LengthEqual result input0
+      assertHaskellScalar observedOne "length result /= length arg0"
+        $ Length.LengthNot $ Length.LengthEqual result input0
+      assertHaskellScalar observedOne "length result <= length arg0"
+        $ Length.LengthAtMost result input0
+      assertHaskellScalar observedOne "length result < length arg0"
+        $ Length.LengthNot $ Length.LengthAtMost input0 result
+      assertHaskellScalar observedOne "length result >= length arg0"
+        $ Length.LengthAtMost input0 result
+      assertHaskellScalar observedOne "length result > length arg0"
+        $ Length.LengthNot $ Length.LengthAtMost result input0
+  , testCase "lower Haskell arithmetic, div, mod, min, and max" $
+      assertHaskellScalar observedThree
+        ("length result == length arg0 + 2 * length arg1 " ++
+          "- length arg2 `div` 3 `mod` 2")
+        (Length.LengthEqual result
+          $ Length.LengthMonus
+              (Length.LengthSum
+                [ input0
+                , Length.LengthScale 2 input1
+                ])
+              (Length.LengthModulo 2 $ Length.LengthQuotient 3 input2))
+  , testCase "lower prefix div and mod application" $
+      assertHaskellScalar observedOne
+        "length result == mod (div (length arg0) 3) 2"
+        (Length.LengthEqual result
+          $ Length.LengthModulo 2 $ Length.LengthQuotient 3 input0)
+  , testCase "lower Haskell prefix extrema" $
+      assertHaskellScalar observedTwo
+        "length result == min (length arg1) (max (length arg0) 3)"
+        (Length.LengthEqual result
+          $ Length.LengthMinimum input1
+              (Length.LengthMaximum input0 $ Length.LengthLiteral 3))
+  , testCase "lower fst and snd result projections" $
+      assertHaskellPair observedOne
+        ("length (fst result) + length (snd result) " ++
+          "== 2 * length arg0")
+        (Length.LengthEqual
+          (Length.LengthSum [pairFirst, pairSecond])
+          (Length.LengthScale 2 pairInput0))
+  , testCase "retain native offsets and reject cross-surface spellings" $ do
+      assertHaskellParseError "length result = length arg0"
+        $ Where.LengthWhereUnexpectedToken 14
+            Where.LengthWhereRelationExpected
+      assertHaskellParseError "length result != length arg0"
+        $ Where.LengthWhereUnexpectedToken 14
+            Where.LengthWhereRelationExpected
+      assertHaskellParseError "len(result)==len(arg0)"
+        $ Where.LengthWhereUnexpectedToken 0
+            Where.LengthWhereExpressionExpected
+      assertHaskellParseError "length (fst arg0) == length result"
+        $ Where.LengthWhereUnexpectedToken 12
+            Where.LengthWhereReferenceExpected
+      assertParseError "length result == length arg0"
+        $ Where.LengthWhereUnexpectedToken 0
+            Where.LengthWhereExpressionExpected
+      assertParseError "0/=0"
+        $ Where.LengthWhereUnexpectedToken 2
+            Where.LengthWhereExpressionExpected
+  , testCase "require Haskell application grouping for compound arguments" $ do
+      assertHaskellParseError "length result == min length arg0 1"
+        $ Where.LengthWhereUnexpectedToken 21
+            Where.LengthWhereExpressionExpected
+      assertHaskellParseError "length result == min(length arg0,1)"
+        $ Where.LengthWhereUnexpectedToken 32
+            Where.LengthWhereRightParenthesisExpected
+      assertHaskellParseError "length result == length arg0 div 2"
+        $ Where.LengthWhereUnexpectedToken 29 Where.LengthWhereEndExpected
+  , testCase "share exact byte, ASCII, and parenthesis bounds" $ do
+      let exact = ascii $ "0==0" ++ replicate 16380 ' '
+          excess = BS.snoc exact 0x20
+          nested count = "length " ++ replicate count '(' ++ "arg0" ++
+            replicate count ')' ++ " == 0"
+      parsed <- case Where.parseHaskellLengthWhereSource defaultLimits exact of
+        Left failure -> assertFailure (show failure) >> error "unreachable"
+        Right value -> pure value
+      assertSeals defaultLimits Where.LengthWhereScalar [] parsed
+      case Where.parseHaskellLengthWhereSource defaultLimits excess of
+        Left failure -> failure @?=
+          Where.LengthWhereSourceByteLimitExceeded 16384 16385
+        Right _ -> assertFailure "accepted oversized Haskell-shaped source"
+      case Where.parseHaskellLengthWhereSource defaultLimits
+          (BS.pack [0x30, 0x3d, 0x3d, 0x30, 0x20, 0x80, 0xff]) of
+        Left failure -> failure @?= Where.LengthWhereNonAsciiByte 5
+        Right _ -> assertFailure "accepted non-ASCII Haskell-shaped source"
+      assertHaskellScalar observedOne (nested 64)
+        $ Length.LengthEqual input0 (Length.LengthLiteral 0)
+      assertHaskellParseError (nested 65)
+        $ Where.LengthWhereSyntaxLimitExceeded
+            Where.LengthWhereNestingDepth 64 65 71
+  , testCase "share emitted semantic resource limits" $ do
+      assertHaskellParseErrorUnder (limitsWithSyntax 2 32 64 256) "0/=0"
+        $ Where.LengthWhereSyntaxLimitExceeded
+            Where.LengthWhereSyntaxNodes 2 3 1
+      assertHaskellParseErrorUnder (limitsWithSyntax 1024 1 64 256) "0==0"
+        $ Where.LengthWhereSyntaxLimitExceeded
+            Where.LengthWhereFormulaClauses 1 2 1
+      assertHaskellParseErrorUnder (limitsWithSyntax 1024 32 1 256)
+        "length arg0 + length arg1 == 0"
+        $ Where.LengthWhereSyntaxLimitExceeded
+            Where.LengthWhereCollectionWidth 1 2 12
+      assertHaskellParseErrorUnder (limitsWithSyntax 1024 32 64 3) "8==0"
+        $ Where.LengthWhereSyntaxLimitExceeded
+            Where.LengthWhereLiteralBits 3 4 0
+      assertHaskellParseError "length arg8 == 0"
+        $ Where.LengthWhereSyntaxLimitExceeded
+            Where.LengthWherePhysicalArgumentIndex 7 8 7
+  , testCase "produce the same scalar and pair contract sources" $ do
+      compactScalar <- scalarContract defaultLimits observedOne
+        "len(result)=len(arg0)+min(len(arg0),1)"
+      haskellScalar <- haskellScalarContract observedOne
+        "length result == length arg0 + min (length arg0) 1"
+      haskellScalar @?= compactScalar
+      compactPair <- pairContract defaultLimits observedOne
+        "len(result.first)+len(result.second)=2*len(arg0)"
+      haskellPair <- haskellPairContract observedOne
+        ("length (fst result) + length (snd result) " ++
+          "== 2 * length arg0")
+      haskellPair @?= compactPair
+  , testCase "re-export the Haskell parser through the facade" $ do
+      source <- case Djex.parseHaskellLengthWhereSource Djex.defaultLengthLimits
+          (ascii "length result == 0") of
+        Left failure -> assertFailure (show failure) >> error "unreachable"
+        Right value -> pure value
+      Djex.elaborateLengthWhereSource Djex.LengthWhereScalar [] source @?=
+        Right (Djex.LengthWhereScalarContractSource []
+          $ scalarSource $ Length.LengthEqual result
+              (Length.LengthLiteral 0))
   ]
 
 relationTests :: TestTree
@@ -467,6 +602,83 @@ parseOKBytes limits source = case Where.parseLengthWhereSource limits source of
   Left failure -> assertFailure ("unexpected where rejection: " ++ show failure)
     >> error "unreachable"
   Right parsed -> pure parsed
+
+parseHaskellOK :: String -> IO Where.LengthWhereSource
+parseHaskellOK source =
+  case Where.parseHaskellLengthWhereSource defaultLimits (ascii source) of
+    Left failure -> assertFailure
+      ("unexpected Haskell-shaped where rejection: " ++ show failure)
+        >> error "unreachable"
+    Right parsed -> pure parsed
+
+assertHaskellParseError
+  :: String -> Where.LengthWhereParseError -> Assertion
+assertHaskellParseError = assertHaskellParseErrorUnder defaultLimits
+
+assertHaskellParseErrorUnder
+  :: Length.LengthLimits
+  -> String
+  -> Where.LengthWhereParseError
+  -> Assertion
+assertHaskellParseErrorUnder limits source expected =
+  case Where.parseHaskellLengthWhereSource limits (ascii source) of
+    Left actual -> actual @?= expected
+    Right _ -> assertFailure "expected Haskell-shaped Length.Where rejection"
+
+assertHaskellScalar
+  :: [Length.LengthTargetArgumentRole]
+  -> String
+  -> Length.LengthFormula Length.LengthContractVariable
+  -> Assertion
+assertHaskellScalar roles source expected = do
+  parsed <- parseHaskellOK source
+  Where.elaborateLengthWhereSource Where.LengthWhereScalar roles parsed @?=
+    Right (Where.LengthWhereScalarContractSource roles $ scalarSource expected)
+  assertSeals defaultLimits Where.LengthWhereScalar roles parsed
+
+assertHaskellPair
+  :: [Length.LengthTargetArgumentRole]
+  -> String
+  -> Length.LengthFormula Length.LengthSpinePairContractVariable
+  -> Assertion
+assertHaskellPair roles source expected = do
+  parsed <- parseHaskellOK source
+  Where.elaborateLengthWhereSource Where.LengthWhereBinaryProduct roles parsed
+    @?= Right (Where.LengthWhereBinaryProductContractSource roles
+      $ pairSource expected)
+  assertSeals defaultLimits Where.LengthWhereBinaryProduct roles parsed
+
+haskellScalarContract
+  :: [Length.LengthTargetArgumentRole]
+  -> String
+  -> IO Length.LengthContractSource
+haskellScalarContract roles source = do
+  parsed <- parseHaskellOK source
+  case Where.elaborateLengthWhereSource Where.LengthWhereScalar roles parsed of
+    Left failure -> assertFailure (show failure) >> error "unreachable"
+    Right (Where.LengthWhereScalarContractSource returnedRoles contract) -> do
+      returnedRoles @?= roles
+      assertSeals defaultLimits Where.LengthWhereScalar roles parsed
+      pure contract
+    Right _ -> assertFailure "Haskell scalar elaboration returned pair source"
+      >> error "unreachable"
+
+haskellPairContract
+  :: [Length.LengthTargetArgumentRole]
+  -> String
+  -> IO Length.LengthSpinePairContractSource
+haskellPairContract roles source = do
+  parsed <- parseHaskellOK source
+  case Where.elaborateLengthWhereSource
+      Where.LengthWhereBinaryProduct roles parsed of
+    Left failure -> assertFailure (show failure) >> error "unreachable"
+    Right (Where.LengthWhereBinaryProductContractSource returnedRoles
+        contract) -> do
+      returnedRoles @?= roles
+      assertSeals defaultLimits Where.LengthWhereBinaryProduct roles parsed
+      pure contract
+    Right _ -> assertFailure "Haskell pair elaboration returned scalar source"
+      >> error "unreachable"
 
 assertParseError :: String -> Where.LengthWhereParseError -> Assertion
 assertParseError = assertParseErrorUnder defaultLimits

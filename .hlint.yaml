@@ -10,14 +10,13 @@
 # validator families, and the standard Maybe/Either idioms -- were applied, so
 # those should stay at zero.
 #
-# Deliberately NOT ignored, so they stay visible as future work: `Use
-# lambda-case` and `Replace case with maybe` (each needs a LANGUAGE pragma
-# or a per-site readability call, so they are worth taking file by file
-# rather than silencing wholesale).  The `Use <$>`/`Use fmap` family was
-# decided 2026-08-20: the short-application shape (`fmap f $ g x`) is
-# applied everywhere; the three remaining REPL.hs reports are the
-# lambda-rewrite shape, where the explicit argument name is the
-# readability, and they stay visible rather than ignored.
+# Every reported family has now been decided (2026-08-20).  `Use
+# lambda-case` is applied everywhere it fired, with the LambdaCase pragma
+# added per module.  The `Use <$>`/`Use fmap` family's short-application
+# shape (`fmap f $ g x`) is applied everywhere; the three remaining
+# REPL.hs reports are the lambda-rewrite shape, where the explicit
+# argument name is the readability, and they stay visible rather than
+# ignored -- as does any new report in an undecided shape.
 
 - ignore:
     name: Use ++

@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 -- | Private Haskeline driver for stateful Djex frontends.
 --
 -- The historical Djinn loop fixes its prompt at initialization and has no
@@ -90,7 +92,7 @@ runReplDriver historyPath initial prompt completions evaluate = do
     , autoAddHistory = True
     }
 
-  loop snapshot state = step snapshot state >>= \outcome -> case outcome of
+  loop snapshot state = step snapshot state >>= \case
     ContinueRepl next -> loop snapshot next
     ExitRepl final -> pure final
 

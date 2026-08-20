@@ -1532,8 +1532,7 @@ showLoadDiagnostics state = case
 
 browseState :: Maybe String -> ReplState -> IO ()
 browseState (Just reference) state = browseWorkspaceModule reference state
-browseState Nothing state = forSelectedBackends state $ \selectedBackend ->
-  case selectedBackend of
+browseState Nothing state = forSelectedBackends state $ \case
     DjinnBackend -> browse "Djinn" id
       $ djinnSessionEnvironment $ currentDjinnSession state
     ExferenceBackend -> case

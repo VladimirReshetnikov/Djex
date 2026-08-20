@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -- | Real-GHC expression evaluation for the shared REPL, built on hint.
@@ -73,7 +74,7 @@ evaluateExpression promptScope workspaceModules expression = do
  where
   toList = maybe [] pure
 
-  establishScope = Catch.try installPromptScope >>= \attempt -> case attempt of
+  establishScope = Catch.try installPromptScope >>= \case
     Right () -> pure Nothing
     Left (failure :: Hint.InterpreterError) -> do
       Hint.reset

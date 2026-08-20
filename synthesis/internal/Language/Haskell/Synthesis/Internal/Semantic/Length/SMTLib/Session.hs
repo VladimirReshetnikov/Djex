@@ -1,4 +1,5 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -3218,64 +3219,40 @@ openConfiguredLengthSMTLibProcess limits cancellation deadline execution
       openLengthSMTLibProcess limits cancellation deadline
         (lengthSMTLibExecutionZ3Profile execution) path
     LengthSMTLibDescriptorBoundExecutableLaunch ->
-#ifndef mingw32_HOST_OS
-      withMVar _workspaceGate $ \state -> case state of
-        WorkspaceFinished _ -> pure $ Left workspaceDescriptorFailure
-        WorkspaceLive identity@(PosixWorkspaceIdentity descriptor _ _ _ _) -> do
-          verified <- tryIOError $ verifyWorkspaceIdentity path identity
-          case verified of
-            Right True -> openLengthSMTLibDescriptorBoundProcess limits
-              cancellation deadline (lengthSMTLibExecutionZ3Profile execution)
-              path $ mkLengthSMTLibWorkingDirectoryDescriptor
-                $ fromIntegral descriptor
-            _ -> pure $ Left workspaceDescriptorFailure
-#else
-      openLengthSMTLibDescriptorBoundProcess limits cancellation deadline
+      descriptorBoundLaunch $ openLengthSMTLibDescriptorBoundProcess
+        limits cancellation deadline
         (lengthSMTLibExecutionZ3Profile execution) path
-        $ mkLengthSMTLibWorkingDirectoryDescriptor (-1)
-#endif
     LengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunch ->
-#ifndef mingw32_HOST_OS
-      withMVar _workspaceGate $ \state -> case state of
-        WorkspaceFinished _ -> pure $ Left workspaceDescriptorFailure
-        WorkspaceLive identity@(PosixWorkspaceIdentity descriptor _ _ _ _) -> do
-          verified <- tryIOError $ verifyWorkspaceIdentity path identity
-          case verified of
-            Right True ->
-              openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
-                limits cancellation deadline
-                (lengthSMTLibExecutionZ3Profile execution) path
-                $ mkLengthSMTLibWorkingDirectoryDescriptor
-                    $ fromIntegral descriptor
-            _ -> pure $ Left workspaceDescriptorFailure
-#else
-      openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
-        limits cancellation deadline
-        (lengthSMTLibExecutionZ3Profile execution) path
-        $ mkLengthSMTLibWorkingDirectoryDescriptor (-1)
-#endif
+      descriptorBoundLaunch
+        $ openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
+            limits cancellation deadline
+            (lengthSMTLibExecutionZ3Profile execution) path
     LengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunch ->
+      descriptorBoundLaunch
+        $ openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcess
+            limits cancellation deadline
+            (lengthSMTLibExecutionZ3Profile execution) path
+ where
+  -- One gate for the three descriptor-bound launches: on POSIX the live
+  -- workspace identity is verified immediately before and the opener
+  -- receives the verified directory descriptor; the non-POSIX branch
+  -- hands the opener a sentinel so it can fail closed itself.
 #ifndef mingw32_HOST_OS
-      withMVar _workspaceGate $ \state -> case state of
-        WorkspaceFinished _ -> pure $ Left workspaceDescriptorFailure
-        WorkspaceLive identity@(PosixWorkspaceIdentity descriptor _ _ _ _) -> do
-          verified <- tryIOError $ verifyWorkspaceIdentity path identity
-          case verified of
-            Right True ->
-              openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcess
-                limits cancellation deadline
-                (lengthSMTLibExecutionZ3Profile execution) path
-                $ mkLengthSMTLibWorkingDirectoryDescriptor
-                    $ fromIntegral descriptor
-            _ -> pure $ Left workspaceDescriptorFailure
+  descriptorBoundLaunch open =
+    withMVar _workspaceGate $ \case
+      WorkspaceFinished _ -> pure $ Left workspaceDescriptorFailure
+      WorkspaceLive identity@(PosixWorkspaceIdentity descriptor _ _ _ _) -> do
+        verified <- tryIOError $ verifyWorkspaceIdentity path identity
+        case verified of
+          Right True -> open
+            $ mkLengthSMTLibWorkingDirectoryDescriptor
+                $ fromIntegral descriptor
+          _ -> pure $ Left workspaceDescriptorFailure
 #else
-      openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcess
-        limits cancellation deadline
-        (lengthSMTLibExecutionZ3Profile execution) path
-        $ mkLengthSMTLibWorkingDirectoryDescriptor (-1)
+  descriptorBoundLaunch open =
+    open $ mkLengthSMTLibWorkingDirectoryDescriptor (-1)
 #endif
 #ifndef mingw32_HOST_OS
- where
   workspaceDescriptorFailure = LengthSMTLibProcessError
     { lengthSMTLibProcessErrorPhase =
         LengthSMTLibProcessWorkingDirectoryPhase
@@ -3355,7 +3332,7 @@ withLengthSMTLibReadyWorkerWithDeadlinePolicy deadlinePolicy config use =
       rolledBackWorkspace <- newTVarIO Nothing
       allocated <- runBeforeLengthSMTLibProcessDeadline cancellation deadline
         (allocateWorkspace sessionLimits $ recordCleanup rolledBackWorkspace)
-        $ \allocation -> case allocation of
+        $ \case
             Left (_, cleanup) -> recordCleanup rolledBackWorkspace cleanup
             Right workspace -> cleanupWorkspace sessionLimits workspace
               >>= recordCleanup rolledBackWorkspace
@@ -3811,8 +3788,7 @@ acquireWorkspaceIdentity _ = pure $ Right WindowsWorkspaceIdentity
 inspectOwnedWorkspace
   :: Workspace
   -> IO (Either LengthSMTLibSessionWorkspaceFailure ())
-inspectOwnedWorkspace (Workspace _ _ path gate) = withMVar gate $ \state ->
-  case state of
+inspectOwnedWorkspace (Workspace _ _ path gate) = withMVar gate $ \case
     WorkspaceFinished _ -> pure $ Left
       LengthSMTLibSessionWorkspacePostconditionFailed
     WorkspaceLive identity -> do

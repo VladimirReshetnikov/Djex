@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 
 -- | Filesystem-backed source targets for the shared REPL.
@@ -929,7 +930,7 @@ resolveModuleFile roots segments = search roots
   search [] = pure $ Right Nothing
   search (root : remaining) = tryCandidates
     [root </> relative <.> "hs", root </> relative <.> "lhs"]
-    >>= \caseResult -> case caseResult of
+    >>= \case
       Left failures -> pure $ Left failures
       Right Nothing -> search remaining
       Right found -> pure $ Right found

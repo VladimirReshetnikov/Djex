@@ -34,6 +34,7 @@ import Unsafe.Coerce (unsafeCoerce)
 
 import qualified SMTLibLiveSpec
 import qualified SMTLibQFLIASpec
+import qualified LengthWhereSpec
 import qualified Language.Haskell.Djex as Djex
 import Language.Haskell.Synthesis.Constraint (Constraint (..))
 import Language.Haskell.Synthesis.Declaration
@@ -121,7 +122,8 @@ main = defaultMain lengthTests
 
 lengthTests :: TestTree
 lengthTests = testGroup "finite-list-spine-length/v1"
-  [ limitTests
+  [ LengthWhereSpec.lengthWhereTests
+  , limitTests
   , contextTests
   , contractTests
   , spinePairContractTests

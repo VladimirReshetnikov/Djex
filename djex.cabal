@@ -412,6 +412,7 @@ Test-Suite synthesis-length-tests
     synthesis/test-length
     synthesis/internal
   Other-Modules:
+    LengthWhereSpec
     SMTLibLiveSpec
     SMTLibQFLIASpec
     Language.Haskell.Synthesis.Internal.Alpha
@@ -446,7 +447,8 @@ Test-Suite synthesis-length-tests
     entropy >= 0.4.1 && < 0.5,
     filepath >= 1.4 && < 1.6,
     process >= 1.6 && < 1.7,
-    stm >= 2.5 && < 2.6
+    stm >= 2.5 && < 2.6,
+    template-haskell
   Build-Tool-Depends: djex:djex-fake-z3
 
   if !os(windows)

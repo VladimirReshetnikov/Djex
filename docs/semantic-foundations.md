@@ -422,11 +422,11 @@ result enters the same sealing pipeline as any hand-built contract source.
 
 ### Host-language REPL surfaces (roadmap)
 
-The bounded `len(...)` grammar is the current source-level library boundary,
-not the intended primary interactive notation. The next surface checkpoint
-adds two small host-language adapters which both elaborate to this exact
-opaque source and therefore preserve its normalization, fingerprints, limits,
-replay rules, and authority boundaries:
+The bounded compact `len(...)` grammar remains a source-level compatibility
+boundary, not the primary interactive notation. Djex now also exposes
+`parseHaskellLengthWhereSource`, which produces the same opaque source with
+the same normalization, fingerprints, limits, replay rules, and authority
+boundaries. The corresponding Leant adapter remains planned:
 
 ```text
 -- Djex / Haskell
@@ -436,15 +436,17 @@ replay rules, and authority boundaries:
 :synth --where List.length result = List.length arg0 -- List a -> List a
 ```
 
-The adapters are nominally separate parsers. Djex uses Haskell application,
+The host adapters are nominally separate parsers. Djex uses Haskell application,
 projection, equality/inequality, `div`, and `mod` notation; Leant uses
 `List.length`, Lean projections, and Lean relations. Neither frontend executes
 the displayed expression, accepts arbitrary host code, or defines a second
-behavioral semantics. The Djex half of the parsing layer has landed:
-`parseHaskellLengthWhereSource` (previous section) already admits exactly the
-Haskell-shaped spelling and lowers it to the same opaque source, so what
-remains scheduled on the Djex side is the REPL flag wiring, help text, and
-parity examples rather than a new parser.
+behavioral semantics. The Djex half has landed in two layers:
+`parseHaskellLengthWhereSource` (previous section) admits exactly the
+Haskell-shaped spelling and lowers it to the same opaque source, and the
+standalone REPL already parses the `--where CLAUSE -- TYPE` envelope with
+Haskell-shaped help examples and a pure `:set length-z3` policy seal.
+Constrained queries stay inert there until checked runtime activation lands,
+so the remaining Djex work is runtime, not surface grammar.
 
 In the built-in list case, omission is intentionally useful but bounded:
 `--where` explicitly selects filtering, the host's standard list model is the
@@ -456,12 +458,15 @@ still independent: a safe activated policy makes this a one-line query; an
 unconfigured session needs one policy-activation line first. Missing policy
 or ambiguity fails before solver IO.
 
-Djex's standalone REPL and Leant's REPL are both first-class consumers. Djex
-REPL support is scheduled with the Leant shorthand, before new `--law`,
-`--example`, typed-sketch, or additional domain syntax. The current explicit
-Leant form and the direct `parseLengthWhereSource` and
-`parseHaskellLengthWhereSource` APIs remain available while the host-native
-REPL adapters acquire parity tests and help text.
+Djex's standalone REPL and Leant's REPL are both first-class consumers. Djex's
+outer structured query grammar, Haskell parser, and pure `:set length-z3`
+policy sealing have landed; checked target defaults, live policy use, and
+Exference assessment are the next runtime checkpoints. The stored policy
+performs no filesystem or process IO and grants no solver authority. These
+checkpoints remain ahead of new `--law`, `--example`, typed-sketch, or
+additional domain syntax. The current explicit Leant form and the direct
+`parseLengthWhereSource` and `parseHaskellLengthWhereSource` APIs remain
+available beside the REPL surfaces.
 
 ### Provider summaries as a trust boundary
 

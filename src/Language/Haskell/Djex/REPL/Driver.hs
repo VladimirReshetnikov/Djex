@@ -206,6 +206,7 @@ candidatesFor completions previous word = case previous of
               else helpNames
         Just IdentifierCompletion -> completionIdentifiers completions
         Just TypeIdentifierCompletion -> completionTypeIdentifiers completions
+        Just SynthesisCompletion -> synthesisCandidates arguments completions
         Just ModuleCompletion
           | null arguments -> moduleCandidates False completions word
         Just ModuleContextCompletion ->
@@ -216,7 +217,15 @@ candidatesFor completions previous word = case previous of
         Just ShowCompletion
           | null arguments -> showNames
         _ -> []
+
  where
+  synthesisCandidates arguments available = case arguments of
+    [] -> "--where" : completionTypeIdentifiers available
+    "--where" : clause
+      | "--" `elem` clause -> completionTypeIdentifiers available
+      | otherwise -> ["--"]
+    _ -> completionTypeIdentifiers available
+
   settingCandidates command arguments = case
       (resolveCommandToken command, arguments) of
     (Right "set", []) -> settingNames

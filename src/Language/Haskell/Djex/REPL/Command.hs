@@ -714,9 +714,9 @@ synthesisDetails =
       ++ " == 2 * length arg0"
   , "  --where is recognized only as the first exact option and requires"
       ++ " a standalone --"
-  , "  the host-native clause is retained opaquely until runtime authority"
-      ++ " is established"
-  , "  behavioral execution is not active yet; constrained requests fail closed"
+  , "  defaults: built-in lists, all list arguments, scalar or boxed-pair result"
+  , "  configure with :set length-z3 PATH [SHA256HEX]"
+  , "  Exference behavioral execution is not active yet; requests fail closed"
   ]
 
 descriptorUsage :: CommandDescriptor -> String

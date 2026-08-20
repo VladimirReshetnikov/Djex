@@ -12,12 +12,13 @@ module Language.Haskell.Synthesis.Selection
   ( SelectionMode (..)
   , Selection (..)
   , foldAllQueryResultsM
+  , selectQueryResultsM
   , selectQueryResults
   , selectPreferredQueryResults
   ) where
 
 import Control.DeepSeq (NFData)
-import Control.Monad (foldM)
+import Control.Monad (filterM, foldM)
 import qualified Data.List as List
 import GHC.Generics (Generic)
 
@@ -93,6 +94,29 @@ foldAllQueryResultsM admissible consume = go Nothing
     nextState <- foldM consume state
       $ filter admissible $ batchCandidates batch
     go (Just $ batchProgress batch) nextState results
+
+-- | Apply a presentation policy while checking candidate admissibility in a
+-- monad.
+--
+-- Candidate checks run once, in encounter order.  'SelectFirst' stops at the
+-- first admitted candidate without demanding its candidate or result suffix.
+-- Both best modes inspect only through the same batch boundary as their pure
+-- siblings.  'SelectAll' necessarily completes every candidate check before
+-- it can return its pure 'Selection'; streaming consumers should instead use
+-- 'foldAllQueryResultsM'.
+selectQueryResultsM
+  :: (Monad action, Ord rank)
+  => SelectionMode
+  -> (candidate -> rank)
+  -> (candidate -> action Bool)
+  -> [QueryResult metadata candidate]
+  -> action (Selection candidate)
+selectQueryResultsM mode rank admissible results = case mode of
+  SelectFirst -> selectFirstM admissible results
+  SelectBest -> selectBestM rank admissible results
+  SelectBestLookahead count ->
+    selectBestLookaheadM (max 0 count) rank admissible results
+  SelectAll -> selectAllM admissible results
 
 -- | Apply a presentation policy to a lazy query-result trace.
 --
@@ -174,6 +198,49 @@ selectFirst admissible = go Nothing
       Just candidate -> Selection progress [candidate]
       Nothing -> go progress results
 
+selectFirstM
+  :: Monad action
+  => (candidate -> action Bool)
+  -> [QueryResult metadata candidate]
+  -> action (Selection candidate)
+selectFirstM admissible = go Nothing
+ where
+  go progress [] = pure $ Selection progress []
+  go _ (result : results) = do
+    let batch = resultSearch result
+        progress = Just $ batchProgress batch
+    found <- findM admissible $ batchCandidates batch
+    case found of
+      Just candidate -> pure $ Selection progress [candidate]
+      Nothing -> go progress results
+
+findM
+  :: Monad action
+  => (candidate -> action Bool)
+  -> [candidate]
+  -> action (Maybe candidate)
+findM _ [] = pure Nothing
+findM predicate (candidate : candidates) = do
+  admitted <- predicate candidate
+  if admitted
+    then pure $ Just candidate
+    else findM predicate candidates
+
+selectAllM
+  :: Monad action
+  => (candidate -> action Bool)
+  -> [QueryResult metadata candidate]
+  -> action (Selection candidate)
+selectAllM admissible = go Nothing []
+ where
+  go progress reversed [] = pure $ Selection progress $ reverse reversed
+  go _ reversed (result : results) = do
+    let batch = resultSearch result
+        progress = Just $ batchProgress batch
+    admitted <- filterM admissible $ batchCandidates batch
+    let next = reverse admitted ++ reversed
+    next `seq` go progress next results
+
 selectBest
   :: Ord rank
   => (candidate -> rank)
@@ -194,6 +261,23 @@ selectBest rank admissible = finish
     -- 'foldl'' only forces the pair constructor. Force both fields here so
     -- an empty run of batches cannot leave a chain of deferred accumulators.
     in progress `seq` nextBest `seq` (progress, nextBest)
+
+selectBestM
+  :: (Monad action, Ord rank)
+  => (candidate -> rank)
+  -> (candidate -> action Bool)
+  -> [QueryResult metadata candidate]
+  -> action (Selection candidate)
+selectBestM rank admissible = go Nothing Nothing
+ where
+  go progress best [] = pure $ Selection progress
+    $ reverse $ maybe [] snd best
+  go _ best (result : results) = do
+    let batch = resultSearch result
+        progress = Just $ batchProgress batch
+    admitted <- filterM admissible $ batchCandidates batch
+    let nextBest = List.foldl' (consider rank $ const True) best admitted
+    progress `seq` nextBest `seq` go progress nextBest results
 
 selectBestLookahead
   :: Ord rank
@@ -217,6 +301,42 @@ selectBestLookahead maximumLookahead rank admissible =
       Just (bestRank, reversed) -> continueBestLookahead
         maximumLookahead rank admissible progress maximumLookahead
         bestRank reversed results
+
+selectBestLookaheadM
+  :: (Monad action, Ord rank)
+  => Int
+  -> (candidate -> rank)
+  -> (candidate -> action Bool)
+  -> [QueryResult metadata candidate]
+  -> action (Selection candidate)
+selectBestLookaheadM maximumLookahead rank admissible =
+    beforeFirst Nothing
+ where
+  beforeFirst progress [] = pure $ Selection progress []
+  beforeFirst _ (result : results) = do
+    let batch = resultSearch result
+        progress = Just $ batchProgress batch
+    admitted <- filterM admissible $ batchCandidates batch
+    case bestInBatch rank (const True) admitted of
+      Nothing -> beforeFirst progress results
+      Just (bestRank, reversed) -> continueM progress maximumLookahead
+        bestRank reversed results
+
+  continueM progress _ _ reversed [] =
+    pure $ Selection progress $ reverse reversed
+  continueM progress 0 _ reversed _ =
+    pure $ Selection progress $ reverse reversed
+  continueM _ remaining bestRank reversed (result : results) = do
+    let batch = resultSearch result
+        progress = Just $ batchProgress batch
+    admitted <- filterM admissible $ batchCandidates batch
+    case bestInBatch rank (const True) admitted of
+      Just (candidateRank, candidates)
+        | candidateRank < bestRank -> continueM progress maximumLookahead
+            candidateRank candidates results
+        | candidateRank == bestRank -> continueM progress (remaining - 1)
+            bestRank (candidates ++ reversed) results
+      _ -> continueM progress (remaining - 1) bestRank reversed results
 
 continueBestLookahead
   :: Ord rank

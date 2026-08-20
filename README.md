@@ -248,10 +248,11 @@ an expression with real GHC.
 Djex already owns the checked Length-contract, replay, SMT-LIB, and Z3
 foundation. The standalone `djex` REPL now recognizes the bounded outer form
 `--where CLAUSE -- TYPE`, retains the clause opaquely, and preserves ordinary
-`:synth TYPE`. Behavioral execution is the next runtime checkpoint: until it
-lands, a structurally valid constrained query fails closed with
-`DJEX_REPL_LENGTH_WHERE_UNAVAILABLE` before parsing the clause or running a
-backend. Haskell users will not need to route this workflow through Leant.
+`:synth TYPE`. Without an activated policy, a constrained query fails before
+parsing the clause. With one, Djex parses the bounded clause, elaborates the
+checked target, and seals the conservative built-in-list profile, then stops
+with `DJEX_REPL_LENGTH_WHERE_RUNTIME_UNAVAILABLE` before running a backend or
+solver. Haskell users will not need to route this workflow through Leant.
 
 The planned common-case spelling is deliberately Haskell-shaped and short:
 
@@ -262,11 +263,11 @@ The planned common-case spelling is deliberately Haskell-shaped and short:
 
 These two lines are accepted by the outer command grammar and shown by
 `:help synth`, but they do not yet run behavioral assessment. For an
-unambiguous built-in-list target, `--where` will itself request filtering, the
-model will default to Haskell `[]`/`(:)`,
-the scalar or pair result domain will follow the host expression and checked
-target, and every eligible list input will be observed in source order. A
-missing or ambiguous default must fail closed and point to the explicit
+unambiguous built-in-list target, `--where` itself requests filtering, the
+model defaults to Haskell `[]`/`(:)`, the scalar or pair result domain follows
+the host expression and checked target, and every eligible list input is
+observed in source order. A missing or ambiguous default must fail closed and
+point to the explicit
 contract form; it must never guess a custom datatype, provider law, or solver
 authority. A configured safe execution policy keeps the query to one line;
 otherwise policy activation plus the query should take two lines.
@@ -281,9 +282,9 @@ filesystem:
 On Linux the sealed default is descriptor-bound; other platforms retain the
 portable path-snapshot policy. `:show settings` reveals only active/inactive,
 launch strategy, and pinned/unpinned status. The live runtime still fails
-closed until target resolution and Exference assessment land, so configuring
-this setting does not yet run Z3. Put it in `.djexrc` to keep normal queries
-one-line once activation is complete.
+closed until Exference candidate assessment lands, so configuring this setting
+does not yet run Z3. Put it in `.djexrc` to keep normal queries one-line once
+activation is complete.
 
 The additive `parseHaskellLengthWhereSource` library entrance already lowers
 this host notation to the existing bounded, normalized Length AST; it does not

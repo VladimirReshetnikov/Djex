@@ -243,6 +243,7 @@ Library
     Language.Haskell.Djex.REPL.Driver
     Language.Haskell.Djex.REPL.Eval
     Language.Haskell.Djex.REPL.Kind
+    Language.Haskell.Djex.REPL.LengthWhere
     Language.Haskell.Djex.REPL.Scope
     Language.Haskell.Djex.REPL.Type
     Language.Haskell.Djex.REPL.Workspace

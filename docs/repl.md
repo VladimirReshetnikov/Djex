@@ -113,9 +113,11 @@ that query; current rendering and search settings are used for the repeat.
 The standalone REPL recognizes a leading exact
 `--where CLAUSE -- TYPE`, preserves ordinary `:synth TYPE`, retains the raw
 clause in query history, and repeats the complete structured query with `:`.
-It deliberately does not parse or execute the clause yet: until checked
-runtime authority lands, a valid constrained query fails closed with
-`DJEX_REPL_LENGTH_WHERE_UNAVAILABLE` and does not echo the source.
+Merely recognizing the command does not parse or execute the clause: until
+checked runtime authority is configured, a valid constrained query fails
+before clause parsing. Once `length-z3` is set, Djex parses the bounded clause
+and seals the checked built-in-list target profile, but still fails closed
+before backend or solver execution while Exference assessment is pending.
 
 The intended common-case form uses ordinary Haskell expression notation:
 
@@ -133,8 +135,8 @@ equality and inequality (`==` and `/=`), and prefix or backticked `div` and
 `mod`; it never evaluates arbitrary Haskell or inherits runtime `Int` overflow
 semantics.
 
-For an unambiguous built-in-list query, omitted options have conservative
-defaults:
+For an unambiguous built-in-list query, omitted options now resolve to these
+conservative defaults:
 
 - `--where` is an explicit request for filter behavior;
 - the spine model is the checked Haskell `[]`/`(:)` model;
@@ -149,16 +151,16 @@ defaults:
 Anything ambiguous or outside that built-in profile fails closed and directs
 the user to an explicit checked contract. In particular, the frontend will not
 infer a custom spine, provider law, modeled argument, executable path, or Z3
-authority from a formula. `:help synth` already shows the accepted outer
-grammar and scalar/pair examples; it will describe resolved runtime defaults
-when activation lands.
+authority from a formula. `:help synth` shows the accepted outer grammar,
+resolved profile defaults, and scalar/pair examples.
 
 `:set length-z3` already seals the finite launch/response policy without
 filesystem or process IO. Linux selects the descriptor-bound launch profile;
 other platforms select the portable path-snapshot profile. `:show settings`
 reports only active/inactive, launch strategy, and pinned/unpinned status, and
-`:unset length-z3` removes the policy. The setting is deliberately inert until
-the checked target resolver and Exference assessment path consume it.
+`:unset length-z3` removes the policy. Target/profile resolution consumes the
+setting only as an authorization gate; no executable is inspected or launched
+until the pending Exference assessment path is active.
 Leant's matching frontend will use `List.length`, Lean relations, and Lean
 projection notation while lowering to the same checked contract vocabulary.
 

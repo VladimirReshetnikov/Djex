@@ -18,14 +18,17 @@ import Control.Concurrent.MVar
   , takeMVar
   )
 import Control.Exception
-  ( Exception
+  ( AsyncException (UserInterrupt)
+  , Exception
   , SomeException
+  , catch
   , finally
   , fromException
   , throwIO
   , try
   )
 import Control.Monad (when)
+import Data.Word (Word64)
 import System.Exit (ExitCode (ExitSuccess))
 import System.Timeout (timeout)
 import Test.Tasty (defaultMain, testGroup)
@@ -42,8 +45,16 @@ import Language.Haskell.Djex.REPL.Parallel
 
 main :: IO ()
 main = defaultMain $ testGroup "Djex deterministic parallel pair"
-  [ testCase "eligibility excludes one worker, timeouts, and streaming"
+  [ testCase "eligibility separates untimed, timed, and serial routes"
       testEligibility
+  , testCase "monotonic deadlines retain one cutoff after early wakes"
+      testMonotonicDeadline
+  , testCase "monotonic deadlines extend across clock wrap and late wake"
+      testMonotonicDeadlineWrap
+  , testCase "maximum accepted budgets use bounded observation chunks"
+      testMaximumMonotonicDeadline
+  , testCase "both request checks precede cutoff capture and lane start"
+      testCheckedPairSequence
   , testCase "both workers start before either is released"
       testSimultaneousStart
   , testCase "completion order cannot reorder consumers"
@@ -68,6 +79,8 @@ main = defaultMain $ testGroup "Djex deterministic parallel pair"
       testTimedPublishedFailureSurvivesCancellation
   , testCase "deadline expiry cancels and joins both lane-local workers"
       testTimedDeadlineExpiry
+  , testCase "deadline cancellation cannot swallow another async exception"
+      testTimedDeadlineCancellationException
   , testCase "deadline watcher failures propagate after worker cleanup"
       testTimedDeadlineWatcherFailure
   , testCase "completion exactly at the cutoff is a timeout"
@@ -104,6 +117,120 @@ testEligibility = do
     not $ parallelPairEligible 2 False True
   assertBool "timed streaming command is serial" $
     not $ parallelPairEligible 2 True True
+  assertBool "timed two-worker strict command" $
+    timedParallelPairEligible 2 True False
+  assertBool "timed larger future job budget" $
+    timedParallelPairEligible 8 True False
+  assertBool "timed one-worker command is serial" $
+    not $ timedParallelPairEligible 1 True False
+  assertBool "untimed commands do not select the timed route" $
+    not $ timedParallelPairEligible 2 False False
+  assertBool "timed streaming commands remain serial" $
+    not $ timedParallelPairEligible 2 True True
+
+testMonotonicDeadline :: Assertion
+testMonotonicDeadline = do
+  logicalNow <- newMVar (4000001 :: Word64)
+  clockReads <- newMVar (0 :: Int)
+  delays <- newMVar ([] :: [Int])
+  let readNow = do
+        modifyMVar_ clockReads $ pure . (+ 1)
+        readMVar logicalNow
+      delay microseconds = do
+        call <- modifyMVar delays $ \previous ->
+          let current = length previous + 1
+          in pure (previous ++ [microseconds], current)
+        modifyMVar_ logicalNow $ \now -> pure $ now + case call of
+          1 -> 250000001
+          _ -> fromIntegral microseconds * 1000
+  deadline <- monotonicParallelDeadlineAfterSecondsWith readNow delay 1
+  assertEqual "one captured elapsed-time cutoff" 1000000000
+    $ parallelDeadlineCutoff deadline
+  assertEqual "construction reads the clock exactly once" 1
+    =<< readMVar clockReads
+  parallelDeadlineAwait deadline
+  assertEqual "an early wake waits only the remaining rounded-up budget"
+    [1000000, 750000] =<< readMVar delays
+  assertEqual "the watcher observes start, early wake, and cutoff" 4
+    =<< readMVar clockReads
+
+testMonotonicDeadlineWrap :: Assertion
+testMonotonicDeadlineWrap = do
+  logicalNow <- newMVar (maxBound - 499999999 :: Word64)
+  delays <- newMVar ([] :: [Int])
+  let readNow = readMVar logicalNow
+      delay microseconds = do
+        modifyMVar_ delays $ \previous -> pure $ previous ++ [microseconds]
+        modifyMVar_ logicalNow $ \now -> pure $
+          now + fromIntegral microseconds * 1000 + 250000000
+  deadline <- monotonicParallelDeadlineAfterSecondsWith readNow delay 1
+  assertEqual "wrap-safe elapsed cutoff" 1000000000
+    $ parallelDeadlineCutoff deadline
+  parallelDeadlineAwait deadline
+  assertEqual "one late wake crosses the Word64 epoch" [1000000]
+    =<< readMVar delays
+  assertEqual "modular delta extends the epoch after wrap" 1250000000
+    =<< parallelDeadlineNow deadline
+
+testMaximumMonotonicDeadline :: Assertion
+testMaximumMonotonicDeadline = do
+  observedDelay <- newEmptyMVar
+  let seconds = maxBound `div` 1000000 :: Int
+      stopAtFirstDelay microseconds = do
+        putMVar observedDelay microseconds
+        throwIO $ TaggedFailure "stop maximum deadline watcher"
+  deadline <- monotonicParallelDeadlineAfterSecondsWith
+    (pure 7) stopAtFirstDelay seconds
+  assertEqual "maximum accepted budget remains exact in Integer nanoseconds"
+    (toInteger seconds * 1000000000)
+    (parallelDeadlineCutoff deadline)
+  outcome <- try $ parallelDeadlineAwait deadline
+  assertTaggedException "stop maximum deadline watcher" outcome
+  assertEqual "large budgets use bounded observation chunks" 1800000000
+    =<< takeMVar observedDelay
+
+testCheckedPairSequence :: Assertion
+testCheckedPairSequence = do
+  events <- newMVar ([] :: [String])
+  leftStarted <- newEmptyMVar
+  rightStarted <- newEmptyMVar
+  release <- newEmptyMVar
+  neverDeadline <- newEmptyMVar
+  consumed <- newMVar
+    ([] :: [ParallelLaneOutcome (Either String String)])
+  let event label = modifyMVar_ events $ \previous ->
+        pure $ previous ++ [label]
+      checkedLeft = event "check-left" >> pure (Left "ordinary left")
+      checkedRight = event "check-right" >> pure (Right "right")
+      captureDeadline = do
+        event "deadline"
+        pure $ logicalDeadline (pure BeforeCutoff) $ takeMVar neverDeadline
+      runLeft checked = do
+        event "left-start"
+        putMVar leftStarted ()
+        readMVar release
+        pure checked
+      runRight checked = do
+        event "right-start"
+        putMVar rightStarted ()
+        readMVar release
+        pure checked
+  runner <- async $ runCheckedParallelPairOrderedBefore
+    checkedLeft checkedRight captureDeadline runLeft runRight
+    (record consumed) (record consumed)
+  await "checked left lane start" leftStarted
+  await "checked right lane start" rightStarted
+  observed <- readMVar events
+  assertEqual "checks and cutoff precede either worker"
+    ["check-left", "check-right", "deadline"]
+    (take 3 observed)
+  putMVar release ()
+  awaitAsync "checked pair completion" runner
+  assertEqual "ordinary checked failure still starts both lanes"
+    [ ParallelLaneCompleted $ Left "ordinary left"
+    , ParallelLaneCompleted $ Right "right"
+    ]
+    =<< readMVar consumed
 
 testSimultaneousStart :: Assertion
 testSimultaneousStart = do
@@ -410,6 +537,39 @@ testTimedDeadlineExpiry = do
     [ParallelLaneTimedOut, ParallelLaneTimedOut]
     =<< readMVar consumed
 
+testTimedDeadlineCancellationException :: Assertion
+testTimedDeadlineCancellationException = do
+  leftStarted <- newEmptyMVar
+  rightStarted <- newEmptyMVar
+  leftStopped <- newEmptyMVar
+  rightStopped <- newEmptyMVar
+  deadlineStarted <- newEmptyMVar
+  deadlineRelease <- newEmptyMVar
+  neverLeft <- newEmptyMVar
+  neverRight <- newEmptyMVar
+  consumed <- newMVar ([] :: [ParallelLaneOutcome String])
+  runner <- async $ try $ runParallelPairOrderedBefore
+    (logicalDeadline (pure AtCutoff) $
+      putMVar deadlineStarted () >> takeMVar deadlineRelease)
+    ((replaceCancellationWithUserInterrupt $
+        putMVar leftStarted () >> takeMVar neverLeft >> pure "left")
+      `finally` putMVar leftStopped ())
+    ((replaceCancellationWithUserInterrupt $
+        putMVar rightStarted () >> takeMVar neverRight >> pure "right")
+      `finally` putMVar rightStopped ())
+    (record consumed)
+    (record consumed)
+  await "replacement-exception left start" leftStarted
+  await "replacement-exception right start" rightStarted
+  await "replacement-exception deadline start" deadlineStarted
+  putMVar deadlineRelease ()
+  outcome <- awaitAsync "replacement async exception delivery" runner
+  assertUserInterrupt outcome
+  await "replacement-exception left cleanup" leftStopped
+  await "replacement-exception right cleanup" rightStopped
+  assertEqual "worker async exception is not reported as timeout" []
+    =<< readMVar consumed
+
 testTimedDeadlineWatcherFailure :: Assertion
 testTimedDeadlineWatcherFailure = do
   leftStarted <- newEmptyMVar
@@ -668,6 +828,19 @@ assertTaggedException expected outcome = case outcome of
       assertEqual "tagged exception" expected actual
     Nothing -> assertFailure $ "unexpected exception type: " ++ show exception
   Right _ -> assertFailure $ "expected TaggedFailure " ++ show expected
+
+replaceCancellationWithUserInterrupt :: IO value -> IO value
+replaceCancellationWithUserInterrupt action = action `catch` throwUserInterrupt
+
+throwUserInterrupt :: SomeException -> IO value
+throwUserInterrupt _ = throwIO UserInterrupt
+
+assertUserInterrupt :: Either SomeException value -> Assertion
+assertUserInterrupt outcome = case outcome of
+  Left exception -> case fromException exception of
+    Just UserInterrupt -> pure ()
+    _ -> assertFailure $ "unexpected exception type: " ++ show exception
+  Right _ -> assertFailure "expected UserInterrupt"
 
 latchedValue :: MVar () -> MVar () -> value -> IO value
 latchedValue started release value =

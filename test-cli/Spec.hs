@@ -66,8 +66,10 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplSettingSignsAndDiagnostics
   , testCase "REPL search settings retune the budget, strategy, and weights"
       testReplSearchSettings
-  , testCase "REPL both-mode jobs preserve deterministic serial output"
+  , testCase "REPL both-mode jobs preserve timed and untimed output"
       testReplParallelBoth
+  , testCase "REPL source routes timed pairs through the checked scheduler"
+      testReplTimedParallelSource
   , testCase "REPL seals Length Z3 policy without executable IO"
       testReplLengthZ3Setting
   , testCase "REPL shares Church rank-N and impredicative queries"
@@ -641,6 +643,8 @@ testReplParallelBoth = withTemporaryEnvironment [] $ \directory -> do
         , ":compare a -> a"
         , ":set select first"
         , ":set timeout 5"
+        -- With jobs=2 this final trivial query takes the absolute-deadline
+        -- pair route; jobs=1 remains the exact serial control transcript.
         , ":compare a -> a"
         ]
       expectedLabels = concat $ replicate 3 ["-- Djinn", "-- Exference"]
@@ -659,6 +663,39 @@ testReplParallelBoth = withTemporaryEnvironment [] $ \directory -> do
   assertEqual "every comparison keeps Djinn before Exference"
     expectedLabels backendLabels
   assertNoCallStack errors
+
+testReplTimedParallelSource :: Assertion
+testReplTimedParallelSource = do
+  source <- readFile "src/Language/Haskell/Djex/REPL.hs"
+  let ownedRoute = unlines
+        [ "    BothBackends"
+        , "      | timedParallelBackendPairEligible"
+        , "      , Just seconds <- queryTimeoutSeconds $ queryTimeout state ->"
+        , "          runParsedBackendsParallelBefore session parsed seconds"
+        , "    BothBackends -> do"
+        , "      runParsedBackend True session parsed DjinnBackend"
+        , "      runParsedBackend True session parsed ExferenceBackend"
+        , ""
+        , "  runParsedBackendsParallelBefore session parsed seconds = do"
+        , "    runCheckedParallelPairOrderedBefore"
+        , "      (evaluate $ checkParsedDjinn parsed)"
+        , "      (evaluate $ checkParsedExference parsed)"
+        , "      (monotonicParallelDeadlineAfterSeconds seconds)"
+        , "      (pure . prepareCheckedDjinn)"
+        , "      (pure . prepareCheckedExference session)"
+        , "      (replayTimedBackend DjinnBackend seconds)"
+        , "      (replayTimedBackend ExferenceBackend seconds)"
+        , ""
+        , "  replayTimedBackend selectedBackend seconds outcome = do"
+        , "    labelBackend True selectedBackend"
+        , "    ignoreExit $ case outcome of"
+        , "      ParallelLaneCompleted output -> replayCommandOutput output"
+        , "      ParallelLaneTimedOut ->"
+        , "        diagnosticFailure $ queryTimeoutDiagnostic seconds"
+        ]
+  assertBool
+    "timed dispatch, check order, cutoff, lanes, and replay remain one owned block"
+    $ ownedRoute `isInfixOf` source
 
 testReplLengthZ3Setting :: Assertion
 testReplLengthZ3Setting = withTemporaryEnvironment [] $ \directory -> do

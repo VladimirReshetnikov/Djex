@@ -9,29 +9,38 @@ module Language.Haskell.Djex.REPL.Parallel
   ( ParallelDeadline (..)
   , ParallelLaneOutcome (..)
   , parallelPairEligible
+  , timedParallelPairEligible
+  , monotonicParallelDeadlineAfterSeconds
+  , monotonicParallelDeadlineAfterSecondsWith
   , runParallelPairOrdered
+  , runCheckedParallelPairOrderedBefore
   , runParallelPairOrderedBefore
   , runParallelPairOrderedBeforeWithPublicationHook
   ) where
 
+import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async
   ( Async
-  , cancel
+  , cancelWith
   , poll
   , wait
+  , waitCatch
   , waitEitherCatch
   , withAsync
   )
 import Control.Concurrent.MVar
   ( MVar
+  , modifyMVar
   , newEmptyMVar
+  , newMVar
   , readMVar
   , tryPutMVar
   , tryReadMVar
   )
 import Control.DeepSeq (NFData (rnf), force)
 import Control.Exception
-  ( SomeAsyncException
+  ( Exception
+  , SomeAsyncException
   , SomeException
   , evaluate
   , fromException
@@ -40,6 +49,8 @@ import Control.Exception
   , tryJust
   )
 import Control.Monad (unless)
+import Data.Word (Word64)
+import GHC.Clock (getMonotonicTimeNSec)
 
 -- | One caller-owned monotonic cutoff and the single signal which becomes
 -- ready at that absolute cutoff.  The clock and signal are explicit so the
@@ -77,12 +88,90 @@ data StrictLaneTerminal instant value
   = StrictLaneCompletedAt !instant !value
   | StrictLaneFailed !SomeException
 
--- | Whether a two-backend command may use the strict buffered worker path.
--- Timed commands and streaming selection deliberately retain their original
--- serial IO boundaries.
+-- This token belongs only to one lane arbiter's deadline decision.  Matching
+-- it exactly after 'cancelWith' prevents an unrelated asynchronous exception
+-- raised by the worker from being silently reclassified as a timeout.
+data ParallelLaneDeadlineExpired = ParallelLaneDeadlineExpired
+  deriving (Show)
+
+instance Exception ParallelLaneDeadlineExpired
+
+-- | Whether an untimed two-backend command may use the original strict
+-- buffered worker path. Timed commands have a distinct absolute-deadline
+-- predicate below; streaming selection retains its serial IO boundary.
 parallelPairEligible :: Int -> Bool -> Bool -> Bool
 parallelPairEligible jobs hasTimeout streamsResults =
   jobs >= 2 && not hasTimeout && not streamsResults
+
+-- | Whether a timed two-backend command may use the absolute-deadline strict
+-- buffered path.  This is separate from 'parallelPairEligible' so the
+-- established untimed route and its eligibility contract remain unchanged.
+timedParallelPairEligible :: Int -> Bool -> Bool -> Bool
+timedParallelPairEligible jobs hasTimeout streamsResults =
+  jobs >= 2 && hasTimeout && not streamsResults
+
+-- | Capture one absolute elapsed-time cutoff for a positive whole-second
+-- budget.  A private epoch extender samples the bounded GHC monotonic clock
+-- at least once per observation chunk and accumulates modular deltas into an
+-- 'Integer'.  Accepted multi-century budgets therefore cannot create an
+-- unreachable cutoff after the underlying 'Word64' clock wraps.  The watcher
+-- always recomputes the delay remaining to the original cutoff; an early or
+-- late wake cannot refresh the budget.
+monotonicParallelDeadlineAfterSeconds
+  :: Int
+  -> IO (ParallelDeadline Integer)
+monotonicParallelDeadlineAfterSeconds =
+  monotonicParallelDeadlineAfterSecondsWith getMonotonicTimeNSec threadDelay
+
+-- | Package-private deterministic seam for the monotonic deadline
+-- constructor.  Tests supply a logical clock and delay action instead of
+-- depending on scheduler timing or wall-clock thresholds.
+monotonicParallelDeadlineAfterSecondsWith
+  :: IO Word64
+  -> (Int -> IO ())
+  -> Int
+  -> IO (ParallelDeadline Integer)
+monotonicParallelDeadlineAfterSecondsWith readNow delay seconds = do
+  startedAt <- readNow
+  clockState <- newMVar (startedAt, 0 :: Integer)
+  let cutoff = toInteger seconds * nanosecondsPerSecond
+      readElapsed = modifyMVar clockState $ \(previous, elapsed) -> do
+        current <- readNow
+        let next = elapsed + toInteger (current - previous)
+        pure ((current, next), next)
+  pure ParallelDeadline
+    { parallelDeadlineCutoff = cutoff
+    , parallelDeadlineNow = readElapsed
+    , parallelDeadlineAwait = awaitCutoff readElapsed cutoff
+    }
+ where
+  awaitCutoff readElapsed cutoff = do
+    now <- readElapsed
+    let remaining = cutoff - now
+    if remaining <= 0
+      then pure ()
+      else do
+        delay $ nanosecondsToDelayMicroseconds remaining
+        awaitCutoff readElapsed cutoff
+
+nanosecondsPerSecond :: Integer
+nanosecondsPerSecond = 1000000000
+
+nanosecondsToDelayMicroseconds :: Integer -> Int
+nanosecondsToDelayMicroseconds nanoseconds = fromInteger $ min
+  maximumClockObservationDelayMicroseconds
+  ((nanoseconds + nanosecondsPerMicrosecond - 1)
+    `div` nanosecondsPerMicrosecond)
+
+-- Thirty minutes is below the 32-bit 'threadDelay' ceiling and many orders of
+-- magnitude below one Word64 nanosecond cycle.  Rechecking at this cadence
+-- lets the epoch extender account for any number of clock wraps over a large
+-- validated query budget.
+maximumClockObservationDelayMicroseconds :: Integer
+maximumClockObservationDelayMicroseconds = 1800000000
+
+nanosecondsPerMicrosecond :: Integer
+nanosecondsPerMicrosecond = 1000
 
 -- | Start two actions together, force their results in their own workers, and
 -- consume them in stable left-to-right order.
@@ -98,6 +187,31 @@ runParallelPairOrdered left right consumeLeft consumeRight =
     withAsync (right >>= evaluate . force) $ \rightWorker -> do
       wait leftWorker >>= consumeLeft
       wait rightWorker >>= consumeRight
+
+-- | Complete both checked request admissions, capture one deadline, and only
+-- then start the two strict lanes.  Keeping this ordering in the private
+-- scheduler makes it directly characterizable without a wall-clock test and
+-- prevents either request check from drifting under the search budget.
+runCheckedParallelPairOrderedBefore
+  :: (Ord instant, NFData left, NFData right)
+  => IO checkedLeft
+  -> IO checkedRight
+  -> IO (ParallelDeadline instant)
+  -> (checkedLeft -> IO left)
+  -> (checkedRight -> IO right)
+  -> (ParallelLaneOutcome left -> IO ())
+  -> (ParallelLaneOutcome right -> IO ())
+  -> IO ()
+runCheckedParallelPairOrderedBefore
+    checkLeft checkRight captureDeadline left right consumeLeft consumeRight = do
+  checkedLeft <- checkLeft
+  checkedRight <- checkRight
+  deadline <- captureDeadline
+  runParallelPairOrderedBefore deadline
+    (left checkedLeft)
+    (right checkedRight)
+    consumeLeft
+    consumeRight
 
 -- | Run two strict lanes against one absolute monotonic deadline and consume
 -- their outcomes in stable left-to-right order.
@@ -177,9 +291,11 @@ runStrictLane deadline terminalCell afterCompletionPublished action =
 
 synchronousException :: SomeException -> Maybe SomeException
 synchronousException exception =
-  case fromException exception :: Maybe SomeAsyncException of
+  case fromException exception :: Maybe ParallelLaneDeadlineExpired of
     Just _ -> Nothing
-    Nothing -> Just exception
+    Nothing -> case fromException exception :: Maybe SomeAsyncException of
+      Just _ -> Nothing
+      Nothing -> Just exception
 
 awaitLane
   :: Ord instant
@@ -201,21 +317,18 @@ awaitLane deadline deadlineWorker terminalCell laneWorker = do
           Just completed ->
             observeLaneWorker deadline terminalCell completed
           Nothing -> do
-            cancel laneWorker
+            cancelWith laneWorker ParallelLaneDeadlineExpired
+            stopped <- waitCatch laneWorker
             terminal <- tryReadMVar terminalCell
             case terminal of
               Just completed -> classifyLaneTerminal deadline completed
-              Nothing -> do
-                stopped <- poll laneWorker
-                case stopped of
-                  Just (Left exception)
-                    | isAsynchronousException exception ->
-                        pure ParallelLaneTimedOut
-                    | otherwise -> throwIO exception
-                  Just (Right ()) -> throwIO $ userError
-                    "Djex parallel lane stopped without a terminal value"
-                  Nothing -> throwIO $ userError
-                    "Djex parallel lane cancellation did not join the worker"
+              Nothing -> case stopped of
+                Left exception
+                  | isDeadlineExpiration exception ->
+                      pure ParallelLaneTimedOut
+                  | otherwise -> throwIO exception
+                Right () -> throwIO $ userError
+                  "Djex parallel lane stopped without a terminal value"
 
 observeLaneWorker
   :: Ord instant
@@ -239,8 +352,8 @@ classifyLaneTerminal deadline terminal = case terminal of
         evaluate $ ParallelLaneCompleted value
     | otherwise -> pure ParallelLaneTimedOut
 
-isAsynchronousException :: SomeException -> Bool
-isAsynchronousException exception = case
-    fromException exception :: Maybe SomeAsyncException of
+isDeadlineExpiration :: SomeException -> Bool
+isDeadlineExpiration exception = case
+    fromException exception :: Maybe ParallelLaneDeadlineExpired of
   Just _ -> True
   Nothing -> False

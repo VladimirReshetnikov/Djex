@@ -45,6 +45,8 @@ module Language.Haskell.Djex.Command
   , noQueryTimeout
   , parseQueryTimeout
   , renderQueryTimeout
+  , queryTimeoutSeconds
+  , queryTimeoutDiagnostic
   , withinQueryTimeout
   , diagnosticFailure
   , emitDiagnostic
@@ -688,6 +690,12 @@ parseQueryTimeout subject source = case readMaybe $ trim source of
 renderQueryTimeout :: QueryTimeout -> String
 renderQueryTimeout (QueryTimeout seconds) = maybe "0" show seconds
 
+-- | The validated positive whole-second budget, when one is active.  This
+-- projection stays private to frontend policy; checked library requests do
+-- not acquire a timeout field.
+queryTimeoutSeconds :: QueryTimeout -> Maybe Int
+queryTimeoutSeconds (QueryTimeout seconds) = seconds
+
 microsecondsPerSecond :: Integer
 microsecondsPerSecond = 1000000
 
@@ -708,12 +716,18 @@ withinQueryTimeout (QueryTimeout (Just seconds)) action = do
   case finished of
     Just code -> pure code
     Nothing -> do
-      emitDiagnostic $ contextualDiagnostic Error "DJEX_SEARCH_TIMEOUT"
-        "the search did not finish within the query budget"
-        $ "budget " ++ show seconds
-          ++ "s; ':set timeout N' chooses another budget and ':set timeout 0'"
-          ++ " searches without one"
+      emitDiagnostic $ queryTimeoutDiagnostic seconds
       pure runtimeFailure
+
+-- | The single timeout diagnostic shared by serial timeout handling and the
+-- ordered parent replay of a timed backend pair.
+queryTimeoutDiagnostic :: Int -> Diagnostic
+queryTimeoutDiagnostic seconds = contextualDiagnostic Error
+  "DJEX_SEARCH_TIMEOUT"
+  "the search did not finish within the query budget"
+  $ "budget " ++ show seconds
+    ++ "s; ':set timeout N' chooses another budget and ':set timeout 0'"
+    ++ " searches without one"
 
 -- | Print one structured diagnostic and return the command's runtime failure.
 diagnosticFailure :: Diagnostic -> IO ExitCode

@@ -100,8 +100,12 @@ import Language.Haskell.Djex.REPL.Eval
 import Language.Haskell.Djex.REPL.Kind
 import Language.Haskell.Djex.REPL.LengthWhere
 import Language.Haskell.Djex.REPL.Parallel
-  ( parallelPairEligible
+  ( ParallelLaneOutcome (..)
+  , monotonicParallelDeadlineAfterSeconds
+  , parallelPairEligible
+  , runCheckedParallelPairOrderedBefore
   , runParallelPairOrdered
+  , timedParallelPairEligible
   )
 import Language.Haskell.Djex.REPL.Scope
 import Language.Haskell.Djex.REPL.Type
@@ -754,18 +758,50 @@ runQuery sourceName query state = do
     BothBackends
       | parallelBackendPairEligible ->
           runParsedBackendsParallel session parsed
+    BothBackends
+      | timedParallelBackendPairEligible
+      , Just seconds <- queryTimeoutSeconds $ queryTimeout state ->
+          runParsedBackendsParallelBefore session parsed seconds
     BothBackends -> do
       runParsedBackend True session parsed DjinnBackend
       runParsedBackend True session parsed ExferenceBackend
 
-  -- Timed commands retain their established whole-presentation timer and
-  -- SelectAll retains one-pass streaming. The strict buffered worker path is
-  -- therefore limited to the ordinary non-streaming case.
+  runParsedBackendsParallelBefore session parsed seconds = do
+    runCheckedParallelPairOrderedBefore
+      (evaluate $ checkParsedDjinn parsed)
+      (evaluate $ checkParsedExference parsed)
+      (monotonicParallelDeadlineAfterSeconds seconds)
+      (pure . prepareCheckedDjinn)
+      (pure . prepareCheckedExference session)
+      (replayTimedBackend DjinnBackend seconds)
+      (replayTimedBackend ExferenceBackend seconds)
+
+  replayTimedBackend selectedBackend seconds outcome = do
+    labelBackend True selectedBackend
+    ignoreExit $ case outcome of
+      ParallelLaneCompleted output -> replayCommandOutput output
+      ParallelLaneTimedOut ->
+        diagnosticFailure $ queryTimeoutDiagnostic seconds
+
+  -- SelectAll retains one-pass streaming. Non-streaming shared-parser pairs
+  -- use either the established untimed strict runner or its one-cutoff timed
+  -- counterpart; all other routes remain serial.
   parallelBackendPairEligible =
     parallelPairEligible
       (searchJobs state)
-      (queryTimeout state /= noQueryTimeout)
-      (presentationSelection (presentation state) == SelectAll)
+      hasQueryTimeout
+      streamsResults
+
+  timedParallelBackendPairEligible =
+    timedParallelPairEligible
+      (searchJobs state)
+      hasQueryTimeout
+      streamsResults
+
+  hasQueryTimeout = queryTimeoutSeconds (queryTimeout state) /= Nothing
+
+  streamsResults =
+    presentationSelection (presentation state) == SelectAll
 
   runParsedBackendsParallel session parsed = do
     labelBackend True DjinnBackend
@@ -798,13 +834,17 @@ runQuery sourceName query state = do
       DjinnBackend -> runParsedDjinn parsed
       ExferenceBackend -> runParsedExference session parsed
 
-  prepareParsedDjinn parsed = case mkDjinnRequest QueryRequest
+  checkParsedDjinn parsed = mkDjinnRequest QueryRequest
       { requestTarget = resultTarget state
       , requestGoal = projectParsedTypeToDjinn state parsed
       , requestContexts = []
       , requestOptions = prepareDjinnQueryOptions
           (presentation state) (djinnSearchOptions state)
-      } of
+      }
+
+  prepareParsedDjinn = prepareCheckedDjinn . checkParsedDjinn
+
+  prepareCheckedDjinn checked = case checked of
     Left failure -> prepareDiagnosticFailure failure
     Right request -> case runDjinnQuery (currentDjinnSession state) request of
       Left failure -> prepareDiagnosticFailure failure
@@ -814,9 +854,14 @@ runQuery sourceName query state = do
           $ djinnProjection $ djinnRuntime state)
         result
 
-  prepareParsedExference session parsed = case
-      mkExferenceRequestWithCheckedTargetFromParsed
-        (exferenceSearchOptions state) (resultTarget state) parsed of
+  checkParsedExference parsed =
+    mkExferenceRequestWithCheckedTargetFromParsed
+      (exferenceSearchOptions state) (resultTarget state) parsed
+
+  prepareParsedExference session =
+    prepareCheckedExference session . checkParsedExference
+
+  prepareCheckedExference session checked = case checked of
     Left failure -> prepareDiagnosticFailure failure
     Right request -> case runExferenceQuery session request of
       Left failure -> prepareDiagnosticFailure failure

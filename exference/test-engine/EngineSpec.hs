@@ -1,7 +1,7 @@
 module Main (main) where
 
 import Control.DeepSeq (force)
-import Control.Exception (evaluate)
+import Control.Exception (SomeException, evaluate, try)
 import qualified Data.Map.Strict as Map
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -10,7 +10,8 @@ import qualified Data.Set as Set
 import Data.Void (Void)
 import Numeric.Natural (Natural)
 import Test.Tasty (TestTree, defaultMain, testGroup)
-import Test.Tasty.HUnit ((@?=), assertBool, assertEqual, testCase)
+import Test.Tasty.HUnit
+  ((@?=), assertBool, assertEqual, assertFailure, testCase)
 
 import Language.Haskell.Exference.Core.Candidate
   ( emptyExferenceSourceTypeVariableHints )
@@ -182,6 +183,165 @@ tests = testGroup "Exference private engine boundaries"
             $ E.queryGoalType query
       singleOptionValidationStrictnessForTesting
         target sourceHints environment query @?= Right ()
+  , testGroup "serial ordered step actions"
+      [ testCase "preserve complete finite traces and typed candidates" $ do
+          let ample = IdentifierCapacities 1000 1000 1000 1000
+              integer = TypeCons $ name "Int"
+              result = TypeCons $ name "Result"
+              atom = TypeCons $ name "Atom"
+              constant bindingName = FunctionBinding
+                integer bindingName 0 [] []
+              immediate = identityInput
+                { E.input_goalType = integer
+                , E.input_envFuncs =
+                    [constant $ name "left", constant $ name "right"]
+                , E.input_maxSteps = 10
+                }
+              wrapper bindingName = FunctionBinding
+                result bindingName 0 [] [atom]
+              seed = FunctionBinding atom (name "seed") 0 [] []
+              tied maximumQueue = identityInput
+                { E.input_goalType = result
+                , E.input_envFuncs =
+                    [wrapper $ name "first", wrapper $ name "second", seed]
+                , E.input_maxSteps = 20
+                , E.input_maxQueueSize = maximumQueue
+                }
+              depthLimited = identityInput
+                { E.input_maxDepth = Just 0
+                , E.input_heuristicsConfig = defaultHeuristicsConfig
+                    {heuristics_functionGoalTransform = 1}
+                }
+              choice = TypeCons $ name "Choice"
+              choiceDeconstructor = DeconstructorBinding choice
+                [ ConstructorBinding (name "LeftChoice") []
+                , ConstructorBinding (name "RightChoice") []
+                ] False
+              patternInput = identityInput
+                { E.input_goalType = TypeArrow choice result
+                , E.input_envFuncs =
+                    [FunctionBinding result (name "result") 0 [] []]
+                , E.input_envDeconsS = [choiceDeconstructor]
+                , E.input_multiPM = True
+                , E.input_maxSteps = 50
+                , E.input_maxQueueSize = Just 128
+                }
+              nestedTuple = TypeTuple Boxed
+                [TypeTuple Boxed [integer, integer], integer]
+              tupleInput = identityInput
+                { E.input_goalType = nestedTuple
+                , E.input_envFuncs = [constant $ name "integer"]
+                , E.input_maxSteps = 50
+                , E.input_maxQueueSize = Just 128
+                }
+              evidence = HsConstraint (name "External") [integer]
+              constrained = identityInput
+                { E.input_goalType = result
+                , E.input_envFuncs =
+                    [ FunctionBinding result (name "constrained") 0
+                        [evidence] []
+                    ]
+                , E.input_allowConstraints = True
+                , E.input_allowConstraintsStopStep = 0
+                , E.input_maxSteps = 10
+                }
+              cases =
+                [ ("identity", identityInput)
+                , ("equal-cost immediate solutions", immediate)
+                , ("equal-priority futures", tied Nothing)
+                , ("equal-priority queue retention", tied $ Just 1)
+                , ("zero queue", identityInput
+                    {E.input_maxQueueSize = Just 0})
+                , ("depth pruning", depthLimited)
+                , ("multi-constructor pattern", patternInput)
+                , ("nested structural tuple", tupleInput)
+                , ("residual constraint", constrained)
+                ]
+          mapM_ (\(label, input) ->
+              assertStepRouteParity label ample input)
+            cases
+      , testCase "preserve every finite identifier-exhaustion route" $ do
+          let integer = TypeCons $ name "Int"
+              result = TypeCons $ name "Result"
+              polymorphic = FunctionBinding
+                (TypeVar 0) (name "polymorphic") 0 [] []
+              constant = FunctionBinding integer (name "constant") 0 [] []
+              successfulSibling = identityInput
+                { E.input_goalType = integer
+                , E.input_envFuncs = [polymorphic, constant]
+                }
+              identityScheme = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              nestedForall = identityInput
+                { E.input_goalType = TypeArrow
+                    (TypeArrow identityScheme result) result
+                , E.input_maxSteps = 200
+                }
+              cases =
+                [ ( "term identifier"
+                  , IdentifierCapacities 0 100 100 100
+                  , identityInput
+                  )
+                , ( "flexible identifier with successful sibling"
+                  , IdentifierCapacities 100 0 100 100
+                  , successfulSibling
+                  )
+                , ( "nested rigid identifier"
+                  , IdentifierCapacities 100 100 0 100
+                  , nestedForall
+                  )
+                , ( "scope identifier"
+                  , IdentifierCapacities 100 100 100 1
+                  , identityInput
+                  )
+                ]
+          mapM_ (\(label, capacities, input) ->
+              assertStepRouteParity label capacities input)
+            cases
+      , testCase "retain identical candidate-to-graph identities" $ do
+          let integer = TypeCons $ name "Int"
+              leftName = name "actionLeft"
+              rightName = name "actionRight"
+              binding bindingName = FunctionBinding
+                integer bindingName 0 [] []
+              input = identityInput
+                { E.input_goalType = integer
+                , E.input_envFuncs = [binding leftName, binding rightName]
+                }
+              capacities = IdentifierCapacities 100 100 100 100
+              observe candidates = Map.fromList
+                [ (bindingName,
+                    Typed.termNodeIdValue $ Typed.termGraphRoot graph)
+                | (ExpName bindingName, _,
+                    ExferenceTermGraphAvailable graph) <- candidates
+                ]
+          (legacyLazy, actionsLazy) <- expectRight
+            $ findTypedEngineCandidateStepRouteTracesWithIdentifierCapacitiesEither
+                capacities input
+          legacy <- evaluate $ force legacyLazy
+          actions <- evaluate $ force actionsLazy
+          assertBool "ordered actions changed typed candidates or graphs"
+            $ actions == legacy
+          let legacyRoots = observe legacy
+              actionRoots = observe actions
+          actionRoots @?= legacyRoots
+          Map.keysSet actionRoots @?= Set.fromList [leftName, rightName]
+          assertBool "ordered actions reused one typed-graph identity"
+            $ Map.lookup leftName actionRoots
+                /= Map.lookup rightName actionRoots
+      , testCase "do not demand the next lazy search step" $ do
+          (legacy, actions) <- expectRight
+            $ findExpressionStepRouteTracesWithPoisonedNextStepEither
+                identityInput
+          legacyFirst <- firstChunk "legacy poisoned trace" legacy
+          actionFirst <- firstChunk "ordered-action poisoned trace" actions
+          assertBool "ordered actions changed the first poisoned batch"
+            $ observeChunk actionFirst == observeChunk legacyFirst
+          E.chunkStatus actionFirst @?=
+            E.SearchStatus E.SearchRunning 0 0
+          assertSecondBatchPoisoned "legacy dispatcher" legacy
+          assertSecondBatchPoisoned "ordered-action dispatcher" actions
+      ]
   , testCase "term identifier exhaustion truncates instead of colliding" $ do
       chunk <- lastCapacityChunk
         (IdentifierCapacities 0 100 100 100) identityInput
@@ -1912,6 +2072,56 @@ lastResult :: [value] -> IO value
 lastResult results = case results of
   [] -> fail "expected at least one capacity-limited query result"
   first : remaining -> pure $ lastElement first remaining
+
+assertStepRouteParity
+  :: String
+  -> IdentifierCapacities
+  -> E.ExferenceInput
+  -> IO ()
+assertStepRouteParity label capacities input = do
+  (legacyChunks, actionChunks) <- expectRight
+    $ findExpressionStepRouteTracesWithIdentifierCapacitiesEither
+        capacities input
+  assertBool (label ++ " changed the complete compatibility trace")
+    $ map observeChunk legacyChunks == map observeChunk actionChunks
+
+  (legacyCandidatesLazy, actionCandidatesLazy) <- expectRight
+    $ findTypedEngineCandidateStepRouteTracesWithIdentifierCapacitiesEither
+        capacities input
+  legacyCandidates <- evaluate $ force legacyCandidatesLazy
+  actionCandidates <- evaluate $ force actionCandidatesLazy
+  assertBool (label ++ " changed typed candidates or retained graphs")
+    $ legacyCandidates == actionCandidates
+
+observeChunk
+  :: E.ExferenceChunkElement
+  -> ( E.SearchStatus
+     , Map.Map QualifiedName Int
+     , [E.ExferenceOutputElement]
+     )
+observeChunk chunk =
+  ( E.chunkStatus chunk
+  , E.chunkBindingUsages chunk
+  , E.chunkElements chunk
+  )
+
+firstChunk :: String -> [value] -> IO value
+firstChunk description chunks = case chunks of
+  [] -> fail $ description ++ " produced no search chunks"
+  first : _ -> pure first
+
+assertSecondBatchPoisoned
+  :: String
+  -> [E.ExferenceChunkElement]
+  -> IO ()
+assertSecondBatchPoisoned label trace = do
+  outcome <- try (evaluate $ length $ take 2 trace)
+    :: IO (Either SomeException Int)
+  case outcome of
+    Left _ -> pure ()
+    Right observed -> assertFailure $ label
+      ++ " evaluated " ++ show observed
+      ++ " batches without reaching the live next-step poison"
 
 lastElement :: value -> [value] -> value
 lastElement latest [] = latest

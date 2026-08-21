@@ -10,7 +10,9 @@
 module Language.Haskell.Exference.Core.Internal.Exference
   ( findExpressions
   , findExpressionsWithAllocators
+  , findExpressionsWithAllocatorsUsingLegacyStateStepForTesting
   , findEngineCandidatesWithAllocatorsForTesting
+  , findEngineCandidatesWithAllocatorsUsingLegacyStateStepForTesting
   , findTypedQueryResultsInEnvironmentEither
   , findQueryResultsInEnvironmentEither
   , findTypedQueryResultsInEnvironmentWithCheckedOptions
@@ -415,6 +417,14 @@ type ExferenceTypedResult =
 data ScheduledNode = ScheduledNode !TGoal SearchNode
 
 type RatedNodes = Q.MaxPQueue Priority ScheduledNode
+
+-- | Which private implementation expands one popped node.  Production uses
+-- the explicit ordered action list; the historical monolithic action remains
+-- reachable only through internal test observers as a differential oracle.
+data StateStepRoute
+  = OrderedStateStepActions
+  | LegacyStateStepAction
+
 data FindExpressionsState = FindExpressionsState
   { findSteps :: Int -- number of steps already performed
   , findQueuePruned :: !Natural
@@ -465,7 +475,15 @@ findEngineBatchesWith
   :: SearchAllocators
   -> CheckedExferenceQuery
   -> [EngineBatch]
-findEngineBatchesWith allocators
+findEngineBatchesWith = findEngineBatchesWithStateStepRoute
+  OrderedStateStepActions
+
+findEngineBatchesWithStateStepRoute
+  :: StateStepRoute
+  -> SearchAllocators
+  -> CheckedExferenceQuery
+  -> [EngineBatch]
+findEngineBatchesWithStateStepRoute stepRoute allocators
     (CheckedExferenceQuery
       (ExferenceEnvironment EnvDictionary
       { environmentFunctions = allFunctions
@@ -734,12 +752,14 @@ findEngineBatchesWith allocators
       -- when the caller explicitly requested constrained results.
       relaxConstraints = constraintsRelaxedAtStep
         allowConstraints allowConstraintsStopStep n'
-      stepResults = runSearchBranches $ (`execStateT` s)
-        $ stateStep allocators
-                    multiPM
-                    relaxConstraints
-                    heuristics
-                    nextGoal
+      stepResults = runStateStep
+        stepRoute
+        allocators
+        multiPM
+        relaxConstraints
+        heuristics
+        nextGoal
+        s
       (rNodes, stepIdentifierSpaceExhausted) =
         foldr collectStepResult ([], False) stepResults
       (withinDepth, tooDeep) = partition depthAllowed rNodes
@@ -812,6 +832,17 @@ findExpressionsWithAllocators
 findExpressionsWithAllocators allocators' =
   map projectCompatibilityChunk . findEngineBatchesWith allocators'
 
+-- | Internal differential oracle retaining the historical monolithic
+-- 'stateStep' dispatch.  It is intentionally absent from the public core
+-- facade; production uses 'findExpressionsWithAllocators'.
+findExpressionsWithAllocatorsUsingLegacyStateStepForTesting
+  :: SearchAllocators
+  -> CheckedExferenceQuery
+  -> [ExferenceChunkElement]
+findExpressionsWithAllocatorsUsingLegacyStateStepForTesting allocators' =
+  map projectCompatibilityChunk
+    . findEngineBatchesWithStateStepRoute LegacyStateStepAction allocators'
+
 -- | Closed test observation of the exact association retained by the private
 -- engine candidate. Unlike either public projector, this reads the typed graph
 -- field produced inside 'transformSolutions'.
@@ -822,6 +853,20 @@ findEngineCandidatesWithAllocatorsForTesting
 findEngineCandidatesWithAllocatorsForTesting allocators' =
   concatMap (map observe . SharedSearch.batchCandidates)
     . findEngineBatchesWith allocators'
+ where
+  observe (ValidatedEngineCandidate expression _ statistics availability) =
+    (expression, statistics, availability)
+
+-- | Typed-candidate counterpart of the legacy differential oracle.  Retaining
+-- the private graph association lets engine tests compare candidate identities
+-- as well as compatibility expressions and metadata.
+findEngineCandidatesWithAllocatorsUsingLegacyStateStepForTesting
+  :: SearchAllocators
+  -> CheckedExferenceQuery
+  -> [(Expression, ExferenceStats, ExferenceTermGraphAvailability)]
+findEngineCandidatesWithAllocatorsUsingLegacyStateStepForTesting allocators' =
+  concatMap (map observe . SharedSearch.batchCandidates)
+    . findEngineBatchesWithStateStepRoute LegacyStateStepAction allocators'
  where
   observe (ValidatedEngineCandidate expression _ statistics availability) =
     (expression, statistics, availability)
@@ -1812,27 +1857,83 @@ getUnusedVarCount = IntMap.foldl' countUnused 0 . nodeVarUses
     | uses == 0 = count + 1
     | otherwise = count
 
--- Take one SearchNode, return some amount of sub-SearchNodes. Some of the
--- returned SearchNodes may in fact be (potential) solutions that do not
--- require further evaluation.
---
--- Basic implementation idea:
--- Take the first goal for this SearchNode. Its type determines what the next
--- step is (and which sub-function to use).
-stateStep :: SearchAllocators
-          -> Bool
-          -> Bool
-          -> ExferenceHeuristicsConfig
-          -> TGoal
-          -> StateT SearchNode SearchBranches ()
-stateStep allocators multiPM allowConstrs h
-    (TGoal (VarBinding var goalType) scopeId forallMode tupleMode
-      givenConstraints) = do
-  -- This paragraph is evil, and hopefully temporary. (Scoping issues make it necessary.)
-  contxt <- gets nodeQueryClassEnv
-  constraintGoals' <- gets nodeConstraintGoals
+-- One suspended branch-local transformation of the popped search node.  Every
+-- sibling action is interpreted against the same immutable input node.
+type StepAction = StateT SearchNode SearchBranches ()
 
+-- The independently spelled historical dispatch is retained as a differential
+-- oracle.  Production consumes the finite ordered action list.
+data StateStepPlan = StateStepPlan
+  { plannedLegacyAction :: StepAction
+  , plannedOrderedActions :: [StepAction]
+  }
+
+runStateStep
+  :: StateStepRoute
+  -> SearchAllocators
+  -> Bool
+  -> Bool
+  -> ExferenceHeuristicsConfig
+  -> TGoal
+  -> SearchNode
+  -> [Either BranchTruncation SearchNode]
+runStateStep route allocators multiPM allowConstrs h goal initialNode =
+  case route of
+    OrderedStateStepActions -> concatMap runAction
+      $ stateStepActions allocators multiPM allowConstrs h goal initialNode
+    LegacyStateStepAction -> runSearchBranches
+      $ execStateT (stateStep allocators multiPM allowConstrs h goal) initialNode
+ where
+  runAction action = runSearchBranches $ execStateT action initialNode
+
+-- | Historical monolithic choice dispatch, kept private as the serial oracle
+-- used by the engine-test facade.
+stateStep
+  :: SearchAllocators
+  -> Bool
+  -> Bool
+  -> ExferenceHeuristicsConfig
+  -> TGoal
+  -> StepAction
+stateStep allocators multiPM allowConstrs h goal = do
+  initialNode <- gets id
+  plannedLegacyAction
+    $ stateStepPlan allocators multiPM allowConstrs h goal initialNode
+
+-- Take one SearchNode and expose its finite ordered sibling actions before any
+-- branch-local unification, allocation, substitution, or expression work.
+stateStepActions
+  :: SearchAllocators
+  -> Bool
+  -> Bool
+  -> ExferenceHeuristicsConfig
+  -> TGoal
+  -> SearchNode
+  -> [StepAction]
+stateStepActions allocators multiPM allowConstrs h goal initialNode =
+  plannedOrderedActions
+    $ stateStepPlan allocators multiPM allowConstrs h goal initialNode
+
+-- Take one SearchNode, return some amount of sub-SearchNodes. Some returned
+-- nodes may in fact be potential solutions that need no further evaluation.
+stateStepPlan
+  :: SearchAllocators
+  -> Bool
+  -> Bool
+  -> ExferenceHeuristicsConfig
+  -> TGoal
+  -> SearchNode
+  -> StateStepPlan
+stateStepPlan allocators multiPM allowConstrs h
+    (TGoal (VarBinding var goalType) scopeId forallMode tupleMode
+      givenConstraints) initialNode =
   let
+    -- These shared inputs are snapshots of the exact node from which every
+    -- sibling action starts.  Keep them lazy: structural lanes do not need to
+    -- inspect constraint state merely because another lane does.
+    contxt = nodeQueryClassEnv initialNode
+    constraintGoals' = nodeConstraintGoals initialNode
+
     -- if type is TypeArrow, transform to lambda expression.
     arrowStep
       :: HsType
@@ -2008,10 +2109,14 @@ stateStep allocators multiPM allowConstrs h
     -- e.g. for (\x -> (_ :: Int)), the goal can be filled by `x` if
     -- `x :: Int`.
 
-    byProvided :: StateT SearchNode SearchBranches ()
+    byProvided :: StepAction
     byProvided = do
       provided <- lift . chooseBranches =<< gets
         (scopeGetAllBindings scopeId . nodeProvidedScopes)
+      byProvidedFor provided
+
+    byProvidedFor :: VarPBinding -> StepAction
+    byProvidedFor provided = do
       let
         provId = varPVariable provided
         provType = varPResult provided
@@ -2105,10 +2210,14 @@ stateStep allocators multiPM allowConstrs h
     -- applications. Keep this lane exact: the shared same-namespace unifier
     -- may refine flexible variables, while the independent checker still
     -- validates the retained declaration annotation on every result.
-    byProvidedWhole :: StateT SearchNode SearchBranches ()
+    byProvidedWhole :: StepAction
     byProvidedWhole = do
       provided <- lift . chooseBranches =<< gets
         (scopeGetAllBindings scopeId . nodeProvidedScopes)
+      byProvidedWholeFor provided
+
+    byProvidedWholeFor :: VarPBinding -> StepAction
+    byProvidedWholeFor provided = do
       let
         provId = varPVariable provided
         dependencies = varPParameters provided
@@ -2127,9 +2236,13 @@ stateStep allocators multiPM allowConstrs h
           ((\substs -> (substs, substs)) <$> unifyShared goalType scheme)
 
     -- try to resolve the goal by looking at functions from the environment.
-    byFunctionSimple :: StateT SearchNode SearchBranches ()
+    byFunctionSimple :: StepAction
     byFunctionSimple = do
       binding <- lift . chooseBranches =<< gets nodeFunctions
+      byFunctionSimpleFor binding
+
+    byFunctionSimpleFor :: FunctionBinding -> StepAction
+    byFunctionSimpleFor binding = do
       renaming <- builderFreshenTVarNamespace allocators
         $ IntSet.toAscList $ IntSet.unions
         $ map flexibleIdentifiers $ functionBindingTypes binding
@@ -2404,21 +2517,53 @@ stateStep allocators multiPM allowConstrs h
           }
         traverse_ (builderRecordVarUse . fst) applierVariable
 
-  case goalType of
-    TypeArrow _ _ -> byProvidedWhole <|> arrowStep goalType []
-    TypeForall is cs t | forallMode == OpenLeadingForalls ->
-      forallStep is cs t
-    TypeForall is cs t | forallMode == ContinueForallIntroduction ->
-      introducedForallStep is cs t
-    TypeForall is cs t | forallMode == TryForallIntroduction ->
-      byProvided <|> byFunctionSimple <|> introducedForallStep is cs t
-    TypeTuple Boxed elements | not $ null elements ->
-      byProvided
-        <|> (case tupleMode of
-          AllowTupleTree -> tupleTreeStep elements <|> tupleStep elements
-          ContinueShallowTuple -> tupleStep elements)
-        <|> byFunctionSimple
-    _ -> byProvided <|> byFunctionSimple
+    providedBindings = scopeGetAllBindings scopeId
+      $ nodeProvidedScopes initialNode
+    functionBindings = nodeFunctions initialNode
+
+    -- Independently retain the historical nondeterministic dispatch so tests
+    -- can compare it with the extracted action interpreter.
+    legacyAction :: StepAction
+    legacyAction = case goalType of
+      TypeArrow _ _ -> byProvidedWhole <|> arrowStep goalType []
+      TypeForall is cs t | forallMode == OpenLeadingForalls ->
+        forallStep is cs t
+      TypeForall is cs t | forallMode == ContinueForallIntroduction ->
+        introducedForallStep is cs t
+      TypeForall is cs t | forallMode == TryForallIntroduction ->
+        byProvided <|> byFunctionSimple <|> introducedForallStep is cs t
+      TypeTuple Boxed elements | not $ null elements ->
+        byProvided
+          <|> (case tupleMode of
+            AllowTupleTree -> tupleTreeStep elements <|> tupleStep elements
+            ContinueShallowTuple -> tupleStep elements)
+          <|> byFunctionSimple
+      _ -> byProvided <|> byFunctionSimple
+
+    -- Each outer list element is one finite sibling lane.  Inner alternatives
+    -- remain within the captured provider/function action, preserving their
+    -- allocation snapshot, truncation cardinality, and contiguous result order.
+    orderedActions :: [StepAction]
+    orderedActions = case goalType of
+      TypeArrow _ _ ->
+        map byProvidedWholeFor providedBindings ++ [arrowStep goalType []]
+      TypeForall is cs t | forallMode == OpenLeadingForalls ->
+        [forallStep is cs t]
+      TypeForall is cs t | forallMode == ContinueForallIntroduction ->
+        [introducedForallStep is cs t]
+      TypeForall is cs t | forallMode == TryForallIntroduction ->
+        map byProvidedFor providedBindings
+          ++ map byFunctionSimpleFor functionBindings
+          ++ [introducedForallStep is cs t]
+      TypeTuple Boxed elements | not $ null elements ->
+        map byProvidedFor providedBindings
+          ++ (case tupleMode of
+            AllowTupleTree -> [tupleTreeStep elements, tupleStep elements]
+            ContinueShallowTuple -> [tupleStep elements])
+          ++ map byFunctionSimpleFor functionBindings
+      _ -> map byProvidedFor providedBindings
+        ++ map byFunctionSimpleFor functionBindings
+  in StateStepPlan legacyAction orderedActions
 
 
 {-# INLINE addScopePatternMatch #-}

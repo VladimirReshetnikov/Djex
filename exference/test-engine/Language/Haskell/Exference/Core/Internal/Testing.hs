@@ -7,7 +7,10 @@
 module Language.Haskell.Exference.Core.Internal.Testing
   ( IdentifierCapacities (..)
   , findExpressionsWithIdentifierCapacitiesEither
+  , findExpressionStepRouteTracesWithIdentifierCapacitiesEither
+  , findExpressionStepRouteTracesWithPoisonedNextStepEither
   , findTypedEngineCandidatesWithIdentifierCapacitiesEither
+  , findTypedEngineCandidateStepRouteTracesWithIdentifierCapacitiesEither
   , findQueryResultsWithIdentifierCapacitiesEither
   , typedQueryProjectionStrictnessForTesting
   , queryProjectionStrictnessForTesting
@@ -72,6 +75,43 @@ findExpressionsWithIdentifierCapacitiesEither capacities input = do
   pure $ E.findExpressionsWithAllocators
     (finiteSearchAllocators capacities) checked
 
+-- | Run the preserved pre-extraction step dispatcher and the production
+-- ordered-action dispatcher from the same checked input and finite allocator
+-- policy.  The legacy trace is first.  Keeping this pairing in the Cabal-only
+-- seam prevents a differential test from accidentally preparing two
+-- different roots or comparing two aliases of the production route.
+findExpressionStepRouteTracesWithIdentifierCapacitiesEither
+  :: IdentifierCapacities
+  -> E.ExferenceInput
+  -> Either E.ExferenceInputError
+      ([E.ExferenceChunkElement], [E.ExferenceChunkElement])
+findExpressionStepRouteTracesWithIdentifierCapacitiesEither capacities input =
+  do
+    checked <- E.prepareExferenceInput input
+    let allocators = finiteSearchAllocators capacities
+    pure
+      ( E.findExpressionsWithAllocatorsUsingLegacyStateStepForTesting
+          allocators checked
+      , E.findExpressionsWithAllocators allocators checked
+      )
+
+-- | A lazy trace whose first root-forall step requires no term allocation,
+-- while the following arrow step attempts the poisoned operation.  Tests can
+-- therefore prove that observing the first batch does not start the next
+-- search step on either dispatcher, and separately prove that the poison is
+-- live by demanding the second batch.
+findExpressionStepRouteTracesWithPoisonedNextStepEither
+  :: E.ExferenceInput
+  -> Either E.ExferenceInputError
+      ([E.ExferenceChunkElement], [E.ExferenceChunkElement])
+findExpressionStepRouteTracesWithPoisonedNextStepEither input = do
+  checked <- E.prepareExferenceInput input
+  pure
+    ( E.findExpressionsWithAllocatorsUsingLegacyStateStepForTesting
+        poisonedNextStepAllocators checked
+    , E.findExpressionsWithAllocators poisonedNextStepAllocators checked
+    )
+
 -- | Retain the exact private engine-candidate association instead of passing
 -- through either legacy projection.
 findTypedEngineCandidatesWithIdentifierCapacitiesEither
@@ -83,6 +123,27 @@ findTypedEngineCandidatesWithIdentifierCapacitiesEither capacities input = do
   checked <- E.prepareExferenceInput input
   pure $ E.findEngineCandidatesWithAllocatorsForTesting
     (finiteSearchAllocators capacities) checked
+
+-- | Typed-candidate counterpart to
+-- 'findExpressionStepRouteTracesWithIdentifierCapacitiesEither'.  Exact list
+-- equality observes candidate order and the retained graph association,
+-- including its deterministic candidate identity.
+findTypedEngineCandidateStepRouteTracesWithIdentifierCapacitiesEither
+  :: IdentifierCapacities
+  -> E.ExferenceInput
+  -> Either E.ExferenceInputError
+      ( [(Expression, ExferenceStats, ExferenceTermGraphAvailability)]
+      , [(Expression, ExferenceStats, ExferenceTermGraphAvailability)]
+      )
+findTypedEngineCandidateStepRouteTracesWithIdentifierCapacitiesEither
+    capacities input = do
+  checked <- E.prepareExferenceInput input
+  let allocators = finiteSearchAllocators capacities
+  pure
+    ( E.findEngineCandidatesWithAllocatorsUsingLegacyStateStepForTesting
+        allocators checked
+    , E.findEngineCandidatesWithAllocatorsForTesting allocators checked
+    )
 
 -- | Exercise the canonical result path with bounded internal namespaces.
 -- Unlike the compatibility-input helpers above, this retains the checked
@@ -227,6 +288,12 @@ finiteSearchAllocators capacities = defaultSearchAllocators
     | otherwise = Left $ Scope.ScopeIdCollision 0
    where
     occupied = fromIntegral $ length $ Scope.scopesToAscList scopes
+
+poisonedNextStepAllocators :: SearchAllocators
+poisonedNextStepAllocators = defaultSearchAllocators
+  { searchAllocateTermIdentifier = \_ ->
+      error "ordered step actions evaluated the next search step"
+  }
 
 -- Count the sequential identifiers preceding the current counter.  The
 -- production allocator traverses positive IDs first, then the negative half,

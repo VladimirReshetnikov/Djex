@@ -9,6 +9,7 @@ import Control.Concurrent.Async
   )
 import Control.Concurrent.MVar
   ( MVar
+  , modifyMVar
   , modifyMVar_
   , newEmptyMVar
   , newMVar
@@ -17,11 +18,14 @@ import Control.Concurrent.MVar
   , takeMVar
   )
 import Control.Exception
-  ( SomeException
+  ( Exception
+  , SomeException
   , finally
+  , fromException
   , throwIO
   , try
   )
+import Control.Monad (when)
 import System.Exit (ExitCode (ExitSuccess))
 import System.Timeout (timeout)
 import Test.Tasty (defaultMain, testGroup)
@@ -54,6 +58,34 @@ main = defaultMain $ testGroup "Djex deterministic parallel pair"
       testCallerCancellation
   , testCase "worker forcing rejects a poisoned output plan before replay"
       testStrictOutputPlan
+  , testCase "timed lanes share one cutoff signal and both start"
+      testTimedCommonDeadlineStart
+  , testCase "pre-cutoff completions survive deadline watcher cleanup"
+      testTimedCompletionBeforeDeadline
+  , testCase "published pre-cutoff completions survive worker cancellation"
+      testTimedPublishedCompletionSurvivesCancellation
+  , testCase "published worker failures survive deadline cancellation"
+      testTimedPublishedFailureSurvivesCancellation
+  , testCase "deadline expiry cancels and joins both lane-local workers"
+      testTimedDeadlineExpiry
+  , testCase "deadline watcher failures propagate after worker cleanup"
+      testTimedDeadlineWatcherFailure
+  , testCase "completion exactly at the cutoff is a timeout"
+      testTimedCutoffTie
+  , testCase "a retained success is observed after its sibling timeout"
+      testTimedSuccessAndTimeout
+  , testCase "an ordinary failure value is retained beside a timeout"
+      testTimedFailureAndTimeout
+  , testCase "timed unexpected exceptions retain left-first precedence"
+      testTimedExceptionPrecedence
+  , testCase "a left timeout is observed before a right exception"
+      testTimedTimeoutBeforeRightException
+  , testCase "caller cancellation cleans timed workers and deadline watcher"
+      testTimedCallerCancellation
+  , testCase "timed worker forcing rejects a poisoned output plan"
+      testTimedStrictOutputPlan
+  , testCase "timed consumers remain stable when right completes first"
+      testTimedStableConsumptionOrder
   ]
 
 testEligibility :: Assertion
@@ -204,6 +236,438 @@ testStrictOutputPlan = do
   assertException "poisoned event" outcome
   await "strictness sibling cleanup" rightStopped
   assertEqual "poisoned plan never reaches replay" [] =<< readMVar consumed
+
+data LogicalTime
+  = BeforeCutoff
+  | AtCutoff
+  deriving (Eq, Ord, Show)
+
+data TaggedFailure = TaggedFailure String
+  deriving (Eq, Show)
+
+instance Exception TaggedFailure
+
+logicalDeadline :: IO LogicalTime -> IO () -> ParallelDeadline LogicalTime
+logicalDeadline readNow awaitCutoff = ParallelDeadline
+  { parallelDeadlineCutoff = AtCutoff
+  , parallelDeadlineNow = readNow
+  , parallelDeadlineAwait = awaitCutoff
+  }
+
+testTimedCommonDeadlineStart :: Assertion
+testTimedCommonDeadlineStart = do
+  leftStarted <- newEmptyMVar
+  rightStarted <- newEmptyMVar
+  leftStopped <- newEmptyMVar
+  rightStopped <- newEmptyMVar
+  deadlineStarted <- newEmptyMVar
+  deadlineRelease <- newEmptyMVar
+  deadlineCalls <- newMVar (0 :: Int)
+  neverLeft <- newEmptyMVar
+  neverRight <- newEmptyMVar
+  consumed <- newMVar ([] :: [ParallelLaneOutcome String])
+  let awaitCutoff = do
+        modifyMVar_ deadlineCalls $ pure . (+ 1)
+        putMVar deadlineStarted ()
+        takeMVar deadlineRelease
+  runner <- async $ runParallelPairOrderedBefore
+    (logicalDeadline (pure AtCutoff) awaitCutoff)
+    ((putMVar leftStarted () >> takeMVar neverLeft >> pure "left")
+      `finally` putMVar leftStopped ())
+    ((putMVar rightStarted () >> takeMVar neverRight >> pure "right")
+      `finally` putMVar rightStopped ())
+    (record consumed)
+    (record consumed)
+  await "timed left worker start" leftStarted
+  await "timed right worker start" rightStarted
+  await "common deadline watcher start" deadlineStarted
+  assertEqual "one common deadline waiter" 1 =<< readMVar deadlineCalls
+  putMVar deadlineRelease ()
+  awaitAsync "common-deadline pair completion" runner
+  await "common-deadline left join" leftStopped
+  await "common-deadline right join" rightStopped
+  assertEqual "lane-local timeout outcomes"
+    [ParallelLaneTimedOut, ParallelLaneTimedOut]
+    =<< readMVar consumed
+  assertEqual "deadline action ran exactly once" 1 =<< readMVar deadlineCalls
+
+testTimedCompletionBeforeDeadline :: Assertion
+testTimedCompletionBeforeDeadline = do
+  deadlineStarted <- newEmptyMVar
+  neverDeadline <- newEmptyMVar
+  deadlineStopped <- newEmptyMVar
+  consumed <- newMVar ([] :: [ParallelLaneOutcome String])
+  runParallelPairOrderedBefore
+    (logicalDeadline (pure BeforeCutoff) $
+      (putMVar deadlineStarted () >> takeMVar neverDeadline)
+        `finally` putMVar deadlineStopped ())
+    (readMVar deadlineStarted >> pure "left")
+    (readMVar deadlineStarted >> pure "right")
+    (record consumed)
+    (record consumed)
+  await "unused deadline watcher cleanup" deadlineStopped
+  assertEqual "both pre-cutoff completions"
+    [ParallelLaneCompleted "left", ParallelLaneCompleted "right"]
+    =<< readMVar consumed
+
+testTimedPublishedCompletionSurvivesCancellation :: Assertion
+testTimedPublishedCompletionSurvivesCancellation = do
+  publicationCount <- newMVar (0 :: Int)
+  bothPublished <- newEmptyMVar
+  publicationStopped <- newMVar (0 :: Int)
+  bothStopped <- newEmptyMVar
+  neverReturnFromPublication <- newEmptyMVar
+  deadlineStarted <- newEmptyMVar
+  deadlineRelease <- newEmptyMVar
+  consumed <- newMVar ([] :: [ParallelLaneOutcome String])
+  let afterCompletionPublished =
+        (do
+          count <- modifyMVar publicationCount $ \previous ->
+            let current = previous + 1
+            in pure (current, current)
+          when (count == 2) $ putMVar bothPublished ()
+          takeMVar neverReturnFromPublication)
+        `finally` do
+          count <- modifyMVar publicationStopped $ \previous ->
+            let current = previous + 1
+            in pure (current, current)
+          when (count == 2) $ putMVar bothStopped ()
+  runner <- async $ runParallelPairOrderedBeforeWithPublicationHook
+    (logicalDeadline (pure BeforeCutoff) $
+      putMVar deadlineStarted () >> takeMVar deadlineRelease)
+    afterCompletionPublished
+    (pure "left")
+    (pure "right")
+    (record consumed)
+    (record consumed)
+  await "post-publication deadline start" deadlineStarted
+  await "both terminal cells published" bothPublished
+  putMVar deadlineRelease ()
+  awaitAsync "post-publication deadline race" runner
+  await "post-publication worker joins" bothStopped
+  assertEqual "published values survive cancellation before Async return"
+    [ParallelLaneCompleted "left", ParallelLaneCompleted "right"]
+    =<< readMVar consumed
+
+testTimedPublishedFailureSurvivesCancellation :: Assertion
+testTimedPublishedFailureSurvivesCancellation = do
+  publicationCount <- newMVar (0 :: Int)
+  bothPublished <- newEmptyMVar
+  neverReturnFromPublication <- newEmptyMVar
+  deadlineStarted <- newEmptyMVar
+  deadlineRelease <- newEmptyMVar
+  consumed <- newMVar ([] :: [ParallelLaneOutcome String])
+  let afterCompletionPublished = do
+        count <- modifyMVar publicationCount $ \previous ->
+          let current = previous + 1
+          in pure (current, current)
+        when (count == 2) $ putMVar bothPublished ()
+        takeMVar neverReturnFromPublication
+  runner <- async $ try $ runParallelPairOrderedBeforeWithPublicationHook
+    (logicalDeadline (pure BeforeCutoff) $
+      putMVar deadlineStarted () >> takeMVar deadlineRelease)
+    afterCompletionPublished
+    (throwIO $ TaggedFailure "published left failure")
+    (pure "right")
+    (record consumed)
+    (record consumed)
+  await "published-failure deadline start" deadlineStarted
+  await "failure and value terminal cells published" bothPublished
+  putMVar deadlineRelease ()
+  outcome <- awaitAsync "published failure deadline race" runner
+  assertTaggedException "published left failure" outcome
+  assertEqual "published failure prevents consumer replay" []
+    =<< readMVar consumed
+
+testTimedDeadlineExpiry :: Assertion
+testTimedDeadlineExpiry = do
+  leftStarted <- newEmptyMVar
+  rightStarted <- newEmptyMVar
+  leftStopped <- newEmptyMVar
+  rightStopped <- newEmptyMVar
+  deadlineStarted <- newEmptyMVar
+  deadlineRelease <- newEmptyMVar
+  neverLeft <- newEmptyMVar
+  neverRight <- newEmptyMVar
+  consumed <- newMVar ([] :: [ParallelLaneOutcome String])
+  runner <- async $ runParallelPairOrderedBefore
+    (logicalDeadline (pure AtCutoff) $
+      putMVar deadlineStarted () >> takeMVar deadlineRelease)
+    ((putMVar leftStarted () >> takeMVar neverLeft >> pure "left")
+      `finally` putMVar leftStopped ())
+    ((putMVar rightStarted () >> takeMVar neverRight >> pure "right")
+      `finally` putMVar rightStopped ())
+    (record consumed)
+    (record consumed)
+  await "expiring left worker start" leftStarted
+  await "expiring right worker start" rightStarted
+  await "expiring deadline watcher start" deadlineStarted
+  putMVar deadlineRelease ()
+  awaitAsync "expired pair completion" runner
+  await "expired left worker join" leftStopped
+  await "expired right worker join" rightStopped
+  assertEqual "deadline outcomes"
+    [ParallelLaneTimedOut, ParallelLaneTimedOut]
+    =<< readMVar consumed
+
+testTimedDeadlineWatcherFailure :: Assertion
+testTimedDeadlineWatcherFailure = do
+  leftStarted <- newEmptyMVar
+  rightStarted <- newEmptyMVar
+  leftStopped <- newEmptyMVar
+  rightStopped <- newEmptyMVar
+  deadlineStarted <- newEmptyMVar
+  deadlineRelease <- newEmptyMVar
+  deadlineStopped <- newEmptyMVar
+  neverLeft <- newEmptyMVar
+  neverRight <- newEmptyMVar
+  consumed <- newMVar ([] :: [ParallelLaneOutcome String])
+  runner <- async $ try $ runParallelPairOrderedBefore
+    (logicalDeadline (pure BeforeCutoff) $
+      (putMVar deadlineStarted () >> takeMVar deadlineRelease
+        >> throwIO (TaggedFailure "deadline"))
+      `finally` putMVar deadlineStopped ())
+    ((putMVar leftStarted () >> takeMVar neverLeft >> pure "left")
+      `finally` putMVar leftStopped ())
+    ((putMVar rightStarted () >> takeMVar neverRight >> pure "right")
+      `finally` putMVar rightStopped ())
+    (record consumed)
+    (record consumed)
+  await "watcher-failure left start" leftStarted
+  await "watcher-failure right start" rightStarted
+  await "watcher-failure deadline start" deadlineStarted
+  putMVar deadlineRelease ()
+  outcome <- awaitAsync "deadline watcher failure" runner
+  assertTaggedException "deadline" outcome
+  await "failed deadline watcher cleanup" deadlineStopped
+  await "watcher-failure left worker join" leftStopped
+  await "watcher-failure right worker join" rightStopped
+  assertEqual "watcher failure prevents consumer replay" []
+    =<< readMVar consumed
+
+testTimedCutoffTie :: Assertion
+testTimedCutoffTie = do
+  deadlineStarted <- newEmptyMVar
+  neverDeadline <- newEmptyMVar
+  deadlineStopped <- newEmptyMVar
+  consumed <- newMVar ([] :: [ParallelLaneOutcome String])
+  runParallelPairOrderedBefore
+    (logicalDeadline (pure AtCutoff) $
+      (putMVar deadlineStarted () >> takeMVar neverDeadline)
+        `finally` putMVar deadlineStopped ())
+    (readMVar deadlineStarted >> pure "left")
+    (readMVar deadlineStarted >> pure "right")
+    (record consumed)
+    (record consumed)
+  await "tie deadline watcher cleanup" deadlineStopped
+  assertEqual "equality belongs to timeout"
+    [ParallelLaneTimedOut, ParallelLaneTimedOut]
+    =<< readMVar consumed
+
+testTimedSuccessAndTimeout :: Assertion
+testTimedSuccessAndTimeout = do
+  leftStarted <- newEmptyMVar
+  leftStopped <- newEmptyMVar
+  rightStamped <- newEmptyMVar
+  deadlineStarted <- newEmptyMVar
+  deadlineRelease <- newEmptyMVar
+  neverLeft <- newEmptyMVar
+  consumed <- newMVar ([] :: [ParallelLaneOutcome String])
+  runner <- async $ runParallelPairOrderedBefore
+    (logicalDeadline
+      (putMVar rightStamped () >> pure BeforeCutoff)
+      (putMVar deadlineStarted () >> takeMVar deadlineRelease))
+    ((putMVar leftStarted () >> takeMVar neverLeft >> pure "left")
+      `finally` putMVar leftStopped ())
+    (pure "right")
+    (record consumed)
+    (record consumed)
+  await "success-timeout left start" leftStarted
+  await "success-timeout deadline start" deadlineStarted
+  await "right result stamped before cutoff" rightStamped
+  putMVar deadlineRelease ()
+  awaitAsync "success-timeout pair completion" runner
+  await "timed-out left lane join" leftStopped
+  assertEqual "right success retained past parent observation of deadline"
+    [ParallelLaneTimedOut, ParallelLaneCompleted "right"]
+    =<< readMVar consumed
+
+testTimedFailureAndTimeout :: Assertion
+testTimedFailureAndTimeout = do
+  leftStamped <- newEmptyMVar
+  rightStarted <- newEmptyMVar
+  rightStopped <- newEmptyMVar
+  deadlineStarted <- newEmptyMVar
+  deadlineRelease <- newEmptyMVar
+  neverRight <- newEmptyMVar
+  consumed <- newMVar
+    ([] :: [ParallelLaneOutcome (Either String String)])
+  runner <- async $ runParallelPairOrderedBefore
+    (logicalDeadline
+      (putMVar leftStamped () >> pure BeforeCutoff)
+      (putMVar deadlineStarted () >> takeMVar deadlineRelease))
+    (pure $ Left "checked failure")
+    ((putMVar rightStarted () >> takeMVar neverRight
+        >> pure (Right "right"))
+      `finally` putMVar rightStopped ())
+    (record consumed)
+    (record consumed)
+  await "ordinary failure stamp" leftStamped
+  await "failure-timeout right start" rightStarted
+  await "failure-timeout deadline start" deadlineStarted
+  putMVar deadlineRelease ()
+  awaitAsync "failure-timeout pair completion" runner
+  await "failure-timeout right join" rightStopped
+  assertEqual "ordinary failure remains a completed lane value"
+    [ ParallelLaneCompleted $ Left "checked failure"
+    , ParallelLaneTimedOut
+    ]
+    =<< readMVar consumed
+
+testTimedExceptionPrecedence :: Assertion
+testTimedExceptionPrecedence = do
+  leftStarted <- newEmptyMVar
+  leftRelease <- newEmptyMVar
+  rightStopped <- newEmptyMVar
+  neverDeadline <- newEmptyMVar
+  consumed <- newMVar ([] :: [ParallelLaneOutcome String])
+  runner <- async $ try $ runParallelPairOrderedBefore
+    (logicalDeadline (pure BeforeCutoff) $ takeMVar neverDeadline)
+    (putMVar leftStarted () >> takeMVar leftRelease
+      >> throwIO (TaggedFailure "left"))
+    ((throwIO (TaggedFailure "right") :: IO String)
+      `finally` putMVar rightStopped ())
+    (record consumed)
+    (record consumed)
+  await "exceptional timed left start" leftStarted
+  await "right exception completion" rightStopped
+  early <- poll runner
+  assertBool "right timed exception remains behind left" $ case early of
+    Nothing -> True
+    Just _ -> False
+  putMVar leftRelease ()
+  outcome <- awaitAsync "left-first timed exception" runner
+  assertTaggedException "left" outcome
+  assertEqual "no timed exception reaches a consumer" []
+    =<< readMVar consumed
+
+testTimedTimeoutBeforeRightException :: Assertion
+testTimedTimeoutBeforeRightException = do
+  leftStarted <- newEmptyMVar
+  leftStopped <- newEmptyMVar
+  rightStopped <- newEmptyMVar
+  deadlineStarted <- newEmptyMVar
+  deadlineRelease <- newEmptyMVar
+  neverLeft <- newEmptyMVar
+  consumed <- newMVar ([] :: [ParallelLaneOutcome String])
+  runner <- async $ try $ runParallelPairOrderedBefore
+    (logicalDeadline (pure BeforeCutoff) $
+      putMVar deadlineStarted () >> takeMVar deadlineRelease)
+    ((putMVar leftStarted () >> takeMVar neverLeft >> pure "left")
+      `finally` putMVar leftStopped ())
+    ((throwIO (TaggedFailure "right") :: IO String)
+      `finally` putMVar rightStopped ())
+    (record consumed)
+    (record consumed)
+  await "timeout-exception left start" leftStarted
+  await "timeout-exception right completion" rightStopped
+  await "timeout-exception deadline start" deadlineStarted
+  putMVar deadlineRelease ()
+  outcome <- awaitAsync "timeout before right exception" runner
+  await "timeout-exception left join" leftStopped
+  assertTaggedException "right" outcome
+  assertEqual "left timeout consumed before right exception"
+    [ParallelLaneTimedOut]
+    =<< readMVar consumed
+
+testTimedCallerCancellation :: Assertion
+testTimedCallerCancellation = do
+  leftStarted <- newEmptyMVar
+  rightStarted <- newEmptyMVar
+  deadlineStarted <- newEmptyMVar
+  leftStopped <- newEmptyMVar
+  rightStopped <- newEmptyMVar
+  deadlineStopped <- newEmptyMVar
+  neverLeft <- newEmptyMVar
+  neverRight <- newEmptyMVar
+  neverDeadline <- newEmptyMVar
+  consumed <- newMVar ([] :: [ParallelLaneOutcome String])
+  runner <- async $ runParallelPairOrderedBefore
+    (logicalDeadline (pure BeforeCutoff) $
+      (putMVar deadlineStarted () >> takeMVar neverDeadline)
+        `finally` putMVar deadlineStopped ())
+    ((putMVar leftStarted () >> takeMVar neverLeft >> pure "left")
+      `finally` putMVar leftStopped ())
+    ((putMVar rightStarted () >> takeMVar neverRight >> pure "right")
+      `finally` putMVar rightStopped ())
+    (record consumed)
+    (record consumed)
+  await "cancelled timed left start" leftStarted
+  await "cancelled timed right start" rightStarted
+  await "cancelled deadline start" deadlineStarted
+  cancel runner
+  await "cancelled timed left cleanup" leftStopped
+  await "cancelled timed right cleanup" rightStopped
+  await "cancelled deadline cleanup" deadlineStopped
+  assertEqual "caller interruption is not a timeout outcome" []
+    =<< readMVar consumed
+
+testTimedStrictOutputPlan :: Assertion
+testTimedStrictOutputPlan = do
+  rightStarted <- newEmptyMVar
+  rightStopped <- newEmptyMVar
+  neverRight <- newEmptyMVar
+  neverDeadline <- newEmptyMVar
+  consumed <- newMVar ([] :: [ParallelLaneOutcome CommandOutput])
+  let poisoned = CommandOutput
+        [CommandStandardOutputLine $ "prefix" ++ error "escaped output thunk"]
+        ExitSuccess
+  outcome <- try $ runParallelPairOrderedBefore
+    (logicalDeadline (pure BeforeCutoff) $ takeMVar neverDeadline)
+    (takeMVar rightStarted >> pure poisoned)
+    ((putMVar rightStarted () >> takeMVar neverRight
+        >> pure (CommandOutput [] ExitSuccess))
+      `finally` putMVar rightStopped ())
+    (record consumed)
+    (record consumed)
+  assertException "timed poisoned event" outcome
+  await "timed strictness sibling cleanup" rightStopped
+  assertEqual "timed poisoned plan never reaches replay" []
+    =<< readMVar consumed
+
+testTimedStableConsumptionOrder :: Assertion
+testTimedStableConsumptionOrder = do
+  leftStarted <- newEmptyMVar
+  leftRelease <- newEmptyMVar
+  rightFinished <- newEmptyMVar
+  neverDeadline <- newEmptyMVar
+  consumed <- newMVar ([] :: [ParallelLaneOutcome String])
+  runner <- async $ runParallelPairOrderedBefore
+    (logicalDeadline (pure BeforeCutoff) $ takeMVar neverDeadline)
+    (latchedValue leftStarted leftRelease "left")
+    (putMVar rightFinished () >> pure "right")
+    (record consumed)
+    (record consumed)
+  await "timed ordered left start" leftStarted
+  await "timed ordered right completion" rightFinished
+  assertEqual "timed right completion is not observed early" []
+    =<< readMVar consumed
+  putMVar leftRelease ()
+  awaitAsync "timed ordered pair completion" runner
+  assertEqual "timed left-to-right observation"
+    [ParallelLaneCompleted "left", ParallelLaneCompleted "right"]
+    =<< readMVar consumed
+
+assertTaggedException
+  :: String
+  -> Either SomeException value
+  -> Assertion
+assertTaggedException expected outcome = case outcome of
+  Left exception -> case fromException exception of
+    Just (TaggedFailure actual) ->
+      assertEqual "tagged exception" expected actual
+    Nothing -> assertFailure $ "unexpected exception type: " ++ show exception
+  Right _ -> assertFailure $ "expected TaggedFailure " ++ show expected
 
 latchedValue :: MVar () -> MVar () -> value -> IO value
 latchedValue started release value =

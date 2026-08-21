@@ -100,7 +100,7 @@ can skip ahead to [Building](#building).
 
 | Rule family | Engine | Reports (newest first) |
 | --- | --- | --- |
-| Deterministic paired-backend REPL concurrency with an exact serial fallback | both | [parallel backend search](docs/reports/2026-08-20-deterministic-parallel-backend-search.md) |
+| Deterministic paired-backend REPL concurrency with an exact serial fallback | both | [timed paired-backend deadlines](docs/reports/2026-08-20-timed-parallel-backend-deadline.md) · [initial parallel backend search](docs/reports/2026-08-20-deterministic-parallel-backend-search.md) |
 | Bounded binder instantiation: six leading binders (conservative boundary at seven), five, then four | both, with exact provider evidence | [six-binder](docs/reports/2026-08-10-six-binder-instantiation.md) · [five-binder](docs/reports/2026-08-09-five-binder-instantiation.md) · [four-binder](docs/reports/2026-08-01-four-binder-instantiation.md) |
 | Per-occurrence instantiation of loaded polymorphic values and closed source monotypes | Djinn | [loaded polymorphic values](docs/reports/2026-08-01-loaded-polymorphic-djinn-values.md) |
 | Positive-only instantiation of query-local hypotheses at closed monotypes already in the request | Djinn | [query-local closed monotypes](docs/reports/2026-08-09-query-local-closed-monotype-instantiation.md) |
@@ -262,19 +262,22 @@ exact serial and lower-peak-memory path, and `:unset jobs` to restore `2`.
 Values above two are accepted for forward compatibility, although this
 checkpoint has only two backend lanes.
 
-Concurrency applies only to unconstrained both-backend queries with
-`timeout = 0` and `select` set to `first` or `best`. Timed queries,
-`select = all`, and behavioral `--where`/Z3 queries keep their established
-serial paths. Each worker strictly prepares its selected output away from the
-terminal; the parent always replays the complete Djinn section before the
-Exference section, so completion order cannot change stdout or stderr. Running
-the two search heaps together can make peak memory approach their sum.
+Concurrency applies to unconstrained both-backend queries with `select` set to
+`first` or `best`, with or without a positive `timeout`. For a timed pair,
+both requests are checked before one shared cutoff starts; each worker must
+strictly prepare its selected output before that cutoff. The parent then
+replays the complete Djinn section before the Exference section, outside the
+timed search boundary, so completion order cannot change stdout or stderr.
+`jobs = 1`, `select = all`, behavioral `--where`/Z3 queries, and legacy-parser
+fallbacks retain their established serial paths. Running the two search heaps
+together can make peak memory approach their sum.
 
 The fixed-sample `djex-parallel-bench` checks exact serial/parallel transcript
 equality before reporting end-to-end timings. Its current measured result is
 a modest workload-specific improvement on two capabilities, not a general
 speedup guarantee; see the
-[parallel-search report](docs/reports/2026-08-20-deterministic-parallel-backend-search.md)
+[timed-deadline report](docs/reports/2026-08-20-timed-parallel-backend-deadline.md),
+the initial [parallel-search report](docs/reports/2026-08-20-deterministic-parallel-backend-search.md),
 and the [REPL guide](docs/repl.md#paired-backend-concurrency).
 
 ### Behavioral constraints in the Djex REPL

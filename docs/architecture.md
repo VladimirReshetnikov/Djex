@@ -204,11 +204,11 @@ runtime, or a requested Djinn scope projection, is unavailable.
 The first parallel seam is deliberately above both engines. For an
 unconstrained both-backend query on the shared parsed route, private REPL
 scheduling may start one Djinn worker and one Exference worker when
-`jobs >= 2`, no wall-clock timeout is active, and presentation is not
-`SelectAll`. A positive `jobs` setting defaults to two; one selects the exact
-pre-checkpoint serial control path. Larger values are accepted, but the present
-scheduler has only these two lanes. The historical parser fallback remains
-serial.
+`jobs >= 2` and presentation is not `SelectAll`, whether the wall-clock timeout
+is disabled or positive. A positive `jobs` setting defaults to two; one selects
+the exact pre-checkpoint serial control path. Larger values are accepted, but
+the present scheduler has only these two lanes. The historical parser fallback
+remains serial.
 
 Workers do not own process handles. Each produces and fully forces a private
 `CommandOutput` plan containing ordered stdout, stderr, and flush events plus
@@ -219,14 +219,31 @@ diagnostics cancel independent work. Structured `withAsync` scopes provide
 masked worker creation and cancel-and-wait cleanup for exceptions and caller
 interruption.
 
+When a positive timeout is active, both checked request admissions complete
+before the scheduler captures one elapsed monotonic cutoff. One watcher owns
+that cutoff while lane-local arbiters race the two strict workers against it.
+A completion stamp must be strictly earlier than the cutoff; an exact tie is a
+timeout. Expiry cancels and joins only that lane with a scheduler-private
+exception, so unrelated asynchronous worker failures remain failures rather
+than timeout values. The parent replays each classified outcome after its
+corresponding lane race, outside the cutoff, in fixed backend order: it
+observes and consumes Djinn first, then Exference. The already-forked right
+arbiter can remain active independently during Djinn replay.
+
+The production monotonic clock is a bounded `Word64` nanosecond counter. A
+private epoch extender accumulates modular deltas into an `Integer` and the
+watcher samples in chunks of at most thirty minutes. This preserves the full
+historically validated timeout range across ordinary clock wraps without
+refreshing the original cutoff.
+
 The boundary preserves laziness instead of forcing a complete backend trace:
 the worker forces only the finite presentation demanded by `SelectFirst` or
-`SelectBest`. `SelectAll` retains its one-pass streaming presenter, timed
-queries retain their whole-presentation timeout boundary, and behavioral
-Length/Z3 assessment retains its checked serial lifecycle. All three therefore
-bypass the pair scheduler. Running two independent heaps can raise peak memory
-from approximately the larger backend footprint toward their sum, so
-`jobs = 1` is also the documented resource fallback.
+`SelectBest`. `SelectAll` retains its one-pass streaming presenter and
+behavioral Length/Z3 assessment retains its checked serial lifecycle, so both
+bypass the pair scheduler. `jobs = 1` also keeps the historical serial
+per-backend whole-presentation timers. Running two independent heaps can raise
+peak memory from approximately the larger backend footprint toward their sum,
+so that setting remains the documented resource fallback.
 
 This is coarse-grained frontend concurrency, not parallel Djinn proof search
 or parallel Exference queue traversal. The checked adapter APIs and immutable
@@ -837,7 +854,11 @@ The downstream API suite also compiles deliberately rejected probes to protect
 opaque-constructor boundaries. `djex-parallel-tests` uses synchronization
 barriers rather than timing guesses to pin simultaneous start, stable
 left-to-right observation, failure isolation, exception cleanup, caller
-cancellation, and strict worker output. Benchmarks are separate Cabal
+cancellation, strict worker output, the one-cutoff timed race, cutoff ties,
+publication races, clock wrap and maximum-budget arithmetic, and exact
+deadline cancellation identity. The CLI suite also pins the contiguous REPL
+dispatch block that performs Djinn admission, Exference admission, cutoff
+capture, lane construction, and ordered replay. Benchmarks are separate Cabal
 components and are not run by `cabal test all`.
 
 Run the complete supported validation from the repository root:
@@ -858,7 +879,9 @@ end-to-end serial/parallel comparison pairs. It requires exact transcript
 equality before timing and for every measured pair, and reports medians and
 95th percentiles rather than making a broad speedup claim. See the
 [dated scheduler report](reports/2026-08-20-deterministic-parallel-backend-search.md)
-for its workload, controls, and current observations.
+for its workload, controls, and current observations. The
+[timed-deadline successor](reports/2026-08-20-timed-parallel-backend-deadline.md)
+records the shared-cutoff scheduler and its deterministic validation.
 
 Two practical notes about reading the result:
 

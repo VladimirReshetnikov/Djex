@@ -2,6 +2,10 @@
 
 Date: 2026-08-20
 
+> **Successor:** This report records the initial untimed checkpoint and its
+> benchmark. Eligible positive-timeout comparisons now use one shared cutoff;
+> see [Timed parallel backend deadline](2026-08-20-timed-parallel-backend-deadline.md).
+
 ## Outcome
 
 The shared Djex REPL can now overlap its two independent backend searches for
@@ -16,10 +20,11 @@ query, result, session, `ReplOptions`, or facade type.
 
 ## Eligibility boundary
 
-The paired scheduler is used only when all of these conditions hold:
+At this initial checkpoint, the paired scheduler was used only when all of
+these conditions held:
 
-- the active query selection is `BothBackends`, whether through `:compare` or
-  a bare query under `:backend both`;
+- the query has resolved to `BothBackends`, including `:compare`, bare input or
+  `:synth` under `:backend both`, and repetition of such a query;
 - the shared parsed request/session route is available rather than the legacy
   parser fallback;
 - the query is unconstrained rather than a behavioral `--where`/Z3 query;
@@ -27,9 +32,9 @@ The paired scheduler is used only when all of these conditions hold:
 - `timeout = 0`; and
 - `select` is `first` or `best`, not `all`.
 
-Everything else retains its existing path. `jobs = 1` is an exact serial
-escape hatch. A nonzero timeout retains the established serial
-whole-presentation timer; `select = all` retains one-pass serial streaming;
+Everything else retained its existing path. `jobs = 1` was and remains an
+exact serial escape hatch. A nonzero timeout then retained the established
+serial whole-presentation timer; `select = all` retains one-pass serial streaming;
 and behavioral assessment retains its checked single-session Length/Z3
 lifecycle. The compatibility parser fallback also stays serial. Values above
 two are valid but cannot add a third lane to a two-backend comparison.
@@ -89,7 +94,7 @@ thresholds. They pin:
 The CLI regression runs the same bounded multi-query session with `jobs = 1`
 and `jobs = 2`, compares complete exit/stdout/stderr triples, repeats the
 parallel case, and covers an eligible ordinary comparison plus the
-`select = all` and timed serial fallbacks.
+`select = all` and, at this checkpoint, timed serial fallbacks.
 
 ## End-to-end benchmark
 
@@ -133,9 +138,11 @@ claim or predict another query, runtime, or machine.
 
 ## Deferred parallel seams
 
-This checkpoint intentionally leaves these as later work:
+This checkpoint originally left a shared absolute deadline for concurrent
+timed comparisons as later work. That seam is implemented and audited in the
+[timed-deadline successor](2026-08-20-timed-parallel-backend-deadline.md).
+The remaining deferred seams are:
 
-- a shared absolute deadline for concurrent timed comparisons;
 - deterministic concurrent streaming or bounded materialization for
   `select = all`;
 - concurrency inside the Exference priority frontier or Djinn proof search;

@@ -77,10 +77,14 @@ Only the shared terminal REPL has an internal paired-backend scheduler. Its
 positive `jobs` setting defaults to `2`; `jobs = 1` is the exact serial and
 lower-peak-memory fallback. It overlaps one Djinn and one Exference worker only
 for unconstrained `both`/`:compare` queries on the shared parsed route, with
-`timeout = 0` and a non-streaming `select` policy. Timed, `select = all`,
-behavioral Length/Z3, and legacy-parser queries remain serial. Workers strictly
-prepare private output plans, and the REPL owner always replays Djinn before
-Exference.
+a non-streaming `select` policy. Both untimed and positive-timeout pairs are
+eligible. Timed pairs validate both requests before one shared cutoff and
+strictly prepare private output plans within it; the REPL owner replays Djinn
+before observing and replaying Exference, whose arbiter can continue
+independently during Djinn replay. `select = all`,
+behavioral Length/Z3, legacy-parser, and single-backend queries remain serial.
+`jobs = 1` also preserves the historical fresh whole-command timer for each
+backend.
 
 The packaged `djex` executable enables the threaded RTS and defaults to two
 capabilities. Calling `runRepl` or `runArguments` from the library does not

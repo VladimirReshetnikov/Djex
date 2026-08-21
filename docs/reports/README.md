@@ -118,3 +118,4 @@ Reports are listed oldest first.
 - 2026-08-16 — [Nominal Length counterexample-bank foundation](2026-08-16-nominal-length-counterexample-bank-foundation.md)
 - 2026-08-16 — [Length counterexample-bank query-replay bridge](2026-08-16-length-counterexample-bank-query-replay-bridge.md)
 - 2026-08-20 — [Deterministic parallel backend search](2026-08-20-deterministic-parallel-backend-search.md)
+- 2026-08-20 — [Timed parallel backend deadline](2026-08-20-timed-parallel-backend-deadline.md)

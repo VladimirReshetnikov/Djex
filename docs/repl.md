@@ -496,8 +496,9 @@ result is not upgraded to Djinn's proof-backed non-inhabitation evidence.
 
 An ordinary unconstrained `:compare TYPE`, or bare `TYPE` while the active
 backend is `both`, starts the Djinn and Exference work together when the shared
-parsed route is available, `jobs >= 2`, `timeout = 0`, and `select` is `first`
-or `best`. The default is `jobs = 2`, so this common case needs no setup:
+parsed route is available, `jobs >= 2`, and `select` is `first` or `best`.
+This includes both `timeout = 0` and positive timeout budgets. The default is
+`jobs = 2`, so this common case needs no setup:
 
 ```text
 :compare a -> a
@@ -518,13 +519,23 @@ diagnostic from either backend does not cancel the other. Scoped worker
 ownership cancels and joins unfinished work if a worker, consumer, or caller
 raises an exception.
 
-The concurrency boundary is intentionally narrow. A nonzero `timeout` keeps
-the established serial whole-presentation timers, `select = all` keeps
-one-pass serial streaming, and behavioral `--where`/Z3 queries keep their
-checked serial path. Running both live search heaps at once can make peak
-memory approach their sum; `jobs = 1` is the resource fallback even on a
-multi-core runtime. This is backend-level overlap only: neither individual
-search algorithm is internally parallel. A legacy-parser fallback is serial
+For a positive timeout, Djinn and Exference request validation both finish
+before the REPL captures one shared monotonic cutoff and starts either search
+lane. A lane succeeds only if its complete strict presentation plan is stamped
+before that cutoff; equality belongs to timeout. Each expired lane produces
+the ordinary `DJEX_SEARCH_TIMEOUT` diagnostic. The fixed Djinn-then-Exference
+terminal order observes and replays the Djinn outcome first, then the
+Exference outcome; the already-forked Exference arbiter can continue
+independently while the parent replays Djinn. Replay IO is outside the cutoff,
+so slow terminal IO cannot retroactively turn a completed plan into a timeout.
+
+The concurrency boundary remains narrow. `select = all` keeps one-pass serial
+streaming, and behavioral `--where`/Z3 queries keep their checked serial path.
+Running both live search heaps at once can make peak memory approach their sum;
+`jobs = 1` is the resource fallback even on a multi-core runtime and retains
+the historical fresh whole-command timer for each backend. This is
+backend-level overlap only: neither individual search algorithm is internally
+parallel. A legacy-parser fallback and every single-backend query are serial
 as well.
 
 ## Commands
@@ -1088,17 +1099,23 @@ the exact serial path; `jobs >= 2` permits the two backend workers described in
 [Paired-backend concurrency](#paired-backend-concurrency). It does not alter a
 single-backend search or increase its internal parallelism.
 
-`timeout` is the only wall-clock bound in the REPL: the engines otherwise
-stop on step, queue, depth, choice-point and candidate bounds, which are
-machine-independent but say nothing about how long a query runs. The budget starts once the checked request exists and covers search,
-selection, rendering and reporting -- all of it, because both engines produce
-results lazily and in different places. Parsing and request validation happen
-before the clock starts. Under `backend both` and `:compare` each backend run gets
-its own fresh budget. An expired budget reports `[DJEX_SEARCH_TIMEOUT]` and
-abandons the search where it stands: with `select = all` the candidates
-already printed stay printed, and no query is ever reported as answered on a
-budget stop. It does not apply to `:load`, `:eval`, `:type` or the package
-commands, and Ctrl+C still interrupts anything.
+`timeout` is the only wall-clock bound in the REPL: the engines otherwise stop
+on step, queue, depth, choice-point and candidate bounds, which are
+machine-independent but say nothing about how long a query runs. On the shared
+parsed route, parsing and request validation happen before the clock starts.
+The legacy-parser fallback retains its historical whole-command boundary, so
+its parser and request check remain inside its serial timer.
+
+On a serial route, each backend gets a fresh whole-command budget covering its
+search, selection, rendering, and reporting. This includes `jobs = 1`,
+single-backend and legacy-parser queries, and `select = all`; in the streaming
+case, candidates printed before expiry remain printed. On an eligible timed
+pair, the two validated requests instead share one cutoff covering concurrent
+search, selection, and strict presentation-plan construction. Ordered terminal
+replay is deliberately outside that cutoff. An expired lane reports
+`[DJEX_SEARCH_TIMEOUT]`, and no query is reported as answered on a budget stop.
+The setting does not apply to `:load`, `:eval`, `:type`, or package commands,
+and Ctrl+C still interrupts anything.
 
 `djinn-strategy` chooses how the prover explores its choice points.
 `depth-first` is the historical order; `interleave` alternates between

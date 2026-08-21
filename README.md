@@ -101,6 +101,7 @@ can skip ahead to [Building](#building).
 | Rule family | Engine | Reports (newest first) |
 | --- | --- | --- |
 | Deterministic paired-backend REPL concurrency with an exact serial fallback | both | [timed paired-backend deadlines](docs/reports/2026-08-20-timed-parallel-backend-deadline.md) · [initial parallel backend search](docs/reports/2026-08-20-deterministic-parallel-backend-search.md) |
+| Serial ordered search-step lanes and the evidence gate for any future internal executor | Exference | [ordered StepAction extraction and parallel research checkpoint](docs/reports/2026-08-20-exference-serial-step-actions.md) |
 | Bounded binder instantiation: six leading binders (conservative boundary at seven), five, then four | both, with exact provider evidence | [six-binder](docs/reports/2026-08-10-six-binder-instantiation.md) · [five-binder](docs/reports/2026-08-09-five-binder-instantiation.md) · [four-binder](docs/reports/2026-08-01-four-binder-instantiation.md) |
 | Per-occurrence instantiation of loaded polymorphic values and closed source monotypes | Djinn | [loaded polymorphic values](docs/reports/2026-08-01-loaded-polymorphic-djinn-values.md) |
 | Positive-only instantiation of query-local hypotheses at closed monotypes already in the request | Djinn | [query-local closed monotypes](docs/reports/2026-08-09-query-local-closed-monotype-instantiation.md) |

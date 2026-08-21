@@ -249,6 +249,27 @@ This is coarse-grained frontend concurrency, not parallel Djinn proof search
 or parallel Exference queue traversal. The checked adapter APIs and immutable
 sessions remain synchronous and unchanged.
 
+### Exference serial step-action boundary
+
+Exference's internal frontier is still serial. For each node popped from its
+priority queue, production now exposes a finite ordered list of private
+`StepAction`s: one lane for each applicable scoped provider, one or more lanes
+for the applicable structural rule, and one lane for each applicable global
+binding. Goal shape determines which categories are present and their exact
+order. Every action is interpreted from the identical popped-node snapshot,
+and a serial `concatMap` preserves the historical sibling order before the
+combined results reach depth pruning, solution classification, rating, and the
+single queue commit. Alternatives internal to one provider or global binding
+remain atomic within that action.
+
+The branching carrier remains `ExceptT BranchTruncation []`; the extraction
+does not change truncation, allocation, or lazy-trace authority. The historical
+monolithic dispatcher remains reachable only through the private engine-test
+facade as a differential oracle. No runtime worker, jobs setting, or public API
+was added. The exact parity coverage, discarded prototype measurements, and
+the admission gates for any future executor are recorded in the
+[serial StepAction report](reports/2026-08-20-exference-serial-step-actions.md).
+
 ### Quantified subtrees and provider-local evidence
 
 A frontend may hand either engine a finite list of closed types, or ordered

@@ -66,6 +66,18 @@ It uses `transformers` directly: expression checking has strict state, while
 the branching search deliberately retains lazy `StateT`.  Its hidden search
 state uses ordinary record selectors and explicit updates, keeping the engine
 independent of `mtl`, generated optics, and Template Haskell.
+
+The production frontier remains serial. Each popped node now exposes a finite
+ordered list of private `StepAction`s, split at scoped-provider, structural,
+and global-binding boundaries. The serial interpreter runs every action from
+the identical node snapshot and concatenates its results in historical order;
+alternatives within one provider or global binding remain atomic. The former
+monolithic dispatcher is retained only behind the private engine-test facade
+as a differential oracle. This changes no public API and ships no internal
+worker executor. The design, parity evidence, negative prototype measurements,
+and future performance gates are in the
+[serial StepAction report](../docs/reports/2026-08-20-exference-serial-step-actions.md).
+
 `Language.Haskell.Exference.Core.Unify` names its two flexible-variable
 contracts explicitly: `unifyDisjoint` returns separate substitutions for
 independent input namespaces, while `unifyShared` applies one occurs-checked

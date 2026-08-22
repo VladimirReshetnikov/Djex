@@ -31,6 +31,7 @@ import Control.Exception
   , try
   )
 import Control.Monad (when)
+import Data.List (isInfixOf, isSuffixOf)
 import Data.Word (Word64)
 import System.Exit (ExitCode (ExitSuccess))
 import System.Timeout (timeout)
@@ -46,6 +47,7 @@ import Test.Tasty.HUnit
 import Language.Haskell.Djex.Command.Output
 import Language.Haskell.Djex.REPL.CandidatePipeline
 import Language.Haskell.Djex.REPL.Parallel
+import Language.Haskell.Djex.REPL.SyntaxHighlight
 import Language.Haskell.Synthesis.Query
   ( QueryResult
   , queryResultFromCandidates
@@ -118,7 +120,78 @@ main = defaultMain $ testGroup "Djex deterministic parallel pair"
   , testCase "timed consumers remain stable when right completes first"
       testTimedStableConsumptionOrder
   , candidatePipelineTests
+  , syntaxHighlightTests
   ]
+
+syntaxHighlightTests :: TestTree
+syntaxHighlightTests = testGroup "Haskell syntax highlighting"
+  [ testCase "disabled highlighting is exact identity" $ do
+      let source = "data Box a = Box { unBox :: a } -- source\n"
+      assertEqual "disabled output" source $ highlightHaskell False source
+  , testCase "stripping every emitted SGR span restores exact source" $ do
+      let sources =
+            [ "module Δemo.Syntax where\n"
+            , "f x = Data.Maybe.fromMaybe 42 (Just \"a\\\"b\")\n"
+            , "g c = c == '\\n' -- character\n"
+            , "{- outer {- nested -} suffix -}\nvalue ∷ Ω → Ω"
+            , "unterminated = \"source"
+            , "{- unterminated {- nested -}"
+            ]
+      mapM_ (\source -> assertEqual "SGR round trip" source
+        $ stripSGR $ highlightHaskell True source) sources
+  , testCase "keywords, constructors, literals, numbers, and operators classify"
+      $ assertEqual "classified spans"
+        [ SyntaxSpan SyntaxKeyword "data"
+        , SyntaxSpan SyntaxPlain " "
+        , SyntaxSpan SyntaxType "Box"
+        , SyntaxSpan SyntaxPlain " a "
+        , SyntaxSpan SyntaxOperator "="
+        , SyntaxSpan SyntaxPlain " "
+        , SyntaxSpan SyntaxType "Box"
+        , SyntaxSpan SyntaxPlain " "
+        , SyntaxSpan SyntaxNumber "42"
+        , SyntaxSpan SyntaxPlain " "
+        , SyntaxSpan SyntaxLiteral "\"ok\""
+        ]
+        $ tokenizeHaskell "data Box a = Box 42 \"ok\""
+  , testCase "comments nest and longer symbolic operators remain operators" $ do
+      assertEqual "nested block comment"
+        [ SyntaxSpan SyntaxComment "{- one {- two -} three -}"
+        , SyntaxSpan SyntaxPlain "\n"
+        , SyntaxSpan SyntaxComment "-- four"
+        ]
+        $ tokenizeHaskell "{- one {- two -} three -}\n-- four"
+      assertEqual "symbolic -- continuation"
+        [SyntaxSpan SyntaxOperator "--*"] $ tokenizeHaskell "--*"
+  , testCase "quoted text, promoted names, Unicode, and partial input are total"
+      $ do
+        let source = "x' = '\\x41' : 'Just Ω ++ \"unterminated"
+            spans = tokenizeHaskell source
+        assertEqual "partial round trip" source
+          $ concatMap syntaxSpanSource spans
+        assertBool "character literal classified"
+          $ SyntaxSpan SyntaxLiteral "'\\x41'" `elem` spans
+        assertBool "Unicode constructor classified"
+          $ SyntaxSpan SyntaxType "Ω" `elem` spans
+  , testCase "highlighted spans reset and long input stays byte preserving" $ do
+      let source = concat $ replicate 2000
+            "case Just 123 of -- retained\n  value -> value\n"
+          highlighted = highlightHaskell True source
+      assertEqual "long round trip" source $ stripSGR highlighted
+      assertBool "syntax highlighting was present" $ "\ESC[" `isInfixOf` highlighted
+      assertBool "styled terminal token was reset"
+        $ "\ESC[0m" `isSuffixOf` highlightHaskell True "Maybe"
+  ]
+
+syntaxSpanSource :: SyntaxSpan -> String
+syntaxSpanSource (SyntaxSpan _ source) = source
+
+stripSGR :: String -> String
+stripSGR [] = []
+stripSGR ('\ESC' : '[' : remaining) = case break (== 'm') remaining of
+  (_, 'm' : suffix) -> stripSGR suffix
+  _ -> '\ESC' : '[' : stripSGR remaining
+stripSGR (character : remaining) = character : stripSGR remaining
 
 candidatePipelineTests :: TestTree
 candidatePipelineTests = testGroup "bounded SelectBest candidate pipeline"

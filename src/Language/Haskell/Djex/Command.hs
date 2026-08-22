@@ -40,6 +40,7 @@ module Language.Haskell.Djex.Command
   , prepareDiagnosticFailure
   , presentDjinn
   , presentAssessedExference
+  , presentExferenceSelection
   , presentExference
   , QueryTimeout
   , noQueryTimeout

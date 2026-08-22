@@ -94,6 +94,10 @@ import Language.Haskell.Djex.Package
   , runPackageOperation
   )
 import Language.Haskell.Djex.REPL.Command
+import Language.Haskell.Djex.REPL.CandidatePipeline
+  ( behavioralBestPipelineEligible
+  , selectBestQueryResultsPipelinedM
+  )
 import Language.Haskell.Djex.REPL.DjinnScope
 import Language.Haskell.Djex.REPL.Driver
 import Language.Haskell.Djex.REPL.Eval
@@ -721,11 +725,25 @@ runQuery sourceName query state = do
         Left failure -> diagnosticFailure failure
         Right results -> do
           opened <- withLengthSMTLibLiveSession execution $ \liveSession ->
-            presentAssessedExference
-              (presentation state)
-              (scopeFieldSelectors state)
-              (admitLengthWhereCandidate resolution liveSession)
-              results
+            if behavioralBestPipelineEligible
+                (searchJobs state)
+                (presentationSelection $ presentation state)
+              then do
+                selectedResults <- selectBestQueryResultsPipelinedM
+                  (void . evaluate . typedCandidateCompatibility)
+                  (exferenceCandidateComplexity . exferenceCandidateMetrics
+                    . typedCandidateCompatibility)
+                  (admitLengthWhereCandidate resolution liveSession)
+                  results
+                presentExferenceSelection
+                  (presentation state)
+                  (scopeFieldSelectors state)
+                  $ fmap typedCandidateCompatibility selectedResults
+              else presentAssessedExference
+                (presentation state)
+                (scopeFieldSelectors state)
+                (admitLengthWhereCandidate resolution liveSession)
+                results
           case opened of
             Left failure -> do
               emitDiagnostic $ contextualDiagnostic Error

@@ -123,7 +123,7 @@ SEALED_SOLVER_MODE = PINNED_Z3_SOURCE_MODE & 0o777
 # benchmark.py itself, these artifacts can safely carry non-self-referential
 # preregistered hashes in the runner.
 FROZEN_ARTIFACT_SHA256 = {
-    "result-schema.tsv": "01ed77ceea0dc246d02e3150bdeff062e828faf5508311fef18c829ce136c7ac",
+    "result-schema.tsv": "f21b3a7d63ff7b2590a46c69db379b55957c156135d478a00f9082c412dfed6a",
     "workloads/w1-scalar.repl.in": "7896c035e06dc72527bc05e63abe13507126337b0fad63ac14bd95f9dc837384",
     "workloads/w2-product.repl.in": "4be4e139dbf4e1b34f94b7c2c8740dc2dca19e5ba9ca4f5b736c536f78c17f50",
 }
@@ -424,6 +424,17 @@ def write_json(path: Path, value: Any) -> None:
         os.fsync(handle.fileno())
     os.replace(temporary, path)
     fsync_directory(path.parent)
+
+
+def sampler_scheduling_policy(interval_ns: int) -> dict[str, Any]:
+    return {
+        "policy": "fixed_rate_monotonic_deadlines",
+        "target_interval_ns": interval_ns,
+        "missed_ticks": "coalesce_to_one_immediate_catch_up",
+        "catch_up_successor": "catch_up_finish_plus_target_interval",
+        "maximum_consecutive_immediate_catch_ups": 1,
+        "deadline_equality": "on_time",
+    }
 
 
 def non_directory_residue(root: Path) -> list[str]:
@@ -1623,10 +1634,51 @@ class ProcessTreeSampler:
 
     def _loop(self) -> None:
         try:
-            while not self.stop_event.wait(self.interval):
-                self._record_sample()
+            self._run_fixed_rate_samples()
         except BaseException as failure:
             self.error = repr(failure)
+
+    def _run_fixed_rate_samples(self) -> None:
+        """Sample on a fixed-rate clock with one bounded catch-up pass.
+
+        A pass that starts after its deadline coalesces every missed tick into
+        that one immediate catch-up.  Its successor is then scheduled from
+        the catch-up finish plus one full period.  This preserves fixed-rate
+        starts while ordinary passes are shorter than the period without
+        allowing an overrun to create an unbounded zero-wait loop.
+        """
+        interval_ns = round(self.interval * 1_000_000_000)
+        require(interval_ns > 0, "process sampler interval is not positive")
+        with self.lock:
+            previous_start = self.last_sample_ns
+        require(
+            previous_start is not None,
+            "process sampler fixed-rate loop lacks its synchronous sample",
+        )
+        deadline_ns = previous_start + interval_ns
+        while True:
+            now_ns = self._monotonic_ns()
+            # Equality is an on-time tick, not an overrun.  wait(0) remains a
+            # stop check and makes a stop before an immediate catch-up
+            # observable without sampling again.
+            catch_up = now_ns > deadline_ns
+            wait_ns = max(0, deadline_ns - now_ns)
+            if self.stop_event.wait(wait_ns / 1_000_000_000):
+                return
+            self._record_sample()
+            with self.lock:
+                sample_finished = self.last_sample_finished_ns
+            require(
+                sample_finished is not None,
+                "process sampler pass lacks its finish timestamp",
+            )
+            if catch_up:
+                # Never chase more than one missed tick.  Even when this
+                # catch-up pass itself overruns, its successor waits a whole
+                # period measured from this finish.
+                deadline_ns = sample_finished + interval_ns
+            else:
+                deadline_ns += interval_ns
 
     def _monotonic_ns(self) -> int:
         return time.monotonic_ns()
@@ -2475,6 +2527,9 @@ class ProcessTreeSampler:
                 ),
                 "max_interval_ns": self.max_interval_ns,
                 "max_pass_ns": self.max_pass_ns,
+                "scheduling": sampler_scheduling_policy(
+                    round(self.interval * 1_000_000_000)
+                ),
                 "sampler_error": self.error,
                 "cleanup_descriptors": sorted(self.cleanup_descriptors),
                 "known_pids": sorted(self.known),
@@ -2666,6 +2721,16 @@ def validate_sampler_quality(
     wall_finished_ns: int,
     target_interval_ms: float,
 ) -> dict[str, Any]:
+    target_interval_ns = round(target_interval_ms * 1_000_000)
+    require(
+        target_interval_ns > 0,
+        "process sampler target interval is not positive",
+    )
+    require(
+        diagnostics.get("scheduling")
+        == sampler_scheduling_policy(target_interval_ns),
+        "process sampler scheduling policy drifted",
+    )
     require(diagnostics.get("sample_count", 0) >= 2, "process sampler has fewer than two samples")
     require(diagnostics.get("span_ns", 0) > 0, "process sampler has no observed span")
     first_sample = diagnostics.get("first_sample_ns")
@@ -2698,7 +2763,6 @@ def validate_sampler_quality(
         - max(wall_started_ns, first_sample),
     )
     coverage = covered_duration / wall_duration
-    target_interval_ns = int(target_interval_ms * 1_000_000)
     initial_delay = max(0, first_sample - wall_started_ns)
     terminal_gap = max(0, wall_finished_ns - last_sample_finished)
     require(
@@ -3246,6 +3310,7 @@ class Screen:
         self.transcripts: dict[str, tuple[int, bytes, bytes]] = {}
         self.query_vectors: dict[str, dict[str, Any]] = {}
         self.rows: list[dict[str, Any]] = []
+        self.failure_attempts: list[dict[str, Any]] = []
         self.binary = {
             "baseline": Path(arguments.baseline_binary).resolve(),
             "candidate": Path(arguments.candidate_binary).resolve(),
@@ -3305,7 +3370,177 @@ class Screen:
             query_expected = self.query_vectors.setdefault(row["workload"], outcome.query_vector)
             require(outcome.query_vector == query_expected, f"{row['workload']} query vector differs in {row['cell']}")
 
+    def _artifact_path(
+        self,
+        phase: str,
+        workload: Workload,
+        cell: Cell,
+        position: int,
+        sample: int | None,
+    ) -> Path:
+        parts = [phase, workload.name]
+        if sample is not None:
+            parts.append(f"sample-{sample:02d}")
+        parts.append(f"pos-{position:02d}-{cell.name}")
+        return self.raw.joinpath(*parts)
+
+    def _failure_artifact_identity(
+        self, path: Path,
+    ) -> dict[str, Any]:
+        relative = str(path.relative_to(self.output))
+        try:
+            metadata = path.stat()
+        except FileNotFoundError:
+            return {
+                "path": relative,
+                "present": False,
+                "size": None,
+                "sha256": None,
+            }
+        require(
+            stat_module.S_ISREG(metadata.st_mode),
+            f"failure-attempt artifact is not a regular file: {relative}",
+        )
+        return {
+            "path": relative,
+            "present": True,
+            "size": metadata.st_size,
+            "sha256": sha256_file(path),
+        }
+
+    def _persist_failure_attempt(
+        self,
+        phase: str,
+        workload: Workload,
+        cell: Cell,
+        position: int,
+        sample: int | None,
+        williams_row: int | None,
+        primary: BaseException,
+    ) -> dict[str, Any]:
+        artifact = self._artifact_path(
+            phase, workload, cell, position, sample,
+        )
+        artifact.mkdir(parents=True, exist_ok=True)
+        manifest_path = artifact / "failure-attempt-manifest.json"
+        require(
+            not manifest_path.exists() and not manifest_path.is_symlink(),
+            "failure-attempt manifest already exists: "
+            f"{manifest_path.relative_to(self.output)}",
+        )
+        named_paths = {
+            "command": artifact / "command.json",
+            "input": artifact / "input.repl",
+            "stdout": artifact / "stdout.bin",
+            "stderr": artifact / "stderr.bin",
+            "stats": artifact / "rts.stats",
+            "process_tree": artifact / "process-tree.json",
+            "residue": artifact / "private-residue.json",
+            "query_vector": artifact / "query-vector.json",
+        }
+        traces = sorted(
+            (
+                path for path in artifact.glob("strace*")
+                if path.is_file() and not path.is_symlink()
+            ),
+            key=lambda path: os.fsencode(path.name),
+        )
+        manifest = {
+            "schema": "djex-benchmark-failure-attempt/v1",
+            "run_id": self.run_id,
+            "attempt": {
+                "phase": phase,
+                "workload": workload.name,
+                "cell": cell.name,
+                "revision": cell.revision,
+                "commit": cell.commit,
+                "jobs": cell.jobs,
+                "capabilities": cell.capabilities,
+                "position": position,
+                "sample": sample,
+                "williams_row": williams_row,
+                "artifact_dir": str(artifact.relative_to(self.output)),
+            },
+            "failure": {
+                "type": type(primary).__name__,
+                "message": str(primary),
+            },
+            "artifacts": {
+                name: self._failure_artifact_identity(path)
+                for name, path in named_paths.items()
+            },
+            "traces": [
+                self._failure_artifact_identity(path) for path in traces
+            ],
+        }
+        write_json(manifest_path, manifest)
+        reference = {
+            **manifest["attempt"],
+            "path": str(manifest_path.relative_to(self.output)),
+            "size": manifest_path.stat().st_size,
+            "sha256": sha256_file(manifest_path),
+        }
+        self.failure_attempts.append(reference)
+        return reference
+
+    def failure_attempt_summary(self) -> dict[str, Any]:
+        references = json.loads(canonical_json(self.failure_attempts))
+        verification_failures: list[str] = []
+        for reference in references:
+            path = self.output / reference["path"]
+            try:
+                metadata = path.stat()
+                require(
+                    stat_module.S_ISREG(metadata.st_mode)
+                    and metadata.st_size == reference["size"]
+                    and sha256_file(path) == reference["sha256"],
+                    "failure-attempt manifest identity drifted",
+                )
+            except BaseException as failure:
+                verification_failures.append(
+                    f"{reference['path']}: {type(failure).__name__}: "
+                    f"{failure}"
+                )
+        return {
+            "schema": "djex-benchmark-failure-attempt-set/v1",
+            "count": len(references),
+            "manifests": references,
+            "manifests_sha256": sha256_bytes(canonical_json(references)),
+            "verification_pass": not verification_failures,
+            "verification_failures": verification_failures,
+        }
+
     def execute(
+        self,
+        phase: str,
+        workload: Workload,
+        cell: Cell,
+        position: int,
+        sample: int | None = None,
+        williams_row: int | None = None,
+    ) -> RunOutcome:
+        try:
+            return self._execute_once(
+                phase, workload, cell, position, sample, williams_row,
+            )
+        except BaseException as primary:
+            try:
+                self._persist_failure_attempt(
+                    phase, workload, cell, position, sample, williams_row,
+                    primary,
+                )
+            except BaseException as durability_failure:
+                raise HarnessFailure(
+                    "screen invocation failed and failure-attempt manifest "
+                    "persistence also failed: "
+                    f"primary={type(primary).__name__}: {primary}; "
+                    "persistence="
+                    f"{type(durability_failure).__name__}: "
+                    f"{durability_failure}"
+                ) from primary
+            raise
+
+    def _execute_once(
         self,
         phase: str,
         workload: Workload,
@@ -3332,11 +3567,9 @@ class Screen:
             ),
             "diagnostic calibration invocation shape drifted",
         )
-        parts = [phase, workload.name]
-        if sample is not None:
-            parts.append(f"sample-{sample:02d}")
-        parts.append(f"pos-{position:02d}-{cell.name}")
-        artifact = self.raw.joinpath(*parts)
+        artifact = self._artifact_path(
+            phase, workload, cell, position, sample,
+        )
         artifact.mkdir(parents=True)
         self.begin_run()
         private = artifact / "private"
@@ -3786,6 +4019,22 @@ class Screen:
         return RunOutcome(row, (process.returncode, stdout, stderr), trace["query_vector"] if trace else None)
 
 
+def screen_failure_attempt_summary(
+    screen: Screen | None,
+) -> dict[str, Any]:
+    if screen is not None:
+        return screen.failure_attempt_summary()
+    references: list[dict[str, Any]] = []
+    return {
+        "schema": "djex-benchmark-failure-attempt-set/v1",
+        "count": 0,
+        "manifests": references,
+        "manifests_sha256": sha256_bytes(canonical_json(references)),
+        "verification_pass": True,
+        "verification_failures": [],
+    }
+
+
 def measured_schedule() -> list[tuple[int, str, int, tuple[str, ...]]]:
     schedule = []
     for sample in range(1, 9):
@@ -3981,6 +4230,9 @@ def collect_provenance(arguments: argparse.Namespace) -> dict[str, Any]:
         "host": host_identity(),
         "sample_interval_ms": arguments.sample_interval_ms,
         "sampler_quality_gates": {
+            "scheduling": sampler_scheduling_policy(
+                round(arguments.sample_interval_ms * 1_000_000)
+            ),
             "minimum_wall_coverage": SAMPLER_MIN_WALL_COVERAGE,
             "maximum_mean_interval_multiplier": (
                 SAMPLER_MAX_MEAN_INTERVAL_MULTIPLIER
@@ -4249,6 +4501,21 @@ def run_screen(arguments: argparse.Namespace) -> int:
                 ]
                 if host_finalization["failure"] is not None:
                     finalization_failures.append(host_finalization["failure"])
+        failure_attempts = screen_failure_attempt_summary(screen)
+        if not failure_attempts["verification_pass"]:
+            finalization_failures.append(
+                "failure-attempt manifest verification failed: "
+                + repr(failure_attempts["verification_failures"])
+            )
+        if provenance is not None:
+            provenance["failure_attempts"] = failure_attempts
+            try:
+                write_json(output / "provenance.json", provenance)
+            except BaseException as failure:
+                finalization_failures.append(
+                    "failure-attempt provenance anchoring failed: "
+                    f"{type(failure).__name__}: {failure}"
+                )
         evidence_hash_failures: list[str] = []
 
         def optional_evidence_hash(path: Path) -> str | None:
@@ -4283,6 +4550,7 @@ def run_screen(arguments: argparse.Namespace) -> int:
             ),
             "host_control_end_sha256": host_end_sha256,
             "host_control_attestation_sha256": host_attestation_sha256,
+            "failure_attempts": failure_attempts,
             "completed_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         if failures or analyzed_decision is None:
@@ -4493,6 +4761,173 @@ def check_proc_stat_parser() -> None:
             )
         else:
             raise HarnessFailure(f"malformed proc-stat {reason} was accepted")
+
+
+def check_sampler_fixed_rate_scheduler() -> None:
+    class FakeStopEvent:
+        def __init__(
+            self, owner: "FixedRateSampler", *,
+            stop_on_positive_wait: int | None = None,
+        ) -> None:
+            self.owner = owner
+            self.stop_on_positive_wait = stop_on_positive_wait
+            self.positive_waits = 0
+            self.wait_calls: list[int] = []
+            self.pending_wait: int | None = None
+            self.stopped = False
+
+        def set(self) -> None:
+            self.stopped = True
+
+        def wait(self, seconds: float) -> bool:
+            wait_ns = round(seconds * 1_000_000_000)
+            self.wait_calls.append(wait_ns)
+            if self.stopped:
+                return True
+            if wait_ns > 0:
+                self.positive_waits += 1
+                if self.positive_waits == self.stop_on_positive_wait:
+                    self.stopped = True
+                    return True
+            self.owner.clock += wait_ns
+            self.pending_wait = wait_ns
+            return False
+
+    class FixedRateSampler(ProcessTreeSampler):
+        def __init__(
+            self, pass_durations: Sequence[int], *,
+            stop_after: int | None = None,
+            stop_on_positive_wait: int | None = None,
+        ) -> None:
+            # The fixed-rate loop needs only these explicitly modeled fields;
+            # no procfs, process, thread, or wall clock enters this fixture.
+            self.interval = 0.001
+            self.lock = threading.Lock()
+            self.clock = 0
+            self.last_sample_ns: int | None = 0
+            self.last_sample_finished_ns: int | None = 0
+            self.first_sample_ns: int | None = 0
+            self.sample_count = 1
+            self.interval_sum_ns = 0
+            self.max_interval_ns = 0
+            self.max_pass_ns = 0
+            self.pass_durations = list(pass_durations)
+            self.stop_after = (
+                len(self.pass_durations)
+                if stop_after is None else stop_after
+            )
+            self.starts = [0]
+            self.waits_before_samples: list[int] = []
+            self.stop_event = FakeStopEvent(
+                self, stop_on_positive_wait=stop_on_positive_wait,
+            )
+
+        def _monotonic_ns(self) -> int:
+            return self.clock
+
+        def _record_sample(
+            self, *, force_session_scan: bool = False,
+        ) -> None:
+            require(
+                not force_session_scan,
+                "fixed-rate fixture received a forced session scan",
+            )
+            require(
+                self.stop_event.pending_wait is not None,
+                "fixed-rate sample lacks its preceding stop check",
+            )
+            wait_ns = self.stop_event.pending_wait
+            self.stop_event.pending_wait = None
+            self.waits_before_samples.append(wait_ns)
+            sample_started = self.clock
+            require(
+                bool(self.pass_durations),
+                "fixed-rate fixture exhausted its pass durations",
+            )
+            sample_duration = self.pass_durations.pop(0)
+            self.clock += sample_duration
+            previous_start = self.last_sample_ns
+            require(
+                previous_start is not None,
+                "fixed-rate fixture lost its preceding sample",
+            )
+            interval = sample_started - previous_start
+            self.interval_sum_ns += interval
+            self.max_interval_ns = max(self.max_interval_ns, interval)
+            self.last_sample_ns = sample_started
+            self.last_sample_finished_ns = self.clock
+            self.sample_count += 1
+            self.max_pass_ns = max(self.max_pass_ns, sample_duration)
+            self.starts.append(sample_started)
+            if len(self.starts) - 1 >= self.stop_after:
+                self.stop_event.set()
+
+        def measured_mean_interval_ns(self) -> int:
+            return self.interval_sum_ns // (self.sample_count - 1)
+
+    sub_period = FixedRateSampler([200_000] * 5)
+    sub_period._run_fixed_rate_samples()
+    require(
+        sub_period.starts
+        == [0, 1_000_000, 2_000_000, 3_000_000, 4_000_000, 5_000_000]
+        and sub_period.waits_before_samples
+        == [1_000_000, 800_000, 800_000, 800_000, 800_000],
+        "sub-period fixed-rate sampling accumulated relative-delay drift",
+    )
+    require(
+        sub_period.measured_mean_interval_ns() == 1_000_000,
+        "fixed-rate measured mean interval drifted",
+    )
+
+    one_overrun = FixedRateSampler([3_500_000, 100_000, 100_000])
+    one_overrun._run_fixed_rate_samples()
+    require(
+        one_overrun.waits_before_samples == [1_000_000, 0, 1_000_000]
+        and one_overrun.starts == [0, 1_000_000, 4_500_000, 5_600_000],
+        "one overrun did not coalesce into exactly one immediate catch-up",
+    )
+
+    repeated_overruns = FixedRateSampler([1_500_000] * 6)
+    repeated_overruns._run_fixed_rate_samples()
+    repeated_waits = repeated_overruns.waits_before_samples
+    require(
+        repeated_waits == [1_000_000, 0, 1_000_000, 0, 1_000_000, 0]
+        and all(
+            not (left == 0 and right == 0)
+            for left, right in zip(repeated_waits, repeated_waits[1:])
+        ),
+        "repeated overruns created consecutive immediate catch-ups",
+    )
+
+    stop_during_wait = FixedRateSampler(
+        [100_000], stop_on_positive_wait=1,
+    )
+    stop_during_wait._run_fixed_rate_samples()
+    require(
+        stop_during_wait.starts == [0]
+        and stop_during_wait.stop_event.wait_calls == [1_000_000],
+        "stop during a scheduled wait allowed another sample",
+    )
+
+    stop_before_catch_up = FixedRateSampler(
+        [1_500_000, 100_000], stop_after=1,
+    )
+    stop_before_catch_up._run_fixed_rate_samples()
+    require(
+        stop_before_catch_up.starts == [0, 1_000_000]
+        and stop_before_catch_up.stop_event.wait_calls
+        == [1_000_000, 0],
+        "stop before an immediate catch-up allowed another sample",
+    )
+
+    exact_equality = FixedRateSampler([1_000_000, 100_000, 100_000])
+    exact_equality._run_fixed_rate_samples()
+    require(
+        exact_equality.starts == [0, 1_000_000, 2_000_000, 3_000_000]
+        and exact_equality.waits_before_samples
+        == [1_000_000, 0, 900_000],
+        "exact-deadline equality was treated as an overrun",
+    )
 
 
 def check_sampler_capture_protocol() -> None:
@@ -5284,7 +5719,7 @@ def check_sampler_capture_protocol() -> None:
             "discard ownership-transfer failure lost or leaked its fd",
         )
 
-        execute_source = inspect.getsource(Screen.execute)
+        execute_source = inspect.getsource(Screen._execute_once)
         require(
             "finalize_sampler_images(" in execute_source
             and "sampler.solver_snapshot()" not in execute_source,
@@ -5683,6 +6118,8 @@ def check_exception_cleanup_and_stable_environment() -> None:
         )
         screen.output = output
         screen.raw = raw
+        screen.run_id = run_identifier(output)
+        screen.failure_attempts = []
         screen.environment = output / "stable-empty-environment"
         screen.binary = {
             "baseline": Path("/definitely-not-a-djex-benchmark-binary"),
@@ -5897,6 +6334,7 @@ def self_check() -> int:
         "mean_interval_ns": 1_000_000,
         "max_interval_ns": 4_000_000,
         "max_pass_ns": 500_000,
+        "scheduling": sampler_scheduling_policy(1_000_000),
         "sampler_error": None,
         "pid_telemetry": {},
         "session_scan": {
@@ -5927,6 +6365,28 @@ def self_check() -> int:
         sampler_fixture, 0, 2_000_000_000, 1.0
     )
     require(sampler_quality["coverage_ratio"] > 0.99, "sampler coverage parser")
+    missing_scheduling = json.loads(canonical_json(sampler_fixture))
+    del missing_scheduling["scheduling"]
+    try:
+        validate_sampler_quality(
+            missing_scheduling, 0, 2_000_000_000, 1.0,
+        )
+    except HarnessFailure:
+        pass
+    else:
+        raise HarnessFailure("missing sampler scheduling policy was accepted")
+    drifted_scheduling = json.loads(canonical_json(sampler_fixture))
+    drifted_scheduling["scheduling"][
+        "maximum_consecutive_immediate_catch_ups"
+    ] = 2
+    try:
+        validate_sampler_quality(
+            drifted_scheduling, 0, 2_000_000_000, 1.0,
+        )
+    except HarnessFailure:
+        pass
+    else:
+        raise HarnessFailure("drifted sampler scheduling policy was accepted")
     missing_forced_scan = json.loads(canonical_json(sampler_fixture))
     missing_forced_scan["session_scan"]["forced_count"] = 1
     try:
@@ -6219,8 +6679,10 @@ def self_check() -> int:
     )
     check_synthetic_trace_parser()
     check_proc_stat_parser()
+    check_sampler_fixed_rate_scheduler()
     check_sampler_capture_protocol()
     check_calibration_protocol()
+    check_failure_attempt_manifest_protocol()
     check_live_sealed_memfd_session_fallback()
     check_exception_cleanup_and_stable_environment()
     for workload in WORKLOADS.values():
@@ -6349,6 +6811,7 @@ def calibration_identity_snapshot(
         },
         "sampler_protocol": {
             "target_interval_ms": 1.0,
+            "scheduling": sampler_scheduling_policy(1_000_000),
             "minimum_wall_coverage": SAMPLER_MIN_WALL_COVERAGE,
             "maximum_mean_interval_multiplier": (
                 SAMPLER_MAX_MEAN_INTERVAL_MULTIPLIER
@@ -6677,6 +7140,129 @@ def check_calibration_protocol() -> None:
     )
 
 
+def check_failure_attempt_manifest_protocol() -> None:
+    with tempfile.TemporaryDirectory(
+        prefix="djex-failure-attempt-self-check-"
+    ) as source:
+        output = Path(source) / "evidence"
+        raw = output / "raw"
+        raw.mkdir(parents=True)
+        screen = object.__new__(Screen)
+        screen.output = output
+        screen.raw = raw
+        screen.run_id = run_identifier(output)
+        screen.rows = []
+        screen.failure_attempts = []
+        artifact = screen._artifact_path(
+            "warmup", WORKLOADS["W1"], CELLS["B"], 7, None,
+        )
+        artifact.mkdir(parents=True)
+        payloads = {
+            "command.json": b'{"synthetic":"command"}\n',
+            "input.repl": b"synthetic input\n",
+            "stdout.bin": b"synthetic stdout\n",
+            "stderr.bin": b"synthetic stderr\n",
+            "rts.stats": b"synthetic stats\n",
+            "process-tree.json": b'{"synthetic":"tree"}\n',
+            "private-residue.json": b'{"synthetic":"residue"}\n',
+            "strace.4242": b"synthetic trace\n",
+        }
+        for name, contents in payloads.items():
+            (artifact / name).write_bytes(contents)
+
+        def fail_after_artifacts(*_arguments: Any, **_keywords: Any) -> Any:
+            raise HarnessFailure("synthetic post-artifact cadence gate")
+
+        screen._execute_once = fail_after_artifacts  # type: ignore[method-assign]
+        try:
+            screen.execute(
+                "warmup", WORKLOADS["W1"], CELLS["B"], 7,
+            )
+        except HarnessFailure as failure:
+            require(
+                str(failure) == "synthetic post-artifact cadence gate",
+                "failure-attempt persistence replaced the primary failure",
+            )
+        else:
+            raise HarnessFailure(
+                "synthetic post-artifact failure was accepted"
+            )
+        require(
+            screen.rows == [],
+            "failure-attempt persistence fabricated a result row",
+        )
+        manifest_path = artifact / "failure-attempt-manifest.json"
+        require(
+            manifest_path.is_file() and len(screen.failure_attempts) == 1,
+            "post-artifact failure manifest was not durably exposed",
+        )
+        manifest = json.loads(manifest_path.read_bytes())
+        require(
+            manifest["attempt"]["phase"] == "warmup"
+            and manifest["attempt"]["workload"] == "W1"
+            and manifest["attempt"]["cell"] == "B"
+            and manifest["attempt"]["position"] == 7
+            and manifest["attempt"]["sample"] is None
+            and manifest["failure"] == {
+                "type": "HarnessFailure",
+                "message": "synthetic post-artifact cadence gate",
+            },
+            "failure-attempt invocation identity drifted",
+        )
+        for key, name in (
+            ("command", "command.json"),
+            ("input", "input.repl"),
+            ("stdout", "stdout.bin"),
+            ("stderr", "stderr.bin"),
+            ("stats", "rts.stats"),
+            ("process_tree", "process-tree.json"),
+            ("residue", "private-residue.json"),
+        ):
+            identity = manifest["artifacts"][key]
+            require(
+                identity["present"] is True
+                and identity["size"] == len(payloads[name])
+                and identity["sha256"] == sha256_bytes(payloads[name]),
+                f"failure-attempt {key} identity drifted",
+            )
+        require(
+            len(manifest["traces"]) == 1
+            and manifest["traces"][0]["size"]
+            == len(payloads["strace.4242"])
+            and manifest["traces"][0]["sha256"]
+            == sha256_bytes(payloads["strace.4242"]),
+            "failure-attempt trace identity drifted",
+        )
+        summary = screen_failure_attempt_summary(screen)
+        require(
+            summary["count"] == 1
+            and summary["verification_pass"] is True
+            and summary["manifests"][0]["sha256"]
+            == sha256_file(manifest_path)
+            and summary["manifests_sha256"]
+            == sha256_bytes(canonical_json(summary["manifests"])),
+            "failure-attempt set did not cryptographically anchor manifest",
+        )
+        for record_name in ("provenance", "decision"):
+            record_path = output / f"synthetic-{record_name}.json"
+            write_json(record_path, {"failure_attempts": summary})
+            restored = json.loads(record_path.read_bytes())
+            require(
+                restored["failure_attempts"]["manifests"][0]["sha256"]
+                == sha256_file(manifest_path),
+                f"synthetic {record_name} lost failure-attempt anchor",
+            )
+        require(
+            'provenance["failure_attempts"] = failure_attempts'
+            in inspect.getsource(run_screen)
+            and '"failure_attempts": failure_attempts'
+            in inspect.getsource(run_screen)
+            and '"failure_attempts": failure_attempts'
+            in inspect.getsource(run_sampler_calibration),
+            "release/calibration failure-attempt anchor wiring drifted",
+        )
+
+
 def run_sampler_calibration(arguments: argparse.Namespace) -> int:
     output = Path(arguments.output).resolve()
     require(
@@ -6846,6 +7432,12 @@ def run_sampler_calibration(arguments: argparse.Namespace) -> int:
                 "catchable termination requested during calibration: "
                 f"{list(termination.requests)}"
             )
+        failure_attempts = screen_failure_attempt_summary(screen)
+        if not failure_attempts["verification_pass"]:
+            finalization_failures.append(
+                "calibration failure-attempt manifest verification failed: "
+                + repr(failure_attempts["verification_failures"])
+            )
 
         def required_evidence_hash(path: Path) -> str | None:
             if not path.is_file():
@@ -6900,6 +7492,7 @@ def run_sampler_calibration(arguments: argparse.Namespace) -> int:
                 "pass": identity_attestation["pass"],
             },
             "row_attestation": row_attestation,
+            "failure_attempts": failure_attempts,
             "termination_requests_before_outcome_commit": list(
                 termination.requests
             ),
@@ -6953,6 +7546,7 @@ def run_sampler_calibration(arguments: argparse.Namespace) -> int:
             "identity_attestation_sha256": (
                 identity_attestation_sha256
             ),
+            "failure_attempts": failure_attempts,
             "rows": rows,
             "primary_failure": failures[0] if failures else None,
             "finalization_failures": failures[1:] if failures else [],

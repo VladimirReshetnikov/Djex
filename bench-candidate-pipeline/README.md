@@ -185,6 +185,57 @@ is a consequence of never reaching post-capture cadence, not an independent
 performance result. The v2-01 directory is never reused; any corrected
 calibration is a new diagnostic invocation from separately frozen bytes.
 
+## Immutable sampler-calibration v2-02 cadence HOLD
+
+The source-mode repair was frozen and the second diagnostic calibration ran
+once at
+`/tmp/djex-solver-sampler-calibration-20260822-c4a76370-v2-02`. It durably
+appended and fsynced 42 valid W1/B calibration rows. Invocation 43 retained the
+exact sealed Z3 image (source-derived mode 493, or `0755`), passed the singleton
+recognized/captured PID-and-start identity attestation, and completed cleanup,
+but its 3,101,996 ns mean sampling interval exceeded the frozen 3,000,000 ns
+gate. The invocation therefore threw before a row could be constructed or
+appended. Its input, stdout, and stderr bytes equal those of the 42 completed
+rows, but invocation 43 is **not** a fully validated workload row: cadence
+failed before the later sealed-image row checks and transcript validation, and
+its process-tree record has no return-code field. No exit-status or semantic
+PASS is inferred for it.
+
+Although those invocation-43 files are coherent and preserved, the immutable
+v2-02 decision and provenance do not cryptographically anchor that unappended
+attempt. That evidence-durability gap is an additional protocol HOLD; the
+files are descriptive diagnostic evidence, not a retroactive row.
+
+This was a harness-only cadence defect. The v2-02 loop used a relative
+`stop_event.wait(interval)` after every sampling pass, so each pass's own work
+was added to the nominal 1 ms interval. The corrected loop schedules pass
+starts against fixed monotonic deadlines. If a pass overruns, all missed ticks
+coalesce into at most one immediate catch-up; the pass after that catch-up is
+scheduled one full interval from its finish, even if the catch-up also
+overruns. This removes relative-delay drift without permitting an unbounded
+back-to-back sampling loop. The 3 ms mean gate and every performance/resource
+gate remain unchanged. The failed invocation now also motivates a durable,
+canonical failure-attempt manifest: it hashes the command, input, transcript,
+RTS statistics, process tree, residue, and any trace files without fabricating
+a result row, and both HOLD provenance and decision records anchor its digest.
+
+The immutable v2-02 tree contains 307 regular files totaling 672,508 bytes.
+Its decision SHA-256 is
+`2852a3d5325bf8483842770db2d304628078108eb0c5e40d74db5fd91ee18e07`;
+provenance is
+`10aacd6cd628a7aa2d4b1f434a13e502c02745afb791a2d862fe250f135ca64e`;
+the 42-row results file is
+`d79296795821e4db6863d0ed10d52f00cac815e4ab72da6483784e7f2c9a553d`;
+and invocation 43's process tree is
+`c2136e5edb64201db5ca67d18cc45881005fbbbf1fc83ff7269c6ee226dadf56`.
+The equal start/end identity files hash to
+`44c53f45a2f23c0bbcc247c0fd56d000539b1a95583d1618af5a5bd3d44fcf68`,
+and their attestation hashes to
+`7abc50295a1179188876c56e324183e0ab8d84d2d4738eb490eb4fbbc1dd0274`.
+This is diagnostic HOLD evidence only, makes no performance inference, and is
+never reused. A v2-03 calibration may use only fresh output after the repaired
+source and synthetic checks receive an independent audit.
+
 ## Frozen workloads and calibration
 
 Both templates explicitly select the Exference backend and `best` selection,
@@ -357,10 +408,14 @@ non-writing process-state check, so there is no second capability handshake.
 
 The 1 ms sampler records explicit parent lineage, sampled process-session CPU,
 aggregate peak RSS, sample count, achieved intervals, and maximum pass
-duration. The SID fallback deliberately adds bounded top-level `/proc` scan
-overhead inside the timed interval: every pass before capture and nominally
-every 50 ms after. Pre-freeze diagnostic helpers characterized full-scan start
-cadence; they were not benchmark samples and do not promote attempt-1. The
+duration. Pass starts use fixed monotonic deadlines rather than sleeping one
+full interval after each pass. Missed ticks coalesce into at most one immediate
+catch-up; the successor of that catch-up waits a full interval from its finish,
+which bounds back-to-back work under repeated overruns. The SID fallback
+deliberately adds bounded top-level `/proc` scan overhead inside the timed
+interval: every pass before capture and nominally every 50 ms after. Pre-freeze
+diagnostic helpers characterized full-scan start cadence; they were not
+benchmark samples and do not promote attempt-1. The
 corrected protocol independently freezes a 50 ms maximum scan duration and
 100 ms maximum start gap as fail-closed quality bounds. After capture, exact
 parsed argv removes any need for sub-millisecond launch racing, while the full
@@ -370,13 +425,25 @@ than subtracted. Every run must cover at least 0.98 of its wall
 interval inside the first-start through last-finish observation window; the
 initial and terminal gaps, maximum interval, and maximum pass duration must
 each be at most 50 times the configured target, while the mean interval must be
-at most 3 times the target. Sparse CPU/RSS sampling is therefore HOLD rather
-than silently under-counted. Cleanup rejects any observed descendant identity or
+at most 3 times the target. Row validation also requires the complete reported
+fixed-rate scheduling-policy object to equal the frozen policy for the rounded
+target interval; a missing or drifted policy is HOLD. Sparse CPU/RSS sampling
+is therefore HOLD rather than silently under-counted. Cleanup rejects any
+observed descendant identity or
 same-process-group survivor and every non-directory private node, including
 FIFO, socket, device, and symlink nodes. A very fast detached double-fork that
 is neither sampled nor left in the original process group is outside this
 literal cleanup guarantee; the evidence claims observed recursive lineage plus
 same-group cleanup, not a cgroup/subreaper guarantee.
+
+If an invocation fails after its artifact directory exists, `Screen.execute`
+does not invent a partial result row. It instead atomically writes and fsyncs a
+canonical `failure-attempt-manifest.json` in that invocation directory. The
+manifest identifies phase, workload, cell, position, optional sample/Williams
+row, and hashes/sizes the command, input, stdout, stderr, RTS statistics,
+process tree, residue, optional query vector, and every extant trace file.
+Release and calibration HOLD provenance and decisions include the verified
+manifest references and their canonical aggregate SHA-256.
 
 After v2 source hashes and self-check are independently frozen, the following
 optional helper performs 64 exact baseline W1/B (`jobs=1`, `-N2`) captures in a

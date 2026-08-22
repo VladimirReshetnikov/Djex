@@ -2,8 +2,11 @@
 
 This directory contains the one-shot, fail-closed, end-to-end screen for the
 behavioral `SelectBest` candidate pipeline. It is benchmark-only: it imports no
-private production module and adds no production or calibration
-instrumentation.
+private production module and adds no production instrumentation. It does
+include a separate benchmark-only diagnostic sampler calibration, whose rows
+are explicitly non-release evidence. The corrected protocol emits screen, row,
+process-tree, and decision schemas at v2. The v1 attempt described below
+remains immutable HOLD evidence and is never reinterpreted as v2 evidence.
 
 The comparison is frozen to:
 
@@ -66,7 +69,11 @@ the committed repository identity provides the non-self-referential binding.
 The workload templates and result schema additionally have embedded,
 preregistered hashes.
 
-Run the cheap static and synthetic checks first:
+Run the cheap static and deterministic checks first. In addition to pure
+fixtures, self-check launches one isolated sealed-Z3 memfd session with task
+children deliberately hidden, captures Z3 4.8.12's deterministic parsed
+cmdline state, and checks one already-exited sealed-Z3 lifecycle. It does not
+run Djex or either benchmark workload:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -B \
@@ -105,6 +112,37 @@ those four signals, folds every queued or already-pending request into the
 decision, atomically publishes `decision.json`, and intentionally keeps them
 blocked through one-shot process exit. `SIGKILL` and host failure are
 inherently outside that guarantee.
+
+## Immutable attempt-1 instrumentation HOLD
+
+Protocol v1 ran exactly once at
+`/tmp/djex-candidate-pipeline-screen-one-shot-20260822-b9f0ab0c`. It completed
+all 16 trace preflights and W1/A warmup, then stopped before appending W1/B
+warmup with `HarnessFailure: observed 0 sealed solver images`. Thus it contains
+17 completed rows and **zero measured rows**. Zero measured rows cannot support
+a speed, KEEP, or revert decision; the production route remains release-HOLD
+until a separately preregistered corrected protocol completes.
+
+The failing invocation was baseline cell B (`jobs=1`, `-N2`), not the candidate
+route. Its sampler recorded direct child PID 494770, start identity, and CPU,
+but not a retained executable image. The 17 earlier rows, provenance, host
+controls, cleanup, and trace vectors independently validated. The attempt-1
+tree contains 315 files and 677,149,306 bytes. Hashing the GNU `sha256sum`
+records for every absolute file path in NUL-sorted order gives SHA-256
+`c93ed82e6ad7ecd0b70ebe536699b6bf4486fce688462bd816ed912022a94051`.
+That path is never reused, completed rows are never promoted into v2, and a v2
+run is new evidence rather than a replacement sample.
+
+The observed v1 failure cause was its pristine-only mutable-cmdline gate. The
+launch vector was the exact six arguments, but Z3 4.8.12 deterministically
+parses each `key=value` setting in place by replacing `=` with NUL. A delayed
+`/proc/PID/cmdline` observation therefore saw the exact stable nine-token
+parsed state and v1 rejected it instead of retaining the image. Incomplete
+Linux task-`children` hints, inspection delayed until after traversal, and
+silently discarded procfs/signature telemetry were additional v1
+instrumentation gaps. A zombie can retain stat/CPU identity after
+`/proc/PID/exe` is unavailable, so overall pass coverage alone did not prove a
+live inspection. None of these findings retroactively promotes attempt-1.
 
 ## Frozen workloads and calibration
 
@@ -166,22 +204,81 @@ cell and phase; calibration does not waive that check.
 
 ## Trace and process validation
 
-Every workload/cell gets an untimed trace preflight. The process sampler first
-identifies exactly one descendant whose executable target is the sealed
-`/memfd:djex-z3-main-image (deleted)`, whose full command line is the frozen Z3
-vector, and whose environment is empty. It opens `/proc/PID/exe` while the
-process is alive, stops the subprocess wall clock and sampler, and only then
-hashes the held executable descriptor. Thus each ordinary run obtains
-cryptographic image identity without hashing 16 MiB inside the timed interval.
+Every workload/cell gets an untimed trace preflight. `Popen(start_new_session)`
+makes the subprocess root PID the frozen session ID. The v2 sampler merges
+recursive task-children hints with a bounded top-level `/proc` TGID scan for
+that exact SID. It inspects synchronously before starting its sampling thread,
+scans every pass until the first solver image is retained, scans at a fixed
+50 ms monotonic target afterward to detect an additional exact-target
+identity, and forces a final scan. No scan may enumerate more than 65,536 TGIDs
+or take more than 50 ms, and the maximum gap between full-scan starts is 100
+ms; missing or sparse scan evidence is HOLD. Cheap known-lineage and
+task-children passes retain the 1 ms target between those full audits.
 
-For preflights, the exact sampled solver PID selects one `strace -ff -yy` file.
-The parser requires one successful sealed `execveat(AT_EMPTY_PATH)` with the
-full six-argument vector and zero environment variables. Failed executable
-access probes do not count. It reconstructs only successful returned byte
-prefixes from that PID's fd-0 pipe `read`/`readv` stream and fd-1 pipe
-`write`/`writev` stream, joining unfinished/resumed calls and tolerating split
-or partial writes. Other processes and file descriptors cannot contaminate the
-protocol.
+For a candidate PID, capture reads stat-before with PID/start/SID/state, rejects
+zombies and foreign sessions, requires the exact
+`/memfd:djex-z3-main-image (deleted)` target, and opens `/proc/PID/exe` **before**
+reading mutable cmdline or environment views. It then requires the held fstat,
+one of two frozen whole-byte live cmdline layouts, empty environment,
+stat-after, readlink-after, live-executable stat, and held-fstat-after to agree
+on the same live non-zombie PID/start/SID and device/inode. `exec_exact` is the
+pristine six-argv layout. `z3_4_8_12_parsed_exact` is the source-backed stable
+layout after Z3 4.8.12's `src/shell/main.cpp` parser replaces each of the three
+`=` bytes in `smtlib2_compliant=true`, `timeout=1000`, and `rlimit=100000`
+with NUL, yielding nine tokens. The two intermediate prefix-mutation layouts
+are retried but never accepted; every other layout is rejected. The untimed
+strace preflight remains the launch-vector oracle and still requires the
+pristine six arguments at successful `execveat`.
+
+The image must be a regular file with the frozen solver size and mode `0500`.
+The descriptor remains open across process exit and is hashed only after the
+timed interval. Every later live inspection of a captured PID also stats its
+executable and requires the retained device/inode, preventing a same-spelling
+memfd re-exec from hiding behind the link target. At finalization, the set of
+every observed exact-target `(PID,start-time)` identity must equal the captured
+image identity set and have cardinality exactly one. Thus a second recognized
+exact-target process remains HOLD even if its cmdline never reaches an accepted
+shape; zero images and multiple captured images are also HOLD.
+
+Executable-descriptor ownership is transferred only under a fail-safe local
+owner. A close-hook failure is reported even when an emergency raw close
+confirms the fd is gone; a descriptor that cannot be confirmed closed remains
+in an explicit retry registry and makes the run HOLD. Snapshot, discard, and
+primary-failure paths therefore cannot silently lose the sole fd owner.
+
+Every observed same-session PID has canonical categorized telemetry: first and
+last observation times, discovery-source counts, state and SID counts, target
+and cmdline-shape counts, gate-success counts, exact signature- and
+consistency-mismatch categories, errno categories for each procfs stage, and
+capture source/time counts. Unexpected cmdlines have a bounded first
+observation containing byte length, SHA-256, NUL count, token lengths, and only
+constrained printable arguments. Environment contents are never recorded.
+Scan counts, endpoints, maximum duration/gap, TGID bounds, categorized
+enumeration errors, and policy are recorded beside it.
+
+`/proc/PID/stat` is parsed as bytes so arbitrary non-UTF-8 or `)` characters in
+an unrelated process name cannot kill sampling. A malformed unknown-TGID race
+in the global scan receives one immediate bounded retry without manufacturing
+a per-PID identity. Only a retry that resolves the identity is allowed; an
+unresolved malformed record and the same parse failure for a known
+same-session PID are HOLD. Normal ENOENT/ESRCH disappearance races are
+categorized. `solver_observation_sha256` binds that material, including the
+recognized-target/captured-identity equality attestation, in each result row,
+and the whole object remains covered by `process_tree_sha256`. Consequently a
+future miss remains HOLD but identifies whether discovery, liveness, target,
+signature, descriptor retention, or identity consistency failed.
+
+For preflights, the exact sampled solver PID selects one `strace -ff -yy` file,
+but every emitted strace file is scanned for successful exact-target sealed
+execs. Across all files there must be exactly one successful
+`execveat(AT_EMPTY_PATH)` for the sealed-main-image target, it must belong to
+the captured solver PID, and it must carry the full six-argument vector and
+zero environment variables, preceded by exactly one successful
+`setpgid(0, 0)` in that PID. Failed executable access probes do not count. The
+parser reconstructs only successful returned byte prefixes from that PID's
+fd-0 pipe `read`/`readv` stream and fd-1 pipe `write`/`writev` stream, joining
+unfinished/resumed calls and tolerating split or partial writes. Other
+processes and file descriptors cannot contaminate the protocol.
 
 Exact echo nonces frame the four-command opening capability handshake, every
 assessment status, and every conditional get-value/model exchange. W1 requires
@@ -202,13 +299,21 @@ are validated; arbitrary `(check-sat)` traffic or capability probes cannot
 satisfy the workload contract. The post-callback readiness check is a
 non-writing process-state check, so there is no second capability handshake.
 
-The 1 ms sampler recursively discovers children from every known process task,
-records explicit parent lineage, sampled process-tree CPU, aggregate peak RSS,
-sample count, achieved intervals, and maximum pass duration. It avoids a global
-`/proc` scan during timing. Every run must cover at least 0.98 of its wall
+The 1 ms sampler records explicit parent lineage, sampled process-session CPU,
+aggregate peak RSS, sample count, achieved intervals, and maximum pass
+duration. The SID fallback deliberately adds bounded top-level `/proc` scan
+overhead inside the timed interval: every pass before capture and nominally
+every 50 ms after. Pre-freeze diagnostic helpers characterized full-scan start
+cadence; they were not benchmark samples and do not promote attempt-1. The
+corrected protocol independently freezes a 50 ms maximum scan duration and
+100 ms maximum start gap as fail-closed quality bounds. After capture, exact
+parsed argv removes any need for sub-millisecond launch racing, while the full
+SID audit exists to detect an unexpected additional exact-target identity.
+This overhead is part of corrected v2 for every cell and is reported rather
+than subtracted. Every run must cover at least 0.98 of its wall
 interval inside the first-start through last-finish observation window; the
 initial and terminal gaps, maximum interval, and maximum pass duration must
-each be at most 20 times the configured target, while the mean interval must be
+each be at most 50 times the configured target, while the mean interval must be
 at most 3 times the target. Sparse CPU/RSS sampling is therefore HOLD rather
 than silently under-counted. Cleanup rejects any observed descendant identity or
 same-process-group survivor and every non-directory private node, including
@@ -216,6 +321,38 @@ FIFO, socket, device, and symlink nodes. A very fast detached double-fork that
 is neither sampled nor left in the original process group is outside this
 literal cleanup guarantee; the evidence claims observed recursive lineage plus
 same-group cleanup, not a cgroup/subreaper guarantee.
+
+After v2 source hashes and self-check are independently frozen, the following
+optional helper performs 64 exact baseline W1/B (`jobs=1`, `-N2`) captures in a
+fresh directory. It is diagnostic-only, emits `release_evidence: false`, has no
+candidate or speed comparison, and cannot replace either attempt-1 or a release
+screen. Run it only on an explicitly quiescent host; do not run it merely as
+part of static validation:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -B \
+  bench-candidate-pipeline/benchmark.py calibrate-sampler \
+  --baseline-root /tmp/djex-pipeline-screen-root-20260822.QUs8ub/baseline \
+  --baseline-binary /tmp/djex-pipeline-screen-root-20260822.QUs8ub/baseline/dist-newstyle/build/x86_64-linux/ghc-9.12.4/djex-2026.7.17/x/djex/opt/build/djex/djex \
+  --baseline-binary-sha256 9d8bf7d37ee13e7933bfef61cb44b85fee0fe4807f44cb1e58b29baa4d9316b0 \
+  --iterations 64 \
+  --output /absolute/new-diagnostic-calibration-directory
+```
+
+Calibration rows use the dedicated
+`djex-solver-sampler-calibration-row/v1` schema and `calibration` phase. Each
+completed row is appended, flushed, and fsynced to `results.tsv` before the
+next invocation; a partial row set is preserved on HOLD. The decision is
+derived only from that durable `Screen.rows` sequence. Before row 1 and after
+closing the results file, calibration independently reattests the protocol
+repository, baseline source/build plan/binary and libraries, Z3 image,
+libraries and package, tools/interpreter/runner, result schema, README, workload
+templates, and sampler constants. Every end identity must exactly equal its
+start identity. The provenance and decision record the start/end/attestation
+hashes and pass flag; any capture, row, close, signal, evidence-write, or
+identity drift is diagnostic HOLD with primary-failure precedence. Calibration
+PASS means only 64/64 valid sampler captures under this diagnostic protocol; it
+still makes no performance or release decision.
 
 Immediately before the first preflight, the runner writes and hashes a
 cgroup-v2 host-control snapshot. It records the process scheduling affinity,

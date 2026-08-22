@@ -1,11 +1,11 @@
 column	type	required	meaning
-schema	string	yes	Fixed row schema identifier.
+schema	string	yes	Release rows use djex-select-best-candidate-pipeline-row/v2; diagnostic-only calibration rows use djex-solver-sampler-calibration-row/v1 and are never release evidence.
 run_id	sha256	yes	SHA-256-derived identifier of the absolute one-shot evidence path.
-phase	enum	yes	preflight, warmup, or measured.
+phase	enum	yes	preflight, warmup, or measured for release rows; calibration only with the diagnostic-only calibration row schema, where it means a non-comparative W1/B sampler capture that cannot support KEEP or release.
 workload	enum	yes	W1 or W2.
 sample	integer	measured only	Unreplaced measured sample number, 1 through 8.
 williams_row	integer	measured only	Even Williams row, 1 through 8.
-position	integer	yes	One-based position inside the phase order.
+position	integer	yes	One-based position inside the phase order; diagnostic calibration uses the exact ordered range 1 through 64.
 cell	enum	yes	A through H treatment cell.
 revision	enum	yes	baseline or candidate.
 commit	sha1	yes	Exact Git commit assigned to the cell.
@@ -24,7 +24,7 @@ semantic_sha256	sha256	yes	Canonical observable selection/truncation manifest di
 stats_sha256	sha256	yes	Exact separate GHC RTS statistics digest.
 rendered_candidates	integer	yes	Selected rendered candidate count derived from exact separators.
 truncation_count	integer	yes	Count of DJEX_SEARCH_TRUNCATED diagnostics; must be one.
-solver_sessions_observed	integer	yes	Exact-command-line sealed Z3 descendants observed in the process tree; must be one.
+solver_sessions_observed	integer	yes	Exact captured sealed-image Z3 identities in either frozen live cmdline state (exec_exact or z3_4_8_12_parsed_exact); must be one, and the recognized exact-target PID/start identity set must equal this singleton.
 solver_queries_observed	integer	preflight only	Behavioral assessment check-sat transactions reconstructed from the solver's fd-0 stream.
 solver_accepted_observed	integer	preflight only	Assessment UNSAT responses (accepted candidates) in the frozen ordered vector.
 solver_rejected_observed	integer	preflight only	Assessment SAT/model responses (replay-refuted candidates) in the frozen ordered vector.
@@ -32,12 +32,16 @@ solver_image_sha256	sha256	yes	SHA-256 of the held sealed solver executable desc
 query_vector_sha256	sha256	preflight only	Normalized ordered query-program/status vector digest.
 sampler_samples	integer	yes	Number of recursive known-tree sampling passes.
 sampler_span_ns	integer	yes	Monotonic span from first through last sampling-pass start.
-sampler_initial_delay_ns	integer	yes	Gap from subprocess wall start to first sampling-pass start; bounded to 20 target intervals.
-sampler_terminal_gap_ns	integer	yes	Gap from last sampling-pass finish to subprocess wall finish, or zero if sampling extends past it; bounded to 20 target intervals.
+sampler_initial_delay_ns	integer	yes	Gap from subprocess wall start to first sampling-pass start; bounded to 50 target intervals.
+sampler_terminal_gap_ns	integer	yes	Gap from last sampling-pass finish to subprocess wall finish, or zero if sampling extends past it; bounded to 50 target intervals.
 sampler_coverage_ratio	float	yes	Fraction of subprocess wall time inside the first-start through last-finish observation window; must be at least 0.98.
 sampler_mean_interval_ns	integer	yes	Mean achieved interval between sampling-pass starts.
 sampler_max_interval_ns	integer	yes	Maximum achieved interval between sampling-pass starts.
 sampler_max_pass_ns	integer	yes	Maximum duration of one recursive sampling pass.
-process_tree_sha256	sha256	yes	Digest of the exact sampler, lineage, metrics, and sealed-image manifest.
+sampler_session_scans	integer	yes	Number of bounded top-level TGID scans of the subprocess-root session; at least two, including immediate and forced-final scans.
+sampler_session_scan_max_gap_ns	integer	yes	Maximum monotonic gap between full session-scan starts; must be at most the frozen 100 ms bound.
+sampler_session_scan_max_duration_ns	integer	yes	Maximum duration of a full top-level TGID session scan; must be at most the frozen 50 ms bound.
+solver_observation_sha256	sha256	yes	Digest of the v2 root-session scan policy, categorized per-PID observation telemetry, scan diagnostics, and exact-target-recognized versus captured PID/start identity attestation.
+process_tree_sha256	sha256	yes	Digest of the exact sampler, lineage, metrics, full solver-observation attestation, descriptor cleanup/retry state, and sealed-image manifest.
 cleanup_ok	boolean	yes	Whether all observed descendant identities, same-process-group members, and private run paths were absent after cleanup.
 artifact_dir	path	yes	Run-relative directory containing exact stdout, stderr, stats, process tree, and optional traces.

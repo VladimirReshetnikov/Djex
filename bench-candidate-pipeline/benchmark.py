@@ -12,7 +12,9 @@ from __future__ import annotations
 import argparse
 import ast
 import csv
+import errno
 import hashlib
+import inspect
 import json
 import math
 import os
@@ -20,6 +22,7 @@ import platform
 import re
 import shutil
 import signal
+import stat as stat_module
 import statistics
 import subprocess
 import sys
@@ -31,8 +34,10 @@ from pathlib import Path
 from typing import Any, Sequence
 
 
-SCHEMA = "djex-select-best-candidate-pipeline-screen/v1"
-ROW_SCHEMA = "djex-select-best-candidate-pipeline-row/v1"
+SCHEMA = "djex-select-best-candidate-pipeline-screen/v2"
+ROW_SCHEMA = "djex-select-best-candidate-pipeline-row/v2"
+CALIBRATION_ROW_SCHEMA = "djex-solver-sampler-calibration-row/v1"
+DECISION_SCHEMA = "djex-select-best-candidate-pipeline-decision/v2"
 BASELINE_COMMIT = "0716144502a7dcd8bfa8755f57fd9ced58bf3b83"
 CANDIDATE_COMMIT = "aff7a5e8d0fe81f50b05c5073ff05f77e1ab68ca"
 BASELINE_BINARY_SHA256 = "9d8bf7d37ee13e7933bfef61cb44b85fee0fe4807f44cb1e58b29baa4d9316b0"
@@ -102,13 +107,19 @@ O2_LOG_SHA256 = {
 }
 SAMPLER_MIN_WALL_COVERAGE = 0.98
 SAMPLER_MAX_MEAN_INTERVAL_MULTIPLIER = 3.0
-SAMPLER_MAX_INTERVAL_MULTIPLIER = 20.0
-SAMPLER_MAX_PASS_MULTIPLIER = 20.0
+SAMPLER_MAX_INTERVAL_MULTIPLIER = 50.0
+SAMPLER_MAX_PASS_MULTIPLIER = 50.0
+SAMPLER_SESSION_SCAN_POST_CAPTURE_NS = 50_000_000
+SAMPLER_SESSION_SCAN_MAX_START_GAP_NS = 100_000_000
+SAMPLER_SESSION_SCAN_MAX_DURATION_NS = 50_000_000
+SAMPLER_SESSION_SCAN_MAX_TGIDS = 65_536
+SEALED_SOLVER_TARGET = "/memfd:djex-z3-main-image (deleted)"
+SEALED_SOLVER_MODE = 0o500
 # Filled only after the workload/schema files are otherwise frozen.  Unlike
 # benchmark.py itself, these artifacts can safely carry non-self-referential
 # preregistered hashes in the runner.
 FROZEN_ARTIFACT_SHA256 = {
-    "result-schema.tsv": "b92d017dac8fb5bbeb4a008a7e9701fa47fb17adea666256a5bd996ca66f8a30",
+    "result-schema.tsv": "8600402a2361253a8f8f8ee18e709dc78d27e7b8b84fb61585b2173af223657c",
     "workloads/w1-scalar.repl.in": "7896c035e06dc72527bc05e63abe13507126337b0fad63ac14bd95f9dc837384",
     "workloads/w2-product.repl.in": "4be4e139dbf4e1b34f94b7c2c8740dc2dca19e5ba9ca4f5b736c536f78c17f50",
 }
@@ -133,13 +144,28 @@ RESULT_COLUMNS = [
     "query_vector_sha256", "sampler_samples", "sampler_span_ns",
     "sampler_initial_delay_ns", "sampler_terminal_gap_ns",
     "sampler_coverage_ratio", "sampler_mean_interval_ns",
-    "sampler_max_interval_ns", "sampler_max_pass_ns", "process_tree_sha256",
+    "sampler_max_interval_ns", "sampler_max_pass_ns",
+    "sampler_session_scans", "sampler_session_scan_max_gap_ns",
+    "sampler_session_scan_max_duration_ns",
+    "solver_observation_sha256", "process_tree_sha256",
     "cleanup_ok", "artifact_dir",
 ]
 
 
 class HarnessFailure(RuntimeError):
     """A fail-closed provenance, semantic, topology, or cleanup failure."""
+
+
+class ProcStatMalformed(RuntimeError):
+    """A categorized malformed `/proc/PID/stat` byte record."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+class CaptureRetry(RuntimeError):
+    """Internal control flow for a categorized, retryable capture rejection."""
 
 
 class TerminationCoordinator:
@@ -199,10 +225,10 @@ def apply_termination_veto(
     result["termination_veto"] = bool(requests)
     if requests:
         result["verdict"] = "HOLD"
-        result.setdefault(
-            "primary_failure",
-            f"catchable termination requested: {list(requests)}",
-        )
+        if not result.get("primary_failure"):
+            result["primary_failure"] = (
+                f"catchable termination requested: {list(requests)}"
+            )
         if "meaningful_over_1_10" in result:
             result["meaningful_over_1_10"] = False
     return result
@@ -378,10 +404,22 @@ def canonical_json(value: Any) -> bytes:
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
+def fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def write_json(path: Path, value: Any) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_bytes(canonical_json(value))
+    with temporary.open("wb") as handle:
+        handle.write(canonical_json(value))
+        handle.flush()
+        os.fsync(handle.fileno())
     os.replace(temporary, path)
+    fsync_directory(path.parent)
 
 
 def non_directory_residue(root: Path) -> list[str]:
@@ -1335,30 +1373,58 @@ def parse_allocated_bytes(stats: bytes) -> int:
     return int(matches[0].replace(b",", b""))
 
 
-def proc_stat(pid: int) -> tuple[int, int, int, int, int, int] | None:
-    try:
-        source = Path(f"/proc/{pid}/stat").read_text()
-    except (FileNotFoundError, ProcessLookupError, PermissionError):
-        return None
-    close = source.rfind(")")
+@dataclass(frozen=True)
+class ProcStat:
+    ppid: int
+    pgrp: int
+    session: int
+    state: str
+    user_ticks: int
+    system_ticks: int
+    start_time: int
+    rss_pages: int
+
+
+def parse_proc_stat_bytes(source: bytes) -> ProcStat:
+    # `comm` is arbitrary bytes, may contain `)`, and is not required to be
+    # UTF-8.  The kernel terminates it with the final `) ` before the
+    # single-byte state and numeric tail.
+    close = source.rfind(b") ")
     if close < 0:
-        return None
+        raise ProcStatMalformed("missing_comm_delimiter")
     fields = source[close + 2 :].split()
     if len(fields) < 22:
-        return None
-    return (
-        int(fields[1]), int(fields[2]), int(fields[11]), int(fields[12]),
-        int(fields[19]), int(fields[21]),
+        raise ProcStatMalformed("short_tail")
+    if len(fields[0]) != 1 or fields[0] not in b"RSDZTWtXxKWPIN":
+        raise ProcStatMalformed("invalid_state")
+    numeric_indices = (1, 2, 3, 11, 12, 19, 21)
+    values: dict[int, int] = {}
+    for index in numeric_indices:
+        try:
+            values[index] = int(fields[index])
+        except (ValueError, OverflowError) as failure:
+            raise ProcStatMalformed(f"invalid_integer_{index}") from failure
+    return ProcStat(
+        ppid=values[1],
+        pgrp=values[2],
+        session=values[3],
+        state=fields[0].decode("ascii"),
+        user_ticks=values[11],
+        system_ticks=values[12],
+        start_time=values[19],
+        rss_pages=values[21],
     )
 
 
-def process_tgid(pid: int) -> int | None:
+def read_proc_stat(pid: int) -> ProcStat:
+    return parse_proc_stat_bytes(Path(f"/proc/{pid}/stat").read_bytes())
+
+
+def proc_stat(pid: int) -> ProcStat | None:
     try:
-        source = Path(f"/proc/{pid}/status").read_text()
-    except (FileNotFoundError, ProcessLookupError, PermissionError):
+        return read_proc_stat(pid)
+    except (OSError, ProcStatMalformed):
         return None
-    match = re.search(r"(?m)^Tgid:\s*([0-9]+)\s*$", source)
-    return int(match.group(1)) if match is not None else None
 
 
 class ProcessTreeSampler:
@@ -1367,8 +1433,10 @@ class ProcessTreeSampler:
         interval: float,
     ):
         self.root_pid = root_pid
+        self.session_id = root_pid
         self.solver_sha256 = solver_sha256
         self.solver_argv0 = solver_argv0.encode()
+        self.solver_size = Path(solver_argv0).stat().st_size
         self.interval = interval
         self.stop_event = threading.Event()
         self.thread = threading.Thread(target=self._loop, name="djex-benchmark-proc-sampler")
@@ -1379,8 +1447,19 @@ class ProcessTreeSampler:
         self.known = {root_pid}
         self.parents: dict[int, int | None] = {root_pid: None}
         self.solver_pids: set[int] = set()
-        self.checked_images: dict[int, str] = {}
         self.solver_images: dict[int, dict[str, Any]] = {}
+        self.cleanup_descriptors: set[int] = set()
+        self.pid_telemetry: dict[int, dict[str, Any]] = {}
+        self.discovery_errors: dict[str, dict[str, int]] = {}
+        self.session_scan_count = 0
+        self.session_scan_forced_count = 0
+        self.session_scan_first_ns: int | None = None
+        self.session_scan_last_ns: int | None = None
+        self.session_scan_last_finished_ns: int | None = None
+        self.session_scan_max_gap_ns = 0
+        self.session_scan_max_duration_ns = 0
+        self.session_scan_tgids_total = 0
+        self.session_scan_max_tgids = 0
         self.sample_count = 0
         self.first_sample_ns: int | None = None
         self.last_sample_ns: int | None = None
@@ -1391,7 +1470,32 @@ class ProcessTreeSampler:
         self.error: str | None = None
 
     def start(self) -> None:
-        self.thread.start()
+        try:
+            root = self._read_proc_stat(self.root_pid)
+            require(
+                root.session == self.session_id
+                and root.start_time > 0
+                and root.state != "Z",
+                "sampler root is not a live leader of its own session",
+            )
+            self._register_process(
+                self.root_pid, None, "root", self._monotonic_ns(), root,
+            )
+            # Synchronous inspection closes the launch-to-thread scheduling
+            # window.  The thread then waits one target interval before its
+            # next pass.
+            self._record_sample(force_session_scan=True)
+            self.thread.start()
+        except BaseException as primary:
+            try:
+                self._discard_solver_descriptors()
+            except BaseException as cleanup:
+                raise HarnessFailure(
+                    "sampler start failed and descriptor cleanup also failed: "
+                    f"primary={type(primary).__name__}: {primary}; "
+                    f"cleanup={type(cleanup).__name__}: {cleanup}"
+                ) from primary
+            raise
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -1402,6 +1506,14 @@ class ProcessTreeSampler:
             except BaseException as failure:
                 if interrupted is None:
                     interrupted = failure
+        if self.error is None:
+            try:
+                # The process may already have exited.  This final forced scan
+                # closes session-scan coverage and records any still-live
+                # same-session process before cleanup.
+                self._record_sample(force_session_scan=True)
+            except BaseException as failure:
+                self.error = repr(failure)
         if self.error is not None:
             raise HarnessFailure(f"process sampler failed: {self.error}")
         if interrupted is not None:
@@ -1409,30 +1521,359 @@ class ProcessTreeSampler:
 
     def _loop(self) -> None:
         try:
-            while True:
-                sample_started = time.monotonic_ns()
-                self._sample()
-                sample_finished = time.monotonic_ns()
-                with self.lock:
-                    if self.last_sample_ns is not None:
-                        interval = sample_started - self.last_sample_ns
-                        self.interval_sum_ns += interval
-                        self.max_interval_ns = max(self.max_interval_ns, interval)
-                    else:
-                        self.first_sample_ns = sample_started
-                    self.last_sample_ns = sample_started
-                    self.last_sample_finished_ns = sample_finished
-                    self.sample_count += 1
-                    self.max_pass_ns = max(
-                        self.max_pass_ns, sample_finished - sample_started
-                    )
-                if self.stop_event.is_set():
-                    break
-                self.stop_event.wait(self.interval)
+            while not self.stop_event.wait(self.interval):
+                self._record_sample()
         except BaseException as failure:
             self.error = repr(failure)
 
-    def _sample(self) -> None:
+    def _monotonic_ns(self) -> int:
+        return time.monotonic_ns()
+
+    def _read_proc_stat(self, pid: int) -> ProcStat:
+        return read_proc_stat(pid)
+
+    def _readlink(self, path: Path) -> str:
+        return os.readlink(path)
+
+    def _read_bytes(self, path: Path) -> bytes:
+        return path.read_bytes()
+
+    def _open_executable(self, path: Path) -> int:
+        return os.open(path, os.O_RDONLY | os.O_CLOEXEC)
+
+    def _fstat(self, descriptor: int) -> os.stat_result:
+        return os.fstat(descriptor)
+
+    def _stat_executable(self, path: Path) -> os.stat_result:
+        return os.stat(path)
+
+    def _close_executable_descriptor(self, descriptor: int) -> None:
+        os.close(descriptor)
+
+    def _emergency_close_executable_descriptor(self, descriptor: int) -> None:
+        """Retry an uncertain descriptor close through an injectable seam."""
+        os.close(descriptor)
+
+    def _close_descriptor_with_emergency(
+        self, descriptor: int,
+    ) -> str | None:
+        """Close an owned fd, retaining ownership unless closure is certain.
+
+        The injectable close seam may fail either before or after the kernel
+        close.  A direct retry closes the former and EBADF confirms the latter.
+        The original failure is still reported so evidence remains HOLD.
+        """
+        try:
+            self._close_executable_descriptor(descriptor)
+        except BaseException as primary:
+            emergency_failure: BaseException | None = None
+            try:
+                self._emergency_close_executable_descriptor(descriptor)
+            except OSError as emergency:
+                if emergency.errno != errno.EBADF:
+                    emergency_failure = emergency
+            except BaseException as emergency:
+                emergency_failure = emergency
+            if emergency_failure is None:
+                with self.lock:
+                    self.cleanup_descriptors.discard(descriptor)
+                return (
+                    f"{type(primary).__name__}: {primary}; emergency close "
+                    "confirmed descriptor closed"
+                )
+            with self.lock:
+                self.cleanup_descriptors.add(descriptor)
+            return (
+                f"{type(primary).__name__}: {primary}; emergency close "
+                f"failed: {type(emergency_failure).__name__}: "
+                f"{emergency_failure}; descriptor retained for retry"
+            )
+        with self.lock:
+            self.cleanup_descriptors.discard(descriptor)
+        return None
+
+    def _discard_transfer_hook(self) -> None:
+        """Pure-test seam after local discard ownership is complete."""
+
+    def _snapshot_transfer_hook(self) -> None:
+        """Pure-test seam at the descriptor ownership-transfer boundary."""
+
+    def _transfer_solver_image(
+        self, pid: int, image: dict[str, Any], start_time: int, now: int,
+    ) -> None:
+        with self.lock:
+            prior_start = self.start_times.get(pid)
+            require(
+                prior_start is None or prior_start == start_time,
+                f"solver PID {pid} was reused during capture",
+            )
+            record = self._pid_record_locked(pid, now)
+            record["captures"] += 1
+            if record["capture_first_ns"] is None:
+                record["capture_first_ns"] = now
+            record["capture_last_ns"] = now
+            self._increment(record["capture_sources"], image["capture_source"])
+            self._increment(record["gate_successes"], "captured")
+            self.start_times[pid] = start_time
+            self.solver_pids.add(pid)
+            self.solver_images[pid] = image
+
+    def _top_level_tgids(self) -> list[int]:
+        entries = [
+            int(entry.name) for entry in Path("/proc").iterdir()
+            if entry.name.isdigit()
+        ]
+        require(
+            len(entries) <= SAMPLER_SESSION_SCAN_MAX_TGIDS,
+            "top-level /proc TGID scan exceeded its preregistered bound",
+        )
+        return sorted(entries)
+
+    def _task_children(self, parent: int, now: int) -> list[int]:
+        task_root = Path(f"/proc/{parent}/task")
+        try:
+            tasks = list(task_root.iterdir())
+        except (FileNotFoundError, ProcessLookupError, PermissionError, OSError) as failure:
+            self._note_error(parent, "task_list", failure, now)
+            return []
+        result: list[int] = []
+        for task in tasks:
+            try:
+                children = (task / "children").read_text().split()
+            except (FileNotFoundError, ProcessLookupError, PermissionError, OSError) as failure:
+                self._note_error(parent, "task_children", failure, now)
+                continue
+            for source in children:
+                require(
+                    source.isdigit(),
+                    f"malformed task-children PID: {source!r}",
+                )
+                result.append(int(source))
+        return sorted(set(result))
+
+    @staticmethod
+    def _errno_name(failure: BaseException) -> str:
+        if isinstance(failure, ProcStatMalformed):
+            return f"PROC_STAT_{failure.reason.upper()}"
+        if isinstance(failure, OSError) and failure.errno is not None:
+            return errno.errorcode.get(failure.errno, f"ERRNO_{failure.errno}")
+        return type(failure).__name__
+
+    def _pid_record_locked(self, pid: int, now: int) -> dict[str, Any]:
+        record = self.pid_telemetry.get(pid)
+        if record is None:
+            record = {
+                "first_observed_ns": now,
+                "last_observed_ns": now,
+                "discovery_counts": {},
+                "inspection_attempts": 0,
+                "states": {},
+                "session_ids": {},
+                "targets": {},
+                "gate_successes": {},
+                "cmdline_shapes": {},
+                "signature_mismatches": {},
+                "argv_first_observation": None,
+                "argv_first_observation_repetitions": 0,
+                "argv_other_observation_count": 0,
+                "consistency_mismatches": {},
+                "errors": {},
+                "captures": 0,
+                "capture_first_ns": None,
+                "capture_last_ns": None,
+                "capture_sources": {},
+            }
+            self.pid_telemetry[pid] = record
+        record["last_observed_ns"] = now
+        return record
+
+    @staticmethod
+    def _increment(mapping: dict[str, int], key: str) -> None:
+        mapping[key] = mapping.get(key, 0) + 1
+
+    def _note_error(
+        self, pid: int | None, stage: str, failure: BaseException, now: int,
+    ) -> None:
+        category = self._errno_name(failure)
+        with self.lock:
+            if pid is None:
+                stages = self.discovery_errors.setdefault(stage, {})
+            else:
+                record = self._pid_record_locked(pid, now)
+                stages = record["errors"].setdefault(stage, {})
+            self._increment(stages, category)
+
+    def _note_mismatch(
+        self, pid: int, category: str, value: str, now: int,
+    ) -> None:
+        with self.lock:
+            record = self._pid_record_locked(pid, now)
+            values = record[category]
+            self._increment(values, value)
+
+    def _note_gate_success(self, pid: int, stage: str, now: int) -> None:
+        with self.lock:
+            record = self._pid_record_locked(pid, now)
+            self._increment(record["gate_successes"], stage)
+
+    def _solver_command_line_shape(self, command_line: bytes) -> str:
+        prefix = [self.solver_argv0, b"-in", b"-smt2"]
+        settings = [
+            (b"smtlib2_compliant", b"true"),
+            (b"timeout", b"1000"),
+            (b"rlimit", b"100000"),
+        ]
+        exact_arguments = prefix + [key + b"=" + value for key, value in settings]
+        exact = b"\0".join(exact_arguments) + b"\0"
+        parsed_arguments = prefix + [
+            item for setting in settings for item in setting
+        ]
+        parsed = b"\0".join(parsed_arguments) + b"\0"
+        if command_line == exact:
+            return "exec_exact"
+        if command_line == parsed:
+            return "z3_4_8_12_parsed_exact"
+        for split_count in (1, 2):
+            intermediate_arguments = list(prefix)
+            for position, (key, value) in enumerate(settings):
+                intermediate_arguments.extend(
+                    (key, value) if position < split_count
+                    else (key + b"=" + value,)
+                )
+            if command_line == b"\0".join(intermediate_arguments) + b"\0":
+                return "intermediate"
+        return "other"
+
+    def _note_argv_observation(
+        self, pid: int, command_line: bytes, arguments: list[bytes],
+        expected_arguments: list[bytes], shape: str, now: int,
+    ) -> None:
+        digest = sha256_bytes(command_line)
+        expected_bytes = b"\0".join(expected_arguments) + b"\0"
+        constrained_ascii = (
+            len(command_line) <= len(expected_bytes)
+            and len(arguments) <= 16
+            and all(
+                re.fullmatch(rb"[A-Za-z0-9_./:=+<>-]*", argument)
+                is not None
+                for argument in arguments
+            )
+        )
+        observation = {
+            "argc": len(arguments),
+            "arguments_ascii": (
+                [argument.decode("ascii") for argument in arguments]
+                if constrained_ascii else None
+            ),
+            "arguments_redacted": not constrained_ascii,
+            "cmdline_bytes": len(command_line),
+            "cmdline_sha256": digest,
+            "nul_count": command_line.count(b"\0"),
+            "token_lengths": [len(argument) for argument in arguments[:16]],
+            "token_lengths_truncated": max(0, len(arguments) - 16),
+        }
+        with self.lock:
+            record = self._pid_record_locked(pid, now)
+            self._increment(record["cmdline_shapes"], shape)
+            first = record["argv_first_observation"]
+            if first is None:
+                record["argv_first_observation"] = observation
+                record["argv_first_observation_repetitions"] = 1
+            elif first["cmdline_sha256"] == digest:
+                record["argv_first_observation_repetitions"] += 1
+            else:
+                record["argv_other_observation_count"] += 1
+
+    def _register_process(
+        self, pid: int, parent: int | None, source: str, now: int,
+        value: ProcStat,
+    ) -> bool:
+        with self.lock:
+            prior_start = self.start_times.get(pid)
+            if prior_start is not None and prior_start != value.start_time:
+                raise HarnessFailure(
+                    f"PID {pid} was reused during one sampled process session"
+                )
+            unseen = pid not in self.known
+            self.known.add(pid)
+            if unseen:
+                self.parents[pid] = parent
+            self.start_times[pid] = value.start_time
+            self.cpu_ticks[pid] = max(
+                self.cpu_ticks.get(pid, 0),
+                value.user_ticks + value.system_ticks,
+            )
+            record = self._pid_record_locked(pid, now)
+            self._increment(record["discovery_counts"], source)
+            self._increment(record["states"], value.state)
+            self._increment(record["session_ids"], str(value.session))
+        return unseen
+
+    def _read_stat_for_discovery(
+        self, pid: int, stage: str, now: int, *, global_if_unknown: bool = False,
+    ) -> ProcStat | None:
+        try:
+            return self._read_proc_stat(pid)
+        except (OSError, ProcStatMalformed) as first_failure:
+            with self.lock:
+                known = pid in self.known
+            if global_if_unknown and not known:
+                # An arbitrary top-level TGID can disappear or expose a
+                # transiently malformed stat record while /proc is scanned.
+                # Retry it immediately once.  Only a successfully resolved
+                # malformed record is benign; an unresolved malformed record
+                # could have hidden a same-session exact-target process and is
+                # retained under an explicitly fail-closed stage.
+                try:
+                    resolved = self._read_proc_stat(pid)
+                except (OSError, ProcStatMalformed) as retry_failure:
+                    self._note_error(
+                        None, f"{stage}_unresolved_initial",
+                        first_failure, now,
+                    )
+                    self._note_error(
+                        None, f"{stage}_unresolved_retry",
+                        retry_failure, now,
+                    )
+                    return None
+                self._note_error(
+                    None, f"{stage}_resolved", first_failure, now,
+                )
+                return resolved
+            self._note_error(pid, stage, first_failure, now)
+            return None
+
+    def _capture_operation(
+        self, pid: int, stage: str, now: int, action: Any,
+    ) -> Any | None:
+        try:
+            value = action()
+            self._note_gate_success(pid, stage, now)
+            return value
+        except (OSError, ProcStatMalformed) as failure:
+            self._note_error(pid, stage, failure, now)
+            return None
+
+    def _record_sample(self, *, force_session_scan: bool = False) -> None:
+        sample_started = self._monotonic_ns()
+        self._sample(sample_started, force_session_scan=force_session_scan)
+        sample_finished = self._monotonic_ns()
+        with self.lock:
+            if self.last_sample_ns is not None:
+                interval = sample_started - self.last_sample_ns
+                self.interval_sum_ns += interval
+                self.max_interval_ns = max(self.max_interval_ns, interval)
+            else:
+                self.first_sample_ns = sample_started
+            self.last_sample_ns = sample_started
+            self.last_sample_finished_ns = sample_finished
+            self.sample_count += 1
+            self.max_pass_ns = max(
+                self.max_pass_ns, sample_finished - sample_started
+            )
+
+    def _sample(self, now: int, *, force_session_scan: bool = False) -> None:
+        inspected: set[int] = set()
         with self.lock:
             frontier = list(self.known)
         visited: set[int] = set()
@@ -1441,96 +1882,377 @@ class ProcessTreeSampler:
             if parent in visited:
                 continue
             visited.add(parent)
-            task_root = Path(f"/proc/{parent}/task")
-            try:
-                tasks = list(task_root.iterdir())
-            except (FileNotFoundError, ProcessLookupError, PermissionError):
-                continue
-            for task in tasks:
-                try:
-                    children = (task / "children").read_text().split()
-                except (FileNotFoundError, ProcessLookupError, PermissionError):
+            for observed in self._task_children(parent, now):
+                value = self._read_stat_for_discovery(
+                    observed, "children_stat", now,
+                )
+                if value is None:
                     continue
-                for source in children:
-                    observed = int(source)
-                    child = process_tgid(observed)
-                    if child is None:
-                        continue
-                    with self.lock:
-                        unseen = child not in self.known
-                        if unseen:
-                            self.known.add(child)
-                            self.parents[child] = parent
-                    if unseen:
-                        frontier.append(child)
+                unseen = self._register_process(
+                    observed, value.ppid, "children", now, value,
+                )
+                self._inspect_candidate(observed, "children", now, value)
+                inspected.add(observed)
+                if unseen:
+                    frontier.append(observed)
+
+        with self.lock:
+            captured = bool(self.solver_images)
+            last_scan = self.session_scan_last_ns
+        scan_due = (
+            force_session_scan
+            or not captured
+            or last_scan is None
+            or now - last_scan >= SAMPLER_SESSION_SCAN_POST_CAPTURE_NS
+        )
+        if scan_due:
+            self._scan_session(now, inspected, forced=force_session_scan)
+
         aggregate_rss = 0
         with self.lock:
             known = list(self.known)
         for pid in known:
-            value = proc_stat(pid)
+            value = self._read_stat_for_discovery(pid, "known_stat", now)
             if value is None:
                 continue
-            _ppid, _pgrp, user, system, started, rss = value
-            with self.lock:
-                prior_start = self.start_times.get(pid)
-                if prior_start is not None and prior_start != started:
-                    raise HarnessFailure(
-                        f"PID {pid} was reused during one sampled process tree"
-                    )
-                self.start_times[pid] = started
-                self.cpu_ticks[pid] = max(
-                    self.cpu_ticks.get(pid, 0), user + system
-                )
-            aggregate_rss += max(0, rss)
-            try:
-                image_path = Path(f"/proc/{pid}/exe")
-                target = os.readlink(image_path)
-            except (FileNotFoundError, ProcessLookupError, PermissionError, OSError):
+            self._register_process(pid, value.ppid, "known", now, value)
+            aggregate_rss += max(0, value.rss_pages)
+            if pid in inspected:
                 continue
-            with self.lock:
-                image_unchecked = self.checked_images.get(pid) != target
-            if not image_unchecked:
-                continue
-            if target != "/memfd:djex-z3-main-image (deleted)":
-                with self.lock:
-                    self.checked_images[pid] = target
-                continue
-            try:
-                command_line = Path(f"/proc/{pid}/cmdline").read_bytes()
-                environment = Path(f"/proc/{pid}/environ").read_bytes()
-                arguments = command_line.rstrip(b"\0").split(b"\0")
-                signature = arguments == [
-                    self.solver_argv0,
-                    b"-in",
-                    b"-smt2",
-                    b"smtlib2_compliant=true",
-                    b"timeout=1000",
-                    b"rlimit=100000",
-                ] and environment == b""
-                if not signature:
-                    continue
-                descriptor = os.open(image_path, os.O_RDONLY | os.O_CLOEXEC)
-                stat = os.fstat(descriptor)
-            except (FileNotFoundError, ProcessLookupError, PermissionError, OSError):
-                continue
-            with self.lock:
-                if pid in self.solver_images:
-                    os.close(descriptor)
-                    continue
-                self.checked_images[pid] = target
-                self.solver_pids.add(pid)
-                self.solver_images[pid] = {
-                    "target": target,
-                    "sha256": None,
-                    "device": stat.st_dev,
-                    "inode": stat.st_ino,
-                    "start_time": started,
-                    "argv": [value.decode("ascii") for value in arguments],
-                    "environment_bytes": 0,
-                    "descriptor": descriptor,
-                }
+            self._inspect_candidate(pid, "known", now, value)
         with self.lock:
             self.peak_rss_pages = max(self.peak_rss_pages, aggregate_rss)
+
+    def _scan_session(
+        self, now: int, inspected: set[int], *, forced: bool,
+    ) -> None:
+        started = self._monotonic_ns()
+        try:
+            tgids = self._top_level_tgids()
+        except BaseException as failure:
+            self._note_error(None, "session_scan", failure, now)
+            raise
+        for pid in tgids:
+            value = self._read_stat_for_discovery(
+                pid, "session_scan_stat", now, global_if_unknown=True,
+            )
+            if value is None or value.session != self.session_id:
+                continue
+            self._register_process(
+                pid, None if pid == self.root_pid else value.ppid,
+                "session_scan", now, value,
+            )
+            self._inspect_candidate(pid, "session_scan", now, value)
+            inspected.add(pid)
+        finished = self._monotonic_ns()
+        with self.lock:
+            if self.session_scan_last_ns is not None:
+                self.session_scan_max_gap_ns = max(
+                    self.session_scan_max_gap_ns,
+                    started - self.session_scan_last_ns,
+                )
+            else:
+                self.session_scan_first_ns = started
+            self.session_scan_last_ns = started
+            self.session_scan_last_finished_ns = finished
+            self.session_scan_count += 1
+            self.session_scan_forced_count += int(forced)
+            self.session_scan_max_duration_ns = max(
+                self.session_scan_max_duration_ns, finished - started,
+            )
+            self.session_scan_tgids_total += len(tgids)
+            self.session_scan_max_tgids = max(
+                self.session_scan_max_tgids, len(tgids)
+            )
+
+    def _inspect_candidate(
+        self, pid: int, source: str, now: int, before: ProcStat,
+    ) -> None:
+        with self.lock:
+            record = self._pid_record_locked(pid, now)
+            record["inspection_attempts"] += 1
+        if before.session != self.session_id:
+            self._note_mismatch(
+                pid, "consistency_mismatches", "session_before", now,
+            )
+            return
+        self._note_gate_success(pid, "session_before", now)
+        if before.state == "Z":
+            self._note_mismatch(
+                pid, "consistency_mismatches", "zombie_before", now,
+            )
+            return
+        self._note_gate_success(pid, "non_z_before", now)
+        image_path = Path(f"/proc/{pid}/exe")
+        try:
+            target_before = self._readlink(image_path)
+        except (FileNotFoundError, ProcessLookupError, PermissionError, OSError) as failure:
+            self._note_error(pid, "readlink_before", failure, now)
+            return
+        with self.lock:
+            record = self._pid_record_locked(pid, now)
+            self._increment(record["targets"], target_before)
+            already_captured = pid in self.solver_images
+            captured_identity = (
+                None if not already_captured else (
+                    self.solver_images[pid]["device"],
+                    self.solver_images[pid]["inode"],
+                )
+            )
+        if already_captured:
+            require(
+                target_before == SEALED_SOLVER_TARGET,
+                f"captured solver PID {pid} executable target drifted",
+            )
+            live_captured = self._capture_operation(
+                pid, "captured_stat_exe", now,
+                lambda: self._stat_executable(image_path),
+            )
+            if live_captured is None:
+                return
+            live_identity = (live_captured.st_dev, live_captured.st_ino)
+            if live_identity != captured_identity:
+                self._note_mismatch(
+                    pid, "consistency_mismatches",
+                    "captured_live_identity", now,
+                )
+                raise HarnessFailure(
+                    f"captured solver PID {pid} executable identity drifted"
+                )
+            self._note_gate_success(pid, "captured_live_identity", now)
+            return
+        if target_before != SEALED_SOLVER_TARGET:
+            return
+        self._note_gate_success(pid, "target_exact", now)
+
+        # Retain the executable first.  cmdline and environ are mutable procfs
+        # views and must not sit between target recognition and the only
+        # attempt to retain the image.
+        try:
+            descriptor = self._open_executable(image_path)
+        except OSError as failure:
+            self._note_error(pid, "open_exe", failure, now)
+            return
+        transferred = False
+        image: dict[str, Any] | None = None
+        primary_failure: BaseException | None = None
+        close_failure: BaseException | None = None
+        try:
+            # Descriptor ownership begins before telemetry: even an injected
+            # gate-recording failure must take the owner-finally close path.
+            self._note_gate_success(pid, "open_exe", now)
+
+            def required_step(stage: str, action: Any) -> Any:
+                value = self._capture_operation(pid, stage, now, action)
+                if value is None:
+                    raise CaptureRetry(stage)
+                return value
+
+            held_before = required_step(
+                "fstat_before", lambda: self._fstat(descriptor)
+            )
+            command_line = required_step(
+                "cmdline_read",
+                lambda: self._read_bytes(Path(f"/proc/{pid}/cmdline")),
+            )
+            environment = required_step(
+                "environ_read",
+                lambda: self._read_bytes(Path(f"/proc/{pid}/environ")),
+            )
+            after = required_step(
+                "stat_after", lambda: self._read_proc_stat(pid)
+            )
+            target_after = required_step(
+                "target_after", lambda: self._readlink(image_path)
+            )
+            live_after = required_step(
+                "stat_exe_after", lambda: self._stat_executable(image_path)
+            )
+            held_after = required_step(
+                "fstat_after", lambda: self._fstat(descriptor)
+            )
+
+            arguments = command_line.rstrip(b"\0").split(b"\0")
+            expected_arguments = [
+                self.solver_argv0,
+                b"-in",
+                b"-smt2",
+                b"smtlib2_compliant=true",
+                b"timeout=1000",
+                b"rlimit=100000",
+            ]
+            command_line_shape = self._solver_command_line_shape(command_line)
+            self._note_argv_observation(
+                pid, command_line, arguments, expected_arguments,
+                command_line_shape, now,
+            )
+            if command_line_shape not in {
+                "exec_exact", "z3_4_8_12_parsed_exact",
+            }:
+                self._note_mismatch(
+                    pid, "signature_mismatches",
+                    f"argv_{command_line_shape}", now,
+                )
+                raise CaptureRetry("cmdline_shape")
+            self._note_gate_success(pid, "cmdline_allowed", now)
+            if environment != b"":
+                self._note_mismatch(
+                    pid, "signature_mismatches", "environment", now,
+                )
+                raise CaptureRetry("environment")
+            self._note_gate_success(pid, "environ_empty", now)
+
+            mismatches = []
+            if after.start_time != before.start_time:
+                mismatches.append("start_time")
+            else:
+                self._note_gate_success(pid, "start_stable", now)
+            if after.session != before.session or after.session != self.session_id:
+                mismatches.append("session")
+            else:
+                self._note_gate_success(pid, "session_stable", now)
+            if after.state == "Z":
+                mismatches.append("zombie_after")
+            else:
+                self._note_gate_success(pid, "non_z_after", now)
+            if target_after != target_before or target_after != SEALED_SOLVER_TARGET:
+                mismatches.append("target")
+            else:
+                self._note_gate_success(pid, "target_stable", now)
+            before_identity = (held_before.st_dev, held_before.st_ino)
+            after_identity = (held_after.st_dev, held_after.st_ino)
+            live_identity = (live_after.st_dev, live_after.st_ino)
+            if before_identity != after_identity:
+                mismatches.append("held_fstat")
+            else:
+                self._note_gate_success(pid, "held_stable", now)
+            if after_identity != live_identity:
+                mismatches.append("live_fstat")
+            else:
+                self._note_gate_success(pid, "live_identity", now)
+            if not stat_module.S_ISREG(held_after.st_mode):
+                mismatches.append("file_type")
+            else:
+                self._note_gate_success(pid, "regular", now)
+            if held_after.st_size != self.solver_size:
+                mismatches.append("size")
+            else:
+                self._note_gate_success(pid, "size", now)
+            if stat_module.S_IMODE(held_after.st_mode) != SEALED_SOLVER_MODE:
+                mismatches.append("mode")
+            else:
+                self._note_gate_success(pid, "mode", now)
+            if mismatches:
+                for mismatch in mismatches:
+                    self._note_mismatch(
+                        pid, "consistency_mismatches", mismatch, now,
+                    )
+                raise CaptureRetry("identity_consistency")
+
+            image = {
+                "target": target_after,
+                "sha256": None,
+                "device": held_after.st_dev,
+                "inode": held_after.st_ino,
+                "size": held_after.st_size,
+                "mode": stat_module.S_IMODE(held_after.st_mode),
+                "start_time": after.start_time,
+                "session_id": after.session,
+                "state_before": before.state,
+                "state_after": after.state,
+                "argv": [value.decode("ascii") for value in arguments],
+                "cmdline_shape": command_line_shape,
+                "environment_bytes": 0,
+                "capture_source": source,
+                "descriptor": descriptor,
+            }
+            self._transfer_solver_image(
+                pid, image, after.start_time, now,
+            )
+            transferred = True
+        except CaptureRetry:
+            pass
+        except BaseException as failure:
+            primary_failure = failure
+        finally:
+            if image is not None:
+                # `_transfer_solver_image` is an injected seam in the pure
+                # tests.  If it raises after installing the exact object, the
+                # sampler—not this frame—owns the descriptor.  Detect that
+                # state before deciding who must close it.
+                with self.lock:
+                    transferred = self.solver_images.get(pid) is image
+            if not transferred:
+                close_report = self._close_descriptor_with_emergency(
+                    descriptor
+                )
+                if close_report is not None:
+                    close_failure = HarnessFailure(close_report)
+        if primary_failure is not None:
+            if close_failure is not None:
+                raise HarnessFailure(
+                    "solver capture failed and retained-descriptor close also "
+                    f"failed: primary={type(primary_failure).__name__}: "
+                    f"{primary_failure}; close={type(close_failure).__name__}: "
+                    f"{close_failure}"
+                ) from primary_failure
+            raise primary_failure
+        if close_failure is not None:
+            raise HarnessFailure(
+                "cannot close rejected solver executable descriptor: "
+                f"{type(close_failure).__name__}: {close_failure}"
+            ) from close_failure
+
+    def _discard_solver_descriptors(self) -> None:
+        descriptors: set[int] = set()
+        transfer_started = False
+        primary_failure: BaseException | None = None
+        try:
+            with self.lock:
+                descriptors = {
+                    descriptor
+                    for value in self.solver_images.values()
+                    if isinstance(
+                        (descriptor := value.get("descriptor")), int,
+                    )
+                } | set(self.cleanup_descriptors)
+                transfer_started = True
+                self.cleanup_descriptors.update(descriptors)
+                self._discard_transfer_hook()
+                for value in self.solver_images.values():
+                    if value.get("descriptor") in descriptors:
+                        value["descriptor"] = None
+        except BaseException as failure:
+            primary_failure = failure
+        failures: list[str] = []
+        if transfer_started:
+            # Even if an injected exception interrupted the clear loop, the
+            # complete local set owns every fd and clears any matching stale
+            # registry entry before attempting close/retry.
+            with self.lock:
+                for value in self.solver_images.values():
+                    if value.get("descriptor") in descriptors:
+                        value["descriptor"] = None
+            for descriptor in sorted(descriptors):
+                report = self._close_descriptor_with_emergency(descriptor)
+                if report is not None:
+                    failures.append(f"fd {descriptor}: {report}")
+        if primary_failure is not None:
+            if failures:
+                raise HarnessFailure(
+                    "descriptor discard transfer failed and close reporting "
+                    f"also failed: primary={type(primary_failure).__name__}: "
+                    f"{primary_failure}; close={'; '.join(failures)}"
+                ) from primary_failure
+            raise primary_failure
+        if failures:
+            with self.lock:
+                retained = sorted(self.cleanup_descriptors)
+            raise HarnessFailure(
+                "cannot discard retained solver descriptors: "
+                + "; ".join(failures)
+                + f"; retry_registry={retained}"
+            )
 
     def metrics(self) -> tuple[int, int, int]:
         with self.lock:
@@ -1546,16 +2268,31 @@ class ProcessTreeSampler:
             return dict(self.start_times)
 
     def solver_snapshot(self) -> dict[int, dict[str, Any]]:
-        with self.lock:
-            images = {pid: dict(value) for pid, value in self.solver_images.items()}
-            for value in self.solver_images.values():
-                value["descriptor"] = None
+        images: dict[int, dict[str, Any]] = {}
+        descriptors: dict[int, int] = {}
         failures: list[str] = []
-        descriptors = {
-            pid: value.get("descriptor") for pid, value in images.items()
-            if value.get("descriptor") is not None
-        }
+        transfer_started = False
+        primary_failure: BaseException | None = None
         try:
+            with self.lock:
+                images = {
+                    pid: dict(value)
+                    for pid, value in self.solver_images.items()
+                }
+                descriptors = {
+                    pid: descriptor
+                    for pid, value in images.items()
+                    if isinstance(
+                        (descriptor := value.get("descriptor")), int,
+                    )
+                }
+                # From this point the outer finally owns every descriptor in
+                # the complete map, even if an injected exception interrupts
+                # the internal metadata clearing loop.
+                transfer_started = True
+                self._snapshot_transfer_hook()
+                for value in self.solver_images.values():
+                    value["descriptor"] = None
             for pid, descriptor in descriptors.items():
                 value = images[pid]
                 digest = hashlib.sha256()
@@ -1576,15 +2313,33 @@ class ProcessTreeSampler:
                 with self.lock:
                     if pid in self.solver_images:
                         self.solver_images[pid] = dict(value)
+        except BaseException as failure:
+            primary_failure = failure
         finally:
-            for pid, descriptor in descriptors.items():
-                try:
-                    os.close(descriptor)
-                except BaseException as failure:
-                    failures.append(
-                        f"cannot close solver image for PID {pid}: "
-                        f"{type(failure).__name__}: {failure}"
-                    )
+            if transfer_started:
+                with self.lock:
+                    for pid, descriptor in descriptors.items():
+                        current = self.solver_images.get(pid)
+                        if (
+                            current is not None
+                            and current.get("descriptor") == descriptor
+                        ):
+                            current["descriptor"] = None
+                for pid, descriptor in descriptors.items():
+                    report = self._close_descriptor_with_emergency(descriptor)
+                    if report is not None:
+                        failures.append(
+                            f"cannot close solver image for PID {pid}: "
+                            f"{report}"
+                        )
+        if primary_failure is not None:
+            if failures:
+                raise HarnessFailure(
+                    "solver snapshot failed and descriptor finalization also "
+                    f"failed: primary={type(primary_failure).__name__}: "
+                    f"{primary_failure}; finalization={'; '.join(failures)}"
+                ) from primary_failure
+            raise primary_failure
         require(not failures, "; ".join(failures))
         return images
 
@@ -1605,12 +2360,142 @@ class ProcessTreeSampler:
                 ),
                 "max_interval_ns": self.max_interval_ns,
                 "max_pass_ns": self.max_pass_ns,
+                "sampler_error": self.error,
+                "cleanup_descriptors": sorted(self.cleanup_descriptors),
                 "known_pids": sorted(self.known),
                 "parents": {str(pid): parent for pid, parent in self.parents.items()},
                 "start_times": dict(self.start_times),
                 "cpu_ticks": dict(self.cpu_ticks),
                 "peak_rss_pages": self.peak_rss_pages,
+                "session_id": self.session_id,
+                "session_scan": {
+                    "policy": {
+                        "before_capture": "every_sampler_pass",
+                        "post_capture_interval_ns": (
+                            SAMPLER_SESSION_SCAN_POST_CAPTURE_NS
+                        ),
+                        "maximum_start_gap_ns": (
+                            SAMPLER_SESSION_SCAN_MAX_START_GAP_NS
+                        ),
+                        "maximum_duration_ns": (
+                            SAMPLER_SESSION_SCAN_MAX_DURATION_NS
+                        ),
+                        "maximum_tgids_per_scan": (
+                            SAMPLER_SESSION_SCAN_MAX_TGIDS
+                        ),
+                    },
+                    "count": self.session_scan_count,
+                    "forced_count": self.session_scan_forced_count,
+                    "first_start_ns": self.session_scan_first_ns,
+                    "last_start_ns": self.session_scan_last_ns,
+                    "last_finished_ns": self.session_scan_last_finished_ns,
+                    "max_start_gap_ns": self.session_scan_max_gap_ns,
+                    "max_duration_ns": self.session_scan_max_duration_ns,
+                    "tgids_total": self.session_scan_tgids_total,
+                    "max_tgids": self.session_scan_max_tgids,
+                    "errors": json.loads(canonical_json(
+                        self.discovery_errors
+                    )),
+                },
+                "pid_telemetry": {
+                    str(pid): json.loads(canonical_json(record))
+                    for pid, record in sorted(self.pid_telemetry.items())
+                },
             }
+
+
+def require_single_solver_image(
+    images: dict[int, dict[str, Any]],
+) -> tuple[int, dict[str, Any]]:
+    require(
+        len(images) == 1,
+        f"observed {len(images)} sealed solver images",
+    )
+    return next(iter(images.items()))
+
+
+def exact_target_identity_attestation(
+    diagnostics: dict[str, Any], images: dict[int, dict[str, Any]],
+) -> dict[str, Any]:
+    start_times = diagnostics.get("start_times", {})
+    observed: set[tuple[int, int]] = set()
+    malformed: list[dict[str, Any]] = []
+    for pid_source, telemetry in diagnostics.get("pid_telemetry", {}).items():
+        if telemetry.get("targets", {}).get(SEALED_SOLVER_TARGET, 0) <= 0:
+            continue
+        try:
+            pid = int(pid_source)
+        except (TypeError, ValueError):
+            malformed.append({"pid": pid_source, "reason": "invalid_pid"})
+            continue
+        start_time = start_times.get(pid, start_times.get(str(pid)))
+        if not isinstance(start_time, int) or start_time <= 0:
+            malformed.append({
+                "pid": pid,
+                "reason": "missing_positive_start_time",
+                "start_time": start_time,
+            })
+            continue
+        observed.add((pid, start_time))
+    captured: set[tuple[int, int]] = set()
+    for pid_source, image in images.items():
+        try:
+            pid = int(pid_source)
+        except (TypeError, ValueError):
+            malformed.append({"pid": pid_source, "reason": "invalid_image_pid"})
+            continue
+        start_time = image.get("start_time")
+        if not isinstance(start_time, int) or start_time <= 0:
+            malformed.append({
+                "pid": pid,
+                "reason": "invalid_image_start_time",
+                "start_time": start_time,
+            })
+            continue
+        captured.add((pid, start_time))
+    passed = not malformed and len(observed) == 1 and observed == captured
+    return {
+        "schema": "djex-exact-target-identity-attestation/v1",
+        "pass": passed,
+        "required_cardinality": 1,
+        "observed_exact_target_identities": [
+            {"pid": pid, "start_time": start_time}
+            for pid, start_time in sorted(observed)
+        ],
+        "captured_image_identities": [
+            {"pid": pid, "start_time": start_time}
+            for pid, start_time in sorted(captured)
+        ],
+        "malformed_identities": malformed,
+    }
+
+
+def finalize_sampler_images(
+    sampler: ProcessTreeSampler, failures: list[str], label: str,
+) -> dict[int, dict[str, Any]]:
+    images: dict[int, dict[str, Any]] = {}
+    snapshot_failed = False
+    try:
+        images = sampler.solver_snapshot()
+    except BaseException as failure:
+        snapshot_failed = True
+        failures.append(
+            f"{label} solver snapshot failure: "
+            f"{type(failure).__name__}: {failure}"
+        )
+    try:
+        # A rejected capture can leave an fd in the sampler's explicit retry
+        # registry even when snapshotting the accepted images succeeds.  Drain
+        # and assert that registry on both paths; snapshot failure remains the
+        # first reported failure when both operations fail.
+        sampler._discard_solver_descriptors()
+    except BaseException as cleanup:
+        failures.append(
+            f"{label} solver descriptor discard failure after "
+            f"{'snapshot failure' if snapshot_failed else 'successful snapshot'}: "
+            f"{type(cleanup).__name__}: {cleanup}"
+        )
+    return {} if snapshot_failed else images
 
 
 def process_group_members(group: int) -> list[int]:
@@ -1619,7 +2504,7 @@ def process_group_members(group: int) -> list[int]:
         if not entry.name.isdigit():
             continue
         value = proc_stat(int(entry.name))
-        if value is not None and value[1] == group:
+        if value is not None and value.pgrp == group:
             members.append(int(entry.name))
     return members
 
@@ -1628,7 +2513,7 @@ def matching_processes(identities: dict[int, int]) -> list[int]:
     matched = []
     for pid, expected_start in identities.items():
         value = proc_stat(pid)
-        if value is not None and value[4] == expected_start:
+        if value is not None and value.start_time == expected_start:
             matched.append(pid)
     return matched
 
@@ -1728,10 +2613,103 @@ def validate_sampler_quality(
         <= target_interval_ns * SAMPLER_MAX_PASS_MULTIPLIER,
         "process sampler maximum pass duration exceeded its preregistered bound",
     )
+    session_scan = diagnostics.get("session_scan")
+    require(isinstance(session_scan, dict), "session scan diagnostics are missing")
+    require(
+        session_scan.get("policy")
+        == {
+            "before_capture": "every_sampler_pass",
+            "post_capture_interval_ns": SAMPLER_SESSION_SCAN_POST_CAPTURE_NS,
+            "maximum_start_gap_ns": SAMPLER_SESSION_SCAN_MAX_START_GAP_NS,
+            "maximum_duration_ns": SAMPLER_SESSION_SCAN_MAX_DURATION_NS,
+            "maximum_tgids_per_scan": SAMPLER_SESSION_SCAN_MAX_TGIDS,
+        },
+        "session scan policy drifted",
+    )
+    require(session_scan.get("count", 0) >= 2, "fewer than two session scans")
+    require(
+        2 <= session_scan.get("forced_count", -1)
+        <= session_scan.get("count", 0),
+        "session scan lacks immediate and forced-final observations",
+    )
+    scan_first = session_scan.get("first_start_ns")
+    scan_last = session_scan.get("last_start_ns")
+    scan_finished = session_scan.get("last_finished_ns")
+    require(
+        isinstance(scan_first, int)
+        and isinstance(scan_last, int)
+        and isinstance(scan_finished, int)
+        and wall_started_ns <= scan_first <= scan_last <= scan_finished,
+        "session scan endpoints are incomplete or inconsistent",
+    )
+    require(
+        scan_first - wall_started_ns <= SAMPLER_SESSION_SCAN_MAX_START_GAP_NS,
+        "initial session scan exceeded its preregistered gap",
+    )
+    require(
+        max(0, wall_finished_ns - scan_finished)
+        <= SAMPLER_SESSION_SCAN_MAX_START_GAP_NS,
+        "terminal session scan exceeded its preregistered gap",
+    )
+    require(
+        session_scan.get("max_start_gap_ns", -1)
+        <= SAMPLER_SESSION_SCAN_MAX_START_GAP_NS,
+        "session scan start gap exceeded its preregistered bound",
+    )
+    require(
+        0 <= session_scan.get("max_duration_ns", -1)
+        <= SAMPLER_SESSION_SCAN_MAX_DURATION_NS,
+        "session scan duration exceeded its preregistered bound",
+    )
+    require(
+        0 <= session_scan.get("max_tgids", -1) <= SAMPLER_SESSION_SCAN_MAX_TGIDS,
+        "session scan TGID count exceeded its preregistered bound",
+    )
+    require(
+        diagnostics.get("sampler_error") is None,
+        f"process sampler error: {diagnostics.get('sampler_error')}",
+    )
+    require(
+        diagnostics.get("cleanup_descriptors", []) == [],
+        "process sampler retained executable descriptors for cleanup retry",
+    )
+    allowed_transient_errors = {"ENOENT", "ESRCH"}
+    unexpected_errors: list[dict[str, Any]] = []
+    error_sources = [("session_scan", session_scan.get("errors", {}))]
+    error_sources.extend(
+        (f"pid:{pid}", telemetry.get("errors", {}))
+        for pid, telemetry in diagnostics.get("pid_telemetry", {}).items()
+    )
+    for owner, stages in error_sources:
+        for stage, categories in stages.items():
+            for category, count in categories.items():
+                globally_resolved_malformed = (
+                    owner == "session_scan"
+                    and stage.endswith("_resolved")
+                    and category.startswith("PROC_STAT_")
+                )
+                if (
+                    category not in allowed_transient_errors
+                    and not globally_resolved_malformed
+                    and count
+                ):
+                    unexpected_errors.append({
+                        "owner": owner,
+                        "stage": stage,
+                        "category": category,
+                        "count": count,
+                    })
+    require(
+        not unexpected_errors,
+        f"unexpected process sampler errors: {unexpected_errors}",
+    )
     return {
         "coverage_ratio": coverage,
         "initial_delay_ns": initial_delay,
         "terminal_gap_ns": terminal_gap,
+        "session_scan_count": session_scan["count"],
+        "session_scan_max_gap_ns": session_scan["max_start_gap_ns"],
+        "session_scan_max_duration_ns": session_scan["max_duration_ns"],
     }
 
 
@@ -1864,13 +2842,39 @@ def parse_trace(
     files = sorted(prefix.parent.glob(prefix.name + ".*"))
     require(files, f"strace emitted no files at {prefix}")
     solver_file: Path | None = None
+    successful_sealed_execs: list[tuple[int, str]] = []
     for path in files:
         suffix = path.name[len(prefix.name) + 1 :]
         require(suffix.isdigit(), f"unexpected strace artifact {path.name}")
-        if int(suffix) == solver_pid:
+        traced_pid = int(suffix)
+        if traced_pid == solver_pid:
             solver_file = path
+        for line in path.read_text(errors="strict").splitlines():
+            if (
+                re.search(r"\bexecveat\(", line) is not None
+                and f"<{SEALED_SOLVER_TARGET}>" in line
+                and "AT_EMPTY_PATH" in line
+                and re.search(r"\) = 0(?:\s|$)", line) is not None
+            ):
+                successful_sealed_execs.append((traced_pid, line))
     require(solver_file is not None, f"strace has no file for sealed solver PID {solver_pid}")
+    require(
+        len(successful_sealed_execs) == 1,
+        "all strace files contain "
+        f"{len(successful_sealed_execs)} successful exact-target sealed "
+        "execveat records",
+    )
+    require(
+        successful_sealed_execs[0][0] == solver_pid,
+        "the sole successful exact-target sealed execveat does not belong "
+        "to the captured solver identity",
+    )
     file_source = solver_file.read_text(errors="strict")
+    successful_process_groups = [
+        line for line in file_source.splitlines()
+        if re.search(r"\bsetpgid\(0, 0\)\s+=\s+0(?:\s|$)", line)
+        is not None
+    ]
     successful_execs = [
         line for line in file_source.splitlines()
         if re.search(r"\bexecve(?:at)?\(", line) is not None
@@ -1894,6 +2898,10 @@ def parse_trace(
         and c_string_literals(line) == expected_exec_literals
     ]
     require(len(successful_execs) == 1, f"sealed solver PID has {len(successful_execs)} successful exec records")
+    require(
+        len(successful_process_groups) == 1,
+        "sealed solver did not establish exactly one private process group",
+    )
     require(len(solver_execs) == 1, "sealed solver successful execveat vector drifted")
     events = trace_file_events(solver_file, solver_pid)
     events.sort(key=lambda event: (event.timestamp, event.pid, event.sequence))
@@ -2053,6 +3061,58 @@ class RunOutcome:
     query_vector: dict[str, Any] | None
 
 
+def validate_result_row_semantics(
+    row: dict[str, Any], *, calibration_enabled: bool,
+) -> None:
+    phase = row.get("phase")
+    if phase == "calibration":
+        require(
+            calibration_enabled,
+            "diagnostic calibration row entered a release screen",
+        )
+        require(
+            row.get("schema") == CALIBRATION_ROW_SCHEMA,
+            "diagnostic calibration row schema drifted",
+        )
+        require(
+            row.get("workload") == "W1"
+            and row.get("cell") == "B"
+            and row.get("revision") == "baseline"
+            and row.get("commit") == BASELINE_COMMIT
+            and row.get("jobs") == 1
+            and row.get("capabilities") == 2,
+            "diagnostic calibration treatment drifted",
+        )
+        require(
+            row.get("sample", "") == ""
+            and row.get("williams_row", "") == ""
+            and isinstance(row.get("position"), int)
+            and 1 <= row["position"] <= 64,
+            "diagnostic calibration row position/sample fields drifted",
+        )
+        require(
+            all(
+                row.get(field, "") == ""
+                for field in (
+                    "solver_queries_observed",
+                    "solver_accepted_observed",
+                    "solver_rejected_observed",
+                    "query_vector_sha256",
+                )
+            ),
+            "diagnostic calibration row contains release-preflight fields",
+        )
+        return
+    require(
+        phase in {"preflight", "warmup", "measured"},
+        f"unknown release result phase: {phase!r}",
+    )
+    require(
+        row.get("schema") == ROW_SCHEMA,
+        "release result row schema drifted",
+    )
+
+
 class Screen:
     def __init__(self, arguments: argparse.Namespace, output: Path):
         self.arguments = arguments
@@ -2066,6 +3126,7 @@ class Screen:
         self.writer.writeheader()
         self.results_handle.flush()
         os.fsync(self.results_handle.fileno())
+        fsync_directory(output)
         self.run_id = run_identifier(output)
         self.transcripts: dict[str, tuple[int, bytes, bytes]] = {}
         self.query_vectors: dict[str, dict[str, Any]] = {}
@@ -2081,6 +3142,9 @@ class Screen:
         self.termination_requests: list[str] = []
         self.termination_delivery_errors: list[str] = []
         self.external_termination_requests: list[str] = []
+        self.calibration_enabled = bool(
+            getattr(arguments, "diagnostic_calibration", False)
+        )
 
     def close(self) -> None:
         if not self.results_handle.closed:
@@ -2113,6 +3177,9 @@ class Screen:
 
     def append(self, outcome: RunOutcome) -> None:
         row = outcome.row
+        validate_result_row_semantics(
+            row, calibration_enabled=self.calibration_enabled,
+        )
         self.writer.writerow({column: row.get(column, "") for column in RESULT_COLUMNS})
         self.results_handle.flush()
         os.fsync(self.results_handle.fileno())
@@ -2132,6 +3199,24 @@ class Screen:
         sample: int | None = None,
         williams_row: int | None = None,
     ) -> RunOutcome:
+        allowed_phases = {"preflight", "warmup", "measured"}
+        if self.calibration_enabled:
+            allowed_phases.add("calibration")
+        require(
+            phase in allowed_phases,
+            f"screen phase is not enabled: {phase!r}",
+        )
+        require(
+            phase != "calibration"
+            or (
+                workload.name == "W1"
+                and cell.name == "B"
+                and sample is None
+                and williams_row is None
+                and 1 <= position <= 64
+            ),
+            "diagnostic calibration invocation shape drifted",
+        )
         parts = [phase, workload.name]
         if sample is not None:
             parts.append(f"sample-{sample:02d}")
@@ -2159,6 +3244,8 @@ class Screen:
         finished: int | None = None
         solver_images: dict[int, dict[str, Any]] = {}
         sampler_diagnostics: dict[str, Any] = {}
+        exact_target_attestation: dict[str, Any] = {}
+        solver_observation_sha256 = ""
         process_tree_sha256 = ""
         try:
             require(
@@ -2209,7 +3296,7 @@ class Screen:
                     "-o",
                     str(trace_prefix),
                     "-e",
-                    "trace=clone,clone3,fork,vfork,execve,execveat,wait4,"
+                    "trace=clone,clone3,fork,vfork,execve,execveat,setpgid,wait4,"
                     "waitid,exit,exit_group,kill,read,write,readv,writev,close",
                     *command,
                 ]
@@ -2301,18 +3388,31 @@ class Screen:
                     sampler.stop()
                 except BaseException as failure:
                     failures.append(f"sampler failure: {type(failure).__name__}: {failure}")
-                try:
-                    solver_images = sampler.solver_snapshot()
-                except BaseException as failure:
-                    failures.append(
-                        "solver image preservation failure: "
-                        f"{type(failure).__name__}: {failure}"
-                    )
+                solver_images = finalize_sampler_images(
+                    sampler, failures, "production run",
+                )
                 try:
                     sampler_diagnostics = sampler.diagnostics()
                 except BaseException as failure:
                     failures.append(
                         f"sampler diagnostics failure: {type(failure).__name__}: {failure}"
+                    )
+            if sampler is not None:
+                try:
+                    exact_target_attestation = exact_target_identity_attestation(
+                        sampler_diagnostics, solver_images,
+                    )
+                    if not exact_target_attestation["pass"]:
+                        failures.append(
+                            "exact-target identity cardinality failure: "
+                            + canonical_json(
+                                exact_target_attestation
+                            ).decode().strip()
+                        )
+                except BaseException as failure:
+                    failures.append(
+                        "exact-target identity attestation failure: "
+                        f"{type(failure).__name__}: {failure}"
                     )
             try:
                 identities = (
@@ -2425,8 +3525,20 @@ class Screen:
             if sampler is not None:
                 try:
                     cpu_ns, peak_rss_bytes, solver_sessions = sampler.metrics()
+                    solver_observation = {
+                        "schema": "djex-solver-observation/v2",
+                        "session_id": sampler_diagnostics.get("session_id"),
+                        "session_scan": sampler_diagnostics.get("session_scan"),
+                        "pid_telemetry": sampler_diagnostics.get("pid_telemetry"),
+                        "exact_target_identity_attestation": (
+                            exact_target_attestation
+                        ),
+                    }
+                    solver_observation_sha256 = sha256_bytes(
+                        canonical_json(solver_observation)
+                    )
                     process_tree = {
-                        "schema": "djex-benchmark-process-tree/v1",
+                        "schema": "djex-benchmark-process-tree/v2",
                         "root_pid": process.pid if process is not None else None,
                         "cpu_ns": cpu_ns,
                         "peak_rss_bytes": peak_rss_bytes,
@@ -2434,6 +3546,10 @@ class Screen:
                         "wall_started_ns": started,
                         "wall_finished_ns": finished,
                         "sampler": sampler_diagnostics,
+                        "solver_observation": solver_observation,
+                        "solver_observation_sha256": (
+                            solver_observation_sha256
+                        ),
                         "solver_images": {
                             str(pid): value for pid, value in solver_images.items()
                         },
@@ -2457,6 +3573,10 @@ class Screen:
         require(not failures, "; ".join(failures))
         require(process is not None and process.returncode is not None, "subprocess returned no status")
         require(sampler is not None, "process sampler was not constructed")
+        require(
+            exact_target_attestation.get("pass") is True,
+            "exact-target identity cardinality did not pass",
+        )
         require(started is not None and finished is not None, "subprocess wall endpoints are incomplete")
         cpu_ns, peak_rss_bytes, solver_sessions = sampler.metrics()
         sampling_quality = validate_sampler_quality(
@@ -2465,8 +3585,7 @@ class Screen:
             finished,
             self.arguments.sample_interval_ms,
         )
-        require(len(solver_images) == 1, f"observed {len(solver_images)} sealed solver images")
-        solver_pid, solver_image = next(iter(solver_images.items()))
+        solver_pid, solver_image = require_single_solver_image(solver_images)
         require(
             sampler.solver_sha256 == self.z3_sha256
             and solver_image.get("sha256") == sampler.solver_sha256,
@@ -2478,6 +3597,14 @@ class Screen:
             == solver_image.get("start_time"),
             "sealed solver PID/start-time identity drifted",
         )
+        require(
+            solver_image.get("session_id") == process.pid
+            and solver_image.get("state_before") != "Z"
+            and solver_image.get("state_after") != "Z"
+            and solver_image.get("size") == sampler.solver_size
+            and solver_image.get("mode") == SEALED_SOLVER_MODE,
+            "sealed solver live identity or executable metadata drifted",
+        )
         require(stats_path.is_file(), f"missing RTS statistics in {artifact}")
         stats = stats_path.read_bytes()
         allocated = parse_allocated_bytes(stats)
@@ -2485,7 +3612,10 @@ class Screen:
         require(solver_sessions == 1, f"observed {solver_sessions} Z3 sessions in {artifact}")
         trace = parse_trace(trace_prefix, workload, solver_pid) if trace_prefix is not None else None
         row = {
-            "schema": ROW_SCHEMA,
+            "schema": (
+                CALIBRATION_ROW_SCHEMA
+                if phase == "calibration" else ROW_SCHEMA
+            ),
             "run_id": self.run_id,
             "phase": phase,
             "workload": workload.name,
@@ -2524,6 +3654,14 @@ class Screen:
             "sampler_mean_interval_ns": sampler_diagnostics["mean_interval_ns"],
             "sampler_max_interval_ns": sampler_diagnostics["max_interval_ns"],
             "sampler_max_pass_ns": sampler_diagnostics["max_pass_ns"],
+            "sampler_session_scans": sampling_quality["session_scan_count"],
+            "sampler_session_scan_max_gap_ns": sampling_quality[
+                "session_scan_max_gap_ns"
+            ],
+            "sampler_session_scan_max_duration_ns": sampling_quality[
+                "session_scan_max_duration_ns"
+            ],
+            "solver_observation_sha256": solver_observation_sha256,
             "process_tree_sha256": process_tree_sha256,
             "cleanup_ok": "true",
             "artifact_dir": str(artifact.relative_to(self.output)),
@@ -2630,7 +3768,7 @@ def analyze(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
     )
     keep = all(item["pass"] for item in gates)
     return {
-        "schema": "djex-select-best-candidate-pipeline-decision/v1",
+        "schema": DECISION_SCHEMA,
         "verdict": "KEEP" if keep else "HOLD",
         "keep_threshold": "> 1.10 geomean with all fail-closed controls",
         "pipeline_geomean": pipeline_geomean,
@@ -2729,6 +3867,18 @@ def collect_provenance(arguments: argparse.Namespace) -> dict[str, Any]:
             ),
             "maximum_interval_multiplier": SAMPLER_MAX_INTERVAL_MULTIPLIER,
             "maximum_pass_multiplier": SAMPLER_MAX_PASS_MULTIPLIER,
+            "session_scan": {
+                "session_id": "subprocess_root_pid",
+                "before_capture": "every_sampler_pass",
+                "post_capture_interval_ns": (
+                    SAMPLER_SESSION_SCAN_POST_CAPTURE_NS
+                ),
+                "maximum_start_gap_ns": (
+                    SAMPLER_SESSION_SCAN_MAX_START_GAP_NS
+                ),
+                "maximum_duration_ns": SAMPLER_SESSION_SCAN_MAX_DURATION_NS,
+                "maximum_tgids_per_scan": SAMPLER_SESSION_SCAN_MAX_TGIDS,
+            },
         },
         "outer_timeout_seconds": arguments.outer_timeout,
         "notes": arguments.notes,
@@ -2993,7 +4143,7 @@ def run_screen(arguments: argparse.Namespace) -> int:
         }
         if failures or analyzed_decision is None:
             decision = {
-                "schema": "djex-select-best-candidate-pipeline-decision/v1",
+                "schema": DECISION_SCHEMA,
                 "verdict": "HOLD",
                 **common,
                 "primary_failure": (
@@ -3103,6 +4253,7 @@ def check_synthetic_trace_parser() -> None:
         second = 811
         outbound_first = 97
         lines = [
+            "0.400000 setpgid(0, 0) = 0 <0.000001>",
             "0.500000 execveat(7</memfd:djex-z3-main-image (deleted)>, "
             f'"", [{executable_arguments}], 0x1234 /* 0 vars */, '
             "AT_EMPTY_PATH) = 0 <0.000001>",
@@ -3140,9 +4291,24 @@ def check_synthetic_trace_parser() -> None:
         require(parsed["rejected"] == 24, "synthetic trace rejected count")
         require(parsed["distinct_programs"] == 4, "synthetic symbolic programs")
 
+        extra_trace = root / "strace.333"
+        extra_trace.write_text(lines[1] + "\n")
+        try:
+            parse_trace(prefix, workload, solver_pid)
+        except HarnessFailure:
+            pass
+        else:
+            raise HarnessFailure(
+                "second successful exact-target exec in another strace file "
+                "was accepted"
+            )
+        finally:
+            extra_trace.unlink()
+
         bad_prefix = root / "bad"
         (root / f"bad.{solver_pid}").write_text(
-            lines[0] + "\n3.000000 read(0<pipe:[11]>,  <unfinished ...>\n"
+            "\n".join(lines[:2])
+            + "\n3.000000 read(0<pipe:[11]>,  <unfinished ...>\n"
         )
         try:
             parse_trace(bad_prefix, workload, solver_pid)
@@ -3150,6 +4316,1174 @@ def check_synthetic_trace_parser() -> None:
             pass
         else:
             raise HarnessFailure("synthetic unresolved trace record was accepted")
+
+
+def check_proc_stat_parser() -> None:
+    tail = [
+        b"S", b"11", b"12", b"13", b"0", b"0", b"0", b"0",
+        b"0", b"0", b"0", b"17", b"19", b"0", b"0", b"20",
+        b"0", b"1", b"0", b"12345", b"4096", b"23",
+    ]
+    parsed = parse_proc_stat_bytes(
+        b"321 (non-utf8-\xff-and-) delimiter) " + b" ".join(tail) + b"\n"
+    )
+    require(
+        parsed == ProcStat(11, 12, 13, "S", 17, 19, 12345, 23),
+        "byte-safe proc-stat parser drifted",
+    )
+    malformed = {
+        b"321 no-delimiter": "missing_comm_delimiter",
+        b"321 (comm) S 1 2": "short_tail",
+        b"321 (comm) ? " + b" ".join(tail[1:]): "invalid_state",
+        b"321 (comm) " + b" ".join(
+            tail[:11] + [b"not-an-integer"] + tail[12:]
+        ): "invalid_integer_11",
+    }
+    for source, reason in malformed.items():
+        try:
+            parse_proc_stat_bytes(source)
+        except ProcStatMalformed as failure:
+            require(
+                failure.reason == reason,
+                f"proc-stat malformed reason {failure.reason} != {reason}",
+            )
+        else:
+            raise HarnessFailure(f"malformed proc-stat {reason} was accepted")
+
+
+def check_sampler_capture_protocol() -> None:
+    with tempfile.TemporaryDirectory(
+        prefix="djex-solver-sampler-self-check-"
+    ) as source:
+        root = Path(source)
+        image_bytes = b"synthetic sealed solver image\n"
+        image = root / "solver-image"
+        alternate = root / "alternate-image"
+        retained = root / "retained-image"
+        for path, contents in (
+            (image, image_bytes),
+            (alternate, b"different sealed solver bytes\n"),
+            (retained, image_bytes),
+        ):
+            require(
+                len(contents) == len(image_bytes),
+                "synthetic sampler image sizes drifted",
+            )
+            path.write_bytes(contents)
+            path.chmod(SEALED_SOLVER_MODE)
+
+        class SyntheticSampler(ProcessTreeSampler):
+            def __init__(
+                self, executable: Path, solver_pids: Sequence[int] = (200,),
+            ) -> None:
+                super().__init__(
+                    100, sha256_file(executable), str(executable), 0.001,
+                )
+                self.executable = executable
+                self.alternate = alternate
+                self.clock = 0
+                self.tgids = [100, *solver_pids]
+                self.stats: dict[int, ProcStat] = {
+                    100: ProcStat(1, 100, 100, "S", 1, 1, 10, 5),
+                    **{
+                        pid: ProcStat(100, 700 + pid, 100, "S", 2, 3, pid, 7)
+                        for pid in solver_pids
+                    },
+                }
+                self.readlink_calls: dict[int, int] = {}
+                self.fail_cmdline = 0
+                self.signature_mismatch = 0
+                self.intermediate_cmdline_shapes: list[int] = []
+                self.parsed_cmdline = False
+                self.stat_calls: dict[int, int] = {}
+                self.malformed_stat_after = False
+                self.malformed_pids: dict[int, str] = {}
+                self.transient_malformed_pids: dict[int, tuple[int, str]] = {}
+                self.reexec_after_open = False
+                self.live_inode_mismatch = False
+                self.persistent_bad_cmdline_pids: set[int] = set()
+                self.raise_open_telemetry = False
+                self.raise_post_open_gate = False
+                self.raise_argv_telemetry = False
+                self.raise_transfer = False
+                self.raise_after_transfer = False
+                self.raise_before_close = False
+                self.raise_after_close = False
+                self.fail_emergency_close = 0
+                self.raise_discard_transfer = False
+                self.raise_snapshot_transfer = False
+
+            def _monotonic_ns(self) -> int:
+                self.clock += 100_000
+                return self.clock
+
+            def _task_children(self, parent: int, now: int) -> list[int]:
+                # Force discovery to depend entirely on the SID fallback.
+                return []
+
+            def _top_level_tgids(self) -> list[int]:
+                return list(self.tgids)
+
+            def _read_proc_stat(self, pid: int) -> ProcStat:
+                calls = self.stat_calls.get(pid, 0) + 1
+                self.stat_calls[pid] = calls
+                transient = self.transient_malformed_pids.get(pid)
+                if transient is not None and transient[0] > 0:
+                    remaining, reason = transient
+                    self.transient_malformed_pids[pid] = (
+                        remaining - 1, reason,
+                    )
+                    raise ProcStatMalformed(reason)
+                if pid in self.malformed_pids:
+                    raise ProcStatMalformed(self.malformed_pids[pid])
+                if self.malformed_stat_after and pid != 100 and calls == 2:
+                    raise ProcStatMalformed("synthetic_stat_after")
+                try:
+                    return self.stats[pid]
+                except KeyError as failure:
+                    raise FileNotFoundError(
+                        errno.ENOENT, "synthetic process exited"
+                    ) from failure
+
+            @staticmethod
+            def _pid_from_proc_path(path: Path) -> int:
+                return int(path.parts[-2])
+
+            def _readlink(self, path: Path) -> str:
+                pid = self._pid_from_proc_path(path)
+                calls = self.readlink_calls.get(pid, 0) + 1
+                self.readlink_calls[pid] = calls
+                if pid == 100:
+                    return "/synthetic/root"
+                if self.reexec_after_open and calls > 1:
+                    return "/synthetic/reexec"
+                return SEALED_SOLVER_TARGET
+
+            def _read_bytes(self, path: Path) -> bytes:
+                pid = self._pid_from_proc_path(path)
+                require(pid != 100, "synthetic root metadata was inspected")
+                if path.name == "cmdline":
+                    if self.fail_cmdline:
+                        self.fail_cmdline -= 1
+                        raise PermissionError(errno.EACCES, "synthetic EACCES")
+                    arguments = [
+                        self.solver_argv0,
+                        b"-in",
+                        b"-smt2",
+                        b"smtlib2_compliant=true",
+                        b"timeout=1000",
+                        b"rlimit=100000",
+                    ]
+                    if self.signature_mismatch:
+                        self.signature_mismatch -= 1
+                        arguments[-1] = b"rlimit=99999"
+                    if pid in self.persistent_bad_cmdline_pids:
+                        arguments[-1] = b"rlimit=persistent-bad"
+                    if self.parsed_cmdline:
+                        arguments = arguments[:3] + [
+                            b"smtlib2_compliant", b"true",
+                            b"timeout", b"1000", b"rlimit", b"100000",
+                        ]
+                    elif self.intermediate_cmdline_shapes:
+                        split_count = self.intermediate_cmdline_shapes.pop(0)
+                        settings = (
+                            (b"smtlib2_compliant", b"true"),
+                            (b"timeout", b"1000"),
+                            (b"rlimit", b"100000"),
+                        )
+                        arguments = arguments[:3]
+                        for position, (key, value) in enumerate(settings):
+                            arguments.extend(
+                                (key, value) if position < split_count
+                                else (key + b"=" + value,)
+                            )
+                    return b"\0".join(arguments) + b"\0"
+                require(path.name == "environ", "synthetic proc metadata path")
+                return b""
+
+            def _open_executable(self, path: Path) -> int:
+                return os.open(self.executable, os.O_RDONLY | os.O_CLOEXEC)
+
+            def _fstat(self, descriptor: int) -> os.stat_result:
+                if self.raise_post_open_gate:
+                    raise HarnessFailure("synthetic post-open gate failure")
+                return super()._fstat(descriptor)
+
+            def _note_gate_success(
+                self, pid: int, stage: str, now: int,
+            ) -> None:
+                if self.raise_open_telemetry and stage == "open_exe":
+                    raise HarnessFailure(
+                        "synthetic open telemetry failure"
+                    )
+                super()._note_gate_success(pid, stage, now)
+
+            def _note_argv_observation(
+                self, pid: int, command_line: bytes,
+                arguments: list[bytes], expected_arguments: list[bytes],
+                shape: str, now: int,
+            ) -> None:
+                if self.raise_argv_telemetry:
+                    raise HarnessFailure("synthetic argv telemetry failure")
+                super()._note_argv_observation(
+                    pid, command_line, arguments, expected_arguments,
+                    shape, now,
+                )
+
+            def _transfer_solver_image(
+                self, pid: int, captured: dict[str, Any],
+                start_time: int, now: int,
+            ) -> None:
+                if self.raise_transfer:
+                    raise HarnessFailure("synthetic ownership transfer failure")
+                super()._transfer_solver_image(
+                    pid, captured, start_time, now,
+                )
+                if self.raise_after_transfer:
+                    raise HarnessFailure(
+                        "synthetic post-transfer telemetry failure"
+                    )
+
+            def _close_executable_descriptor(self, descriptor: int) -> None:
+                if self.raise_before_close:
+                    raise OSError(
+                        errno.EIO, "synthetic pre-close failure"
+                    )
+                super()._close_executable_descriptor(descriptor)
+                if self.raise_after_close:
+                    raise OSError(errno.EIO, "synthetic close report failure")
+
+            def _emergency_close_executable_descriptor(
+                self, descriptor: int,
+            ) -> None:
+                if self.fail_emergency_close:
+                    self.fail_emergency_close -= 1
+                    raise OSError(
+                        errno.EIO, "synthetic emergency-close failure"
+                    )
+                super()._emergency_close_executable_descriptor(descriptor)
+
+            def _discard_transfer_hook(self) -> None:
+                if self.raise_discard_transfer:
+                    raise HarnessFailure(
+                        "synthetic discard transfer failure"
+                    )
+
+            def _snapshot_transfer_hook(self) -> None:
+                if self.raise_snapshot_transfer:
+                    raise HarnessFailure(
+                        "synthetic snapshot transfer failure"
+                    )
+
+            def _stat_executable(self, path: Path) -> os.stat_result:
+                return os.stat(
+                    self.alternate if self.live_inode_mismatch
+                    else self.executable
+                )
+
+        fallback = SyntheticSampler(image)
+        fallback._record_sample(force_session_scan=True)
+        require(
+            len(fallback.solver_images) == 1,
+            "session fallback did not capture the solver",
+        )
+        fallback_diagnostics = fallback.diagnostics()
+        solver_telemetry = fallback_diagnostics["pid_telemetry"]["200"]
+        require(
+            solver_telemetry["capture_sources"] == {"session_scan": 1}
+            and solver_telemetry["discovery_counts"].get("children", 0) == 0,
+            "session fallback capture source drifted",
+        )
+        cadence_last = fallback.session_scan_last_ns
+        require(cadence_last is not None, "synthetic cadence lacks first scan")
+        cadence_count = fallback.session_scan_count
+        fallback._sample(
+            cadence_last + SAMPLER_SESSION_SCAN_POST_CAPTURE_NS - 1
+        )
+        require(
+            fallback.session_scan_count == cadence_count,
+            "post-capture session scan ran below its exact cadence bound",
+        )
+        fallback.clock = (
+            cadence_last + SAMPLER_SESSION_SCAN_POST_CAPTURE_NS - 100_000
+        )
+        fallback._sample(
+            cadence_last + SAMPLER_SESSION_SCAN_POST_CAPTURE_NS
+        )
+        require(
+            fallback.session_scan_count == cadence_count + 1,
+            "post-capture session scan did not run at its exact cadence bound",
+        )
+        fallback_diagnostics = fallback.diagnostics()
+        solver_telemetry = fallback_diagnostics["pid_telemetry"]["200"]
+        require(
+            canonical_json(fallback_diagnostics)
+            == canonical_json(fallback.diagnostics()),
+            "sampler telemetry serialization is unstable",
+        )
+        fallback_snapshot = fallback.solver_snapshot()
+        _, fallback_image = require_single_solver_image(fallback_snapshot)
+        require(
+            fallback_image["sha256"] == sha256_bytes(image_bytes),
+            "synthetic fallback image hash drifted",
+        )
+        require(
+            fallback_image["cmdline_shape"] == "exec_exact"
+            and solver_telemetry["cmdline_shapes"] == {"exec_exact": 1}
+            and solver_telemetry["gate_successes"].get("captured") == 1,
+            "pristine exec cmdline shape drifted",
+        )
+
+        parsed = SyntheticSampler(image)
+        parsed.parsed_cmdline = True
+        parsed._record_sample(force_session_scan=True)
+        _, parsed_image = require_single_solver_image(parsed.solver_snapshot())
+        require(
+            parsed_image["cmdline_shape"] == "z3_4_8_12_parsed_exact"
+            and parsed.diagnostics()["pid_telemetry"]["200"]
+            ["cmdline_shapes"] == {"z3_4_8_12_parsed_exact": 1},
+            "fully parsed Z3 4.8.12 cmdline shape was rejected",
+        )
+
+        for split_count in (1, 2):
+            intermediate = SyntheticSampler(image)
+            intermediate.intermediate_cmdline_shapes = [split_count]
+            intermediate._record_sample(force_session_scan=True)
+            require(
+                not intermediate.solver_images,
+                f"intermediate-{split_count} Z3 cmdline mutation was accepted",
+            )
+            intermediate._record_sample(force_session_scan=True)
+            intermediate_telemetry = intermediate.diagnostics()[
+                "pid_telemetry"
+            ]["200"]
+            require(
+                intermediate_telemetry["cmdline_shapes"]
+                == {"exec_exact": 1, "intermediate": 1}
+                and intermediate_telemetry["signature_mismatches"]
+                == {"argv_intermediate": 1},
+                f"intermediate-{split_count} Z3 cmdline mutation was not "
+                "retried/categorized",
+            )
+            intermediate_snapshot = intermediate.solver_snapshot()
+            require_single_solver_image(intermediate_snapshot)
+            require(
+                exact_target_identity_attestation(
+                    intermediate.diagnostics(), intermediate_snapshot,
+                )["pass"],
+                f"intermediate-{split_count} cmdline was not limited to its "
+                "eventual identity",
+            )
+
+        transient = SyntheticSampler(image)
+        transient.fail_cmdline = 1
+        transient._record_sample(force_session_scan=True)
+        require(not transient.solver_images, "transient procfs failure was ignored")
+        transient._record_sample(force_session_scan=True)
+        transient_telemetry = transient.diagnostics()["pid_telemetry"]["200"]
+        require(
+            transient_telemetry["errors"]
+            == {"cmdline_read": {"EACCES": 1}},
+            "procfs errno telemetry drifted",
+        )
+        require_single_solver_image(transient.solver_snapshot())
+
+        signature = SyntheticSampler(image)
+        signature.signature_mismatch = 1
+        signature._record_sample(force_session_scan=True)
+        require(not signature.solver_images, "signature mismatch was accepted")
+        signature._record_sample(force_session_scan=True)
+        signature_telemetry = signature.diagnostics()["pid_telemetry"]["200"]
+        require(
+            signature_telemetry["signature_mismatches"]
+            == {"argv_other": 1}
+            and signature_telemetry["cmdline_shapes"]
+            == {"exec_exact": 1, "other": 1},
+            "signature mismatch telemetry drifted",
+        )
+        require_single_solver_image(signature.solver_snapshot())
+
+        second_bad_identity = SyntheticSampler(image, (200, 201))
+        second_bad_identity.persistent_bad_cmdline_pids.add(201)
+        second_bad_identity._record_sample(force_session_scan=True)
+        second_bad_snapshot = second_bad_identity.solver_snapshot()
+        require(
+            len(second_bad_snapshot) == 1,
+            "persistent bad-argv identity changed accepted capture count",
+        )
+        second_bad_attestation = exact_target_identity_attestation(
+            second_bad_identity.diagnostics(), second_bad_snapshot,
+        )
+        require(
+            not second_bad_attestation["pass"]
+            and len(second_bad_attestation[
+                "observed_exact_target_identities"
+            ]) == 2
+            and len(second_bad_attestation["captured_image_identities"]) == 1,
+            "second exact-target identity escaped cardinality HOLD",
+        )
+
+        malformed_after = SyntheticSampler(image)
+        malformed_after.malformed_stat_after = True
+        descriptors_before = len(os.listdir("/proc/self/fd"))
+        malformed_after._record_sample(force_session_scan=True)
+        require(
+            not malformed_after.solver_images
+            and malformed_after.diagnostics()["pid_telemetry"]["200"]
+            ["errors"]
+            == {"stat_after": {"PROC_STAT_SYNTHETIC_STAT_AFTER": 1}}
+            and len(os.listdir("/proc/self/fd")) == descriptors_before,
+            "malformed stat-after was not categorized/retried without fd leak",
+        )
+        malformed_after._record_sample(force_session_scan=True)
+        require_single_solver_image(malformed_after.solver_snapshot())
+
+        global_races = SyntheticSampler(image, ())
+        global_races.tgids.extend((400, 401))
+        global_races.stats[400] = ProcStat(
+            1, 400, 999, "S", 1, 1, 400, 1,
+        )
+        global_races.transient_malformed_pids[400] = (
+            1, "synthetic_global_tail",
+        )
+        global_races._record_sample(force_session_scan=True)
+        global_diagnostics = global_races.diagnostics()
+        require(
+            "400" not in global_diagnostics["pid_telemetry"]
+            and "401" not in global_diagnostics["pid_telemetry"]
+            and global_diagnostics["session_scan"]["errors"]
+            == {
+                "session_scan_stat_resolved": {
+                    "PROC_STAT_SYNTHETIC_GLOBAL_TAIL": 1,
+                },
+                "session_scan_stat_unresolved_initial": {"ENOENT": 1},
+                "session_scan_stat_unresolved_retry": {"ENOENT": 1},
+            },
+            "foreign global-stat races were not bounded/categorized",
+        )
+
+        unresolved_global = SyntheticSampler(image, ())
+        unresolved_global.tgids.append(402)
+        unresolved_global.malformed_pids[402] = "synthetic_unresolved_tail"
+        unresolved_global._record_sample(force_session_scan=True)
+        require(
+            unresolved_global.diagnostics()["session_scan"]["errors"]
+            == {
+                "session_scan_stat_unresolved_initial": {
+                    "PROC_STAT_SYNTHETIC_UNRESOLVED_TAIL": 1,
+                },
+                "session_scan_stat_unresolved_retry": {
+                    "PROC_STAT_SYNTHETIC_UNRESOLVED_TAIL": 1,
+                },
+            },
+            "unresolved malformed global TGID was not fail-closed telemetry",
+        )
+
+        zombie = SyntheticSampler(image)
+        zombie.stats[200] = ProcStat(100, 900, 100, "Z", 2, 3, 200, 0)
+        zombie._record_sample(force_session_scan=True)
+        try:
+            require_single_solver_image(zombie.solver_snapshot())
+        except HarnessFailure:
+            pass
+        else:
+            raise HarnessFailure("zombie-only solver observation was accepted")
+        require(
+            zombie.diagnostics()["pid_telemetry"]["200"]
+            ["consistency_mismatches"].get("zombie_before", 0) >= 1,
+            "zombie observation was not classified",
+        )
+
+        reused = SyntheticSampler(image)
+        reused._record_sample(force_session_scan=True)
+        reused.stats[200] = ProcStat(100, 900, 100, "S", 2, 3, 999, 7)
+        try:
+            reused._record_sample(force_session_scan=True)
+        except HarnessFailure:
+            pass
+        else:
+            raise HarnessFailure("PID reuse was accepted")
+        reused._discard_solver_descriptors()
+
+        inode_drift = SyntheticSampler(image)
+        inode_drift.live_inode_mismatch = True
+        inode_drift._record_sample(force_session_scan=True)
+        require(
+            not inode_drift.solver_images
+            and inode_drift.diagnostics()["pid_telemetry"]["200"]
+            ["consistency_mismatches"] == {"live_fstat": 1},
+            "same-target/different-inode capture was accepted",
+        )
+
+        captured_inode_drift = SyntheticSampler(image)
+        captured_inode_drift._record_sample(force_session_scan=True)
+        captured_inode_drift.live_inode_mismatch = True
+        try:
+            captured_inode_drift._record_sample(force_session_scan=True)
+        except HarnessFailure:
+            pass
+        else:
+            raise HarnessFailure(
+                "captured same-target/different-inode re-exec was accepted"
+            )
+        require(
+            captured_inode_drift.diagnostics()["pid_telemetry"]["200"]
+            ["consistency_mismatches"]
+            == {"captured_live_identity": 1},
+            "captured executable identity drift was not categorized",
+        )
+        captured_inode_drift._discard_solver_descriptors()
+
+        reexec = SyntheticSampler(image)
+        reexec.reexec_after_open = True
+        reexec._record_sample(force_session_scan=True)
+        require(
+            not reexec.solver_images
+            and reexec.diagnostics()["pid_telemetry"]["200"]
+            ["consistency_mismatches"] == {"target": 1},
+            "mid-capture re-exec was accepted",
+        )
+
+        sessions = SyntheticSampler(image, (200, 300))
+        sessions.stats[300] = ProcStat(100, 100, 999, "S", 1, 1, 300, 4)
+        sessions._record_sample(force_session_scan=True)
+        session_snapshot = sessions.solver_snapshot()
+        require(
+            set(session_snapshot) == {200},
+            "different-session process entered solver capture",
+        )
+
+        duplicate = SyntheticSampler(image, (200, 201))
+        duplicate._record_sample(force_session_scan=True)
+        duplicate_snapshot = duplicate.solver_snapshot()
+        try:
+            require_single_solver_image(duplicate_snapshot)
+        except HarnessFailure:
+            pass
+        else:
+            raise HarnessFailure("two sealed solver images were accepted")
+
+        retained_sampler = SyntheticSampler(retained)
+        retained_sampler._record_sample(force_session_scan=True)
+        retained_descriptor = retained_sampler.solver_images[200]["descriptor"]
+        retained.unlink()
+        del retained_sampler.stats[200]
+        retained_sampler.tgids.remove(200)
+        retained_snapshot = retained_sampler.solver_snapshot()
+        _, retained_image = require_single_solver_image(retained_snapshot)
+        require(
+            retained_image["sha256"] == sha256_bytes(image_bytes),
+            "held executable descriptor did not survive process/image exit",
+        )
+        try:
+            os.fstat(retained_descriptor)
+        except OSError as failure:
+            require(failure.errno == errno.EBADF, "retained descriptor close errno")
+        else:
+            raise HarnessFailure("solver snapshot leaked its held descriptor")
+
+        for attribute, expected_text in (
+            ("raise_open_telemetry", "synthetic open telemetry failure"),
+            ("raise_post_open_gate", "synthetic post-open gate failure"),
+            ("raise_argv_telemetry", "synthetic argv telemetry failure"),
+            ("raise_transfer", "synthetic ownership transfer failure"),
+            (
+                "raise_after_transfer",
+                "synthetic post-transfer telemetry failure",
+            ),
+        ):
+            injected = SyntheticSampler(image)
+            setattr(injected, attribute, True)
+            descriptors_before = len(os.listdir("/proc/self/fd"))
+            try:
+                injected._record_sample(force_session_scan=True)
+            except HarnessFailure as failure:
+                require(
+                    expected_text in str(failure),
+                    f"{attribute} primary failure precedence drifted",
+                )
+            else:
+                raise HarnessFailure(f"{attribute} failure was accepted")
+            finally:
+                injected._discard_solver_descriptors()
+            require(
+                len(os.listdir("/proc/self/fd")) == descriptors_before,
+                f"{attribute} leaked a retained executable descriptor",
+            )
+
+        close_only = SyntheticSampler(image)
+        close_only.signature_mismatch = 1
+        close_only.raise_after_close = True
+        descriptors_before = len(os.listdir("/proc/self/fd"))
+        try:
+            close_only._record_sample(force_session_scan=True)
+        except HarnessFailure as failure:
+            require(
+                "cannot close rejected solver executable descriptor"
+                in str(failure),
+                "descriptor-close-only failure was not explicit",
+            )
+        else:
+            raise HarnessFailure("descriptor close failure was accepted")
+        require(
+            len(os.listdir("/proc/self/fd")) == descriptors_before,
+            "reported descriptor close failure leaked an fd",
+        )
+
+        primary_and_close = SyntheticSampler(image)
+        primary_and_close.raise_post_open_gate = True
+        primary_and_close.raise_after_close = True
+        descriptors_before = len(os.listdir("/proc/self/fd"))
+        try:
+            primary_and_close._record_sample(force_session_scan=True)
+        except HarnessFailure as failure:
+            require(
+                "synthetic post-open gate failure" in str(failure)
+                and "synthetic close report failure" in str(failure),
+                "primary/close failure aggregation drifted",
+            )
+        else:
+            raise HarnessFailure("primary plus close failure was accepted")
+        require(
+            len(os.listdir("/proc/self/fd")) == descriptors_before,
+            "primary plus reported close failure leaked an fd",
+        )
+
+        cleanup_registry_retry = SyntheticSampler(image)
+        cleanup_registry_retry.signature_mismatch = 1
+        cleanup_registry_retry.raise_before_close = True
+        cleanup_registry_retry.fail_emergency_close = 1
+        descriptors_before = len(os.listdir("/proc/self/fd"))
+        try:
+            cleanup_registry_retry._record_sample(force_session_scan=True)
+        except HarnessFailure as failure:
+            require(
+                "synthetic pre-close failure" in str(failure)
+                and "synthetic emergency-close failure" in str(failure)
+                and len(cleanup_registry_retry.cleanup_descriptors) == 1
+                and len(os.listdir("/proc/self/fd"))
+                == descriptors_before + 1,
+                "uncertain rejected-capture close was not retained",
+            )
+        else:
+            raise HarnessFailure(
+                "uncertain rejected-capture close was accepted"
+            )
+        cleanup_registry_retry.raise_before_close = False
+        cleanup_retry_failures: list[str] = []
+        require(
+            finalize_sampler_images(
+                cleanup_registry_retry, cleanup_retry_failures,
+                "production run",
+            ) == {}
+            and not cleanup_retry_failures
+            and not cleanup_registry_retry.cleanup_descriptors
+            and len(os.listdir("/proc/self/fd")) == descriptors_before,
+            "successful snapshot did not drain the descriptor retry registry",
+        )
+
+        class SnapshotFailureSampler(SyntheticSampler):
+            def solver_snapshot(self) -> dict[int, dict[str, Any]]:
+                raise HarnessFailure("synthetic production snapshot failure")
+
+        snapshot_failure = SnapshotFailureSampler(image)
+        descriptors_before = len(os.listdir("/proc/self/fd"))
+        snapshot_failure._record_sample(force_session_scan=True)
+        snapshot_failures: list[str] = []
+        require(
+            finalize_sampler_images(
+                snapshot_failure, snapshot_failures, "production run",
+            ) == {}
+            and len(snapshot_failures) == 1
+            and "synthetic production snapshot failure"
+            in snapshot_failures[0]
+            and len(os.listdir("/proc/self/fd")) == descriptors_before,
+            "production snapshot failure did not fail-safe close its fd",
+        )
+
+        snapshot_transfer_failure = SyntheticSampler(image)
+        snapshot_transfer_failure._record_sample(force_session_scan=True)
+        snapshot_transfer_failure.raise_snapshot_transfer = True
+        descriptors_before = len(os.listdir("/proc/self/fd"))
+        snapshot_transfer_failures: list[str] = []
+        require(
+            finalize_sampler_images(
+                snapshot_transfer_failure, snapshot_transfer_failures,
+                "production run",
+            ) == {}
+            and len(snapshot_transfer_failures) == 1
+            and "synthetic snapshot transfer failure"
+            in snapshot_transfer_failures[0]
+            and len(os.listdir("/proc/self/fd")) == descriptors_before - 1,
+            "snapshot ownership-transfer failure leaked or lost its fd",
+        )
+
+        snapshot_transfer_and_close = SyntheticSampler(image)
+        snapshot_transfer_and_close._record_sample(
+            force_session_scan=True
+        )
+        snapshot_transfer_and_close.raise_snapshot_transfer = True
+        snapshot_transfer_and_close.raise_after_close = True
+        descriptors_before = len(os.listdir("/proc/self/fd"))
+        snapshot_transfer_close_failures: list[str] = []
+        require(
+            finalize_sampler_images(
+                snapshot_transfer_and_close,
+                snapshot_transfer_close_failures,
+                "production run",
+            ) == {}
+            and len(snapshot_transfer_close_failures) == 1
+            and "synthetic snapshot transfer failure"
+            in snapshot_transfer_close_failures[0]
+            and "synthetic close report failure"
+            in snapshot_transfer_close_failures[0]
+            and len(os.listdir("/proc/self/fd")) == descriptors_before - 1,
+            "snapshot transfer/close primary precedence or fd cleanup drifted",
+        )
+
+        snapshot_cleanup_failure = SnapshotFailureSampler(image)
+        snapshot_cleanup_failure.raise_after_close = True
+        descriptors_before = len(os.listdir("/proc/self/fd"))
+        snapshot_cleanup_failure._record_sample(force_session_scan=True)
+        snapshot_cleanup_failures: list[str] = []
+        require(
+            finalize_sampler_images(
+                snapshot_cleanup_failure, snapshot_cleanup_failures,
+                "production run",
+            ) == {}
+            and len(snapshot_cleanup_failures) == 2
+            and "synthetic production snapshot failure"
+            in snapshot_cleanup_failures[0]
+            and "solver descriptor discard failure"
+            in snapshot_cleanup_failures[1]
+            and len(os.listdir("/proc/self/fd")) == descriptors_before,
+            "snapshot/discard failure precedence or fd cleanup drifted",
+        )
+
+        snapshot_preclose_failure = SnapshotFailureSampler(image)
+        snapshot_preclose_failure.raise_before_close = True
+        descriptors_before = len(os.listdir("/proc/self/fd"))
+        snapshot_preclose_failure._record_sample(force_session_scan=True)
+        snapshot_preclose_failures: list[str] = []
+        require(
+            finalize_sampler_images(
+                snapshot_preclose_failure, snapshot_preclose_failures,
+                "production run",
+            ) == {}
+            and len(snapshot_preclose_failures) == 2
+            and "synthetic production snapshot failure"
+            in snapshot_preclose_failures[0]
+            and "synthetic pre-close failure"
+            in snapshot_preclose_failures[1]
+            and not snapshot_preclose_failure.cleanup_descriptors
+            and len(os.listdir("/proc/self/fd")) == descriptors_before,
+            "pre-close discard failure lost ownership or leaked its fd",
+        )
+
+        snapshot_discard_transfer = SnapshotFailureSampler(image)
+        snapshot_discard_transfer.raise_discard_transfer = True
+        descriptors_before = len(os.listdir("/proc/self/fd"))
+        snapshot_discard_transfer._record_sample(force_session_scan=True)
+        snapshot_discard_transfer_failures: list[str] = []
+        require(
+            finalize_sampler_images(
+                snapshot_discard_transfer,
+                snapshot_discard_transfer_failures,
+                "production run",
+            ) == {}
+            and len(snapshot_discard_transfer_failures) == 2
+            and "synthetic production snapshot failure"
+            in snapshot_discard_transfer_failures[0]
+            and "synthetic discard transfer failure"
+            in snapshot_discard_transfer_failures[1]
+            and not snapshot_discard_transfer.cleanup_descriptors
+            and len(os.listdir("/proc/self/fd")) == descriptors_before,
+            "discard ownership-transfer failure lost or leaked its fd",
+        )
+
+        execute_source = inspect.getsource(Screen.execute)
+        require(
+            "finalize_sampler_images(" in execute_source
+            and "sampler.solver_snapshot()" not in execute_source,
+            "production Screen bypassed fail-safe solver finalization",
+        )
+
+        finalization_sampler = SyntheticSampler(image)
+        finalization_sampler._record_sample(force_session_scan=True)
+        finalization_descriptor = finalization_sampler.solver_images[200][
+            "descriptor"
+        ]
+        synthetic_primary = HarnessFailure("synthetic later finalization failure")
+        finalization_failures: list[str] = []
+        finalization_images = finalize_sampler_images(
+            finalization_sampler, finalization_failures,
+            "synthetic finalization",
+        )
+        require(
+            synthetic_primary.args == ("synthetic later finalization failure",)
+            and not finalization_failures
+            and len(finalization_images) == 1,
+            "captured-image finalization changed primary precedence",
+        )
+        try:
+            os.fstat(finalization_descriptor)
+        except OSError as failure:
+            require(
+                failure.errno == errno.EBADF,
+                "finalization descriptor close errno",
+            )
+        else:
+            raise HarnessFailure(
+                "captured image leaked after later finalization failure"
+            )
+
+
+def check_live_sealed_memfd_session_fallback() -> None:
+    helper = r'''
+import ctypes
+import os
+import sys
+import time
+
+source = sys.argv[1]
+short = sys.argv[2] == "short"
+descriptor = os.memfd_create(
+    "djex-z3-main-image", os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING
+)
+with open(source, "rb") as handle:
+    while True:
+        block = handle.read(1024 * 1024)
+        if not block:
+            break
+        view = memoryview(block)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise RuntimeError("short memfd write")
+            view = view[written:]
+os.fchmod(descriptor, 0o500)
+import fcntl
+fcntl.fcntl(descriptor, 1033, 0x0001 | 0x0002 | 0x0004 | 0x0008)
+input_read, input_write = os.pipe()
+pid = os.fork()
+if pid == 0:
+    os.setpgid(0, 0)
+    os.close(input_write)
+    os.dup2(input_read, 0)
+    if input_read != 0:
+        os.close(input_read)
+    values = [
+        source.encode(), b"-in", b"-smt2",
+        b"smtlib2_compliant=true", b"timeout=1000", b"rlimit=100000",
+    ]
+    argv = (ctypes.c_char_p * (len(values) + 1))(*values, None)
+    envp = (ctypes.c_char_p * 1)(None)
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.syscall(322, descriptor, b"", argv, envp, 0x1000)
+    os._exit(127)
+os.close(descriptor)
+os.close(input_read)
+target = "/memfd:djex-z3-main-image (deleted)"
+deadline = time.monotonic() + 5
+while True:
+    waited, status = os.waitpid(pid, os.WNOHANG)
+    if waited == pid:
+        print(f"child-exited-before-ready:{status}", file=sys.stderr, flush=True)
+        os.close(input_write)
+        raise SystemExit(1)
+    try:
+        if os.readlink(f"/proc/{pid}/exe") == target:
+            break
+    except (FileNotFoundError, ProcessLookupError, PermissionError):
+        pass
+    if time.monotonic() >= deadline:
+        print("child-readiness-timeout", file=sys.stderr, flush=True)
+        os.close(input_write)
+        os.kill(pid, 9)
+        os.waitpid(pid, 0)
+        raise SystemExit(1)
+    time.sleep(0.001)
+print(pid, flush=True)
+if short:
+    os.close(input_write)
+    os.waitpid(pid, 0)
+    print("exited", flush=True)
+while True:
+    time.sleep(1)
+'''
+
+    class SessionOnlySampler(ProcessTreeSampler):
+        def _task_children(self, parent: int, now: int) -> list[int]:
+            return []
+
+    def launch(short: bool) -> subprocess.Popen[bytes]:
+        return subprocess.Popen(
+            [
+                str(PINNED_PYTHON), "-B", "-c", helper,
+                str(PINNED_Z3), "short" if short else "live",
+            ],
+            stdin=subprocess.DEVNULL if short else subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+
+    def bounded_failure_snapshot(
+        sampler: ProcessTreeSampler, child_pid: int,
+    ) -> str:
+        diagnostics = sampler.diagnostics()
+        telemetry = diagnostics["pid_telemetry"]
+        return canonical_json({
+            "child_pid": child_pid,
+            "child": telemetry.get(str(child_pid)),
+            "root_pid": sampler.root_pid,
+            "root": telemetry.get(str(sampler.root_pid)),
+            "known_pids": diagnostics["known_pids"],
+            "sampler_error": diagnostics["sampler_error"],
+            "session_scan": diagnostics["session_scan"],
+        }).decode().strip()
+
+    def raise_fixture_failures(
+        label: str, primary: BaseException | None,
+        finalization: list[str], snapshot: str | None,
+        helper_stderr: bytes,
+    ) -> None:
+        details = list(finalization)
+        if snapshot is not None:
+            details.append(f"sampler_snapshot={snapshot}")
+        if helper_stderr:
+            bounded = helper_stderr[:4096]
+            details.append(
+                f"helper_stderr_bytes={len(helper_stderr)} "
+                f"helper_stderr_sha256={sha256_bytes(helper_stderr)} "
+                f"helper_stderr_prefix={bounded!r}"
+            )
+        suffix = "" if not details else "; finalization=" + repr(details)
+        if primary is not None:
+            raise HarnessFailure(
+                f"{label} primary failure: {type(primary).__name__}: "
+                f"{primary}{suffix}"
+            ) from primary
+        require(not details, f"{label} finalization failure: {details}")
+
+    live = launch(False)
+    live_sampler: SessionOnlySampler | None = None
+    live_sampler_stopped = False
+    live_child_pid = -1
+    live_primary: BaseException | None = None
+    live_finalization: list[str] = []
+    live_failure_snapshot: str | None = None
+    live_stderr = b""
+    try:
+        require(live.stdout is not None, "live memfd helper lacks stdout")
+        child_line = live.stdout.readline()
+        require(
+            child_line.strip().isdigit(),
+            f"live memfd helper did not report its child: {child_line!r}",
+        )
+        live_child_pid = int(child_line)
+        live_sampler = SessionOnlySampler(
+            live.pid, PINNED_Z3_SHA256, str(PINNED_Z3), 0.001,
+        )
+        live_sampler.start()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if live_sampler.metrics()[2] == 1:
+                break
+            if live_sampler.error is not None:
+                raise HarnessFailure(
+                    "live session sampler failed early: "
+                    + bounded_failure_snapshot(live_sampler, live_child_pid)
+                )
+            time.sleep(0.001)
+        require(
+            live_sampler.metrics()[2] == 1,
+            "live session fallback did not capture sealed Z3: "
+            + bounded_failure_snapshot(live_sampler, live_child_pid),
+        )
+        # Exercise the fixed 50 ms post-capture full-SID audit cadence.
+        time.sleep(0.06)
+        live_sampler.stop()
+        live_sampler_stopped = True
+    except BaseException as failure:
+        live_primary = failure
+        if live_sampler is not None:
+            try:
+                live_failure_snapshot = bounded_failure_snapshot(
+                    live_sampler, live_child_pid,
+                )
+            except BaseException as snapshot_failure:
+                live_finalization.append(
+                    "pre-cleanup diagnostics failure: "
+                    f"{type(snapshot_failure).__name__}: {snapshot_failure}"
+                )
+    finally:
+        if live_sampler is not None and not live_sampler_stopped:
+            try:
+                live_sampler.stop()
+                live_sampler_stopped = True
+            except BaseException as failure:
+                live_finalization.append(
+                    f"sampler stop failure: {type(failure).__name__}: {failure}"
+                )
+        if live_sampler is not None:
+            try:
+                terminate_owned_processes(
+                    live.pid, live_sampler.identity_snapshot(),
+                )
+            except BaseException as failure:
+                live_finalization.append(
+                    "descendant termination failure: "
+                    f"{type(failure).__name__}: {failure}"
+                )
+        elif live.poll() is None:
+            try:
+                os.killpg(live.pid, signal.SIGKILL)
+            except BaseException as failure:
+                live_finalization.append(
+                    f"process-group kill failure: {type(failure).__name__}: {failure}"
+                )
+        try:
+            _live_stdout, live_stderr = live.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(live.pid, signal.SIGKILL)
+            except BaseException as failure:
+                live_finalization.append(
+                    f"timeout kill failure: {type(failure).__name__}: {failure}"
+                )
+            try:
+                _live_stdout, live_stderr = live.communicate(timeout=5)
+            except BaseException as failure:
+                live_finalization.append(
+                    f"post-kill reap failure: {type(failure).__name__}: {failure}"
+                )
+        except BaseException as failure:
+            live_finalization.append(
+                f"helper reap failure: {type(failure).__name__}: {failure}"
+            )
+    live_snapshot = (
+        {} if live_sampler is None else finalize_sampler_images(
+            live_sampler, live_finalization, "live fixture",
+        )
+    )
+    raise_fixture_failures(
+        "live sealed-memfd fixture", live_primary, live_finalization,
+        live_failure_snapshot, live_stderr,
+    )
+    require(live_sampler is not None, "live sampler was not constructed")
+    live_pid, live_image = require_single_solver_image(live_snapshot)
+    live_diagnostics = live_sampler.diagnostics()
+    live_telemetry = live_diagnostics["pid_telemetry"][str(live_pid)]
+    require(
+        live_image["sha256"] == PINNED_Z3_SHA256
+        and live_image["capture_source"] == "session_scan"
+        and live_image["cmdline_shape"] == "z3_4_8_12_parsed_exact"
+        and live_telemetry["capture_sources"] == {"session_scan": 1}
+        and live_diagnostics["session_scan"]["forced_count"] == 2
+        and live_diagnostics["session_scan"]["count"] >= 3
+        and live_diagnostics["session_scan"]["last_start_ns"]
+        >= live_telemetry["capture_first_ns"],
+        "live retained session-fallback capture drifted",
+    )
+
+    short = launch(True)
+    short_sampler: SessionOnlySampler | None = None
+    short_sampler_stopped = False
+    short_child_pid = -1
+    short_primary: BaseException | None = None
+    short_finalization: list[str] = []
+    short_failure_snapshot: str | None = None
+    short_stderr = b""
+    try:
+        require(short.stdout is not None, "short memfd helper lacks stdout")
+        child_line = short.stdout.readline()
+        exit_line = short.stdout.readline()
+        require(
+            child_line.strip().isdigit() and exit_line == b"exited\n",
+            "short memfd helper did not complete before sampling",
+        )
+        short_child_pid = int(child_line)
+        short_sampler = SessionOnlySampler(
+            short.pid, PINNED_Z3_SHA256, str(PINNED_Z3), 0.001,
+        )
+        short_sampler.start()
+        time.sleep(0.02)
+        short_sampler.stop()
+        short_sampler_stopped = True
+    except BaseException as failure:
+        short_primary = failure
+        if short_sampler is not None:
+            try:
+                short_failure_snapshot = bounded_failure_snapshot(
+                    short_sampler, short_child_pid,
+                )
+            except BaseException as snapshot_failure:
+                short_finalization.append(
+                    "pre-cleanup diagnostics failure: "
+                    f"{type(snapshot_failure).__name__}: {snapshot_failure}"
+                )
+    finally:
+        if short_sampler is not None and not short_sampler_stopped:
+            try:
+                short_sampler.stop()
+                short_sampler_stopped = True
+            except BaseException as failure:
+                short_finalization.append(
+                    f"sampler stop failure: {type(failure).__name__}: {failure}"
+                )
+        if short_sampler is not None:
+            try:
+                terminate_owned_processes(
+                    short.pid, short_sampler.identity_snapshot(),
+                )
+            except BaseException as failure:
+                short_finalization.append(
+                    "descendant termination failure: "
+                    f"{type(failure).__name__}: {failure}"
+                )
+        elif short.poll() is None:
+            try:
+                os.killpg(short.pid, signal.SIGKILL)
+            except BaseException as failure:
+                short_finalization.append(
+                    f"process-group kill failure: {type(failure).__name__}: {failure}"
+                )
+        try:
+            _short_stdout, short_stderr = short.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(short.pid, signal.SIGKILL)
+            except BaseException as failure:
+                short_finalization.append(
+                    f"timeout kill failure: {type(failure).__name__}: {failure}"
+                )
+            try:
+                _short_stdout, short_stderr = short.communicate(timeout=5)
+            except BaseException as failure:
+                short_finalization.append(
+                    f"post-kill reap failure: {type(failure).__name__}: {failure}"
+                )
+        except BaseException as failure:
+            short_finalization.append(
+                f"helper reap failure: {type(failure).__name__}: {failure}"
+            )
+    short_snapshot = (
+        {} if short_sampler is None else finalize_sampler_images(
+            short_sampler, short_finalization, "short fixture",
+        )
+    )
+    raise_fixture_failures(
+        "short sealed-memfd fixture", short_primary, short_finalization,
+        short_failure_snapshot, short_stderr,
+    )
+    require(short_sampler is not None, "short sampler was not constructed")
+    try:
+        require_single_solver_image(short_snapshot)
+    except HarnessFailure:
+        pass
+    else:
+        raise HarnessFailure("already-exited sealed solver was accepted")
 
 
 def check_exception_cleanup_and_stable_environment() -> None:
@@ -3175,6 +5509,7 @@ def check_exception_cleanup_and_stable_environment() -> None:
         screen.termination_requests = []
         screen.termination_delivery_errors = []
         screen.external_termination_requests = []
+        screen.calibration_enabled = False
         screen.termination_requests.append("STALE")
         screen.termination_delivery_errors.append("STALE")
         screen.begin_run(
@@ -3280,6 +5615,12 @@ def self_check() -> int:
         [row["column"] for row in schema_rows] == RESULT_COLUMNS,
         "result schema columns differ from runner",
     )
+    phase_schema = next(row for row in schema_rows if row["column"] == "phase")
+    require(
+        "calibration" in phase_schema["meaning"]
+        and "diagnostic-only" in phase_schema["meaning"],
+        "result schema does not distinguish diagnostic calibration rows",
+    )
     normalized_fixture = normalized_plan_bytes(
         {
             "absolute": "/synthetic/worktree/dist",
@@ -3351,13 +5692,166 @@ def self_check() -> int:
         "mean_interval_ns": 1_000_000,
         "max_interval_ns": 4_000_000,
         "max_pass_ns": 500_000,
+        "sampler_error": None,
+        "pid_telemetry": {},
+        "session_scan": {
+            "policy": {
+                "before_capture": "every_sampler_pass",
+                "post_capture_interval_ns": (
+                    SAMPLER_SESSION_SCAN_POST_CAPTURE_NS
+                ),
+                "maximum_start_gap_ns": (
+                    SAMPLER_SESSION_SCAN_MAX_START_GAP_NS
+                ),
+                "maximum_duration_ns": SAMPLER_SESSION_SCAN_MAX_DURATION_NS,
+                "maximum_tgids_per_scan": SAMPLER_SESSION_SCAN_MAX_TGIDS,
+            },
+            "count": 201,
+            "forced_count": 2,
+            "first_start_ns": 1_000_000,
+            "last_start_ns": 1_999_000_000,
+            "last_finished_ns": 2_000_000_000,
+            "max_start_gap_ns": 10_000_000,
+            "max_duration_ns": 12_000_000,
+            "tgids_total": 603,
+            "max_tgids": 3,
+            "errors": {},
+        },
     }
     sampler_quality = validate_sampler_quality(
         sampler_fixture, 0, 2_000_000_000, 1.0
     )
     require(sampler_quality["coverage_ratio"] > 0.99, "sampler coverage parser")
+    missing_forced_scan = json.loads(canonical_json(sampler_fixture))
+    missing_forced_scan["session_scan"]["forced_count"] = 1
+    try:
+        validate_sampler_quality(
+            missing_forced_scan, 0, 2_000_000_000, 1.0,
+        )
+    except HarnessFailure:
+        pass
+    else:
+        raise HarnessFailure("missing forced-final session scan was accepted")
+    global_malformed = json.loads(canonical_json(sampler_fixture))
+    global_malformed["session_scan"]["errors"] = {
+        "session_scan_stat_resolved": {"PROC_STAT_SHORT_TAIL": 1},
+    }
+    validate_sampler_quality(global_malformed, 0, 2_000_000_000, 1.0)
+    unresolved_global_malformed = json.loads(canonical_json(sampler_fixture))
+    unresolved_global_malformed["session_scan"]["errors"] = {
+        "session_scan_stat_unresolved_retry": {
+            "PROC_STAT_SHORT_TAIL": 1,
+        },
+    }
+    try:
+        validate_sampler_quality(
+            unresolved_global_malformed, 0, 2_000_000_000, 1.0,
+        )
+    except HarnessFailure:
+        pass
+    else:
+        raise HarnessFailure(
+            "unresolved malformed global proc-stat was accepted"
+        )
+    known_malformed = json.loads(canonical_json(sampler_fixture))
+    known_malformed["pid_telemetry"] = {
+        "123": {
+            "errors": {"known_stat": {"PROC_STAT_SHORT_TAIL": 1}},
+        },
+    }
+    try:
+        validate_sampler_quality(
+            known_malformed, 0, 2_000_000_000, 1.0
+        )
+    except HarnessFailure:
+        pass
+    else:
+        raise HarnessFailure("known-PID malformed proc-stat was accepted")
+
+    for field, multiplier in (
+        ("max_interval_ns", SAMPLER_MAX_INTERVAL_MULTIPLIER),
+        ("max_pass_ns", SAMPLER_MAX_PASS_MULTIPLIER),
+    ):
+        exact = json.loads(canonical_json(sampler_fixture))
+        exact[field] = int(1_000_000 * multiplier)
+        validate_sampler_quality(exact, 0, 2_000_000_000, 1.0)
+        over = json.loads(canonical_json(exact))
+        over[field] += 1
+        try:
+            validate_sampler_quality(over, 0, 2_000_000_000, 1.0)
+        except HarnessFailure:
+            pass
+        else:
+            raise HarnessFailure(f"{field} accepted bound plus one")
+
+    exact_coverage = json.loads(canonical_json(sampler_fixture))
+    exact_coverage["first_sample_ns"] = 40_000_000
+    exact_coverage["span_ns"] = (
+        exact_coverage["last_sample_start_ns"]
+        - exact_coverage["first_sample_ns"]
+    )
+    exact_coverage["mean_interval_ns"] = (
+        exact_coverage["span_ns"]
+        // (exact_coverage["sample_count"] - 1)
+    )
+    require(
+        validate_sampler_quality(
+            exact_coverage, 0, 2_000_000_000, 1.0,
+        )["coverage_ratio"] == SAMPLER_MIN_WALL_COVERAGE,
+        "exact sampler coverage bound drifted",
+    )
+    below_coverage = json.loads(canonical_json(exact_coverage))
+    below_coverage["first_sample_ns"] += 1
+    below_coverage["span_ns"] -= 1
+    below_coverage["mean_interval_ns"] = (
+        below_coverage["span_ns"]
+        // (below_coverage["sample_count"] - 1)
+    )
+    try:
+        validate_sampler_quality(
+            below_coverage, 0, 2_000_000_000, 1.0,
+        )
+    except HarnessFailure:
+        pass
+    else:
+        raise HarnessFailure("sampler coverage accepted bound minus one ns")
+
+    terminal_bound = json.loads(canonical_json(sampler_fixture))
+    terminal_bound.update({
+        "last_sample_start_ns": 2_949_000_000,
+        "last_sample_finished_ns": 2_950_000_000,
+    })
+    terminal_bound["span_ns"] = (
+        terminal_bound["last_sample_start_ns"]
+        - terminal_bound["first_sample_ns"]
+    )
+    terminal_bound["mean_interval_ns"] = (
+        terminal_bound["span_ns"]
+        // (terminal_bound["sample_count"] - 1)
+    )
+    terminal_bound["session_scan"].update({
+        "last_start_ns": 2_999_000_000,
+        "last_finished_ns": 3_000_000_000,
+    })
+    quality_at_terminal_bound = validate_sampler_quality(
+        terminal_bound, 0, 3_000_000_000, 1.0,
+    )
+    require(
+        quality_at_terminal_bound["terminal_gap_ns"] == 50_000_000,
+        "exact sampler terminal-gap bound drifted",
+    )
+    terminal_over = json.loads(canonical_json(terminal_bound))
+    terminal_over["last_sample_finished_ns"] -= 1
+    try:
+        validate_sampler_quality(
+            terminal_over, 0, 3_000_000_000, 1.0,
+        )
+    except HarnessFailure:
+        pass
+    else:
+        raise HarnessFailure("sampler terminal gap accepted bound plus one")
     delayed_sampler = dict(sampler_fixture)
-    delayed_sampler["first_sample_ns"] = 25_000_000
+    delayed_sampler["first_sample_ns"] = 51_000_000
     delayed_sampler["span_ns"] = (
         delayed_sampler["last_sample_start_ns"]
         - delayed_sampler["first_sample_ns"]
@@ -3371,6 +5865,30 @@ def self_check() -> int:
         pass
     else:
         raise HarnessFailure("excessive initial sampler delay was accepted")
+    sparse_session_scan = json.loads(canonical_json(sampler_fixture))
+    sparse_session_scan["session_scan"]["max_start_gap_ns"] = (
+        SAMPLER_SESSION_SCAN_MAX_START_GAP_NS + 1
+    )
+    try:
+        validate_sampler_quality(
+            sparse_session_scan, 0, 2_000_000_000, 1.0
+        )
+    except HarnessFailure:
+        pass
+    else:
+        raise HarnessFailure("excessive session-scan gap was accepted")
+    slow_session_scan = json.loads(canonical_json(sampler_fixture))
+    slow_session_scan["session_scan"]["max_duration_ns"] = (
+        SAMPLER_SESSION_SCAN_MAX_DURATION_NS + 1
+    )
+    try:
+        validate_sampler_quality(
+            slow_session_scan, 0, 2_000_000_000, 1.0
+        )
+    except HarnessFailure:
+        pass
+    else:
+        raise HarnessFailure("excessive session-scan duration was accepted")
     live_host_control = host_control_snapshot()
     require(
         attest_host_control_start(live_host_control)["verdict"] == "PASS",
@@ -3481,7 +5999,9 @@ def self_check() -> int:
     )
     require(
         vetoed["verdict"] == "HOLD"
-        and not vetoed["meaningful_over_1_10"],
+        and not vetoed["meaningful_over_1_10"]
+        and vetoed["primary_failure"]
+        == "catchable termination requested: ['SIGQUIT']",
         "outcome-commit termination did not veto KEEP",
     )
     already_held = apply_termination_veto(
@@ -3493,6 +6013,10 @@ def self_check() -> int:
         "preexisting HOLD omitted its termination request",
     )
     check_synthetic_trace_parser()
+    check_proc_stat_parser()
+    check_sampler_capture_protocol()
+    check_calibration_protocol()
+    check_live_sealed_memfd_session_fallback()
     check_exception_cleanup_and_stable_environment()
     for workload in WORKLOADS.values():
         stdout = b"banner\n" + OR_SEPARATOR.join([b"candidate"] * workload.rendered)
@@ -3507,10 +6031,759 @@ def self_check() -> int:
     return 0
 
 
+CALIBRATION_IDENTITY_FIELDS = (
+    "protocol_source",
+    "baseline_source",
+    "baseline_build_plan",
+    "baseline_binary",
+    "z3",
+    "z3_package",
+    "tools",
+    "python",
+    "runner",
+    "readme",
+    "result_schema",
+    "workloads",
+    "sampler_protocol",
+)
+
+
+def calibration_executable_identity(
+    path: Path, expected_sha256: str, label: str,
+    *,
+    expected_build_id: str | None = None,
+    expected_library_hashes: set[str] | None = None,
+) -> dict[str, Any]:
+    identity = executable_identity(
+        path, expected_sha256, label,
+        expected_build_id=expected_build_id,
+        expected_library_hashes=expected_library_hashes,
+    )
+    # ldd prints randomized load addresses.  The exact resolved library paths
+    # and their byte hashes are the durable identity; do not make ASLR output
+    # an impossible start/end equality gate.
+    identity.pop("ldd_sha256")
+    identity["dynamic_linkage_identity"] = (
+        "sorted resolved library paths and exact SHA-256 values"
+    )
+    return identity
+
+
+def calibration_identity_snapshot(
+    baseline_root: Path, baseline_binary: Path,
+) -> dict[str, Any]:
+    frozen_artifacts: dict[str, dict[str, Any]] = {}
+    for relative, expected in FROZEN_ARTIFACT_SHA256.items():
+        path = SCRIPT_DIR / relative
+        actual = sha256_file(path)
+        require(
+            actual == expected,
+            f"calibration frozen artifact drifted for {relative}: {actual}",
+        )
+        frozen_artifacts[relative] = {
+            "path": str(path), "sha256": actual,
+        }
+    runner_path = Path(__file__).resolve()
+    runner_stat = runner_path.stat()
+    baseline_source = verify_source_root(
+        baseline_root, BASELINE_COMMIT, "calibration baseline",
+    )
+    baseline_plan = build_plan_identity(
+        baseline_root, baseline_binary, BASELINE_PLAN_SHA256,
+        "calibration baseline",
+    )
+    return {
+        "schema": "djex-solver-sampler-calibration-identity/v1",
+        "protocol_source": verify_protocol_repository(),
+        "baseline_source": baseline_source,
+        "baseline_build_plan": baseline_plan,
+        "baseline_binary": calibration_executable_identity(
+            baseline_binary, BASELINE_BINARY_SHA256,
+            "calibration baseline binary",
+            expected_build_id=BASELINE_BUILD_ID,
+            expected_library_hashes=PINNED_DJEX_LIBRARY_SHA256,
+        ),
+        "z3": calibration_executable_identity(
+            PINNED_Z3, PINNED_Z3_SHA256, "calibration Z3",
+            expected_library_hashes=PINNED_Z3_LIBRARY_SHA256,
+        ),
+        "z3_package": z3_package_identity(),
+        "tools": tool_identities("/usr/bin/strace"),
+        "python": python_identity(),
+        "runner": {
+            "path": str(runner_path),
+            "sha256": sha256_file(runner_path),
+            "size": runner_stat.st_size,
+            "device": runner_stat.st_dev,
+            "inode": runner_stat.st_ino,
+            "mode": stat_module.S_IMODE(runner_stat.st_mode),
+        },
+        "readme": {
+            "path": str(SCRIPT_DIR / "README.md"),
+            "sha256": sha256_file(SCRIPT_DIR / "README.md"),
+        },
+        "result_schema": {
+            **frozen_artifacts["result-schema.tsv"],
+            "release_row_schema": ROW_SCHEMA,
+            "calibration_row_schema": CALIBRATION_ROW_SCHEMA,
+            "columns": list(RESULT_COLUMNS),
+        },
+        "workloads": {
+            name: {
+                "path": str(SCRIPT_DIR / workload.template),
+                "sha256": frozen_artifacts[workload.template]["sha256"],
+                "assessments": workload.assessments,
+                "accepted": workload.accepted,
+                "rejected": workload.rejected,
+                "rendered": workload.rendered,
+            }
+            for name, workload in WORKLOADS.items()
+        },
+        "sampler_protocol": {
+            "target_interval_ms": 1.0,
+            "minimum_wall_coverage": SAMPLER_MIN_WALL_COVERAGE,
+            "maximum_mean_interval_multiplier": (
+                SAMPLER_MAX_MEAN_INTERVAL_MULTIPLIER
+            ),
+            "maximum_interval_multiplier": SAMPLER_MAX_INTERVAL_MULTIPLIER,
+            "maximum_pass_multiplier": SAMPLER_MAX_PASS_MULTIPLIER,
+            "post_capture_session_scan_interval_ns": (
+                SAMPLER_SESSION_SCAN_POST_CAPTURE_NS
+            ),
+            "maximum_session_scan_start_gap_ns": (
+                SAMPLER_SESSION_SCAN_MAX_START_GAP_NS
+            ),
+            "maximum_session_scan_duration_ns": (
+                SAMPLER_SESSION_SCAN_MAX_DURATION_NS
+            ),
+            "maximum_session_scan_tgids": SAMPLER_SESSION_SCAN_MAX_TGIDS,
+            "accepted_cmdline_shapes": [
+                "exec_exact", "z3_4_8_12_parsed_exact",
+            ],
+            "exact_target": SEALED_SOLVER_TARGET,
+            "exact_mode": SEALED_SOLVER_MODE,
+        },
+    }
+
+
+def calibration_identity_attestation(
+    start: dict[str, Any] | None,
+    end: dict[str, Any] | None,
+    *,
+    start_failure: str | None = None,
+    end_failure: str | None = None,
+) -> dict[str, Any]:
+    gates: list[dict[str, Any]] = []
+    key_sets_match = (
+        start is not None
+        and end is not None
+        and set(start) == set(end)
+        and set(CALIBRATION_IDENTITY_FIELDS).issubset(start)
+    )
+    gates.append({
+        "name": "identity_field_set",
+        "pass": key_sets_match,
+        "requirement": (
+            "start/end fields equal and contain every frozen calibration "
+            "identity field"
+        ),
+        "start_fields": [] if start is None else sorted(start),
+        "end_fields": [] if end is None else sorted(end),
+    })
+    gates.append({
+        "name": "whole_snapshot_exact",
+        "pass": start is not None and end is not None and start == end,
+        "requirement": "the complete canonical end snapshot equals start",
+    })
+    for field in CALIBRATION_IDENTITY_FIELDS:
+        equal = (
+            start is not None
+            and end is not None
+            and field in start
+            and field in end
+            and start[field] == end[field]
+        )
+        gates.append({
+            "name": field,
+            "pass": equal,
+            "start_sha256": (
+                None if start is None or field not in start
+                else sha256_bytes(canonical_json(start[field]))
+            ),
+            "end_sha256": (
+                None if end is None or field not in end
+                else sha256_bytes(canonical_json(end[field]))
+            ),
+            "requirement": "end identity exactly equals start identity",
+        })
+    passed = (
+        start_failure is None
+        and end_failure is None
+        and all(gate["pass"] for gate in gates)
+    )
+    return {
+        "schema": "djex-solver-sampler-calibration-identity-attestation/v1",
+        "pass": passed,
+        "start_capture_failure": start_failure,
+        "end_capture_failure": end_failure,
+        "start_snapshot_sha256": (
+            None if start is None else sha256_bytes(canonical_json(start))
+        ),
+        "end_snapshot_sha256": (
+            None if end is None else sha256_bytes(canonical_json(end))
+        ),
+        "gates": gates,
+    }
+
+
+def calibration_row_attestation(
+    rows: Sequence[dict[str, Any]], required: int,
+) -> dict[str, Any]:
+    positions = [row.get("position") for row in rows]
+    gates = [
+        {
+            "name": "row_count",
+            "pass": len(rows) == required,
+            "observed": len(rows),
+            "requirement": required,
+        },
+        {
+            "name": "positions",
+            "pass": positions == list(range(1, required + 1)),
+            "observed": positions,
+            "requirement": f"exact ordered integers 1 through {required}",
+        },
+        {
+            "name": "diagnostic_row_schema",
+            "pass": all(
+                row.get("schema") == CALIBRATION_ROW_SCHEMA
+                and row.get("phase") == "calibration"
+                for row in rows
+            ),
+            "observed": sorted({
+                (row.get("schema"), row.get("phase")) for row in rows
+            }),
+            "requirement": (
+                f"{CALIBRATION_ROW_SCHEMA}/calibration for every row"
+            ),
+        },
+        {
+            "name": "treatment",
+            "pass": all(
+                row.get("workload") == "W1"
+                and row.get("cell") == "B"
+                and row.get("revision") == "baseline"
+                and row.get("commit") == BASELINE_COMMIT
+                and row.get("jobs") == 1
+                and row.get("capabilities") == 2
+                for row in rows
+            ),
+            "observed": sorted({
+                (
+                    row.get("workload"), row.get("cell"),
+                    row.get("revision"), row.get("commit"),
+                    row.get("jobs"), row.get("capabilities"),
+                )
+                for row in rows
+            }),
+            "requirement": "W1/B baseline jobs=1 -N2 only",
+        },
+        {
+            "name": "exact_solver_image_hash",
+            "pass": all(
+                row.get("solver_image_sha256") == PINNED_Z3_SHA256
+                for row in rows
+            ),
+            "observed": sum(
+                row.get("solver_image_sha256") == PINNED_Z3_SHA256
+                for row in rows
+            ),
+            "requirement": required,
+        },
+        {
+            "name": "cleanup",
+            "pass": all(row.get("cleanup_ok") == "true" for row in rows),
+            "observed": sum(
+                row.get("cleanup_ok") == "true" for row in rows
+            ),
+            "requirement": required,
+        },
+    ]
+    return {
+        "schema": "djex-solver-sampler-calibration-row-attestation/v1",
+        "pass": all(gate["pass"] for gate in gates),
+        "gates": gates,
+    }
+
+
+def calibration_passes(
+    failures: Sequence[str],
+    identity_attestation: dict[str, Any],
+    row_attestation: dict[str, Any],
+    evidence_hashes: Sequence[str | None],
+) -> bool:
+    return (
+        not failures
+        and identity_attestation.get("pass") is True
+        and row_attestation.get("pass") is True
+        and all(digest is not None for digest in evidence_hashes)
+    )
+
+
+def close_calibration_screen(
+    screen: Screen | None, finalization_failures: list[str],
+) -> None:
+    if screen is None:
+        return
+    try:
+        screen.close()
+    except BaseException as failure:
+        finalization_failures.append(
+            "calibration results close failure: "
+            f"{type(failure).__name__}: {failure}"
+        )
+
+
+def check_calibration_protocol() -> None:
+    identity = {
+        "schema": "djex-solver-sampler-calibration-identity/v1",
+        **{
+            field: {"synthetic_identity": field}
+            for field in CALIBRATION_IDENTITY_FIELDS
+        },
+    }
+    require(
+        calibration_identity_attestation(identity, identity)["pass"],
+        "equal synthetic calibration identities did not attest",
+    )
+    drifted_identity = json.loads(canonical_json(identity))
+    drifted_identity["runner"]["synthetic_identity"] = "drifted"
+    require(
+        not calibration_identity_attestation(
+            identity, drifted_identity,
+        )["pass"],
+        "synthetic calibration end-identity drift was accepted",
+    )
+
+    rows = []
+    for position in range(1, 65):
+        rows.append({
+            "schema": CALIBRATION_ROW_SCHEMA,
+            "phase": "calibration",
+            "workload": "W1",
+            "sample": "",
+            "williams_row": "",
+            "position": position,
+            "cell": "B",
+            "revision": "baseline",
+            "commit": BASELINE_COMMIT,
+            "jobs": 1,
+            "capabilities": 2,
+            "solver_image_sha256": PINNED_Z3_SHA256,
+            "cleanup_ok": "true",
+        })
+    require(
+        calibration_row_attestation(rows, 64)["pass"],
+        "synthetic 64-row calibration did not attest",
+    )
+    drifted_rows = json.loads(canonical_json(rows))
+    drifted_rows[-1]["position"] = 65
+    require(
+        not calibration_row_attestation(drifted_rows, 64)["pass"],
+        "synthetic calibration position drift was accepted",
+    )
+    required_hashes: list[str | None] = ["0" * 64] * 5
+    require(
+        calibration_passes(
+            [], {"pass": True}, {"pass": True}, required_hashes,
+        ),
+        "complete synthetic calibration evidence did not pass",
+    )
+    for missing in range(len(required_hashes)):
+        absent = list(required_hashes)
+        absent[missing] = None
+        require(
+            not calibration_passes(
+                [], {"pass": True}, {"pass": True}, absent,
+            ),
+            f"missing calibration evidence hash {missing} was accepted",
+        )
+
+    with tempfile.TemporaryDirectory(
+        prefix="djex-calibration-durability-self-check-"
+    ) as source:
+        output = Path(source) / "evidence"
+        output.mkdir()
+        arguments = argparse.Namespace(
+            baseline_binary="/synthetic/baseline",
+            candidate_binary="/synthetic/baseline",
+            z3=str(PINNED_Z3),
+            z3_sha256=PINNED_Z3_SHA256,
+            diagnostic_calibration=True,
+        )
+        screen = Screen(arguments, output)
+        row = dict(rows[0])
+        row.update({
+            "run_id": screen.run_id,
+            "artifact_dir": "raw/calibration/W1/pos-01-B",
+        })
+        outcome = RunOutcome(row, (0, b"stdout", b"stderr"), None)
+        try:
+            screen.append(outcome)
+            with screen.results_path.open(newline="") as handle:
+                durable_rows = list(csv.DictReader(handle, delimiter="\t"))
+            require(
+                len(screen.rows) == 1
+                and len(durable_rows) == 1
+                and durable_rows[0]["schema"] == CALIBRATION_ROW_SCHEMA
+                and durable_rows[0]["phase"] == "calibration",
+                "calibration append was not durably visible before close",
+            )
+        finally:
+            screen.close()
+
+    class FailingClose:
+        def close(self) -> None:
+            raise OSError(errno.EIO, "synthetic calibration close failure")
+
+    synthetic_primary = "synthetic primary failure"
+    close_failures: list[str] = []
+    close_calibration_screen(FailingClose(), close_failures)  # type: ignore[arg-type]
+    require(
+        synthetic_primary == "synthetic primary failure"
+        and len(close_failures) == 1
+        and "synthetic calibration close failure" in close_failures[0],
+        "calibration close failure suppressed primary precedence",
+    )
+
+    calibration_source = inspect.getsource(run_sampler_calibration)
+    require(
+        "screen.append(outcome)" in calibration_source
+        and "rows.append(outcome.row)" not in calibration_source
+        and "rows = [] if screen is None else list(screen.rows)"
+        in calibration_source,
+        "calibration durable-row source characterization drifted",
+    )
+
+
+def run_sampler_calibration(arguments: argparse.Namespace) -> int:
+    output = Path(arguments.output).resolve()
+    require(
+        not output.exists() and not output.is_symlink(),
+        f"calibration output already exists: {output}",
+    )
+    screen: Screen | None = None
+    start_identity: dict[str, Any] | None = None
+    end_identity: dict[str, Any] | None = None
+    start_failure: str | None = None
+    end_failure: str | None = None
+    primary_failure: str | None = None
+    finalization_failures: list[str] = []
+    termination = TerminationCoordinator()
+    handled_signals = (
+        signal.SIGHUP, signal.SIGINT, signal.SIGTERM, signal.SIGQUIT,
+    )
+    previous_handlers = {
+        value: signal.getsignal(value) for value in handled_signals
+    }
+    installed_signals: list[signal.Signals] = []
+    provenance = {
+        "schema": "djex-solver-sampler-calibration/v1",
+        "state": "initializing",
+        "diagnostic_only": True,
+        "release_evidence": False,
+        "cell": "B",
+        "workload": "W1",
+        "requested_iterations": arguments.iterations,
+        "required_iterations": 64,
+        "run_id": run_identifier(output),
+        "results_row_schema": CALIBRATION_ROW_SCHEMA,
+        "notes": arguments.notes,
+    }
+
+    def termination_requested(signum: int, _frame: Any) -> None:
+        termination.record(signum, _frame)
+
+    try:
+        try:
+            for value in handled_signals:
+                signal.signal(value, termination_requested)
+                installed_signals.append(value)
+            output.mkdir(parents=True)
+            fsync_directory(output.parent)
+            write_json(output / "calibration-provenance.json", provenance)
+            validate_run_configuration(arguments)
+            require(
+                arguments.iterations == 64,
+                "diagnostic sampler calibration must contain exactly 64 "
+                "invocations",
+            )
+            require(
+                require_sha256(
+                    arguments.baseline_binary_sha256,
+                    "calibration baseline binary SHA-256",
+                ) == BASELINE_BINARY_SHA256,
+                "calibration baseline binary hash is not the frozen baseline "
+                "hash",
+            )
+            require(
+                Path(arguments.z3).resolve() == PINNED_Z3
+                and require_sha256(
+                    arguments.z3_sha256, "calibration Z3 SHA-256",
+                ) == PINNED_Z3_SHA256,
+                "calibration Z3 identity drifted",
+            )
+            baseline_root = Path(arguments.baseline_root).resolve()
+            baseline_binary = Path(arguments.baseline_binary).resolve()
+            try:
+                start_identity = calibration_identity_snapshot(
+                    baseline_root, baseline_binary,
+                )
+            except BaseException as failure:
+                start_failure = (
+                    f"{type(failure).__name__}: {failure}"
+                )
+                raise
+            start_path = output / "calibration-identity-start.json"
+            write_json(start_path, start_identity)
+            provenance.update({
+                "state": "running",
+                "start_identity": {
+                    "path": str(start_path),
+                    "sha256": sha256_file(start_path),
+                    "snapshot_sha256": sha256_bytes(
+                        canonical_json(start_identity)
+                    ),
+                },
+                "configuration": {
+                    "outer_timeout_seconds": arguments.outer_timeout,
+                    "sample_interval_ms": arguments.sample_interval_ms,
+                },
+            })
+            write_json(output / "calibration-provenance.json", provenance)
+            screen_arguments = argparse.Namespace(
+                baseline_binary=str(baseline_binary),
+                candidate_binary=str(baseline_binary),
+                z3=str(PINNED_Z3),
+                z3_sha256=PINNED_Z3_SHA256,
+                outer_timeout=arguments.outer_timeout,
+                sample_interval_ms=arguments.sample_interval_ms,
+                diagnostic_calibration=True,
+            )
+            screen = Screen(screen_arguments, output)
+            termination.bind_screen(screen)
+            screen.external_termination_requests = termination.requests
+            for iteration in range(1, arguments.iterations + 1):
+                outcome = screen.execute(
+                    "calibration", WORKLOADS["W1"], CELLS["B"], iteration,
+                )
+                # append() writes, flushes, and fsyncs before its semantic
+                # parity checks, so even the first failing completed row is
+                # immutable partial diagnostic evidence.
+                screen.append(outcome)
+                require(
+                    outcome.row["solver_image_sha256"] == PINNED_Z3_SHA256,
+                    "calibration solver image drifted at invocation "
+                    f"{iteration}",
+                )
+        except BaseException as observed:
+            primary_failure = f"{type(observed).__name__}: {observed}"
+        finally:
+            termination.publish_finalization()
+            close_calibration_screen(screen, finalization_failures)
+
+        rows = [] if screen is None else list(screen.rows)
+        if start_identity is not None:
+            try:
+                end_identity = calibration_identity_snapshot(
+                    Path(arguments.baseline_root).resolve(),
+                    Path(arguments.baseline_binary).resolve(),
+                )
+                end_path = output / "calibration-identity-end.json"
+                write_json(end_path, end_identity)
+            except BaseException as failure:
+                end_failure = f"{type(failure).__name__}: {failure}"
+                finalization_failures.append(
+                    "calibration end-identity capture failure: "
+                    + end_failure
+                )
+        else:
+            end_failure = "start identity was unavailable"
+        identity_attestation = calibration_identity_attestation(
+            start_identity, end_identity,
+            start_failure=start_failure, end_failure=end_failure,
+        )
+        identity_attestation_path = (
+            output / "calibration-identity-attestation.json"
+        )
+        try:
+            write_json(identity_attestation_path, identity_attestation)
+        except BaseException as failure:
+            finalization_failures.append(
+                "calibration identity-attestation write failure: "
+                f"{type(failure).__name__}: {failure}"
+            )
+        if not identity_attestation["pass"] and primary_failure is None:
+            primary_failure = "calibration end-identity attestation failed"
+        row_attestation = calibration_row_attestation(
+            rows, 64,
+        )
+        if not row_attestation["pass"] and primary_failure is None:
+            primary_failure = "calibration row attestation failed"
+        if termination.requests and primary_failure is None:
+            primary_failure = (
+                "catchable termination requested during calibration: "
+                f"{list(termination.requests)}"
+            )
+
+        def required_evidence_hash(path: Path) -> str | None:
+            if not path.is_file():
+                finalization_failures.append(
+                    f"required calibration evidence is missing: {path.name}"
+                )
+                return None
+            try:
+                return sha256_file(path)
+            except BaseException as failure:
+                finalization_failures.append(
+                    f"cannot hash calibration evidence {path.name}: "
+                    f"{type(failure).__name__}: {failure}"
+                )
+                return None
+
+        results_path = (
+            screen.results_path if screen is not None
+            else output / "results.tsv"
+        )
+        results_sha256 = required_evidence_hash(results_path)
+        start_identity_sha256 = required_evidence_hash(
+            output / "calibration-identity-start.json"
+        )
+        end_identity_sha256 = required_evidence_hash(
+            output / "calibration-identity-end.json"
+        )
+        identity_attestation_sha256 = required_evidence_hash(
+            identity_attestation_path
+        )
+        provenance.update({
+            "state": (
+                "complete" if primary_failure is None
+                and not finalization_failures else "hold"
+            ),
+            "completed_invocations": len(rows),
+            "results": {
+                "path": str(results_path),
+                "sha256": results_sha256,
+                "rows_fsynced": len(rows),
+            },
+            "end_identity": {
+                "path": str(output / "calibration-identity-end.json"),
+                "sha256": end_identity_sha256,
+                "snapshot_sha256": identity_attestation[
+                    "end_snapshot_sha256"
+                ],
+            },
+            "end_identity_attestation": {
+                "path": str(identity_attestation_path),
+                "sha256": identity_attestation_sha256,
+                "pass": identity_attestation["pass"],
+            },
+            "row_attestation": row_attestation,
+            "termination_requests_before_outcome_commit": list(
+                termination.requests
+            ),
+            "primary_failure": primary_failure,
+            "finalization_failures": list(finalization_failures),
+        })
+        try:
+            write_json(output / "calibration-provenance.json", provenance)
+        except BaseException as failure:
+            finalization_failures.append(
+                "calibration provenance finalization failure: "
+                f"{type(failure).__name__}: {failure}"
+            )
+        provenance_sha256 = required_evidence_hash(
+            output / "calibration-provenance.json"
+        )
+        failures = (
+            ([primary_failure] if primary_failure is not None else [])
+            + finalization_failures
+        )
+        passed = calibration_passes(
+            failures,
+            identity_attestation,
+            row_attestation,
+            (
+                results_sha256,
+                provenance_sha256,
+                start_identity_sha256,
+                end_identity_sha256,
+                identity_attestation_sha256,
+            ),
+        )
+        decision = {
+            "schema": "djex-solver-sampler-calibration-decision/v1",
+            "diagnostic_only": True,
+            "release_evidence": False,
+            "verdict": "PASS" if passed else "HOLD",
+            "run_id": run_identifier(output),
+            "completed_invocations": len(rows),
+            "required_invocations": 64,
+            "exact_solver_image_captures": sum(
+                row.get("solver_image_sha256") == PINNED_Z3_SHA256
+                for row in rows
+            ),
+            "row_attestation": row_attestation,
+            "end_identity_attestation": identity_attestation,
+            "results_sha256": results_sha256,
+            "provenance_sha256": provenance_sha256,
+            "start_identity_sha256": start_identity_sha256,
+            "end_identity_sha256": end_identity_sha256,
+            "identity_attestation_sha256": (
+                identity_attestation_sha256
+            ),
+            "rows": rows,
+            "primary_failure": failures[0] if failures else None,
+            "finalization_failures": failures[1:] if failures else [],
+        }
+        outcome_requests = termination.block_for_outcome_commit(
+            handled_signals,
+        )
+        decision = apply_termination_veto(decision, outcome_requests)
+        decision["outcome_commit"] = {
+            "monotonic_ns": termination.outcome_commit_monotonic_ns,
+            "signals_blocked_through_process_exit": [
+                value.name for value in handled_signals
+            ],
+        }
+        write_json(output / "calibration-decision.json", decision)
+        destination = (
+            sys.stdout if decision["verdict"] == "PASS" else sys.stderr
+        )
+        print(json.dumps(decision, indent=2, sort_keys=True), file=destination)
+        return 0 if decision["verdict"] == "PASS" else 2
+    finally:
+        for value in reversed(installed_signals):
+            try:
+                signal.signal(value, previous_handlers[value])
+            except BaseException as failure:
+                print(
+                    "calibration signal-handler restoration failure: "
+                    f"{failure}",
+                    file=sys.stderr,
+                )
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     commands = result.add_subparsers(dest="command", required=True)
-    commands.add_parser("self-check", help="run static and synthetic protocol checks only")
+    commands.add_parser(
+        "self-check",
+        help=(
+            "run static/synthetic checks plus two live sealed-memfd helper "
+            "sessions; no Djex workload"
+        ),
+    )
     run = commands.add_parser("run", help="execute the one-shot screen")
     run.add_argument("--baseline-root", required=True)
     run.add_argument("--baseline-binary", required=True)
@@ -3531,6 +6804,23 @@ def parser() -> argparse.ArgumentParser:
         help="frozen process-tree sampler target; must equal 1.0",
     )
     run.add_argument("--notes", default="")
+    calibration = commands.add_parser(
+        "calibrate-sampler",
+        help=(
+            "run 64 diagnostic-only W1/B sampler captures; never release "
+            "or replacement evidence"
+        ),
+    )
+    calibration.add_argument("--baseline-root", required=True)
+    calibration.add_argument("--baseline-binary", required=True)
+    calibration.add_argument("--baseline-binary-sha256", required=True)
+    calibration.add_argument("--z3", default=str(PINNED_Z3))
+    calibration.add_argument("--z3-sha256", default=PINNED_Z3_SHA256)
+    calibration.add_argument("--output", required=True)
+    calibration.add_argument("--iterations", type=int, default=64)
+    calibration.add_argument("--outer-timeout", type=int, default=600)
+    calibration.add_argument("--sample-interval-ms", type=float, default=1.0)
+    calibration.add_argument("--notes", default="")
     return result
 
 
@@ -3549,6 +6839,8 @@ def main() -> int:
     arguments = parser().parse_args()
     if arguments.command == "self-check":
         return self_check()
+    if arguments.command == "calibrate-sampler":
+        return run_sampler_calibration(arguments)
     validate_run_configuration(arguments)
     return run_screen(arguments)
 

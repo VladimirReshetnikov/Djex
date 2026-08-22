@@ -1,0 +1,43 @@
+column	type	required	meaning
+schema	string	yes	Fixed row schema identifier.
+run_id	sha256	yes	SHA-256-derived identifier of the absolute one-shot evidence path.
+phase	enum	yes	preflight, warmup, or measured.
+workload	enum	yes	W1 or W2.
+sample	integer	measured only	Unreplaced measured sample number, 1 through 8.
+williams_row	integer	measured only	Even Williams row, 1 through 8.
+position	integer	yes	One-based position inside the phase order.
+cell	enum	yes	A through H treatment cell.
+revision	enum	yes	baseline or candidate.
+commit	sha1	yes	Exact Git commit assigned to the cell.
+jobs	integer	yes	REPL search-jobs setting.
+capabilities	integer	yes	Explicit RTS -N value.
+input_sha256	sha256	yes	Exact rendered REPL input bytes.
+wall_ns	integer	yes	Monotonic subprocess wall duration; warmup/preflight values are not analyzed.
+cpu_ns	integer	yes	Sampled process-tree user plus system CPU, quantized to host clock ticks.
+peak_rss_bytes	integer	yes	Maximum sampled aggregate resident bytes over the live process tree.
+allocated_bytes	integer	yes	GHC +RTS -s bytes allocated in the heap.
+exit_code	integer	yes	Djex process exit status (or strace wrapper status in preflight).
+stdout_sha256	sha256	yes	Exact application stdout digest.
+stderr_sha256	sha256	yes	Exact application stderr digest; RTS statistics are separate.
+transcript_sha256	sha256	yes	Length-framed exit/stdout/stderr digest.
+semantic_sha256	sha256	yes	Canonical observable selection/truncation manifest digest.
+stats_sha256	sha256	yes	Exact separate GHC RTS statistics digest.
+rendered_candidates	integer	yes	Selected rendered candidate count derived from exact separators.
+truncation_count	integer	yes	Count of DJEX_SEARCH_TRUNCATED diagnostics; must be one.
+solver_sessions_observed	integer	yes	Exact-command-line sealed Z3 descendants observed in the process tree; must be one.
+solver_queries_observed	integer	preflight only	Behavioral assessment check-sat transactions reconstructed from the solver's fd-0 stream.
+solver_accepted_observed	integer	preflight only	Assessment UNSAT responses (accepted candidates) in the frozen ordered vector.
+solver_rejected_observed	integer	preflight only	Assessment SAT/model responses (replay-refuted candidates) in the frozen ordered vector.
+solver_image_sha256	sha256	yes	SHA-256 of the held sealed solver executable descriptor, computed after the timed interval.
+query_vector_sha256	sha256	preflight only	Normalized ordered query-program/status vector digest.
+sampler_samples	integer	yes	Number of recursive known-tree sampling passes.
+sampler_span_ns	integer	yes	Monotonic span from first through last sampling-pass start.
+sampler_initial_delay_ns	integer	yes	Gap from subprocess wall start to first sampling-pass start; bounded to 20 target intervals.
+sampler_terminal_gap_ns	integer	yes	Gap from last sampling-pass finish to subprocess wall finish, or zero if sampling extends past it; bounded to 20 target intervals.
+sampler_coverage_ratio	float	yes	Fraction of subprocess wall time inside the first-start through last-finish observation window; must be at least 0.98.
+sampler_mean_interval_ns	integer	yes	Mean achieved interval between sampling-pass starts.
+sampler_max_interval_ns	integer	yes	Maximum achieved interval between sampling-pass starts.
+sampler_max_pass_ns	integer	yes	Maximum duration of one recursive sampling pass.
+process_tree_sha256	sha256	yes	Digest of the exact sampler, lineage, metrics, and sealed-image manifest.
+cleanup_ok	boolean	yes	Whether all observed descendant identities, same-process-group members, and private run paths were absent after cleanup.
+artifact_dir	path	yes	Run-relative directory containing exact stdout, stderr, stats, process tree, and optional traces.

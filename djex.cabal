@@ -36,6 +36,11 @@ Extra-Doc-Files:
   exference/README.md
 
 Extra-Source-Files:
+  bench-candidate-pipeline/README.md
+  bench-candidate-pipeline/benchmark.py
+  bench-candidate-pipeline/result-schema.tsv
+  bench-candidate-pipeline/workloads/w1-scalar.repl.in
+  bench-candidate-pipeline/workloads/w2-product.repl.in
   docs/examples/*.hs
   docs/reports/*.md
   djinn/docs/reports/*.md

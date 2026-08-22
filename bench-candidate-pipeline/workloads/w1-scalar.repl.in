@@ -1,0 +1,17 @@
+:set prompt ""
+:backend exference
+:set render expression
+:set qualification none
+:set select best
+:set jobs @JOBS@
+:set -allow-unused
+:set -allow-constraints
+:set -multi-constructor-patterns
+:set constraint-deferral-steps 0
+:set max-steps 128
+:set max-queue 2048
+:set max-depth unbounded
+:set timeout 0
+:set length-z3 @Z3_PATH@ @Z3_SHA256@
+:exference --where length result > length arg4 + mod (length arg4) 4 -- a -> a -> a -> a -> [a] -> [a]
+:quit

@@ -118,6 +118,21 @@ fails before clause parsing. Once `length-z3` is set, Djex parses the bounded
 clause, seals the checked built-in-list target profile, generates typed
 Exference candidates, and checks them through one live Length/Z3 session.
 
+With `select = best` and `jobs >= 2`, a bounded package-private producer may
+advance this query's lazy typed-result stream and evaluate the next candidate's
+checked compatibility projection to weak-head normal form while the REPL owner
+assesses the current candidate. The owner remains the only thread that touches
+the typed graph, admits a behavioral problem, talks to Z3, emits a warning,
+ranks a completed batch, or presents output. A single permit bounds the
+lookahead to one candidate, and the same one live session serves the complete
+query. `jobs = 1`, `select = first`, and `select = all` use the historical
+serial presenters literally. The route is independent of RTS capabilities.
+
+Its semantic and cancellation gates are green, but the first preregistered
+performance screen stopped on a baseline process-sampler instrumentation HOLD
+before measurement. It therefore supports no speed claim yet; see the
+[bounded behavioral pipeline report](reports/2026-08-22-bounded-behavioral-best-pipeline.md).
+
 The intended common-case form uses ordinary Haskell expression notation:
 
 ```text
@@ -530,13 +545,15 @@ independently while the parent replays Djinn. Replay IO is outside the cutoff,
 so slow terminal IO cannot retroactively turn a completed plan into a timeout.
 
 The concurrency boundary remains narrow. `select = all` keeps one-pass serial
-streaming, and behavioral `--where`/Z3 queries keep their checked serial path.
-Running both live search heaps at once can make peak memory approach their sum;
-`jobs = 1` is the resource fallback even on a multi-core runtime and retains
-the historical fresh whole-command timer for each backend. This is
-backend-level overlap only: neither individual search algorithm is internally
-parallel. A legacy-parser fallback and every single-backend query are serial
-as well.
+streaming, and behavioral `--where`/Z3 queries bypass the paired-backend
+scheduler. Their separate `select = best`, `jobs >= 2` route may prepare one
+typed candidate ahead, but it still owns one solver and performs every
+assessment serially on the REPL owner thread. Running both live search heaps at
+once can make peak memory approach their sum; `jobs = 1` is the resource
+fallback even on a multi-core runtime and retains both the historical paired
+backend path and the historical behavioral presenter. This is backend-level
+overlap plus bounded pure candidate preparation, not parallel engine traversal
+or parallel solver IO. A legacy-parser fallback remains serial.
 
 ## Commands
 
@@ -1078,7 +1095,7 @@ spelling is rejected as an unknown setting.
 | `qualification` | `none`, `identifiers`, `full` | `full` | Shared presentation |
 | `prompt` | Text, or a Haskell string literal; `%b` expands to the active selection | `"djex[%b]> "` | Interactive UI |
 | `timeout` | Non-negative integer seconds; `0` means no budget | `0` | Shared search |
-| `jobs` | Positive integer; the current both-backend scheduler uses at most two | `2` | Shared search scheduling |
+| `jobs` | Positive integer; two admits the current paired-backend and behavioral-best routes | `2` | Shared search scheduling |
 | `length-z3` | Absolute executable path and optional SHA-256 hex digest | Inactive | Behavioral verification |
 | `candidate-limit` | Positive integer | `200` | Djinn |
 | `choice-budget` | Non-negative integer; `0` means unbounded | `0` | Djinn |
@@ -1094,10 +1111,13 @@ spelling is rejected as an unknown setting.
 | `heuristic` | `NAME VALUE`: a weight name and a finite non-negative number | The thirteen built-in weights | Exference |
 | `fix` | Boolean | Off | Exference load policy |
 
-`jobs` controls only eligible both-backend REPL queries. `jobs = 1` selects
-the exact serial path; `jobs >= 2` permits the two backend workers described in
-[Paired-backend concurrency](#paired-backend-concurrency). It does not alter a
-single-backend search or increase its internal parallelism.
+`jobs = 1` selects the exact serial paths. `jobs >= 2` permits the two backend
+workers described in [Paired-backend concurrency](#paired-backend-concurrency)
+and, independently, the one-candidate-ahead behavioral `SelectBest` producer
+described in [Behavioral constraints](#behavioral-constraints). It does not
+make either search engine's frontier concurrent, and the behavioral route still
+uses one serial live solver. Values above two do not add another lane in either
+current scheduler.
 
 `timeout` is the only wall-clock bound in the REPL: the engines otherwise stop
 on step, queue, depth, choice-point and candidate bounds, which are

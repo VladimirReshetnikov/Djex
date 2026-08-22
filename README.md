@@ -100,6 +100,7 @@ can skip ahead to [Building](#building).
 
 | Rule family | Engine | Reports (newest first) |
 | --- | --- | --- |
+| One-candidate-ahead behavioral `SelectBest` pipeline with an exact jobs-one serial fallback | Exference | [bounded behavioral best pipeline](docs/reports/2026-08-22-bounded-behavioral-best-pipeline.md) |
 | Deterministic paired-backend REPL concurrency with an exact serial fallback | both | [timed paired-backend deadlines](docs/reports/2026-08-20-timed-parallel-backend-deadline.md) · [initial parallel backend search](docs/reports/2026-08-20-deterministic-parallel-backend-search.md) |
 | Serial ordered search-step lanes and the evidence gate for any future internal executor | Exference | [ordered StepAction extraction and parallel research checkpoint](docs/reports/2026-08-20-exference-serial-step-actions.md) |
 | Bounded binder instantiation: six leading binders (conservative boundary at seven), five, then four | both, with exact provider evidence | [six-binder](docs/reports/2026-08-10-six-binder-instantiation.md) · [five-binder](docs/reports/2026-08-09-five-binder-instantiation.md) · [four-binder](docs/reports/2026-08-01-four-binder-instantiation.md) |
@@ -269,8 +270,13 @@ both requests are checked before one shared cutoff starts; each worker must
 strictly prepare its selected output before that cutoff. The parent then
 replays the complete Djinn section before the Exference section, outside the
 timed search boundary, so completion order cannot change stdout or stderr.
-`jobs = 1`, `select = all`, behavioral `--where`/Z3 queries, and legacy-parser
-fallbacks retain their established serial paths. Running the two search heaps
+`jobs = 1`, `select = all`, and legacy-parser fallbacks retain their established
+serial paths. Behavioral `--where` queries bypass this two-backend scheduler.
+For their `select = best` path only, `jobs >= 2` instead permits one bounded
+producer to prepare the next typed Exference candidate while the owner performs
+the current candidate's existing serial Length/Z3 assessment. It uses the same
+single live solver and never moves solver traffic, diagnostics, ranking, or
+presentation off the owner thread. Running the two backend search heaps
 together can make peak memory approach their sum.
 
 The fixed-sample `djex-parallel-bench` checks exact serial/parallel transcript
@@ -280,6 +286,13 @@ speedup guarantee; see the
 [timed-deadline report](docs/reports/2026-08-20-timed-parallel-backend-deadline.md),
 the initial [parallel-search report](docs/reports/2026-08-20-deterministic-parallel-backend-search.md),
 and the [REPL guide](docs/repl.md#paired-backend-concurrency).
+
+The behavioral best-candidate pipeline has separate fail-closed evidence. Its
+first one-shot screen stopped on a baseline process-sampler instrumentation
+HOLD before any measured row, so no acceleration claim follows from that
+attempt. The connected route and immutable partial evidence are described in
+the [bounded behavioral pipeline report](docs/reports/2026-08-22-bounded-behavioral-best-pipeline.md);
+`:set jobs 1` remains the exact serial control and resource fallback.
 
 ### Behavioral constraints in the Djex REPL
 

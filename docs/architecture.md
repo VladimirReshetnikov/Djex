@@ -238,16 +238,43 @@ refreshing the original cutoff.
 
 The boundary preserves laziness instead of forcing a complete backend trace:
 the worker forces only the finite presentation demanded by `SelectFirst` or
-`SelectBest`. `SelectAll` retains its one-pass streaming presenter and
-behavioral Length/Z3 assessment retains its checked serial lifecycle, so both
-bypass the pair scheduler. `jobs = 1` also keeps the historical serial
-per-backend whole-presentation timers. Running two independent heaps can raise
-peak memory from approximately the larger backend footprint toward their sum,
-so that setting remains the documented resource fallback.
+`SelectBest`. `SelectAll` retains its one-pass streaming presenter. Behavioral
+Length/Z3 queries bypass the pair scheduler and retain one live solver; their
+separate bounded `SelectBest` pipeline is described below. `jobs = 1` also
+keeps the historical serial per-backend whole-presentation timers. Running two
+independent heaps can raise peak memory from approximately the larger backend
+footprint toward their sum, so that setting remains the documented resource
+fallback.
 
 This is coarse-grained frontend concurrency, not parallel Djinn proof search
 or parallel Exference queue traversal. The checked adapter APIs and immutable
 sessions remain synchronous and unchanged.
+
+### Behavioral SelectBest candidate pipeline
+
+A behavioral Exference query still owns exactly one Length/Z3 live session and
+assesses candidates serially. When its presentation is `SelectBest` and the
+configured `jobs` value is at least two, a package-private producer may advance
+the lazy typed-result trace and prepare one compatibility candidate ahead while
+the owner assesses the current candidate. This route depends on configured
+search jobs, not RTS capabilities; jobs two remains eligible under `+RTS -N1`.
+
+The producer evaluates only `typedCandidateCompatibility` to weak-head normal
+form. It cannot inspect the lazy typed graph and does not run residual checks,
+solver IO, warning emission, ranking, batch commitment, or presentation. A
+one-candidate permit and FIFO batch-boundary events preserve whole-batch
+admission-before-rank, stable ties, progress laziness, and serial exception
+precedence. The owner alone performs every effectful assessment and terminal
+decision.
+
+The scoped producer is nested inside the unchanged live-session callback,
+which is nested inside the unchanged outer timeout. Cancellation therefore
+joins the pure producer before solver cleanup. `jobs = 1`, `SelectFirst`, and
+`SelectAll` invoke the previous serial presenters literally. The first
+performance screen ended in a baseline sampler instrumentation HOLD before
+measurement, so the route currently has semantic evidence but no acceleration
+claim; see the
+[bounded pipeline report](reports/2026-08-22-bounded-behavioral-best-pipeline.md).
 
 ### Exference serial step-action boundary
 

@@ -455,6 +455,20 @@ rendering. Leant's concise command derives only exact built-in-`List` input
 roles and scalar/canonical-`Prod` result defaults after Lean translation, then
 uses its existing command-local filter context and scheduler.
 
+Djex may overlap only pure candidate preparation with that pipeline. For
+`SelectBest` and configured `jobs >= 2`, one package-private producer advances
+the lazy typed trace and evaluates the next checked compatibility projection
+to weak-head normal form. The owner thread still seals every behavioral
+problem, submits every ordinal to the same single live worker, interprets and
+replays every response, emits every diagnostic, and ranks the completed batch.
+The one-candidate permit, FIFO batch boundaries, and scoped cancellation do not
+transfer any problem, query, observation, evidence, or solver authority to the
+producer. `jobs = 1`, `SelectFirst`, and `SelectAll` remain literal serial
+controls. The first performance screen stopped on benchmark instrumentation
+before measurement, so this concurrency boundary currently makes no speed
+claim; see the
+[bounded behavioral pipeline report](reports/2026-08-22-bounded-behavioral-best-pipeline.md).
+
 In the built-in list case, omission is intentionally useful but bounded:
 `--where` explicitly selects filtering, the host's standard list model is the
 default, the scalar/product domain must agree with both expression and target,

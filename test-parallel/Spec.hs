@@ -1,5 +1,6 @@
 module Main (main) where
 
+import Control.Concurrent (myThreadId)
 import Control.Concurrent.Async
   ( Async
   , async
@@ -16,6 +17,7 @@ import Control.Concurrent.MVar
   , putMVar
   , readMVar
   , takeMVar
+  , tryReadMVar
   )
 import Control.Exception
   ( AsyncException (UserInterrupt)
@@ -24,6 +26,7 @@ import Control.Exception
   , catch
   , finally
   , fromException
+  , throw
   , throwIO
   , try
   )
@@ -31,7 +34,7 @@ import Control.Monad (when)
 import Data.Word (Word64)
 import System.Exit (ExitCode (ExitSuccess))
 import System.Timeout (timeout)
-import Test.Tasty (defaultMain, testGroup)
+import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit
   ( Assertion
   , assertBool
@@ -41,7 +44,22 @@ import Test.Tasty.HUnit
   )
 
 import Language.Haskell.Djex.Command.Output
+import Language.Haskell.Djex.REPL.CandidatePipeline
 import Language.Haskell.Djex.REPL.Parallel
+import Language.Haskell.Synthesis.Query
+  ( QueryResult
+  , queryResultFromCandidates
+  )
+import Language.Haskell.Synthesis.Search
+  ( Completion (Finished)
+  , Progress (Completed, Continuing)
+  , SearchBatch (SearchBatch)
+  )
+import Language.Haskell.Synthesis.Selection
+  ( Selection (..)
+  , SelectionMode (..)
+  , selectQueryResultsM
+  )
 
 main :: IO ()
 main = defaultMain $ testGroup "Djex deterministic parallel pair"
@@ -99,7 +117,301 @@ main = defaultMain $ testGroup "Djex deterministic parallel pair"
       testTimedStrictOutputPlan
   , testCase "timed consumers remain stable when right completes first"
       testTimedStableConsumptionOrder
+  , candidatePipelineTests
   ]
+
+candidatePipelineTests :: TestTree
+candidatePipelineTests = testGroup "bounded SelectBest candidate pipeline"
+  [ testCase "eligibility admits only behavioral best with two search jobs"
+      testCandidatePipelineEligibility
+  , testCase "finite selection and owner action order match serial SelectBest"
+      testCandidatePipelineSerialParity
+  , testCase "preparation runs off-owner and admission stays on-owner"
+      testCandidatePipelineThreadOwnership
+  , testCase "one permit defers a poisoned successor until the next dequeue"
+      testCandidatePipelineOneAhead
+  , testCase "owner admission outranks an already-produced successor failure"
+      testCandidatePipelineAdmissionExceptionPrecedence
+  , testCase "whole-batch admission completes before any batch rank"
+      testCandidatePipelineWholeBatchAdmission
+  , testCase "producer failure inside a batch precedes partial-batch rank"
+      testCandidatePipelineProducerBeforePartialRank
+  , testCase "completed-batch rank precedes a later producer failure"
+      testCandidatePipelineBatchBoundaryPrecedence
+  , testCase "progress payload stays lazy behind batch ranking"
+      testCandidatePipelineProgressDemand
+  , testCase "empty batches coalesce while retaining terminal progress"
+      testCandidatePipelineEmptyBatches
+  , testCase "empty progress stays lazy while the result suffix is demanded"
+      testCandidatePipelineEmptyProgressDemand
+  , testCase "owner failure cancels and joins blocked preparation"
+      testCandidatePipelineOwnerFailureCleanup
+  , testCase "caller cancellation cancels and joins blocked preparation"
+      testCandidatePipelineCallerCancellation
+  ]
+
+testCandidatePipelineEligibility :: Assertion
+testCandidatePipelineEligibility = do
+  assertBool "two search jobs enable unbounded behavioral best" $
+    behavioralBestPipelineEligible 2 SelectBest
+  assertBool "larger search-job budgets retain the route" $
+    behavioralBestPipelineEligible 16 SelectBest
+  assertBool "one search job retains the serial route" $
+    not $ behavioralBestPipelineEligible 1 SelectBest
+  assertBool "zero search jobs are ineligible" $
+    not $ behavioralBestPipelineEligible 0 SelectBest
+  assertBool "negative search jobs are ineligible" $
+    not $ behavioralBestPipelineEligible (-1) SelectBest
+  assertBool "first has an earlier stopping point" $
+    not $ behavioralBestPipelineEligible 2 SelectFirst
+  assertBool "lookahead has a bounded stopping point" $
+    not $ behavioralBestPipelineEligible 2 $ SelectBestLookahead 2
+  assertBool "all has a streaming result contract" $
+    not $ behavioralBestPipelineEligible 2 SelectAll
+
+testCandidatePipelineSerialParity :: Assertion
+testCandidatePipelineSerialParity = do
+  let terminal = Completed Finished
+      results =
+        [ pipelineQueryResult Continuing []
+        , pipelineQueryResult Continuing
+            [(3 :: Int, "first"), (2, "inadmissible")]
+        , pipelineQueryResult Continuing
+            [(1, "second"), (1, "third"), (4, "worse")]
+        , pipelineQueryResult terminal []
+        ]
+      rank = fst
+      isAdmissible = (/= "inadmissible") . snd
+      logged logCell candidate = do
+        modifyMVar_ logCell $ \previous -> pure $ previous ++ [candidate]
+        pure $ isAdmissible candidate
+  serialLog <- newMVar []
+  pipelineLog <- newMVar []
+  serial <- selectQueryResultsM SelectBest rank (logged serialLog) results
+  pipelined <- selectBestQueryResultsPipelinedM
+    (const $ pure ()) rank (logged pipelineLog) results
+  assertEqual "selection parity" serial pipelined
+  assertEqual "expected stable tied winners"
+    (Selection (Just terminal) [(1, "second"), (1, "third")]) pipelined
+  serialAdmissions <- readMVar serialLog
+  pipelineAdmissions <- readMVar pipelineLog
+  assertEqual "admission action order and cardinality"
+    serialAdmissions pipelineAdmissions
+
+testCandidatePipelineThreadOwnership :: Assertion
+testCandidatePipelineThreadOwnership = do
+  owner <- myThreadId
+  producerThreads <- newMVar []
+  admissionThreads <- newMVar []
+  let observe cell = do
+        thread <- myThreadId
+        modifyMVar_ cell $ \previous -> pure $ previous ++ [thread]
+      prepare _ = observe producerThreads
+      admissible _ = observe admissionThreads >> pure True
+  selection <- selectBestQueryResultsPipelinedM prepare id admissible
+    [pipelineQueryResult (Completed Finished) [2 :: Int, 1]]
+  assertEqual "ordinary best result" (Selection
+    (Just $ Completed Finished) [1]) selection
+  preparedBy <- readMVar producerThreads
+  admittedBy <- readMVar admissionThreads
+  assertEqual "every candidate prepared once" 2 $ length preparedBy
+  assertEqual "every candidate admitted once" 2 $ length admittedBy
+  assertBool "all preparation stays on one non-owner worker" $
+    case preparedBy of
+      [] -> False
+      producer : remaining ->
+        producer /= owner && all (== producer) remaining
+  assertBool "admission remains on the calling owner" $
+    all (== owner) admittedBy
+
+testCandidatePipelineOneAhead :: Assertion
+testCandidatePipelineOneAhead = do
+  firstAdmissionStarted <- newEmptyMVar
+  releaseFirstAdmission <- newEmptyMVar
+  secondPrepared <- newEmptyMVar
+  thirdPrepared <- newEmptyMVar
+  let prepare candidate = case candidate of
+        2 -> putMVar secondPrepared ()
+        3 -> do
+          putMVar thirdPrepared ()
+          throwIO $ TaggedFailure "third preparation"
+        _ -> pure ()
+      admissible candidate = case candidate of
+        1 -> do
+          putMVar firstAdmissionStarted ()
+          takeMVar releaseFirstAdmission
+          pure True
+        _ -> pure True
+  runner <- async $ selectBestQueryResultsPipelinedM prepare id admissible
+    [pipelineQueryResult (Completed Finished) [1 :: Int, 2, 3]]
+  await "first owner admission" firstAdmissionStarted
+  await "one prepared successor" secondPrepared
+  earlyThird <- tryReadMVar thirdPrepared
+  assertEqual "the second outstanding candidate consumes the sole permit"
+    Nothing earlyThird
+  putMVar releaseFirstAdmission ()
+  await "third preparation after second dequeue" thirdPrepared
+  outcome <- try $ awaitAsync "one-ahead poisoned pipeline" runner
+  assertTaggedException "third preparation" outcome
+
+testCandidatePipelineAdmissionExceptionPrecedence :: Assertion
+testCandidatePipelineAdmissionExceptionPrecedence = do
+  successorFailed <- newEmptyMVar
+  let prepare candidate
+        | candidate == (2 :: Int) = do
+            putMVar successorFailed ()
+            throwIO $ TaggedFailure "prepared successor"
+        | otherwise = pure ()
+      admissible candidate
+        | candidate == 1 = do
+            takeMVar successorFailed
+            throwIO $ TaggedFailure "current admission"
+        | otherwise = pure True
+  outcome <- try $ selectBestQueryResultsPipelinedM prepare id admissible
+    [pipelineQueryResult (Completed Finished) [1 :: Int, 2]]
+  assertTaggedException "current admission" outcome
+
+testCandidatePipelineWholeBatchAdmission :: Assertion
+testCandidatePipelineWholeBatchAdmission = do
+  let rank candidate
+        | candidate == (1 :: Int) =
+            throw $ TaggedFailure "premature batch rank"
+        | otherwise = candidate
+      admissible candidate
+        | candidate == 2 = throwIO $ TaggedFailure "later admission"
+        | otherwise = pure True
+  outcome <- try $ selectBestQueryResultsPipelinedM
+    (const $ pure ()) rank admissible
+    [pipelineQueryResult (Completed Finished) [1 :: Int, 2]]
+  assertTaggedException "later admission" outcome
+
+testCandidatePipelineProducerBeforePartialRank :: Assertion
+testCandidatePipelineProducerBeforePartialRank = do
+  let prepare candidate
+        | candidate == (2 :: Int) =
+            throwIO $ TaggedFailure "incomplete-batch preparation"
+        | otherwise = pure ()
+      rank _ = throw $ TaggedFailure "partial-batch rank" :: Int
+  outcome <- try $ selectBestQueryResultsPipelinedM prepare rank
+    (const $ pure True)
+    [pipelineQueryResult (Completed Finished) [1 :: Int, 2]]
+  assertTaggedException "incomplete-batch preparation" outcome
+
+testCandidatePipelineBatchBoundaryPrecedence :: Assertion
+testCandidatePipelineBatchBoundaryPrecedence = do
+  let prepare candidate
+        | candidate == (3 :: Int) =
+            throwIO $ TaggedFailure "later-batch preparation"
+        | otherwise = pure ()
+      rank _ = throw $ TaggedFailure "completed-batch rank" :: Int
+      results =
+        [ pipelineQueryResult Continuing [1 :: Int, 2]
+        , pipelineQueryResult (Completed Finished) [3]
+        ]
+  outcome <- try $ selectBestQueryResultsPipelinedM prepare rank
+    (const $ pure True) results
+  assertTaggedException "completed-batch rank" outcome
+
+testCandidatePipelineProgressDemand :: Assertion
+testCandidatePipelineProgressDemand = do
+  let poisonedProgress = throw $ TaggedFailure "batch progress"
+      rank _ = throw $ TaggedFailure "batch rank" :: Int
+  outcome <- try $ selectBestQueryResultsPipelinedM
+    (const $ pure ()) rank (const $ pure True)
+    [pipelineQueryResult poisonedProgress [1 :: Int, 2]]
+  assertTaggedException "batch rank" outcome
+
+  selection <- selectBestQueryResultsPipelinedM
+    (const $ pure ()) id (const $ pure True)
+    [pipelineQueryResult poisonedProgress [1 :: Int]]
+  assertEqual "candidate projection does not force retained progress"
+    [1] $ selectionCandidates selection
+  progressOutcome <- try $ case selectionProgress selection of
+    Nothing -> assertFailure "nonempty trace lost its progress"
+    Just progress -> progress `seq` pure ()
+  assertTaggedException "batch progress" progressOutcome
+
+testCandidatePipelineEmptyBatches :: Assertion
+testCandidatePipelineEmptyBatches = do
+  preparationCount <- newMVar (0 :: Int)
+  let terminal = Completed Finished
+      results =
+        [ pipelineQueryResult Continuing []
+        , pipelineQueryResult Continuing []
+        , pipelineQueryResult Continuing [2 :: Int, 1]
+        , pipelineQueryResult Continuing []
+        , pipelineQueryResult terminal []
+        ]
+      prepare _ = modifyMVar_ preparationCount $ pure . (+ 1)
+  selection <- selectBestQueryResultsPipelinedM prepare id
+    (const $ pure True) results
+  assertEqual "terminal empty progress wins"
+    (Selection (Just terminal) [1]) selection
+  assertEqual "empty batches publish no candidate work" 2
+    =<< readMVar preparationCount
+
+testCandidatePipelineEmptyProgressDemand :: Assertion
+testCandidatePipelineEmptyProgressDemand = do
+  let poisonedProgress = throw $ TaggedFailure "empty progress"
+      results =
+        [ pipelineQueryResult poisonedProgress ([] :: [Int])
+        , throw $ TaggedFailure "result suffix"
+        ]
+  outcome <- try $ selectBestQueryResultsPipelinedM
+    (const $ pure ()) id (const $ pure True) results
+  assertTaggedException "result suffix" outcome
+
+  selection <- selectBestQueryResultsPipelinedM
+    (const $ pure ()) id (const $ pure True)
+    [pipelineQueryResult poisonedProgress ([] :: [Int])]
+  assertEqual "empty terminal retains no candidates" []
+    $ selectionCandidates selection
+  progressOutcome <- try $ case selectionProgress selection of
+    Nothing -> assertFailure "empty batch lost its progress"
+    Just progress -> progress `seq` pure ()
+  assertTaggedException "empty progress" progressOutcome
+
+testCandidatePipelineOwnerFailureCleanup :: Assertion
+testCandidatePipelineOwnerFailureCleanup = do
+  preparationStarted <- newEmptyMVar
+  preparationStopped <- newEmptyMVar
+  neverFinishPreparation <- newEmptyMVar
+  let prepare candidate
+        | candidate == (2 :: Int) =
+            (putMVar preparationStarted () >> takeMVar neverFinishPreparation)
+              `finally` putMVar preparationStopped ()
+        | otherwise = pure ()
+      admissible candidate
+        | candidate == 1 = do
+            takeMVar preparationStarted
+            throwIO $ TaggedFailure "owner action"
+        | otherwise = pure True
+  outcome <- try $ selectBestQueryResultsPipelinedM prepare id admissible
+    [pipelineQueryResult (Completed Finished) [1 :: Int, 2]]
+  assertTaggedException "owner action" outcome
+  await "producer join after owner failure" preparationStopped
+
+testCandidatePipelineCallerCancellation :: Assertion
+testCandidatePipelineCallerCancellation = do
+  preparationStarted <- newEmptyMVar
+  preparationStopped <- newEmptyMVar
+  neverFinishPreparation <- newEmptyMVar
+  let prepare _ =
+        (putMVar preparationStarted () >> takeMVar neverFinishPreparation)
+          `finally` putMVar preparationStopped ()
+  runner <- async $ selectBestQueryResultsPipelinedM prepare id
+    (const $ pure True)
+    [pipelineQueryResult (Completed Finished) [1 :: Int]]
+  await "blocked candidate preparation" preparationStarted
+  cancel runner
+  await "producer join after caller cancellation" preparationStopped
+
+pipelineQueryResult
+  :: Progress
+  -> [candidate]
+  -> QueryResult () candidate
+pipelineQueryResult progress candidates = queryResultFromCandidates
+  $ SearchBatch progress () candidates
 
 testEligibility :: Assertion
 testEligibility = do

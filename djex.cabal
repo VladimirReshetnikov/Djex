@@ -243,6 +243,7 @@ Library
     Language.Haskell.Djex.Internal.ImplicitPrelude
     Language.Haskell.Djex.Package
     Language.Haskell.Djex.Text
+    Language.Haskell.Djex.REPL.CandidatePipeline
     Language.Haskell.Djex.REPL.Command
     Language.Haskell.Djex.REPL.DjinnScope
     Language.Haskell.Djex.REPL.Driver
@@ -398,7 +399,9 @@ Test-Suite djex-parallel-tests
     src
   Other-Modules:
     Language.Haskell.Djex.Command.Output
+    Language.Haskell.Djex.REPL.CandidatePipeline
     Language.Haskell.Djex.REPL.Parallel
+  Build-Depends:  djex
   Ghc-Options:    -threaded -with-rtsopts=-N2
 
 Test-Suite synthesis-tests

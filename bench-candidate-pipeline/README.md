@@ -81,8 +81,9 @@ PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -B \
   bench-candidate-pipeline/benchmark.py self-check
 ```
 
-Then invoke the screen exactly once, after the harness commit, with a new
-absolute evidence path:
+Then invoke the corrected release screen exactly once, after the harness
+commit, with the preregistered absolute evidence path below. The path must be
+absent (fresh) before invocation; there is no retry or sample replacement:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -B \
@@ -93,7 +94,7 @@ PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -B \
   --candidate-root /tmp/djex-pipeline-screen-root-20260822.QUs8ub/candidate \
   --candidate-binary /tmp/djex-pipeline-screen-root-20260822.QUs8ub/candidate/dist-newstyle/build/x86_64-linux/ghc-9.12.4/djex-2026.7.17/x/djex/opt/build/djex/djex \
   --candidate-binary-sha256 37b7e3c25cdba445244c7253fc9c78d9007c77c994d6858ab7842c612aca1dac \
-  --output /absolute/new-evidence-directory
+  --output /tmp/djex-candidate-pipeline-screen-one-shot-20260822-ea369674-v2-02
 ```
 
 The apparent timing options are not protocol knobs: `--outer-timeout` must be
@@ -235,6 +236,41 @@ and their attestation hashes to
 This is diagnostic HOLD evidence only, makes no performance inference, and is
 never reused. A v2-03 calibration may use only fresh output after the repaired
 source and synthetic checks receive an independent audit.
+
+## Immutable sampler-calibration v2-03 diagnostic PASS
+
+The independently frozen fixed-rate repair ran exactly one diagnostic
+calibration at
+`/tmp/djex-solver-sampler-calibration-20260822-ea369674-v2-03`. It completed
+and fsynced all 64 required W1/B invocations, captured one exact sealed Z3
+image in every invocation, and produced a diagnostic PASS. The decision
+records `diagnostic_only: true` and `release_evidence: false`: this is sampler
+validation only, not performance evidence or a release decision.
+
+Across the 64 per-invocation sampler mean intervals, the minimum was 1,968,576
+ns, the median was 2,096,867.5 ns, the nearest-rank P95 was 2,264,496 ns, and
+the maximum was 2,315,338 ns. The maximum retained 684,662 ns, or 22.82%, of
+headroom below the unchanged 3,000,000 ns gate. Five captures observed the
+pristine exec argv and 59 observed Z3 4.8.12's exact stable parsed argv; 56
+captures came through task-children discovery and eight through the SID scan.
+There were no failure attempts, primary or finalization failures, termination
+requests or vetoes, cleanup failures, or residue.
+
+The immutable v2-03 tree contains 454 regular files totaling 1,008,901 bytes.
+Its decision SHA-256 is
+`094d3252f6a4ce12d08b6b85df0608a87061abb2722a24ba236bd79a1d141e19`;
+provenance is
+`21ff55ad26902a4353f44b163866353fcdd96c0fdcc7dcb49b3d34f60372e057`;
+and the 64-row results file is
+`7395a8294b149eb6ee5197240278ac32db6e9a21d1a70c63186547b22718d719`.
+The equal start/end identity files hash to
+`71064aa354cfe27e2e14dfed041537f67ecc134b35e3cedf4dd9a441d99323ce`,
+and their attestation hashes to
+`23a5eab4916557643311ef0f7299da9ace6c09e9eaa815322d1f462fe8b7f49a`.
+The NUL-sorted relative-path full-content manifest hashes to
+`a7896198ca064dd9fa7e33f6413bb980b286da3e685caabb08237109b03b42fe`.
+The v1, v2-01, and v2-02 evidence trees remain preserved and unchanged; this
+PASS neither replaces nor promotes any earlier HOLD evidence.
 
 ## Frozen workloads and calibration
 

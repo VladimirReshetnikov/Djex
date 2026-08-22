@@ -8,6 +8,32 @@ are explicitly non-release evidence. The corrected protocol emits screen, row,
 process-tree, and decision schemas at v2. The v1 attempt described below
 remains immutable HOLD evidence and is never reinterpreted as v2 evidence.
 
+## Final release outcome
+
+The corrected release screen ran exactly once at
+`/tmp/djex-candidate-pipeline-screen-one-shot-20260822-ea369674-v2-02` and
+completed all 160 planned rows: 16 preflights, 16 warmups, and 128 unreplaced
+measurements. There were no failure attempts, finalization failures,
+termination requests or vetoes, cleanup failures, or residue. Semantic, query,
+host, resource, serial-control, provenance, topology, tail, and cleanup gates
+passed.
+
+The performance decision is nevertheless final HOLD. The geometric-mean
+pipeline comparison `F/H` was `1.0180039235801621`; the canonical shipped
+comparison `B/H` was `1.000683278814482`. Both are below the preregistered
+strictly-greater-than-`1.10` KEEP threshold. W1 also had wrong-direction
+canonical and matched ratios, `0.9905676361` and `0.9940672572`. A valid
+positive result above `1.10x` would be meaningful and worth keeping, but this
+screen did not produce one. The stronger `1.25x` tier was false.
+
+The candidate production connection from
+`aff7a5e8d0fe81f50b05c5073ff05f77e1ab68ca` was reverted exactly at
+`73ec1891db0c9362d11f6a35e2eeeeea5c031241`. The tested package-private
+foundation from `0716144502a7dcd8bfa8755f57fd9ced58bf3b83` remains, with no
+production call site and no public API. Production behavioral assessment is
+serial for every `select` and `jobs` value; `jobs >= 2` continues to affect
+only the independent paired-backend scheduler.
+
 The comparison is frozen to:
 
 - baseline commit `0716144502a7dcd8bfa8755f57fd9ced58bf3b83`, binary
@@ -61,29 +87,31 @@ pinned to resolved path `/usr/bin/python3.10`, version `3.10.12`, and SHA-256
 `7d51cd6b48b521277f5caa4610a82126e315fa2be4df069823a8b1eeb5bd4a86`;
 the documented launcher is `/usr/bin/python3`, which resolves to that payload.
 
-Before the expensive run, commit the harness and `djex.cabal` additions. The
-runner requires its repository to be tracked-clean, verifies that every
-protocol artifact is tracked, and records the protocol repository HEAD, tree,
-and Git-archive hash. Untracked files are deliberately ignored, including a
-caller-owned ReplayLedger. The runner records and rechecks its own source hash;
-the committed repository identity provides the non-self-referential binding.
-The workload templates and result schema additionally have embedded,
-preregistered hashes.
+Before the expensive run, the protocol required the harness and `djex.cabal`
+additions to be committed. The runner required its repository to be
+tracked-clean, verified that every protocol artifact was tracked, and recorded
+the protocol repository HEAD, tree, and Git-archive hash. Untracked files were
+deliberately ignored, including a caller-owned ReplayLedger. The runner
+recorded and rechecked its own source hash; the committed repository identity
+provided the non-self-referential binding. The workload templates and result
+schema additionally have embedded, preregistered hashes.
 
-Run the cheap static and deterministic checks first. In addition to pure
-fixtures, self-check launches one isolated sealed-Z3 memfd session with task
-children deliberately hidden, captures Z3 4.8.12's deterministic parsed
-cmdline state, and checks one already-exited sealed-Z3 lifecycle. It does not
-run Djex or either benchmark workload:
+The protocol ran the cheap static and deterministic checks first. In addition
+to pure fixtures, self-check launched one isolated sealed-Z3 memfd session with
+task children deliberately hidden, captured Z3 4.8.12's deterministic parsed
+cmdline state, and checked one already-exited sealed-Z3 lifecycle. It did not
+run Djex or either benchmark workload. This command records the frozen
+procedure; it is not an instruction to repeat the completed release screen:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -B \
   bench-candidate-pipeline/benchmark.py self-check
 ```
 
-Then invoke the corrected release screen exactly once, after the harness
-commit, with the preregistered absolute evidence path below. The path must be
-absent (fresh) before invocation; there is no retry or sample replacement:
+The corrected release screen was then invoked exactly once, after the harness
+commit, with the preregistered absolute evidence path below. The path was
+absent before invocation. This is historical provenance: do not rerun the
+command or reuse its output path.
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 -B \
@@ -101,8 +129,9 @@ The apparent timing options are not protocol knobs: `--outer-timeout` must be
 exactly `600` seconds and `--sample-interval-ms` must be exactly `1.0`.
 Supplying any other values is HOLD before the screen can run.
 
-The output path must not exist. A failed or interrupted invocation is immutable
-HOLD evidence; never replace a sample or reuse its output directory. A HOLD
+At invocation time the output path had to be absent. A failed or interrupted
+invocation is immutable HOLD evidence; never replace a sample or reuse its
+output directory. A HOLD
 decision records the primary failure, run ID, completed-row count, and hashes
 of the flushed partial results, provenance, and schedule when present. Raw
 artifacts remain for audit. The run ID is the SHA-256 of the absolute evidence
@@ -121,9 +150,10 @@ Protocol v1 ran exactly once at
 `/tmp/djex-candidate-pipeline-screen-one-shot-20260822-b9f0ab0c`. It completed
 all 16 trace preflights and W1/A warmup, then stopped before appending W1/B
 warmup with `HarnessFailure: observed 0 sealed solver images`. Thus it contains
-17 completed rows and **zero measured rows**. Zero measured rows cannot support
-a speed, KEEP, or revert decision; the production route remains release-HOLD
-until a separately preregistered corrected protocol completes.
+17 completed rows and **zero measured rows**. Zero measured rows could not
+support a speed, KEEP, or revert decision. The separately preregistered
+corrected protocol later completed and is recorded in
+[Final release outcome](#final-release-outcome).
 
 The failing invocation was baseline cell B (`jobs=1`, `-N2`), not the candidate
 route. Its sampler recorded direct child PID 494770, start identity, and CPU,
@@ -234,8 +264,8 @@ The equal start/end identity files hash to
 and their attestation hashes to
 `7abc50295a1179188876c56e324183e0ab8d84d2d4738eb490eb4fbbc1dd0274`.
 This is diagnostic HOLD evidence only, makes no performance inference, and is
-never reused. A v2-03 calibration may use only fresh output after the repaired
-source and synthetic checks receive an independent audit.
+never reused. The repaired source and synthetic checks were independently
+audited before the fresh v2-03 calibration below.
 
 ## Immutable sampler-calibration v2-03 diagnostic PASS
 
@@ -622,3 +652,34 @@ phase instrumentation was added. The decision rests on unreplaced production
 end-to-end `F/H` and `B/H > 1.10` results together with the preregistered
 semantic, route, drift, tail, allocation, CPU, RSS, provenance, and cleanup
 controls above.
+
+## Final measured decision and disposition
+
+The completed screen produced these median-wall treatment ratios:
+
+| Metric | W1 | W2 | Geometric mean where applicable |
+| --- | ---: | ---: | ---: |
+| Pipeline `F/H` | `1.0117322535` | `1.0243144714` | `1.0180039235801621` |
+| Canonical shipped `B/H` | `0.9905676361` | `1.0109022221` | `1.000683278814482` |
+| Matched shipped `D/H` | `0.9940672572` | `1.0189985382` | — |
+| Difference in differences | `1.0153066480` | `1.0325182062` | — |
+
+The resource gates, serial-drift controls, host attestation, semantic/query
+checks, and cleanup requirements passed. The two geometric means failed the
+`>1.10` KEEP gate, and W1 failed the positive-direction requirement for both
+`B/H` and `D/H`. The final outcome is HOLD and production revert.
+
+| Evidence | SHA-256 |
+| --- | --- |
+| Decision | `28f2aa788aaf4199e9c509c8693ac6443f6077727ef5f4cddbe2a87a550a58b5` |
+| 160-row results | `4d7e0e24e81d6ebba12cf25de8cf19565e54c5df80f37db2ac1e8702abdea868` |
+| Provenance | `df998b0357795f91ee8793e3cb7cd4d4b7b58e06561125d0ec5d8209567cf51c` |
+| Schedule | `82b3075105fce3c6b84cfd6161c9b346391a9fd5e771335d0b6c5a1fa80c5b47` |
+| Host-control window attestation | `a37b54a25b2148f3b8a39bff7b2e0ace5b338f5ef4dc7b3c76dadfc2dff70faf` |
+| Full 1,308-file manifest | `dea351c97bacc0984062133b7ab78139b3d8fcccbc0199600485a0c76100cff7` |
+| Raw 1,300-file manifest | `041137d15df91542f171c10942188ad8a78c3550a3c53a5c736410631ef88f9b` |
+
+The full manifest covers 1,308 files and 679,203,342 bytes; the raw manifest
+covers 1,300 files and 679,006,506 bytes. All attempt and calibration trees
+remain immutable. The production connection is reverted, while the tested
+private foundation and this audit harness remain as research evidence.

@@ -2,185 +2,268 @@
 
 Date: 2026-08-22
 
-## Current outcome
+## Final outcome: HOLD and production revert
 
-Djex now has a narrowly routed producer/consumer pipeline for behavioral
-Exference queries using `select = best` and `jobs >= 2`.  Search can prepare
-one typed candidate ahead while the owner thread performs the existing serial
-Length/Z3 assessment.  Candidate admission, solver traffic, warnings, ranking,
-batch commitment, and presentation remain on that single owner thread and use
-one live Z3 session.
+The corrected, preregistered release screen completed successfully, but the
+one-candidate-ahead route did not meet its performance and direction gates.
+The immutable evidence is at
+`/tmp/djex-candidate-pipeline-screen-one-shot-20260822-ea369674-v2-02`.
+It contains all 160 planned rows: 16 traced preflights, 16 warmups, and 128
+unreplaced measurements. There were no failure attempts, finalization
+failures, termination requests or vetoes, cleanup failures, or residue.
 
-The implementation and semantic gates are green, but this report makes no
-speed claim yet.  The first preregistered performance screen stopped before
-measurement because its process sampler failed to retain one baseline Z3
-image.  That invocation is immutable `HOLD` evidence: it completed all sixteen
-trace preflights and one warmup, but zero measured rows.  A separately named,
-reviewed screen is required before the route receives a performance decision.
+Semantic transcripts, query vectors, solver topology, host controls, serial
+drift, tail latency, allocation, process-tree CPU, aggregate RSS, provenance,
+and cleanup all passed. The decisive geometric means did not:
 
-The production connection is commit
-`aff7a5e8d0fe81f50b05c5073ff05f77e1ab68ca`.  Its private foundation is commit
-`0716144502a7dcd8bfa8755f57fd9ced58bf3b83`.  The initial benchmark harness is
-commit `a02054006d388645102e33e77fdab946e249e5d3`.
+| Comparison | Final ratio | Required |
+| --- | ---: | ---: |
+| Pipeline, `F/H` | `1.0180039235801621` | strictly greater than `1.10` |
+| Canonical shipped, `B/H` | `1.000683278814482` | strictly greater than `1.10` |
 
-## Exact production boundary
+The workload-level direction controls also failed for W1: `B/H` was
+`0.9905676361` and `D/H` was `0.9940672572`. The stronger `1.25x` tier was
+false. A valid positive result above `1.10x` would have been substantive and
+worth keeping; this result simply did not reach that threshold.
 
-The route is deliberately smaller than general parallel candidate checking:
+The production connection introduced at
+`aff7a5e8d0fe81f50b05c5073ff05f77e1ab68ca` was therefore reverted exactly at
+`73ec1891db0c9362d11f6a35e2eeeeea5c031241`. The tested private foundation from
+`0716144502a7dcd8bfa8755f57fd9ced58bf3b83` remains package-private, with no
+production call site and no public API.
 
-- only behavioral Exference `SelectBest` queries are eligible;
-- the configured `jobs` value, not RTS capabilities, controls admission;
-- `jobs = 1`, `SelectFirst`, `SelectAll`, and unconstrained queries call the
+Current production behavior is consequently simple: every behavioral
+Exference query uses the serial candidate presenter for every `select` and
+`jobs` value, owns one live Length/Z3 session, and performs all admission,
+solver traffic, diagnostics, ranking, and presentation on its owner thread.
+`jobs >= 2` still admits the independent paired-backend scheduler for eligible
+unconstrained Djinn-plus-Exference queries; it no longer changes behavioral
+candidate preparation.
+
+## Experimental production boundary
+
+The reverted route was deliberately smaller than general parallel candidate
+checking:
+
+- only behavioral Exference `SelectBest` queries were eligible;
+- the configured `jobs` value, not RTS capabilities, controlled admission;
+- `jobs = 1`, `SelectFirst`, `SelectAll`, and unconstrained queries called the
   historical serial presenter literally;
-- the producer advances the lazy typed-result trace and evaluates only
+- the producer advanced the lazy typed-result trace and evaluated only
   `typedCandidateCompatibility` to weak-head normal form;
-- it never forces the typed term graph, residual constraints, or an `NFData`
-  instance;
-- one permit bounds preparation to exactly one candidate ahead;
-- explicit nonempty-batch events preserve the historical rule that the owner
-  assesses a whole batch before ranking it; and
-- the owner alone calls `admitLengthWhereCandidate`, uses the live solver,
-  emits diagnostics, ranks candidates, and presents the selected result.
+- it never forced the typed term graph or residual constraints and required no
+  `NFData` instance;
+- one permit bounded preparation to exactly one candidate ahead;
+- explicit nonempty-batch events preserved whole-batch assessment before
+  ranking; and
+- the owner alone called `admitLengthWhereCandidate`, used the live solver,
+  emitted diagnostics, ranked candidates, and presented the selected result.
 
-The pipeline's `withAsync` scope remains inside the unchanged live-session
-bracket, which remains inside the unchanged outer query timeout.  A timeout,
-caller exception, or owner exit therefore cancels and joins the pure producer
-before the live-session finalizer owns solver cleanup.  No second Z3 process or
-public API was introduced.
+The pipeline's `withAsync` scope was inside the unchanged live-session bracket,
+which was inside the unchanged outer query timeout. A timeout, caller
+exception, or owner exit therefore cancelled and joined the pure producer
+before the live-session finalizer owned solver cleanup. No second Z3 process
+or public API was introduced.
 
-The package-private carrier is in
-`Language.Haskell.Djex.REPL.CandidatePipeline`.  It is a Cabal
-`other-modules` entry, not an exposed module.  The REPL connection exports only
-the already-existing package-private `presentExferenceSelection` helper from
-`Language.Haskell.Djex.Command`; the public facades remain unchanged.
+The retained package-private carrier is
+`Language.Haskell.Djex.REPL.CandidatePipeline`, a Cabal `other-modules` entry.
+Its producer acquired a single permit before demanding the next result. FIFO
+candidate, nonempty-batch, and terminal events preserved stable tie order,
+progress laziness, and serial exception precedence. Focused tests pin one-ahead
+backpressure, empty batches, stable ties, owner-versus-producer identity,
+producer and owner exception precedence, lazy progress, and cancellation/join
+behavior. Those tests remain useful foundation evidence; they do not connect
+the carrier to production.
 
-## Demand and ordering proof
-
-The producer acquires a single candidate permit before demanding the next
-result.  FIFO events carry candidates, nonempty batch boundaries, and one
-terminal outcome.  Empty result batches can be traversed without consuming a
-second permit, while a later nonempty batch cannot finish before its first
-candidate has been dequeued.  The queue therefore remains bounded by one
-prepared candidate plus its adjacent control/terminal information.
-
-The owner consumes events in encounter order.  It admits every candidate in a
-batch before applying the existing rank function, retaining stable tie order.
-Producer exceptions are observed only when the serial trace would next be
-demanded; a rank from a completed earlier batch wins before a poisoned later
-progress payload.  The terminal `Maybe Progress` payload stays lazy, matching
-the old `SelectBest` presenter.
-
-The foundation suite pins one-ahead backpressure, empty batches, stable ties,
-owner-versus-producer thread identity, producer and owner exception precedence,
-lazy progress, and cancellation/join behavior.  The connected CLI gate uses a
-fresh fake Z3 process and checks byte-identical jobs-one/jobs-two output,
-repeated jobs-two output, jobs-two behavior under `+RTS -N1`, and exact query
-ordinals `0` through `9`.  A status-phase hang produces the established timeout
-diagnostic, no value request or candidate rendering, and a healthy follow-up
-query in the same REPL.  Independent strict validation passed 40/40 parallel
-tests and 95/95 CLI tests, plus repeated `-N1` and `-N2` runs without a leaked
-Djex or fake-Z3 process.
+While connected, the CLI gate used a fresh fake Z3 process and checked
+byte-identical jobs-one/jobs-two output, repeated jobs-two output, jobs-two
+behavior under `+RTS -N1`, and exact query ordinals `0` through `9`. A
+status-phase hang produced the established timeout diagnostic, made no value
+request, rendered no candidate, and allowed a healthy follow-up query in the
+same REPL. Independent strict validation passed 40/40 parallel tests and 95/95
+CLI tests, plus repeated `-N1` and `-N2` runs without leaked Djex or fake-Z3
+processes.
 
 ## Frozen performance protocol
 
-The benchmark harness compares eight cells: baseline and candidate binaries,
-each at jobs one and two and RTS capabilities one and two.  It uses two fixed
-real-Z3 workloads:
+The benchmark compared eight cells: baseline and candidate binaries, each at
+jobs one and two and RTS capabilities one and two. It used two fixed real-Z3
+workloads:
 
-- W1 performs 24 symbolic modulo/length assessments, all accepted, and renders
-  24 tied best candidates; and
-- W2 performs 48 assessments, split 24 accepted and 24 replay-refuted, and
-  renders the best six.
+- W1 performed 24 symbolic modulo/length assessments, accepted all 24, and
+  rendered 24 tied best candidates; and
+- W2 performed 48 assessments, split 24 accepted and 24 replay-refuted, and
+  rendered the best six.
 
-Every cell first gets a traced semantic/topology preflight and one warmup.
-Eight unreplaced measurements per workload/cell then use an eight-row Williams
-schedule with every directed carryover exactly once.  The runner binds exact
-Git trees, optimized binaries and build IDs, Cabal plans, the Python payload,
-the pinned Z3 Debian package and executable, dynamic libraries, workload bytes,
-and host cgroup/affinity controls.  It reconstructs actual returned SMT-LIB
-bytes from the solver's `strace` file for preflight rather than trusting counts
-or fabricated solver output.
+Every cell received a traced semantic/topology preflight and one warmup. Eight
+unreplaced measurements per workload/cell then followed an eight-row Williams
+schedule with every directed carryover exactly once. The runner bound exact Git
+trees, optimized binaries and build IDs, Cabal plans, Python payload, pinned Z3
+package and executable, dynamic libraries, workload bytes, and host
+cgroup/affinity controls. Preflight reconstructed the actual returned SMT-LIB
+bytes from solver `strace` files.
 
-A result is worth keeping when both geometric-mean end-to-end comparisons are
-strictly greater than `1.10`, every workload-level treatment comparison is
-positive, and the preregistered tail, serial-drift, allocation, process-tree
-CPU, RSS, semantic, provenance, and cleanup gates pass.  This is a substantive
-threshold: for example, a valid `1.165x` result is meaningful evidence, not
-speculation.  The separately reported `1.25x` tier is stronger but is not the
-minimum KEEP threshold.
-
-The complete protocol and frozen workload details live in the
+KEEP required both geometric-mean end-to-end comparisons, `F/H` and `B/H`, to
+be strictly greater than `1.10`; every workload's `F/H`, `B/H`, `D/H`, and
+difference-in-differences to be positive; and all preregistered tail,
+serial-drift, allocation, process-tree CPU, RSS, semantic, provenance, and
+cleanup controls to pass. The separately reported `1.25x` tier was stronger,
+not the minimum KEEP threshold. The complete frozen protocol is in the
 [benchmark README](../../bench-candidate-pipeline/README.md).
 
 ## Attempt 1: instrumentation HOLD
 
-The first one-shot output is preserved at
-`/tmp/djex-candidate-pipeline-screen-one-shot-20260822-b9f0ab0c`.  It started
-from a tracked-clean harness commit with only the unrelated, caller-owned
-`ReplayLedger.hs` untracked.  The runner exited `2` with decision schema
-`djex-select-best-candidate-pipeline-decision/v1` and primary failure:
+Protocol v1 ran exactly once at
+`/tmp/djex-candidate-pipeline-screen-one-shot-20260822-b9f0ab0c`. It completed
+all 16 preflights and W1/A warmup, then stopped before appending W1/B warmup
+with `HarnessFailure: observed 0 sealed solver images`. Its 17 completed rows
+contained zero measured rows and therefore supplied neither a KEEP nor a
+revert signal.
 
-```text
-HarnessFailure: observed 0 sealed solver images
-```
-
-The failure was the second W1 warmup, cell B: baseline commit
-`0716144502a7dcd8bfa8755f57fd9ced58bf3b83`, `jobs = 1`, and `+RTS -N2`.
-The completed partial result contains exactly sixteen preflight rows and W1
-warmup cell A.  No measured row exists, so the attempt supplies neither a KEEP
-nor a production-revert signal.
-
-The failed invocation itself has complete input, stdout, stderr, RTS statistics,
-cleanup, and process-tree artifacts.  Its transcript is byte-identical to the
-valid W1/B preflight and W1/A warmup.  The sampler tracked the direct child PID,
-start time, and 11 CPU ticks across 679 passes with approximately 99.94% wall
-coverage, but retained no `/proc/PID/exe` descriptor.  Because the initial
-sampler silently discarded procfs read/open failures and signature mismatches,
-the exact missed observation cannot be recovered after process exit.  This is
-why the fail-closed outcome is correct even though no candidate semantic fault
-was observed.
-
-The decision binds these top-level hashes:
+The failing baseline W1/B invocation had complete input, stdout, stderr, RTS,
+cleanup, and process-tree artifacts. Its transcript was byte-identical to the
+valid W1/B preflight and W1/A warmup. The sampler tracked the direct child PID,
+start time, and CPU ticks but retained no executable descriptor. Z3 4.8.12 had
+mutated its `key=value` argv strings into a deterministic NUL-separated parsed
+state, while v1 accepted only the pristine argv. Incomplete task-children
+hints, delayed inspection, and silently discarded procfs/signature telemetry
+were additional instrumentation gaps. None of those findings promotes the
+attempt.
 
 | Evidence | SHA-256 |
 | --- | --- |
-| Decision file | `e1398907ce7a8ec26c056862007ade9b5cc130c985590671ca8b74b5961a81ee` |
+| Decision | `e1398907ce7a8ec26c056862007ade9b5cc130c985590671ca8b74b5961a81ee` |
 | Partial results | `238f476f230dd40ca4bfe683c7ce1dd7d33b319dab8874f0259d94c176e74c64` |
 | Provenance | `f9a2aa2449b4648e8e1a60cd5d3d87e505b3aa57e6fddebe708358a8ad610433` |
 | Schedule | `82b3075105fce3c6b84cfd6161c9b346391a9fd5e771335d0b6c5a1fa80c5b47` |
-| Host-control start | `6001c33150366d603a12972bf569652f3a84e247afd807782c47c60a933a1a66` |
-| Host-control start attestation | `183a8d431f71adb4b0009c6a4faa17ee67c7be489f9fde2b4439747086cae027` |
-| Host-control end | `ad90bea75d5384a53ce9a5e675393c33a1a1a131b26a709ca98a22865b1e845d` |
-| Host-control window attestation | `314fce7cfe72c5d9b40f1b60b92556e07641ff49317f884914167a7bc3d89302` |
+| Full 315-file content manifest | `c93ed82e6ad7ecd0b70ebe536699b6bf4486fce688462bd816ed912022a94051` |
 
-Independent audit recomputed every decision-linked hash, all 38 provenance
-path/hash references, every partial-row metric, and all sixteen query vectors.
-The W1 vector remained 24 transactions with SHA-256
-`532772f41a2cfe8a362a20530239875f091700d2350880878ed6dee07681d883`;
-W2 remained 48 transactions with SHA-256
-`b0c1d2d38e5de857b2e58a6b4beafb639b0db03691218b12b70c5541b0b679dc`.
-Host affinity and cgroup controls were stable, and both exposing ancestors had
-zero `nr_throttled` and `throttled_usec` deltas.  No private residue or live
-process remained. The preserved tree contains 315 files totaling 677,149,306
-bytes. Its full content-manifest SHA-256 is
-`c93ed82e6ad7ecd0b70ebe536699b6bf4486fce688462bd816ed912022a94051`:
-the audit sorted all absolute file paths as NUL-delimited bytes, ran GNU
-`sha256sum` on each in that order, and hashed the resulting 315 textual records.
-The separately hashed ordered path list is
-`7d9d8f566ef09a9f77099295aab0af31701b074deb52115b4d7f187adcd8d0ea`.
+The immutable tree contains 315 files totaling 677,149,306 bytes. Independent
+audit recomputed the decision-linked evidence, partial-row metrics, 16 query
+vectors, host controls, cleanup state, and full manifest. No private residue or
+live process remained.
 
-## Next gate
+## Sampler calibration v2-01: mode HOLD
 
-Attempt 1 will not be rerun, altered, or reused.  Before another full screen,
-the sampler must retain exact live-image identity while making discovery and
-capture failures classifiable.  The planned repair adds a session-ID fallback
-beside the cheap child walk, opens the executable descriptor before reading
-mutable process metadata, rechecks PID/start/session/image identity around the
-capture, and records categorized per-PID observation telemetry.  Deterministic
-sealed-memfd, injected-failure, retained-descriptor, and unexpected-second-
-solver tests must pass, followed by an explicitly non-decision single-cell
-calibration.
+The first diagnostic v2 calibration ran once at
+`/tmp/djex-solver-sampler-calibration-20260822-7920655b-v2-01`. It stopped in
+its first baseline W1/B invocation with zero completed rows and zero captures.
+The sampler observed the exact parsed Z3 argv 212 times and passed target,
+open, regular-file, size, and live device/inode gates each time. Its sole
+consistency mismatch was mode: production staged the pinned ordinary executable
+as `0755`, while v2-01 incorrectly required `0500`. Exact-target cardinality
+correctly forced diagnostic HOLD.
 
-Only after that repair is committed and independently audited may a fresh,
-separately named full screen run once.  Until then the connected route is
-provisional, the old serial path remains available with `jobs = 1`, and no
-release acceleration claim is made.
+| Evidence | SHA-256 |
+| --- | --- |
+| Decision | `e4546cc010a2b7353629160278ece9614acc2406b799cdad2dbd6cca3b1087be` |
+| Header-only results | `504ec031e2ae8882af356d4e8a02ae18e4557a19298c16b354a34e69cad9c2a4` |
+| Provenance | `859b97ecec96402c43ee6b790b517164503e06a4e353f7e402834d7fdf345feb` |
+| First process tree | `612d718522538966717f086c2764b8cee7268c6f2f35fdb62b9fa5882d8654e8` |
+| Start/end identity | `ca33ebebad5c0da1b07bf7ce2291c88ce6ae58918421bff34865bc76a3a069a0` |
+| Identity attestation | `46e2f74e1f42cc3906f735caa9b4142679e47f08ae297c2eaac8092607cc8f86` |
+
+The immutable tree contains 13 regular files totaling 40,648 bytes. End
+identity passed and there were no finalization failures.
+
+## Sampler calibration v2-02: cadence HOLD
+
+After the exact `0755` source-mode repair, the second diagnostic calibration
+ran once at
+`/tmp/djex-solver-sampler-calibration-20260822-c4a76370-v2-02`. It durably
+appended 42 valid W1/B rows. Invocation 43 retained the exact sealed image,
+passed singleton identity and cleanup, but its 3,101,996 ns mean interval
+exceeded the unchanged 3,000,000 ns gate. It failed before a row was built, so
+no exit-status or semantic PASS is inferred for that invocation.
+
+The cause was a relative sleep after every sampling pass, which added the
+pass's own work to the nominal interval. The repaired scheduler uses fixed
+monotonic pass-start deadlines, coalesces missed ticks into at most one
+immediate catch-up, and schedules a full interval after that catch-up. The
+3 ms quality gate was not relaxed. This attempt also exposed a durability gap:
+its unappended failing artifacts were not top-level cryptographically anchored.
+The repair added a canonical, fsynced failure-attempt manifest without
+fabricating a result row.
+
+| Evidence | SHA-256 |
+| --- | --- |
+| Decision | `2852a3d5325bf8483842770db2d304628078108eb0c5e40d74db5fd91ee18e07` |
+| 42-row results | `d79296795821e4db6863d0ed10d52f00cac815e4ab72da6483784e7f2c9a553d` |
+| Provenance | `10aacd6cd628a7aa2d4b1f434a13e502c02745afb791a2d862fe250f135ca64e` |
+| Invocation-43 process tree | `c2136e5edb64201db5ca67d18cc45881005fbbbf1fc83ff7269c6ee226dadf56` |
+| Start/end identity | `44c53f45a2f23c0bbcc247c0fd56d000539b1a95583d1618af5a5bd3d44fcf68` |
+| Identity attestation | `7abc50295a1179188876c56e324183e0ab8d84d2d4738eb490eb4fbbc1dd0274` |
+
+The immutable tree contains 307 regular files totaling 672,508 bytes. It is
+diagnostic HOLD evidence only and remains unchanged.
+
+## Sampler calibration v2-03: diagnostic PASS
+
+The independently frozen fixed-rate repair ran exactly one diagnostic
+calibration at
+`/tmp/djex-solver-sampler-calibration-20260822-ea369674-v2-03`. All 64 required
+baseline W1/B invocations were appended and fsynced, each retained exactly one
+sealed Z3 image, and the decision recorded `diagnostic_only: true` and
+`release_evidence: false`.
+
+Sampler mean intervals ranged from 1,968,576 ns to 2,315,338 ns, with median
+2,096,867.5 ns and nearest-rank P95 2,264,496 ns. The worst row retained
+684,662 ns, or 22.82%, of headroom below the unchanged 3,000,000 ns gate.
+There were no failure attempts, finalization failures, termination requests or
+vetoes, cleanup failures, or residue.
+
+| Evidence | SHA-256 |
+| --- | --- |
+| Decision | `094d3252f6a4ce12d08b6b85df0608a87061abb2722a24ba236bd79a1d141e19` |
+| 64-row results | `7395a8294b149eb6ee5197240278ac32db6e9a21d1a70c63186547b22718d719` |
+| Provenance | `21ff55ad26902a4353f44b163866353fcdd96c0fdcc7dcb49b3d34f60372e057` |
+| Start/end identity | `71064aa354cfe27e2e14dfed041537f67ecc134b35e3cedf4dd9a441d99323ce` |
+| Identity attestation | `23a5eab4916557643311ef0f7299da9ace6c09e9eaa815322d1f462fe8b7f49a` |
+| Relative-path full manifest | `a7896198ca064dd9fa7e33f6413bb980b286da3e685caabb08237109b03b42fe` |
+
+The immutable tree contains 454 regular files totaling 1,008,901 bytes. This
+PASS validated the sampler only; it neither replaced earlier HOLD evidence nor
+made a performance decision.
+
+## Final release-screen evidence
+
+With the corrected sampler frozen, the release screen ran exactly once at
+`/tmp/djex-candidate-pipeline-screen-one-shot-20260822-ea369674-v2-02`.
+All rows and all non-performance controls passed. The complete comparison was:
+
+| Metric | W1 | W2 | Geometric mean where applicable |
+| --- | ---: | ---: | ---: |
+| Pipeline `F/H` | `1.0117322535` | `1.0243144714` | `1.0180039235801621` |
+| Canonical shipped `B/H` | `0.9905676361` | `1.0109022221` | `1.000683278814482` |
+| Matched shipped `D/H` | `0.9940672572` | `1.0189985382` | — |
+| Difference in differences | `1.0153066480` | `1.0325182062` | — |
+
+The pipeline and canonical geometric means missed `>1.10`, while W1 canonical
+and matched comparisons were not positive. Resource ratios remained within
+their gates, the serial and host controls passed, and the separate `1.25x`
+tier was false. The outcome is therefore final behavioral candidate-pipeline
+HOLD, not KEEP.
+
+| Evidence | SHA-256 |
+| --- | --- |
+| Decision | `28f2aa788aaf4199e9c509c8693ac6443f6077727ef5f4cddbe2a87a550a58b5` |
+| 160-row results | `4d7e0e24e81d6ebba12cf25de8cf19565e54c5df80f37db2ac1e8702abdea868` |
+| Provenance | `df998b0357795f91ee8793e3cb7cd4d4b7b58e06561125d0ec5d8209567cf51c` |
+| Schedule | `82b3075105fce3c6b84cfd6161c9b346391a9fd5e771335d0b6c5a1fa80c5b47` |
+| Host-control window attestation | `a37b54a25b2148f3b8a39bff7b2e0ace5b338f5ef4dc7b3c76dadfc2dff70faf` |
+| Full 1,308-file content manifest | `dea351c97bacc0984062133b7ab78139b3d8fcccbc0199600485a0c76100cff7` |
+| Raw 1,300-file content manifest | `041137d15df91542f171c10942188ad8a78c3550a3c53a5c736410631ef88f9b` |
+
+The full manifest covers 1,308 files totaling 679,203,342 bytes; the raw
+manifest covers 1,300 files totaling 679,006,506 bytes. Independent audit
+recomputed the frozen evidence and confirmed the absence of failed attempts,
+finalization or termination faults, cleanup failures, and residue.
+
+## Disposition
+
+Attempt 1, calibrations v2-01 and v2-02, diagnostic PASS v2-03, and the final
+release screen remain immutable at their distinct paths. No sample was
+replaced or promoted across protocols. The experiment is complete: retain the
+private tested foundation, retain the benchmark and audit history, keep
+behavioral production serial, and do not claim an acceleration from this
+route.

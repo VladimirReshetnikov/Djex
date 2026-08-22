@@ -455,18 +455,21 @@ rendering. Leant's concise command derives only exact built-in-`List` input
 roles and scalar/canonical-`Prod` result defaults after Lean translation, then
 uses its existing command-local filter context and scheduler.
 
-Djex may overlap only pure candidate preparation with that pipeline. For
-`SelectBest` and configured `jobs >= 2`, one package-private producer advances
-the lazy typed trace and evaluates the next checked compatibility projection
-to weak-head normal form. The owner thread still seals every behavioral
-problem, submits every ordinal to the same single live worker, interprets and
-replays every response, emits every diagnostic, and ranks the completed batch.
-The one-candidate permit, FIFO batch boundaries, and scoped cancellation do not
-transfer any problem, query, observation, evidence, or solver authority to the
-producer. `jobs = 1`, `SelectFirst`, and `SelectAll` remain literal serial
-controls. The first performance screen stopped on benchmark instrumentation
-before measurement, so this concurrency boundary currently makes no speed
-claim; see the
+Djex production keeps that complete behavioral pipeline serial for every
+selection mode and configured `jobs` value. The owner thread advances each
+typed trace, seals every behavioral problem, submits every ordinal to the same
+single live worker, interprets and replays every response, emits every
+diagnostic, and ranks each completed batch.
+
+A package-private foundation still models one-candidate-ahead pure preparation
+with a single permit, FIFO batch boundaries, and scoped cancellation. Its
+focused tests establish the intended demand, ordering, exception, and cleanup
+properties, but it has no production call site and exports no public API. The
+connected experiment passed semantic and resource controls yet reached only
+`1.0180x` geometric-mean pipeline improvement and `1.0007x` against the
+canonical shipped control, below the preregistered `>1.10x` KEEP threshold.
+The production connection was reverted exactly at
+`73ec1891db0c9362d11f6a35e2eeeeea5c031241`; see the
 [bounded behavioral pipeline report](reports/2026-08-22-bounded-behavioral-best-pipeline.md).
 
 In the built-in list case, omission is intentionally useful but bounded:

@@ -239,41 +239,41 @@ refreshing the original cutoff.
 The boundary preserves laziness instead of forcing a complete backend trace:
 the worker forces only the finite presentation demanded by `SelectFirst` or
 `SelectBest`. `SelectAll` retains its one-pass streaming presenter. Behavioral
-Length/Z3 queries bypass the pair scheduler and retain one live solver; their
-separate bounded `SelectBest` pipeline is described below. `jobs = 1` also
-keeps the historical serial per-backend whole-presentation timers. Running two
-independent heaps can raise peak memory from approximately the larger backend
-footprint toward their sum, so that setting remains the documented resource
-fallback.
+Length/Z3 queries bypass the pair scheduler, retain one live solver, and use
+the serial candidate presenter for every `select` and `jobs` value. `jobs = 1`
+also keeps the historical serial per-backend whole-presentation timers.
+Running two independent heaps can raise peak memory from approximately the
+larger backend footprint toward their sum, so that setting remains the
+documented resource fallback for paired-backend queries.
 
 This is coarse-grained frontend concurrency, not parallel Djinn proof search
 or parallel Exference queue traversal. The checked adapter APIs and immutable
 sessions remain synchronous and unchanged.
 
-### Behavioral SelectBest candidate pipeline
+### Behavioral SelectBest pipeline research foundation
 
-A behavioral Exference query still owns exactly one Length/Z3 live session and
-assesses candidates serially. When its presentation is `SelectBest` and the
-configured `jobs` value is at least two, a package-private producer may advance
-the lazy typed-result trace and prepare one compatibility candidate ahead while
-the owner assesses the current candidate. This route depends on configured
-search jobs, not RTS capabilities; jobs two remains eligible under `+RTS -N1`.
+Behavioral Exference queries own exactly one Length/Z3 live session and assess
+candidates serially. Production now invokes the historical serial presenter
+for every `SelectFirst`, `SelectBest`, and `SelectAll` query regardless of the
+configured `jobs` value.
 
-The producer evaluates only `typedCandidateCompatibility` to weak-head normal
-form. It cannot inspect the lazy typed graph and does not run residual checks,
-solver IO, warning emission, ranking, batch commitment, or presentation. A
-one-candidate permit and FIFO batch-boundary events preserve whole-batch
-admission-before-rank, stable ties, progress laziness, and serial exception
-precedence. The owner alone performs every effectful assessment and terminal
-decision.
+The retained package-private
+`Language.Haskell.Djex.REPL.CandidatePipeline` foundation was used to test a
+one-candidate-ahead experiment. Its producer evaluated only
+`typedCandidateCompatibility` to weak-head normal form; a one-candidate permit,
+FIFO batch boundaries, and scoped cancellation preserved serial demand,
+ordering, exception, and cleanup semantics. The foundation remains a Cabal
+`other-modules` implementation detail with its focused tests. It has no
+production call site and exposes no public API.
 
-The scoped producer is nested inside the unchanged live-session callback,
-which is nested inside the unchanged outer timeout. Cancellation therefore
-joins the pure producer before solver cleanup. `jobs = 1`, `SelectFirst`, and
-`SelectAll` invoke the previous serial presenters literally. The first
-performance screen ended in a baseline sampler instrumentation HOLD before
-measurement, so the route currently has semantic evidence but no acceleration
-claim; see the
+The connected route at
+`aff7a5e8d0fe81f50b05c5073ff05f77e1ab68ca` passed its semantic and resource
+controls, but the final valid 160-row screen measured only a `1.0180x`
+geometric-mean pipeline improvement and `1.0007x` against the canonical shipped
+control, below the preregistered `>1.10x` KEEP threshold. W1 also failed the
+required positive direction for the canonical and matched comparisons. The
+production connection was reverted exactly at
+`73ec1891db0c9362d11f6a35e2eeeeea5c031241`; see the
 [bounded pipeline report](reports/2026-08-22-bounded-behavioral-best-pipeline.md).
 
 ### Exference serial step-action boundary

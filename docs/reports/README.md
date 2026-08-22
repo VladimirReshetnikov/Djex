@@ -120,4 +120,4 @@ Reports are listed oldest first.
 - 2026-08-20 — [Deterministic parallel backend search](2026-08-20-deterministic-parallel-backend-search.md)
 - 2026-08-20 — [Timed parallel backend deadline](2026-08-20-timed-parallel-backend-deadline.md)
 - 2026-08-20 — [Exference serial ordered StepActions and parallel research checkpoint](2026-08-20-exference-serial-step-actions.md)
-- 2026-08-22 — [Bounded behavioral SelectBest candidate pipeline](2026-08-22-bounded-behavioral-best-pipeline.md)
+- 2026-08-22 — [Bounded behavioral SelectBest candidate pipeline — final HOLD, production route reverted](2026-08-22-bounded-behavioral-best-pipeline.md)

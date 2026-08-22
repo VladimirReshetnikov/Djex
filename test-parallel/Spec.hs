@@ -46,6 +46,7 @@ import Test.Tasty.HUnit
 
 import Language.Haskell.Djex.Command.Output
 import Language.Haskell.Djex.REPL.CandidatePipeline
+import Language.Haskell.Djex.REPL.Color
 import Language.Haskell.Djex.REPL.Parallel
 import Language.Haskell.Djex.REPL.SyntaxHighlight
 import Language.Haskell.Synthesis.Query
@@ -89,6 +90,8 @@ main = defaultMain $ testGroup "Djex deterministic parallel pair"
       testCallerCancellation
   , testCase "worker forcing rejects a poisoned output plan before replay"
       testStrictOutputPlan
+  , testCase "source replay delegates raw text on the owner thread"
+      testSourceReplayOwner
   , testCase "timed lanes share one cutoff signal and both start"
       testTimedCommonDeadlineStart
   , testCase "pre-cutoff completions survive deadline watcher cleanup"
@@ -120,7 +123,42 @@ main = defaultMain $ testGroup "Djex deterministic parallel pair"
   , testCase "timed consumers remain stable when right completes first"
       testTimedStableConsumptionOrder
   , candidatePipelineTests
+  , colorPolicyTests
   , syntaxHighlightTests
+  ]
+
+colorPolicyTests :: TestTree
+colorPolicyTests = testGroup "interactive color policy"
+  [ testCase "mode parsing is case-insensitive and exact" $ do
+      assertEqual "auto mode" (Right ColorAuto)
+        $ parseColorMode "color" "AUTO"
+      assertEqual "always mode" (Right ColorAlways)
+        $ parseColorMode "color" " always "
+      assertEqual "never mode" (Right ColorNever)
+        $ parseColorMode "color" "never"
+      assertEqual "unknown mode"
+        (Left "color must be auto, always, or never")
+        $ parseColorMode "color" "sometimes"
+  , testCase "automatic mode requires capability and honors opt-outs" $ do
+      let supported = resolveTerminalColorSupport Nothing (Just "xterm") True
+          pipe = resolveTerminalColorSupport Nothing (Just "xterm") False
+          noColor = resolveTerminalColorSupport (Just "1") (Just "xterm") True
+          emptyNoColor = resolveTerminalColorSupport (Just "") Nothing True
+          dumb = resolveTerminalColorSupport Nothing (Just "DUMB") True
+      assertBool "capable terminal enables auto"
+        $ colorEnabled supported ColorAuto
+      assertBool "pipe disables auto" $ not $ colorEnabled pipe ColorAuto
+      assertBool "NO_COLOR disables auto" $ not $ colorEnabled noColor ColorAuto
+      assertBool "present empty NO_COLOR also disables auto"
+        $ not $ colorEnabled emptyNoColor ColorAuto
+      assertBool "TERM=dumb disables auto" $ not $ colorEnabled dumb ColorAuto
+  , testCase "explicit modes override the automatic capability snapshot" $ do
+      let unsupported = resolveTerminalColorSupport Nothing Nothing False
+          supported = resolveTerminalColorSupport Nothing Nothing True
+      assertBool "always forces styling"
+        $ colorEnabled unsupported ColorAlways
+      assertBool "never suppresses styling"
+        $ not $ colorEnabled supported ColorNever
   ]
 
 syntaxHighlightTests :: TestTree
@@ -173,6 +211,16 @@ syntaxHighlightTests = testGroup "Haskell syntax highlighting"
           $ SyntaxSpan SyntaxLiteral "'\\x41'" `elem` spans
         assertBool "Unicode constructor classified"
           $ SyntaxSpan SyntaxType "Ω" `elem` spans
+  , testCase "punctuation cannot absorb adjacent comments or literals" $ do
+      assertEqual "parenthesized string"
+        [ SyntaxSpan SyntaxOperator "("
+        , SyntaxSpan SyntaxLiteral "\"x\""
+        , SyntaxSpan SyntaxOperator ")"
+        ] $ tokenizeHaskell "(\"x\")"
+      assertEqual "comment after opening punctuation"
+        [ SyntaxSpan SyntaxOperator "("
+        , SyntaxSpan SyntaxComment "-- note"
+        ] $ tokenizeHaskell "(-- note"
   , testCase "highlighted spans reset and long input stays byte preserving" $ do
       let source = concat $ replicate 2000
             "case Just 123 of -- retained\n  value -> value\n"
@@ -748,6 +796,20 @@ testStrictOutputPlan = do
   assertException "poisoned event" outcome
   await "strictness sibling cleanup" rightStopped
   assertEqual "poisoned plan never reaches replay" [] =<< readMVar consumed
+
+testSourceReplayOwner :: Assertion
+testSourceReplayOwner = do
+  owner <- myThreadId
+  observed <- newMVar []
+  let rawSource = "data Box a = Box a -- raw"
+  exitCode <- replayCommandOutputWith
+    (\source -> do
+      presenter <- myThreadId
+      modifyMVar_ observed $ pure . ((presenter, source) :))
+    $ CommandOutput [CommandHaskellOutputLine rawSource] ExitSuccess
+  assertEqual "replay exit" ExitSuccess exitCode
+  assertEqual "raw source reaches the caller-owned presenter exactly once"
+    [(owner, rawSource)] =<< readMVar observed
 
 data LogicalTime
   = BeforeCutoff

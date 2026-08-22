@@ -172,6 +172,7 @@ data ReplSetting
   | SelectionSetting
   | RenderingSetting
   | QualificationSetting
+  | ColorSetting
   | PromptSetting
   | QueryTimeoutSetting
   | SearchJobsSetting
@@ -200,6 +201,7 @@ replSettingName setting = case setting of
   SelectionSetting -> "select"
   RenderingSetting -> "render"
   QualificationSetting -> "qualification"
+  ColorSetting -> "color"
   PromptSetting -> "prompt"
   QueryTimeoutSetting -> "timeout"
   SearchJobsSetting -> "jobs"

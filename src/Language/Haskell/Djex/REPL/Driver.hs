@@ -47,6 +47,7 @@ import Language.Haskell.Djex.REPL.Command
   , settingNames
   , showNames
   )
+import Language.Haskell.Djex.REPL.Color (colorModeNames)
 import Language.Haskell.Djex.Text (trim)
 
 -- | Scope-derived completion candidates projected from the frontend state.
@@ -233,6 +234,7 @@ candidatesFor completions previous word = case previous of
       ++ map ('-' :) booleanSettingNames
     (Right "set", [setting]) -> case map toLower setting of
       "backend" -> backendNames
+      "color" -> colorModeNames
       "djinn-strategy" -> searchStrategyNames
       "heuristic" -> heuristicNames
       _ -> []

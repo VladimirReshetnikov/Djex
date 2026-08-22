@@ -33,14 +33,20 @@ module Language.Haskell.Djex.Command
   , noFieldSelectors
   , prepareDjinnQueryOptions
   , executeDjinnCommand
+  , executeDjinnCommandWith
   , executeExferenceCommand
+  , executeExferenceCommandWith
   , executeExferenceCommandInScope
+  , executeExferenceCommandInScopeWith
   , prepareDjinnPresentation
   , prepareExferencePresentation
   , prepareDiagnosticFailure
   , presentDjinn
+  , presentDjinnWith
   , presentAssessedExference
+  , presentAssessedExferenceWith
   , presentExference
+  , presentExferenceWith
   , QueryTimeout
   , noQueryTimeout
   , parseQueryTimeout
@@ -68,7 +74,7 @@ import Language.Haskell.Djex
 import Language.Haskell.Djex.Command.Output
   ( CommandOutput (..)
   , CommandOutputEvent (..)
-  , replayCommandOutput
+  , replayCommandOutputWith
   )
 import Language.Haskell.Exference.Core.Internal.Options
   (heuristicAssignments, heuristicFields)
@@ -299,7 +305,23 @@ executeDjinnCommand
   -> String
   -> IO ExitCode
 executeDjinnCommand presentation fieldSelectors session options target
-    sourceName source =
+    sourceName source = executeDjinnCommandWith putStrLn presentation
+      fieldSelectors session options target sourceName source
+
+-- | Parse, execute, and present one checked Djinn query through a caller-owned
+-- source renderer. Diagnostics retain their established stderr path.
+executeDjinnCommandWith
+  :: (String -> IO ())
+  -> PresentationOptions
+  -> FieldSelectors
+  -> DjinnSession
+  -> QueryOptions
+  -> DefinitionName
+  -> FilePath
+  -> String
+  -> IO ExitCode
+executeDjinnCommandWith presentHaskell presentation fieldSelectors session
+    options target sourceName source =
   executeParsedQuery
     (parseDjinnRequestWithCheckedTarget
       session
@@ -308,7 +330,7 @@ executeDjinnCommand presentation fieldSelectors session options target
       sourceName
       source)
     (runDjinnQuery session)
-    (presentDjinn presentation fieldSelectors)
+    (presentDjinnWith presentHaskell presentation fieldSelectors)
 
 -- | Parse, execute, and present one checked Exference query.
 executeExferenceCommand
@@ -321,12 +343,28 @@ executeExferenceCommand
   -> String
   -> IO ExitCode
 executeExferenceCommand presentation fieldSelectors session options target
-    sourceName source =
+    sourceName source = executeExferenceCommandWith putStrLn presentation
+      fieldSelectors session options target sourceName source
+
+-- | Parse, execute, and present one checked Exference query through a
+-- caller-owned source renderer.
+executeExferenceCommandWith
+  :: (String -> IO ())
+  -> PresentationOptions
+  -> FieldSelectors
+  -> ExferenceSession
+  -> ExferenceOptions
+  -> DefinitionName
+  -> FilePath
+  -> String
+  -> IO ExitCode
+executeExferenceCommandWith presentHaskell presentation fieldSelectors session
+    options target sourceName source =
   executeParsedQuery
     (parseExferenceRequestWithCheckedTarget
       session options target sourceName source)
     (runExferenceQuery session)
-    (presentExference presentation fieldSelectors)
+    (presentExferenceWith presentHaskell presentation fieldSelectors)
 
 -- | Parse, execute, and present an Exference query in an interactive module
 -- scope. The supplied session may already have its search dictionary narrowed;
@@ -342,12 +380,29 @@ executeExferenceCommandInScope
   -> String
   -> IO ExitCode
 executeExferenceCommandInScope presentation fieldSelectors session options
-    target scope sourceName source =
+    target scope sourceName source = executeExferenceCommandInScopeWith
+      putStrLn presentation fieldSelectors session options target scope
+      sourceName source
+
+-- | Scoped variant of 'executeExferenceCommandWith'.
+executeExferenceCommandInScopeWith
+  :: (String -> IO ())
+  -> PresentationOptions
+  -> FieldSelectors
+  -> ExferenceSession
+  -> ExferenceOptions
+  -> DefinitionName
+  -> ExferenceQueryScope
+  -> FilePath
+  -> String
+  -> IO ExitCode
+executeExferenceCommandInScopeWith presentHaskell presentation fieldSelectors
+    session options target scope sourceName source =
   executeParsedQuery
     (parseExferenceRequestWithCheckedTargetInScope
       session options target scope sourceName source)
     (runExferenceQuery session)
-    (presentExference presentation fieldSelectors)
+    (presentExferenceWith presentHaskell presentation fieldSelectors)
 
 -- Run one parsed request and present its result, reporting a parse or query
 -- failure as a diagnostic.  Every command above is this shape.
@@ -368,8 +423,18 @@ presentDjinn
   -> FieldSelectors
   -> DjinnResult
   -> IO ExitCode
-presentDjinn options fieldSelectors =
-  replayCommandOutput . prepareDjinnPresentation options fieldSelectors
+presentDjinn = presentDjinnWith putStrLn
+
+-- | Present one Djinn result through a caller-owned source renderer.
+presentDjinnWith
+  :: (String -> IO ())
+  -> PresentationOptions
+  -> FieldSelectors
+  -> DjinnResult
+  -> IO ExitCode
+presentDjinnWith presentHaskell options fieldSelectors =
+  replayCommandOutputWith presentHaskell
+    . prepareDjinnPresentation options fieldSelectors
 
 -- | Select and render one Djinn result without touching process handles.
 -- Fully forcing this plan performs exactly the work demanded by the existing
@@ -405,11 +470,21 @@ presentExference
   -> FieldSelectors
   -> [ExferenceResult]
   -> IO ExitCode
-presentExference options fieldSelectors results
+presentExference = presentExferenceWith putStrLn
+
+-- | Present Exference results through a caller-owned source renderer.
+presentExferenceWith
+  :: (String -> IO ())
+  -> PresentationOptions
+  -> FieldSelectors
+  -> [ExferenceResult]
+  -> IO ExitCode
+presentExferenceWith presentHaskell options fieldSelectors results
   | presentationSelection options == SelectAll =
-      presentAllExference options fieldSelectors results
-presentExference options fieldSelectors results = replayCommandOutput
-  $ prepareExferencePresentation options fieldSelectors results
+      presentAllExference presentHaskell options fieldSelectors results
+presentExferenceWith presentHaskell options fieldSelectors results =
+  replayCommandOutputWith presentHaskell
+    $ prepareExferencePresentation options fieldSelectors results
 
 -- | Check typed Exference candidates effectfully before selecting, rendering,
 -- and reporting them through the established presentation policy.
@@ -424,10 +499,22 @@ presentAssessedExference
   -> (ExferenceTypedCandidate -> IO Bool)
   -> [ExferenceTypedResult]
   -> IO ExitCode
-presentAssessedExference options fieldSelectors admit results
+presentAssessedExference = presentAssessedExferenceWith putStrLn
+
+-- | Assessed Exference presentation with a caller-owned source renderer.
+presentAssessedExferenceWith
+  :: (String -> IO ())
+  -> PresentationOptions
+  -> FieldSelectors
+  -> (ExferenceTypedCandidate -> IO Bool)
+  -> [ExferenceTypedResult]
+  -> IO ExitCode
+presentAssessedExferenceWith presentHaskell options fieldSelectors admit results
   | presentationSelection options == SelectAll =
-      presentAllAssessedExference options fieldSelectors admit results
-presentAssessedExference options fieldSelectors admit results = do
+      presentAllAssessedExference presentHaskell options fieldSelectors admit
+        results
+presentAssessedExferenceWith presentHaskell options fieldSelectors admit
+    results = do
   selected <- case presentationSelection options of
     SelectFirst
       | not $ Map.null fieldSelectors -> selectQueryResultsM
@@ -442,16 +529,18 @@ presentAssessedExference options fieldSelectors admit results = do
         . typedCandidateCompatibility)
       admit
       results
-  presentExferenceSelection options fieldSelectors
+  presentExferenceSelection presentHaskell options fieldSelectors
     $ fmap typedCandidateCompatibility selected
 
 presentExferenceSelection
-  :: PresentationOptions
+  :: (String -> IO ())
+  -> PresentationOptions
   -> FieldSelectors
   -> Selection ExferenceCandidate
   -> IO ExitCode
-presentExferenceSelection options fieldSelectors =
-  replayCommandOutput . prepareExferenceSelection options fieldSelectors
+presentExferenceSelection presentHaskell options fieldSelectors =
+  replayCommandOutputWith presentHaskell
+    . prepareExferenceSelection options fieldSelectors
 
 -- | Select and render a non-streaming Exference result sequence without
 -- touching process handles.  The caller must retain the streaming presenter
@@ -505,11 +594,12 @@ simplificationLookahead :: Int
 simplificationLookahead = 3
 
 presentAllExference
-  :: PresentationOptions
+  :: (String -> IO ())
+  -> PresentationOptions
   -> FieldSelectors
   -> [ExferenceResult]
   -> IO ExitCode
-presentAllExference options fieldSelectors results = do
+presentAllExference presentHaskell options fieldSelectors results = do
   outcome <- runExceptT $ foldAllQueryResultsM
     (const True) printOne False results
   case outcome of
@@ -523,18 +613,20 @@ presentAllExference options fieldSelectors results = do
     rendered <- ExceptT $ pure $ renderExferenceBlock options
       $ fmap (projectFieldSelectors fieldSelectors) candidate
     liftIO $ do
-      when printed $ putStrLn "\n-- or\n"
-      putStrLn rendered
+      when printed $ presentHaskell "\n-- or\n"
+      presentHaskell rendered
       hFlush stdout
     pure True
 
 presentAllAssessedExference
-  :: PresentationOptions
+  :: (String -> IO ())
+  -> PresentationOptions
   -> FieldSelectors
   -> (ExferenceTypedCandidate -> IO Bool)
   -> [ExferenceTypedResult]
   -> IO ExitCode
-presentAllAssessedExference options fieldSelectors admit results = do
+presentAllAssessedExference presentHaskell options fieldSelectors admit
+    results = do
   outcome <- runExceptT $ foldAllQueryResultsM
     (const True) printOne False results
   case outcome of
@@ -553,8 +645,8 @@ presentAllAssessedExference options fieldSelectors admit results = do
           $ fmap (projectFieldSelectors fieldSelectors)
           $ typedCandidateCompatibility typedCandidate
         liftIO $ do
-          when printed $ putStrLn "\n-- or\n"
-          putStrLn rendered
+          when printed $ presentHaskell "\n-- or\n"
+          presentHaskell rendered
           hFlush stdout
         pure True
 
@@ -641,7 +733,7 @@ reportTruncation = mapM_ emitDiagnostic . progressTruncationDiagnostic
 candidateOutputEvents :: [String] -> [CommandOutputEvent]
 candidateOutputEvents [] = []
 candidateOutputEvents rendered =
-  [CommandStandardOutputLine $ intercalate "\n\n-- or\n\n" rendered]
+  [CommandHaskellOutputLine $ intercalate "\n\n-- or\n\n" rendered]
 
 diagnosticOutputEvent :: Diagnostic -> CommandOutputEvent
 diagnosticOutputEvent = CommandStandardErrorLine . renderDiagnostic

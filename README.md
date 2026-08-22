@@ -255,6 +255,16 @@ deliberately still a requested result type, not a Haskell expression; the
 explicit `:eval` command is the separate boundary that compiles and executes
 an expression with real GHC.
 
+The interactive frontend syntax-highlights generated candidates and
+source-shaped inspection output on a capable terminal. `:set color
+auto|always|never` changes the runtime policy and `:unset color` restores the
+default `auto`. Automatic mode disables escapes when stdout is not a terminal,
+when `NO_COLOR` is present, or when `TERM=dumb`; its terminal probe also
+enables Windows virtual-terminal processing when available. Prompts,
+diagnostics, shell and `:eval` output, other REPL prose, and both one-shot
+subcommands remain plain. See [syntax highlighting](docs/repl.md#syntax-highlighting)
+for the exact output surfaces and scripting contract.
+
 ### Paired-backend concurrency
 
 The common shared-parser case needs no setup: `:compare TYPE`, or a bare `TYPE`
@@ -456,7 +466,8 @@ bounds. Run `djex <backend> --help` for the exact backend-specific table.
 
 Generated Haskell alone is written to stdout. Loader messages, logical
 negative answers, undecided/truncated status, and structured diagnostics go
-to stderr. Help, version, successful synthesis, proof-backed
+to stderr. One-shot output never contains REPL syntax-color escapes. Help,
+version, successful synthesis, proof-backed
 uninhabitability, and bounded no-result searches exit 0;
 load/parse/search/render failures exit 1; malformed command lines exit 2.
 Package commands propagate ordinary Cabal exit codes; failure to launch Cabal

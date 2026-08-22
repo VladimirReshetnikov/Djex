@@ -7,6 +7,7 @@ module Language.Haskell.Djex.Command.Output
   ( CommandOutputEvent (..)
   , CommandOutput (..)
   , replayCommandOutput
+  , replayCommandOutputWith
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -17,6 +18,7 @@ import System.IO (hFlush, hPutStrLn, stderr, stdout)
 -- | One console effect in its original program order.
 data CommandOutputEvent
   = CommandStandardOutputLine String
+  | CommandHaskellOutputLine String
   | CommandStandardErrorLine String
   | CommandFlushStandardOutput
   deriving (Eq, Show)
@@ -24,6 +26,7 @@ data CommandOutputEvent
 instance NFData CommandOutputEvent where
   rnf event = case event of
     CommandStandardOutputLine line -> rnf line
+    CommandHaskellOutputLine line -> rnf line
     CommandStandardErrorLine line -> rnf line
     CommandFlushStandardOutput -> ()
 
@@ -40,9 +43,20 @@ forceExitCode (ExitFailure code) = rnf code
 
 -- | Replay one fully prepared plan against the real process handles.
 replayCommandOutput :: CommandOutput -> IO ExitCode
-replayCommandOutput (CommandOutput events exitCode) = do
+replayCommandOutput = replayCommandOutputWith putStrLn
+
+-- | Replay a plan while presenting source-shaped stdout through a
+-- frontend-owned renderer. Plans retain raw source strings, so concurrent
+-- workers never inspect terminal state or construct presentation escapes.
+replayCommandOutputWith
+  :: (String -> IO ())
+  -> CommandOutput
+  -> IO ExitCode
+replayCommandOutputWith presentHaskell
+    (CommandOutput events exitCode) = do
   forM_ events $ \event -> case event of
     CommandStandardOutputLine line -> putStrLn line
+    CommandHaskellOutputLine line -> presentHaskell line
     CommandStandardErrorLine line -> hPutStrLn stderr line
     CommandFlushStandardOutput -> hFlush stdout
   pure exitCode

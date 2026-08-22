@@ -66,6 +66,10 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplSettingSignsAndDiagnostics
   , testCase "REPL search settings retune the budget, strategy, and weights"
       testReplSearchSettings
+  , testCase "REPL color policy preserves plain and stripped transcripts"
+      testReplSyntaxColorPolicy
+  , testCase "REPL colors each source-inspection surface"
+      testReplSyntaxColorSurfaces
   , testCase "REPL both-mode jobs preserve timed and untimed output"
       testReplParallelBoth
   , testCase "REPL source routes timed pairs through the checked scheduler"
@@ -630,10 +634,120 @@ testReplSearchSettings = withTemporaryEnvironment [] $ \directory -> do
     "heuristic weights: goalVar" output
   assertNoCallStack errors
 
+testReplSyntaxColorPolicy :: Assertion
+testReplSyntaxColorPolicy = withTemporaryEnvironment [] $ \directory -> do
+  let finite mode = runRepl directory
+        [ ":set color " ++ mode
+        , ":set backend djinn"
+        , ":set render expression"
+        , ":set qualification none"
+        , "a -> a"
+        ]
+      streaming mode = runRepl directory
+        [ ":set color " ++ mode
+        , ":set backend exference"
+        , ":set render expression"
+        , ":set qualification none"
+        , ":set select all"
+        , ":set max-steps 16"
+        , "a -> a"
+        ]
+  automatic@(_, automaticOutput, automaticErrors) <- runRepl directory
+    [ ":set render expression"
+    , ":set qualification none"
+    , "a -> a"
+    ]
+  forced@(_, forcedOutput, forcedErrors) <- finite "always"
+  plain@(_, plainOutput, plainErrors) <- finite "never"
+  assertSuccessTriple "automatic color transcript" automatic
+  assertSuccessTriple "forced color transcript" forced
+  assertSuccessTriple "disabled color transcript" plain
+  assertNoSGR "captured stdout disables automatic color" automaticOutput
+  assertNoSGR "automatic-color diagnostics remain plain" automaticErrors
+  assertBool "always emits syntax SGR on captured stdout"
+    $ "\ESC[" `isInfixOf` forcedOutput
+  assertNoSGR "always leaves diagnostics plain" forcedErrors
+  assertNoSGR "never leaves stdout plain" plainOutput
+  assertNoSGR "never leaves diagnostics plain" plainErrors
+  assertEqual "stripping forced finite output restores never output"
+    plainOutput $ stripSGR forcedOutput
+
+  forcedStream@(_, forcedStreamOutput, forcedStreamErrors) <-
+    streaming "always"
+  plainStream@(_, plainStreamOutput, plainStreamErrors) <- streaming "never"
+  assertSuccessTriple "forced streaming transcript" forcedStream
+  assertSuccessTriple "disabled streaming transcript" plainStream
+  assertBool "streaming Exference presentation emits syntax SGR"
+    $ "\ESC[" `isInfixOf` forcedStreamOutput
+  assertEqual "stripping forced streaming output restores never output"
+    plainStreamOutput $ stripSGR forcedStreamOutput
+  assertEqual "streaming diagnostics do not depend on color policy"
+    plainStreamErrors forcedStreamErrors
+  assertNoSGR "streaming diagnostics remain plain" forcedStreamErrors
+
+  (settingExit, settingOutput, settingErrors) <- runRepl directory
+    [ ":set color always"
+    , ":show settings"
+    , ":unset color"
+    , ":show settings"
+    , ":set color vivid"
+    ]
+  assertEqual "color-setting REPL exit" ExitSuccess settingExit
+  assertContains "always is a visible runtime policy"
+    "color = always" settingOutput
+  assertContains ":unset color restores automatic policy"
+    "color = auto" settingOutput
+  assertContains "invalid color modes are diagnosed"
+    "color must be auto, always, or never" settingErrors
+  assertNoSGR "settings and setting diagnostics stay plain"
+    $ settingOutput ++ settingErrors
+
+  (oneShotExit, oneShotOutput, oneShotErrors) <- runDjex
+    [ "djinn"
+    , "--render", "expression"
+    , "--qualification", "none"
+    , "a -> a"
+    ]
+  assertEqual "one-shot Djinn exit" ExitSuccess oneShotExit
+  assertContains "one-shot Djinn still presents its candidate"
+    "\\a -> a" oneShotOutput
+  assertNoSGR "one-shot commands remain plain"
+    $ oneShotOutput ++ oneShotErrors
+
+testReplSyntaxColorSurfaces :: Assertion
+testReplSyntaxColorSurfaces = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      surface = canonicalRoot </> "scope" </> "Surface.hs"
+      checkSurface label command expected = do
+        (exitCode, output, errors) <- runRepl empty
+          [ ":load " ++ show surface
+          , ":set color always"
+          , ":set qualification none"
+          , command
+          ]
+        assertEqual (label ++ " exit") ExitSuccess exitCode
+        assertBool (label ++ " emits syntax SGR")
+          $ "\ESC[" `isInfixOf` output
+        assertContains (label ++ " retains source text") expected
+          $ stripSGR output
+        assertNoSGR (label ++ " diagnostics remain plain") errors
+  checkSurface ":type" ":type publicValue"
+    "publicValue :: PublicType"
+  checkSurface ":kind" ":kind PublicType"
+    "PublicType :: Type"
+  checkSurface ":show imports" ":show imports"
+    "import *Surface -- automatic"
+  checkSurface ":browse" ":browse Surface"
+    "data Surface.PublicType"
+  checkSurface ":info" ":info PublicType"
+    "data PublicType"
+
 testReplParallelBoth :: Assertion
 testReplParallelBoth = withTemporaryEnvironment [] $ \directory -> do
   let run jobs = runRepl directory
-        [ ":set render expression"
+        [ ":set color always"
+        , ":set render expression"
         , ":set qualification none"
         , ":set candidate-limit 3"
         , ":set max-steps 16"
@@ -662,6 +776,8 @@ testReplParallelBoth = withTemporaryEnvironment [] $ \directory -> do
   assertEqual "parallel both-mode exit" ExitSuccess exitCode
   assertEqual "every comparison keeps Djinn before Exference"
     expectedLabels backendLabels
+  assertBool "parallel owner replay applies syntax styling"
+    $ "\ESC[" `isInfixOf` output
   assertNoCallStack errors
 
 testReplTimedParallelSource :: Assertion
@@ -689,7 +805,7 @@ testReplTimedParallelSource = do
         , "  replayTimedBackend selectedBackend seconds outcome = do"
         , "    labelBackend True selectedBackend"
         , "    ignoreExit $ case outcome of"
-        , "      ParallelLaneCompleted output -> replayCommandOutput output"
+        , "      ParallelLaneCompleted output -> replayReplCommandOutput state output"
         , "      ParallelLaneTimedOut ->"
         , "        diagnosticFailure $ queryTimeoutDiagnostic seconds"
         ]
@@ -749,6 +865,7 @@ testReplSettingSignsAndDiagnostics = withTemporaryEnvironment [] $ \directory ->
         , "select"
         , "render"
         , "qualification"
+        , "color"
         , "prompt"
         , "timeout"
         , "jobs"
@@ -3853,6 +3970,27 @@ assertSuccess arguments = do
   assertBool ("successful synthesis emitted an error: " ++ errors) $
     not $ "error" `isInfixOf` map toLower errors
   pure output
+
+assertSuccessTriple
+  :: String
+  -> (ExitCode, String, String)
+  -> Assertion
+assertSuccessTriple label (exitCode, _, errors) =
+  assertEqual (label ++ " stderr: " ++ errors) ExitSuccess exitCode
+
+assertNoSGR :: String -> String -> Assertion
+assertNoSGR label source = assertBool label
+  $ not $ "\ESC[" `isInfixOf` source
+
+-- The production lexer promises that styling only inserts complete SGR
+-- sequences. CLI parity tests remove those sequences without otherwise
+-- normalizing the captured transcript.
+stripSGR :: String -> String
+stripSGR [] = []
+stripSGR ('\ESC' : '[' : remaining) = case break (== 'm') remaining of
+  (_, 'm' : suffix) -> stripSGR suffix
+  _ -> '\ESC' : '[' : stripSGR remaining
+stripSGR (character : remaining) = character : stripSGR remaining
 
 assertUsageFailure :: [String] -> String -> Assertion
 assertUsageFailure arguments expected = do

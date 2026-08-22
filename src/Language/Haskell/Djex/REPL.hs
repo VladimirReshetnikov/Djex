@@ -76,7 +76,10 @@ import System.Posix.User (getRealUserID)
 
 import Language.Haskell.Djex
 import Language.Haskell.Djex.Command
-import Language.Haskell.Djex.Command.Output (replayCommandOutput)
+import Language.Haskell.Djex.Command.Output
+  ( CommandOutput
+  , replayCommandOutputWith
+  )
 import Language.Haskell.Djex.Exference.HaskellSrc
   ( ExferenceSessionLoadReport (..)
   , defaultExferenceEnvironmentPath
@@ -94,6 +97,7 @@ import Language.Haskell.Djex.Package
   , runPackageOperation
   )
 import Language.Haskell.Djex.REPL.Command
+import Language.Haskell.Djex.REPL.Color
 import Language.Haskell.Djex.REPL.DjinnScope
 import Language.Haskell.Djex.REPL.Driver
 import Language.Haskell.Djex.REPL.Eval
@@ -108,6 +112,7 @@ import Language.Haskell.Djex.REPL.Parallel
   , timedParallelPairEligible
   )
 import Language.Haskell.Djex.REPL.Scope
+import Language.Haskell.Djex.REPL.SyntaxHighlight (highlightHaskell)
 import Language.Haskell.Djex.REPL.Type
 import Language.Haskell.Djex.REPL.Workspace
 import Language.Haskell.Djex.Text (normalize, trim)
@@ -154,6 +159,8 @@ data ReplState = ReplState
     -- structural eliminations unchanged.
   , resultTarget :: DefinitionName
   , presentation :: PresentationOptions
+  , colorMode :: ColorMode
+  , terminalColorSupport :: TerminalColorSupport
   , djinnSearchOptions :: QueryOptions
   , exferenceSearchOptions :: ExferenceOptions
   , promptTemplate :: String
@@ -281,6 +288,7 @@ runRepl options = case standardDjinnSession of
       case resolvedHistory of
         Left failure -> diagnosticFailure failure
         Right historyPath -> do
+          terminalColor <- detectTerminalColorSupport
           requestedPath <- maybe defaultExferenceEnvironmentPath pure
             $ replEnvironmentPath options
           attempt <- loadExference [requestedPath] $ replAllowFix options
@@ -304,6 +312,8 @@ runRepl options = case standardDjinnSession of
                 , scopeFieldSelectors = noFieldSelectors
                 , resultTarget = target
                 , presentation = defaultInteractivePresentationOptions
+                , colorMode = ColorAuto
+                , terminalColorSupport = terminalColor
                 , djinnSearchOptions = defaultQueryOptions
                 , exferenceSearchOptions = defaultExferenceOptions
                 , promptTemplate = defaultPromptTemplate
@@ -345,6 +355,17 @@ defaultPromptTemplate = "djex[%b]> "
 -- budgets, while this runner consumes at most two.
 defaultSearchJobs :: Int
 defaultSearchJobs = 2
+
+-- Source styling is applied only by the REPL owner thread. Search workers
+-- retain raw presentation plans, and every non-source output path stays plain.
+putReplHaskellLn :: ReplState -> String -> IO ()
+putReplHaskellLn state = putStrLn . highlightHaskell enabled
+ where
+  enabled = colorEnabled (terminalColorSupport state) (colorMode state)
+
+replayReplCommandOutput :: ReplState -> CommandOutput -> IO ExitCode
+replayReplCommandOutput state = replayCommandOutputWith
+  $ putReplHaskellLn state
 
 -- | Run @.djexrc@ from the home directory and then the current directory
 -- through the ordinary script machinery, following GHCi's trust boundary for
@@ -721,7 +742,8 @@ runQuery sourceName query state = do
         Left failure -> diagnosticFailure failure
         Right results -> do
           opened <- withLengthSMTLibLiveSession execution $ \liveSession ->
-            presentAssessedExference
+            presentAssessedExferenceWith
+              (putReplHaskellLn state)
               (presentation state)
               (scopeFieldSelectors state)
               (admitLengthWhereCandidate resolution liveSession)
@@ -779,7 +801,7 @@ runQuery sourceName query state = do
   replayTimedBackend selectedBackend seconds outcome = do
     labelBackend True selectedBackend
     ignoreExit $ case outcome of
-      ParallelLaneCompleted output -> replayCommandOutput output
+      ParallelLaneCompleted output -> replayReplCommandOutput state output
       ParallelLaneTimedOut ->
         diagnosticFailure $ queryTimeoutDiagnostic seconds
 
@@ -808,10 +830,10 @@ runQuery sourceName query state = do
     runParallelPairOrdered
       (pure $ prepareParsedDjinn parsed)
       (pure $ prepareParsedExference session parsed)
-      (ignoreExit . replayCommandOutput)
+      (ignoreExit . replayReplCommandOutput state)
       (\output -> do
         labelBackend True ExferenceBackend
-        ignoreExit $ replayCommandOutput output)
+        ignoreExit $ replayReplCommandOutput state output)
 
   runLegacySelection = case selected of
     OneBackend selectedBackend -> runLegacyBackend False selectedBackend
@@ -819,7 +841,7 @@ runQuery sourceName query state = do
       runLegacyBackend True DjinnBackend
       runLegacyBackend True ExferenceBackend
 
-  labelBackend labelled selectedBackend = when labelled $ putStrLn
+  labelBackend labelled selectedBackend = when labelled $ putReplHaskellLn state
     $ "-- " ++ backendName (backendInfo selectedBackend)
 
   runLegacyBackend labelled selectedBackend = do
@@ -879,7 +901,8 @@ runQuery sourceName query state = do
     Right request -> ignoreExit $ withinQueryTimeout (queryTimeout state)
       $ case runDjinnQuery (currentDjinnSession state) request of
         Left failure -> diagnosticFailure failure
-        Right result -> presentDjinn
+        Right result -> presentDjinnWith
+          (putReplHaskellLn state)
           (presentation state)
           (maybe noFieldSelectors djinnProjectionFieldSelectors
             $ djinnProjection $ djinnRuntime state)
@@ -892,7 +915,8 @@ runQuery sourceName query state = do
     Right request -> ignoreExit $ withinQueryTimeout (queryTimeout state)
       $ case runExferenceQuery session request of
         Left failure -> diagnosticFailure failure
-        Right results -> presentExference
+        Right results -> presentExferenceWith
+          (putReplHaskellLn state)
           (presentation state) (scopeFieldSelectors state) results
 
 projectParsedTypeToDjinn
@@ -914,7 +938,8 @@ projectParsedTypeToDjinn state = mapTypeNames projectName
 runDjinnInteractive :: FilePath -> String -> ReplState -> IO ()
 runDjinnInteractive sourceName typeSource state = ignoreExit
   $ withinQueryTimeout (queryTimeout state)
-  $ executeDjinnCommand
+  $ executeDjinnCommandWith
+      (putReplHaskellLn state)
       (presentation state)
       (maybe noFieldSelectors djinnProjectionFieldSelectors
         $ djinnProjection $ djinnRuntime state)
@@ -928,7 +953,8 @@ runExferenceInteractive :: FilePath -> String -> ReplState -> IO ()
 runExferenceInteractive sourceName typeSource state = case runtimeState of
   (Just session, Just context) -> ignoreExit
     $ withinQueryTimeout (queryTimeout state)
-    $ executeExferenceCommandInScope
+    $ executeExferenceCommandInScopeWith
+        (putReplHaskellLn state)
         (presentation state)
         (scopeFieldSelectors state)
         session
@@ -963,7 +989,8 @@ showExpressionType sourceName defaulting expression state = case
   (Just session, Just scope) -> case inferExpressionType
       session scope defaulting sourceName expression of
     Left failure -> emitDiagnostic failure
-    Right inferred -> putStrLn $ inferredExpressionSource inferred ++ " :: "
+    Right inferred -> putReplHaskellLn state
+      $ inferredExpressionSource inferred ++ " :: "
       ++ renderInferredType
           (presentationQualification $ presentation state) inferred
   _ -> replFailure "DJEX_REPL_TYPE_UNAVAILABLE"
@@ -985,7 +1012,7 @@ showTypeKind sourceName normalization typeSource state = case
   (Just session, Just scope) -> case inspectKind
       session scope sourceName normalization typeSource of
     Left failure -> emitDiagnostic failure
-    Right inspection -> mapM_ putStrLn $ renderKindInspection
+    Right inspection -> mapM_ (putReplHaskellLn state) $ renderKindInspection
       (presentationQualification $ presentation state)
       normalization
       inspection
@@ -1373,6 +1400,11 @@ settingBehavior setting = case setting of
     presentationQualification
     (\value options -> options {presentationQualification = value})
     qualificationName
+  ColorSetting -> fieldSetting setting parseColorMode
+    colorMode
+    (\value state -> state {colorMode = value})
+    ColorAuto
+    colorModeName
   PromptSetting -> fieldSetting setting
     (\_ source -> Right $ decodeString source)
     promptTemplate
@@ -1748,7 +1780,7 @@ showImports state = case exferenceRuntimeScope $ exferenceRuntime state of
   Nothing -> putStrLn "No source module context."
   Just context -> case renderScopeImports context of
     [] -> putStrLn "(no imports)"
-    imports -> mapM_ putStrLn imports
+    imports -> mapM_ (putReplHaskellLn state) imports
 
 showModules :: ReplState -> IO ()
 showModules state = case exferenceRuntimeWorkspace $ exferenceRuntime state of
@@ -1796,18 +1828,19 @@ showLoadDiagnostics state = case
 browseState :: Maybe String -> ReplState -> IO ()
 browseState (Just reference) state = browseWorkspaceModule reference state
 browseState Nothing state = forSelectedBackends state $ \case
-    DjinnBackend -> browse "Djinn" id
+    DjinnBackend -> browse (putReplHaskellLn state) "Djinn" id
       $ djinnSessionEnvironment $ currentDjinnSession state
     ExferenceBackend -> case
         ( exferenceRuntimeBaseSession runtime
         , exferenceRuntimeScope runtime
         ) of
       (Just session, Just context) -> do
-        browseNames "Current source scope"
+        browseNames (putReplHaskellLn state) "Current source scope"
           ExferenceType.defaultVariableName
           (scopeBrowseNames context)
           $ exferenceSessionEnvironment session
-        unless (null $ exferenceSessionOmissions session) $ putStrLn
+        unless (null $ exferenceSessionOmissions session)
+          $ putReplHaskellLn state
           "-- Some loaded capabilities are not searchable; use :show omissions."
       _ -> putStrLn "Exference is unavailable."
  where
@@ -1828,7 +1861,7 @@ browseWorkspaceModule reference state = case
     (starred, moduleSource) -> case moduleNamesForBrowse
         (exferenceSessionInventory session) workspace starred moduleSource of
       Left failure -> emitDiagnostic failure
-      Right names -> browseNames
+      Right names -> browseNames (putReplHaskellLn state)
         ("Source module " ++ (if starred then "*" else "") ++ moduleSource)
         ExferenceType.defaultVariableName names
         $ exferenceSessionEnvironment session
@@ -1905,14 +1938,15 @@ showInfo state source = case parseName $ trim source of
   showExferenceInfo session environment canonicalName = do
     let matchingNames = canonicalName : map declarationSubjectName
           (matchingDeclarations canonicalName environment)
-    info "Exference loaded declarations"
+    info (putReplHaskellLn state) "Exference loaded declarations"
       ExferenceType.defaultVariableName canonicalName
       environment
-    mapM_ (putStrLn . ("-- search omission: " ++) . renderOmission)
+    mapM_ (putReplHaskellLn state
+      . ("-- search omission: " ++) . renderOmission)
       $ filter ((`elem` matchingNames) . omittedName)
       $ exferenceSessionOmissions session
 
-  showDjinnInfo name = info "Djinn" id name
+  showDjinnInfo name = info (putReplHaskellLn state) "Djinn" id name
     $ djinnSessionEnvironment $ currentDjinnSession state
 
 forSelectedBackends :: ReplState -> (Backend -> IO ()) -> IO ()
@@ -1921,28 +1955,30 @@ forSelectedBackends state action = case activeBackends state of
   BothBackends -> action DjinnBackend >> action ExferenceBackend
 
 browse
-  :: String
+  :: (String -> IO ())
+  -> String
   -> (variable -> String)
   -> Environment variable Void ()
   -> IO ()
-browse label variableName environment = do
-  putStrLn $ "-- " ++ label
+browse presentHaskell label variableName environment = do
+  presentHaskell $ "-- " ++ label
   case environmentDeclarations environment of
     [] -> putStrLn "(no declarations)"
-    declarations -> mapM_ (putStrLn . renderDeclaration variableName)
+    declarations -> mapM_ (presentHaskell . renderDeclaration variableName)
       declarations
 
 browseNames
-  :: String
+  :: (String -> IO ())
+  -> String
   -> (variable -> String)
   -> [Name]
   -> Environment variable Void ()
   -> IO ()
-browseNames label variableName names environment = do
-  putStrLn $ "-- " ++ label
+browseNames presentHaskell label variableName names environment = do
+  presentHaskell $ "-- " ++ label
   case filter definesVisible $ environmentDeclarations environment of
     [] -> putStrLn "(no declarations)"
-    declarations -> mapM_ (putStrLn . renderVisibleDeclaration)
+    declarations -> mapM_ (presentHaskell . renderVisibleDeclaration)
       declarations
  where
   visible = Set.fromList names
@@ -1959,18 +1995,19 @@ browseNames label variableName names environment = do
       _ -> declaration
 
 info
-  :: String
+  :: (String -> IO ())
+  -> String
   -> (variable -> String)
   -> Name
   -> Environment variable Void ()
   -> IO ()
-info label variableName name environment = do
-  putStrLn $ "-- " ++ label
+info presentHaskell label variableName name environment = do
+  presentHaskell $ "-- " ++ label
   case (declarations, relatedInstances) of
     ([], []) -> putStrLn $ "No declaration for " ++ renderCanonical name
     (matching, instances) -> do
-      mapM_ (putStrLn . renderDeclaration variableName) matching
-      mapM_ (putStrLn . renderDeclaration variableName) instances
+      mapM_ (presentHaskell . renderDeclaration variableName) matching
+      mapM_ (presentHaskell . renderDeclaration variableName) instances
  where
   declarations = matchingDeclarations name environment
   owners = Set.fromList $ mapMaybe declarationOwner declarations

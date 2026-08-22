@@ -79,7 +79,8 @@ tokenizeHaskell = mergeAdjacent . scan
         let (identifier, remaining) = span identifierCharacter source
         in SyntaxSpan (identifierClass identifier) identifier : scan remaining
     | symbolicCharacter character =
-        spanToken SyntaxOperator symbolicCharacter source
+        let (operator, remaining) = operatorToken source
+        in SyntaxSpan SyntaxOperator operator : scan remaining
     | otherwise = SyntaxSpan SyntaxPlain [character] : scan rest
 
   literalToken quote source =
@@ -89,6 +90,29 @@ tokenizeHaskell = mergeAdjacent . scan
   spanToken syntaxClass predicate source =
     let (token, remaining) = span predicate source
     in SyntaxSpan syntaxClass token : scan remaining
+
+-- Stop before a lexical form that the outer scanner must see at its own
+-- boundary.  A plain @span symbolicCharacter@ would consume the quote in
+-- common source such as @("text")@ because quotes are Unicode punctuation.
+operatorToken :: String -> (String, String)
+operatorToken [] = ([], [])
+operatorToken (first : rest) = go [first] rest
+ where
+  go reversed remaining
+    | beginsSpecialToken remaining = (reverse reversed, remaining)
+  go reversed (character : remaining)
+    | symbolicCharacter character = go (character : reversed) remaining
+  go reversed remaining = (reverse reversed, remaining)
+
+  beginsSpecialToken ('"' : _) = True
+  beginsSpecialToken source@('\'' : _) = case characterLiteral source of
+    Just _ -> True
+    Nothing -> False
+  beginsSpecialToken source = case lineComment source of
+    Just _ -> True
+    Nothing -> case blockComment source of
+      Just _ -> True
+      Nothing -> False
 
 -- Keep reset traffic bounded when a malformed token makes the scanner fall
 -- back one character at a time.

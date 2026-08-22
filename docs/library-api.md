@@ -86,6 +86,13 @@ behavioral Length/Z3, legacy-parser, and single-backend queries remain serial.
 `jobs = 1` also preserves the historical fresh whole-command timer for each
 backend.
 
+Those private output plans store raw source plus semantic output-event tags,
+not ANSI escapes or terminal capability state. The owner thread applies the
+current interactive `color` policy while replaying source events, which keeps
+serial and parallel presentation equivalent and leaves diagnostics untouched.
+This is a private frontend seam; it does not add a colored-output option to the
+checked adapters or one-shot API.
+
 The packaged `djex` executable enables the threaded RTS and defaults to two
 capabilities. Calling `runRepl` or `runArguments` from the library does not
 change the host program's RTS capabilities or runtime defaults; the embedding
@@ -127,6 +134,15 @@ no-fix policy, and keeps history only for the process lifetime.
 interactive loop is running, `:set jobs N` changes its private paired-backend
 policy and `:unset jobs` restores `2`; this does not mutate either sealed
 backend session.
+
+It likewise has no color field. The loop begins with `color = auto`:
+`NO_COLOR`, `TERM=dumb`, and a non-ANSI stdout disable styling, while the
+terminal probe enables Windows virtual-terminal processing where supported.
+Callers can use the ordinary runtime commands `:set color always|never` and
+`:unset color`; prompts, diagnostics, shell/evaluation prose, and one-shot
+library dispatch stay plain. An embedding that needs protocol-owned styled
+records should use the checked adapters and provide its own presentation
+layer rather than scraping this terminal frontend.
 
 `runRepl` returns an `ExitCode` and does not terminate the host application.
 EOF and `:quit` are successful. Individual query, setting, shell, script,

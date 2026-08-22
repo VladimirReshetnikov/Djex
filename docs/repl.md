@@ -82,6 +82,35 @@ directory target. The default prompt contains `%b`, which is replaced
 dynamically by `djinn`, `exference`, or `both`. It does not duplicate the
 potentially long module context; use `:show imports` to inspect that context.
 
+## Syntax highlighting
+
+The REPL syntax-highlights source-shaped output without changing the source
+text. The `color` setting accepts `auto`, `always`, and `never`; it defaults to
+`auto`, and `:unset color` restores that default. `always` is useful when a
+terminal-like consumer is reached through a pipe, while `never` is the
+explicit scripting policy.
+
+Automatic mode emits SGR escapes only when stdout supports ANSI control
+sequences. The startup probe treats the presence of `NO_COLOR` and
+`TERM=dumb` as opt-outs and otherwise asks the terminal whether ANSI is
+supported; on Windows the same probe enables virtual-terminal processing when
+the console supports it. Capability is sampled once when the REPL starts,
+while the `color` mode itself remains mutable during the session. Captured
+stdout and ordinary pipes therefore stay byte-for-byte plain by default.
+
+Color applies to finite and streaming Djinn/Exference candidate blocks,
+including ordered parallel replay and source-comment section labels, and to
+the Haskell rendered by `:type`, `:kind`, `:show imports`, `:browse`, and
+`:info`. Prepared parallel output plans retain raw strings; only the owning
+REPL thread adds styling while replaying or presenting them. Removing complete
+SGR sequences from colored output reproduces the corresponding `never`
+transcript exactly.
+
+The prompt and entered text are not syntax-highlighted. Diagnostics, loader
+and setting messages, shell output, `:eval` results and advisories, package
+subprocess output, and other prose stay plain. The one-shot `djex djinn` and
+`djex exference` commands also remain plain under every environment.
+
 ## Querying and switching backends
 
 Enter a type directly to use the active selection:
@@ -557,7 +586,7 @@ Exact aliases win; otherwise any nonempty, unique prefix of a canonical
 command is accepted. For example, `:q` is `:quit`, `:s` is deliberately
 `:set`, and `:sy` is `:synth`. Tab completion offers commands, backend names,
 settings (including the `+NAME`/`-NAME` Boolean forms and the accepted values
-of `backend`, `djinn-strategy`, and `heuristic`), `:show` subjects, and paths
+of `backend`, `color`, `djinn-strategy`, and `heuristic`), `:show` subjects, and paths
 where appropriate. Argument completion
 uses the same command descriptor as parsing, so exact aliases and accepted
 unique prefixes behave like the canonical command; `:module` completion also
@@ -1062,7 +1091,7 @@ Use any of these forms:
 ```
 
 Bare `:set` also prints an informational `targets = ...` line beside the
-twenty-two settings; the target set is workspace state owned by `:load`, not a
+twenty-three settings; the target set is workspace state owned by `:load`, not a
 setting, so `:set targets`/`:unset targets` are rejected.
 
 A bare `:set NAME` is not a getter: it is rejected as `setting NAME requires
@@ -1089,6 +1118,7 @@ spelling is rejected as an unknown setting.
 | `select` | `first`, `best`, `all` | `first` | Shared presentation |
 | `render` | `definition`, `expression` | `definition` | Shared presentation |
 | `qualification` | `none`, `identifiers`, `full` | `full` | Shared presentation |
+| `color` | `auto`, `always`, `never` | `auto` | Interactive source presentation |
 | `prompt` | Text, or a Haskell string literal; `%b` expands to the active selection | `"djex[%b]> "` | Interactive UI |
 | `timeout` | Non-negative integer seconds; `0` means no budget | `0` | Shared search |
 | `jobs` | Positive integer; two admits the paired-backend route | `2` | Shared search scheduling |
@@ -1402,7 +1432,8 @@ This differs from one-shot operation. `djex djinn ...` and
 negative/search-status messages to stderr, and return exit 1 for a query/load/
 render failure or exit 2 for malformed command arguments. Proof-backed
 negative results and bounded no-result searches remain successful one-shot
-outcomes. Top-level package operations follow the exit-status contract in
+outcomes. They never emit the REPL's syntax-color escapes. Top-level package
+operations follow the exit-status contract in
 [Downloading and installing packages](#downloading-and-installing-packages).
 
 ## Embedding the REPL

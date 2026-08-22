@@ -28,7 +28,7 @@ solver_sessions_observed	integer	yes	Exact captured sealed-image Z3 identities i
 solver_queries_observed	integer	preflight only	Behavioral assessment check-sat transactions reconstructed from the solver's fd-0 stream.
 solver_accepted_observed	integer	preflight only	Assessment UNSAT responses (accepted candidates) in the frozen ordered vector.
 solver_rejected_observed	integer	preflight only	Assessment SAT/model responses (replay-refuted candidates) in the frozen ordered vector.
-solver_image_sha256	sha256	yes	SHA-256 of the held sealed solver executable descriptor, computed after the timed interval.
+solver_image_sha256	sha256	yes	SHA-256 of the held sealed solver executable descriptor, computed after the timed interval; the same image must attest exact regular-file size and source-derived mode 0755 for the plain descriptor-bound launch.
 query_vector_sha256	sha256	preflight only	Normalized ordered query-program/status vector digest.
 sampler_samples	integer	yes	Number of recursive known-tree sampling passes.
 sampler_span_ns	integer	yes	Monotonic span from first through last sampling-pass start.
@@ -42,6 +42,6 @@ sampler_session_scans	integer	yes	Number of bounded top-level TGID scans of the 
 sampler_session_scan_max_gap_ns	integer	yes	Maximum monotonic gap between full session-scan starts; must be at most the frozen 100 ms bound.
 sampler_session_scan_max_duration_ns	integer	yes	Maximum duration of a full top-level TGID session scan; must be at most the frozen 50 ms bound.
 solver_observation_sha256	sha256	yes	Digest of the v2 root-session scan policy, categorized per-PID observation telemetry, scan diagnostics, and exact-target-recognized versus captured PID/start identity attestation.
-process_tree_sha256	sha256	yes	Digest of the exact sampler, lineage, metrics, full solver-observation attestation, descriptor cleanup/retry state, and sealed-image manifest.
+process_tree_sha256	sha256	yes	Digest of the exact sampler, lineage, metrics, full solver-observation attestation (including numeric executable-mode observations), descriptor cleanup/retry state, and sealed-image manifest.
 cleanup_ok	boolean	yes	Whether all observed descendant identities, same-process-group members, and private run paths were absent after cleanup.
 artifact_dir	path	yes	Run-relative directory containing exact stdout, stderr, stats, process tree, and optional traces.

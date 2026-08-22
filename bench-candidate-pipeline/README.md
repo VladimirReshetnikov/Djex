@@ -25,7 +25,8 @@ The comparison is frozen to:
   SHA-256 is
   `3188206125975e224660994aeee5c1d45cec40eaf53bcdee8509ef58f43d68c9`;
 - Z3 `/tmp/djex-z3-4.8.12.5tlMuM/root/usr/bin/z3`, SHA-256
-  `e555c27efbbbdd63b6cb6d54abb4a7aeabacba8184593bb917c4a7c16cb6056c`;
+  `e555c27efbbbdd63b6cb6d54abb4a7aeabacba8184593bb917c4a7c16cb6056c`,
+  and exact ordinary mode `0755`;
 - Debian package
   `/tmp/djex-z3-4.8.12.5tlMuM/z3_4.8.12-1_amd64.deb`, SHA-256
   `6742d8addd8a39df4d48945ef2323179966595d4c9249f4e92f44d83ad3a2ab3`,
@@ -144,6 +145,46 @@ instrumentation gaps. A zombie can retain stat/CPU identity after
 `/proc/PID/exe` is unavailable, so overall pass coverage alone did not prove a
 live inspection. None of these findings retroactively promotes attempt-1.
 
+## Immutable sampler-calibration v2-01 mode HOLD
+
+The first diagnostic v2 sampler calibration ran once at
+`/tmp/djex-solver-sampler-calibration-20260822-7920655b-v2-01`. It stopped in
+the first baseline W1/B invocation before appending a row. Its durable
+`results.tsv` therefore contains only the header, the decision records zero
+completed invocations and zero captures, and the row attestation records zero
+rows. The decision is HOLD; this is neither replacement evidence nor
+performance or release evidence.
+
+The process-tree evidence isolates the harness-only error. For exact-target
+PID 506321 the sampler observed Z3 4.8.12's exact parsed argv shape 212 times.
+Target, open, regular-file, size, and live device/inode gates also succeeded
+212 times. The sole consistency mismatch was `mode`, also exactly 212 times:
+the image was `0755`, but v2-01 incorrectly required `0500`. The production
+Linux REPL had selected the plain descriptor-bound launcher, which copies the
+pinned Z3 source's ordinary rwx bits; fixed `0500` belongs to the separate
+access-checked launch variants. No descriptor was captured, so exact-target
+cardinality correctly forced HOLD. End identity attestation passed and there
+were no finalization failures.
+
+The immutable evidence contains 13 regular files totaling 40,648 bytes. Its
+decision SHA-256 is
+`e4546cc010a2b7353629160278ece9614acc2406b799cdad2dbd6cca3b1087be`;
+the first process-tree SHA-256 is
+`612d718522538966717f086c2764b8cee7268c6f2f35fdb62b9fa5882d8654e8`;
+the header-only results SHA-256 is
+`504ec031e2ae8882af356d4e8a02ae18e4557a19298c16b354a34e69cad9c2a4`;
+and provenance SHA-256 is
+`859b97ecec96402c43ee6b790b517164503e06a4e353f7e402834d7fdf345feb`.
+Start and end identity files both have SHA-256
+`ca33ebebad5c0da1b07bf7ce2291c88ce6ae58918421bff34865bc76a3a069a0`,
+and their attestation has SHA-256
+`46e2f74e1f42cc3906f735caa9b4142679e47f08ae297c2eaac8092607cc8f86`.
+The failed capture kept the expensive full `/proc` scan active on every pass,
+so its 11.379314 ms mean sampling interval also exceeded the 3 ms gate. That
+is a consequence of never reaching post-capture cadence, not an independent
+performance result. The v2-01 directory is never reused; any corrected
+calibration is a new diagnostic invocation from separately frozen bytes.
+
 ## Frozen workloads and calibration
 
 Both templates explicitly select the Exference backend and `best` selection,
@@ -230,15 +271,30 @@ are retried but never accepted; every other layout is rejected. The untimed
 strace preflight remains the launch-vector oracle and still requires the
 pristine six arguments at successful `execveat`.
 
-The image must be a regular file with the frozen solver size and mode `0500`.
-The descriptor remains open across process exit and is hashed only after the
-timed interval. Every later live inspection of a captured PID also stats its
-executable and requires the retained device/inode, preventing a same-spelling
-memfd re-exec from hiding behind the link target. At finalization, the set of
-every observed exact-target `(PID,start-time)` identity must equal the captured
-image identity set and have cardinality exactly one. Thus a second recognized
-exact-target process remains HOLD even if its cmdline never reaches an accepted
-shape; zero images and multiple captured images are also HOLD.
+The image must be a regular file with the frozen solver size and exact mode
+`0755`. This is not a permissive `0500|0755` gate. On Linux the REPL's
+`:set length-z3` path selects `mkLengthSMTLibDescriptorBoundExecutionConfig`;
+the plain descriptor-bound Haskell sealer forwards the opened source metadata
+mode, and its native sealer applies `source_mode & 0777`. The pinned regular Z3
+source is exactly `0755`, so the staged image must also be exactly `0755`.
+Provenance records the numeric source and expected image modes plus hashes of
+the REPL selection, Haskell sealer, and native sealer sources in both detached
+revisions; start/end checks rederive the same identity. The live and synthetic
+fixtures emulate this plain production launch. The fixed `0500` staging mode
+used by the effective-ID and execve-check access-checked variants is explicitly
+rejected here because those variants are not the benchmark treatment.
+
+Every held-image mode is numeric in the image manifest, and every attempted
+exact-target capture records numeric first, last, and counted mode observations
+in per-PID telemetry, including rejected modes. The descriptor remains open
+across process exit and is hashed only after the timed interval. Every later
+live inspection of a captured PID also stats its executable and requires the
+retained device/inode, preventing a same-spelling memfd re-exec from hiding
+behind the link target. At finalization, the set of every observed exact-target
+`(PID,start-time)` identity must equal the captured image identity set and have
+cardinality exactly one. Thus a second recognized exact-target process remains
+HOLD even if its cmdline never reaches an accepted shape; zero images and
+multiple captured images are also HOLD.
 
 Executable-descriptor ownership is transferred only under a fail-safe local
 owner. A close-hook failure is reported even when an emergency raw close

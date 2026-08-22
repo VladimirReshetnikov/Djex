@@ -63,6 +63,7 @@ PINNED_Z3 = Path("/tmp/djex-z3-4.8.12.5tlMuM/root/usr/bin/z3")
 PINNED_Z3_SHA256 = (
     "e555c27efbbbdd63b6cb6d54abb4a7aeabacba8184593bb917c4a7c16cb6056c"
 )
+PINNED_Z3_SOURCE_MODE = 0o755
 PINNED_Z3_DEB = Path(
     "/tmp/djex-z3-4.8.12.5tlMuM/z3_4.8.12-1_amd64.deb"
 )
@@ -114,12 +115,15 @@ SAMPLER_SESSION_SCAN_MAX_START_GAP_NS = 100_000_000
 SAMPLER_SESSION_SCAN_MAX_DURATION_NS = 50_000_000
 SAMPLER_SESSION_SCAN_MAX_TGIDS = 65_536
 SEALED_SOLVER_TARGET = "/memfd:djex-z3-main-image (deleted)"
-SEALED_SOLVER_MODE = 0o500
+# The Linux REPL selects the plain descriptor-bound launcher.  That launcher's
+# sealer copies the source executable's ordinary rwx bits, so the exact staged
+# mode is derived from (and must remain equal to) the pinned Z3 source mode.
+SEALED_SOLVER_MODE = PINNED_Z3_SOURCE_MODE & 0o777
 # Filled only after the workload/schema files are otherwise frozen.  Unlike
 # benchmark.py itself, these artifacts can safely carry non-self-referential
 # preregistered hashes in the runner.
 FROZEN_ARTIFACT_SHA256 = {
-    "result-schema.tsv": "8600402a2361253a8f8f8ee18e709dc78d27e7b8b84fb61585b2173af223657c",
+    "result-schema.tsv": "01ed77ceea0dc246d02e3150bdeff062e828faf5508311fef18c829ce136c7ac",
     "workloads/w1-scalar.repl.in": "7896c035e06dc72527bc05e63abe13507126337b0fad63ac14bd95f9dc837384",
     "workloads/w2-product.repl.in": "4be4e139dbf4e1b34f94b7c2c8740dc2dca19e5ba9ca4f5b736c536f78c17f50",
 }
@@ -495,6 +499,96 @@ def verify_source_root(root: Path, expected_commit: str, label: str) -> dict[str
     }
 
 
+def derive_plain_descriptor_bound_sealed_mode(source_mode: int) -> int:
+    require(
+        source_mode == PINNED_Z3_SOURCE_MODE,
+        f"pinned Z3 source mode {source_mode:#o} != "
+        f"{PINNED_Z3_SOURCE_MODE:#o}",
+    )
+    derived_mode = source_mode & 0o777
+    require(
+        derived_mode == SEALED_SOLVER_MODE == 0o755,
+        "plain descriptor-bound sealed mode derivation drifted",
+    )
+    return derived_mode
+
+
+def plain_descriptor_bound_mode_identity(root: Path) -> dict[str, Any]:
+    """Bind the production launch selection and its source-mode derivation."""
+    root = root.resolve()
+    relative_sources = {
+        "linux_repl_selection": Path("src/Language/Haskell/Djex/REPL.hs"),
+        "haskell_staged_sealer": Path(
+            "synthesis/internal/Language/Haskell/Synthesis/Internal/SMTLib/"
+            "Z3/Process.hs"
+        ),
+        "native_staged_sealer": Path(
+            "synthesis/cbits/z3_descriptor_spawn.c"
+        ),
+    }
+    sources: dict[str, dict[str, Any]] = {}
+    contents: dict[str, str] = {}
+    for label, relative in relative_sources.items():
+        path = root / relative
+        require(path.is_file(), f"plain descriptor-bound source is missing: {path}")
+        try:
+            contents[label] = path.read_text()
+        except (OSError, UnicodeDecodeError) as failure:
+            raise HarnessFailure(
+                f"cannot read plain descriptor-bound source {path}: {failure}"
+            ) from failure
+        sources[label] = {
+            "path": str(path),
+            "relative_path": relative.as_posix(),
+            "sha256": sha256_file(path),
+        }
+    require(
+        "#if defined(linux_HOST_OS)\n"
+        "buildLengthZ3ExecutionConfig = "
+        "mkLengthSMTLibDescriptorBoundExecutionConfig\n"
+        in contents["linux_repl_selection"],
+        "Linux REPL no longer selects the plain descriptor-bound launch",
+    )
+    require(
+        "(c_sealStagedExecutable (fdToCInt descriptor)\n"
+        "      (descriptorMetadataMode metadata) (fromIntegral count))\n"
+        "    SealedImageModeCopiedFromSource descriptor count"
+        in contents["haskell_staged_sealer"],
+        "plain descriptor-bound Haskell sealer no longer forwards/copies "
+        "source mode",
+    )
+    require(
+        "if (fchmod(descriptor, (mode_t) (source_mode & 0777U)) < 0)"
+        in contents["native_staged_sealer"],
+        "plain descriptor-bound native sealer no longer copies ordinary "
+        "source rwx bits",
+    )
+    source_stat = PINNED_Z3.stat()
+    source_mode = stat_module.S_IMODE(source_stat.st_mode)
+    require(
+        stat_module.S_ISREG(source_stat.st_mode),
+        f"pinned Z3 source is not regular: {PINNED_Z3}",
+    )
+    require(
+        sha256_file(PINNED_Z3) == PINNED_Z3_SHA256,
+        "pinned Z3 source bytes drifted while deriving sealed mode",
+    )
+    derived_mode = derive_plain_descriptor_bound_sealed_mode(source_mode)
+    return {
+        "schema": "djex-plain-descriptor-bound-mode-identity/v1",
+        "source_root": str(root),
+        "launch_selection": "linux REPL plain descriptor-bound",
+        "mode_derivation": "pinned Z3 source st_mode & 0777",
+        "pinned_z3_source": {
+            "path": str(PINNED_Z3),
+            "sha256": PINNED_Z3_SHA256,
+            "mode": source_mode,
+        },
+        "expected_sealed_mode": derived_mode,
+        "production_sources": sources,
+    }
+
+
 def verify_protocol_repository() -> dict[str, Any]:
     root = SCRIPT_DIR.parent.resolve()
     require(
@@ -642,6 +736,7 @@ def executable_identity(
     *,
     expected_build_id: str | None = None,
     expected_library_hashes: set[str] | None = None,
+    expected_mode: int | None = None,
 ) -> dict[str, Any]:
     path = path.resolve()
     require(path.is_absolute() and path.is_file(), f"{label} is not an absolute file: {path}")
@@ -649,6 +744,12 @@ def executable_identity(
     digest = sha256_file(path)
     require(digest == expected_sha256, f"{label} SHA-256 {digest} != {expected_sha256}")
     stat = path.stat()
+    mode = stat_module.S_IMODE(stat.st_mode)
+    if expected_mode is not None:
+        require(
+            mode == expected_mode,
+            f"{label} mode {mode:#o} != {expected_mode:#o}",
+        )
     readelf = command_output(["/usr/bin/readelf", "-n", str(path)]).decode(errors="replace")
     build_ids = re.findall(r"Build ID:\s*([0-9a-fA-F]+)", readelf)
     require(len(build_ids) == 1, f"{label} does not have exactly one ELF build ID")
@@ -681,6 +782,7 @@ def executable_identity(
         "size": stat.st_size,
         "device": stat.st_dev,
         "inode": stat.st_ino,
+        "mode": mode,
         "build_id": build_id,
         "dynamic_libraries": libraries,
         "ldd_sha256": sha256_bytes(ldd.encode()),
@@ -1677,6 +1779,9 @@ class ProcessTreeSampler:
                 "argv_first_observation_repetitions": 0,
                 "argv_other_observation_count": 0,
                 "consistency_mismatches": {},
+                "executable_mode_first": None,
+                "executable_mode_last": None,
+                "executable_mode_counts": {},
                 "errors": {},
                 "captures": 0,
                 "capture_first_ns": None,
@@ -1715,6 +1820,14 @@ class ProcessTreeSampler:
         with self.lock:
             record = self._pid_record_locked(pid, now)
             self._increment(record["gate_successes"], stage)
+
+    def _note_executable_mode(self, pid: int, mode: int, now: int) -> None:
+        with self.lock:
+            record = self._pid_record_locked(pid, now)
+            if record["executable_mode_first"] is None:
+                record["executable_mode_first"] = mode
+            record["executable_mode_last"] = mode
+            self._increment(record["executable_mode_counts"], str(mode))
 
     def _solver_command_line_shape(self, command_line: bytes) -> str:
         prefix = [self.solver_argv0, b"-in", b"-smt2"]
@@ -2071,6 +2184,8 @@ class ProcessTreeSampler:
             held_after = required_step(
                 "fstat_after", lambda: self._fstat(descriptor)
             )
+            held_mode = stat_module.S_IMODE(held_after.st_mode)
+            self._note_executable_mode(pid, held_mode, now)
 
             arguments = command_line.rstrip(b"\0").split(b"\0")
             expected_arguments = [
@@ -2138,7 +2253,7 @@ class ProcessTreeSampler:
                 mismatches.append("size")
             else:
                 self._note_gate_success(pid, "size", now)
-            if stat_module.S_IMODE(held_after.st_mode) != SEALED_SOLVER_MODE:
+            if held_mode != SEALED_SOLVER_MODE:
                 mismatches.append("mode")
             else:
                 self._note_gate_success(pid, "mode", now)
@@ -2155,7 +2270,7 @@ class ProcessTreeSampler:
                 "device": held_after.st_dev,
                 "inode": held_after.st_ino,
                 "size": held_after.st_size,
-                "mode": stat_module.S_IMODE(held_after.st_mode),
+                "mode": held_mode,
                 "start_time": after.start_time,
                 "session_id": after.session,
                 "state_before": before.state,
@@ -3846,7 +3961,12 @@ def collect_provenance(arguments: argparse.Namespace) -> dict[str, Any]:
         "z3": executable_identity(
             Path(arguments.z3), z3_sha, "Z3",
             expected_library_hashes=PINNED_Z3_LIBRARY_SHA256,
+            expected_mode=PINNED_Z3_SOURCE_MODE,
         ),
+        "plain_descriptor_bound_mode": {
+            "baseline": plain_descriptor_bound_mode_identity(baseline_root),
+            "candidate": plain_descriptor_bound_mode_identity(candidate_root),
+        },
         "z3_package": z3_package_identity(),
         "tools": tools,
         "python": python_identity(),
@@ -3890,7 +4010,19 @@ def verify_frozen_artifacts(provenance: dict[str, Any]) -> None:
         identity = provenance[key]
         require(sha256_file(Path(identity["path"])) == identity["sha256"], f"{key} changed during screen")
         stat = Path(identity["path"]).stat()
-        require((stat.st_dev, stat.st_ino) == (identity["device"], identity["inode"]), f"{key} inode changed during screen")
+        require(
+            (
+                stat.st_dev,
+                stat.st_ino,
+                stat.st_size,
+                stat_module.S_IMODE(stat.st_mode),
+            )
+            == (
+                identity["device"], identity["inode"], identity["size"],
+                identity["mode"],
+            ),
+            f"{key} executable metadata changed during screen",
+        )
         for library in identity["dynamic_libraries"]:
             require(
                 sha256_file(Path(library["path"])) == library["sha256"],
@@ -3934,6 +4066,18 @@ def verify_frozen_artifacts(provenance: dict[str, Any]) -> None:
         == provenance["candidate_build_plan"]["normalized"]
         == provenance["normalized_build_plan_equivalence"],
         "normalized build-plan equivalence changed during screen",
+    )
+    require(
+        {
+            "baseline": plain_descriptor_bound_mode_identity(
+                Path(provenance["baseline_source"]["root"])
+            ),
+            "candidate": plain_descriptor_bound_mode_identity(
+                Path(provenance["candidate_source"]["root"])
+            ),
+        }
+        == provenance["plain_descriptor_bound_mode"],
+        "plain descriptor-bound mode identity changed during screen",
     )
     require(
         o2_attestation_identity(
@@ -4360,10 +4504,12 @@ def check_sampler_capture_protocol() -> None:
         image = root / "solver-image"
         alternate = root / "alternate-image"
         retained = root / "retained-image"
+        wrong_mode = root / "wrong-mode-image"
         for path, contents in (
             (image, image_bytes),
             (alternate, b"different sealed solver bytes\n"),
             (retained, image_bytes),
+            (wrong_mode, image_bytes),
         ):
             require(
                 len(contents) == len(image_bytes),
@@ -4371,6 +4517,7 @@ def check_sampler_capture_protocol() -> None:
             )
             path.write_bytes(contents)
             path.chmod(SEALED_SOLVER_MODE)
+        wrong_mode.chmod(0o500)
 
         class SyntheticSampler(ProcessTreeSampler):
             def __init__(
@@ -4628,10 +4775,23 @@ def check_sampler_capture_protocol() -> None:
             "synthetic fallback image hash drifted",
         )
         require(
+            exact_target_identity_attestation(
+                fallback.diagnostics(), fallback_snapshot,
+            )["pass"],
+            "exact source-derived mode did not pass identity attestation",
+        )
+        require(
             fallback_image["cmdline_shape"] == "exec_exact"
+            and fallback_image["mode"] == SEALED_SOLVER_MODE
             and solver_telemetry["cmdline_shapes"] == {"exec_exact": 1}
+            and solver_telemetry["executable_mode_first"]
+            == SEALED_SOLVER_MODE
+            and solver_telemetry["executable_mode_last"]
+            == SEALED_SOLVER_MODE
+            and solver_telemetry["executable_mode_counts"]
+            == {str(SEALED_SOLVER_MODE): 1}
             and solver_telemetry["gate_successes"].get("captured") == 1,
-            "pristine exec cmdline shape drifted",
+            "pristine exec cmdline or exact source-derived mode drifted",
         )
 
         parsed = SyntheticSampler(image)
@@ -4643,6 +4803,29 @@ def check_sampler_capture_protocol() -> None:
             and parsed.diagnostics()["pid_telemetry"]["200"]
             ["cmdline_shapes"] == {"z3_4_8_12_parsed_exact": 1},
             "fully parsed Z3 4.8.12 cmdline shape was rejected",
+        )
+
+        rejected_fixed_mode = SyntheticSampler(wrong_mode)
+        descriptors_before = len(os.listdir("/proc/self/fd"))
+        rejected_fixed_mode._record_sample(force_session_scan=True)
+        rejected_fixed_snapshot = rejected_fixed_mode.solver_snapshot()
+        rejected_fixed_telemetry = rejected_fixed_mode.diagnostics()[
+            "pid_telemetry"
+        ]["200"]
+        require(
+            not rejected_fixed_mode.solver_images
+            and rejected_fixed_telemetry["consistency_mismatches"]
+            == {"mode": 1}
+            and rejected_fixed_telemetry["executable_mode_first"] == 0o500
+            and rejected_fixed_telemetry["executable_mode_last"] == 0o500
+            and rejected_fixed_telemetry["executable_mode_counts"]
+            == {str(0o500): 1}
+            and not exact_target_identity_attestation(
+                rejected_fixed_mode.diagnostics(), rejected_fixed_snapshot,
+            )["pass"]
+            and len(os.listdir("/proc/self/fd")) == descriptors_before,
+            "access-checked fixed mode 0500 was accepted by the plain-launch "
+            "sampler",
         )
 
         for split_count in (1, 2):
@@ -5161,7 +5344,10 @@ with open(source, "rb") as handle:
             if written <= 0:
                 raise RuntimeError("short memfd write")
             view = view[written:]
-os.fchmod(descriptor, 0o500)
+# Match the production Linux REPL's plain descriptor-bound launch: copy the
+# pinned source executable's ordinary rwx mode (0755), rather than the fixed
+# 0500 transport mode used only by the access-checked launch variants.
+os.fchmod(descriptor, 0o755)
 import fcntl
 fcntl.fcntl(descriptor, 1033, 0x0001 | 0x0002 | 0x0004 | 0x0008)
 input_read, input_write = os.pipe()
@@ -5602,6 +5788,25 @@ def check_exception_cleanup_and_stable_environment() -> None:
 
 def self_check() -> int:
     python_identity()
+    mode_identity = plain_descriptor_bound_mode_identity(SCRIPT_DIR.parent)
+    require(
+        mode_identity["pinned_z3_source"]["mode"]
+        == mode_identity["expected_sealed_mode"]
+        == SEALED_SOLVER_MODE
+        == 0o755,
+        "plain descriptor-bound exact-mode characterization drifted",
+    )
+    try:
+        derive_plain_descriptor_bound_sealed_mode(0o500)
+    except HarnessFailure:
+        pass
+    else:
+        raise HarnessFailure("pinned Z3 source-mode drift was accepted")
+    live_fixture_source = Path(__file__).read_text()
+    require(
+        "os.fchmod(descriptor, 0o755)" in live_fixture_source,
+        "live fixture no longer emulates the plain descriptor-bound mode",
+    )
     require_sha256(NORMALIZED_PLAN_SHA256, "normalized build-plan hash")
     require(NORMALIZED_PLAN_SIZE == 72_323, "normalized build-plan size")
     for relative, expected in FROZEN_ARTIFACT_SHA256.items():
@@ -6053,11 +6258,13 @@ def calibration_executable_identity(
     *,
     expected_build_id: str | None = None,
     expected_library_hashes: set[str] | None = None,
+    expected_mode: int | None = None,
 ) -> dict[str, Any]:
     identity = executable_identity(
         path, expected_sha256, label,
         expected_build_id=expected_build_id,
         expected_library_hashes=expected_library_hashes,
+        expected_mode=expected_mode,
     )
     # ldd prints randomized load addresses.  The exact resolved library paths
     # and their byte hashes are the durable identity; do not make ASLR output
@@ -6106,6 +6313,7 @@ def calibration_identity_snapshot(
         "z3": calibration_executable_identity(
             PINNED_Z3, PINNED_Z3_SHA256, "calibration Z3",
             expected_library_hashes=PINNED_Z3_LIBRARY_SHA256,
+            expected_mode=PINNED_Z3_SOURCE_MODE,
         ),
         "z3_package": z3_package_identity(),
         "tools": tool_identities("/usr/bin/strace"),
@@ -6162,6 +6370,9 @@ def calibration_identity_snapshot(
             ],
             "exact_target": SEALED_SOLVER_TARGET,
             "exact_mode": SEALED_SOLVER_MODE,
+            "mode_identity": plain_descriptor_bound_mode_identity(
+                baseline_root
+            ),
         },
     }
 

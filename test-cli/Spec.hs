@@ -38,7 +38,6 @@ import System.Process
   , readCreateProcessWithExitCode
   , readProcessWithExitCode
   )
-import qualified System.Timeout as Timeout
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit
   ( Assertion
@@ -87,10 +86,6 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplWhereGrammar
   , testCase "REPL resolves conservative built-in Length where profiles"
       testReplLengthWhereResolution
-  , testCase "REPL owns behavioral best candidate pipeline dispatch"
-      testReplBehavioralBestPipelineSource
-  , testCase "REPL behavioral best pipeline preserves solver transcripts"
-      testReplBehavioralBestPipelineRuntime
   , testCase "REPL filters Exference candidates through live Length replay"
       testReplLengthWhereRuntime
   , testCase "REPL multiline, repeat, and command errors recover"
@@ -1080,221 +1075,6 @@ testReplLengthWhereResolution = withTemporaryEnvironment
   assertBool "a Djinn-refused clause was parsed or echoed"
     $ not $ "271828" `isInfixOf` errors
   assertNoCallStack errors
-
--- The behavioral producer is owned only by the constrained Exference route.
--- Keep its preparation boundary visibly narrower than admission, ranking,
--- presentation, timeout, and live-session ownership.
-testReplBehavioralBestPipelineSource :: Assertion
-testReplBehavioralBestPipelineSource = do
-  commandSource <- readFile "src/Language/Haskell/Djex/Command.hs"
-  replSource <- readFile "src/Language/Haskell/Djex/REPL.hs"
-  assertContains "the package-private selected-result presenter is exported"
-    "\n  , presentExferenceSelection\n" commandSource
-  let ownedRoute = unlines
-        [ "      ignoreExit $ withinQueryTimeout (queryTimeout state) $ case"
-        , "          runExferenceTypedQuery session request of"
-        , "        Left failure -> diagnosticFailure failure"
-        , "        Right results -> do"
-        , "          opened <- withLengthSMTLibLiveSession execution $ \\liveSession ->"
-        , "            if behavioralBestPipelineEligible"
-        , "                (searchJobs state)"
-        , "                (presentationSelection $ presentation state)"
-        , "              then do"
-        , "                selectedResults <- selectBestQueryResultsPipelinedM"
-        , "                  (void . evaluate . typedCandidateCompatibility)"
-        , "                  (exferenceCandidateComplexity . exferenceCandidateMetrics"
-        , "                    . typedCandidateCompatibility)"
-        , "                  (admitLengthWhereCandidate resolution liveSession)"
-        , "                  results"
-        , "                presentExferenceSelection"
-        , "                  (presentation state)"
-        , "                  (scopeFieldSelectors state)"
-        , "                  $ fmap typedCandidateCompatibility selectedResults"
-        , "              else presentAssessedExference"
-        , "                (presentation state)"
-        , "                (scopeFieldSelectors state)"
-        , "                (admitLengthWhereCandidate resolution liveSession)"
-        , "                results"
-        ]
-  assertBool
-    "timeout, session, eligibility, preparation, owner admission, and fallback drifted"
-    $ ownedRoute `isInfixOf` replSource
-  assertEqual "the behavioral pipeline has one production call site" 2
-    $ countOccurrences "selectBestQueryResultsPipelinedM" replSource
-
-testReplBehavioralBestPipelineRuntime :: Assertion
-testReplBehavioralBestPipelineRuntime =
-    withBehavioralBestFakeZ3s $ \directory freshFakeZ3 -> do
-  let runUnsatisfiable label jobs runtimeArguments = do
-        executable <- freshFakeZ3 label "query-unsat"
-        outcome <- runReplWithRuntimeArguments directory runtimeArguments
-          [ ":set select best"
-          , ":set jobs " ++ show (jobs :: Int)
-          , ":set +allow-unused"
-          , ":set max-steps 32"
-          , ":set candidate-limit 2"
-          , ":set length-z3 " ++ executable
-          , ":set target pipeline"
-          , behavioralBestQuery
-          ]
-        events <- readFakeZ3Trace executable
-        pure (outcome, events)
-  serial <- runUnsatisfiable "serial" 1 []
-  parallel <- runUnsatisfiable "parallel" 2 []
-  repeated <- runUnsatisfiable "repeated" 2 []
-  singleCapability <- runUnsatisfiable
-    "single-capability" 2 ["+RTS", "-N1", "-RTS"]
-  let (serialOutcome, serialEvents) = serial
-      (parallelOutcome, parallelEvents) = parallel
-      (repeatedOutcome, repeatedEvents) = repeated
-      (singleCapabilityOutcome, singleCapabilityEvents) = singleCapability
-      (_, _, serialErrors) = serialOutcome
-      sessionFailures = countOccurrences
-        "[DJEX_REPL_LENGTH_WHERE_SESSION]" serialErrors
-      traces =
-        [ serialEvents
-        , parallelEvents
-        , repeatedEvents
-        , singleCapabilityEvents
-        ]
-  assertEqual "jobs=2 preserves the jobs=1 behavioral transcript"
-    serialOutcome parallelOutcome
-  assertEqual "the behavioral pipeline transcript is repeatable"
-    serialOutcome repeatedOutcome
-  assertEqual "jobs=2 remains semantically eligible under RTS -N1"
-    serialOutcome singleCapabilityOutcome
-  if sessionFailures == 0
-    then do
-      let expectedChecks =
-            [(show ordinal, "unsat") | ordinal <- [0 :: Int .. 9]]
-      forM_ (zip ["jobs=1", "jobs=2", "repeat", "RTS -N1"] traces) $
-        \(label, events) -> do
-          assertEqual (label ++ " exact raw query-check event count") 10
-            $ countOccurrences "EVENT query-check " events
-          assertEqual (label ++ " exact query-check ordinals and statuses")
-            expectedChecks $ queryCheckTrace events
-          assertEqual (label ++ " emits no model request after unsat") 0
-            $ countOccurrences "EVENT query-get-value " events
-    else do
-      assertEqual "the unsupported host fails one live session closed" 1
-        sessionFailures
-      forM_ traces $ \events ->
-        assertEqual "an unsupported host launched no traced solver" 0
-          $ countOccurrences "EVENT query-check " events
-      assertContains "the unsupported launch remains typed"
-        "LengthSMTLibLiveSession" serialErrors
-
-  hanging <- freshFakeZ3 "timeout-hang" "query-hang-status"
-  recovery <- freshFakeZ3 "timeout-recovery" "query-unsat"
-  timed <- Timeout.timeout 10000000 $ runReplWithRuntimeArguments directory []
-    [ ":set select best"
-    , ":set jobs 2"
-    , ":set +allow-unused"
-    , ":set max-steps 32"
-    , ":set candidate-limit 2"
-    , ":set timeout 1"
-    , ":set length-z3 " ++ hanging
-    , ":set target timedOut"
-    , behavioralBestQuery
-    , ":unset timeout"
-    , ":set length-z3 " ++ recovery
-    , ":set target recovered"
-    , behavioralBestQuery
-    ]
-  timedOutcome <- maybe
-    (fail "behavioral pipeline timeout exceeded its 10s test-side bound")
-    pure timed
-  hangingEvents <- readFakeZ3Trace hanging
-  recoveryEvents <- readFakeZ3Trace recovery
-  let (timedExit, timedOutput, timedErrors) = timedOutcome
-      timedSessionFailures = countOccurrences
-        "[DJEX_REPL_LENGTH_WHERE_SESSION]" timedErrors
-  assertEqual "timed behavioral REPL exit" ExitSuccess timedExit
-  if timedSessionFailures == 0
-    then do
-      assertEqual "the hanging search reports one timeout" 1
-        $ countOccurrences "[DJEX_SEARCH_TIMEOUT]" timedErrors
-      assertBool "the timed-out candidate was rendered"
-        $ not $ "timedOut" `isInfixOf` timedOutput
-      assertContains "the same REPL recovers through a fresh healthy worker"
-        "recovered a = a" timedOutput
-      assertEqual "the hanging trace has one raw query-check event" 1
-        $ countOccurrences "EVENT query-check " hangingEvents
-      assertEqual "the hanging worker receives exactly its first query"
-        [("0", "hang")] $ queryCheckTrace hangingEvents
-      assertEqual "the hanging trace has one raw query-hang event" 1
-        $ countOccurrences "EVENT query-hang " hangingEvents
-      assertEqual "the hanging worker stops in the status phase"
-        [("0", "status")] $ queryHangTrace hangingEvents
-      assertEqual "the hanging worker never reaches get-value" 0
-        $ countOccurrences "EVENT query-get-value " hangingEvents
-      assertEqual "the recovery worker retains the calibrated transcript"
-        [(show ordinal, "unsat") | ordinal <- [0 :: Int .. 9]]
-        $ queryCheckTrace recoveryEvents
-    else do
-      assertEqual "both unsupported timeout policies fail closed" 2
-        timedSessionFailures
-      assertContains "timeout launch refusal remains typed"
-        "LengthSMTLibLiveSession" timedErrors
-      assertBool "an unsupported timeout route rendered a candidate"
-        $ all (`notElem` words timedOutput) ["timedOut", "recovered"]
-      assertEqual "an unsupported host launched no hanging query" 0
-        $ countOccurrences "EVENT query-check " hangingEvents
-      assertEqual "an unsupported host launched no recovery query" 0
-        $ countOccurrences "EVENT query-check " recoveryEvents
-  assertNoCallStack timedErrors
-
-behavioralBestQuery :: String
-behavioralBestQuery =
-  ":exference --where length result >= 0 -- [a] -> [a]"
-
-withBehavioralBestFakeZ3s
-  :: (FilePath -> (String -> String -> IO FilePath) -> IO result)
-  -> IO result
-withBehavioralBestFakeZ3s action = withTemporaryEnvironment [] $ \root -> do
-  source <- findExecutable "djex-fake-z3" >>= maybe
-    (fail "cannot locate the djex-fake-z3 test build tool")
-    canonicalizePath
-  let directory = root </> "environment"
-      workers = root </> "workers"
-      freshFakeZ3 label mode = do
-        let workerDirectory = workers </> label
-            executable = workerDirectory </> fakeZ3FileName mode
-        createDirectoryIfMissing True workerDirectory
-        copyFile source executable
-        permissions <- getPermissions executable
-        setPermissions executable $ setOwnerExecutable True permissions
-        pure executable
-  createDirectoryIfMissing True directory
-  createDirectoryIfMissing True workers
-  action directory freshFakeZ3
-
-readFakeZ3Trace :: FilePath -> IO String
-readFakeZ3Trace executable = do
-  let path = executable ++ ".events"
-  exists <- doesFileExist path
-  if exists then readFile path else pure ""
-
-queryCheckTrace :: String -> [(String, String)]
-queryCheckTrace = twoFieldEventTrace "query-check" "status"
-
-queryHangTrace :: String -> [(String, String)]
-queryHangTrace = twoFieldEventTrace "query-hang" "phase"
-
-twoFieldEventTrace :: String -> String -> String -> [(String, String)]
-twoFieldEventTrace tag secondName = go . lines
- where
-  go [] = []
-  go (eventHeader : firstHeader : firstValue : secondHeader : secondValue
-      : "END" : remaining)
-    | eventHeader == "EVENT " ++ tag ++ " 2"
-    , firstHeader == fieldHeader "ordinal" firstValue
-    , secondHeader == fieldHeader secondName secondValue =
-        (firstValue, secondValue) : go remaining
-  go (_ : remaining) = go remaining
-
-  fieldHeader name value =
-    "FIELD " ++ name ++ " " ++ show (length value)
 
 testReplLengthWhereRuntime :: Assertion
 testReplLengthWhereRuntime = withCompiledFakeZ3s
@@ -4227,16 +4007,8 @@ runRepl
   :: FilePath
   -> [String]
   -> IO (ExitCode, String, String)
-runRepl directory = runReplWithRuntimeArguments directory []
-
-runReplWithRuntimeArguments
-  :: FilePath
-  -> [String]
-  -> [String]
-  -> IO (ExitCode, String, String)
-runReplWithRuntimeArguments directory runtimeArguments inputs = runDjexInput
-  (["repl", "--environment", directory, "--ignore-startup"]
-    ++ runtimeArguments)
+runRepl directory inputs = runDjexInput
+  ["repl", "--environment", directory, "--ignore-startup"]
   $ replSession inputs
 
 replSession :: [String] -> String

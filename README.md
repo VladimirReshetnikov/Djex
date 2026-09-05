@@ -2,11 +2,13 @@
 
 Djex is a Haskell expression synthesizer formed by merging
 [Djinn](https://github.com/augustss/djinn) and
-[Exference](https://github.com/lspitzner/exference) and adding support for rank-N types. Given a type, it
-generates a Haskell expression of that type. Djinn contributes a complete
-intuitionistic prover built on Dyckhoff's LJT calculus, so it terminates and
-can prove a type uninhabited; Exference contributes a ranked heuristic search
-engine with type-class evidence resolution and explicit resource controls.
+[Exference](https://github.com/lspitzner/exference), with rank-N and
+impredicative synthesis in both engines. Given a type, it generates a Haskell
+expression of that type. Djinn contributes an intuitionistic prover built on
+Dyckhoff's LJT calculus, which terminates and can prove uninhabitation in its
+complete propositional fragment; its higher-rank extensions use bounded search.
+Exference contributes a ranked heuristic search engine with type-class
+evidence resolution and explicit resource controls.
 Both engines carry class obligations as the same shared
 `Constraint (Type variable)` structure. Exference resolves givens,
 superclasses, and explicit instances; Djinn validates the class, arity, and
@@ -45,6 +47,7 @@ these tiers explicitly.
 
 ## Contents
 
+- [Rank-N and impredicative synthesis](#rank-n-and-impredicative-synthesis)
 - [Components](#components)
 - [The semantic stratum](#the-semantic-stratum) — one paragraph; the
   specification is [docs/semantic-foundations.md](docs/semantic-foundations.md)
@@ -61,6 +64,47 @@ these tiers explicitly.
   - [Compatibility executables](#compatibility-executables)
 - [Dependency migration](#dependency-migration)
 - [License and credits](#license-and-credits)
+
+## Rank-N and impredicative synthesis
+
+Both Djinn and Exference now synthesize implementations that construct,
+consume, and return polymorphic values. The shared type representation retains
+nested `forall` binders and their scopes throughout search and reconstruction.
+The improvements cover:
+
+- **Higher-rank arguments and results:** introduce nested polymorphic goals,
+  construct polymorphic arguments, and use providers whose types alternate
+  ordinary arguments with `forall` binders.
+- **Impredicative instantiation:** choose an entire polymorphic type for a type
+  variable, preserve that choice across later arguments, and solve correlated
+  choices for multiple binders together.
+- **Source-driven instantiation:** use the provider's full source arity for
+  exact assignment evidence and demand-directed matching, with capture-safe
+  substitution and scope checks. Historical heuristic frontiers retain the
+  bounds documented in the [rule guide](docs/rank-n.md).
+- **Checked reconstruction:** preserve the type choices in Haskell output
+  through visible type applications and annotated lets. The
+  [Leant integration](https://github.com/VladimirReshetnikov/Leant) reconstructs
+  Lean terms with explicit and implicit binders and checks every displayed
+  candidate with Lean.
+
+The [Church acceptance suite](test-church/README.md) covers all **350 resolved
+signatures** in [Church.hs](docs/examples/Church.hs): **350/350 for each engine
+in Haskell and 350/350 universe-correct counterparts for each engine through
+Leant**. Per engine, this includes 315 total cases, 16 cases with integer
+providers, and 19 partial cases tested with an explicit supplied default.
+Haskell additionally compiler-checks partial wrappers at the original
+signatures, supplying `undefined` only after synthesis; Lean keeps the default
+as an ordinary argument. All 700 generated Lean terms passed independent
+kernel replay with empty axiom inventories.
+
+These results establish practical corpus coverage. General impredicative
+inhabitation is undecidable, so a higher-rank search miss remains inconclusive;
+Lean synthesis also respects Lean's predicative universe rules. The detailed
+implementation and acceptance report explains the algorithms, examples,
+remaining bounds, and reproducible validation:
+[**PDF**](docs/rank-n-impredicative-synthesis.pdf) ·
+[LaTeX source](docs/rank-n-impredicative-synthesis.tex).
 
 ## Components
 

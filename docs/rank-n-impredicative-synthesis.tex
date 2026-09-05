@@ -394,9 +394,11 @@ opportunity and before broad historical loaded-instance guesses. It
 contains the actual named scheme premises and one complete checked
 construction family. This ordering prevents unsuccessful older guesses from
 using the entire choice budget before a useful construction can be tried.
-An already available exact opaque source for the whole goal keeps the
-established forwarding route ahead of this speculative construction. For a
-monomorphic goal, the deferred phase also tries exact forwarding first.
+For newly eligible sources exposed after ordinary arguments, an already
+available exact opaque source for the whole goal keeps the established
+forwarding route ahead of speculative construction. Leading schemes retain
+their existing policy. For a monomorphic goal, the deferred phase also tries
+exact forwarding first.
 No scheduling choice adds an unchecked source
 assumption or changes the authority of negative evidence.
 
@@ -496,8 +498,9 @@ historical correlated family and act as an inhabitation fallback only when
 the earlier search has no result. This preserves established alternative
 ordering and cutoff behavior for already inhabited goals and avoids opening
 a large new alternative stream after a satisfactory result has been found.
-It is a guarantee about finding checked inhabitants under the configured
-search policy, not an exhaustive enumeration of every typable program.
+This policy prioritizes the first checked inhabitant under the configured
+limits; it does not guarantee success for every inhabited type or enumerate
+every typable program.
 
 The current family builder retains at most 16 axioms per scheme and 64 per
 family, with a 512-attempt bound. These are operational limits, not language
@@ -505,11 +508,13 @@ rank limits. The directed rule remains positive-only. A search that misses an
 inhabitant because of these limits must remain inconclusive.
 
 The raw proposed-vector allowance is applied before alpha-equivalence
-deduplication. Otherwise a request could traverse an unbounded sequence of
+deduplication. Otherwise a request could traverse an arbitrarily large sequence of
 duplicate or rejected proposals while apparently retaining only a few
 instances. A scheme whose allowance is exhausted stops before forcing the
-remaining lazy proposal stream. Resource accounting therefore bounds the work
-used to discover candidates as well as the number eventually retained.
+remaining lazy proposal stream. This bounds the number of raw vectors inspected
+before deduplication and the number of retained instances. It does not impose
+a wall-clock or LJT choice-point bound; those are separate query limits, and
+an unbudgeted provider search may remain expensive.
 
 The main implementation locations are
 \path{djinn/src-core/Djinn/Internal/DirectedInstantiation.hs},
@@ -1379,8 +1384,15 @@ with an explicit element default. The last group remains conditional on that
 default in Lean, while Haskell separately checks its documented partial
 wrapper at the original signature.
 
-Both runs use a one-candidate window, 4,096 search steps, and a thirty-second
-per-query timeout. They use Leant implementation revision \code{4757569}, with
+Both runs use a one-candidate window and a configured thirty-second synthesis
+timeout. Exference uses 4,096 search steps. The Lean runner's \code{--steps}
+option sets \code{synth-steps}, which applies only to Exference; it does not
+impose a Djinn choice-point limit. Djinn retains its default unbounded
+choice-point budget, \code{synth-budget off}, subject to the shared wall-clock
+search deadline and intrinsic finite planning caps. The configured synthesis
+timeout is not an end-to-end limit covering process startup, goal serialization,
+or the separate standalone kernel replay.
+The runs use Leant implementation revision \code{4757569}, with
 Djex revision \code{e2eb71e}, on the same unchanged executable with SHA-256
 \begin{center}\small\ttfamily
 addfac35b9d82955fc871c177b582a8c043475c0171c22cb17977e0e9f5b9869
@@ -1428,10 +1440,36 @@ The ordinary Leant Haskell unit suite additionally passes all 558 tests. These
 unit and harness checks are distinct from the standalone target-language
 replays of the compact fixtures and full corpus.
 
-The full ordinary transcript replay on that same executable remains pending.
-That additional compatibility check is separate from the completed 700-case
-Lean corpus and 90 compact fixture checks above.
+The full ordinary compatibility run completed on the same unchanged executable
+on 5 September 2026 at 01:55:44, UTC$-07{:}00$. It used a configured
+600-second synthesis timeout and took 5,515.86 seconds in total. Its original
+runner exit code was 1: seventeen fixture outputs matched immediately and
+thirteen differed from their recorded baselines. That original result is
+preserved; it is not rewritten as an initially passing run.
 
+The thirteen changed fixtures were reviewed query by query: 114 actual
+displayed terms across 34 changed queries passed independent Lean 4.32.0
+replay. Thirty-one have empty axiom inventories; the other 83 have exactly
+their fixture-declared premises. No previously successful query lost its
+result. The aggregate record is
+\path{Leant/test-church/generated-final-drift-index/results.json}; it excludes
+four earlier reviewed baseline updates and their separate 44 term replays.
+Only the reviewed term and diagnostic changes were applied to the golden files.
+
+An offline comparison then checked all thirty final golden files against the
+retained outputs of that completed live run, covering all 265 synthesis
+commands. It used the production Bash runner's normalization functions and
+command-substitution semantics; all thirty comparisons pass. This is an
+offline comparison of completed live outputs, not a second live synthesis
+run. The evidence is retained under
+\path{Leant/test-church/generated-goldens-final/}: \path{results.json}
+records the original exit status, timing, and executable identity;
+\path{final-comparison.json} records the final per-fixture comparisons;
+\path{runner.log} and \path{transcripts/} retain the live output. This ordinary
+compatibility closure is separate from the independently checked 700-case
+Lean corpus and 90 compact fixture results above.
+
+\clearpage
 \section{Limits, diagnostics, and future extensions}
 
 The changes remove concrete structural barriers; they do not remove the need

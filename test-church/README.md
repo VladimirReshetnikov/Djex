@@ -152,16 +152,43 @@ Leant independently completed the same 350-case inventory through each engine
 in live runs: **350/350 Djinn and 350/350 Exference**, with all **700 exact
 displayed terms accepted by Lean 4.32.0 and all 700 axiom inventories empty**.
 Each engine covers 315 pure total cases, 16 integer-provider cases, and 19
-explicit-default cases. The runs used a one-candidate window, 4,096 search
-steps, and a thirty-second per-query timeout on one unchanged executable:
+explicit-default cases. The runs used a one-candidate window and a configured
+thirty-second synthesis timeout. Exference used 4,096 search steps; Djinn
+retained its default unbounded choice-point budget (`synth-budget off`), subject
+to the shared wall-clock search deadline and intrinsic finite planning caps.
+The Lean runner's `--steps` option sets the Exference-only `synth-steps` budget,
+so `--steps 4096` does not impose a Djinn choice-point limit. The synthesis
+timeout does not cover process startup, goal serialization, or the separate
+standalone kernel replay. Both runs used one unchanged executable:
 `addfac35b9d82955fc871c177b582a8c043475c0171c22cb17977e0e9f5b9869` (SHA-256),
 built from Leant `4757569` with Djex `e2eb71e`.
 
 The reports in Leant are
 `test-church/generated-djinn-acceptance/results.json` and
 `test-church/generated-exference-acceptance/results.json`; the independent
-90-query compact fixtures also pass on that executable. The full ordinary
-Leant transcript replay remains pending. The
+90-query compact fixtures also pass on that executable.
+
+The full ordinary Leant compatibility run also completed on the same unchanged
+executable, using a configured 600-second synthesis timeout. It covered 30
+files and 265 synthesis commands (263 explicit-type queries plus two proof-mode
+commands), taking 5,515.86 seconds. The original runner returned exit code 1:
+17 fixture outputs matched immediately and 13 differed from their baselines.
+Those changes were reviewed query by query: 114 actual displayed terms across
+34 changed queries passed independent Lean 4.32.0 replay, with 31 empty axiom
+inventories and 83 containing exactly their fixture-declared premises. No
+previously successful query lost its result. Leant's
+`test-church/generated-final-drift-index/results.json` records that review,
+excluding four earlier baseline updates and their separate 44 term replays.
+Only reviewed term and diagnostic changes were applied to the golden files.
+
+All **30 final golden files match the retained full live-run outputs** after
+the production Bash runner's normalization and command-substitution semantics.
+This final check is an offline comparison of the completed live outputs, not
+a second live synthesis run. Leant's
+`test-church/generated-goldens-final/results.json` preserves the original
+exit code, timing, and executable identity; `final-comparison.json` records
+the successful final comparisons, with `runner.log` and `transcripts/`
+retaining the original output. The
 [comprehensive account](../docs/rank-n-impredicative-synthesis.tex) records
 those separate acceptance boundaries and Lean's universe/default policy.
 

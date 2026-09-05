@@ -27,6 +27,7 @@ module Djinn.Internal.Instantiation
     , ProviderInstantiationPremises
     , instantiationAxioms
     , queryCorrelatedInstantiationAxioms
+    , queryDirectedInstantiationAxioms
     , queryClosedInstantiationAxioms
     , loadedInstantiationAxioms
     , providerInstantiationPremises
@@ -52,6 +53,7 @@ import Djinn.Internal.InstantiationEvidence
     , usesInstantiationEvidence
     )
 import Djinn.Internal.LJTFormula
+import Djinn.Internal.DirectedInstantiation (directedInstantiationTuples)
 import Language.Haskell.Synthesis.Collection (distinctOn)
 import Language.Haskell.Synthesis.Constraint (constraintArguments)
 import qualified Language.Haskell.Synthesis.Type as SharedType
@@ -199,6 +201,15 @@ instantiationScheme source = case SharedType.splitLeadingForalls source of
     (binders@(_ : _), [], body)
         | length binders <= maxInstantiationBinders ->
             Just $ InstantiationScheme source binders body
+    _ -> Nothing
+
+-- Demand matching does not enumerate a Cartesian power of the binder list,
+-- so its eligibility is independent of the historical six-binder frontier.
+directedInstantiationScheme
+    :: SharedType.Type String -> Maybe InstantiationScheme
+directedInstantiationScheme source = case SharedType.splitLeadingForalls source of
+    (binders@(_ : _), [], body) ->
+        Just $ InstantiationScheme source binders body
     _ -> Nothing
 
 schemeKey :: InstantiationScheme -> SharedTypeAtom.TypeAtomKey String
@@ -355,6 +366,52 @@ queryCorrelatedInstantiationAxioms translator visibleArgument
         bodyVariables = SharedType.freeVariables $ schemeBody scheme
     initialSchemes = hypothesisSchemes schemeAtoms
 
+-- | Structural demand matching, excluding the earlier correlated family.
+-- Unlike tuple guessing, matching selects arbitrarily many correlated
+-- arguments in one traversal, including open monotypes and impredicative
+-- subtrees. Search work remains bounded and positive-only. Demands never
+-- expose a binder from beneath an unopened forall.
+queryDirectedInstantiationAxioms
+    :: (SharedType.Type String -> Either String Formula)
+    -> (SharedType.Type String -> Maybe SharedGenerated.VisibleTypeArgument)
+    -> InstantiationAxioms
+    -> [String]
+    -> SharedType.Type String
+    -> [Formula]
+    -> [Formula]
+    -> InstantiationAxioms
+queryDirectedInstantiationAxioms translator visibleArgument historicalAxioms
+        variableSpellings elaboratedGoal goalFormulas premiseFormulas =
+    directed
+  where
+    correlated = queryCorrelatedInstantiationAxioms translator visibleArgument
+        historicalAxioms variableSpellings elaboratedGoal goalFormulas premiseFormulas
+    excluded = Set.fromList
+        [ InstantiationAxiom formula $ Map.lookup symbol $
+            instantiationVisibleApplications family
+        | family <- [historicalAxioms, correlated]
+        , (symbol, formula) <- instantiationAxiomPremises family
+        ]
+    atoms = queryAtomSymbols goalFormulas premiseFormulas
+    allowed = Set.fromList variableSpellings
+    demands = distinctOn SharedTypeAtom.alphaTypeKey $
+        variableCandidatesOf variableSpellings ++
+        [ subtree
+        | source <- elaboratedGoal : opaqueAtomSources atoms
+        , subtree <- typeSubtrees source
+        , SharedType.freeVariables subtree `Set.isSubsetOf` allowed
+        ]
+    schemes = distinctOn schemeKey
+        [ scheme
+        | (HypothesisSide, symbol) <- atoms
+        , Just source <- [opaqueSymbolSource symbol]
+        , Just scheme <- [directedInstantiationScheme source]
+        ]
+    directed = buildInstantiationAxiomsWithExclusions False True excluded
+        "$djinn$query-directed-instantiation$" translator True visibleArgument
+        (\scheme -> directedInstantiationTuples (schemeSource scheme) demands demands)
+        schemes
+
 -- | Build an additive hypothesis-instantiation tail whose tuples use at
 -- least one closed, forall-free subtree already present in the checked query.
 --
@@ -463,7 +520,8 @@ providerInstantiationPremises
     -> ProviderInstantiationPremises
 providerInstantiationPremises
         symbolPrefix translator fidelityTranslator schemes candidates =
-    providerPremisesWith symbolPrefix translator fidelityTranslator schemes
+    providerPremisesWith instantiationScheme
+        symbolPrefix translator fidelityTranslator schemes
         (take maxInstantiationAxiomsPerScheme)
         vectorsFor
   where
@@ -499,7 +557,8 @@ providerInstantiationAssignmentPremises
     -> ProviderInstantiationPremises
 providerInstantiationAssignmentPremises
         symbolPrefix translator fidelityTranslator schemes assignments =
-    providerPremisesWith symbolPrefix translator fidelityTranslator schemes id
+    providerPremisesWith directedInstantiationScheme
+        symbolPrefix translator fidelityTranslator schemes id
         vectorsFor
   where
     vectorsFor provider scheme =
@@ -518,7 +577,8 @@ providerInstantiationAssignmentPremises
 -- synthetic premise symbols in order, and the visible arguments travel beside
 -- them into the application table.
 providerPremisesWith
-    :: String
+    :: (SharedType.Type String -> Maybe InstantiationScheme)
+    -> String
     -> (SharedType.Type String -> Either String Formula)
     -> Maybe ProviderInstantiationFidelity
     -> [(Symbol, Formula)]
@@ -532,7 +592,7 @@ providerPremisesWith
        -- argument vectors, each type paired with its visible argument
     -> ProviderInstantiationPremises
 providerPremisesWith
-        symbolPrefix translator fidelityTranslator schemes retainPerScheme
+        eligibleScheme symbolPrefix translator fidelityTranslator schemes retainPerScheme
         vectorsFor =
     ProviderInstantiationPremises premises applications
   where
@@ -553,7 +613,7 @@ providerPremisesWith
         ]
 
     specialize (provider, schemeFormula) = case schemeSourceFromFormula
-            schemeFormula >>= instantiationScheme of
+            schemeFormula >>= eligibleScheme of
         Nothing -> []
         Just scheme -> retainPerScheme
             [ (provider, formula, map snd vector)
@@ -603,7 +663,7 @@ buildInstantiationAxioms
     -> [InstantiationScheme]
     -> InstantiationAxioms
 buildInstantiationAxioms =
-    buildInstantiationAxiomsWithExclusions False Set.empty
+    buildInstantiationAxiomsWithExclusions True False Set.empty
 
 buildInstantiationAxiomsExcluding
     :: Set.Set InstantiationAxiom
@@ -616,10 +676,11 @@ buildInstantiationAxiomsExcluding
     -> [InstantiationScheme]
     -> InstantiationAxioms
 buildInstantiationAxiomsExcluding =
-    buildInstantiationAxiomsWithExclusions True
+    buildInstantiationAxiomsWithExclusions True True
 
 buildInstantiationAxiomsWithExclusions
     :: Bool
+    -> Bool
     -> Set.Set InstantiationAxiom
     -> String
     -> (SharedType.Type String -> Either String Formula)
@@ -629,7 +690,7 @@ buildInstantiationAxiomsWithExclusions
     -> (InstantiationScheme -> [[SharedType.Type String]])
     -> [InstantiationScheme]
     -> InstantiationAxioms
-buildInstantiationAxiomsWithExclusions deduplicateFormula excludedAxioms
+buildInstantiationAxiomsWithExclusions discoverNested deduplicateFormula excludedAxioms
         symbolPrefix translator interleaveSchemes
         visibleArgument candidateTuples schemes =
     InstantiationAxioms premises symbols visibleApplications
@@ -637,7 +698,7 @@ buildInstantiationAxiomsWithExclusions deduplicateFormula excludedAxioms
     entries =
         [ (Symbol $ symbolPrefix ++ show index, axiom)
         | (index, axiom) <- zip [0 :: Int ..] $
-            buildAxiomFormulas deduplicateFormula excludedAxioms
+            buildAxiomFormulas discoverNested deduplicateFormula excludedAxioms
                 interleaveSchemes translator visibleArgument
                 candidateTuples schemes
         ]
@@ -729,6 +790,7 @@ data InstantiationJob
 
 buildAxiomFormulas
     :: Bool
+    -> Bool
     -> Set.Set InstantiationAxiom
     -> Bool
     -> (SharedType.Type String -> Either String Formula)
@@ -737,7 +799,7 @@ buildAxiomFormulas
     -> (InstantiationScheme -> [[SharedType.Type String]])
     -> [InstantiationScheme]
     -> [InstantiationAxiom]
-buildAxiomFormulas deduplicateFormula excludedAxioms interleaveSchemes
+buildAxiomFormulas discoverNested deduplicateFormula excludedAxioms interleaveSchemes
         translator visibleArgument candidateTuples initialSchemes = loop
     (Set.fromList $ map schemeKey startingSchemes)
     excludedAxioms
@@ -845,7 +907,9 @@ buildAxiomFormulas deduplicateFormula excludedAxioms interleaveSchemes
     -- The axiom itself acts as a premise: its domain atom becomes an
     -- obligation while its body joins the hypothesis side, so only body
     -- schemes feed the closure.
-    discoveredSchemes axiom =
+    discoveredSchemes axiom
+        | not discoverNested = []
+        | otherwise =
         [ scheme
         | (HypothesisSide, symbol) <-
             sidedAtomSymbols HypothesisSide axiom

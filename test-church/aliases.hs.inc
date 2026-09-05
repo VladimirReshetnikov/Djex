@@ -1,0 +1,10 @@
+type Bool       = ∀e. e -> e -> e
+type Pair a b   = ∀e. (a -> b -> e) -> e
+type List a     = ∀e. (a -> e -> e) -> e -> e
+type Maybe a    = ∀e. e -> (a -> e) -> e
+type Either a b = ∀e. (a -> e) -> (b -> e) -> e
+type Tuple a = List a
+type Dict k v = List (k `Pair` v)
+type Equal a = a -> a -> Bool
+type LE a = a -> a -> Bool
+type Matrix a = List (List a)

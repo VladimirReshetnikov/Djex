@@ -344,8 +344,6 @@ assignmentProviderInstantiations rawAssignments source =
           traverse SharedType.flexibleVariableIdentity binders
     orderedBinders <- maybe [] pure binderIdentifiers
     guard $ not $ null orderedBinders
-    guard $ length orderedBinders <=
-      SharedQuery.maximumProviderInstantiationArguments
     guard $ null constraints
     arguments <- SharedCollection.distinctOn
       (map SharedTypeAtom.alphaTypeKey) rawAssignments

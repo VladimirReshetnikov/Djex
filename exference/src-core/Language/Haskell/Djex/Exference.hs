@@ -193,7 +193,6 @@ import Language.Haskell.Synthesis.Query
   , ProviderInstantiationAssignment (..)
   , QueryResult
   , QueryRequest (..)
-  , maximumProviderInstantiationArguments
   , maximumProviderInstantiationAssignments
   , maximumProviderInstantiationCandidates
   , maximumProviderInstantiationKindNodes
@@ -835,14 +834,12 @@ prepareProviderInstantiationAssignments session evidence
 
   prepareAssignment
       (seenKinds, seenArguments, retained) (assignmentIndex, assignment) = do
-    let (provider, argumentCount, suppliedKinds, rawArguments) =
+    let (provider, suppliedKinds, rawArguments) =
           case assignment of
           InferredProviderInstantiationAssignmentInput inferred ->
             let arguments = providerInstantiationAssignmentArguments inferred
             in
             ( providerInstantiationAssignmentProvider inferred
-            , SharedCollection.observedListLength
-                maximumProviderInstantiationArguments arguments
             , Nothing
             , arguments
             )
@@ -851,23 +848,11 @@ prepareProviderInstantiationAssignments session evidence
                   kindedProviderInstantiationAssignmentArguments kinded
             in
             ( kindedProviderInstantiationAssignmentProvider kinded
-            , SharedCollection.observedListLength
-                maximumProviderInstantiationArguments arguments
             , Just $ map fst arguments
             , map snd arguments
             )
         label = "provider instantiation assignment #" ++
           show assignmentIndex ++ " for " ++ renderCanonical provider
-    when (argumentCount == 0)
-      $ Left $ shownErrorDiagnostic
-        "DJEX_EXF_ASSIGNMENT_ARITY"
-        "Exference provider instantiation assignment is empty"
-        label
-    when (argumentCount > maximumProviderInstantiationArguments)
-      $ Left $ shownErrorDiagnostic
-        "DJEX_EXF_ASSIGNMENT_ARGUMENT_LIMIT"
-        "too many Exference provider instantiation arguments"
-        (label, maximumProviderInstantiationArguments, argumentCount)
     scheme <- case CoreInternal.exferenceEnvironmentBindingScheme
         provider searchEnvironment of
       Nothing -> Left $ contextualDiagnostic Error
@@ -877,10 +862,20 @@ prepareProviderInstantiationAssignments session evidence
       Just retainedScheme -> Right retainedScheme
     let (binders, constraints, schemeBody) =
           SharedType.splitLeadingForalls scheme
-    unless (length binders == argumentCount) $ Left $ shownErrorDiagnostic
+        arity = length binders
+        -- The retained provider is already finite and validated. Observing
+        -- only its arity plus one cells rejects a cyclic argument spine
+        -- before forcing any argument, without a language-wide binder cap.
+        argumentCount = SharedCollection.observedListLength arity rawArguments
+    when (argumentCount == 0)
+      $ Left $ shownErrorDiagnostic
+        "DJEX_EXF_ASSIGNMENT_ARITY"
+        "Exference provider instantiation assignment is empty"
+        label
+    unless (arity == argumentCount) $ Left $ shownErrorDiagnostic
         "DJEX_EXF_ASSIGNMENT_ARITY"
         "Exference provider instantiation assignment has the wrong arity"
-        (label, length binders, argumentCount)
+        (label, arity, argumentCount)
     unless (null constraints) $ Left $ shownErrorDiagnostic
         "DJEX_EXF_ASSIGNMENT_CONTEXT"
         "Exference provider instantiation assignment targets a contextual scheme"

@@ -174,11 +174,14 @@ instance NFData variable =>
 maximumProviderInstantiationAssignments :: Int
 maximumProviderInstantiationAssignments = 32
 
--- | Maximum number of ordered leading-forall arguments in one complete
--- provider assignment.
+-- | Maximum number of leading-forall arguments selected by the historical
+-- heuristic candidate-product families.
 --
--- Checked adapters must bound an argument-list spine before entering any
--- argument, so an over-wide or cyclic caller-built list fails finitely.
+-- This is not a limit on rank-N types or complete provider assignments.
+-- Exact-assignment adapters derive their finite argument-list bound from the
+-- validated provider's actual arity, observing at most one extra list cell
+-- before entering any argument. Thus long exact vectors are accepted while
+-- cyclic or overlong vectors still fail finitely.
 maximumProviderInstantiationArguments :: Int
 maximumProviderInstantiationArguments = 6
 

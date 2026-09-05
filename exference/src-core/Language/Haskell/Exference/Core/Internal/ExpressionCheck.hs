@@ -83,7 +83,6 @@ import Language.Haskell.Exference.Core.Unify (unifyShared)
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Name as SharedName
-import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 import qualified Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate
@@ -1090,14 +1089,14 @@ checkValidatedExpression provenCandidateRigids
 
     eligibleTypeApplicationOriginArity source arguments
       | observedArity == 0 = Nothing
-      | observedArity > maximumArity = Nothing
       | not $ specifiedPrefix observedArity arguments = Nothing
       | not $ Set.null $ SharedType.freeVariables source = Nothing
       | otherwise = Just observedArity
      where
-      maximumArity = SharedQuery.maximumProviderInstantiationArguments
-      observedArity = SharedCollection.observedListLength maximumArity
-        $ SharedType.leadingForallVariables source
+      -- The source came from the checked retained environment. Its exact
+      -- finite prefix, rather than the heuristic tuple frontier, owns the
+      -- arity of this evidence origin.
+      observedArity = length $ SharedType.leadingForallVariables source
 
     specifiedPrefix 0 _ = True
     specifiedPrefix _ [] = False

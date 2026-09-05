@@ -37,6 +37,12 @@ Extra-Doc-Files:
 
 Extra-Source-Files:
   docs/examples/*.hs
+  docs/rank-n-impredicative-synthesis.tex
+  test-church/*.py
+  test-church/*.json
+  test-church/*.tsv
+  test-church/*.inc
+  test-church/*.md
   docs/reports/*.md
   djinn/docs/reports/*.md
   exference/docs/reports/*.md
@@ -231,6 +237,7 @@ Library
     Djinn.Internal.HCheck.Implementation
     Djinn.Internal.Help
     Djinn.Internal.Instantiation
+    Djinn.Internal.DirectedInstantiation
     Djinn.Internal.InstantiationEvidence
     Djinn.Internal.ProofCheck.Evidence
     Djinn.Internal.ProofToGenerated
@@ -377,6 +384,13 @@ Test-Suite djex-tests
   Build-Depends:
     djex,
     process >= 1.6 && < 1.7
+
+Test-Suite djex-church-tests
+  import:         build-settings, directory-dep
+  Type:           exitcode-stdio-1.0
+  Main-Is:        Main.hs
+  Hs-Source-Dirs: test-church
+  Build-Depends: djex, filepath >= 1.4 && < 1.6, process >= 1.6 && < 1.7
 
 Test-Suite djex-cli-tests
   import:         cli-test

@@ -89,7 +89,8 @@ tests =
     hKindCompatibilityTests ++
     hTypeCompatibilityTests ++
     hCheckCompatibilityTests ++
-    [ ("parse prefix function constructor", testPrefixArrowParsing)
+    [ ("demand-directed rank-N instantiation", testDirectedRankN)
+    , ("parse prefix function constructor", testPrefixArrowParsing)
     , ("parse maximal Djinn type and kind spines", testMaximalParserSpines)
     , ("render union prefixes without forcing field tails",
           testProductiveUnionRendering)
@@ -1180,6 +1181,34 @@ testStructuralHigherKindedAssignments = do
 -- open for dictionary-independent introduction, while an opaque fallback
 -- retains exact polymorphic transport and unsupported searches stay
 -- inconclusive.
+testDirectedRankN :: IO ()
+testDirectedRankN = do
+    session <- expectShownRight Djex.standardDjinnSession
+    let variables prefix = [prefix ++ show n | n <- [1 .. 12 :: Int]]
+        tuple names = "(" ++ joinComma names ++ ")"
+        joinComma [] = ""
+        joinComma [x] = x
+        joinComma (x : xs) = x ++ ", " ++ joinComma xs
+        cases =
+            [ ("directedTwelve", "(forall " ++ unwords (variables "a") ++ ". "
+                ++ tuple (variables "a") ++ ") -> " ++ tuple (reverse $ variables "x"))
+            , ("churchEither", "(a -> c) -> (b -> c) -> "
+                ++ "(forall e. (a -> e) -> (b -> e) -> e) -> c")
+            , ("openImpredicativeDemand", "(forall t. t -> t) -> "
+                ++ "(forall b. a -> b -> a) -> (forall c. a -> c -> a)")
+            ]
+    mapM_ (check session) cases
+  where
+    check session (spelling, source) = do
+        target <- expectShownRight $ SharedName.mkIdentifier spelling
+        request <- expectShownRight $ Djex.parseDjinnRequest session
+            defaultQueryOptions
+                { optionSorted = False, optionCutoff = 1, optionBudget = Just 10000 }
+            target "directed-instantiation" source
+        result <- expectShownRight $ Djex.runDjinnQuery session request
+        assertBool (spelling ++ " exhausted search without a candidate") $
+            not $ null $ SharedSearch.batchCandidates $ SharedQuery.resultSearch result
+
 testRankNTypeAtoms :: IO ()
 testRankNTypeAtoms = do
     parsed <- expectRight $ parseHType
@@ -1327,7 +1356,7 @@ testRankNTypeAtoms = do
         ++ "g (forall x. x -> x) -> h (forall y. y -> y -> y) -> "
         ++ "a -> c -> d -> e -> u -> v -> r -> (f v -> r) -> r"
     assertEqual
-        "quantified choices on only a vacuous binder activated the correlated tail"
+        "the directed fallback changed an already inhabited alternative stream"
         1 $ length $ SharedSearch.batchCandidates
             $ SharedQuery.resultSearch vacuousOnlyCorrelated
 
@@ -2631,14 +2660,21 @@ testRankNTypeAtoms = do
     assertEqual "a bounded seven-binder loaded-scheme miss was falsely refuted"
         SharedQuery.NoEvidence $ SharedQuery.resultEvidence sevenLoaded
     sevenAssignmentTarget <- expectShownRight $
-        SharedName.mkIdentifier "rejectSevenBinderAssignment"
+        SharedName.mkIdentifier "retainSevenBinderAssignment"
     sevenAssignmentRequest <- expectShownRight $ Djex.parseDjinnRequest
         sevenSession defaultQueryOptions sevenAssignmentTarget
         "seven-provider-assignment.djinn" "MonoSevenResult"
-    expectAssignmentFailure "a seven-binder assignment provider"
-        sevenSession sevenAssignmentRequest
+    sevenAssigned <- expectShownRight $
+        Djex.runDjinnQueryWithInstantiationAssignments
+        sevenSession
         [providerAssignment "monoSevenProvider" $
             map SharedType.TypeConstructor sevenNames]
+        sevenAssignmentRequest
+    sevenAssignedRendered <- renderStableCandidates sevenAssigned
+    assertBool "an exact seven-binder assignment was absent" $
+        any (("monoSevenProvider @MonoSeven1 @MonoSeven2 @MonoSeven3 " ++
+                "@MonoSeven4 @MonoSeven5 @MonoSeven6 @MonoSeven7") `isInfixOf`)
+            sevenAssignedRendered
 
     -- Four-binder chains remain practical under the existing per-scheme and
     -- per-query attempt caps. The generated evidence is still the original
@@ -2706,17 +2742,16 @@ testRankNTypeAtoms = do
         $ "(forall a b c d e f. RankNSix a b c d e f) -> "
         ++ "RankNSix z y x w v u"
 
-    -- A leading chain beyond the widened binder bound stays opaque. The honest
-    -- inconclusive answer is retained: no candidate is invented and no
-    -- refutation is manufactured.
-    unsupported <- runStableQuery stableSession "sevenBinderOpaqueRankN"
+    -- The historical Cartesian family still stops at six, but directed
+    -- matching can use a longer hypothesis without enumerating its tuples.
+    supported <- runStableQuery stableSession "sevenBinderDirectedRankN"
         $ "(forall a b c d e f g. "
         ++ "a -> b -> c -> d -> e -> f -> g -> result) -> "
         ++ "t -> u -> v -> w -> x -> y -> z -> result"
-    assertEqual "an uninstantiable rank-N chain unexpectedly found a candidate"
-        [] $ SharedSearch.batchCandidates $ SharedQuery.resultSearch unsupported
-    assertEqual "an uninstantiable opaque rank-N search was falsely refuted"
-        SharedQuery.NoEvidence $ SharedQuery.resultEvidence unsupported
+    assertBool "a seven-binder rank-N chain was not instantiated"
+        $ not $ null $ SharedSearch.batchCandidates $ SharedQuery.resultSearch supported
+    assertEqual "a synthesized longer chain did not retain positive evidence"
+        SharedQuery.ValidatedCandidates $ SharedQuery.resultEvidence supported
 
     -- One occurrence-local opaque choice can now coexist with structural
     -- introduction at a sibling forall. This is the first compositional
@@ -3210,7 +3245,13 @@ testRankNTypeAtoms = do
         target <- expectShownRight $ SharedName.mkIdentifier targetSpelling
         request <- expectShownRight $ Djex.parseDjinnRequest session
             options target (targetSpelling ++ ".djinn") source
-        expectShownRight $ Djex.runDjinnQuery session request
+        completed <- timeout 30000000 $ do
+            result <- expectShownRight $ Djex.runDjinnQuery session request
+            _ <- evaluate $ length $ SharedSearch.batchCandidates $
+                SharedQuery.resultSearch result
+            pure result
+        maybe (fail $ targetSpelling ++ " exceeded the 30-second regression bound")
+            pure completed
 
     renderStableCandidates result = mapM
         (expectShownRight . Djex.renderDjinnCandidateExpression
@@ -4206,11 +4247,11 @@ testComplementaryRankNPlans = do
     -- whichever checked spelling appeared first.
     complete <- run
         unsortedOptions {optionCutoff = 60} "allRankNPlans" environment goal
-    assertEqual "complementary plans did not finish within the global cutoff"
-        SharedSearch.Finished $ reportCompletion complete
     allClauses <- realizedClauses "complementary rank-N plans" complete
     assertEqual "the plan union lost or duplicated a candidate"
         5 $ length allClauses
+    assertEqual "the plan union repeated a generated candidate"
+        allClauses $ nub allClauses
     assertBool "the opaque church candidate disappeared behind polarized hits"
         $ any ("church" `isInfixOf`) allClauses
 

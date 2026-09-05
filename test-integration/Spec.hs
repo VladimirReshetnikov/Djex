@@ -3,7 +3,7 @@
 module Main (main) where
 
 import Data.Maybe (isJust)
-import Control.Monad (void)
+import Control.Monad (forM_, void)
 import Control.Exception
   ( AsyncException (ThreadKilled)
   , SomeException
@@ -1774,7 +1774,7 @@ tests = testGroup "Djex facade"
         ("the exact four-binder assignment was absent: " ++ show visibleVectors)
         $ visibleArguments `elem` visibleVectors
 
-  , testCase "retain six-binder Exference assignments and reject seven" $ do
+  , testCase "retain six- and seven-binder exact Exference assignments" $ do
       tokenName <- expectRight $ mkIdentifier "SixEvidenceToken"
       providerName <- expectRight $ mkIdentifier "sixEvidenceProvider"
       sevenProviderName <- expectRight $
@@ -1849,12 +1849,110 @@ tests = testGroup "Djex facade"
             , providerInstantiationAssignmentArguments =
                 arguments ++ [seventhArgument]
             }
-      case runExferenceQueryWithInstantiationAssignments
-          session [sevenAssignment] request of
-        Left failure -> diagnosticCode failure @?=
-          Just "DJEX_EXF_ASSIGNMENT_ARGUMENT_LIMIT"
-        Right result -> fail $
-          "Exference accepted a seven-binder assignment: " ++ show result
+      sevenResults <- expectRight $ runExferenceQueryWithInstantiationAssignments
+          session [sevenAssignment] request
+      sevenVisible <- expectRight $ traverse specifiedVisibleTypeArgument
+        $ arguments ++ [seventhArgument]
+      assertBool "the exact seven-binder assignment was absent" $ or
+        [ occurrence == sevenProviderName && actual == sevenVisible
+        | candidate <- concatMap (batchCandidates . resultSearch) sevenResults
+        , FunctionClause _ [] body <- [candidateOutput candidate]
+        , Just (occurrence, actual) <- [visibleSpine body]
+        ]
+
+  , testCase "compile exact eight- and twelve-binder assignments from both engines" $
+      forM_ [8, 12] $ \arity -> do
+        tokenName <- expectRight $ mkIdentifier "WideEvidenceToken"
+        providerName <- expectRight $ mkIdentifier "wideEvidenceProvider"
+        djinnTargetName <- expectRight $ mkIdentifier "useWideDjinn"
+        djinnTarget <- expectRight $ mkDefinitionName djinnTargetName
+        exferenceTargetName <- expectRight $ mkIdentifier "useWideExference"
+        exferenceTarget <- expectRight $ mkDefinitionName exferenceTargetName
+        let tokenType = TypeConstructor tokenName
+            providerType = ForallType (map FlexibleVariable [0 .. arity - 1]) [] tokenType
+            identityBinder = FlexibleVariable (arity + 1)
+            identityType = ForallType [identityBinder] [] $ FunctionType
+              (TypeVariable identityBinder) (TypeVariable identityBinder)
+            arguments = take arity $ cycle [tokenType, identityType]
+            exferenceDeclarations =
+              [ AbstractTypeDeclaration () tokenName ProperTypeKind
+              , ValueDeclaration $ ValueSignature () providerName providerType
+              ]
+            djinnType = fmap (\v -> "t" ++ show (variableIdentity v))
+            djinnDeclarations =
+              [ AbstractTypeDeclaration () tokenName ProperTypeKind
+              , ValueDeclaration $ ValueSignature () providerName $ djinnType providerType
+              ]
+            exactAssignment = ProviderInstantiationAssignment providerName arguments
+            kindedAssignment = KindedProviderInstantiationAssignment providerName
+              $ map ((,) ProperTypeKind) arguments
+            visibleSpine expression = case expression of
+              Global name -> Just (name, [])
+              VisibleTypeApplication function argument -> do
+                (name, earlier) <- visibleSpine function
+                pure (name, earlier ++ [argument])
+              _ -> Nothing
+        visibleArguments <- expectRight $ traverse specifiedVisibleTypeArgument arguments
+        let hasExactVector candidate = case candidateOutput candidate of
+              FunctionClause _ [] body -> visibleSpine body == Just (providerName, visibleArguments)
+              _ -> False
+        exferenceEnvironment <- expectRight
+          (mkEnvironment exferenceDeclarations :: Either
+            (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+        exferenceSession <- expectRight $ mkExferenceSession exferenceEnvironment
+        exferenceRequest <- expectRight $ mkExferenceRequest QueryRequest
+          { requestTarget = exferenceTarget
+          , requestGoal = tokenType
+          , requestContexts = []
+          , requestOptions = defaultExferenceOptions {exferenceMaximumSteps = 256}
+          }
+        exferencePlain <- expectRight $ runExferenceQueryWithInstantiationAssignments
+          exferenceSession [exactAssignment] exferenceRequest
+        exferenceKinded <- expectRight $ runExferenceQueryWithKindedInstantiationAssignments
+          exferenceSession [kindedAssignment] exferenceRequest
+        exferenceCandidate <- maybe (fail "wide exact Exference assignment was absent") pure
+          $ find hasExactVector $ concatMap (batchCandidates . resultSearch) exferencePlain
+        assertBool "wide kinded Exference assignment was absent"
+          $ any hasExactVector $ concatMap (batchCandidates . resultSearch) exferenceKinded
+        djinnEnvironment <- expectRight
+          (mkEnvironment djinnDeclarations :: Either
+            (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+        djinnSession <- expectRight $ mkDjinnSession djinnEnvironment
+        djinnRequest <- expectRight $ mkDjinnRequest QueryRequest
+          { requestTarget = djinnTarget
+          , requestGoal = djinnType tokenType
+          , requestContexts = []
+          , requestOptions = defaultQueryOptions
+          }
+        djinnPlain <- expectRight $ runDjinnQueryWithInstantiationAssignments
+          djinnSession [fmap (\v -> "t" ++ show (variableIdentity v)) exactAssignment] djinnRequest
+        djinnKinded <- expectRight $ runDjinnQueryWithKindedInstantiationAssignments
+          djinnSession [fmap (\v -> "t" ++ show (variableIdentity v)) kindedAssignment] djinnRequest
+        djinnCandidate <- maybe (fail "wide exact Djinn assignment was absent") pure
+          $ find hasExactVector $ batchCandidates $ resultSearch djinnPlain
+        assertBool "wide kinded Djinn assignment was absent"
+          $ any hasExactVector $ batchCandidates $ resultSearch djinnKinded
+        exferenceSource <- expectRight $ renderExferenceCandidateDefinition Unqualified exferenceCandidate
+        djinnSource <- expectRight $ renderDjinnCandidateDefinition Unqualified djinnCandidate
+        let fixture = unlines
+              [ "module WideExactEvidence where"
+              , "data WideEvidenceToken = WideEvidenceToken"
+              , "wideEvidenceProvider :: forall " ++ unwords ["a" ++ show i | i <- [1 .. arity]]
+                  ++ ". WideEvidenceToken"
+              , "wideEvidenceProvider = WideEvidenceToken"
+              , "useWideDjinn :: WideEvidenceToken"
+              , djinnSource
+              , "useWideExference :: WideEvidenceToken"
+              , exferenceSource
+              ]
+        withTemporaryHaskellModule fixture $ \sourcePath -> do
+          (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+            [ "-v0", "-fforce-recomp", "-fno-code", "-fno-write-interface"
+            , "-XHaskell2010", "-XAllowAmbiguousTypes", "-XImpredicativeTypes"
+            , "-XRankNTypes", "-XTypeApplications", sourcePath
+            ] ""
+          assertEqual ("GHC rejected exact " ++ show arity ++ "-binder output\n"
+            ++ output ++ errors ++ fixture) ExitSuccess exitCode
 
   , testCase "empty Exference provider evidence is exactly inert" $ do
       tokenName <- expectRight $ mkIdentifier "EmptyEvidenceToken"
@@ -1995,7 +2093,7 @@ tests = testGroup "Djex facade"
               Left failure -> diagnosticCode failure @?= Just code
               Right _ -> fail $ label ++ " was accepted"
       expectFailure "cyclic assignment argument spine"
-        "DJEX_EXF_ASSIGNMENT_ARGUMENT_LIMIT" poisonedArguments
+        "DJEX_EXF_ASSIGNMENT_ARITY" poisonedArguments
       expectFailure "empty assignment vector"
         "DJEX_EXF_ASSIGNMENT_ARITY" []
       expectFailure "wrong assignment arity"
@@ -2005,7 +2103,7 @@ tests = testGroup "Djex facade"
           session [kindedAssignment poisonedKindedArguments] request
       case kindedOutcome of
         Left failure -> diagnosticCode failure @?=
-          Just "DJEX_EXF_ASSIGNMENT_ARGUMENT_LIMIT"
+          Just "DJEX_EXF_ASSIGNMENT_ARITY"
         Right _ -> fail
           "cyclic kinded assignment argument spine was accepted"
       let expectKindLimit label supplied = do

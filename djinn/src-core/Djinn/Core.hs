@@ -62,7 +62,7 @@ module Djinn.Core (
 import Control.Monad (foldM, unless, void, when)
 import Data.Bifunctor (first)
 import Data.Either (fromRight)
-import Data.List (intercalate, mapAccumL)
+import Data.List (intercalate, isPrefixOf, mapAccumL)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import Data.Ratio ((%))
@@ -112,6 +112,7 @@ import Djinn.Internal.Instantiation
     , instantiationVisibleApplications
     , instantiationAxioms
     , loadedInstantiationAxioms
+    , queryDirectedInstantiationAxioms
     , queryCorrelatedInstantiationAxioms
     , queryClosedInstantiationAxioms
     , providerInstantiationApplications
@@ -1291,7 +1292,6 @@ prepareProviderInstantiationAssignments prepared evidence = do
         zip [0 :: Int ..] rawAssignments
     return $ reverse retained
   where
-    maximumArguments = SharedQuery.maximumProviderInstantiationArguments
     (loadedSchemes, _, _) =
         preparedEnvironmentLoadedFunctionInstantiation prepared
     loadedSchemeSources = Map.fromList
@@ -1303,7 +1303,7 @@ prepareProviderInstantiationAssignments prepared evidence = do
 
     validateAssignment
             (seenKinds, seenArguments, retained) (index, assignment) = do
-        let (providerName, observedArguments, suppliedKinds, arguments) =
+        let (providerName, suppliedKinds, arguments) =
                 case assignment of
                     InferredProviderInstantiationAssignment unkinded ->
                         let rawArguments =
@@ -1312,8 +1312,6 @@ prepareProviderInstantiationAssignments prepared evidence = do
                         in
                         ( SharedQuery.providerInstantiationAssignmentProvider
                             unkinded
-                        , SharedCollection.observedListLength
-                            maximumArguments rawArguments
                         , Nothing
                         , rawArguments
                         )
@@ -1324,17 +1322,11 @@ prepareProviderInstantiationAssignments prepared evidence = do
                         in
                         ( SharedQuery.kindedProviderInstantiationAssignmentProvider
                             kinded
-                        , SharedCollection.observedListLength
-                            maximumArguments rawArguments
                         , Just $ map fst rawArguments
                         , map snd rawArguments
                         )
             assignmentLabel =
                 "provider instantiation assignment #" ++ show index ++ ": "
-        when (observedArguments > maximumArguments)
-            $ Left $ DjinnInstantiationAssignmentFailure $
-                assignmentLabel ++ "argument count exceeds " ++
-                    show maximumArguments
         let providerLabel = assignmentLabel ++ "provider " ++
                 SharedName.renderCanonical providerName ++ ": "
         providerSpelling <- first
@@ -1349,14 +1341,18 @@ prepareProviderInstantiationAssignments prepared evidence = do
         let (binders, schemeConstraints, schemeBody) =
                 SharedType.splitLeadingForalls schemeSource
             arity = length binders
+            -- A checked retained scheme supplies the finite exact bound.
+            -- Overlong and cyclic caller spines are rejected after arity+1
+            -- cells, before inspecting any argument value or kind.
+            observedArguments = SharedCollection.observedListLength
+                arity arguments
         unless (null schemeConstraints) $
             Left $ DjinnInstantiationAssignmentFailure $
                 providerLabel ++ "provider scheme is not context-free"
-        unless (arity >= 1 && arity <= maximumArguments) $
+        unless (arity >= 1) $
             Left $ DjinnInstantiationAssignmentFailure $
                 providerLabel ++ "leading forall arity " ++ show arity ++
-                    " is outside the supported range 1.." ++
-                    show maximumArguments
+                    " is empty"
         unless (observedArguments == arity) $
             Left $ DjinnInstantiationAssignmentFailure $
                 providerLabel ++ "expected " ++ show arity ++
@@ -1474,7 +1470,7 @@ searchPreparedFormula
 searchPreparedFormula options prepared providerCandidates providerAssignments
         target elaboratedGoal parametricDataRelevant formulaPlans
         nominalFormulaPlans = do
-    results <- runPlans collectAcrossPlans
+    results <- runPlans True collectAcrossPlans
         options (optionCutoff options) [] searchPlans
     mergeFormulaPlanResults options results
   where
@@ -1655,6 +1651,14 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         instantiationAxiomPremises nominalQueryCorrelatedAxioms
     nominalQueryCorrelatedVisibleApplications =
         instantiationVisibleApplications nominalQueryCorrelatedAxioms
+    queryDirectedAxioms = queryDirectedInstantiationAxioms
+        structuralTranslator visibleArgument activeAxioms
+        (goalVariables ++ polarizedFormulaPlanSkolems formulaPlans ++ premiseSpellings)
+        elaboratedGoal (map fst plans) (map snd premises)
+    nominalQueryDirectedAxioms = queryDirectedInstantiationAxioms
+        nominalTranslator visibleArgument activeNominalAxioms
+        (goalVariables ++ polarizedFormulaPlanSkolems nominalFormulaPlans ++ nominalPremiseSpellings)
+        elaboratedGoal (map fst nominalPlans) (map snd nominalPremises)
     queryClosedAxioms = queryClosedInstantiationAxioms
         structuralTranslator
         visibleArgument
@@ -2247,6 +2251,45 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
                 not (null targetAllNominalProviderPremises)
             , (form, _) <- nominalPlans
             ]
+    -- Try each independently justified specialization on the primary goal
+    -- before putting every specialization into the same LJT context. The
+    -- combined context can contain many mutually recursive implications and
+    -- exhaust a budget even for a one-step Church eliminator. These small
+    -- plans share the ordinary global budget and cannot establish a negative
+    -- result. Combined families remain available for multi-instance terms.
+    focusedInstantiationSearchPlans = focusedPlansOf
+        [ (activeAxiomPremises, activeVisibleApplications)
+        , (queryClosedAxiomPremises, queryClosedVisibleApplications)
+        , (queryCorrelatedAxiomPremises, queryCorrelatedVisibleApplications)
+        ]
+    focusedPlansOf families =
+        [ ( premises ++ loadedSchemePremises ++ [(focusedSymbol, formula)]
+          , []
+          , Set.singleton focusedSymbol
+          , maybe Map.empty (Map.singleton focusedSymbol) $ Map.lookup symbol applications
+          , Map.empty
+          , translatedFormula primary
+          , False
+          )
+        | (index, ((symbol, formula), applications)) <- zip [0 :: Int ..]
+            [ (premise, applications)
+            | (axioms, applications) <- families
+            , premise <- axioms
+            ]
+        , let focusedSymbol = Symbol $ "$djinn$focused$" ++ show index
+        ]
+    -- Richer compound instantiations are an inhabitation fallback. Keep the
+    -- established alternative streams intact once they already contain a
+    -- solution; otherwise augment the checked contexts with directed axioms.
+    augmentDirected axioms basePlans =
+        [ ( ps ++ instantiationAxiomPremises axioms, diagnostics
+          , symbols `Set.union` instantiationAxiomSymbols axioms
+          , visible `Map.union` instantiationVisibleApplications axioms
+          , providers, form, False
+          )
+        | not $ null $ instantiationAxiomPremises axioms
+        , (ps, diagnostics, symbols, visible, providers, form, _) <- basePlans
+        ]
     searchPlans =
         -- Exact assignment priority is absent for both the scalar-only
         -- and empty-evidence entrances, so their historical plan order is
@@ -2255,6 +2298,7 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         providerAssignmentPriorityNominalSearchPlans ++
         structuralSearchPlans ++
         nominalSearchPlans ++
+        focusedInstantiationSearchPlans ++
         structuralAxiomSearchPlans ++
         -- A productive historical loaded proof stream can consume the
         -- global candidate cutoff without finishing.  Run its strict
@@ -2270,11 +2314,37 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         queryCorrelatedNominalSearchPlans ++
         queryCorrelatedClosedStructuralSearchPlans ++
         queryCorrelatedClosedNominalSearchPlans
+    directedSearchPlans =
+        focusedPlansOf
+            [(instantiationAxiomPremises queryDirectedAxioms,
+                instantiationVisibleApplications queryDirectedAxioms)] ++
+        augmentDirected queryDirectedAxioms
+            (structuralSearchPlans ++ structuralAxiomSearchPlans ++
+                providerStructuralSearchPlans ++ loadedStructuralSearchPlans ++
+                queryClosedStructuralSearchPlans ++ queryCorrelatedStructuralSearchPlans) ++
+        augmentDirected nominalQueryDirectedAxioms
+            (nominalSearchPlans ++ providerNominalSearchPlans ++ loadedNominalSearchPlans ++
+                queryClosedNominalSearchPlans ++ queryCorrelatedNominalSearchPlans)
     withoutProviders providerNames =
         filter ((`Set.notMember` providerNames) . fst)
 
-    runPlans _ _ _ completed [] = Right $ reverse completed
-    runPlans collect currentOptions candidateLimit completed
+    -- Do not even prepare the richer fallback until the historical search
+    -- has found no inhabitant. Looking at a fallback's symbol set already
+    -- forces axiom preparation, so deciding this from individual plan tuples
+    -- would defeat the intended laziness.
+    runPlans True collect currentOptions candidateLimit completed []
+        | all (null . formulaPlanCandidates) completed =
+            runPlans False collect currentOptions candidateLimit completed directedSearchPlans
+    runPlans _ _ _ _ completed [] = Right $ reverse completed
+    -- Focused contexts are a first-inhabitant accelerator. Once another plan
+    -- has produced a term, enumerating that term again in singleton contexts
+    -- would spend the raw-proof cutoff and starve later alternative families.
+    runPlans allowDirected collect currentOptions candidateLimit completed
+            ((_, _, symbols, _, _, _, _) : remaining)
+        | any (not . null . formulaPlanCandidates) completed
+        , any isInhabitationFallbackSymbol $ Set.toList symbols =
+            runPlans allowDirected collect currentOptions candidateLimit completed remaining
+    runPlans allowDirected collect currentOptions candidateLimit completed
             (( planPremises
               , diagnosticOnlyPremises
               , axiomSymbols
@@ -2295,12 +2365,17 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
                 (collect || null (formulaPlanCandidates result)) &&
                 evidenceCanBenefitFromAnotherPlan result
         if continue
-            then runPlans collect
+            then runPlans allowDirected collect
                 currentOptions {
                     optionBudget = formulaPlanRemainingBudget result
                     }
                 nextLimit completed' remaining
             else Right $ reverse completed'
+
+    isInhabitationFallbackSymbol (Symbol spelling) =
+        "$djinn$focused$" `isPrefixOf` spelling ||
+        "$djinn$query-directed-instantiation$" `isPrefixOf` spelling
+    isInhabitationFallbackSymbol _ = False
 
     -- A proof-backed target diagnostic is already the sharpest candidate-free
     -- result. A completed refutation may still be sharpened by a later

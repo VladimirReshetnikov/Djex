@@ -2404,14 +2404,14 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         (map fst nominalPlans)
         (map snd $ nominalPremises ++ activeNominalLoadedSchemePremises)
         nominalQueryConstructedAxioms
-    -- An exact loaded scheme can construct a quantified result before the
+    -- An available loaded scheme can construct a quantified result before the
     -- older generic loaded instances spend the choice budget. Keep the entire
     -- scoped family and its original source premises together; singleton
     -- aliases would lose the lexical ownership checked before erasure.
     -- Already successful primary/transport plans suppress this accelerator.
     loadedConstructedAccelerationPlans
         | not $ SharedType.containsForall elaboratedGoal = []
-        | null activeLoadedSchemePremises = []
+        | not hasLoadedConstructionSource = []
         | otherwise = concatMap (\axioms -> augmentDirected axioms
             [(activePremises ++ activeLoadedSchemePremises, [], Set.empty,
                 Map.empty, Map.empty, translatedFormula primary, False)])
@@ -2421,6 +2421,26 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
                     [], Set.empty, Map.empty, Map.empty,
                     translatedFormula $ primaryFormulaPlan nominalFormulaPlans, False)])
                 nominalConstructedFamilies
+    -- Providers beginning with an ordinary argument have no leading-scheme
+    -- entry. Their result-position quantified atoms are nevertheless real
+    -- available schemes once that argument is supplied. Use the same polarity
+    -- as construction discovery, so a quantified argument obligation does not
+    -- authorize this early plan. Target-named premises remain excluded.
+    hasLoadedConstructionSource =
+        not (null activeLoadedSchemePremises) ||
+        not (null activeNominalLoadedSchemePremises) ||
+        hasResidualConstructionSource formulaPlans activePremises ||
+        hasResidualConstructionSource nominalFormulaPlans activeNominalPremises
+    -- If an exact source already supplies the whole goal, its established
+    -- opaque frontier can forward it directly. Keep that opportunity before
+    -- speculative construction from quantifiers inside the supplied result
+    -- (which may include an empty polytype). Leading-scheme plans retain
+    -- their existing policy; this only gates newly eligible residual sources.
+    hasResidualConstructionSource goalPlans available =
+        any hasAvailableScheme available &&
+        exactOpaqueFormulaPlan goalPlans `notElem` map snd available
+    hasAvailableScheme =
+        not . Set.null . negativeOpaqueFormulaSymbols NegativeFormula . snd
     -- Monotype results often need only forwarding (including self-application
     -- of an available complete polytype). Try those exact bridges before
     -- opening speculative construction scopes. Quantified goals retain the

@@ -1280,6 +1280,43 @@ testConstructedRankN = do
     globalSession <- expectShownRight $ Djex.mkDjinnSession globalEnvironment
     check globalSession True ("constructLoadedAlternatingForalls",
         "ConstructedGlobal (forall a. a -> a) (forall a. a -> a)")
+    layeredSeed <- expectShownRight $ SharedName.mkIdentifier "ConstructionSeed"
+    layeredTwo <- expectShownRight $ SharedName.mkIdentifier "ConstructionTwo"
+    layeredThree <- expectShownRight $ SharedName.mkIdentifier "ConstructionThree"
+    let kindWithArguments count = foldr SharedKind.FunctionKind proper $
+            replicate count proper
+        layeredDeclarations =
+            [ SharedDeclaration.AbstractTypeDeclaration () layeredSeed proper
+            , SharedDeclaration.AbstractTypeDeclaration () layeredTwo $ kindWithArguments 2
+            , SharedDeclaration.AbstractTypeDeclaration () layeredThree $ kindWithArguments 3
+            ]
+        layeredProviders =
+            [ ("constructionSeed", "ConstructionSeed")
+            , ("constructionMakerTwo", "ConstructionSeed -> forall a. a -> " ++
+                "ConstructionSeed -> forall b. b -> ConstructionTwo a b")
+            , ("constructionMakerThree", "ConstructionSeed -> forall a b. a -> b -> " ++
+                "ConstructionSeed -> forall c. c -> ConstructionThree a b c")
+            ]
+    layeredBaseEnvironment <- expectShownRight $ SharedEnvironment.mkEnvironment layeredDeclarations
+    layeredBaseSession <- expectShownRight $ Djex.mkDjinnSession layeredBaseEnvironment
+    layeredValues <- mapM (\(spelling, source) -> do
+        name <- expectShownRight $ SharedName.mkIdentifier spelling
+        parsed <- expectShownRight $ Djex.parseDjinnRequest layeredBaseSession
+            defaultQueryOptions name "construction-layered-provider" source
+        pure $ SharedDeclaration.ValueDeclaration $ SharedDeclaration.ValueSignature () name $
+            SharedQuery.requestGoal $ Djex.djinnRequestQuery parsed) layeredProviders
+    layeredEnvironment <- expectShownRight $ SharedEnvironment.mkEnvironment $
+        layeredDeclarations ++ layeredValues
+    layeredSession <- expectShownRight $ Djex.mkDjinnSession layeredEnvironment
+    -- Both factories are present for both queries: an unrelated available
+    -- result constructor must not hide the useful residual quantified scheme.
+    mapM_ (check layeredSession True)
+        [ ("constructLoadedAfterSeedTwo",
+            "ConstructionTwo (forall a. a -> a) (forall a. a -> a -> a)")
+        , ("constructLoadedAfterSeedThree",
+            "ConstructionThree (forall a. a -> a) " ++
+            "(forall a. a -> a -> a) (forall a. a -> a)")
+        ]
     mapM_ (check session True)
         [ ("constructPolyIdentity",
             "(forall a. a -> f a) -> f (forall b. b -> b)")

@@ -102,6 +102,12 @@ probes =
   , ProviderProbe "alternatingGlobalResults" True
       "G (forall c. c -> c) (forall d. d -> d)"
       [("alternatingProvider", "forall a. a -> () -> (forall b. b -> G a b)"), ("unitSeed", "()")]
+  , ProviderProbe "seedLeadingGlobalBinary" True
+      "G (forall a. a -> a) (forall a. a -> a -> a)"
+      [("seedProvider", "Seed"), ("layeredBinaryProvider", "Seed -> forall a. a -> Seed -> forall b. b -> G a b")]
+  , ProviderProbe "seedLeadingGlobalTernary" True
+      "G3 (forall a. a -> a) (forall a. a -> a -> a) (forall a. a -> a)"
+      [("seedProvider", "Seed"), ("layeredTernaryProvider", "Seed -> forall a b. a -> b -> Seed -> forall c. c -> G3 a b c")]
   , ProviderProbe "polymorphicResultAfterUnit" True
       "(() -> (forall a. a -> F a)) -> F (forall b. b -> b)"
       [("unitSeed", "()")]
@@ -138,10 +144,12 @@ main = do
   createDirectoryIfMissing True "test-church/results/scopes"
   writeFile "test-church/results/scopes/ScopeProviders.hs" $ unlines
     [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, NoImplicitPrelude, NoPolyKinds, EmptyDataDecls #-}"
-    , "module ScopeProviders (F, H, G, Token, delayedProvider, delayedValue, alternatingProvider, unitSeed) where"
+    , "module ScopeProviders (F, H, G, G3, Seed, Token, delayedProvider, delayedValue, alternatingProvider, unitSeed, seedProvider, layeredBinaryProvider, layeredTernaryProvider) where"
     , "data F a = F"
     , "data H a"
     , "data G a b = G"
+    , "data G3 a b c = G3"
+    , "data Seed = Seed"
     , "data Token = Token"
     , "delayedProvider :: " ++ delayedProviderSignature
     , "delayedProvider _ = Token"
@@ -151,6 +159,12 @@ main = do
     , "alternatingProvider _ _ _ = G"
     , "unitSeed :: ()"
     , "unitSeed = ()"
+    , "seedProvider :: Seed"
+    , "seedProvider = Seed"
+    , "layeredBinaryProvider :: Seed -> forall a. a -> Seed -> forall b. b -> G a b"
+    , "layeredBinaryProvider _ _ _ _ = G"
+    , "layeredTernaryProvider :: Seed -> forall a b. a -> b -> Seed -> forall c. c -> G3 a b c"
+    , "layeredTernaryProvider _ _ _ _ _ = G3"
     ]
   failures <- forM ["djinn", "exference"] $ \engine -> do
     results <- forM probes $ \probe -> do
@@ -176,7 +190,7 @@ main = do
             [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, ScopedTypeVariables #-}"
             , "{-# LANGUAGE NoImplicitPrelude, TypeApplications, NoPolyKinds #-}"
             , "module Scope_" ++ name ++ " where"
-            , "import ScopeProviders (" ++ intercalate ", " (["F", "H", "G", "Token"] ++ map fst providers) ++ ")"
+            , "import ScopeProviders (" ++ intercalate ", " (["F", "H", "G", "G3", "Seed", "Token"] ++ map fst providers) ++ ")"
             , name ++ " :: " ++ signature
             , term
             ]
@@ -202,6 +216,8 @@ synthesize engine probe = do
       searchBudget = if shouldSucceed then 10000 else 1000
   f <- expectRight $ mkIdentifier "F"
   g <- expectRight $ mkIdentifier "G"
+  g3 <- expectRight $ mkIdentifier "G3"
+  seedType <- expectRight $ mkIdentifier "Seed"
   h <- expectRight $ mkIdentifier "H"
   token <- expectRight $ mkIdentifier "Token"
   target <- expectRight $ mkIdentifier name
@@ -210,6 +226,8 @@ synthesize engine probe = do
       declarations =
         [ AbstractTypeDeclaration () f unary
         , AbstractTypeDeclaration () g binary
+        , AbstractTypeDeclaration () g3 (FunctionKind ProperTypeKind binary)
+        , AbstractTypeDeclaration () seedType ProperTypeKind
         , AbstractTypeDeclaration () h unary
         , AbstractTypeDeclaration () token ProperTypeKind
         ]

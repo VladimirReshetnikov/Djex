@@ -723,15 +723,16 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
       -- repeating one of those tree traversals here would let the two result
       -- boundaries drift again. The raw term remains a safe fallback, but it
       -- too must pass that complete checker independently.
-      checkedSimplification rigidScope constraints rawExpression = case
-          preparedCheckContext of
-        Left _ -> Nothing
-        Right context -> firstChecked rigidScope context candidates
+      checkedSimplification rigidScope constraints rawExpression = do
+        normalized <- inlineVisibleTypeApplicationAliases rawExpression
+        case preparedCheckContext of
+          Left _ -> Nothing
+          Right context -> firstChecked rigidScope context $ candidates normalized
        where
-        simplified = simplifyExpression rawExpression
-        candidates
-          | simplified == rawExpression = [rawExpression]
-          | otherwise = [simplified, rawExpression]
+        candidates normalized
+          | simplified == normalized = [normalized]
+          | otherwise = [simplified, normalized]
+         where simplified = simplifyExpression normalized
         firstChecked _ _ [] = Nothing
         firstChecked candidateScope context
             (candidate : remainingCandidates) =
@@ -740,12 +741,14 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
               constraints candidate of
             Right evidence -> case checkedExpressionVisibleInstantiationRepair evidence of
               Nothing -> Just (candidate, evidence)
-              Just repaired -> case
-                  checkExpressionInContextWithNestedRigidProvenanceEvidence
-                    context (nestedRigidProvenance candidateScope)
-                    constraints repaired of
-                Right repairedEvidence -> Just (repaired, repairedEvidence)
-                Left _ -> firstChecked candidateScope context remainingCandidates
+              Just repaired -> case inlineVisibleTypeApplicationAliases repaired of
+                Nothing -> firstChecked candidateScope context remainingCandidates
+                Just normalizedRepair -> case
+                    checkExpressionInContextWithNestedRigidProvenanceEvidence
+                      context (nestedRigidProvenance candidateScope)
+                      constraints normalizedRepair of
+                  Right repairedEvidence -> Just (normalizedRepair, repairedEvidence)
+                  Left _ -> firstChecked candidateScope context remainingCandidates
             Left _ -> firstChecked candidateScope context remainingCandidates
   helper :: FindExpressionsState -> Maybe (EngineBatch, FindExpressionsState)
   helper searchState | findSteps searchState >= maxSteps = Nothing
@@ -2112,6 +2115,66 @@ stateStepPlan allocators multiPM allowConstrs h
         hole <- builderAllocHole allocators
         pure (ExpHole hole, [VarBinding hole fieldType])
 
+    -- Look through later value/forall layers only to choose an instance of
+    -- the provider's current leading binders. The ordinary partial-application
+    -- rule still has to synthesize every argument and expose each residual
+    -- scheme in its real lexical scope. No lookahead equation fills a goal.
+    -- Future binders live in a temporary fresh namespace; a selected current
+    -- image containing one of them is rejected rather than exported.
+    resultDirectedProviderUse
+      :: HsType
+      -> StateT SearchNode SearchBranches
+          ([SharedGenerated.VisibleTypeArgument], HsType, [HsConstraint])
+    resultDirectedProviderUse source = do
+      case source of
+        TypeForallNative{} -> pure ()
+        _ -> mzero
+      when (null $ SharedType.leadingForallVariables source) mzero
+      -- An inapplicable optional branch must not allocate identifiers or add
+      -- an exhaustion event to the established ordinary-provider path.
+      let (_, _, currentBody) = SharedType.splitLeadingForalls source
+      case splitArrowChain currentBody of
+        (TypeForallNative{}, _ : _) -> pure ()
+        _ -> mzero
+      supply <- gets nodeFlexibleIds
+      (instantiated, constraints, currentSupply) <- maybe
+        (lift $ truncateBranch BranchIdentifierSpaceExhausted) pure $
+          instantiateLeadingForallsWith
+            (searchAllocateFlexibleNamespace allocators) supply source
+      case splitArrowChain instantiated of
+        (TypeForallNative{}, _ : _) -> pure ()
+        _ -> mzero
+      (ultimateResult, futureSupply) <- maybe
+        (lift $ truncateBranch BranchIdentifierSpaceExhausted) pure $
+          lookAhead currentSupply instantiated
+      substitutions <- maybe mzero pure $ unifyShared goalType ultimateResult
+      let currentBinders = freeVars instantiated `S.difference` freeVars source
+          futureBinders = S.fromList $ IntSet.toList $
+            reservedIdentifierSet futureSupply `IntSet.difference`
+              reservedIdentifierSet currentSupply
+          choices =
+            [ (binder, image)
+            | binder <- S.toList currentBinders
+            , let image = snd $ applySubsts substitutions $ TypeVar binder
+            , image /= TypeVar binder
+            ]
+      unless (any (SharedType.containsForall . snd) choices) mzero
+      unless (all (S.null . S.intersection futureBinders . freeVars . snd) choices) mzero
+      let projected = IntMap.fromList choices
+          selected = snd $ applySubsts projected instantiated
+          selectedConstraints = map (snd . constraintApplySubsts projected) constraints
+          arguments = selectedPolytypeVisibleArguments source selected
+      when (null arguments) mzero
+      modify $ \node -> node {nodeFlexibleIds = futureSupply}
+      pure (arguments, selected, selectedConstraints)
+     where
+      lookAhead current sourceType = case fst $ splitArrowChain sourceType of
+        residual@TypeForallNative{} -> do
+          (opened, _, next) <- instantiateLeadingForallsWith
+            (searchAllocateFlexibleNamespace allocators) current residual
+          lookAhead next opened
+        result -> Just (result, current)
+
     -- try to resolve the goal by looking at the parameters in scope, i.e.
     -- the parameters accumulated by building the expression so far.
     -- e.g. for (\x -> (_ :: Int)), the goal can be filled by `x` if
@@ -2162,7 +2225,7 @@ stateStepPlan allocators multiPM allowConstrs h
           useProvider goalType goalType [] [] $ Just IntMap.empty
         InstantiateProviderUse ->
           ordinaryInstantiation <|> wholePolytypeInstantiation
-            <|> visibleGroundInstantiation
+            <|> visibleGroundInstantiation <|> resultDirectedInstantiation
           where
           -- An argument metavariable may denote the entire polymorphic
           -- value. Keeping this branch beside ordinary per-use elimination
@@ -2200,6 +2263,11 @@ stateStepPlan allocators multiPM allowConstrs h
                   constraints
                   instantiatedParameters
                   unification
+
+          resultDirectedInstantiation = do
+            (arguments, selected, constraints) <- resultDirectedProviderUse scheme
+            let (result, parameters) = splitArrowChain selected
+            useProviderWith arguments scheme result constraints parameters Nothing
 
           -- A separate evidence-directed branch selects either closed
           -- monotypes named by explicit instance heads or checked proper-type
@@ -2403,7 +2471,10 @@ stateStepPlan allocators multiPM allowConstrs h
                 groundProviderInstantiations contxt source ++
                 candidateProviderInstantiations candidates source ++
                 candidateProviderInstantiations suppliedCandidates source
-          useVisible instantiations
+          useVisible instantiations <|> do
+            (arguments, selected, selectedConstraints) <- resultDirectedProviderUse source
+            let (result, selectedParameters) = splitArrowChain selected
+            useGlobal arguments result selectedConstraints selectedParameters
       -- A caller-supplied complete assignment is exact retained-provider
       -- evidence.  Prefer its explicit visible application over the flattened
       -- compatibility binding when both render the same specialization; a

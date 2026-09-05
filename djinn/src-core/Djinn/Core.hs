@@ -1478,8 +1478,8 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         target elaboratedGoal parametricDataRelevant formulaPlans
         nominalFormulaPlans = do
     results <- runPlans
-        [(False, initialSearchPlans), (False, searchPlans),
-            (True, constructedSearchPlans), (True, directedSearchPlans)]
+        ([(False, initialSearchPlans), (True, loadedConstructedAccelerationPlans),
+            (False, searchPlans)] ++ deferredInstantiationPlans)
         collectAcrossPlans options (optionCutoff options) [] transportSearchPlans
     mergeFormulaPlanResults options results
   where
@@ -1673,21 +1673,25 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
     queryDirectedAxioms = queryDirectedInstantiationAxioms
         structuralTranslator visibleArgument activeAxioms
         (goalVariables ++ polarizedFormulaPlanSkolems formulaPlans ++ premiseSpellings)
-        elaboratedGoal (map fst plans) (map snd premises)
+        elaboratedGoal (map fst plans)
+        (map snd $ premises ++ activeLoadedSchemePremises)
     nominalQueryDirectedAxioms = queryDirectedInstantiationAxioms
         nominalTranslator visibleArgument activeNominalAxioms
         (goalVariables ++ polarizedFormulaPlanSkolems nominalFormulaPlans ++ nominalPremiseSpellings)
-        elaboratedGoal (map fst nominalPlans) (map snd nominalPremises)
+        elaboratedGoal (map fst nominalPlans)
+        (map snd $ nominalPremises ++ activeNominalLoadedSchemePremises)
     queryConstructedAxioms = queryConstructedInstantiationAxioms
         (preparedEnvironmentConstructedHypothesisTranslator prepared)
         visibleArgumentInScope
         (goalVariables ++ polarizedFormulaPlanSkolems formulaPlans ++ premiseSpellings)
-        elaboratedGoal (map fst plans) (map snd premises)
+        elaboratedGoal (map fst plans)
+        (map snd $ premises ++ activeLoadedSchemePremises)
     nominalQueryConstructedAxioms = queryConstructedInstantiationAxioms
         (preparedEnvironmentNominalConstructedHypothesisTranslator prepared)
         visibleArgumentInScope
         (goalVariables ++ polarizedFormulaPlanSkolems nominalFormulaPlans ++ nominalPremiseSpellings)
-        elaboratedGoal (map fst nominalPlans) (map snd nominalPremises)
+        elaboratedGoal (map fst nominalPlans)
+        (map snd $ nominalPremises ++ activeNominalLoadedSchemePremises)
     queryClosedAxioms = queryClosedInstantiationAxioms
         structuralTranslator
         visibleArgument
@@ -2389,22 +2393,52 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             translatedFormula goal `notElem` map fst existingGoals ||
             any (`Set.notMember` Set.fromList existingPremises)
                 (filter ((/= targetSymbol) . fst) supplied)
+    structuralConstructedFamilies = scopedConstructionInstantiationAxioms
+        (preparedEnvironmentScopedSynthesisFormulaTranslator prepared) visibleArgumentInScope
+        (goalVariables ++ polarizedFormulaPlanSkolems formulaPlans ++ premiseSpellings)
+        (map fst plans) (map snd $ premises ++ activeLoadedSchemePremises)
+        queryConstructedAxioms
+    nominalConstructedFamilies = scopedConstructionInstantiationAxioms
+        (preparedEnvironmentNominalScopedSynthesisFormulaTranslator prepared) visibleArgumentInScope
+        (goalVariables ++ polarizedFormulaPlanSkolems nominalFormulaPlans ++ nominalPremiseSpellings)
+        (map fst nominalPlans)
+        (map snd $ nominalPremises ++ activeNominalLoadedSchemePremises)
+        nominalQueryConstructedAxioms
+    -- An exact loaded scheme can construct a quantified result before the
+    -- older generic loaded instances spend the choice budget. Keep the entire
+    -- scoped family and its original source premises together; singleton
+    -- aliases would lose the lexical ownership checked before erasure.
+    -- Already successful primary/transport plans suppress this accelerator.
+    loadedConstructedAccelerationPlans
+        | not $ SharedType.containsForall elaboratedGoal = []
+        | null activeLoadedSchemePremises = []
+        | otherwise = concatMap (\axioms -> augmentDirected axioms
+            [(activePremises ++ activeLoadedSchemePremises, [], Set.empty,
+                Map.empty, Map.empty, translatedFormula primary, False)])
+            structuralConstructedFamilies ++
+            concatMap (\axioms -> augmentDirected axioms
+                [(activeNominalPremises ++ activeNominalLoadedSchemePremises,
+                    [], Set.empty, Map.empty, Map.empty,
+                    translatedFormula $ primaryFormulaPlan nominalFormulaPlans, False)])
+                nominalConstructedFamilies
+    -- Monotype results often need only forwarding (including self-application
+    -- of an available complete polytype). Try those exact bridges before
+    -- opening speculative construction scopes. Quantified goals retain the
+    -- construction-first order needed by their argument introductions.
+    deferredInstantiationPlans
+        | SharedType.containsForall elaboratedGoal =
+            [(True, constructedSearchPlans), (True, directedSearchPlans)]
+        | otherwise = [(True, directedSearchPlans), (True, constructedSearchPlans)]
     constructedSearchPlans =
         concatMap (\axioms -> augmentDirected axioms
             (structuralSearchPlans ++ structuralAxiomSearchPlans ++
                 providerStructuralSearchPlans ++ loadedStructuralSearchPlans ++
                 queryClosedStructuralSearchPlans ++ queryCorrelatedStructuralSearchPlans))
-            (scopedConstructionInstantiationAxioms
-                (preparedEnvironmentScopedSynthesisFormulaTranslator prepared) visibleArgumentInScope
-                (goalVariables ++ polarizedFormulaPlanSkolems formulaPlans ++ premiseSpellings)
-                (map fst plans) (map snd premises) queryConstructedAxioms) ++
+            structuralConstructedFamilies ++
         concatMap (\axioms -> augmentDirected axioms
             (nominalSearchPlans ++ providerNominalSearchPlans ++ loadedNominalSearchPlans ++
                 queryClosedNominalSearchPlans ++ queryCorrelatedNominalSearchPlans))
-            (scopedConstructionInstantiationAxioms
-                (preparedEnvironmentNominalScopedSynthesisFormulaTranslator prepared) visibleArgumentInScope
-                (goalVariables ++ polarizedFormulaPlanSkolems nominalFormulaPlans ++ nominalPremiseSpellings)
-                (map fst nominalPlans) (map snd nominalPremises) nominalQueryConstructedAxioms)
+            nominalConstructedFamilies
     directedSearchPlans = instanceSearchPlans
         queryDirectedAxioms nominalQueryDirectedAxioms
     instanceSearchPlans structuralInstances nominalInstances =

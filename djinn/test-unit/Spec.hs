@@ -1249,15 +1249,37 @@ testConstructedRankN = do
             prepared (Set.singleton rigid)
     assertEqual "an owned rigid can cross the internal kind boundary" (Right ()) $
         checkOwned [(KStar, identityAt rigid)]
-    assertLeft "source kind checking rejects a private rigid" $
+    assertConstructionRejected "source kind checking rejects a private rigid" $
         RawEnvironment.checkPreparedSynthesisTypesKinds prepared [(KStar, identityAt rigid)]
-    assertLeft "another rigid is not authorized by the owned set" $
+    assertConstructionRejected "another rigid is not authorized by the owned set" $
         checkOwned [(KStar, identityAt otherRigid)]
-    assertLeft "owned rigid renaming retains kind consistency" $
+    assertConstructionRejected "owned rigid renaming retains kind consistency" $
         checkOwned [(KStar, SharedType.FunctionType (rigidType rigid) $
             SharedType.TypeApplication (rigidType rigid) $
                 SharedType.TupleType SharedName.Boxed [])]
     session <- expectShownRight Djex.standardDjinnSession
+    globalResult <- expectShownRight $ SharedName.mkIdentifier "ConstructedGlobal"
+    globalProvider <- expectShownRight $ SharedName.mkIdentifier "constructedGlobalProvider"
+    unitProvider <- expectShownRight $ SharedName.mkIdentifier "constructedUnitSeed"
+    let proper = SharedKind.ProperTypeKind
+        globalDeclarations = [SharedDeclaration.AbstractTypeDeclaration ()
+            globalResult $ SharedKind.FunctionKind proper $
+                SharedKind.FunctionKind proper proper]
+    globalBaseEnvironment <- expectShownRight $ SharedEnvironment.mkEnvironment globalDeclarations
+    globalBaseSession <- expectShownRight $ Djex.mkDjinnSession globalBaseEnvironment
+    globalProviderRequest <- expectShownRight $ Djex.parseDjinnRequest globalBaseSession
+        defaultQueryOptions globalProvider "constructed-global-provider"
+        "forall a. a -> () -> forall b. b -> ConstructedGlobal a b"
+    globalEnvironment <- expectShownRight $ SharedEnvironment.mkEnvironment $
+        globalDeclarations ++
+        [ SharedDeclaration.ValueDeclaration $ SharedDeclaration.ValueSignature () globalProvider $
+            SharedQuery.requestGoal $ Djex.djinnRequestQuery globalProviderRequest
+        , SharedDeclaration.ValueDeclaration $ SharedDeclaration.ValueSignature () unitProvider $
+            SharedType.TupleType SharedName.Boxed []
+        ]
+    globalSession <- expectShownRight $ Djex.mkDjinnSession globalEnvironment
+    check globalSession True ("constructLoadedAlternatingForalls",
+        "ConstructedGlobal (forall a. a -> a) (forall a. a -> a)")
     mapM_ (check session True)
         [ ("constructPolyIdentity",
             "(forall a. a -> f a) -> f (forall b. b -> b)")
@@ -1271,12 +1293,26 @@ testConstructedRankN = do
         , ("constructDistinctPolyArguments",
             "(forall a b. a -> b -> f a b) -> " ++
             "f (forall x. x -> x) (forall y z. y -> z -> y)")
+        , ("constructIdentityAndBoolean",
+            "(forall a b. a -> b -> f a b) -> " ++
+            "f (forall a. a -> a) (forall b. b -> b -> b)")
+        , ("constructIdentityAndBooleanWithRepeatedBinders",
+            "(forall a b. a -> b -> f a b) -> " ++
+            "f (forall a. a -> a) (forall a. a -> a -> a)")
         , ("constructAmbientPolyArgument",
             "(forall a. a -> f a) -> f (forall b. x -> b -> x)")
         , ("constructHigherKindedPolyArgument",
             "(forall a. a -> f a) -> f (forall b. g b -> g b)")
         , ("constructAfterTermArgument",
             "(() -> forall a. a -> f a) -> f (forall b. b -> b)")
+        , ("constructAlternatingForallSpine",
+            "forall seed g. seed -> " ++
+            "(seed -> forall a. a -> seed -> forall b. b -> g a b) -> " ++
+            "g (forall c. c -> c) (forall d. d -> d)")
+        , ("constructMixedArgumentsBeforeLaterForall",
+            "forall seed f. seed -> " ++
+            "(seed -> forall a b. a -> b -> seed -> forall c. c -> f a b c) -> " ++
+            "f (forall a. a -> a) (forall a. a -> a -> a) (forall a. a -> a)")
         ]
     mapM_ (check session False)
         [ ("rejectEmptyPolyConstruction",
@@ -1285,9 +1321,17 @@ testConstructedRankN = do
             "x -> (forall a. a -> f a) -> f (forall b. b)")
         , ("rejectCorrelatedEmptyScopes",
             "(forall a b. a -> b -> f a b) -> f (forall x. x) (forall y. y)")
+        , ("rejectAlternatingScopeEscape",
+            "forall seed x g. seed -> x -> " ++
+            "(seed -> forall a. a -> seed -> forall b. b -> g a b) -> " ++
+            "g (forall c. c -> c) (forall d. d)")
+        , ("rejectMixedArgumentScopeEscape",
+            "forall seed x f. seed -> x -> " ++
+            "(seed -> forall a b. a -> b -> seed -> forall c. c -> f a b c) -> " ++
+            "f (forall a. a -> a) (forall a. a -> a -> a) (forall a. a)")
         ]
   where
-    assertLeft message result = case result of
+    assertConstructionRejected message result = case result of
         Left _ -> pure ()
         Right _ -> fail message
     check session expected (spelling, source) = do
@@ -2780,9 +2824,9 @@ testRankNTypeAtoms = do
                 "@MonoSix4 @MonoSix5 @MonoSix6") `isInfixOf`)
             sixAssignedRendered
 
-    -- Retaining a scheme remains an honesty witness. A leading chain beyond
-    -- the shared six-binder bound stays inconclusive even though every
-    -- required closed monotype and value is loaded in the environment.
+    -- Automatic directed instances can now use a retained wide source without
+    -- an explicit vector. Its complete polytype is itself an available value,
+    -- so impredicative self-application supplies all seven independent inputs.
     let sevenNames = map (sharedName . ("MonoSeven" ++) . show)
             ([1 .. 7] :: [Int])
         sevenResultName = sharedName "MonoSevenResult"
@@ -2800,12 +2844,13 @@ testRankNTypeAtoms = do
                 ([1 ..] :: [Int]) sevenNames ++
             [valueDeclaration "monoSevenProvider" sevenProviderType]
     sevenSession <- sealDjinnSessionFrom stableSession sevenDeclarations
-    sevenLoaded <- runStableQuery sevenSession
-        "doNotRefuteSevenBinderLoadedScheme" "MonoSevenResult"
-    assertEqual "a seven-binder loaded scheme escaped its bound"
-        [] $ SharedSearch.batchCandidates $ SharedQuery.resultSearch sevenLoaded
-    assertEqual "a bounded seven-binder loaded-scheme miss was falsely refuted"
-        SharedQuery.NoEvidence $ SharedQuery.resultEvidence sevenLoaded
+    sevenLoaded <- runStableQueryWith
+        firstCandidateOptions {optionBudget = Just 10000} sevenSession
+        "instantiateSevenBinderLoadedScheme" "MonoSevenResult"
+    assertBool "a directed seven-binder loaded scheme produced no candidate" $
+        not $ null $ SharedSearch.batchCandidates $ SharedQuery.resultSearch sevenLoaded
+    assertEqual "the directed wide instance lost positive evidence"
+        SharedQuery.ValidatedCandidates $ SharedQuery.resultEvidence sevenLoaded
     sevenAssignmentTarget <- expectShownRight $
         SharedName.mkIdentifier "retainSevenBinderAssignment"
     sevenAssignmentRequest <- expectShownRight $ Djex.parseDjinnRequest

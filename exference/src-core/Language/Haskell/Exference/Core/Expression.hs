@@ -31,10 +31,12 @@ module Language.Haskell.Exference.Core.Expression
   , showExpression
   , fillExprHole
   , simplifyExpression
+  , inlineVisibleTypeApplicationAliases
   )
 where
 
 import Control.DeepSeq (NFData)
+import Control.Monad.Trans.Writer.Strict (execWriter, tell)
 import Data.Foldable (toList)
 import qualified Data.List as List
 import qualified Data.Map as Map
@@ -356,3 +358,32 @@ fillExprHole variable (Expression replacement) (Expression expression) =
 simplifyExpression :: Expression -> Expression
 simplifyExpression (Expression expression) = Expression
   $ Generated.simplifyExpressionBy annotatedIdentity expression
+
+-- | Preserve visible instantiation on its original expression spine. GHC
+-- does not expose inferred let binders as specified type-application slots.
+-- Inline only nonrecursive aliases selected by an explicit type use, keeping
+-- other lets as useful bidirectional checking boundaries. The shared
+-- substitution rejects capture and respects lexical shadowing. Inlining all
+-- uses of a selected alias preserves its pure expression meaning; it may
+-- change sharing, but cannot introduce a value or type assumption.
+inlineVisibleTypeApplicationAliases :: Expression -> Maybe Expression
+inlineVisibleTypeApplicationAliases (Expression expression) = Expression <$>
+  Generated.rewriteExpressionBottomUpM inlineAlias expression
+ where
+  inlineAlias original@(Generated.Let (Generated.Bind local) binding body)
+    | annotatedIdentity local `elem` visibleHeads body =
+        Generated.substituteExpressionLocalBy
+          annotatedIdentity (annotatedIdentity local) binding body
+    | otherwise = Just original
+  inlineAlias original = Just original
+
+  -- A shadowed same-identity use can only cause an unnecessary selection:
+  -- the substitution itself is the lexical authority and leaves it alone.
+  visibleHeads source = execWriter $
+    Generated.rewriteExpressionBottomUpM observe source
+  observe node = do
+    case node of
+      Generated.VisibleTypeApplication (Generated.Local local) _ ->
+        tell [annotatedIdentity local]
+      _ -> pure ()
+    pure node

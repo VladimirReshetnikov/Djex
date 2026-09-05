@@ -63,6 +63,7 @@ import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.Core.Expression
   ( Expression (..)
   , ExpressionRenderError (..)
+  , inlineVisibleTypeApplicationAliases
   , expressionTypedLocals
   , expressionNameHints
   , renderExpression
@@ -4533,6 +4534,41 @@ tests = testGroup "Exference"
               residual @?= []
               checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
                 goal [] expression @?= Right ()
+      , testCase "alternating term and forall layers preserve correlated instances" $ do
+          let pair left right = TypeApp (TypeApp (TypeCons $ name "AlternatingPair") left) right
+              identity = TypeForall [2] [] $ TypeArrow (TypeVar 2) (TypeVar 2)
+              seed = TypeCons $ name "Seed"
+              factory = TypeForall [0] [] $ TypeArrow (TypeVar 0) $
+                TypeArrow seed $ TypeForall [1] [] $
+                  TypeArrow (TypeVar 1) $ pair (TypeVar 0) (TypeVar 1)
+          forM_ [identity, TypeForall [3] [] $ TypeArrow (TypeVar 9) $
+              TypeArrow (TypeVar 3) (TypeVar 3)] $ \firstImage -> do
+            let goal = TypeArrow seed $ TypeArrow (TypeArrow seed factory) $
+                  pair firstImage identity
+                input = identityInput
+                  { input_goalType = goal, input_maxSteps = 3000, input_allowUnused = True }
+            (expression, residual, _) <- maybe
+              (fail "result lookahead did not select the first impredicative image") pure $
+                findOneExpression input
+            residual @?= []
+            checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+              goal [] expression @?= Right ()
+      , testCase "visible instantiation aliases inline without capture" $ do
+          let identity = TypeForall [0] [] $ TypeArrow (TypeVar 0) (TypeVar 0)
+              local = ExpVar 1 identity
+              alias = ExpVar 2 identity
+          argument <- expectRight $ Generated.specifiedVisibleTypeArgument identity
+          let original = ExpLet 2 identity local $ ExpTypeApply alias argument
+              expected = ExpTypeApply local argument
+          assertBool "visible alias did not retain its original applied spine" $
+            inlineVisibleTypeApplicationAliases original == Just expected
+          let ordinary = ExpLet 2 identity local alias
+          assertBool "ordinary let was unnecessarily inlined" $
+            inlineVisibleTypeApplicationAliases ordinary == Just ordinary
+          let captures = ExpLet 2 identity local $ ExpLambda 1 identity $
+                ExpTypeApply alias argument
+          assertBool "visible alias substitution captured an outer local" $
+            inlineVisibleTypeApplicationAliases captures == Nothing
       , testCase "scoped vacuous providers instantiate at query polytypes" $ do
           let quantified = TypeForall [1] []
                 $ TypeArrow (TypeVar 1) (TypeVar 1)

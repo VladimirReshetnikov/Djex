@@ -81,10 +81,27 @@ probes =
       "(forall a. a -> F a) -> F (forall b. b -> b)"
   , Probe "constructTwoPolymorphicArguments" True
       "(forall a b. a -> b -> G a b) -> G (forall c. c -> c) (forall d e. d -> e -> d)"
+  , Probe "constructRepeatedBinderPolytypes" True
+      "(forall a b. a -> b -> G a b) -> G (forall a. a -> a) (forall a. a -> a -> a)"
   , Probe "constructAmbientPolymorphicArgument" True
       "forall x. (forall a. a -> F a) -> F (forall b. x -> b -> x)"
   , Probe "constructHigherKindedPolymorphicArgument" True
       "forall g. (forall a. a -> F a) -> F (forall b. g b -> g b)"
+  , Probe "constructPolymorphicComposition" True
+      "forall f g h k. (forall a. a -> f a) -> (forall a. g a -> h a) -> (forall a. h a -> k a) -> f (forall a. g a -> k a)"
+  , Probe "constructNestedPolymorphicArgument" True
+      "(forall a. a -> F a) -> F (forall b. b -> F (forall c. c -> c))"
+  , Probe "constructNestedDependentArgument" True
+      "(forall a. a -> F a) -> F (forall b. b -> F (forall c. b -> c -> b))"
+  , Probe "alternatingQuantifiedResults" True
+      "forall seed. seed -> (seed -> forall a. a -> seed -> forall b. b -> G a b) -> G (forall c. c -> c) (forall d. d -> d)"
+  , Probe "alternatingAmbientResults" True
+      "forall seed x. seed -> (seed -> forall a. a -> seed -> forall b. b -> G a b) -> G (forall c. x -> c -> c) (forall d. d -> d)"
+  , Probe "alternatingMixedPolytypes" True
+      "forall seed f. seed -> (seed -> forall a b. a -> b -> seed -> forall c. c -> f a b c) -> f (forall a. a -> a) (forall a. a -> a -> a) (forall a. a -> a)"
+  , ProviderProbe "alternatingGlobalResults" True
+      "G (forall c. c -> c) (forall d. d -> d)"
+      [("alternatingProvider", "forall a. a -> () -> (forall b. b -> G a b)"), ("unitSeed", "()")]
   , ProviderProbe "polymorphicResultAfterUnit" True
       "(() -> (forall a. a -> F a)) -> F (forall b. b -> b)"
       [("unitSeed", "()")]
@@ -110,6 +127,8 @@ probes =
       "forall x. x -> (forall a. a -> F a) -> F (forall b. b)"
   , Probe "rejectTwoEmptyPolytypes" False
       "(forall a b. a -> b -> G a b) -> G (forall c. c) (forall d. d)"
+  , Probe "rejectAlternatingEmptyPolytype" False
+      "forall seed. seed -> (seed -> forall a. a -> seed -> forall b. b -> G a b) -> G (forall c. c) (forall d. d -> d)"
   ]
 
 main :: IO ()
@@ -119,15 +138,17 @@ main = do
   createDirectoryIfMissing True "test-church/results/scopes"
   writeFile "test-church/results/scopes/ScopeProviders.hs" $ unlines
     [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, NoImplicitPrelude, NoPolyKinds, EmptyDataDecls #-}"
-    , "module ScopeProviders (F, H, G, Token, delayedProvider, delayedValue, unitSeed) where"
+    , "module ScopeProviders (F, H, G, Token, delayedProvider, delayedValue, alternatingProvider, unitSeed) where"
     , "data F a = F"
     , "data H a"
-    , "data G a b"
+    , "data G a b = G"
     , "data Token = Token"
     , "delayedProvider :: " ++ delayedProviderSignature
     , "delayedProvider _ = Token"
     , "delayedValue :: " ++ delayedValueSignature
     , "delayedValue = F"
+    , "alternatingProvider :: forall a. a -> () -> (forall b. b -> G a b)"
+    , "alternatingProvider _ _ _ = G"
     , "unitSeed :: ()"
     , "unitSeed = ()"
     ]

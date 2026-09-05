@@ -47,7 +47,7 @@ module Djinn.Internal.Instantiation
     ) where
 
 import Control.Monad (replicateM)
-import Data.List (sort, sortOn)
+import Data.List (isPrefixOf, sort, sortOn)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Numeric.Natural (Natural)
@@ -164,8 +164,9 @@ retainsProviderInstantiationFidelity fidelityTranslator scheme arguments =
 
 -- One retained logical axiom plus the explicit type arguments required when
 -- its proof evidence cannot safely collapse to an implicitly instantiated
--- occurrence. The latter is populated only when a leading binder is absent
--- from the residual body.
+-- occurrence. The latter retains a necessary visible prefix when an image
+-- cannot be inferred from an occurrence outside nested quantification,
+-- including vacuous binders.
 data InstantiationAxiom = InstantiationAxiom
     { instantiationAxiomFormula :: Formula
     , instantiationAxiomVisibleArguments ::
@@ -418,14 +419,16 @@ queryDirectedInstantiationAxioms translator visibleArgument historicalAxioms
         ]
     directed = buildInstantiationAxiomsWithExclusions False True excluded
         "$djinn$query-directed-instantiation$" translator True visibleArgument
-        (\scheme -> directedInstantiationTuples (schemeSource scheme) demands demands)
+        (\scheme -> directedInstantiationTuples maxInstantiationAttempts
+            (schemeSource scheme) demands demands)
         schemes
 
 -- | A demand-directed, positive-only family which can construct a quantified
 -- argument after choosing an impredicative provider instance. Unlike the
 -- historical exact translator, the scoped translator opens obligation-side
 -- foralls in the instantiated provider body. Fresh names are private to one
--- attempted axiom and never join the demand vocabulary or nested discovery.
+-- attempted axiom; only the separately checked scoped family below may use
+-- them to specialize providers while constructing that argument.
 queryConstructedInstantiationAxioms
     :: (Set.Set String -> Natural -> SharedType.Type String ->
         Either String (Formula, [String]))
@@ -444,7 +447,8 @@ queryConstructedInstantiationAxioms translator visibleArgument variableSpellings
         (translator (Set.fromList variableSpellings) . fromIntegral) True
         (visibleArgument $ Set.fromList variableSpellings)
         (\scheme -> distinctOn (map SharedTypeAtom.alphaTypeKey) $
-            directedInstantiationTuples (schemeSource scheme) demands demands ++
+            directedInstantiationTuples maxInstantiationAttempts
+                (schemeSource scheme) demands demands ++
             [ replicate (length $ schemeBinders scheme) image
             | image <- demands, SharedType.containsForall image
             ])
@@ -481,7 +485,7 @@ scopedConstructionInstantiationAxioms
     -> [InstantiationAxioms]
 scopedConstructionInstantiationAxioms translator visibleArgument variableSpellings
         goalFormulas premiseFormulas constructions =
-    [ grow (initial symbol formula skolems) $ jobsFor symbol skolems formula
+    [ grow (initial symbol formula skolems) $ jobsFor skolems formula
     | (symbol, formula) <- instantiationAxiomPremises constructions
     , Just skolems <- [Map.lookup symbol $
         instantiationConstructionSkolems constructions]
@@ -518,13 +522,40 @@ scopedConstructionInstantiationAxioms translator visibleArgument variableSpellin
             | attempt >= maxInstantiationAttempts || allowance <= 0 = accumulated
             | otherwise = case queue of
                 [] -> accumulated
-                ScopedInstantiationJob parent scope constructing scheme arguments : rest ->
-                    let family = case (constructing,
+                ScopedInstantiationJob scope constructing scheme arguments : rest ->
+                    let dependencies = Set.unions $ map SharedType.freeVariables $
+                            schemeSource scheme : arguments
+                        owners = sortOn (length . symbolSpelling)
+                            [ owner
+                            | (owner, names) <- Map.toList $
+                                instantiationConstructionSkolems accumulated
+                            , not $ Set.null $ Set.intersection dependencies $
+                                Set.fromList names
+                            ]
+                        anchor = case reverse owners of
+                            owner : _ -> Just owner
+                            [] -> Nothing
+                        constructionPrefix = case anchor of
+                            Just owner -> symbolSpelling owner ++ "$nested$" ++
+                                show attempt ++ "$"
+                            Nothing -> "$djinn$query-constructed-instantiation$independent$" ++
+                                show attempt ++ "$"
+                        inherited = case anchor of
+                            Nothing -> []
+                            Just owner -> concat
+                                [ names
+                                | (ancestor, names) <- Map.toList $
+                                    instantiationConstructionSkolems accumulated
+                                , ancestor == owner ||
+                                    (symbolSpelling ancestor ++ "$nested$")
+                                        `isPrefixOf` symbolSpelling owner
+                                ]
+                        family = case (constructing,
                             instantiationConstructionTranslator constructions) of
                             (True, Just construct) ->
                                 buildInstantiationAxiomsWithScopedTranslator
                                     False True Set.empty
-                                    (symbolSpelling parent ++ "$nested$" ++ show attempt ++ "$")
+                                    constructionPrefix
                                     (\_ -> construct owned $ fromIntegral $
                                         maxInstantiationAttempts + attempt)
                                     False (visibleArgument owned) (const [arguments]) [scheme]
@@ -559,12 +590,12 @@ scopedConstructionInstantiationAxioms translator visibleArgument variableSpellin
                             | (symbol, formula) <- freshPremises
                             , Just introduced <- [Map.lookup symbol $
                                 instantiationConstructionSkolems family]
-                            , job <- jobsFor symbol (scope ++ introduced) formula
+                            , job <- jobsFor (inherited ++ introduced) formula
                             ]
                     in loop (attempt + 1) (allowance - length freshPremises)
                         next (rest ++ children)
 
-    jobsFor parent skolems formula = roundRobin $ concat
+    jobsFor skolems formula = roundRobin $ concat
         [ [normalJobs scheme, constructionJobs scheme]
         | scheme <- scopedSchemes
         ]
@@ -582,9 +613,9 @@ scopedConstructionInstantiationAxioms translator visibleArgument variableSpellin
             , subtree <- typeSubtrees source
             , SharedType.freeVariables subtree `Set.isSubsetOf` allowed
             ]
-        obligations = distinctOn SharedTypeAtom.alphaTypeKey
+        obligationTypes atoms = distinctOn SharedTypeAtom.alphaTypeKey
             [ source
-            | (ObligationSide, symbol) <- bodyAtoms
+            | (ObligationSide, symbol) <- atoms
             , source <- case opaqueSymbolSource symbol of
                 Just supplied -> [supplied]
                 Nothing | symbolSpelling symbol `Set.member` allowed ->
@@ -593,13 +624,14 @@ scopedConstructionInstantiationAxioms translator visibleArgument variableSpellin
                     (symbolSpelling symbol) sourceConstructors
             , SharedType.freeVariables source `Set.isSubsetOf` allowed
             ]
+        obligations = obligationTypes bodyAtoms
         normalJobs scheme =
-            [ ScopedInstantiationJob parent skolems False scheme arguments
+            [ ScopedInstantiationJob skolems False scheme arguments
             | arguments <- take maxInstantiationAttempts $
                 distinctOn (map SharedTypeAtom.alphaTypeKey) $
                     [ replicate (length $ schemeBinders scheme) variable
                     | variable <- variableCandidatesOf skolems
-                    ] ++ directedInstantiationTuples (schemeSource scheme)
+                    ] ++ directedInstantiationTuples maxInstantiationAttempts (schemeSource scheme)
                         vocabulary vocabulary
             , any (not . Set.null . Set.intersection fresh . SharedType.freeVariables)
                 arguments ||
@@ -608,15 +640,21 @@ scopedConstructionInstantiationAxioms translator visibleArgument variableSpellin
                 schemeKey scheme `Set.notMember` originalSchemeKeys
             ]
         constructionJobs scheme =
-            [ ScopedInstantiationJob parent skolems True scheme arguments
+            [ ScopedInstantiationJob skolems True scheme arguments
             | arguments <- take maxInstantiationAttempts $
-                directedInstantiationTuples (schemeSource scheme) obligations vocabulary
+                directedInstantiationTuples maxInstantiationAttempts (schemeSource scheme)
+                    (obligations ++
+                        [ source
+                        | schemeKey scheme `Set.notMember` originalSchemeKeys
+                        , source <- obligationTypes $ queryAtomSymbols goalFormulas []
+                        ]) vocabulary
             ]
 
--- The parent symbol is also the lexical ancestry token carried by a child
--- construction axiom. Scope variables are inherited only along that ancestry.
+-- Scope variables are available only while planning their lexical context.
+-- A new construction retains precisely the ancestors mentioned by its source
+-- scheme and selected images; a closed later stage can be independent.
 data ScopedInstantiationJob = ScopedInstantiationJob
-    Symbol [String] Bool InstantiationScheme [SharedType.Type String]
+    [String] Bool InstantiationScheme [SharedType.Type String]
 
 -- | Build an additive hypothesis-instantiation tail whose tuples use at
 -- least one closed, forall-free subtree already present in the checked query.
@@ -1057,11 +1095,12 @@ buildAxiomFormulas discoverNested deduplicateFormula excludedAxioms interleaveSc
                 AxiomJob scheme maxInstantiationAxiomsPerScheme
                     (candidateTuples scheme)
                 : jobs
+        AxiomJob _ schemeAllowance _ : jobs
+            | schemeAllowance <= 0 ->
+                loop seenSchemes seenAxioms attempts allowance jobs
         AxiomJob _ _ [] : jobs ->
             loop seenSchemes seenAxioms attempts allowance jobs
         AxiomJob scheme schemeAllowance (arguments : tuples) : jobs
-            | schemeAllowance <= 0 ->
-                loop seenSchemes seenAxioms attempts allowance jobs
             | otherwise -> case schemeAxiom (maxInstantiationAttempts - attempts)
                     scheme arguments of
                 Just axiom ->

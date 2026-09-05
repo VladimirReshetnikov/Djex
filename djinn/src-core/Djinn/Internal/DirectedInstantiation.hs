@@ -14,37 +14,47 @@ import Language.Haskell.Synthesis.TypeAtom (alphaTypeKey)
 
 -- | Match a scheme's whole body and every application-result suffix against
 -- actual demands. A demand is rigid; only the scheme's leading binders may be
--- selected. Whole polymorphic subtrees are ordinary selections. Unobserved
+-- selected. Later context-free forall groups in the result spine contribute
+-- temporary matching variables, so an eventual result can constrain an earlier
+-- choice. Their solutions are discarded here: subsequent checked elimination
+-- evidence must still establish those later instances. Whole polymorphic
+-- subtrees are ordinary selections. Unobserved
 -- binders draw from the supplied, scope-checked vocabulary lazily.
 directedInstantiationTuples
-    :: Type String -> [Type String] -> [Type String] -> [[Type String]]
-directedInstantiationTuples source demands candidates = case unique source of
+    :: Int -> Type String -> [Type String] -> [Type String] -> [[Type String]]
+directedInstantiationTuples attempts source demands candidates = case unique source of
     Nothing -> []
     Just normalized -> case splitLeadingForalls normalized of
         (binders@(_ : _), [], body) ->
             let matches =
                     [ (solved, filter (`Map.notMember` solved) binders)
-                    | suffix <- resultSuffixes body
+                    | (laterBinders, suffix) <- resultSuffixes [] body
                     , actual <- mapMaybe unique demands
-                    , Just solved <- [matchType (Set.fromList binders)
+                    , Just solved <- [matchType (Set.fromList $ binders ++ laterBinders)
                         Map.empty Set.empty Map.empty suffix actual]
                     ]
                 vectors (solved, missing) =
                     [map (selection solved missing choices) binders
                     | choices <- unobservedChoices $ length missing]
-            in distinctOn (map alphaTypeKey) $
+            -- Charge raw proposals before alpha deduplication. Otherwise a
+            -- finite output allowance can still inspect a Cartesian-sized
+            -- duplicate suffix before discovering that no new tuple remains.
+            in distinctOn (map alphaTypeKey) $ take attempts $
                 concatMap vectors (filter (null . snd) matches) ++
                 roundRobin (map vectors $ filter (not . null . snd) matches)
         _ -> []
   where
     unique ty = either (const Nothing) (Just . fst) $
         uniquifyTypeBinders (const (Nothing :: Maybe ())) fresh Set.empty ty
-    fresh reserved old = Just $ choose (0 :: Integer)
+    -- Selected images pass through the ordinary source kind checker later.
+    -- Keep renamed lexical binders valid source identifiers; private '$'
+    -- spellings are reserved for separately owned rigid variables.
+    fresh reserved _old = Just $ choose (0 :: Integer)
       where
         choose n
             | candidate `Set.member` reserved = choose $ n + 1
             | otherwise = candidate
-          where candidate = old ++ "$directed" ++ show n
+          where candidate = "djinnDirected" ++ show n
     roundRobin streams = case [(x, xs) | x : xs <- streams] of
         [] -> []
         active -> map fst active ++ roundRobin (map snd active)
@@ -56,8 +66,9 @@ directedInstantiationTuples source demands candidates = case unique source of
     unobservedChoices 0 = [[]]
     unobservedChoices count =
         map (replicate count) candidates ++ replicateM count candidates
-    resultSuffixes body = body : case body of
-        FunctionType _ result -> resultSuffixes result
+    resultSuffixes later body = (later, body) : case body of
+        FunctionType _ result -> resultSuffixes later result
+        ForallType binders [] result -> resultSuffixes (later ++ binders) result
         _ -> []
 
 -- A separate lexical correspondence records nested binders. It takes

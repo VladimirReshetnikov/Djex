@@ -12,6 +12,7 @@ module Language.Haskell.Exference.Core.Internal.Polytype
   , quantifiedProviderSubsumes
   , instantiateLeadingForallsWith
   , inferredProviderVisibleArguments
+  , selectedPolytypeVisibleArguments
   , groundProviderInstantiations
   , candidateProviderInstantiations
   , assignmentProviderInstantiations
@@ -219,7 +220,18 @@ instantiateLeadingForallsWith allocate initialSupply source =
 -- anonymous type holes; the surrounding independently checked use fixes them.
 inferredProviderVisibleArguments
   :: HsType -> HsType -> [SharedGenerated.VisibleTypeArgument]
-inferredProviderVisibleArguments source selected = maybe [] id $ do
+inferredProviderVisibleArguments = providerVisibleArguments False
+
+-- | Retain every selected polymorphic image. A result-directed choice made
+-- across a later forall cannot rely on an intervening inferred let to recover
+-- that choice from its ultimate result. Earlier unsolved slots remain @_@.
+selectedPolytypeVisibleArguments
+  :: HsType -> HsType -> [SharedGenerated.VisibleTypeArgument]
+selectedPolytypeVisibleArguments = providerVisibleArguments True
+
+providerVisibleArguments
+  :: Bool -> HsType -> HsType -> [SharedGenerated.VisibleTypeArgument]
+providerVisibleArguments retainEveryPolytype source selected = maybe [] id $ do
   guard $ not $ null $ SharedType.leadingForallVariables source
   normalized <- either (const Nothing) (Just . fst) $
     alphaNormalizeForalls IntSet.empty source
@@ -228,7 +240,8 @@ inferredProviderVisibleArguments source selected = maybe [] id $ do
   substitutions <- unifyRight selected body
   let outside = outsideForallVariables body
       argument identifier = case IntMap.lookup identifier substitutions of
-        Just image | containsForall image, identifier `Set.notMember` outside ->
+        Just image | containsForall image
+                   , retainEveryPolytype || identifier `Set.notMember` outside ->
           either (const Nothing) Just $
           SharedGenerated.partiallySpecifiedVisibleTypeArgument image
         _ -> Just SharedGenerated.inferredVisibleTypeArgument

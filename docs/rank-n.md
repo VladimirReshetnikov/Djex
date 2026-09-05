@@ -7,9 +7,17 @@ The default `balanced` profile can change choices and candidate order within
 the search families described below. Statements about historical prefixes
 refer to the preserved family schedule or the `legacy` profile, not a promise
 that every profile emits the same first term. The
-[focused quality probes](../test-church/quality.md) are separate from the
-rank-N acceptance recorded for Djex `e2eb71e` and Leant `4757569`; final
-validation of the new default is still being completed.
+[focused quality probes](../test-church/quality.md) record current acceptance
+at Djex `2954b6d2` and Leant `fb84b96`: 56 Haskell queries with 104 GHC-checked
+terms, 14 compiler-replayed CLI outputs and ten invalid-option rejections, and
+84 Lean quality queries with 139 exact kernel-accepted terms. These remain
+separate from corpus coverage. The current Djex aggregate passed all 19 test
+components, including all 700 Haskell Church queries and 100 scope queries.
+The [Church guide](../test-church/README.md) also preserves the earlier full
+Lean corpus receipt for Djex `e2eb71e` and Leant `4757569` separately from the
+fresh balanced-executable replay: 350 candidates per engine, all 700 exact
+displayed terms independently kernel-accepted, and all 700 axiom inventories
+empty. Its receipts record the executable hash and the distinct engine budgets.
 
 *The typing rules and search families both engines use for higher-rank and impredicative
 goals — what each engine can introduce and eliminate, the resource bounds, the

@@ -7,9 +7,9 @@ unit tests. They do not replace the Church corpus, the rank-N scope corpus,
 or the existing Length behavioral contracts.
 The [policy guide](../docs/candidate-quality.md) defines the score and the
 distinction between raw search work, observed candidates, and output quotas.
-Haskell compiler and CLI acceptance is recorded below. Live Lean validation
-of the new policies remains pending; the historical Lean Church receipts are
-not a new-policy test result.
+Haskell compiler, CLI, and live Lean quality acceptance are recorded below.
+The fresh full Lean Church replay on the same balanced executable is recorded
+separately from the quality matrix and from the historical corpus receipts.
 
 Run against an already built checkout, with the repository's build owner
 having released the build slot:
@@ -95,13 +95,13 @@ also do not assert that a finite observed frontier contains a global minimum.
 
 ## Recorded Haskell acceptance
 
-The aggregate in `results/quality/build-all-04.log` passed all **19 test
+The aggregate in `results/quality/build-all-05.log` passed all **19 test
 components**, including the following checks:
 
 | Test group | Passed |
 | --- | ---: |
 | Shared synthesis | 437 |
-| Exference | 511 |
+| Exference | 512 |
 | Private Exference engine | 49 |
 | Djinn | 102 |
 | Djex integration | 96 |
@@ -112,21 +112,21 @@ components**, including the following checks:
 | Haskell Church queries | 700 |
 | Rank-N scope queries | 100 |
 
-The standalone probe receipt at `results/quality/compiled-final/receipt.json`
+The standalone probe receipt at `results/quality/compiled-closure/receipt.json`
 records **56 successful queries, 104 independently GHC-checked terms, and
 successful projection evaluation**. Its `validation-status.txt`,
 `candidates.tsv`, `query-metrics.tsv`, `ghc.txt`, and
 `projection-diversity.txt` preserve the separate stages. The probe was compiled
 with `-O1`; its executable SHA-256 is
-`75ae07c4db2378a411e3f39bf64eea4f8a018dc4373bb08b25935dffa0c60eec`.
+`3bee140a0d864c7f4016722aaadc954363ddb2ab956311614d574e5193235604`.
 The observation window of 12, output cap of four, 10,000-step/choice budget,
 and 15-second timeout were unchanged.
 
-`results/quality-cli-accepted/results.json` records **14 exact compiler-replayed
+`results/quality-cli-closure/results.json` records **14 exact compiler-replayed
 outputs, ten invalid-option rejections, and successful settings/reset,
 qualified-provider, reload, and module-scope checks**. That distinct executable
 remained unchanged throughout the run and has SHA-256
-`cc295118ce4bf45a385eba3a4d430db3bb366cc314863e58f1daa75f988e4baf`.
+`485bc35ea11cc4e6d5b9ba04009b4bb69386f3a932c38c53b6cd639ce3ce1982`.
 
 The measured quality distinction is explicit:
 
@@ -136,14 +136,74 @@ The measured quality distinction is explicit:
 | Djinn provider | `cheap ()` | `cheap ()` | Existing preference preserved. |
 | Haskell `nil`, both engines | Zero eliminations | Zero eliminations | Existing simple output preserved. |
 
-The final Exference `nil` runs exhausted the full 10,000-step alternatives
-trace in approximately 0.05–0.08 seconds wall time. These are recorded
+The final Exference `nil` alternatives queries used a 10,000-step budget and
+completed in approximately 0.10–0.17 seconds wall time. These are recorded
 diagnostics, not first-result latency. The cause of their difference from
 earlier runs has not been established; no particular source change is credited
 with that timing difference, and no general speedup is claimed.
 
-These Haskell receipts do not establish live Lean acceptance of the new
-policies. That separate validation remains pending.
+## Recorded Lean acceptance
+
+Live Lean quality acceptance was run against Leant `fb84b96` with vendored
+Djex `2954b6d2`. The fixed executable SHA-256 is
+`dab110ad2a7903ac4ef4883898d48532c00cc8c3b1b8d8748aac7744eedffb61`.
+The following receipts belong to Leant's `test-church/quality-results/`
+directory, separately from the Haskell reports above:
+
+| Receipt | Confirmed result |
+| --- | --- |
+| `build-leant-04.log` | All 565 synthesis tests passed in 392.05 seconds. |
+| `focused-repair/results.json` | Six live queries, 14 exact kernel-accepted terms, and two fresh paired nil improvements passed. |
+| `matrix-accepted/results.json` | All 84 queries and 139 exact displayed terms passed synthesis and independent kernel replay; all three fresh paired nil improvements passed. |
+| `church-djinn/results.json` and `church-exference/results.json` | Each engine produced 350/350 candidates; all 700 exact displayed terms passed independent kernel replay with empty axiom inventories on the same unchanged balanced executable. |
+
+The full matrix covers seven examples, four policies, and three engine
+selections. Every policy uses the same candidate window of 12, display cap of
+four, 10,000 Exference steps or Djinn choice points, and 30-second timeout.
+The receipt records unchanged executable hashes and successful live and
+kernel process exits. Its source-transcript SHA-256 is
+`96b6681ec583aa213df0d6a80d780eac17f36ba4e13827f98b1e8526a1851547`.
+The focused repair transcript has SHA-256
+`e5b4e9b6cab117d1d6a3bdb3a7bf34062ab2c2f29e39ef4b0f48a66221992ece`.
+
+Kernel axiom inspection found empty inventories for all **112 closed terms**.
+The other **27 terms** used only their explicitly declared provider premises;
+they are accepted relative to those premises, not counted as closed proofs.
+`QualityCandidates.lean` and `kernel-output.txt` preserve the exact displayed
+terms and their inventories. The replay module also contains three successful
+functional-diversity proofs: for each engine selection, the diverse projection
+outputs include both 11 and 29 when applied to those distinct inputs.
+
+The paired nil comparison is a strict improvement in all three structural
+profiles. In the same fresh matrix, Exference legacy returns:
+
+```lean
+fun _ _ f x => match Sum.inr x with | .inl a => f a x | .inr b => b
+```
+
+Balanced, compact, and diverse each return:
+
+```lean
+fun _ _ _ x => x
+```
+
+Both before and after terms are independently kernel-accepted under the
+original signature. The quality gate checks the direct last-argument selector
+as well as removal of the explicit match; it does not infer success from a
+smaller printed name or a changed structural-family label.
+
+The separate full Church replay used one candidate per query, 4,096 Exference
+steps, and a 30-second synthesis timeout. Djinn retained its default unbounded
+choice-point budget; `synth-steps` is Exference-only. Both engines' receipts
+record 350 cases, 350 candidates, successful live and kernel exits, and the
+same unchanged `dab110ad...` executable identified above. The shared canonical
+source hash is
+`782e4edaa5bf813e30e39ae02d52278ab0566315ebc521401a947b98c44cfd11`,
+and the input manifest hash is
+`0c2954eeb36811ea065aba86187d09cd8761529de1acefd5111ccf088b189ed9`.
+The [corpus guide](README.md) describes the universe and explicit-default
+policy and retains the historical 700-term and ordinary compatibility
+receipts under their original executable identities.
 
 The corresponding [Lean runner and guide](https://github.com/VladimirReshetnikov/Leant/blob/main/test-church/quality.md)
 live in Leant's `test-church/` directory.

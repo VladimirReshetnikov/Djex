@@ -59,10 +59,14 @@ These controls belong to the modern `djex` frontend. The historical standalone
 `--short` preference. Use `djex exference --ranking ...` for structural policies.
 
 In Leant, use `:set synth-ranking legacy|balanced|compact|diverse`. The selected
-profile applies to ordinary, provider, library, and classical lanes. Provider
-costs use the existing relevance ordering, keyed by each provider's exact
-private identity. Changing the ranking profile preserves the configured
-resource bounds and eligibility for the existing parallel search schedule.
+profile applies to ordinary, provider, library, and classical lanes. Both
+engines use the shared default structural prices: each named value occurrence
+costs one, and constructors have no provider surcharge. Provider discovery
+and lane order keep their relevance priorities. Exference also retains its
+existing source ratings of 0, 20, 40, and so on under exact private identities;
+these remain search inputs and are not charged again as structural prices.
+Changing the ranking profile preserves the configured resource bounds and
+eligibility for the existing parallel search schedule.
 
 ## Structural cost and diversity
 
@@ -182,6 +186,16 @@ the existing capture-safe cleanup may remove an unused binding or inline a
 single use. Local type annotations and visible applications in retained
 payloads are preserved. Required higher-rank eta expansion is not removed.
 
+Exference first exposes safe single-use let aliases and removes unused lets
+with the capture-safe simplifier that does not contract eta expansions. It
+then applies the shared one-pass constructor reducer and simplifies the
+resulting field lets. If this reveals another reducible match, it repeats only
+while the number of case nodes strictly decreases. Neither step duplicates
+cases, so the original case count bounds this closure. Repeated payload uses
+remain shared, and visible type applications on a constructor head still
+block its reduction. This iteration belongs to the Exference adapter; the
+shared `Generated` reducer retains its one-pass contract.
+
 Exference independently checks a reduced term before constructing its typed
 candidate and graph. If reduction cannot retain the necessary typing context,
 the checked original remains available. Selection keeps the whole candidate
@@ -220,14 +234,14 @@ acceptance is complete for the recorded build and executables:
 
 | Receipt | Confirmed result |
 | --- | --- |
-| `build-all-04.log` | All 19 test components passed, including 437 shared tests, 511 Exference tests, 49 private engine tests, 102 Djinn tests, 96 integration tests, 429 Length tests, and CLI suites of 93, 25, and 24 tests. The same aggregate reran all 700 Haskell Church queries and all 100 rank-N scope queries. |
-| `compiled-final` | 56 policy/backend queries passed; all 104 retained terms passed independent GHC replay, and the diverse projections passed evaluation on distinct inputs. |
-| `quality-cli-accepted` | 14 exact outputs passed GHC, ten invalid options were rejected, and settings/reset, qualified provider costs, reload, and changed module scope passed. |
+| `build-all-05.log` | All 19 test components passed, including 437 shared tests, 512 Exference tests, 49 private engine tests, 102 Djinn tests, 96 integration tests, 429 Length tests, and CLI suites of 93, 25, and 24 tests. The same aggregate reran all 700 Haskell Church queries and all 100 rank-N scope queries. |
+| `compiled-closure` | 56 policy/backend queries passed; all 104 retained terms passed independent GHC replay, and the diverse projections passed evaluation on distinct inputs. |
+| `quality-cli-closure` | 14 exact outputs passed GHC, ten invalid options were rejected, and settings/reset, qualified provider costs, reload, and changed module scope passed. |
 
 The standalone probe executable has SHA-256
-`75ae07c4db2378a411e3f39bf64eea4f8a018dc4373bb08b25935dffa0c60eec`.
+`3bee140a0d864c7f4016722aaadc954363ddb2ab956311614d574e5193235604`.
 The separately recorded CLI executable has SHA-256
-`cc295118ce4bf45a385eba3a4d430db3bb366cc314863e58f1daa75f988e4baf`.
+`485bc35ea11cc4e6d5b9ba04009b4bb69386f3a932c38c53b6cd639ce3ce1982`.
 The [focused guide](../test-church/quality.md#recorded-haskell-acceptance)
 identifies their reports and measurement boundaries.
 
@@ -239,20 +253,47 @@ from one to three. Djinn already chose `cheap ()` under legacy, and Haskell
 `nil` had zero eliminations under every profile. Those checks demonstrate
 preservation, not additional strict improvements.
 
-The final compiled Exference `nil` alternatives runs completed their
-10,000-step traces in approximately 0.05–0.08 seconds wall time. The cause of
+The final compiled Exference `nil` alternatives queries, configured with a
+10,000-step budget, completed in approximately 0.10–0.17 seconds wall time. The cause of
 the difference from earlier diagnostic runs has not been established, so
 these timings are not an attributed source-level speedup claim or a
 first-result latency measurement.
 
-Live Lean acceptance of the new policies remains pending. No new Lean kernel
-receipt is implied by these Haskell results.
+Live Lean quality acceptance is now recorded separately for Leant `fb84b96`
+with Djex `2954b6d2`. Its executable remained unchanged during replay and has
+SHA-256
+`dab110ad2a7903ac4ef4883898d48532c00cc8c3b1b8d8748aac7744eedffb61`.
+The Leant receipts under `test-church/quality-results/` establish:
 
-The completed rank-N corpus results in the
-[Church guide](../test-church/README.md) are pinned to Djex `e2eb71e` and Leant
-`4757569`, before these quality policies. The newly repeated Haskell corpus
-checks above supplement that record; its 700-term Lean result remains evidence
-for the earlier unchanged executable, not a fresh Lean run of the new default.
+| Receipt | Confirmed result |
+| --- | --- |
+| `build-leant-04.log` | All 565 synthesis tests passed in 392.05 seconds. |
+| `focused-repair/results.json` | Six live queries and all 14 exact displayed terms passed kernel replay, including both paired nil improvements. |
+| `matrix-accepted/results.json` | All 84 policy/engine/example queries passed; all 139 exact displayed terms passed kernel replay. The 112 closed terms had empty axiom inventories; the remaining 27 depended only on the fixture's declared provider premises. |
+| `church-djinn/results.json` and `church-exference/results.json` | The same unchanged balanced executable produced 350/350 candidates per engine; all 700 exact displayed terms passed independent kernel replay with empty axiom inventories. |
+
+The full quality matrix used the same window of 12, display cap of four,
+10,000 Exference steps or Djinn choice points, and 30-second timeout for each
+policy. Fresh comparisons show Exference's legacy nil retaining
+`match Sum.inr x with | .inl a => f a x | .inr b => b`, while balanced,
+compact, and diverse return the direct selector `fun _ _ _ x => x`.
+Three independent Lean proofs also establish that the diverse projection
+outputs include both distinct results on inputs 11 and 29, one proof per
+engine selection. These are measured quality improvements and behavioral
+distinctions within the tested allowance, not global minimality claims.
+The [focused guide](../test-church/quality.md#recorded-lean-acceptance) identifies
+the complete receipt and source hashes.
+
+The [Church guide](../test-church/README.md) records the fresh Haskell and Lean
+corpus results separately from the earlier Djex `e2eb71e`/Leant `4757569`
+receipts. The new Lean corpus used a one-candidate window, 4,096 Exference
+steps, and a 30-second synthesis timeout; Djinn retained its default unbounded
+choice-point budget, subject to the shared deadline and intrinsic planning
+caps. All 700 fresh terms passed independent kernel replay with empty axiom
+inventories. This checks corpus preservation under the new balanced default;
+the separate 84-query matrix establishes the measured quality distinctions.
+The earlier ordinary compatibility run remains historical evidence for its
+own executable and is not relabeled by either new receipt.
 
 ## Related documentation
 

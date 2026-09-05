@@ -69,13 +69,6 @@ these tiers explicitly.
 
 ## Rank-N and impredicative synthesis
 
-Candidate quality is also considered before the result cutoff: both engines
-support `balanced`, `compact`, `diverse`, and `legacy` ranking profiles.
-Structural policies combine term size, elimination structure, exact provider
-costs, and optional diversity. Checked known-constructor reductions preserve
-sharing and type metadata, while duplicates still consume their original
-search work. See the [policy and configuration guide](docs/candidate-quality.md).
-
 Both Djinn and Exference now synthesize implementations that construct,
 consume, and return polymorphic values. The shared type representation retains
 nested `forall` binders and their scopes throughout search and reconstruction.
@@ -97,20 +90,48 @@ The improvements cover:
   Lean terms with explicit and implicit binders and checks every displayed
   candidate with Lean.
 
-The rank-N validation recorded in the
-[Church acceptance suite](test-church/README.md) covers all **350 resolved
-signatures** in [Church.hs](docs/examples/Church.hs): **350/350 for each engine
-in Haskell and 350/350 universe-correct counterparts for each engine through
-Leant**. Per engine, this includes 315 total cases, 16 cases with integer
-providers, and 19 partial cases tested with an explicit supplied default.
-Haskell additionally compiler-checks partial wrappers at the original
-signatures, supplying `undefined` only after synthesis; Lean keeps the default
-as an ordinary argument. All 700 generated Lean terms passed independent
-kernel replay with empty axiom inventories.
-These results are pinned to Djex `e2eb71e` and Leant `4757569`, before the new
-quality policies. The [focused quality guide](test-church/quality.md) describes
-the separate policy comparisons; their final compiler and live Lean validation
-is still being completed.
+Candidate quality is considered before the result cutoff. Both engines
+support `balanced`, `compact`, `diverse`, and `legacy` ranking profiles.
+Structural policies combine term size, elimination structure, exact provider
+costs, and optional diversity. Checked known-constructor reductions preserve
+sharing and type metadata, while duplicates still consume their original
+search work. For example:
+
+```text
+djex djinn --ranking balanced "(forall a. a -> a) -> b -> b"
+djex exference --ranking diverse --select all --quality-window 12 --max-steps 4096 "(forall a. a -> a) -> b -> b"
+```
+
+The [policy guide](docs/candidate-quality.md) explains the scores, exact
+provider-cost overrides, and bounded selection. The
+[rank-N guide](docs/rank-n.md) describes the typing rules and search families.
+
+Current Haskell validation at Djex `2954b6d2` passed all **19 test components**,
+including the [Church acceptance suite](test-church/README.md): **350/350
+resolved signatures for each engine**, with both complete generated modules
+accepted by GHC. It also reran all **100 independent scope queries**, including
+76 positive implementations checked by GHC and 24 bounded negative cases.
+The Church inventory includes, per engine, 315 total cases, 16 cases with
+integer providers, and 19 partial cases tested with an explicit supplied
+default. Haskell additionally compiler-checks those partial wrappers at the
+original signatures, supplying `undefined` only after synthesis.
+
+The separate [quality comparisons](test-church/quality.md) passed **56 Haskell
+queries with 104 GHC-checked terms**, plus **14 exact CLI outputs and ten
+invalid-option rejections**. Current Leant `fb84b96`, using that Djex revision,
+passed **84 quality queries with 139 exact displayed terms independently
+accepted by Lean**: 112 had empty axiom inventories, and 27 used only their
+declared provider premises. These include three fresh nil improvements and
+three functional-diversity proofs at unchanged search allowances.
+
+The same current balanced Leant executable also completed a fresh replay of
+all **350/350 universe-correct Church counterparts per engine**, with all
+**700 exact displayed terms independently kernel-accepted and all 700 axiom
+inventories empty**. Lean keeps the partial cases' supplied defaults as
+ordinary arguments. These corpus checks are separate from the quality matrix.
+The linked acceptance guides record the exact executable hash and retain
+the earlier Leant `4757569`/Djex `e2eb71e` corpus and ordinary compatibility
+receipts as historical evidence.
 
 These results establish practical corpus coverage. General impredicative
 inhabitation is undecidable, so a higher-rank search miss remains inconclusive;

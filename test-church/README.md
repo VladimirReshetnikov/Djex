@@ -4,9 +4,9 @@ The [candidate-quality guide](../docs/candidate-quality.md) and
 [focused quality probes](quality.md) cover the separate comparison of
 `legacy`, `balanced`, `compact`, and `diverse`. The reproduction commands
 below run the current checkout and its default policy. The completed corpus
-results in this document are historical rank-N acceptance at the explicitly
-recorded revisions; final acceptance of the new quality policies is still
-being completed.
+receipts below distinguish the current Haskell rerun and quality-policy
+validation, including the fresh full 700-query Lean Church replay of the
+balanced executable, from historical rank-N and ordinary compatibility runs.
 
 This suite synthesizes implementations from **every type signature** in
 `docs/examples/Church.hs`: 346 top-level signatures and four explicitly
@@ -149,7 +149,47 @@ per-case TSV result, and the full GHC diagnostic output. These reproducible
 run artifacts are ignored by Git. A successful exit requires every selected
 query to produce a candidate and the entire generated module to pass GHC.
 
-The recorded Djex `e2eb71e` validation on 2026-09-04 with GHC 9.12.4,
+### Current corpus and quality acceptance
+
+Djex `2954b6d2` passed all **19 test components** in
+`results/quality/build-all-05.log`. That aggregate reran this full Church
+inventory: **350/350 candidates for Djinn and 350/350 for Exference**, both
+with `failed=0` and successful independent GHC checks of their generated
+modules. It also passed all 100 independent scope queries, with 76 positive
+implementations checked by GHC and 24 bounded negative cases.
+
+The [focused quality guide](quality.md) records the separate current policy
+comparisons: **56 Haskell queries and 104 GHC-checked terms**, plus **14 exact
+CLI outputs and ten invalid-option rejections**. Leant `fb84b96` with this
+Djex revision passed **84 quality queries and 139 exact kernel-accepted
+terms**, of which 112 had empty axiom inventories and 27 used only the
+fixture's declared provider premises. All 565 Leant synthesis tests also
+passed. Those live quality receipts use the unchanged executable with SHA-256
+`dab110ad2a7903ac4ef4883898d48532c00cc8c3b1b8d8748aac7744eedffb61`.
+
+That same balanced executable separately completed the full Lean Church
+corpus: **350/350 Djinn and 350/350 Exference candidates**, with all **700
+exact displayed terms independently kernel-accepted and all 700 axiom
+inventories empty**. Leant's
+`test-church/quality-results/church-djinn/results.json` and
+`test-church/quality-results/church-exference/results.json` each record 350
+cases, 350 candidates, successful live and kernel process exits, and unchanged
+executable hashes. These fresh corpus receipts do not depend on the separate
+quality matrix's success.
+
+Both runs used a one-candidate observation, verification, and display window,
+a 30-second synthesis timeout, and `synth-steps 4096`. That step budget applies
+to Exference; Djinn retained `synth-budget off`, subject to its shared wall-clock
+deadline and intrinsic planning caps. The timeout excludes process startup,
+goal serialization, and separate kernel replay. The canonical source hash is
+`782e4edaa5bf813e30e39ae02d52278ab0566315ebc521401a947b98c44cfd11`;
+the input manifest hash is
+`0c2954eeb36811ea065aba86187d09cd8761529de1acefd5111ccf088b189ed9`.
+The source hash uses the line-ending normalization described above.
+
+### Historical rank-N and ordinary compatibility acceptance
+
+The earlier Djex `e2eb71e` validation on 2026-09-04 with GHC 9.12.4,
 a two-second per-query timeout, and a
 10,000-step/choice budget produced **350/350 candidates for Djinn and 350/350
 for Exference**. Both complete generated modules, including all original-type
@@ -251,4 +291,7 @@ explains these cases and compiler-checked explicit type applications.
 The pre-quality reconstruction pass was validated in September 2026: all 100 probe
 queries met their expectations across both engines, all 76 positive
 implementations passed GHC, and all 24 negative queries returned no candidate
-without errors or timeouts. These counts are separate from the Church corpus.
+without errors or timeouts. The current `2954b6d2` aggregate in
+`results/quality/build-all-05.log` reran the same 100-query inventory with all
+expectations satisfied and both GHC checks successful. These counts are
+separate from the Church corpus.

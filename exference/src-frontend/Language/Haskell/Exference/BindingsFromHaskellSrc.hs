@@ -15,6 +15,7 @@ module Language.Haskell.Exference.BindingsFromHaskellSrc
   , getDataConssLocated
   , getDataConssSourced
   , getDataConssSourcedWithResolver
+  , getDataConssSourcedWithResolverAndExtensions
   , getDataTypes
   , getDataTypesLocated
   )
@@ -23,6 +24,7 @@ where
 
 
 import Language.Haskell.Exts.Syntax hiding (TypeApp)
+import qualified Language.Haskell.Exts.Extension as HSE
 import Language.Haskell.Exts.Pretty
 import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
 import Language.Haskell.Exference.Core.FunctionBinding
@@ -51,6 +53,7 @@ import Numeric.Natural (Natural)
 data LoweredConstructor = LoweredConstructor
   { loweredConstructorName :: QualifiedName
   , loweredConstructorFields :: [HsType]
+  , loweredConstructorNonStrict :: Bool
   , loweredRecordSelectors :: [(QualifiedName, HsType)]
   }
 
@@ -206,13 +209,31 @@ getDataConssSourcedWithResolver
        [ SourcedExtraction
            ([FunctionBinding], DeconstructorBinding)
        ]
-getDataConssSourcedWithResolver resolver tDeclMap modul = do
+getDataConssSourcedWithResolver resolver tDeclMap =
+  getDataConssSourcedWithResolverAndExtensions resolver tDeclMap []
+
+-- | Retain the caller's known extension switches when classifying constructor
+-- evaluation. Source pragmas override these switches in source order; an
+-- AST-only caller uses the ordinary Haskell field default through the wrapper
+-- above and remains responsible for supplying any external compiler defaults.
+getDataConssSourcedWithResolverAndExtensions
+  :: Monad m
+  => TypeResolver
+  -> TypeDeclMap
+  -> [HSE.Extension]
+  -> Module SrcSpanInfo
+  -> m
+       [ SourcedExtraction
+           ([FunctionBinding], DeconstructorBinding)
+       ]
+getDataConssSourcedWithResolverAndExtensions resolver tDeclMap extensions modul = do
   sourced <- sequence $ do
     (moduleName, declarations) <- maybeToList $ moduleNameAndDecls modul
     (slot, declaration@(DataDecl _ _ context rawHead conss _)) <-
       zip [0 :: Natural ..] declarations
     pure $ extractDataDeclarationWithResolver
-      resolver tDeclMap slot moduleName declaration
+      resolver tDeclMap (moduleHasStrictFields extensions modul)
+      slot moduleName declaration
       context rawHead conss
   let marked = markRecursiveDeconstructors
         $ map sourcedExtractionResult sourced
@@ -224,6 +245,7 @@ extractDataDeclarationWithResolver
   :: Monad m
   => TypeResolver
   -> TypeDeclMap
+  -> Bool
   -> Natural
   -> ModuleName SrcSpanInfo
   -> Decl SrcSpanInfo
@@ -234,7 +256,7 @@ extractDataDeclarationWithResolver
        ( SourcedExtraction
            ([FunctionBinding], DeconstructorBinding)
        )
-extractDataDeclarationWithResolver resolver tDeclMap slot moduleName declaration
+extractDataDeclarationWithResolver resolver tDeclMap strictFields slot moduleName declaration
     context rawHead conss = do
   let (name, params) = splitDeclHead rawHead
   let
@@ -279,11 +301,16 @@ extractDataDeclarationWithResolver resolver tDeclMap slot moduleName declaration
       pure LoweredConstructor
         { loweredConstructorName = qualifiedConstructor
         , loweredConstructorFields = fieldTypes
+        , loweredConstructorNonStrict = all (fieldIsNonStrict strictFields)
+            $ case conDecl of
+                ConDecl _ _ types -> types
+                InfixConDecl _ left _ right -> [left, right]
+                RecDecl _ _ fields -> [fieldType | FieldDecl _ _ fieldType <- fields]
         , loweredRecordSelectors = selectors
         }
      where
-      -- Strictness and unpacking govern representation and evaluation, not a
-      -- field's source type. Exference's inventory models the latter only.
+      -- Preserve evaluation authority separately before erasing annotations
+      -- from the type used for kind inference and synthesis.
       convertFieldType = convertTypeInternalWithResolver
         resolver (Just moduleName) tDeclMap . eraseFieldAnnotations
 
@@ -330,7 +357,8 @@ extractDataDeclarationWithResolver resolver tDeclMap slot moduleName declaration
                     ]
                , DeconstructorBinding
                    rtype
-                   [ ConstructorBinding
+                   [ (if loweredConstructorNonStrict constructor
+                        then nonStrictConstructorBinding else ConstructorBinding)
                        (loweredConstructorName constructor)
                        (loweredConstructorFields constructor)
                    | constructor <- consDatas
@@ -352,6 +380,53 @@ eraseFieldAnnotations (TyBang _ _ _ fieldType) =
 eraseFieldAnnotations (TyParen location fieldType) =
   TyParen location $ eraseFieldAnnotations fieldType
 eraseFieldAnnotations fieldType = fieldType
+
+-- Explicit lazy fields remain lazy under StrictData. Apply known parse-mode
+-- switches first, followed by module pragmas and their switches in source
+-- order. Enabling Strict also enables StrictData; disabling Strict does not
+-- undo that implication, whereas NoStrictData explicitly restores lazy fields.
+-- No extension state outside the supplied mode and module is inferred.
+moduleHasStrictFields :: [HSE.Extension] -> Module SrcSpanInfo -> Bool
+moduleHasStrictFields extensions modul = case modul of
+  Module _ _ pragmas _ _ -> foldl' updatePragma modeStrict pragmas
+  _ -> True
+ where
+  modeStrict = foldl' updateExtension False extensions
+
+  updateExtension strict extension = case extension of
+    HSE.EnableExtension HSE.Strict -> True
+    HSE.EnableExtension HSE.StrictData -> True
+    HSE.DisableExtension HSE.StrictData -> False
+    HSE.UnknownExtension spelling -> updateSpelling strict spelling
+    _ -> strict
+
+  updatePragma strict pragma = case pragma of
+    LanguagePragma _ names -> foldl' updateName strict names
+    OptionsPragma _ compiler options
+      | maybe True (== GHC) compiler -> foldl' updateOption strict $ words options
+    _ -> strict
+
+  updateName strict syntaxName = case syntaxName of
+    Ident _ spelling -> updateSpelling strict spelling
+    Symbol _ _ -> strict
+
+  updateOption strict option = case option of
+    '-':'X':spelling -> updateSpelling strict spelling
+    _ -> strict
+
+  updateSpelling strict spelling = case spelling of
+    "Strict" -> True
+    "StrictData" -> True
+    "NoStrictData" -> False
+    _ -> strict
+
+fieldIsNonStrict :: Bool -> Type SrcSpanInfo -> Bool
+fieldIsNonStrict strictFields field = case field of
+  TyBang _ (BangedTy _) _ _ -> False
+  TyBang _ (LazyTy _) _ _ -> True
+  TyBang _ (NoStrictAnnot _) _ inner -> fieldIsNonStrict strictFields inner
+  TyParen _ inner -> fieldIsNonStrict strictFields inner
+  _ -> not strictFields
 
 -- | A selector shared by several record constructors denotes one top-level
 -- function. Keep its first source occurrence and reject inconsistent types

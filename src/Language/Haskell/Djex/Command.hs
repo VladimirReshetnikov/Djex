@@ -12,6 +12,7 @@ module Language.Haskell.Djex.Command
   , defaultResultTargetSpelling
   , parseResultTarget
   , parseSelectionMode
+  , parseProviderCostAssignment
   , parseSearchStrategy
   , parseRenderMode
   , parseQualification
@@ -58,6 +59,7 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
 import Data.Bifunctor (first)
 import Data.List (intercalate)
+import Numeric.Natural (Natural)
 import qualified Data.Map.Strict as Map
 import System.Exit (ExitCode (ExitFailure, ExitSuccess))
 import System.Timeout (timeout)
@@ -88,6 +90,9 @@ data PresentationOptions = PresentationOptions
   { presentationSelection :: SelectionMode
   , presentationRenderMode :: RenderMode
   , presentationQualification :: Qualification
+  , presentationRanking :: CandidateRankingPolicy
+  , presentationProviderCosts :: Map.Map Name Natural
+  , presentationQualityWindow :: Int
   }
   deriving (Eq, Show)
 
@@ -97,6 +102,9 @@ defaultOneShotPresentationOptions = PresentationOptions
   { presentationSelection = SelectBest
   , presentationRenderMode = RenderDefinition
   , presentationQualification = FullyQualified
+  , presentationRanking = defaultCandidateRankingPolicy
+  , presentationProviderCosts = Map.empty
+  , presentationQualityWindow = 60
   }
 
 -- | Latency-oriented defaults for an interactive session.
@@ -121,6 +129,16 @@ parseSelectionMode subject source = case normalize source of
   "best" -> Right SelectBest
   "all" -> Right SelectAll
   _ -> Left $ subject ++ " must be first, best, or all"
+
+-- | A nonnegative cost for one exact source name. Split at the last equals
+-- sign so qualified operator names can also be assigned a cost.
+parseProviderCostAssignment :: String -> Either String (Name, Natural)
+parseProviderCostAssignment source = case break (== '=') (reverse $ trim source) of
+  (reversedCost, '=' : reversedName) -> do
+    name <- either (Left . renderNameError) Right $ parseName $ trim $ reverse reversedName
+    cost <- nonNegativeInteger "provider cost" $ reverse reversedCost
+    pure (name, fromInteger cost)
+  _ -> Left "expected NAME=COST with a nonnegative integer cost"
 
 -- | Parse a Djinn search-strategy setting with a caller-owned option name.
 parseSearchStrategy :: String -> String -> Either String Strategy
@@ -277,15 +295,18 @@ noFieldSelectors :: FieldSelectors
 noFieldSelectors = Map.empty
 
 -- | Apply presentation-driven proof enumeration without changing the caller's
--- resource limits. Djinn never needs its historical internal sorting because
--- the shared selection layer owns result ordering.
+-- resource limits. Structural policies rank the admitted collection before
+-- presentation selection; legacy retains the historical command path.
 prepareDjinnQueryOptions
   :: PresentationOptions
   -> QueryOptions
   -> QueryOptions
 prepareDjinnQueryOptions presentation options = options
   { optionAlternatives = presentationSelection presentation /= SelectFirst
-  , optionSorted = False
+  , optionSorted = presentationRanking presentation /= LegacyCandidateRanking
+      && presentationSelection presentation /= SelectFirst
+  , optionRanking = presentationRanking presentation
+  , optionProviderCosts = presentationProviderCosts presentation
   }
 
 -- | Parse, execute, and present one checked Djinn query.
@@ -324,7 +345,7 @@ executeExferenceCommand presentation fieldSelectors session options target
     sourceName source =
   executeParsedQuery
     (parseExferenceRequestWithCheckedTarget
-      session options target sourceName source)
+      session (prepareExferenceQualityOptions presentation options) target sourceName source)
     (runExferenceQuery session)
     (presentExference presentation fieldSelectors)
 
@@ -345,9 +366,15 @@ executeExferenceCommandInScope presentation fieldSelectors session options
     target scope sourceName source =
   executeParsedQuery
     (parseExferenceRequestWithCheckedTargetInScope
-      session options target scope sourceName source)
+      session (prepareExferenceQualityOptions presentation options) target scope sourceName source)
     (runExferenceQuery session)
     (presentExference presentation fieldSelectors)
+
+prepareExferenceQualityOptions :: PresentationOptions -> ExferenceOptions -> ExferenceOptions
+prepareExferenceQualityOptions presentation options = options
+  { exferenceCandidateRanking = presentationRanking presentation
+  , exferenceProviderCosts = presentationProviderCosts presentation
+  }
 
 -- Run one parsed request and present its result, reporting a parse or query
 -- failure as a diagnostic.  Every command above is this shape.
@@ -391,7 +418,11 @@ prepareDjinnPresentation options fieldSelectors result = case
   evidence = resultEvidence result
   selection = selectQueryResults
     (presentationSelection options)
-    candidateDetails
+    (\candidate ->
+      ( if presentationRanking options == LegacyCandidateRanking
+          then Just $ candidateDetails candidate else Nothing
+      , presentationQualityCost options
+          $ projectFieldSelectorsWithoutEta fieldSelectors $ candidateOutput candidate ))
     (const True)
     [result]
   candidates = map
@@ -406,7 +437,8 @@ presentExference
   -> [ExferenceResult]
   -> IO ExitCode
 presentExference options fieldSelectors results
-  | presentationSelection options == SelectAll =
+  | presentationRanking options == LegacyCandidateRanking
+  , presentationSelection options == SelectAll =
       presentAllExference options fieldSelectors results
 presentExference options fieldSelectors results = replayCommandOutput
   $ prepareExferencePresentation options fieldSelectors results
@@ -416,8 +448,9 @@ presentExference options fieldSelectors results = replayCommandOutput
 --
 -- The admission action runs exactly once for every candidate the policy
 -- inspects. Rejected candidates cannot participate in ranking. 'SelectAll'
--- retains the existing one-pass output behavior instead of materializing the
--- complete admitted trace.
+-- retains one-pass output in legacy mode. Structural all-selection checks a
+-- bounded pool before ranking and output. First-selection retains its stopping
+-- rule; the backend has already ordered its choices and checked batches.
 presentAssessedExference
   :: PresentationOptions
   -> FieldSelectors
@@ -425,21 +458,29 @@ presentAssessedExference
   -> [ExferenceTypedResult]
   -> IO ExitCode
 presentAssessedExference options fieldSelectors admit results
-  | presentationSelection options == SelectAll =
+  | presentationRanking options == LegacyCandidateRanking
+  , presentationSelection options == SelectAll =
       presentAllAssessedExference options fieldSelectors admit results
 presentAssessedExference options fieldSelectors admit results = do
   selected <- case presentationSelection options of
+    mode
+      | presentationRanking options /= LegacyCandidateRanking
+      , mode == SelectAll -> selectQualityQueryResultsM
+          (presentationQualityWindow options) (presentationRanking options)
+          (presentationProviderCost options)
+          (functionClauseExpression . projectFieldSelectors fieldSelectors
+            . candidateOutput . typedCandidateCompatibility)
+          admit results
     SelectFirst
       | not $ Map.null fieldSelectors -> selectQueryResultsM
           (SelectBestLookahead simplificationLookahead)
-          (expressionSize . functionClauseExpression
+          (presentationSelectorCost options
             . projectFieldSelectors fieldSelectors . candidateOutput
             . typedCandidateCompatibility)
           admit
           results
     mode -> selectQueryResultsM mode
-      (exferenceCandidateComplexity . exferenceCandidateMetrics
-        . typedCandidateCompatibility)
+      (presentationExferenceRank options fieldSelectors . typedCandidateCompatibility)
       admit
       results
   presentExferenceSelection options fieldSelectors
@@ -454,8 +495,8 @@ presentExferenceSelection options fieldSelectors =
   replayCommandOutput . prepareExferenceSelection options fieldSelectors
 
 -- | Select and render a non-streaming Exference result sequence without
--- touching process handles.  The caller must retain the streaming presenter
--- for 'SelectAll'.
+-- touching process handles. The caller retains the streaming presenter for
+-- legacy 'SelectAll'; structural all-selection uses a bounded pool.
 prepareExferencePresentation
   :: PresentationOptions
   -> FieldSelectors
@@ -469,17 +510,48 @@ prepareExferencePresentation options fieldSelectors results =
   -- is smallest: search order distinguishes deconstruct-and-rebuild
   -- spellings that presentation renders identically simple or not at all.
   selection = case presentationSelection options of
+    mode
+      | presentationRanking options /= LegacyCandidateRanking
+      , mode == SelectAll -> selectQualityQueryResults
+          (presentationQualityWindow options) (presentationRanking options)
+          (presentationProviderCost options)
+          (functionClauseExpression . projectFieldSelectors fieldSelectors . candidateOutput)
+          (const True) results
     SelectFirst
       | not $ Map.null fieldSelectors -> selectQueryResults
           (SelectBestLookahead simplificationLookahead)
-          (expressionSize . functionClauseExpression
+          (presentationSelectorCost options
             . projectFieldSelectors fieldSelectors . candidateOutput)
           (const True)
           results
     mode -> selectQueryResults mode
-      (exferenceCandidateComplexity . exferenceCandidateMetrics)
+      (presentationExferenceRank options fieldSelectors)
       (const True)
       results
+
+presentationQualityCost :: PresentationOptions -> FunctionClause local -> Natural
+presentationQualityCost options = candidateQualityCost
+  (presentationRanking options) (presentationProviderCost options)
+  . functionClauseExpression
+
+-- Record-selector lookahead keeps its established bound. A structural policy
+-- scores the spelling the user will see; legacy retains its prior size metric.
+presentationSelectorCost :: PresentationOptions -> FunctionClause local -> Natural
+presentationSelectorCost options
+  | presentationRanking options == LegacyCandidateRanking =
+      fromIntegral . expressionSize . functionClauseExpression
+  | otherwise = presentationQualityCost options
+
+presentationProviderCost :: PresentationOptions -> Name -> Natural
+presentationProviderCost options name = Map.findWithDefault
+  (defaultCandidateProviderCost name) name (presentationProviderCosts options)
+
+presentationExferenceRank
+  :: PresentationOptions -> FieldSelectors -> ExferenceCandidate -> (Natural, Penalty)
+presentationExferenceRank options fieldSelectors candidate =
+  ( presentationQualityCost options
+      $ projectFieldSelectors fieldSelectors $ candidateOutput candidate
+  , exferenceCandidateComplexity $ exferenceCandidateMetrics candidate )
 
 prepareExferenceSelection
   :: PresentationOptions

@@ -36,6 +36,8 @@ version, and dependency contract.
   ([PDF](docs/rank-n-impredicative-synthesis.pdf),
   [LaTeX source](docs/rank-n-impredicative-synthesis.tex)), and the
   [350-signature Church regression guide](test-church/README.md).
+- For better first results and useful alternatives under bounded search, see
+  [candidate quality, checked normalization, and ranking policies](docs/candidate-quality.md).
 
 New library code should start with `Language.Haskell.Djex`, a narrower checked
 backend adapter, or a focused `Language.Haskell.Synthesis.*` import. The package
@@ -67,6 +69,13 @@ these tiers explicitly.
 
 ## Rank-N and impredicative synthesis
 
+Candidate quality is also considered before the result cutoff: both engines
+support `balanced`, `compact`, `diverse`, and `legacy` ranking profiles.
+Structural policies combine term size, elimination structure, exact provider
+costs, and optional diversity. Checked known-constructor reductions preserve
+sharing and type metadata, while duplicates still consume their original
+search work. See the [policy and configuration guide](docs/candidate-quality.md).
+
 Both Djinn and Exference now synthesize implementations that construct,
 consume, and return polymorphic values. The shared type representation retains
 nested `forall` binders and their scopes throughout search and reconstruction.
@@ -88,7 +97,8 @@ The improvements cover:
   Lean terms with explicit and implicit binders and checks every displayed
   candidate with Lean.
 
-The [Church acceptance suite](test-church/README.md) covers all **350 resolved
+The rank-N validation recorded in the
+[Church acceptance suite](test-church/README.md) covers all **350 resolved
 signatures** in [Church.hs](docs/examples/Church.hs): **350/350 for each engine
 in Haskell and 350/350 universe-correct counterparts for each engine through
 Leant**. Per engine, this includes 315 total cases, 16 cases with integer
@@ -97,6 +107,10 @@ Haskell additionally compiler-checks partial wrappers at the original
 signatures, supplying `undefined` only after synthesis; Lean keeps the default
 as an ordinary argument. All 700 generated Lean terms passed independent
 kernel replay with empty axiom inventories.
+These results are pinned to Djex `e2eb71e` and Leant `4757569`, before the new
+quality policies. The [focused quality guide](test-church/quality.md) describes
+the separate policy comparisons; their final compiler and live Lean validation
+is still being completed.
 
 These results establish practical corpus coverage. General impredicative
 inhabitation is undecidable, so a higher-rank search miss remains inconclusive;
@@ -267,6 +281,9 @@ callers can override that default, for example with `+RTS -N1 -K64m -RTS`.
 The historical `djinn` and `exference` executables remain serial. No
 executable automatically scales its capability count to all detected cores or
 inherits a fixed multi-gigabyte heap hint.
+The standalone `exference` command also retains legacy search defaults, so its
+existing `--short` preference remains effective. Select structural quality
+profiles through the modern `djex exference --ranking ...` interface.
 
 The Exference benchmark uses parser-free, explicitly step- and queue-bounded
 core fixtures. For an optimization-sensitive comparison of the search
@@ -958,10 +975,18 @@ canonical group, and a
 caller-built `Lambda []` is a validation error rather than being silently
 erased.
 
-Candidate selection and rendering remain presentation policies outside both
-session operations. The shared `Selection` module provides first,
+Output selection and rendering remain presentation policies over the checked
+session results; structural quality also influences finite choices inside each
+search. The shared `Selection` module provides first,
 global-best, streaming-all, batch-lookahead, and preferred-tier lookahead
-policies over either backend's result envelope. `TypeRender` prints shared
+policies over either backend's result envelope. The separate
+`CandidateQuality` selectors charge a bounded raw observation pool before
+ranking. The Djex frontend uses that pool for nonlegacy Exference `all`.
+`first` retains early stopping, with backend quality ordering and the existing
+bounded record-selector lookahead where needed. `best` retains search-wide
+selection, and `legacy all` retains streaming.
+See the [policy guide](docs/candidate-quality.md) for how those limits differ.
+`TypeRender` prints shared
 types and constraints from tagged variable-name hints without collapsing
 flexible and rigid identities. Its qualification-aware entry points use the
 same identifier/operator policy as generated terms, so an Exference candidate
@@ -1004,9 +1029,10 @@ opt-ins. The unrestricted programmatic session default is unchanged. Parse,
 kind, option, and search failures are structured diagnostics; one-shot
 failures have failure exit status, while an interactive diagnostic leaves the
 REPL available. Repeated compatibility-command inputs are all processed and
-conflicting presentation modes are rejected. The historical ranking vector
-remains an explicit compatibility profile, and `--short` adds backend-neutral
-structural expression size to the candidate cost.
+conflicting presentation modes are rejected. This standalone command retains
+legacy search defaults and its historical ranking vector; `--short` adds
+backend-neutral structural expression size to the candidate cost. The modern
+`djex exference --ranking ...` command exposes structural profiles separately.
 
 The `djinn` compatibility frontend retains its declaration REPL while
 storing only the exact sealed `DjinnSession`. Successful mutations edit its

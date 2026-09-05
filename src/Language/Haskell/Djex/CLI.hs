@@ -9,6 +9,8 @@ module Language.Haskell.Djex.CLI
   ) where
 
 import Data.Foldable (toList)
+import Control.Monad (unless)
+import qualified Data.Map.Strict as Map
 import Data.List (intercalate)
 import Data.Maybe (mapMaybe)
 import Data.Version (showVersion)
@@ -49,6 +51,9 @@ import Paths_djex (version)
 data Flag
   = TargetFlag String
   | SelectionFlag String
+  | RankingFlag String
+  | ProviderCostFlag String
+  | QualityWindowFlag String
   | RenderFlag String
   | QualificationFlag String
   | CandidateLimitFlag String
@@ -238,6 +243,8 @@ djinnQueryOptions :: DjinnOptions -> QueryOptions
 djinnQueryOptions options = defaultQueryOptions
   { optionCutoff = djinnCandidateLimit options
   , optionBudget = djinnChoiceBudget options
+  , optionRanking = presentationRanking $ commonPresentation $ djinnCommon options
+  , optionProviderCosts = presentationProviderCosts $ commonPresentation $ djinnCommon options
   }
 
 parseDjinnOptions :: [String] -> Either String DjinnOptions
@@ -291,6 +298,8 @@ parseExferenceOptions arguments = do
         , exferenceMaximumSteps = maximumSteps
         , exferenceMaximumQueueSize = maximumQueue
         , exferenceMaximumDepth = maximumDepth
+        , exferenceCandidateRanking = presentationRanking $ commonPresentation common
+        , exferenceProviderCosts = presentationProviderCosts $ commonPresentation common
         }
     }
  where
@@ -317,12 +326,23 @@ parseCommonOptions flags source = do
   qualification <- uniqueValue
     "--qualification" qualificationValue defaultQualificationSpelling flags
     >>= parseQualification "--qualification"
+  ranking <- uniqueValue "--ranking" rankingValue "balanced" flags
+    >>= parseCandidateRankingPolicy
+  qualityWindow <- uniqueValue "--quality-window" qualityWindowValue "60" flags
+    >>= positiveInt "--quality-window"
+  providerCosts <- traverse parseProviderCostAssignment
+    [assignment | ProviderCostFlag assignment <- flags]
+  unless (length providerCosts == Map.size (Map.fromList providerCosts))
+    $ Left "--provider-cost may assign each exact name only once"
   pure CommonOptions
     { commonTarget = target
     , commonPresentation = PresentationOptions
         { presentationSelection = selection
         , presentationRenderMode = renderMode
         , presentationQualification = qualification
+        , presentationRanking = ranking
+        , presentationProviderCosts = Map.fromList providerCosts
+        , presentationQualityWindow = qualityWindow
         }
     , commonInput = source
     }
@@ -370,6 +390,12 @@ renderValue _ = Nothing
 qualificationValue (QualificationFlag value) = Just value
 qualificationValue _ = Nothing
 
+rankingValue, qualityWindowValue :: Flag -> Maybe String
+rankingValue (RankingFlag value) = Just value
+rankingValue _ = Nothing
+qualityWindowValue (QualityWindowFlag value) = Just value
+qualityWindowValue _ = Nothing
+
 candidateLimitValue, choiceBudgetValue, constraintDeferralValue
   , maximumStepsValue, maximumQueueValue, maximumDepthValue
   :: Flag -> Maybe String
@@ -413,6 +439,12 @@ commonOptions =
       $ defaulted "generated definition name" defaultResultTargetSpelling
   , Option [] ["select"] (ReqArg SelectionFlag "first|best|all")
       $ defaulted "candidate selection policy" defaultSelectionSpelling
+  , Option [] ["ranking"] (ReqArg RankingFlag "legacy|balanced|compact|diverse")
+      "candidate quality policy (default balanced)"
+  , Option [] ["provider-cost"] (ReqArg ProviderCostFlag "NAME=COST")
+      "nonnegative structural cost for one exact provider; repeat for distinct names"
+  , Option [] ["quality-window"] (ReqArg QualityWindowFlag "N")
+      "Exference raw candidate observation window for structural all-selection (default 60)"
   , Option [] ["render"] (ReqArg RenderFlag "definition|expression")
       $ defaulted "render a definition or expression" defaultRenderSpelling
   , Option [] ["qualification"]

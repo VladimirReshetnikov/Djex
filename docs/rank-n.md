@@ -1,5 +1,16 @@
 # Rank-N and impredicative types
 
+For structural ranking and checked normalization before result selection, see
+the [candidate-quality guide](candidate-quality.md). Its policies retain these
+typing and scope rules, required eta expansion, and raw search-work accounting.
+The default `balanced` profile can change choices and candidate order within
+the search families described below. Statements about historical prefixes
+refer to the preserved family schedule or the `legacy` profile, not a promise
+that every profile emits the same first term. The
+[focused quality probes](../test-church/quality.md) are separate from the
+rank-N acceptance recorded for Djex `e2eb71e` and Leant `4757569`; final
+validation of the new default is still being completed.
+
 *The typing rules and search families both engines use for higher-rank and impredicative
 goals — what each engine can introduce and eliminate, the resource bounds, the
 worked `:djinn`/`:exference`/`:compare` examples, and the exact places where a

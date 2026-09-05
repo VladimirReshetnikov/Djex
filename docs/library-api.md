@@ -6,6 +6,30 @@ sealed session, a checked request, and the shared result envelope — plus, for
 behavioral verification, the semantic stratum described in
 [its own section below](#the-semantic-stratum).
 
+The shared [candidate-quality policy](candidate-quality.md) is available through
+`Language.Haskell.Djex` and `Language.Haskell.Synthesis.CandidateQuality`.
+`optionRanking` and `exferenceCandidateRanking` select the same profiles;
+`optionProviderCosts` and `exferenceProviderCosts` carry exact-name overrides.
+`rankCandidatesByQuality` preserves whole checked handles, and
+`selectQualityQueryResults` / `selectQualityQueryResultsM` bound observation
+before admission, ranking, and frontend deduplication. Custom weights use
+`Natural`; none of these operations grants typing or behavioral evidence.
+The default profile is `balanced`. `LegacyCandidateRanking` preserves the
+earlier search order and normalization path; it does not enable the additional
+known-constructor reduction. The [focused quality probes](../test-church/quality.md)
+compare profiles and independently replay emitted terms. Their final new-policy
+acceptance is still being completed.
+
+Named-constructor reduction requires retained evidence that its fields are
+non-strict. The Haskell source loader carries that information before erasing
+source annotations. Generic neutral datatype declarations do not imply it.
+A trusted integration may supply exact arities through
+`ExferenceSessionPolicy.exferenceNonStrictConstructors`; sealing checks the
+constructor inventory and arities, while the integration owns the evaluation
+claim. Boxed tuples and nullary constructors do not need field authority.
+All reduced Exference expressions are independently checked before typed
+graphs and candidate associations are created.
+
 ## Build and install
 
 Djex currently supports GHC 9.12.4. From the repository root:
@@ -77,7 +101,7 @@ Only the shared terminal REPL has an internal paired-backend scheduler. Its
 positive `jobs` setting defaults to `2`; `jobs = 1` is the exact serial and
 lower-peak-memory fallback. It overlaps one Djinn and one Exference worker only
 for unconstrained `both`/`:compare` queries on the shared parsed route, with
-a non-streaming `select` policy. Both untimed and positive-timeout pairs are
+`select = first` or `select = best`. Both untimed and positive-timeout pairs are
 eligible. Timed pairs validate both requests before one shared cutoff and
 strictly prepare private output plans within it; the REPL owner replays Djinn
 before observing and replaying Exference, whose arbiter can continue
@@ -199,12 +223,19 @@ environment construction, kind inference, or a backend request hang.
 Construction and result consumption have intentionally different evaluation
 contracts. Finite declaration indexes and application spines are built
 strictly, so sealing a large environment or lowering a wide generated term
-does not leave a deferred fold behind. Result sequences remain lazy: taking
-the first admissible candidate does not inspect later batches, and a checked
-result does not force candidate payloads or tails merely to prove that its
+does not leave a deferred fold behind. Raw result sequences remain lazy:
+explicit `selectQueryResults SelectFirst` consumption does not inspect later
+batches, and a checked result does not force candidate payloads or tails merely to prove that its
 batch is nonempty. Keep the returned Exference result list lazy when streaming,
 but apply an explicit selection or fold when a global best candidate is
-required.
+required. The frontend's default Exference first-selection likewise retains
+early stopping, except for its established bounded record-selector lookahead
+when needed. Backend frontier and checked-batch quality apply before that
+selection. Nonlegacy all-selection instead uses `selectQualityQueryResults`
+to collect and rank a bounded pool before output. This explicit selector
+charges rejected and duplicate candidate observations as well as accepted
+ones, preserves whole handles, and reports conservative truncation at the cap
+without probing the next candidate.
 
 ## Supply provider-local instantiation evidence
 
@@ -892,6 +923,26 @@ lookahead rank admissible preferred` adds a preferred tier to the
 `SelectionMode`: candidates satisfying the caller's `preferred` predicate
 (typically constraint-free ones) outrank the rest, and the globally minimal
 fallback is retained only until the first preferred candidate appears.
+
+Those general selectors remain available to callers. The Djex CLI and REPL
+choose a different selector for nonlegacy Exference `all`:
+`selectQualityQueryResults` observes at most `quality-window` raw candidates,
+ranks the admitted pool, and preserves the progress of exactly that observed
+prefix. Its monadic sibling admits each observed candidate once before
+ranking. Neither operation itself deduplicates or refunds slots; a frontend
+may perform its evidence-aware deduplication only within the retained pool.
+`first` keeps its existing stopping behavior and bounded record-selector
+lookahead, benefiting from backend frontier and checked-batch ranking without
+collecting this pool. `best` keeps search-wide minimum selection, and legacy
+`all` keeps streaming.
+The command helpers apply the presentation profile and exact provider costs
+to the Exference search options as well as output selection. With a checked
+record-selector table, structural pool and global-best scoring use the same
+selector-normalized expression that will be printed while admission retains
+the original candidate handle. First-selection retains its established
+record-selector lookahead bound, using the configured structural cost on the
+normalized clause for structural profiles and the old size-only metric for
+`legacy`.
 
 Exference first discharges an exact local given, including a variable-bearing
 given such as `C a`, before deciding whether an obligation must be deferred. It

@@ -2510,6 +2510,8 @@ testReplNamespaceSelectiveImports = withTemporaryEnvironment
     , "T"
     , ":backend djinn"
     , "T"
+    , ":set render expression"
+    , "()"
     ]
   assertEqual "type-only namespace REPL exit" ExitSuccess typeExit
   assertContains "a type-only re-export remains available to :kind"
@@ -2520,6 +2522,8 @@ testReplNamespaceSelectiveImports = withTemporaryEnvironment
     "[DJEX_EXF_NO_RESULT]" typeErrors
   assertContains "Djinn treats the constructor-hidden type as uninhabited"
     "[DJEX_DJINN_UNINHABITABLE]" typeErrors
+  assertEqual "intrinsic unit survives the type-only import without exposing T" 1
+    $ length $ filter (== "()") $ lines typeOutput
   assertNoCallStack typeErrors
 
   (patternExit, patternOutput, patternErrors) <- runRepl directory
@@ -2587,8 +2591,10 @@ testReplDjinnReferenceNamespaces = withTemporaryEnvironment
   assertContains
     ("same-named type stub keeps the value axiom usable: " ++ output ++ errors)
     "bridge" output
-  assertContains "the distinct type stub enters the projected environment"
-    "4 declarations (projected from the module scope, 0 omissions)" output
+  -- Projection retains the canonical unit declaration independently of module
+  -- imports, in addition to the four source/stub declarations in this fixture.
+  assertContains "the distinct type stub and intrinsic unit enter the projected environment"
+    "5 declarations (projected from the module scope, 0 omissions)" output
   assertContains "the genuine empty datatype supports absurd elimination"
     "case a of {}" output
   assertContains "the genuine empty datatype requires no projection compromise"
@@ -2623,8 +2629,8 @@ testReplDjinnHigherKindStub = withTemporaryEnvironment
   assertContains
     ("the wrapper remains structurally eliminable: " ++ output ++ errors)
     "case a of" output
-  assertContains "the inferred external stub remains in the projection"
-    "3 declarations (projected from the module scope, 0 omissions)" output
+  assertContains "the inferred external stub and intrinsic unit remain in the projection"
+    "4 declarations (projected from the module scope, 0 omissions)" output
   assertContains "the exact inferred kind avoids projection omissions"
     "-- Djinn scope projection\n(no omissions)" output
   assertBool "higher-kinded stub forced the standard-environment fallback" $
@@ -2876,8 +2882,8 @@ testReplDjinnClassMethodRepair = withTemporaryEnvironment
     , ":show omissions"
     ]
   assertEqual "all-bad-method repair REPL exit" ExitSuccess exitCode
-  assertContains "the methodless class remains in the projected environment"
-    "1 declarations (projected from the module scope, 3 omissions)" output
+  assertContains "the methodless class and intrinsic unit remain in the projected environment"
+    "2 declarations (projected from the module scope, 3 omissions)" output
   assertContains
     ("the first unusable method is reported independently: "
       ++ output ++ errors)
@@ -2917,7 +2923,7 @@ testReplDjinnRepairDepth = withTemporaryEnvironment
       ++ output ++ errors)
     "Survivor" output
   assertContains "all cascading omissions reach the sealed projection"
-    ("1 declarations (projected from the module scope, "
+    ("2 declarations (projected from the module scope, "
       ++ show (chainLength + 1) ++ " omissions)") output
   assertBool "deep repair fell back from the projected environment" $
     not $ "Djinn falls back to its standard checked environment" `isInfixOf`

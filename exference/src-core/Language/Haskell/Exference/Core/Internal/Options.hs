@@ -15,6 +15,11 @@ module Language.Haskell.Exference.Core.Internal.Options
   ) where
 
 import Language.Haskell.Exference.Core.Score (Penalty)
+import Language.Haskell.Synthesis.CandidateQuality
+  (CandidateRankingPolicy, defaultCandidateRankingPolicy)
+import Language.Haskell.Synthesis.Name (Name)
+import qualified Data.Map.Strict as Map
+import Numeric.Natural (Natural)
 
 -- | Penalties used to rank Exference's heuristic search frontier.
 data ExferenceHeuristicsConfig = ExferenceHeuristicsConfig
@@ -66,6 +71,8 @@ data ExferenceOptions = ExferenceOptions
   , exferenceMaximumQueueSize :: Maybe Int
   , exferenceMaximumDepth :: Maybe Penalty
   , exferenceHeuristics :: ExferenceHeuristicsConfig
+  , exferenceCandidateRanking :: CandidateRankingPolicy
+  , exferenceProviderCosts :: Map.Map Name Natural
   }
   deriving (Eq, Show)
 
@@ -80,6 +87,8 @@ defaultExferenceOptions = ExferenceOptions
   , exferenceMaximumQueueSize = Just 8192
   , exferenceMaximumDepth = Nothing
   , exferenceHeuristics = defaultHeuristicsConfig
+  , exferenceCandidateRanking = defaultCandidateRankingPolicy
+  , exferenceProviderCosts = Map.empty
   }
 
 -- | Every heuristic weight paired with its field name (without the

@@ -39,9 +39,11 @@ data ExferenceBatchMetadata = ExferenceBatchMetadata
 instance NFData ExferenceBatchMetadata
 
 -- | Per-candidate search measurements: the number of search steps completed
--- when the candidate was found, its final heuristic complexity rating (lower
--- ranks ahead), and the search-queue size immediately after the producing
--- step.
+-- when the candidate was admitted, its final heuristic complexity rating
+-- (lower ranks ahead), and the queue size immediately after that step. Under
+-- structural ranking, the bounded queue may also retain completed branches
+-- while cheaper unfinished work is explored. Their typed graph identities
+-- retain the original discovery step even when admission is deferred.
 data ExferenceStats = ExferenceStats
   { exference_steps :: Int
   , exference_complexityRating :: Penalty

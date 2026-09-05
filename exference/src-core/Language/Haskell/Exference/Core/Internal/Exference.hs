@@ -100,6 +100,7 @@ import qualified Language.Haskell.Synthesis.Count as SharedCount
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
+import qualified Language.Haskell.Synthesis.CandidateQuality as SharedQuality
 import qualified Language.Haskell.Synthesis.Name as SynthesisName
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
 import qualified Language.Haskell.Synthesis.Query as SharedQuery
@@ -411,12 +412,22 @@ type ExferenceTypedCandidate =
 type ExferenceTypedResult =
   SharedQuery.QueryResult ExferenceBatchMetadata ExferenceTypedCandidate
 
--- | A search node paired with the next goal already removed from its goal
--- sequence. The queue can therefore contain only work that 'stateStep' may
--- execute; solved nodes never have a representation here.
+-- | An unfinished node paired with its next goal. Only this representation
+-- may enter 'stateStep'; completed branches use the separate ready form.
 data ScheduledNode = ScheduledNode !TGoal SearchNode
 
-type RatedNodes = Q.MaxPQueue Priority ScheduledNode
+-- A completed branch keeps its original discovery identity even when a
+-- cheaper unfinished branch delays its admission. Its exact scope and term
+-- remain together until the independent result checker runs.
+data ReadySolution = ReadySolution !Int !Natural SearchNode
+
+data FrontierEntry
+  = Unfinished !ScheduledNode
+  | Ready !ReadySolution
+
+-- Ready branches win exact priority ties. Both kinds of pending work share
+-- the configured queue bound; there is no separate unbounded result buffer.
+type RatedNodes = Q.MaxPQueue (Priority, Bool) FrontierEntry
 
 -- | Which private implementation expands one popped node.  Production uses
 -- the explicit ordered action list; the historical monolithic action remains
@@ -436,7 +447,7 @@ data FindExpressionsState = FindExpressionsState
 
 -- Keep the search trace productive by retaining the historical lazy state
 -- transformer. An empty priority queue terminates the unfold through Maybe.
-popBestNode :: StateT FindExpressionsState Maybe ScheduledNode
+popBestNode :: StateT FindExpressionsState Maybe FrontierEntry
 popBestNode = StateT $ \searchState -> do
   (node, remaining) <- Q.maxView $ findQueue searchState
   return (node, searchState { findQueue = remaining })
@@ -502,6 +513,8 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
           , exferenceMaximumQueueSize = maxQueueSize
           , exferenceMaximumDepth = maxDepth
           , exferenceHeuristics = heuristics
+          , exferenceCandidateRanking = ranking
+          , exferenceProviderCosts = providerCostOverrides
           }
       }
       providerCandidates
@@ -512,6 +525,10 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
   -- Removing an already checked binding cannot invalidate the environment.
   -- Use the same exact projection for search and independent result checking,
   -- otherwise a generated definition could regain the binding it shadows.
+  -- Signed source ratings retain their historical nodeDepth contribution.
+  -- Structural cost has one shared interpretation at search and presentation.
+  providerQualityCost name = M.findWithDefault
+    (SharedQuality.defaultCandidateProviderCost name) name providerCostOverrides
   funcs = filter bindingAvailable allFunctions
   bindingAvailable binding = functionName binding
     `S.notMember` excludedBindings
@@ -620,7 +637,7 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
     , findDepthPruned = 0
     , findIdentifierSpaceExhausted = False
     , findBindingUsages = M.empty
-    , findQueue = Q.singleton 0 $ ScheduledNode rootGoal rootSearchNode
+    , findQueue = Q.singleton (0, False) $ Unfinished $ ScheduledNode rootGoal rootSearchNode
     }
   t = forallify rawType
   rootGoal = TGoal
@@ -638,7 +655,9 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
     , nodeAggregateDonations = M.empty
     , nodeDeconstructors  = deconss
     , nodeQueryClassEnv   = rootClassEnvironment
-    , nodeExpression      = ExpHole 0
+    , nodeExpression      = case ranking of
+        SharedQuality.LegacyCandidateRanking -> ExpHole 0
+        _ -> enableExpressionQualityCache $ ExpHole 0
       -- The root goal and expression already own hole 0.
     , nodeNextVarId       = 1
     , nodeFlexibleIds     = supplyFromIdentifiers
@@ -649,7 +668,7 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
     , nodeDepth           = 0.0
     , nodeLastStepBinding = Nothing
     }
-  transformSolutions :: [SearchNode] -> FindExpressionsState -> EngineBatch
+  transformSolutions :: [ReadySolution] -> FindExpressionsState -> EngineBatch
   transformSolutions potentialSolutions searchState = SharedSearch.SearchBatch
       progress
       (ExferenceBatchMetadata
@@ -657,6 +676,9 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
         , exferenceQueuePruned = totalQueuePruned
         , exferenceDepthPruned = totalDepthPruned
         })
+      (SharedQuality.rankCandidatesByQuality ranking providerQualityCost
+        (\(ValidatedEngineCandidate expression _ _ _) ->
+          toGeneratedExpression expression)
       [ ValidatedEngineCandidate
           e
           remainingConstraints
@@ -664,7 +686,7 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
             $ SharedCount.saturatingNaturalToInt
             $ queueSizeNatural newNodes)
           typedGraphAvailability
-      | (solutionIndex, solution) <- zip [0 ..] potentialSolutions
+      | ReadySolution originStep solutionIndex solution <- potentialSolutions
       , let contxt = nodeQueryClassEnv solution
       , remainingScopedConstraints <- maybeToList
           $ resolveScopedConstraints filterUnresolved contxt
@@ -685,8 +707,8 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
       , (e, checkedEvidence) <- maybeToList $ checkedSimplification
           (nodeRigidScope solution) remainingConstraints rawExpression
       , let typedGraphAvailability = checkedExpressionTermGraph
-              (candidateIdentity n' solutionIndex) checkedEvidence
-      , let d = normalizePenalty $ sumScores
+              (candidateIdentity originStep solutionIndex) checkedEvidence
+      , let historicalScore = sumScores
               [ nodeDepth solution
               , multiplyScore (heuristics_unusedVar heuristics)
                   $ fromIntegral unusedVarCount
@@ -694,7 +716,11 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
                   $ fromIntegral (SharedGenerated.expressionSizeNatural
                       $ toGeneratedExpression e)
               ]
-      ]
+            d = normalizePenalty $ case ranking of
+              SharedQuality.LegacyCandidateRanking -> historicalScore
+              _ -> fromInteger $ toInteger $ expressionQualityCost
+                ranking providerQualityCost e
+      ])
     where
       n' = findSteps searchState
       totalQueuePruned = findQueuePruned searchState
@@ -729,10 +755,25 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
           Left _ -> Nothing
           Right context -> firstChecked rigidScope context $ candidates normalized
        where
-        candidates normalized
-          | simplified == normalized = [normalized]
-          | otherwise = [simplified, normalized]
-         where simplified = simplifyExpression normalized
+        candidates normalized = L.nub
+          $ reduced ++ [simplifyExpression normalized, normalized]
+         where
+          reduced = case ranking of
+            SharedQuality.LegacyCandidateRanking -> []
+            _ -> let reducedExpression =
+                       reduceKnownConstructorCases safeConstructorArity normalized
+                 in [simplifyExpression reducedExpression, reducedExpression]
+        -- Only explicit source evaluation metadata certifies non-strict
+        -- fields. Nullary constructors require no such field authority;
+        -- boxed tuples are also recognized intrinsically by the reducer.
+        safeConstructorArity name = M.lookup name safeConstructorArities
+        safeConstructorArities = M.fromList
+          [ (constructorName constructor, length $ constructorFields constructor)
+          | deconstructor <- deconss
+          , constructor <- deconstructorConstructors deconstructor
+          , null (constructorFields constructor)
+              || constructorFieldsAreNonStrict constructor
+          ]
         firstChecked _ _ [] = Nothing
         firstChecked candidateScope context
             (candidate : remainingCandidates) =
@@ -753,7 +794,7 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
   helper :: FindExpressionsState -> Maybe (EngineBatch, FindExpressionsState)
   helper searchState | findSteps searchState >= maxSteps = Nothing
   helper searchState = runStateT (do
-    ScheduledNode nextGoal s <- popBestNode
+    entry <- popBestNode
     n' <- advanceStep
     let
       -- actual work happens in stateStep
@@ -762,28 +803,33 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
       -- when the caller explicitly requested constrained results.
       relaxConstraints = constraintsRelaxedAtStep
         allowConstraints allowConstraintsStopStep n'
-      stepResults = runStateStep
-        stepRoute
-        allocators
-        multiPM
-        relaxConstraints
-        heuristics
-        nextGoal
-        s
+      stepResults = case entry of
+        Unfinished (ScheduledNode nextGoal s) -> runStateStep
+          stepRoute allocators multiPM relaxConstraints heuristics nextGoal s
+        Ready _ -> []
       (rNodes, stepIdentifierSpaceExhausted) =
         foldr collectStepResult ([], False) stepResults
       (withinDepth, tooDeep) = partition depthAllowed rNodes
       (potentialSolutions, futures) = classifySearchNodes withinDepth
-      ratedNew =
-        [ ( normalizePriority $ addPriority
-              (rateNode heuristics $ restoreScheduledNode newS)
-              (Priority $ 4.5 * f (fromIntegral n'))
-          , newS)
+      discovered = case entry of
+        Ready solution -> [solution]
+        Unfinished _ ->
+          [ReadySolution (n' + 1) index node | (index, node) <- zip [0 ..] potentialSolutions]
+      frontierPriority node = normalizePriority $ addPriority
+        (rateNode ranking providerQualityCost heuristics node)
+        (Priority $ 4.5 * ageFactor (fromIntegral n'))
+      ageFactor :: Double -> Double
+      ageFactor x
+        | x > 900 = 0.0
+        | otherwise = let k = 1.111e-3*x in 1 + 2*k**3 - 3*k**2
+      ratedFutures =
+        [ ( (frontierPriority $ restoreScheduledNode newS, False)
+          , Unfinished newS)
         | newS <- futures
-        , let f :: Double -> Double
-              f x | x > 900 = 0.0
-                  | otherwise = let k = 1.111e-3*x
-                                 in 1 + 2*k**3 - 3*k**2
+        ]
+      ratedReady =
+        [ ((frontierPriority node, True), Ready solution)
+        | solution@(ReadySolution _ _ node) <- discovered
         ]
       depthAllowed node = maybe True (nodeDepth node <=) maxDepth
       collectStepResult result (nodes, exhausted) = case result of
@@ -801,13 +847,62 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
             || stepIdentifierSpaceExhausted
       }
     queued <- gets findQueue
-    let (retained, queueDiscarded) = mergeQueueWithCapacity
-          maximumPQueueSize maxQueueSize queued ratedNew
+    let (admitted, retained, queueDiscarded) = case ranking of
+          SharedQuality.LegacyCandidateRanking ->
+            let (remaining, discarded) = mergeQueueWithCapacity
+                  maximumPQueueSize maxQueueSize queued ratedFutures
+            in (discovered, remaining, discarded)
+          _ -> admitReadyFrontier (n' + 1 >= maxSteps) maxQueueSize queued
+            (ratedFutures ++ ratedReady)
     modify $ \current -> current
       { findQueue = retained
       , findQueuePruned = findQueuePruned current + queueDiscarded
       }
-    gets $ transformSolutions potentialSolutions) searchState
+    gets $ transformSolutions admitted) searchState
+
+-- Completed branches participate in the same priority frontier as unfinished
+-- work. Already-best completions are emitted during the producing step, so
+-- no additional step is charged for admission. The retained head is always
+-- unfinished. At the final step, known completions are emitted even if their
+-- cheaper competitors remain unfinished; exhaustion cannot hide a witness
+-- already found within the caller's allowance.
+admitReadyFrontier
+  :: Bool
+  -> Maybe Int
+  -> RatedNodes
+  -> [((Priority, Bool), FrontierEntry)]
+  -> ([ReadySolution], RatedNodes, Natural)
+admitReadyFrontier finalStep maximumSize queued newEntries =
+  let (combined, representationPruned) = mergeQueueWithCapacity
+        maximumPQueueSize Nothing queued newEntries
+      (immediate, pending) = if finalStep
+        then extractAllReady combined
+        else extractLeadingReady combined
+      (retained, capacityPruned) = limitQueue maximumSize pending
+  in if Q.null retained
+      then
+        -- A zero-capacity frontier may discard the cheaper unfinished work.
+        -- Emit every remaining known completion instead of discarding those
+        -- witnesses alongside work which can no longer be explored.
+        let (readyAtCapacity, _) = extractAllReady pending
+        in ( immediate ++ readyAtCapacity
+           , retained
+           , representationPruned + capacityPruned
+               - SharedCount.naturalLength readyAtCapacity)
+      else (immediate, retained, representationPruned + capacityPruned)
+ where
+  extractLeadingReady queue = case Q.maxView queue of
+    Just (Ready solution, remaining) ->
+      let (solutions, rest) = extractLeadingReady remaining
+      in (solution : solutions, rest)
+    _ -> ([], queue)
+  extractAllReady queue =
+    let (solutions, unfinished) = foldr collect ([], []) $ Q.toDescList queue
+    in (solutions, Q.fromList unfinished)
+  collect (_, Ready solution) (solutions, unfinished) =
+    (solution : solutions, unfinished)
+  collect entry@(_, Unfinished _) (solutions, unfinished) =
+    (solutions, entry : unfinished)
 
 -- Partition generated nodes while extracting the next goal from every future
 -- before it can enter the priority queue. This preserves the historical node
@@ -1697,6 +1792,9 @@ inputSearchOptions input = ExferenceOptions
   , exferenceMaximumQueueSize = input_maxQueueSize input
   , exferenceMaximumDepth = input_maxDepth input
   , exferenceHeuristics = input_heuristicsConfig input
+  -- The flat compatibility input predates configurable ranking.
+  , exferenceCandidateRanking = SharedQuality.LegacyCandidateRanking
+  , exferenceProviderCosts = M.empty
   }
 
 -- Checked values retain the same canonical representation that validation
@@ -1813,11 +1911,18 @@ naturalPruningReasons queuePruned depthPruned =
   | depthPruned > 0
   ]
 
-rateNode :: ExferenceHeuristicsConfig -> SearchNode -> Priority
-rateNode h s = priorityFromPenalty
-  $ addScore
-      (negateScore $ addScore (rateGoals h $ nodeGoals s) $ nodeDepth s)
-      (rateUsage h s)
+rateNode :: SharedQuality.CandidateRankingPolicy
+         -> (SynthesisName.Name -> Natural)
+         -> ExferenceHeuristicsConfig -> SearchNode -> Priority
+rateNode ranking providerCost h s = priorityFromPenalty $
+    addScore historical $ negateScore structural
+ where
+  historical = addScore
+    (negateScore $ addScore (rateGoals h $ nodeGoals s) $ nodeDepth s)
+    (rateUsage h s)
+  -- Quality is a heuristic, never a reason to discard a proof or refund work.
+  structural = fromInteger $ toInteger $ expressionQualityCost
+    ranking providerCost $ nodeExpression s
 
 rateGoals :: ExferenceHeuristicsConfig -> Seq.Seq TGoal -> Penalty
 rateGoals h = sumScores . fmap rateGoal

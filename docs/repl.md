@@ -533,8 +533,9 @@ Exference outcome; the already-forked Exference arbiter can continue
 independently while the parent replays Djinn. Replay IO is outside the cutoff,
 so slow terminal IO cannot retroactively turn a completed plan into a timeout.
 
-The concurrency boundary remains narrow. `select = all` keeps one-pass serial
-streaming, and behavioral `--where`/Z3 queries keep their checked serial path.
+The concurrency boundary remains narrow. `select = all` stays serial;
+Exference streams in `legacy` and buffers a bounded candidate pool under
+structural profiles. Behavioral `--where`/Z3 queries keep their checked serial path.
 Running both live search heaps at once can make peak memory approach their sum;
 `jobs = 1` is the resource fallback even on a multi-core runtime and retains
 the historical fresh whole-command timer for each backend. This is
@@ -1069,7 +1070,7 @@ transactional behavior.
 A bare `prompt` value is trimmed like any other setting value, so trailing
 whitespace survives only through the Haskell string-literal form: the default
 is reproduced by `:set prompt "djex[%b]> "`, not by the unquoted spelling.
-Because `:set` gives the first `=` to the *setting name*, a prompt containing
+For ordinary settings, `:set` gives the first `=` to the *setting name*, so a prompt containing
 `=` must also use the quoted `:set prompt="djex => "` form; the unquoted
 spelling is rejected as an unknown setting.
 
@@ -1078,6 +1079,9 @@ spelling is rejected as an unknown setting.
 | `backend` | `djinn`, `exference`, `both` or a unique prefix | `djinn` | Routing |
 | `target` | Unqualified Haskell value identifier or operator other than `_` | `djexResult` | Shared output |
 | `select` | `first`, `best`, `all` | `first` | Shared presentation |
+| `ranking` | `legacy`, `balanced`, `compact`, `diverse` | `balanced` | Both engines and presentation |
+| `provider-cost` | `NAME=COST`, nonnegative integer | No overrides | Exact provider preference in both engines |
+| `quality-window` | Positive integer | `60` | Structural Exference all-selection raw observation pool |
 | `render` | `definition`, `expression` | `definition` | Shared presentation |
 | `qualification` | `none`, `identifiers`, `full` | `full` | Shared presentation |
 | `prompt` | Text, or a Haskell string literal; `%b` expands to the active selection | `"djex[%b]> "` | Interactive UI |
@@ -1098,6 +1102,30 @@ spelling is rejected as an unknown setting.
 | `heuristic` | `NAME VALUE`: a weight name and a finite non-negative number | The thirteen built-in weights | Exference |
 | `fix` | Boolean | Off | Exference load policy |
 
+The [candidate-quality guide](candidate-quality.md) defines structural cost,
+diversity, checked normalization, and the distinction between raw search work,
+candidate observations, and displayed results. `provider-cost` updates one
+exact-name entry; `:unset provider-cost` clears the map. Structural Exference
+all-selection ranks a finite pool before output and reports truncation
+when its observation cap is reached; legacy all-selection retains streaming.
+First-selection retains early stopping and benefits from backend frontier
+ordering, checked-batch quality, and normalization. It does not wait to fill
+the quality pool; existing bounded record-selector lookahead remains intact.
+Use canonical qualified names for loaded providers. The REPL derives Djinn's
+prompt-name cost map from the current checked scope at each query and applies
+it consistently to search and presentation; reloads and module changes do not
+reassign the stored canonical costs. Structural pool and global-best scoring
+include record-selector normalization, so selectors introduced for output
+receive their configured costs too. First-selection keeps the existing
+selector-lookahead bound, using the configured structural metric on the
+normalized clause; `legacy` retains size-only scoring. Invalid profiles,
+malformed costs, and nonpositive
+windows leave the previous settings intact.
+`provider-cost` has an explicit nested assignment grammar: both
+`:set provider-cost Fast.provide=0` and
+`:set provider-cost=Fast.provide=0` are accepted. Other settings retain their
+existing parsing rules, including the quoted prompt form above.
+
 `jobs` controls only eligible both-backend REPL queries. `jobs = 1` selects
 the exact serial path; `jobs >= 2` permits the two backend workers described in
 [Paired-backend concurrency](#paired-backend-concurrency). It does not alter a
@@ -1112,8 +1140,12 @@ its parser and request check remain inside its serial timer.
 
 On a serial route, each backend gets a fresh whole-command budget covering its
 search, selection, rendering, and reporting. This includes `jobs = 1`,
-single-backend and legacy-parser queries, and `select = all`; in the streaming
-case, candidates printed before expiry remain printed. On an eligible timed
+single-backend and legacy-parser queries, and `select = all`. Under legacy
+streaming, candidates printed before expiry remain printed. Structural
+Exference all-selection buffers its pool, so timeout during collection
+can prevent an already discovered prefix from being printed. Lowering
+`quality-window` trades the amount of quality comparison for earlier output.
+On an eligible timed
 pair, the two validated requests instead share one cutoff covering concurrent
 search, selection, and strict presentation-plan construction. Ordered terminal
 replay is deliberately outside that cutoff. An expired lane reports
@@ -1138,9 +1170,15 @@ finite and non-negative, since search-option validation would otherwise
 reject the query.
 
 The interactive default is `select = first`, unlike the one-shot command's
-global-best default. It makes an exploratory prompt responsive and preserves
-Exference's lazy result stream. `best` may need to consume the complete
-configured search; `all` prints every admissible result. Rendering and
+global-best default. Exference first-selection retains its stopping behavior
+after an admissible result, with the existing bounded record-selector
+lookahead when needed. Backend quality ordering and checked normalization can
+improve that result without waiting for a frontend quality pool. `best` may
+consume the complete configured search. Structural `all` observes at most
+`quality-window` raw candidates and displays the admitted ranked pool;
+rejected or duplicate candidates do not earn replacement slots. `legacy all` streams
+every admissible result from the configured search. Djinn retains its separate
+raw `candidate-limit`; `quality-window` does not change that limit. Rendering and
 selection use the same checked presentation path as the one-shot frontend,
 including residual-constraint reporting and truncation or evidence messages.
 
@@ -1447,7 +1485,9 @@ The executable names intentionally expose three different contracts:
   Exference. Its syntax and mutable-environment behavior should not be assumed
   for the shared REPL.
 - `exference` is the historical compatibility one-shot command, not an
-  interactive session.
+  interactive session. It retains legacy search defaults and the existing
+  `--short` preference. Use `djex exference --ranking ...` to select the new
+  structural quality policies.
 
 This separation preserves existing scripts while giving new interactive use a
 uniform command and presentation layer over the checked backend APIs.

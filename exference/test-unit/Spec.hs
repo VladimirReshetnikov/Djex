@@ -16,6 +16,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import qualified Language.Haskell.Synthesis.CandidateQuality as SharedQuality
 import Data.Void (Void)
 import Numeric.Natural (Natural)
 import System.Directory
@@ -27,7 +28,7 @@ import System.Directory
 import System.IO (hClose, hPutStr, openTempFile)
 import System.Timeout (timeout)
 import Test.Tasty (TestTree, defaultMain, testGroup)
-import Test.Tasty.HUnit ((@?=), assertBool, assertEqual, testCase)
+import Test.Tasty.HUnit (Assertion, (@?=), assertBool, assertEqual, testCase)
 import Control.Monad.Trans.Except (catchE, runExceptT, throwE)
 import qualified Language.Haskell.Exts.Syntax as HSE
 import qualified Language.Haskell.Exts.Parser as HSE
@@ -58,14 +59,19 @@ import Language.Haskell.Exference.Core
   , validateExferenceInput
   )
 import qualified Language.Haskell.Exference.Core as Core
+import qualified Language.Haskell.Djex.Exference as DjexExference
 import Language.Haskell.Exference.Core.ConstraintSolver
 import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.Core.Expression
   ( Expression (..)
   , ExpressionRenderError (..)
   , inlineVisibleTypeApplicationAliases
+  , reduceKnownConstructorCases
   , expressionTypedLocals
   , expressionNameHints
+  , expressionQualityCost
+  , enableExpressionQualityCache
+  , fillExprHole
   , renderExpression
   , showExpression
   , toGeneratedExpression
@@ -75,6 +81,8 @@ import Language.Haskell.Exference.Core.ExpressionCheck
 import Language.Haskell.Exference.Core.ExpressionSimplify (simplifyExpression)
 import Language.Haskell.Exference.Core.FunctionBinding
   ( ConstructorBinding (..)
+  , nonStrictConstructorBinding
+  , constructorFieldsAreNonStrict
   , DeconstructorBinding (..)
   , DeconstructorValidationError (..)
   , EnvironmentDuplicateError (..)
@@ -237,6 +245,8 @@ import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypedCandidate as SharedTypedCandidate
+import qualified Language.Haskell.Synthesis.TypedGenerated as SharedTypedGenerated
 import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 import qualified CompatibilityImport
 import Paths_djex (getDataFileName)
@@ -246,7 +256,15 @@ main = defaultMain tests
 
 tests :: TestTree
 tests = testGroup "Exference"
-  [ testGroup "class environments"
+  [ testCase "structural provider quality precedes the unchanged step cutoff"
+      testCandidateQuality
+  , testCase "completed providers respect the bounded unfinished frontier"
+      testCompletedCandidateFrontier
+  , testCase "annotated frontier quality equals the shared erased metric"
+      testExpressionQualityCost
+  , testCase "constructor evaluation authority survives source preparation"
+      testConstructorEvaluationAuthority
+  , testGroup "class environments"
       [ testCase "class declarations contain only finite name references" $ do
           let self = HsTypeClass (name "Self") [0]
                 [HsConstraint (name "Self") [TypeVar 0]]
@@ -1123,7 +1141,7 @@ tests = testGroup "Exference"
               expectedFunction = FunctionBinding
                 input makeBox 0 [] [nested, TypeVar 0]
               expectedDeconstructor = DeconstructorBinding input
-                [ConstructorBinding makeBox [nested, TypeVar 0]] False
+                [nonStrictConstructorBinding makeBox [nested, TypeVar 0]] False
               extracted = runIdentity
                 $ getDataConss Map.empty [] Map.empty [parsedModule]
           extracted @?= [Right ([expectedFunction], expectedDeconstructor)]
@@ -1149,8 +1167,8 @@ tests = testGroup "Exference"
                     $ TypeForall [0] [] resultType
                 ]
               fields @?=
-                [ ConstructorBinding this [TypeVar 0]
-                , ConstructorBinding that []
+                [ nonStrictConstructorBinding this [TypeVar 0]
+                , nonStrictConstructorBinding that []
                 ]
             result -> fail $ "unexpected datatype bindings: " ++ show result
       , testCase "record constructors flatten fields and emit selectors once" $ do
@@ -1205,9 +1223,9 @@ tests = testGroup "Exference"
                     $ TypeArrow recordType pairType
                 ]
               constructors @?=
-                [ ConstructorBinding firstConstructor
+                [ nonStrictConstructorBinding firstConstructor
                     [parameter, pairType, pairType]
-                , ConstructorBinding secondConstructor [parameter]
+                , nonStrictConstructorBinding secondConstructor [parameter]
                 ]
             result -> fail $ "unexpected record bindings: " ++ show result
       , testCase "infix constructors lower as binary constructors" $ do
@@ -1230,7 +1248,7 @@ tests = testGroup "Exference"
                   $ TypeArrow parameter
                   $ TypeArrow parameter chainType)
               constructors @?=
-                [ConstructorBinding link [parameter, parameter]]
+                [nonStrictConstructorBinding link [parameter, parameter]]
             result -> fail $ "unexpected infix bindings: " ++ show result
       , testCase "field strictness and unpack metadata do not change types" $ do
           parsedModule <- expectParsedModule $ unlines
@@ -3001,6 +3019,8 @@ tests = testGroup "Exference"
               , exferenceMaximumQueueSize = Just 8192
               , exferenceMaximumDepth = Nothing
               , exferenceHeuristics = defaultHeuristicsConfig
+              , exferenceCandidateRanking = SharedQuality.defaultCandidateRankingPolicy
+              , exferenceProviderCosts = Map.empty
               })
             defaultExferenceOptions
           assertEqual "core/stable options re-export"
@@ -8402,7 +8422,7 @@ tests = testGroup "Exference"
                   <$> Map.lookup constructor constructors
           mapM_ (\(constructor, expectedPenalty) ->
               constructorPenalty constructor @?=
-                Just (SearchPenaltyMetadata expectedPenalty))
+                Just (NonStrictConstructorMetadata $ Just expectedPenalty))
             [ (ListCon, Penalty 0)
             , (Cons, Penalty 5)
             , (validTupleName 0, Penalty 9.9)
@@ -11081,7 +11101,379 @@ legacyInputOptions input = ExferenceOptions
   , exferenceMaximumQueueSize = input_maxQueueSize input
   , exferenceMaximumDepth = input_maxDepth input
   , exferenceHeuristics = input_heuristicsConfig input
+  , exferenceCandidateRanking = SharedQuality.LegacyCandidateRanking
+  , exferenceProviderCosts = Map.empty
   }
+
+testConstructorEvaluationAuthority :: Assertion
+testConstructorEvaluationAuthority = do
+  source <- expectSourceEnvironment
+    [("Evaluation.hs", unlines
+      [ "{-# LANGUAGE StrictData #-}"
+      , "module Evaluation where"
+      , "data Box a = Lazy ~a | Strict !a | Default a"
+      ])]
+  checked <- expectRight $ checkSourceEnvironment source
+  let constructors = concatMap deconstructorConstructors
+        $ sourceDeconstructors $ checkedSourceProjection checked
+      byName = Map.fromList
+        [(constructorName constructor, constructor) | constructor <- constructors]
+  lazyName <- expectRight $ mkQualifiedName ["Evaluation"] "Lazy"
+  strictName <- expectRight $ mkQualifiedName ["Evaluation"] "Strict"
+  defaultName <- expectRight $ mkQualifiedName ["Evaluation"] "Default"
+  boxName <- expectRight $ mkQualifiedName ["Evaluation"] "Box"
+  assertEqual "explicit laziness survives source types and neutral preparation"
+    [Just True, Just False, Just False]
+    [constructorFieldsAreNonStrict <$> Map.lookup constructor byName
+      | constructor <- [lazyName, strictName, defaultName]]
+  let mapped = concatMap deconstructorConstructors
+        $ map (mapDeconstructorBindingTypes id)
+        $ sourceDeconstructors $ checkedSourceProjection checked
+  assertEqual "capture-safe type mapping preserves evaluation authority"
+    constructors mapped
+
+  -- Use the public file loader: reading the AST alone loses extensions
+  -- supplied through ParseMode and would incorrectly certify strict fields.
+  let modeCases =
+        [ ("ordinary fields stay lazy", [], [], True)
+        , ("parse-mode StrictData", [HSE.EnableExtension HSE.StrictData], [], False)
+        , ("parse-mode Strict implies StrictData", [HSE.EnableExtension HSE.Strict], [], False)
+        , ("later mode NoStrictData overrides Strict",
+            [HSE.EnableExtension HSE.Strict, HSE.DisableExtension HSE.StrictData], [], True)
+        , ("later mode Strict re-enables StrictData",
+            [HSE.DisableExtension HSE.StrictData, HSE.EnableExtension HSE.Strict], [], False)
+        , ("NoStrict does not undo the StrictData implication",
+            [HSE.EnableExtension HSE.Strict, HSE.DisableExtension HSE.Strict], [], False)
+        , ("source NoStrictData overrides mode StrictData",
+            [HSE.EnableExtension HSE.StrictData], ["{-# LANGUAGE NoStrictData #-}"], True)
+        , ("source NoStrictData overrides mode Strict",
+            [HSE.EnableExtension HSE.Strict], ["{-# LANGUAGE NoStrictData #-}"], True)
+        , ("source StrictData overrides disabled mode",
+            [HSE.DisableExtension HSE.StrictData], ["{-# LANGUAGE StrictData #-}"], False)
+        , ("source switch order restores lazy fields", [],
+            ["{-# LANGUAGE Strict, NoStrictData #-}"], True)
+        , ("source switch order re-enables strict fields", [],
+            ["{-# LANGUAGE NoStrictData, Strict #-}"], False)
+        , ("GHC options override mode StrictData",
+            [HSE.EnableExtension HSE.StrictData], ["{-# OPTIONS_GHC -XNoStrictData #-}"], True)
+        , ("later GHC options re-enable StrictData",
+            [HSE.EnableExtension HSE.StrictData],
+            ["{-# OPTIONS_GHC -XNoStrictData -XStrictData #-}"], False)
+        , ("other compiler options cannot disable GHC strict fields",
+            [HSE.EnableExtension HSE.StrictData], ["{-# OPTIONS_HUGS -XNoStrictData #-}"], False)
+        ]
+  forM_ modeCases $ \(label, switches, pragmas, expectedDefault) ->
+    withTemporaryFile (unlines $ pragmas ++
+      [ "module Evaluation where"
+      , "data Box a = Default a | Strict !a"
+      ]) $ \modulePath -> do
+      let baseMode = haskellSrcExtsParseMode modulePath
+          mode = baseMode {HSE.extensions = HSE.extensions baseMode ++ switches}
+      LoadReport loaded _ <- parseModules [(mode, modulePath)]
+      modeChecked <- expectRight loaded >>= expectRight . checkSourceEnvironment
+      let modeConstructors = Map.fromList
+            [(constructorName constructor, constructorFieldsAreNonStrict constructor)
+            | deconstructor <- sourceDeconstructors $ checkedSourceProjection modeChecked
+            , constructor <- deconstructorConstructors deconstructor]
+      assertEqual label [Just expectedDefault, Just False]
+        [Map.lookup constructor modeConstructors | constructor <- [defaultName, strictName]]
+  forM_ [HSE.StrictData, HSE.Strict] $ \extension ->
+    withTemporaryFile (unlines
+      [ "module Evaluation where"
+      , "data Box a = Lazy ~a | Strict !a | Default a"
+      ]) $ \modulePath -> do
+      let mode = enableExtensions [extension] $ haskellSrcExtsParseMode modulePath
+      LoadReport loaded _ <- parseModules [(mode, modulePath)]
+      modeChecked <- expectRight loaded >>= expectRight . checkSourceEnvironment
+      let modeConstructors = Map.fromList
+            [(constructorName constructor, constructorFieldsAreNonStrict constructor)
+            | deconstructor <- sourceDeconstructors $ checkedSourceProjection modeChecked
+            , constructor <- deconstructorConstructors deconstructor]
+      assertEqual "explicit lazy fields retain exact authority under mode defaults"
+        [Just True, Just False, Just False]
+        [Map.lookup constructor modeConstructors
+        | constructor <- [lazyName, strictName, defaultName]]
+
+  -- The same shallow elimination is reducible only with source authority.
+  -- Both terms pass the independent type checker; equality of their types
+  -- alone cannot justify dropping a possibly strict constructor application.
+  let integer = TypeCons $ name "Int"
+      boxType = TypeApp (TypeCons boxName) integer
+      lazyConstructor = nonStrictConstructorBinding lazyName [integer]
+      strictConstructor = ConstructorBinding strictName [integer]
+      declaration = DeconstructorBinding boxType
+        [lazyConstructor, strictConstructor] False
+      bindings =
+        [ functionBindingFromType constructor 0 $ TypeArrow integer boxType
+        | constructor <- [lazyName, strictName]
+        ]
+      expression constructor = ExpLambda 1 integer $ ExpCaseMatch
+        (ExpApply (ExpName constructor) $ ExpVar 1 integer)
+        [ (lazyName, [(2, integer)], ExpVar 2 integer)
+        , (strictName, [(3, integer)], ExpVar 3 integer)
+        ]
+      resolver constructor
+        | constructor == lazyName = Just 1
+        | otherwise = Nothing
+      lazyExpression = expression lazyName
+      reduced = reduceKnownConstructorCases resolver lazyExpression
+      goal = TypeArrow integer integer
+  assertEqual "known lazy constructor elimination produces the identity"
+    (toGeneratedExpression $ ExpLambda 1 integer $ ExpVar 1 integer)
+    $ toGeneratedExpression reduced
+  assertEqual "unknown or strict constructor applications retain their match"
+    (toGeneratedExpression $ expression strictName)
+    $ toGeneratedExpression $ reduceKnownConstructorCases resolver
+        $ expression strictName
+  checkExpression (mkQueryClassEnv emptyClassEnv []) bindings [declaration]
+    goal [] lazyExpression @?= Right ()
+  checkExpression (mkQueryClassEnv emptyClassEnv []) bindings [declaration]
+    goal [] reduced @?= Right ()
+
+  let leanConstructorName = neutralName "LeanBox"
+      variable = neutralVariable 0
+      neutralDeclaration = SharedDeclaration.DataTypeDeclaration ()
+        leanConstructorName [SharedDeclaration.TypeParameter variable Nothing]
+        [SharedDeclaration.DataConstructor () leanConstructorName
+          [SharedType.TypeVariable variable]]
+      policy arity = defaultExferenceSessionPolicy
+        {exferenceNonStrictConstructors = Map.singleton leanConstructorName arity}
+  environment <- expectRight $ SharedEnvironment.mkEnvironment [neutralDeclaration]
+  _ <- expectRight $ mkExferenceSessionWithPolicy (policy 1) environment
+  case mkExferenceSessionWithPolicy (policy 2) environment of
+    Left _ -> pure ()
+    Right _ -> fail "constructor evaluation authority accepted a forged arity"
+  case mkExferenceSessionWithPolicy
+      defaultExferenceSessionPolicy
+        {exferenceNonStrictConstructors = Map.singleton (neutralName "Missing") 0}
+      environment of
+    Left _ -> pure ()
+    Right _ -> fail "constructor evaluation authority accepted an absent constructor"
+
+testCompletedCandidateFrontier :: Assertion
+testCompletedCandidateFrontier = do
+  let tokenName = name "QualityReadyToken"
+      cheap = name "qualityReadyCheap"
+      expensive = name "qualityReadyExpensive"
+      token = SharedType.TypeConstructor tokenName
+  unitName <- expectRight $ SharedName.tupleName SharedName.Boxed 0
+  target <- checkedIdentifierTarget "qualityReadyResult"
+  environment <- expectRight $ SharedEnvironment.mkEnvironment
+    [ SharedDeclaration.AbstractTypeDeclaration () tokenName SharedKind.ProperTypeKind
+    , SharedDeclaration.DataTypeDeclaration () unitName []
+        [SharedDeclaration.DataConstructor () unitName []]
+    , SharedDeclaration.ValueDeclaration $ SharedDeclaration.ValueSignature () expensive token
+    , SharedDeclaration.ValueDeclaration $ SharedDeclaration.ValueSignature () cheap $
+        SharedType.FunctionType (SharedType.TypeConstructor unitName) token
+    ]
+  session <- expectRight $ DjexExference.mkExferenceSession environment
+  let run ranking budget capacity = do
+        request <- expectRight $ DjexExference.mkExferenceRequest SharedQuery.QueryRequest
+          { SharedQuery.requestTarget = target
+          , SharedQuery.requestGoal = token
+          , SharedQuery.requestContexts = []
+          , SharedQuery.requestOptions = defaultExferenceOptions
+              { exferenceCandidateRanking = ranking
+              , exferenceProviderCosts = Map.fromList [(cheap, 0), (expensive, 40)]
+              , exferenceMaximumSteps = budget
+              , exferenceMaximumQueueSize = capacity
+              }
+          }
+        expectRight $ DjexExference.runExferenceTypedQuery session request
+      candidates = concatMap (SharedSearch.batchCandidates . SharedQuery.resultSearch)
+      compatibility = SharedTypedCandidate.typedCandidateCompatibility
+      globals = Generated.expressionGlobals . Generated.functionClauseExpression
+        . SharedCandidate.candidateOutput . compatibility
+      stepsOf = DjexExference.exferenceCandidateSteps
+        . DjexExference.exferenceCandidateMetrics . compatibility
+      finalProgress results = case results of
+        firstResult : remaining -> SharedSearch.batchProgress
+          $ SharedQuery.resultSearch $ lastElement firstResult remaining
+        [] -> error "completion-frontier fixture produced no search batches"
+      structurallyRanked = SharedQuality.defaultCandidateRankingPolicy
+  ranked <- run structurallyRanked 3 Nothing
+  assertEqual "ready admission added an uncharged completion batch" 3 $ length ranked
+  let rankedCandidates = candidates ranked
+  case rankedCandidates of
+    firstCandidate : _ -> assertBool "a completed expensive value bypassed cheap's unit argument"
+      $ cheap `elem` globals firstCandidate && expensive `notElem` globals firstCandidate
+    [] -> fail "bounded structural frontier produced no candidate"
+  assertBool "the final allowed step suppressed an already discovered expensive witness"
+    $ any (elem expensive . globals) rankedCandidates
+  assertBool "deferred candidates reported fewer steps than admission required"
+    $ all ((== 3) . stepsOf) rankedCandidates
+  graphs <- mapM (expectRight . SharedTypedCandidate.typedCandidateTermGraph) rankedCandidates
+  assertEqual "deferred and new candidates reused an origin identity"
+    (length graphs) (Set.size $ Set.fromList $ map SharedTypedGenerated.termGraphRoot graphs)
+  forM_ (zip graphs rankedCandidates) $ \(graph, candidate) ->
+    assertEqual "deferral detached the typed graph from its checked expression"
+      (Generated.functionClauseExpression $ SharedCandidate.candidateOutput $ compatibility candidate)
+      (SharedTypedGenerated.eraseTermGraph graph)
+  short <- run structurallyRanked 2 Nothing
+  assertEqual "last-step fallback changed the search allowance" 2 $ length short
+  assertBool "an unfinished cheaper application hid the available last-step witness"
+    $ any (elem expensive . globals) $ candidates short
+  assertBool "the final fallback fabricated the unfinished cheap application"
+    $ all (notElem cheap . globals) $ candidates short
+  case finalProgress short of
+    SharedSearch.Completed (SharedSearch.Truncated reasons) ->
+      assertBool "last-step admission lost its unfinished-work truncation"
+        $ SharedSearch.StepLimitReached `elem` NonEmpty.toList reasons
+    progress -> fail $ "unexpected last-step frontier progress: " ++ show progress
+  historical <- run SharedQuality.LegacyCandidateRanking 3 Nothing
+  case candidates historical of
+    firstCandidate : _ -> do
+      assertBool "legacy stopped emitting completed providers immediately"
+        $ expensive `elem` globals firstCandidate
+      assertEqual "legacy completion moved to a later search step" 2 $ stepsOf firstCandidate
+    [] -> fail "legacy direct provider disappeared"
+  oneSlot <- run structurallyRanked 3 $ Just 1
+  assertBool "the shared queue bound lost the cheaper unfinished branch"
+    $ any (elem cheap . globals) $ candidates oneSlot
+  assertBool "ready entries escaped the configured one-slot queue bound"
+    $ all ((<= 1) . DjexExference.exferenceCandidateFinalQueueSize
+        . DjexExference.exferenceCandidateMetrics . compatibility) $ candidates oneSlot
+  assertBool "pruning a deferred ready entry was not accounted for"
+    $ any ((> 0) . exferenceQueuePruned . SharedSearch.batchMetadata
+        . SharedQuery.resultSearch) oneSlot
+  zeroSlots <- run structurallyRanked 3 $ Just 0
+  assertBool "a zero-slot root frontier fabricated a candidate" $ null $ candidates zeroSlots
+  case finalProgress zeroSlots of
+    SharedSearch.Completed (SharedSearch.Truncated reasons) ->
+      assertBool "a zero-slot frontier lost its queue-pruning reason"
+        $ any isQueuePruning $ NonEmpty.toList reasons
+    progress -> fail $ "a zero-slot frontier claimed exhaustive search: " ++ show progress
+ where
+  isQueuePruning (SharedSearch.QueueLimitPruned count) = count > 0
+  isQueuePruning _ = False
+
+testExpressionQualityCost :: Assertion
+testExpressionQualityCost = do
+  let ty = TypeVar 0
+      provider = name "qualityProvider"
+      constructor = name "QualityConstructor"
+      variable = ExpVar 1 ty
+      global = ExpName provider
+      directFixtures =
+        [ ExpHole 0
+        , variable
+        , global
+        , ExpLambda 1 ty variable
+        , ExpApply global variable
+        , ExpTypeApply global Generated.inferredVisibleTypeArgument
+        , ExpTuple [global, variable]
+        , ExpLet 1 ty global variable
+        , ExpLetMatch constructor [(1, ty)] global variable
+        , ExpCaseMatch global
+            [(constructor, [(1, ty)], variable), (name "QualityEmpty", [], ExpHole 2)]
+        ]
+      repeatedHoleRoot = ExpTuple [ExpHole 0, ExpHole 0, ExpHole 1, ExpVar 0 ty]
+      repeatedHoleUpdates =
+        [ (0, ExpApply global $ ExpHole 0)
+        , (0, ExpTuple [ExpHole 1, global])
+        , (99, ExpName $ name "missingHoleReplacement")
+        , (1, ExpTypeApply global Generated.inferredVisibleTypeArgument)
+        ]
+      nestedUpdates =
+        [ (0, ExpLambda 1 ty $ ExpHole 2)
+        , (2, ExpLetMatch constructor [(3, ty)]
+            (ExpApply global $ ExpHole 4) $ ExpHole 5)
+        , (4, global)
+        , (5, ExpCaseMatch (ExpVar 3 ty)
+            [(constructor, [(7, ty)], ExpHole 6), (name "QualityEmpty", [], variable)])
+        , (6, ExpTuple [ExpVar 7 ty, global])
+        ]
+      filled root updates = scanl
+        (\expression (hole, replacement) -> fillExprHole hole replacement expression)
+        root updates
+      cachedTrails =
+        filled (enableExpressionQualityCache repeatedHoleRoot) repeatedHoleUpdates
+        ++ filled (enableExpressionQualityCache $ ExpHole 0) nestedUpdates
+      uncachedTrails = filled repeatedHoleRoot repeatedHoleUpdates
+        ++ filled (ExpHole 0) nestedUpdates
+      reducible = enableExpressionQualityCache $ ExpLetMatch constructor [(1, ty)]
+        (ExpApply (ExpName constructor) global) variable
+      fixtures = directFixtures ++ map enableExpressionQualityCache directFixtures
+        ++ cachedTrails ++ uncachedTrails
+        ++ [simplifyExpression $ enableExpressionQualityCache $
+              ExpLet 1 ty global variable
+           , reduceKnownConstructorCases
+               (\selected -> if selected == constructor then Just 1 else Nothing) reducible]
+      policies =
+        [ SharedQuality.LegacyCandidateRanking
+        , SharedQuality.defaultCandidateRankingPolicy
+        , SharedQuality.compactCandidateRankingPolicy
+        , SharedQuality.diverseCandidateRankingPolicy
+        , SharedQuality.StructuralCandidateRanking $
+            SharedQuality.CandidateQualityWeights 0 7 (2 ^ (70 :: Int)) 3
+        ]
+      cost selected = if selected == provider then 11 else 0
+  forM_ policies $ \policy -> forM_ fixtures $ \expression ->
+    assertEqual "direct annotation-preserving score changed the shared metric"
+      (SharedQuality.candidateQualityCost policy cost $ toGeneratedExpression expression)
+      (expressionQualityCost policy cost expression)
+  assertEqual "cache updates changed repeated, absent, or newly inserted hole semantics"
+    (map toGeneratedExpression uncachedTrails)
+    (map toGeneratedExpression cachedTrails)
+  assertEqual "legacy scoring inspected a derived cache or expression" 0 $
+    expressionQualityCost SharedQuality.LegacyCandidateRanking
+      (error "legacy provider cost was forced") (error "legacy expression was forced")
+
+testCandidateQuality :: Assertion
+testCandidateQuality = do
+  let token = TypeCons $ name "QualityToken"
+      seed = TypeCons $ name "QualitySeed"
+      cheap = name "qualityCheap"
+      expensive = name "qualityExpensive"
+      providers =
+        [ functionBindingFromType expensive 0 $ TypeArrow seed token
+        , functionBindingFromType cheap 0 $ TypeArrow seed token
+        , functionBindingFromType (name "qualitySeed") 0 seed
+        ]
+      costs = Map.fromList [(cheap, 0), (expensive, 100)]
+      -- The ground goal still owns an explicit forall layer: opening it,
+      -- selecting a function, and filling its seed are three charged steps.
+      -- Both policies receive this same minimal complete-expression allowance.
+      options = defaultExferenceOptions
+        { exferenceMaximumSteps = 3
+        , exferenceMaximumQueueSize = Nothing
+        , exferenceProviderCosts = costs
+        }
+  environment <- expectRight $ mkExferenceEnvironment
+    $ EnvDictionary providers [] emptyClassEnv
+  target <- checkedIdentifierTarget "qualityResult"
+  let run selected = expectRight $ findQueryResultsInEnvironmentEither
+        target (emptyExferenceSourceTypeVariableHints token) environment
+        $ ExferenceQuery token Set.empty selected
+      outputs = concatMap
+        (SharedSearch.batchCandidates . SharedQuery.resultSearch)
+      expressions = map
+        (Generated.functionClauseExpression . SharedCandidate.candidateOutput)
+  ranked <- run options
+  assertEqual "ranking retains the exact step allowance" 3 $ length ranked
+  case expressions $ outputs ranked of
+    [expression] -> assertEqual "the lower-cost provider wins before step 3"
+      (Generated.Apply (Generated.Global cheap)
+        $ Generated.Global $ name "qualitySeed") expression
+    found -> fail $ "unexpected bounded quality candidates: " ++ show found
+  reversed <- run options
+    {exferenceProviderCosts = Map.fromList [(cheap, 100), (expensive, 0)]}
+  assertEqual "reversed costs keep the same charged step allowance"
+    (length ranked) (length reversed)
+  case expressions $ outputs reversed of
+    [expression] -> assertEqual "the preference follows cost rather than insertion order"
+      (Generated.Apply (Generated.Global expensive)
+        $ Generated.Global $ name "qualitySeed") expression
+    found -> fail $ "unexpected reversed-cost bounded candidates: " ++ show found
+  let legacy = options
+        { exferenceCandidateRanking = SharedQuality.LegacyCandidateRanking }
+  historical <- run legacy
+  historicalWithoutCosts <- run legacy {exferenceProviderCosts = Map.empty}
+  assertEqual "legacy ignores structural provider overrides"
+    (expressions $ outputs historicalWithoutCosts)
+    (expressions $ outputs historical)
+  assertEqual "legacy and structural ranking charge the same steps"
+    (length historical) (length ranked)
 
 mapQueryOptions
   :: (ExferenceOptions -> ExferenceOptions)

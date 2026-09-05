@@ -1,5 +1,13 @@
 # Church signature synthesis acceptance
 
+The [candidate-quality guide](../docs/candidate-quality.md) and
+[focused quality probes](quality.md) cover the separate comparison of
+`legacy`, `balanced`, `compact`, and `diverse`. The reproduction commands
+below run the current checkout and its default policy. The completed corpus
+results in this document are historical rank-N acceptance at the explicitly
+recorded revisions; final acceptance of the new quality policies is still
+being completed.
+
 This suite synthesizes implementations from **every type signature** in
 `docs/examples/Church.hs`: 346 top-level signatures and four explicitly
 annotated local bindings. The generated implementations need only inhabit the
@@ -141,7 +149,8 @@ per-case TSV result, and the full GHC diagnostic output. These reproducible
 run artifacts are ignored by Git. A successful exit requires every selected
 query to produce a candidate and the entire generated module to pass GHC.
 
-Validation on 2026-09-04 with GHC 9.12.4, a two-second per-query timeout, and a
+The recorded Djex `e2eb71e` validation on 2026-09-04 with GHC 9.12.4,
+a two-second per-query timeout, and a
 10,000-step/choice budget produced **350/350 candidates for Djinn and 350/350
 for Exference**. Both complete generated modules, including all original-type
 forwarding checks and all 38 exact-original-signature partial wrappers, passed
@@ -239,7 +248,7 @@ always infer from an unannotated occurrence. The implementation report in
 [`docs/rank-n-impredicative-synthesis.tex`](../docs/rank-n-impredicative-synthesis.tex)
 explains these cases and compiler-checked explicit type applications.
 
-The completed reconstruction pass was validated in September 2026: all 100 probe
+The pre-quality reconstruction pass was validated in September 2026: all 100 probe
 queries met their expectations across both engines, all 76 positive
 implementations passed GHC, and all 24 negative queries returned no candidate
 without errors or timeouts. These counts are separate from the Church corpus.

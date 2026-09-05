@@ -87,6 +87,7 @@ import Language.Haskell.Exference.Core.RigidInstantiation
   ( mkRigidInstantiationContext, planRigidInstantiation )
 import Language.Haskell.Exference.Core.Types
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
+import qualified Language.Haskell.Synthesis.CandidateQuality as SharedQuality
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Generated as Generated
@@ -2065,6 +2066,8 @@ legacyInputQuery input = E.ExferenceQuery
       , exferenceMaximumQueueSize = E.input_maxQueueSize input
       , exferenceMaximumDepth = E.input_maxDepth input
       , exferenceHeuristics = E.input_heuristicsConfig input
+      , exferenceCandidateRanking = SharedQuality.LegacyCandidateRanking
+      , exferenceProviderCosts = Map.empty
       }
   }
 

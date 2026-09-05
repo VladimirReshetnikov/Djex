@@ -32,13 +32,16 @@ module Djinn.Internal.LJT (
 
 import Control.Applicative (Alternative(empty, (<|>)))
 import Control.Monad (MonadPlus(mzero, mplus), ap, foldM)
-import Data.List ((!?))
+import Data.List ((!?), sortOn)
 import Data.Maybe (fromMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Fresh (allocateFresh)
+import qualified Language.Haskell.Synthesis.CandidateQuality as Quality
+import qualified Language.Haskell.Synthesis.Generated as Generated
+import qualified Language.Haskell.Synthesis.Name as Name
 import Djinn.Internal.LJTFormula
 import Djinn.Internal.ProofCheck (checkProofEnvironment)
 
@@ -63,7 +66,11 @@ data SearchMode = SearchMode {
     -- Maximum number of choice points to explore; Nothing is unlimited.
     -- With a limit the search is no longer a decision procedure: an empty
     -- result with searchExhausted set means "not found", not "unprovable".
-    searchBudget :: Maybe Integer
+    searchBudget :: Maybe Integer,
+    -- Ranking only permutes finite alternatives; every choice remains charged.
+    searchRanking :: Quality.CandidateRankingPolicy,
+    searchProviderNames :: Map.Map Symbol Name.Name,
+    searchProviderCosts :: Map.Map Name.Name Natural
     }
     deriving (Show)
 
@@ -73,7 +80,10 @@ defaultSearchMode :: MoreSolutions -> SearchMode
 defaultSearchMode more = SearchMode {
     searchAlternatives = more,
     searchStrategy = DepthFirst,
-    searchBudget = Nothing
+    searchBudget = Nothing,
+    searchRanking = Quality.LegacyCandidateRanking,
+    searchProviderNames = Map.empty,
+    searchProviderCosts = Map.empty
     }
 
 -- | The result of one mode-aware search: the lazily produced proof terms
@@ -113,7 +123,7 @@ proveWithMode mode env goal =
   where
     (proofs, exhausted, remaining) =
         runBounded (searchBudget mode) (searchStrategy mode) reservedSymbols $
-            redtop (searchAlternatives mode) env goal
+            redtop mode (searchAlternatives mode) env goal
     -- Symbol is shared by proof variables and propositional atoms.  Reserving
     -- both namespaces prevents generated binders from capturing environment
     -- variables and keeps the atom introduced for disjunction genuinely fresh.
@@ -136,11 +146,19 @@ proveWithModeChecked mode environment goal = do
 -- Fold the environment into the goal as premises, prove the resulting
 -- implication, then apply the proof to the environment variables and
 -- normalize, leaving a term whose free variables are the assumption names.
-redtop :: MoreSolutions -> [(Symbol, Formula)] -> Formula -> P Proof
-redtop more env goal = do
-    let form = foldr (:->) goal (map snd env)
-    p <- redant more [] Map.empty [] Map.empty form
-    nf (applys p (map (Var . fst) env))
+redtop :: SearchMode -> MoreSolutions -> [(Symbol, Formula)] -> Formula -> P Proof
+redtop mode more env goal
+    | Quality.LegacyCandidateRanking <- searchRanking mode = do
+        let form = foldr (:->) goal (map snd env)
+        p <- redant mode more [] Map.empty [] Map.empty form
+        nf (applys p (map (Var . fst) env))
+    | otherwise = do
+        -- Keep source assumption identities while choosing proofs so provider
+        -- ratings cannot be lost behind the temporary outer lambda prefix.
+        -- The independent proof checker sees exactly this same environment.
+        p <- redant mode more [A (Var name) formula | (name, formula) <- env]
+            Map.empty [] Map.empty goal
+        nf p
 
 ------------------------------
 -----
@@ -353,6 +371,50 @@ interleaveChoices (choice : choices) = P $ \ strat s sk fk ->
     advance (Step rest : streams) rear =
         Step (advance streams (rest : rear))
 
+-- A cost-only structural view of a partial proof. It is never emitted or
+-- admitted as typing evidence: ordering preserves the original proof handles.
+-- Logical eliminators retain an explicit Case cost, even before saturation.
+orderProofs :: SearchMode -> [Term] -> [Term]
+orderProofs mode = Quality.rankCandidatesByQuality (searchRanking mode)
+    (\name -> Map.findWithDefault (Quality.defaultCandidateProviderCost name) name $ searchProviderCosts mode)
+    (proofQualityExpression mode)
+
+orderNestedProofs :: SearchMode -> [NestImp] -> [NestImp]
+orderNestedProofs mode = Quality.rankCandidatesByQuality (searchRanking mode)
+    (\name -> Map.findWithDefault (Quality.defaultCandidateProviderCost name) name $ searchProviderCosts mode)
+    (\(NestImp proof _ _ _) -> proofQualityExpression mode proof)
+
+-- An exact pending assumption can finish the proof before it enters an atom
+-- index. Rank this finite work list as well, so an expensive direct provider
+-- cannot bypass the same policy used by indexed choices. Stable scalar order
+-- retains ties without repeatedly applying diversity penalties to one worklist.
+orderAntecedents :: SearchMode -> Antecedents -> Antecedents
+orderAntecedents mode = case searchRanking mode of
+    Quality.LegacyCandidateRanking -> id
+    ranking -> sortOn $ \(A proof _) -> Quality.candidateQualityCost ranking
+        (\name -> Map.findWithDefault
+            (Quality.defaultCandidateProviderCost name) name $ searchProviderCosts mode)
+        $ proofQualityExpression mode proof
+
+proofQualityExpression :: SearchMode -> Term -> Generated.Expression Symbol
+proofQualityExpression mode = go
+  where
+    go (Var symbol) = case Map.lookup symbol $ searchProviderNames mode of
+        Just name -> Generated.Global name
+        Nothing -> Generated.Local symbol
+    go (Lam binder body) = Generated.Lambda [Generated.Bind binder] $ go body
+    go (Apply function argument) = Generated.Apply (go function) (go argument)
+    go (Xsel _ _ value) = Generated.Case (go value)
+        [(Generated.Wildcard, Generated.Hole $ Symbol "qualityHole")]
+    go (Ccases constructors) = Generated.Case (Generated.Hole $ Symbol "qualityHole")
+        [(Generated.Wildcard, Generated.Hole $ Symbol "qualityHole") | _ <- constructors]
+    go (Csplit _) = Generated.Case (Generated.Hole $ Symbol "qualityHole")
+        [(Generated.Wildcard, Generated.Hole $ Symbol "qualityHole")]
+    go (Cinj (ConsDesc spelling _) _) = case Name.parseName spelling of
+        Right name -> Generated.Global name
+        Left _ -> Generated.Local $ Symbol spelling
+    go (Ctuple _) = Generated.Tuple []
+
 -- Cut a subsearch to its first result, preserving the choice points that
 -- were explored to reach it so budgets stay honest.
 atMostOne :: P a -> P a
@@ -476,14 +538,14 @@ type Goal = Formula
 --
 -- There is also a proof object associated with each antecedent.
 --
-redant :: MoreSolutions -> Antecedents -> AtomImps -> NestImps
+redant :: SearchMode -> MoreSolutions -> Antecedents -> AtomImps -> NestImps
        -> AtomicProofs -> Goal -> P Proof
-redant more antes atomImps nestImps atoms goal =
-    case antes of
+redant mode more antes atomImps nestImps atoms goal =
+    case orderAntecedents mode antes of
         [] -> redsucc goal
         a : rest -> redant1 Nothing a rest goal
   where
-    redant0 pending g = redant more pending atomImps nestImps atoms g
+    redant0 pending g = redant mode more pending atomImps nestImps atoms g
 
     redant1 ::
         Maybe (Symbol, [Term]) -> Antecedent -> Antecedents -> Goal -> P Proof
@@ -507,7 +569,7 @@ redant more antes atomImps nestImps atoms goal =
         let (consequences, remainingAtomImps) = extract atomImps s
             newAntecedents =
                 [A (Apply f p) b | A f b <- consequences] ++ pending
-        in redant more newAntecedents remainingAtomImps nestImps
+        in redant mode more newAntecedents remainingAtomImps nestImps
              (addAtom p s atoms) g
     reduceAntecedent _ (A p (Conj conjuncts)) pending g = do
         variables <- mapM (const (newSym "v")) conjuncts
@@ -577,7 +639,7 @@ redant more antes atomImps nestImps atoms goal =
             (A (Var y) (d :-> emptyResult) : pending) g
         cImpDImpFalse x y p proof
     reduceNestedImp p c d b pending g =
-        redant more pending atomImps
+        redant mode more pending atomImps
             (addNestImp (NestImp p c d b) nestImps) atoms g
 
     -- Reduce an implication whose antecedent is atomic.  One branch applies
@@ -588,10 +650,10 @@ redant more antes atomImps nestImps atoms goal =
     reduceAtomicImp fairChain p s b pending g =
         applyAvailable
         `mplus`
-        redant more pending (insert atomImps s [A p b])
+        redant mode more pending (insert atomImps s [A p b])
             nestImps atoms g
       where
-        available = findAtoms s atoms
+        available = orderProofs mode $ findAtoms s atoms
         -- A binary endomorphism is the common combining shape where reusing
         -- the first argument can starve a direct mixed application.  Prefer
         -- unused proofs within a small oldest-first cohort, fairly
@@ -633,7 +695,7 @@ redant more antes atomImps nestImps atoms goal =
     -- Reduce the goal once every antecedent has been classified.
     redsucc :: Goal -> P Proof
     redsucc atomicGoal@(PVar s) =
-        cutSearch more (choose (findAtoms s atoms))
+        cutSearch more (choose (orderProofs mode $ findAtoms s atoms))
         `mplus`
         if goalMayBeReachable s atomImps nestImps then
             chooseNestedImp atomicGoal
@@ -663,7 +725,7 @@ redant more antes atomImps nestImps atoms goal =
         continuation <- newSym "_"
         redant0 [] (PVar continuation)
     redsucc implication@(a :-> b) =
-        cutSearch more (choose $ findIndexedImplications implication)
+        cutSearch more (choose $ orderProofs mode $ findIndexedImplications implication)
         `mplus`
         do
             s <- newSym "x"
@@ -692,12 +754,12 @@ redant more antes atomImps nestImps atoms goal =
     -- one once, removing the selected implication from the recursive calls.
     chooseNestedImp :: Goal -> P Proof
     chooseNestedImp g = do
-        (NestImp p c d b, remaining) <- select nestImps
+        (NestImp p c d b, remaining) <- select $ orderNestedProofs mode nestImps
         x <- newSym "x"
         z <- newSym "z"
-        qz <- redant more [A (Var z) (d :-> b)] atomImps remaining atoms
+        qz <- redant mode more [A (Var z) (d :-> b)] atomImps remaining atoms
             (c :-> d)
-        proof <- redant more [A (Var x) b] atomImps remaining atoms g
+        proof <- redant mode more [A (Var x) b] atomImps remaining atoms g
         subst (applyImp p (Lam z qz)) x proof
 
 -- A cheap necessary-condition check before branching over nested implications.

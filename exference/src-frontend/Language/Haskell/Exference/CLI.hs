@@ -52,6 +52,8 @@ import Language.Haskell.Exference.EnvironmentParser
   )
 import Language.Haskell.Synthesis.Candidate
   ( candidateResidualConstraints )
+import Language.Haskell.Synthesis.CandidateQuality
+  ( CandidateRankingPolicy (LegacyCandidateRanking) )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , Severity (Info)
@@ -278,7 +280,8 @@ optionsFor flags = cliSearchDefaults
 -- literal or record constructor to update.
 cliSearchDefaults :: ExferenceOptions
 cliSearchDefaults = defaultExferenceOptions
-  { exferenceHeuristics =
+  { exferenceCandidateRanking = LegacyCandidateRanking
+  , exferenceHeuristics =
       cliHeuristicsConfig {heuristics_solutionLength = 0}
   }
 

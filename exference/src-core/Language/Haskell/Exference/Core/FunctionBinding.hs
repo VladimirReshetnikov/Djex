@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 -- | The raw search-environment records of the Exference engine: flat
 -- t'FunctionBinding's built from opened prenex signatures, datatype
@@ -7,7 +8,9 @@
 -- (identities, ratings, syntax, deconstructor shape) are the single policy
 -- shared by search-environment sealing and independent expression checking.
 module Language.Haskell.Exference.Core.FunctionBinding
-  ( ConstructorBinding (..)
+  ( ConstructorBinding (ConstructorBinding, constructorName, constructorFields)
+  , nonStrictConstructorBinding
+  , constructorFieldsAreNonStrict
   , DeconstructorBinding (..)
   , DeconstructorValidationError (..)
   , EnvironmentDuplicateError (..)
@@ -125,11 +128,43 @@ mapFunctionBindingTypes transform binding = binding
 
 -- | One data constructor of a t'DeconstructorBinding': its name and its
 -- field types in declaration order.
-data ConstructorBinding = ConstructorBinding
-  { constructorName :: QualifiedName
-  , constructorFields :: [HsType]
-  }
-  deriving (Eq, Generic, Show)
+data ConstructorBinding = ConstructorBindingDetails QualifiedName [HsType] Bool
+  deriving (Eq, Generic)
+
+-- | Compatibility construction records unknown field evaluation. Pattern
+-- matching also sees certified constructors. A record update through this
+-- pattern conservatively drops the certificate; use the type-mapping helper
+-- when changing only the representation of the same field types.
+pattern ConstructorBinding :: QualifiedName -> [HsType] -> ConstructorBinding
+pattern ConstructorBinding {constructorName, constructorFields} <-
+  ConstructorBindingDetails constructorName constructorFields _
+ where
+  ConstructorBinding name fields = ConstructorBindingDetails name fields False
+
+{-# COMPLETE ConstructorBinding #-}
+
+-- | Explicit source authority that all constructor fields are non-strict.
+-- A frontend must establish this from source evaluation semantics, not from
+-- the field types (which do not retain Haskell strictness annotations).
+nonStrictConstructorBinding :: QualifiedName -> [HsType] -> ConstructorBinding
+nonStrictConstructorBinding name fields = ConstructorBindingDetails name fields True
+
+constructorFieldsAreNonStrict :: ConstructorBinding -> Bool
+constructorFieldsAreNonStrict (ConstructorBindingDetails _ _ nonStrict) = nonStrict
+
+instance Show ConstructorBinding where
+  showsPrec precedence constructor
+    | constructorFieldsAreNonStrict constructor = showParen (precedence > 10) $
+        showString "nonStrictConstructorBinding "
+          . showsPrec 11 (constructorName constructor)
+          . showChar ' '
+          . showsPrec 11 (constructorFields constructor)
+    | otherwise = showParen (precedence > 10) $
+        showString "ConstructorBinding {constructorName = "
+          . shows (constructorName constructor)
+          . showString ", constructorFields = "
+          . shows (constructorFields constructor)
+          . showChar '}'
 
 instance NFData ConstructorBinding
 
@@ -223,8 +258,10 @@ mapDeconstructorBindingTypes transform binding = binding
       $ deconstructorConstructors binding
   }
  where
-  transformConstructor constructor = constructor
-    { constructorFields = map transform $ constructorFields constructor }
+  transformConstructor constructor = ConstructorBindingDetails
+    (constructorName constructor)
+    (map transform $ constructorFields constructor)
+    (constructorFieldsAreNonStrict constructor)
 
 -- | A raw search environment: the value bindings, the datatype eliminators,
 -- and the sealed class environment.  Search sealing and independent

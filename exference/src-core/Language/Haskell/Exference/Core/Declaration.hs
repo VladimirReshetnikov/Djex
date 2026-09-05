@@ -74,13 +74,17 @@ import Language.Haskell.Exference.Core.Score
 import Language.Haskell.Exference.Core.Types
 
 -- | The annotation Exference attaches to shared declarations: a search
--- penalty on value signatures and data constructors, a recursion flag on
--- datatype declarations, and nothing on classes, instances, and synonyms.
+-- penalty on value signatures and data constructors, explicit non-strict
+-- constructor-field authority, a recursion flag on datatype declarations,
+-- and nothing on classes, instances, and synonyms.
 -- The lowering adapters below require the metadata kind matching the
 -- declaration kind and fail otherwise.
 data DeclarationMetadata
   = NoDeclarationMetadata
   | SearchPenaltyMetadata Penalty
+  -- The optional cost distinguishes unrated declaration conversion from a
+  -- rated source constructor while retaining the same evaluation authority.
+  | NonStrictConstructorMetadata (Maybe Penalty)
   | RecursiveDataMetadata Bool
   deriving (Eq, Show, Generic)
 
@@ -207,13 +211,38 @@ prepareSynthesisInventory inventory = do
 -- | Prepare the metadata-bearing Inventory produced by Exference's source
 -- compatibility frontend. Alias-aware recursion is foundation-derived and
 -- then copied into the retained annotations so historical source projections
--- see the same classification as search.
+-- see the same classification as search. Exact constructor evaluation metadata
+-- also survives into the backend; generic neutral preparation stays conservative.
 prepareSourceSynthesisInventory
   :: SynthesisInventory
   -> Either SynthesisEnvironmentError
       (PreparedSynthesisInventory DeclarationMetadata)
-prepareSourceSynthesisInventory inventory =
-  prepareSynthesisInventory inventory >>= normalizePreparedDataMetadata
+prepareSourceSynthesisInventory inventory = do
+  prepared <- prepareSynthesisInventory inventory >>= normalizePreparedDataMetadata
+  pure $ retainSourceConstructorEvaluation prepared
+ where
+  certified = Set.fromList
+    [ SharedDeclaration.constructorName constructor
+    | SharedDeclaration.DataTypeDeclaration _ _ _ constructors <-
+        SharedEnvironment.environmentDeclarations
+          $ SharedInventory.inventoryEnvironment inventory
+    , constructor <- constructors
+    , NonStrictConstructorMetadata{} <-
+        [SharedDeclaration.constructorAnnotation constructor]
+    ]
+  retainSourceConstructorEvaluation
+      (PreparedSynthesisInventory witness backend schemes) =
+    PreparedSynthesisInventory witness
+      (backend {environmentDeconstructors = map retainData
+        $ environmentDeconstructors backend}) schemes
+  retainData declaration = declaration
+    { deconstructorConstructors = map retainConstructor
+        $ deconstructorConstructors declaration }
+  retainConstructor constructor
+    | constructorName constructor `Set.member` certified =
+        nonStrictConstructorBinding (constructorName constructor)
+          $ constructorFields constructor
+    | otherwise = constructor
 
 -- | Reorder a canonical backend to match a source frontend and attach its
 -- finite heuristic ratings. Function names and deconstructor heads form an
@@ -1070,17 +1099,28 @@ convertedConstructorWith
       (SharedDeclaration.DataConstructor
         SynthesisVariable DeclarationMetadata)
 convertedConstructorWith metadata constructor = SharedDeclaration.DataConstructor
-  <$> metadata constructor
+  <$> (retainEvaluation <$> metadata constructor)
   <*> pure (constructorName constructor)
   <*> mapM checkedType (constructorFields constructor)
+ where
+  retainEvaluation annotation
+    | constructorFieldsAreNonStrict constructor = case annotation of
+        NoDeclarationMetadata -> NonStrictConstructorMetadata Nothing
+        SearchPenaltyMetadata penalty -> NonStrictConstructorMetadata $ Just penalty
+        _ -> annotation
+    | otherwise = annotation
 
 loweredConstructor
   :: SharedDeclaration.DataConstructor
       SynthesisVariable DeclarationMetadata
   -> Either SynthesisDeclarationError ConstructorBinding
-loweredConstructor constructor = ConstructorBinding
+loweredConstructor constructor = makeConstructor
   (SharedDeclaration.constructorName constructor)
   <$> mapM checkedType (SharedDeclaration.constructorFields constructor)
+ where
+  makeConstructor = case SharedDeclaration.constructorAnnotation constructor of
+    NonStrictConstructorMetadata{} -> nonStrictConstructorBinding
+    _ -> ConstructorBinding
 
 loweredRatedConstructor
   :: HsType
@@ -1090,6 +1130,7 @@ loweredRatedConstructor
 loweredRatedConstructor result constructor = do
   penalty <- case SharedDeclaration.constructorAnnotation constructor of
     SearchPenaltyMetadata value -> Right value
+    NonStrictConstructorMetadata (Just value) -> Right value
     _ -> Left $ MissingSearchPenaltyMetadata
       $ SharedDeclaration.constructorName constructor
   lowered <- loweredConstructor constructor

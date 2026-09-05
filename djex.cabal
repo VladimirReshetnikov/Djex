@@ -44,6 +44,7 @@ Extra-Source-Files:
   test-church/*.tsv
   test-church/*.inc
   test-church/*.md
+  test-church/quality_probe.hs
   docs/reports/*.md
   djinn/docs/reports/*.md
   exference/docs/reports/*.md
@@ -170,6 +171,7 @@ Library
     Language.Haskell.Synthesis.Query
     Language.Haskell.Synthesis.Search
     Language.Haskell.Synthesis.Selection
+    Language.Haskell.Synthesis.CandidateQuality
     Language.Haskell.Synthesis.Semantic.Length
     Language.Haskell.Synthesis.Semantic.Length.CounterexampleBank
     Language.Haskell.Synthesis.Semantic.Length.Evaluate
@@ -432,6 +434,7 @@ Test-Suite synthesis-tests
     synthesis/internal
   Other-Modules:
     ClassResolutionSpec
+    CandidateQualitySpec
     SMTLibCausalBoundaryWhitespaceSpec
     SMTLibCausalDriverSpec
     SMTLibCausalStdoutChunkSpec

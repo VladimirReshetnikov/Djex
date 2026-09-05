@@ -31,6 +31,7 @@ module Language.Haskell.Djex
   ( module Language.Haskell.Djex.Djinn
   , module Language.Haskell.Djex.Exference
   , module Language.Haskell.Synthesis.Candidate
+  , module Language.Haskell.Synthesis.CandidateQuality
   , module Language.Haskell.Synthesis.Class
   , module Language.Haskell.Synthesis.Collection
   , module Language.Haskell.Synthesis.Count
@@ -80,6 +81,7 @@ module Language.Haskell.Djex
 import Language.Haskell.Djex.Djinn
 import Language.Haskell.Djex.Exference
 import Language.Haskell.Synthesis.Candidate
+import Language.Haskell.Synthesis.CandidateQuality
 import Language.Haskell.Synthesis.Class
 import Language.Haskell.Synthesis.Collection
 import Language.Haskell.Synthesis.Count

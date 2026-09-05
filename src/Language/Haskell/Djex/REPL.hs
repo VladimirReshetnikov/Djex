@@ -31,6 +31,7 @@ import Data.Foldable (toList)
 import Data.List (intercalate, isPrefixOf)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.Map.Strict as Map
+import Numeric.Natural (Natural)
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import qualified Data.Set as Set
 import Data.Version (showVersion)
@@ -180,6 +181,26 @@ currentDjinnSession state = case djinnProjection djinn of
  where
   djinn = djinnRuntime state
 
+-- | Settings retain exact source names, as used by the canonical Exference
+-- inventory. Djinn's checked scope projection renames those declarations to
+-- prompt names. Derive its cost view at each query, after any load, reload,
+-- import, or module change, and use that same view for search and presentation.
+-- A resolved canonical assignment takes precedence over a coincident spelling
+-- that is not a canonical source key; unrelated assignments remain unchanged.
+djinnPresentationOptions :: ReplState -> PresentationOptions
+djinnPresentationOptions state = options
+  { presentationProviderCosts = Map.union projected costs }
+ where
+  options = presentation state
+  costs = presentationProviderCosts options
+  names = maybe Map.empty djinnProjectionPromptNames
+    $ djinnProjection $ djinnRuntime state
+  projected = Map.fromList
+    [ (promptName, cost)
+    | (canonicalName, cost) <- Map.toAscList costs
+    , Just promptName <- [Map.lookup canonicalName names]
+    ]
+
 -- | Recompute Djinn's view of the module scope after any change to the
 -- loaded workspace, the scope, or the axiom policy. The caller decides how to
 -- recover from failure: startup has no earlier source state and may use the
@@ -191,15 +212,29 @@ refreshDjinnProjection state = case
     , exferenceRuntimeScope runtime
     ) of
   (Just baseSession, Just context) ->
-    let visibleTypes = Set.fromList $ scopeUnqualifiedTypeNames context
-        visibleValues = Set.fromList $ scopeUnqualifiedValueNames context
+    let declarations = scopeProjectionDeclarations baseSession
+        -- Boxed unit is Haskell syntax, independent of module imports. The
+        -- source loader already supplies its canonical checked declaration;
+        -- keep that exact authority when projecting Djinn's nominal unit.
+        -- No ordinary hidden constructor gains visibility from this rule.
+        intrinsicUnits = Set.fromList
+          [ name
+          | DataTypeDeclaration _ name [] [DataConstructor _ constructor []]
+              <- declarations
+          , constructor == name
+          , nameSpecial name == Just (TupleConstructor Boxed 0)
+          ]
+        visibleTypes = Set.union intrinsicUnits
+          $ Set.fromList $ scopeUnqualifiedTypeNames context
+        visibleValues = Set.union intrinsicUnits
+          $ Set.fromList $ scopeUnqualifiedValueNames context
     in case projectDjinnScope
         (djinnAxiomPolicy djinn)
         records
         (typeConstructorKinds $ inventoryKindAssumptions
           $ exferenceSessionInventory baseSession)
         (ExferenceSession.sessionRecursiveDataTypeNames baseSession)
-        (scopeProjectionDeclarations baseSession)
+        declarations
         visibleTypes
         visibleValues of
       Left failure -> Left failure
@@ -783,7 +818,8 @@ runQuery sourceName query state = do
       ParallelLaneTimedOut ->
         diagnosticFailure $ queryTimeoutDiagnostic seconds
 
-  -- SelectAll retains one-pass streaming. Non-streaming shared-parser pairs
+  -- SelectAll retains its serial presentation route: legacy streams, while
+  -- structural policies buffer a bounded quality pool. Shared-parser pairs
   -- use either the established untimed strict runner or its one-cutoff timed
   -- counterpart; all other routes remain serial.
   parallelBackendPairEligible =
@@ -839,7 +875,7 @@ runQuery sourceName query state = do
       , requestGoal = projectParsedTypeToDjinn state parsed
       , requestContexts = []
       , requestOptions = prepareDjinnQueryOptions
-          (presentation state) (djinnSearchOptions state)
+          (djinnPresentationOptions state) (djinnSearchOptions state)
       }
 
   prepareParsedDjinn = prepareCheckedDjinn . checkParsedDjinn
@@ -849,7 +885,7 @@ runQuery sourceName query state = do
     Right request -> case runDjinnQuery (currentDjinnSession state) request of
       Left failure -> prepareDiagnosticFailure failure
       Right result -> prepareDjinnPresentation
-        (presentation state)
+        (djinnPresentationOptions state)
         (maybe noFieldSelectors djinnProjectionFieldSelectors
           $ djinnProjection $ djinnRuntime state)
         result
@@ -873,14 +909,14 @@ runQuery sourceName query state = do
       , requestGoal = projectParsedTypeToDjinn state parsed
       , requestContexts = []
       , requestOptions = prepareDjinnQueryOptions
-          (presentation state) (djinnSearchOptions state)
+          (djinnPresentationOptions state) (djinnSearchOptions state)
       } of
     Left failure -> emitDiagnostic failure
     Right request -> ignoreExit $ withinQueryTimeout (queryTimeout state)
       $ case runDjinnQuery (currentDjinnSession state) request of
         Left failure -> diagnosticFailure failure
         Right result -> presentDjinn
-          (presentation state)
+          (djinnPresentationOptions state)
           (maybe noFieldSelectors djinnProjectionFieldSelectors
             $ djinnProjection $ djinnRuntime state)
           result
@@ -915,7 +951,7 @@ runDjinnInteractive :: FilePath -> String -> ReplState -> IO ()
 runDjinnInteractive sourceName typeSource state = ignoreExit
   $ withinQueryTimeout (queryTimeout state)
   $ executeDjinnCommand
-      (presentation state)
+      (djinnPresentationOptions state)
       (maybe noFieldSelectors djinnProjectionFieldSelectors
         $ djinnProjection $ djinnRuntime state)
       (currentDjinnSession state)
@@ -1365,6 +1401,26 @@ settingBehavior setting = case setting of
     presentationSelection
     (\value options -> options {presentationSelection = value})
     selectionModeName
+  RankingSetting -> fieldSetting setting
+    (\_ -> parseCandidateRankingPolicy . normalize)
+    (presentationRanking . presentation)
+    (\value state -> (onDjinnOptions (\options -> options {optionRanking = value})
+      $ onExferenceOptions (\options -> options {exferenceCandidateRanking = value}) state)
+        { presentation = (presentation state) {presentationRanking = value} })
+    defaultCandidateRankingPolicy candidateRankingPolicyName
+  ProviderCostSetting -> SettingBehavior
+    { settingApply = requiredValue setting $ \source -> do
+        (name, cost) <- parseProviderCostAssignment source
+        Right $ pure . \state -> applyProviderCosts
+          (Map.insert name cost $ presentationProviderCosts $ presentation state) state
+    , settingReset = pure . applyProviderCosts Map.empty
+    , settingRender = intercalate ", " . map
+        (\(name, cost) -> renderCanonical name ++ "=" ++ show cost)
+        . Map.toAscList . presentationProviderCosts . presentation
+    }
+  QualityWindowSetting -> presentationSetting setting positiveInt
+    presentationQualityWindow
+    (\value options -> options {presentationQualityWindow = value}) show
   RenderingSetting -> presentationSetting setting parseRenderMode
     presentationRenderMode
     (\value options -> options {presentationRenderMode = value})
@@ -1470,6 +1526,12 @@ settingBehavior setting = case setting of
     , settingRender =
         booleanName . exferenceRuntimeAllowsFix . exferenceRuntime
     }
+
+applyProviderCosts :: Map.Map Name Natural -> ReplState -> ReplState
+applyProviderCosts costs state =
+  (onDjinnOptions (\options -> options {optionProviderCosts = costs})
+    $ onExferenceOptions (\options -> options {exferenceProviderCosts = costs}) state)
+      { presentation = (presentation state) {presentationProviderCosts = costs} }
 
 applyFixPolicy :: Bool -> ReplState -> IO ReplState
 applyFixPolicy allowFix state
@@ -1642,6 +1704,16 @@ settingInvocation source = case trim source of
     , not (null rest)
     , all (not . isSpace) rest ->
         signed sign rest
+  value
+    -- Provider assignments contain their own '='. Recognize the setting word
+    -- first so the ordinary whitespace form does not consume part of its value
+    -- as the setting name; retain the optional setting-level '=' as well.
+    | name : _ <- words value
+    , normalize name == replSettingName ProviderCostSetting
+    , Just remainder <- optionalRemainder name value ->
+        checked name $ Just $ case remainder of
+          '=' : settingValue -> trim settingValue
+          _ -> remainder
   value -> case break (== '=') value of
     (name, '=' : settingValue) -> checked name $ Just $ trim settingValue
     _ -> case words value of

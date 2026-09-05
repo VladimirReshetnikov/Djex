@@ -48,6 +48,7 @@ import Test.Tasty.HUnit
   , (@?=)
   )
 import qualified Test.Tasty.QuickCheck as QC
+import CandidateQualitySpec (candidateQualityTests)
 import ClassResolutionSpec (classResolutionTests)
 import SMTLibCausalBoundaryWhitespaceSpec
   ( smtLibCausalBoundaryWhitespaceTests )
@@ -64,6 +65,7 @@ main = defaultMain tests
 tests :: TestTree
 tests = testGroup "Djex synthesis foundation"
   [ candidateTests
+  , candidateQualityTests
   , semanticObservationTests
   , smtLibCausalBoundaryWhitespaceTests
   , smtLibCausalDriverTests
@@ -80,6 +82,7 @@ tests = testGroup "Djex synthesis foundation"
   , declarationTests
   , environmentTests
   , generatedTests
+  , knownConstructorCaseTests
   , observabilityTests
   , typedGeneratedTests
   , queryTests
@@ -5015,6 +5018,149 @@ selectionTests = testGroup "result selection"
  where
   queryResult progress candidates = queryResultFromCandidates
     $ SearchBatch progress () candidates
+
+knownConstructorCaseTests :: TestTree
+knownConstructorCaseTests = testGroup "known constructor case reduction"
+  [ testCase "select either constructor and clean the Church nil redex" $ do
+      let nilRedex constructor = Lambda [Bind "step", Bind "zero"] $
+            Case (Apply (Global constructor) $ Local "zero")
+              [ ( Constructor leftName [Bind "left"]
+                , Apply (Local "step") $ Local "left"
+                )
+              , (Constructor rightName [Bind "right"], Local "right")
+              ]
+      simplifyExpressionWithoutEtaBy id (reduce $ nilRedex rightName) @?=
+        Lambda [Bind "step", Bind "zero"] (Local "zero")
+      simplifyExpressionWithoutEtaBy id (reduce $ nilRedex leftName) @?=
+        Lambda [Bind "step", Bind "zero"]
+          (Apply (Local "step") $ Local "zero")
+  , testCase "retain a payload binding when its selected field is shared" $ do
+      let payload = Apply (global "produce") $ global "seed"
+          source = Case (Apply (Global rightName) payload)
+            [(Constructor rightName [Bind "field"],
+                Tuple [Local "field", Local "field"])]
+          expected = Let (Bind "field") payload $
+            Tuple [Local "field", Local "field"]
+          result = reduce source
+      result @?= expected
+      simplifyExpressionWithoutEtaBy id result @?= expected
+      length (filter (== name "produce") $ expressionGlobals result) @?= 1
+      validateExpressionScope result @?= Right ()
+  , testCase "preserve exact binder and occurrence payloads by identity" $ do
+      let bound = (7 :: Int, "selected binder type")
+          occurrence = (7, "selected occurrence type")
+          payload = Global $ name "value"
+          source = Case (Apply (Global rightName) payload)
+            [(Constructor rightName [Bind bound],
+                Tuple [Local occurrence, Local occurrence])]
+      reduceKnownConstructorCasesBy fst arity source @?=
+        Let (Bind bound) payload (Tuple [Local occurrence, Local occurrence])
+  , testCase "reduce boxed tuples and preserve simultaneous field scope" $ do
+      let first = Apply (global "firstPayload") $ global "seed"
+          second = global "secondPayload"
+          source = Case (Tuple [first, second])
+            [(TuplePattern [Bind "x", Bind "y"],
+                Tuple [Local "y", Local "x", Local "x"])]
+          expected = Let (Bind "x") first $ Let (Bind "y") second $
+            Tuple [Local "y", Local "x", Local "x"]
+      reduce source @?= expected
+      validateExpressionScope expected @?= Right ()
+      reduce (Case (Tuple [] :: Expression String)
+          [(TuplePattern [], global "unitResult")]) @?= global "unitResult"
+      reduce (Case (Tuple [global "value"] :: Expression String)
+          [(TuplePattern [Bind "x"], Local "x")]) @?=
+        Case (Tuple [global "value"])
+          [(TuplePattern [Bind "x"], Local "x")]
+  , testCase "honor an earlier wildcard or whole-value binder" $ do
+      let source = Apply (Global rightName) $ global "value"
+          later = (Constructor rightName [Bind "field"], Local "field")
+      reduce (Case source [(Wildcard, global "first"), later]) @?=
+        global "first"
+      reduce (Case source [(Bind "whole", Local "whole"), later]) @?=
+        Let (Bind "whole") source (Local "whole")
+  , testCase "refuse undeclared, unsaturated, oversaturated, or malformed constructors" $ do
+      let alternatives = [(Constructor rightName [Bind "field"], Local "field")]
+          cases =
+            [ Case (Global rightName) alternatives
+            , Case (Apply (Apply (Global rightName) $ global "one") $ global "two") alternatives
+            , Case (Apply (Global $ name "Unknown") $ global "value") alternatives
+            , Case (Apply (Global rightName) $ global "value")
+                [(Constructor rightName [], global "badArity")]
+            , Case (Apply (Global rightName) $ global "value")
+                [(Constructor rightName [Bind "x", Bind "y"], Local "x")]
+            ] :: [Expression String]
+      map reduce cases @?= cases
+      reduceKnownConstructorCasesBy id (const $ Just 1)
+          (Case (Apply (global "ordinaryFunction") $ global "value") alternatives)
+        @?= Case (Apply (global "ordinaryFunction") $ global "value") alternatives
+  , testCase "do not bypass an undecidable nested or as-pattern" $ do
+      let source = Apply (Global rightName) $ Apply (Global leftName) $ global "value"
+          cases =
+            [ Case source
+                [ (Constructor rightName [Constructor leftName [Bind "x"]], Local "x")
+                , (Wildcard, global "fallback")
+                ]
+            , Case source
+                [ (As "whole" $ Constructor rightName [Bind "x"], Local "whole")
+                , (Wildcard, global "fallback")
+                ]
+            ] :: [Expression String]
+      map reduce cases @?= cases
+  , testCase "do not reduce equal branches of an unknown scrutinee or contract eta" $ do
+      let source = Case (global "unknown")
+            [ (Constructor leftName [Wildcard], global "same")
+            , (Constructor rightName [Wildcard], global "same")
+            ] :: Expression String
+          eta = Lambda [Bind "x"] $ Apply (global "function") $ Local "x"
+      reduce source @?= source
+      reduce eta @?= eta
+  , testCase "refuse scope capture introduced by sequential payload lets" $ do
+      let source = Case
+            (Tuple [global "first", Lambda [Bind "x"] $ Local "x"])
+            [(TuplePattern [Bind "x", Bind "y"], Tuple [Local "x", Local "y"])]
+          projectedCollision = Case
+            (Apply (Global rightName) $ Local (1 :: Int, "outer"))
+            [(Constructor rightName [Bind (1, "inner")], Local (1, "use"))]
+      validateExpressionScope source @?= Right ()
+      reduce source @?= source
+      reduceKnownConstructorCasesBy fst arity projectedCollision @?=
+        projectedCollision
+  , testCase "reject malformed duplicate and escaping branch identities" $ do
+      let cases =
+            [ Case (Tuple [global "one", global "two"])
+                [(TuplePattern [Bind "x", Bind "x"], Local "x")]
+            , Case (Apply (Global rightName) $ global "value")
+                [ (Constructor rightName [Bind "field"], Local "escaped")
+                , (Constructor leftName [Bind "escaped"], Local "escaped")
+                ]
+            ]
+      map reduce cases @?= cases
+  , testCase "preserve visible payload evidence and retain a visibly specialized head" $ do
+      let polytype = SharedType.ForallType ["a"] [] $
+            SharedType.FunctionType (SharedType.TypeVariable "a")
+              (SharedType.TypeVariable "a")
+          selected = right $ specifiedVisibleTypeArgument polytype
+          payload = VisibleTypeApplication (global "identity") selected
+          body = VisibleTypeApplication (Local "field") inferredVisibleTypeArgument
+          plain = Case (Apply (Global rightName) payload)
+            [(Constructor rightName [Bind "field"], body)]
+          explicitHead = Case
+            (Apply (VisibleTypeApplication (Global rightName) selected) payload)
+            [(Constructor rightName [Bind "field"], body)]
+      reduce plain @?= Let (Bind "field") payload body
+      reduce explicitHead @?= explicitHead
+      validateExpressionScope (reduce plain) @?= Right ()
+      validateExpressionSyntax (reduce plain) @?= Right ()
+  ]
+ where
+  name = right . mkIdentifier
+  global = Global . name
+  leftName = name "Left"
+  rightName = name "Right"
+  arity constructor
+    | constructor == leftName || constructor == rightName = Just 1
+    | otherwise = Nothing
+  reduce = reduceKnownConstructorCasesBy id arity
 
 generatedTests :: TestTree
 generatedTests = testGroup "generated syntax"

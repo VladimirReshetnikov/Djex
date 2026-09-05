@@ -74,6 +74,7 @@ import Text.ParserCombinators.ReadP
 import Language.Haskell.Synthesis.Constraint
     (Constraint(..), validateKnownConstraintArityWith)
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
+import qualified Language.Haskell.Synthesis.CandidateQuality as SharedQuality
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
@@ -656,7 +657,14 @@ data QueryOptions = QueryOptions {
     -- expensive dead end cannot starve a cheap alternative.  The choice
     -- reorders candidates and changes how a budget is spent; it never
     -- changes which formulas are provable.
-    optionStrategy :: Strategy
+    optionStrategy :: Strategy,
+    -- | Structural quality influences finite search choices before the raw
+    -- proof cutoff and ranks checked results afterward. Legacy preserves the
+    -- historical unused-binder ordering and proof enumeration.
+    optionRanking :: SharedQuality.CandidateRankingPolicy,
+    -- | Exact named-provider cost overrides. Unlisted providers cost one;
+    -- names are semantic identities, not rendered spellings or lengths.
+    optionProviderCosts :: Map.Map SharedName.Name Natural
     }
     deriving (Eq, Show)
 
@@ -668,7 +676,9 @@ defaultQueryOptions = QueryOptions {
     optionSorted = True,
     optionCutoff = 200,
     optionBudget = Nothing,
-    optionStrategy = DepthFirst
+    optionStrategy = DepthFirst,
+    optionRanking = SharedQuality.defaultCandidateRankingPolicy,
+    optionProviderCosts = Map.empty
     }
 
 -- | Ranking information retained with every checked Djinn candidate.
@@ -2642,7 +2652,20 @@ searchPreparedFormulaPlan options candidateLimit target externalEnv
         mode = (defaultSearchMode
                     (optionAlternatives options || optionSorted options)) {
             searchStrategy = optionStrategy options,
-            searchBudget = optionBudget options
+            searchBudget = optionBudget options,
+            searchRanking = optionRanking options,
+            searchProviderCosts = optionProviderCosts options,
+            searchProviderNames = Map.fromList
+                [ (internal, sourceName)
+                | (internal, _) <- internalEnv
+                , Var restored <- [restoreProofTerm proofEnv $ Var internal]
+                -- Exact provider specializations are checked synthetic
+                -- premises, but their cost still belongs to their retained
+                -- source provider. This mapping changes only heuristic names.
+                , let provider = maybe restored fst
+                        $ Map.lookup restored providerApplications
+                , Right sourceName <- [SharedName.parseName $ symbolSpelling provider]
+                ]
             }
         internalFailure what = first $
             DjinnInternalQueryFailure . ((what ++ ": ") ++)
@@ -2793,9 +2816,12 @@ mergeFormulaPlanResults options results = Right validatedResult
     -- we retain.
     distinctCandidates = deduplicateEtaEquivalentClausesOn
         validatedCandidateOutput mergedCandidates
-    candidates
-        | optionSorted options =
-            sortValidatedCandidates distinctCandidates
+    candidates = SharedQuality.rankCandidatesByQuality (optionRanking options)
+        (\name -> Map.findWithDefault (SharedQuality.defaultCandidateProviderCost name) name $ optionProviderCosts options)
+        (SharedGenerated.functionClauseExpression . validatedCandidateOutput)
+        historicallyRanked
+    historicallyRanked
+        | optionSorted options = sortValidatedCandidates distinctCandidates
         | otherwise = distinctCandidates
     evidence = case candidates of
         _ : _ -> SharedQuery.ValidatedCandidates

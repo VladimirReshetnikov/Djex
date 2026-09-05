@@ -4409,7 +4409,7 @@ tests = testGroup "Djex facade"
           omittedCapability omission @?= BindingIntroduction
           omittedReason omission @?= ExcludedByPolicy
         omissions -> fail $ "unexpected policy omissions: " ++ show omissions
-  , testCase "apply neutral rating overrides to candidate penalties" $ do
+  , testCase "apply neutral rating overrides to legacy candidate penalties" $ do
       tokenName <- expectRight $ parseName "Fixture.Token"
       preferredName <- expectRight $ parseName "Fixture.preferred"
       ordinaryName <- expectRight $ parseName "Fixture.ordinary"
@@ -4438,7 +4438,9 @@ tests = testGroup "Djex facade"
               , requestGoal = tokenType
               , requestContexts = []
               , requestOptions = defaultExferenceOptions
-                  {exferenceMaximumSteps = 64}
+                  { exferenceMaximumSteps = 64
+                  , exferenceCandidateRanking = LegacyCandidateRanking
+                  }
               }
             results <- expectRight $ runExferenceQuery session request
             pure $ Map.fromList
@@ -4463,6 +4465,59 @@ tests = testGroup "Djex facade"
         $ ratedPreferred < baselinePreferred
       assertBool "positive override did not increase the candidate penalty"
         $ ratedOrdinary > baselineOrdinary
+  , testCase "retain signed neutral ratings in the structural search frontier" $ do
+      tokenName <- expectRight $ parseName "Fixture.Token"
+      seedName <- expectRight $ parseName "Fixture.Seed"
+      seedValue <- expectRight $ parseName "Fixture.seed"
+      preferredName <- expectRight $ parseName "Fixture.preferred"
+      ordinaryName <- expectRight $ parseName "Fixture.ordinary"
+      target <- expectRight $ mkIdentifier "ratedFrontierToken"
+      checkedTarget <- expectRight $ mkDefinitionName target
+      let tokenType = TypeConstructor tokenName
+          seedType = TypeConstructor seedName
+          providerType = FunctionType seedType tokenType
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , AbstractTypeDeclaration () seedName ProperTypeKind
+            , ValueDeclaration $ ValueSignature () preferredName providerType
+            , ValueDeclaration $ ValueSignature () ordinaryName providerType
+            , ValueDeclaration $ ValueSignature () seedValue seedType
+            ]
+          run preferredRating ordinaryRating = do
+            environment <- expectRight
+              (mkEnvironment declarations :: Either
+                (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+            session <- expectRight $ mkExferenceSessionWithPolicy
+              defaultExferenceSessionPolicy
+                { exferenceRatingOverrides = Map.fromList
+                    [(preferredName, Penalty preferredRating), (ordinaryName, Penalty ordinaryRating)]
+                }
+              environment
+            request <- expectRight $ mkExferenceRequest QueryRequest
+              { requestTarget = checkedTarget
+              , requestGoal = tokenType
+              , requestContexts = []
+              , requestOptions = defaultExferenceOptions
+                  { exferenceMaximumSteps = 3
+                  , exferenceCandidateRanking = defaultCandidateRankingPolicy
+                  }
+              }
+            results <- expectRight $ runExferenceQuery session request
+            -- Opening the ground forall, selecting a provider, and filling
+            -- its seed consume the same three steps in both runs. Provider
+            -- shapes and structural costs agree; only signed ratings differ.
+            length results @?= 3
+            pure
+              [ provider
+              | result <- results
+              , candidate <- batchCandidates $ resultSearch result
+              , provider <- expressionGlobals $ functionClauseExpression $ candidateOutput candidate
+              , provider `elem` [preferredName, ordinaryName]
+              ]
+      favored <- run (-5) 5
+      reversed <- run 5 (-5)
+      favored @?= [preferredName]
+      reversed @?= [ordinaryName]
   , testCase "synthesize one recursive Exference elimination layer" $ do
       naturalName <- expectRight $ parseName "Fixture.Natural"
       zeroName <- expectRight $ parseName "Fixture.Zero"

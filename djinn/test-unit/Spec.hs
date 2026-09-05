@@ -30,7 +30,7 @@ import Djinn.Core (
     inhabitSynthesisResultPrepared, inhabitTypedSynthesisResultPrepared,
     generatedReportCandidates,
     kArrow, kStar, optionAlternatives, optionBudget, optionCutoff, optionSorted,
-    optionStrategy,
+    optionStrategy, optionRanking, optionProviderCosts,
     fromSynthesisDeclaration, fromSynthesisEnvironment,
     fromSynthesisKind, fromSynthesisType,
     mkContext, parseContextualHType, parseHKind, parseHType,
@@ -64,6 +64,7 @@ import qualified Language.Haskell.Djex.Djinn as Djex
 import Language.Haskell.Synthesis.Constraint
     (Constraint(..), constraintArguments, constraintArity, constraintClass)
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
+import qualified Language.Haskell.Synthesis.CandidateQuality as SharedQuality
 import qualified Language.Haskell.Synthesis.Diagnostic as SharedDiagnostic
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
@@ -89,7 +90,8 @@ tests =
     hKindCompatibilityTests ++
     hTypeCompatibilityTests ++
     hCheckCompatibilityTests ++
-    [ ("demand-directed rank-N instantiation", testDirectedRankN)
+    [ ("structural provider quality precedes the raw proof cutoff", testCandidateQuality)
+    , ("demand-directed rank-N instantiation", testDirectedRankN)
     , ("construct impredicative arguments under fresh scopes", testConstructedRankN)
     , ("transport-directed rank-N opacity", testTransportRankN)
     , ("parse prefix function constructor", testPrefixArrowParsing)
@@ -1183,6 +1185,85 @@ testStructuralHigherKindedAssignments = do
 -- open for dictionary-independent introduction, while an opaque fallback
 -- retains exact polymorphic transport and unsupported searches stay
 -- inconclusive.
+testCandidateQuality :: IO ()
+testCandidateQuality = do
+    let token = HTCon "QualityToken"
+        expensive = sharedName "aaQualityExpensive"
+        cheap = sharedName "zzQualityCheap"
+        options = defaultQueryOptions
+            { optionAlternatives = True
+            , optionSorted = False
+            , optionCutoff = 1
+            , optionBudget = Just 64
+            , optionProviderCosts = Map.fromList
+                [(expensive, 100), (cheap, 0)]
+            }
+    environment <- expectRight $ do
+        types <- declare (AbstractType "QualityToken" KStar) emptyEnvironment
+        first <- declare (Function "aaQualityExpensive" token) types
+        declare (Function "zzQualityCheap" token) first
+    ranked <- expectRight $ inhabit options environment [] "qualityResult" token
+    assertEqual "the cheap source wins before the first raw-proof cutoff"
+        (Realized ["qualityResult = zzQualityCheap"]) $ reportOutcome ranked
+    reversed <- expectRight $ inhabit options
+        {optionProviderCosts = Map.fromList [(expensive, 0), (cheap, 100)]}
+        environment [] "qualityResult" token
+    assertEqual "the preference follows costs rather than source order"
+        (Realized ["qualityResult = aaQualityExpensive"]) $ reportOutcome reversed
+    let legacy = options {optionRanking = SharedQuality.LegacyCandidateRanking}
+    historical <- expectRight $ inhabit legacy environment [] "qualityResult" token
+    assertEqual "legacy retains the original provider order"
+        (Realized ["qualityResult = aaQualityExpensive"]) $ reportOutcome historical
+    assertEqual "ranking does not refund or enlarge the raw candidate cutoff"
+        (reportCompletion historical) (reportCompletion ranked)
+    both <- expectRight $ inhabit options {optionCutoff = 2}
+        environment [] "qualityResult" token
+    assertEqual "quality ranking preserves structurally distinct provider alternatives"
+        (Realized ["qualityResult = zzQualityCheap", "qualityResult = aaQualityExpensive"])
+        $ reportOutcome both
+    again <- expectRight $ inhabit options environment [] "qualityResult" token
+    assertEqual "quality ordering is deterministic"
+        (reportOutcome ranked) (reportOutcome again)
+    -- An exact impredicative assignment has a synthetic proof identity.
+    -- Its source name must survive before the raw cutoff, not only after
+    -- generated visible applications have been reconstructed for display.
+    polyEnvironment <- expectRight $ do
+        types <- declare (AbstractType "QualityF" $ KArrow KStar KStar) emptyEnvironment
+        let provider = HTForall ["a"] [] $ HTApp (HTCon "QualityF") (HTVar "a")
+        first <- declare (Function "aaPolyQualityExpensive" provider) types
+        declare (Function "zzPolyQualityCheap" provider) first
+    neutral <- expectShownRight $ toSynthesisEnvironment polyEnvironment
+    groundNeutral <- expectShownRight $ SharedEnvironment.groundEnvironmentKinds neutral
+    session <- expectShownRight $ Djex.mkDjinnSession groundNeutral
+    target <- expectShownRight $ SharedName.mkIdentifier "qualityPolyResult"
+    let polyExpensive = sharedName "aaPolyQualityExpensive"
+        polyCheap = sharedName "zzPolyQualityCheap"
+        identity = SharedType.ForallType ["i"] [] $ SharedType.FunctionType
+            (SharedType.TypeVariable "i") (SharedType.TypeVariable "i")
+        assignments =
+            [ SharedQuery.ProviderInstantiationAssignment provider [identity]
+            | provider <- [polyExpensive, polyCheap]
+            ]
+        runExact costs = do
+            request <- expectShownRight $ Djex.parseDjinnRequest session
+                options {optionProviderCosts = costs} target
+                "quality-exact.djinn" "QualityF (forall b. b -> b)"
+            result <- expectShownRight $ Djex.runDjinnQueryWithInstantiationAssignments
+                session assignments request
+            mapM (expectShownRight . Djex.renderDjinnCandidateExpression
+                SharedGenerated.Unqualified)
+                $ SharedSearch.batchCandidates $ SharedQuery.resultSearch result
+    exactCheap <- runExact $ Map.fromList [(polyExpensive, 100), (polyCheap, 0)]
+    exactExpensive <- runExact $ Map.fromList [(polyExpensive, 0), (polyCheap, 100)]
+    assertBool ("synthetic specialization lost the cheap source cost: " ++ show exactCheap)
+        $ case exactCheap of
+            [candidate] -> "zzPolyQualityCheap @" `isPrefixOf` candidate
+            _ -> False
+    assertBool ("synthetic specialization ignored reversed costs: " ++ show exactExpensive)
+        $ case exactExpensive of
+            [candidate] -> "aaPolyQualityExpensive @" `isPrefixOf` candidate
+            _ -> False
+
 testDirectedRankN :: IO ()
 testDirectedRankN = do
     session <- expectShownRight Djex.standardDjinnSession
@@ -4177,6 +4258,7 @@ testNominalDataProjectionBoundaries = do
             [rigidValue rigidLeftName, rigidValue rigidRightName]
         rigidOptions = defaultQueryOptions
             { optionAlternatives = True
+            , optionRanking = SharedQuality.LegacyCandidateRanking
             , optionSorted = False
             , optionCutoff = 10
             }

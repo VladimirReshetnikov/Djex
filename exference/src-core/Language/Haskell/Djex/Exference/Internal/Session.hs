@@ -39,6 +39,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Void (Void)
 import GHC.Generics (Generic)
+import Numeric.Natural (Natural)
 
 import qualified Language.Haskell.Exference.Core as Core
 import qualified Language.Haskell.Exference.Core.Internal.Exference as CoreInternal
@@ -52,6 +53,7 @@ import Language.Haskell.Exference.Core.Declaration
   )
 import Language.Haskell.Exference.Core.FunctionBinding
   ( ConstructorBinding (..)
+  , nonStrictConstructorBinding
   , DeconstructorBinding (..)
   , EnvDictionary (..)
   , FunctionBinding (..)
@@ -181,6 +183,11 @@ data ExferenceSessionPolicy = ExferenceSessionPolicy
   , exferenceRatingOverrides :: Map Name Penalty
     -- ^ Finite ratings for supported, non-excluded search bindings. An
     -- override that cannot affect search is rejected.
+  , exferenceNonStrictConstructors :: Map Name Natural
+    -- ^ Explicit frontend authority for non-strict constructor fields. Names
+    -- and arities must match this exact checked declaration inventory. Use
+    -- only when the source language's evaluation semantics establish laziness
+    -- or total constructor elimination, never from erased field types alone.
   }
   deriving (Eq, Show)
 
@@ -189,6 +196,7 @@ defaultExferenceSessionPolicy :: ExferenceSessionPolicy
 defaultExferenceSessionPolicy = ExferenceSessionPolicy
   { exferenceExcludedBindings = []
   , exferenceRatingOverrides = Map.empty
+  , exferenceNonStrictConstructors = Map.empty
   }
 
 -- | Seal a session from a parser-neutral declaration environment: the
@@ -246,8 +254,11 @@ sealPreparedEnvironment policy prepared = do
         , not $ functionExcluded binding
         ]
   supportedFunctions <- applyRatingOverrides overrides retainedFunctions
+  supportedDeconstructors <- applyConstructorEvaluationAuthority
+    (exferenceNonStrictConstructors policy) $ environmentDeconstructors backend
   let supportedBackend = backend
         { environmentFunctions = supportedFunctions
+        , environmentDeconstructors = supportedDeconstructors
         }
       omissions =
         [ ExferenceOmission
@@ -348,6 +359,35 @@ scopeExferenceSession visible session = do
     $ CoreInternal.mkExferenceEnvironmentWithSchemes scoped scopedSchemes
   scoped `deepseq` scopedSchemes `deepseq` pure session
     { searchView = searchEnvironment }
+
+applyConstructorEvaluationAuthority
+  :: Map Name Natural
+  -> [DeconstructorBinding]
+  -> Either Diagnostic [DeconstructorBinding]
+applyConstructorEvaluationAuthority requested declarations = do
+  let available = Map.fromList
+        [ (constructorName constructor, naturalLength $ constructorFields constructor)
+        | declaration <- declarations
+        , constructor <- deconstructorConstructors declaration
+        ]
+      invalid =
+        [ (renderCanonical name, arity, Map.lookup name available)
+        | (name, arity) <- Map.toAscList requested
+        , Map.lookup name available /= Just arity
+        ]
+  if null invalid then pure $ map certifyDeclaration declarations
+    else Left $ shownErrorDiagnostic "DJEX_EXF_POLICY_CONSTRUCTOR"
+      "Exference constructor evaluation authority names unavailable constructors or wrong arities"
+      invalid
+ where
+  certifyDeclaration declaration = declaration
+    { deconstructorConstructors = map certify
+        $ deconstructorConstructors declaration }
+  certify constructor
+    | Map.member (constructorName constructor) requested =
+        nonStrictConstructorBinding (constructorName constructor)
+          $ constructorFields constructor
+    | otherwise = constructor
 
 applyRatingOverrides
   :: Map Name Penalty

@@ -103,7 +103,7 @@ import Language.Haskell.Exts (parseFileContentsWithMode)
 import Language.Haskell.Exts.Syntax ( Module )
 import qualified Language.Haskell.Exts.Syntax as HSE
 import Language.Haskell.Exts.Parser ( ParseResult (..)
-                                    , ParseMode
+                                    , ParseMode (extensions)
                                     )
 import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
 import qualified Language.Haskell.Exts.SrcLoc as HSE
@@ -984,18 +984,18 @@ builtInDeconstructors = do
   -- namespace instead of invalid ordinary values.
   pure $
     DeconstructorBinding listType
-      [ ConstructorBinding listName []
-      , ConstructorBinding consName [TypeVar 0, listType]
+      [ nonStrictConstructorBinding listName []
+      , nonStrictConstructorBinding consName [TypeVar 0, listType]
       ] True
     : DeconstructorBinding (TypeCons unitName)
-        [ConstructorBinding unitName []] False
+        [nonStrictConstructorBinding unitName []] False
     : tuples
  where
   tupleDeconstructor arity = do
     tupleName <- mkBoxedTupleName arity
     pure $ DeconstructorBinding
       (tupleType tupleName arity)
-      [ConstructorBinding tupleName (typeVariables arity)]
+      [nonStrictConstructorBinding tupleName (typeVariables arity)]
       False
 
 typeVariables :: Int -> [HsType]
@@ -1527,9 +1527,11 @@ parseModuleInputsM inputs = do
         [ hExtractBinds
             (resolverFor moduleName)
             M.empty
+            mode
             modul
             methodResults
-        | (modul, methodResults) <- zip modules methodsByModule
+        | ((mode, _), (modul, methodResults)) <-
+            zip rawTuples $ zip modules methodsByModule
         , (moduleName, _) <- maybeToList $ moduleNameAndDecls modul
         ]
       let (bindingLists, deconstructorLists, errorLists) = unzip3 extracted
@@ -1659,6 +1661,7 @@ parseModuleInputsM inputs = do
 
     hExtractBinds :: TypeResolver
                   -> TypeDeclMap
+                  -> ParseMode
                   -> Module SrcSpanInfo
                   -> [SourcedExtraction [ClassMethodDeclaration]]
                   -> Loader
@@ -1666,9 +1669,9 @@ parseModuleInputsM inputs = do
                        , [DeconstructorBinding]
                        , [ExtractionError]
                        )
-    hExtractBinds resolver tDeclMap modul methodResults = do
-      fromData <- getDataConssSourcedWithResolver
-        resolver tDeclMap modul
+    hExtractBinds resolver tDeclMap mode modul methodResults = do
+      fromData <- getDataConssSourcedWithResolverAndExtensions
+        resolver tDeclMap (extensions mode) modul
       declarations <- getDeclsSourcedWithResolver
         resolver tDeclMap modul
       let ordered = sortOn orderedBindingSlot

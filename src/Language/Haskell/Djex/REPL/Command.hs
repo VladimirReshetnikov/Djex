@@ -170,6 +170,9 @@ data ReplSetting
   = BackendSetting
   | TargetSetting
   | SelectionSetting
+  | RankingSetting
+  | ProviderCostSetting
+  | QualityWindowSetting
   | RenderingSetting
   | QualificationSetting
   | PromptSetting
@@ -198,6 +201,9 @@ replSettingName setting = case setting of
   BackendSetting -> "backend"
   TargetSetting -> "target"
   SelectionSetting -> "select"
+  RankingSetting -> "ranking"
+  ProviderCostSetting -> "provider-cost"
+  QualityWindowSetting -> "quality-window"
   RenderingSetting -> "render"
   QualificationSetting -> "qualification"
   PromptSetting -> "prompt"
@@ -696,6 +702,9 @@ setDetails =
   [ "  settings: " ++ intercalate ", " settingNames
   , "  booleans also accept :set +NAME and :set -NAME"
   , "  sign forms are rejected for non-boolean settings"
+  , "  ranking: legacy, balanced (default), compact, or diverse"
+  , "  provider-cost: NAME=COST; :unset provider-cost clears every override"
+  , "  quality-window: positive raw-candidate bound for structural Exference all-output"
   , "  Length/Z3 policy: :set length-z3 /absolute/path/to/z3 [SHA256HEX]"
   , "  heuristic weights: " ++ intercalate ", " heuristicNames
   ]

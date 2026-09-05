@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -24,6 +25,8 @@ module Language.Haskell.Exference.Core.Expression
       )
   , ExpressionRenderError (..)
   , toGeneratedExpression
+  , expressionQualityCost
+  , enableExpressionQualityCache
   , expressionTypedLocals
   , expressionNameHints
   , renderExpression
@@ -31,18 +34,23 @@ module Language.Haskell.Exference.Core.Expression
   , showExpression
   , fillExprHole
   , simplifyExpression
+  , reduceKnownConstructorCases
   , inlineVisibleTypeApplicationAliases
   )
 where
 
-import Control.DeepSeq (NFData)
+import Control.DeepSeq (NFData (rnf))
 import Control.Monad.Trans.Writer.Strict (execWriter, tell)
 import Data.Foldable (toList)
+import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List as List
 import qualified Data.Map as Map
+import qualified Data.Map.Strict as StrictMap
 import GHC.Generics (Generic)
+import Numeric.Natural (Natural)
 
 import Language.Haskell.Exference.Core.Types
+import qualified Language.Haskell.Synthesis.CandidateQuality as Quality
 import qualified Language.Haskell.Synthesis.Generated as Generated
 
 -- | A shared local identity annotated for Exference's search and checker.
@@ -55,10 +63,80 @@ instance NFData AnnotatedLocal
 -- | The shared generated-expression tree with Exference annotations in its
 -- local payload. The constructor stays private so callers can create only the
 -- historical, fully annotated subset represented by the bundled patterns.
-newtype Expression = Expression (Generated.Expression AnnotatedLocal)
-  deriving (Eq, Generic)
+data Expression = MeasuredExpression
+  (Generated.Expression AnnotatedLocal)
+  !(Maybe ExpressionQualitySummary)
+  deriving Generic
 
-instance NFData Expression
+-- The optional summary is enabled only by structural search. Legacy trees
+-- retain no summary thunks and therefore cannot retain historical trees
+-- through unevaluated cache updates. Equality and deep evaluation retain
+-- their historical tree-only semantics, independent of cache availability.
+instance Eq Expression where
+  MeasuredExpression left _ == MeasuredExpression right _ = left == right
+
+instance NFData Expression where
+  rnf (MeasuredExpression expression _) = rnf expression
+
+-- All general shared rewrites rebuild through this private pattern and drop
+-- the optional cache rather than accidentally inherit stale measurements.
+-- The search's hole-fill operation below updates an active cache exactly.
+pattern Expression :: Generated.Expression AnnotatedLocal -> Expression
+pattern Expression expression <- MeasuredExpression expression _
+ where
+  Expression expression = MeasuredExpression expression Nothing
+
+{-# COMPLETE Expression #-}
+
+data ExpressionQualitySummary = ExpressionQualitySummary
+  { summarySize :: !Natural
+  , summaryEliminations :: !Natural
+  , summaryProviders :: !(StrictMap.Map QualifiedName Natural)
+  , summaryHoles :: !(IntMap.IntMap Natural)
+  }
+
+summarizeExpression :: Generated.Expression AnnotatedLocal -> ExpressionQualitySummary
+summarizeExpression expression = ExpressionQualitySummary
+  (Quality.qualityTermSize quality)
+  (Quality.qualityEliminations quality)
+  providers holes
+ where
+  -- Reuse the shared metric as the sole definition of structural size and
+  -- elimination costs. Only occurrence counts need a separate small fold.
+  quality = Quality.candidateQuality (const 0) expression
+  (providers, holes) = occurrences expression (StrictMap.empty, IntMap.empty)
+  occurrences node counts = case node of
+    Generated.Local _ -> counts
+    Generated.Global name ->
+      (StrictMap.insertWith (+) name 1 $ fst counts, snd counts)
+    Generated.Hole (AnnotatedLocal variable Nothing) ->
+      (fst counts, IntMap.insertWith (+) variable 1 $ snd counts)
+    Generated.Hole _ -> counts
+    Generated.Lambda _ body -> occurrences body counts
+    Generated.Apply function argument -> occurrences argument $ occurrences function counts
+    Generated.VisibleTypeApplication function _ -> occurrences function counts
+    Generated.Tuple elements -> List.foldl' (flip occurrences) counts elements
+    Generated.Let _ binding body -> occurrences body $ occurrences binding counts
+    Generated.Case scrutinee alternatives -> List.foldl'
+      (\current (_, body) -> occurrences body current)
+      (occurrences scrutinee counts) alternatives
+
+fillQualitySummary
+  :: TVarId
+  -> ExpressionQualitySummary
+  -> ExpressionQualitySummary
+  -> ExpressionQualitySummary
+fillQualitySummary variable replacement original
+  | count == 0 = original
+  | otherwise = ExpressionQualitySummary
+      (summarySize original - count + count * summarySize replacement)
+      (summaryEliminations original + count * summaryEliminations replacement)
+      (StrictMap.unionWith (+) (summaryProviders original)
+        $ StrictMap.map (* count) $ summaryProviders replacement)
+      (IntMap.unionWith (+) (IntMap.delete variable $ summaryHoles original)
+        $ IntMap.map (* count) $ summaryHoles replacement)
+ where
+  count = IntMap.findWithDefault 0 variable $ summaryHoles original
 
 pattern ExpVar :: TVarId -> HsType -> Expression
 pattern ExpVar variable annotation <-
@@ -261,6 +339,38 @@ toGeneratedExpression :: Expression -> Generated.Expression TVarId
 toGeneratedExpression (Expression expression) =
   annotatedIdentity <$> expression
 
+-- | Score the exact immutable summary retained with the annotated tree.
+-- Hole filling updates it from only the inserted fragment and its occurrence
+-- count, so frontier scoring no longer walks the growing partial expression.
+-- Provider costs remain query-specific and use exact names; no policy or
+-- caller's overrides are cached in an expression. Types and evidence are
+-- untouched. Uncached expressions use the direct shared fold, and legacy
+-- ranking does not inspect the expression.
+expressionQualityCost
+  :: Quality.CandidateRankingPolicy
+  -> (QualifiedName -> Natural)
+  -> Expression
+  -> Natural
+expressionQualityCost Quality.LegacyCandidateRanking _ _ = 0
+expressionQualityCost ranking@(Quality.StructuralCandidateRanking weights) providerCost
+    (MeasuredExpression expression cache) = case cache of
+  Nothing -> Quality.candidateQualityCost ranking providerCost expression
+  Just summary ->
+    Quality.candidateSizeWeight weights * summarySize summary
+      + Quality.candidateEliminationWeight weights * summaryEliminations summary
+      + Quality.candidateProviderWeight weights * StrictMap.foldlWithKey'
+          (\cost name count -> cost + count * providerCost name) 0
+          (summaryProviders summary)
+
+-- | Enable exact incremental quality measurements for a search root. An
+-- existing cache is reused. Ordinary constructors and shared rewrites remain
+-- uncached, so legacy search allocates no unused cache or delayed summary.
+enableExpressionQualityCache :: Expression -> Expression
+enableExpressionQualityCache original@(MeasuredExpression expression cache) = case cache of
+  Just _ -> original
+  Nothing -> let !summary = summarizeExpression expression
+             in MeasuredExpression expression $ Just summary
+
 annotatedIdentity :: AnnotatedLocal -> TVarId
 annotatedIdentity (AnnotatedLocal variable _) = variable
 
@@ -347,17 +457,33 @@ expressionTypedLocals (Expression expression) =
 -- inserted as a whole and not itself searched, so fresh holes it introduces
 -- are never mistaken for the one just filled.
 fillExprHole :: TVarId -> Expression -> Expression -> Expression
-fillExprHole variable (Expression replacement) (Expression expression) =
-  Expression $ Generated.fillExpressionHole
-    (AnnotatedLocal variable Nothing)
-    replacement
-    expression
+fillExprHole variable (MeasuredExpression replacement replacementCache)
+    (MeasuredExpression expression originalCache) = case originalCache of
+  Nothing -> MeasuredExpression filled Nothing
+  Just originalSummary ->
+    let replacementSummary = case replacementCache of
+          Nothing -> summarizeExpression replacement
+          Just summary -> summary
+        !updatedSummary = fillQualitySummary variable replacementSummary originalSummary
+    in MeasuredExpression filled $ Just updatedSummary
+ where
+  filled = Generated.fillExpressionHole
+    (AnnotatedLocal variable Nothing) replacement expression
 
 -- | Apply the shared capture-safe generated-term simplifier while comparing
 -- annotated locals solely by Exference's stable numeric identity.
 simplifyExpression :: Expression -> Expression
 simplifyExpression (Expression expression) = Expression
   $ Generated.simplifyExpressionBy annotatedIdentity expression
+
+-- | Reduce constructor matches using checked, non-strict constructor arities.
+-- Keep local annotations intact and retain sharing through the shared let
+-- simplifier. Callers independently check the returned expression before use.
+reduceKnownConstructorCases :: (QualifiedName -> Maybe Int) -> Expression -> Expression
+reduceKnownConstructorCases constructorArity (Expression expression) = Expression
+  $ Generated.simplifyExpressionWithoutEtaBy annotatedIdentity
+  $ Generated.reduceKnownConstructorCasesBy annotatedIdentity constructorArity
+      expression
 
 -- | Preserve visible instantiation on its original expression spine. GHC
 -- does not expose inferred let binders as specified type-application slots.

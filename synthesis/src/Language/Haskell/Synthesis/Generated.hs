@@ -66,6 +66,7 @@ module Language.Haskell.Synthesis.Generated
   , discardUnusedPatternBindingsBy
   , simplifyExpressionBy
   , simplifyExpressionWithoutEtaBy
+  , reduceKnownConstructorCasesBy
   , expressionHoles
   , expressionSizeNatural
   , expressionSize
@@ -1352,6 +1353,118 @@ simplifyExpressionWithoutEtaBy
   -> Expression local
   -> Expression local
 simplifyExpressionWithoutEtaBy = simplifyExpressionWithEtaBy False
+
+-- | Reduce cases on a known, fully applied constructor in one bottom-up pass.
+--
+-- The resolver is checking authority supplied by the caller: a returned arity
+-- certifies a constructor whose fields are non-strict. In particular, callers
+-- must not infer this fact from capitalization, a rendered spelling, or an
+-- erased declaration which could have strict fields. Boxed tuples carry their
+-- own structural arity. This operation is not a type checker; backends must
+-- independently check the rewritten term before associating typed evidence.
+--
+-- Only shallow variable/wildcard fields are supported. A preceding pattern
+-- which cannot be decided stops reduction, rather than allowing a later
+-- branch to bypass it. Constructor-head visible type applications are also
+-- left intact: removing their type-directed context could make an otherwise
+-- valid higher-rank payload uncheckable. Visible applications inside retained
+-- payloads and bodies are preserved verbatim.
+--
+-- Selected field binders become nonrecursive lets, retaining the original
+-- local payloads and sharing repeated field uses. No substitution, eta law,
+-- unknown-scrutinee reduction, or fresh local allocation occurs here. Both
+-- projected source and result scopes must validate; a let nesting which would
+-- capture or shadow an identity therefore leaves the original case intact.
+-- Existing 'simplifyExpressionWithoutEtaBy' can subsequently remove unused
+-- lets or inline a single use without duplicating a shared payload.
+--
+-- New let nodes are not revisited. Thus one pass attempts at most one
+-- reduction per case node in the caller's finite admitted source tree.
+reduceKnownConstructorCasesBy
+  :: Ord identity
+  => (local -> identity)
+  -> (Name -> Maybe Int)
+  -> Expression local
+  -> Expression local
+reduceKnownConstructorCasesBy identity constructorArity =
+  rewriteExpressionBottomUp reduce
+ where
+  reduce original@(Case scrutinee alternatives) =
+    case constructorView scrutinee of
+      Just (constructor, fields) ->
+        case selectBranch constructor fields scrutinee alternatives of
+          Just (bindings, body) ->
+            let rewritten = foldr
+                  (\(local, value) rest -> Let (Bind local) value rest)
+                  body bindings
+            in if validInOriginalScope original original &&
+                  validInOriginalScope original rewritten
+              then rewritten
+              else original
+          Nothing -> original
+      Nothing -> original
+  reduce original = original
+
+  constructorView (Tuple fields) = do
+    let arity = observedListLength maximumTupleArity fields
+    constructor <- either (const Nothing) Just $ tupleName Boxed arity
+    pure (constructor, fields)
+  constructorView expression = case expressionApplicationSpine expression of
+    (Global constructor, fields) -> do
+      arity <- checkedArity constructor
+      if observedListLength arity fields == arity
+        then Just (constructor, fields)
+        else Nothing
+    _ -> Nothing
+
+  checkedArity constructor
+    | nameLexicalClass constructor /= ConstructorLike = Nothing
+    | Just (TupleConstructor Boxed arity) <- nameSpecial constructor = Just arity
+    | Just FunctionConstructor <- nameSpecial constructor = Nothing
+    | Just (TupleConstructor Unboxed _) <- nameSpecial constructor = Nothing
+    | otherwise = do
+        arity <- constructorArity constructor
+        if arity >= 0 then Just arity else Nothing
+
+  selectBranch _ _ _ [] = Nothing
+  selectBranch constructor fields scrutinee ((pattern, body) : rest) =
+    case pattern of
+      Wildcard -> Just ([], body)
+      Bind local -> Just ([(local, scrutinee)], body)
+      Constructor alternative patterns -> do
+        arity <- checkedArity alternative
+        if observedListLength arity patterns /= arity
+          then Nothing
+          else if constructor /= alternative
+            then selectBranch constructor fields scrutinee rest
+            else do
+              bindings <- bindFields patterns fields
+              pure (bindings, body)
+      TuplePattern patterns -> do
+        let arity = observedListLength maximumTupleArity patterns
+        alternative <- either (const Nothing) Just $ tupleName Boxed arity
+        if constructor /= alternative
+          then Nothing
+          else do
+            bindings <- bindFields patterns fields
+            pure (bindings, body)
+      As{} -> Nothing
+
+  bindFields [] [] = Just []
+  bindFields (pattern : patterns) (value : values) = do
+    bindings <- case pattern of
+      Bind local -> Just [(local, value)]
+      Wildcard -> Just []
+      _ -> Nothing
+    remaining <- bindFields patterns values
+    pure $ bindings ++ remaining
+  bindFields _ _ = Nothing
+
+  validInOriginalScope original rewritten =
+    validateExpressionScope
+      (lambdaExpression (map Bind free) $ fmap identity rewritten) == Right ()
+   where
+    free = Set.toAscList $ expressionFreeLocalIdentitiesBy identity original
 
 simplifyExpressionWithEtaBy
   :: Ord identity

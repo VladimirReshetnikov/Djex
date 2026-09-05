@@ -474,24 +474,31 @@ assertLiveUsableWorkLocalQueryDeadline = do
         assertEffectiveDeadlineCause "fresh-per-query-deadline" pairIdentity
   _ <- expectRight =<< expectRight healthy
 
+  -- Keep the worker quiescent after the query-check record. A delayed reply
+  -- can wake during deadline cleanup and be killed halfway through writing
+  -- its trace; that tests an incidental logging race instead of which
+  -- deadline owns the query. The unchanged outer-scope assertions distinguish
+  -- this fresh 200 ms deadline from the shared 2000 ms allowance.
   scalarScoped <- withInternalBudgetedWorker
-    "query-delay-300ms" 2000 200
+    "query-hang-status" 2000 200
     $ \executable worker -> do
         rejected <- SMTLibSession.runLengthSMTLibReadyWorkerQuery
           Evaluate.defaultLengthEvaluationLimits worker scalarQuery
         assertInternalQueryDeadlineFailure True rejected
         events <- SMTLibLiveSpec.readFakeZ3Events executable
         assertFakeZ3EventOrdinals "query-check" [0] events
+        assertFakeZ3EventOrdinals "query-hang" [0] events
   _ <- expectRight =<< expectRight scalarScoped
 
   pairScoped <- withInternalBudgetedWorker
-    "query-delay-300ms" 2000 200
+    "query-hang-status" 2000 200
     $ \executable worker -> do
         rejected <- SMTLibSession.runLengthSpinePairSMTLibReadyWorkerQuery
           Evaluate.defaultLengthEvaluationLimits worker pairQuery
         assertInternalPairQueryDeadlineFailure True rejected
         events <- SMTLibLiveSpec.readFakeZ3Events executable
         assertFakeZ3EventOrdinals "query-check" [0] events
+        assertFakeZ3EventOrdinals "query-hang" [0] events
   _ <- expectRight =<< expectRight pairScoped
   pure ()
 
@@ -848,8 +855,10 @@ assertDescriptorBoundScopedIdentitySchemas = do
         "scoped-shared-usable-work-deadline" $ BS.unpack scalarIdentity
       assertEffectiveDeadlineCause
         "scoped-shared-usable-work-deadline" $ BS.unpack pairIdentity
-  _ <- expectRight =<< expectRight scoped
-  pure ()
+  assertDescriptorScopedOutcome
+    SMTLibProcess.lengthSMTLibDescriptorBoundExecutableLaunchSupported
+    SMTLibProcess.LengthSMTLibProcessSpawnPhase
+    SMTLibProcess.LengthSMTLibProcessDescriptorBoundLaunchUnavailable scoped
 
 assertEffectiveIDDescriptorBoundScopedIdentitySchemas :: IO ()
 assertEffectiveIDDescriptorBoundScopedIdentitySchemas = do
@@ -918,8 +927,28 @@ assertEffectiveIDDescriptorBoundScopedIdentitySchemas = do
         "scoped-shared-usable-work-deadline" $ BS.unpack scalarIdentity
       assertEffectiveDeadlineCause
         "scoped-shared-usable-work-deadline" $ BS.unpack pairIdentity
-  _ <- expectRight =<< expectRight scoped
-  pure ()
+  assertDescriptorScopedOutcome
+    SMTLibProcess.lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchSupported
+    SMTLibProcess.LengthSMTLibProcessSnapshotPhase
+    SMTLibProcess.LengthSMTLibProcessEffectiveIDExecutableAccessCheckUnavailable scoped
+
+-- Unsupported launch policies must retain their exact refusal instead of
+-- silently falling back to pathname execution. Supported builds must still
+-- execute every identity assertion in the callback above.
+assertDescriptorScopedOutcome
+  :: Show failure
+  => Bool
+  -> SMTLibProcess.LengthSMTLibProcessPhase
+  -> SMTLibProcess.LengthSMTLibProcessFailureClass
+  -> Either failure (Either SMTLibSession.LengthSMTLibSessionScopeError ())
+  -> IO ()
+assertDescriptorScopedOutcome supported phase failureClass outcome = case outcome of
+  Left failure -> assertFailure $ "unexpected descriptor Session failure: " ++ show failure
+  Right (Left scope) -> do
+    assertBool "supported descriptor launch failed" $ not supported
+    assertDescriptorLaunchUnavailableScope phase failureClass scope
+  Right (Right ()) ->
+    assertBool "unsupported descriptor launch executed its callback" supported
 
 assertExecveCheckDescriptorBoundBudgetIdentitySchemas :: IO ()
 assertExecveCheckDescriptorBoundBudgetIdentitySchemas = do
@@ -1439,7 +1468,35 @@ data LiveLaunchParityObservation = LiveLaunchParityObservation
   deriving (Eq, Show)
 
 assertDescriptorBoundLiveQueryParity :: IO ()
-assertDescriptorBoundLiveQueryParity = do
+assertDescriptorBoundLiveQueryParity
+  | SMTLibProcess.lengthSMTLibDescriptorBoundExecutableLaunchSupported =
+      assertSupportedDescriptorBoundLiveQueryParity
+  | otherwise = do
+      SMTLibProcess.lengthSMTLibDescriptorBoundEffectiveIDExecutableAccessLaunchSupported
+        @?= False
+      SMTLibProcess.lengthSMTLibDescriptorBoundExecveCheckExecutableAccessLaunchSupported
+        @?= False
+      let unexpected _ _ = assertFailure "unsupported launch executed a query callback"
+          policy = InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
+      descriptor <- SMTLibLiveSpec.withDescriptorBoundLiveQueryWorker
+        "healthy" policy id unexpected
+      effective <- SMTLibLiveSpec.withEffectiveIDDescriptorBoundLiveQueryWorker
+        "healthy" policy id unexpected
+      execCheck <- SMTLibLiveSpec.withExecveCheckDescriptorBoundLiveQueryWorker
+        "healthy" policy id unexpected
+      assertUnavailable SMTLibProcess.LengthSMTLibProcessSpawnPhase
+        SMTLibProcess.LengthSMTLibProcessDescriptorBoundLaunchUnavailable descriptor
+      assertUnavailable SMTLibProcess.LengthSMTLibProcessSnapshotPhase
+        SMTLibProcess.LengthSMTLibProcessEffectiveIDExecutableAccessCheckUnavailable effective
+      assertUnavailable SMTLibProcess.LengthSMTLibProcessSnapshotPhase
+        SMTLibProcess.LengthSMTLibProcessSourceExecveCheckUnavailable execCheck
+  where
+    assertUnavailable phase failureClass result = case result of
+      Left scope -> assertDescriptorLaunchUnavailableScope phase failureClass scope
+      Right _ -> assertFailure "unsupported launch fell back to another policy"
+
+assertSupportedDescriptorBoundLiveQueryParity :: IO ()
+assertSupportedDescriptorBoundLiveQueryParity = do
   (scalarQuery, pairQuery) <- liveWireTwinQueries
   legacy <- expectRight =<< SMTLibLiveSpec.withLiveQueryWorker "healthy"
     InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable id
@@ -1616,17 +1673,24 @@ assertDescriptorBoundLiveQueryParity = do
 assertExecveCheckUnavailableScope
   :: SMTLibSession.LengthSMTLibSessionScopeError
   -> IO ()
-assertExecveCheckUnavailableScope scope = case
+assertExecveCheckUnavailableScope = assertDescriptorLaunchUnavailableScope
+  SMTLibProcess.LengthSMTLibProcessSnapshotPhase
+  SMTLibProcess.LengthSMTLibProcessSourceExecveCheckUnavailable
+
+assertDescriptorLaunchUnavailableScope
+  :: SMTLibProcess.LengthSMTLibProcessPhase
+  -> SMTLibProcess.LengthSMTLibProcessFailureClass
+  -> SMTLibSession.LengthSMTLibSessionScopeError
+  -> IO ()
+assertDescriptorLaunchUnavailableScope phase failureClass scope = case
     SMTLibSession.lengthSMTLibSessionScopePrimaryError scope of
   SMTLibSession.LengthSMTLibSessionProcessFailure failure -> do
-    SMTLibProcess.lengthSMTLibProcessErrorPhase failure @?=
-      SMTLibProcess.LengthSMTLibProcessSnapshotPhase
-    SMTLibProcess.lengthSMTLibProcessErrorClass failure @?=
-      SMTLibProcess.LengthSMTLibProcessSourceExecveCheckUnavailable
+    SMTLibProcess.lengthSMTLibProcessErrorPhase failure @?= phase
+    SMTLibProcess.lengthSMTLibProcessErrorClass failure @?= failureClass
     SMTLibProcess.lengthSMTLibProcessErrorCleanupStatus failure @?= Nothing
     SMTLibSession.lengthSMTLibSessionProcessCleanupStatus
         (SMTLibSession.lengthSMTLibSessionScopeCleanupStatus scope) @?= Nothing
-  other -> assertFailure $ "unexpected exec-check scope failure: " ++ show other
+  other -> assertFailure $ "unexpected descriptor scope failure: " ++ show other
 
 execveCheckQueryAuthorityTag :: String
 execveCheckQueryAuthorityTag = concat
@@ -11972,16 +12036,26 @@ smtLibProtocolTests = testGroup
         InternalSMTLibExecution.LengthSMTLibInputValuesAfterSatisfiable
       -- This digest is only a regression snapshot of the collision-free
       -- canonical bytes. It is not used as protocol identity or authority.
+      -- The retained execution policy includes the exact executable path,
+      -- so the two platform-specific absolute fixture paths have distinct
+      -- snapshots even though their SMT-LIB wire bytes are identical.
       SHA256.hash
           (BS.pack
             $ InternalFingerprint.fingerprintCanonicalBytes
             $ SMTLibProtocol.lengthSMTLibProtocolPlanFingerprint plan) @?=
-        BS.pack
-          [ 184, 6, 142, 55, 253, 114, 15, 174
-          , 57, 52, 196, 159, 68, 202, 30, 249
-          , 187, 57, 62, 212, 139, 254, 69, 52
-          , 48, 42, 15, 218, 134, 243, 136, 234
-          ]
+        BS.pack (if SystemInfo.os == "mingw32"
+          then
+            [ 111, 201, 71, 253, 24, 184, 101, 237
+            , 221, 115, 138, 60, 208, 125, 174, 135
+            , 65, 123, 99, 186, 143, 242, 58, 176
+            , 159, 168, 13, 25, 116, 14, 194, 144
+            ]
+          else
+            [ 184, 6, 142, 55, 253, 114, 15, 174
+            , 57, 52, 196, 159, 68, 202, 30, 249
+            , 187, 57, 62, 212, 139, 254, 69, 52
+            , 48, 42, 15, 218, 134, 243, 136, 234
+            ])
       checkReceiver <- expectProtocolWrite
         SMTLibProtocol.LengthSMTLibProtocolInitialQueryWrite
         expectedInitial

@@ -1035,9 +1035,10 @@ testReplLengthWhereResolution = withTemporaryEnvironment
       , "type Items value = [value]"
       ])] $ \directory -> do
   let list9 = concat $ replicate 9 "[a] -> "
+      missingPath = directory ++ "/missing-private-z3"
   (exitCode, _, errors) <- runRepl directory
     [ "import Aliases"
-    , ":set length-z3 /missing/z3"
+    , ":set length-z3 " ++ missingPath
     , ":exference --where length result == length arg0 -- [a] -> [a]"
     , ":exference --where length result == length arg0 -- Items a -> Items a"
     , ":exference --where length result == length arg1 -- b -> [a] -> [a]"

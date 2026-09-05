@@ -671,6 +671,9 @@ openLengthSMTLibDescriptorBoundProcess limits cancellation deadline profile
 -- | Deterministic package-private seam used to replace the configured
 -- pathname after the sealed image has been admitted and before child
 -- allocation.  No executable descriptor is exposed to the hook.
+-- Descriptor projection is deliberately lazy in all descriptor-launch
+-- adapters: an unsupported raw launcher rejects before demanding any runtime
+-- input, including a workspace descriptor which was never acquired.
 openLengthSMTLibProcessWithPreDescriptorExecHook
   :: LengthSMTLibProcessLimits
   -> LengthSMTLibProcessCancellation
@@ -682,7 +685,7 @@ openLengthSMTLibProcessWithPreDescriptorExecHook
   -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
 openLengthSMTLibProcessWithPreDescriptorExecHook limits cancellation deadline
     profile workingDirectory
-    (LengthSMTLibWorkingDirectoryDescriptor descriptor) hook =
+    ~(LengthSMTLibWorkingDirectoryDescriptor descriptor) hook =
   openRetained limits cancellation deadline $ \z3Limits z3Cancellation
       z3Deadline ->
     Z3Process.openZ3SMTLibDescriptorBoundProcessWithPreExecHook z3Limits
@@ -727,7 +730,7 @@ openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
   -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
 openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
     limits cancellation deadline profile workingDirectory
-    (LengthSMTLibWorkingDirectoryDescriptor descriptor) =
+    ~(LengthSMTLibWorkingDirectoryDescriptor descriptor) =
   openRetained limits cancellation deadline $ \z3Limits z3Cancellation
       z3Deadline ->
     Z3Process.openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcess
@@ -752,7 +755,7 @@ openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
 -- retain or close it.
 openLengthSMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
     limits cancellation deadline profile workingDirectory
-    (LengthSMTLibWorkingDirectoryDescriptor descriptor) accessCheck hook =
+    ~(LengthSMTLibWorkingDirectoryDescriptor descriptor) accessCheck hook =
   openRetained limits cancellation deadline $ \z3Limits z3Cancellation
       z3Deadline ->
     Z3Process.openZ3SMTLibDescriptorBoundEffectiveIDExecutableAccessProcessWithHooks
@@ -836,7 +839,7 @@ openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcess
   -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
 openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcess
     limits cancellation deadline profile workingDirectory
-    (LengthSMTLibWorkingDirectoryDescriptor descriptor) =
+    ~(LengthSMTLibWorkingDirectoryDescriptor descriptor) =
   openRetained limits cancellation deadline $ \z3Limits z3Cancellation
       z3Deadline ->
     Z3Process.openZ3SMTLibDescriptorBoundExecveCheckExecutableAccessProcess
@@ -861,7 +864,7 @@ openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithHooks
   -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
 openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithHooks
     limits cancellation deadline profile workingDirectory
-    (LengthSMTLibWorkingDirectoryDescriptor descriptor) accessCheck
+    ~(LengthSMTLibWorkingDirectoryDescriptor descriptor) accessCheck
     execveCheck hook =
   openRetained limits cancellation deadline $ \z3Limits z3Cancellation
       z3Deadline ->
@@ -892,7 +895,7 @@ openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithTestHooks
   -> IO (Either LengthSMTLibProcessError LengthSMTLibProcess)
 openLengthSMTLibDescriptorBoundExecveCheckExecutableAccessProcessWithTestHooks
     limits cancellation deadline profile workingDirectory
-    (LengthSMTLibWorkingDirectoryDescriptor descriptor) accessCheck
+    ~(LengthSMTLibWorkingDirectoryDescriptor descriptor) accessCheck
     execveCheck creator sealer inspectionHook hook =
   openRetained limits cancellation deadline $ \z3Limits z3Cancellation
       z3Deadline ->

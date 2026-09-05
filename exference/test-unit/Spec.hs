@@ -4513,6 +4513,26 @@ tests = testGroup "Exference"
             retainsChoice expression
           checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
             goal [] expression @?= Right ()
+      , testCase "partial applications retain polymorphic body expectations" $ do
+          let wrapper = TypeApp $ TypeCons $ name "ResultFactory"
+              identity = TypeForall [2] [] $ TypeArrow (TypeVar 2) (TypeVar 2)
+              factory = TypeForall [0] [] $
+                TypeArrow (TypeVar 0) (wrapper $ TypeVar 0)
+          forM_ [TypeCons $ name "Seed", TypeVar 9] $ \seed ->
+            forM_ [1, 2 :: Int] $ \argumentCount -> do
+              let provider = foldr TypeArrow factory $ replicate argumentCount seed
+                  goal = TypeArrow seed $ TypeArrow provider $ wrapper identity
+                  input = identityInput
+                    { input_goalType = goal
+                    , input_maxSteps = 1000
+                    , input_allowUnused = True
+                    }
+              (expression, residual, _) <- maybe
+                (fail "a provider result exposed after term arguments lost its polytype") pure $
+                  findOneExpression input
+              residual @?= []
+              checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+                goal [] expression @?= Right ()
       , testCase "scoped vacuous providers instantiate at query polytypes" $ do
           let quantified = TypeForall [1] []
                 $ TypeArrow (TypeVar 1) (TypeVar 1)
@@ -10087,6 +10107,27 @@ tests = testGroup "Exference"
           checkExpression classes [] []
             (TypeArrow outer identityScheme) [] direct @?= Right ()
           checkExpression classes [consume] [] result [] applied @?= Right ()
+      , testCase "propagates polymorphic expectations through let bodies" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let token = TypeCons $ name "Seed"
+              wrapper = TypeApp $ TypeCons $ name "ResultFactory"
+              source = TypeForall [0] [] $
+                TypeArrow (TypeVar 0) (wrapper $ TypeVar 0)
+              maker = TypeArrow token source
+              identity = TypeForall [1] [] $ TypeArrow (TypeVar 1) (TypeVar 1)
+              selected = TypeArrow (TypeVar 4) $ wrapper $ TypeVar 4
+              goal = TypeArrow token $ TypeArrow maker $ wrapper identity
+              candidate rigid = ExpLambda 10 token $ ExpLambda 11 maker $
+                ExpLet 12 source
+                  (ExpApply (ExpVar 11 maker) $ ExpVar 10 token) $
+                    ExpApply (ExpVar 12 selected) $
+                      ExpLambda 13 (TypeConstant rigid) $ ExpVar 13 $ TypeConstant rigid
+              classes = mkQueryClassEnv staticClasses []
+          checkExpression classes [] [] goal [] (candidate 0) @?= Right ()
+          case checkExpression classes [] [] goal [] (candidate 7) of
+            Left TypeMismatch{} -> pure ()
+            actual -> fail $ "let checking trusted an unrelated annotation rigid: "
+              ++ show actual
       , testCase
           "propagates quantified tuple results through application spines" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []

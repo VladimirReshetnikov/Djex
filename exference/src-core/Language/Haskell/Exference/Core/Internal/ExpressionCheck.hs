@@ -813,6 +813,19 @@ checkValidatedExpression provenCandidateRigids
             result
           pure $ unaryCheckedTerm expectedType
             (CheckedLambda variable annotation) checkedBody
+        -- A let does not hide the expected result type from its body. This
+        -- matters when a partial application exposes a polymorphic provider:
+        -- infer-only traversal would choose a monomorphic type for a fresh
+        -- lambda argument before learning that the surrounding result requires
+        -- a polytype. The binding is still checked independently against its
+        -- retained declaration; only the trusted outer expectation flows into
+        -- the body, exactly as for a lambda or application below.
+        (ExpLet variable annotation binding body, _) -> do
+          checkedBinding <- checkAgainst variables binding annotation
+          checkedBody <- checkAgainst
+            (IntMap.insert variable annotation variables) body expectedType
+          pure $ binaryCheckedTerm expectedType
+            (CheckedLet variable annotation) checkedBinding checkedBody
         -- Checking an application from its result propagates the trusted
         -- expected type back through a partial application spine.  Pure
         -- bottom-up inference instantiates a constructor's parameters before

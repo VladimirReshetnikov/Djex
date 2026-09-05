@@ -264,6 +264,8 @@ tests = testGroup "Exference"
       testExpressionQualityCost
   , testCase "constructor evaluation authority survives source preparation"
       testConstructorEvaluationAuthority
+  , testCase "checked constructor reduction closes through typed let aliases"
+      testConstructorReductionThroughLets
   , testGroup "class environments"
       [ testCase "class declarations contain only finite name references" $ do
           let self = HsTypeClass (name "Self") [0]
@@ -11249,6 +11251,136 @@ testConstructorEvaluationAuthority = do
       environment of
     Left _ -> pure ()
     Right _ -> fail "constructor evaluation authority accepted an absent constructor"
+
+testConstructorReductionThroughLets :: Assertion
+testConstructorReductionThroughLets = do
+  let boxName = name "QualityAliasBox"
+      boxConstructor = name "QualityAliasConstructor"
+      valueName = name "qualityAliasValue"
+      integer = TypeCons $ name "Int"
+      boxType = TypeApp (TypeCons boxName) integer
+      constructorBinding = functionBindingFromType boxConstructor 0 $
+        TypeArrow integer boxType
+      deconstructor = DeconstructorBinding boxType
+        [nonStrictConstructorBinding boxConstructor [integer]] False
+      bindings = [constructorBinding, functionBindingFromType valueName 0 integer]
+      context = mkQueryClassEnv emptyClassEnv []
+      resolve selected
+        | selected == boxConstructor = Just 1
+        | otherwise = Nothing
+      reduce = reduceKnownConstructorCases resolve
+      putInBox = ExpApply $ ExpName boxConstructor
+      identity = ExpLambda 1 integer $ ExpVar 1 integer
+      -- Each inner selected branch returns a constructor through a fresh
+      -- field let. The next outer case becomes reducible only after that let
+      -- is simplified, exercising more than a fixed pair of rewrite passes.
+      layer index inner = ExpLet (2 * index) boxType inner $
+        ExpCaseMatch (ExpVar (2 * index) boxType)
+          [(boxConstructor, [(2 * index + 1, integer)],
+            putInBox $ ExpVar (2 * index + 1) integer)]
+      nested count = ExpLambda 1 integer $ ExpCaseMatch
+        (foldl (flip layer) (putInBox $ ExpVar 1 integer) [1 .. count])
+        [(boxConstructor, [(2 * count + 2, integer)],
+          ExpVar (2 * count + 2) integer)]
+  forM_ [1, 2, 8, 24] $ \count -> do
+    let original = nested count
+        reduced = reduce original
+    assertEqual "nested aliases left a newly exposed constructor case"
+      (toGeneratedExpression identity) $ toGeneratedExpression reduced
+    checkExpression context bindings [deconstructor]
+      (TypeArrow integer integer) [] original @?= Right ()
+    checkExpression context bindings [deconstructor]
+      (TypeArrow integer integer) [] reduced @?= Right ()
+
+  let shared = ExpCaseMatch (putInBox $ ExpName valueName)
+        [(boxConstructor, [(10, integer)],
+          ExpTuple [ExpVar 10 integer, ExpVar 10 integer])]
+      sharedExpected = ExpLet 10 integer (ExpName valueName) $
+        ExpTuple [ExpVar 10 integer, ExpVar 10 integer]
+      sharedReduced = reduce shared
+  assertEqual "constructor reduction duplicated a repeatedly used payload"
+    (toGeneratedExpression sharedExpected) $ toGeneratedExpression sharedReduced
+  checkExpression context bindings [deconstructor]
+    (TypeTuple Boxed [integer, integer]) [] sharedReduced @?= Right ()
+
+  visibleInteger <- expectRight $ Generated.specifiedVisibleTypeArgument integer
+  let polyIdentity = TypeForall [0] [] $ TypeArrow (TypeVar 0) (TypeVar 0)
+      typedPayload = ExpApply
+        (ExpTypeApply (ExpVar 20 polyIdentity) visibleInteger) $ ExpName valueName
+      retainedPayload = ExpLambda 20 polyIdentity $ ExpCaseMatch (putInBox typedPayload)
+        [(boxConstructor, [(10, integer)],
+          ExpTuple [ExpVar 10 integer, ExpVar 10 integer])]
+      blockedHead = ExpCaseMatch
+        (ExpApply (ExpTypeApply (ExpName boxConstructor) visibleInteger) $
+          ExpName valueName)
+        [(boxConstructor, [(10, integer)], ExpVar 10 integer)]
+  assertEqual "normalization changed a retained payload's visible type evidence"
+    (toGeneratedExpression $ ExpLambda 20 polyIdentity $ ExpLet 10 integer typedPayload $
+      ExpTuple [ExpVar 10 integer, ExpVar 10 integer])
+    $ toGeneratedExpression $ reduce retainedPayload
+  checkExpression context bindings [deconstructor]
+    (TypeArrow polyIdentity $ TypeTuple Boxed [integer, integer]) [] retainedPayload
+    @?= Right ()
+  checkExpression context bindings [deconstructor]
+    (TypeArrow polyIdentity $ TypeTuple Boxed [integer, integer]) [] (reduce retainedPayload)
+    @?= Right ()
+  assertEqual "normalization crossed the constructor-head visible-type barrier"
+    (toGeneratedExpression blockedHead) $ toGeneratedExpression $ reduce blockedHead
+  assertEqual "let exposure granted authority for unknown or strict fields"
+    (toGeneratedExpression $ simplifyExpression shared)
+    $ toGeneratedExpression $ reduceKnownConstructorCases (const Nothing) shared
+
+  -- Exercise the actual checked admission path with the strict unused-variable
+  -- policy. Its raw proof uses f only in the unreachable sum alternative; the
+  -- certified normalization may erase that dead use after admission. A source
+  -- derivation that never used f must still fail the same policy.
+  let leftName = name "QualityAliasLeft"
+      rightName = name "QualityAliasRight"
+      sumName = name "QualityAliasSum"
+      a = TypeVar 0
+      r = TypeVar 1
+      sumType = TypeApp (TypeApp (TypeCons sumName) a) r
+      nilGoal = TypeArrow (TypeArrow a $ TypeArrow r r) $ TypeArrow r r
+      constructors =
+        [functionBindingFromType leftName 0 $ TypeArrow a sumType,
+         functionBindingFromType rightName 0 $ TypeArrow r sumType]
+      sumDeconstructor = DeconstructorBinding sumType
+        [nonStrictConstructorBinding leftName [a],
+         nonStrictConstructorBinding rightName [r]] False
+      options ranking = defaultExferenceOptions
+        { exferenceAllowUnused = False
+        , exferenceMultiConstructorPatterns = True
+        , exferenceMaximumSteps = 1000
+        , exferenceMaximumQueueSize = Just 1024
+        , exferenceCandidateRanking = ranking
+        }
+      outputs = concatMap (SharedSearch.batchCandidates . SharedQuery.resultSearch)
+      expression = Generated.functionClauseExpression . SharedCandidate.candidateOutput
+      eliminations = SharedQuality.qualityEliminations
+        . SharedQuality.candidateQuality (const 0) . expression
+  environment <- expectRight $ mkExferenceEnvironment $
+    EnvDictionary constructors [sumDeconstructor] emptyClassEnv
+  emptyEnvironment <- expectRight $ mkExferenceEnvironment $
+    EnvDictionary [] [] emptyClassEnv
+  target <- checkedIdentifierTarget "qualityAliasNil"
+  let run selectedEnvironment ranking = expectRight $
+        findQueryResultsInEnvironmentEither target
+          (emptyExferenceSourceTypeVariableHints nilGoal) selectedEnvironment $
+          ExferenceQuery nilGoal Set.empty $ options ranking
+  modern <- run environment SharedQuality.defaultCandidateRankingPolicy
+  case outputs modern of
+    firstCandidate : _ -> assertEqual
+      "checked admission retained a match exposed by a constructor alias"
+      0 $ eliminations firstCandidate
+    [] -> fail "the strict-use constructor fixture produced no checked candidate"
+  historical <- run environment SharedQuality.LegacyCandidateRanking
+  case outputs historical of
+    firstCandidate : _ -> assertBool "legacy constructor normalization changed"
+      $ eliminations firstCandidate > 0
+    [] -> fail "the historical strict-use constructor fixture produced no candidate"
+  withoutDeadBranch <- run emptyEnvironment SharedQuality.defaultCandidateRankingPolicy
+  assertBool "normalization disabled the strict unused-variable admission policy"
+    $ null $ outputs withoutDeadBranch
 
 testCompletedCandidateFrontier :: Assertion
 testCompletedCandidateFrontier = do

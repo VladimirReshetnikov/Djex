@@ -699,9 +699,9 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
         -- otherwise we discard this solution.
       , allowConstraints || null remainingConstraints
       , let unusedVarCount = getUnusedVarCount solution
-        -- similarly:
-        -- if allowUnused, there may be unused variables in the
-        -- output. Otherwise the solution is discarded.
+        -- Apply the unused-variable policy to the search derivation before
+        -- normalization. Certified dead-code removal can subsequently erase
+        -- a use; it must not fabricate use evidence for a rejected derivation.
       , allowUnused || unusedVarCount==0
       , rawExpression <- [nodeExpression solution]
       , (e, checkedEvidence) <- maybeToList $ checkedSimplification

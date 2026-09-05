@@ -477,13 +477,41 @@ simplifyExpression (Expression expression) = Expression
   $ Generated.simplifyExpressionBy annotatedIdentity expression
 
 -- | Reduce constructor matches using checked, non-strict constructor arities.
--- Keep local annotations intact and retain sharing through the shared let
--- simplifier. Callers independently check the returned expression before use.
+-- Expose single-use constructor aliases before reduction, retaining repeated
+-- uses as shared lets. A reduction can expose another case only after its new
+-- field lets simplify, so continue while the number of case nodes decreases.
+-- Neither operation creates or duplicates a case: the original case count
+-- bounds the whole closure, without an arbitrary normalization fuel limit.
+-- Keep local annotations and visible applications intact. Callers independently
+-- check the returned expression before use and retain the original fallback.
 reduceKnownConstructorCases :: (QualifiedName -> Maybe Int) -> Expression -> Expression
 reduceKnownConstructorCases constructorArity (Expression expression) = Expression
-  $ Generated.simplifyExpressionWithoutEtaBy annotatedIdentity
-  $ Generated.reduceKnownConstructorCasesBy annotatedIdentity constructorArity
-      expression
+  $ closeReductions (caseCount exposed) exposed
+ where
+  simplify = Generated.simplifyExpressionWithoutEtaBy annotatedIdentity
+  exposed = simplify expression
+  closeReductions 0 current = current
+  closeReductions remaining current =
+    let reduced = simplify
+          $ Generated.reduceKnownConstructorCasesBy annotatedIdentity
+              constructorArity current
+        !remaining' = caseCount reduced
+    in if remaining' < remaining
+      then closeReductions remaining' reduced
+      else reduced
+
+  caseCount :: Generated.Expression local -> Natural
+  caseCount current = case current of
+    Generated.Local{} -> 0
+    Generated.Global{} -> 0
+    Generated.Hole{} -> 0
+    Generated.Lambda _ body -> caseCount body
+    Generated.Apply function argument -> caseCount function + caseCount argument
+    Generated.VisibleTypeApplication function _ -> caseCount function
+    Generated.Tuple elements -> List.foldl' (\n child -> n + caseCount child) 0 elements
+    Generated.Let _ binding body -> caseCount binding + caseCount body
+    Generated.Case scrutinee alternatives -> 1 + caseCount scrutinee
+      + List.foldl' (\n (_, body) -> n + caseCount body) 0 alternatives
 
 -- | Preserve visible instantiation on its original expression spine. GHC
 -- does not expose inferred let binders as specified type-application slots.

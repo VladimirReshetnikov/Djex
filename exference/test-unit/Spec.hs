@@ -1751,7 +1751,7 @@ tests = testGroup "Exference"
                 [TypeForall [3] [] $ TypeTuple Boxed [TypeVar 3, TypeVar 1]]
           showHsConstraint (Map.singleton "c" 1) collisionConstraint
             @?= "C (forall c'. (c', c))"
-      , testCase "unifiers compare opaque polytypes by alpha identity" $ do
+      , testCase "unifiers compare polytypes by alpha identity" $ do
           let flexibleLeft = TypeForall [0] []
                 $ TypeArrow (TypeVar 0) (TypeVar 0)
               flexibleRight = TypeForall [7] []
@@ -1789,19 +1789,96 @@ tests = testGroup "Exference"
           unifyRight variable polymorphic @?= Nothing
           unifyShared (listOf variable) (listOf polymorphic) @?=
             Just (IntMap.singleton 1 polymorphic)
-      , testCase "opaque polytypes expose only free variables to substitution" $ do
+      , testCase "polytype equations solve their free variables" $ do
           let integer = TypeCons $ name "Int"
               open = TypeForall [1] []
                 $ TypeArrow (TypeVar 1) (TypeVar 0)
               closed = TypeForall [2] []
                 $ TypeArrow (TypeVar 2) integer
               pair left right = TypeTuple Boxed [left, right]
-          -- The atom equation is deliberately first. It may become equal after
-          -- an independent outer equation, but is never decomposed itself.
+          -- Matching under forall can determine a free variable without an
+          -- independent outer equation, while ordinary occurs checks remain.
           unifyShared (pair open $ TypeVar 0) (pair closed integer) @?=
             Just (IntMap.singleton 0 integer)
-          unifyShared open closed @?= Nothing
+          unifyShared open closed @?= Just (IntMap.singleton 0 integer)
           unifyShared (TypeVar 0) open @?= Nothing
+      , testCase "polytype matching is directional in every namespace" $ do
+          let integer = TypeCons $ name "Int"
+              open = TypeForall [1] []
+                $ TypeArrow (TypeVar 1) (TypeVar 0)
+              closed = TypeForall [2] []
+                $ TypeArrow (TypeVar 2) integer
+          unify open closed @?=
+            Just (IntMap.singleton 0 integer, IntMap.empty)
+          unify closed open @?=
+            Just (IntMap.empty, IntMap.singleton 0 integer)
+          unifyRight closed open @?= Just (IntMap.singleton 0 integer)
+          unifyRight open closed @?= Nothing
+          unifyOffset closed (HsTypeOffset open 20) @?=
+            Just (IntMap.empty, IntMap.singleton 20 integer)
+          unifyRightOffset closed (HsTypeOffset open 20) @?=
+            Just (IntMap.singleton 20 integer)
+      , testCase "polytype matching rejects direct and indirect binder escape" $ do
+          let free = TypeForall [1] [] $ TypeVar 0
+              bound = TypeForall [2] [] $ TypeVar 2
+              indirect = TypeTuple Boxed [TypeVar 0, free]
+              target = TypeTuple Boxed [TypeVar 3, bound]
+          unifyShared free bound @?= Nothing
+          unifyRight bound free @?= Nothing
+          unify free bound @?= Nothing
+          unifyShared indirect target @?= Nothing
+          unifyShared target indirect @?= Nothing
+      , testCase "polytype matching retains nested lexical scopes" $ do
+          let integer = TypeCons $ name "Int"
+              open = TypeForall [1] [] $ TypeArrow (TypeVar 1)
+                $ TypeForall [1] [] $ TypeArrow (TypeVar 1) (TypeVar 0)
+              closed = TypeForall [2] [] $ TypeArrow (TypeVar 2)
+                $ TypeForall [3] [] $ TypeArrow (TypeVar 3) integer
+              escaped = TypeForall [2] [] $ TypeArrow (TypeVar 2)
+                $ TypeForall [3] [] $ TypeArrow (TypeVar 3) (TypeVar 2)
+          unifyShared open closed @?= Just (IntMap.singleton 0 integer)
+          unifyShared open escaped @?= Nothing
+      , testCase "polytype matching keeps impredicative substitution images closed" $ do
+          let identity = TypeForall [4] []
+                $ TypeArrow (TypeVar 4) (TypeVar 4)
+              open = TypeForall [1] []
+                $ TypeArrow (TypeVar 0) (TypeVar 1)
+              closed = TypeForall [2] []
+                $ TypeArrow identity (TypeVar 2)
+              escaping = TypeForall [2] [] $ TypeArrow
+                (TypeForall [4] [] $ TypeArrow (TypeVar 4) (TypeVar 2))
+                (TypeVar 2)
+          unifyShared open closed @?= Just (IntMap.singleton 0 identity)
+          unifyShared open escaping @?= Nothing
+      , testCase "polytype matching handles grouped and residual forall chains" $ do
+          let grouped = TypeForall [1, 2] []
+                $ TypeArrow (TypeVar 1) (TypeArrow (TypeVar 2) $ TypeVar 1)
+              layered = TypeForall [3] [] $ TypeForall [4] []
+                $ TypeArrow (TypeVar 3) (TypeArrow (TypeVar 4) $ TypeVar 3)
+              open = TypeForall [1] [] $ TypeVar 0
+              identity = TypeForall [4] []
+                $ TypeArrow (TypeVar 4) (TypeVar 4)
+              closed = TypeForall [2] [] identity
+          unifyShared grouped layered @?= Just IntMap.empty
+          unifyShared open closed @?= Just (IntMap.singleton 0 identity)
+      , testCase "polytype contexts determine free variables without granting evidence" $ do
+          let integer = TypeCons $ name "Int"
+              scheme binder argument className = TypeForall [binder]
+                [HsConstraint (name className) [argument, TypeVar binder]]
+                $ TypeArrow (TypeVar binder) (TypeVar binder)
+          unifyShared (scheme 1 (TypeVar 0) "C") (scheme 2 integer "C")
+            @?= Just (IntMap.singleton 0 integer)
+          unifyShared (scheme 1 (TypeVar 0) "C") (scheme 2 integer "D")
+            @?= Nothing
+          unifyShared (scheme 1 (TypeVar 0) "C") (scheme 2 (TypeVar 2) "C")
+            @?= Nothing
+      , testCase "polytype matching solves higher-kinded free heads" $ do
+          let integer = TypeCons $ name "Int"
+              constructor = TypeCons $ name "Maybe"
+              scheme binder function = TypeForall [binder] [] $ TypeArrow
+                (TypeApp function integer) (TypeVar binder)
+          unifyShared (scheme 1 $ TypeVar 0) (scheme 2 constructor)
+            @?= Just (IntMap.singleton 0 constructor)
       , testCase "all unifier modes canonicalize structural tuples" $ do
           boxedPairName <- expectRight $ mkBoxedTupleName 2
           unboxedPairName <- expectRight
@@ -4339,6 +4416,46 @@ tests = testGroup "Exference"
                     Nothing -> False
             _ -> fail $ "unexpected provider elimination result: "
               ++ showExpression expression
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+            goal [] expression @?= Right ()
+      , testCase "impredicative arguments correlate a polymorphic value with its consumer" $ do
+          let token = TypeCons $ name "Token"
+              identity = TypeForall [1] []
+                $ TypeArrow (TypeVar 1) (TypeVar 1)
+              apply = TypeForall [0] [] $ TypeArrow (TypeVar 0)
+                $ TypeArrow (TypeArrow (TypeVar 0) token) token
+              goal = TypeArrow apply $ TypeArrow identity
+                $ TypeArrow (TypeArrow identity token) token
+              input = identityInput
+                { input_goalType = goal
+                , input_maxSteps = 1500
+                , input_allowUnused = False
+                }
+              usesCorrelatedApplication expression = case expression of
+                ExpLambda applyVar _ (ExpLambda identityVar _
+                    (ExpLambda consumerVar _ body)) ->
+                  let containsApplication term = case term of
+                        ExpApply (ExpApply (ExpVar usedApply _) (ExpVar usedIdentity _))
+                            (ExpVar usedConsumer _)
+                          | applyVar == usedApply && identityVar == usedIdentity
+                              && consumerVar == usedConsumer -> True
+                        ExpApply function argument ->
+                          containsApplication function || containsApplication argument
+                        ExpLambda _ _ nested -> containsApplication nested
+                        ExpLet _ _ binding nested ->
+                          containsApplication binding || containsApplication nested
+                        ExpTuple elements -> any containsApplication elements
+                        _ -> False
+                  in containsApplication body
+                _ -> False
+          candidates <- expectRight $ findExpressionsEither input
+          (expression, constraints, _) <- maybe
+            (fail $ "no correlated impredicative application was synthesized:\n"
+              ++ unlines [showExpression candidate
+                | (candidate, _, _) <- take 20 candidates]) pure
+            $ find (usesCorrelatedApplication . (\(expression, _, _) -> expression))
+                candidates
+          constraints @?= []
           checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
             goal [] expression @?= Right ()
       , testCase "scoped vacuous providers instantiate at query polytypes" $ do

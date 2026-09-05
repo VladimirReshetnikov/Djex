@@ -1837,8 +1837,9 @@ typeComplexity h = complexity
    where
     applyElement functionCost element = sumScores
       [heuristics_goalApp h, functionCost, complexity element]
-  -- Nested quantified values are indivisible atoms to the search heuristic,
-  -- just as they are to unification. The root prenex wrapper is scheduled at
+  -- Nested quantified values retain one unit of search-heuristic complexity;
+  -- structural unification may nevertheless inspect their bodies. The root
+  -- prenex wrapper is scheduled at
   -- priority zero and opened separately, so this cost applies to rank-N goals.
   complexity TypeForallNative{} = heuristics_goalCons h
 
@@ -2153,8 +2154,22 @@ stateStepPlan allocators multiPM allowConstrs h
         SubsumedProviderForwarding ->
           useProvider goalType goalType [] [] $ Just IntMap.empty
         InstantiateProviderUse ->
-          ordinaryInstantiation <|> visibleGroundInstantiation
+          ordinaryInstantiation <|> wholePolytypeInstantiation
+            <|> visibleGroundInstantiation
           where
+          -- An argument metavariable may denote the entire polymorphic
+          -- value. Keeping this branch beside ordinary per-use elimination
+          -- lets a later argument correlate that choice with a rank-N
+          -- consumer, as in @apply identity consumeIdentity@. The exact
+          -- provider scheme supplies the impredicative type; no quantifier
+          -- vocabulary, binder cap, or Cartesian instantiation guesses are
+          -- needed. The occurrence retains that scheme so the independent
+          -- checker verifies forwarding before considering elimination.
+          wholePolytypeInstantiation = case goalType of
+            TypeVar{} -> useProvider scheme scheme [] []
+              $ unifyShared goalType scheme
+            _ -> mzero
+
           ordinaryInstantiation = do
             supply <- gets nodeFlexibleIds
             case instantiateLeadingForallsWith

@@ -1,8 +1,10 @@
 -- | Explicit forall elimination at scoped-value use sites.
 --
--- The first-order unifier deliberately treats quantified subtrees as atoms.
--- Opening a provider is a typing rule, not a unification rule, so search and
--- the independent expression checker share that operation here.
+-- Unification matches corresponding quantified binders rigidly and may solve
+-- free variables beneath them. Eliminating a provider's forall instead makes
+-- its binders independently instantiable at one occurrence: that is a typing
+-- rule, not type equality, so search and the independent expression checker
+-- share the operation here.
 module Language.Haskell.Exference.Core.Internal.Polytype
   ( ProviderUseMode (..)
   , GroundProviderInstantiation (..)

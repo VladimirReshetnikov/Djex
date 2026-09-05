@@ -16,7 +16,8 @@ module Language.Haskell.Exference.Core.Unify
   )
 where
 
-import Control.Monad (foldM)
+import Control.Monad (foldM, guard)
+import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict (StateT (..), evalStateT, get, put)
 import qualified Data.IntMap.Strict as IntMap
 import Data.Maybe (catMaybes)
@@ -31,6 +32,7 @@ import Language.Haskell.Exference.Core.Internal.VariableSupply
   , supplyFromIdentifiers
   )
 import Language.Haskell.Exference.Core.Types
+import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 
@@ -107,7 +109,7 @@ data TaggedVariable
   | RightVariable !TVarId
   deriving (Eq, Ord)
 
--- Variables inside an opaque polytype retain both distinctions that ordinary
+-- Variables inside a retained polytype retain both distinctions that ordinary
 -- tagged nodes encode structurally: flexible variables belong to the left or
 -- right unification namespace, while rigid variables are nominal constants
 -- shared by both sides. Bound variables use the same representation in the
@@ -115,6 +117,7 @@ data TaggedVariable
 data TaggedAtomVariable
   = TaggedAtomFlexible !TaggedVariable
   | TaggedAtomRigid !TVarId
+  | TaggedAtomBound !Integer
   deriving (Eq, Ord)
 
 -- Structural functions and constructor-backed tuples deliberately use the
@@ -127,6 +130,7 @@ data TaggedAtomVariable
 data TaggedType
   = TaggedVar !TaggedVariable
   | TaggedConstant !TVarId
+  | TaggedBound !Integer
   | TaggedConstructor !QualifiedName
   | TaggedApplication !TaggedType !TaggedType
   | TaggedTuple !Boxity ![TaggedType]
@@ -141,30 +145,34 @@ canonicalUnificationType = either (const Nothing) Just
   . SharedType.normalizeType
 
 tagType :: (TVarId -> TaggedVariable) -> HsType -> Maybe TaggedType
-tagType side = tag . SharedType.constructorApplicationForm
+tagType side = tagAtomType . fmap (tagAtomVariable side)
+
+-- Quantifiers stay intact while they are substitution images. Only an
+-- equation between two quantified types opens their corresponding binders;
+-- those fresh identities inhabit a separate, solver-private rigid namespace.
+tagAtomType :: SharedType.Type TaggedAtomVariable -> Maybe TaggedType
+tagAtomType = tag . SharedType.constructorApplicationForm
  where
   tag ty = case ty of
-    TypeVar variable -> Just $ TaggedVar $ side variable
-    TypeConstant constant -> Just $ TaggedConstant constant
-    TypeCons constructor -> Just $ TaggedConstructor constructor
-    TypeArrow{} -> Nothing
-    TypeApp function argument ->
+    SharedType.TypeVariable (TaggedAtomFlexible variable) ->
+      Just $ TaggedVar variable
+    SharedType.TypeVariable (TaggedAtomRigid constant) ->
+      Just $ TaggedConstant constant
+    SharedType.TypeVariable (TaggedAtomBound binder) -> Just $ TaggedBound binder
+    SharedType.TypeConstructor constructor -> Just $ TaggedConstructor constructor
+    SharedType.FunctionType{} -> Nothing
+    SharedType.TypeApplication function argument ->
       TaggedApplication <$> tag function <*> tag argument
     -- The shared applicative view leaves unary unboxed tuples structural
     -- because Haskell has no corresponding unary constructor.
-    TypeTuple boxity elements -> TaggedTuple boxity <$> mapM tag elements
-    -- A quantified subterm is one first-order atom. The solver may bind a
-    -- metavariable to the whole value, but never generates equations from its
-    -- context or body. This is enough for impredicative constructor arguments
-    -- without introducing higher-rank subsumption.
-    quantified@TypeForallNative{} -> case SharedTypeAtom.mkTypeAtom quantified of
-      Right sourceAtom -> TaggedOpaquePolytype <$> either (const Nothing) Just
-        (SharedTypeAtom.mapTypeAtomVariables
-          (tagAtomVariable side) sourceAtom)
-      -- A vacuous forall is textually and semantically transparent. The shared
-      -- atom constructor erases it and returns the remaining monotype.
-      Left (SharedTypeAtom.MonomorphicTypeAtom monotype) -> tag monotype
-      Left _ -> Nothing
+    SharedType.TupleType boxity elements -> TaggedTuple boxity <$> mapM tag elements
+    quantified@SharedType.ForallType{} ->
+      case SharedTypeAtom.mkTypeAtom quantified of
+        Right sourceAtom -> Just $ TaggedOpaquePolytype sourceAtom
+        -- A vacuous forall is textually and semantically transparent. The shared
+        -- atom constructor erases it and returns the remaining monotype.
+        Left (SharedTypeAtom.MonomorphicTypeAtom monotype) -> tagAtomType monotype
+        Left _ -> Nothing
 
 tagAtomVariable
   :: (TVarId -> TaggedVariable)
@@ -213,19 +221,19 @@ solveTagged bindable ((rawLeft, rawRight) : equations) substitutions = do
         solveTagged bindable
           (zip leftElements rightElements ++ equations)
           substitutions
-    -- Atom equality can become true after an independent outer equation
-    -- substitutes one of their free variables. Solve those equations first,
-    -- then compare the zonked atoms once; never inspect their internal shape.
-    | TaggedOpaquePolytype{} <- left
-    , TaggedOpaquePolytype{} <- right = do
-        solved <- solveTagged bindable equations substitutions
-        solvedLeft <- zonkTagged solved left
-        solvedRight <- zonkTagged solved right
-        if solvedLeft == solvedRight then Just solved else Nothing
+    | TaggedOpaquePolytype leftAtom <- left
+    , TaggedOpaquePolytype rightAtom <- right = do
+        opened <- quantifiedEquations leftAtom rightAtom
+        solveTagged bindable (opened ++ equations) substitutions
     | otherwise = Nothing
 
   bindTagged variable replacement
     | occursTagged variable replacement = Nothing
+    -- Every flexible variable existed before the quantifier equation opened.
+    -- Its solution must therefore be independent of every binder introduced
+    -- by that equation, including binders hidden in a nested polytype image.
+    -- Applying this check at every binding also rejects indirect escape.
+    | containsOpenedBinder replacement = Nothing
     | otherwise = do
         substitutedEquations <- mapM
           (\(equationLeft, equationRight) -> (,)
@@ -237,10 +245,75 @@ solveTagged bindable ((rawLeft, rawRight) : equations) substitutions = do
         solveTagged bindable substitutedEquations
           $ Map.insert variable replacement substitutedBindings
 
+-- | Open exactly one corresponding binder from each scheme. Opening one at
+-- a time handles both grouped and successively written forall prefixes, and
+-- lets a remaining free metavariable receive a complete impredicative type.
+-- Class contexts are matched structurally, not solved or treated as givens.
+quantifiedEquations
+  :: SharedTypeAtom.TypeAtom TaggedAtomVariable
+  -> SharedTypeAtom.TypeAtom TaggedAtomVariable
+  -> Maybe [(TaggedType, TaggedType)]
+quantifiedEquations leftAtom rightAtom = case (left, right) of
+  ( SharedType.ForallType (leftBinder : leftRest) leftContext leftBody
+    , SharedType.ForallType (rightBinder : rightRest) rightContext rightBody
+    ) -> do
+      let fresh = TaggedAtomBound $ 1 + maximum (-1 : existingBinders)
+          open binder rest context body =
+            let rename = SharedType.renameScopedVariables
+                  $ Map.singleton binder fresh
+            in SharedType.ForallType rest (map (fmap rename) context)
+                $ rename body
+      openedLeft <- tagAtomType $ open leftBinder leftRest leftContext leftBody
+      openedRight <- tagAtomType $ open rightBinder rightRest rightContext rightBody
+      pure [(openedLeft, openedRight)]
+  ( SharedType.ForallType [] leftContext leftBody
+    , SharedType.ForallType [] rightContext rightBody
+    ) -> do
+      guard $ length leftContext == length rightContext
+      contextEquations <- concat <$> sequence
+        (zipWith compareConstraint leftContext rightContext)
+      bodyEquation <- (,) <$> tagAtomType leftBody <*> tagAtomType rightBody
+      pure $ contextEquations ++ [bodyEquation]
+  _ -> Nothing
+ where
+  left = SharedTypeAtom.typeAtomType leftAtom
+  right = SharedTypeAtom.typeAtomType rightAtom
+  existingBinders =
+    [ identifier
+    | TaggedAtomBound identifier <- Set.toList $ Set.union
+        (SharedTypeAtom.typeAtomFreeVariables leftAtom)
+        (SharedTypeAtom.typeAtomFreeVariables rightAtom)
+    ]
+  compareConstraint leftConstraint rightConstraint = do
+    guard $ SharedConstraint.constraintClass leftConstraint ==
+      SharedConstraint.constraintClass rightConstraint
+    let leftArguments = SharedConstraint.constraintArguments leftConstraint
+        rightArguments = SharedConstraint.constraintArguments rightConstraint
+    guard $ length leftArguments == length rightArguments
+    sequence $ zipWith
+      (\a b -> (,) <$> tagAtomType a <*> tagAtomType b)
+      leftArguments rightArguments
+
+containsOpenedBinder :: TaggedType -> Bool
+containsOpenedBinder ty = case ty of
+  TaggedBound{} -> True
+  TaggedVar{} -> False
+  TaggedConstant{} -> False
+  TaggedConstructor{} -> False
+  TaggedApplication function argument ->
+    containsOpenedBinder function || containsOpenedBinder argument
+  TaggedTuple _ elements -> any containsOpenedBinder elements
+  TaggedOpaquePolytype atom -> any isOpened
+    $ Set.toList $ SharedTypeAtom.typeAtomFreeVariables atom
+ where
+  isOpened TaggedAtomBound{} = True
+  isOpened _ = False
+
 occursTagged :: TaggedVariable -> TaggedType -> Bool
 occursTagged variable ty = case ty of
   TaggedVar candidate -> variable == candidate
   TaggedConstant{} -> False
+  TaggedBound{} -> False
   TaggedConstructor{} -> False
   TaggedApplication function argument ->
     occursTagged variable function || occursTagged variable argument
@@ -258,6 +331,7 @@ substituteTagged variable replacement ty = case ty of
     | variable == candidate -> Just replacement
     | otherwise -> Just ty
   TaggedConstant{} -> Just ty
+  TaggedBound{} -> Just ty
   TaggedConstructor{} -> Just ty
   TaggedApplication function argument -> TaggedApplication
     <$> substituteTagged variable replacement function
@@ -280,6 +354,7 @@ zonkTagged substitutions ty = case ty of
   TaggedVar variable -> maybe (Just ty) (zonkTagged substitutions)
     $ Map.lookup variable substitutions
   TaggedConstant{} -> Just ty
+  TaggedBound{} -> Just ty
   TaggedConstructor{} -> Just ty
   TaggedApplication function argument -> TaggedApplication
     <$> zonkTagged substitutions function
@@ -291,6 +366,7 @@ zonkTagged substitutions ty = case ty of
  where
   substituteFree current atomVariable = case atomVariable of
     TaggedAtomRigid{} -> Just current
+    TaggedAtomBound{} -> Just current
     TaggedAtomFlexible variable -> case Map.lookup variable substitutions of
       Nothing -> Just current
       Just replacement -> do
@@ -303,6 +379,7 @@ taggedTypeAsAtomType ty = case ty of
     $ TaggedAtomFlexible variable
   TaggedConstant identifier -> SharedType.TypeVariable
     $ TaggedAtomRigid identifier
+  TaggedBound identifier -> SharedType.TypeVariable $ TaggedAtomBound identifier
   TaggedConstructor constructor -> SharedType.TypeConstructor constructor
   TaggedApplication function argument -> SharedType.TypeApplication
     (taggedTypeAsAtomType function) (taggedTypeAsAtomType argument)
@@ -336,6 +413,9 @@ freshTaggedAtomVariable reserved old = wrap . fst
         ]
       , TaggedAtomRigid
       )
+    TaggedAtomBound{} ->
+      ([], const $ TaggedAtomBound $ 1 + maximum
+        (-1 : [identifier | TaggedAtomBound identifier <- Set.toList reserved]))
 
 projectTagged
   :: HsType
@@ -399,6 +479,7 @@ untagTagged variableIdentifier tagged = SharedType.canonicalizeType
   convert ty = case ty of
     TaggedVar variable -> Just $ TypeVar $ variableIdentifier variable
     TaggedConstant constant -> Just $ TypeConstant constant
+    TaggedBound{} -> Nothing
     TaggedConstructor constructor -> Just $ TypeCons constructor
     TaggedApplication function argument -> TypeApp
       <$> convert function <*> convert argument
@@ -413,21 +494,23 @@ untagTypeAtom
   :: (TaggedVariable -> TVarId)
   -> SharedTypeAtom.TypeAtom TaggedAtomVariable
   -> Maybe HsType
-untagTypeAtom variableIdentifier atom = evalStateT
-  (convert Map.empty $ SharedTypeAtom.typeAtomType atom)
-  initialReserved
+untagTypeAtom variableIdentifier atom = do
+  mappedFree <- mapM freeVariable
+    $ Set.toList $ SharedTypeAtom.typeAtomFreeVariables atom
+  evalStateT (convert Map.empty $ SharedTypeAtom.typeAtomType atom)
+    $ Set.fromList mappedFree
  where
-  initialReserved = Set.map freeVariable
-    $ SharedTypeAtom.typeAtomFreeVariables atom
-
   freeVariable atomVariable = case atomVariable of
-    TaggedAtomFlexible variable -> SharedType.FlexibleVariable
+    TaggedAtomFlexible variable -> Just $ SharedType.FlexibleVariable
       $ variableIdentifier variable
-    TaggedAtomRigid identifier -> SharedType.RigidVariable identifier
+    TaggedAtomRigid identifier -> Just $ SharedType.RigidVariable identifier
+    -- A solver-private binder can never reach a projected substitution: the
+    -- binding rule rejects it, and a whole polytype retains its own binders.
+    TaggedAtomBound{} -> Nothing
 
   convert bindings source = case source of
-    SharedType.TypeVariable variable -> pure $ SharedType.TypeVariable
-      $ Map.findWithDefault (freeVariable variable) variable bindings
+    SharedType.TypeVariable variable -> SharedType.TypeVariable <$>
+      maybe (lift $ freeVariable variable) pure (Map.lookup variable bindings)
     SharedType.TypeConstructor constructor -> pure
       $ SharedType.TypeConstructor constructor
     SharedType.TypeApplication function argument -> SharedType.TypeApplication
@@ -448,7 +531,7 @@ untagTypeAtom variableIdentifier atom = evalStateT
 
   allocateBinder variable = do
     reserved <- get
-    let preferred = freeVariable variable
+    preferred <- lift $ freeVariable variable
     replacement <- if preferred `Set.notMember` reserved
       then pure preferred
       else StateT $ \current -> do

@@ -11,6 +11,7 @@ module Language.Haskell.Exference.Core.Internal.Polytype
   , classifyProviderUse
   , quantifiedProviderSubsumes
   , instantiateLeadingForallsWith
+  , inferredProviderVisibleArguments
   , groundProviderInstantiations
   , candidateProviderInstantiations
   , assignmentProviderInstantiations
@@ -209,6 +210,40 @@ instantiateLeadingForallsWith allocate initialSupply source =
       (rename body)
   go supply contextChunks body = Just
     (body, concat $ reverse contextChunks, supply)
+
+-- | Preserve an impredicative choice which Haskell's simplified subsumption
+-- may not infer beneath another forall. Recover the selected leading-binder
+-- images from the actual specialized full type, then retain the shortest
+-- visible prefix ending at a quantified image. Earlier ordinary selections
+-- remain inferred. Free ambient variables inside a selected polytype become
+-- anonymous type holes; the surrounding independently checked use fixes them.
+inferredProviderVisibleArguments
+  :: HsType -> HsType -> [SharedGenerated.VisibleTypeArgument]
+inferredProviderVisibleArguments source selected = maybe [] id $ do
+  guard $ not $ null $ SharedType.leadingForallVariables source
+  normalized <- either (const Nothing) (Just . fst) $
+    alphaNormalizeForalls IntSet.empty source
+  let (binders, _, body) = SharedType.splitLeadingForalls normalized
+  identifiers <- traverse SharedType.flexibleVariableIdentity binders
+  substitutions <- unifyRight selected body
+  let outside = outsideForallVariables body
+      argument identifier = case IntMap.lookup identifier substitutions of
+        Just image | containsForall image, identifier `Set.notMember` outside ->
+          either (const Nothing) Just $
+          SharedGenerated.partiallySpecifiedVisibleTypeArgument image
+        _ -> Just SharedGenerated.inferredVisibleTypeArgument
+  arguments <- traverse argument identifiers
+  pure $ reverse $ dropWhile SharedGenerated.isInferredVisibleTypeArgument $
+    reverse arguments
+ where
+  outsideForallVariables ty = case ty of
+    TypeForallNative{} -> Set.empty
+    TypeArrow parameter result -> outsideForallVariables parameter `Set.union`
+      outsideForallVariables result
+    TypeApp function argument -> outsideForallVariables function `Set.union`
+      outsideForallVariables argument
+    TypeTuple _ elements -> Set.unions $ map outsideForallVariables elements
+    _ -> freeVars ty
 
 -- | Enumerate the finite closed instantiations justified by explicit instance
 -- heads in the current class environment.

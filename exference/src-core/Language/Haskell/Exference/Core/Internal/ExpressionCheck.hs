@@ -11,6 +11,7 @@ module Language.Haskell.Exference.Core.Internal.ExpressionCheck
   , ExpressionCheckContext
   , NestedRigidProvenance
   , CheckedExpressionEvidence
+  , checkedExpressionVisibleInstantiationRepair
   , CheckedTypeApplicationOrigin
   , CheckedTypeApplicationOriginStep
   , checkedExpressionTypeApplicationOrigins
@@ -96,6 +97,7 @@ import qualified Language.Haskell.Synthesis.TypedGenerated as SharedTyped
 -- the first failure, so a result carries exactly one reason.
 data ExpressionCheckError
   = UnknownVariable TVarId
+  | VisibleTypeApplicationOccurrenceTraceMismatch
   | UnknownBinding QualifiedName
   | UnknownConstructor QualifiedName
   | EmptyCaseWithoutMatchingDeconstructor HsType
@@ -223,6 +225,65 @@ data CheckedExpressionEvidence = CheckedExpressionEvidence
   (SharedGenerated.Expression TVarId)
   CheckedTermResult
   [CheckedTypeApplicationOrigin]
+  (Maybe Expression)
+
+-- | A proposed emission repair derived from completed type reconstruction.
+-- This is not checked evidence for the modified expression: callers must run
+-- the complete checker again before publishing that tree.
+checkedExpressionVisibleInstantiationRepair
+  :: CheckedExpressionEvidence -> Maybe Expression
+checkedExpressionVisibleInstantiationRepair
+    (CheckedExpressionEvidence _ _ _ repair) = repair
+
+-- Failed transactional inference branches discard this source-order trace
+-- with the other checker state. Keep it independent of optional term graphs
+-- so patterns and quantified introductions preserve delayed choices too.
+type CheckedProviderOccurrence =
+  (Either TVarId QualifiedName, HsType, HsType)
+
+repairInferredProviderApplications
+  :: Substs -> [CheckedProviderOccurrence] -> Expression -> Maybe Expression
+repairInferredProviderApplications substitutions occurrences expression = do
+  (repaired, remaining) <- runStateT (go expression) occurrences
+  if null remaining then Just repaired else Nothing
+ where
+  go :: Expression -> StateT [CheckedProviderOccurrence] Maybe Expression
+  go original = case original of
+    ExpVar variable _ -> occurrence (Left variable) original
+    ExpName name -> occurrence (Right name) original
+    ExpLambda variable annotation body -> ExpLambda variable annotation <$> go body
+    ExpApply function argument -> ExpApply <$> go function <*> go argument
+    -- Direct global visible spines have a separate checker entrance and do
+    -- not generate ordinary occurrence records. A local visible base is
+    -- inferred normally and therefore consumes its (exact-source) record.
+    ExpTypeApply function argument
+      | directGlobal original -> pure original
+      | otherwise -> (`ExpTypeApply` argument) <$> go function
+    ExpTuple elements -> ExpTuple <$> mapM go elements
+    ExpHole{} -> pure original
+    ExpLetMatch constructor variables binding body ->
+      ExpLetMatch constructor variables <$> go binding <*> go body
+    ExpLet variable annotation binding body ->
+      ExpLet variable annotation <$> go binding <*> go body
+    ExpCaseMatch scrutinee alternatives -> ExpCaseMatch <$> go scrutinee <*>
+      mapM (\(constructor, variables, body) -> do
+        repaired <- go body
+        pure (constructor, variables, repaired)) alternatives
+
+  directGlobal (ExpTypeApply function _) = directGlobal function
+  directGlobal ExpName{} = True
+  directGlobal _ = False
+
+  occurrence identity original = StateT $ \remaining -> case remaining of
+    (recorded, source, selected) : rest | identity == recorded ->
+      let source' = snd $ applySubsts substitutions source
+          selected' = snd $ applySubsts substitutions selected
+          arguments = inferredProviderVisibleArguments source' selected'
+          base = case (arguments, original) of
+            (_ : _, ExpVar variable _) -> ExpVar variable source'
+            _ -> original
+      in Just (foldl ExpTypeApply base arguments, rest)
+    _ -> Nothing
 
 -- | Checker-owned identity for one exact global specialization.  The
 -- constructor remains private: these records are observations retained after
@@ -254,7 +315,7 @@ checkedExpressionTypeApplicationOrigins
   :: CheckedExpressionEvidence
   -> [CheckedTypeApplicationOrigin]
 checkedExpressionTypeApplicationOrigins
-    (CheckedExpressionEvidence _ _ origins) = origins
+    (CheckedExpressionEvidence _ _ origins _) = origins
 
 -- | Origin coordinates attached to checked visible applications, in source
 -- order.  Coordinates are lookup identities only; this projection grants no
@@ -265,7 +326,7 @@ checkedExpressionTypeApplicationOriginReferences
   :: CheckedExpressionEvidence
   -> [(Natural, Natural)]
 checkedExpressionTypeApplicationOriginReferences
-    (CheckedExpressionEvidence _ checkedResult origins) =
+    (CheckedExpressionEvidence _ checkedResult origins _) =
   case checkedResult of
     CheckedTermResult _ (Right term) -> concatMap referencesForOrigin origins
      where
@@ -421,6 +482,7 @@ data CheckState = CheckState
   , checkRigidAlphaInverse :: !(IntMap.IntMap TVarId)
   , checkNextTypeApplicationOrigin :: !Natural
   , checkTypeApplicationOrigins :: [CheckedTypeApplicationOrigin]
+  , checkProviderOccurrences :: [CheckedProviderOccurrence]
   }
 
 -- | Fixed, independently validated inputs for checking many candidates from
@@ -659,6 +721,7 @@ checkValidatedExpression provenCandidateRigids
         , checkRigidAlphaInverse = IntMap.empty
         , checkNextTypeApplicationOrigin = 0
         , checkTypeApplicationOrigins = []
+        , checkProviderOccurrences = []
         }
   (checkedResult, finalState) <- runStateT
     (checkAgainst IntMap.empty expression checkedGoal)
@@ -704,6 +767,9 @@ checkValidatedExpression provenCandidateRigids
   unless (null escaping) $ Left $ EscapingRigidConstraints escaping
   unless (unresolved == normalizedExpected)
     $ Left (ConstraintMismatch normalizedExpected unresolved)
+  repaired <- maybe (Left VisibleTypeApplicationOccurrenceTraceMismatch) Right $
+    repairInferredProviderApplications substitutions
+      (reverse $ checkProviderOccurrences finalState) expression
   pure $ CheckedExpressionEvidence
     ( SharedGenerated.discardUnusedPatternBindingsBy id
     $ toGeneratedExpression expression
@@ -712,6 +778,7 @@ checkValidatedExpression provenCandidateRigids
     ( map (normalizeCheckedTypeApplicationOrigin substitutions rigidAlpha)
     $ reverse $ checkTypeApplicationOrigins finalState
     )
+    (if repaired == expression then Nothing else Just repaired)
   where
     -- Checking is deliberately bidirectional only where the expected type
     -- carries information which synthesis cannot recover. In particular, an
@@ -811,7 +878,7 @@ checkValidatedExpression provenCandidateRigids
         $ IntMap.lookup variable variables
       declared' <- zonk declared
       annotation' <- zonk annotation
-      case classifyProviderUse declared' annotation' of
+      checked <- case classifyProviderUse declared' annotation' of
         OpaqueProviderForwarding -> do
           -- Exact opaque forwarding has priority over elimination, matching
           -- search and preserving explicitly polymorphic occurrences. Merely
@@ -837,8 +904,12 @@ checkValidatedExpression provenCandidateRigids
         OrdinaryProviderUse -> do
           unifyTypes declared' annotation'
           availableCheckedTerm <$> zonk declared' <*> pure (CheckedLocal variable)
+      recordProviderOccurrence (Left variable) declared' $ checkedResultType checked
+      pure checked
     infer _ (ExpName name) = do
       instantiated <- instantiateBinding name
+      recordProviderOccurrence (Right name)
+        (Map.findWithDefault instantiated name functionSchemes) instantiated
       pure $ availableCheckedTerm instantiated $ CheckedGlobal name Nothing
     infer variables (ExpLambda variable annotation body) = do
       recordAliveType annotation
@@ -1111,6 +1182,10 @@ checkValidatedExpression provenCandidateRigids
         { checkNextTypeApplicationOrigin = identifier + 1 }
       pure identifier
 
+    recordProviderOccurrence identity source selected = modify' $ \current -> current
+      { checkProviderOccurrences = (identity, source, selected) :
+          checkProviderOccurrences current }
+
     instantiateBinding name = case
         [binding | binding <- functions, functionName binding == name] of
       [] -> throwCheck $ UnknownBinding name
@@ -1175,11 +1250,11 @@ checkValidatedExpression provenCandidateRigids
           $ SharedType.flexibleVariableIdentity binder
         replacement <- case
             ( SharedGenerated.isInferredVisibleTypeArgument argument
-            , SharedGenerated.visibleTypeArgumentClosedType argument
+            , SharedGenerated.visibleTypeArgumentPatternType argument
             ) of
           (True, Nothing) -> freshTypeVariable
-          (False, Just closed) ->
-            instantiateClosedVisibleTypeArgument closed
+          (False, Just patternType) ->
+            instantiatePatternVisibleTypeArgument patternType
           -- The shared constructor is abstract, so the discriminator and
           -- structural view cannot disagree. Fail closed if that contract is
           -- ever extended rather than silently changing explicit evidence
@@ -1266,15 +1341,22 @@ checkValidatedExpression provenCandidateRigids
     -- they must not enter 'checkAliveFlexibleIds' as live free variables.
     -- Mapping the complete type preserves nested shadowing and contexts: the
     -- shared closed identities distinguish every lexical scope and slot.
-    instantiateClosedVisibleTypeArgument source = do
-      let binders = SharedType.typeBinderVariables source
+    instantiatePatternVisibleTypeArgument source = do
+      binders <- maybe (throwCheck FlexibleIdentifierSupplyExhausted) pure $
+        sequence $ SharedType.typeBinderVariables source
       replacements <- mapM (const reserveClosedVisibleTypeBinder) binders
       let renaming = Map.fromList $ zip binders replacements
-      case traverse (`Map.lookup` renaming) source of
-        -- The abstract shared constructor proves lexical closure, hence every
-        -- occurrence is owned by one of the binders collected above.
-        Nothing -> throwCheck FlexibleIdentifierSupplyExhausted
-        Just translated -> pure translated
+          occurrence Nothing = reserveClosedVisibleTypeBinder
+          occurrence (Just variable) = maybe
+            (throwCheck FlexibleIdentifierSupplyExhausted) pure $
+              Map.lookup variable renaming
+      translated <- traverse occurrence source
+      -- Every wildcard is a distinct metavariable. Record only its free
+      -- identity as live; lexical forall identities remain bound. Subsequent
+      -- checking solves the complete application against its actual expected
+      -- type, retaining all correlations in the checked term evidence.
+      recordAliveType translated
+      pure translated
 
     reserveClosedVisibleTypeBinder = do
       supply <- gets checkFlexibleIds
@@ -1510,7 +1592,7 @@ checkedExpressionTermGraph
   -> CheckedExpressionEvidence
   -> ExferenceTermGraphAvailability
 checkedExpressionTermGraph candidateKey
-    (CheckedExpressionEvidence compatibility checkedResult origins) =
+    (CheckedExpressionEvidence compatibility checkedResult origins _) =
   case checkedResult of
     CheckedTermResult _ (Left reason) ->
       ExferenceTermGraphUnavailable reason
@@ -2193,16 +2275,20 @@ validateExpressionPatternArities classEnvironment constructorArities =
   -- namespace, then validate both its type structure and every contextual
   -- class occurrence before expression checking can consume it.
   inspectVisibleTypeArgument argument = case
-      SharedGenerated.visibleTypeArgumentClosedType argument of
+      SharedGenerated.visibleTypeArgumentPatternType argument of
     Nothing -> Right ()
-    Just closed -> do
-      let binders = SharedType.typeBinderVariables closed
+    Just patternType -> do
+      binders <- maybe (Left FlexibleIdentifierSupplyExhausted) Right $
+        sequence $ SharedType.typeBinderVariables patternType
+      let
           renaming = Map.fromList $ zip binders
             $ map SharedType.FlexibleVariable [0 ..]
+          occurrence Nothing = Just $ SharedType.FlexibleVariable $ length binders
+          occurrence (Just variable) = Map.lookup variable renaming
       translated <- maybe
         (Left FlexibleIdentifierSupplyExhausted)
         Right
-        $ traverse (`Map.lookup` renaming) closed
+        $ traverse occurrence patternType
       validateCheckType classEnvironment QueryConstraint translated
       mapM_ validateDeclaredClass $ typeConstraints translated
 

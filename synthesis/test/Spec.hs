@@ -5189,6 +5189,25 @@ generatedTests = testGroup "generated syntax"
         Left (VisibleTypeArgumentVariable "a")
       specifiedVisibleTypeArgument open @?=
         Left (VisibleTypeArgumentVariable "free")
+      partial <- case partiallySpecifiedVisibleTypeArgument open of
+        Left failure -> assertFailure $ show failure
+        Right argument -> pure argument
+      isInferredVisibleTypeArgument partial @?= False
+      visibleTypeArgumentClosedType partial @?= Nothing
+      visibleTypeArgumentType partial @?= Nothing
+      visibleTypeArgumentPatternType partial @?= Just
+        (SharedType.ForallType [Just outer] [] $ SharedType.FunctionType
+          (SharedType.TypeVariable $ Just outer) (SharedType.TypeVariable Nothing))
+      partiallySpecifiedVisibleTypeArgument quantified @?= Right specifiedQuantified
+      visibleTypeArgumentMatches partial open @?= True
+      visibleTypeArgumentMatches partial
+        (SharedType.ForallType ["renamed"] [] $ SharedType.FunctionType
+          (SharedType.TypeVariable "renamed")
+          (SharedType.ForallType ["nested"] [] $ SharedType.TypeVariable "nested")) @?= True
+      visibleTypeArgumentMatches partial
+        (SharedType.ForallType ["renamed"] [] $ SharedType.FunctionType
+          (SharedType.TypeVariable "ambient") (SharedType.TypeVariable "ambient")) @?= False
+      visibleTypeArgumentMatches specifiedQuantified contextual @?= False
       specifiedVisibleTypeArgument malformed @?=
         Left (InvalidVisibleTypeArgument
           $ SharedType.InvalidTupleTypeArity Boxed 1)

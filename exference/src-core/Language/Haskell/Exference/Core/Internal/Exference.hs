@@ -738,7 +738,14 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
           case checkExpressionInContextWithNestedRigidProvenanceEvidence
               context (nestedRigidProvenance candidateScope)
               constraints candidate of
-            Right evidence -> Just (candidate, evidence)
+            Right evidence -> case checkedExpressionVisibleInstantiationRepair evidence of
+              Nothing -> Just (candidate, evidence)
+              Just repaired -> case
+                  checkExpressionInContextWithNestedRigidProvenanceEvidence
+                    context (nestedRigidProvenance candidateScope)
+                    constraints repaired of
+                Right repairedEvidence -> Just (repaired, repairedEvidence)
+                Left _ -> firstChecked candidateScope context remainingCandidates
             Left _ -> firstChecked candidateScope context remainingCandidates
   helper :: FindExpressionsState -> Maybe (EngineBatch, FindExpressionsState)
   helper searchState | findSteps searchState >= maxSteps = Nothing
@@ -2181,12 +2188,18 @@ stateStepPlan allocators multiPM allowConstrs h
                 modify $ \node -> node {nodeFlexibleIds = nextSupply}
                 let (instantiatedResult, instantiatedParameters) =
                       splitArrowChain instantiated
-                useProvider
-                  instantiated
+                    unification = unifyShared goalType instantiatedResult
+                    typeArguments = case unification of
+                      Nothing -> []
+                      Just substitutions -> inferredProviderVisibleArguments
+                        scheme $ snd $ applySubsts substitutions instantiated
+                useProviderWith
+                  typeArguments
+                  (if null typeArguments then instantiated else scheme)
                   instantiatedResult
                   constraints
                   instantiatedParameters
-                  (unifyShared goalType instantiatedResult)
+                  unification
 
           -- A separate evidence-directed branch selects either closed
           -- monotypes named by explicit instance heads or checked proper-type
@@ -2357,7 +2370,14 @@ stateStepPlan allocators multiPM allowConstrs h
               [splitBinding $ VarBinding aggregate providedType]
             modify $ \node -> node
               { nodeGoals = nodeGoals node <> Seq.fromList additionalGoals }
-        ordinary = useGlobal [] provType constraints parameters
+        ordinary = do
+          retained <- gets $ M.lookup (functionName binding) . nodeFunctionSchemes
+          let typeArguments = case (retained, unifyDisjoint goalType provType) of
+                (Just source, Just (_, substitutions)) ->
+                  inferredProviderVisibleArguments source $ snd $
+                    applySubsts substitutions $ SharedType.functionType parameters provType
+                _ -> []
+          useGlobal typeArguments provType constraints parameters
         useVisible instantiations = do
           instantiation <- lift $ chooseBranches instantiations
           typeArguments <- maybe mzero pure

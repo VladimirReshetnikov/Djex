@@ -90,6 +90,7 @@ tests =
     hTypeCompatibilityTests ++
     hCheckCompatibilityTests ++
     [ ("demand-directed rank-N instantiation", testDirectedRankN)
+    , ("transport-directed rank-N opacity", testTransportRankN)
     , ("parse prefix function constructor", testPrefixArrowParsing)
     , ("parse maximal Djinn type and kind spines", testMaximalParserSpines)
     , ("render union prefixes without forcing field tails",
@@ -1208,6 +1209,61 @@ testDirectedRankN = do
         result <- expectShownRight $ Djex.runDjinnQuery session request
         assertBool (spelling ++ " exhausted search without a candidate") $
             not $ null $ SharedSearch.batchCandidates $ SharedQuery.resultSearch result
+
+-- A coherent transport view must scale with the source rather than stopping
+-- at the next middle layer of a fixed occurrence-subset frontier. The loaded
+-- case additionally needs the query's available schemes while compiling a
+-- provider's positive callback arguments.
+testTransportRankN :: IO ()
+testTransportRankN = do
+    session <- expectShownRight Djex.standardDjinnSession
+    mapM_ (checkLocal session) [8, 12]
+    let results = ["TransportQ" ++ show n | n <- [1 .. 6 :: Int]]
+        inputTypes = map (scheme "a") results
+        outputTypes = map (scheme "b") results ++ replicate 6 identity
+        consumerName = "consumeTransportTwelve"
+    consumer <- expectRight $ parseHType $
+        tuple outputTypes ++ " -> TransportResult"
+    goal <- expectRight $ parseHType $
+        arrows inputTypes "TransportResult"
+    environment <- foldDeclarations standardEnvironment $
+        map (\name -> AbstractType name KStar) ("TransportResult" : results) ++
+            [Function consumerName consumer]
+    report <- expectRight $ inhabit options environment []
+        "loadedTransportTwelve" goal
+    case reportOutcome report of
+        Realized clauses -> assertBool
+            "the exact loaded consumer was not used by the transport view" $
+            any (consumerName `isInfixOf`) clauses
+        outcome -> fail $ "loaded twelve-site transport failed: " ++ show outcome
+  where
+    options = defaultQueryOptions
+        { optionSorted = False, optionCutoff = 1, optionBudget = Just 10000 }
+    tuple values = "(" ++ joinComma values ++ ")"
+    joinComma [] = ""
+    joinComma [value] = value
+    joinComma (value : rest) = value ++ ", " ++ joinComma rest
+    arrows inputs result = foldr (\argument rest -> argument ++ " -> " ++ rest)
+        result inputs
+    scheme prefix result = "(forall " ++ unwords variables ++ ". " ++
+        tuple variables ++ " -> " ++ result ++ ")"
+      where variables = [prefix ++ show n | n <- [1 .. 7 :: Int]]
+    identity = "(forall x. x -> x)"
+    checkLocal session count = do
+        let results = ["r" ++ show n | n <- [1 .. count]]
+            source = arrows (map (scheme "a") results) $
+                tuple $ map (scheme "b") results ++ replicate count identity
+            spelling = "transport" ++ show (2 * count) ++ "Sites"
+        target <- expectShownRight $ SharedName.mkIdentifier spelling
+        request <- expectShownRight $ Djex.parseDjinnRequest session options
+            target "transport-instantiation" source
+        result <- expectShownRight $ Djex.runDjinnQuery session request
+        assertBool (spelling ++ " exhausted search without a candidate") $
+            not $ null $ SharedSearch.batchCandidates $ SharedQuery.resultSearch result
+    foldDeclarations environment [] = pure environment
+    foldDeclarations environment (declaration : rest) = do
+        updated <- expectRight $ declare declaration environment
+        foldDeclarations updated rest
 
 testRankNTypeAtoms :: IO ()
 testRankNTypeAtoms = do
@@ -3004,10 +3060,9 @@ testRankNTypeAtoms = do
         ++ "(forall v w x y u t s. (v, w, x, y, u, t, s) -> n), "
         ++ "(forall i. i -> i))"
 
-    -- Twelve independent sites expose the next omitted balanced layer. Six
-    -- exact transports plus six structural identities need a 6/6 selection,
-    -- so exhausting the bounded family stays inconclusive rather than
-    -- manufacturing a refutation.
+    -- Twelve independent sites expose the next omitted balanced layer. The
+    -- demand-aware transport view retains the six supplied schemes and opens
+    -- the six identity obligations without enumerating the missing 6/6 layer.
     sexticOpacityGap <- runStableQueryWith firstCandidateOptions stableSession
         "twelveSiteCentralOpacityRankNGap"
         $ "(forall a b c d e f g. (a, b, c, d, e, f, g)) -> "
@@ -3025,11 +3080,9 @@ testRankNTypeAtoms = do
         ++ "(forall e. e -> e), (forall f. f -> f), "
         ++ "(forall g. g -> g), (forall h. h -> h), "
         ++ "(forall i. i -> i), (forall j. j -> j))"
-    assertEqual "the quintic frontier unexpectedly covered a flat 6/6 subset"
-        [] $ SharedSearch.batchCandidates
+    assertBool "the transport view missed six independent exact schemes"
+        $ not $ null $ SharedSearch.batchCandidates
             $ SharedQuery.resultSearch sexticOpacityGap
-    assertEqual "a bounded sextic-subset gap was falsely refuted"
-        SharedQuery.NoEvidence $ SharedQuery.resultEvidence sexticOpacityGap
 
     -- Prepared global premises cache the same pairwise views as a goal.  The
     -- only route to the abstract result is to call this loaded consumer with

@@ -4458,6 +4458,61 @@ tests = testGroup "Exference"
           constraints @?= []
           checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
             goal [] expression @?= Right ()
+      , testCase "retain inferred polytype shape beneath nested quantifiers" $ do
+          let wrapper = TypeApp $ TypeCons $ name "NestedProviderF"
+              provider = TypeForall [0] [] $ wrapper $
+                TypeForall [1] [] $ TypeArrow (TypeVar 1) (TypeVar 0)
+          forM_ [False, True] $ \open -> do
+            let identity = TypeForall [2] [] $
+                  if open then TypeArrow (TypeVar 9) $
+                    TypeArrow (TypeVar 2) (TypeVar 2)
+                  else TypeArrow (TypeVar 2) (TypeVar 2)
+                result = wrapper $ TypeForall [3] [] $
+                  TypeArrow (TypeVar 3) identity
+                goal = TypeArrow provider result
+                input = identityInput
+                  { input_goalType = goal, input_maxSteps = 300 }
+            expectedArgument <- expectRight $
+              Generated.partiallySpecifiedVisibleTypeArgument identity
+            (expression, residual, _) <- maybe
+              (fail "nested impredicative specialization was not synthesized") pure $
+                findOneExpression input
+            residual @?= []
+            case expression of
+              ExpLambda binder _ (ExpTypeApply (ExpVar used _) argument) -> do
+                binder @?= used
+                argument @?= expectedArgument
+              _ -> fail $ "nested impredicative specialization lost its type argument: "
+                ++ showExpression expression
+            checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+              goal [] expression @?= Right ()
+      , testCase "retain polytype choices learned from later argument goals" $ do
+          let wrapper = TypeApp $ TypeCons $ name "DelayedProviderF"
+              token = TypeCons $ name "Token"
+              identity = TypeForall [2] [] $ TypeArrow (TypeVar 2) (TypeVar 2)
+              provider = TypeForall [0] [] $ TypeArrow
+                (wrapper $ TypeForall [1] [] $ TypeArrow (TypeVar 1) (TypeVar 0))
+                token
+              supplied = wrapper $ TypeForall [3] [] $
+                TypeArrow (TypeVar 3) identity
+              goal = TypeArrow provider $ TypeArrow supplied token
+              input = identityInput
+                { input_goalType = goal, input_maxSteps = 600 }
+          expectedArgument <- expectRight $
+            Generated.specifiedVisibleTypeArgument identity
+          (expression, residual, _) <- maybe
+            (fail "delayed impredicative application was not synthesized") pure $
+              findOneExpression input
+          residual @?= []
+          let retainsChoice term = case term of
+                ExpTypeApply _ argument -> argument == expectedArgument
+                ExpLambda _ _ body -> retainsChoice body
+                ExpApply function argument -> retainsChoice function || retainsChoice argument
+                _ -> False
+          assertBool "late inference erased the required polymorphic type argument" $
+            retainsChoice expression
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+            goal [] expression @?= Right ()
       , testCase "scoped vacuous providers instantiate at query polytypes" $ do
           let quantified = TypeForall [1] []
                 $ TypeArrow (TypeVar 1) (TypeVar 1)

@@ -18,6 +18,10 @@ module Djinn.Internal.Environment (
     preparedEnvironmentNominalSynthesisFormulaTranslator,
     preparedEnvironmentPolarizedSynthesisFormulaPlans,
     preparedEnvironmentNominalPolarizedSynthesisFormulaPlans,
+    preparedEnvironmentTransportSynthesisFormula,
+    preparedEnvironmentNominalTransportSynthesisFormula,
+    preparedEnvironmentTransportFunctionPremises,
+    preparedEnvironmentNominalTransportFunctionPremises,
     preparedEnvironmentFunctionPremises,
     preparedEnvironmentPolarizedFunctionPremises,
     preparedEnvironmentNominalPolarizedFunctionPremises,
@@ -1297,6 +1301,98 @@ preparedEnvironmentNominalPolarizedSynthesisFormulaPlans
 preparedEnvironmentNominalPolarizedSynthesisFormulaPlans
         (PreparedEnvironment _ _ _ _ _ _ _ compiler _) =
     compilePolarizedSynthesisFormulaPlans 0 PositiveFormula compiler
+
+-- | One additional positive view selected by exact types already available
+-- in the current query. This is prepared only by the candidate-free fallback;
+-- ordinary cached occurrence frontiers keep their established order.
+preparedEnvironmentTransportSynthesisFormula
+    :: PreparedEnvironment
+    -> Set.Set Symbol
+    -> SharedType.Type HSymbol
+    -> Either String FormulaTranslation
+preparedEnvironmentTransportSynthesisFormula
+        (PreparedEnvironment _ _ _ _ _ _ compiler _ _) available =
+    compileTransportSynthesisFormula compiler available 0 PositiveFormula
+
+preparedEnvironmentNominalTransportSynthesisFormula
+    :: PreparedEnvironment
+    -> Set.Set Symbol
+    -> SharedType.Type HSymbol
+    -> Either String FormulaTranslation
+preparedEnvironmentNominalTransportSynthesisFormula
+        (PreparedEnvironment _ _ _ _ _ _ _ compiler _) available =
+    compileTransportSynthesisFormula compiler available 0 PositiveFormula
+
+compileTransportSynthesisFormula
+    :: PreparedFormulaCompiler
+    -> Set.Set Symbol
+    -> Natural
+    -> FormulaPolarity
+    -> SharedType.Type HSymbol
+    -> Either String FormulaTranslation
+compileTransportSynthesisFormula compiler available namespace polarity =
+    compileTransportFormula available namespace polarity
+        synthesisFormulaTypeView synthesisFormulaTypeView compiler .
+            SharedType.canonicalizeType
+
+-- | Recompile one coherent argument view per retained value from the sealed
+-- inventory. A query may supply more exact polymorphic arguments than any
+-- fixed occurrence frontier can select. Their symbols guide opacity here;
+-- they are not premises, and the caller still excludes target identities and
+-- validates every proof against the returned real provider formulas.
+preparedEnvironmentTransportFunctionPremises
+    :: PreparedEnvironment
+    -> Set.Set Symbol
+    -> Either String ([(Symbol, Formula)], [String])
+preparedEnvironmentTransportFunctionPremises prepared
+        available = transportFunctionPremises compiler prepared available
+  where
+    PreparedEnvironment _ _ _ _ _ _ compiler _ _ = prepared
+
+preparedEnvironmentNominalTransportFunctionPremises
+    :: PreparedEnvironment
+    -> Set.Set Symbol
+    -> Either String ([(Symbol, Formula)], [String])
+preparedEnvironmentNominalTransportFunctionPremises prepared
+        available = transportFunctionPremises compiler prepared available
+  where
+    PreparedEnvironment _ _ _ _ _ _ _ compiler _ = prepared
+
+transportFunctionPremises
+    :: PreparedFormulaCompiler
+    -> PreparedEnvironment
+    -> Set.Set Symbol
+    -> Either String ([(Symbol, Formula)], [String])
+transportFunctionPremises compiler prepared available = do
+    translated <- mapM translate $ zip [1 ..] signatures
+    pure (map fst translated, SharedCollection.distinctOn id $ concatMap snd translated)
+  where
+    signatures =
+        [ signature
+        | SharedDeclaration.ValueDeclaration signature <-
+            SharedEnvironment.environmentDeclarations $
+                SharedInventory.inventoryEnvironment $
+                    preparedEnvironmentInventory prepared
+        ]
+    translate (namespace, signature) = do
+        name <- synthesisFunctionSymbol $ SharedDeclaration.valueName signature
+        expanded <- elaboratePreparedSynthesisTypes prepared
+            [(KStar, SharedDeclaration.valueType signature)]
+        source <- case expanded of
+            [one] -> Right one
+            _ -> Left "transport premise elaboration changed the signature count"
+        implicit <- first show $
+            (fst <$> SharedType.implicitizeLeadingForalls
+                (const (Nothing :: Maybe ())) freshBinder mempty
+                source)
+        let (_, _, body) = SharedType.splitLeadingForalls implicit
+        translation <- compileTransportSynthesisFormula compiler available
+            namespace NegativeFormula body
+        pure ((Symbol name, translatedFormula translation),
+            SharedType.freeVariablesInFirstOccurrenceOrder body ++
+                translationIntroducedSkolems translation)
+    freshBinder reserved variable = Just $
+        fst $ freshPrimedVariable reserved variable
 
 projectPreparedInventory
     :: PreparedEnvironment

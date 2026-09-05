@@ -746,7 +746,13 @@ fingerprintVisibleTypeArgument
   -> FingerprintM identity local FingerprintField
 fingerprintVisibleTypeArgument argument =
   case Generated.visibleTypeArgumentClosedType argument of
-    Nothing -> pure $ taggedFingerprintField "inferred-visible-type" []
+    Nothing -> case Generated.visibleTypeArgumentPatternType argument of
+      Nothing -> pure $ taggedFingerprintField "inferred-visible-type" []
+      Just selected -> pure $ taggedFingerprintField "partial-visible-type"
+        [ typeFingerprintField
+            (maybe (taggedFingerprintField "inference-hole" []) closedVisibleVariableField)
+            $ canonicalTypeFingerprintForm selected
+        ]
     Just selected -> pure $ taggedFingerprintField "specified-visible-type"
       [ typeFingerprintField closedVisibleVariableField
           $ canonicalTypeFingerprintForm selected

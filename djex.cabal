@@ -392,6 +392,13 @@ Test-Suite djex-church-tests
   Hs-Source-Dirs: test-church
   Build-Depends: djex, filepath >= 1.4 && < 1.6, process >= 1.6 && < 1.7
 
+Test-Suite djex-rank-n-scope-tests
+  import:         build-settings, directory-dep
+  Type:           exitcode-stdio-1.0
+  Main-Is:        probe_scopes.hs
+  Hs-Source-Dirs: test-church
+  Build-Depends: djex, process >= 1.6 && < 1.7
+
 Test-Suite djex-cli-tests
   import:         cli-test
   Type:           exitcode-stdio-1.0

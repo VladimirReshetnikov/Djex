@@ -23,6 +23,7 @@ module Djinn.Internal.TypeFormula
     , PolarizedFormulaPlans
     , primaryFormulaPlan
     , exactOpaqueFormulaPlan
+    , transportFormulaPlan
     , singleOpaqueFormulaPlans
     , singleOpenFormulaPlans
     , pairOpaqueFormulaPlans
@@ -39,6 +40,8 @@ module Djinn.Internal.TypeFormula
     , compileFormula
     , structuralFormulaRetainsAssignments
     , compilePolarizedFormulaPlans
+    , compileTransportFormula
+    , negativeOpaqueFormulaSymbols
     ) where
 
 import Control.Monad (zipWithM)
@@ -216,6 +219,7 @@ data FormulaTranslation = FormulaTranslation
 data PolarizedFormulaPlans = PolarizedFormulaPlans
     { primaryFormulaPlan :: FormulaTranslation
     , exactOpaqueFormulaPlan :: Formula
+    , transportFormulaPlan :: FormulaTranslation
     , singleOpaqueFormulaPlans :: [FormulaTranslation]
     , singleOpenFormulaPlans :: [FormulaTranslation]
     , pairOpaqueFormulaPlans :: [FormulaTranslation]
@@ -236,6 +240,7 @@ data PolarizedFormulaPlans = PolarizedFormulaPlans
 polarizedFormulaPlanSkolems :: PolarizedFormulaPlans -> [String]
 polarizedFormulaPlanSkolems plans = SharedCollection.distinctOn id $
     translationIntroducedSkolems (primaryFormulaPlan plans) ++
+    translationIntroducedSkolems (transportFormulaPlan plans) ++
     concatMap translationIntroducedSkolems
         (singleOpaqueFormulaPlans plans ++ singleOpenFormulaPlans plans ++
             pairOpaqueFormulaPlans plans ++ pairOpenFormulaPlans plans ++
@@ -439,13 +444,17 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
         source = do
     expanded <- expansionTypeAt view QueryOrigin [] source
     primary <- lowerExpansionType
-        (PolarizedForalls namespace polarity openedView Set.empty)
+        (PolarizedForalls namespace polarity openedView Set.empty Set.empty)
         prepared emptyExpansionPath [] expanded
     -- Exact opacity applies to recursive data as well as quantified subtrees.
     -- This complementary view preserves forwarding such as @Rec a -> Rec a@
     -- when the primary positive view exposes one constructor layer.
     exact <- translatedFormula <$> lowerExpansionType
         OpaqueForalls prepared emptyExpansionPath [] expanded
+    let available = negativeOpaqueFormulaSymbols polarity $ translatedFormula primary
+    transport <- if Set.null available then pure primary else lowerExpansionType
+        (PolarizedForalls namespace polarity openedView Set.empty available)
+        prepared emptyExpansionPath [] expanded
     let sites = translationOpenableForalls primary
         allSites = Set.fromList sites
     singleOpaque <- mapM
@@ -495,6 +504,7 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
     return PolarizedFormulaPlans
         { primaryFormulaPlan = primary
         , exactOpaqueFormulaPlan = exact
+        , transportFormulaPlan = transport
         , singleOpaqueFormulaPlans = singleOpaque
         , singleOpenFormulaPlans = singleOpen
         , pairOpaqueFormulaPlans = pairOpaque
@@ -508,7 +518,7 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
         }
   where
     compileSelection expanded opaqueSites = lowerExpansionType
-        (PolarizedForalls namespace polarity openedView opaqueSites)
+        (PolarizedForalls namespace polarity openedView opaqueSites Set.empty)
         prepared emptyExpansionPath [] expanded
 
     -- Opening nested targets necessarily opens the union of every enclosing
@@ -583,6 +593,52 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
 maxQuintuplePlansPerFrontier :: Int
 maxQuintuplePlansPerFrontier = 512
 
+-- | A single demand-aware introduction plan. Keep a positive quantified site
+-- opaque when its exact alpha-aware type is supplied by a negative position;
+-- introduce all remaining positive sites. Unlike occurrence-subset frontiers,
+-- this plan handles any number of independent transports and introductions in
+-- one traversal. External symbols let query preparation share its available
+-- schemes with a loaded consumer's argument view. They affect search choices
+-- only: ordinary formula proof checking still establishes every use.
+compileTransportFormula
+    :: Set.Set Symbol
+    -> Natural
+    -> FormulaPolarity
+    -> TypeView (SharedType.Type String)
+    -> TypeView source
+    -> PreparedFormulaCompiler
+    -> source
+    -> Either String FormulaTranslation
+compileTransportFormula supplied namespace polarity openedView view prepared source = do
+    expanded <- expansionTypeAt view QueryOrigin [] source
+    primary <- lowerExpansionType
+        (PolarizedForalls namespace polarity openedView Set.empty Set.empty)
+        prepared emptyExpansionPath [] expanded
+    let available = supplied `Set.union`
+            negativeOpaqueFormulaSymbols polarity (translatedFormula primary)
+    lowerExpansionType
+        (PolarizedForalls namespace polarity openedView Set.empty available)
+        prepared emptyExpansionPath [] expanded
+
+-- | Exact opaque types available at negative source positions. Polarity is
+-- the compiler's initial polarity, so a prepared premise starts negative and
+-- a requested goal starts positive. Free skolems stay nominal in symbol keys;
+-- an inner scope cannot accidentally authorize an alpha-similar outer type.
+negativeOpaqueFormulaSymbols :: FormulaPolarity -> Formula -> Set.Set Symbol
+negativeOpaqueFormulaSymbols polarity formula = case formula of
+    PVar symbol | polarity == NegativeFormula,
+            Just SharedType.ForallType{} <- opaqueSymbolSource symbol -> Set.singleton symbol
+    left :-> right -> negativeOpaqueFormulaSymbols (oppositePolarity polarity) left
+        `Set.union` negativeOpaqueFormulaSymbols polarity right
+    Conj fields -> Set.unions $ map (negativeOpaqueFormulaSymbols polarity) fields
+    Disj alternatives -> Set.unions $
+        map (negativeOpaqueFormulaSymbols polarity . snd) alternatives
+    _ -> Set.empty
+
+oppositePolarity :: FormulaPolarity -> FormulaPolarity
+oppositePolarity PositiveFormula = NegativeFormula
+oppositePolarity NegativeFormula = PositiveFormula
+
 data ForallLowering
     = OpaqueForalls
     | PolarizedForalls
@@ -590,6 +646,8 @@ data ForallLowering
         FormulaPolarity
         (TypeView (SharedType.Type String))
         (Set.Set ForallSite)
+        (Set.Set Symbol)
+        -- ^ exact hypothesis types which positive forall sites may transport
 
 lookupFormulaDefinition
     :: String
@@ -769,14 +827,15 @@ lowerForall
     -> Either String FormulaTranslation
 lowerForall lowering definitions path occurrencePath origin atom = case lowering of
     OpaqueForalls -> Right opaque
-    PolarizedForalls namespace PositiveFormula openedView opaqueSites ->
+    PolarizedForalls namespace PositiveFormula openedView opaqueSites transportTypes ->
         case SharedTypeAtom.typeAtomType atom of
             -- Context validation belongs to the checked request/session edge.
             -- LJT receives only the body: accepting a contextual positive
             -- forall therefore permits dictionary-independent introduction
             -- without pretending that class methods are proof premises.
             SharedType.ForallType binders _ body
-                | site `Set.member` opaqueSites -> Right incompleteOpaque
+                | site `Set.member` opaqueSites ||
+                    symbol `Set.member` transportTypes -> Right incompleteOpaque
                 | otherwise -> do
                     (skolems, opened) <- openForallBody
                         namespace occurrencePath origin binders body
@@ -791,11 +850,11 @@ lowerForall lowering definitions path occurrencePath origin atom = case lowering
                             ++ translationIntroducedSkolems translation
                         }
             _ -> Right incompleteOpaque
-    PolarizedForalls _ NegativeFormula _ _ -> Right incompleteOpaque
+    PolarizedForalls _ NegativeFormula _ _ _ -> Right incompleteOpaque
   where
     site = ForallSite origin occurrencePath
-    opaque = completeTranslation $ PVar $ opaqueTypeSymbol
-        $ SharedTypeAtom.typeAtomType atom
+    symbol = opaqueTypeSymbol $ SharedTypeAtom.typeAtomType atom
+    opaque = completeTranslation $ PVar symbol
     incompleteOpaque = opaque {translationIncomplete = True}
 
 -- Opening happens after removing the forall wrapper, so its binders are free
@@ -869,12 +928,9 @@ combineBinary constructor left right = FormulaTranslation
 reverseFormulaPolarity :: ForallLowering -> ForallLowering
 reverseFormulaPolarity lowering = case lowering of
     OpaqueForalls -> OpaqueForalls
-    PolarizedForalls namespace polarity openedView selected ->
-        PolarizedForalls namespace reversed openedView selected
-      where
-        reversed = case polarity of
-            PositiveFormula -> NegativeFormula
-            NegativeFormula -> PositiveFormula
+    PolarizedForalls namespace polarity openedView selected transportTypes ->
+        PolarizedForalls namespace (oppositePolarity polarity) openedView selected
+            transportTypes
 
 lowerApplication
     :: ForallLowering
@@ -940,11 +996,11 @@ recursiveDataCanUnfold
     -> ExpansionPath
     -> Bool
 recursiveDataCanUnfold lowering definitions name path = case lowering of
-    PolarizedForalls _ PositiveFormula _ _ ->
+    PolarizedForalls _ PositiveFormula _ _ _ ->
         recursiveComponentLayerAvailable path &&
             not (expansionPathContainsRecursiveComponent definitions name path)
     OpaqueForalls -> False
-    PolarizedForalls _ NegativeFormula _ _ -> False
+    PolarizedForalls _ NegativeFormula _ _ _ -> False
 
 -- Two independent recursive components recover the common finite wrapper
 -- shape (@Outer (Inner a)@) without allowing a duplicated component chain to

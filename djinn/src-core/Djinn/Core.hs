@@ -132,9 +132,11 @@ import Djinn.Internal.ProofToGenerated
 import Djinn.Internal.Type
 import Djinn.Internal.TypeFormula
     ( PolarizedFormulaPlans
+    , FormulaPolarity (..)
     , exactOpaqueFormulaPlan
     , polarizedFormulaPlanSkolems
     , primaryFormulaPlan
+    , negativeOpaqueFormulaSymbols
     , pairOpaqueFormulaPlans
     , pairOpenFormulaPlans
     , tripleOpaqueFormulaPlans
@@ -1470,8 +1472,9 @@ searchPreparedFormula
 searchPreparedFormula options prepared providerCandidates providerAssignments
         target elaboratedGoal parametricDataRelevant formulaPlans
         nominalFormulaPlans = do
-    results <- runPlans True collectAcrossPlans
-        options (optionCutoff options) [] searchPlans
+    results <- runPlans
+        [(False, initialSearchPlans), (False, searchPlans), (True, directedSearchPlans)]
+        collectAcrossPlans options (optionCutoff options) [] transportSearchPlans
     mergeFormulaPlanResults options results
   where
     -- Premise partitioning and the complete deterministic plan-family
@@ -2290,13 +2293,15 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         | not $ null $ instantiationAxiomPremises axioms
         , (ps, diagnostics, symbols, visible, providers, form, _) <- basePlans
         ]
-    searchPlans =
+    initialSearchPlans =
         -- Exact assignment priority is absent for both the scalar-only
         -- and empty-evidence entrances, so their historical plan order is
         -- unchanged byte for byte.
         providerAssignmentPriorityStructuralSearchPlans ++
         providerAssignmentPriorityNominalSearchPlans ++
-        structuralSearchPlans ++
+        take 1 structuralSearchPlans
+    searchPlans =
+        drop 1 structuralSearchPlans ++
         nominalSearchPlans ++
         focusedInstantiationSearchPlans ++
         structuralAxiomSearchPlans ++
@@ -2314,6 +2319,45 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         queryCorrelatedNominalSearchPlans ++
         queryCorrelatedClosedStructuralSearchPlans ++
         queryCorrelatedClosedNominalSearchPlans
+    -- One coherent view keeps quantified results opaque when the query
+    -- already supplies exactly that scheme, while opening fresh obligations.
+    -- It handles wide mixtures without enumerating subsets of forall sites.
+    transportSearchPlans =
+        [ ( suppliedPremises ++ loadedSchemePremises, [], Set.empty, Map.empty, Map.empty
+          , translatedFormula translatedGoal, False
+          )
+        | let available = availableTransportSymbols primary premises
+        , not $ Set.null available
+        , Right translatedGoal <-
+            [preparedEnvironmentTransportSynthesisFormula prepared available elaboratedGoal]
+        , Right (suppliedPremises, _) <-
+            [preparedEnvironmentTransportFunctionPremises prepared available]
+        , novelTransportPlan plans premises translatedGoal suppliedPremises
+        ] ++
+        [ ( suppliedPremises ++ nominalLoadedSchemePremises, [], Set.empty
+          , Map.empty, Map.empty
+          , translatedFormula translatedGoal, False
+          )
+        | useNominalProjection
+        , let available = availableTransportSymbols
+                (primaryFormulaPlan nominalFormulaPlans) nominalPremises
+        , not $ Set.null available
+        , Right translatedGoal <-
+            [preparedEnvironmentNominalTransportSynthesisFormula prepared available elaboratedGoal]
+        , Right (suppliedPremises, _) <-
+            [preparedEnvironmentNominalTransportFunctionPremises prepared available]
+        , novelTransportPlan nominalPlans nominalPremises translatedGoal suppliedPremises
+        ]
+    availableTransportSymbols goal supplied = Set.unions $
+        negativeOpaqueFormulaSymbols PositiveFormula (translatedFormula goal) :
+        map (negativeOpaqueFormulaSymbols NegativeFormula . snd) supplied
+    -- Existing views keep their established candidate order. A coherent view
+    -- outside those frontiers runs first: otherwise a large cached consumer
+    -- family could consume the entire budget before this one-step plan runs.
+    novelTransportPlan existingGoals existingPremises goal supplied =
+        translatedFormula goal `notElem` map fst existingGoals ||
+            any (`Set.notMember` Set.fromList existingPremises)
+                (filter ((/= targetSymbol) . fst) supplied)
     directedSearchPlans =
         focusedPlansOf
             [(instantiationAxiomPremises queryDirectedAxioms,
@@ -2332,19 +2376,24 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
     -- has found no inhabitant. Looking at a fallback's symbol set already
     -- forces axiom preparation, so deciding this from individual plan tuples
     -- would defeat the intended laziness.
-    runPlans True collect currentOptions candidateLimit completed []
-        | all (null . formulaPlanCandidates) completed =
-            runPlans False collect currentOptions candidateLimit completed directedSearchPlans
+    runPlans ((inhabitationOnly, nextFamily) : remainingFamilies)
+            collect currentOptions candidateLimit completed []
+        | inhabitationOnly
+        , any (not . null . formulaPlanCandidates) completed ||
+            any ((/= SharedQuery.NoEvidence) . formulaPlanEvidence) completed =
+            runPlans remainingFamilies collect currentOptions candidateLimit completed []
+        | otherwise =
+            runPlans remainingFamilies collect currentOptions candidateLimit completed nextFamily
     runPlans _ _ _ _ completed [] = Right $ reverse completed
     -- Focused contexts are a first-inhabitant accelerator. Once another plan
     -- has produced a term, enumerating that term again in singleton contexts
     -- would spend the raw-proof cutoff and starve later alternative families.
-    runPlans allowDirected collect currentOptions candidateLimit completed
+    runPlans remainingFamilies collect currentOptions candidateLimit completed
             ((_, _, symbols, _, _, _, _) : remaining)
         | any (not . null . formulaPlanCandidates) completed
         , any isInhabitationFallbackSymbol $ Set.toList symbols =
-            runPlans allowDirected collect currentOptions candidateLimit completed remaining
-    runPlans allowDirected collect currentOptions candidateLimit completed
+            runPlans remainingFamilies collect currentOptions candidateLimit completed remaining
+    runPlans remainingFamilies collect currentOptions candidateLimit completed
             (( planPremises
               , diagnosticOnlyPremises
               , axiomSymbols
@@ -2365,7 +2414,7 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
                 (collect || null (formulaPlanCandidates result)) &&
                 evidenceCanBenefitFromAnotherPlan result
         if continue
-            then runPlans allowDirected collect
+            then runPlans remainingFamilies collect
                 currentOptions {
                     optionBudget = formulaPlanRemainingBudget result
                     }

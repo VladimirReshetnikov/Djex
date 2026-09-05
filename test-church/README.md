@@ -40,7 +40,7 @@ miss under these limits is a test failure, not a non-inhabitation theorem.
 The test runner first re-extracts the source and fails if any checked-in
 inventory artifact is stale. It then passes each expanded type through the
 public Djex session/request/search/rendering API. Each successful candidate is
-compiled by GHC twice within one generated module:
+checked by GHC within one generated module:
 
 1. At the fully expanded, capture-avoiding query type used for synthesis.
 2. Through a forwarding binding at the original, alias-preserving resolved
@@ -147,3 +147,45 @@ for Exference**. Both complete generated modules, including all original-type
 forwarding checks and all 38 exact-original-signature partial wrappers, passed
 GHC. These are compiler-checked type-inhabitation
 results, not behavioral equivalence tests for the reference functions.
+
+## Independent scope and reconstruction probe
+
+```powershell
+cabal exec -- runghc -package=djex test-church/probe_scopes.hs
+```
+
+This separate probe exercises 22 inhabitable signatures and eight deliberately
+incompatible scope or correlation patterns through each public backend. It
+covers alpha-renaming, shadowed binders, nested polymorphic results, ambient
+type variables, repeated correlations, higher-kinded applications, and
+instantiation choices determined only when an argument is supplied. Every
+query receives only the abstract type constructors `F`, `G`, `H`, and `Token`,
+plus any provider signatures explicitly listed for that case. Two global
+provider cases exercise delayed instantiation of a named polymorphic function;
+the remaining cases use only values supplied as query arguments.
+
+Provider bodies are generated solely in a separate compiler support module.
+They are total, their constructors are hidden, and their source never enters
+the synthesis API. Each candidate is compiled in its own module importing
+exactly its case's allowed provider names. This prevents one case's compiler
+context from accidentally supplying an implementation to another case.
+
+Every returned candidate is sent to GHC at the unchanged query signature,
+including any unexpected candidate for a negative case. Missing positive
+candidates, unexpected negative candidates, errors, timeouts, or compiler
+failures make the probe fail. A negative result means that no candidate was
+returned under the stated search budget; it is not a non-inhabitation theorem.
+Generated modules and per-case results are written to the ignored
+`results/scopes/` directory. `NoPolyKinds` in the compiler fixture makes the
+support module's datatype declarations agree with the explicitly supplied kinds
+of the abstract constructors in the synthesis API.
+
+The nested-result cases also require reconstruction evidence that GHC cannot
+always infer from an unannotated occurrence. The implementation report in
+[`docs/rank-n-impredicative-synthesis.tex`](../docs/rank-n-impredicative-synthesis.tex)
+explains these cases and compiler-checked explicit type applications.
+
+The completed reconstruction pass was validated on 2026-09-04: all 60 probe
+queries met their expectations across both engines, all 44 positive
+implementations passed GHC, and all 16 negative queries returned no candidate
+without errors or timeouts. These counts are separate from the Church corpus.

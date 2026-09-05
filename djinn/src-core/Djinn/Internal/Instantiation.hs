@@ -884,13 +884,19 @@ buildAxiomFormulas discoverNested deduplicateFormula excludedAxioms interleaveSc
                 (hypothesis :-> bodyFormula)
                 (visibleArguments scheme arguments)
 
-    visibleArguments scheme arguments = case vacuousPrefixLengths of
+    visibleArguments scheme arguments = case requiredPrefixLengths of
         [] -> Nothing
         lengths -> traverse retainArgument $
             take (last lengths) $ zip (schemeBinders scheme) arguments
       where
         bodyVariables = SharedType.freeVariables $ schemeBody scheme
+        inferableVariables = outsideForallVariables $ schemeBody scheme
+        needsPolytypeShape binder argument =
+            binder `Set.notMember` inferableVariables &&
+                SharedType.containsForall argument
         retainArgument (binder, argument)
+            | needsPolytypeShape binder argument = rightToMaybe $
+                SharedGenerated.partiallySpecifiedVisibleTypeArgument argument
             | binder `Set.member` bodyVariables =
                 Just SharedGenerated.inferredVisibleTypeArgument
             | otherwise = visibleArgument argument
@@ -898,11 +904,26 @@ buildAxiomFormulas discoverNested deduplicateFormula excludedAxioms interleaveSc
         -- reaches every vacuous binder, using inferred placeholders for any
         -- earlier open choice; later binders remain implicit so GHC can still
         -- perform ordinary and guarded impredicative inference for them.
-        vacuousPrefixLengths =
+        requiredPrefixLengths =
             [ index
-            | (index, binder) <- zip [1 :: Int ..] $ schemeBinders scheme
-            , binder `Set.notMember` bodyVariables
+            | (index, (binder, argument)) <- zip [1 :: Int ..] $
+                zip (schemeBinders scheme) arguments
+            , binder `Set.notMember` bodyVariables || needsPolytypeShape binder argument
             ]
+
+    -- GHC can infer ordinary impredicative arguments from an exposed result
+    -- occurrence, but cannot discover a polytype through a nested forall.
+    -- Preserve that quantified shape as visible syntax instead of erasing the
+    -- checked instantiation. Ambient variables become inference holes.
+    outsideForallVariables source = case source of
+        SharedType.ForallType{} -> Set.empty
+        SharedType.TypeVariable variable -> Set.singleton variable
+        SharedType.TypeConstructor{} -> Set.empty
+        SharedType.TypeApplication function argument ->
+            outsideForallVariables function `Set.union` outsideForallVariables argument
+        SharedType.FunctionType argument result ->
+            outsideForallVariables argument `Set.union` outsideForallVariables result
+        SharedType.TupleType _ fields -> Set.unions $ map outsideForallVariables fields
 
     -- The axiom itself acts as a premise: its domain atom becomes an
     -- obligation while its body joins the hypothesis side, so only body

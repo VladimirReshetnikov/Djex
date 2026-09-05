@@ -262,10 +262,7 @@ sharedTypeStructure = TypeStructure
         (typeApplicationSource witness)
         (typeApplicationSelected witness)
         (typeApplicationResult witness)
-        && case Generated.visibleTypeArgumentClosedType argument of
-          Nothing -> True
-          Just specified -> TypeAtom.alphaEquivalentClosedTypes
-            (typeApplicationSelected witness) specified
+        && Generated.visibleTypeArgumentMatches argument (typeApplicationSelected witness)
   }
 
 observeSharedTypeWithin

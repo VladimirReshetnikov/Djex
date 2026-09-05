@@ -326,9 +326,9 @@ visibleTypeArgument
 visibleTypeArgument qualification argument
   | Generated.isInferredVisibleTypeArgument argument =
       TyWildCard noLoc Nothing
-  | otherwise = case Generated.visibleTypeArgumentClosedType argument of
-      -- 'VisibleTypeArgument' is abstract, so only the inferred constructor
-      -- can lack a closed type. Retain a total fallback if that API grows.
+  | otherwise = case Generated.visibleTypeArgumentPatternType argument of
+      -- A partial pattern keeps its quantified binders and emits anonymous
+      -- holes for ambient variables; the checked use determines those holes.
       Nothing -> TyWildCard noLoc Nothing
       Just typeExpression -> atomicVisibleTypeArgument
         $ closedType qualification typeExpression
@@ -350,10 +350,11 @@ atomicVisibleTypeArgument typeExpression = case typeExpression of
 -- type constructors and class names.
 closedType
   :: Generated.Qualification
-  -> SharedType.Type Generated.ClosedVisibleTypeVariable
+  -> SharedType.Type (Maybe Generated.ClosedVisibleTypeVariable)
   -> Type SrcSpanInfo
 closedType qualification typeExpression = case typeExpression of
-  SharedType.TypeVariable variable -> TyVar noLoc $ Ident noLoc
+  SharedType.TypeVariable Nothing -> TyWildCard noLoc Nothing
+  SharedType.TypeVariable (Just variable) -> TyVar noLoc $ Ident noLoc
     $ Generated.closedVisibleTypeVariableSpelling variable
   SharedType.TypeConstructor name -> TyCon noLoc $ toQName qualification name
   SharedType.TypeApplication (SharedType.TypeConstructor name) argument
@@ -373,7 +374,7 @@ closedType qualification typeExpression = case typeExpression of
   SharedType.ForallType variables constraints body -> TyForall noLoc
     (case variables of
       [] -> Nothing
-      _ -> Just $ map closedTypeBinder variables)
+      _ -> Just [closedTypeBinder variable | Just variable <- variables])
     (closedTypeContext qualification constraints)
     (closedType qualification body)
 
@@ -386,7 +387,7 @@ closedTypeBinder variable = UnkindedVar noLoc $ Ident noLoc
 closedTypeContext
   :: Generated.Qualification
   -> [SharedConstraint.Constraint
-        (SharedType.Type Generated.ClosedVisibleTypeVariable)]
+        (SharedType.Type (Maybe Generated.ClosedVisibleTypeVariable))]
   -> Maybe (Context SrcSpanInfo)
 closedTypeContext _ [] = Nothing
 closedTypeContext qualification [constraint] = Just $ CxSingle noLoc
@@ -397,7 +398,7 @@ closedTypeContext qualification constraints = Just $ CxTuple noLoc
 closedTypeConstraint
   :: Generated.Qualification
   -> SharedConstraint.Constraint
-       (SharedType.Type Generated.ClosedVisibleTypeVariable)
+       (SharedType.Type (Maybe Generated.ClosedVisibleTypeVariable))
   -> Asst SrcSpanInfo
 closedTypeConstraint qualification constraint = TypeA noLoc
   $ foldl (TyApp noLoc) classType argumentTypes

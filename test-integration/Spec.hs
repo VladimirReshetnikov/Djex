@@ -3,7 +3,7 @@
 module Main (main) where
 
 import Data.Maybe (isJust)
-import Control.Monad (forM_, void)
+import Control.Monad (forM, forM_, void)
 import Control.Exception
   ( AsyncException (ThreadKilled)
   , SomeException
@@ -74,7 +74,11 @@ main = defaultMain tests
 
 tests :: TestTree
 tests = testGroup "Djex facade"
-  [ testCase "enumerate backends in stable presentation order" $
+  [ testCase "compile transport-directed rank-N introductions and loaded consumers"
+      testTransportCompilerReplay
+  , testCase "compile delayed impredicative choices from local and global providers"
+      testDelayedImpredicativeCompilerReplay
+  , testCase "enumerate backends in stable presentation order" $
       map backend availableBackends @?= [DjinnBackend, ExferenceBackend]
   , testCase "backend metadata is the canonical projection" $
       availableBackends @?= map backendInfo [DjinnBackend, ExferenceBackend]
@@ -5247,6 +5251,162 @@ firstExferenceCandidate results = case
     candidate : _ -> pure candidate
     [] -> fail "Exference reported a nonempty batch without a candidate"
   [] -> fail "Exference produced no candidate"
+
+testDelayedImpredicativeCompilerReplay :: IO ()
+testDelayedImpredicativeCompilerReplay = do
+  wrapperName <- expectRight $ mkIdentifier "DelayedF"
+  tokenName <- expectRight $ mkIdentifier "DelayedToken"
+  providerName <- expectRight $ mkIdentifier "delayedProvider"
+  argumentName <- expectRight $ mkIdentifier "delayedArgument"
+  let variable = TypeVariable . FlexibleVariable
+      wrapper = TypeApplication $ TypeConstructor wrapperName
+      token = TypeConstructor tokenName
+      identity = ForallType [FlexibleVariable 3] [] $
+        FunctionType (variable 3) (variable 3)
+      provider = ForallType [FlexibleVariable 0] [] $ FunctionType
+        (wrapper $ ForallType [FlexibleVariable 1] [] $
+          FunctionType (variable 1) (variable 0)) token
+      argument = wrapper $ ForallType [FlexibleVariable 2] [] $
+        FunctionType (variable 2) identity
+      abstractDeclarations =
+        [ AbstractTypeDeclaration () wrapperName $
+            FunctionKind ProperTypeKind ProperTypeKind
+        , AbstractTypeDeclaration () tokenName ProperTypeKind
+        ]
+      providerDeclarations =
+        [ ValueDeclaration $ ValueSignature () providerName provider
+        , ValueDeclaration $ ValueSignature () argumentName argument
+        ]
+      localGoal = FunctionType provider $ FunctionType argument token
+      asDjinn = mapDeclarationTypeVariables $
+        \v -> "t" ++ show (variableIdentity v)
+      goalAsDjinn = fmap $ \v -> "t" ++ show (variableIdentity v)
+      cases =
+        [ ("Local", abstractDeclarations, localGoal)
+        , ("Global", abstractDeclarations ++ providerDeclarations, token)
+        ]
+  definitions <- forM cases $ \(suffix, declarations, goal) -> do
+    djinnEnvironment <- expectRight $ mkEnvironment $ map asDjinn declarations
+    djinnSession <- expectRight $ mkDjinnSession djinnEnvironment
+    djinnName <- expectRight $ mkIdentifier $ "delayedDjinn" ++ suffix
+    djinnTarget <- expectRight $ mkDefinitionName djinnName
+    djinnRequest <- expectRight $ mkDjinnRequest QueryRequest
+      { requestTarget = djinnTarget, requestGoal = goalAsDjinn goal
+      , requestContexts = [], requestOptions = defaultQueryOptions
+          {optionSorted = False, optionCutoff = 1, optionBudget = Just 10000}
+      }
+    djinnResult <- expectRight $ runDjinnQuery djinnSession djinnRequest
+    djinnCandidate <- firstCandidate $ batchCandidates $ resultSearch djinnResult
+    djinnSource <- expectRight $
+      renderDjinnCandidateDefinition Unqualified djinnCandidate
+    exferenceEnvironment <- expectRight $ mkEnvironment declarations
+    exferenceSession <- expectRight $ mkExferenceSession exferenceEnvironment
+    exferenceName <- expectRight $ mkIdentifier $ "delayedExference" ++ suffix
+    exferenceTarget <- expectRight $ mkDefinitionName exferenceName
+    exferenceRequest <- expectRight $ mkExferenceRequest QueryRequest
+      { requestTarget = exferenceTarget, requestGoal = goal
+      , requestContexts = [], requestOptions = defaultExferenceOptions
+          {exferenceMaximumSteps = 1000}
+      }
+    exferenceResults <- expectRight $ runExferenceQuery exferenceSession exferenceRequest
+    exferenceCandidate <- firstCandidate $
+      concatMap (batchCandidates . resultSearch) exferenceResults
+    exferenceSource <- expectRight $
+      renderExferenceCandidateDefinition Unqualified exferenceCandidate
+    let signature = if suffix == "Local" then localSignature else "DelayedToken"
+    pure $ unlines
+      [ "delayedDjinn" ++ suffix ++ " :: " ++ signature, djinnSource
+      , "delayedExference" ++ suffix ++ " :: " ++ signature, exferenceSource
+      ]
+  let fixture = unlines $
+        [ "module DelayedImpredicative where"
+        , "data DelayedF a = DelayedF"
+        , "data DelayedToken = DelayedToken"
+        , "delayedProvider :: " ++ providerSignature
+        , "delayedProvider _ = DelayedToken"
+        , "delayedArgument :: " ++ argumentSignature
+        , "delayedArgument = DelayedF"
+        ] ++ definitions
+  withTemporaryHaskellModule fixture $ \sourcePath -> do
+    (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+      [ "-v0", "-fforce-recomp", "-fno-code", "-fno-write-interface"
+      , "-XHaskell2010", "-XImpredicativeTypes", "-XRankNTypes"
+      , "-XTypeApplications", sourcePath
+      ] ""
+    assertEqual ("GHC rejected delayed impredicative output\n" ++
+      output ++ errors ++ fixture) ExitSuccess exitCode
+ where
+  providerSignature = "forall a. DelayedF (forall b. b -> a) -> DelayedToken"
+  argumentSignature = "DelayedF (forall c. c -> (forall d. d -> d))"
+  localSignature = "(" ++ providerSignature ++ ") -> " ++
+    argumentSignature ++ " -> DelayedToken"
+  firstCandidate candidates = maybe (fail "delayed specialization produced no candidate")
+    pure $ find (const True) candidates
+
+testTransportCompilerReplay :: IO ()
+testTransportCompilerReplay = do
+  standard <- expectRight standardDjinnSession
+  let localResults = ["r" ++ show n | n <- [1 .. 8 :: Int]]
+      localType = arrows (map (scheme "a") localResults) $
+        tuple $ map (scheme "b") localResults ++ replicate 8 identity
+  localDefinition <- synthesize standard "transportSixteen" localType
+  resultNames <- traverse (expectRight . mkIdentifier) $
+    ["TransportQ" ++ show n | n <- [1 .. 6 :: Int]]
+  tokenName <- expectRight $ mkIdentifier "TransportResult"
+  consumerName <- expectRight $ mkIdentifier "consumeTransport"
+  let resultSpellings = map renderCanonical resultNames
+      consumerType = tuple
+        (map (scheme "b") resultSpellings ++ replicate 6 identity) ++
+          " -> TransportResult"
+      loadedType = arrows (map (scheme "a") resultSpellings) "TransportResult"
+  parsedConsumer <- expectRight $ parseHType consumerType
+  sharedConsumer <- expectRight $ toSynthesisType parsedConsumer
+  environment <- expectRight $ mkEnvironment $
+    map (\name -> AbstractTypeDeclaration () name ProperTypeKind)
+      (tokenName : resultNames) ++
+        [ValueDeclaration $ ValueSignature () consumerName sharedConsumer]
+  loadedSession <- expectRight $ mkDjinnSession environment
+  loadedDefinition <- synthesize loadedSession "transportLoadedTwelve" loadedType
+  let fixture = unlines $
+        [ "module TransportRankN where"
+        , "data TransportResult = TransportResult"
+        ] ++
+        ["data " ++ name ++ " = " ++ name | name <- resultSpellings] ++
+        [ "consumeTransport :: " ++ consumerType
+        , "consumeTransport _ = TransportResult"
+        , "transportSixteen :: " ++ localType
+        , localDefinition
+        , "transportLoadedTwelve :: " ++ loadedType
+        , loadedDefinition
+        ]
+  withTemporaryHaskellModule fixture $ \sourcePath -> do
+    (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+      [ "-v0", "-fforce-recomp", "-fno-code", "-fno-write-interface"
+      , "-XHaskell2010", "-XImpredicativeTypes", "-XRankNTypes", sourcePath
+      ] ""
+    assertEqual ("GHC rejected transport-directed output\n" ++
+      output ++ errors ++ fixture) ExitSuccess exitCode
+  where
+    tuple values = "(" ++ joinComma values ++ ")"
+    joinComma [] = ""
+    joinComma [value] = value
+    joinComma (value : rest) = value ++ ", " ++ joinComma rest
+    arrows inputs result = foldr (\argument rest -> argument ++ " -> " ++ rest)
+      result inputs
+    scheme prefix result = "(forall " ++ unwords variables ++ ". " ++
+      tuple variables ++ " -> " ++ result ++ ")"
+      where variables = [prefix ++ show n | n <- [1 .. 7 :: Int]]
+    identity = "(forall x. x -> x)"
+    synthesize session spelling source = do
+      target <- expectRight $ mkIdentifier spelling
+      request <- expectRight $ parseDjinnRequest session
+        defaultQueryOptions
+          {optionSorted = False, optionCutoff = 1, optionBudget = Just 10000}
+        target "transport-compiler-replay" source
+      result <- expectRight $ runDjinnQuery session request
+      candidate <- maybe (fail $ spelling ++ " produced no candidate") pure $
+        find (const True) $ batchCandidates $ resultSearch result
+      expectRight $ renderDjinnCandidateDefinition Unqualified candidate
 
 expectRight :: Show error => Either error value -> IO value
 expectRight result = case result of

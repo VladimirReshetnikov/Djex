@@ -21,9 +21,12 @@ module Language.Haskell.Synthesis.Generated
   , VisibleTypeArgumentError (..)
   , inferredVisibleTypeArgument
   , specifiedVisibleTypeArgument
+  , partiallySpecifiedVisibleTypeArgument
   , isInferredVisibleTypeArgument
   , visibleTypeArgumentType
   , visibleTypeArgumentClosedType
+  , visibleTypeArgumentPatternType
+  , visibleTypeArgumentMatches
   , Expression (..)
   , ApplicationArgument (..)
   , FunctionClause (..)
@@ -86,6 +89,7 @@ import Data.Set (Set)
 import Data.Void (Void)
 import GHC.Generics (Generic)
 import Language.Haskell.Synthesis.Collection (observedListLength)
+import Language.Haskell.Synthesis.Constraint (Constraint (..))
 import Language.Haskell.Synthesis.Count (saturatingNaturalToInt)
 import qualified Language.Haskell.Synthesis.Fresh as Fresh
 import qualified Language.Haskell.Synthesis.Internal.Alpha as Alpha
@@ -180,18 +184,21 @@ closedVisibleTypeVariableSpelling variable =
 --
 -- The representation is deliberately abstract. An inferred argument renders
 -- as @\@_@. A specified argument retains a canonical, structurally validated,
--- lexically closed type. Bound variables are alpha-normalized independently
--- of their source spellings, so quantified arguments do not depend on a type
--- variable scope carried by the enclosing t'FunctionClause'.
+-- lexically closed type; a partial argument retains that shape with anonymous
+-- inference holes. Bound variables are alpha-normalized independently of their
+-- source spellings, so neither form needs a named outer type-variable scope.
 data VisibleTypeArgument
   = InferredVisibleTypeArgument
   | SpecifiedVisibleTypeArgument
       (SharedType.Type ClosedVisibleTypeVariable)
+  | PartiallySpecifiedVisibleTypeArgument
+      (SharedType.Type (Maybe ClosedVisibleTypeVariable))
   deriving (Eq, Ord, Show)
 
 instance NFData VisibleTypeArgument where
   rnf InferredVisibleTypeArgument = ()
   rnf (SpecifiedVisibleTypeArgument typeExpression) = rnf typeExpression
+  rnf (PartiallySpecifiedVisibleTypeArgument typeExpression) = rnf typeExpression
 
 -- | Why a source type cannot become a bounded visible type argument.
 -- Structural validation runs before the bounded-vocabulary check, so malformed
@@ -230,6 +237,30 @@ specifiedVisibleTypeArgument source = do
     Alpha.AlphaFreeVariable free ->
       Left $ VisibleTypeArgumentVariable free
 
+-- | Preserve the quantified shape of an inferred type argument while leaving
+-- its ambient variables for the target compiler to infer. This is needed
+-- when simplified subsumption cannot infer a polytype beneath another forall.
+-- Inner binders retain their lexical identity; each free occurrence becomes
+-- a type-application wildcard, so generated terms require no named outer
+-- type-variable scope. Callers must first check the original, fully correlated
+-- instantiation: these holes are emission syntax, never proof evidence.
+partiallySpecifiedVisibleTypeArgument
+  :: Ord variable
+  => SharedType.Type variable
+  -> Either (VisibleTypeArgumentError variable) VisibleTypeArgument
+partiallySpecifiedVisibleTypeArgument source = do
+  canonical <- Bifunctor.first InvalidVisibleTypeArgument
+    $ SharedType.normalizeType source
+  if Set.null $ SharedType.freeVariables canonical
+    then specifiedVisibleTypeArgument canonical
+    else pure $ PartiallySpecifiedVisibleTypeArgument $ fmap variablePattern
+      $ Alpha.alphaNormalizeTypeWith Alpha.PositionalBinderSlots
+        $ eraseVacuousVisibleForalls canonical
+ where
+  variablePattern variable = case variable of
+    Alpha.AlphaBoundVariable scope slot -> Just $ ClosedVisibleTypeVariable scope slot
+    Alpha.AlphaFreeVariable _ -> Nothing
+
 -- A binderless, context-free forall is semantically and textually invisible.
 -- Erase it before allocating lexical scope numbers so equivalent source trees
 -- compare and render identically, including when the no-op wrapper surrounds a
@@ -264,6 +295,7 @@ isInferredVisibleTypeArgument :: VisibleTypeArgument -> Bool
 isInferredVisibleTypeArgument argument = case argument of
   InferredVisibleTypeArgument -> True
   SpecifiedVisibleTypeArgument{} -> False
+  PartiallySpecifiedVisibleTypeArgument{} -> False
 
 -- | Recover the specified closed monotype when the argument has no forall
 -- layer, or 'Nothing' for either @\@_@ or a specified quantified type.
@@ -280,15 +312,67 @@ visibleTypeArgumentType argument = case argument of
   SpecifiedVisibleTypeArgument typeExpression
     | SharedType.containsForall typeExpression -> Nothing
     | otherwise -> traverse (const Nothing) typeExpression
+  PartiallySpecifiedVisibleTypeArgument{} -> Nothing
 
--- | Recover the complete specified closed type, including explicit forall
--- layers, or 'Nothing' only for @\@_@.
+-- | Recover a completely specified closed type, including explicit forall
+-- layers. Inferred arguments and patterns containing holes return 'Nothing'.
+-- Consumers of general emitted syntax should use 'visibleTypeArgumentPatternType'.
 visibleTypeArgumentClosedType
   :: VisibleTypeArgument
   -> Maybe (SharedType.Type ClosedVisibleTypeVariable)
 visibleTypeArgumentClosedType argument = case argument of
   InferredVisibleTypeArgument -> Nothing
   SpecifiedVisibleTypeArgument typeExpression -> Just typeExpression
+  PartiallySpecifiedVisibleTypeArgument{} -> Nothing
+
+-- | Complete visible type syntax. A 'Nothing' variable inside the returned
+-- type is an anonymous inference hole; a 'Just' variable is owned by a forall
+-- in that same type. The outer 'Nothing' denotes the single argument @\@_@.
+visibleTypeArgumentPatternType
+  :: VisibleTypeArgument
+  -> Maybe (SharedType.Type (Maybe ClosedVisibleTypeVariable))
+visibleTypeArgumentPatternType argument = case argument of
+  InferredVisibleTypeArgument -> Nothing
+  SpecifiedVisibleTypeArgument source -> Just $ fmap Just source
+  PartiallySpecifiedVisibleTypeArgument source -> Just source
+
+-- | Check emitted type syntax against the exact selected argument retained
+-- by a proof. Holes impose no extra constraint; named inner binders must
+-- correspond lexically. The proof's source/selection/result relation must be
+-- checked independently, even when the visible argument consists only of holes.
+visibleTypeArgumentMatches
+  :: Ord variable
+  => VisibleTypeArgument -> SharedType.Type variable -> Bool
+visibleTypeArgumentMatches argument selected = case visibleTypeArgumentPatternType argument of
+  Nothing -> True
+  Just patternType -> case SharedType.normalizeType selected of
+    Left _ -> False
+    Right canonical -> matches Map.empty patternType
+      $ Alpha.alphaNormalizeTypeWith Alpha.PositionalBinderSlots
+        $ eraseVacuousVisibleForalls canonical
+ where
+  sameList compareItems left right = length left == length right &&
+    and (zipWith compareItems left right)
+  matches lexical patternType actual = case (patternType, actual) of
+    (SharedType.TypeVariable Nothing, _) -> True
+    (SharedType.TypeVariable (Just variable), SharedType.TypeVariable other) ->
+      Map.lookup variable lexical == Just other
+    (SharedType.TypeConstructor name, SharedType.TypeConstructor other) -> name == other
+    (SharedType.TypeApplication f x, SharedType.TypeApplication g y) ->
+      matches lexical f g && matches lexical x y
+    (SharedType.FunctionType x y, SharedType.FunctionType a b) ->
+      matches lexical x a && matches lexical y b
+    (SharedType.TupleType box xs, SharedType.TupleType other ys) ->
+      box == other && sameList (matches lexical) xs ys
+    (SharedType.ForallType variables context body,
+        SharedType.ForallType others constraints result) ->
+      let nested = Map.union (Map.fromList
+            [(bound, other) | (Just bound, other) <- zip variables others]) lexical
+          sameConstraint (Constraint name xs) (Constraint other ys) =
+            name == other && sameList (matches nested) xs ys
+      in length variables == length others &&
+          sameList sameConstraint context constraints && matches nested body result
+    _ -> False
 
 -- | Surface expression tree after backend-specific checking.
 --
@@ -1798,6 +1882,9 @@ renderVisibleTypeArgument qualification argument = case argument of
   SpecifiedVisibleTypeArgument typeExpression ->
     SharedTypeRender.showsTypeWithQualification qualification
       closedVisibleTypeVariableSpelling 2 typeExpression ""
+  PartiallySpecifiedVisibleTypeArgument typeExpression ->
+    SharedTypeRender.showsTypeWithQualification qualification
+      (maybe "_" closedVisibleTypeVariableSpelling) 2 typeExpression ""
 
 ppApplication
   :: Ord local

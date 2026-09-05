@@ -107,12 +107,15 @@ import Djinn.Internal.HTypes
 import Djinn.Internal.Instantiation
     ( closedMonotypeSubtrees
     , eliminateInstantiationEvidence
+    , independentConstructionScopes
     , instantiationAxiomPremises
     , instantiationAxiomSymbols
     , instantiationVisibleApplications
     , instantiationAxioms
     , loadedInstantiationAxioms
     , queryDirectedInstantiationAxioms
+    , queryConstructedInstantiationAxioms
+    , scopedConstructionInstantiationAxioms
     , queryCorrelatedInstantiationAxioms
     , queryClosedInstantiationAxioms
     , providerInstantiationApplications
@@ -135,6 +138,8 @@ import Djinn.Internal.TypeFormula
     , FormulaPolarity (..)
     , exactOpaqueFormulaPlan
     , polarizedFormulaPlanSkolems
+    , polarizedFormulaPlanPositiveForallCount
+    , maxCompleteForallFrontierSites
     , primaryFormulaPlan
     , negativeOpaqueFormulaSymbols
     , pairOpaqueFormulaPlans
@@ -1473,7 +1478,8 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         target elaboratedGoal parametricDataRelevant formulaPlans
         nominalFormulaPlans = do
     results <- runPlans
-        [(False, initialSearchPlans), (False, searchPlans), (True, directedSearchPlans)]
+        [(False, initialSearchPlans), (False, searchPlans),
+            (True, constructedSearchPlans), (True, directedSearchPlans)]
         collectAcrossPlans options (optionCutoff options) [] transportSearchPlans
     mergeFormulaPlanResults options results
   where
@@ -1513,8 +1519,8 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey $
             queryClosedCandidates ++
                 environmentClosedCandidates
-    checkedTranslator translator source = do
-        checkPreparedSynthesisTypesKinds prepared [(KStar, source)]
+    checkedTranslator owned translator source = do
+        checkPreparedSynthesisTypesKindsWithRigids prepared owned [(KStar, source)]
         translator source
     visibleArgument source = case
             checkPreparedSynthesisTypesKinds prepared [(KStar, source)] of
@@ -1522,9 +1528,19 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         Right () -> Just
             $ fromRight SharedGenerated.inferredVisibleTypeArgument
             $ SharedGenerated.specifiedVisibleTypeArgument source
-    structuralTranslator = checkedTranslator $
+    visibleArgumentInScope owned source = case
+            checkPreparedSynthesisTypesKindsWithRigids prepared owned [(KStar, source)] of
+        Left _ -> Nothing
+        Right () -> Just
+            $ fromRight SharedGenerated.inferredVisibleTypeArgument
+            $ SharedGenerated.partiallySpecifiedVisibleTypeArgument source
+    structuralOwnedRigids = Set.fromList $
+        goalVariables ++ polarizedFormulaPlanSkolems formulaPlans ++ premiseSpellings
+    nominalOwnedRigids = Set.fromList $
+        goalVariables ++ polarizedFormulaPlanSkolems nominalFormulaPlans ++ nominalPremiseSpellings
+    structuralTranslator = checkedTranslator structuralOwnedRigids $
         preparedEnvironmentSynthesisFormulaTranslator prepared
-    nominalTranslator = checkedTranslator $
+    nominalTranslator = checkedTranslator nominalOwnedRigids $
         preparedEnvironmentNominalSynthesisFormulaTranslator prepared
     collectAcrossPlans =
         optionAlternatives options || optionSorted options
@@ -1660,6 +1676,16 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         elaboratedGoal (map fst plans) (map snd premises)
     nominalQueryDirectedAxioms = queryDirectedInstantiationAxioms
         nominalTranslator visibleArgument activeNominalAxioms
+        (goalVariables ++ polarizedFormulaPlanSkolems nominalFormulaPlans ++ nominalPremiseSpellings)
+        elaboratedGoal (map fst nominalPlans) (map snd nominalPremises)
+    queryConstructedAxioms = queryConstructedInstantiationAxioms
+        (preparedEnvironmentConstructedHypothesisTranslator prepared)
+        visibleArgumentInScope
+        (goalVariables ++ polarizedFormulaPlanSkolems formulaPlans ++ premiseSpellings)
+        elaboratedGoal (map fst plans) (map snd premises)
+    nominalQueryConstructedAxioms = queryConstructedInstantiationAxioms
+        (preparedEnvironmentNominalConstructedHypothesisTranslator prepared)
+        visibleArgumentInScope
         (goalVariables ++ polarizedFormulaPlanSkolems nominalFormulaPlans ++ nominalPremiseSpellings)
         elaboratedGoal (map fst nominalPlans) (map snd nominalPremises)
     queryClosedAxioms = queryClosedInstantiationAxioms
@@ -2332,7 +2358,7 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             [preparedEnvironmentTransportSynthesisFormula prepared available elaboratedGoal]
         , Right (suppliedPremises, _) <-
             [preparedEnvironmentTransportFunctionPremises prepared available]
-        , novelTransportPlan plans premises translatedGoal suppliedPremises
+        , novelTransportPlan formulaPlans plans premises translatedGoal suppliedPremises
         ] ++
         [ ( suppliedPremises ++ nominalLoadedSchemePremises, [], Set.empty
           , Map.empty, Map.empty
@@ -2346,7 +2372,8 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             [preparedEnvironmentNominalTransportSynthesisFormula prepared available elaboratedGoal]
         , Right (suppliedPremises, _) <-
             [preparedEnvironmentNominalTransportFunctionPremises prepared available]
-        , novelTransportPlan nominalPlans nominalPremises translatedGoal suppliedPremises
+        , novelTransportPlan nominalFormulaPlans nominalPlans nominalPremises
+            translatedGoal suppliedPremises
         ]
     availableTransportSymbols goal supplied = Set.unions $
         negativeOpaqueFormulaSymbols PositiveFormula (translatedFormula goal) :
@@ -2354,19 +2381,41 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
     -- Existing views keep their established candidate order. A coherent view
     -- outside those frontiers runs first: otherwise a large cached consumer
     -- family could consume the entire budget before this one-step plan runs.
-    novelTransportPlan existingGoals existingPremises goal supplied =
-        translatedFormula goal `notElem` map fst existingGoals ||
+    novelTransportPlan sourcePlans existingGoals existingPremises goal supplied =
+        -- Above the exhaustive occurrence frontier, try the coherent view
+        -- without compiling thousands of older formulas just to compare them.
+        -- This is a scheduling threshold, not a type-language restriction.
+        polarizedFormulaPlanPositiveForallCount sourcePlans > maxCompleteForallFrontierSites ||
+            translatedFormula goal `notElem` map fst existingGoals ||
             any (`Set.notMember` Set.fromList existingPremises)
                 (filter ((/= targetSymbol) . fst) supplied)
-    directedSearchPlans =
+    constructedSearchPlans =
+        concatMap (\axioms -> augmentDirected axioms
+            (structuralSearchPlans ++ structuralAxiomSearchPlans ++
+                providerStructuralSearchPlans ++ loadedStructuralSearchPlans ++
+                queryClosedStructuralSearchPlans ++ queryCorrelatedStructuralSearchPlans))
+            (scopedConstructionInstantiationAxioms
+                (preparedEnvironmentScopedSynthesisFormulaTranslator prepared) visibleArgumentInScope
+                (goalVariables ++ polarizedFormulaPlanSkolems formulaPlans ++ premiseSpellings)
+                (map fst plans) (map snd premises) queryConstructedAxioms) ++
+        concatMap (\axioms -> augmentDirected axioms
+            (nominalSearchPlans ++ providerNominalSearchPlans ++ loadedNominalSearchPlans ++
+                queryClosedNominalSearchPlans ++ queryCorrelatedNominalSearchPlans))
+            (scopedConstructionInstantiationAxioms
+                (preparedEnvironmentNominalScopedSynthesisFormulaTranslator prepared) visibleArgumentInScope
+                (goalVariables ++ polarizedFormulaPlanSkolems nominalFormulaPlans ++ nominalPremiseSpellings)
+                (map fst nominalPlans) (map snd nominalPremises) nominalQueryConstructedAxioms)
+    directedSearchPlans = instanceSearchPlans
+        queryDirectedAxioms nominalQueryDirectedAxioms
+    instanceSearchPlans structuralInstances nominalInstances =
         focusedPlansOf
-            [(instantiationAxiomPremises queryDirectedAxioms,
-                instantiationVisibleApplications queryDirectedAxioms)] ++
-        augmentDirected queryDirectedAxioms
+            [(instantiationAxiomPremises structuralInstances,
+                instantiationVisibleApplications structuralInstances)] ++
+        augmentDirected structuralInstances
             (structuralSearchPlans ++ structuralAxiomSearchPlans ++
                 providerStructuralSearchPlans ++ loadedStructuralSearchPlans ++
                 queryClosedStructuralSearchPlans ++ queryCorrelatedStructuralSearchPlans) ++
-        augmentDirected nominalQueryDirectedAxioms
+        augmentDirected nominalInstances
             (nominalSearchPlans ++ providerNominalSearchPlans ++ loadedNominalSearchPlans ++
                 queryClosedNominalSearchPlans ++ queryCorrelatedNominalSearchPlans)
     withoutProviders providerNames =
@@ -2423,7 +2472,8 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
 
     isInhabitationFallbackSymbol (Symbol spelling) =
         "$djinn$focused$" `isPrefixOf` spelling ||
-        "$djinn$query-directed-instantiation$" `isPrefixOf` spelling
+        "$djinn$query-directed-instantiation$" `isPrefixOf` spelling ||
+        "$djinn$query-constructed-instantiation$" `isPrefixOf` spelling
     isInhabitationFallbackSymbol _ = False
 
     -- A proof-backed target diagnostic is already the sharpest candidate-free
@@ -2622,11 +2672,22 @@ searchPreparedFormulaPlan options candidateLimit target externalEnv
                     (checkCandidateProofWith $
                         checkProofWithEvidence internalEnv form)
                     internalProofs
+            -- Each constructed argument introduces its own rigid scope. A
+            -- raw propositional proof may reuse an axiom beneath that same
+            -- introduction; it needs a fresh instance before it can become a
+            -- source-language term. Keep counting it against the raw budget,
+            -- but do not erase its scope evidence into a candidate.
+            let independentProofs =
+                    [ checked
+                    | (internalProof, checked) <- zip internalProofs checkedProofs
+                    , independentConstructionScopes axiomSymbols $
+                        restoreProofTerm proofEnv internalProof
+                    ]
             generatedCandidates <- internalFailure
                 "cannot construct generated clause" $
                 mapM
                     (convertCheckedCandidate convertProof candidateDetails)
-                    checkedProofs
+                    independentProofs
             let firstProof = case internalProofs of
                     firstProofTerm : _ -> Just $ show firstProofTerm
                     [] -> Nothing

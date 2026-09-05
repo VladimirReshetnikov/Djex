@@ -725,7 +725,7 @@ tests = testGroup "Exference private engine boundaries"
             , groundProviderConstraints = []
             }
         ]
-  , testCase "provider instantiation admits six binders and rejects seven" $ do
+  , testCase "heuristic instantiation stays bounded while exact vectors follow source arity" $ do
       let token = TypeCons $ name "WideToken"
           quantified binder body = TypeForall [binder] [] body
           selected = quantified 10
@@ -763,7 +763,16 @@ tests = testGroup "Exference private engine boundaries"
         ]
       candidateProviderInstantiations [selected] sevenBinderProvider @?= []
       assignmentProviderInstantiations
-          [exactArguments ++ [seventhArgument]] sevenBinderProvider @?= []
+          [exactArguments ++ [seventhArgument]] sevenBinderProvider @?=
+        [ GroundProviderInstantiation
+            { groundProviderArguments = exactArguments ++ [seventhArgument]
+            , groundProviderType = token
+            , groundProviderConstraints = []
+            }
+        ]
+      assignmentProviderInstantiations [exactArguments] sevenBinderProvider @?= []
+      assignmentProviderInstantiations
+          [exactArguments ++ [seventhArgument]] sixBinderProvider @?= []
   , testCase "generic deconstructors need no persistent flexible IDs" $ do
       let integer = TypeCons $ name "Int"
           box argument = TypeApp (TypeCons $ name "Box") argument
@@ -1368,7 +1377,7 @@ tests = testGroup "Exference private engine boundaries"
         integer (ExpTypeApply (ExpName fallbackName) integerArgument)
       null (checkedExpressionTypeApplicationOrigins compatibility) @?= True
       expectPlainGraph "compatibility fallback" 46 compatibility
-  , testCase "origin eligibility is closed bounded and post-constraint" $ do
+  , testCase "origin eligibility is closed source-arity-directed and post-constraint" $ do
       let integer = TypeCons $ name "Int"
           boolean = TypeCons $ name "Bool"
           token = TypeCons $ name "Token"
@@ -1418,9 +1427,19 @@ tests = testGroup "Exference private engine boundaries"
       sevenEvidence <- checkedEvidenceWithSchemes emptyStaticClassEnv
         sevenBindings [] sevenSchemes token
         (foldl ExpTypeApply (ExpName sevenName) arguments)
-      null (checkedExpressionTypeApplicationOrigins sevenEvidence) @?= True
-      checkedExpressionTypeApplicationOriginReferences sevenEvidence @?= []
-      expectPlainGraph "seven-slot ineligible telescope" 48 sevenEvidence
+      length (checkedExpressionTypeApplicationOrigins sevenEvidence) @?= 1
+      checkedExpressionTypeApplicationOriginReferences sevenEvidence @?=
+        [(0, slot) | slot <- [0 .. 6]]
+      case checkedExpressionTermGraph 48 sevenEvidence of
+        ExferenceTermGraphAssociated checked ->
+          map (Certificate.checkedTypeApplicationCertificateStepSlot . third)
+            (concat $ Association.foldCheckedTypeApplicationCertificateGraph
+              (\rows _ _ _ _ _ receipts -> receipts : rows) [] checked)
+            @?= [0 .. 6]
+        ExferenceTermGraphAvailable _ -> fail
+          "seven-slot exact origin was downgraded to a plain graph"
+        ExferenceTermGraphUnavailable reason -> fail
+          $ "seven-slot exact origin lost association: " ++ show reason
 
       -- A deliberately open retained scheme can satisfy the structural
       -- sidecar check, but cannot own a closed specialization origin.

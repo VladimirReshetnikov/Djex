@@ -154,15 +154,18 @@ results, not behavioral equivalence tests for the reference functions.
 cabal exec -- runghc -package=djex test-church/probe_scopes.hs
 ```
 
-This separate probe exercises 22 inhabitable signatures and eight deliberately
+This separate probe exercises 28 inhabitable signatures and 11 deliberately
 incompatible scope or correlation patterns through each public backend. It
 covers alpha-renaming, shadowed binders, nested polymorphic results, ambient
 type variables, repeated correlations, higher-kinded applications, and
-instantiation choices determined only when an argument is supplied. Every
+instantiation choices determined only when an argument is supplied. It also
+constructs one or two distinct polymorphic arguments and instantiates a
+polymorphic result exposed only after applying an ordinary term argument. Every
 query receives only the abstract type constructors `F`, `G`, `H`, and `Token`,
 plus any provider signatures explicitly listed for that case. Two global
 provider cases exercise delayed instantiation of a named polymorphic function;
-the remaining cases use only values supplied as query arguments.
+one additional case supplies only a unit value. The remaining cases use only
+values supplied as query arguments.
 
 Provider bodies are generated solely in a separate compiler support module.
 They are total, their constructors are hidden, and their source never enters
@@ -175,6 +178,11 @@ including any unexpected candidate for a negative case. Missing positive
 candidates, unexpected negative candidates, errors, timeouts, or compiler
 failures make the probe fail. A negative result means that no candidate was
 returned under the stated search budget; it is not a non-inhabitation theorem.
+Positive queries use 10,000 steps or choices; every negative query uses the
+same smaller 1,000-step or choice budget. All queries retain a three-second
+wall-clock safety timeout, and reaching that timeout is a failure. This
+distinction matters for intentionally empty polymorphic factory goals whose
+bounded search can otherwise spend substantial time exploring alternatives.
 Generated modules and per-case results are written to the ignored
 `results/scopes/` directory. `NoPolyKinds` in the compiler fixture makes the
 support module's datatype declarations agree with the explicitly supplied kinds
@@ -185,7 +193,7 @@ always infer from an unannotated occurrence. The implementation report in
 [`docs/rank-n-impredicative-synthesis.tex`](../docs/rank-n-impredicative-synthesis.tex)
 explains these cases and compiler-checked explicit type applications.
 
-The completed reconstruction pass was validated on 2026-09-04: all 60 probe
-queries met their expectations across both engines, all 44 positive
-implementations passed GHC, and all 16 negative queries returned no candidate
+The completed reconstruction pass was validated on 2026-09-04: all 78 probe
+queries met their expectations across both engines, all 56 positive
+implementations passed GHC, and all 22 negative queries returned no candidate
 without errors or timeouts. These counts are separate from the Church corpus.

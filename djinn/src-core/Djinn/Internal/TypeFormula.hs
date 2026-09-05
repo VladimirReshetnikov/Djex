@@ -35,12 +35,15 @@ module Djinn.Internal.TypeFormula
     , quintupleOpaqueFormulaPlans
     , quintupleOpenFormulaPlans
     , polarizedFormulaPlanSkolems
+    , polarizedFormulaPlanPositiveForallCount
+    , maxCompleteForallFrontierSites
     , prepareFormulaCompiler
     , prepareFormulaCompilerWithRecursiveData
     , compileFormula
     , structuralFormulaRetainsAssignments
     , compilePolarizedFormulaPlans
     , compileTransportFormula
+    , compileConstructedHypothesisFormula
     , negativeOpaqueFormulaSymbols
     ) where
 
@@ -52,7 +55,7 @@ import Data.Graph (SCC(..), stronglyConnComp)
 import Data.List (intercalate, isSuffixOf, sortOn)
 import qualified Data.Map.Lazy as LazyMap
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import qualified Data.Set as Set
 import Numeric.Natural (Natural)
 
@@ -234,21 +237,19 @@ data PolarizedFormulaPlans = PolarizedFormulaPlans
     deriving (Eq, Show)
 
 -- | Every distinct skolem spelling introduced by any plan of this family, in
--- first-plan order. Frontier plans reuse the primary expansion and namespace,
--- so central deduplication prevents the polynomial tail from multiplying the
--- instantiation candidate inventory.
+-- first-plan order. The primary view opens every supported positive site.
+-- Alternatives only omit sites and reuse the primary expansion paths and
+-- namespaces, so they cannot introduce another spelling. Reading their lists
+-- here would unnecessarily force every optional occurrence frontier.
 polarizedFormulaPlanSkolems :: PolarizedFormulaPlans -> [String]
 polarizedFormulaPlanSkolems plans = SharedCollection.distinctOn id $
-    translationIntroducedSkolems (primaryFormulaPlan plans) ++
-    translationIntroducedSkolems (transportFormulaPlan plans) ++
-    concatMap translationIntroducedSkolems
-        (singleOpaqueFormulaPlans plans ++ singleOpenFormulaPlans plans ++
-            pairOpaqueFormulaPlans plans ++ pairOpenFormulaPlans plans ++
-            tripleOpaqueFormulaPlans plans ++ tripleOpenFormulaPlans plans ++
-            quadrupleOpaqueFormulaPlans plans ++
-            quadrupleOpenFormulaPlans plans ++
-            quintupleOpaqueFormulaPlans plans ++
-            quintupleOpenFormulaPlans plans)
+    translationIntroducedSkolems $ primaryFormulaPlan plans
+
+-- | Source-sized planning information without demanding any optional
+-- occurrence-subset view. This is a scheduling input, never a rank limit.
+polarizedFormulaPlanPositiveForallCount :: PolarizedFormulaPlans -> Int
+polarizedFormulaPlanPositiveForallCount =
+    length . translationOpenableForalls . primaryFormulaPlan
 
 -- A definition origin plus the reverse source path is stable across alias
 -- expansion, duplicated arguments, datatype fields, and reopened forall
@@ -444,7 +445,7 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
         source = do
     expanded <- expansionTypeAt view QueryOrigin [] source
     primary <- lowerExpansionType
-        (PolarizedForalls namespace polarity openedView Set.empty Set.empty)
+        (PolarizedForalls (show namespace) polarity openedView Set.empty Set.empty)
         prepared emptyExpansionPath [] expanded
     -- Exact opacity applies to recursive data as well as quantified subtrees.
     -- This complementary view preserves forwarding such as @Rec a -> Rec a@
@@ -453,54 +454,39 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
         OpaqueForalls prepared emptyExpansionPath [] expanded
     let available = negativeOpaqueFormulaSymbols polarity $ translatedFormula primary
     transport <- if Set.null available then pure primary else lowerExpansionType
-        (PolarizedForalls namespace polarity openedView Set.empty available)
+        (PolarizedForalls (show namespace) polarity openedView Set.empty available)
         prepared emptyExpansionPath [] expanded
     let sites = translationOpenableForalls primary
         allSites = Set.fromList sites
-    singleOpaque <- mapM
-        (compileSelection expanded . Set.singleton) sites
-    singleOpen <- if atLeast 3 sites then mapM
-            (compileSelection expanded . opaqueExceptTargets allSites . (: []))
-            sites
-        else Right []
-    let sitePairs = unorderedPairs sites
-    pairOpaque <- if atLeast 4 sites then mapM
-            (compileSelection expanded . Set.fromList . pairMembers) sitePairs
-        else Right []
-    pairOpen <- if atLeast 5 sites then mapM
-            (compileSelection expanded . opaqueExceptTargets allSites .
-                pairMembers) sitePairs
-        else Right []
-    let siteTriples = unorderedTriples sites
-    tripleOpaque <- if atLeast 6 sites then mapM
-            (compileSelection expanded . Set.fromList . tripleMembers)
-            siteTriples
-        else Right []
-    tripleOpen <- if atLeast 7 sites then mapM
-            (compileSelection expanded . opaqueExceptTargets allSites .
-                tripleMembers)
-            siteTriples
-        else Right []
-    let siteQuadruples = unorderedQuadruples sites
-    quadrupleOpaque <- if atLeast 8 sites then mapM
-            (compileSelection expanded . Set.fromList . quadrupleMembers)
-            siteQuadruples
-        else Right []
-    quadrupleOpen <- if atLeast 9 sites then mapM
-            (compileSelection expanded . opaqueExceptTargets allSites .
-                quadrupleMembers)
-            siteQuadruples
-        else Right []
-    let siteQuintuples = boundedQuintuples sites
-    quintupleOpaque <- if atLeast 10 sites then mapM
-            (compileSelection expanded . Set.fromList . quintupleMembers)
-            siteQuintuples
-        else Right []
-    quintupleOpen <- if atLeast 11 sites then mapM
-            (compileSelection expanded . opaqueExceptTargets allSites .
-                quintupleMembers)
-            siteQuintuples
-        else Right []
+        -- Primary and exact compilation above retain eager diagnostics. The
+        -- remaining views are optional proof-producing strategies: compile
+        -- each only when search asks for it, omitting a failed alternative.
+        -- Such an omission grants no negative authority. In particular, an
+        -- early transport proof need not prepare thousands of unused subsets.
+        selection = either (const Nothing) Just . compileSelection expanded
+        singleOpaque = mapMaybe (selection . Set.singleton) sites
+        singleOpen = if atLeast 3 sites then mapMaybe
+            (selection . opaqueExceptTargets allSites . (: [])) sites else []
+        sitePairs = unorderedPairs sites
+        pairOpaque = if atLeast 4 sites then mapMaybe
+            (selection . Set.fromList . pairMembers) sitePairs else []
+        pairOpen = if atLeast 5 sites then mapMaybe
+            (selection . opaqueExceptTargets allSites . pairMembers) sitePairs else []
+        siteTriples = unorderedTriples sites
+        tripleOpaque = if atLeast 6 sites then mapMaybe
+            (selection . Set.fromList . tripleMembers) siteTriples else []
+        tripleOpen = if atLeast 7 sites then mapMaybe
+            (selection . opaqueExceptTargets allSites . tripleMembers) siteTriples else []
+        siteQuadruples = unorderedQuadruples sites
+        quadrupleOpaque = if atLeast 8 sites then mapMaybe
+            (selection . Set.fromList . quadrupleMembers) siteQuadruples else []
+        quadrupleOpen = if atLeast 9 sites then mapMaybe
+            (selection . opaqueExceptTargets allSites . quadrupleMembers) siteQuadruples else []
+        siteQuintuples = boundedQuintuples sites
+        quintupleOpaque = if atLeast 10 sites then mapMaybe
+            (selection . Set.fromList . quintupleMembers) siteQuintuples else []
+        quintupleOpen = if atLeast 11 sites then mapMaybe
+            (selection . opaqueExceptTargets allSites . quintupleMembers) siteQuintuples else []
     return PolarizedFormulaPlans
         { primaryFormulaPlan = primary
         , exactOpaqueFormulaPlan = exact
@@ -518,7 +504,7 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
         }
   where
     compileSelection expanded opaqueSites = lowerExpansionType
-        (PolarizedForalls namespace polarity openedView opaqueSites Set.empty)
+        (PolarizedForalls (show namespace) polarity openedView opaqueSites Set.empty)
         prepared emptyExpansionPath [] expanded
 
     -- Opening nested targets necessarily opens the union of every enclosing
@@ -593,6 +579,15 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
 maxQuintuplePlansPerFrontier :: Int
 maxQuintuplePlansPerFrontier = 512
 
+-- | Up to this many independent positive sites, the historical frontiers
+-- cover every subset: either its open side or its opaque side has at most
+-- five members, and C(11, 5) = 462 fits the quintuple frontier's 512 cap.
+-- Larger sources still use the same proof rules and coherent transport;
+-- callers use this threshold only to avoid enumerating known-costly views
+-- before trying an inhabitation-only acceleration.
+maxCompleteForallFrontierSites :: Int
+maxCompleteForallFrontierSites = 11
+
 -- | A single demand-aware introduction plan. Keep a positive quantified site
 -- opaque when its exact alpha-aware type is supplied by a negative position;
 -- introduce all remaining positive sites. Unlike occurrence-subset frontiers,
@@ -612,13 +607,37 @@ compileTransportFormula
 compileTransportFormula supplied namespace polarity openedView view prepared source = do
     expanded <- expansionTypeAt view QueryOrigin [] source
     primary <- lowerExpansionType
-        (PolarizedForalls namespace polarity openedView Set.empty Set.empty)
+        (PolarizedForalls (show namespace) polarity openedView Set.empty Set.empty)
         prepared emptyExpansionPath [] expanded
     let available = supplied `Set.union`
             negativeOpaqueFormulaSymbols polarity (translatedFormula primary)
     lowerExpansionType
-        (PolarizedForalls namespace polarity openedView Set.empty available)
+        (PolarizedForalls (show namespace) polarity openedView Set.empty available)
         prepared emptyExpansionPath [] expanded
+
+-- | Compile one already instantiated provider as a hypothesis, opening
+-- polymorphic argument obligations so their values can be constructed. Every
+-- axiom owns a namespace disjoint from ordinary goal/premise namespaces and
+-- from every other axiom. Its new rigid variables must not enter a shared
+-- instantiation candidate inventory: they belong only to this introduction.
+compileConstructedHypothesisFormula
+    :: String
+    -> Natural
+    -> TypeView (SharedType.Type String)
+    -> PreparedFormulaCompiler
+    -> SharedType.Type String
+    -> Either String (Formula, [String])
+compileConstructedHypothesisFormula family index view prepared source = do
+    expanded <- expansionTypeAt view QueryOrigin [] source
+    translation <- lowerExpansionType
+        (PolarizedForalls namespace NegativeFormula view Set.empty Set.empty)
+        prepared emptyExpansionPath [] expanded
+    if null (translationIntroducedSkolems translation)
+        then Left "provider instance has no quantified argument to construct"
+        else Right (translatedFormula translation,
+            translationIntroducedSkolems translation)
+  where
+    namespace = "construction$" ++ family ++ "$" ++ show index
 
 -- | Exact opaque types available at negative source positions. Polarity is
 -- the compiler's initial polarity, so a prepared premise starts negative and
@@ -642,7 +661,7 @@ oppositePolarity NegativeFormula = PositiveFormula
 data ForallLowering
     = OpaqueForalls
     | PolarizedForalls
-        Natural
+        String
         FormulaPolarity
         (TypeView (SharedType.Type String))
         (Set.Set ForallSite)
@@ -864,7 +883,7 @@ lowerForall lowering definitions path occurrencePath origin atom = case lowering
 -- The allocated skolem spellings are returned so instantiation policy can
 -- treat them as sequent variables without reparsing rendered atoms.
 openForallBody
-    :: Natural
+    :: String
     -> [Natural]
     -> ExpansionOrigin
     -> [String]
@@ -890,7 +909,7 @@ openForallBody namespace occurrencePath origin binders body = do
            , chosen ++ [(binder, fresh)]
            )
 
-    skolemBase index = "$djinn$skolem$" ++ show namespace ++ "$" ++
+    skolemBase index = "$djinn$skolem$" ++ namespace ++ "$" ++
         show occurrencePath ++ "$" ++ show origin ++ "$" ++ show index
 
     allocateShadow reserved binder = Just $ chooseFresh reserved $

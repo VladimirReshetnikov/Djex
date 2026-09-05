@@ -28,6 +28,8 @@ module Djinn.Internal.Instantiation
     , instantiationAxioms
     , queryCorrelatedInstantiationAxioms
     , queryDirectedInstantiationAxioms
+    , queryConstructedInstantiationAxioms
+    , scopedConstructionInstantiationAxioms
     , queryClosedInstantiationAxioms
     , loadedInstantiationAxioms
     , providerInstantiationPremises
@@ -40,6 +42,7 @@ module Djinn.Internal.Instantiation
     , providerInstantiationApplications
     , rewriteProviderInstantiationEvidence
     , usesInstantiationEvidence
+    , independentConstructionScopes
     , eliminateInstantiationEvidence
     ) where
 
@@ -47,10 +50,12 @@ import Control.Monad (replicateM)
 import Data.List (sort, sortOn)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Numeric.Natural (Natural)
 
 import Djinn.Internal.InstantiationEvidence
     ( eliminateInstantiationEvidence
     , usesInstantiationEvidence
+    , independentConstructionScopes
     )
 import Djinn.Internal.LJTFormula
 import Djinn.Internal.DirectedInstantiation (directedInstantiationTuples)
@@ -109,6 +114,10 @@ data InstantiationAxioms = InstantiationAxioms
     , instantiationAxiomSymbols :: Set.Set Symbol
     , instantiationVisibleApplications ::
         Map.Map Symbol [SharedGenerated.VisibleTypeArgument]
+    , instantiationConstructionSkolems :: Map.Map Symbol [String]
+    , instantiationConstructionTranslator :: Maybe
+        (Set.Set String -> Natural -> SharedType.Type String ->
+            Either String (Formula, [String]))
     }
 
 -- | Provider-local specializations justified by caller-supplied evidence.
@@ -161,6 +170,7 @@ data InstantiationAxiom = InstantiationAxiom
     { instantiationAxiomFormula :: Formula
     , instantiationAxiomVisibleArguments ::
         Maybe [SharedGenerated.VisibleTypeArgument]
+    , instantiationAxiomSkolems :: [String]
     }
     deriving (Eq, Ord)
 
@@ -341,9 +351,8 @@ queryCorrelatedInstantiationAxioms translator visibleArgument
         map SharedTypeAtom.alphaTypeKey $
         typeSubtrees $ SharedType.canonicalizeType elaboratedGoal
     historicalAxiomSet = Set.fromList
-        [ InstantiationAxiom formula $
-            Map.lookup symbol $
-                instantiationVisibleApplications historicalAxioms
+        [ InstantiationAxiom formula
+            (Map.lookup symbol $ instantiationVisibleApplications historicalAxioms) []
         | (symbol, formula) <- instantiationAxiomPremises historicalAxioms
         ]
     correlatedTuples _ | null quantifiedCandidates = []
@@ -387,8 +396,8 @@ queryDirectedInstantiationAxioms translator visibleArgument historicalAxioms
     correlated = queryCorrelatedInstantiationAxioms translator visibleArgument
         historicalAxioms variableSpellings elaboratedGoal goalFormulas premiseFormulas
     excluded = Set.fromList
-        [ InstantiationAxiom formula $ Map.lookup symbol $
-            instantiationVisibleApplications family
+        [ InstantiationAxiom formula
+            (Map.lookup symbol $ instantiationVisibleApplications family) []
         | family <- [historicalAxioms, correlated]
         , (symbol, formula) <- instantiationAxiomPremises family
         ]
@@ -411,6 +420,203 @@ queryDirectedInstantiationAxioms translator visibleArgument historicalAxioms
         "$djinn$query-directed-instantiation$" translator True visibleArgument
         (\scheme -> directedInstantiationTuples (schemeSource scheme) demands demands)
         schemes
+
+-- | A demand-directed, positive-only family which can construct a quantified
+-- argument after choosing an impredicative provider instance. Unlike the
+-- historical exact translator, the scoped translator opens obligation-side
+-- foralls in the instantiated provider body. Fresh names are private to one
+-- attempted axiom and never join the demand vocabulary or nested discovery.
+queryConstructedInstantiationAxioms
+    :: (Set.Set String -> Natural -> SharedType.Type String ->
+        Either String (Formula, [String]))
+    -> (Set.Set String -> SharedType.Type String -> Maybe SharedGenerated.VisibleTypeArgument)
+    -> [String]
+    -> SharedType.Type String
+    -> [Formula]
+    -> [Formula]
+    -> InstantiationAxioms
+queryConstructedInstantiationAxioms translator visibleArgument variableSpellings
+        elaboratedGoal goalFormulas premiseFormulas = initial
+        { instantiationConstructionTranslator = Just translator }
+  where
+    initial = buildInstantiationAxiomsWithScopedTranslator False True Set.empty
+        "$djinn$query-constructed-instantiation$"
+        (translator (Set.fromList variableSpellings) . fromIntegral) True
+        (visibleArgument $ Set.fromList variableSpellings)
+        (\scheme -> distinctOn (map SharedTypeAtom.alphaTypeKey) $
+            directedInstantiationTuples (schemeSource scheme) demands demands ++
+            [ replicate (length $ schemeBinders scheme) image
+            | image <- demands, SharedType.containsForall image
+            ])
+        schemes
+    atoms = queryAtomSymbols goalFormulas premiseFormulas
+    allowed = Set.fromList variableSpellings
+    demands = distinctOn SharedTypeAtom.alphaTypeKey $
+        variableCandidatesOf variableSpellings ++
+        [ subtree
+        | source <- elaboratedGoal : opaqueAtomSources atoms
+        , subtree <- typeSubtrees source
+        , SharedType.freeVariables subtree `Set.isSubsetOf` allowed
+        ]
+    schemes = distinctOn schemeKey
+        [ scheme
+        | (HypothesisSide, symbol) <- atoms
+        , Just source <- [opaqueSymbolSource symbol]
+        , Just scheme <- [directedInstantiationScheme source]
+        ]
+
+-- | Keep each argument introduction in a separate proof-search family. Its
+-- private rigid variables may specialize original quantified assumptions,
+-- enabling polymorphic composition inside the new argument, but never become
+-- variables of the enclosing query or another construction family. Derived
+-- premises retain ordinary checked instantiation evidence back to the exact
+-- original scheme; none is an additional source assumption.
+scopedConstructionInstantiationAxioms
+    :: (Set.Set String -> SharedType.Type String -> Either String Formula)
+    -> (Set.Set String -> SharedType.Type String -> Maybe SharedGenerated.VisibleTypeArgument)
+    -> [String]
+    -> [Formula]
+    -> [Formula]
+    -> InstantiationAxioms
+    -> [InstantiationAxioms]
+scopedConstructionInstantiationAxioms translator visibleArgument variableSpellings
+        goalFormulas premiseFormulas constructions =
+    [ grow (initial symbol formula skolems) $ jobsFor symbol skolems formula
+    | (symbol, formula) <- instantiationAxiomPremises constructions
+    , Just skolems <- [Map.lookup symbol $
+        instantiationConstructionSkolems constructions]
+    ]
+  where
+    originalAtoms = queryAtomSymbols goalFormulas premiseFormulas
+    originalSources = opaqueAtomSources originalAtoms
+    originalSchemes = schemesOf originalAtoms
+    originalSchemeKeys = Set.fromList $ map schemeKey originalSchemes
+    schemesOf atoms = distinctOn schemeKey
+        [ scheme
+        | (HypothesisSide, symbol) <- atoms
+        , Just source <- [opaqueSymbolSource symbol]
+        , Just scheme <- [directedInstantiationScheme source]
+        ]
+    sourceConstructors = Map.fromList
+        [ (SharedTypeRender.renderType id source, source)
+        | containing <- originalSources
+        , source@SharedType.TypeConstructor{} <- typeSubtrees containing
+        ]
+    initial symbol formula skolems = InstantiationAxioms
+        [(symbol, formula)] (Set.singleton symbol)
+        (Map.restrictKeys (instantiationVisibleApplications constructions) $
+            Set.singleton symbol)
+        (Map.singleton symbol skolems)
+        (instantiationConstructionTranslator constructions)
+
+    -- All descendants of one root share one attempt and premise allowance.
+    -- Breadth-first scheduling lets sibling obligations and source schemes
+    -- progress before a provider which can keep exposing another forall.
+    grow beginning = loop 0 (maxInstantiationAxioms - 1) beginning
+      where
+        loop attempt allowance accumulated queue
+            | attempt >= maxInstantiationAttempts || allowance <= 0 = accumulated
+            | otherwise = case queue of
+                [] -> accumulated
+                ScopedInstantiationJob parent scope constructing scheme arguments : rest ->
+                    let family = case (constructing,
+                            instantiationConstructionTranslator constructions) of
+                            (True, Just construct) ->
+                                buildInstantiationAxiomsWithScopedTranslator
+                                    False True Set.empty
+                                    (symbolSpelling parent ++ "$nested$" ++ show attempt ++ "$")
+                                    (\_ -> construct owned $ fromIntegral $
+                                        maxInstantiationAttempts + attempt)
+                                    False (visibleArgument owned) (const [arguments]) [scheme]
+                            (True, Nothing) -> InstantiationAxioms [] Set.empty
+                                Map.empty Map.empty Nothing
+                            (False, _) -> buildInstantiationAxiomsWithExclusions
+                                False True Set.empty
+                                ("$djinn$construction-scope$" ++ show attempt ++ "$")
+                                (translator owned) False (visibleArgument owned)
+                                (const [arguments]) [scheme]
+                        owned = Set.fromList $ scope ++ variableSpellings
+                        freshPremises =
+                            [ premise
+                            | premise@(_, formula) <- instantiationAxiomPremises family
+                            , formula `notElem` map snd (instantiationAxiomPremises accumulated)
+                            ]
+                        retained = Set.fromList $ map fst freshPremises
+                        next = accumulated
+                            { instantiationAxiomPremises =
+                                instantiationAxiomPremises accumulated ++ freshPremises
+                            , instantiationAxiomSymbols =
+                                instantiationAxiomSymbols accumulated `Set.union` retained
+                            , instantiationVisibleApplications = Map.union
+                                (instantiationVisibleApplications accumulated)
+                                (Map.restrictKeys (instantiationVisibleApplications family) retained)
+                            , instantiationConstructionSkolems = Map.union
+                                (instantiationConstructionSkolems accumulated)
+                                (Map.restrictKeys (instantiationConstructionSkolems family) retained)
+                            }
+                        children =
+                            [ job
+                            | (symbol, formula) <- freshPremises
+                            , Just introduced <- [Map.lookup symbol $
+                                instantiationConstructionSkolems family]
+                            , job <- jobsFor symbol (scope ++ introduced) formula
+                            ]
+                    in loop (attempt + 1) (allowance - length freshPremises)
+                        next (rest ++ children)
+
+    jobsFor parent skolems formula = roundRobin $ concat
+        [ [normalJobs scheme, constructionJobs scheme]
+        | scheme <- scopedSchemes
+        ]
+      where
+        fresh = Set.fromList skolems
+        allowed = fresh `Set.union` Set.fromList variableSpellings
+        body = case formula of _ :-> result -> result; _ -> formula
+        bodyAtoms = sidedAtomSymbols HypothesisSide body
+        scopedSchemes = distinctOn schemeKey $ originalSchemes ++ schemesOf bodyAtoms
+        scopedSources = originalSources ++ opaqueAtomSources bodyAtoms
+        vocabulary = distinctOn SharedTypeAtom.alphaTypeKey $
+            variableCandidatesOf skolems ++
+            [ subtree
+            | source <- scopedSources
+            , subtree <- typeSubtrees source
+            , SharedType.freeVariables subtree `Set.isSubsetOf` allowed
+            ]
+        obligations = distinctOn SharedTypeAtom.alphaTypeKey
+            [ source
+            | (ObligationSide, symbol) <- bodyAtoms
+            , source <- case opaqueSymbolSource symbol of
+                Just supplied -> [supplied]
+                Nothing | symbolSpelling symbol `Set.member` allowed ->
+                    [SharedType.TypeVariable $ symbolSpelling symbol]
+                Nothing -> maybe [] (: []) $ Map.lookup
+                    (symbolSpelling symbol) sourceConstructors
+            , SharedType.freeVariables source `Set.isSubsetOf` allowed
+            ]
+        normalJobs scheme =
+            [ ScopedInstantiationJob parent skolems False scheme arguments
+            | arguments <- take maxInstantiationAttempts $
+                distinctOn (map SharedTypeAtom.alphaTypeKey) $
+                    [ replicate (length $ schemeBinders scheme) variable
+                    | variable <- variableCandidatesOf skolems
+                    ] ++ directedInstantiationTuples (schemeSource scheme)
+                        vocabulary vocabulary
+            , any (not . Set.null . Set.intersection fresh . SharedType.freeVariables)
+                arguments ||
+                not (Set.null $ Set.intersection fresh $
+                    SharedType.freeVariables $ schemeSource scheme) ||
+                schemeKey scheme `Set.notMember` originalSchemeKeys
+            ]
+        constructionJobs scheme =
+            [ ScopedInstantiationJob parent skolems True scheme arguments
+            | arguments <- take maxInstantiationAttempts $
+                directedInstantiationTuples (schemeSource scheme) obligations vocabulary
+            ]
+
+-- The parent symbol is also the lexical ancestry token carried by a child
+-- construction axiom. Scope variables are inherited only along that ancestry.
+data ScopedInstantiationJob = ScopedInstantiationJob
+    Symbol [String] Bool InstantiationScheme [SharedType.Type String]
 
 -- | Build an additive hypothesis-instantiation tail whose tuples use at
 -- least one closed, forall-free subtree already present in the checked query.
@@ -693,7 +899,26 @@ buildInstantiationAxiomsWithExclusions
 buildInstantiationAxiomsWithExclusions discoverNested deduplicateFormula excludedAxioms
         symbolPrefix translator interleaveSchemes
         visibleArgument candidateTuples schemes =
-    InstantiationAxioms premises symbols visibleApplications
+    buildInstantiationAxiomsWithScopedTranslator discoverNested deduplicateFormula
+        excludedAxioms symbolPrefix (\_ source -> (\formula -> (formula, [])) <$> translator source) interleaveSchemes
+        visibleArgument candidateTuples schemes
+
+buildInstantiationAxiomsWithScopedTranslator
+    :: Bool
+    -> Bool
+    -> Set.Set InstantiationAxiom
+    -> String
+    -> (Int -> SharedType.Type String -> Either String (Formula, [String]))
+    -> Bool
+    -> (SharedType.Type String ->
+        Maybe SharedGenerated.VisibleTypeArgument)
+    -> (InstantiationScheme -> [[SharedType.Type String]])
+    -> [InstantiationScheme]
+    -> InstantiationAxioms
+buildInstantiationAxiomsWithScopedTranslator discoverNested deduplicateFormula excludedAxioms
+        symbolPrefix translator interleaveSchemes
+        visibleArgument candidateTuples schemes =
+    InstantiationAxioms premises symbols visibleApplications constructionSkolems Nothing
   where
     entries =
         [ (Symbol $ symbolPrefix ++ show index, axiom)
@@ -711,6 +936,12 @@ buildInstantiationAxiomsWithExclusions discoverNested deduplicateFormula exclude
         [ (symbol, arguments)
         | (symbol, axiom) <- entries
         , Just arguments <- [instantiationAxiomVisibleArguments axiom]
+        ]
+    constructionSkolems = Map.fromList
+        [ (symbol, skolems)
+        | (symbol, axiom) <- entries
+        , let skolems = instantiationAxiomSkolems axiom
+        , not $ null skolems
         ]
 
 -- | Enumerate every source subtree which is closed and contains no explicit
@@ -793,7 +1024,7 @@ buildAxiomFormulas
     -> Bool
     -> Set.Set InstantiationAxiom
     -> Bool
-    -> (SharedType.Type String -> Either String Formula)
+    -> (Int -> SharedType.Type String -> Either String (Formula, [String]))
     -> (SharedType.Type String ->
         Maybe SharedGenerated.VisibleTypeArgument)
     -> (InstantiationScheme -> [[SharedType.Type String]])
@@ -831,7 +1062,8 @@ buildAxiomFormulas discoverNested deduplicateFormula excludedAxioms interleaveSc
         AxiomJob scheme schemeAllowance (arguments : tuples) : jobs
             | schemeAllowance <= 0 ->
                 loop seenSchemes seenAxioms attempts allowance jobs
-            | otherwise -> case schemeAxiom scheme arguments of
+            | otherwise -> case schemeAxiom (maxInstantiationAttempts - attempts)
+                    scheme arguments of
                 Just axiom ->
                     let discovered = distinctOn schemeKey
                             [ found
@@ -873,16 +1105,17 @@ buildAxiomFormulas discoverNested deduplicateFormula excludedAxioms interleaveSc
         | interleaveSchemes = jobs ++ [job]
         | otherwise = job : jobs
 
-    schemeAxiom scheme arguments = do
+    schemeAxiom index scheme arguments = do
         instantiated <- rightToMaybe $
             instantiateSchemeBody scheme arguments
-        bodyFormula <- rightToMaybe $ translator instantiated
+        (bodyFormula, skolems) <- rightToMaybe $ translator index instantiated
         let hypothesis = PVar $ opaqueTypeSymbol $ schemeSource scheme
         if bodyFormula == hypothesis
             then Nothing
             else Just $ InstantiationAxiom
                 (hypothesis :-> bodyFormula)
                 (visibleArguments scheme arguments)
+                skolems
 
     visibleArguments scheme arguments = case requiredPrefixLengths of
         [] -> Nothing

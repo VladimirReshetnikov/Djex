@@ -90,6 +90,7 @@ tests =
     hTypeCompatibilityTests ++
     hCheckCompatibilityTests ++
     [ ("demand-directed rank-N instantiation", testDirectedRankN)
+    , ("construct impredicative arguments under fresh scopes", testConstructedRankN)
     , ("transport-directed rank-N opacity", testTransportRankN)
     , ("parse prefix function constructor", testPrefixArrowParsing)
     , ("parse maximal Djinn type and kind spines", testMaximalParserSpines)
@@ -1209,6 +1210,96 @@ testDirectedRankN = do
         result <- expectShownRight $ Djex.runDjinnQuery session request
         assertBool (spelling ++ " exhausted search without a candidate") $
             not $ null $ SharedSearch.batchCandidates $ SharedQuery.resultSearch result
+
+-- A selected impredicative image may itself require constructing a value.
+-- Every opened argument scope remains rigid and isolated from ambient data.
+testConstructedRankN :: IO ()
+testConstructedRankN = do
+    let construction = Symbol "$djinn$query-constructed-instantiation$guard"
+        child = Symbol "$djinn$query-constructed-instantiation$guard$nested$0$0"
+        sibling = Symbol "$djinn$query-constructed-instantiation$sibling"
+        ordinary = Symbol "$djinn$instantiation$guard"
+        input = Var $ Symbol "input"
+        use symbol argument = Apply (Apply (Var symbol) input) argument
+        evidence = Set.fromList [construction, child, sibling, ordinary]
+    assertBool "sibling construction scopes remain independent" $
+        InstantiationEvidence.independentConstructionScopes evidence $
+            Apply (Apply (Ctuple 2) (use construction input)) (use construction input)
+    assertBool "a construction scope cannot capture its own earlier introduction" $
+        not $ InstantiationEvidence.independentConstructionScopes evidence $
+            use construction (use construction input)
+    assertBool "ordinary instantiation remains reusable" $
+        InstantiationEvidence.independentConstructionScopes evidence $
+            use ordinary (use ordinary input)
+    assertBool "nested construction retains its lexical ancestor" $
+        InstantiationEvidence.independentConstructionScopes evidence $
+            use construction (use child input)
+    assertBool "a child construction cannot escape its ancestor" $
+        not $ InstantiationEvidence.independentConstructionScopes evidence $
+            use child input
+    assertBool "a sibling cannot authorize another construction's child" $
+        not $ InstantiationEvidence.independentConstructionScopes evidence $
+            use sibling (use child input)
+    prepared <- expectShownRight $ prepareEnvironment standardEnvironment
+    let rigid = "$djinn$skolem$construction$owned"
+        otherRigid = "$djinn$skolem$construction$other"
+        rigidType name = SharedType.TypeVariable name
+        identityAt name = SharedType.FunctionType (rigidType name) (rigidType name)
+        checkOwned = RawEnvironment.checkPreparedSynthesisTypesKindsWithRigids
+            prepared (Set.singleton rigid)
+    assertEqual "an owned rigid can cross the internal kind boundary" (Right ()) $
+        checkOwned [(KStar, identityAt rigid)]
+    assertLeft "source kind checking rejects a private rigid" $
+        RawEnvironment.checkPreparedSynthesisTypesKinds prepared [(KStar, identityAt rigid)]
+    assertLeft "another rigid is not authorized by the owned set" $
+        checkOwned [(KStar, identityAt otherRigid)]
+    assertLeft "owned rigid renaming retains kind consistency" $
+        checkOwned [(KStar, SharedType.FunctionType (rigidType rigid) $
+            SharedType.TypeApplication (rigidType rigid) $
+                SharedType.TupleType SharedName.Boxed [])]
+    session <- expectShownRight Djex.standardDjinnSession
+    mapM_ (check session True)
+        [ ("constructPolyIdentity",
+            "(forall a. a -> f a) -> f (forall b. b -> b)")
+        , ("constructPolyComposition",
+            "(forall a. a -> f a) -> (forall a. g a -> h a) -> " ++
+            "(forall a. h a -> k a) -> f (forall a. g a -> k a)")
+        , ("constructNestedPolyArgument",
+            "(forall a. a -> f a) -> f (forall b. b -> f (forall c. c -> c))")
+        , ("constructNestedAmbientPolyArgument",
+            "(forall a. a -> f a) -> f (forall b. b -> f (forall c. b -> c -> b))")
+        , ("constructDistinctPolyArguments",
+            "(forall a b. a -> b -> f a b) -> " ++
+            "f (forall x. x -> x) (forall y z. y -> z -> y)")
+        , ("constructAmbientPolyArgument",
+            "(forall a. a -> f a) -> f (forall b. x -> b -> x)")
+        , ("constructHigherKindedPolyArgument",
+            "(forall a. a -> f a) -> f (forall b. g b -> g b)")
+        , ("constructAfterTermArgument",
+            "(() -> forall a. a -> f a) -> f (forall b. b -> b)")
+        ]
+    mapM_ (check session False)
+        [ ("rejectEmptyPolyConstruction",
+            "(forall a. a -> f a) -> f (forall b. b)")
+        , ("rejectEscapingConstructionScope",
+            "x -> (forall a. a -> f a) -> f (forall b. b)")
+        , ("rejectCorrelatedEmptyScopes",
+            "(forall a b. a -> b -> f a b) -> f (forall x. x) (forall y. y)")
+        ]
+  where
+    assertLeft message result = case result of
+        Left _ -> pure ()
+        Right _ -> fail message
+    check session expected (spelling, source) = do
+        target <- expectShownRight $ SharedName.mkIdentifier spelling
+        request <- expectShownRight $ Djex.parseDjinnRequest session
+            defaultQueryOptions
+                { optionSorted = False, optionCutoff = 1, optionBudget = Just 10000 }
+            target "constructed-instantiation" source
+        result <- expectShownRight $ Djex.runDjinnQuery session request
+        let candidates = SharedSearch.batchCandidates $ SharedQuery.resultSearch result
+        assertEqual (spelling ++ ": " ++ show (SharedQuery.resultSearch result))
+            expected (not $ null candidates)
 
 -- A coherent transport view must scale with the source rather than stopping
 -- at the next middle layer of a fixed occurrence-subset frontier. The loaded

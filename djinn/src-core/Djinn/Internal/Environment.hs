@@ -13,9 +13,14 @@ module Djinn.Internal.Environment (
     prepareGroundSynthesisEnvironment,
     preparedEnvironmentSource, preparedEnvironmentInventory,
     checkPreparedTypesKinds, checkPreparedSynthesisTypesKinds,
+    checkPreparedSynthesisTypesKindsWithRigids,
     preparedEnvironmentSynthesisFormulaTranslator,
+    preparedEnvironmentScopedSynthesisFormulaTranslator,
+    preparedEnvironmentNominalScopedSynthesisFormulaTranslator,
     preparedEnvironmentStructuralAssignmentFidelity,
     preparedEnvironmentNominalSynthesisFormulaTranslator,
+    preparedEnvironmentConstructedHypothesisTranslator,
+    preparedEnvironmentNominalConstructedHypothesisTranslator,
     preparedEnvironmentPolarizedSynthesisFormulaPlans,
     preparedEnvironmentNominalPolarizedSynthesisFormulaPlans,
     preparedEnvironmentTransportSynthesisFormula,
@@ -55,6 +60,7 @@ import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 
 import Djinn.Internal.Declaration
+import Djinn.Internal.HIdentifier (isVarId)
 import Djinn.Internal.HCheck.Implementation
     ( AbstractTypeDefinitionError(..)
     , PreparedKindCheck
@@ -1184,6 +1190,31 @@ checkPreparedSynthesisTypesKinds prepared expectedTypes = do
         <$> checkedGroundHKind expected
         <*> first show (normalizeSynthesisType source)
 
+-- | Kind-check a solver-owned scope without broadening the source grammar.
+-- Only explicitly owned rigid variables are renamed to fresh legal spellings
+-- for this check. The formula compiler still sees the original rigid names;
+-- another private or malformed free variable remains a source-boundary error.
+checkPreparedSynthesisTypesKindsWithRigids
+    :: PreparedEnvironment
+    -> Set.Set HSymbol
+    -> [(HKind, SharedType.Type HSymbol)]
+    -> Either String ()
+checkPreparedSynthesisTypesKindsWithRigids prepared owned expectedTypes = do
+    checked <- mapM rename expectedTypes
+    checkPreparedSynthesisTypesKinds prepared checked
+  where
+    reserved = foldMap (foldMap Set.singleton . snd) expectedTypes
+    legalNames = filter (`Set.notMember` reserved)
+        ["djinnRigid" ++ show index | index <- [0 :: Integer ..]]
+    replacements = Map.fromList $ zip
+        (filter (not . isVarId) $ Set.toAscList owned)
+        (map SharedType.TypeVariable legalNames)
+    rename (kind, source) = do
+        checked <- first show $ SharedType.substituteTypeVariables
+            (\used name -> Just $ fst $ freshPrimedVariable used name)
+            Set.empty replacements source
+        Right (kind, checked)
+
 -- | The historical exact premise for each function assumption, in
 -- declaration order: the structural translation in which every quantified
 -- subtree is left opaque, keyed by the function's proof symbol.  The rank-N
@@ -1247,6 +1278,50 @@ preparedEnvironmentSynthesisFormulaTranslator
 preparedEnvironmentSynthesisFormulaTranslator
         (PreparedEnvironment _ _ _ _ _ _ compiler _ _) =
     compileSynthesisFormula compiler
+
+-- | Positive-only provider views for constructing quantified arguments after
+-- instantiation. Kind checking happens before opening any fresh rigid scope.
+preparedEnvironmentConstructedHypothesisTranslator
+    :: PreparedEnvironment
+    -> Set.Set HSymbol
+    -> Natural
+    -> SharedType.Type HSymbol
+    -> Either String (Formula, [String])
+preparedEnvironmentConstructedHypothesisTranslator
+        prepared@(PreparedEnvironment _ _ _ _ _ _ compiler _ _) owned index source = do
+    checkPreparedSynthesisTypesKindsWithRigids prepared owned [(KStar, source)]
+    compileConstructedHypothesisFormula "structural" index
+        synthesisFormulaTypeView compiler $ SharedType.canonicalizeType source
+
+preparedEnvironmentNominalConstructedHypothesisTranslator
+    :: PreparedEnvironment
+    -> Set.Set HSymbol
+    -> Natural
+    -> SharedType.Type HSymbol
+    -> Either String (Formula, [String])
+preparedEnvironmentNominalConstructedHypothesisTranslator
+        prepared@(PreparedEnvironment _ _ _ _ _ _ _ compiler _) owned index source = do
+    checkPreparedSynthesisTypesKindsWithRigids prepared owned [(KStar, source)]
+    compileConstructedHypothesisFormula "nominal" index
+        synthesisFormulaTypeView compiler $ SharedType.canonicalizeType source
+
+preparedEnvironmentScopedSynthesisFormulaTranslator
+    :: PreparedEnvironment
+    -> Set.Set HSymbol
+    -> SharedType.Type HSymbol
+    -> Either String Formula
+preparedEnvironmentScopedSynthesisFormulaTranslator prepared owned source = do
+    checkPreparedSynthesisTypesKindsWithRigids prepared owned [(KStar, source)]
+    preparedEnvironmentSynthesisFormulaTranslator prepared source
+
+preparedEnvironmentNominalScopedSynthesisFormulaTranslator
+    :: PreparedEnvironment
+    -> Set.Set HSymbol
+    -> SharedType.Type HSymbol
+    -> Either String Formula
+preparedEnvironmentNominalScopedSynthesisFormulaTranslator prepared owned source = do
+    checkPreparedSynthesisTypesKindsWithRigids prepared owned [(KStar, source)]
+    preparedEnvironmentNominalSynthesisFormulaTranslator prepared source
 
 -- | Mark an exact provider argument vector, substitute it into the retained
 -- scheme body, and check whether structural expansion preserves every reached

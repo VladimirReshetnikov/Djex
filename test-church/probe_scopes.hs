@@ -75,6 +75,19 @@ probes =
   , ProviderProbe "delayedGlobalAmbientArgument" True
       "forall x. F (forall c. c -> (forall d. x -> d -> d)) -> Token"
       [("delayedProvider", delayedProviderSignature)]
+  , Probe "polymorphicResultAfterArgument" True
+      "forall seed. seed -> (seed -> (forall a. a -> F a)) -> F (forall b. b -> b)"
+  , Probe "constructPolymorphicArgument" True
+      "(forall a. a -> F a) -> F (forall b. b -> b)"
+  , Probe "constructTwoPolymorphicArguments" True
+      "(forall a b. a -> b -> G a b) -> G (forall c. c -> c) (forall d e. d -> e -> d)"
+  , Probe "constructAmbientPolymorphicArgument" True
+      "forall x. (forall a. a -> F a) -> F (forall b. x -> b -> x)"
+  , Probe "constructHigherKindedPolymorphicArgument" True
+      "forall g. (forall a. a -> F a) -> F (forall b. g b -> g b)"
+  , ProviderProbe "polymorphicResultAfterUnit" True
+      "(() -> (forall a. a -> F a)) -> F (forall b. b -> b)"
+      [("unitSeed", "()")]
   , Probe "rejectDirectEscape" False
       "(forall a. F (forall b. b -> a)) -> F (forall c. c -> c)"
   , Probe "rejectEscapeBeneathForall" False
@@ -91,6 +104,12 @@ probes =
       "(forall a. F (forall b. G b a)) -> F (forall c. G c c)"
   , Probe "rejectHigherKindedEscape" False
       "(forall f. F (forall b. f b)) -> F (forall c. G c c)"
+  , Probe "rejectEmptyPolytypeConstruction" False
+      "(forall a. a -> F a) -> F (forall b. b)"
+  , Probe "rejectAmbientPolytypeEscape" False
+      "forall x. x -> (forall a. a -> F a) -> F (forall b. b)"
+  , Probe "rejectTwoEmptyPolytypes" False
+      "(forall a b. a -> b -> G a b) -> G (forall c. c) (forall d. d)"
   ]
 
 main :: IO ()
@@ -100,7 +119,7 @@ main = do
   createDirectoryIfMissing True "test-church/results/scopes"
   writeFile "test-church/results/scopes/ScopeProviders.hs" $ unlines
     [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, NoImplicitPrelude, NoPolyKinds, EmptyDataDecls #-}"
-    , "module ScopeProviders (F, H, G, Token, delayedProvider, delayedValue) where"
+    , "module ScopeProviders (F, H, G, Token, delayedProvider, delayedValue, unitSeed) where"
     , "data F a = F"
     , "data H a"
     , "data G a b"
@@ -109,6 +128,8 @@ main = do
     , "delayedProvider _ = Token"
     , "delayedValue :: " ++ delayedValueSignature
     , "delayedValue = F"
+    , "unitSeed :: ()"
+    , "unitSeed = ()"
     ]
   failures <- forM ["djinn", "exference"] $ \engine -> do
     results <- forM probes $ \probe -> do
@@ -153,7 +174,11 @@ main = do
 
 synthesize :: String -> Probe -> IO (Maybe String)
 synthesize engine probe = do
-  let (name, _, signature, providers) = probeDetails probe
+  let (name, shouldSucceed, signature, providers) = probeDetails probe
+      -- Negative queries test that no unsound candidate escapes a bounded
+      -- search. They are not decision procedures for System F inhabitation;
+      -- spend a smaller uniform budget on those intentionally empty goals.
+      searchBudget = if shouldSucceed then 10000 else 1000
   f <- expectRight $ mkIdentifier "F"
   g <- expectRight $ mkIdentifier "G"
   h <- expectRight $ mkIdentifier "H"
@@ -178,7 +203,7 @@ synthesize engine probe = do
       environment <- expectRight $ mkEnvironment $ declarations ++ values
       session <- expectRight $ mkDjinnSession environment
       request <- expectRight $ parseDjinnRequest session
-        defaultQueryOptions {optionSorted = False, optionCutoff = 1, optionBudget = Just 10000}
+        defaultQueryOptions {optionSorted = False, optionCutoff = 1, optionBudget = Just searchBudget}
         target "scope-probe" signature
       result <- expectRight $ runDjinnQuery session request
       case batchCandidates $ resultSearch result of
@@ -194,7 +219,7 @@ synthesize engine probe = do
       environment <- expectRight $ mkEnvironment $ declarations ++ values
       session <- expectRight $ mkExferenceSession environment
       request <- expectRight $ parseExferenceRequest session
-        defaultExferenceOptions {exferenceAllowUnused = True, exferenceMaximumSteps = 10000}
+        defaultExferenceOptions {exferenceAllowUnused = True, exferenceMaximumSteps = fromIntegral searchBudget}
         target "scope-probe" signature
       results <- expectRight $ runExferenceQuery session request
       case concatMap (batchCandidates . resultSearch) results of

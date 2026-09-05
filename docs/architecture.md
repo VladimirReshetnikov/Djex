@@ -282,9 +282,20 @@ The two search projections share `TypeAtom` for quantified subtrees. Its
 retained source tree supports rendering and capture-avoiding substitution of
 free variables; its cached lexical alpha key owns equality and ordering.
 Binders use scope and declaration position, so spelling is irrelevant while
-reordering binders or changing a free variable is significant. Ordinary
-unification never decomposes an atom. Instead, the two engines own explicit,
-bounded rules at different architectural boundaries. Djinn's polarized formula
+reordering binders or changing a free variable is significant. Djinn's ordinary
+formula translation preserves the atom; its demand-directed matcher can compare
+the retained type structure to select a checked forall elimination. Exference's
+type-equation solver also compares corresponding quantified bodies, opening
+paired binders with private rigid markers. It solves free metavariables,
+including assignments to complete polytypes, while rejecting any substitution
+image that contains a free marker from the comparison. Grouped and nested
+context-free prefixes align by lexical binder order; contexts match class,
+arity, order, and argument types structurally. The existing occurs check and
+directional variable namespaces remain in force. This is equality solving,
+not general higher-rank subsumption.
+
+The two engines also own explicit typing rules at different architectural
+boundaries. Djinn's polarized formula
 compiler may reopen a positive forall, including a contextual one; the
 validated context contributes no LJT premises, so generated inhabitants remain
 dictionary-independent. Exference may open an exposed goal's complete leading
@@ -292,7 +303,12 @@ forall chain, substitute fresh rigids through each layer's contexts and body,
 and make those contexts lexical givens only for that body. Deferred obligations
 retain their exact given snapshot, preventing binderless or sibling evidence
 leakage. Exference may also instantiate a scoped provider's leading binders
-immediately before ordinary type unification. A separate visible branch keeps
+immediately before ordinary type unification. If the pending argument goal is
+itself flexible, a separate branch forwards the provider's complete polytype
+and shares that choice with later argument obligations. This branch obtains its
+image from the provider scheme, so it requires no guessed tuple and introduces
+no fixed rank bound. The independent expression checker reconstructs the use.
+A separate visible branch keeps
 explicit-instance selection monotype-only, while a fully vacuous,
 context-free scoped or retained global provider with no free flexible
 variables may select complete closed context-free foralls from the checked
@@ -313,10 +329,13 @@ for source kind facts which the retained, kind-erased value scheme cannot
 recover.
 
 The checked Djinn and Exference runners first bound either outer relation at 32
-before entering an element. Assignment runners also bound each argument spine
-at six before entering an argument. The runners then resolve every `Name`
-against the exact sealed session and require an eligible context-free retained
-polymorphic scheme whose complete leading arity matches the vector.
+before entering an element. Assignment runners resolve the exact provider
+`Name` in the sealed session and derive the complete leading arity `n` of its
+eligible context-free retained scheme. They observe at most `n + 1` vector
+cells before entering an argument and require exactly `n` entries. Cyclic or
+overlong spines therefore fail finitely, while exact eight- or twelve-binder
+assignments receive the same treatment as shorter vectors. The exported
+six-argument constant continues to bound heuristic tuple reconstruction only.
 
 After those checks, kinded runners productively count at most 129 constructors
 in each caller-supplied kind under the public
@@ -327,7 +346,7 @@ vector equality, backend kind conversion, and forcing the paired type. It
 rejects a cyclic kind or any finite tree above the bound without entering an
 unbounded remainder, while preserving the shared 64-tuple constructor's
 129-node right-associated all-`Type` kind. The latter is a capacity within one
-argument's kind, independent of the six-argument vector limit.
+argument's kind, independent of the source-derived vector arity.
 
 Each scalar candidate is elaborated as a closed, context-free proper type in
 the sealed session's synonym and kind scope. That compatibility relation
@@ -425,12 +444,14 @@ productive exact assignment, that ordinary-first sequence is unchanged. The
 exact route consumes a vector once and may instantiate non-vacuous leading
 binders, whereas the scalar pool route requires a completely vacuous prefix.
 Scoped values never consult either map. These are finite evidence-directed
-typing rules, not permission for ordinary unification to decompose a polytype
-or a claim of general impredicative inference.
+typing rules. They do not change the separate structural equality solver or
+claim general impredicative inference.
 
 ### Djinn's four instantiation-axiom families
 
-Djinn has four bounded instantiation-axiom families. The historical
+Djinn retains four historical bounded instantiation-axiom families, together
+with the demand-directed matching and scoped construction described below. The
+historical
 query-local family instantiates up to six leading binders at variables,
 opened-forall skolems, premise-scope spellings, and guarded quantified query
 subtrees. A separate positive-only query-correlated family fairly schedules
@@ -457,22 +478,155 @@ Environment sealing separately keeps exact context-free loaded schemes in a
 private structural/nominal index. That appended family may use the historical
 candidates plus closed, forall-free subtrees of the checked query and
 synonym-expanded loaded signatures. All four families share visible-evidence
-retention: inferable choices erase, but a vacuous binder retains the shortest
-visible prefix. Every complete substituted body and specified visible argument
+retention: inferable choices erase, while a binder requiring explicit polytype
+shape information retains the shortest necessary visible prefix. Every complete
+substituted body and specified visible argument
 is kind-checked against the prepared environment. These bounded extensions are
 proof-producing only; the query-correlated, query-closed, and loaded
 families are positive-only, and a missed non-target loaded scheme cannot
-support negative evidence. The plan schedule retains the historical prefix,
-then the provider and loaded plans, and then the formerly final query-closed
-structural and optional nominal plans unchanged. Pure query-correlated plans
+support negative evidence. These historical families retain their relative
+order: the structural prefix, provider and loaded plans, and query-closed
+structural and optional nominal plans. The additional transport and loaded
+construction accelerators described below can run before generic guesses when
+earlier plans have found no candidate. Pure query-correlated plans
 follow and carry historical, loaded, and provider premises without importing
 query-closed axioms. A final combined superset appears only when both families
 contribute and permits their instances to compose. None of these tails resets
 the query-wide cutoff or fuel. Quantifiers outside these explicit boundaries
-remain opaque.
+remain opaque in the formula translation.
 Structure surrounding those opaque quantifiers retains its ordinary form,
 which permits impredicative values such as
 `[(forall a. a -> a)]` without claiming general higher-rank subsumption.
+
+### Demand-directed opacity and instantiation
+
+The formula compiler retains one additional `transportFormulaPlan`. A traversal
+of the primary formula collects exact opaque types in negative positions.
+Recompilation preserves a positive quantified site when its complete alpha-aware
+symbol belongs to that set and opens other positive sites. The same mechanism
+accepts external query symbols when compiling a loaded consumer's argument
+view. Existing scope-specific skolem identities remain in the keys, and the
+normal formula checker must still find evidence for each preserved atom.
+
+This plan combines any source-sized number of exact transports with fresh
+introductions without a combinatorial subset search. The prepared-environment
+transport helpers obtain loaded signatures from the sealed inventory,
+synonym-elaborate them, and use the same leading-binder implicitization and
+fresh namespace discipline as ordinary preparation. These views run only while
+no candidate has been found; a newly useful view can precede combinatorial
+occurrence search. They do not alter cached historical premise alternatives.
+
+The primary and exact views retain eager compilation diagnostics. Optional
+occurrence frontiers compile as search demands them; a failed optional view is
+omitted and cannot authorize negative evidence. Every alternative reuses the
+primary source paths and namespaces, so the primary's skolem inventory already
+contains all names that any alternative can introduce. Reading the inventory
+therefore does not force unused frontiers. The historical family's eleven-site
+exhaustiveness threshold also serves as a cheap scheduling hint for larger
+goals, allowing coherent transport before costly subset comparisons.
+
+### Constructing quantified arguments
+
+Instantiation also creates new argument obligations. For example, specializing
+`forall a. a -> f a` at `forall b. b -> b` must construct the polymorphic identity
+before applying the provider. Djinn compiles that selected provider at hypothesis
+polarity, opening quantified argument positions in a private scope. Its family
+may specialize source providers at the scope's rigid variables, allowing
+composition such as `p (\x -> v (u x))` inside a polymorphic argument.
+
+Newly exposed argument demands can introduce child scopes, including polytypes
+which mention an outer rigid variable. A later forall exposed after a term
+argument uses the actual free dependencies of its source and selected images
+to determine its ancestry. A closed subsequent stage is independent; a stage
+which mentions an outer rigid retains that exact owner and its ancestors.
+Each family shares its existing attempt and premise allowances; scope depth is
+not a separate rank cutoff. Synthetic evidence retains lexical ancestry, and
+an additional check prevents a child
+from escaping its ancestor or recursively reusing the same introduction's
+fixed skolem identities. These checks run before evidence erasure, and rejected
+proofs still consume the original proof cutoff and search budget.
+
+A quantified result supplied through available loaded schemes also receives a
+minimal construction plan after primary search, before generic loaded-instance
+guesses can consume its budget. This plan retains original source premises and
+the complete scoped family, and is skipped if an earlier plan already found a
+candidate. Scheme eligibility includes hypothesis-side quantified results
+exposed after ordinary provider arguments. That additional route preserves
+the existing opaque forwarding opportunity when an active provider's formula
+already equals the exact whole goal; it does not first speculate from
+quantified components of a value that can be forwarded directly. The existing
+leading-scheme policy is unchanged. The deferred phase for a monotype result tries exact forwarding
+before speculative construction.
+
+Kind checking accepts a private rigid name only through an explicitly supplied
+ownership set. It temporarily replaces those names with fresh legal variable
+spellings for kind inference, then compiles the original rigid identities.
+Unowned private names continue to fail the source boundary, and kind
+inconsistencies remain errors.
+
+### Retaining inferred polymorphic type arguments
+
+An instantiation whose selected binder occurs only beneath nested quantification
+may need explicit Haskell syntax even though the mathematical type is fully
+determined. Both backends retain the shortest visible prefix through the needed
+polytype image. A closed image uses the existing specified argument; an image
+with ambient free variables uses a partially specified pattern whose inner
+forall identities remain lexical and whose free occurrences render as holes.
+The complete correlated instantiation remains the checked type. Partial patterns
+do not satisfy the closed exact-assignment certificate boundary.
+
+Exference records source-order local/global occurrence types during independent
+checking, outside the optional term-graph draft. Failed transactional branches
+discard that trace. Only after all substitutions are known does the checker
+propose necessary visible applications, so later argument obligations can solve
+an earlier provider's impredicative choice. Trace alignment must consume exactly
+the original expression's occurrences, and the engine checks the entire repaired
+tree again before publication. Existing explicit global spines remain intact.
+The structural Haskell renderer and shared generated-term renderer both preserve
+interior holes; no named outer type-variable scope is required.
+
+### Demand-directed Djinn instantiation
+
+`Djinn.Internal.DirectedInstantiation` matches each context-free source body's
+complete type and successive arrow results against scope-compatible query
+demands. The leading source variables alone are selected; demands remain
+rigid. It also looks through later context-free forall groups in a result
+spine, using their binders as temporary matching variables to constrain the
+earlier group. Their solutions do not become selections here: ordinary checked
+elimination evidence must still establish each later instance. A solution may
+be a whole polytype or compound type containing one.
+Observed selections are solved together without a fixed binder-count bound.
+Unobserved selections draw lazily from the checked vocabulary. Fully solved
+matches precede incomplete matches, whose streams are interleaved before the
+family's raw proposal bound is applied. This bound precedes alpha
+deduplication, so an enormous duplicate Cartesian suffix cannot bypass it.
+An exhausted per-scheme allowance also stops before inspecting the remaining
+tuple stream.
+
+Both source and demand receive unique lexical binder identities before
+matching. Fresh lexical names remain legal source identifiers, so repeated
+spelling in independent quantified arguments survives subsequent kind checking.
+Nested corresponding quantifiers extend a local correspondence,
+and no selected outer image may contain a binder protected by that local
+comparison. Repeated selections must be alpha-equivalent. The actual scheme
+is instantiated capture-safely and the complete result is kind-checked before
+its formula is admitted. The matcher supplies a proposed tuple; it adds no
+independent proof authority. Proof checking still verifies the forall
+elimination and its use before lowering restores the source provider.
+
+Additional directed plans are evaluated only while the established searches
+have produced no candidate. Focused plans expose an individual specialization
+before the combined family. Scheme discovery uses original hypothesis sources;
+it does not recursively discover new providers inside substituted demand
+images. This prevents a selection containing the complete query from growing
+an expanding closure of synthetic schemes. These plans share the query-wide
+cutoff and resource accounting and contribute no negative evidence.
+
+The current user-facing contract is in the
+[rank-N guide](rank-n.md#demand-directed-instantiation). The derivations,
+realistic examples, and practical completeness boundaries are developed in the
+comprehensive account ([PDF](rank-n-impredicative-synthesis.pdf),
+[LaTeX source](rank-n-impredicative-synthesis.tex)).
 
 ### Bounded recursion and nominal transport
 
@@ -870,6 +1024,20 @@ and unboxed rejection, and non-vacuous exact and contextual rank-N assignment
 use through the public runner. The facade integration suite then carries the
 same boxed-pair and partial-`Either` evidence through both engines, renders all
 four definitions, and type-checks the combined fixture with GHC.
+
+Additional regressions check structural forall unification, lexical shadowing,
+grouped prefixes, quantified contexts, direct and indirect binder escape,
+occurs checks, and whole-polytype forwarding across correlated arguments.
+The integration suite sends exact eight- and twelve-binder provider vectors
+through both backends with inferred and supplied kinds, then asks GHC to check
+the emitted visible applications. Cyclic and overlong vector tests verify
+that source-arity preflight rejects the spine before entering its elements.
+Transport regressions exercise sixteen and twenty-four local quantified output
+sites, a twelve-site loaded consumer, and GHC compilation of emitted local and
+loaded transport implementations.
+The [Church acceptance suite](../test-church/README.md) extracts all 350 source
+signatures, synthesizes with each backend, and compiler-checks the generated
+expressions under the guide's explicit environment and partiality assumptions.
 
 The downstream API suite also compiles deliberately rejected probes to protect
 opaque-constructor boundaries. `djex-parallel-tests` uses synchronization

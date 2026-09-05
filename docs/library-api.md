@@ -51,7 +51,7 @@ build-depends: djex
 | Proof-backed non-inhabitation result | Yes when formula translation is complete | No |
 | Ranked heuristic candidates | No | Yes |
 | Explicit prenex polymorphism | Yes at the checked request edge | Yes |
-| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through singleton, pairwise, triple, quadruple, and capped quintuple occurrence frontiers; historical context-free hypothesis instantiation at variable and guarded-quantified candidates; a positive-only query-correlated tail requiring a result-relevant quantified choice and an exact query-subtree result while excluding historical logical formulas; an established positive-only query-closed family adding closed, forall-free query subtrees while requiring at least one per tuple; separate per-use loaded-scheme instantiation at query/value-signature candidates; exact externally established provider-assignment vectors; and positive-only nominal transport through reachable parameterized datatype applications | Contextual quantified-goal introduction with lexical givens and escape-checked skolems; scoped-provider instantiation; closed visible instantiation selected by monomorphic instance heads or, for fully vacuous scoped and retained global providers, checked query monotypes and polytypes; exact externally established provider-assignment vectors; and guarded context-free shallow quantified-provider subsumption |
+| Rank-N and impredicative rules | Positive introduction, including validated contexts under dictionary-independent semantics; historical bounded occurrence and tuple frontiers; demand-directed body/result matching with no fixed binder-count bound; scoped construction of polymorphic arguments; query-correlated, query-closed, and loaded-scheme families; exact source-arity provider vectors; and positive-only nominal datatype transport | Structural equality beneath paired quantifiers; contextual quantified-goal introduction with lexical givens and escape-checked skolems; per-use provider instantiation and whole-polytype forwarding to flexible arguments; bounded closed visible selection; exact source-arity provider vectors; and guarded context-free shallow quantified-provider subsumption |
 | Type-class participation | Validates contexts; synthesizes only dictionary-independent terms | Resolves givens, superclasses, and instances |
 | Main controls | Candidate limit, choice-point budget, and search strategy | Step, queue, depth, constraint, and pattern controls, plus thirteen heuristic weights |
 
@@ -293,15 +293,17 @@ by `Language.Haskell.Djex`:
 
 - `maximumProviderInstantiationCandidates` is 32 scalar associations per call;
 - `maximumProviderInstantiationAssignments` is 32 complete vectors per call;
-- `maximumProviderInstantiationArguments` is six ordered arguments per
-  vector; and
+- `maximumProviderInstantiationArguments` is six leading binders for
+  heuristic tuple reconstruction, not a limit on exact vectors; and
 - `maximumProviderInstantiationKindNodes` is 129 constructors in each
   caller-supplied `GroundKind`.
 
 Each checked runner observes an outer list through at most its first extra cell
-before entering an element. Assignment runners likewise bound each argument
-spine before entering an argument. Over-wide or cyclic caller-built lists
-therefore fail finitely.
+before entering an element. Assignment runners first resolve the retained
+provider and derive its complete leading arity `n`. They then observe at most
+`n + 1` argument-list cells before entering an argument. A vector must have
+exactly `n` entries. Over-wide or cyclic caller-built lists therefore fail
+finitely without imposing an unrelated fixed rank limit.
 
 For each assignment that passes provider, scheme, context, and exact-arity
 checks, kinded runners apply a productive node observer to all its supplied
@@ -311,7 +313,7 @@ at most 129 constructors; if work remains, it returns the sentinel 130 without
 entering the pending constructor. Cyclic kinds and finite trees above the bound
 therefore fail finitely. The shared 64-tuple constructor's right-associated
 all-`Type` kind contains exactly `2 * 64 + 1 = 129` nodes and remains accepted.
-This kind capacity does not change the six-argument limit on one
+This per-kind capacity is independent of the source-derived length of the
 provider-assignment vector.
 
 Construction is not certification. The caller remains responsible for the
@@ -326,11 +328,12 @@ forall-rooted type and uses it only for a context-free provider whose complete
 leading prefix is vacuous.
 
 Assignment runners additionally require an exact retained polymorphic scheme,
-a context-free leading chain of arity one through six, and a vector whose
+a nonempty context-free leading chain, and a vector whose
 length equals that complete chain; contextual schemes are unsupported. The
 legacy assignment runners infer each binder's ground kind from the exact
 provider body, default a vacuous binder to `Type`, and synonym-elaborate the
-argument in that position at the inferred kind. Their behavior is unchanged.
+argument in that position at the inferred kind. The kind inference contract
+is unchanged; exact assignments now admit source chains longer than six.
 
 The kinded runners instead consume the caller's complete positional
 `GroundKind` vector. They check the provider body at `Type` while sharing each
@@ -421,7 +424,7 @@ Nonempty evidence is additive, with engine- and payload-specific scheduling:
 
 | Engine | Independent candidate pool | Exact ordered assignments |
 | --- | --- | --- |
-| Djinn | The historical plain structural, nominal, and query-local-instantiation plans remain first. The positive-only provider family reconstructs bounded tuples: at most six binders, 512 attempts, sixteen specializations per scheme, and 32 direct provider premises. | The same positive-only provider-plan position receives one direct premise per retained vector and never uses the tuple-attempt or per-scheme Cartesian window. It still carries query-local and loaded instantiation axioms for mixed proofs and runs before evidence-free loaded tails. Each proof is checked before lowering restores the exact provider and visible arguments. |
+| Djinn | Scalar evidence retains its historical positive-only provider-plan position. That family reconstructs bounded tuples: at most six binders, 512 attempts, sixteen specializations per scheme, and 32 direct provider premises. Independent transport and scoped-construction accelerators may precede generic loaded-instance guesses when earlier plans have found no candidate. | Exact vectors receive dedicated priority plans and remain available in the combined provider family. Each retained vector contributes one direct premise, uses the provider's complete source arity, and bypasses the tuple-attempt and per-scheme Cartesian windows. Mixed proofs retain query-local and loaded instantiation axioms. Each proof is checked before lowering restores the exact provider and visible arguments. |
 | Exference | Exact retained-global lookup alone receives the pool. After ordinary implicit use, its visible order is ground monomorphic instance heads, checked query-derived choices, then supplied scalar choices. Query-derived and supplied products retain separate 32-combination caps. Scoped values and sibling globals never consult the map. | Exact retained-global lookup consumes each productive vector once in a leading visible lane, before the ordinary fallback and unchanged inferred/scalar visible sequence. This prevents exact-spelling deduplication from discarding checked association authority. An absent or unusable raw private assignment keeps the historical ordinary-first order. No Cartesian product or vacuous-body restriction is used. Scoped values and sibling globals never consult the map. |
 
 Both evidence models can make a visible choice such as
@@ -429,8 +432,9 @@ Both evidence models can make a visible choice such as
 established the necessary fact. Only the exact-assignment model preserves a
 multi-binder choice such as `[T1, T2]` without also authorizing `[T1, T1]` or
 `[T2, T1]`. Neither model inspects the frontend's proof, infers an instance head,
-invents a polytype, performs general higher-rank subsumption, or enables the
-first-order unifiers to enter quantified bodies. A miss after the finite
+invents a polytype or performs general higher-rank subsumption. Exference's
+structural unification beneath paired quantifiers is a separate typing rule,
+independent of this evidence channel. A miss after the finite
 engine-specific tails remains subject to each engine's existing incompleteness
 and search-budget rules. See the original
 [provider-local instantiation evidence report](reports/2026-08-05-provider-local-instantiation-evidence.md)
@@ -497,8 +501,15 @@ selection alternates stably from the two source-order edges and is capped at
 eleven-site selections, making the family exhaustive through eleven
 independent occurrences while limiting the new layer to 1,024 views on larger
 inputs. A twelve-site proof requiring exactly six open and six opaque
-occurrences remains outside the family. When a hypothesis-side
-context-free chain of at most six binders exists, bounded instantiation axioms
+occurrences remains outside that occurrence-plan family. An additional coherent
+transport view selects positive sites by alpha-equal negative-position types
+already available to the query, opening the remaining sites. This handles
+arbitrarily many independent transports and introductions in a single view and
+can use the same query evidence when compiling a loaded consumer's argument.
+It runs while no candidate has been found; a genuinely new transport view can
+precede combinatorial occurrence enumeration. Its availability scan adds no
+premise: proof checking must still establish each forwarded value. When a hypothesis-side
+context-free chain of at most six binders exists, historical instantiation axioms
 can eliminate it completely at a candidate tuple drawn from
 the sequent's variables, opened-forall skolems, premise scopes, and already
 mentioned subtrees that are independent of enclosing binders and contain
@@ -511,6 +522,31 @@ Cartesian order. Four-, five-, and six-binder schemes fairly interleave source-o
 windows, repeated arguments,
 sparse monotone selections, and the Cartesian tail without raising any search
 cap.
+
+A demand-directed family additionally matches the complete body and successive
+application-result types of a context-free scheme against scope-compatible
+query demands. It solves observed leading binders together, including
+selections of whole polytypes; there is no fixed binder-count limit on this
+matching operation. Missing selections are drawn lazily from the checked
+vocabulary under the existing family resource budget. Distinct lexical binder
+identities and escape checks prevent an inner demand binder from leaking into
+an outer selection. The complete specialized body must still kind-check.
+Fully solved matches receive priority, followed by interleaved incomplete
+match streams. Additional directed plans run only while the established
+searches have produced no candidate, preserving their existing alternative
+enumeration. They add positive evidence only. See the canonical
+[demand-directed rule](rank-n.md#demand-directed-instantiation).
+
+Selected polytypes can also become construction obligations. A private scope
+opens their argument-side quantifiers and specializes original providers at
+the new rigid variables, supporting polymorphic identity, composition, and
+nested or alternating term/forall construction. Exact free dependencies
+determine child scope ancestry; closed subsequent stages are independent.
+The same kind checker accepts private rigid names only through explicit
+ownership, and independent proof checking validates each scoped family before
+its evidence is erased. These additional families share finite attempt and
+premise budgets and provide positive evidence only. See
+[constructing polymorphic arguments](rank-n.md#constructing-polymorphic-arguments).
 
 A separate positive-only query-correlated family revisits only hypothesis-side
 schemes embedded in the elaborated goal. It fairly schedules the same finite
@@ -649,10 +685,21 @@ feature. Each backend must opt into explicit typing rules: positive
 introduction (with validated contexts ignored for proof power), bounded
 context-free hypothesis instantiation, query-correlated guarded-impredicative
 instantiation, query-closed monotype instantiation, and bounded
-loaded-value instantiation in Djinn; or fresh
-per-use provider instantiation, contextual quantified-goal introduction, and shallow subsumption
+loaded-value instantiation, together with demand-directed matching, in Djinn;
+or structural equality beneath paired quantifiers, whole-polytype forwarding
+to flexible arguments, fresh per-use provider instantiation, contextual
+quantified-goal introduction, and shallow subsumption
 between context-free quantified schemes with no free flexible variables in
 Exference. Neither backend implements general rank-N subsumption.
+
+Exference's type-equation solver compares paired quantified types beneath
+fresh private binder markers. It may solve a free metavariable to a complete
+polytype, aligns grouped and nested context-free binder prefixes, and preserves
+lexical shadowing. Contexts must agree structurally in class identity, order,
+arity, and argument types; this operation does not use class entailment.
+An assignment containing a free comparison marker is rejected even when the
+marker occurs inside another quantified image. Occurs checks and the separate
+namespaces used by directed unification remain in force.
 
 When ordinary Exference search exposes a nested `forall` as an active goal, it
 can open the complete leading chain with branch-local fresh rigid constants and
@@ -690,6 +737,12 @@ records the requested occurrence annotation without importing matcher state,
 and independent expression checking classifies the occurrence again. A
 non-quantified request instead freshly instantiates the complete leading
 provider chain and turns its direct contexts into proof obligations.
+When that request is a flexible type variable, an additional branch forwards
+the provider's whole polytype. Later arguments can then constrain that same
+choice, allowing a polymorphic value to pass through an ordinary polymorphic
+application combinator. The choice comes from the actual provider scheme,
+without enumerating a guessed impredicative argument; independent expression
+checking validates the completed expression.
 
 Exference also tries one bounded visible construction for an instantiable
 scoped or retained global provider. A direct provider constraint can match an
@@ -712,15 +765,38 @@ The shared generated-term API represents this with
 `specifiedVisibleTypeArgument` accepts a structurally valid, lexically closed
 type and alpha-normalizes quantified binders. The complete value is available
 through `visibleTypeArgumentClosedType`; `visibleTypeArgumentType` remains the
-monotype-only compatibility projection. The independent Exference checker
+monotype-only compatibility projection.
+`partiallySpecifiedVisibleTypeArgument` preserves a type's quantified structure
+while replacing its free variable occurrences with anonymous interior holes.
+`visibleTypeArgumentPatternType` exposes that syntax, distinguishing bound
+variables from holes; a hole-bearing argument has no closed-type projection.
+This is an emission facility for an independently established instantiation,
+including choices GHC cannot infer beneath another forall. It does not widen
+the exact provider-evidence or certificate contract, which still requires closed
+arguments. The independent Exference checker
 first reconstructs each complete specified payload in a checker-local binder
 namespace, validates its full type, and requires every nested constraint class
 to exist in the sealed class environment. It then consumes one flexible
-leading binder for each node and accepts either bounded form. Open arguments
+leading binder for each node and checks the complete source-derived arity.
+Exact eight- and twelve-binder vectors, including closed polymorphic arguments,
+are covered by cross-engine GHC replay tests. Explicit named open arguments
 such as `@a` and arbitrary caller-directed instantiation remain outside the API
 invariant. Djinn's bounded axiom routes can also retain the node for vacuous
 local or loaded binders; its historical `HExpr` projection rejects the shared
 node instead of erasing it.
+
+For a choice learned only from a later term argument, Exference's completed
+checker trace records the local/global source scheme and its fully substituted
+occurrence type independently of typed term-graph availability. A proposed
+visible-argument repair must align with the exact expression tree and pass the
+entire checker again before becoming a candidate. The compiler replay suite
+covers these delayed local and global specializations in both engines.
+
+The [Church regression guide](../test-church/README.md) covers every signature
+in the supplied Church module and documents the compilation environment and
+partiality assumptions. The comprehensive account is available as
+[PDF](rank-n-impredicative-synthesis.pdf) and
+[LaTeX source](rank-n-impredicative-synthesis.tex).
 
 Candidate source containing such a node must be compiled with
 `TypeApplications`. Its enclosing signature will commonly also need

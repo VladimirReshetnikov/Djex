@@ -148,22 +148,41 @@ forwarding checks and all 38 exact-original-signature partial wrappers, passed
 GHC. These are compiler-checked type-inhabitation
 results, not behavioral equivalence tests for the reference functions.
 
+Leant independently completed the same 350-case inventory through each engine
+in live runs: **350/350 Djinn and 350/350 Exference**, with all **700 exact
+displayed terms accepted by Lean 4.32.0 and all 700 axiom inventories empty**.
+Each engine covers 315 pure total cases, 16 integer-provider cases, and 19
+explicit-default cases. The runs used a one-candidate window, 4,096 search
+steps, and a thirty-second per-query timeout on one unchanged executable:
+`addfac35b9d82955fc871c177b582a8c043475c0171c22cb17977e0e9f5b9869` (SHA-256),
+built from Leant `4757569` with Djex `e2eb71e`.
+
+The reports in Leant are
+`test-church/generated-djinn-acceptance/results.json` and
+`test-church/generated-exference-acceptance/results.json`; the independent
+90-query compact fixtures also pass on that executable. The full ordinary
+Leant transcript replay remains pending. The
+[comprehensive account](../docs/rank-n-impredicative-synthesis.tex) records
+those separate acceptance boundaries and Lean's universe/default policy.
+
 ## Independent scope and reconstruction probe
 
 ```powershell
 cabal exec -- runghc -package=djex test-church/probe_scopes.hs
 ```
 
-This separate probe exercises 28 inhabitable signatures and 11 deliberately
+This separate probe exercises 38 inhabitable signatures and 12 deliberately
 incompatible scope or correlation patterns through each public backend. It
 covers alpha-renaming, shadowed binders, nested polymorphic results, ambient
 type variables, repeated correlations, higher-kinded applications, and
 instantiation choices determined only when an argument is supplied. It also
-constructs one or two distinct polymorphic arguments and instantiates a
-polymorphic result exposed only after applying an ordinary term argument. Every
-query receives only the abstract type constructors `F`, `G`, `H`, and `Token`,
-plus any provider signatures explicitly listed for that case. Two global
-provider cases exercise delayed instantiation of a named polymorphic function;
+constructs one or two distinct polymorphic arguments, composes providers inside
+a new polymorphic argument, preserves dependent nested scopes, and selects
+polymorphic instances across successive ordinary-argument/forall layers. Every
+query receives only the abstract type constructors `F`, `G`, `G3`, `H`, `Seed`,
+and `Token`, plus any provider signatures explicitly listed for that case. Five global
+provider cases exercise delayed instantiation or successive quantified result
+layers of a named polymorphic function;
 one additional case supplies only a unit value. The remaining cases use only
 values supplied as query arguments.
 
@@ -193,7 +212,7 @@ always infer from an unannotated occurrence. The implementation report in
 [`docs/rank-n-impredicative-synthesis.tex`](../docs/rank-n-impredicative-synthesis.tex)
 explains these cases and compiler-checked explicit type applications.
 
-The completed reconstruction pass was validated on 2026-09-04: all 78 probe
-queries met their expectations across both engines, all 56 positive
-implementations passed GHC, and all 22 negative queries returned no candidate
+The completed reconstruction pass was validated in September 2026: all 100 probe
+queries met their expectations across both engines, all 76 positive
+implementations passed GHC, and all 24 negative queries returned no candidate
 without errors or timeouts. These counts are separate from the Church corpus.

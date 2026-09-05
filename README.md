@@ -29,6 +29,11 @@ version, and dependency contract.
   [architecture guide](docs/architecture.md).
 - For a concise map of the neutral modules, see the
   [shared synthesis foundation](synthesis/README.md).
+- For higher-rank and impredicative synthesis, read the
+  [current rules](docs/rank-n.md), the comprehensive account
+  ([PDF](docs/rank-n-impredicative-synthesis.pdf),
+  [LaTeX source](docs/rank-n-impredicative-synthesis.tex)), and the
+  [350-signature Church regression guide](test-church/README.md).
 
 New library code should start with `Language.Haskell.Djex`, a narrower checked
 backend adapter, or a focused `Language.Haskell.Synthesis.*` import. The package
@@ -102,7 +107,7 @@ can skip ahead to [Building](#building).
 | --- | --- | --- |
 | Deterministic paired-backend REPL concurrency with an exact serial fallback | both | [timed paired-backend deadlines](docs/reports/2026-08-20-timed-parallel-backend-deadline.md) · [initial parallel backend search](docs/reports/2026-08-20-deterministic-parallel-backend-search.md) |
 | Serial ordered search-step lanes and the evidence gate for any future internal executor | Exference | [ordered StepAction extraction and parallel research checkpoint](docs/reports/2026-08-20-exference-serial-step-actions.md) |
-| Bounded binder instantiation: six leading binders (conservative boundary at seven), five, then four | both, with exact provider evidence | [six-binder](docs/reports/2026-08-10-six-binder-instantiation.md) · [five-binder](docs/reports/2026-08-09-five-binder-instantiation.md) · [four-binder](docs/reports/2026-08-01-four-binder-instantiation.md) |
+| Historical bounded binder frontiers: six, five, then four leading binders; current demand matching and exact evidence also admit longer prefixes | both | [six-binder](docs/reports/2026-08-10-six-binder-instantiation.md) · [five-binder](docs/reports/2026-08-09-five-binder-instantiation.md) · [four-binder](docs/reports/2026-08-01-four-binder-instantiation.md) |
 | Per-occurrence instantiation of loaded polymorphic values and closed source monotypes | Djinn | [loaded polymorphic values](docs/reports/2026-08-01-loaded-polymorphic-djinn-values.md) |
 | Positive-only instantiation of query-local hypotheses at closed monotypes already in the request | Djinn | [query-local closed monotypes](docs/reports/2026-08-09-query-local-closed-monotype-instantiation.md) |
 | Query-correlated guarded-impredicative tail, selecting a multi-binder tuple only when its specialized body already occurs in the request | Djinn | [query-correlated guarded impredicativity](docs/reports/2026-08-09-query-correlated-guarded-impredicative-instantiation.md) |
@@ -336,20 +341,30 @@ bounds are canonical in docs/rank-n.md. This section, docs/repl.md, and
 docs/library-api.md carry summaries; change a rule or bound in docs/rank-n.md
 first and then re-check the three summaries and the joint Djex/Leant codebase
 walkthrough (docs/Djex_Leant_Codebase_Walkthrough/ in the Leant repository). -->
-Rank-N and impredicative support uses deliberately bounded, backend-specific
-rule families. Djinn can introduce a `forall` (with or without a validated
-class context) in positive positions and eliminate a hypothesis-side
-context-free `forall` of up to six leading binders, instantiating it at
-sequent-supplied candidates and — as guarded impredicativity — at quantified
-query subtrees; further positive-only families cover query-closed monotypes,
-loaded value schemes, and a query-correlated tail. Exference can introduce a
-nested `forall` once ordinary search exposes it, eliminate a scoped value's
-complete leading chain at each use, and forward context-free quantified
-providers to less-general goals. Every extension beyond the structural core is
-bounded and positive-only, so reaching a bound makes an empty search
-inconclusive rather than a refutation. The complete rule families, the exact
-numeric bounds, and worked `:djinn`/`:exference`/`:compare` examples are in
-[docs/rank-n.md](docs/rank-n.md).
+Rank-N and impredicative synthesis combines structural typing rules with
+resource-bounded search. Djinn introduces a `forall` in positive positions and
+matches context-free provider bodies and application results against types
+needed by the query. That matching selects whole polytypes and solves all
+observed leading binders together, without a fixed rank limit. Its historical
+six-binder candidate frontiers remain available. A demand-aware formula view
+also combines exact polymorphic forwarding with fresh introductions across any
+number of sites, including arguments supplied to loaded consumers. Private
+construction scopes specialize providers within newly introduced polymorphic
+arguments, including composition, dependent nested arguments, and alternating
+term/forall spines. Exference opens nested
+quantified goals, instantiates each provider use independently, and solves
+structural type equalities beneath corresponding `forall` binders while
+preventing local variables from escaping their scope. It can also forward a
+provider's complete polytype into a flexible argument and preserve that choice
+across later arguments. Exact provider-assignment vectors in both engines use
+the provider's complete source arity; the six-argument limit applies only to
+heuristic tuple reconstruction. Search exhaustion under these additional rules
+is inconclusive rather than a refutation. The
+[canonical guide](docs/rank-n.md) records the rules, remaining resource bounds,
+and worked `:djinn`/`:exference`/`:compare` examples. The
+[Church regression suite](test-church/README.md) covers all 350 source
+signatures and compiler-checks the generated terms under its documented
+environment and partiality assumptions.
 
 `:type EXPRESSION` (or `:t EXPRESSION`) is a separate, non-evaluating
 inspection command. It infers against term signatures in the current loaded
@@ -797,8 +812,10 @@ capability request, so an unknown excluded name is an intentional no-op; this
 also lets command defaults name optional recursion helpers without requiring
 every environment to define them. A rating override claims to change search,
 so a non-finite rating or a name unavailable after exclusion and capability
-filtering is a fatal structured diagnostic. Quantified subtrees remain
-searchable through opaque atoms outside each backend's bounded rank-N rule.
+filtering is a fatal structured diagnostic. Djinn retains quantified subtrees
+as alpha-aware atoms outside its explicit introduction and instantiation rules.
+Exference additionally solves structural equalities beneath corresponding
+quantifiers, with lexical binder and escape checks.
 Djinn retains visible recursive constructors for bounded introduction: at most
 two distinct alias-normalized recursive SCCs may expose one positive
 constructor layer each on a logical path. Same-SCC revisits, a third SCC,

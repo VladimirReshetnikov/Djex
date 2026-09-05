@@ -38,6 +38,7 @@ Extra-Doc-Files:
 Extra-Source-Files:
   docs/examples/*.hs
   docs/rank-n-impredicative-synthesis.tex
+  docs/rank-n-impredicative-synthesis.pdf
   test-church/*.py
   test-church/*.json
   test-church/*.tsv

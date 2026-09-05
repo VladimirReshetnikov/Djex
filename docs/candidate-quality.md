@@ -164,8 +164,14 @@ Full-trace timings are diagnostic measurements; the policy does not imply a
 speedup for every query or selection mode.
 
 Combined-engine Leant searches rank each engine's candidates before the
-existing fair merge. Structural ranking does not move candidates across
-sealed Length decisions or change provider-lane discovery rules.
+existing fair merge. Under structural profiles, proper provider-inventory
+prefixes use Djinn alone; the full inventory runs both engines, so a singleton
+inventory still runs both. Legacy retains its combined singleton/full stages
+and Djinn-only intermediate prefixes. This avoids spending Exference's search
+on an incomplete provider prefix before reaching a required composition.
+Discovery order, standalone engine schedules, shared deadlines, raw budgets,
+verification quotas, and the final merge are unchanged. Ranking does not move
+candidates across sealed Length decisions.
 
 Structural pool and global-best scoring use record-selector-normalized
 expressions when a checked selector table is available, matching the form
@@ -221,6 +227,22 @@ those names and arities, while the host remains responsible for the evaluation
 claim. Leant derives that authority from its actual total family translation
 and active constructor inventory.
 
+Leant also preserves the boundary between provider evidence and target
+reconstruction. A marked fallback scheme can erase a leading class context
+whose quantified assignment is not representable as a resolver fact, while
+retaining complete source-derived Lean vectors. Rendering may restore a whole
+closed vector at a bare provider occurrence only when every leading variable
+is absent from the residual value type, including ordinary argument domains
+and later contexts. Existing visible choices and nonvacuous dependencies are
+not overwritten. Whole-vector alternatives retain their Lean binder metadata
+inside the existing bounded rendering cohorts, without new raw candidate
+slots or refunded work.
+
+Those inserted choices are not certified by the original bare expression's
+graph. Reconstructed groups use `RouteUnobserved` and carry no typed semantic
+sidecar or exact typed origin. Lean must check each resulting term before
+display; Length cannot inherit a certificate from the uninstantiated graph.
+
 Length assessment still consumes the exact verified batch. Its behavioral
 ranking, authorized filtering, and failure-preservation rules are unchanged.
 A structural score is never a type certificate or behavioral proof.
@@ -259,41 +281,47 @@ the difference from earlier diagnostic runs has not been established, so
 these timings are not an attributed source-level speedup claim or a
 first-result latency measurement.
 
-Live Lean quality acceptance is now recorded separately for Leant `fb84b96`
-with Djex `2954b6d2`. Its executable remained unchanged during replay and has
-SHA-256
-`dab110ad2a7903ac4ef4883898d48532c00cc8c3b1b8d8748aac7744eedffb61`.
-The Leant receipts under `test-church/quality-results/` establish:
+Current Lean quality acceptance belongs to Leant `5629936`, which includes
+the corrected test assertion and reviewed compact goldens. Its production
+code and E0 executable remain those introduced at `a970d1f`, with vendored
+Djex `ae986bf5` and unchanged synthesis code `2954b6d2`. The E0 executable
+remained unchanged and has SHA-256
+`e0b9c87cae0bc34d59c8d5a34a58fdd5005676913969a80d5503d7281081d025`.
+Its receipts under Leant's `test-church/quality-results/` establish:
 
 | Receipt | Confirmed result |
 | --- | --- |
-| `build-leant-04.log` | All 565 synthesis tests passed in 392.05 seconds. |
-| `focused-repair/results.json` | Six live queries and all 14 exact displayed terms passed kernel replay, including both paired nil improvements. |
-| `matrix-accepted/results.json` | All 84 policy/engine/example queries passed; all 139 exact displayed terms passed kernel replay. The 112 closed terms had empty axiom inventories; the remaining 27 depended only on the fixture's declared provider premises. |
-| `church-djinn/results.json` and `church-exference/results.json` | The same unchanged balanced executable produced 350/350 candidates per engine; all 700 exact displayed terms passed independent kernel replay with empty axiom inventories. |
+| `build-leant-06.log` | All 569 Leant unit tests passed in 389.71 seconds; the process exited zero and the E0 executable remained unchanged. |
+| `matrix-final/results.json` | All 84 policy/engine/example queries and 136 exact displayed terms passed live synthesis and independent kernel replay: 112 empty axiom inventories and 24 containing only declared provider premises. All three paired nil improvements passed. |
+| `fixtures-repair/results.json` | All 90 compact rank-N/provider queries passed live and kernel checks: 78 empty axiom inventories and 12 exact declared-premise inventories. |
+| `church-djinn-final/results.json` and `church-exference-final/results.json` | Fresh 350/350 candidates per engine on unchanged E0; all 700 exact displayed terms passed independent kernel replay with empty axiom inventories. |
+| `compact-comparison/results.json` | All four reviewed goldens match the preserved compact captures by offline comparison; the original live receipt retains its three golden mismatches. |
 
-The full quality matrix used the same window of 12, display cap of four,
-10,000 Exference steps or Djinn choice points, and 30-second timeout for each
-policy. Fresh comparisons show Exference's legacy nil retaining
-`match Sum.inr x with | .inl a => f a x | .inr b => b`, while balanced,
-compact, and diverse return the direct selector `fun _ _ _ x => x`.
-Three independent Lean proofs also establish that the diverse projection
-outputs include both distinct results on inputs 11 and 29, one proof per
-engine selection. These are measured quality improvements and behavioral
-distinctions within the tested allowance, not global minimality claims.
-The [focused guide](../test-church/quality.md#recorded-lean-acceptance) identifies
-the complete receipt and source hashes.
+The matrix used a window of 12, display cap of four, 10,000 Exference steps
+or Djinn choice points, and a 30-second synthesis timeout for each policy.
+Exference's freshly observed legacy nil retains
+`match Sum.inr x with | .inl a => f a x | .inr b => b`; balanced, compact, and
+diverse return `fun _ _ _ x => x`. Three independent Lean proofs also show
+that diverse projection outputs include both results on inputs 11 and 29,
+one proof per engine selection. These are quality and behavioral distinctions
+within the tested allowance, not global minimality claims.
 
-The [Church guide](../test-church/README.md) records the fresh Haskell and Lean
-corpus results separately from the earlier Djex `e2eb71e`/Leant `4757569`
-receipts. The new Lean corpus used a one-candidate window, 4,096 Exference
-steps, and a 30-second synthesis timeout; Djinn retained its default unbounded
-choice-point budget, subject to the shared deadline and intrinsic planning
-caps. All 700 fresh terms passed independent kernel replay with empty axiom
-inventories. This checks corpus preservation under the new balanced default;
-the separate 84-query matrix establishes the measured quality distinctions.
-The earlier ordinary compatibility run remains historical evidence for its
-own executable and is not relabeled by either new receipt.
+The separate fresh Church replay covers, per engine, 315 total cases,
+16 integer-provider cases, and 19 cases made total by explicit input defaults.
+It uses one-candidate observation/verification/display windows and a
+30-second synthesis timeout. Exference has 4,096 steps; Djinn retains its
+default unbounded choice-point budget, subject to the shared deadline and
+intrinsic planning caps. These settings do not bound startup, serialization,
+or separate kernel replay. Exact candidate texts match the earlier corpus
+run, establishing preservation on E0 rather than another quality improvement.
+Only the **remaining ordinary compatibility checks are pending**. The earlier Leant `fb84b96`
+executable `dab110ad2a7903ac4ef4883898d48532c00cc8c3b1b8d8748aac7744eedffb61`
+passed 565 tests, an 84-query/139-term matrix, and all 700 Church terms; those
+receipts remain historical and do not establish acceptance of E0. The
+[focused guide](../test-church/quality.md#recorded-lean-acceptance) records
+current hashes and the [Church guide](../test-church/README.md) preserves the
+separate corpus budgets, universe/default policy, and earlier
+Leant `4757569`/Djex `e2eb71e` rank-N and ordinary compatibility report.
 
 ## Related documentation
 

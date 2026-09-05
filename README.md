@@ -118,20 +118,24 @@ original signatures, supplying `undefined` only after synthesis.
 
 The separate [quality comparisons](test-church/quality.md) passed **56 Haskell
 queries with 104 GHC-checked terms**, plus **14 exact CLI outputs and ten
-invalid-option rejections**. Current Leant `fb84b96`, using that Djex revision,
-passed **84 quality queries with 139 exact displayed terms independently
-accepted by Lean**: 112 had empty axiom inventories, and 27 used only their
-declared provider premises. These include three fresh nil improvements and
-three functional-diversity proofs at unchanged search allowances.
+invalid-option rejections**. Current Leant `5629936`, using unchanged Djex
+synthesis code `2954b6d2`, passed **all 569 unit tests** and **84 quality queries
+with 136 exact displayed terms independently accepted by Lean**: 112 had empty axiom inventories, and
+24 used only their declared provider premises. These include three fresh nil
+improvements and three functional-diversity proofs at unchanged allowances.
 
-The same current balanced Leant executable also completed a fresh replay of
-all **350/350 universe-correct Church counterparts per engine**, with all
-**700 exact displayed terms independently kernel-accepted and all 700 axiom
-inventories empty**. Lean keeps the partial cases' supplied defaults as
-ordinary arguments. These corpus checks are separate from the quality matrix.
-The linked acceptance guides record the exact executable hash and retain
-the earlier Leant `4757569`/Djex `e2eb71e` corpus and ordinary compatibility
-receipts as historical evidence.
+The same E0 executable passed **90 compact rank-N/provider queries**, with
+all exact terms independently kernel-accepted: 78 had empty axiom inventories
+and 12 had exactly their declared provider premises. After three reviewed
+baseline changes, all four compact goldens match those retained live outputs
+by offline comparison. Both engines also completed a fresh E0 replay of
+**350/350 universe-correct Church counterparts each**: all **700 exact
+displayed terms passed independent kernel replay with empty axiom
+inventories**. Lean keeps the 19 partial cases per engine total under their
+supplied default arguments. Only the **remaining ordinary compatibility
+checks are pending**. The [acceptance guides](test-church/README.md) record
+these separate receipts, exact executable identity and budgets, and prior
+results under their original executable identities.
 
 These results establish practical corpus coverage. General impredicative
 inhabitation is undecidable, so a higher-rank search miss remains inconclusive;

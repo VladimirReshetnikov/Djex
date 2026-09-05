@@ -8,16 +8,23 @@ the search families described below. Statements about historical prefixes
 refer to the preserved family schedule or the `legacy` profile, not a promise
 that every profile emits the same first term. The
 [focused quality probes](../test-church/quality.md) record current acceptance
-at Djex `2954b6d2` and Leant `fb84b96`: 56 Haskell queries with 104 GHC-checked
+at Djex `2954b6d2` and Leant `5629936`: 56 Haskell queries with 104 GHC-checked
 terms, 14 compiler-replayed CLI outputs and ten invalid-option rejections, and
-84 Lean quality queries with 139 exact kernel-accepted terms. These remain
-separate from corpus coverage. The current Djex aggregate passed all 19 test
-components, including all 700 Haskell Church queries and 100 scope queries.
-The [Church guide](../test-church/README.md) also preserves the earlier full
-Lean corpus receipt for Djex `e2eb71e` and Leant `4757569` separately from the
-fresh balanced-executable replay: 350 candidates per engine, all 700 exact
-displayed terms independently kernel-accepted, and all 700 axiom inventories
-empty. Its receipts record the executable hash and the distinct engine budgets.
+84 Lean quality queries with 136 exact kernel-accepted terms. The same E0
+executable passed all 90 compact rank-N/provider queries; 78 terms had empty
+axiom inventories and 12 had exactly the declared premises. Their four
+goldens match the retained live captures after reviewed offline closure.
+The current Djex aggregate passed all 19 test components, including all 700
+Haskell Church queries and 100 scope queries. All 569 Leant unit tests passed
+in 389.71 seconds (`quality-results/build-leant-06.log`). Fresh E0 Lean Church
+runs also passed 350/350 cases per engine: all 700 exact displayed terms passed
+independent kernel replay with empty axiom inventories. Their receipts are
+`quality-results/church-djinn-final/results.json` and
+`quality-results/church-exference-final/results.json` in Leant. Remaining
+ordinary compatibility checks are pending. The [Church guide](../test-church/README.md) preserves
+Leant `fb84b96`/`dab110...`'s earlier 565 tests, 84-query/139-term matrix and
+700-term corpus receipt, as well as the Leant `4757569`/Djex `e2eb71e` report,
+under their original executable identities and distinct engine budgets.
 
 *The typing rules and search families both engines use for higher-rank and impredicative
 goals — what each engine can introduce and eliminate, the resource bounds, the

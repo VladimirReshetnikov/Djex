@@ -8,8 +8,10 @@ or the existing Length behavioral contracts.
 The [policy guide](../docs/candidate-quality.md) defines the score and the
 distinction between raw search work, observed candidates, and output quotas.
 Haskell compiler, CLI, and live Lean quality acceptance are recorded below.
-The fresh full Lean Church replay on the same balanced executable is recorded
-separately from the quality matrix and from the historical corpus receipts.
+The current E0 quality matrix, compact fixtures, and fresh full 700-query
+Lean Church replay have separate successful receipts. Earlier corpus runs
+retain their original executable identities; remaining ordinary compatibility
+checks are pending.
 
 Run against an already built checkout, with the repository's build owner
 having released the build slot:
@@ -144,30 +146,37 @@ with that timing difference, and no general speedup is claimed.
 
 ## Recorded Lean acceptance
 
-Live Lean quality acceptance was run against Leant `fb84b96` with vendored
-Djex `2954b6d2`. The fixed executable SHA-256 is
-`dab110ad2a7903ac4ef4883898d48532c00cc8c3b1b8d8748aac7744eedffb61`.
-The following receipts belong to Leant's `test-church/quality-results/`
-directory, separately from the Haskell reports above:
+Current Lean quality acceptance belongs to Leant `5629936`, which includes
+the corrected test assertion and reviewed compact goldens. Its production
+code and E0 executable remain those introduced at `a970d1f`, with vendored
+Djex `ae986bf5` and unchanged synthesis code `2954b6d2`. Its E0 executable
+remained unchanged and has SHA-256
+`e0b9c87cae0bc34d59c8d5a34a58fdd5005676913969a80d5503d7281081d025`.
+The following receipts are in Leant's `test-church/quality-results/`,
+separately from the Haskell reports above:
 
 | Receipt | Confirmed result |
 | --- | --- |
-| `build-leant-04.log` | All 565 synthesis tests passed in 392.05 seconds. |
-| `focused-repair/results.json` | Six live queries, 14 exact kernel-accepted terms, and two fresh paired nil improvements passed. |
-| `matrix-accepted/results.json` | All 84 queries and 139 exact displayed terms passed synthesis and independent kernel replay; all three fresh paired nil improvements passed. |
-| `church-djinn/results.json` and `church-exference/results.json` | Each engine produced 350/350 candidates; all 700 exact displayed terms passed independent kernel replay with empty axiom inventories on the same unchanged balanced executable. |
+| `build-leant-06.log` | All 569 Leant unit tests passed in 389.71 seconds; the process exited zero and the E0 executable remained unchanged. |
+| `matrix-final/results.json` | All 84 queries and 136 exact displayed terms passed live synthesis and independent kernel replay; all three fresh paired nil improvements passed. |
+| `fixtures-repair/results.json` | All 90 compact queries passed live and kernel checks: 78 empty axiom inventories and 12 exact declared-premise inventories. All four pre-golden validations passed. |
+| `church-djinn-final/results.json` and `church-exference-final/results.json` | Fresh 350/350 candidates per engine on unchanged E0; all 700 exact displayed terms passed independent kernel replay with empty axiom inventories. |
+| `compact-comparison/results.json` | All four reviewed goldens match the preserved compact captures by offline comparison. The original receipt retains its three golden mismatches; no synthesis or kernel run was repeated for this comparison. |
+
+Remaining ordinary compatibility checks are pending. The compact fixtures exercise
+retained exact-vector reconstruction and structural combined-mode provider
+staging under their original limits; the [policy guide](../docs/candidate-quality.md)
+explains the reconstruction authority and unchanged resource bounds.
 
 The full matrix covers seven examples, four policies, and three engine
 selections. Every policy uses the same candidate window of 12, display cap of
-four, 10,000 Exference steps or Djinn choice points, and 30-second timeout.
+four, 10,000 Exference steps or Djinn choice points, and a 30-second synthesis timeout.
 The receipt records unchanged executable hashes and successful live and
 kernel process exits. Its source-transcript SHA-256 is
 `96b6681ec583aa213df0d6a80d780eac17f36ba4e13827f98b1e8526a1851547`.
-The focused repair transcript has SHA-256
-`e5b4e9b6cab117d1d6a3bdb3a7bf34062ab2c2f29e39ef4b0f48a66221992ece`.
 
 Kernel axiom inspection found empty inventories for all **112 closed terms**.
-The other **27 terms** used only their explicitly declared provider premises;
+The other **24 terms** used only their explicitly declared provider premises;
 they are accepted relative to those premises, not counted as closed proofs.
 `QualityCandidates.lean` and `kernel-output.txt` preserve the exact displayed
 terms and their inventories. The replay module also contains three successful
@@ -192,18 +201,28 @@ original signature. The quality gate checks the direct last-argument selector
 as well as removal of the explicit match; it does not infer success from a
 smaller printed name or a changed structural-family label.
 
-The separate full Church replay used one candidate per query, 4,096 Exference
-steps, and a 30-second synthesis timeout. Djinn retained its default unbounded
-choice-point budget; `synth-steps` is Exference-only. Both engines' receipts
-record 350 cases, 350 candidates, successful live and kernel exits, and the
-same unchanged `dab110ad...` executable identified above. The shared canonical
-source hash is
+The separate fresh E0 Church replay covers 315 total, 16 integer-provider,
+and 19 explicit-default cases per engine. Every exact displayed term is
+unchanged from its earlier corpus counterpart, so this is preservation
+evidence. The runs use a one-candidate window, 4,096 Exference steps, and a
+30-second synthesis timeout. Djinn retains `synth-budget off`, subject to the
+shared deadline and intrinsic planning caps; startup, serialization, and
+kernel replay are outside that synthesis timeout.
+
+The earlier Leant `fb84b96` executable
+`dab110ad2a7903ac4ef4883898d48532c00cc8c3b1b8d8748aac7744eedffb61`
+passed 565 tests (`build-leant-04.log`), an 84-query/139-term matrix
+(`matrix-accepted/results.json`), and all 700 Church terms
+(`church-djinn/results.json` and `church-exference/results.json`). These
+remain historical receipts for that executable. Its Church runs used one
+candidate per query, 4,096 Exference steps, and a 30-second synthesis timeout;
+Djinn retained its default unbounded choice-point budget, subject to the
+shared deadline and intrinsic planning caps. The corpus source SHA-256 is
 `782e4edaa5bf813e30e39ae02d52278ab0566315ebc521401a947b98c44cfd11`,
-and the input manifest hash is
+and the manifest SHA-256 is
 `0c2954eeb36811ea065aba86187d09cd8761529de1acefd5111ccf088b189ed9`.
-The [corpus guide](README.md) describes the universe and explicit-default
-policy and retains the historical 700-term and ordinary compatibility
-receipts under their original executable identities.
+The [corpus guide](README.md) retains the universe/default policy and the
+earlier Leant `4757569`/Djex `e2eb71e` rank-N and ordinary compatibility report.
 
 The corresponding [Lean runner and guide](https://github.com/VladimirReshetnikov/Leant/blob/main/test-church/quality.md)
 live in Leant's `test-church/` directory.

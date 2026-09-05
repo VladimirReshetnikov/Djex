@@ -3,10 +3,11 @@
 The [candidate-quality guide](../docs/candidate-quality.md) and
 [focused quality probes](quality.md) cover the separate comparison of
 `legacy`, `balanced`, `compact`, and `diverse`. The reproduction commands
-below run the current checkout and its default policy. The completed corpus
-receipts below distinguish the current Haskell rerun and quality-policy
-validation, including the fresh full 700-query Lean Church replay of the
-balanced executable, from historical rank-N and ordinary compatibility runs.
+below run the current checkout and its default policy. The receipts below
+distinguish current Haskell and E0 Lean corpus acceptance, quality comparisons,
+and compact-fixture validation from historical receipts. The fresh full E0
+Lean Church replay passed all 700 queries; remaining ordinary compatibility
+checks are pending.
 
 This suite synthesizes implementations from **every type signature** in
 `docs/examples/Church.hs`: 346 top-level signatures and four explicitly
@@ -158,34 +159,60 @@ with `failed=0` and successful independent GHC checks of their generated
 modules. It also passed all 100 independent scope queries, with 76 positive
 implementations checked by GHC and 24 bounded negative cases.
 
+Fresh Lean Church runs on the unchanged E0 executable produced **350/350
+Djinn and 350/350 Exference candidates**. All **700 exact displayed terms
+passed independent kernel replay**, with exactly 700 empty axiom inventories.
+Each engine covers 315 total cases, 16 integer-provider cases, and 19
+explicit-default cases. Leant's
+`test-church/quality-results/church-djinn-final/results.json` and
+`church-exference-final/results.json` record successful live and kernel exits,
+the exact source/manifest hashes, and stable executable identity. Independent
+artifact review reconstructed every replay declaration from its exact
+displayed term; neither engine changed a candidate's text from the earlier
+`dab110...` corpus run. This is fresh preservation evidence, separate from
+quality improvement measurements.
+
+These corpus runs used one-candidate observation, verification, and display
+windows, a 30-second synthesis timeout, and 4,096 Exference steps. Djinn
+retained `synth-budget off`, subject to the shared deadline and intrinsic
+planning caps. The synthesis timeout excludes startup, goal serialization,
+and separate kernel replay. Defaults remain ordinary Lean arguments only in
+the 19 partial cases; they do not introduce unchecked axioms.
+
 The [focused quality guide](quality.md) records the separate current policy
 comparisons: **56 Haskell queries and 104 GHC-checked terms**, plus **14 exact
-CLI outputs and ten invalid-option rejections**. Leant `fb84b96` with this
-Djex revision passed **84 quality queries and 139 exact kernel-accepted
-terms**, of which 112 had empty axiom inventories and 27 used only the
-fixture's declared provider premises. All 565 Leant synthesis tests also
-passed. Those live quality receipts use the unchanged executable with SHA-256
-`dab110ad2a7903ac4ef4883898d48532c00cc8c3b1b8d8748aac7744eedffb61`.
+CLI outputs and ten invalid-option rejections**. Leant `5629936`, with
+unchanged Djex synthesis code `2954b6d2`, passed **84 quality queries and 136
+exact kernel-accepted terms**: 112 had empty axiom inventories and 24 used
+only declared provider premises. Its unchanged E0 executable SHA-256 is
+`e0b9c87cae0bc34d59c8d5a34a58fdd5005676913969a80d5503d7281081d025`.
+Leant's `test-church/quality-results/matrix-final/results.json` records this
+quality comparison, separately from the 350-signature corpus.
 
-That same balanced executable separately completed the full Lean Church
-corpus: **350/350 Djinn and 350/350 Exference candidates**, with all **700
-exact displayed terms independently kernel-accepted and all 700 axiom
-inventories empty**. Leant's
-`test-church/quality-results/church-djinn/results.json` and
-`test-church/quality-results/church-exference/results.json` each record 350
-cases, 350 candidates, successful live and kernel process exits, and unchanged
-executable hashes. These fresh corpus receipts do not depend on the separate
-quality matrix's success.
+The same executable passed **90 compact rank-N/provider queries**, including
+all eight/twelve-argument providers and layered global factories. Every exact
+term passed independent kernel replay: 78 empty axiom inventories and 12
+exact declared-premise inventories. All four live processes and pre-golden
+checks passed. After three reviewed golden changes, all four goldens match
+the preserved captures by offline comparison; this is not a second synthesis
+or kernel run. Leant's `test-church/quality-results/fixtures-repair/results.json`
+and `compact-comparison/results.json` retain those distinct outcomes.
+The full Leant unit rerun passed **all 569 tests in 389.71 seconds**, with
+process exit zero and E0 unchanged (`test-church/quality-results/build-leant-06.log`).
+Only the **remaining ordinary compatibility checks are pending**.
 
-Both runs used a one-candidate observation, verification, and display window,
-a 30-second synthesis timeout, and `synth-steps 4096`. That step budget applies
-to Exference; Djinn retained `synth-budget off`, subject to its shared wall-clock
-deadline and intrinsic planning caps. The timeout excludes process startup,
-goal serialization, and separate kernel replay. The canonical source hash is
-`782e4edaa5bf813e30e39ae02d52278ab0566315ebc521401a947b98c44cfd11`;
-the input manifest hash is
-`0c2954eeb36811ea065aba86187d09cd8761529de1acefd5111ccf088b189ed9`.
-The source hash uses the line-ending normalization described above.
+The earlier Leant `fb84b96` executable
+`dab110ad2a7903ac4ef4883898d48532c00cc8c3b1b8d8748aac7744eedffb61`
+passed 565 tests, an 84-query/139-term quality matrix, and the full Church
+corpus: 350/350 candidates per engine, all 700 exact terms independently
+kernel-accepted with empty axiom inventories. Its receipts remain under
+`test-church/quality-results/matrix-accepted/results.json`,
+`church-djinn/results.json`, and `church-exference/results.json` in Leant;
+they are historical evidence for that executable, not fresh E0 results.
+Those corpus runs used a one-candidate window, a 30-second synthesis timeout,
+and 4,096 Exference steps. Djinn retained `synth-budget off`, subject to the
+shared deadline and intrinsic planning caps; the timeout excludes startup,
+serialization, and separate kernel replay.
 
 ### Historical rank-N and ordinary compatibility acceptance
 

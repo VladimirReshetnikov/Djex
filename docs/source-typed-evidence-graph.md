@@ -5,11 +5,12 @@ sealed source-typed graph beside its unchanged compatibility candidate. The
 graph can be consumed by the shared Length interface under the same engine's
 source inventory and an explicitly sealed interpretation policy.
 
-**Canonical Djex validation has passed; downstream Leant validation is pending.**
+**Canonical Djex and downstream Leant validation have passed on native Windows.**
 The [acceptance report](reports/2026-09-06-djinn-source-graphs.md) records the
 compiler, runtime, frontend and independent-replay receipts separately from
 source review. This guide describes the implemented authority and its precise
-acceptance requirements.
+acceptance requirements, including the existing native Windows limitation on
+Leant's public solver-configuration acquisition.
 
 The earlier [typed-result seam report](reports/2026-08-11-djinn-typed-result-seam.md)
 established the opaque candidate association and deliberately returned

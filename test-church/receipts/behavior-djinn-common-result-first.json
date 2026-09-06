@@ -1,0 +1,1116 @@
+{
+  "schema_version": 1,
+  "receipt_kind": "Offline compact projection of a completed live six-operation Djinn run and separate isolated exact GHC execution; no new execution performed by this extractor.",
+  "source_receipt": {
+    "workspace_relative_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/results.json",
+    "sha256": "54f445c70b2c8e20266eab0e9f9ce6ed9d329100d2402845c34f086d90f5f7c5"
+  },
+  "status": "passed",
+  "validation_mode": "live_synthesis_then_exact_ghc_execution",
+  "scope": {
+    "engines": [
+      "djinn"
+    ],
+    "operations": [
+      "not",
+      "swap",
+      "map",
+      "append",
+      "reverse",
+      "filter"
+    ],
+    "named_synthesis_providers": [],
+    "finite_claim": "626 specified finite observations passed for the six exact emitted terms. This is not a universal behavioral proof or search-completeness claim."
+  },
+  "executable_sha256": "d5d9f0112f300b4d33c0fbebdcf39a9d3aaf22db5b054c6411882c0c6651cefd",
+  "executable_unchanged": true,
+  "provenance": {
+    "manifest_path": "test-church/manifest.json",
+    "manifest_sha256": "0c2954eeb36811ea065aba86187d09cd8761529de1acefd5111ccf088b189ed9",
+    "church_source_path": "docs/examples/Church.hs",
+    "church_source_raw_sha256": "782e4edaa5bf813e30e39ae02d52278ab0566315ebc521401a947b98c44cfd11",
+    "church_source_canonical_lf_sha256": "782e4edaa5bf813e30e39ae02d52278ab0566315ebc521401a947b98c44cfd11",
+    "operations": [
+      {
+        "id": "church_case_009",
+        "name": "not",
+        "line": 170,
+        "source_signature": "Bool -> Bool",
+        "expanded_type": {
+          "tag": "arrow",
+          "domain": {
+            "tag": "forall",
+            "binders": [
+              "church0"
+            ],
+            "body": {
+              "tag": "arrow",
+              "domain": {
+                "tag": "name",
+                "name": "church0"
+              },
+              "codomain": {
+                "tag": "arrow",
+                "domain": {
+                  "tag": "name",
+                  "name": "church0"
+                },
+                "codomain": {
+                  "tag": "name",
+                  "name": "church0"
+                }
+              }
+            }
+          },
+          "codomain": {
+            "tag": "forall",
+            "binders": [
+              "church1"
+            ],
+            "body": {
+              "tag": "arrow",
+              "domain": {
+                "tag": "name",
+                "name": "church1"
+              },
+              "codomain": {
+                "tag": "arrow",
+                "domain": {
+                  "tag": "name",
+                  "name": "church1"
+                },
+                "codomain": {
+                  "tag": "name",
+                  "name": "church1"
+                }
+              }
+            }
+          }
+        },
+        "haskell_target": "((forall church0. (church0 -> (church0 -> church0))) -> (forall church1. (church1 -> (church1 -> church1))))",
+        "lean_target": "((∀ (church0 : Type), (church0 → (church0 → church0))) → (∀ (church1 : Type), (church1 → (church1 → church1))))"
+      },
+      {
+        "id": "church_case_016",
+        "name": "swap",
+        "line": 195,
+        "source_signature": "a `Pair` b -> b `Pair` a",
+        "expanded_type": {
+          "tag": "forall",
+          "binders": [
+            "church0",
+            "church1"
+          ],
+          "body": {
+            "tag": "arrow",
+            "domain": {
+              "tag": "forall",
+              "binders": [
+                "church2"
+              ],
+              "body": {
+                "tag": "arrow",
+                "domain": {
+                  "tag": "arrow",
+                  "domain": {
+                    "tag": "name",
+                    "name": "church0"
+                  },
+                  "codomain": {
+                    "tag": "arrow",
+                    "domain": {
+                      "tag": "name",
+                      "name": "church1"
+                    },
+                    "codomain": {
+                      "tag": "name",
+                      "name": "church2"
+                    }
+                  }
+                },
+                "codomain": {
+                  "tag": "name",
+                  "name": "church2"
+                }
+              }
+            },
+            "codomain": {
+              "tag": "forall",
+              "binders": [
+                "church3"
+              ],
+              "body": {
+                "tag": "arrow",
+                "domain": {
+                  "tag": "arrow",
+                  "domain": {
+                    "tag": "name",
+                    "name": "church1"
+                  },
+                  "codomain": {
+                    "tag": "arrow",
+                    "domain": {
+                      "tag": "name",
+                      "name": "church0"
+                    },
+                    "codomain": {
+                      "tag": "name",
+                      "name": "church3"
+                    }
+                  }
+                },
+                "codomain": {
+                  "tag": "name",
+                  "name": "church3"
+                }
+              }
+            }
+          }
+        },
+        "haskell_target": "(forall church0 church1. ((forall church2. ((church0 -> (church1 -> church2)) -> church2)) -> (forall church3. ((church1 -> (church0 -> church3)) -> church3))))",
+        "lean_target": "(∀ (church0 : Type) (church1 : Type), ((∀ (church2 : Type), ((church0 → (church1 → church2)) → church2)) → (∀ (church3 : Type), ((church1 → (church0 → church3)) → church3))))"
+      },
+      {
+        "id": "church_case_056",
+        "name": "map",
+        "line": 397,
+        "source_signature": "_ -> List a -> List b",
+        "expanded_type": {
+          "tag": "forall",
+          "binders": [
+            "church0",
+            "church1"
+          ],
+          "body": {
+            "tag": "arrow",
+            "domain": {
+              "tag": "arrow",
+              "domain": {
+                "tag": "name",
+                "name": "church0"
+              },
+              "codomain": {
+                "tag": "name",
+                "name": "church1"
+              }
+            },
+            "codomain": {
+              "tag": "arrow",
+              "domain": {
+                "tag": "forall",
+                "binders": [
+                  "church2"
+                ],
+                "body": {
+                  "tag": "arrow",
+                  "domain": {
+                    "tag": "arrow",
+                    "domain": {
+                      "tag": "name",
+                      "name": "church0"
+                    },
+                    "codomain": {
+                      "tag": "arrow",
+                      "domain": {
+                        "tag": "name",
+                        "name": "church2"
+                      },
+                      "codomain": {
+                        "tag": "name",
+                        "name": "church2"
+                      }
+                    }
+                  },
+                  "codomain": {
+                    "tag": "arrow",
+                    "domain": {
+                      "tag": "name",
+                      "name": "church2"
+                    },
+                    "codomain": {
+                      "tag": "name",
+                      "name": "church2"
+                    }
+                  }
+                }
+              },
+              "codomain": {
+                "tag": "forall",
+                "binders": [
+                  "church3"
+                ],
+                "body": {
+                  "tag": "arrow",
+                  "domain": {
+                    "tag": "arrow",
+                    "domain": {
+                      "tag": "name",
+                      "name": "church1"
+                    },
+                    "codomain": {
+                      "tag": "arrow",
+                      "domain": {
+                        "tag": "name",
+                        "name": "church3"
+                      },
+                      "codomain": {
+                        "tag": "name",
+                        "name": "church3"
+                      }
+                    }
+                  },
+                  "codomain": {
+                    "tag": "arrow",
+                    "domain": {
+                      "tag": "name",
+                      "name": "church3"
+                    },
+                    "codomain": {
+                      "tag": "name",
+                      "name": "church3"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "haskell_target": "(forall church0 church1. ((church0 -> church1) -> ((forall church2. ((church0 -> (church2 -> church2)) -> (church2 -> church2))) -> (forall church3. ((church1 -> (church3 -> church3)) -> (church3 -> church3))))))",
+        "lean_target": "(∀ (church0 : Type) (church1 : Type), ((church0 → church1) → ((∀ (church2 : Type), ((church0 → (church2 → church2)) → (church2 → church2))) → (∀ (church3 : Type), ((church1 → (church3 → church3)) → (church3 → church3))))))"
+      },
+      {
+        "id": "church_case_054",
+        "name": "append",
+        "line": 391,
+        "source_signature": "List a -> List a -> List a",
+        "expanded_type": {
+          "tag": "forall",
+          "binders": [
+            "church0"
+          ],
+          "body": {
+            "tag": "arrow",
+            "domain": {
+              "tag": "forall",
+              "binders": [
+                "church1"
+              ],
+              "body": {
+                "tag": "arrow",
+                "domain": {
+                  "tag": "arrow",
+                  "domain": {
+                    "tag": "name",
+                    "name": "church0"
+                  },
+                  "codomain": {
+                    "tag": "arrow",
+                    "domain": {
+                      "tag": "name",
+                      "name": "church1"
+                    },
+                    "codomain": {
+                      "tag": "name",
+                      "name": "church1"
+                    }
+                  }
+                },
+                "codomain": {
+                  "tag": "arrow",
+                  "domain": {
+                    "tag": "name",
+                    "name": "church1"
+                  },
+                  "codomain": {
+                    "tag": "name",
+                    "name": "church1"
+                  }
+                }
+              }
+            },
+            "codomain": {
+              "tag": "arrow",
+              "domain": {
+                "tag": "forall",
+                "binders": [
+                  "church2"
+                ],
+                "body": {
+                  "tag": "arrow",
+                  "domain": {
+                    "tag": "arrow",
+                    "domain": {
+                      "tag": "name",
+                      "name": "church0"
+                    },
+                    "codomain": {
+                      "tag": "arrow",
+                      "domain": {
+                        "tag": "name",
+                        "name": "church2"
+                      },
+                      "codomain": {
+                        "tag": "name",
+                        "name": "church2"
+                      }
+                    }
+                  },
+                  "codomain": {
+                    "tag": "arrow",
+                    "domain": {
+                      "tag": "name",
+                      "name": "church2"
+                    },
+                    "codomain": {
+                      "tag": "name",
+                      "name": "church2"
+                    }
+                  }
+                }
+              },
+              "codomain": {
+                "tag": "forall",
+                "binders": [
+                  "church3"
+                ],
+                "body": {
+                  "tag": "arrow",
+                  "domain": {
+                    "tag": "arrow",
+                    "domain": {
+                      "tag": "name",
+                      "name": "church0"
+                    },
+                    "codomain": {
+                      "tag": "arrow",
+                      "domain": {
+                        "tag": "name",
+                        "name": "church3"
+                      },
+                      "codomain": {
+                        "tag": "name",
+                        "name": "church3"
+                      }
+                    }
+                  },
+                  "codomain": {
+                    "tag": "arrow",
+                    "domain": {
+                      "tag": "name",
+                      "name": "church3"
+                    },
+                    "codomain": {
+                      "tag": "name",
+                      "name": "church3"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "haskell_target": "(forall church0. ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> ((forall church2. ((church0 -> (church2 -> church2)) -> (church2 -> church2))) -> (forall church3. ((church0 -> (church3 -> church3)) -> (church3 -> church3))))))",
+        "lean_target": "(∀ (church0 : Type), ((∀ (church1 : Type), ((church0 → (church1 → church1)) → (church1 → church1))) → ((∀ (church2 : Type), ((church0 → (church2 → church2)) → (church2 → church2))) → (∀ (church3 : Type), ((church0 → (church3 → church3)) → (church3 → church3))))))"
+      },
+      {
+        "id": "church_case_061",
+        "name": "reverse",
+        "line": 412,
+        "source_signature": "List a -> List a",
+        "expanded_type": {
+          "tag": "forall",
+          "binders": [
+            "church0"
+          ],
+          "body": {
+            "tag": "arrow",
+            "domain": {
+              "tag": "forall",
+              "binders": [
+                "church1"
+              ],
+              "body": {
+                "tag": "arrow",
+                "domain": {
+                  "tag": "arrow",
+                  "domain": {
+                    "tag": "name",
+                    "name": "church0"
+                  },
+                  "codomain": {
+                    "tag": "arrow",
+                    "domain": {
+                      "tag": "name",
+                      "name": "church1"
+                    },
+                    "codomain": {
+                      "tag": "name",
+                      "name": "church1"
+                    }
+                  }
+                },
+                "codomain": {
+                  "tag": "arrow",
+                  "domain": {
+                    "tag": "name",
+                    "name": "church1"
+                  },
+                  "codomain": {
+                    "tag": "name",
+                    "name": "church1"
+                  }
+                }
+              }
+            },
+            "codomain": {
+              "tag": "forall",
+              "binders": [
+                "church2"
+              ],
+              "body": {
+                "tag": "arrow",
+                "domain": {
+                  "tag": "arrow",
+                  "domain": {
+                    "tag": "name",
+                    "name": "church0"
+                  },
+                  "codomain": {
+                    "tag": "arrow",
+                    "domain": {
+                      "tag": "name",
+                      "name": "church2"
+                    },
+                    "codomain": {
+                      "tag": "name",
+                      "name": "church2"
+                    }
+                  }
+                },
+                "codomain": {
+                  "tag": "arrow",
+                  "domain": {
+                    "tag": "name",
+                    "name": "church2"
+                  },
+                  "codomain": {
+                    "tag": "name",
+                    "name": "church2"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "haskell_target": "(forall church0. ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> (forall church2. ((church0 -> (church2 -> church2)) -> (church2 -> church2)))))",
+        "lean_target": "(∀ (church0 : Type), ((∀ (church1 : Type), ((church0 → (church1 → church1)) → (church1 → church1))) → (∀ (church2 : Type), ((church0 → (church2 → church2)) → (church2 → church2)))))"
+      },
+      {
+        "id": "church_case_059",
+        "name": "filter",
+        "line": 406,
+        "source_signature": "(a -> Bool) -> List a -> List a",
+        "expanded_type": {
+          "tag": "forall",
+          "binders": [
+            "church0"
+          ],
+          "body": {
+            "tag": "arrow",
+            "domain": {
+              "tag": "arrow",
+              "domain": {
+                "tag": "name",
+                "name": "church0"
+              },
+              "codomain": {
+                "tag": "forall",
+                "binders": [
+                  "church1"
+                ],
+                "body": {
+                  "tag": "arrow",
+                  "domain": {
+                    "tag": "name",
+                    "name": "church1"
+                  },
+                  "codomain": {
+                    "tag": "arrow",
+                    "domain": {
+                      "tag": "name",
+                      "name": "church1"
+                    },
+                    "codomain": {
+                      "tag": "name",
+                      "name": "church1"
+                    }
+                  }
+                }
+              }
+            },
+            "codomain": {
+              "tag": "arrow",
+              "domain": {
+                "tag": "forall",
+                "binders": [
+                  "church2"
+                ],
+                "body": {
+                  "tag": "arrow",
+                  "domain": {
+                    "tag": "arrow",
+                    "domain": {
+                      "tag": "name",
+                      "name": "church0"
+                    },
+                    "codomain": {
+                      "tag": "arrow",
+                      "domain": {
+                        "tag": "name",
+                        "name": "church2"
+                      },
+                      "codomain": {
+                        "tag": "name",
+                        "name": "church2"
+                      }
+                    }
+                  },
+                  "codomain": {
+                    "tag": "arrow",
+                    "domain": {
+                      "tag": "name",
+                      "name": "church2"
+                    },
+                    "codomain": {
+                      "tag": "name",
+                      "name": "church2"
+                    }
+                  }
+                }
+              },
+              "codomain": {
+                "tag": "forall",
+                "binders": [
+                  "church3"
+                ],
+                "body": {
+                  "tag": "arrow",
+                  "domain": {
+                    "tag": "arrow",
+                    "domain": {
+                      "tag": "name",
+                      "name": "church0"
+                    },
+                    "codomain": {
+                      "tag": "arrow",
+                      "domain": {
+                        "tag": "name",
+                        "name": "church3"
+                      },
+                      "codomain": {
+                        "tag": "name",
+                        "name": "church3"
+                      }
+                    }
+                  },
+                  "codomain": {
+                    "tag": "arrow",
+                    "domain": {
+                      "tag": "name",
+                      "name": "church3"
+                    },
+                    "codomain": {
+                      "tag": "name",
+                      "name": "church3"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "haskell_target": "(forall church0. ((church0 -> (forall church1. (church1 -> (church1 -> church1)))) -> ((forall church2. ((church0 -> (church2 -> church2)) -> (church2 -> church2))) -> (forall church3. ((church0 -> (church3 -> church3)) -> (church3 -> church3))))))",
+        "lean_target": "(∀ (church0 : Type), ((church0 → (∀ (church1 : Type), (church1 → (church1 → church1)))) → ((∀ (church2 : Type), ((church0 → (church2 → church2)) → (church2 → church2))) → (∀ (church3 : Type), ((church0 → (church3 → church3)) → (church3 → church3))))))"
+      }
+    ]
+  },
+  "runner_sha256": "7ffea55c85cc2e0c9bc93b98a5d57c8694e22f8070dd5814236f9c97090ac996",
+  "spec_sha256": "426fb6cf5e8a607608bed4ca52a74776cd38d1c5f7a5c49866fda6b2a98cedf4",
+  "settings": {
+    "ranking": "balanced",
+    "select": "first",
+    "window": 65536,
+    "djinn_strategy": "interleave",
+    "steps": 100000,
+    "choice_budget": 500000,
+    "independent_evaluation_seconds": 2,
+    "separate_process_guard_seconds": 300
+  },
+  "candidate_count": 6,
+  "cells": [
+    {
+      "operation": "not",
+      "name": "behavior_djinn_not",
+      "type": "((forall church0. (church0 -> (church0 -> church0))) -> (forall church1. (church1 -> (church1 -> church1))))",
+      "exact_definition": "behavior_djinn_not a b c = a c b",
+      "finite_observation_count": 2,
+      "behavioral_observations": {
+        "checked": 6,
+        "true": 1,
+        "false": 5,
+        "error": 0,
+        "timeout": 0,
+        "window": 65536
+      },
+      "validated_settings": {
+        "backend": "djinn",
+        "ranking": "balanced",
+        "select": "first",
+        "render": "definition",
+        "prompt": "\"\"",
+        "allow-unused": "on",
+        "djinn-axioms": "off",
+        "djinn-strategy": "interleave",
+        "candidate-limit": "65536",
+        "quality-window": "65536",
+        "choice-budget": "500000",
+        "max-steps": "100000"
+      }
+    },
+    {
+      "operation": "swap",
+      "name": "behavior_djinn_swap",
+      "type": "(forall church0 church1. ((forall church2. ((church0 -> (church1 -> church2)) -> church2)) -> (forall church3. ((church1 -> (church0 -> church3)) -> church3))))",
+      "exact_definition": "behavior_djinn_swap a b = a (\\c d -> b d c)",
+      "finite_observation_count": 15,
+      "behavioral_observations": {
+        "checked": 1,
+        "true": 1,
+        "false": 0,
+        "error": 0,
+        "timeout": 0,
+        "window": 65536
+      },
+      "validated_settings": {
+        "backend": "djinn",
+        "ranking": "balanced",
+        "select": "first",
+        "render": "definition",
+        "prompt": "\"\"",
+        "allow-unused": "on",
+        "djinn-axioms": "off",
+        "djinn-strategy": "interleave",
+        "candidate-limit": "65536",
+        "quality-window": "65536",
+        "choice-budget": "500000",
+        "max-steps": "100000"
+      }
+    },
+    {
+      "operation": "map",
+      "name": "behavior_djinn_map",
+      "type": "(forall church0 church1. ((church0 -> church1) -> ((forall church2. ((church0 -> (church2 -> church2)) -> (church2 -> church2))) -> (forall church3. ((church1 -> (church3 -> church3)) -> (church3 -> church3))))))",
+      "exact_definition": "behavior_djinn_map a b c d = b (\\e -> c (a e)) d",
+      "finite_observation_count": 200,
+      "behavioral_observations": {
+        "checked": 6,
+        "true": 1,
+        "false": 5,
+        "error": 0,
+        "timeout": 0,
+        "window": 65536
+      },
+      "validated_settings": {
+        "backend": "djinn",
+        "ranking": "balanced",
+        "select": "first",
+        "render": "definition",
+        "prompt": "\"\"",
+        "allow-unused": "on",
+        "djinn-axioms": "off",
+        "djinn-strategy": "interleave",
+        "candidate-limit": "65536",
+        "quality-window": "65536",
+        "choice-budget": "500000",
+        "max-steps": "100000"
+      }
+    },
+    {
+      "operation": "append",
+      "name": "behavior_djinn_append",
+      "type": "(forall church0. ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> ((forall church2. ((church0 -> (church2 -> church2)) -> (church2 -> church2))) -> (forall church3. ((church0 -> (church3 -> church3)) -> (church3 -> church3))))))",
+      "exact_definition": "behavior_djinn_append a b c d = a c (b c d)",
+      "finite_observation_count": 169,
+      "behavioral_observations": {
+        "checked": 309,
+        "true": 1,
+        "false": 302,
+        "error": 6,
+        "timeout": 0,
+        "window": 65536
+      },
+      "validated_settings": {
+        "backend": "djinn",
+        "ranking": "balanced",
+        "select": "first",
+        "render": "definition",
+        "prompt": "\"\"",
+        "allow-unused": "on",
+        "djinn-axioms": "off",
+        "djinn-strategy": "interleave",
+        "candidate-limit": "65536",
+        "quality-window": "65536",
+        "choice-budget": "500000",
+        "max-steps": "100000"
+      }
+    },
+    {
+      "operation": "reverse",
+      "name": "behavior_djinn_reverse",
+      "type": "(forall church0. ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> (forall church2. ((church0 -> (church2 -> church2)) -> (church2 -> church2)))))",
+      "exact_definition": "behavior_djinn_reverse a b = a (\\c d e -> d (b c e)) (\\f -> f)",
+      "finite_observation_count": 40,
+      "behavioral_observations": {
+        "checked": 78,
+        "true": 1,
+        "false": 73,
+        "error": 4,
+        "timeout": 0,
+        "window": 65536
+      },
+      "validated_settings": {
+        "backend": "djinn",
+        "ranking": "balanced",
+        "select": "first",
+        "render": "definition",
+        "prompt": "\"\"",
+        "allow-unused": "on",
+        "djinn-axioms": "off",
+        "djinn-strategy": "interleave",
+        "candidate-limit": "65536",
+        "quality-window": "65536",
+        "choice-budget": "500000",
+        "max-steps": "100000"
+      }
+    },
+    {
+      "operation": "filter",
+      "name": "behavior_djinn_filter",
+      "type": "(forall church0. ((church0 -> (forall church1. (church1 -> (church1 -> church1)))) -> ((forall church2. ((church0 -> (church2 -> church2)) -> (church2 -> church2))) -> (forall church3. ((church0 -> (church3 -> church3)) -> (church3 -> church3))))))",
+      "exact_definition": "behavior_djinn_filter a b c = b (\\d e -> a d (c d e) e)",
+      "finite_observation_count": 200,
+      "behavioral_observations": {
+        "checked": 103,
+        "true": 1,
+        "false": 101,
+        "error": 1,
+        "timeout": 0,
+        "window": 65536
+      },
+      "validated_settings": {
+        "backend": "djinn",
+        "ranking": "balanced",
+        "select": "first",
+        "render": "definition",
+        "prompt": "\"\"",
+        "allow-unused": "on",
+        "djinn-axioms": "off",
+        "djinn-strategy": "interleave",
+        "candidate-limit": "65536",
+        "quality-window": "65536",
+        "choice-budget": "500000",
+        "max-steps": "100000"
+      }
+    }
+  ],
+  "independent_replay": {
+    "compiler_exit_code": 0,
+    "execution_exit_code": 0,
+    "assertion_count": 23,
+    "finite_observation_count": 626,
+    "positive_oracle_controls": 6,
+    "wrong_total_controls": 10,
+    "specialized_swap_control": 1,
+    "modules": [
+      {
+        "path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/BehaviorCandidate0.hs",
+        "sha256": "b0d87629148caf85699607dd63f8ebb50fbd9c8c51f86bd34ff07167f97972b9"
+      },
+      {
+        "path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/BehaviorCandidate1.hs",
+        "sha256": "208ef7f5e9650c2ae00ba3d6a91f2a07779cff5b5a3ce0c9c27a9ff87056fe1c"
+      },
+      {
+        "path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/BehaviorCandidate2.hs",
+        "sha256": "770ddb4b5bdb77f2f41453dd27215f6aa382a49319d110ab7b008d113d4f17d3"
+      },
+      {
+        "path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/BehaviorCandidate3.hs",
+        "sha256": "d1cfad03569e7b46be45a4506e0684b05803ab2f4587ca9f155633bd689460f2"
+      },
+      {
+        "path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/BehaviorCandidate4.hs",
+        "sha256": "548fc8e4d98bd6c1e76d800e64d4b3c902978537d414fde3bdb4afa618a11d37"
+      },
+      {
+        "path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/BehaviorCandidate5.hs",
+        "sha256": "3cf4c662005d583f549796cde68dec6d9cb74b810ce093dceb883d921bb55e55"
+      },
+      {
+        "path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/BehaviorOracleControls.hs",
+        "sha256": "85fffd1e5beeba328f9083e6231d64422f91f4c34b2c2acebe73235ff67507bb"
+      },
+      {
+        "path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/BehaviorCandidates.hs",
+        "sha256": "35858aaf30dfe0f2375ff37ea85ab0261035ca04330b1f1eafa75baee61d43ac"
+      }
+    ]
+  },
+  "false_oracle_results": [
+    {
+      "engine": "djinn",
+      "observations": {
+        "checked": 1,
+        "true": 0,
+        "false": 1,
+        "error": 0,
+        "timeout": 0,
+        "window": 65536
+      }
+    }
+  ],
+  "processes": [
+    {
+      "label": "djinn-not",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+        "repl",
+        "--ignore-startup",
+        "--environment",
+        "C:\\Djex\\dist-newstyle\\behavioral-acceptance\\djinn-six-common-result-first\\empty-environment"
+      ],
+      "process_timeout_seconds": 300,
+      "cwd": "C:\\Djex",
+      "status": "completed",
+      "started_utc": "2026-09-06T18:05:51Z",
+      "capture_format": "raw child bytes; returned text decodes UTF-8 with universal newlines",
+      "input_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-not.input.txt",
+      "input_sha256": "54439d14bc598fc282a7947ebc0326e6abbd664c505ec2f8c57b2240d88f371f",
+      "stdout_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-not.stdout.txt",
+      "stderr_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-not.stderr.txt",
+      "owned_root_pid": 40432,
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 53.697875200014096,
+      "finished_utc": "2026-09-06T18:06:45Z",
+      "stdout_sha256": "cac1f8c1f4bb18a358c06592ceee2b777a475f225ba7a5a0586ef44a2de52b2e",
+      "stderr_sha256": "dec35b37e3918d114e4e0bafb0504e28880bd42df99f82e94bcc1334367cb6af"
+    },
+    {
+      "label": "djinn-swap",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+        "repl",
+        "--ignore-startup",
+        "--environment",
+        "C:\\Djex\\dist-newstyle\\behavioral-acceptance\\djinn-six-common-result-first\\empty-environment"
+      ],
+      "process_timeout_seconds": 300,
+      "cwd": "C:\\Djex",
+      "status": "completed",
+      "started_utc": "2026-09-06T18:06:45Z",
+      "capture_format": "raw child bytes; returned text decodes UTF-8 with universal newlines",
+      "input_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-swap.input.txt",
+      "input_sha256": "28fe9450531f701330ebbdfa1017b36fe1cdd6ec1f0643da3db3554dd72344ad",
+      "stdout_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-swap.stdout.txt",
+      "stderr_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-swap.stderr.txt",
+      "owned_root_pid": 14316,
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 23.44243729999289,
+      "finished_utc": "2026-09-06T18:07:09Z",
+      "stdout_sha256": "3ad5ce0ecc5724e9feb360cc73648b1362fc422db0c0c5c05c9b9d78d9cb4c7d",
+      "stderr_sha256": "18847d98a8f0f671aa2d555e64c88604c5fd4112e262c174443ef5bebff36387"
+    },
+    {
+      "label": "djinn-map",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+        "repl",
+        "--ignore-startup",
+        "--environment",
+        "C:\\Djex\\dist-newstyle\\behavioral-acceptance\\djinn-six-common-result-first\\empty-environment"
+      ],
+      "process_timeout_seconds": 300,
+      "cwd": "C:\\Djex",
+      "status": "completed",
+      "started_utc": "2026-09-06T18:07:09Z",
+      "capture_format": "raw child bytes; returned text decodes UTF-8 with universal newlines",
+      "input_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-map.input.txt",
+      "input_sha256": "d48704a7c7c6e6f93c6fbd3a979300ef496a6ca56c4f99b1568dbcfdeb8233fb",
+      "stdout_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-map.stdout.txt",
+      "stderr_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-map.stderr.txt",
+      "owned_root_pid": 2788,
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 23.930582700006198,
+      "finished_utc": "2026-09-06T18:07:33Z",
+      "stdout_sha256": "71093cbd7f21bcfa3098b2d48cdb9a1c05bc38b9ceed723e87bf90d169a0e39c",
+      "stderr_sha256": "dec35b37e3918d114e4e0bafb0504e28880bd42df99f82e94bcc1334367cb6af"
+    },
+    {
+      "label": "djinn-append",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+        "repl",
+        "--ignore-startup",
+        "--environment",
+        "C:\\Djex\\dist-newstyle\\behavioral-acceptance\\djinn-six-common-result-first\\empty-environment"
+      ],
+      "process_timeout_seconds": 300,
+      "cwd": "C:\\Djex",
+      "status": "completed",
+      "started_utc": "2026-09-06T18:07:33Z",
+      "capture_format": "raw child bytes; returned text decodes UTF-8 with universal newlines",
+      "input_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-append.input.txt",
+      "input_sha256": "b74f37f22b86a4dca07ca9e0f4a84a76848b8f86e6eff3ce65bd1397c9df5592",
+      "stdout_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-append.stdout.txt",
+      "stderr_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-append.stderr.txt",
+      "owned_root_pid": 8260,
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 44.03277740001795,
+      "finished_utc": "2026-09-06T18:08:17Z",
+      "stdout_sha256": "183a3d302d6d47b526c593f8ff0db9bce0ad7063c869c381966d6c54467914f9",
+      "stderr_sha256": "d56a2f59f055df89338787907147bf6897ff95a174d8917fe47675e7a6106d61"
+    },
+    {
+      "label": "djinn-reverse",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+        "repl",
+        "--ignore-startup",
+        "--environment",
+        "C:\\Djex\\dist-newstyle\\behavioral-acceptance\\djinn-six-common-result-first\\empty-environment"
+      ],
+      "process_timeout_seconds": 300,
+      "cwd": "C:\\Djex",
+      "status": "completed",
+      "started_utc": "2026-09-06T18:08:17Z",
+      "capture_format": "raw child bytes; returned text decodes UTF-8 with universal newlines",
+      "input_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-reverse.input.txt",
+      "input_sha256": "96e457ddedaa820a9b87f73acddbaf877bbfa8bab8ad1076a9f31611b8d01982",
+      "stdout_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-reverse.stdout.txt",
+      "stderr_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-reverse.stderr.txt",
+      "owned_root_pid": 34300,
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 34.71514639997622,
+      "finished_utc": "2026-09-06T18:08:51Z",
+      "stdout_sha256": "60de838f108403109ec7137c12e8c6adec4ad203fa5e299b69b5a44434420cf4",
+      "stderr_sha256": "6c394b9be7f54fe8ac032fb5ae4ae3c24bd0fecff93651a3bbe645e765ea4cf7"
+    },
+    {
+      "label": "djinn-filter",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+        "repl",
+        "--ignore-startup",
+        "--environment",
+        "C:\\Djex\\dist-newstyle\\behavioral-acceptance\\djinn-six-common-result-first\\empty-environment"
+      ],
+      "process_timeout_seconds": 300,
+      "cwd": "C:\\Djex",
+      "status": "completed",
+      "started_utc": "2026-09-06T18:08:51Z",
+      "capture_format": "raw child bytes; returned text decodes UTF-8 with universal newlines",
+      "input_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-filter.input.txt",
+      "input_sha256": "554256793a0a8f48362fe4d3f354fa0a158c422253c9fdda3285caee52825692",
+      "stdout_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-filter.stdout.txt",
+      "stderr_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-filter.stderr.txt",
+      "owned_root_pid": 31644,
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 14.496625300002052,
+      "finished_utc": "2026-09-06T18:09:06Z",
+      "stdout_sha256": "f8701722220466a8ed91c055531a962af1e15ab8e6bf5712e7516ae45bdeb312",
+      "stderr_sha256": "c31ba6c28fc64825b9bd752884ba2e871d0d7deb9d1cf9d80b0f40101f628b0f"
+    },
+    {
+      "label": "djinn-reject-all",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe",
+        "repl",
+        "--ignore-startup",
+        "--environment",
+        "C:\\Djex\\dist-newstyle\\behavioral-acceptance\\djinn-six-common-result-first\\empty-environment"
+      ],
+      "process_timeout_seconds": 300,
+      "cwd": "C:\\Djex",
+      "status": "completed",
+      "started_utc": "2026-09-06T18:09:06Z",
+      "capture_format": "raw child bytes; returned text decodes UTF-8 with universal newlines",
+      "input_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-reject-all.input.txt",
+      "input_sha256": "324d93689eaa570331c8326609862d4a48a2a8ee529443c6d49171ceb730d153",
+      "stdout_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-reject-all.stdout.txt",
+      "stderr_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/djinn-reject-all.stderr.txt",
+      "owned_root_pid": 15128,
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 1.1091345000022557,
+      "finished_utc": "2026-09-06T18:09:07Z",
+      "stdout_sha256": "005634fc495cae6bf58f49609848746ad7920882fdecd5dc4440b838bccaa510",
+      "stderr_sha256": "ed16817aff2618975bea0576b17f342d8a3fc928ce22694109dc0dec0a994e51"
+    },
+    {
+      "label": "ghc",
+      "command": [
+        "ghc",
+        "-v0",
+        "-O0",
+        "-fforce-recomp",
+        "-iC:\\Djex\\dist-newstyle\\behavioral-acceptance\\djinn-six-common-result-first",
+        "-outputdir",
+        "C:\\Djex\\dist-newstyle\\behavioral-acceptance\\djinn-six-common-result-first",
+        "C:\\Djex\\dist-newstyle\\behavioral-acceptance\\djinn-six-common-result-first\\BehaviorCandidates.hs",
+        "-o",
+        "C:\\Djex\\dist-newstyle\\behavioral-acceptance\\djinn-six-common-result-first\\behavior-candidates.exe"
+      ],
+      "process_timeout_seconds": 300,
+      "cwd": "C:\\Djex",
+      "status": "completed",
+      "started_utc": "2026-09-06T18:09:07Z",
+      "capture_format": "raw child bytes; returned text decodes UTF-8 with universal newlines",
+      "stdout_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/ghc.stdout.txt",
+      "stderr_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/ghc.stderr.txt",
+      "owned_root_pid": 34188,
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 3.1362697999866214,
+      "finished_utc": "2026-09-06T18:09:10Z",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "behavior",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\behavioral-acceptance\\djinn-six-common-result-first\\behavior-candidates.exe"
+      ],
+      "process_timeout_seconds": 300,
+      "cwd": "C:\\Djex",
+      "status": "completed",
+      "started_utc": "2026-09-06T18:09:10Z",
+      "capture_format": "raw child bytes; returned text decodes UTF-8 with universal newlines",
+      "stdout_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/behavior.stdout.txt",
+      "stderr_path": "dist-newstyle/behavioral-acceptance/djinn-six-common-result-first/behavior.stderr.txt",
+      "owned_root_pid": 28640,
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 0.514125600020634,
+      "finished_utc": "2026-09-06T18:09:11Z",
+      "stdout_sha256": "7ad3aa64114d01a1f509bb61a3d3f9894febeda6eb6ab4db7befcaf22053f3e4",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "extractor_sha256": "3147a1d6a2c4e7e790c0ff7cf514628deb84623c50809ed100fdbdc43b246d64"
+}

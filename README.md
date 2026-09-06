@@ -397,6 +397,14 @@ Passing finite examples establishes those examples, not a universal behavioral
 specification. See the [behavioral synthesis guide](docs/behavioral-synthesis.md)
 for the six-operation Church corpus, examples, and execution limits.
 
+Both Haskell engines have synthesized implementations of Church `not`, `swap`,
+`map`, `append`, `reverse`, and `filter` that pass the finite behavioral corpus
+and separate GHC replay at their recorded settings. Djinn's explicit
+`interleave` alternative search can reuse functions and instantiation bridges,
+and group checked specializations by exact result type. Its recorded run uses
+a larger search allowance than Exference's; the guide gives the complete
+settings, exact emitted definitions, and acceptance receipts.
+
 The symbolic Length interface remains available separately. It reasons about
 checked list-spine models rather than executing arbitrary Haskell expressions.
 Djex already owns the checked Length-contract, replay, SMT-LIB, and Z3

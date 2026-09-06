@@ -2,7 +2,7 @@ module Main (main) where
 
 import Control.Monad (void)
 import Control.Exception (evaluate)
-import Data.List (isInfixOf, isPrefixOf, isSuffixOf, nub, sort)
+import Data.List (findIndex, isInfixOf, isPrefixOf, isSuffixOf, nub, sort)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (listToMaybe)
 import qualified Data.Set as Set
@@ -25,6 +25,7 @@ import Djinn.Core (
     classDeclarations, declare, defaultQueryOptions, emptyEnvironment,
     functionDeclarations, generatedReportCandidates,
     generatedReportCompletion, generatedReportEvidence,
+    generatedReportFormula, generatedReportProof,
     inhabit, inhabitGenerated, inhabitResult,
     inhabitGeneratedPrepared, inhabitResultPrepared,
     inhabitSynthesisResultPrepared, inhabitTypedSynthesisResultPrepared,
@@ -53,6 +54,7 @@ import Djinn.Internal.HCheck (
 import Djinn.Internal.HIdentifier
 import Djinn.Internal.HTypes hiding (fromSynthesisKind, toSynthesisKind)
 import Djinn.Internal.LJT
+import Djinn.Internal.PlanFamily (nextAdmittedPlanFamily)
 import qualified Djinn.Internal.InstantiationEvidence as InstantiationEvidence
 import Djinn.Internal.ProofCheck (checkProof)
 import qualified Djinn.Internal.ProofCheck.Evidence as ProofEvidence
@@ -92,6 +94,22 @@ tests =
     hCheckCompatibilityTests ++
     [ ("structural provider quality precedes the raw proof cutoff", testCandidateQuality)
     , ("demand-directed rank-N instantiation", testDirectedRankN)
+    , ("enumerate scoped residual carriers within explicit raw bounds", testResidualFunctionCarriers)
+    , ("enumerate both endomorphism compositions within the original raw bounds", testEndomorphismCompositionAlternatives)
+    , ("retain an ordinary first result at the one-proof carrier cutoff", testCarrierFirstResult)
+    , ("retain exact choice fuel after the first proof prefix", testFirstProofPrefixBudget)
+    , ("resume raw proof cursors without repeating proofs or refunding choices", testProofSearchCursor)
+    , ("retain nested proof products and branch-local freshness", testNestedProofProduct)
+    , ("enumerate reusable heads and exact partial-function spines", testNormalTermAlternatives)
+    , ("finish proved finite normal layers while retaining recursive alternatives", testFiniteNormalLayers)
+    , ("keep same-rendered residual atoms logically distinct", testNormalResidualIdentity)
+    , ("retain repeated local and global heads across context extension", testNormalContextExtension)
+    , ("interleave carriers without starving append and filter", testCarrierPlanFairness)
+    , ("admit a later formula view beside a prolific proof cursor", testFormulaPlanAdmission)
+    , ("skip suppressed formula families before forcing their generators", testLazyPlanFamilyAdmission)
+    , ("reuse one fold bridge on two distinct opaque inputs", testFoldBridgeReuse)
+    , ("retain both binary compositions over the inner result", testBinaryCompositionWithOuterResult)
+    , ("compose endomorphisms using the last result argument", testEndomorphismCompositionWithOuterResult)
     , ("construct impredicative arguments under fresh scopes", testConstructedRankN)
     , ("transport-directed rank-N opacity", testTransportRankN)
     , ("parse prefix function constructor", testPrefixArrowParsing)
@@ -1292,6 +1310,677 @@ testDirectedRankN = do
         assertBool (spelling ++ " exhausted search without a candidate") $
             not $ null $ SharedSearch.batchCandidates $ SharedQuery.resultSearch result
 
+-- Public generated candidates, interpreted only in this test's closed pure
+-- lambda fragment. The behavioral oracle does not enter synthesis or supply a
+-- target implementation. Distinct elements distinguish reversal from identity.
+testResidualFunctionCarriers :: IO ()
+testResidualFunctionCarriers = do
+    source <- expectRight $ parseHType
+        "forall a. (forall r. (a -> r -> r) -> r -> r) -> (forall r. (a -> r -> r) -> r -> r)"
+    let options = defaultQueryOptions
+            { optionAlternatives = True
+            , optionSorted = False
+            , optionCutoff = 4096
+            , optionBudget = Just 100000
+            , optionStrategy = Interleave
+            }
+        run configured = expectRight $ inhabitGenerated configured emptyEnvironment []
+            "carrierResult" source
+    historical <- run options {optionAlternatives = False}
+    alternatives <- run options
+    let clauses = map SharedCandidate.candidateOutput $
+            generatedReportCandidates alternatives
+        historicalClauses = map SharedCandidate.candidateOutput $
+            generatedReportCandidates historical
+        expressions = map SharedGenerated.functionClauseExpression clauses
+        samples = [[], [7], [11, 29], [3, 1, 8]]
+        reverses expression = all
+            (\xs -> carrierListResult expression xs == Right (reverse xs)) samples
+    let diagnostic = unlines
+            [ "the carrier family did not produce a reversal with Interleave / 4096 raw proofs / 100000 choices"
+            , "candidate count: " ++ show (length clauses)
+            , "completion: " ++ show (generatedReportCompletion alternatives)
+            , "evidence: " ++ show (generatedReportEvidence alternatives)
+            , "formula: " ++ generatedReportFormula alternatives
+            , "first proof: " ++ show (generatedReportProof alternatives)
+            , "first expressions: " ++ show (take 8 expressions)
+            , "sample observations: " ++ show
+                [map (carrierListResult expression) samples | expression <- take 8 expressions]
+            ]
+    calibration <- if any reverses expressions then pure "" else do
+        depth <- run options {optionCutoff = 256, optionStrategy = DepthFirst}
+        fair <- run options {optionCutoff = 256}
+        pure $ unlines
+            [ "smaller-prefix diagnostic (256 raw proofs, unchanged 100000 choices): " ++ label ++
+                "; count=" ++ show (length candidates) ++
+                "; first reversal index=" ++ show
+                    (findIndex (reverses . SharedGenerated.functionClauseExpression . SharedCandidate.candidateOutput)
+                        candidates) ++
+                "; completion=" ++ show (generatedReportCompletion report)
+            | (label, report) <- [("depth-first", depth), ("interleave", fair)]
+            , let candidates = generatedReportCandidates report
+            ]
+    assertBool (diagnostic ++ calibration) $
+        any reverses expressions
+    assertBool "carrier enumeration consumed the historical alternative family" $
+        not (null historicalClauses) && all (`elem` clauses) historicalClauses
+    assertBool "carrier enumeration exceeded the raw candidate cutoff" $
+        length clauses <= optionCutoff options
+    single <- run options {optionCutoff = 1}
+    assertBool "a carrier rejection refilled the one-proof allowance" $
+        length (generatedReportCandidates single) <= 1
+    first <- run options {optionAlternatives = False, optionCutoff = 1}
+    assertEqual "carrier enumeration changed first-only synthesis"
+        historicalClauses $ map SharedCandidate.candidateOutput $
+            generatedReportCandidates first
+    impossible <- expectRight $ parseHType
+        "forall a b. (forall r. (a -> r -> r) -> r -> r) -> b"
+    negative <- expectRight $ inhabitGenerated
+        options {optionCutoff = 8, optionBudget = Just 1000}
+        emptyEnvironment [] "carrierMustNotCapture" impossible
+    assertEqual "a residual carrier invented an unowned result inhabitant" 0 $
+        length $ generatedReportCandidates negative
+
+testCarrierFirstResult :: IO ()
+testCarrierFirstResult = do
+    source <- expectRight $ parseHType
+        "forall a. (forall r. (a -> r -> r) -> r -> r) -> (forall r. (a -> r -> r) -> r -> r)"
+    let options = defaultQueryOptions
+            { optionAlternatives = True, optionSorted = False
+            , optionCutoff = 1, optionBudget = Just 100000
+            }
+        run configured = expectRight $ inhabitGenerated configured emptyEnvironment []
+            "carrierFirstResult" source
+    baseline <- run options {optionAlternatives = False}
+    actual <- run options
+    let clauses = map SharedCandidate.candidateOutput . generatedReportCandidates
+    assertBool "the historical one-proof query had no candidate" $ not $ null $ clauses baseline
+    assertEqual "carrier exploration lost the ordinary one-proof result"
+        (clauses baseline) (clauses actual)
+
+-- A successful first result is available without spending a choice. Its
+-- alternative branch does spend choices, so forcing that tail would change
+-- the returned budget and fail this test independently of candidate text.
+testFirstProofPrefixBudget :: IO ()
+testFirstProofPrefixBudget = do
+    let atom = PVar $ Symbol "prefixR"
+        goal = atom :-> atom
+        proofContext = [(Symbol "prefixF", goal), (Symbol "prefixG", goal)]
+        mode = (defaultSearchMode True)
+            { searchBudget = Just 10
+            , searchStrategy = Interleave, searchTermAlternatives = True
+            , searchRanking = SharedQuality.defaultCandidateRankingPolicy
+            }
+    prefix <- expectRight $ proveFirstWithModeChecked mode proofContext goal
+    full <- expectRight $ proveWithModeChecked mode proofContext goal
+    assertEqual "the first-proof policy returned more than its first proof"
+        (take 1 $ searchProofs full) (searchProofs prefix)
+    assertEqual "the first-proof policy spent an unobserved tail's fuel"
+        (Just 10) (remainingSearchBudget prefix)
+    assertBool "the control did not have a choice-bearing alternative tail" $
+        remainingSearchBudget full < Just 10
+    assertBool "a successful first-proof policy reported choice exhaustion" $
+        not $ searchExhausted prefix
+    mapM_ (expectRight . checkProof proofContext goal) $ searchProofs prefix
+    zero <- expectRight $ proveFirstWithModeChecked
+        mode {searchBudget = Just 0} proofContext goal
+    assertEqual "a zero-choice first proof forced an alternative branch"
+        (searchProofs prefix, Just 0, False)
+        (searchProofs zero, remainingSearchBudget zero, searchExhausted zero)
+
+testProofSearchCursor :: IO ()
+testProofSearchCursor = mapM_ check
+    [(strategy, budget, nested) | strategy <- [DepthFirst, Interleave],
+        budget <- [0, 1, 10, 100], nested <- [False, True]]
+  where
+    atom = PVar $ Symbol "cursorR"
+    identityGoal = atom :-> atom
+    identityContext = [(Symbol "cursorF", identityGoal), (Symbol "cursorG", identityGoal)]
+    check (strategy, budget, nested) = do
+        let (cursorContext, goal) = if nested then nestedProductSequent
+                else (identityContext, identityGoal)
+            mode = (defaultSearchMode True)
+                { searchBudget = Just budget, searchStrategy = strategy
+                , searchTermAlternatives = nested
+                , searchRanking = SharedQuality.defaultCandidateRankingPolicy }
+        full <- expectRight $ proveWithModeChecked mode cursorContext goal
+        cursor <- expectRight $ startProofSearchChecked mode cursorContext goal
+        let (proofs, exhausted, remainder) = consume budget cursor
+        assertEqual "resumption changed the raw proof stream"
+            (searchProofs full) proofs
+        assertEqual "resumption duplicated or refunded a choice"
+            (searchExhausted full, remainingSearchBudget full)
+            (exhausted, Just remainder)
+        mapM_ (expectRight . checkProof cursorContext goal) proofs
+    consume budget cursor = case observeProofSearch cursor of
+        ProofSearchFinished -> ([], False, budget)
+        ProofSearchChoice rest
+            | budget <= 0 -> ([], True, budget)
+            | otherwise -> consume (budget - 1) rest
+        ProofSearchResult proof rest ->
+            let (proofs, exhausted, remainder) = consume budget rest
+            in (proof : proofs, exhausted, remainder)
+
+-- Both sides of this nested-implication product have independent choices.
+-- Assumption names deliberately occupy the prover's ordinary fresh prefixes.
+-- The four checked results must retain their own argument and continuation,
+-- even when interleaving resumes another branch between those two searches.
+nestedProductSequent :: ([(Symbol, Formula)], Formula)
+nestedProductSequent = (premises, productD)
+  where
+    productA = PVar $ Symbol "productA"
+    productB = PVar $ Symbol "productB"
+    productC = PVar $ Symbol "productC"
+    productD = PVar $ Symbol "productD"
+    premises =
+        [ (Symbol "x1", (productA :-> productB) :-> productC)
+        , (Symbol "z1", productB), (Symbol "x2", productB)
+        , (Symbol "z2", productC :-> productD), (Symbol "x3", productC :-> productD)
+        ]
+
+testNestedProofProduct :: IO ()
+testNestedProofProduct = mapM_ check [DepthFirst, Interleave]
+  where
+    (premises, goal) = nestedProductSequent
+    check strategy = do
+        result <- expectRight $ proveWithModeChecked
+            (defaultSearchMode True)
+                { searchStrategy = strategy, searchTermAlternatives = True
+                , searchBudget = Just 10000
+                , searchRanking = SharedQuality.defaultCandidateRankingPolicy }
+            premises goal
+        mapM_ (expectRight . checkProof premises goal) $ searchProofs result
+        pairs <- mapM pair $ searchProofs result
+        assertEqual "nested search lost or crossed an argument/continuation branch"
+            (sort [(Symbol consumer, Symbol argument)
+                | consumer <- ["z2", "x3"], argument <- ["z1", "x2"]]) $
+            sort $ nub pairs
+    pair (Apply (Var consumer) (Apply (Var provider) (Lam _ (Var argument))))
+        | provider == Symbol "x1" = pure (consumer, argument)
+    pair proof = fail $ "the nested product emitted an unexpected proof: " ++ show proof
+
+testNormalTermAlternatives :: IO ()
+testNormalTermAlternatives = do
+    let mode = (defaultSearchMode True)
+            { searchStrategy = Interleave, searchTermAlternatives = True
+            , searchBudget = Just 10000
+            , searchRanking = SharedQuality.defaultCandidateRankingPolicy }
+        resultAtom = PVar $ Symbol "normalR"
+        reuseGoal = (resultAtom :-> resultAtom) :-> resultAtom :-> resultAtom
+    reused <- expectRight $ proveWithModeChecked mode [] reuseGoal
+    mapM_ (expectRight . checkProof [] reuseGoal) $ searchProofs reused
+    assertBool "a reusable assumption could not form f (f x)" $
+        any twice $ searchProofs reused
+    let inputAtom = PVar $ Symbol "normalInput"
+        argumentAtom = PVar $ Symbol "normalArgument"
+        outputAtom = PVar $ Symbol "normalOutput"
+        provider = Symbol "normalProvider"
+        function = Symbol "normalFunction"
+        input = Symbol "normalValue"
+        functionType = argumentAtom :-> resultAtom
+        premises = [(provider, functionType :-> outputAtom),
+            (function, inputAtom :-> functionType), (input, inputAtom)]
+        forwarded = Apply (Var provider) $ Apply (Var function) (Var input)
+    partial <- expectRight $ proveWithModeChecked mode premises outputAtom
+    mapM_ (expectRight . checkProof premises outputAtom) $ searchProofs partial
+    assertBool "an exact residual function type could not be forwarded without eta expansion" $
+        forwarded `elem` searchProofs partial
+    -- No first LJT proof means no added size ladder and no altered evidence.
+    original <- expectRight $ proveWithModeChecked mode {searchTermAlternatives = False} [] resultAtom
+    impossible <- expectRight $ proveWithModeChecked mode [] resultAtom
+    assertEqual "normal alternatives altered an unsuccessful historical prefix"
+        (searchProofs original, searchExhausted original, remainingSearchBudget original)
+        (searchProofs impossible, searchExhausted impossible, remainingSearchBudget impossible)
+  where
+    twice (Lam function (Lam input (Apply (Var outer) (Apply (Var inner) (Var value))))) =
+        function == outer && function == inner && input == value
+    twice _ = False
+
+-- A plain atom and an opaque source atom may print identically while owning
+-- different logical identities. Both zero-argument and applied heads must
+-- retain that distinction throughout the additional normal proof stream.
+testFiniteNormalLayers :: IO ()
+testFiniteNormalLayers = do
+    let finiteAtom = PVar $ Symbol "finiteNormalA"
+        absentAtom = PVar $ Symbol "finiteNormalB"
+        finalAtom = PVar $ Symbol "finiteNormalC"
+        finiteValue = Symbol "finiteValue"
+        blockedHead = Symbol "finiteBlocked"
+        enumerationMode = (defaultSearchMode True)
+            { searchStrategy = Interleave, searchTermAlternatives = True
+            , searchBudget = Just 10000
+            , searchRanking = SharedQuality.defaultCandidateRankingPolicy }
+        inspectFiniteCase premises goal = do
+            result <- expectRight $ proveWithModeChecked enumerationMode premises goal
+            mapM_ (expectRight . checkProof premises goal) $ searchProofs result
+            assertBool "a proved finite normal grammar exhausted its choice budget" $
+                not $ searchExhausted result
+            pure $ searchProofs result
+    -- Same-typed lambda assumptions retain both term identities, although
+    -- their types are a set only in the maximum-size analysis.
+    projections <- inspectFiniteCase [] $ finiteAtom :-> finiteAtom :-> finiteAtom
+    assertEqual "finite-layer stopping lost a same-typed lambda projection"
+        [False, True] $ sort $ nub $ map projectedFirst projections
+    -- A cyclic first argument is Unknown, but the unavailable second
+    -- argument makes the entire head impossible. This case must be finite.
+    blocked <- inspectFiniteCase
+        [(blockedHead, finiteAtom :-> absentAtom :-> finiteAtom), (finiteValue, finiteAtom)]
+        finiteAtom
+    assertEqual "an impossible head argument invented or hid a proof"
+        [Var finiteValue] $ nub blocked
+    -- The finite maximum must include multi-head terms, not just projections.
+    let firstLink = Symbol "finiteFirst"
+        secondLink = Symbol "finiteSecond"
+        premises = [(firstLink, finiteAtom :-> absentAtom),
+            (secondLink, absentAtom :-> finalAtom), (finiteValue, finiteAtom)]
+        expected = Apply (Var secondLink) $ Apply (Var firstLink) (Var finiteValue)
+    chained <- inspectFiniteCase premises finalAtom
+    assertBool "finite maximum discarded the end of an acyclic head chain" $
+        expected `elem` chained
+    -- A viable recursive state remains Unknown: no finite cap is fabricated.
+    let recursiveHead = Symbol "finiteRecursive"
+        recursivePremises = [(recursiveHead, finiteAtom :-> finiteAtom),
+            (finiteValue, finiteAtom)]
+        twiceApplied = Apply (Var recursiveHead) $
+            Apply (Var recursiveHead) (Var finiteValue)
+    recursive <- expectRight $ proveWithModeChecked enumerationMode recursivePremises finiteAtom
+    mapM_ (expectRight . checkProof recursivePremises finiteAtom) $ searchProofs recursive
+    assertBool "a viable cycle was incorrectly declared finite" $ searchExhausted recursive
+    assertBool "cycle handling removed a reusable-head term" $
+        twiceApplied `elem` searchProofs recursive
+  where
+    projectedFirst (Lam first (Lam _ (Var selected))) = first == selected
+    projectedFirst proof = error $ "unexpected projection term: " ++ show proof
+
+testNormalResidualIdentity :: IO ()
+testNormalResidualIdentity = mapM_ check
+    [(target, decoy, applied) | (target, decoy) <- [(plain, opaque), (opaque, plain)],
+        applied <- [False, True]]
+  where
+    plain = PVar $ Symbol "indexedAtom"
+    opaque = PVar $ opaqueTypeSymbol $ SharedType.TypeVariable "indexedAtom"
+    inputAtom = PVar $ Symbol "indexedInput"
+    correct = Symbol "indexedCorrect"
+    wrong = Symbol "indexedWrong"
+    input = Symbol "indexedValue"
+    mode = (defaultSearchMode True)
+        { searchStrategy = Interleave, searchTermAlternatives = True
+        , searchBudget = Just 2000
+        , searchRanking = SharedQuality.defaultCandidateRankingPolicy }
+    check (target, decoy, applied) = do
+        assertEqual "the residual identity control no longer shares display text"
+            (show target) (show decoy)
+        assertBool "the residual identity control collapsed its logical atoms" $
+            target /= decoy
+        let source result = if applied then inputAtom :-> result else result
+            premises = [(wrong, source decoy), (correct, source target)] ++
+                [(input, inputAtom) | applied]
+            expected = if applied then Apply (Var correct) (Var input) else Var correct
+        result <- expectRight $ proveWithModeChecked mode premises target
+        mapM_ (expectRight . checkProof premises target) $ searchProofs result
+        assertEqual "a residual lookup lost its owned head or admitted the same-rendered decoy"
+            [expected] $ nub $ searchProofs result
+
+-- The two external heads have the same type and occupy fresh-name prefixes;
+-- the atom occupies the next prefix. Lambda introduction adds a third head
+-- of that same type. All nine ordered two-head compositions must survive in
+-- either source encounter order, with each proof checked in its own scope.
+testNormalContextExtension :: IO ()
+testNormalContextExtension = mapM_ check [False, True]
+  where
+    first = Symbol "n1"
+    second = Symbol "n2"
+    resultAtom = PVar $ Symbol "n3"
+    functionType = resultAtom :-> resultAtom
+    goal = functionType :-> resultAtom :-> resultAtom
+    mode = (defaultSearchMode True)
+        { searchStrategy = Interleave, searchTermAlternatives = True
+        , searchBudget = Just 10000
+        , searchRanking = SharedQuality.defaultCandidateRankingPolicy }
+    expectedPairs = [(outer, inner) | outer <- [0 .. 2 :: Int], inner <- [0 .. 2 :: Int]]
+    check reversed = do
+        let heads = [(first, functionType), (second, functionType)]
+            premises = if reversed then reverse heads else heads
+            reserved = map fst premises ++ formulaSymbols goal
+        result <- expectRight $ proveWithModeChecked mode premises goal
+        mapM_ (expectRight . checkProof premises goal) $ searchProofs result
+        let observed = [entry | Just entry <- map composition $ searchProofs result]
+        assertEqual "context extension lost or conflated distinct reusable head choices"
+            expectedPairs $ sort $ nub [pair | (_, _, pair) <- observed]
+        assertBool "a normal lambda captured a source head or formula identity" $
+            all (\(function, input, _) -> function /= input &&
+                function `notElem` reserved && input `notElem` reserved) observed
+    composition (Lam function (Lam input
+            (Apply (Var outer) (Apply (Var inner) (Var value)))))
+        | value == input = do
+            outerChoice <- headChoice function outer
+            innerChoice <- headChoice function inner
+            pure (function, input, (outerChoice, innerChoice))
+    composition _ = Nothing
+    headChoice function name
+        | name == first = Just 0
+        | name == second = Just 1
+        | name == function = Just 2
+        | otherwise = Nothing
+
+-- The historical list-fold opportunities must advance while a productive
+-- carrier context still has thousands of alternatives. The oracles below
+-- interpret emitted terms only; neither implementation enters the query.
+testCarrierPlanFairness :: IO ()
+testCarrierPlanFairness = do
+    check "appendWhileExploringCarriers"
+        "forall a. (forall r. (a -> r -> r) -> r -> r) -> (forall r. (a -> r -> r) -> r -> r) -> (forall r. (a -> r -> r) -> r -> r)"
+        (\expression -> all (\(left, right) ->
+            appendResult expression left right == Right (left ++ right))
+            [(left, right) | left <- samples, right <- samples])
+    check "filterWhileExploringCarriers"
+        "forall a. (a -> (forall r. r -> r -> r)) -> (forall r. (a -> r -> r) -> r -> r) -> (forall r. (a -> r -> r) -> r -> r)"
+        (\expression -> all (\(predicate, values) ->
+            filterResult expression predicate values == Right (filter predicate values))
+            [(predicate, values) | predicate <- [const True, const False, even, (< 0)],
+                values <- samples])
+  where
+    samples = [[], [7], [11, 29], [-2, 1, 8, -2]]
+    check name signature accepts = do
+        source <- expectRight $ parseHType signature
+        result <- expectRight $ inhabitGenerated
+            defaultQueryOptions
+                { optionAlternatives = True, optionSorted = False
+                , optionStrategy = Interleave, optionCutoff = 65536
+                , optionBudget = Just 500000 }
+            emptyEnvironment [] name source
+        let expressions = map (SharedGenerated.functionClauseExpression .
+                SharedCandidate.candidateOutput) $ generatedReportCandidates result
+        assertBool (name ++ ": no matching term in the shared 65536-proof / 500000-choice prefix; " ++
+            "candidates=" ++ show (length expressions) ++
+            "; completion=" ++ show (generatedReportCompletion result)) $
+            any accepts expressions
+    appendResult expression left right = do
+        candidate <- evaluateCarrierExpression 10000 Map.empty expression
+        partial <- carrierTestApply candidate $ carrierListEncode left
+        folded <- carrierTestApply partial $ carrierListEncode right
+        carrierListDecode folded
+    filterResult expression predicate values = do
+        candidate <- evaluateCarrierExpression 10000 Map.empty expression
+        partial <- carrierTestApply candidate $ CarrierTestFunction $ \element ->
+            case element of
+                CarrierTestElement value -> Right $ CarrierTestFunction $ \yes ->
+                    Right $ CarrierTestFunction $ \no -> Right $
+                        if predicate value then yes else no
+                _ -> Left "the predicate received a non-element"
+        folded <- carrierTestApply partial $ carrierListEncode values
+        carrierListDecode folded
+
+-- A later exact-opaque view can forward the declared polymorphic provider.
+-- Four independent fields each choose one of four ordinary inputs: the
+-- opened view has 4^4 combinations before considering its two choice lambdas.
+-- This Cartesian prefix does not depend on endomorphism reuse, local cuts,
+-- or the extra normal-term lane. No provider body is supplied.
+testFormulaPlanAdmission :: IO ()
+testFormulaPlanAdmission = do
+    choice <- expectRight $ parseHType "forall a. a -> a -> a"
+    environment <- expectRight $ declare (Function "laterChoice" choice) emptyEnvironment
+    source <- expectRight $ parseHType
+        "forall r. r -> r -> r -> r -> (r, r, r, r, (forall a. a -> a -> a))"
+    provider <- expectShownRight $ SharedName.parseName "laterChoice"
+    let run strategy = expectRight $ inhabitGenerated
+            defaultQueryOptions
+                { optionAlternatives = True, optionSorted = False
+                , optionStrategy = strategy, optionCutoff = 128
+                , optionBudget = Just 10000 }
+            environment [] "admitLaterView" source
+        usesProvider = any (elem provider . SharedGenerated.expressionGlobals .
+            SharedGenerated.functionClauseExpression . SharedCandidate.candidateOutput) .
+            generatedReportCandidates
+    depth <- run DepthFirst
+    assertEqual "the prolific initial view did not fill the control prefix"
+        (SharedSearch.truncated SharedSearch.CandidateLimitReached) $
+        generatedReportCompletion depth
+    assertBool "the depth-first control already reached the later provider view" $
+        not $ usesProvider depth
+    fair <- run Interleave
+    assertBool ("a later formula view was starved by the first cursor; completion=" ++
+        show (generatedReportCompletion fair)) $ usesProvider fair
+
+testLazyPlanFamilyAdmission :: IO ()
+testLazyPlanFamilyAdmission = do
+    -- The first family represents an expensive optional instantiation
+    -- generator. Its tag is sufficient to suppress it; even WHNF is forbidden.
+    let families =
+            [ (True, error "a suppressed family generator was forced")
+            , (False, [17 :: Int])
+            ]
+    case nextAdmittedPlanFamily id families of
+        Just (False, firstPlan : _, []) -> assertEqual "the later family was lost" 17 firstPlan
+        _ -> fail "the admitted family did not preserve source order"
+    -- A candidate bound may stop after the admitted head. Do not inspect
+    -- either that family's remaining plans or the later family source.
+    let lazyTail = (False, 23 : error "an admitted plan tail was forced") :
+            error "an unobserved later family was forced"
+    case nextAdmittedPlanFamily id lazyTail of
+        Just (False, firstPlan : _, _) -> assertEqual "the admitted head changed" (23 :: Int) firstPlan
+        _ -> fail "the first admitted family was unavailable"
+
+testFoldBridgeReuse :: IO ()
+testFoldBridgeReuse = do
+    source <- expectRight $ parseHType
+        "forall a r q. (q -> ((a -> r -> r) -> r -> r)) -> q -> q -> (a -> r -> r) -> r -> r"
+    let options = defaultQueryOptions
+            { optionAlternatives = True, optionSorted = False, optionStrategy = Interleave
+            , optionCutoff = 512, optionBudget = Just 100000 }
+        run configured = expectRight $ inhabitGenerated configured emptyEnvironment []
+            "reuseOpaqueFoldBridge" source
+        expressions = map (SharedGenerated.functionClauseExpression . SharedCandidate.candidateOutput) .
+            generatedReportCandidates
+        samples = [[], [7], [11, 29], [-2, 1, 8, -2]]
+        appends expression = all (\(left, rightValues) ->
+            observe expression left rightValues == Right (left ++ rightValues))
+            [(left, rightValues) | left <- samples, rightValues <- samples]
+    result <- run options
+    assertBool ("the bridge was consumed before its second opaque input; candidates=" ++
+        show (length $ expressions result) ++ "; completion=" ++
+        show (generatedReportCompletion result)) $ any appends $ expressions result
+    bounded <- run options {optionCutoff = 1}
+    assertBool "finite bridge saturation refilled the one-proof allowance" $
+        length (expressions bounded) <= 1
+    zero <- run options {optionCutoff = 8, optionBudget = Just 0}
+    assertEqual "bridge alternatives bypassed the zero-choice guard"
+        (SharedSearch.truncated SharedSearch.ChoicePointLimitReached) $
+        generatedReportCompletion zero
+  where
+    observe expression left rightValues = do
+        candidate <- evaluateCarrierExpression 10000 Map.empty expression
+        converted <- carrierTestApply candidate $ CarrierTestFunction Right
+        firstInput <- carrierTestApply converted $ carrierListEncode left
+        folded <- carrierTestApply firstInput $ carrierListEncode rightValues
+        carrierListDecode folded
+
+testBinaryCompositionWithOuterResult :: IO ()
+testBinaryCompositionWithOuterResult = mapM_ check [False, True]
+  where
+    check withOuter = do
+        source <- expectRight $ parseHType $
+            "forall r. (r -> r -> r) -> (r -> r) -> " ++
+            (if withOuter then "r -> r -> r" else "r -> r")
+        result <- expectRight $ inhabitGenerated
+            defaultQueryOptions
+                { optionAlternatives = True, optionSorted = False, optionStrategy = Interleave
+                , optionCutoff = 256, optionBudget = Just 100000 }
+            emptyEnvironment [] "composeOverInnerResult" source
+        let expressions = map (SharedGenerated.functionClauseExpression . SharedCandidate.candidateOutput) $
+                generatedReportCandidates result
+            cases = [(binary, unary, outer, inner)
+                | binary <- [(\x y -> x + 3 * y), (\x y -> 7 * x - y)]
+                , unary <- [(\x -> 2 * x + 1), negate, const 5]
+                , outer <- [-2, 0, 7], inner <- [-1, 3]]
+            accepts leftFirst expression = all (\(binary, unary, outer, inner) ->
+                observe withOuter expression binary unary outer inner == Right
+                    (if leftFirst then binary (unary inner) inner else binary inner (unary inner))) cases
+        mapM_ (\leftFirst -> assertBool
+            ("binary composition was lost with extra outer result=" ++ show withOuter ++
+                ", transformed argument is first=" ++ show leftFirst ++
+                "; completion=" ++ show (generatedReportCompletion result)) $
+            any (accepts leftFirst) expressions) [False, True]
+    observe withOuter expression binary unary outer inner = do
+        candidate <- evaluateCarrierExpression 10000 Map.empty expression
+        withBinary <- carrierTestApply candidate $ CarrierTestFunction $ \left ->
+            Right $ CarrierTestFunction $ \rightValue -> case (left, rightValue) of
+                (CarrierTestElement x, CarrierTestElement y) -> Right $ CarrierTestElement $ binary x y
+                _ -> Left "binary function received a non-element"
+        withUnary <- carrierTestApply withBinary $ CarrierTestFunction $ \value -> case value of
+            CarrierTestElement x -> Right $ CarrierTestElement $ unary x
+            _ -> Left "unary function received a non-element"
+        withOuterValue <- if withOuter
+            then carrierTestApply withUnary $ CarrierTestElement outer
+            else pure withUnary
+        result <- carrierTestApply withOuterValue $ CarrierTestElement inner
+        case result of
+            CarrierTestElement value -> Right value
+            _ -> Left "composition returned a non-element"
+
+data CarrierTestValue
+    = CarrierTestFunction (CarrierTestValue -> Either String CarrierTestValue)
+    | CarrierTestElement Int
+    | CarrierTestList [Int]
+
+carrierTestApply :: CarrierTestValue -> CarrierTestValue -> Either String CarrierTestValue
+carrierTestApply (CarrierTestFunction function) argument = function argument
+carrierTestApply _ _ = Left "the generated term applied a non-function"
+
+-- This rank-one control separates composition enumeration from selection of a
+-- rank-N carrier. The supplied endomorphisms record their exact application
+-- order, so neither projection nor repeated use of one argument can pass.
+testEndomorphismCompositionAlternatives :: IO ()
+testEndomorphismCompositionAlternatives = do
+    source <- expectRight $ parseHType
+        "forall r. (r -> r) -> (r -> r) -> r -> r"
+    let options = defaultQueryOptions
+            { optionAlternatives = True, optionSorted = False
+            , optionStrategy = Interleave
+            , optionCutoff = 256, optionBudget = Just 10000
+            }
+        run configured = expectRight $ inhabitGenerated configured emptyEnvironment []
+            "compositionResult" source
+    alternatives <- run options
+    first <- run options {optionAlternatives = False}
+    singleton <- run options {optionAlternatives = False, optionCutoff = 1}
+    let expressions = map (SharedGenerated.functionClauseExpression . SharedCandidate.candidateOutput) $
+            generatedReportCandidates alternatives
+        observed = map applicationOrder expressions
+        diagnostic = unlines
+            [ "both endomorphism compositions must remain reachable within 256 raw proofs / 10000 choices"
+            , "candidate count: " ++ show (length expressions)
+            , "completion: " ++ show (generatedReportCompletion alternatives)
+            , "observed application orders: " ++ show observed
+            , "first expressions: " ++ show (take 8 expressions)
+            ]
+    assertBool diagnostic $ all (`elem` observed) [Right [1, 2], Right [2, 1]]
+    assertEqual "alternative composition changed first-only synthesis"
+        (map SharedCandidate.candidateOutput $ generatedReportCandidates first)
+        (map SharedCandidate.candidateOutput $ generatedReportCandidates singleton)
+  where
+    applicationOrder expression = do
+        candidate <- evaluateCarrierExpression 10000 Map.empty expression
+        first <- carrierTestApply candidate $ record 1
+        second <- carrierTestApply first $ record 2
+        result <- carrierTestApply second $ CarrierTestList []
+        case result of
+            CarrierTestList values -> Right values
+            _ -> Left "the endomorphism result was not its supplied result type"
+    record marker = CarrierTestFunction $ \value -> case value of
+        CarrierTestList values -> Right $ CarrierTestList $ marker : values
+        _ -> Left "the endomorphism received a different result type"
+
+testEndomorphismCompositionWithOuterResult :: IO ()
+testEndomorphismCompositionWithOuterResult = do
+    source <- expectRight $ parseHType
+        "forall r. r -> (r -> r) -> (r -> r) -> r -> r"
+    result <- expectRight $ inhabitGenerated
+        defaultQueryOptions
+            { optionAlternatives = True, optionSorted = False
+            , optionStrategy = Interleave
+            , optionCutoff = 256, optionBudget = Just 10000
+            }
+        emptyEnvironment [] "compositionWithOuterResult" source
+    let expressions = map (SharedGenerated.functionClauseExpression . SharedCandidate.candidateOutput) $
+            generatedReportCandidates result
+        observed = map applicationOrder expressions
+    assertBool ("compositions over the last result argument were missing: " ++ show observed) $
+        all (`elem` observed) [Right [1, 2, 9], Right [2, 1, 9]]
+  where
+    applicationOrder expression = do
+        candidate <- evaluateCarrierExpression 10000 Map.empty expression
+        outer <- carrierTestApply candidate $ CarrierTestList [8]
+        first <- carrierTestApply outer $ record 1
+        second <- carrierTestApply first $ record 2
+        result <- carrierTestApply second $ CarrierTestList [9]
+        case result of
+            CarrierTestList values -> Right values
+            _ -> Left "the endomorphism result did not preserve the supplied type"
+    record marker = CarrierTestFunction $ \value -> case value of
+        CarrierTestList values -> Right $ CarrierTestList $ marker : values
+        _ -> Left "the endomorphism received a different result type"
+
+carrierListResult :: SharedGenerated.Expression String -> [Int] -> Either String [Int]
+carrierListResult expression inputs = do
+    candidate <- evaluateCarrierExpression 10000 Map.empty expression
+    folded <- carrierTestApply candidate $ carrierListEncode inputs
+    carrierListDecode folded
+
+carrierListDecode :: CarrierTestValue -> Either String [Int]
+carrierListDecode folded = do
+    withStep <- carrierTestApply folded cons
+    result <- carrierTestApply withStep $ CarrierTestList []
+    case result of
+        CarrierTestList values -> Right values
+        _ -> Left "the generated Church fold returned a non-list"
+  where
+    cons = CarrierTestFunction $ \element -> Right $ CarrierTestFunction $ \rest ->
+        case (element, rest) of
+            (CarrierTestElement value, CarrierTestList values) ->
+                Right $ CarrierTestList $ value : values
+            _ -> Left "the generated fold used a malformed list constructor"
+
+carrierListEncode :: [Int] -> CarrierTestValue
+carrierListEncode inputs = CarrierTestFunction $ \step -> Right $ CarrierTestFunction $ \zero ->
+    foldValues step zero inputs
+  where
+    foldValues _ zero [] = Right zero
+    foldValues step zero (value : values) = do
+        rest <- foldValues step zero values
+        applied <- carrierTestApply step $ CarrierTestElement value
+        carrierTestApply applied rest
+evaluateCarrierExpression :: Int -> Map.Map String CarrierTestValue
+    -> SharedGenerated.Expression String -> Either String CarrierTestValue
+evaluateCarrierExpression fuel environment expression'
+    | fuel <= 0 = Left "the test interpreter exhausted its reduction depth"
+    | otherwise = case expression' of
+        SharedGenerated.Local name -> maybe
+            (Left $ "unbound generated variable: " ++ name) Right $
+            Map.lookup name environment
+        SharedGenerated.Lambda [] body -> descend body
+        SharedGenerated.Lambda (pattern' : rest) body ->
+            Right $ CarrierTestFunction $ \argument -> do
+                nested <- bind pattern' argument environment
+                evaluateCarrierExpression (fuel - 1) nested $
+                    SharedGenerated.Lambda rest body
+        SharedGenerated.Apply function argument -> do
+            callable <- descend function
+            value <- descend argument
+            carrierTestApply callable value
+        SharedGenerated.VisibleTypeApplication function _ -> descend function
+        SharedGenerated.Let pattern' value body -> do
+            result <- descend value
+            nested <- bind pattern' result environment
+            evaluateCarrierExpression (fuel - 1) nested body
+        _ -> Left "the generated term left the test's pure lambda fragment"
+  where
+    descend = evaluateCarrierExpression (fuel - 1) environment
+    bind pattern' value bindings = case pattern' of
+        SharedGenerated.Bind name -> Right $ Map.insert name value bindings
+        SharedGenerated.Wildcard -> Right bindings
+        _ -> Left "the generated term used a non-variable lambda pattern"
+
 -- A selected impredicative image may itself require constructing a value.
 -- Every opened argument scope remains rigid and isolated from ambient data.
 testConstructedRankN :: IO ()
@@ -1754,6 +2443,58 @@ testRankNTypeAtoms = do
         ("a query-local vacuous scheme lost its closed monotype choice: "
             ++ show localClosedVacuousRendered)
         $ any ("@MonoClosed" `isInfixOf`) localClosedVacuousRendered
+
+    -- The seed and consumer share MonoToken as their exact residual result,
+    -- but require different visible-prefix lengths. A grouped bridge context
+    -- must keep each full vector on its own local source occurrence.
+    let groupedVisibleSource =
+            "(forall selected. selected -> selected) -> " ++
+            "(forall hidden. MonoToken) -> " ++
+            "(forall first second. MonoToken -> MonoToken) -> MonoToken"
+        groupedVisibleOptions = defaultQueryOptions
+            { optionAlternatives = True
+            , optionStrategy = Interleave
+            , optionSorted = False
+            , optionCutoff = 4096
+            , optionBudget = Just 100000
+            }
+        groupedIdentity = SharedType.ForallType ["groupedIdentityType"] [] $
+            SharedType.FunctionType
+                (SharedType.TypeVariable "groupedIdentityType")
+                (SharedType.TypeVariable "groupedIdentityType")
+        groupedOccurrenceVectors expression = case SharedGenerated.expressionLambdaSpine $
+                SharedGenerated.simplifyExpressionWithoutEtaBy id expression of
+            ([_, SharedGenerated.Bind seed, SharedGenerated.Bind consumer],
+                SharedGenerated.Apply
+                    (SharedGenerated.VisibleTypeApplication
+                        (SharedGenerated.VisibleTypeApplication
+                            (SharedGenerated.Local usedConsumer) consumerFirst)
+                        consumerSecond)
+                    (SharedGenerated.VisibleTypeApplication
+                        (SharedGenerated.Local usedSeed) seedArgument))
+                | usedSeed == seed && usedConsumer == consumer && seed /= consumer ->
+                    Just (seedArgument, consumerFirst, consumerSecond)
+            _ -> Nothing
+    groupedIdentityArgument <- expectShownRight $
+        SharedGenerated.specifiedVisibleTypeArgument groupedIdentity
+    groupedVisible <- runStableQueryWith groupedVisibleOptions closedSession
+        "preserveGroupedLocalVisibleVectors" groupedVisibleSource
+    let groupedVisibleCandidates = SharedSearch.batchCandidates $
+            SharedQuery.resultSearch groupedVisible
+        groupedVisibleExpressions = map
+            (SharedGenerated.functionClauseExpression . SharedCandidate.candidateOutput)
+            groupedVisibleCandidates
+        groupedVisibleVectors =
+            [vectors | Just vectors <- map groupedOccurrenceVectors groupedVisibleExpressions]
+    assertBool
+        ("cooperating local bridges lost or exchanged their one-/two-slot visible prefixes; " ++
+            "candidate count=" ++ show (length groupedVisibleCandidates) ++
+            "; progress=" ++ show (SharedSearch.batchProgress $ SharedQuery.resultSearch groupedVisible) ++
+            "; observed vectors=" ++ show (take 8 groupedVisibleVectors)) $
+        (groupedIdentityArgument, groupedIdentityArgument, groupedIdentityArgument)
+            `elem` groupedVisibleVectors
+    assertBool "grouped visible bridges exceeded their original raw candidate limit" $
+        length groupedVisibleCandidates <= optionCutoff groupedVisibleOptions
 
     -- Loaded polymorphic values cross the same checked boundary.  The only
     -- possible inhabitant composes the three named globals, so this pins both

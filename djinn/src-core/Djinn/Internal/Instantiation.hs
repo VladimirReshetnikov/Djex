@@ -28,6 +28,8 @@ module Djinn.Internal.Instantiation
     , instantiationAxioms
     , queryCorrelatedInstantiationAxioms
     , queryDirectedInstantiationAxioms
+    , queryCarrierInstantiationAxioms
+    , formulaFunctionCarriers
     , queryConstructedInstantiationAxioms
     , scopedConstructionInstantiationAxioms
     , queryClosedInstantiationAxioms
@@ -422,6 +424,78 @@ queryDirectedInstantiationAxioms translator visibleArgument historicalAxioms
         (\scheme -> directedInstantiationTuples maxInstantiationAttempts
             (schemeSource scheme) demands demands)
         schemes
+
+-- | Recover function carriers from the actual opened formula, rather than
+-- guessing the spelling of a binder underneath an unopened source forall.
+-- Only owned variable atoms and exact opaque source payloads are reversible.
+-- A structural conjunction/disjunction is not evidence of a particular source
+-- datatype, so those nodes contribute only their independently reversible
+-- children. The checked compiler must reproduce the exact original arrow.
+-- Residual results precede larger function types; raw carrier proposals are
+-- bounded before alpha deduplication or compilation.
+formulaFunctionCarriers
+    :: (SharedType.Type String -> Either String Formula)
+    -> [String]
+    -> [Formula]
+    -> [SharedType.Type String]
+formulaFunctionCarriers translator variableSpellings formulas =
+    distinctOn SharedTypeAtom.alphaTypeKey
+        [ source
+        | (formula, source) <- take maxInstantiationAttempts $
+            concatMap (snd . recover) formulas
+        , Right translated <- [translator source]
+        , translated == formula
+        ]
+  where
+    owned = Set.fromList variableSpellings
+    recover formula = case formula of
+        PVar symbol -> (atomSource symbol, [])
+        argument :-> result ->
+            let (argumentType, argumentCarriers) = recover argument
+                (resultType, resultCarriers) = recover result
+                source = SharedType.FunctionType <$> argumentType <*> resultType
+            in (source, resultCarriers ++ argumentCarriers ++
+                maybe [] (\ty -> [(formula, ty)]) source)
+        Conj children -> (Nothing, concatMap (snd . recover) children)
+        Disj children -> (Nothing, concatMap (snd . recover . snd) children)
+        Empty _ -> (Nothing, [])
+    atomSource symbol = case opaqueSymbolSource symbol of
+        Just source
+            | SharedType.freeVariables source `Set.isSubsetOf` owned -> Just source
+        _ -> case symbol of
+            Symbol spelling | spelling `Set.member` owned ->
+                Just $ SharedType.TypeVariable spelling
+            _ -> Nothing
+
+-- | A separate positive-only family selects at least one residual function
+-- carrier. It cannot consume the historical variable/quantified prefix, and
+-- its focused plans may be scheduled independently when alternatives are
+-- requested. In particular a fold's fresh output R permits the carrier R -> R
+-- without making an unopened source binder R an ambient variable.
+queryCarrierInstantiationAxioms
+    :: (SharedType.Type String -> Either String Formula)
+    -> (SharedType.Type String -> Maybe SharedGenerated.VisibleTypeArgument)
+    -> [String]
+    -> [Formula]
+    -> [Formula]
+    -> InstantiationAxioms
+queryCarrierInstantiationAxioms translator visibleArgument variableSpellings
+        goalFormulas premiseFormulas =
+    buildInstantiationAxioms "$djinn$query-carrier-instantiation$" translator
+        True visibleArgument carrierTuples (hypothesisSchemes atoms)
+  where
+    atoms = queryAtomSymbols goalFormulas premiseFormulas
+    carriers = formulaFunctionCarriers translator variableSpellings
+        (goalFormulas ++ premiseFormulas)
+    carrierKeys = Set.fromList $ map SharedTypeAtom.alphaTypeKey carriers
+    vocabulary = variableCandidatesOf variableSpellings ++ carriers
+    carrierTuples _ | null carriers = []
+    carrierTuples scheme =
+        [ arguments
+        | arguments <- directedInstantiationTuples maxInstantiationAttempts
+            (schemeSource scheme) carriers vocabulary
+        , any ((`Set.member` carrierKeys) . SharedTypeAtom.alphaTypeKey) arguments
+        ]
 
 -- | A demand-directed, positive-only family which can construct a quantified
 -- argument after choosing an impredicative provider instance. Unlike the

@@ -22,12 +22,18 @@
 -- search in Dyckhoff's contraction-free LJT calculus, extended to produce
 -- proof terms ('Proof' is a "Djinn.Internal.LJTFormula" 'Term').  A
 -- t'SearchMode' selects the branch strategy, alternative retention, and an
--- optional choice-point budget; unbudgeted search is a decision procedure,
--- and 'proveWithModeChecked' first validates the assumption identities.
+-- optional choice-point budget. Historical LJT is a decision procedure for
+-- its propositional fragment. Explicit interleaved term alternatives may
+-- continue enumerating normal terms without a finite bound, even after the
+-- original formula is proved. 'proveWithModeChecked' first validates the
+-- assumption identities.
 module Djinn.Internal.LJT (
     module Djinn.Internal.LJTFormula, provable, prove, Proof,
     SearchMode(..), Strategy(..), SearchOutcome(..),
-    defaultSearchMode, proveWithMode, proveWithModeChecked
+    defaultSearchMode, proveWithMode, proveWithModeChecked,
+    proveFirstWithModeChecked,
+    ProofSearchCursor, ProofSearchObservation(..),
+    startProofSearchChecked, observeProofSearch
     ) where
 
 import Control.Applicative (Alternative(empty, (<|>)))
@@ -52,9 +58,10 @@ type MoreSolutions = Bool
 -- is the classical order (fully explore the first branch before the second),
 -- except for the bounded local rotation of the three oldest proofs while
 -- enumerating retained alternatives for an exact atomic @A -> A -> A@ suffix.
--- Interleave alternates between branches at every choice point, so an
--- expensive dead end cannot starve a cheap alternative (including the tail
--- outside that local three-proof cohort).
+-- Interleave rotates ordinary choice branches at each choice point. The
+-- optional LJT-tail/normal-term merge instead preempts on a proof or 64
+-- observed choices; the source query's optional formula-plan scheduler uses
+-- the same turn rule. Every observed choice retains its original charge.
 data Strategy = DepthFirst | Interleave
     deriving (Eq, Show)
 
@@ -62,6 +69,12 @@ data Strategy = DepthFirst | Interleave
 data SearchMode = SearchMode {
     -- Retain alternative proofs at local search cuts (multiple solutions).
     searchAlternatives :: Bool,
+    -- Together with searchAlternatives and Interleave, enumerate checked
+    -- normal terms after the exact historical first-proof prefix. This is
+    -- disabled in default raw modes; source queries enable it only through
+    -- explicit optionAlternatives, not through sorting alone. A proved finite
+    -- maximum ends the extra size ladder; unresolved cycles remain unbounded.
+    searchTermAlternatives :: Bool,
     searchStrategy :: Strategy,
     -- Maximum number of choice points to explore; Nothing is unlimited.
     -- With a limit the search is no longer a decision procedure: an empty
@@ -79,6 +92,7 @@ data SearchMode = SearchMode {
 defaultSearchMode :: MoreSolutions -> SearchMode
 defaultSearchMode more = SearchMode {
     searchAlternatives = more,
+    searchTermAlternatives = False,
     searchStrategy = DepthFirst,
     searchBudget = Nothing,
     searchRanking = Quality.LegacyCandidateRanking,
@@ -118,12 +132,20 @@ prove more env = searchProofs . proveWithMode (defaultSearchMode more) env
 -- 'proveWithModeChecked' unless the caller has already assigned unique proof
 -- identities.
 proveWithMode :: SearchMode -> [(Symbol, Formula)] -> Formula -> SearchOutcome
-proveWithMode mode env goal =
+proveWithMode = proveWithModeBy id
+
+-- Apply the result policy inside the choice-counted computation. In
+-- particular a first-result policy must not obtain its remaining fuel by
+-- traversing an already-produced list's unobserved proof tail.
+proveWithModeBy
+    :: (P Proof -> P Proof)
+    -> SearchMode -> [(Symbol, Formula)] -> Formula -> SearchOutcome
+proveWithModeBy policy mode env goal =
     SearchOutcome proofs exhausted remaining
   where
     (proofs, exhausted, remaining) =
         runBounded (searchBudget mode) (searchStrategy mode) reservedSymbols $
-            redtop mode (searchAlternatives mode) env goal
+            policy $ proofSearchComputation mode env goal
     -- Symbol is shared by proof variables and propositional atoms.  Reserving
     -- both namespaces prevents generated binders from capturing environment
     -- variables and keeps the atom introduced for disjunction genuinely fresh.
@@ -142,6 +164,285 @@ proveWithModeChecked
 proveWithModeChecked mode environment goal = do
     checkProofEnvironment environment
     return $ proveWithMode mode environment goal
+
+-- | Search just through the first proof, preserving the exact choice budget
+-- left at that prefix. No later proof or choice is inspected. The ordinary
+-- prover's enumeration policy is unchanged; this entrance supports a charged
+-- first-result stage followed by a different bounded search family.
+proveFirstWithModeChecked
+    :: SearchMode -> [(Symbol, Formula)] -> Formula
+    -> Either String SearchOutcome
+proveFirstWithModeChecked mode environment goal = do
+    checkProofEnvironment environment
+    return $ proveWithModeBy atMostOne mode environment goal
+
+-- | A resumable, unconsumed search stream. The cursor owns the branch-local
+-- freshness state; resuming it never starts the proof search again. Its
+-- caller must charge every 'ProofSearchChoice' against its shared query
+-- budget and every 'ProofSearchResult' against its raw candidate allowance.
+-- The mode's per-search budget is deliberately not applied a second time.
+newtype ProofSearchCursor = ProofSearchCursor (Steps (PS, Proof))
+
+data ProofSearchObservation
+    = ProofSearchFinished
+    | ProofSearchChoice ProofSearchCursor
+    | ProofSearchResult Proof ProofSearchCursor
+
+-- | Validate a plan and retain its lazy continuation, without observing a
+-- proof or choice. This supports fair outer-plan scheduling with one budget.
+startProofSearchChecked
+    :: SearchMode -> [(Symbol, Formula)] -> Formula
+    -> Either String ProofSearchCursor
+startProofSearchChecked mode environment goal = do
+    checkProofEnvironment environment
+    return $ ProofSearchCursor $ reify (searchStrategy mode)
+        (startPS reservedSymbols) $
+        proofSearchComputation mode environment goal
+  where
+    reservedSymbols = map fst environment ++
+        concatMap (formulaSymbols . snd) environment ++ formulaSymbols goal
+
+-- | Observe exactly one stream node. Neither a result's tail nor a choice's
+-- continuation is forced here, so a caller can stop at either exact bound.
+observeProofSearch :: ProofSearchCursor -> ProofSearchObservation
+observeProofSearch (ProofSearchCursor stream) = case stream of
+    Done -> ProofSearchFinished
+    Step rest -> ProofSearchChoice $ ProofSearchCursor rest
+    Yield (_, proof) rest -> ProofSearchResult proof $ ProofSearchCursor rest
+
+-- Preserve the exact historical first-proof prefix. Only an explicit
+-- interleaved term-alternative request can then add normal forms, alongside
+-- the unconsumed LJT tail. Support detection and the additional stream stay
+-- behind that first Yield, so a first-result cut never forces them and an
+-- unsuccessful LJT search keeps its original negative evidence and budget.
+proofSearchComputation
+    :: SearchMode -> [(Symbol, Formula)] -> Formula -> P Proof
+proofSearchComputation mode environment goal
+    | searchAlternatives mode && searchTermAlternatives mode &&
+        searchStrategy mode == Interleave = P $ \strategy state sk fk ->
+            let normalTail
+                    | all (normalFormula . snd) environment && normalFormula goal =
+                        reify strategy state $ chargeNormalAttempt $
+                            normalProofSearch environment goal
+                    | otherwise = Done
+                afterFirst Done = Done
+                afterFirst (Step rest) = Step (afterFirst rest)
+                afterFirst (Yield result rest) = Yield result (interleaveProofWork 64 rest normalTail)
+            in replay sk fk $ afterFirst $ reify strategy state original
+    | otherwise = original
+  where
+    original = redtop mode (searchAlternatives mode) environment goal
+
+-- This additional grammar uses only the exact existing atomic identities and
+-- arrows. Structural sums/products and their eliminators remain with LJT.
+normalFormula :: Formula -> Bool
+normalFormula (PVar _) = True
+normalFormula (argument :-> result) = normalFormula argument && normalFormula result
+normalFormula _ = False
+
+-- Index every exact residual of an assumption's arrow spine. A residual may
+-- itself be an arrow, retaining forwarding and partial application. Each head
+-- occurs once per residual; the lists retain association-list encounter order.
+-- The maps are immutable: introducing a lambda prepends only its fresh head
+-- and shares all unrelated residual entries with the enclosing context.
+data NormalContext = NormalContext
+    { normalCompatibleHeads :: Map.Map Formula [(Symbol, [Formula])]
+    , normalMinimumHeadCosts :: Map.Map Formula Integer
+    }
+
+normalContext :: [(Symbol, Formula)] -> NormalContext
+normalContext = foldr (uncurry extendNormalContext) $
+    NormalContext Map.empty Map.empty
+
+extendNormalContext :: Symbol -> Formula -> NormalContext -> NormalContext
+extendNormalContext name source context = NormalContext
+    (insertHead [] source $ normalCompatibleHeads context)
+    (extendNormalMinimumCosts source $ normalMinimumHeadCosts context)
+  where
+    insertHead reversedArguments residual heads =
+        let extended = Map.insertWith (++) residual
+                [(name, reverse reversedArguments)] heads
+        in case residual of
+            argument :-> result -> insertHead (argument : reversedArguments) result extended
+            _ -> extended
+
+-- One neutral head plus at least one head use per supplied argument. This
+-- projection needs no proof identity, so lower-bound lambda exploration can
+-- extend it without allocating or inventing a term binder.
+extendNormalMinimumCosts :: Formula -> Map.Map Formula Integer -> Map.Map Formula Integer
+extendNormalMinimumCosts = insertCost 1
+  where
+    insertCost cost residual costs =
+        let extended = Map.insertWith min residual cost costs
+        in case residual of
+            _ :-> result -> insertCost (cost + 1) result extended
+            _ -> extended
+
+-- Size counts neutral head uses, including repeated uses of one assumption.
+-- Lambda introduction is free; existing neutral functions can also be
+-- forwarded or partially applied. Each applied head costs one, so
+-- every argument has a strictly smaller positive size. Finite input formulae
+-- bound consecutive lambda introductions. Increasing layers share the outer
+-- cursor's budget; even advancing to another empty layer is a charged Step.
+-- The context is shared across size layers. Its initial thunk is first
+-- demanded inside normalProofAtSize, after the normal lane's charged Step.
+-- A finite maximum is proved over exact type-set/goal states. Multiplicity
+-- changes the number of terms, but not their attainable head-use sizes. Only
+-- actual assumption types enter the state: indexed arrow residuals are not
+-- assumptions. A live cycle is Unknown, never an invented finite cut-off.
+data NormalMaximum = NormalImpossible | NormalFinite Integer | NormalUnknown
+    deriving (Eq, Show)
+
+type NormalBoundState = (Set.Set Formula, Formula)
+type NormalBoundMemo = Map.Map NormalBoundState NormalMaximum
+
+normalProofSearch :: [(Symbol, Formula)] -> Formula -> P Proof
+normalProofSearch environment goal = do
+    maximumSize <- normalMaximumSize (Set.fromList $ map snd environment) goal
+    normalProofLayers maximumSize (normalContext environment) goal 1
+
+-- Every recursive state, candidate head, arrow-spine link, and argument is
+-- behind a charged Step. This deterministic analysis shares the normal
+-- lane's existing cursor fuel; it has no private allowance or depth cap.
+-- It runs only behind the historical first proof and the lane's first Step.
+-- Unknown cycles return promptly and keep the old unbounded size ladder.
+normalMaximumSize :: Set.Set Formula -> Formula -> P NormalMaximum
+normalMaximumSize assumptions goal =
+    fst <$> inspect Set.empty Map.empty assumptions goal
+  where
+    inspect :: Set.Set NormalBoundState -> NormalBoundMemo
+        -> Set.Set Formula -> Formula -> P (NormalMaximum, NormalBoundMemo)
+    inspect active memo available target = chargeNormalAttempt $
+        case Map.lookup key memo of
+            Just known -> return (known, memo)
+            Nothing
+                | Set.member key active -> return (NormalUnknown, memo)
+                | otherwise -> do
+                    let active' = Set.insert key active
+                    (lambdaMaximum, memo') <- case target of
+                        argument :-> result ->
+                            inspect active' memo (Set.insert argument available) result
+                        _ -> return (NormalImpossible, memo)
+                    (maximumSize, memo'') <- heads active' available target
+                        lambdaMaximum memo' (Set.toList available)
+                    return (maximumSize, Map.insert key maximumSize memo'')
+      where
+        key = (available, target)
+
+    -- Unknown is absorbing for alternatives. It is NOT absorbing for the
+    -- arguments of one head: a later Impossible argument kills that head.
+    heads _ _ _ NormalUnknown memo _ = return (NormalUnknown, memo)
+    heads _ _ _ accumulated memo [] = return (accumulated, memo)
+    heads active available target accumulated memo (source : sources) =
+        chargeNormalAttempt $ do
+            matched <- matchingArguments target [] source
+            case matched of
+                Nothing -> heads active available target accumulated memo sources
+                Just arguments -> do
+                    (headMaximum, memo') <- argumentsMaximum active available
+                        (NormalFinite 1) memo arguments
+                    heads active available target
+                        (alternativeMaximum accumulated headMaximum) memo' sources
+
+    matchingArguments target reversedArguments source = chargeNormalAttempt $
+        if source == target then return $ Just $ reverse reversedArguments
+        else case source of
+            argument :-> result ->
+                matchingArguments target (argument : reversedArguments) result
+            _ -> return Nothing
+
+    argumentsMaximum _ _ NormalImpossible memo _ = return (NormalImpossible, memo)
+    argumentsMaximum _ _ accumulated memo [] = return (accumulated, memo)
+    argumentsMaximum active available accumulated memo (argument : arguments) =
+        chargeNormalAttempt $ do
+            (argumentMaximum, memo') <- inspect active memo available argument
+            argumentsMaximum active available
+                (productMaximum accumulated argumentMaximum) memo' arguments
+
+    alternativeMaximum NormalUnknown _ = NormalUnknown
+    alternativeMaximum _ NormalUnknown = NormalUnknown
+    alternativeMaximum NormalImpossible other = other
+    alternativeMaximum other NormalImpossible = other
+    alternativeMaximum (NormalFinite left) (NormalFinite right) =
+        NormalFinite $ max left right
+
+    productMaximum NormalImpossible _ = NormalImpossible
+    productMaximum _ NormalImpossible = NormalImpossible
+    productMaximum NormalUnknown _ = NormalUnknown
+    productMaximum _ NormalUnknown = NormalUnknown
+    productMaximum (NormalFinite left) (NormalFinite right) = NormalFinite $ left + right
+
+normalProofLayers :: NormalMaximum -> NormalContext -> Formula -> Integer -> P Proof
+normalProofLayers NormalImpossible _ _ _ = mzero
+normalProofLayers maximumSize context goal size = P $ \strategy state sk fk ->
+    let continue = case maximumSize of
+            NormalFinite limit | size >= limit -> fk
+            _ -> Step $ unP (normalProofLayers maximumSize context goal (size + 1))
+                    strategy state sk fk
+    in unP (normalProofAtSize context goal size) strategy state sk continue
+
+normalProofAtSize :: NormalContext -> Formula -> Integer -> P Proof
+normalProofAtSize context goal size = chargeNormalAttempt $
+    case normalLowerBound context goal of
+        Nothing -> mzero
+        Just required | size < required -> mzero
+        _ -> case goal of
+            argument :-> result -> normalChoices
+                [ neutral
+                , do
+                    binder <- newSym "n"
+                    Lam binder <$> normalProofAtSize (extendNormalContext binder argument context) result size
+                ]
+            PVar _ -> neutral
+            _ -> mzero
+  where
+    neutral = normalChoices
+        [applyHead name arguments
+        | (name, arguments) <- Map.findWithDefault [] goal $ normalCompatibleHeads context]
+    applyHead name arguments = case traverse (normalLowerBound context) arguments of
+        Nothing -> mzero
+        Just minima -> bindInterleaved (normalSizePartitions minima (size - 1)) $ \argumentSizes -> do
+            arguments' <- normalArgumentProduct arguments argumentSizes
+            return $ applys (Var name) arguments'
+    normalArgumentProduct [] [] = return []
+    normalArgumentProduct (argument : arguments) (argumentSize : sizes) =
+        bindInterleaved (normalProofAtSize context argument argumentSize) $ \proof ->
+            (proof :) <$> normalArgumentProduct arguments sizes
+    normalArgumentProduct _ _ = mzero
+
+chargeNormalAttempt :: P a -> P a
+chargeNormalAttempt attempt = P $ \strategy state sk fk ->
+    Step $ unP attempt strategy state sk fk
+
+-- An admissible cost bound only: required lambdas introduce their domains
+-- before head lookup, and every argument of a matching head needs at least
+-- one head use. No type- or syntax-specific construction rule is involved.
+-- The stored minimum is exactly the previous scan's neutral minimum; this
+-- lookup does not instantiate, unify, or identify merely similar formulae.
+normalLowerBound :: NormalContext -> Formula -> Maybe Integer
+normalLowerBound context = lowerBound $ normalMinimumHeadCosts context
+  where
+    lowerBound costs goal = case (Map.lookup goal costs, lambdaBound costs goal) of
+        (Nothing, other) -> other
+        (other, Nothing) -> other
+        (Just neutralCost, Just lambdaCost) -> Just $ min neutralCost lambdaCost
+    lambdaBound costs (argument :-> result) =
+        lowerBound (extendNormalMinimumCosts argument costs) result
+    lambdaBound _ _ = Nothing
+
+normalSizePartitions :: [Integer] -> Integer -> P [Integer]
+normalSizePartitions [] size = chargeNormalAttempt $
+    if size == 0 then return [] else mzero
+normalSizePartitions (minimumHere : minima) size = chargeNormalAttempt $
+    normalChoices
+        [(part :) <$> normalSizePartitions minima (size - part)
+        | part <- [minimumHere .. size - sum minima]]
+
+-- Every attempted head/partition/intro branch is charged, even on failure.
+-- Finite choices are visited round-robin without building their products.
+normalChoices :: [P a] -> P a
+normalChoices branches = P $ \strategy state sk fk ->
+    replay sk fk $ roundRobinSteps $ map (Step . reify strategy state) branches
 
 -- Fold the environment into the goal as premises, prove the resulting
 -- implication, then apply the proof to the environment variables and
@@ -275,6 +576,24 @@ interleaveS Done ys = ys
 interleaveS (Yield x xs) ys = Yield x (interleaveS ys xs)
 interleaveS (Step xs) ys = Step (interleaveS ys xs)
 
+-- Balance a proof-producing stream with a stream that needs several failed
+-- expansions before its next proof. A turn ends at one Yield or a positive
+-- quantum of Steps. Each Step is emitted lazily and unchanged: reaching a
+-- caller's exact budget never evaluates the rest of the turn. A quantum of
+-- one is precisely interleaveS. This is a scheduling quantum, not a proof,
+-- size, or total-work cap; neither stream is restarted or granted new fuel.
+interleaveProofWork :: Int -> Steps a -> Steps a -> Steps a
+interleaveProofWork quantum = advance turnSize
+  where
+    turnSize = max 1 quantum
+    advance _ Done right = right
+    advance _ (Yield result rest) right =
+        Yield result (advance turnSize right rest)
+    advance remaining (Step rest) right = Step $
+        if remaining <= 1
+            then advance turnSize right rest
+            else advance (remaining - 1) rest right
+
 -- The success continuation receives the value's final state and the rest
 -- of the stream (all remaining alternatives) as an already-built tail.
 type Success r a = PS -> a -> Steps r -> Steps r
@@ -331,6 +650,20 @@ replay sk fk = go
     go (Yield (s', x) rest) = sk s' x (go rest)
     go (Step rest) = Step (go rest)
 
+-- Fairly combine an argument stream with its dependent proof searches.
+-- Ordinary monadic bind deliberately retains the historical depth-first
+-- continuation order. Here each argument keeps its own freshness state and
+-- unconsumed tail, while the existing stream merge advances later arguments
+-- beside an expensive earlier continuation. Every source/continuation Step
+-- is retained exactly once; admitting an argument adds no synthetic choice.
+bindInterleaved :: P a -> (a -> P b) -> P b
+bindInterleaved source continue = P $ \strategy state sk fk ->
+    let combine Done = Done
+        combine (Step rest) = Step (combine rest)
+        combine (Yield (branchState, argument) rest) =
+            interleaveS (reify strategy branchState $ continue argument) (combine rest)
+    in replay sk fk $ combine $ reify strategy state source
+
 -- The state carries both the next suffix and every symbol already in use.
 -- The initial used set contains caller-supplied term and formula symbols; each
 -- generated symbol is then recorded here as well.
@@ -356,13 +689,15 @@ interleaveChoices :: [P a] -> P a
 interleaveChoices [] = mzero
 interleaveChoices [choice] = choice
 interleaveChoices (choice : choices) = P $ \ strat s sk fk ->
-    replay sk fk $ roundRobin
+    replay sk fk $ roundRobinSteps
         (reify strat s choice : map (Step . reify strat s) choices)
+
+-- Advance every live stream by one node per round. The reversed rear list
+-- makes queue rotation amortized constant-time without favoring a right-
+-- nested suffix when three or more proofs are available.
+roundRobinSteps :: [Steps a] -> Steps a
+roundRobinSteps initialStreams = advance initialStreams []
   where
-    -- Advance every live stream by one node per round.  The reversed rear
-    -- list makes queue rotation amortized constant-time without favoring a
-    -- right-nested suffix when three or more proofs are available.
-    roundRobin streams = advance streams []
     advance [] [] = Done
     advance [] rear = advance (reverse rear) []
     advance (Done : streams) rear = advance streams rear
@@ -569,8 +904,7 @@ redant mode more antes atomImps nestImps atoms goal =
         let (consequences, remainingAtomImps) = extract atomImps s
             newAntecedents =
                 [A (Apply f p) b | A f b <- consequences] ++ pending
-        in redant mode more newAntecedents remainingAtomImps nestImps
-             (addAtom p s atoms) g
+        in redant mode more newAntecedents remainingAtomImps nestImps (addAtom p s atoms) g
     reduceAntecedent _ (A p (Conj conjuncts)) pending g = do
         variables <- mapM (const (newSym "v")) conjuncts
         proof <- redant0
@@ -757,8 +1091,7 @@ redant mode more antes atomImps nestImps atoms goal =
         (NestImp p c d b, remaining) <- select $ orderNestedProofs mode nestImps
         x <- newSym "x"
         z <- newSym "z"
-        qz <- redant mode more [A (Var z) (d :-> b)] atomImps remaining atoms
-            (c :-> d)
+        qz <- redant mode more [A (Var z) (d :-> b)] atomImps remaining atoms (c :-> d)
         proof <- redant mode more [A (Var x) b] atomImps remaining atoms g
         subst (applyImp p (Lam z qz)) x proof
 

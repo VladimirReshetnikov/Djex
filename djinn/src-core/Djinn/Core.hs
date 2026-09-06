@@ -115,6 +115,7 @@ import Djinn.Internal.Instantiation
     , instantiationAxioms
     , loadedInstantiationAxioms
     , queryDirectedInstantiationAxioms
+    , queryCarrierInstantiationAxioms
     , queryConstructedInstantiationAxioms
     , scopedConstructionInstantiationAxioms
     , queryCorrelatedInstantiationAxioms
@@ -127,6 +128,7 @@ import Djinn.Internal.Instantiation
     , usesInstantiationEvidence
     )
 import Djinn.Internal.LJT
+import Djinn.Internal.PlanFamily (nextAdmittedPlanFamily)
 import Djinn.Internal.ProofCheck.Evidence (checkProofWithEvidence)
 import Djinn.Internal.ProofEnv
 import Djinn.Internal.ProofToGenerated
@@ -645,22 +647,26 @@ data QueryOptions = QueryOptions {
     -- | Rank solutions by the fraction of unused binders, then binder
     -- count; implies collecting alternatives.
     optionSorted :: Bool,
-    -- | Maximum number of candidate proofs considered across all formula
-    -- plans (positive). Observing one more proof reports
-    -- 'SharedSearch.CandidateLimitReached'.
+    -- | Positive raw-proof allowance shared across all formula plans.
+    -- Rejected proofs and duplicates still count; reaching the bound may
+    -- report 'SharedSearch.CandidateLimitReached' before search finishes.
     optionCutoff :: Int,
-    -- | Choice-point budget; 'Nothing' keeps the search a complete
-    -- decision procedure.
+    -- | Shared choice-point budget; 'Nothing' removes this work bound.
+    -- Higher-rank planning remains a bounded approximation. Explicit
+    -- interleaved alternatives may enumerate infinitely many normal terms,
+    -- or retain an unbounded size ladder when finiteness is not established.
     optionBudget :: Maybe Integer,
-    -- | How the proof search explores its choice points.  'DepthFirst' is
-    -- the historical order; 'Interleave' alternates between branches so an
-    -- expensive dead end cannot starve a cheap alternative.  The choice
-    -- reorders candidates and changes how a budget is spent; it never
-    -- changes which formulas are provable.
+    -- | How proof search explores alternatives. 'DepthFirst' retains the
+    -- historical plan schedule. 'Interleave' rotates ordinary choices;
+    -- with explicit 'optionAlternatives' it also admits later formula plans
+    -- and reusable-head normal terms under proof-or-64-choice turns. These
+    -- turns share the query's existing proof/choice bounds. Sorting alone
+    -- does not enable the additional term or plan enumeration.
     optionStrategy :: Strategy,
     -- | Structural quality influences finite search choices before the raw
     -- proof cutoff and ranks checked results afterward. Legacy preserves the
-    -- historical unused-binder ordering and proof enumeration.
+    -- historical unused-binder metric; the explicit strategy and alternative
+    -- controls remain independent of the ranking profile.
     optionRanking :: SharedQuality.CandidateRankingPolicy,
     -- | Exact named-provider cost overrides. Unlisted providers cost one;
     -- names are semantic identities, not rendered spellings or lengths.
@@ -1487,16 +1493,22 @@ searchPreparedFormula
 searchPreparedFormula options prepared providerCandidates providerAssignments
         target elaboratedGoal parametricDataRelevant formulaPlans
         nominalFormulaPlans = do
-    results <- runPlans
-        ([(False, initialSearchPlans), (True, loadedConstructedAccelerationPlans),
-            (False, searchPlans)] ++ deferredInstantiationPlans)
-        collectAcrossPlans options (optionCutoff options) [] transportSearchPlans
+    results <- if interleavePlanAlternatives
+        then runFairPlans (optionCutoff options) (optionBudget options) []
+            [ FormulaPlanLane (0, 0) False historicalFamilies transportSearchPlans Nothing
+            , FormulaPlanLane (1, 0) False [] carrierAlternativeSearchPlans Nothing
+            ] []
+        else runPlans False historicalFamilies
+            collectAcrossPlans options (optionCutoff options) [] transportSearchPlans
     mergeFormulaPlanResults options results
   where
-    -- Premise partitioning and the complete deterministic plan-family
-    -- schedule.  Everything below is a pure derivation from the prepared
-    -- environment and the caller-checked evidence; the search itself is
-    -- runPlans' fold over the finished searchPlans list.
+    historicalFamilies =
+        [(False, initialSearchPlans), (True, loadedConstructedAccelerationPlans),
+            (False, searchPlans)] ++ deferredInstantiationPlans
+    -- Premise partitioning and deterministic plan-family derivation from
+    -- the prepared environment and caller-checked evidence. The ordinary
+    -- path consumes families sequentially; explicit interleaved alternatives
+    -- admit their still-lazy plans incrementally while retaining live cursors.
     (premises, premiseTranslationIncomplete, premiseSpellings) =
         preparedEnvironmentPolarizedFunctionPremises prepared
     (nominalPremises, _, nominalPremiseSpellings) =
@@ -1685,6 +1697,10 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         (goalVariables ++ polarizedFormulaPlanSkolems formulaPlans ++ premiseSpellings)
         elaboratedGoal (map fst plans)
         (map snd $ premises ++ activeLoadedSchemePremises)
+    queryCarrierAxioms = queryCarrierInstantiationAxioms
+        structuralTranslator visibleArgument
+        (goalVariables ++ polarizedFormulaPlanSkolems formulaPlans ++ premiseSpellings)
+        (map fst plans) (map snd $ premises ++ activeLoadedSchemePremises)
     nominalQueryDirectedAxioms = queryDirectedInstantiationAxioms
         nominalTranslator visibleArgument activeNominalAxioms
         (goalVariables ++ polarizedFormulaPlanSkolems nominalFormulaPlans ++ nominalPremiseSpellings)
@@ -2305,7 +2321,8 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         , (queryClosedAxiomPremises, queryClosedVisibleApplications)
         , (queryCorrelatedAxiomPremises, queryCorrelatedVisibleApplications)
         ]
-    focusedPlansOf families =
+    focusedPlansOf = focusedPlansWithPrefix "$djinn$focused$"
+    focusedPlansWithPrefix symbolPrefix families =
         [ ( premises ++ loadedSchemePremises ++ [(focusedSymbol, formula)]
           , []
           , Set.singleton focusedSymbol
@@ -2319,11 +2336,64 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             | (axioms, applications) <- families
             , premise <- axioms
             ]
-        , let focusedSymbol = Symbol $ "$djinn$focused$" ++ show index
+        , let focusedSymbol = Symbol $ symbolPrefix ++ show index
         ]
-    -- Richer compound instantiations are an inhabitation fallback. Keep the
-    -- established alternative streams intact once they already contain a
-    -- solution; otherwise augment the checked contexts with directed axioms.
+    -- Explicit interleaving explores residual carriers alongside the old
+    -- plan stream, retaining both continuations. Depth-first, first-only and
+    -- sorted-only requests keep their established family policy and prefixes.
+    -- Neither lane can refill the shared raw-proof or choice allowance.
+    carrierAlternativeSearchPlans
+        | not interleavePlanAlternatives = []
+        | otherwise = commonResultInstantiationSearchPlans ++
+            focusedPlansWithPrefix "$djinn$carrier-focused$"
+                [(instantiationAxiomPremises queryCarrierAxioms,
+                    instantiationVisibleApplications queryCarrierAxioms)]
+    -- Several source schemes may cooperate at one exact result type. Keep
+    -- those already-checked bridges together before the singleton carrier
+    -- contexts, without importing every unrelated instantiation image. This
+    -- is result-type grouping, not a claim that complete source assignment
+    -- vectors coincide. Each member retains its own formula and any visible
+    -- arguments; the historical all-axiom context remains available.
+    -- The existing bounded historical axiom inventory bounds these groups.
+    -- Their order follows first result occurrence, and heads within a group
+    -- retain source encounter order. No tuple or additional axiom is created.
+    commonResultInstantiationSearchPlans =
+        [ ( premises ++ loadedSchemePremises ++
+                [(focusedSymbol, formula) | (_, focusedSymbol, formula) <- renamed]
+          , []
+          , Set.fromList [focusedSymbol | (_, focusedSymbol, _) <- renamed]
+          , Map.fromList
+                [(focusedSymbol, arguments)
+                | (originalSymbol, focusedSymbol, _) <- renamed
+                , Just arguments <- [Map.lookup originalSymbol activeVisibleApplications]]
+          , Map.empty
+          , translatedFormula primary
+          , False
+          )
+        | (groupIndex, group) <- zip [0 :: Int ..] commonResultInstantiationGroups
+        , let renamed =
+                [ (originalSymbol, Symbol $ "$djinn$carrier-focused$common$" ++
+                        show groupIndex ++ "$" ++ show memberIndex, formula)
+                | (memberIndex, (originalSymbol, formula)) <- zip [0 :: Int ..] group
+                ]
+        ]
+    commonResultInstantiationGroups =
+        [ group
+        | result <- SharedCollection.distinctOn id
+            [instantiationResult body | (_, PVar _ :-> body) <- activeAxiomPremises]
+        , let group =
+                [(symbol, formula)
+                | (symbol, formula@(PVar _ :-> body)) <- activeAxiomPremises
+                , instantiationResult body == result]
+        , length group >= 2
+        ]
+    instantiationResult (_ :-> result) = instantiationResult result
+    instantiationResult result = result
+    interleavePlanAlternatives =
+        optionAlternatives options && optionStrategy options == Interleave
+    -- Richer compound instantiations remain an inhabitation fallback for
+    -- first-only requests. Explicit alternative enumeration may also explore
+    -- them after an earlier syntactic inhabitant, under the same global fuel.
     augmentDirected axioms basePlans =
         [ ( ps ++ instantiationAxiomPremises axioms, diagnostics
           , symbols `Set.union` instantiationAxiomSymbols axioms
@@ -2457,8 +2527,10 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
     -- construction-first order needed by their argument introductions.
     deferredInstantiationPlans
         | SharedType.containsForall elaboratedGoal =
-            [(True, constructedSearchPlans), (True, directedSearchPlans)]
-        | otherwise = [(True, directedSearchPlans), (True, constructedSearchPlans)]
+            [(inhabitationOnly, constructedSearchPlans), (inhabitationOnly, directedSearchPlans)]
+        | otherwise = [(inhabitationOnly, directedSearchPlans), (inhabitationOnly, constructedSearchPlans)]
+      where
+        inhabitationOnly = not interleavePlanAlternatives
     constructedSearchPlans =
         concatMap (\axioms -> augmentDirected axioms
             (structuralSearchPlans ++ structuralAxiomSearchPlans ++
@@ -2485,28 +2557,156 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
     withoutProviders providerNames =
         filter ((`Set.notMember` providerNames) . fst)
 
-    -- Do not even prepare the richer fallback until the historical search
-    -- has found no inhabitant. Looking at a fallback's symbol set already
+    -- Advance active plans round-robin after one raw proof or a bounded
+    -- quantum of choices. Every choice is still observed and charged before
+    -- continuing the current turn. After a new plan's first turn, its cursor
+    -- and still-lazy pending plan source get separate queue entries. Thus later
+    -- formula views enter incrementally even when an earlier view has a
+    -- prolific proof stream. No anchor is restarted and no continuation is
+    -- discarded. Family admission retains the first-inhabitant-only rules;
+    -- rejected and duplicate raw proofs still spend their original slots.
+    runFairPlans candidateLimit budget completed front rear
+        | candidateLimit <= 0 = finishFair
+            (SharedSearch.truncated SharedSearch.CandidateLimitReached) budget completed
+        | otherwise = case front of
+            [] -> case reverse rear of
+                [] -> finishFair SharedSearch.Finished budget completed
+                next -> runFairPlans candidateLimit budget completed next []
+            lane : remaining -> do
+                active <- activateLane completed lane
+                case active of
+                    Nothing -> runFairPlans candidateLimit budget completed remaining rear
+                    Just (FormulaPlanLane ordinal inhabitationOnly families pendingPlans (Just stream)) ->
+                        case observeProofSearch $ formulaStreamCursor stream of
+                            ProofSearchChoice continuation
+                                | Just fuel <- budget, fuel <= 0 -> finishFair
+                                    (SharedSearch.truncated SharedSearch.ChoicePointLimitReached)
+                                    budget completed
+                                | formulaStreamWorkRemaining stream > 1 ->
+                                    runFairPlans candidateLimit (fmap (subtract 1) budget) completed
+                                        (FormulaPlanLane ordinal inhabitationOnly families pendingPlans
+                                            (Just stream {formulaStreamCursor = continuation,
+                                                formulaStreamWorkRemaining = formulaStreamWorkRemaining stream - 1})
+                                            : remaining) rear
+                                | otherwise -> runFairPlans candidateLimit
+                                    (fmap (subtract 1) budget) completed remaining $
+                                    requeuePlan ordinal inhabitationOnly families pendingPlans
+                                        stream {formulaStreamCursor = continuation} rear
+                            ProofSearchResult proof continuation -> do
+                                result <- formulaStreamAssess stream $
+                                    SearchOutcome [proof] False budget
+                                runFairPlans (candidateLimit - 1) budget ((ordinal, result) : completed)
+                                    remaining $ requeuePlan ordinal inhabitationOnly families pendingPlans
+                                        stream {formulaStreamCursor = continuation,
+                                            formulaStreamProducedProof = True} rear
+                            ProofSearchFinished
+                                | formulaStreamProducedProof stream ->
+                                    runFairPlans candidateLimit budget completed remaining $
+                                        FormulaPlanLane (nextPlanOrdinal ordinal) inhabitationOnly
+                                            families pendingPlans Nothing : rear
+                                | otherwise -> do
+                                    result <- formulaStreamAssess stream $
+                                        SearchOutcome [] False budget
+                                    let completed' = (ordinal, result) : completed
+                                    if evidenceCanBenefitFromAnotherPlan result
+                                        then runFairPlans candidateLimit
+                                            (formulaPlanRemainingBudget result) completed' remaining $
+                                            FormulaPlanLane (nextPlanOrdinal ordinal) inhabitationOnly
+                                                families pendingPlans Nothing : rear
+                                        else finishFair SharedSearch.Finished
+                                            (formulaPlanRemainingBudget result) completed'
+                    Just _ -> Left $ DjinnInternalQueryFailure
+                        "fair proof-plan activation did not retain a cursor"
+
+    -- Queue the active continuation before the next source admission on the
+    -- following round. Splitting the source happens once per started plan:
+    -- an already-suspended cursor has empty pending lists. Looking only at
+    -- list constructors does not enumerate or compile future formula views.
+    requeuePlan ordinal inhabitationOnly families pendingPlans stream rear =
+        let continuation = FormulaPlanLane ordinal inhabitationOnly [] [] $
+                Just stream {formulaStreamWorkRemaining = formulaPlanWorkQuantum}
+        in case (families, pendingPlans) of
+            ([], []) -> continuation : rear
+            _ -> FormulaPlanLane (nextPlanOrdinal ordinal) inhabitationOnly
+                families pendingPlans Nothing : continuation : rear
+
+    finishFair completion budget completed = Right $ reverse $ case map snd completed of
+        latest : earlier -> latest {formulaPlanCompletion = completion,
+            formulaPlanRemainingBudget = budget} : earlier
+        [] -> [FormulaPlanResult
+            { formulaPlanFormula = show $ translatedFormula primary
+            , formulaPlanFirstProof = Nothing
+            , formulaPlanCompletion = completion
+            , formulaPlanCandidates = []
+            , formulaPlanEvidence = SharedQuery.NoEvidence
+            , formulaPlanRemainingBudget = budget
+            , formulaPlanProofCount = 0
+            }]
+
+    -- The source ordinal is scheduling metadata, not proof identity. Fast
+    -- later/carrier results cannot suppress an earlier historical source.
+    -- An admitted first-inhabitant accelerator can still be cancelled when
+    -- an earlier source subsequently succeeds; consumed work and already
+    -- emitted results remain in the global accounting/result stream.
+    activateLane completed lane@(FormulaPlanLane ordinal inhabitationOnly families pendingPlans (Just stream))
+        | suppressPlan ordinal inhabitationOnly (formulaStreamFirstCandidateOnly stream) completed =
+            activateLane completed $ FormulaPlanLane (nextPlanOrdinal ordinal)
+                inhabitationOnly families pendingPlans Nothing
+        | otherwise = Right $ Just lane
+    activateLane completed (FormulaPlanLane ordinal _ families [] Nothing) =
+        case nextAdmittedPlanFamily
+                (\inhabitationOnly -> suppressPlan ordinal inhabitationOnly False completed)
+                families of
+            Nothing -> Right Nothing
+            Just (inhabitationOnly, familyPlans, remaining) ->
+                activateLane completed $ FormulaPlanLane ordinal inhabitationOnly
+                    remaining familyPlans Nothing
+    activateLane completed (FormulaPlanLane ordinal inhabitationOnly families (plan : remaining) Nothing)
+        | suppressPlan ordinal inhabitationOnly False completed =
+            activateLane completed $ FormulaPlanLane ordinal False families [] Nothing
+        | firstCandidateOnly
+        , suppressPlan ordinal False True completed =
+            activateLane completed $ FormulaPlanLane (nextPlanOrdinal ordinal)
+                inhabitationOnly families remaining Nothing
+        | otherwise = do
+            stream <- startFormulaPlanStream options target plan
+            return $ Just $ FormulaPlanLane ordinal inhabitationOnly families remaining $
+                Just stream {formulaStreamFirstCandidateOnly = firstCandidateOnly}
+      where
+        (_, _, symbols, _, _, _, _) = plan
+        firstCandidateOnly = any isInhabitationFallbackSymbol $ Set.toList symbols
+
+    suppressPlan ordinal inhabitationOnly firstCandidateOnly completed =
+        (inhabitationOnly && (hasCandidate || hasEvidence)) ||
+        (firstCandidateOnly && hasCandidate)
+      where
+        earlier = [result | (sourceOrdinal, result) <- completed, sourceOrdinal < ordinal]
+        hasCandidate = any (not . null . formulaPlanCandidates) earlier
+        hasEvidence = any ((/= SharedQuery.NoEvidence) . formulaPlanEvidence) earlier
+    nextPlanOrdinal (lane, index) = (lane, index + 1)
+
+    -- Do not even prepare an inhabitation-only fallback once historical search
+    -- has found an inhabitant. Looking at a fallback's symbol set already
     -- forces axiom preparation, so deciding this from individual plan tuples
     -- would defeat the intended laziness.
-    runPlans ((inhabitationOnly, nextFamily) : remainingFamilies)
+    runPlans firstProofOnly ((inhabitationOnly, nextFamily) : remainingFamilies)
             collect currentOptions candidateLimit completed []
         | inhabitationOnly
         , any (not . null . formulaPlanCandidates) completed ||
             any ((/= SharedQuery.NoEvidence) . formulaPlanEvidence) completed =
-            runPlans remainingFamilies collect currentOptions candidateLimit completed []
+            runPlans firstProofOnly remainingFamilies collect currentOptions candidateLimit completed []
         | otherwise =
-            runPlans remainingFamilies collect currentOptions candidateLimit completed nextFamily
-    runPlans _ _ _ _ completed [] = Right $ reverse completed
+            runPlans firstProofOnly remainingFamilies collect currentOptions candidateLimit completed nextFamily
+    runPlans _ _ _ _ _ completed [] = Right $ reverse completed
     -- Focused contexts are a first-inhabitant accelerator. Once another plan
     -- has produced a term, enumerating that term again in singleton contexts
     -- would spend the raw-proof cutoff and starve later alternative families.
-    runPlans remainingFamilies collect currentOptions candidateLimit completed
+    runPlans firstProofOnly remainingFamilies collect currentOptions candidateLimit completed
             ((_, _, symbols, _, _, _, _) : remaining)
         | any (not . null . formulaPlanCandidates) completed
         , any isInhabitationFallbackSymbol $ Set.toList symbols =
-            runPlans remainingFamilies collect currentOptions candidateLimit completed remaining
-    runPlans remainingFamilies collect currentOptions candidateLimit completed
+            runPlans firstProofOnly remainingFamilies collect currentOptions candidateLimit completed remaining
+    runPlans firstProofOnly remainingFamilies collect currentOptions candidateLimit completed
             (( planPremises
               , diagnosticOnlyPremises
               , axiomSymbols
@@ -2516,7 +2716,7 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
               , negativeEvidenceSound
               )
                 : remaining) = do
-        result <- searchPreparedFormulaPlan
+        result <- searchPreparedFormulaPlan firstProofOnly
             currentOptions candidateLimit target planPremises axiomSymbols
             visibleApplications providerApplications diagnosticOnlyPremises form
             negativeEvidenceSound
@@ -2524,10 +2724,11 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             nextLimit = candidateLimit - formulaPlanProofCount result
             continue =
                 formulaPlanFinished result &&
+                not (firstProofOnly && formulaPlanProofCount result > 0) &&
                 (collect || null (formulaPlanCandidates result)) &&
                 evidenceCanBenefitFromAnotherPlan result
         if continue
-            then runPlans remainingFamilies collect
+            then runPlans firstProofOnly remainingFamilies collect
                 currentOptions {
                     optionBudget = formulaPlanRemainingBudget result
                     }
@@ -2536,8 +2737,9 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
 
     isInhabitationFallbackSymbol (Symbol spelling) =
         "$djinn$focused$" `isPrefixOf` spelling ||
-        "$djinn$query-directed-instantiation$" `isPrefixOf` spelling ||
-        "$djinn$query-constructed-instantiation$" `isPrefixOf` spelling
+        (not interleavePlanAlternatives &&
+            ("$djinn$query-directed-instantiation$" `isPrefixOf` spelling ||
+                "$djinn$query-constructed-instantiation$" `isPrefixOf` spelling))
     isInhabitationFallbackSymbol _ = False
 
     -- A proof-backed target diagnostic is already the sharpest candidate-free
@@ -2617,6 +2819,79 @@ data FormulaPlanResult = FormulaPlanResult
     , formulaPlanProofCount :: Int
     }
 
+type FormulaSearchPlan =
+    ( [(Symbol, Formula)], [(Symbol, Formula)], Set.Set Symbol
+    , Map.Map Symbol [SharedGenerated.VisibleTypeArgument]
+    , Map.Map Symbol (Symbol, [SharedGenerated.VisibleTypeArgument])
+    , Formula, Bool
+    )
+
+data FormulaPlanStream = FormulaPlanStream
+    { formulaStreamCursor :: ProofSearchCursor
+    , formulaStreamAssess :: SearchOutcome -> Either DjinnQueryError FormulaPlanResult
+    , formulaStreamProducedProof :: Bool
+    , formulaStreamFirstCandidateOnly :: Bool
+    , formulaStreamWorkRemaining :: Int
+    }
+
+-- Scheduling only: a raw proof preempts this turn, and every choice still
+-- spends the shared query allowance. It is not a separate search budget.
+formulaPlanWorkQuantum :: Int
+formulaPlanWorkQuantum = 64
+
+data FormulaPlanLane = FormulaPlanLane
+    (Int, Int) Bool [(Bool, [FormulaSearchPlan])] [FormulaSearchPlan] (Maybe FormulaPlanStream)
+
+-- The cursor and the independent checker use exactly the same renamed
+-- assumptions. The callback only supplies an already-observed raw prefix;
+-- it cannot add premises or bypass the existing checked conversion pipeline.
+startFormulaPlanStream
+    :: QueryOptions -> SharedGenerated.DefinitionName -> FormulaSearchPlan
+    -> Either DjinnQueryError FormulaPlanStream
+startFormulaPlanStream options target
+        (premises, diagnostics, symbols, visible, providers, form, negativeSound) = do
+    let (_, internalEnv, mode) = formulaPlanSearchContext options target premises providers
+    cursor <- first (DjinnInternalQueryFailure .
+        ("invalid proof-search environment: " ++)) $
+        startProofSearchChecked mode internalEnv form
+    return FormulaPlanStream
+        { formulaStreamCursor = cursor
+        , formulaStreamAssess = \outcome -> searchPreparedFormulaPlanBy
+            True (\_ _ _ -> Right outcome) options 1 target premises symbols visible
+            providers diagnostics form negativeSound
+        , formulaStreamProducedProof = False
+        , formulaStreamFirstCandidateOnly = False
+        , formulaStreamWorkRemaining = formulaPlanWorkQuantum
+        }
+
+formulaPlanSearchContext
+    :: QueryOptions -> SharedGenerated.DefinitionName -> [(Symbol, Formula)]
+    -> Map.Map Symbol (Symbol, [SharedGenerated.VisibleTypeArgument])
+    -> (ProofEnvironment, [(Symbol, Formula)], SearchMode)
+formulaPlanSearchContext options target externalEnv providerApplications =
+    (proofEnv, internalEnv, mode)
+  where
+    proofEnv = prepareProofEnvironment
+        (Symbol $ SharedGenerated.definitionSpelling target) externalEnv
+    internalEnv = proofBindings proofEnv
+    mode = (defaultSearchMode
+                (optionAlternatives options || optionSorted options))
+        { searchTermAlternatives = optionAlternatives options
+        , searchStrategy = optionStrategy options
+        , searchBudget = optionBudget options
+        , searchRanking = optionRanking options
+        , searchProviderCosts = optionProviderCosts options
+        , searchProviderNames = Map.fromList
+            [ (internal, sourceName)
+            | (internal, _) <- internalEnv
+            , Var restored <- [restoreProofTerm proofEnv $ Var internal]
+            -- Synthetic exact specializations retain their source's price.
+            , let provider = maybe restored fst $
+                    Map.lookup restored providerApplications
+            , Right sourceName <- [SharedName.parseName $ symbolSpelling provider]
+            ]
+        }
+
 -- | One proof-search plan. The final flag authorizes logical negative
 -- evidence only when translation covered every quantified subtree. Checked
 -- proofs remain useful under an incomplete plan, but absence of one does not
@@ -2630,7 +2905,8 @@ data FormulaPlanResult = FormulaPlanResult
 -- synthetic occurrence through its exact provider before the existing visible
 -- type-application lowering runs.
 searchPreparedFormulaPlan
-    :: QueryOptions
+    :: Bool
+    -> QueryOptions
     -> Int
     -> SharedGenerated.DefinitionName
     -> [(Symbol, Formula)]
@@ -2642,44 +2918,43 @@ searchPreparedFormulaPlan
     -> Formula
     -> Bool
     -> Either DjinnQueryError FormulaPlanResult
-searchPreparedFormulaPlan options candidateLimit target externalEnv
+searchPreparedFormulaPlan firstProofOnly = searchPreparedFormulaPlanBy False $
+    if firstProofOnly then proveFirstWithModeChecked else proveWithModeChecked
+
+searchPreparedFormulaPlanBy
+    :: Bool
+    -> (SearchMode -> [(Symbol, Formula)] -> Formula -> Either String SearchOutcome)
+    -> QueryOptions
+    -> Int
+    -> SharedGenerated.DefinitionName
+    -> [(Symbol, Formula)]
+    -> Set.Set Symbol
+    -> Map.Map Symbol [SharedGenerated.VisibleTypeArgument]
+    -> Map.Map Symbol (Symbol, [SharedGenerated.VisibleTypeArgument])
+    -> [(Symbol, Formula)]
+    -> Formula
+    -> Bool
+    -> Either DjinnQueryError FormulaPlanResult
+searchPreparedFormulaPlanBy chargeDiagnosticChoices runProofSearch options candidateLimit target externalEnv
         axiomSymbols visibleApplications providerApplications
         diagnosticOnlyEnv form
         negativeEvidenceSound = do
     let name = SharedGenerated.definitionSpelling target
-        proofEnv = prepareProofEnvironment (Symbol name) externalEnv
-        internalEnv = proofBindings proofEnv
-        mode = (defaultSearchMode
-                    (optionAlternatives options || optionSorted options)) {
-            searchStrategy = optionStrategy options,
-            searchBudget = optionBudget options,
-            searchRanking = optionRanking options,
-            searchProviderCosts = optionProviderCosts options,
-            searchProviderNames = Map.fromList
-                [ (internal, sourceName)
-                | (internal, _) <- internalEnv
-                , Var restored <- [restoreProofTerm proofEnv $ Var internal]
-                -- Exact provider specializations are checked synthetic
-                -- premises, but their cost still belongs to their retained
-                -- source provider. This mapping changes only heuristic names.
-                , let provider = maybe restored fst
-                        $ Map.lookup restored providerApplications
-                , Right sourceName <- [SharedName.parseName $ symbolSpelling provider]
-                ]
-            }
+        (proofEnv, internalEnv, mode) =
+            formulaPlanSearchContext options target externalEnv providerApplications
         internalFailure what = first $
             DjinnInternalQueryFailure . ((what ++ ": ") ++)
     outcome <- internalFailure "invalid proof-search environment" $
-        proveWithModeChecked mode internalEnv form
+        runProofSearch mode internalEnv form
     case searchProofs outcome of
         [] -> do
-            failure <-
+            (failure, diagnosticRemaining) <-
                 if searchExhausted outcome then
-                    return Undecided
+                    return (Undecided, remainingSearchBudget outcome)
                 else if not negativeEvidenceSound then
-                    return Undecided
+                    return (Undecided, remainingSearchBudget outcome)
                 else if not (targetWasExcluded proofEnv) then
-                    return Unrealizable
+                    return (Unrealizable, remainingSearchBudget outcome)
                 else do
                     -- The safe search has already decided that no admissible
                     -- proof exists.  Reintroduce target-named assumptions only
@@ -2694,24 +2969,30 @@ searchPreparedFormulaPlan options candidateLimit target externalEnv
                             searchAlternatives = False,
                             searchBudget = remainingSearchBudget outcome
                             }
+                        diagnosticSearch
+                            | chargeDiagnosticChoices = proveFirstWithModeChecked
+                            | otherwise = proveWithModeChecked
                     diagnosticOutcome <- internalFailure
                         "invalid diagnostic proof-search environment" $
-                        proveWithModeChecked diagnosticMode diagnosticEnv form
+                        diagnosticSearch diagnosticMode diagnosticEnv form
+                    let remaining
+                            | chargeDiagnosticChoices = remainingSearchBudget diagnosticOutcome
+                            | otherwise = remainingSearchBudget outcome
                     case searchProofs diagnosticOutcome of
                         diagnosticProof : _ -> do
                             internalFailure
                                 "generated an invalid self-reference proof" $
                                 void $ checkProofWithEvidence
                                     diagnosticEnv form diagnosticProof
-                            return UnrealizableWithoutSelfReference
-                        [] -> return Unrealizable
+                            return (UnrealizableWithoutSelfReference, remaining)
+                        [] -> return (Unrealizable, remaining)
             return FormulaPlanResult {
                 formulaPlanFormula = show form,
                 formulaPlanFirstProof = Nothing,
                 formulaPlanCompletion = queryCompletion outcome,
                 formulaPlanCandidates = [],
                 formulaPlanEvidence = outcomeEvidence failure,
-                formulaPlanRemainingBudget = remainingSearchBudget outcome,
+                formulaPlanRemainingBudget = diagnosticRemaining,
                 formulaPlanProofCount = 0
                 }
         proofs@(_ : _) -> do
@@ -2759,7 +3040,17 @@ searchPreparedFormulaPlan options candidateLimit target externalEnv
                     | (internalProof, checked) <- zip internalProofs checkedProofs
                     , independentConstructionScopes axiomSymbols $
                         restoreProofTerm proofEnv internalProof
+                    -- A carrier-only plan must contribute its new instance,
+                    -- not refill the candidate pool with proofs available in
+                    -- the historical context. Ignored-instance proofs still
+                    -- consume the raw cutoff and their complete checking cost.
+                    , Set.null requiredCarrierSymbols ||
+                        usesInstantiationEvidence requiredCarrierSymbols
+                            (restoreProofTerm proofEnv internalProof)
                     ]
+                requiredCarrierSymbols = Set.filter
+                    (isPrefixOf "$djinn$carrier-focused$" . symbolSpelling)
+                    axiomSymbols
             generatedCandidates <- internalFailure
                 "cannot construct generated clause" $
                 mapM

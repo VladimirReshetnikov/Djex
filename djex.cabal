@@ -243,6 +243,7 @@ Library
     Djinn.Internal.Instantiation
     Djinn.Internal.DirectedInstantiation
     Djinn.Internal.InstantiationEvidence
+    Djinn.Internal.PlanFamily
     Djinn.Internal.ProofCheck.Evidence
     Djinn.Internal.ProofToGenerated
     Djinn.Internal.REPL
@@ -610,6 +611,7 @@ Test-Suite djinn-tests
     Djinn.Internal.CheckedCandidate
     Djinn.Internal.GeneratedDeduplication
     Djinn.Internal.InstantiationEvidence
+    Djinn.Internal.PlanFamily
     Djinn.Internal.ProofCheck.Evidence
     HCheckCompatibility
     HKindCompatibility

@@ -74,6 +74,51 @@ decoders with explicit rank-N signatures, so the oracle helpers are not loaded
 as named synthesis providers. No reference `not`, `swap`, `map`, `append`,
 `reverse`, or `filter` implementation is available to search.
 
+## Djinn's explicit alternative search
+
+Djinn retains its ordinary `depth-first` default. Explicit alternative search
+with `interleave` additionally explores reusable assumptions and later formula
+plans. This combination is useful for behavioral conditions: the first
+well-typed inhabitant may be an identity, projection, or constant that fails
+the supplied examples. Sorting alone does not enable this extra search.
+
+Each formula plan first follows the original LJT proof search. After its exact
+first proof, a second stream enumerates beta-normal terms using the same
+checked assumptions and exact atomic type identities. It can reuse a function
+or a conversion bridge, introduce lambdas, and forward an existing function
+after a partial application. This grammar applies to atomic and function
+formulas; products, sums, and their eliminators continue through LJT. It does
+not contain operation names, Church-specific construction rules, or reference
+implementations. Quantified-type instantiations come from the existing checked
+plan machinery.
+
+Normal terms are explored by increasing number of variable or provider uses;
+lambda introduction adds no cost to this size measure. An index selects only
+heads whose exact remaining function type matches the current goal. A
+conservative analysis can prove a finite maximum size and stop that plan's
+normal-term stream after its final layer. Recursive or unresolved states keep
+an unbounded stream: this extension is not an exhaustive decision procedure
+for higher-rank or impredicative synthesis. Failed attempts, argument
+partitions, the finite-bound analysis, and advancing a size layer all consume
+the existing choice allowance.
+
+Formula plans are admitted incrementally. The LJT and normal-term streams,
+and the active formula plans, give up their turn after a raw proof or 64
+observed choices. This is a scheduling interval, not an additional budget.
+Small plans can group already-checked instantiation bridges that share an
+exact result type, allowing different source schemes to cooperate without
+adding unrelated instances. Every bridge keeps its own source type and
+visible type arguments; the broader original plans remain available.
+
+All emitted proofs still pass the existing independent checking and source
+conversion. Rejected proofs and duplicates consume their original raw slots;
+none of these paths refill a query's work allowance. Preserving the first LJT
+proof of each plan does not promise the same first result across differently
+scheduled plans. Similarly, `select first` stops at the first accepted result
+in the frontend, while Djinn may materialize its bounded internal candidate
+pool before behavioral evaluation begins. A larger raw window can therefore
+increase latency even when an acceptable term appears early in that pool.
+
 ## Reproduction and evidence
 
 Run against an already built executable; the runner does not build Djex:
@@ -90,8 +135,8 @@ The default `--window 256` sets both Djinn's raw proof-candidate limit and the
 behavioral observation window (`quality-window`). Both engine work limits are explicitly
 100,000, and selection is `first` under `balanced` ranking. Djinn's ordinary
 `depth-first` strategy remains the default. The recorded Exference run passed
-all six operations at these limits; Djinn's complete six-operation acceptance
-remains pending. The separate process wall guard defaults to 300 seconds; independent
+all six operations at these limits. Djinn passed all six with the wider
+explicit Interleave calibration below. The separate process wall guard defaults to 300 seconds; independent
 Boolean replay allows two seconds per assertion. Child processes belong to a
 kill-on-close Windows Job, assigned before execution, or a dedicated POSIX
 process group.
@@ -114,6 +159,21 @@ selected for a run. Add
 `--operation` with any of `not`, `swap`, `map`, `append`, `reverse`, and `filter`.
 Omitting it selects all six. A pass at 4,096 is evidence at that configured
 window, not evidence that the earlier 256-window attempt passed.
+
+The completed six-operation Djinn run used a wider, explicit calibration:
+
+```powershell
+python test-church/behavior_probe.py --djex PATH_TO_BUILT_DJEX_EXE --engine djinn --window 65536 --djinn-strategy interleave --steps 100000 --budget 500000 --output test-church/results/behavior-djinn-six
+```
+
+This raises the raw/observation window to 65,536 and the shared Djinn choice
+budget to 500,000. It retains the same predicates, full source types, balanced
+ranking, isolated GHC replay, and deliberately false control. These are
+caller-selected calibration limits, not new defaults or completeness bounds.
+The [Djinn acceptance receipt](../test-church/receipts/behavior-djinn-common-result-first.json)
+records the complete run, including independent replay. Use a smaller operation
+subset when investigating a specific miss, while retaining its exact settings
+and an independent receipt.
 
 Every preparation or live attempt requires a fresh output directory; an
 existing empty directory is also accepted. The runner rejects a nonempty path
@@ -173,7 +233,41 @@ polymorphic type. The separate Lean oracle baseline passed 33 named
 declaration/proof checks with empty axiom inventories; that baseline alone
 does not establish live synthesis coverage.
 
-**Djinn's complete six-operation Haskell acceptance remains pending.** The
-receipt records the tested Exference executable and bounds; it does not claim
-that later builds, other strategies, or all well-typed inputs have been
-validated.
+**Djinn also passed all six live Haskell queries**, using explicit Interleave,
+a 65,536 raw-proof/observation window, and 500,000 shared choices under balanced
+ranking and `select first`. Its
+[compact acceptance receipt](../test-church/receipts/behavior-djinn-common-result-first.json)
+retains the six exact definitions, full types, settings, source and capture
+hashes, and separate replay results. The unchanged executable SHA-256 was
+`d5d9f0112f300b4d33c0fbebdcf39a9d3aaf22db5b054c6411882c0c6651cefd`.
+
+| Operation | Candidates checked through success | Predicate false | Compilation errors rejected |
+| --- | ---: | ---: | ---: |
+| `not` | 6 | 5 | 0 |
+| `swap` | 1 | 0 | 0 |
+| `map` | 6 | 5 | 0 |
+| `append` | 309 | 302 | 6 |
+| `reverse` | 78 | 73 | 4 |
+| `filter` | 103 | 101 | 1 |
+
+Each query accepted exactly one candidate and reported no predicate timeout.
+The 11 compilation errors were rejected before success; they are distinct
+from false Boolean observations. All six accepted definitions subsequently
+compiled at their complete original types in separate modules and passed
+their finite conditions again. This second execution passed **23 assertions**:
+the six candidate conditions, covering all 626 observations, plus the same
+17 oracle controls. Compiler and execution exit codes were both zero.
+
+The separate false-predicate query observed one candidate, rejected it, and
+displayed no definition. It did not consume the entire 65,536-slot window;
+the receipt preserves that actual count. Captured positive-query process
+times ranged from about 14.5 to 53.7 seconds, including startup, bounded
+candidate collection, compilation and predicate checks. They are measurements
+of this run, not latency guarantees; `select first` does not avoid the internal
+collection cost described above.
+
+Together these receipts establish the **12 Haskell cells** of the behavioral
+matrix. They pin different tested executable snapshots and explicit settings;
+they do not establish that every later build, strategy, or well-typed input
+has been validated. The 18 Lean cells and overall 30-cell closure require their
+own live and kernel-replay receipts.

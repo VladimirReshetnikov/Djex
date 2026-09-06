@@ -152,6 +152,7 @@ Library
     Language.Haskell.Djex.Djinn
     Language.Haskell.Djex.Exference
     Language.Haskell.Synthesis.Candidate
+    Language.Haskell.Synthesis.Behavioral
     Language.Haskell.Synthesis.Class
     Language.Haskell.Synthesis.Collection
     Language.Haskell.Synthesis.Count
@@ -435,6 +436,7 @@ Test-Suite synthesis-tests
   Other-Modules:
     ClassResolutionSpec
     CandidateQualitySpec
+    BehavioralSpec
     SMTLibCausalBoundaryWhitespaceSpec
     SMTLibCausalDriverSpec
     SMTLibCausalStdoutChunkSpec

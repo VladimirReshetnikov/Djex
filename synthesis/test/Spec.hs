@@ -49,6 +49,7 @@ import Test.Tasty.HUnit
   )
 import qualified Test.Tasty.QuickCheck as QC
 import CandidateQualitySpec (candidateQualityTests)
+import BehavioralSpec (behavioralTests)
 import ClassResolutionSpec (classResolutionTests)
 import SMTLibCausalBoundaryWhitespaceSpec
   ( smtLibCausalBoundaryWhitespaceTests )
@@ -65,6 +66,7 @@ main = defaultMain tests
 tests :: TestTree
 tests = testGroup "Djex synthesis foundation"
   [ candidateTests
+  , behavioralTests
   , candidateQualityTests
   , semanticObservationTests
   , smtLibCausalBoundaryWhitespaceTests

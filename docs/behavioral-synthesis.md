@@ -199,15 +199,19 @@ observations. It records source/manifest/specification hashes, the executable
 identity, exact commands, bounds, candidate definitions, and process receipts.
 `--prepare-only` also emits `OracleControls.hs`; preparing an artifact does not
 run or validate it. The corresponding Lean runner covers Djinn, Exference, and
-Both, bringing the intended positive matrix to **30** cells across the two
+Both, bringing the complete positive matrix to **30** cells across the two
 host languages.
 
 **Exference passed all six live Haskell queries** at window 256 and 100,000
 steps under `balanced` ranking and `select first`. The
-[compact acceptance receipt](../test-church/receipts/behavior-exference-grounded-first.json)
+[current compact acceptance receipt](../test-church/receipts/behavior-exference-current-final.json)
 retains every exact definition and full type, settings, per-query verdicts,
-executable hash, and source/capture/replay hashes. Its executable SHA-256 is
-`3f1b36a3a700c0a7bd9cf0771b3ee91718e4435fe6278e3343e60f108f9e00d4`.
+executable hash, and source/capture/replay hashes. This fresh run used the same
+unchanged executable as the Djinn acceptance below, SHA-256
+`d5d9f0112f300b4d33c0fbebdcf39a9d3aaf22db5b054c6411882c0c6651cefd`.
+Its six exact definitions, full types, and observation counts match the
+[earlier Exference milestone](../test-church/receipts/behavior-exference-grounded-first.json),
+which remains available as historical evidence for its older executable.
 
 | Operation | Candidates checked through success | Rejected by the predicate |
 | --- | ---: | ---: |
@@ -267,7 +271,11 @@ of this run, not latency guarantees; `select first` does not avoid the internal
 collection cost described above.
 
 Together these receipts establish the **12 Haskell cells** of the behavioral
-matrix. They pin different tested executable snapshots and explicit settings;
-they do not establish that every later build, strategy, or well-typed input
-has been validated. The 18 Lean cells and overall 30-cell closure require their
-own live and kernel-replay receipts.
+matrix on **one unchanged executable**, with each engine's explicit settings.
+The separate [Lean acceptance receipt](https://github.com/VladimirReshetnikov/Leant/blob/main/test-church/receipts/behavior-lean-complete.json)
+records the other **18 cells** across Djinn, Exference, and Both, including
+independent kernel replay of each exact term and its finite assertion. Together
+they complete the **30-cell behavioral corpus** at the recorded per-engine
+limits. These receipts do not establish that every later build, strategy, or
+well-typed input has been validated, and they remain distinct from aggregate
+unit-suite results.

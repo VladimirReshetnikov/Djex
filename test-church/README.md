@@ -4,10 +4,13 @@ The [candidate-quality guide](../docs/candidate-quality.md) and
 [focused quality probes](quality.md) cover the separate comparison of
 `legacy`, `balanced`, `compact`, and `diverse`. The reproduction commands
 below run the current checkout and its default policy. The receipts below
-distinguish current Haskell and E0 Lean corpus acceptance, quality comparisons,
-and compact-fixture validation from historical receipts. The fresh full E0
-Lean Church replay passed all 700 queries; remaining ordinary compatibility
-checks are pending.
+distinguish Haskell and E0 Lean corpus acceptance, quality comparisons, and
+reviewed ordinary/compact compatibility from validation of later changes.
+E0 passed all 700 Lean Church queries and completed all 26 ordinary fixtures.
+The subsequent Leant-only accepted-spelling deduplication repair passed all
+578 unit tests, its executable build, a full 30-fixture compatibility run,
+and an 84-query/136-term quality matrix. The 700-term E0 Church receipt
+remains historical; that full corpus was not rerun for this repair.
 
 This suite synthesizes implementations from **every type signature** in
 `docs/examples/Church.hs`: 346 top-level signatures and four explicitly
@@ -199,7 +202,44 @@ or kernel run. Leant's `test-church/quality-results/fixtures-repair/results.json
 and `compact-comparison/results.json` retain those distinct outcomes.
 The full Leant unit rerun passed **all 569 tests in 389.71 seconds**, with
 process exit zero and E0 unchanged (`test-church/quality-results/build-leant-06.log`).
-Only the **remaining ordinary compatibility checks are pending**.
+The same E0 executable subsequently completed **all 26 ordinary fixtures and
+175 synthesis commands**. The original live comparison retained exit 1 for
+20 golden differences. Review included **99 exact changed-term kernel
+replays**, query-specific axiom checks, and a separate proof-mode receipt
+covering six terms, two exact tactic applications, and the expected evaluation
+type error. After 20 reviewed golden updates, offline comparison of these
+captures and the four compact fixtures matched **30/30 goldens**. This did
+not rerun synthesis or the kernel. Leant's `ordinary-final/results.json`,
+`ordinary-review-audit.json`, `synth-prove-review/review.json`,
+`ordinary-golden-application/application.json`, and
+`composite-comparison/results.json`, all under
+`test-church/quality-results/`, preserve those distinct steps.
+
+These are historical E0 receipts. A later Leant integration repair removes
+duplicate accepted spellings without borrowing a later candidate's evidence
+or refilling the raw search window. Leant `043a6a3d` passed **all 578 unit tests
+serially in 533.23 seconds** and built successfully, as recorded in
+`test-church/quality-results/dedup-build-acceptance.json`. The
+[focused guide](quality.md) identifies its new executable separately from E0.
+Its full **30-fixture/265-command** live run completed with no prior success,
+first-result, control, or proof-output loss. Only one duplicate accepted
+spelling disappeared; both retained terms passed exact kernel replay with
+only `Gap.Token` and `Gap.polyGlobal`. Following that single reviewed golden
+update, all 30 goldens matched the preserved captures offline, with the
+original live exit 1 kept separately. The run used a 30-second synthesis
+timeout; no 600-second retry was needed.
+
+The fresh quality matrix also passed **84 queries and 136 exact kernel-accepted
+terms**, combining two disjoint runs: 56/87 for Djinn/Exference and 28/49 for
+Both. It retains 112 empty and 24 declared-premise axiom inventories, three
+paired nil improvements, and three diversity proofs. Type/term lists and
+matrix settings are unchanged from E0. The [focused guide](quality.md)
+records the exact receipts and links the detailed Leant review. The E0
+700-term Church corpus was not rerun for this repair. Canonical Djex
+synthesis code `2954b6d2` and its
+recorded 19-component acceptance remain unchanged; no rerun is implied. The
+[quality guide](../docs/candidate-quality.md) records the kernel-accepted
+manual Q20 regression from two matches to three alongside the measured gains.
 
 The earlier Leant `fb84b96` executable
 `dab110ad2a7903ac4ef4883898d48532c00cc8c3b1b8d8748aac7744eedffb61`

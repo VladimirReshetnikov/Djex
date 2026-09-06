@@ -118,24 +118,29 @@ original signatures, supplying `undefined` only after synthesis.
 
 The separate [quality comparisons](test-church/quality.md) passed **56 Haskell
 queries with 104 GHC-checked terms**, plus **14 exact CLI outputs and ten
-invalid-option rejections**. Current Leant `5629936`, using unchanged Djex
-synthesis code `2954b6d2`, passed **all 569 unit tests** and **84 quality queries
-with 136 exact displayed terms independently accepted by Lean**: 112 had empty axiom inventories, and
-24 used only their declared provider premises. These include three fresh nil
-improvements and three functional-diversity proofs at unchanged allowances.
+invalid-option rejections**. Current Leant `043a6a3d` passed **all 578 unit
+tests serially in 533.23 seconds**, its executable build, and a fresh **84-query
+quality matrix with 136 exact kernel-accepted terms**: 112 empty axiom
+inventories and 24 containing only declared provider premises. Three paired
+nil improvements and three functional-diversity proofs passed at unchanged
+matrix allowances. Its full **30-fixture/265-command** live compatibility run
+preserved every prior success and control output, removing only one duplicate
+accepted spelling. After exact kernel replay of the two retained terms and
+that single reviewed golden update, offline comparison matched **30/30
+goldens**; the original live comparison exit 1 remains preserved.
 
-The same E0 executable passed **90 compact rank-N/provider queries**, with
-all exact terms independently kernel-accepted: 78 had empty axiom inventories
-and 12 had exactly their declared provider premises. After three reviewed
-baseline changes, all four compact goldens match those retained live outputs
-by offline comparison. Both engines also completed a fresh E0 replay of
-**350/350 universe-correct Church counterparts each**: all **700 exact
-displayed terms passed independent kernel replay with empty axiom
-inventories**. Lean keeps the 19 partial cases per engine total under their
-supplied default arguments. Only the **remaining ordinary compatibility
-checks are pending**. The [acceptance guides](test-church/README.md) record
-these separate receipts, exact executable identity and budgets, and prior
-results under their original executable identities.
+The earlier E0 executable's Church receipt remains historical: **350/350
+universe-correct counterparts per engine**, with all **700 exact displayed
+terms kernel-accepted and axiom-free**. Lean keeps the 19 partial cases per
+engine total under supplied default arguments. This corpus was not rerun for
+the Leant-only accepted-spelling repair, which preserves each accepted
+candidate's own evidence and the bounded raw search prefix. Canonical Djex
+code `2954b6d2` and its recorded 19-component aggregate are unchanged. The
+[acceptance guides](test-church/README.md) preserve exact executable identities,
+budgets, and earlier compatibility reviews. Quality gains are
+not universal: the reviewed manual Q20 first result grew from two matches to
+three while remaining kernel-accepted; the [policy guide](docs/candidate-quality.md)
+records the unresolved cause.
 
 These results establish practical corpus coverage. General impredicative
 inhabitation is undecidable, so a higher-rank search miss remains inconclusive;

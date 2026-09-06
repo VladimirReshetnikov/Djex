@@ -281,7 +281,7 @@ the difference from earlier diagnostic runs has not been established, so
 these timings are not an attributed source-level speedup claim or a
 first-result latency measurement.
 
-Current Lean quality acceptance belongs to Leant `5629936`, which includes
+Recorded E0 Lean quality acceptance belongs to Leant `5629936`, which includes
 the corrected test assertion and reviewed compact goldens. Its production
 code and E0 executable remain those introduced at `a970d1f`, with vendored
 Djex `ae986bf5` and unchanged synthesis code `2954b6d2`. The E0 executable
@@ -296,6 +296,8 @@ Its receipts under Leant's `test-church/quality-results/` establish:
 | `fixtures-repair/results.json` | All 90 compact rank-N/provider queries passed live and kernel checks: 78 empty axiom inventories and 12 exact declared-premise inventories. |
 | `church-djinn-final/results.json` and `church-exference-final/results.json` | Fresh 350/350 candidates per engine on unchanged E0; all 700 exact displayed terms passed independent kernel replay with empty axiom inventories. |
 | `compact-comparison/results.json` | All four reviewed goldens match the preserved compact captures by offline comparison; the original live receipt retains its three golden mismatches. |
+| `ordinary-final/results.json`, `ordinary-review-audit.json`, and `synth-prove-review/review.json` | All 26 ordinary fixtures completed on E0. Review checked 99 exact changed-term kernel replays and their query-specific axiom allowances; separate proof-mode validation covered six terms, two exact tactic applications, and the expected evaluation type error. |
+| `ordinary-golden-application/application.json` and `composite-comparison/results.json` | Twenty reviewed ordinary goldens were updated; offline comparison then matched all 30 ordinary/compact goldens. The original ordinary live exit 1 remains preserved. This comparison reran neither synthesis nor kernel checking. |
 
 The matrix used a window of 12, display cap of four, 10,000 Exference steps
 or Djinn choice points, and a 30-second synthesis timeout for each policy.
@@ -306,6 +308,15 @@ that diverse projection outputs include both results on inputs 11 and 29,
 one proof per engine selection. These are quality and behavioral distinctions
 within the tested allowance, not global minimality claims.
 
+The ordinary review also found a concrete first-result regression. In
+`synth-manual.txt` Q20, Djinn's implementation of
+`Decidable p → Decidable q → Decidable (p ∧ q)` grew from two syntactic
+matches to three. The new term passed exact kernel replay. No final-score
+inversion was identified, and the transcript has no truncation diagnostic:
+whether the smaller old term entered the new finite candidate pool is unknown.
+The evidence therefore establishes neither a scoring inversion nor budget
+exhaustion. It does refute any claim that every first result becomes smaller.
+
 The separate fresh Church replay covers, per engine, 315 total cases,
 16 integer-provider cases, and 19 cases made total by explicit input defaults.
 It uses one-candidate observation/verification/display windows and a
@@ -314,7 +325,38 @@ default unbounded choice-point budget, subject to the shared deadline and
 intrinsic planning caps. These settings do not bound startup, serialization,
 or separate kernel replay. Exact candidate texts match the earlier corpus
 run, establishing preservation on E0 rather than another quality improvement.
-Only the **remaining ordinary compatibility checks are pending**. The earlier Leant `fb84b96`
+Those E0 receipts precede a later Leant-only accepted-exact-spelling repair.
+Within the already bounded verification groups, it remembers only spellings
+that actually passed verification, tries fresh alternatives in the same group,
+and preserves the accepted representative's original metadata and authority.
+It neither refills the raw search prefix nor borrows evidence from a later
+duplicate. Leant production commit
+`043a6a3d1562578f9aee8ad73ada4e02ddd4a52d` passed **all 578 unit tests serially
+in 533.23 seconds** and its executable build passed. The receipt
+`quality-results/dedup-build-acceptance.json` and its `dedup-02` test/build logs
+record successful process exits and executable SHA-256
+`42c0c9c0a46a35302a04691a93fc68099c5e80bd91305e9a927ba9de9cec5cae`.
+The fresh full **30-fixture/265-command** live run completed in 1,124.61
+seconds with a 30-second synthesis timeout, preserving every prior success,
+first result, and control/proof output. Its sole golden drift removed one
+duplicate accepted spelling; both retained terms passed exact kernel replay
+using only `Gap.Token` and `Gap.polyGlobal`. After that one reviewed update,
+offline comparison matched all 30 goldens, preserving the original live
+exit 1. No retry at the earlier 600-second allowance was needed.
+
+Two disjoint fresh matrix runs covered Djinn/Exference (56 queries, 87 terms)
+and Both (28 queries, 49 terms). `matrix-dedup-complete.json` records **84
+queries and 136 exact kernel-accepted terms**, with 112 empty axiom inventories,
+24 declared-premise inventories, three paired Exference nil improvements,
+and three diversity proofs. All type/term lists match E0 under the same
+12/4 observation/display caps, 10,000-step/choice-point allowances, and
+30-second synthesis timeout. The [focused guide](../test-church/quality.md#recorded-lean-acceptance)
+links the live, independent-review, kernel, and offline-comparison receipts.
+The E0 700-term Church corpus was not rerun for this Leant-only repair.
+Canonical Djex synthesis code `2954b6d2` is unchanged, and its recorded
+19-component acceptance above is not a new rerun.
+
+The earlier Leant `fb84b96`
 executable `dab110ad2a7903ac4ef4883898d48532c00cc8c3b1b8d8748aac7744eedffb61`
 passed 565 tests, an 84-query/139-term matrix, and all 700 Church terms; those
 receipts remain historical and do not establish acceptance of E0. The

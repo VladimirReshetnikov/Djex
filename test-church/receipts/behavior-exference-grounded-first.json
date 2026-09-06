@@ -1,0 +1,482 @@
+{
+  "schema_version": 1,
+  "receipt_kind": "Compact projection of a completed live Haskell behavioral synthesis run and separate exact GHC replay; no new execution performed to prepare this receipt.",
+  "source_receipt": {
+    "workspace_relative_path": "dist-newstyle/behavioral-acceptance/exference-six-grounded-first/results.json",
+    "sha256": "cc1d2ade3142dfb6f15c979425d1ace251aa8cc05c13d02aa8e8a1d662eac16e"
+  },
+  "status": "passed",
+  "validation_mode": "live_synthesis_then_exact_ghc_execution",
+  "scope": {
+    "engines": [
+      "exference"
+    ],
+    "operations": [
+      "not",
+      "swap",
+      "map",
+      "append",
+      "reverse",
+      "filter"
+    ],
+    "named_synthesis_providers": [],
+    "source_workspace": "Empty source environment; no source implementations or oracle helpers admitted as named synthesis providers.",
+    "finite_claim": "All specified finite observations passed. This is not a universal behavioral proof, a search completeness claim, or validation of another engine or later executable."
+  },
+  "provenance": {
+    "executable_sha256": "3f1b36a3a700c0a7bd9cf0771b3ee91718e4435fe6278e3343e60f108f9e00d4",
+    "executable_unchanged": true,
+    "runner_path": "test-church/behavior_probe.py",
+    "runner_sha256": "7ffea55c85cc2e0c9bc93b98a5d57c8694e22f8070dd5814236f9c97090ac996",
+    "spec_sha256": "426fb6cf5e8a607608bed4ca52a74776cd38d1c5f7a5c49866fda6b2a98cedf4",
+    "manifest_path": "test-church/manifest.json",
+    "manifest_sha256": "0c2954eeb36811ea065aba86187d09cd8761529de1acefd5111ccf088b189ed9",
+    "church_source_path": "docs/examples/Church.hs",
+    "church_source_raw_sha256": "782e4edaa5bf813e30e39ae02d52278ab0566315ebc521401a947b98c44cfd11",
+    "church_source_canonical_lf_sha256": "782e4edaa5bf813e30e39ae02d52278ab0566315ebc521401a947b98c44cfd11"
+  },
+  "settings": {
+    "ranking": "balanced",
+    "select": "first",
+    "window": 256,
+    "djinn_strategy": "depth-first",
+    "steps": 100000,
+    "choice_budget": 100000,
+    "independent_evaluation_seconds": 2,
+    "separate_process_guard_seconds": 300
+  },
+  "observed_additional_settings": {
+    "max_queue": 8192,
+    "query_timeout_seconds": 0,
+    "qualification": "full",
+    "fix": "off",
+    "note": "Recorded in the live settings snapshots; separate process and independent assertion deadlines remain active."
+  },
+  "candidate_count": 6,
+  "cells": [
+    {
+      "operation": "not",
+      "source_case_id": "church_case_009",
+      "source_line": 170,
+      "source_signature": "Bool -> Bool",
+      "name": "behavior_exference_not",
+      "type": "((forall church0. (church0 -> (church0 -> church0))) -> (forall church1. (church1 -> (church1 -> church1))))",
+      "exact_definition": "behavior_exference_not f1 c d = f1 d c",
+      "finite_observation_count": 2,
+      "behavioral_observations": {
+        "checked": 5,
+        "true": 1,
+        "false": 4,
+        "error": 0,
+        "timeout": 0,
+        "window": 256
+      },
+      "validated_settings": {
+        "backend": "exference",
+        "ranking": "balanced",
+        "select": "first",
+        "render": "definition",
+        "prompt": "\"\"",
+        "allow-unused": "on",
+        "djinn-axioms": "off",
+        "djinn-strategy": "depth-first",
+        "candidate-limit": "256",
+        "quality-window": "256",
+        "choice-budget": "100000",
+        "max-steps": "100000"
+      },
+      "replay_module": "BehaviorCandidate0.hs",
+      "replay_module_sha256": "50432a42415dfc594445ae16fde4c6dd0f56a076dfead98567233e9824db1d86"
+    },
+    {
+      "operation": "swap",
+      "source_case_id": "church_case_016",
+      "source_line": 195,
+      "source_signature": "a `Pair` b -> b `Pair` a",
+      "name": "behavior_exference_swap",
+      "type": "(forall church0 church1. ((forall church2. ((church0 -> (church1 -> church2)) -> church2)) -> (forall church3. ((church1 -> (church0 -> church3)) -> church3))))",
+      "exact_definition": "behavior_exference_swap f1 f3 = f1 (\\f -> \\g -> f3 g f)",
+      "finite_observation_count": 15,
+      "behavioral_observations": {
+        "checked": 1,
+        "true": 1,
+        "false": 0,
+        "error": 0,
+        "timeout": 0,
+        "window": 256
+      },
+      "validated_settings": {
+        "backend": "exference",
+        "ranking": "balanced",
+        "select": "first",
+        "render": "definition",
+        "prompt": "\"\"",
+        "allow-unused": "on",
+        "djinn-axioms": "off",
+        "djinn-strategy": "depth-first",
+        "candidate-limit": "256",
+        "quality-window": "256",
+        "choice-budget": "100000",
+        "max-steps": "100000"
+      },
+      "replay_module": "BehaviorCandidate1.hs",
+      "replay_module_sha256": "bb141c5515df10290b286124c2883ea672143d7fc6e706f867b6c549605e98a4"
+    },
+    {
+      "operation": "map",
+      "source_case_id": "church_case_056",
+      "source_line": 397,
+      "source_signature": "_ -> List a -> List b",
+      "name": "behavior_exference_map",
+      "type": "(forall church0 church1. ((church0 -> church1) -> ((forall church2. ((church0 -> (church2 -> church2)) -> (church2 -> church2))) -> (forall church3. ((church1 -> (church3 -> church3)) -> (church3 -> church3))))))",
+      "exact_definition": "behavior_exference_map f1 f2 f4 = f2 (\\i -> f4 (f1 i))",
+      "finite_observation_count": 200,
+      "behavioral_observations": {
+        "checked": 3,
+        "true": 1,
+        "false": 2,
+        "error": 0,
+        "timeout": 0,
+        "window": 256
+      },
+      "validated_settings": {
+        "backend": "exference",
+        "ranking": "balanced",
+        "select": "first",
+        "render": "definition",
+        "prompt": "\"\"",
+        "allow-unused": "on",
+        "djinn-axioms": "off",
+        "djinn-strategy": "depth-first",
+        "candidate-limit": "256",
+        "quality-window": "256",
+        "choice-budget": "100000",
+        "max-steps": "100000"
+      },
+      "replay_module": "BehaviorCandidate2.hs",
+      "replay_module_sha256": "782e819c1bf85c2bb950b9e05694811bcba05341d111cb90dffeb6755dd2af05"
+    },
+    {
+      "operation": "append",
+      "source_case_id": "church_case_054",
+      "source_line": 391,
+      "source_signature": "List a -> List a -> List a",
+      "name": "behavior_exference_append",
+      "type": "(forall church0. ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> ((forall church2. ((church0 -> (church2 -> church2)) -> (church2 -> church2))) -> (forall church3. ((church0 -> (church3 -> church3)) -> (church3 -> church3))))))",
+      "exact_definition": "behavior_exference_append f1 f2 f4 e = f1 f4 (f2 f4 e)",
+      "finite_observation_count": 169,
+      "behavioral_observations": {
+        "checked": 11,
+        "true": 1,
+        "false": 10,
+        "error": 0,
+        "timeout": 0,
+        "window": 256
+      },
+      "validated_settings": {
+        "backend": "exference",
+        "ranking": "balanced",
+        "select": "first",
+        "render": "definition",
+        "prompt": "\"\"",
+        "allow-unused": "on",
+        "djinn-axioms": "off",
+        "djinn-strategy": "depth-first",
+        "candidate-limit": "256",
+        "quality-window": "256",
+        "choice-budget": "100000",
+        "max-steps": "100000"
+      },
+      "replay_module": "BehaviorCandidate3.hs",
+      "replay_module_sha256": "b5a85ec8b4394132d06e8c07bf07eb416d6310a66325faa33cbbb8b7875c0aaf"
+    },
+    {
+      "operation": "reverse",
+      "source_case_id": "church_case_061",
+      "source_line": 412,
+      "source_signature": "List a -> List a",
+      "name": "behavior_exference_reverse",
+      "type": "(forall church0. ((forall church1. ((church0 -> (church1 -> church1)) -> (church1 -> church1))) -> (forall church2. ((church0 -> (church2 -> church2)) -> (church2 -> church2)))))",
+      "exact_definition": "behavior_exference_reverse f1 f3 =\n  f1 (\\i -> \\f10 -> \\k -> f10 (f3 i k)) (\\m -> m)",
+      "finite_observation_count": 40,
+      "behavioral_observations": {
+        "checked": 146,
+        "true": 1,
+        "false": 145,
+        "error": 0,
+        "timeout": 0,
+        "window": 256
+      },
+      "validated_settings": {
+        "backend": "exference",
+        "ranking": "balanced",
+        "select": "first",
+        "render": "definition",
+        "prompt": "\"\"",
+        "allow-unused": "on",
+        "djinn-axioms": "off",
+        "djinn-strategy": "depth-first",
+        "candidate-limit": "256",
+        "quality-window": "256",
+        "choice-budget": "100000",
+        "max-steps": "100000"
+      },
+      "replay_module": "BehaviorCandidate4.hs",
+      "replay_module_sha256": "0970c847e4669ad276d21baf385944f49172e3c4ef0c9fff1cc43d3da628fb6e"
+    },
+    {
+      "operation": "filter",
+      "source_case_id": "church_case_059",
+      "source_line": 406,
+      "source_signature": "(a -> Bool) -> List a -> List a",
+      "name": "behavior_exference_filter",
+      "type": "(forall church0. ((church0 -> (forall church1. (church1 -> (church1 -> church1)))) -> ((forall church2. ((church0 -> (church2 -> church2)) -> (church2 -> church2))) -> (forall church3. ((church0 -> (church3 -> church3)) -> (church3 -> church3))))))",
+      "exact_definition": "behavior_exference_filter f1 f2 f4 e =\n  f2 (\\i -> \\j -> let f12 = f1 i in f12 (f4 i j) j) e",
+      "finite_observation_count": 200,
+      "behavioral_observations": {
+        "checked": 30,
+        "true": 1,
+        "false": 29,
+        "error": 0,
+        "timeout": 0,
+        "window": 256
+      },
+      "validated_settings": {
+        "backend": "exference",
+        "ranking": "balanced",
+        "select": "first",
+        "render": "definition",
+        "prompt": "\"\"",
+        "allow-unused": "on",
+        "djinn-axioms": "off",
+        "djinn-strategy": "depth-first",
+        "candidate-limit": "256",
+        "quality-window": "256",
+        "choice-budget": "100000",
+        "max-steps": "100000"
+      },
+      "replay_module": "BehaviorCandidate5.hs",
+      "replay_module_sha256": "533cc9bd65b03c97e16b030eb4ead91496d48fcada2515e5b3d03d27e5ceb48f"
+    }
+  ],
+  "false_oracle": {
+    "engine": "exference",
+    "name": "behavior_exference_reject_all",
+    "type": "forall a. a -> a",
+    "predicate": "Prelude.False",
+    "displayed_definitions": [],
+    "observations": {
+      "checked": 256,
+      "true": 0,
+      "false": 256,
+      "error": 0,
+      "timeout": 0,
+      "window": 256
+    },
+    "diagnostics": [
+      "DJEX_REPL_BEHAVIORAL_NO_MATCH",
+      "DJEX_REPL_BEHAVIORAL_WINDOW"
+    ],
+    "completion": "The 256-slot behavioral window was consumed without a survivor; rejected slots were not refilled. This is not a proof of uninhabitation."
+  },
+  "independent_ghc_replay": {
+    "compiler_exit_code": 0,
+    "execution_exit_code": 0,
+    "candidate_assertions": 6,
+    "candidate_finite_observations": 626,
+    "oracle_control_assertions": 17,
+    "oracle_positive_controls": 6,
+    "exact_type_wrong_controls": 10,
+    "specialized_swap_control": 1,
+    "total_assertions": 23,
+    "passed_labels": [
+      "behavior_exference_not",
+      "behavior_exference_swap",
+      "behavior_exference_map",
+      "behavior_exference_append",
+      "behavior_exference_reverse",
+      "behavior_exference_filter",
+      "oracleWitness_not",
+      "oracleWitness_swap",
+      "oracleWitness_map",
+      "oracleWitness_append",
+      "oracleWitness_reverse",
+      "oracleWitness_filter",
+      "oracleWrong_not_identity",
+      "oracleWrong_not_constant_false",
+      "oracleWrong_map_empty",
+      "oracleWrong_append_first",
+      "oracleWrong_append_reversed",
+      "oracleWrong_reverse_identity",
+      "oracleWrong_reverse_empty",
+      "oracleWrong_filter_identity",
+      "oracleWrong_filter_empty",
+      "oracleWrong_filter_negated",
+      "swap_specialized_identity_rejected"
+    ],
+    "assertion_semantics": "Each candidate assertion evaluates the complete finite condition for one operation. The separate 17 controls comprise six passing witnesses, ten rejected well-typed wrong implementations, and one rejected monomorphic swap identity.",
+    "isolation": "Each exact displayed definition is compiled in its own module at the original full polymorphic signature. Candidate modules import neither other candidates nor oracle controls; a separate driver calls their exported check actions.",
+    "compiler_command": [
+      "ghc",
+      "-v0",
+      "-O0",
+      "-fforce-recomp",
+      "-iC:\\Djex\\dist-newstyle\\behavioral-acceptance\\exference-six-grounded-first",
+      "-outputdir",
+      "C:\\Djex\\dist-newstyle\\behavioral-acceptance\\exference-six-grounded-first",
+      "C:\\Djex\\dist-newstyle\\behavioral-acceptance\\exference-six-grounded-first\\BehaviorCandidates.hs",
+      "-o",
+      "C:\\Djex\\dist-newstyle\\behavioral-acceptance\\exference-six-grounded-first\\behavior-candidates.exe"
+    ],
+    "oracle_control_source_sha256": "6b1770aebc1dfbe44848cf2440b4eb3d2d6023f09a4696d043be56d3c76cc3b1",
+    "replay_modules": [
+      {
+        "file": "BehaviorCandidate0.hs",
+        "sha256": "50432a42415dfc594445ae16fde4c6dd0f56a076dfead98567233e9824db1d86"
+      },
+      {
+        "file": "BehaviorCandidate1.hs",
+        "sha256": "bb141c5515df10290b286124c2883ea672143d7fc6e706f867b6c549605e98a4"
+      },
+      {
+        "file": "BehaviorCandidate2.hs",
+        "sha256": "782e819c1bf85c2bb950b9e05694811bcba05341d111cb90dffeb6755dd2af05"
+      },
+      {
+        "file": "BehaviorCandidate3.hs",
+        "sha256": "b5a85ec8b4394132d06e8c07bf07eb416d6310a66325faa33cbbb8b7875c0aaf"
+      },
+      {
+        "file": "BehaviorCandidate4.hs",
+        "sha256": "0970c847e4669ad276d21baf385944f49172e3c4ef0c9fff1cc43d3da628fb6e"
+      },
+      {
+        "file": "BehaviorCandidate5.hs",
+        "sha256": "533cc9bd65b03c97e16b030eb4ead91496d48fcada2515e5b3d03d27e5ceb48f"
+      },
+      {
+        "file": "BehaviorOracleControls.hs",
+        "sha256": "85fffd1e5beeba328f9083e6231d64422f91f4c34b2c2acebe73235ff67507bb"
+      },
+      {
+        "file": "BehaviorCandidates.hs",
+        "sha256": "35858aaf30dfe0f2375ff37ea85ab0261035ca04330b1f1eafa75baee61d43ac"
+      }
+    ]
+  },
+  "processes": [
+    {
+      "label": "exference-not",
+      "exit_code": 0,
+      "timed_out": false,
+      "process_timeout_seconds": 300,
+      "wall_seconds": 1.3817691000003833,
+      "started_utc": "2026-09-06T02:42:47Z",
+      "finished_utc": "2026-09-06T02:42:48Z",
+      "input_sha256": "4ae079a67ef62dd9c0c6539aa2e1f356fc3f5028978d29dc28d7aba7a5669dc2",
+      "stdout_sha256": "19423ff9d2a222e82edb57afddd10533a355f24462ee7463ff5746b97d8cdc6c",
+      "stderr_sha256": "1cde06016fb376941a0988075a9e4fde0fb695c0ea700782ab8561605c0ef088"
+    },
+    {
+      "label": "exference-swap",
+      "exit_code": 0,
+      "timed_out": false,
+      "process_timeout_seconds": 300,
+      "wall_seconds": 1.3041483999986667,
+      "started_utc": "2026-09-06T02:42:48Z",
+      "finished_utc": "2026-09-06T02:42:49Z",
+      "input_sha256": "8006daaf3de76fc28221d80922740da6ca288fc4cd3be67a6be8f49f4cef9c07",
+      "stdout_sha256": "ed906d5af94a4b8b94635a690c2bcf0e8977030a4700156a021fb3e5ce70a4a5",
+      "stderr_sha256": "17d3b288b9525a4be9cca6639ba16b744fb18570b523e51e20a5921b35e26137"
+    },
+    {
+      "label": "exference-map",
+      "exit_code": 0,
+      "timed_out": false,
+      "process_timeout_seconds": 300,
+      "wall_seconds": 1.1022319000039715,
+      "started_utc": "2026-09-06T02:42:49Z",
+      "finished_utc": "2026-09-06T02:42:51Z",
+      "input_sha256": "fd443ff7201ab95c7bee2e557be9945381cdc3d31e00244ab7a8c3015bdaf74f",
+      "stdout_sha256": "9e075fb495717faab399072bf71963d75f4a448665c36e23bb763e93160e6701",
+      "stderr_sha256": "f280ccd3734d0e6b73a80d37051dcc6c0083a2a87d057825ccd06dfe9b234584"
+    },
+    {
+      "label": "exference-append",
+      "exit_code": 0,
+      "timed_out": false,
+      "process_timeout_seconds": 300,
+      "wall_seconds": 1.142432299995562,
+      "started_utc": "2026-09-06T02:42:51Z",
+      "finished_utc": "2026-09-06T02:42:52Z",
+      "input_sha256": "8e33a08a7254171a5943644d04629407edeebffe17ba5b5779c054e395e2ab4e",
+      "stdout_sha256": "f3cbd1944d9b46c8971be6e5207956a0190e4891de800560cbc57fb9a8a68ca4",
+      "stderr_sha256": "e494d7f3b5ab15abd40de2c15382a443733f807be93296f4c06a45a99efb3cb6"
+    },
+    {
+      "label": "exference-reverse",
+      "exit_code": 0,
+      "timed_out": false,
+      "process_timeout_seconds": 300,
+      "wall_seconds": 2.4028564000036567,
+      "started_utc": "2026-09-06T02:42:52Z",
+      "finished_utc": "2026-09-06T02:42:54Z",
+      "input_sha256": "b6a48844363ac0c9defad595dc0f440d1e06fcaeae06f7e8a9372b4cd9b99939",
+      "stdout_sha256": "74006c5ad64e7ab2c65cbd3eba5642e32f6a5f37e171a4c97387071b98139006",
+      "stderr_sha256": "f97dd93a02191565af48ed678418351246fa737549328bf490eafe74d88936f5"
+    },
+    {
+      "label": "exference-filter",
+      "exit_code": 0,
+      "timed_out": false,
+      "process_timeout_seconds": 300,
+      "wall_seconds": 1.3522487000009278,
+      "started_utc": "2026-09-06T02:42:54Z",
+      "finished_utc": "2026-09-06T02:42:56Z",
+      "input_sha256": "3ce8d7601fa9abcd0daa4bdf1cfe61b800af91cd38b5b54b72de4f038dbf850a",
+      "stdout_sha256": "3a14238de4a96a24e4d271cc41c245afdc80dc3715f5a643c00ca992a59fbb33",
+      "stderr_sha256": "68a581a6ec316194c5eed09474f10eb3172a982d74f9f505e9df29581c23bc5c"
+    },
+    {
+      "label": "exference-reject-all",
+      "exit_code": 0,
+      "timed_out": false,
+      "process_timeout_seconds": 300,
+      "wall_seconds": 1.675076400002581,
+      "started_utc": "2026-09-06T02:42:56Z",
+      "finished_utc": "2026-09-06T02:42:57Z",
+      "input_sha256": "6a8a129ccdcd85423f0a0a7a5475005e74fd426aa0cb49ef0bf0551d90a7ff3e",
+      "stdout_sha256": "a53b84eefc268ad60c5266254ca7aabcbb261a76307bbcd4dd6f2e21dec5cd65",
+      "stderr_sha256": "5bd5fbff44d4f5eab13ef5d747d5c6b1d169420b53cbf259ca3e3e37f654ecae"
+    },
+    {
+      "label": "ghc",
+      "exit_code": 0,
+      "timed_out": false,
+      "process_timeout_seconds": 300,
+      "wall_seconds": 1.77203369999188,
+      "started_utc": "2026-09-06T02:42:57Z",
+      "finished_utc": "2026-09-06T02:42:59Z",
+      "input_sha256": null,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "behavior",
+      "exit_code": 0,
+      "timed_out": false,
+      "process_timeout_seconds": 300,
+      "wall_seconds": 0.24716120000812225,
+      "started_utc": "2026-09-06T02:42:59Z",
+      "finished_utc": "2026-09-06T02:42:59Z",
+      "input_sha256": null,
+      "stdout_sha256": "2ee6b77f2d64e49edf3254edecbf37d09da660c165bdfe3abfbaed486f528bac",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "excluded_claims": [
+    "Completed Djinn six-operation acceptance.",
+    "Any later executable or changed search strategy reproduces this run.",
+    "Finite observations prove the operations universally correct."
+  ]
+}

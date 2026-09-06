@@ -89,9 +89,9 @@ owned process and capture. `--engine` and `--operation` select explicit subsets.
 The default `--window 256` sets both Djinn's raw proof-candidate limit and the
 behavioral observation window (`quality-window`). Both engine work limits are explicitly
 100,000, and selection is `first` under `balanced` ranking. Djinn's ordinary
-`depth-first` strategy remains the default. These are proposed
-corpus limits pending live calibration, not a claim of current synthesis
-success. The separate process wall guard defaults to 300 seconds; independent
+`depth-first` strategy remains the default. The recorded Exference run passed
+all six operations at these limits; Djinn's complete six-operation acceptance
+remains pending. The separate process wall guard defaults to 300 seconds; independent
 Boolean replay allows two seconds per assertion. Child processes belong to a
 kill-on-close Windows Job, assigned before execution, or a dedicated POSIX
 process group.
@@ -142,9 +142,38 @@ run or validate it. The corresponding Lean runner covers Djinn, Exference, and
 Both, bringing the intended positive matrix to **30** cells across the two
 host languages.
 
-The independent oracle baseline has passed 17 Haskell assertions and the Lean
-counterpart has passed all 33 named declaration/proof checks with empty axiom
-inventories. **Live six-operation synthesis acceptance is pending.** This
-baseline establishes that the oracles accept their witnesses and reject the
-wrong controls; it does not establish that either engine can yet find all six
-operations within the proposed bounds.
+**Exference passed all six live Haskell queries** at window 256 and 100,000
+steps under `balanced` ranking and `select first`. The
+[compact acceptance receipt](../test-church/receipts/behavior-exference-grounded-first.json)
+retains every exact definition and full type, settings, per-query verdicts,
+executable hash, and source/capture/replay hashes. Its executable SHA-256 is
+`3f1b36a3a700c0a7bd9cf0771b3ee91718e4435fe6278e3343e60f108f9e00d4`.
+
+| Operation | Candidates checked through success | Rejected by the predicate |
+| --- | ---: | ---: |
+| `not` | 5 | 4 |
+| `swap` | 1 | 0 |
+| `map` | 3 | 2 |
+| `append` | 11 | 10 |
+| `reverse` | 146 | 145 |
+| `filter` | 30 | 29 |
+
+Each query accepted one candidate with no predicate errors or timeouts. A
+separate `forall a. a -> a where Prelude.False` query rejected all 256 observed
+candidates and displayed no definition; the observation window was consumed
+without refilling it. This control establishes rejection within that window,
+not a proof that the type is uninhabited.
+
+Independent GHC compilation and execution then passed **23 assertions**: one
+complete finite condition for each of the six exact emitted definitions,
+covering 626 observations in total, plus the 17 oracle controls described
+above. Both compiler and execution exit codes were zero. This replay is
+separate from the live worker's decisions and preserves each candidate's full
+polymorphic type. The separate Lean oracle baseline passed 33 named
+declaration/proof checks with empty axiom inventories; that baseline alone
+does not establish live synthesis coverage.
+
+**Djinn's complete six-operation Haskell acceptance remains pending.** The
+receipt records the tested Exference executable and bounds; it does not claim
+that later builds, other strategies, or all well-typed inputs have been
+validated.

@@ -4575,6 +4575,42 @@ tests = testGroup "Exference"
             residual @?= []
             checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
               goal [] expression @?= Right ()
+      , testCase "polymorphic results may receive one additional argument" $ do
+          let envelope = TypeApp $ TypeCons $ name "OverapplicationEnvelope"
+              seed = TypeCons $ name "OverapplicationSeed"
+              result = TypeCons $ name "OverapplicationResult"
+              extractor = TypeForall [0] [] $
+                TypeArrow (envelope $ TypeVar 0) (TypeVar 0)
+              wrapped = envelope $ TypeArrow seed result
+              scopedGoal = foldr TypeArrow result [extractor, wrapped, seed]
+              globals =
+                [ FunctionBinding (TypeVar 0) (name "extract") 0 []
+                    [envelope $ TypeVar 0]
+                , FunctionBinding wrapped (name "wrapped") 0 [] []
+                , FunctionBinding seed (name "seed") 0 [] []
+                ]
+          forM_ [(scopedGoal, []), (result, globals)] $ \(goal, functions) -> do
+            let input = identityInput
+                  { input_goalType = goal, input_envFuncs = functions
+                  , input_maxSteps = 500, input_maxQueueSize = Just 512 }
+            (expression, residual, _) <- maybe
+              (fail "the instantiated function result was never applied to its extra argument") pure $
+                findOneExpression input
+            residual @?= []
+            checkExpression (mkQueryClassEnv emptyClassEnv []) functions []
+              goal [] expression @?= Right ()
+          -- A monomorphic local result is owned by the surrounding forall;
+          -- this extension must never turn that rigid into a function carrier.
+          let rigidGoal = TypeForall [0, 1] [] $ TypeArrow
+                (TypeArrow (envelope $ TypeVar 0) (TypeVar 0)) $
+                TypeArrow (envelope $ TypeArrow (TypeVar 1) (TypeVar 1)) (TypeVar 0)
+              wrongResultGoal = foldr TypeArrow result
+                [extractor, envelope $ TypeArrow seed seed, seed]
+          forM_ [rigidGoal, wrongResultGoal] $ \goal -> do
+            rejected <- expectRight $ findExpressionsEither identityInput
+              { input_goalType = goal, input_maxSteps = 500
+              , input_maxQueueSize = Just 512, input_allowUnused = True }
+            assertBool "overapplication refined an unrelated rigid result" $ null rejected
       , testCase "visible instantiation aliases inline without capture" $ do
           let identity = TypeForall [0] [] $ TypeArrow (TypeVar 0) (TypeVar 0)
               local = ExpVar 1 identity

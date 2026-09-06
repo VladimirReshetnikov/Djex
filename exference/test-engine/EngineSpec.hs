@@ -2,6 +2,8 @@ module Main (main) where
 
 import Control.DeepSeq (force)
 import Control.Exception (SomeException, evaluate, try)
+import Control.Monad (forM_)
+import Data.List (find)
 import qualified Data.Map.Strict as Map
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
@@ -61,6 +63,7 @@ import Language.Haskell.Exference.Core.Internal.Options
   ( ExferenceHeuristicsConfig (..)
   , ExferenceOptions (..)
   , defaultHeuristicsConfig
+  , defaultExferenceOptions
   )
 import Language.Haskell.Exference.Core.Internal.Polytype
   ( GroundProviderInstantiation (..)
@@ -448,6 +451,100 @@ tests = testGroup "Exference private engine boundaries"
             (IdentifierCapacities 100 100 100 100) input
       assertBool "an older result meta captured a nested skolem"
         $ all (null . E.chunkElements) chunks
+  , testCase "overapplication uses the finite flexible namespace and checked arguments" $ do
+      let envelope = TypeApp $ TypeCons $ name "ExtraArgumentEnvelope"
+          seed = TypeCons $ name "ExtraArgumentSeed"
+          result = TypeCons $ name "ExtraArgumentResult"
+          extractor = TypeForall [0] [] $
+            TypeArrow (envelope $ TypeVar 0) (TypeVar 0)
+          goal = foldr TypeArrow result
+            [extractor, envelope $ TypeArrow seed result, seed]
+          input = identityInput
+            { E.input_goalType = goal, E.input_maxSteps = 500
+            , E.input_maxQueueSize = Just 512 }
+      ample <- expectRight $ findExpressionsWithIdentifierCapacitiesEither
+        (IdentifierCapacities 1000 1000 1000 1000) input
+      let candidates = [expression | chunk <- ample,
+            (expression, _, _) <- E.chunkElements chunk]
+      assertBool "the bounded extra application produced no checked witness" $
+        not $ null candidates
+      mapM_ (\expression -> checkExpression
+          (mkQueryClassEnv emptyStaticClassEnv []) [] [] goal [] expression @?= Right ())
+        candidates
+      limited <- lastCapacityChunk (IdentifierCapacities 1000 1 1000 1000) input
+      E.searchCompletion (E.chunkStatus limited) @?= E.SearchIdentifierSpaceExhausted
+      assertBool "namespace exhaustion manufactured an extra-argument witness" $
+        null $ E.chunkElements limited
+  , testCase "balanced search instantiates Church reverse and scalar folds at an endomorphism" $ do
+      let element = TypeVar 0
+          list = TypeForall [1] [] $ TypeArrow
+            (TypeArrow element $ TypeArrow (TypeVar 1) (TypeVar 1)) $
+            TypeArrow (TypeVar 1) (TypeVar 1)
+          goal = TypeArrow list list
+          scalarElement = TypeCons $ name "ContinuationElement"
+          scalarCarrier = TypeCons $ name "ContinuationCarrier"
+          scalarFold = TypeForall [1] [] $ TypeArrow
+            (TypeArrow scalarElement $ TypeArrow (TypeVar 1) (TypeVar 1)) $
+            TypeArrow (TypeVar 1) (TypeVar 1)
+          scalarGoal = foldr TypeArrow scalarCarrier
+            [ scalarFold
+            , TypeArrow scalarElement $ TypeArrow scalarCarrier scalarCarrier
+            , scalarCarrier
+            ]
+          local = Generated.Local
+          app = Generated.Apply
+          lam variables = Generated.lambdaExpression $ map Generated.Bind variables
+          -- xs (\a k r -> k (c a r)) (\r -> r) z
+          step = lam [4, 5, 6] $ app (local 5) $
+            app (app (local 2) (local 4)) (local 6)
+          -- The shared eta simplifier acts on singleton lambdas, while
+          -- the alpha comparator preserves pattern grouping. Split the
+          -- grouped witness before applying that existing simplifier so
+          -- an eta-shorter emitted fold compares equally. Keep all
+          -- visible type arguments and check the original candidate below.
+          singletonLambdas source = case source of
+            Generated.Lambda patterns body -> foldr
+              (\pattern rest -> Generated.Lambda [pattern] rest)
+              (singletonLambdas body) patterns
+            Generated.Apply function argument -> Generated.Apply
+              (singletonLambdas function) (singletonLambdas argument)
+            Generated.VisibleTypeApplication function argument ->
+              Generated.VisibleTypeApplication (singletonLambdas function) argument
+            Generated.Tuple elements -> Generated.Tuple $ map singletonLambdas elements
+            Generated.Let pattern value body -> Generated.Let pattern
+              (singletonLambdas value) (singletonLambdas body)
+            Generated.Case value branches -> Generated.Case (singletonLambdas value)
+              [(pattern, singletonLambdas body) | (pattern, body) <- branches]
+            _ -> source
+          normalize = Generated.simplifyExpressionBy id . singletonLambdas
+          expected = normalize $ lam [1, 2, 3] $
+            app (app (app (local 1) step) (lam [7] $ local 7)) (local 3)
+          matches (expression, _, _) = Generated.alphaEquivalentExpression expected $
+            normalize $ toGeneratedExpression expression
+      assertBool "the witness comparison rejected the same eta-shorter fold" $
+        Generated.alphaEquivalentExpression expected $ normalize $ lam [1, 2] $
+          app (app (local 1) step) (lam [7] $ local 7)
+      forM_ [("Church reverse", goal), ("arbitrary scalar continuation", scalarGoal)] $
+        \(label, requested) -> do
+          -- The behavioral command uses the balanced policy. The historical
+          -- ExferenceInput facade deliberately selects legacy ranking, whose
+          -- first candidate window is a different search-order contract.
+          environment <- expectRight $ E.mkExferenceEnvironment $
+            EnvDictionary [] [] emptyStaticClassEnv
+          checked <- expectRight $ E.prepareExferenceQuery environment $
+            E.ExferenceQuery requested Set.empty defaultExferenceOptions
+              { exferenceMaximumSteps = 100000
+              , exferenceMaximumQueueSize = Just 8192
+              , exferenceAllowUnused = True
+              , exferenceCandidateRanking = SharedQuality.defaultCandidateRankingPolicy
+              }
+          let candidates = concatMap E.chunkElements $ E.findExpressions checked
+          (expression, residual, _) <- maybe
+            (fail $ label ++ " was absent from the bounded candidate prefix") pure $
+              find matches $ take 256 candidates
+          residual @?= []
+          checkExpression (mkQueryClassEnv emptyStaticClassEnv []) [] []
+            requested [] expression @?= Right ()
   , testCase "bare provider foralls cross the checked result boundary" $ do
       let unit = TypeTuple Boxed []
           vacuousUnit = TypeForall [] [] unit

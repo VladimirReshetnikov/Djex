@@ -2299,10 +2299,11 @@ stateStepPlan allocators multiPM allowConstrs h
         dependencies = varPParameters provided
         scheme = SharedType.functionType dependencies provType
         exactUnification = unifyShared goalType provType
-        useProviderWith
+        useProviderWith = useProviderWithGoalOrder id
+        useProviderWithGoalOrder goalOrder
             typeArguments annotation providedType constraints parameters
             unification =
-          byGenericUnify
+          byGenericUnifyWithGoalOrder goalOrder
             (Right (provId, annotation, typeArguments))
             providedType
             constraints
@@ -2331,6 +2332,8 @@ stateStepPlan allocators multiPM allowConstrs h
         InstantiateProviderUse ->
           ordinaryInstantiation <|> wholePolytypeInstantiation
             <|> visibleGroundInstantiation <|> resultDirectedInstantiation
+            <|> groundedOverappliedInstantiation
+            <|> overappliedInstantiation
           where
           -- An argument metavariable may denote the entire polymorphic
           -- value. Keeping this branch beside ordinary per-use elimination
@@ -2373,6 +2376,41 @@ stateStepPlan allocators multiPM allowConstrs h
             (arguments, selected, constraints) <- resultDirectedProviderUse scheme
             let (result, parameters) = splitArrowChain selected
             useProviderWith arguments scheme result constraints parameters Nothing
+
+          -- A quantified result may itself be a function which must receive
+          -- one more argument to reach this goal. Matching only the unsolved
+          -- final result to the goal commits its carrier too early (for
+          -- example, a fold can accumulate an endomorphism). This is one
+          -- finite sibling, not an enumeration of guessed carrier types.
+          -- Its fresh proper-type domain and additional argument goal remain
+          -- subject to the ordinary allocators, queue, depth and step bounds.
+          groundedOverappliedInstantiation = do
+            unless (hasQuantifiedResult scheme) mzero
+            domain <- lift $ chooseBranches knownOverapplicationDomains
+            overappliedInstantiationAt $ Just domain
+
+          overappliedInstantiation = overappliedInstantiationAt Nothing
+
+          overappliedInstantiationAt knownDomain = do
+            unless (hasQuantifiedResult scheme) mzero
+            supply <- gets nodeFlexibleIds
+            (instantiated, constraints, nextSupply) <- maybe
+              (lift $ truncateBranch BranchIdentifierSpaceExhausted) pure $
+                instantiateLeadingForallsWith
+                  (searchAllocateFlexibleNamespace allocators) supply scheme
+            let (result, parameters) = splitArrowChain instantiated
+            case result of
+              TypeVar identifier
+                | identifier `S.notMember` freeVars scheme -> pure ()
+              _ -> mzero
+            modify $ \node -> node {nodeFlexibleIds = nextSupply}
+            (domain, substitutions) <- overapplicationSubstitution result knownDomain
+            let selected = snd $ applySubsts substitutions instantiated
+                arguments = inferredProviderVisibleArguments scheme selected
+            useProviderWithGoalOrder extraArgumentFirst arguments
+              (if null arguments then selected else scheme)
+              goalType constraints (parameters ++ [domain])
+              (Just substitutions)
 
           -- A separate evidence-directed branch selects either closed
           -- monotypes named by explicit instance heads or checked proper-type
@@ -2551,6 +2589,30 @@ stateStepPlan allocators multiPM allowConstrs h
                     applySubsts substitutions $ SharedType.functionType parameters provType
                 _ -> []
           useGlobal typeArguments provType constraints parameters
+        -- Every free variable in this global's complete binding namespace was
+        -- freshly allocated above. The extra domain belongs to that same
+        -- persistent namespace, so use the shared unifier and carry its full
+        -- substitution through the normal rigid-escape and constraint checks.
+        -- A disjoint unifier here would wrongly treat the added domain as a
+        -- second provider variable with a coincident numeric identifier.
+        groundedOverapplied = case provType of
+          TypeVar{} -> do
+            domain <- lift $ chooseBranches knownOverapplicationDomains
+            overappliedAt $ Just domain
+          _ -> mzero
+        overapplied = overappliedAt Nothing
+        overappliedAt knownDomain = case provType of
+          TypeVar{} -> do
+            (domain, substitutions) <- overapplicationSubstitution provType knownDomain
+            retained <- gets $ M.lookup (functionName binding) . nodeFunctionSchemes
+            let selected = snd $ applySubsts substitutions $
+                  SharedType.functionType parameters provType
+                arguments = maybe [] (`inferredProviderVisibleArguments` selected) retained
+            byGenericUnifyWithGoalOrder extraArgumentFirst
+              (Left (functionName binding, arguments))
+              goalType constraints (parameters ++ [domain]) good bad
+              (Just (substitutions, substitutions))
+          _ -> mzero
         useVisible instantiations = do
           instantiation <- lift $ chooseBranches instantiations
           typeArguments <- maybe mzero pure
@@ -2592,7 +2654,7 @@ stateStepPlan allocators multiPM allowConstrs h
         (M.findWithDefault [] (functionName binding)
           . nodeProviderInstantiationAssignments)
       case suppliedAssignments of
-        [] -> ordinary <|> remainingVisible
+        [] -> ordinary <|> remainingVisible <|> groundedOverapplied <|> overapplied
         _ -> do
           assignedInstantiations <- gets $ \node -> case
               M.lookup (functionName binding) (nodeFunctionSchemes node) of
@@ -2600,11 +2662,61 @@ stateStepPlan allocators multiPM allowConstrs h
             Just source -> L.nub $ assignmentProviderInstantiations
               suppliedAssignments source
           if null assignedInstantiations
-            then ordinary <|> remainingVisible
+            then ordinary <|> remainingVisible <|> groundedOverapplied <|> overapplied
             else useVisible assignedInstantiations
-              <|> ordinary <|> remainingVisible
+              <|> ordinary <|> remainingVisible <|> groundedOverapplied <|> overapplied
 
-    -- on code for byProvided and byFunctionSimple
+    -- Check the syntactic rule precondition before enumerating any domain or
+    -- reserving an identifier. A nominal/arrow/quantified final result cannot
+    -- become the function result of this particular elimination rule.
+    hasQuantifiedResult scheme =
+      let (_, _, body) = SharedType.splitLeadingForalls scheme
+      in case fst $ splitArrowChain body of
+        TypeVar identifier -> identifier `S.notMember` freeVars scheme
+        _ -> False
+
+    -- A scalar already present in this lexical scope can determine the
+    -- domain of a polymorphic function result before its dependent argument
+    -- goals enter the frontier. Otherwise a fresh domain is repeatedly priced
+    -- as unknown inside those goals and its useful specialization may remain
+    -- behind many ordinary folds. This finite acceleration uses only checked
+    -- input bindings and exact monotypes; it neither guesses a type grammar
+    -- nor manufactures the scalar's term. Every argument is still searched,
+    -- and the fully flexible overapplication sibling remains available.
+    knownOverapplicationDomains = SharedCollection.distinctOn
+      SharedTypeAtom.alphaTypeKey $ filter knownMonotype $
+        [varPResult binding | binding <- providedBindings,
+          null $ varPParameters binding] ++
+        [functionResult binding | binding <- functionBindings,
+          null $ functionParameters binding,
+          null $ functionConstraints binding]
+     where
+      knownMonotype ty = S.null (freeVars ty) && not (SharedType.containsForall ty)
+
+    overapplicationSubstitution result knownDomain = do
+      renaming <- builderFreshenTVarNamespace allocators [0]
+      let freshDomain = renameFlexibleType renaming $ TypeVar 0
+      domainSubstitution <- case knownDomain of
+        Nothing -> pure IntMap.empty
+        Just selected -> maybe mzero pure $ unifyShared freshDomain selected
+      let domain = snd $ applySubsts domainSubstitution freshDomain
+      resultSubstitution <- maybe mzero pure $
+        unifyShared result $ TypeArrow domain goalType
+      -- The domain is freshly allocated; selected monotypes have no flexible
+      -- variables, so these maps have disjoint domains and no unresolved
+      -- cross-reference. The normal builder validates all rigid references.
+      pure (domain, IntMap.union resultSubstitution domainSubstitution)
+
+    -- The last dependency is the value to which a freshly instantiated
+    -- function result is applied. Solve it before constructing arguments
+    -- whose types mention its still-flexible domain. This changes only goal
+    -- order: holes and the actual provider application keep source order,
+    -- and every goal still takes its ordinary charged search step.
+    extraArgumentFirst goals = case reverse goals of
+      [] -> []
+      argument : earlier -> argument : reverse earlier
+
+    -- Common code for byProvided and byFunctionSimple.
     byGenericUnify
                    :: Either
                         (QualifiedName,
@@ -2618,7 +2730,23 @@ stateStepPlan allocators multiPM allowConstrs h
                    -> Penalty
                    -> Maybe (Substs, Substs)
                    -> StateT SearchNode SearchBranches ()
-    byGenericUnify applier
+    byGenericUnify = byGenericUnifyWithGoalOrder id
+
+    byGenericUnifyWithGoalOrder
+                   :: ([TGoal] -> [TGoal])
+                   -> Either
+                        (QualifiedName,
+                          [SharedGenerated.VisibleTypeArgument])
+                        (TVarId, HsType,
+                          [SharedGenerated.VisibleTypeArgument])
+                   -> HsType
+                   -> [HsConstraint]
+                   -> [HsType]
+                   -> Penalty
+                   -> Penalty
+                   -> Maybe (Substs, Substs)
+                   -> StateT SearchNode SearchBranches ()
+    byGenericUnifyWithGoalOrder goalOrder applier
                    provided
                    provConstrs
                    dependencies
@@ -2716,7 +2844,7 @@ stateStepPlan allocators multiPM allowConstrs h
               Right _ -> id
         modify $ \node -> node
           { nodeGoals = nodeGoals node
-              <> Seq.fromList (map applyProviderSubstitution newGoals) }
+              <> Seq.fromList (goalOrder $ map applyProviderSubstitution newGoals) }
         builderApplySubst allSS substs
         modify $ \node -> node
           { nodeExpression = fillExprHole var

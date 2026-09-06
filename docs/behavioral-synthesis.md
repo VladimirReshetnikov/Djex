@@ -86,13 +86,40 @@ python test-church/behavior_probe.py --djex PATH_TO_BUILT_DJEX_EXE --output test
 The default matrix has **12 positive queries**, six for each Haskell engine,
 plus one deliberately false predicate per engine. Each query uses its own
 owned process and capture. `--engine` and `--operation` select explicit subsets.
-The initial observation frontier is 256, both engine work limits are explicitly
-100,000, and selection is `first` under `balanced` ranking. These are proposed
+The default `--window 256` sets both Djinn's raw proof-candidate limit and the
+behavioral observation window (`quality-window`). Both engine work limits are explicitly
+100,000, and selection is `first` under `balanced` ranking. Djinn's ordinary
+`depth-first` strategy remains the default. These are proposed
 corpus limits pending live calibration, not a claim of current synthesis
 success. The separate process wall guard defaults to 300 seconds; independent
 Boolean replay allows two seconds per assertion. Child processes belong to a
 kill-on-close Windows Job, assigned before execution, or a dedicated POSIX
 process group.
+
+A larger frontier can be calibrated explicitly without changing the default:
+
+```powershell
+python test-church/behavior_probe.py --djex PATH_TO_BUILT_DJEX_EXE --window 4096 --djinn-strategy interleave --steps 100000 --budget 100000 --output test-church/results/behavior-window4096-interleave
+```
+
+This explicitly selects Djinn's `interleave` branch strategy and expands search
+and observation allowances while retaining `select first`,
+all finite assertions, isolated replay, and false-predicate controls. It does
+not increase the step/choice budgets or time guards. The strategy is sent through
+`:set djinn-strategy`, verified in the settings snapshot, and recorded in the
+receipt; `--djinn-strategy depth-first` explicitly selects the ordinary order.
+Strategy changes affect Djinn only, including when both Haskell engines are
+selected for a run. Add
+`--operation reverse --operation filter` for those two operations, or repeat
+`--operation` with any of `not`, `swap`, `map`, `append`, `reverse`, and `filter`.
+Omitting it selects all six. A pass at 4,096 is evidence at that configured
+window, not evidence that the earlier 256-window attempt passed.
+
+Every preparation or live attempt requires a fresh output directory; an
+existing empty directory is also accepted. The runner rejects a nonempty path
+before writing files, preserving earlier commands, captures, and receipts.
+Use different paths for `--prepare-only`, live runs, and successive calibration
+attempts. The receipt retains the exact window and selected matrix.
 
 The runner preserves each exact displayed definition, compiles it at the full
 polymorphic signature, and executes the finite condition again outside Djex.

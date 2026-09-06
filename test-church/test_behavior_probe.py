@@ -7,13 +7,38 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
-from behavior_probe import (behavioral_observations, displayed_definition,
-                            isolated_replay_sources, replay_source, validate_settings)
-from behavior_runtime import Processes, render_type
+from behavior_probe import (behavioral_observations, commands, displayed_definition,
+                            isolated_replay_sources, main, replay_source, validate_settings)
+from behavior_runtime import Processes, prepare_output_directory, render_type
 
 
 class TranscriptTests(unittest.TestCase):
+    def test_output_guard_accepts_new_or_empty_paths_and_preserves_prior_files(self):
+        with tempfile.TemporaryDirectory(prefix="behavior-output-guard-") as directory:
+            output = Path(directory) / "attempt"
+            self.assertEqual(prepare_output_directory(output), output)
+            self.assertEqual(prepare_output_directory(output), output)
+            marker = output / "results.json"
+            marker.write_bytes(b"previous immutable receipt\r\n")
+            with self.assertRaisesRegex(ValueError, "fresh path"):
+                prepare_output_directory(output)
+            self.assertEqual(marker.read_bytes(), b"previous immutable receipt\r\n")
+            with self.assertRaisesRegex(ValueError, "fresh path"):
+                prepare_output_directory(marker)
+
+    def test_haskell_runner_rejects_existing_receipt_before_preparation(self):
+        with tempfile.TemporaryDirectory(prefix="behavior-existing-receipt-") as directory:
+            marker = Path(directory) / "results.json"
+            marker.write_bytes(b"previous receipt")
+            with mock.patch.object(sys, "argv", ["behavior_probe.py", "--prepare-only", "--output", directory]), \
+                    mock.patch("behavior_probe.source_provenance", side_effect=AssertionError("guard ran too late")):
+                with self.assertRaisesRegex(ValueError, "fresh path"):
+                    main()
+            self.assertEqual(list(Path(directory).iterdir()), [marker])
+            self.assertEqual(marker.read_bytes(), b"previous receipt")
+
     def test_exact_multiline_equation(self):
         source = "djex[djinn]> answer a =\n  case a of\n    x -> x\n[notice]\n"
         self.assertEqual(displayed_definition(source, "answer"), "answer a =\n  case a of\n    x -> x")
@@ -50,21 +75,34 @@ class TranscriptTests(unittest.TestCase):
         self.assertEqual(render_type(goal, lean=True), "((∀ (a : Type), (a → a)) → (∀ (a : Type), (a → a)))")
 
     def test_backend_and_settings_snapshot_are_required(self):
-        args = SimpleNamespace(window=8, budget=100, steps=200)
+        args = SimpleNamespace(window=8, budget=100, steps=200, djinn_strategy="depth-first")
         settings = {"backend": "exference", "ranking": "balanced", "select": "first",
                     "render": "definition", "prompt": '\"\"', "allow-unused": "on",
-                    "djinn-axioms": "off", "candidate-limit": "8", "quality-window": "8",
+                    "djinn-axioms": "off", "djinn-strategy": "depth-first",
+                    "candidate-limit": "8", "quality-window": "8",
                     "choice-budget": "100", "max-steps": "200"}
         good = "Active backend: exference\n" + "\n".join(key + " = " + value for key, value in settings.items())
         self.assertEqual(validate_settings(good, "exference", args), settings)
         bad = [good.replace("Active backend: exference", "Active backend: djinn"),
                good.replace("backend = exference", "backend = djinn"),
                good.replace("choice-budget = 100", "choice-budget = 0"),
+               good.replace("djinn-strategy = depth-first", "djinn-strategy = interleave"),
                good + "\nbackend = exference", good + "\n[DJEX_REPL_BACKEND] failure",
                good + "\n[DJEX_REPL_COMMAND] failure"]
         for text in bad:
             with self.subTest(text=text), self.assertRaises(ValueError):
                 validate_settings(text, "exference", args)
+
+    def test_selected_djinn_strategy_is_emitted_without_changing_other_limits(self):
+        for strategy in ("depth-first", "interleave"):
+            args = SimpleNamespace(window=4096, budget=100000, steps=100000, djinn_strategy=strategy)
+            source, cases = commands("djinn", ["not"], args, {"not": "a -> a"})
+            self.assertEqual(source.splitlines().count(":set djinn-strategy " + strategy), 1)
+            for setting in (":set candidate-limit 4096", ":set quality-window 4096",
+                            ":set choice-budget 100000", ":set max-steps 100000", ":set select first"):
+                self.assertIn(setting, source.splitlines())
+            self.assertEqual(len(cases), 1)
+            self.assertIn("where Prelude.False", source)
 
     def test_candidate_modules_do_not_gain_control_or_other_candidate_scope(self):
         first = {"name": "first", "operation": "reverse", "type": "forall a. a -> a",

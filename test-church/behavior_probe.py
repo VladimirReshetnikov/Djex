@@ -14,7 +14,8 @@ from pathlib import Path
 import re
 import sys
 
-from behavior_runtime import Processes, sha256, source_provenance, validate_limits, write_json
+from behavior_runtime import (Processes, prepare_output_directory, sha256,
+                              source_provenance, validate_limits, write_json)
 from behavior_spec import (OPERATIONS, OBSERVATIONS, HASKELL_TYPES,
                            haskell_predicate, haskell_control_source)
 
@@ -45,6 +46,7 @@ def commands(engine, operations, args, targets, *, include_false=True):
     lines = [':set prompt ""', ":backend " + engine,
              ":set ranking balanced", ":set select first", ":set render definition",
              ":set allow-unused on", ":set djinn-axioms off",
+             f":set djinn-strategy {args.djinn_strategy}",
              f":set candidate-limit {args.window}", f":set quality-window {args.window}",
              f":set choice-budget {args.budget}", f":set max-steps {args.steps}",
              ":show settings"]
@@ -93,7 +95,8 @@ def validate_settings(output, engine, args):
         raise ValueError("requested backend was not acknowledged exactly once")
     expected = {"backend": engine, "ranking": "balanced", "select": "first",
                 "render": "definition", "prompt": '\"\"', "allow-unused": "on",
-                "djinn-axioms": "off", "candidate-limit": str(args.window),
+                "djinn-axioms": "off", "djinn-strategy": args.djinn_strategy,
+                "candidate-limit": str(args.window),
                 "quality-window": str(args.window), "choice-budget": str(args.budget),
                 "max-steps": str(args.steps)}
     for key, value in expected.items():
@@ -149,11 +152,15 @@ def isolated_replay_sources(cases, evaluation_seconds):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--djex", type=Path)
-    parser.add_argument("--output", type=Path, default=HERE / "results/behavior")
+    parser.add_argument("--output", type=Path, default=HERE / "results/behavior",
+                        help="new or empty directory; prior receipts are never overwritten")
     parser.add_argument("--manifest", type=Path, default=HERE / "manifest.json")
     parser.add_argument("--engine", action="append", choices=("djinn", "exference"))
     parser.add_argument("--operation", action="append", choices=OPERATIONS)
-    parser.add_argument("--window", type=int, default=256)
+    parser.add_argument("--window", type=int, default=256,
+                        help="sets both Djinn raw candidate-limit and behavioral quality-window (default: 256; calibration is explicit)")
+    parser.add_argument("--djinn-strategy", choices=("depth-first", "interleave"), default="depth-first",
+                        help="explicit Djinn branch strategy; preserves ordinary depth-first default")
     parser.add_argument("--steps", type=int, default=100000)
     parser.add_argument("--budget", type=int, default=100000)
     parser.add_argument("--process-timeout", type=float, default=300)
@@ -170,7 +177,7 @@ def main():
     operations = args.operation or list(OPERATIONS)
     if len(set(engines)) != len(engines) or len(set(operations)) != len(operations):
         parser.error("duplicate engine/operation selections are not coverage")
-    args.output.mkdir(parents=True, exist_ok=True)
+    args.output = prepare_output_directory(args.output)
     environment = args.output / "empty-environment"
     environment.mkdir(exist_ok=True)
     if any(environment.iterdir()):
@@ -186,6 +193,7 @@ def main():
               "engines": engines, "operations": operations,
               "expected_query_count": len(engines) * len(operations),
               "settings": {"ranking": "balanced", "select": "first", "window": args.window,
+                           "djinn_strategy": args.djinn_strategy,
                            "steps": args.steps, "choice_budget": args.budget,
                            "independent_evaluation_seconds": args.evaluation_timeout,
                            "separate_process_guard_seconds": args.process_timeout},

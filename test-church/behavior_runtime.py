@@ -22,6 +22,17 @@ def write_json(path, value):
     Path(path).write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def prepare_output_directory(path):
+    """A new attempt must never replace earlier captures or receipts."""
+    path = Path(path)
+    if path.exists():
+        if not path.is_dir() or any(path.iterdir()):
+            raise ValueError("output directory must be empty; choose a fresh path to preserve earlier acceptance receipts: " + str(path))
+    else:
+        path.mkdir(parents=True)
+    return path
+
+
 def render_type(node, *, lean=False):
     """Render the actual manifest tree, rather than a second signature table."""
     tag = node["tag"]

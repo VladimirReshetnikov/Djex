@@ -379,6 +379,26 @@ and the [REPL guide](docs/repl.md#paired-backend-concurrency).
 
 ### Behavioral constraints in the Djex REPL
 
+Give the function a local name and write ordinary Haskell Boolean expressions
+after `where`. Load GHC-compilable sources, or use `:load` without a file to
+start a self-contained query with the real Prelude:
+
+```text
+:load
+:synth f :: forall a. a -> a -> a where f True False == False && f (11 :: Int) 29 == 29
+```
+
+The name `f` is available in the assertion. Each candidate is checked at the
+requested type and evaluated against the assertion before it can occupy a
+displayed-result slot. These queries work with Djinn, Exference, and `:compare`;
+evaluation uses a separate, time-bounded GHC worker with the loaded source and
+prompt scope. A failed, timed-out, or unevaluable assertion does not pass.
+Passing finite examples establishes those examples, not a universal behavioral
+specification. See the [behavioral synthesis guide](docs/behavioral-synthesis.md)
+for the six-operation Church corpus, examples, and execution limits.
+
+The symbolic Length interface remains available separately. It reasons about
+checked list-spine models rather than executing arbitrary Haskell expressions.
 Djex already owns the checked Length-contract, replay, SMT-LIB, and Z3
 foundation. The standalone `djex` REPL now recognizes the bounded outer form
 `--where CLAUSE -- TYPE`, preserves ordinary `:synth TYPE`, and filters typed
@@ -409,8 +429,8 @@ closed warning. Only a counterexample independently replayed against the exact
 candidate removes it; `unsat`, `unknown`, or an unassociated `sat` status is
 never rejection authority.
 
-Djinn currently lacks the required source-typed candidate graph, so a
-Djinn-only constrained query fails closed. `:compare --where ...` labels Djinn
+Djinn currently lacks the required source-typed candidate graph for Length, so a
+Djinn-only Length-constrained query fails closed. `:compare --where ...` labels Djinn
 as unavailable and filters only Exference; it never runs Djinn unconstrained.
 On Linux the sealed Z3 default is descriptor-bound; other platforms use the
 portable path-snapshot policy. `:show settings` reveals only active/inactive,

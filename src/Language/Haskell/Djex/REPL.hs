@@ -95,6 +95,8 @@ import Language.Haskell.Djex.Package
   , runPackageOperation
   )
 import Language.Haskell.Djex.REPL.Command
+import Language.Haskell.Djex.REPL.Behavioral (presentBehavioralCandidates)
+import Language.Haskell.Djex.REPL.BehavioralWorker (prepareBehavioralContext)
 import Language.Haskell.Djex.REPL.DjinnScope
 import Language.Haskell.Djex.REPL.Driver
 import Language.Haskell.Djex.REPL.Eval
@@ -112,6 +114,7 @@ import Language.Haskell.Djex.REPL.Scope
 import Language.Haskell.Djex.REPL.Type
 import Language.Haskell.Djex.REPL.Workspace
 import Language.Haskell.Djex.Text (normalize, trim)
+import Language.Haskell.Synthesis.Behavioral (BehavioralQuery (..))
 import qualified Language.Haskell.Djex.Exference.Internal.Session
   as ExferenceSession
 import qualified Language.Haskell.Exference.Core.Types as ExferenceType
@@ -675,9 +678,11 @@ runQuery
   -> ReplState
   -> IO (ReplStep ReplState)
 runQuery sourceName query state = do
-  case replQueryWhereSource query of
-    Just clause -> runLengthWhere clause
-    Nothing -> runUnconstrained
+  case replQueryBehavioral query of
+    Just behavioral -> runBehavioral behavioral
+    Nothing -> case replQueryWhereSource query of
+      Just clause -> runLengthWhere clause
+      Nothing -> runUnconstrained
   pure $ ContinueRepl state
     { lastQuery = Just resolved }
  where
@@ -703,6 +708,88 @@ runQuery sourceName query state = do
         Left failure -> emitDiagnostic failure
         Right parsed -> runParsedSelection session parsed
     _ -> runLegacySelection
+
+  runBehavioral behavioral = case sharedRuntime of
+    Just (session, context) | sharedProjectionAvailable ->
+      case parseSourceTypeInScope (exferenceSessionInventory session)
+          (scopeExferenceQueryScope context) sourceName typeSource of
+        Left failure -> emitDiagnostic failure
+        Right parsed -> case parseResultTarget $ behavioralName behavioral of
+          Left failure -> replFailure "DJEX_REPL_BEHAVIORAL_TARGET"
+            "invalid behavioral function name" failure
+          Right target -> do
+            let evaluatorContext = prepareBehavioralContext (Just context)
+                  $ case exferenceRuntimeWorkspace runtime of
+                    Nothing -> []
+                    Just workspace -> zip
+                      (map workspaceModuleName $ workspaceModules workspace)
+                      (map snd $ workspaceModuleSources workspace)
+                lanes = case selected of
+                  OneBackend chosenBackend -> [chosenBackend]
+                  BothBackends -> [DjinnBackend, ExferenceBackend]
+            forM_ lanes $ \chosenBackend -> do
+              labelBackend (selected == BothBackends) chosenBackend
+              ignoreExit $ withinQueryTimeout (queryTimeout state) $ case chosenBackend of
+                DjinnBackend -> runBehavioralDjinn evaluatorContext behavioral target parsed
+                ExferenceBackend -> runBehavioralExference
+                  evaluatorContext behavioral target session parsed
+    _ -> replFailure "DJEX_REPL_BEHAVIORAL_SCOPE"
+      "checked behavioral source scope is unavailable"
+      "load a valid workspace; executable predicates never fall back to another scope"
+
+  runBehavioralDjinn context behavioral target parsed = case mkDjinnRequest QueryRequest
+      { requestTarget = target
+      , requestGoal = projectParsedTypeToDjinn state parsed
+      , requestContexts = []
+      , requestOptions = (prepareDjinnQueryOptions options $ djinnSearchOptions state)
+          { optionAlternatives = True }
+      } of
+    Left failure -> diagnosticFailure failure
+    Right request -> presentBehavioralCandidates options context behavioral
+        (renderDjinnCandidateExpression qualification . projected)
+        (renderDefinitionOrExpression renderDjinnCandidateDefinition
+          renderDjinnCandidateExpression options . projected)
+        (\candidate -> (if presentationRanking options == LegacyCandidateRanking
+            then Just $ candidateDetails candidate else Nothing,
+          candidateQualityCost (presentationRanking options) (providerPrice options)
+            $ functionClauseExpression $ candidateOutput $ projected candidate))
+        (rankCandidatesByQuality (presentationRanking options) (providerPrice options)
+          $ functionClauseExpression . candidateOutput . projected)
+        (fmap pure $ runDjinnQuery (currentDjinnSession state) request)
+   where
+    options = (djinnPresentationOptions state) { presentationQualification = FullyQualified }
+    qualification = presentationQualification options
+    selectors = maybe noFieldSelectors djinnProjectionFieldSelectors
+      $ djinnProjection $ djinnRuntime state
+    projected = fmap $ projectFieldSelectorsWithoutEta selectors
+
+  runBehavioralExference context behavioral target session parsed = case
+      mkExferenceRequestWithCheckedTargetFromParsed
+        (exferenceSearchOptions state) target parsed of
+    Left failure -> diagnosticFailure failure
+    Right request -> presentBehavioralCandidates options context behavioral
+        (renderExferenceCandidateExpression qualification . projected)
+        (renderDefinitionOrExpression renderExferenceCandidateDefinition
+          renderExferenceCandidateExpression options . projected)
+        (\candidate -> (candidateQualityCost (presentationRanking options)
+            (providerPrice options) $ expression candidate,
+          exferenceCandidateComplexity $ exferenceCandidateMetrics $ projected candidate))
+        (rankCandidatesByQuality (presentationRanking options) (providerPrice options) expression)
+        (runExferenceTypedQuery session request)
+   where
+    options = (presentation state) { presentationQualification = FullyQualified }
+    qualification = presentationQualification options
+    projected = fmap (projectFieldSelectors $ scopeFieldSelectors state)
+      . typedCandidateCompatibility
+    expression = functionClauseExpression . candidateOutput . projected
+
+  providerPrice options name = Map.findWithDefault
+    (defaultCandidateProviderCost name) name $ presentationProviderCosts options
+
+  renderDefinitionOrExpression definition expression options =
+    (case presentationRenderMode options of
+      RenderDefinition -> definition
+      RenderExpression -> expression) $ presentationQualification options
 
   runLengthWhere clause = case sharedRuntime of
     Nothing -> replFailure "DJEX_REPL_LENGTH_WHERE_SCOPE"

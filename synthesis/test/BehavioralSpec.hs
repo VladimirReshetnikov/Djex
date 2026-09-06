@@ -53,12 +53,17 @@ behavioralTests = testGroup "named behavioral query syntax"
   , testCase "where in a qualified name is not the separator" $
       parseBehavioralQuery LeanBehavioral "f : Namespace.where → Nat where True"
         @?= Right (Just (BehavioralQuery "f" "Namespace.where → Nat" "True"))
+  , testCase "Lean quoted type names do not expose a where delimiter" $
+      parseBehavioralQuery LeanBehavioral
+        "f : Namespace.«where () /-» → Nat where True"
+        @?= Right (Just (BehavioralQuery "f" "Namespace.«where () /-» → Nat" "True"))
   , testCase "malformed named queries cannot degrade into unconstrained search" $
       mapM_ (\input -> assertBool input $ isLeft $
         parseBehavioralQuery LeanBehavioral input)
         ["f : Nat", "f : where True", "f : Nat where", "f : Nat where -- empty",
          "f : Nat /- unterminated", "f : (Nat where True", "f : Nat) where True",
-         "f : \"where", "f : Nat where /- only a comment -/"]
+         "f : \"where", "f : Nat where /- only a comment -/",
+         "f : /- no type -/ where True", "f : «where"]
   , testCase "Lean does not consume Haskell's signature separator" $
       parseBehavioralQuery LeanBehavioral "f :: Nat where True" @?= Right Nothing
   ]

@@ -43,7 +43,8 @@ parseBehavioralQuery language source =
     else do
       (target, predicate) <- splitWhere language
         $ drop (length separator) signature
-      if null (trim target)
+      targetContent <- dropTrivia language target
+      if null targetContent
         then Left "a behavioral query needs a type before 'where'"
         else pure ()
       predicateContent <- dropTrivia language predicate
@@ -88,6 +89,10 @@ splitWhere language = walk [] []
   walk stack acc input@('"' : _) = do
     (literal, rest) <- stringLiteral input
     walk stack (reverse literal ++ acc) rest
+  walk stack acc input@('«' : _)
+    | language == LeanBehavioral = do
+        (identifier, rest) <- quotedIdentifier input
+        walk stack (reverse identifier ++ acc) rest
   walk stack acc input@('\'' : _)
     | Just (literal, rest) <- characterLiteral input =
         walk stack (reverse literal ++ acc) rest
@@ -145,6 +150,12 @@ stringLiteral ('"' : source) = go ['"'] source
   go acc ('"' : rest) = Right (reverse ('"' : acc), rest)
   go acc (c : rest) = go (c : acc) rest
 stringLiteral _ = Left "expected a string literal"
+
+quotedIdentifier :: String -> Either String (String, String)
+quotedIdentifier ('«' : source) = case break (== '»') source of
+  (body, '»' : rest) -> Right ('«' : body ++ "»", rest)
+  _ -> Left "unterminated quoted identifier in the behavioral query type"
+quotedIdentifier _ = Left "expected a quoted identifier"
 
 -- A promotion tick and an identifier suffix are not character literals.
 characterLiteral :: String -> Maybe (String, String)

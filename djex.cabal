@@ -255,6 +255,8 @@ Library
     Language.Haskell.Djex.Package
     Language.Haskell.Djex.Text
     Language.Haskell.Djex.REPL.Command
+    Language.Haskell.Djex.REPL.Behavioral
+    Language.Haskell.Djex.REPL.BehavioralWorker
     Language.Haskell.Djex.REPL.DjinnScope
     Language.Haskell.Djex.REPL.Driver
     Language.Haskell.Djex.REPL.Eval

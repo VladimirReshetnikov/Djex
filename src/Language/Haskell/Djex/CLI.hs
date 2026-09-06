@@ -42,6 +42,7 @@ import Language.Haskell.Djex.Package
   , validatePackageTargets
   )
 import Language.Haskell.Djex.REPL
+import Language.Haskell.Djex.REPL.BehavioralWorker (runBehavioralWorker)
 import Language.Haskell.Djex.REPL.Command
   ( parseReplBackend
   , replBackendName
@@ -106,6 +107,7 @@ main = getArgs >>= runArguments >>= exitWith
 -- instead when the host must own those effects.
 runArguments :: [String] -> IO ExitCode
 runArguments arguments = case arguments of
+  ["--internal-behavioral-worker"] -> runBehavioralWorker
   ["--help"] -> putStrLn fullUsage >> pure ExitSuccess
   ["-h"] -> putStrLn fullUsage >> pure ExitSuccess
   ["--version"] -> do

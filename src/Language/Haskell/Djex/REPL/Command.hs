@@ -46,6 +46,8 @@ import Language.Haskell.Djex.Package
   , validatePackageTargets
   )
 import Language.Haskell.Djex.Text (normalize, stripLineComments, trim)
+import Language.Haskell.Synthesis.Behavioral
+  ( BehavioralLanguage (HaskellBehavioral), BehavioralQuery (..), parseBehavioralQuery )
 
 -- | Backend selection retained by the interactive frontend.
 data ReplBackend
@@ -74,6 +76,7 @@ data ReplQueryTarget
 data ReplSynthesisQuery = ReplSynthesisQuery
   { replQueryTarget :: ReplQueryTarget
   , replQueryWhereSource :: Maybe String
+  , replQueryBehavioral :: Maybe BehavioralQuery
   , replQueryTypeSource :: String
   }
   deriving (Eq, Show)
@@ -271,11 +274,7 @@ parseReplInput source
   | ':' : commandSource <- rawInput = parseColon commandSource
   | null input = Right ReplNoInput
   | isImport input = Right $ ReplImport input
-  | otherwise = Right $ ReplQuery ReplSynthesisQuery
-      { replQueryTarget = ActiveBackends
-      , replQueryWhereSource = Nothing
-      , replQueryTypeSource = input
-      }
+  | otherwise = parseSynthesisArguments ActiveBackends input
  where
   -- Colon commands own their argument grammar: shell text, prompts, and paths
   -- may contain a literal @--@. Bare Haskell input instead follows Djinn's
@@ -720,14 +719,17 @@ synthesisArguments = "[--where CLAUSE --] TYPE"
 
 synthesisDetails :: [String]
 synthesisDetails =
-  [ "  common case: :synth --where length result == length arg0 -- [a] -> [a]"
+  [ "  executable predicate: :synth f :: a -> a where f True == True"
+  , "  named where queries check a host Bool before displaying a candidate"
+  , "  quality-window bounds observations; each GHC check has a 30s deadline"
+  , "  Length/Z3: :synth --where length result == length arg0 -- [a] -> [a]"
   , "  pair result: length (fst result) + length (snd result)"
       ++ " == 2 * length arg0"
   , "  --where is recognized only as the first exact option and requires"
       ++ " a standalone --"
   , "  defaults: built-in lists, all list arguments, scalar or boxed-pair result"
   , "  configure with :set length-z3 PATH [SHA256HEX]"
-  , "  Exference behavioral execution is not active yet; requests fail closed"
+  , "  --where uses the separate Exference Length/Z3 assessment route"
   ]
 
 descriptorUsage :: CommandDescriptor -> String
@@ -762,14 +764,17 @@ parseSynthesisArguments target source = case splitHead source of
     pure $ ReplQuery ReplSynthesisQuery
       { replQueryTarget = target
       , replQueryWhereSource = Just clause
+      , replQueryBehavioral = Nothing
       , replQueryTypeSource = typeSource
       }
   _ -> do
     typeSource <- required "a type" source
+    behavioral <- parseBehavioralQuery HaskellBehavioral typeSource
     pure $ ReplQuery ReplSynthesisQuery
       { replQueryTarget = target
       , replQueryWhereSource = Nothing
-      , replQueryTypeSource = typeSource
+      , replQueryBehavioral = behavioral
+      , replQueryTypeSource = maybe typeSource behavioralType behavioral
       }
 
 splitWhereClause :: String -> Either String (String, String)

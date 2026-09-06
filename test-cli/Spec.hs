@@ -187,6 +187,14 @@ main = defaultMain $ testGroup "Djex CLI integration"
   , testCase "REPL :info lists participating instances"
       testReplInfoInstances
   , testCase "REPL :eval runs expressions with real GHC" testReplEval
+  , testCase "REPL behavioral predicates filter before the displayed cutoff"
+      testReplBehavioralPredicates
+  , testCase "behavioral worker checks Bool without leaking previous bindings"
+      testBehavioralWorkerIsolation
+  , testCase "REPL behavioral timeout retires its worker before the next query"
+      testReplBehavioralTimeout
+  , testCase "REPL behavioral execution preserves loaded scope and same-named providers"
+      testReplBehavioralScope
   , testCase "REPL scripts persist state and reject recursion"
       testReplScripts
   , testCase "REPL history preserves chronological numbering"
@@ -3323,9 +3331,162 @@ testReplInfoInstances = withTemporaryEnvironment
     $ countOccurrences "instance Inst.Marker Inst.Thing" output
   assertNoCallStack errors
 
--- Evaluation is the one command that runs code. It compiles the entire local
--- dependency closure but translates the transactional prompt scope to GHC's
+-- Evaluation and named behavioral predicates run code. They compile the local
+-- dependency closure but translate the transactional prompt scope to GHC's
 -- context instead of opening every loaded module.
+testReplBehavioralPredicates :: Assertion
+testReplBehavioralPredicates = do
+ withTemporaryEnvironment [] $ \directory ->
+  forM_ ["djinn", "exference"] $ \backend -> do
+    (exitCode, output, errors) <- runRepl directory
+      [ ":backend " ++ backend
+      , ":set select first"
+      , ":set render definition"
+      , ":set allow-unused on"
+      , ":set quality-window 12"
+      , ":set candidate-limit 12"
+      , ":set choice-budget 10000"
+      , ":set max-steps 512"
+      , ":synth choose :: forall a. a -> a -> a where choose True False == False"
+      , ":synth chooseLeft :: forall a. a -> a -> a where chooseLeft True False == True"
+      , ":synth rejectAll :: forall a. a -> a where Prelude.False"
+      , ":synth illTyped :: forall a. a -> a where (42 :: Prelude.Int)"
+      , ":set quality-window 1"
+      , ":synth raises :: forall a. a -> a where Prelude.error \"predicate-runtime\""
+      , ":synth trailing :: a -> a where trailing True -- retained comment"
+      , ":"
+      ]
+    assertEqual (backend ++ " behavioral REPL exit") ExitSuccess exitCode
+    assertContains "a passing projection is displayed" "choose " output
+    assertContains "the opposite passing projection is also displayed" "chooseLeft " output
+    let projectionObservations = take 2 $ filter ("checked=" `isInfixOf`) $ lines errors
+    assertEqual "both projection queries report their own observations" 2 $
+      length projectionObservations
+    assertBool "one opposite projection rejects a candidate before its first success" $
+      any (not . isInfixOf "false=0") projectionObservations
+    assertEqual "repeat preserves the exact named predicate" 2 $
+      countOccurrences "trailing " output
+    forM_ ["rejectAll ", "illTyped ", "raises "] $ \name ->
+      assertBool ("rejected definition leaked: " ++ name) $ not $ name `isInfixOf` output
+    assertEqual "malformed host Bool is checked once before search" 1 $
+      countOccurrences "[DJEX_REPL_BEHAVIORAL_PREFLIGHT]" errors
+    assertEqual "False and runtime failure remain unsuccessful" 2 $
+      countOccurrences "[DJEX_REPL_BEHAVIORAL_NO_MATCH]" errors
+    assertContains "runtime exceptions retain their category"
+      "BehavioralRuntimeError" errors
+    assertContains "accepted observations are explicit" "true=1" errors
+    assertBool "ordinary Bool checking was unavailable" $
+      not $ "BehavioralUnavailable" `isInfixOf` errors
+ (startupExit, startupOutput, startupErrors) <- runDjexInput
+   ["repl", "--ignore-startup"] $ replSession
+     [ ":load"
+     , ":synth cleared :: forall a. a -> a where cleared True"
+     ]
+ assertEqual "default startup can explicitly clear its declaration models" ExitSuccess startupExit
+ assertContains "bare load establishes a checked empty workspace" "(no targets)" startupOutput
+ assertContains "self-contained predicate then uses actual Prelude" "cleared " startupOutput
+ assertBool "cleared startup unexpectedly failed behavioral preflight" $
+   not $ "BEHAVIORAL_PREFLIGHT" `isInfixOf` startupErrors
+
+testBehavioralWorkerIsolation :: Assertion
+testBehavioralWorkerIsolation = do
+  let request execute expression = show (execute, expression :: String)
+  (exitCode, output, _) <- runDjexInput ["--internal-behavioral-worker"] $ unlines
+    [ "BehavioralContext [] [] []"
+    , request False "let { f :: forall a. a -> a; f = f } in f True"
+    , request True "let { privateCandidate :: Bool; privateCandidate = True } in privateCandidate"
+    , request True "privateCandidate"
+    , request True "(42 :: Int)"
+    , request True "error \"runtime-marker\""
+    , request True "False"
+    , request True "True"
+    ]
+  assertEqual "worker protocol exit" ExitSuccess exitCode
+  assertEqual "initialization, preflight, and two evaluated successes" 4 $
+    countOccurrences "BehavioralPassed" output
+  assertEqual "local bindings do not persist and non-Bool is rejected" 2 $
+    countOccurrences "BehavioralCompilationError" output
+  assertContains "runtime failure differs from False" "BehavioralRuntimeError" output
+  assertContains "False remains a normal failed observation" "BehavioralFalse" output
+  forM_ [("DjexBehavioralRuntime0", "type Bool = forall a. a -> a", "(\\x -> x) :: Bool"),
+         ("DjexBehavioralRuntime0", "data Bool = Imposter", "Imposter"),
+         ("DJEXBEHAVIORALRUNTIME0", "data Bool = Imposter", "Imposter")] $
+    \(moduleName, declaration, invalidBool) -> do
+   let shadowSource = unlines
+        [ "{-# LANGUAGE RankNTypes #-}"
+        , "module " ++ moduleName ++ " where"
+        , "import qualified Prelude"
+        , "import qualified Prelude as DjexBehavioralRuntime1"
+        , declaration
+        , "token :: Prelude.Bool"
+        , "token = Prelude.True"
+        ]
+       shadowContext = "BehavioralContext " ++ show [(moduleName, shadowSource)]
+         ++ " " ++ show [moduleName] ++ " []"
+   (shadowExit, shadowOutput, shadowErrors) <- runDjexInput ["--internal-behavioral-worker"] $ unlines
+    [ shadowContext
+    , request False "token"
+    , request True "token"
+    , request True invalidBool
+    , request True "token"
+    ]
+   assertEqual ("shadowed Bool worker exit: " ++ shadowOutput ++ shadowErrors) ExitSuccess shadowExit
+   assertEqual "the runtime Boolean remains independent of the prompt type" 4 $
+    countOccurrences "BehavioralPassed" shadowOutput
+   assertEqual "a user Bool is not confused with runtime Bool" 1 $
+    countOccurrences "BehavioralCompilationError" shadowOutput
+
+testReplBehavioralTimeout :: Assertion
+testReplBehavioralTimeout = withTemporaryEnvironment [] $ \directory ->
+ forM_ ["djinn", "exference"] $ \backend -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":backend " ++ backend
+    , ":set select first"
+    , ":set max-steps 512"
+    , ":set timeout 5"
+    , ":synth diverges :: forall a. a -> a where Prelude.all (\\n -> n >= 0) ([0..] :: [Prelude.Integer])"
+    , ":set timeout 0"
+    , ":synth recovered :: forall a. a -> a where recovered True"
+    ]
+  assertEqual (backend ++ " timeout recovery REPL exit") ExitSuccess exitCode
+  assertEqual "the encompassing deadline expires once" 1 $
+    countOccurrences "[DJEX_SEARCH_TIMEOUT]" errors
+  assertBool "a diverging predicate must not produce a definition" $
+    not $ "diverges " `isInfixOf` output
+  assertContains "the next query uses a fresh functioning worker" "recovered " output
+  assertBool "a retired worker poisoned the next query" $
+    not $ "BehavioralUnavailable" `isInfixOf` errors
+
+testReplBehavioralScope :: Assertion
+testReplBehavioralScope = withTemporaryEnvironment
+  [ ("Collision.hs", unlines
+      [ "module Collision (Token, f, observe) where"
+      , "import qualified Prelude"
+      , "data Token = Token"
+      , "f :: Token"
+      , "f = Token"
+      , "observe :: Token -> Prelude.Bool"
+      , "observe Token = Prelude.True"
+      ]) ] $ \directory -> do
+    (exitCode, output, errors) <- runRepl directory
+      [ ":backend exference"
+      , ":module Collision"
+      , ":set qualification none"
+      , ":set select first"
+      , ":set max-steps 64"
+      , ":synth f :: Token where observe f"
+      , ":synth hidden :: Token where missingPredicate hidden"
+      ]
+    assertEqual "scope-preserving behavioral REPL exit" ExitSuccess exitCode
+    assertContains "the named predicate did not capture the original global"
+      "f = Collision.f" output
+    assertContains "a missing predicate is rejected in the original scope"
+      "[DJEX_REPL_BEHAVIORAL_PREFLIGHT]" errors
+    assertBool "hidden predicate produced a declaration" $
+      not $ "hidden =" `isInfixOf` output
+    assertBool "same-named global became recursive during checking" $
+      not $ "BEHAVIORAL_TIMEOUT" `isInfixOf` errors
+
 testReplEval :: Assertion
 testReplEval = do
   withTemporaryEnvironment

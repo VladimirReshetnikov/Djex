@@ -3,16 +3,19 @@
 
 -- | Real-GHC expression evaluation for the shared REPL, built on hint.
 --
--- Synthesis queries never execute code, and the synthesis environment is
+-- Ordinary type-only synthesis queries never execute code, and the environment is
 -- deliberately parser-level pseudo-Haskell that real GHC cannot compile.
 -- Evaluation therefore targets the real package universe: loaded files are
 -- compiled, the checked prompt context selects the bindings that enter scope,
 -- and a load or context failure falls back to Prelude with one advisory saying
 -- why. Every call runs a fresh interpreter session, so evaluation always sees
 -- the current workspace and leaves no state behind.
+-- Named behavioral synthesis uses the separate isolated BehavioralWorker,
+-- which preserves the exact scope and deliberately has no Prelude fallback.
 module Language.Haskell.Djex.REPL.Eval
   ( EvalOutcome (..)
   , evaluateExpression
+  , renderInterpreterError
   ) where
 
 import qualified Control.Monad.Catch as Catch

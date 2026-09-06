@@ -309,6 +309,8 @@ childNodes form = case form of
   TypedLambda _ body -> [body]
   TypedApply function argument _ -> [function, argument]
   TypedVisibleTypeApplication _ function _ _ -> [function]
+  TypedForallIntroduction _ body _ -> [body]
+  TypedImplicitTypeApplication _ function _ -> [function]
   TypedTuple elements -> elements
   TypedHole{} -> []
   TypedLet _ binding body -> [binding, body]
@@ -343,6 +345,8 @@ collectCertificateUses = foldM collect (Map.empty, [])
     TypedGlobal{} -> Right current
     TypedLambda{} -> Right current
     TypedApply{} -> Right current
+    TypedForallIntroduction{} -> Right current
+    TypedImplicitTypeApplication{} -> Right current
     TypedTuple{} -> Right current
     TypedHole{} -> Right current
     TypedLet{} -> Right current

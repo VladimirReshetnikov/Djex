@@ -729,7 +729,7 @@ synthesisDetails =
       ++ " a standalone --"
   , "  defaults: built-in lists, all list arguments, scalar or boxed-pair result"
   , "  configure with :set length-z3 PATH [SHA256HEX]"
-  , "  --where uses the separate Exference Length/Z3 assessment route"
+  , "  --where checks each selected engine's own typed candidate through Length/Z3"
   ]
 
 descriptorUsage :: CommandDescriptor -> String

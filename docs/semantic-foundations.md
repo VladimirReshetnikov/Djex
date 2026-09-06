@@ -128,26 +128,28 @@ was reached.
 
 ## Canonical typed candidate identities
 
-Both checked engines now expose the same typed-result shape. Exference may
-retain a sealed graph or an engine-specific absence reason.
+Both checked engines expose the same typed-result shape, retaining a sealed
+graph or an engine-specific absence reason for each candidate.
 `runDjinnTypedQuery` and its three provider-evidence variants retain each
 post-deduplication, final-order Djinn candidate in the same opaque
-`TypedCandidate` envelope, but currently report the explicit
-`DjinnTermGraphSourceTypingContextUnavailable` absence. Djinn's checked LJT
-sidecar predates assumption-name restoration, provider rewriting,
-instantiation-evidence erasure, visible applications, and generated-term
-cleanup; its formulas have also erased source nominal structure. Reconstructing
-a shared graph from either rendered formulas or final generated code would
-therefore invent authority.
+`TypedCandidate` envelope. Djinn keeps the checked proof and its lowering
+history together with the original source inventory, complete source goal,
+and exact final clause. It independently checks that clause against the
+retained source authority, then requires the sealed graph to erase to exactly
+the associated clause. Formula atoms and final syntax alone supply no nominal
+declaration authority. Unsupported dictionary evidence, incompatible source
+kinds, or exceeded checking bounds remain explicit graph absences without
+removing or rewriting the historical compatibility candidate.
 
-The graph type is nevertheless fixed at the sound future boundary:
+The graph type preserves source variable roles:
 `DjinnTermGraphType = Type DjinnTermGraphTypeVariable`, where
 `DjinnTermGraphTypeVariable = Variable HSymbol`, distinct from the historical
-compatibility `DjinnType = Type DjinnTypeVariable`. A future lowerer must retain
-whether an identity is flexible or rigid before Length or another behavioral
-domain may authorize root skolems. Final candidate keys are already allocated
+compatibility `DjinnType = Type DjinnTypeVariable`. Flexible inference
+identities and fresh rigid forall openings remain distinct, with checked
+lexical scope before Length or another behavioral domain consumes the graph.
+Final candidate keys are allocated
 after cross-plan de-duplication and the configured final ordering step, so
-later graph node and occurrence identities need not reuse discarded
+graph node and occurrence identities do not reuse discarded
 search-plan ordinals. The four
 legacy Djinn runners lift the shared `typedQueryResultCompatibility` projection
 over their single-result error channel. Exference lifts the same per-result
@@ -162,21 +164,27 @@ the already nominal `TypedCandidate`: representationally equal newtypes cannot
 relabel the domains under which the graph was sealed. Its public `Generic`
 instance has also been removed, so the private constructor cannot be recreated
 through `GHC.Generics.to`; deep evaluation uses an explicit `NFData`
-implementation instead. See the
-[Djinn typed-result seam report](reports/2026-08-11-djinn-typed-result-seam.md).
+implementation instead. The
+[source-typed evidence graph guide](source-typed-evidence-graph.md) describes
+the current authority, supported forms, checking bounds, and integration
+validation status. The earlier
+[Djinn typed-result seam report](reports/2026-08-11-djinn-typed-result-seam.md)
+records the preceding graph-absence implementation.
 
 ### Graph fingerprints
 
 `Language.Haskell.Synthesis.TypedGenerated.Fingerprint` assigns an opaque,
 nominal structural identity to a shared typed `TermGraph`. Before encoding, it
-reconstructs the raw graph and reseals it with `sharedTypeStructure` under the
+reconstructs the raw graph and reseals it with `sharedTypeStructure`, explicitly
+opting into the checked erased-forall witness rules, under the
 caller's explicit graph limits; an earlier seal performed with a different type
 checker is not trusted. The canonical rooted-tree key ignores node-table order
 and raw node, occurrence, local-binder, hole, and private type-variable
 allocation numbers. It preserves lexical binding and hole equality classes,
 flexible-versus-rigid free-variable flavor, exact global names, normalized node
-and pattern types, term and shared-checkable pattern forms, application and visible-type
-witnesses, inferred-versus-specified type arguments, and case-branch order.
+and pattern types, term and shared-checkable pattern forms, application,
+forall-introduction, and implicit/visible-selection witnesses,
+inferred-versus-specified type arguments, and case-branch order.
 There is deliberately no beta, eta, let, or behavioral quotienting.
 
 ### Certificate tables and atomic graph associations
@@ -448,8 +456,9 @@ behavioral semantics. The Djex half has landed end to end:
 Haskell-shaped spelling and lowers it to the same opaque source, and the
 standalone REPL already parses the `--where CLAUSE -- TYPE` envelope with
 Haskell-shaped help examples and a pure `:set length-z3` policy seal. Once that
-policy is active, the REPL resolves one conservative built-in profile, searches
-typed Exference candidates, opens one live Length session, and applies the
+policy is active, the REPL resolves a conservative built-in profile for each
+selected engine, searches its typed candidates, opens the matching live Length
+session, and applies the
 existing problem/query/observation/replay pipeline before selection and
 rendering. Leant's concise command derives only exact built-in-`List` input
 roles and scalar/canonical-`Prod` result defaults after Lean translation, then
@@ -467,13 +476,17 @@ or ambiguity fails before solver IO.
 
 Djex's standalone REPL and Leant's REPL are both first-class consumers. Djex's
 outer structured query grammar, Haskell parser, pure policy seal, conservative
-profile resolver, and Exference assessment path have landed. The stored policy
+profile resolver, and per-engine assessment paths are implemented. The stored policy
 performs no filesystem or process IO at setting time and grants no solver
 verdict rejection authority. Only exact independent replay of a returned model
 can refute a candidate; every status-only or failed assessment retains it.
-Djinn-only constrained queries remain unavailable because Djinn does not yet
-retain a matching source-typed graph, and Both mode never compensates by
-running it unconstrained. The concise and explicit Leant forms and the direct
+Djinn uses its own typed candidate and exact source inventory; Both mode
+assesses the two engines separately and never transfers a graph or inventory
+between equal-looking candidates. An unavailable graph or unsupported Length
+interpretation retains that candidate with an unavailable-assessment diagnostic.
+The [source-typed evidence graph guide](source-typed-evidence-graph.md) records
+the supported authority and current integration validation status. The concise
+and explicit Leant forms and the direct
 `parseLengthWhereSource`, `parseHaskellLengthWhereSource`, and
 `parseLeanLengthWhereSource` APIs remain available beside the REPL surfaces.
 
@@ -572,16 +585,25 @@ plain v1 graph and candidate identity path. The contract's
 free flexible variables are treated as implicit source quantifiers only at the
 root boundary; the engine's corresponding selections must be distinct rigid
 variables. Every provider occurrence is then matched capture-safely against
-its exact closed inventory scheme, and any free selected variable must be one
-of those authorized root rigids. The interpreter carries that exact checked
+its exact closed inventory scheme. Free selected variables must be authorized
+root rigids or lexical forall rigids whose scope has passed the fresh graph
+reseal; local forall introductions do not extend source-global authority.
+The interpreter carries that exact checked
 summary through provider use and into the canonical used-law set; it does not
 discard the authority to a name and recover it later. Closed impredicative
 selections remain admissible. Every graph, pattern, application-witness, and
-visible-application type is kind-checked again under the session's exact
+implicit/visible-selection type is kind-checked again under the session's exact
 inventory assumptions.
+
+The Djinn Length REPL makes implicit Haskell source universals explicit
+before constructing both its request and contract. Its exact closed graph root
+then matches the closed contract directly; it does not substitute flexible
+identities for rigid openings. This frontend normalization leaves the shared
+opening rules and deliberately open direct Core requests unchanged.
+
 A visible selection is checked at the kind inferred for the leading binder,
 so closed higher-kinded and impredicative selections remain legal while free
-flexibles, non-root rigids, and types from a foreign inventory fail closed.
+flexibles, unscoped rigids, and types from a foreign inventory fail closed.
 
 Discharge alone does not authorize the provider name globally. Before proof
 search, Length audits the complete graph, including dead nodes, so the
@@ -2294,8 +2316,13 @@ identity entrance freshly reseals constructor patterns from the session-owned
 schema, while the public shared fingerprint continues to reject them. Analysis
 is canonical zero then step, maps the recursive field to `n monus 1`, keeps the
 payload opaque, and unions provider authority reached in both branches.
-Exference now retains that one checker-proved nonempty graph shape; Djinn and
-all other nonempty case shapes remain unavailable at the typed-candidate edge.
+Exference retains that checker-proved nonempty graph shape. Djinn's source
+checker also supports cases checked against exact nominal declarations; graph
+availability does not widen Length's exact zero/step case policy. Djinn's
+public recursive-input search abstraction remains unchanged, so the private
+source-checker-to-Length recursive case fixture is distinct from a public
+search-output claim. See the
+[source-typed evidence graph guide](source-typed-evidence-graph.md) for that boundary.
 The domain foundation itself remains independent of either frontend. See the
 [exact zero/step case foundation report](reports/2026-08-13-exact-zero-step-length-cases.md)
 and the additive
@@ -3384,7 +3411,8 @@ behavioral, or fingerprint authority. See the
 #### `TypedGenerated.Fingerprint`
 
 `TypedGenerated.Fingerprint` reconstructs and reseals that graph with
-`sharedTypeStructure` before assigning its nominal v1 identity. Its rooted-tree
+`sharedTypeStructure` with the checked erased-forall witness rules enabled
+before assigning its nominal v1 identity. Its rooted-tree
 encoding ignores table order and raw allocation numbers while preserving exact
 binding structure, hole equality, flexible/rigid free-variable flavor, globals,
 normalized types, patterns, witnesses, visible arguments, and branch order. It

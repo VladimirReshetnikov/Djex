@@ -14,6 +14,7 @@ module Language.Haskell.Synthesis.Inventory
   , mkInventoryWithClassPolicy
   , mkInventoryFromEnvironmentWithClassPolicy
   , adjustInventoryDataTypeAnnotations
+  , tagInventoryTypeVariables
   , inventoryEnvironment
   , inventoryKindAssumptions
   , inventoryClassArity
@@ -29,6 +30,7 @@ import Language.Haskell.Synthesis.Environment (Environment, EnvironmentError)
 import qualified Language.Haskell.Synthesis.Environment as Environment
 import Language.Haskell.Synthesis.KindInference
 import Language.Haskell.Synthesis.Name (Name)
+import Language.Haskell.Synthesis.Type (Variable)
 
 -- | A coherent pair of one sealed environment and the kind assumptions
 -- inferred from exactly that environment.
@@ -54,6 +56,16 @@ inventoryEnvironment (Inventory environment _) = environment
 -- | Recover the assumptions inferred while sealing the inventory.
 inventoryKindAssumptions :: Inventory typeVariable annotation -> KindAssumptions
 inventoryKindAssumptions (Inventory _ assumptions) = assumptions
+
+-- | Inject source variables into the flexible namespace without rerunning
+-- inference or changing the nominal kind assumptions. The environment's
+-- fixed injective conversion preserves all source declaration identities.
+tagInventoryTypeVariables
+  :: Ord variable
+  => Inventory variable annotation
+  -> Inventory (Variable variable) annotation
+tagInventoryTypeVariables (Inventory environment assumptions) =
+  Inventory (Environment.tagEnvironmentTypeVariables environment) assumptions
 
 -- | Look up the exact width inferred for a declared or open-inventory class.
 --

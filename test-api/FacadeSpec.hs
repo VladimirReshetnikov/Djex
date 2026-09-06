@@ -2660,7 +2660,7 @@ facadeTests = testGroup "public Djex facade"
       maximumProviderInstantiationAssignments @?= 32
       maximumProviderInstantiationArguments @?= 6
       maximumProviderInstantiationKindNodes @?= 129
-  , testCase "retains explicit Djinn typed absence without compatibility drift" $ do
+  , testCase "retains checked Djinn source graphs without compatibility drift" $ do
       environment <- expectRight
         (mkEnvironment [] ::
           Either (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
@@ -2705,8 +2705,12 @@ facadeTests = testGroup "public Djex facade"
         [] -> fail "the Djinn identity query returned no typed candidate"
         candidate : _ -> do
           resultEvidence typed @?= ValidatedCandidates
-          typedCandidateTermGraph candidate @?=
-            Left DjinnTermGraphSourceTypingContextUnavailable
+          graph <- expectRight $ typedCandidateTermGraph candidate
+          eraseTermGraphToFunctionClause target graph @?=
+            candidateOutput (typedCandidateCompatibility candidate)
+          root <- maybe (fail "typed Djinn graph lost its root") pure $
+            lookupTermNode (termGraphRoot graph) graph
+          termNodeType root @?= fmap FlexibleVariable goal
   , testCase "retains checked Exference graphs beside exact legacy results" $ do
       environment <- expectRight
         (mkEnvironment [] ::

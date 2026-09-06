@@ -14,6 +14,7 @@ module Djinn.Internal.CheckedCandidate
     , checkCandidateProofWith
     , ValidatedCandidate
     , convertCheckedCandidate
+    , convertCheckedCandidateWithEvidence
     , validatedCandidateOutput
     , validatedCandidateDetails
     , validatedCandidateProofEvidence
@@ -74,8 +75,20 @@ convertCheckedCandidate
     -> CheckedCandidateProof raw
     -> Either failure (ValidatedCandidate details output)
 convertCheckedCandidate convert makeDetails
+        checked = convertCheckedCandidateWithEvidence
+            (\raw _ -> convert raw) makeDetails checked
+
+-- | Retain source authority while lowering the exact checked occurrence.
+-- The raw proof and its checker-owned evidence are consumed together before
+-- any de-duplication, ranking, or compatibility projection.
+convertCheckedCandidateWithEvidence
+    :: (raw -> CheckedProofEvidence -> Either failure output)
+    -> (output -> details)
+    -> CheckedCandidateProof raw
+    -> Either failure (ValidatedCandidate details output)
+convertCheckedCandidateWithEvidence convert makeDetails
         (CheckedCandidateProof raw evidence) = do
-    output <- convert raw
+    output <- convert raw evidence
     return $ ValidatedCandidate output (makeDetails output) evidence
 
 -- | Observe the converted generated output without entering proof evidence.

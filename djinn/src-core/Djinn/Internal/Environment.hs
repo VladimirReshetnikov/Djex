@@ -789,7 +789,9 @@ synthesisFormulaDefinition declaration = case declaration of
             SharedType.canonicalizeType body]
     SharedDeclaration.DataTypeDeclaration _ name parameters constructors -> do
         owner <- synthesisFormulaTypeSymbol name
-        alternatives <- mapM convertConstructor constructors
+        alternatives <- mapM
+            (convertConstructor $ canonicalSynthesisListParameter declaration)
+            constructors
         return [FormulaData owner
             (map parameterVariable parameters) alternatives]
     SharedDeclaration.AbstractTypeDeclaration _ name _ -> do
@@ -801,9 +803,14 @@ synthesisFormulaDefinition declaration = case declaration of
   where
     parameterVariable = SharedDeclaration.parameterVariable
 
-    convertConstructor constructor = do
-        name <- synthesisFormulaTypeSymbol $
-            SharedDeclaration.constructorName constructor
+    convertConstructor canonicalList constructor = do
+        -- (:) is a term constructor, never a type-constructor spelling.
+        -- Admit it only under the complete checked intrinsic list family.
+        name <- case canonicalList of
+            Just _ | SharedDeclaration.constructorName constructor == SharedName.consName ->
+                Right ":"
+            _ -> synthesisFormulaTypeSymbol $
+                SharedDeclaration.constructorName constructor
         return (name, map SharedType.canonicalizeType $
             SharedDeclaration.constructorFields constructor)
 

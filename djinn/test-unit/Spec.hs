@@ -1,6 +1,6 @@
 module Main (main) where
 
-import Control.Monad (void)
+import Control.Monad (forM_, void)
 import Control.Exception (evaluate)
 import Data.List (findIndex, isInfixOf, isPrefixOf, isSuffixOf, nub, sort)
 import qualified Data.Map.Strict as Map
@@ -16,8 +16,9 @@ import Text.Read (readMaybe)
 
 import Djinn.Core (
     Context, Declaration(..), DjinnCandidateDetails(..),
-    DjinnQueryMetadata(..), DjinnResult,
+    DjinnQueryMetadata(..), DjinnResult, DjinnTypedResult,
     DjinnTermGraphAbsence(..),
+    DjinnSourceProviderEvidence(..),
     DjinnDeclarationNameRole(..), QueryOutcome(..),
     DjinnQueryError(..), DjinnQueryOptionsError(..),
     SynthesisDeclarationError(..), SynthesisEnvironmentError(..),
@@ -29,6 +30,7 @@ import Djinn.Core (
     inhabit, inhabitGenerated, inhabitResult,
     inhabitGeneratedPrepared, inhabitResultPrepared,
     inhabitSynthesisResultPrepared, inhabitTypedSynthesisResultPrepared,
+    inhabitTypedSynthesisResultPreparedWithSourceGoal,
     generatedReportCandidates,
     kArrow, kStar, optionAlternatives, optionBudget, optionCutoff, optionSorted,
     optionStrategy, optionRanking, optionProviderCosts,
@@ -78,10 +80,12 @@ import qualified Language.Haskell.Synthesis.KindInference as SharedInference
 import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 import qualified Language.Haskell.Synthesis.TypeRender as SharedTypeRender
 import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 import qualified Language.Haskell.Synthesis.TypedCandidate
     as SharedTypedCandidate
+import qualified Language.Haskell.Synthesis.TypedGenerated as SharedTypedGenerated
 
 main :: IO ()
 main = defaultMain $ testGroup "Djinn unit tests" $
@@ -223,6 +227,12 @@ tests =
           testValidatedCandidateResultParity)
     , ("project typed Djinn results through the retained association",
           testTypedDjinnCoreProjectionParity)
+    , ("preserve monomorphic and quantified source goals through prepared search",
+          testPreparedSourceGoalGraphs)
+    , ("retain source aliases and jointly opened class contexts",
+          testPreparedSourceContextCorrespondence)
+    , ("reject unrelated prepared source goals before publishing evidence",
+          testPreparedSourceGoalMismatch)
     , ("retain the first checked sidecar through eta de-duplication",
           testValidatedCandidateDeduplication)
     , ("move checked sidecars with stable candidate-detail sorting",
@@ -231,7 +241,7 @@ tests =
           testValidatedCandidateFinalKeys)
     , ("project compatibility candidates without forcing sidecars",
           testValidatedCandidateProjectionLaziness)
-    , ("project typed absence without forcing sidecars",
+    , ("defer typed graph checking without forcing sidecars",
           testValidatedTypedProjectionLaziness)
     , ("retain production rank-N evidence before instantiation erasure",
           testValidatedRankNProductionEvidence)
@@ -253,6 +263,8 @@ tests =
           testPrintedValueNamespace)
     , ("reserve unit declarations for the standard environment",
           testTrustedUnitDeclaration)
+    , ("retain only the exact intrinsic list declaration across source adapters",
+          testIntrinsicListDeclaration)
     , ("render shadowing terms without capture", testScopeSafeRendering)
     , ("report malformed proof rendering", testMalformedRendering)
     , ("validate generated clauses at conversion", testGeneratedClauseBoundary)
@@ -5701,6 +5713,78 @@ testSharedEnvironmentAdapter = do
         [ ("()", ([], HTUnion [("()", [])], KStar)) ]
         (typeDeclarations loweredUnit)
 
+testIntrinsicListDeclaration :: IO ()
+testIntrinsicListDeclaration = do
+    let element = HTVar "element"
+        list = HTApp (HTCon "[]") element
+        canonical = DataType "[]" ["element"]
+            [("[]", []), (":", [element, list])]
+        rejected label result = case result of
+            Left _ -> pure ()
+            Right _ -> fail $ label ++ ": a forged intrinsic declaration was accepted"
+        sharedElement = SharedType.TypeVariable "element"
+        sharedList = SharedType.TypeApplication
+            (SharedType.TypeConstructor SharedName.listName) sharedElement
+        parameter kind = SharedDeclaration.TypeParameter "element" kind
+        source owner kind constructors = SharedDeclaration.DataTypeDeclaration ()
+            owner [parameter kind] constructors
+        nil = SharedDeclaration.DataConstructor () SharedName.listName []
+        cons fields = SharedDeclaration.DataConstructor () SharedName.consName fields
+        exact kind = source SharedName.listName kind [nil, cons [sharedElement, sharedList]]
+    converted <- expectShownRight $ toSynthesisDeclaration canonical
+    assertEqual "the shared list retains the exact binder and constructor identities"
+        (exact Nothing) converted
+    assertEqual "the complete intrinsic list round-trips to its raw source"
+        (Right canonical) $ fromSynthesisDeclaration converted
+    assertEqual "an explicitly proper element kind has the same exact raw projection"
+        (Right canonical) $ fromSynthesisDeclaration $ exact $ Just SharedKind.ProperTypeKind
+    sourceEnvironment <- expectShownRight $ SharedEnvironment.mkEnvironment [converted]
+    prepared <- expectShownRight $ RawEnvironment.prepareSynthesisEnvironment sourceEnvironment
+    assertEqual "preparation retains the intrinsic source declaration"
+        [converted] $ map (SharedDeclaration.mapDeclarationKindVariables absurd)
+            $ SharedEnvironment.environmentDeclarations
+            $ SharedInventory.inventoryEnvironment $ RawEnvironment.preparedEnvironmentInventory prepared
+    _ <- expectShownRight $ toSynthesisEnvironment $ RawEnvironment.preparedEnvironmentSource prepared
+    forM_
+        [ ("another datatype cannot own list constructors",
+            DataType "Counterfeit" ["element"] [("[]", []), (":", [element, list])])
+        , ("a list alias cannot replace its datatype", TypeSynonym "[]" ["element"] list)
+        , ("a function cannot own cons", Function ":" $ element `HTArrow` list)
+        , ("a function cannot own nil", Function "[]" list)
+        , ("a class cannot own list", ClassDecl "[]" ["element"] [])
+        , ("a class method cannot own cons",
+            ClassDecl "Counterfeit" ["element"] [(":", element `HTArrow` list)])
+        , ("list constructor fields cannot be swapped",
+            DataType "[]" ["element"] [("[]", []), (":", [list, element])])
+        , ("recursive fields retain the exact element parameter",
+            DataType "[]" ["element"]
+                [("[]", []), (":", [element, HTApp (HTCon "[]") (HTVar "other")])])
+        , ("a list family cannot omit cons", DataType "[]" ["element"] [("[]", [])])
+        ] $ \(label, declaration) -> rejected label $ toSynthesisDeclaration declaration
+    forM_
+        [ ("shared nominal owners cannot steal list constructors",
+            source (sharedName "Counterfeit") Nothing [nil, cons [sharedElement, sharedList]])
+        , ("shared cons fields cannot be swapped",
+            source SharedName.listName Nothing [nil, cons [sharedList, sharedElement]])
+        , ("shared recursive fields retain the exact parameter",
+            source SharedName.listName Nothing
+                [nil, cons [sharedElement, SharedType.TypeApplication
+                    (SharedType.TypeConstructor SharedName.listName)
+                    (SharedType.TypeVariable "other")]])
+        , ("shared list parameters cannot have a unary kind",
+            exact $ Just $ SharedKind.FunctionKind SharedKind.ProperTypeKind SharedKind.ProperTypeKind)
+        , ("shared list cannot gain an extra constructor",
+            source SharedName.listName Nothing [nil, cons [sharedElement, sharedList],
+                SharedDeclaration.DataConstructor () (sharedName "Other") []])
+        , ("shared function cannot own cons",
+            SharedDeclaration.ValueDeclaration $ SharedDeclaration.ValueSignature ()
+                SharedName.consName $ SharedType.FunctionType sharedElement sharedList)
+        , ("shared class cannot own list",
+            SharedDeclaration.ClassDeclaration () SharedName.listName [parameter Nothing] [] [])
+        ] $ \(label, declaration) -> rejected label $ fromSynthesisDeclaration declaration
+    rejected "cons remains invalid in type position"
+        $ fromSynthesisType $ SharedType.TypeConstructor SharedName.consName
+
 -- Raw compatibility type definitions predate 'Declaration' and redundantly
 -- encode an abstract type's name and kind.  Every entrance must resolve that
 -- redundancy identically instead of allowing its chosen projection to decide
@@ -7946,12 +8030,133 @@ testTypedDjinnCoreProjectionParity = do
         defaultQueryOptions prepared [] target goal
     assertEqual "typed Core projection changed the complete legacy result"
         legacy $ SharedTypedCandidate.typedQueryResultCompatibility typed
-    case SharedSearch.batchCandidates $ SharedQuery.resultSearch typed of
-        [] -> fail "typed Core identity produced no candidate"
-        candidate : _ -> assertEqual
-            "typed Core projection invented a source-typed graph"
-            (Left DjinnTermGraphSourceTypingContextUnavailable)
-            (SharedTypedCandidate.typedCandidateTermGraph candidate)
+    assertTypedCoreGraphs target goal typed
+
+-- A supported ordinary producer must retain source authority for every
+-- returned candidate, not just erase to a plausible untyped expression.
+assertTypedCoreGraphs
+    :: SharedGenerated.DefinitionName
+    -> SharedType.Type String
+    -> DjinnTypedResult
+    -> Assertion
+assertTypedCoreGraphs target expectedGoal result = do
+    let candidates = SharedSearch.batchCandidates $ SharedQuery.resultSearch result
+    assertBool "supported typed Core query produced no candidate" $ not $ null candidates
+    mapM_ check candidates
+  where
+    check candidate = do
+        graph <- expectShownRight $ SharedTypedCandidate.typedCandidateTermGraph candidate
+        assertEqual "source graph changed its exact associated clause"
+            (SharedCandidate.candidateOutput $
+                SharedTypedCandidate.typedCandidateCompatibility candidate)
+            (SharedTypedGenerated.eraseTermGraphToFunctionClause target graph)
+        root <- maybe (fail "source graph lost its root") pure $
+            SharedTypedGenerated.lookupTermNode
+                (SharedTypedGenerated.termGraphRoot graph) graph
+        let actualGoal = SharedTypedGenerated.termNodeType root
+            taggedGoal = fmap SharedType.FlexibleVariable expectedGoal
+        assertBool ("source graph changed its root type: " ++ show actualGoal) $
+            actualGoal == taggedGoal ||
+                SharedTypeAtom.alphaEquivalentClosedTypes expectedGoal actualGoal
+
+testPreparedSourceGoalGraphs :: IO ()
+testPreparedSourceGoalGraphs = do
+    tokenEnvironment <- expectRight $ declare
+        (DataType "SourceToken" [] [("SourceTokenValue", [])]) emptyEnvironment
+    environment <- expectRight $ declare
+        (TypeSynonym "SourceIdentity" ["a"] $ HTVar "a") tokenEnvironment
+    prepared <- expectShownRight $ prepareEnvironment environment
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $
+        sharedName "preservedSourceGoal"
+    let token = SharedType.TypeConstructor $ sharedName "SourceToken"
+        variable = SharedType.TypeVariable
+        identity = SharedType.TypeApplication $
+            SharedType.TypeConstructor $ sharedName "SourceIdentity"
+        quantified body = SharedType.ForallType ["a"] [] body
+        source = quantified $ SharedType.FunctionType (identity $ variable "a") (variable "a")
+        opened = SharedType.FunctionType (identity $ variable "a'") (variable "a'")
+        expanded = quantified $ SharedType.FunctionType (variable "a") (variable "a")
+        cases =
+            [ (token, token, token)
+            , (SharedType.ForallType [] [] token, token, token)
+            , (source, opened, expanded)
+            ]
+    mapM_ (\(sourceGoal, searchGoal, expectedGoal) -> do
+        legacy <- expectShownRight $ inhabitSynthesisResultPrepared
+            defaultQueryOptions prepared [] target searchGoal
+        typed <- expectShownRight $ inhabitTypedSynthesisResultPreparedWithSourceGoal
+            defaultQueryOptions prepared sourceGoal []
+            (DjinnSourceInstantiationCandidates []) target searchGoal
+        assertEqual "source preservation changed the complete search envelope"
+            legacy $ SharedTypedCandidate.typedQueryResultCompatibility typed
+        assertTypedCoreGraphs target expectedGoal typed) cases
+
+testPreparedSourceContextCorrespondence :: IO ()
+testPreparedSourceContextCorrespondence = do
+    aliasEnvironment <- expectRight $ declare
+        (TypeSynonym "SourceIdentity" ["a"] $ HTVar "a") emptyEnvironment
+    environment <- expectRight $ declare
+        (ClassDecl "SourceContext" ["a"]
+            [("sourceContextMethod", HTArrow (HTVar "a") (HTVar "a"))]) aliasEnvironment
+    prepared <- expectShownRight $ prepareEnvironment environment
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $
+        sharedName "preservedSourceContext"
+    let variable = SharedType.TypeVariable
+        identity = SharedType.TypeApplication $
+            SharedType.TypeConstructor $ sharedName "SourceIdentity"
+        sourceContext ty = Constraint (sharedName "SourceContext") [identity ty]
+        source = SharedType.ForallType ["a"] [sourceContext $ variable "a"] $
+            SharedType.FunctionType (identity $ variable "a") (variable "a")
+        searchGoal = SharedType.FunctionType (identity $ variable "a'") (variable "a'")
+        contexts = [sourceContext $ variable "a'"]
+    legacy <- expectShownRight $ inhabitSynthesisResultPrepared
+        defaultQueryOptions prepared contexts target searchGoal
+    typed <- expectShownRight $ inhabitTypedSynthesisResultPreparedWithSourceGoal
+        defaultQueryOptions prepared source contexts
+        (DjinnSourceInstantiationCandidates []) target searchGoal
+    assertEqual "joint context opening changed the complete search envelope"
+        legacy $ SharedTypedCandidate.typedQueryResultCompatibility typed
+    let candidates = SharedSearch.batchCandidates $ SharedQuery.resultSearch typed
+    assertBool "context-independent identity was lost" $ not $ null candidates
+    -- Class-method-free search remains useful, but no dictionary graph is
+    -- supplied for a contextual source type. Keep that precise limitation.
+    mapM_ (\candidate -> case SharedTypedCandidate.typedCandidateTermGraph candidate of
+        Left (DjinnTermGraphSourceTypingFailure message) -> assertBool
+            "contextual graph failure lost the dictionary boundary"
+            $ "dictionary evidence" `isInfixOf` message
+        Left failure -> fail $ "unexpected contextual graph absence: " ++ show failure
+        Right _ -> fail "a contextual candidate acquired an unchecked dictionary graph") candidates
+    case inhabitTypedSynthesisResultPreparedWithSourceGoal defaultQueryOptions prepared
+            source [sourceContext $ variable "unrelated"]
+            (DjinnSourceInstantiationCandidates []) target searchGoal of
+        Left (DjinnInternalQueryFailure message) -> assertBool
+            "context mismatch lost its source/search diagnostic"
+            $ "does not match its preserved source goal" `isInfixOf` message
+        Left failure -> fail $ "unexpected context-mismatch rejection: " ++ show failure
+        Right _ -> fail "a separately renamed context acquired source-goal authority"
+
+testPreparedSourceGoalMismatch :: IO ()
+testPreparedSourceGoalMismatch = do
+    prepared <- expectShownRight $ prepareEnvironment emptyEnvironment
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $
+        sharedName "unrelatedSourceGoal"
+    let variable = SharedType.TypeVariable
+        identity name = SharedType.FunctionType (variable name) (variable name)
+        source = SharedType.ForallType ["a"] [] $ identity "a"
+        mismatches =
+            [ (source, SharedType.FunctionType (variable "a'") (variable "b'"))
+            , (SharedType.ForallType ["a"] [] (variable "a"), identity "a'")
+            , (source, SharedType.ForallType ["a'"] [] $ identity "a'")
+            ]
+    mapM_ (\(sourceGoal, searchGoal) ->
+        case inhabitTypedSynthesisResultPreparedWithSourceGoal defaultQueryOptions
+                prepared sourceGoal [] (DjinnSourceInstantiationCandidates [])
+                target searchGoal of
+            Left (DjinnInternalQueryFailure message) -> assertBool
+                "source mismatch lost its precise diagnostic"
+                $ "does not match its preserved source goal" `isInfixOf` message
+            Left failure -> fail $ "unexpected source-mismatch rejection: " ++ show failure
+            Right _ -> fail "an unrelated source goal acquired search evidence") mismatches
 
 testValidatedCandidateDeduplication :: IO ()
 testValidatedCandidateDeduplication = do
@@ -8147,7 +8352,7 @@ testValidatedTypedProjectionLaziness = do
         projected = CheckedCandidate.projectValidatedResultWith
             (\_ retained ->
                 ( CheckedCandidate.validatedCandidateOutput retained
-                , Left DjinnTermGraphSourceTypingContextUnavailable
+                , error "typed projection forced deferred graph checking"
                     :: Either DjinnTermGraphAbsence ()
                 ))
             validated
@@ -8157,11 +8362,14 @@ testValidatedTypedProjectionLaziness = do
                      Either DjinnTermGraphAbsence ()))
     result <- expectShownRight projected
     case SharedSearch.batchCandidates $ SharedQuery.resultSearch result of
-        (actualClause, graph) : _ -> do
+        (actualClause, _) : _ -> do
             assertEqual "typed lazy projection changed compatibility output"
                 clause actualClause
-            assertEqual "typed lazy projection changed graph absence"
-                (Left DjinnTermGraphSourceTypingContextUnavailable) graph
+            assertEqual "typed lazy projection lost logical evidence"
+                SharedQuery.ValidatedCandidates $ SharedQuery.resultEvidence result
+            assertEqual "typed lazy projection changed query metadata"
+                (DjinnQueryMetadata "lazy-typed-formula" Nothing) $
+                    SharedSearch.batchMetadata $ SharedQuery.resultSearch result
         [] -> fail "lazy typed sidecar projection produced no candidate"
 
 testValidatedRankNProductionEvidence :: IO ()

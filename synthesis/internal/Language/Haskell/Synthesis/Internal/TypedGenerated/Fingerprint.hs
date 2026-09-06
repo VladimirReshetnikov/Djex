@@ -77,13 +77,17 @@ import Language.Haskell.Synthesis.TypedGenerated
   , TermNodeForm (..)
   , TermNodeId
   , TypeApplicationWitness (..)
+  , ForallIntroductionWitness (..)
+  , ImplicitTypeApplicationWitness (..)
   , TypeStructure
+  , forallTypeStructure
   , validTypeApplicationWitness
   , TypedPattern (..)
   , TypedPatternNode (..)
   , lookupTermNode
   , sealTermGraph
   , sharedTypeStructure
+  , sharedForallTypeStructure
   , termGraphNodes
   , termGraphRoot
   )
@@ -145,7 +149,8 @@ fingerprintSharedTermGraph
       (Fingerprint TermGraphFingerprintSubject)
 fingerprintSharedTermGraph graphLimits maximumBytes original = do
   fingerprintTermGraphWithTypeStructure
-    sharedTypeStructure graphLimits maximumBytes original
+    (sharedTypeStructure {forallTypeStructure = Just sharedForallTypeStructure})
+    graphLimits maximumBytes original
 
 -- | Package-private authority-parametric counterpart.
 --
@@ -536,6 +541,20 @@ fingerprintNodeForm certificateReferences graph locals owner form = case form of
           , certificateField
           ]
       ]
+  TypedForallIntroduction _ body witness -> do
+    sourceField <- fingerprintType $ forallIntroductionSource witness
+    variableField <- fingerprintType $ forallIntroductionVariable witness
+    bodyTypeField <- fingerprintType $ forallIntroductionBody witness
+    bodyField <- fingerprintNode certificateReferences graph locals body
+    pure $ taggedFingerprintField "forall-introduction"
+      [sourceField, variableField, bodyTypeField, bodyField]
+  TypedImplicitTypeApplication _ function witness -> do
+    functionField <- fingerprintNode certificateReferences graph locals function
+    sourceField <- fingerprintType $ implicitTypeApplicationSource witness
+    selectedField <- fingerprintType $ implicitTypeApplicationSelected witness
+    resultField <- fingerprintType $ implicitTypeApplicationResult witness
+    pure $ taggedFingerprintField "implicit-type-application"
+      [functionField, sourceField, selectedField, resultField]
   TypedTuple elements -> do
     elementFields <- mapM
       (fingerprintNode certificateReferences graph locals) elements

@@ -216,10 +216,9 @@ refreshDjinnProjection state = case
     ) of
   (Just baseSession, Just context) ->
     let declarations = scopeProjectionDeclarations baseSession
-        -- Boxed unit is Haskell syntax, independent of module imports. The
-        -- source loader already supplies its canonical checked declaration;
-        -- keep that exact authority when projecting Djinn's nominal unit.
-        -- No ordinary hidden constructor gains visibility from this rule.
+        -- Unit and list constructors are Haskell syntax, independent of
+        -- module imports. Retain only their exact checked source declarations;
+        -- no ordinary hidden constructor gains visibility from this rule.
         intrinsicUnits = Set.fromList
           [ name
           | DataTypeDeclaration _ name [] [DataConstructor _ constructor []]
@@ -227,9 +226,31 @@ refreshDjinnProjection state = case
           , constructor == name
           , nameSpecial name == Just (TupleConstructor Boxed 0)
           ]
-        visibleTypes = Set.union intrinsicUnits
+        intrinsicLists =
+          [ (name, [zero, step])
+          | DataTypeDeclaration _ name [TypeParameter parameter explicitKind]
+              [ DataConstructor _ zero []
+              , DataConstructor _ step
+                  [ TypeVariable element
+                  , TypeApplication (TypeConstructor recursiveHead)
+                      (TypeVariable recursiveElement)
+                  ]
+              ] <- declarations
+          , name == listName
+          , zero == listName
+          , step == consName
+          , maybe True (== ProperTypeKind) explicitKind
+          , element == parameter
+          , recursiveHead == name
+          , recursiveElement == parameter
+          ]
+        intrinsicTypes = Set.union intrinsicUnits
+          $ Set.fromList $ map fst intrinsicLists
+        intrinsicValues = Set.union intrinsicUnits
+          $ Set.fromList $ concatMap snd intrinsicLists
+        visibleTypes = Set.union intrinsicTypes
           $ Set.fromList $ scopeUnqualifiedTypeNames context
-        visibleValues = Set.union intrinsicUnits
+        visibleValues = Set.union intrinsicValues
           $ Set.fromList $ scopeUnqualifiedValueNames context
     in case projectDjinnScope
         (djinnAxiomPolicy djinn)
@@ -803,59 +824,92 @@ runQuery sourceName query state = do
           $ parsedSourceType parsed of
         Left failure -> replFailure "DJEX_REPL_LENGTH_WHERE_TARGET"
           "behavioral target elaboration failed" $ show failure
-        Right elaborated -> case selected of
-          OneBackend DjinnBackend ->
-            replFailure "DJEX_REPL_LENGTH_WHERE_BACKEND"
-              "Djinn behavioral candidates are not available"
-              ("use :exference or a both-backend request; Djinn will not run " ++
-                "unconstrained under --where")
-          _ -> case lengthSMTLibExecutionConfig state of
-            Nothing -> replFailure "DJEX_REPL_LENGTH_WHERE_POLICY"
-              "Length/Z3 execution policy is not active"
-              ("use :set length-z3 /absolute/path/to/z3 [SHA256HEX] " ++
-                "before this query")
-            Just execution -> case parseHaskellLengthWhereSource
-                defaultLengthLimits
-                $ utf8 clause of
-              Left failure -> replFailure "DJEX_REPL_LENGTH_WHERE_CLAUSE"
-                "behavioral where clause was rejected" $ show failure
-              Right whereSource -> case resolveReplLengthWhereSource
-                  (exferenceSessionInventory session) elaborated whereSource of
-                Left failure -> replFailure "DJEX_REPL_LENGTH_WHERE_TARGET"
-                  "behavioral target profile was rejected" $ show failure
-                Right resolution -> runResolvedLengthWhere
-                  session parsed execution resolution
+        Right elaborated -> case lengthSMTLibExecutionConfig state of
+          Nothing -> replFailure "DJEX_REPL_LENGTH_WHERE_POLICY"
+            "Length/Z3 execution policy is not active"
+            ("use :set length-z3 /absolute/path/to/z3 [SHA256HEX] " ++
+              "before this query")
+          Just execution -> case parseHaskellLengthWhereSource
+              defaultLengthLimits $ utf8 clause of
+            Left failure -> replFailure "DJEX_REPL_LENGTH_WHERE_CLAUSE"
+              "behavioral where clause was rejected" $ show failure
+            Right whereSource -> do
+              let lanes = case selected of
+                    OneBackend chosenBackend -> [chosenBackend]
+                    BothBackends -> [DjinnBackend, ExferenceBackend]
+              forM_ lanes $ \chosenBackend -> do
+                labelBackend (selected == BothBackends) chosenBackend
+                case chosenBackend of
+                  DjinnBackend -> runDjinnLengthWhere elaborated execution whereSource
+                  ExferenceBackend -> case resolveReplLengthWhereSource
+                      (exferenceSessionInventory session) elaborated whereSource of
+                    Left failure -> replFailure "DJEX_REPL_LENGTH_WHERE_TARGET"
+                      "behavioral target profile was rejected" $ show failure
+                    Right resolution -> runExferenceLengthWhere
+                      session parsed execution resolution
 
-  runResolvedLengthWhere session parsed execution resolution = case
+  runDjinnLengthWhere elaborated execution whereSource = case
+      djinnProjection $ djinnRuntime state of
+    Nothing -> replFailure "DJEX_REPL_LENGTH_WHERE_SCOPE"
+      "checked Djinn behavioral source scope is unavailable"
+      "load a workspace with a valid Djinn projection; another engine's inventory is not substituted"
+    Just projection -> do
+      let session = djinnProjectionSession projection
+          -- A Haskell query's free source variables are implicit universals.
+          -- Close that source scope once, before both the request and Length
+          -- contract, so the retained graph has the same explicit root.
+          -- Do not relabel graph variables or imitate backend skolems.
+          goal = closeReplDjinnLengthWhereSourceGoal
+            $ projectExferenceTypeToDjinn state elaborated
+      case resolveReplLengthWhereSource (djinnSessionSourceInventory session)
+          (fmap FlexibleVariable goal) whereSource of
+        Left failure -> replFailure "DJEX_REPL_LENGTH_WHERE_TARGET"
+          "behavioral target profile was rejected" $ show failure
+        Right resolution -> case mkDjinnRequest QueryRequest
+            { requestTarget = resultTarget state
+            , requestGoal = goal
+            , requestContexts = []
+            , requestOptions = (prepareDjinnQueryOptions
+                (djinnPresentationOptions state) (djinnSearchOptions state))
+                { optionAlternatives = True }
+            } of
+          Left failure -> emitDiagnostic failure
+          Right request -> ignoreExit $ withinQueryTimeout (queryTimeout state) $
+            case runDjinnTypedQuery session request of
+              Left failure -> diagnosticFailure failure
+              Right result -> do
+                opened <- withLengthSMTLibLiveSession execution $ \liveSession ->
+                  presentAssessedDjinn (djinnPresentationOptions state)
+                    (admitLengthWhereCandidate resolution liveSession
+                      . djinnTypedCandidateForLength)
+                    result
+                finishLengthWhereSession opened
+
+  runExferenceLengthWhere session parsed execution resolution = case
       mkExferenceRequestWithCheckedTargetFromParsed
         (exferenceSearchOptions state) (resultTarget state) parsed of
     Left failure -> emitDiagnostic failure
-    Right request -> do
-      when (selected == BothBackends) $ do
-        labelBackend True DjinnBackend
-        emitDiagnostic $ contextualDiagnostic Warning
-          "DJEX_REPL_LENGTH_WHERE_DJINN_UNAVAILABLE"
-          "Djinn behavioral candidates are not available"
-          "the constrained command continues with Exference only"
-        labelBackend True ExferenceBackend
-      ignoreExit $ withinQueryTimeout (queryTimeout state) $ case
+    Right request -> ignoreExit $ withinQueryTimeout (queryTimeout state) $ case
           runExferenceTypedQuery session request of
         Left failure -> diagnosticFailure failure
         Right results -> do
           opened <- withLengthSMTLibLiveSession execution $ \liveSession ->
             presentAssessedExference
               (presentation state)
-              (scopeFieldSelectors state)
+              -- The graph certifies the retained clause. Do not assess that
+              -- clause and then display a selector-rewritten replacement.
+              noFieldSelectors
               (admitLengthWhereCandidate resolution liveSession)
               results
-          case opened of
-            Left failure -> do
-              emitDiagnostic $ contextualDiagnostic Error
-                "DJEX_REPL_LENGTH_WHERE_SESSION"
-                "Length/Z3 session could not be opened"
-                $ show failure
-              pure runtimeFailure
-            Right exitCode -> pure exitCode
+          finishLengthWhereSession opened
+
+  finishLengthWhereSession opened = case opened of
+    Left failure -> do
+      emitDiagnostic $ contextualDiagnostic Error
+        "DJEX_REPL_LENGTH_WHERE_SESSION"
+        "Length/Z3 session could not be opened" $ show failure
+      pure runtimeFailure
+    Right exitCode -> pure exitCode
 
   admitLengthWhereCandidate resolution liveSession candidate = do
     assessment <- assessReplLengthWhereCandidate
@@ -1022,9 +1076,14 @@ projectParsedTypeToDjinn
   :: ReplState
   -> ParsedSourceType
   -> DjinnType
-projectParsedTypeToDjinn state = mapTypeNames projectName
+projectParsedTypeToDjinn state = projectExferenceTypeToDjinn state . parsedSourceType
+
+-- Project the source query vocabulary before either engine runs. This never
+-- relabels a sealed graph: Djinn checks the resulting request in its own exact
+-- projected session, including its constructor and provider identities.
+projectExferenceTypeToDjinn :: ReplState -> ExferenceType -> DjinnType
+projectExferenceTypeToDjinn state = mapTypeNames projectName
   . fmap ExferenceType.defaultVariableName
-  . parsedSourceType
  where
   promptNames = maybe Map.empty djinnProjectionPromptNames
     $ djinnProjection $ djinnRuntime state

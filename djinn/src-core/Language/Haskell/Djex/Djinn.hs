@@ -19,6 +19,7 @@ module Language.Haskell.Djex.Djinn
   , standardDjinnSession
   , djinnSessionEnvironment
   , djinnSessionInventory
+  , djinnSessionSourceInventory
 
     -- * Requests
   , DjinnTypeVariable
@@ -37,6 +38,8 @@ module Language.Haskell.Djex.Djinn
     -- * Results
   , DjinnCandidate
   , DjinnTypedCandidate
+  , DjinnLengthTypedCandidate
+  , djinnTypedCandidateForLength
   , DjinnTermGraphTypeVariable
   , DjinnTermGraphType
   , DjinnTermGraphAbsence (..)
@@ -90,12 +93,13 @@ import Language.Haskell.Djex.Djinn.Internal.Session
   , DjinnSession
   , djinnSessionEnvironment
   , djinnSessionInventory
+  , djinnSessionSourceInventory
   , mkDjinnSession
   , standardDjinnSession
   )
 import qualified Language.Haskell.Djex.Djinn.Internal.Session as Session
 import Language.Haskell.Synthesis.Candidate
-  ( candidateResidualConstraints
+  ( Candidate (..)
   , renderCandidateDefinition
   , renderCandidateExpression
   )
@@ -122,12 +126,29 @@ import Language.Haskell.Synthesis.Query
   , QueryRequest (..)
   , RequestProvenance (..)
   , mkQueryResult
+  , requestContextualType
   , resultEvidence
   , resultSearch
   , withRequestProvenance
   )
 import Language.Haskell.Synthesis.TypedCandidate
   ( typedQueryResultCompatibility )
+import qualified Language.Haskell.Synthesis.Internal.TypedCandidate as TypedCandidate
+import qualified Language.Haskell.Synthesis.Generated as Generated
+
+-- | Djinn's exact candidate association with the compatibility residual
+-- vocabulary aligned to its graph source types. Djinn proves closed
+-- obligations; its residual list is invariantly empty in both views.
+type DjinnLengthTypedCandidate =
+  TypedCandidate.TypedCandidate DjinnTermGraphAbsence DjinnTermGraphType String
+    (Candidate DjinnTermGraphType DjinnCandidateDetails (Generated.FunctionClause String))
+
+-- | The only conversion is the invariant-empty residual-constraint slot.
+-- Clause, details, graph availability, and private certificate carrier remain
+-- part of the original candidate; the graph is not demanded or rebuilt.
+djinnTypedCandidateForLength :: DjinnTypedCandidate -> DjinnLengthTypedCandidate
+djinnTypedCandidateForLength = TypedCandidate.mapTypedCandidateCompatibility $ \candidate ->
+  Candidate (candidateOutput candidate) [] (candidateDetails candidate)
 
 -- | Parse the type portion of a Djinn query.  The accepted context grammar is
 -- exactly the historical one: either one constraint or a comma-separated
@@ -290,31 +311,21 @@ runDjinnTypedQueryWithProviderEvidence session evidence request = do
   let query = djinnRequestQuery request
   (contexts, goal) <- Request.prepareDjinnRequest
     (Session.sessionClassArity session) request
-  let execute = case evidence of
+  let sourceEvidence = case evidence of
         CandidateEvidence candidates ->
-          Core.inhabitTypedSynthesisResultPreparedWithInstantiationCandidates
-            (requestOptions query)
-            (Session.sessionPreparedEnvironment session)
-            contexts
-            candidates
-            (requestTarget query)
-            goal
+          Core.DjinnSourceInstantiationCandidates candidates
         AssignmentEvidence assignments ->
-          Core.inhabitTypedSynthesisResultPreparedWithInstantiationAssignments
-            (requestOptions query)
-            (Session.sessionPreparedEnvironment session)
-            contexts
-            assignments
-            (requestTarget query)
-            goal
+          Core.DjinnSourceInstantiationAssignments assignments
         KindedAssignmentEvidence assignments ->
-          Core.inhabitTypedSynthesisResultPreparedWithKindedInstantiationAssignments
-            (requestOptions query)
-            (Session.sessionPreparedEnvironment session)
-            contexts
-            assignments
-            (requestTarget query)
-            goal
+          Core.DjinnSourceKindedInstantiationAssignments assignments
+      execute = Core.inhabitTypedSynthesisResultPreparedWithSourceGoal
+        (requestOptions query)
+        (Session.sessionPreparedEnvironment session)
+        (requestContextualType query)
+        contexts
+        sourceEvidence
+        (requestTarget query)
+        goal
   case execute of
     Left failure -> Left $
       djinnQueryFailure request failure

@@ -9,8 +9,8 @@ import CLIAssertions
   )
 import Control.Exception (bracket)
 import Control.Monad (forM_, when)
-import Data.Char (toLower)
-import Data.List (findIndex, intercalate, isInfixOf, isPrefixOf, tails)
+import Data.Char (isSpace, toLower)
+import Data.List (findIndex, intercalate, isInfixOf, isPrefixOf, stripPrefix, tails)
 import System.Directory
   ( canonicalizePath
   , copyFile
@@ -86,7 +86,7 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplWhereGrammar
   , testCase "REPL resolves conservative built-in Length where profiles"
       testReplLengthWhereResolution
-  , testCase "REPL filters Exference candidates through live Length replay"
+  , testCase "REPL filters each engine's own candidates through live Length replay"
       testReplLengthWhereRuntime
   , testCase "REPL multiline, repeat, and command errors recover"
       testReplInputRecovery
@@ -1023,13 +1023,15 @@ testReplWhereGrammar = withTemporaryEnvironment [] $ \directory -> do
     ":synth [--where CLAUSE --] TYPE" output
   assertContains "synthesis help uses ordinary Haskell notation"
     ":synth --where length result == length arg0 -- [a] -> [a]" output
+  assertContains "synthesis help retains each engine's own authority"
+    "each selected engine's own typed candidate" output
   assertEqual "outer where grammar rejects four structural failures" 4
     $ countOccurrences "[DJEX_REPL_COMMAND]" errors
   assertEqual "a longer lookalike remains ordinary type source" 1
     $ countOccurrences "[DJEX_TYPE_PARSE]" errors
-  assertEqual "Djinn routes fail closed before policy or clause parsing" 3
+  assertEqual "Djinn no longer has an unconditional Length refusal" 0
     $ countOccurrences "[DJEX_REPL_LENGTH_WHERE_BACKEND]" errors
-  assertEqual "Exference-capable routes require explicit policy first" 2
+  assertEqual "every constrained route requires explicit policy first" 5
     $ countOccurrences "[DJEX_REPL_LENGTH_WHERE_POLICY]" errors
   assertBool "the opaque clause leaked through the unavailable diagnostic"
     $ not $ "31337" `isInfixOf` errors
@@ -1052,18 +1054,24 @@ testReplLengthWhereResolution = withTemporaryEnvironment
     , ":exference --where length result == length arg1 -- b -> [a] -> [a]"
     , ":exference --where length (fst result) + length (snd result) == length arg0 -- [a] -> ([a], [a])"
     , ":exference --where length result == 0 -- b -> [a]"
+    , ":djinn --where length result == length arg0 -- [a] -> [a]"
+    , ":djinn --where length result == length arg0 -- Items a -> Items a"
+    , ":djinn --where length result == length arg1 -- b -> [a] -> [a]"
+    , ":djinn --where length (fst result) >= 0 -- [a] -> ([a], [a])"
     , ":exference --where length (fst result) == 0 -- [a]"
     , ":exference --where length result == 0 -- ([a], [a])"
     , ":exference --where length arg0 == 0 -- b -> [a]"
     , ":exference --where length result == 0 -- [a] -> b"
     , ":exference --where length result == 0 -- " ++ list9 ++ "[a]"
+    , ":djinn --where length arg0 == 0 -- b -> [a]"
+    , ":djinn --where length result == 0 -- [a] -> b"
     , ":exference --where length result = 314159 -- [a]"
     , ":djinn --where length result = 271828 -- [a]"
     ]
   assertEqual "Length where resolution REPL exit" ExitSuccess exitCode
-  assertEqual "five conservative profiles reach the sealed live boundary" 5
+  assertEqual "both engines' conservative profiles reach the sealed live boundary" 9
     $ countOccurrences "[DJEX_REPL_LENGTH_WHERE_SESSION]" errors
-  assertEqual "five target/profile mismatches fail at resolution" 5
+  assertEqual "both engines reject target/profile mismatches at resolution" 7
     $ countOccurrences "[DJEX_REPL_LENGTH_WHERE_TARGET]" errors
   assertContains "pair result syntax is rejected for a scalar result"
     "LengthWhereScalarDomainPairResult" errors
@@ -1075,13 +1083,13 @@ testReplLengthWhereResolution = withTemporaryEnvironment
     "ReplLengthWhereUnsupportedResult" errors
   assertContains "the complete physical arrow vector is bounded"
     "ReplLengthWherePhysicalArgumentLimitExceeded 8 9" errors
-  assertEqual "the active policy admits exactly one malformed clause refusal" 1
+  assertEqual "the active policy rejects malformed clauses for either engine" 2
     $ countOccurrences "[DJEX_REPL_LENGTH_WHERE_CLAUSE]" errors
-  assertEqual "Djinn refusal wins before malformed clause parsing" 1
+  assertEqual "Djinn uses the same parsed constraint route" 0
     $ countOccurrences "[DJEX_REPL_LENGTH_WHERE_BACKEND]" errors
   assertBool "a malformed clause leaked through its closed diagnostic"
     $ not $ "314159" `isInfixOf` errors
-  assertBool "a Djinn-refused clause was parsed or echoed"
+  assertBool "a rejected Djinn clause was echoed"
     $ not $ "271828" `isInfixOf` errors
   assertNoCallStack errors
 
@@ -1097,32 +1105,65 @@ testReplLengthWhereRuntime = withCompiledFakeZ3s
     , ":exference --where length (fst result) >= 0 -- [a] -> ([a], [a])"
     , ":set target bothKept"
     , ":compare --where length result == length arg0 -- [a] -> [a]"
+    , ":set target djinnScalarKept"
+    , ":djinn --where length result == length arg0 -- [a] -> [a]"
+    , ":djinn --where length result == length arg0 -- forall a. [a] -> [a]"
+    , ":set target djinnPairKept"
+    , ":djinn --where length (fst result) >= 0 -- [a] -> ([a], [a])"
+    , ":djinn --where length (fst result) >= 0 -- forall a. [a] -> ([a], [a])"
+    , ":set target djinnNilKept"
+    , ":djinn --where length result == 0 -- [a] -> [b]"
+    , ":djinn --where length result == 0 -- forall a b. [a] -> [b]"
     , ":set length-z3 " ++ healthyExecutable
     , ":set max-steps 4"
     , ":set target impossible"
     , ":exference --where length result > length result -- [a] -> [a]"
+    , ":set target djinnImpossible"
+    , ":djinn --where length result > length result -- [a] -> [a]"
+    , ":djinn --where length result > length result -- forall a. [a] -> [a]"
+    , ":set target bothImpossible"
+    , ":compare --where length result > length result -- [a] -> [a]"
     ]
-  assertEqual "live Length where REPL exit" ExitSuccess exitCode
-  let sessionFailures = countOccurrences
+  let captured label = label ++ "\nstdout:\n" ++ output ++ "\nstderr:\n" ++ errors
+      sessionFailures = countOccurrences
         "[DJEX_REPL_LENGTH_WHERE_SESSION]" errors
+  assertEqual (captured "live Length where REPL exit") ExitSuccess exitCode
   if sessionFailures == 0
     then do
       assertContains "scalar replay retains the exact identity"
         "scalarKept a = a" output
       assertContains "a tautological pair contract retains one pair candidate"
         "pairKept" output
-      assertBool "an impossible postcondition retained a candidate"
-        $ not $ "impossible" `isInfixOf` output
+      assertContains "Djinn's exact graph reaches scalar replay"
+        "djinnScalarKept" output
+      assertContains "Djinn's exact graph reaches binary-product replay"
+        "djinnPairKept" output
+      forM_ ["djinnScalarKept", "djinnPairKept", "djinnNilKept"] $ \target ->
+        case lengthFixtureDefinitions target output of
+          [implicit, explicit] -> assertEqual
+            (captured $ "implicit and explicit universals retain the same " ++ target ++ " clause")
+            implicit explicit
+          definitions -> assertEqual
+            (captured $ target ++ " must emit two nonempty definitions: " ++ show definitions)
+            2 $ length definitions
+      assertContains ("Djinn's own constructor graph reaches replay"
+          ++ "\nstdout:\n" ++ output ++ "\nstderr:\n" ++ errors)
+        "djinnNilKept" output
+      assertBool (captured "an impossible postcondition retained a candidate")
+        $ all (\target -> not $ target `isInfixOf` output)
+            ["impossible", "djinnImpossible", "bothImpossible"]
       assertContains "a fully refuted search reports no surviving candidate"
         "[DJEX_EXF_NO_RESULT]" errors
-      assertContains "both mode labels the unsupported backend" "-- Djinn" output
+      assertContains "Djinn refutations do not become type-uninhabitability claims"
+        "[DJEX_DJINN_NO_ADMITTED_RESULT]" errors
+      assertContains "both mode labels its Djinn lane" "-- Djinn" output
       assertContains "both mode labels its constrained backend"
         "-- Exference" output
-      assertContains "both mode still presents the constrained Exference result"
-        "bothKept a = a" output
-      assertContains "both mode reports Djinn without running it unconstrained"
-        "[DJEX_REPL_LENGTH_WHERE_DJINN_UNAVAILABLE]" errors
-      assertBool "a candidate unexpectedly escaped behavioral assessment"
+      assertEqual "both mode independently admits one candidate from each engine" 2
+        $ countOccurrences "bothKept " output
+      assertBool "both mode still bypassed Djinn Length checking" $
+        not $ "DJEX_REPL_LENGTH_WHERE_DJINN_UNAVAILABLE" `isInfixOf` errors
+      assertBool (captured "a candidate unexpectedly escaped behavioral assessment")
         $ not $ "DJEX_REPL_LENGTH_WHERE_CANDIDATE_UNASSESSED"
             `isInfixOf` errors
       unsatisfiableEventsExist <- doesFileExist
@@ -1132,17 +1173,98 @@ testReplLengthWhereRuntime = withCompiledFakeZ3s
         unsatisfiableEventsExist
       assertBool "the counterexample fake Z3 worker was never launched"
         healthyEventsExist
+      -- Healthy deliberately claims SAT for every candidate. A correct Cons
+      -- candidate must survive its invalid counterexample with a precise
+      -- refusal, independently of the no-unassessed checks above.
+      assertLengthAfterRefutation directory healthyExecutable
     else do
       assertEqual "an unsupported sealed-launch host fails every query closed"
-        4 sessionFailures
+        15 sessionFailures
       assertContains "the launch refusal remains closed and typed"
         "LengthSMTLibLiveSession" errors
       assertBool "a candidate was emitted without a live replay session"
         $ all (`notElem` words output)
-            ["scalarKept", "pairKept", "impossible", "bothKept"]
+            ["scalarKept", "pairKept", "impossible", "bothKept",
+             "djinnScalarKept", "djinnPairKept", "djinnNilKept",
+             "djinnImpossible", "bothImpossible"]
   assertBool "the runtime diagnostic echoed a behavioral clause"
     $ not $ "length result > length result" `isInfixOf` errors
   assertNoCallStack errors
+
+-- Preserve actual emitted spelling (including continuations), rather than
+-- fixing an implementation which can change when admitted constructors change.
+lengthFixtureDefinitions :: String -> String -> [String]
+lengthFixtureDefinitions target = collect . lines . stripCarriageReturns
+ where
+  collect [] = []
+  collect (raw : rest)
+    | (target ++ " ") `isPrefixOf` line =
+        let (continuations, remaining) = span isContinuation rest
+            definition = unlines $ line : continuations
+            body = drop 1 $ dropWhile (/= '=') definition
+        in if any (not . isSpace) body
+             then definition : collect remaining
+             else collect remaining
+    | otherwise = collect rest
+   where
+    line = maybe raw id $ stripPrefix "djex[djinn]> " raw
+  isContinuation (first : _) = isSpace first
+  isContinuation [] = False
+
+assertLengthAfterRefutation :: FilePath -> FilePath -> Assertion
+assertLengthAfterRefutation directory healthyExecutable = do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":set length-z3 " ++ healthyExecutable
+    , ":set target djinnAfterRefutation"
+    , ":djinn --where length result > length arg1 -- a -> [a] -> [a]"
+    ]
+  let captured label = label ++ "\nstdout:\n" ++ output ++ "\nstderr:\n" ++ errors
+      definitions = lengthFixtureDefinitions "djinnAfterRefutation" output
+      assessmentContexts =
+        [ stripped
+        | line <- lines errors
+        , let stripped = dropWhile isSpace line
+        , "context: ReplLengthWhere" `isPrefixOf` stripped
+        ]
+  assertEqual (captured "post-refutation Length query exits normally") ExitSuccess exitCode
+  assertEqual (captured "only one candidate survives the displayed-success cutoff") 1
+    $ length definitions
+  assertBool (captured "the retained candidate really prepends elements to its list argument")
+    $ all isLengthExtendingCons definitions
+  assertEqual (captured "only the deliberately false SAT model makes assessment unavailable") 1
+    $ countOccurrences "[DJEX_REPL_LENGTH_WHERE_CANDIDATE_UNASSESSED]" errors
+  assertEqual (captured "the false model is refused after graph, root, and problem checking")
+    ["context: ReplLengthWhereScalarLiveQueryRejected (LengthSMTLibLiveQueryError LengthSMTLibLiveQueryCounterexampleRejected False)"]
+    assessmentContexts
+  assertBool (captured "the wrong-model control encountered a source or session failure")
+    $ all (\marker -> not $ marker `isInfixOf` errors)
+        [ "[DJEX_REPL_LENGTH_WHERE_TARGET]", "[DJEX_REPL_LENGTH_WHERE_SCOPE]"
+        , "[DJEX_REPL_LENGTH_WHERE_SESSION]", "LengthProblemRootOpeningRejected"
+        , "ReplLengthWhereScalarProblemRejected", "ReplLengthWhereBinaryProductProblemRejected"
+        ]
+  -- The worker overwrites its own sidecar on startup; this trace belongs only
+  -- to the isolated query. At least two model checks establish that an earlier
+  -- candidate was rejected before the one retained above.
+  events <- stripCarriageReturns <$> readFile (healthyExecutable ++ ".events")
+  assertBool (captured "the surviving constructor bypassed the earlier counterexample")
+    $ countOccurrences "EVENT query-check 2\n" events >= 2
+  assertNoCallStack errors
+ where
+  -- Admit alpha-renamed and eta-contracted spellings of a positive Cons spine,
+  -- ending in the original list argument. Nil and argument projection fail.
+  isLengthExtendingCons definition = case break (== "=") $ words definition of
+    (["djinnAfterRefutation"], ["=", "(:)"]) -> True
+    (["djinnAfterRefutation", element], "=" : body) ->
+      element /= "_" && body == ["(:)", element]
+    (["djinnAfterRefutation", element, input], "=" : body) ->
+      element /= "_" && input /= "_" && element /= input &&
+        (body == ["(:)", element, input] ||
+          positiveSpine element input
+            (words $ filter (`notElem` "()") $ unwords body))
+    _ -> False
+  positiveSpine element input (headName : ":" : rest)
+    | headName == element = rest == [input] || positiveSpine element input rest
+  positiveSpine _ _ _ = False
 
 testReplInputRecovery :: Assertion
 testReplInputRecovery = withTemporaryEnvironment [] $ \directory -> do
@@ -1451,15 +1573,23 @@ testReplReloadTargetSpelling = withReplModuleFixture $ \root -> do
   let empty = canonicalRoot </> "empty"
       target = canonicalRoot </> "rename" </> "Target.hs"
       replacement = canonicalRoot </> "rename" </> "After.source"
+      copyCommand
+        | os == "mingw32" = ":! copy /Y " ++ nativeQuoted replacement ++ " " ++ nativeQuoted target
+        | otherwise = ":! cp " ++ show replacement ++ " " ++ show target
+      -- :! uses cmd.exe on Windows, not PowerShell's cp alias. Native
+      -- quoted paths retain single backslashes instead of Haskell escapes.
+      nativeQuoted path = "\"" ++ map (\character -> if character == '/' then '\\' else character) path ++ "\""
   (exitCode, output, errors) <- runRepl empty
     [ ":load " ++ show target
-    , ":! cp " ++ show replacement ++ " " ++ show target
+    , copyCommand
     , ":reload"
     , ":unadd Before"
     , ":unadd After"
     , ":show targets"
     ]
   assertEqual "renamed module reload REPL exit" ExitSuccess exitCode
+  assertBool ("fixture replacement shell command failed: " ++ errors) $
+    not $ "[DJEX_REPL_SHELL]" `isInfixOf` errors
   assertContains "reload accepts the replacement module declaration"
     "Loaded source workspace:" output
   assertEqual "stale derived module spelling is rejected once" 1
@@ -2599,14 +2729,14 @@ testReplDjinnReferenceNamespaces = withTemporaryEnvironment
   assertContains
     ("same-named type stub keeps the value axiom usable: " ++ output ++ errors)
     "bridge" output
-  -- Projection retains the canonical unit declaration independently of module
+  -- Projection retains checked unit/list declarations independently of module
   -- imports, in addition to the four source/stub declarations in this fixture.
-  assertContains "the distinct type stub and intrinsic unit enter the projected environment"
-    "5 declarations (projected from the module scope, 0 omissions)" output
+  assertContains "the distinct type stub and intrinsic types enter the projected environment"
+    "6 declarations (projected from the module scope, 1 omissions)" output
   assertContains "the genuine empty datatype supports absurd elimination"
     "case a of {}" output
-  assertContains "the genuine empty datatype requires no projection compromise"
-    "-- Djinn scope projection\n(no omissions)" output
+  assertContains "only the intrinsic recursive list reports an elimination limitation"
+    "[]: recursive datatype; constructors are introduction-only in Djinn" output
   assertBool "cross-namespace reference forced the standard fallback" $
     not $ "Djinn falls back to its standard checked environment" `isInfixOf`
       output
@@ -2637,10 +2767,10 @@ testReplDjinnHigherKindStub = withTemporaryEnvironment
   assertContains
     ("the wrapper remains structurally eliminable: " ++ output ++ errors)
     "case a of" output
-  assertContains "the inferred external stub and intrinsic unit remain in the projection"
-    "4 declarations (projected from the module scope, 0 omissions)" output
-  assertContains "the exact inferred kind avoids projection omissions"
-    "-- Djinn scope projection\n(no omissions)" output
+  assertContains "the inferred external stub and intrinsic types remain in the projection"
+    "5 declarations (projected from the module scope, 1 omissions)" output
+  assertContains "only the intrinsic recursive list reports an elimination limitation"
+    "[]: recursive datatype; constructors are introduction-only in Djinn" output
   assertBool "higher-kinded stub forced the standard-environment fallback" $
     not $ "Djinn falls back to its standard checked environment" `isInfixOf`
       output
@@ -2797,8 +2927,13 @@ testReplDjinnHiddenRecursiveConstructors = withTemporaryEnvironment
       ++ " abstract type") output
   assertBool "a hidden recursive constructor entered Djinn search" $
     not ("Done" `isInfixOf` output || "Again" `isInfixOf` output)
-  assertBool "an already-abstract projection gained a recursive omission" $
-    not $ "constructors are introduction-only" `isInfixOf` output
+  assertBool ("an already-abstract projection gained a recursive omission: " ++ output ++ errors) $
+    all (\line -> all (\subject -> not $
+        (subject ++ ": recursive datatype; constructors are introduction-only")
+          `isPrefixOf` dropWhile isSpace line)
+      ["Rec", "HiddenRecursive.Rec"]) $ lines output
+  assertContains "the intrinsic list keeps its separate introduction-only limitation"
+    "[]: recursive datatype; constructors are introduction-only in Djinn" output
   assertContains "constructor-hidden recursion remains uninhabitable"
     "[DJEX_DJINN_UNINHABITABLE]" errors
   assertNoCallStack errors
@@ -2827,8 +2962,13 @@ testReplDjinnRepairedRecursiveConstructors = withTemporaryEnvironment
   assertContains "the unexported field forces an abstract projection"
     ("Rec: its constructors mention RepairedRecursive.Hidden, which is outside"
       ++ " the Djinn scope; projected as an abstract type") output
-  assertBool "a repaired datatype retained a stale constructor boundary" $
-    not $ "constructors are introduction-only" `isInfixOf` output
+  assertBool ("a repaired datatype retained a stale constructor boundary: " ++ output ++ errors) $
+    all (\line -> all (\subject -> not $
+        (subject ++ ": recursive datatype; constructors are introduction-only")
+          `isPrefixOf` dropWhile isSpace line)
+      ["Rec", "RepairedRecursive.Rec"]) $ lines output
+  assertContains "the intrinsic list keeps its separate introduction-only limitation"
+    "[]: recursive datatype; constructors are introduction-only in Djinn" output
   assertBool "a repaired recursive constructor entered Djinn search" $
     not ("Done" `isInfixOf` output || "Again" `isInfixOf` output)
   assertContains "the repaired abstract recursion remains uninhabitable"
@@ -2890,8 +3030,8 @@ testReplDjinnClassMethodRepair = withTemporaryEnvironment
     , ":show omissions"
     ]
   assertEqual "all-bad-method repair REPL exit" ExitSuccess exitCode
-  assertContains "the methodless class and intrinsic unit remain in the projected environment"
-    "2 declarations (projected from the module scope, 3 omissions)" output
+  assertContains "the methodless class and intrinsic types remain in the projected environment"
+    "3 declarations (projected from the module scope, 4 omissions)" output
   assertContains
     ("the first unusable method is reported independently: "
       ++ output ++ errors)
@@ -2931,8 +3071,8 @@ testReplDjinnRepairDepth = withTemporaryEnvironment
       ++ output ++ errors)
     "Survivor" output
   assertContains "all cascading omissions reach the sealed projection"
-    ("2 declarations (projected from the module scope, "
-      ++ show (chainLength + 1) ++ " omissions)") output
+    ("3 declarations (projected from the module scope, "
+      ++ show (chainLength + 2) ++ " omissions)") output
   assertBool "deep repair fell back from the projected environment" $
     not $ "Djinn falls back to its standard checked environment" `isInfixOf`
       output

@@ -441,15 +441,35 @@ runExferenceQuery session =
     . runExferenceTypedQuery session
 ```
 
-Exference's typed candidate may contain its checked graph. Djinn currently
-returns the explicit `DjinnTermGraphSourceTypingContextUnavailable` absence:
-the retained LJT proof evidence is exact for its formula but predates the
-source-typed proof transformations needed by a shared graph. Its public future
-graph domain is already `DjinnTermGraphType = Type
-DjinnTermGraphTypeVariable`, where `DjinnTermGraphTypeVariable = Variable
-HSymbol`, not the role-erased compatibility `DjinnType`. Thus the typed API
-unifies result association without claiming behavioral
-interoperability before the required source-variable role plan exists.
+Both engines expose checked graph availability for each exact typed candidate.
+Djinn preserves the full source goal separately from the opened goal used by
+proof search, checks the final clause against the retained nominal declarations,
+and requires the sealed graph to erase to that exact clause. Its source graph
+retains higher-rank scopes, impredicative selections, implicit versus visible
+type applications, generalized let bindings, and checked provider kinds.
+`DjinnTermGraphType = Type DjinnTermGraphTypeVariable`, with
+`DjinnTermGraphTypeVariable = Variable HSymbol`, keeps flexible identities
+distinct from rigid openings. Compatibility candidates retain their historical
+untagged source-type vocabulary.
+
+The Djinn declaration adapter accepts the exact intrinsic List family as well
+as canonical unit. List's special names, proper element kind, and Nil/Cons
+field identities must match the complete declaration. Other owners cannot
+claim `[]` or `(:)`, and `(:)` remains invalid in type position. This supports
+checked constructor introduction and forwarding without enabling recursive
+input elimination.
+
+Graph checking is lazy in `typedQueryResultCompatibility` and does not reorder,
+remove, or rewrite a legacy candidate. An unsupported contextual source scheme
+still requires dictionary evidence and yields `DjinnTermGraphSourceTypingFailure`.
+An incompatible historical visible selection also remains in the compatibility
+result with an explicit graph failure. For example, once the exact provider's
+vacuous binder is admitted at kind `Type -> Type`, its retained `@Token` choice
+cannot acquire a graph if `Token :: Type`; compatible bare and `@F` candidates
+can, when `F :: Type -> Type`. Source graph availability therefore does not
+claim that every historical alternative is source-valid. The
+[source-typed evidence graph guide](source-typed-evidence-graph.md) describes
+the full checks, finite limits, and pending integration-validation boundary.
 
 Nonempty evidence is additive, with engine- and payload-specific scheduling:
 
@@ -1321,6 +1341,33 @@ resource-bounded and fail-closed:
    re-evaluate candidate behavior independently; only that replay can mint a
    `ValidatedLengthCounterexample` or bounded-positive receipt, and even
    `unsat` never becomes proof or pruning authority.
+
+For Djinn, pair `djinnTypedCandidateForLength candidate` with the inventory from
+`djinnSessionSourceInventory session`. The adapter changes only the invariantly
+empty compatibility residual-constraint slot to the graph's tagged type domain;
+it leaves the exact clause, details, graph identities, and private certificate
+association intact and does not force graph checking. Seal the Length session
+and contract in that same domain. Exference retains its existing candidate and
+inventory entrances. Djex's Djinn, Exference, and combined REPL routes assess
+each candidate under its own engine's authority; they do not relabel or borrow
+graphs across engines. A missing graph or unsupported interpretation remains
+an unavailable assessment, and only independent counterexample replay removes
+the candidate.
+
+At the Djinn Length REPL boundary, implicit Haskell source universals are
+explicitly quantified once before creating both the request and contract.
+Implicit and explicit `forall` spellings consequently share a closed source
+root. This neither changes graph identities nor relaxes Length's rigid-opening
+checks; the direct Core APIs still permit deliberately open goals.
+
+The exact zero/step case policy remains explicit. A private integration fixture
+checks a retained recursive `List` tail/default-empty clause against Djinn's
+source declarations, then passes its graph to Length and independently replays
+the identity-length counterexample `3 -> 2`. This exercises the source checker
+and semantic consumer. Public Djinn search still uses its historical abstraction
+for recursive input elimination; public graph coverage includes nonrecursive
+constructor cases and recursive-container forwarding. Graph support does not
+broaden either proof search or the selected Length model.
 
 ### Prepare a bounded replay-input bank
 

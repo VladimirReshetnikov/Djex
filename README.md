@@ -410,14 +410,16 @@ checked list-spine models rather than executing arbitrary Haskell expressions.
 Djex already owns the checked Length-contract, replay, SMT-LIB, and Z3
 foundation. The standalone `djex` REPL now recognizes the bounded outer form
 `--where CLAUSE -- TYPE`, preserves ordinary `:synth TYPE`, and filters typed
-Exference candidates through the checked built-in-list Length model. Haskell
-users do not need to route this workflow through Leant.
+candidates from Djinn, Exference, or both through each engine's own checked
+source graph and inventory. The default model is the built-in list spine.
+Haskell users do not need to route this workflow through Leant.
 
 Put an absolute Z3 path in `.djexrc` and the common case is one line:
 
 ```text
 :exference --where length result == length arg0 -- [a] -> [a]
-:exference --where length (fst result) + length (snd result) == 2 * length arg0 -- [a] -> ([a], [a])
+:djinn --where length result == length arg0 -- [a] -> [a]
+:compare --where length (fst result) + length (snd result) == 2 * length arg0 -- [a] -> ([a], [a])
 ```
 
 Without that startup setting, activate the policy explicitly and use two
@@ -437,9 +439,17 @@ closed warning. Only a counterexample independently replayed against the exact
 candidate removes it; `unsat`, `unknown`, or an unassociated `sat` status is
 never rejection authority.
 
-Djinn currently lacks the required source-typed candidate graph for Length, so a
-Djinn-only Length-constrained query fails closed. `:compare --where ...` labels Djinn
-as unavailable and filters only Exference; it never runs Djinn unconstrained.
+Djinn checks the exact returned clause against its retained source goal and
+declarations, then seals a graph whose erasure is that same clause. The graph
+retains nominal types, nested quantifiers, implicit and visible selections,
+local scopes, and sharing. Graph availability is checked per candidate:
+unsupported dictionary evidence or an incompatible source-kind selection
+remains an explicit absence while the legacy candidate stays available.
+`:compare --where ...` assesses both engines separately; it does not transfer
+a graph or a session between equal-looking results. See the
+[source-typed evidence graph guide](docs/source-typed-evidence-graph.md) for
+the exact authority, supported forms, bounds, and integration validation status.
+
 On Linux the sealed Z3 default is descriptor-bound; other platforms use the
 portable path-snapshot policy. `:show settings` reveals only active/inactive,
 launch strategy, and pinned/unpinned status.

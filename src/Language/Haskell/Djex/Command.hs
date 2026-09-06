@@ -40,6 +40,7 @@ module Language.Haskell.Djex.Command
   , prepareExferencePresentation
   , prepareDiagnosticFailure
   , presentDjinn
+  , presentAssessedDjinn
   , presentAssessedExference
   , presentExference
   , QueryTimeout
@@ -397,6 +398,37 @@ presentDjinn
   -> IO ExitCode
 presentDjinn options fieldSelectors =
   replayCommandOutput . prepareDjinnPresentation options fieldSelectors
+
+-- | Admit Djinn's exact typed candidates before applying the displayed-result
+-- selection. Graph authority belongs to the retained clause, so this path
+-- renders that clause without a field-selector rewrite. It neither reruns
+-- search nor refills its raw/choice limits after a semantic rejection.
+presentAssessedDjinn
+  :: PresentationOptions
+  -> (DjinnTypedCandidate -> IO Bool)
+  -> DjinnTypedResult
+  -> IO ExitCode
+presentAssessedDjinn options admit result = do
+  selection <- selectQueryResultsM (presentationSelection options)
+    (\typedCandidate ->
+      let candidate = typedCandidateCompatibility typedCandidate
+      in ( if presentationRanking options == LegacyCandidateRanking
+              then Just $ candidateDetails candidate else Nothing
+         , presentationQualityCost options $ candidateOutput candidate ))
+    admit [result]
+  let candidates = map typedCandidateCompatibility $ selectionCandidates selection
+      progress = selectionProgress selection
+      evidence = resultEvidence result
+      diagnostics = djinnOutcomeDiagnostics evidence progress
+        ++ [ contextualDiagnostic Info "DJEX_DJINN_NO_ADMITTED_RESULT"
+               "no inspected Djinn candidate survived the supplied Length constraint"
+               (maybe "no search batch" show progress)
+           | null candidates, evidence == ValidatedCandidates ]
+        ++ maybe [] pure (progressTruncationDiagnostic progress)
+  replayCommandOutput $ case traverse (renderDjinn options) candidates of
+    Left failure -> prepareRenderFailure "DJEX_DJINN_RENDER" failure
+    Right rendered -> successfulPresentation (candidateOutputEvents rendered)
+      $ map diagnosticOutputEvent diagnostics
 
 -- | Select and render one Djinn result without touching process handles.
 -- Fully forcing this plan performs exactly the work demanded by the existing

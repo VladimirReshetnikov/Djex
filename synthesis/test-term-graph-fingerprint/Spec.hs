@@ -27,7 +27,24 @@ main = defaultMain tests
 
 tests :: TestTree
 tests = testGroup "shared term-graph fingerprints"
-  [ testCase "ignore allocation, table order, locals, and binder spelling" $ do
+  [ testCase "retain erased forall evidence modulo fresh binder allocation" $ do
+      left <- fingerprintErasedSource $ erasedIntroductionFixture "a" "opening" 0
+      right <- fingerprintErasedSource $ erasedIntroductionFixture "renamed" "fresh" 100
+      left @?= right
+  , testCase "distinguish erased selections even when source and output coincide" $ do
+      let source = Type.ForallType [Type.FlexibleVariable "unused"] [] unit
+          unit = Type.TupleType Boxed []
+          fixture selected = Typed.TermGraphSource (nodeId 1)
+            [ (nodeId 0, Typed.TermNode source $
+                Typed.TypedGlobal (occurrenceId 0) fixtureGlobal)
+            , (nodeId 1, Typed.TermNode unit $
+                Typed.TypedImplicitTypeApplication (occurrenceId 1) (nodeId 0)
+                  $ Typed.ImplicitTypeApplicationWitness source selected unit)
+            ]
+      left <- fingerprintErasedSource $ fixture unit
+      right <- fingerprintErasedSource $ fixture impredicativeType
+      assertBool "erased selected types vanished from the graph key" $ left /= right
+  , testCase "ignore allocation, table order, locals, and binder spelling" $ do
       left <- fingerprintSource $ renamingFixture
         fixtureGlobal (10, 20, 30, 40) (1, 2, 3)
         7 "a" "meta-17" False
@@ -93,6 +110,36 @@ tests = testGroup "shared term-graph fingerprints"
         Left (GraphFingerprint.TermGraphFingerprintByteLimitExceeded
           (exact - 1) exact)
   ]
+
+fingerprintErasedSource
+  :: FixtureSource
+  -> IO (Fingerprint.Fingerprint GraphFingerprint.TermGraphFingerprintSubject)
+fingerprintErasedSource source = do
+  graph <- expectRight $ Typed.sealTermGraph
+    (Typed.sharedTypeStructure
+      {Typed.forallTypeStructure = Just Typed.sharedForallTypeStructure})
+    Typed.defaultTermGraphLimits source
+  expectRight $ fingerprintGraph
+    GraphFingerprint.defaultTermGraphFingerprintByteLimit graph
+
+erasedIntroductionFixture :: Identity -> Identity -> Natural -> FixtureSource
+erasedIntroductionFixture binderName openingName offset =
+  Typed.TermGraphSource (nodeId offset)
+    [ (nodeId offset, Typed.TermNode source $
+        Typed.TypedForallIntroduction (occurrenceId offset) (nodeId $ offset + 1)
+          $ Typed.ForallIntroductionWitness source opening bodyType)
+    , (nodeId $ offset + 1, Typed.TermNode bodyType $ Typed.TypedLambda
+        [Typed.TypedPattern (occurrenceId $ offset + 1) opening $ Typed.TypedBind 0]
+        (nodeId $ offset + 2))
+    , (nodeId $ offset + 2, Typed.TermNode opening $
+        Typed.TypedLocal (occurrenceId $ offset + 2) 0)
+    ]
+ where
+  binder = Type.FlexibleVariable binderName
+  source = Type.ForallType [binder] [] $
+    Type.FunctionType (Type.TypeVariable binder) (Type.TypeVariable binder)
+  opening = Type.TypeVariable $ Type.RigidVariable openingName
+  bodyType = Type.FunctionType opening opening
 
 fingerprintSource
   :: FixtureSource
@@ -237,6 +284,7 @@ permissiveTypeStructure = Typed.TypeStructure
   , Typed.tupleTypeComponents = const Nothing
   , Typed.constructorPatternFieldTypes = \_ _ -> Nothing
   , Typed.validTypeApplicationWitness = \_ _ -> True
+  , Typed.forallTypeStructure = Nothing
   }
 
 fixtureGlobal :: Name

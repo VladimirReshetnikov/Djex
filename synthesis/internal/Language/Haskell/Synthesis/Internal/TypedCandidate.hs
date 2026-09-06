@@ -12,6 +12,7 @@ module Language.Haskell.Synthesis.Internal.TypedCandidate
   , mkTypedCandidate
   , mkCertificateCapableTypedCandidate
   , mkCertificateAssociatedTypedCandidate
+  , mapTypedCandidateCompatibility
   , foldTypedCandidateGraph
   , typedCandidateCompatibility
   , typedQueryResultCompatibility
@@ -122,6 +123,17 @@ mkTypedCandidate compatibility graph =
   TypedCandidate compatibility $ case graph of
     Left failure -> TypedCandidateGraphUnavailable failure
     Right checkedGraph -> TypedCandidatePlainGraph checkedGraph
+
+-- | Package-private, lazy conversion of the compatibility vocabulary while
+-- retaining the exact hidden graph carrier. Engine-owned adapters must prove
+-- that their conversion preserves the candidate and its source association;
+-- this function is intentionally unavailable to public consumers.
+mapTypedCandidateCompatibility
+  :: (candidate -> candidate')
+  -> TypedCandidate failure ty local candidate
+  -> TypedCandidate failure ty local candidate'
+mapTypedCandidateCompatibility convert (TypedCandidate candidate graph) =
+  TypedCandidate (convert candidate) graph
 
 -- | Package one compatibility candidate with a lazy three-way graph result:
 -- @Left failure@ is unavailable, @Right (Left graph)@ is a legacy plain graph,

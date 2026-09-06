@@ -102,9 +102,28 @@ synthesize engine steps entry = do
           , optionBudget = Just $ toInteger steps
           }
         target "church-corpus" $ caseSignature entry
-      result <- expectRight $ runDjinnQuery session request
+      result <- expectRight $ runDjinnTypedQuery session request
       case batchCandidates $ resultSearch result of
-        candidate : _ -> expectRight $ renderDjinnCandidateDefinition Unqualified candidate
+        candidate : _ -> do
+          -- The selected clause must carry its own checked source graph.
+          -- Render the unchanged compatibility clause only after validating
+          -- that the graph preserves that exact clause and full source type.
+          graph <- expectRight $ typedCandidateTermGraph candidate
+          let compatibility = typedCandidateCompatibility candidate
+              sourceQuery = djinnRequestQuery request
+              sourceType = fmap FlexibleVariable $ requestContextualType sourceQuery
+          unless (eraseTermGraphToFunctionClause (requestTarget sourceQuery) graph
+              == candidateOutput compatibility) $
+            fail "Djinn source graph does not erase to its exact selected clause"
+          root <- maybe (fail "Djinn source graph has no root") pure $
+            lookupTermNode (termGraphRoot graph) graph
+          -- Preserve genuinely free request identities as well as lexical
+          -- forall binders; closing both sides would reject valid open goals.
+          unless (alphaEquivalentTypes sourceType $ termNodeType root) $
+            fail "Djinn source graph root differs from the full request source type"
+          unless (null $ expressionHoles $ eraseTermGraph graph) $
+            fail "Djinn source graph contains an unresolved term hole"
+          expectRight $ renderDjinnCandidateDefinition Unqualified compatibility
         [] -> fail $ "no candidate; " ++ show (resultEvidence result)
           ++ "; " ++ show (batchProgress $ resultSearch result)
     else do

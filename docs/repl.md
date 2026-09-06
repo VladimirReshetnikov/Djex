@@ -115,14 +115,15 @@ The standalone REPL recognizes a leading exact
 clause only in query history, and repeats the complete structured query with
 `:`. Until checked runtime authority is configured, a valid constrained query
 fails before clause parsing. Once `length-z3` is set, Djex parses the bounded
-clause, seals the checked built-in-list target profile, generates typed
-Exference candidates, and checks them through one live Length/Z3 session.
+clause, seals the checked built-in-list target profile, and checks each selected
+engine's typed candidates through its own live Length/Z3 session.
 
 The intended common-case form uses ordinary Haskell expression notation:
 
 ```text
 :exference --where length result == length arg0 -- [a] -> [a]
 :exference --where length (fst result) + length (snd result) == 2 * length arg0 -- [a] -> ([a], [a])
+:djinn --where length result == 0 -- [a] -> [b]
 ```
 
 With `length-z3` in `.djexrc`, each example is a one-line behavioral query.
@@ -162,15 +163,20 @@ active/inactive, launch strategy, and pinned/unpinned status, and
 launched after clause and target resolution, inside the established query
 timeout.
 
-Every typed Exference candidate is sealed into the exact scalar or pair
+Every assessed typed candidate is sealed into the exact scalar or pair
 problem, translated, checked, and independently replayed. Only a fresh replayed
 counterexample removes the candidate. `unsat`, `unknown`, status-only `sat`,
 problem/query failures, and replay failures do not create negative evidence;
 per-candidate failures retain the candidate with a sanitized warning. A
 session-open or launch failure stops the constrained request.
-Djinn-only constrained requests fail closed because Djinn does not yet retain
-the required source-typed candidate graph. Both mode reports that limitation
-and runs only the constrained Exference lane, never an unconstrained Djinn lane.
+Djinn constrained requests use their own typed candidates and matching source
+inventory. Both mode assesses the two engines separately, without transferring
+graphs or inventories between candidates. An unavailable graph or unsupported
+interpretation retains that candidate with an unavailable-assessment warning.
+For Djinn, implicit type variables in the Haskell query are explicitly
+quantified before constructing both its request and Length contract. For
+example, `[a] -> [a]` and `forall a. [a] -> [a]` have the same source boundary;
+this does not relabel graph variables or weaken the consumer's scope checks.
 Leant's matching frontend now uses `List.length`, Lean relations, and Lean
 projection notation while lowering to the same checked contract vocabulary:
 `:synth --where List.length result = List.length arg0 -- TYPE`.
@@ -1203,6 +1209,11 @@ sessions and settings of both backends.
 Djinn's declaration grammar is stricter than the shared neutral vocabulary,
 so the projection degrades rather than fails:
 
+- Checked intrinsic unit and List declarations remain available independently
+  of imports. List admission requires its exact special names, proper element
+  parameter, and Nil/Cons fields; nominal user constructors still obey scope
+  visibility. Its recursive elimination remains unavailable and is reported
+  by `:show omissions`.
 - Names are projected at their unqualified in-scope spellings; a name whose
   unqualified spelling is ambiguous in scope is omitted.
 - A visible recursive datatype retains its declaration and constructors. Djinn

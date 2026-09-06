@@ -15,6 +15,7 @@ module Language.Haskell.Djex.Djinn.Internal.Session
   , standardDjinnSession
   , djinnSessionEnvironment
   , djinnSessionInventory
+  , djinnSessionSourceInventory
   , djinnSessionDeclarationSnapshot
   , djinnSnapshotTypeDeclarations
   , djinnSnapshotFunctionDeclarations
@@ -54,6 +55,7 @@ import Language.Haskell.Synthesis.Inventory
   )
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import Language.Haskell.Synthesis.Name (Name)
+import Language.Haskell.Synthesis.Type (Variable)
 
 -- | The neutral declaration environment accepted by the Djinn adapter.
 -- Djinn uses textual source variables, while explicit declaration kinds are
@@ -128,6 +130,12 @@ djinnSessionEnvironment =
 djinnSessionInventory :: DjinnSession -> DjinnInventory
 djinnSessionInventory (DjinnSession prepared _) =
   preparedEnvironmentInventory prepared
+
+-- | The same checked declarations in the tagged graph variable domain.
+-- This injective projection preserves nominal identities and kind facts.
+djinnSessionSourceInventory :: DjinnSession -> Inventory (Variable String) ()
+djinnSessionSourceInventory =
+  SharedInventory.tagInventoryTypeVariables . djinnSessionInventory
 
 -- | Reconstruct all historical declaration tables from the authoritative
 -- shared inventory in one compatibility projection. Bind this snapshot when

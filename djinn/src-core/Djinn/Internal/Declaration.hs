@@ -6,6 +6,7 @@ module Djinn.Internal.Declaration
   , DjinnDeclarationNameRole (..)
   , SynthesisDeclarationError (..)
   , canonicalUnitDeclaration
+  , canonicalSynthesisListParameter
   , isDjinnDeclarationName
   , djinnDeclarationSpelling
   , djinnDeclarationSymbol
@@ -17,6 +18,8 @@ module Djinn.Internal.Declaration
 
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Kind as SharedKind
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 import Djinn.Internal.HIdentifier
   ( isConId
@@ -27,7 +30,7 @@ import Djinn.Internal.HIdentifier
 import Djinn.Internal.HTypes
   ( HKind
   , HSymbol
-  , HType
+  , HType (..)
   , fromSynthesisKind
   , toSynthesisKind
   )
@@ -76,7 +79,7 @@ data DjinnDeclarationNameRole
 -- the shared IR in either direction: an unparsable or role-inappropriate
 -- name, a type conversion failure, a shared-side validation failure, or a
 -- shared feature (explicit parameter kinds, superclasses, instances, or a
--- non-canonical @()@ owner) that Djinn does not represent.
+-- non-canonical @()@ or list owner) that Djinn does not represent.
 data SynthesisDeclarationError
   = InvalidDjinnDeclarationName HSymbol SharedName.NameError
   | UnsupportedDjinnDeclarationName
@@ -88,6 +91,7 @@ data SynthesisDeclarationError
   | ClassSuperclassesUnsupported
   | InstanceDeclarationUnsupported
   | NonCanonicalUnitDeclaration
+  | NonCanonicalListDeclaration
   deriving (Eq, Show)
 
 -- | The exact lexical policy used by 'Djinn.Core.declare'.  Type, class,
@@ -105,8 +109,8 @@ isDjinnDeclarationName role name = case role of
 -- | Convert a Djinn declaration into the shared IR, checking every name
 -- against its 'DjinnDeclarationNameRole' and validating the result with
 -- 'SharedDeclaration.validateDeclaration'.  The canonical unit declaration
--- maps to the shared boxed 0-tuple; any other declaration mentioning @()@ is
--- rejected.
+-- maps to the shared boxed 0-tuple. Canonical list ownership has its own exact
+-- family check; other declarations owning either structural family fail.
 toSynthesisDeclaration
   :: Declaration
   -> Either SynthesisDeclarationError SynthesisDeclaration
@@ -114,7 +118,10 @@ toSynthesisDeclaration declaration = do
   converted <- case djinnUnitStatus declaration of
     CanonicalUnit -> canonicalSynthesisUnit
     NonCanonicalUnit -> Left NonCanonicalUnitDeclaration
-    NoUnitOwnership -> convertDeclaration declaration
+    NoUnitOwnership -> case djinnListStatus declaration of
+      CanonicalList parameter -> canonicalSynthesisList <$> convertedVariable parameter
+      NonCanonicalList -> Left NonCanonicalListDeclaration
+      NoListOwnership -> convertDeclaration declaration
   either (Left . InvalidSharedDeclaration) Right
     $ SharedDeclaration.validateDeclaration converted
   return converted
@@ -175,7 +182,8 @@ toSynthesisDeclaration declaration = do
 -- project it back into Djinn's compatibility AST.  Instances, class
 -- superclasses, and explicitly kinded type parameters have no Djinn form and
 -- are reported as errors; the shared unit type maps to
--- 'canonicalUnitDeclaration'.
+-- 'canonicalUnitDeclaration'. The exact intrinsic list family also projects,
+-- permitting its already-proper element kind without changing the source.
 fromSynthesisDeclaration
   :: SynthesisDeclaration
   -> Either SynthesisDeclarationError Declaration
@@ -185,7 +193,10 @@ fromSynthesisDeclaration declaration = do
   case synthesisUnitStatus declaration of
     CanonicalUnit -> Right canonicalUnitDeclaration
     NonCanonicalUnit -> Left NonCanonicalUnitDeclaration
-    NoUnitOwnership -> convertDeclaration declaration
+    NoUnitOwnership -> case synthesisListStatus declaration of
+      CanonicalList parameter -> canonicalListDeclaration <$> convertedVariable parameter
+      NonCanonicalList -> Left NonCanonicalListDeclaration
+      NoListOwnership -> convertDeclaration declaration
  where
   convertDeclaration source = case source of
     SharedDeclaration.TypeSynonymDeclaration _ name parameters body ->
@@ -320,3 +331,85 @@ canonicalSynthesisUnit = do
     Right name -> Right name
   return $ SharedDeclaration.DataTypeDeclaration () unitName []
     [SharedDeclaration.DataConstructor () unitName []]
+
+-- List syntax has one exact constructor family. This exception belongs to
+-- the complete declaration, never to the general identifier-role predicate:
+-- a nominal datatype cannot steal either constructor and (:) is not a type.
+data ListStatus = NoListOwnership | CanonicalList HSymbol | NonCanonicalList
+
+canonicalListDeclaration :: HSymbol -> Declaration
+canonicalListDeclaration parameter = DataType "[]" [parameter]
+  [("[]", []), (":", [HTVar parameter, HTApp (HTCon "[]") (HTVar parameter)])]
+
+canonicalSynthesisList :: HSymbol -> SynthesisDeclaration
+canonicalSynthesisList parameter = SharedDeclaration.DataTypeDeclaration ()
+  SharedName.listName [SharedDeclaration.TypeParameter parameter Nothing]
+  [ SharedDeclaration.DataConstructor () SharedName.listName []
+  , SharedDeclaration.DataConstructor () SharedName.consName
+      [ SharedType.TypeVariable parameter
+      , SharedType.TypeApplication (SharedType.TypeConstructor SharedName.listName)
+          (SharedType.TypeVariable parameter)
+      ]
+  ]
+
+-- | Recognize the retained source declaration without changing its binder,
+-- field identities, or explicit proper-kind annotation. Formula projection
+-- uses this same guard before treating (:) as a constructor symbol.
+canonicalSynthesisListParameter
+  :: Eq variable
+  => SharedDeclaration.Declaration variable kindVariable annotation
+  -> Maybe variable
+canonicalSynthesisListParameter declaration = case declaration of
+  SharedDeclaration.DataTypeDeclaration _ owner
+      [SharedDeclaration.TypeParameter parameter explicitKind]
+      [ SharedDeclaration.DataConstructor _ zero []
+      , SharedDeclaration.DataConstructor _ step
+          [ SharedType.TypeVariable element
+          , SharedType.TypeApplication (SharedType.TypeConstructor recursiveOwner)
+              (SharedType.TypeVariable recursiveElement)
+          ]
+      ]
+    | owner == SharedName.listName
+    , zero == SharedName.listName
+    , step == SharedName.consName
+    , properParameterKind explicitKind
+    , element == parameter
+    , recursiveOwner == owner
+    , recursiveElement == parameter -> Just parameter
+  _ -> Nothing
+ where
+  properParameterKind Nothing = True
+  properParameterKind (Just SharedKind.ProperTypeKind) = True
+  properParameterKind _ = False
+
+djinnListStatus :: Declaration -> ListStatus
+djinnListStatus declaration = case declaration of
+  DataType "[]" [parameter] _
+    | declaration == canonicalListDeclaration parameter -> CanonicalList parameter
+  _ | ownsList -> NonCanonicalList
+    | otherwise -> NoListOwnership
+ where
+  listOwner name = name == "[]" || name == ":"
+  ownsList = case declaration of
+    TypeSynonym name _ _ -> listOwner name
+    DataType name _ constructors -> listOwner name || any (listOwner . fst) constructors
+    AbstractType name _ -> listOwner name
+    ClassDecl name _ methods -> listOwner name || any (listOwner . fst) methods
+    Function name _ -> listOwner name
+
+synthesisListStatus :: SynthesisDeclaration -> ListStatus
+synthesisListStatus declaration = case canonicalSynthesisListParameter declaration of
+  Just parameter -> CanonicalList parameter
+  Nothing | ownsList -> NonCanonicalList
+          | otherwise -> NoListOwnership
+ where
+  listOwner name = name == SharedName.listName || name == SharedName.consName
+  ownsList = case declaration of
+    SharedDeclaration.TypeSynonymDeclaration _ name _ _ -> listOwner name
+    SharedDeclaration.DataTypeDeclaration _ name _ constructors ->
+      listOwner name || any (listOwner . SharedDeclaration.constructorName) constructors
+    SharedDeclaration.AbstractTypeDeclaration _ name _ -> listOwner name
+    SharedDeclaration.ValueDeclaration signature -> listOwner $ SharedDeclaration.valueName signature
+    SharedDeclaration.ClassDeclaration _ name _ _ methods ->
+      listOwner name || any (listOwner . SharedDeclaration.valueName) methods
+    SharedDeclaration.InstanceDeclaration{} -> False

@@ -14,6 +14,7 @@ module Language.Haskell.Synthesis.Environment
   , mkEnvironment
   , groundEnvironmentKinds
   , mapEnvironmentKindVariables
+  , tagEnvironmentTypeVariables
   , adjustEnvironmentDataTypeAnnotations
   , environmentDeclarations
   , typeDeclarationMap
@@ -165,6 +166,38 @@ mapEnvironmentKindVariables transform environment = Environment
   }
  where
   mappedDeclaration = mapDeclarationKindVariables transform
+
+-- | Inject a source inventory's variable identities into the flexible
+-- namespace. Unlike arbitrary renaming, this fixed injection cannot merge
+-- binders or change nominal type equality. Rebuild all variable-keyed indexes
+-- together while preserving declaration order and the validated namespaces.
+tagEnvironmentTypeVariables
+  :: Ord variable
+  => Environment variable kindVariable annotation
+  -> Environment (Variable variable) kindVariable annotation
+tagEnvironmentTypeVariables environment = Environment
+  { reversedDeclarations = map mappedDeclaration $ reversedDeclarations environment
+  , typeDeclarationsByName = Map.map mappedDeclaration $ typeDeclarationsByName environment
+  , valuesByName = Map.map mappedSignature $ valuesByName environment
+  , constructorsByName = Map.map mappedConstructor $ constructorsByName environment
+  , classesByName = Map.map mappedDeclaration $ classesByName environment
+  , instancesByHead = mappedInstances
+  , canonicalInstanceHeads = Set.fromList
+      [ instanceHeadKey variables headConstraint
+      | InstanceDeclaration _ variables _ headConstraint <- Map.elems mappedInstances
+      ]
+  , occupiedValueNames = occupiedValueNames environment
+  }
+ where
+  mappedDeclaration = mapDeclarationTypeVariables FlexibleVariable
+  mappedSignature signature = signature
+    { valueType = fmap FlexibleVariable $ valueType signature }
+  mappedConstructor constructor = constructor
+    { constructorFields = map (fmap FlexibleVariable) $ constructorFields constructor }
+  mappedInstances = Map.fromList
+    [ (fmap (fmap FlexibleVariable) key, mappedDeclaration declaration)
+    | (key, declaration) <- Map.toList $ instancesByHead environment
+    ]
 
 -- | Change only the top-level annotation of every datatype declaration.
 --

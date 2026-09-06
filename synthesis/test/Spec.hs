@@ -66,6 +66,7 @@ main = defaultMain tests
 tests :: TestTree
 tests = testGroup "Djex synthesis foundation"
   [ candidateTests
+  , erasedForallTests
   , behavioralTests
   , candidateQualityTests
   , semanticObservationTests
@@ -305,6 +306,174 @@ observabilityTests = testGroup "synthesis observability"
       _ <- evaluate $ force snapshot
       pure ()
   ]
+
+erasedForallTests :: TestTree
+erasedForallTests = testGroup "erased forall graph evidence"
+  [ testCase "introduce a rigid binder with exact syntax and projection cost" $ do
+      graph <- checked $ identitySource rigid
+      Typed.eraseTermGraph graph @?= Lambda [Bind (0 :: Int)] (Local 0)
+      Typed.typedGraphProjectedNodes (Typed.termGraphMetrics graph) @?= 3
+      let limits = right $ Typed.mkTermGraphLimits 3 2 1 32 4 3
+      assertBool "erased introduction consumed a compatibility slot" $
+        not $ isLeft $ Typed.sealTermGraph structure limits $ identitySource rigid
+  , testCase "require explicit forall authority for introductions and eliminations" $ do
+      forM_ [identitySource rigid, implicitSource poly] $ \source ->
+        case Typed.sealTermGraph Typed.sharedTypeStructure
+            Typed.defaultTermGraphLimits source of
+          Left Typed.ErasedForallTypeStructureUnavailable{} -> pure ()
+          other -> assertFailure $ "missing authority was accepted: " ++ show other
+  , testCase "retain an exact impredicative inferred selection without inventing VTA" $ do
+      graph <- checked $ implicitSource poly
+      Typed.eraseTermGraph graph @?= Global global
+      Typed.typedGraphProjectedNodes (Typed.termGraphMetrics graph) @?= 1
+      Typed.termGraphNodes graph @?= Typed.termGraphSourceNodes (implicitSource poly)
+  , testCase "reject an incorrect inferred instantiation result" $ do
+      let source = Typed.TermGraphSource (nid 0)
+            [ (nid 0, node unit $ Typed.TypedImplicitTypeApplication (oid 0) (nid 1)
+                $ Typed.ImplicitTypeApplicationWitness poly unit unit)
+            , (nid 1, node poly $ Typed.TypedGlobal (oid 1) global)
+            ]
+      rejected source
+  , testCase "reject flexible variables as forall introduction evidence" $
+      rejected $ identitySource $ SharedType.TypeVariable
+        $ SharedType.FlexibleVariable "opening"
+  , testCase "reject a locally specialized global below forall introduction" $
+      rejected $ Typed.TermGraphSource (nid 0)
+        [ (nid 0, node (quantify [bound] $ variable bound) $
+            Typed.TypedForallIntroduction (oid 0) (nid 1)
+              $ Typed.ForallIntroductionWitness
+                  (quantify [bound] $ variable bound) rigid rigid)
+        , (nid 1, node rigid $ Typed.TypedGlobal (oid 1) global)
+        ]
+  , testCase "reject an introduction variable that escapes into the outer result" $ do
+      let identityNodes = Typed.termGraphSourceNodes $ identitySource rigid
+      rejected $ Typed.TermGraphSource (nid 3)
+        $ identityNodes ++
+          [ (nid 3, node (tuple [poly, rigid]) $ Typed.TypedTuple [nid 0, nid 4])
+          , (nid 4, node rigid $ Typed.TypedGlobal (oid 4) global)
+          ]
+  , testCase "reject a sibling escape hidden only in an inferred selection" $ do
+      let source = quantify [bound] unit
+      rejected $ Typed.TermGraphSource (nid 3)
+        $ Typed.termGraphSourceNodes (identitySource rigid) ++
+          [ (nid 3, node (tuple [poly, unit]) $ Typed.TypedTuple [nid 0, nid 4])
+          , (nid 4, node unit $ Typed.TypedImplicitTypeApplication (oid 4) (nid 5)
+              $ Typed.ImplicitTypeApplicationWitness source rigid unit)
+          , (nid 5, node source $ Typed.TypedGlobal (oid 5) global)
+          ]
+  , testCase "reject duplicate introduced identities across disjoint branches" $ do
+      let second = map (\(key, value) -> (shiftNode key, shiftTerm value))
+            $ Typed.termGraphSourceNodes $ identitySource rigid
+      rejected $ Typed.TermGraphSource (nid 6)
+        $ Typed.termGraphSourceNodes (identitySource rigid) ++ second ++
+          [(nid 6, node (tuple [poly, poly]) $ Typed.TypedTuple [nid 0, nid 3])]
+  , testCase "introduce nested binders without capturing an outer rigid" $ do
+      let secondBound = SharedType.FlexibleVariable "b"
+          secondRigid = variable $ SharedType.RigidVariable "inner"
+          source = quantify [bound, secondBound] $
+            arrow (variable bound) $ arrow (variable secondBound) $ variable bound
+          middle = quantify [secondBound] $ arrow rigid $
+            arrow (variable secondBound) rigid
+          bodyType = arrow rigid $ arrow secondRigid rigid
+      graph <- checked $ Typed.TermGraphSource (nid 0)
+        [ (nid 0, node source $ Typed.TypedForallIntroduction (oid 0) (nid 1)
+            $ Typed.ForallIntroductionWitness source rigid middle)
+        , (nid 1, node middle $ Typed.TypedForallIntroduction (oid 1) (nid 2)
+            $ Typed.ForallIntroductionWitness middle secondRigid bodyType)
+        , (nid 2, node bodyType $ Typed.TypedLambda
+            [bind 2 0 rigid, bind 3 1 secondRigid] (nid 3))
+        , (nid 3, node rigid $ Typed.TypedLocal (oid 4) 0)
+        ]
+      Typed.eraseTermGraph graph @?= Lambda [Bind (0 :: Int), Bind 1] (Local 0)
+  , testCase "permit a vacuous binder while retaining its exact source type" $ do
+      let source = quantify [bound] unit
+      graph <- checked $ Typed.TermGraphSource (nid 0)
+        [ (nid 0, node source $ Typed.TypedForallIntroduction (oid 0) (nid 1)
+            $ Typed.ForallIntroductionWitness source rigid unit)
+        , (nid 1, node unit $ Typed.TypedGlobal (oid 1) global)
+        ]
+      Typed.eraseTermGraph graph @?= Global global
+  , testCase "merge source lambda groups across a returned forall with exact projection cost" $ do
+      let source = arrow unit poly
+          graphSource = Typed.TermGraphSource (nid 3) $
+            (nid 3, node source $ Typed.TypedLambda [bind 3 1 unit] (nid 0))
+              : Typed.termGraphSourceNodes (identitySource rigid)
+          limits = right $ Typed.mkTermGraphLimits 4 3 2 32 4 4
+      graph <- case Typed.sealTermGraph structure limits graphSource of
+        Left failure -> assertFailure (show failure) >> fail "unreachable"
+        Right graph -> pure graph
+      Typed.eraseTermGraph graph @?= Lambda [Bind (1 :: Int), Bind 0] (Local 0)
+      Typed.typedGraphProjectedNodes (Typed.termGraphMetrics graph) @?= 4
+  , testCase "do not erase class constraints without dictionary evidence" $ do
+      let constrained = SharedType.ForallType [bound]
+            [Constraint (right $ parseName "Eq") [variable bound]]
+            (arrow (variable bound) $ variable bound)
+          source = Typed.TermGraphSource (nid 0)
+            [ (nid 0, node (arrow unit unit) $
+                Typed.TypedImplicitTypeApplication (oid 0) (nid 1)
+                  $ Typed.ImplicitTypeApplicationWitness constrained unit (arrow unit unit))
+            , (nid 1, node constrained $ Typed.TypedGlobal (oid 1) global)
+            ]
+      rejected source
+  , testCase "bound free-variable observer output before scope traversal" $ do
+      let authority = Typed.sharedForallTypeStructure
+            { Typed.forallFreeTypeVariables = const $ repeat rigid }
+          bounded = structure {Typed.forallTypeStructure = Just authority}
+          limits = right $ Typed.mkTermGraphLimits 3 2 1 8 4 3
+      case Typed.sealTermGraph bounded limits $ identitySource rigid of
+        Left Typed.TermGraphTypeNodeLimitExceeded{} -> pure ()
+        other -> assertFailure $ "unbounded scope observation: " ++ show other
+  ]
+ where
+  structure :: Typed.TypeStructure (SharedType.Type (SharedType.Variable String))
+  structure = Typed.sharedTypeStructure
+    {Typed.forallTypeStructure = Just Typed.sharedForallTypeStructure}
+  checked
+    :: Typed.TermGraphSource (SharedType.Type (SharedType.Variable String)) Int
+    -> IO (Typed.TermGraph (SharedType.Type (SharedType.Variable String)) Int)
+  checked source = case Typed.sealTermGraph structure Typed.defaultTermGraphLimits source of
+    Left failure -> assertFailure (show failure) >> fail "unreachable"
+    Right graph -> pure graph
+  rejected
+    :: Typed.TermGraphSource (SharedType.Type (SharedType.Variable String)) Int
+    -> Assertion
+  rejected source = assertBool "unsound erased-forall graph accepted" $
+    isLeft $ Typed.sealTermGraph structure Typed.defaultTermGraphLimits source
+  variable = SharedType.TypeVariable
+  bound = SharedType.FlexibleVariable "a"
+  rigid = variable $ SharedType.RigidVariable "opening"
+  quantify binders = SharedType.ForallType binders []
+  arrow = SharedType.FunctionType
+  tuple = SharedType.TupleType Boxed
+  unit = tuple []
+  poly = quantify [bound] $ arrow (variable bound) (variable bound)
+  global = right $ parseName "Fixture.identity"
+  nid = Typed.termNodeId
+  oid = Typed.occurrenceId
+  node = Typed.TermNode
+  bind occurrence local ty = Typed.TypedPattern (oid occurrence) ty $ Typed.TypedBind local
+  identitySource opening = Typed.TermGraphSource (nid 0)
+    [ (nid 0, node poly $ Typed.TypedForallIntroduction (oid 0) (nid 1)
+        $ Typed.ForallIntroductionWitness poly opening (arrow opening opening))
+    , (nid 1, node (arrow opening opening) $ Typed.TypedLambda [bind 1 0 opening] (nid 2))
+    , (nid 2, node opening $ Typed.TypedLocal (oid 2) (0 :: Int))
+    ]
+  implicitSource selected = Typed.TermGraphSource (nid 0)
+    [ (nid 0, node (arrow selected selected) $
+        Typed.TypedImplicitTypeApplication (oid 0) (nid 1)
+          $ Typed.ImplicitTypeApplicationWitness poly selected (arrow selected selected))
+    , (nid 1, node poly $ Typed.TypedGlobal (oid 1) global)
+    ]
+  shiftNode key = nid $ Typed.termNodeIdValue key + 3
+  shiftOccurrence key = oid $ Typed.occurrenceIdValue key + 3
+  shiftTerm (Typed.TermNode ty form) = Typed.TermNode ty $ case form of
+    Typed.TypedForallIntroduction occurrence child witness ->
+      Typed.TypedForallIntroduction (shiftOccurrence occurrence) (shiftNode child) witness
+    Typed.TypedLambda [pattern] child -> Typed.TypedLambda
+      [pattern {Typed.typedPatternOccurrence = shiftOccurrence $ Typed.typedPatternOccurrence pattern,
+        Typed.typedPatternNode = Typed.TypedBind (1 :: Int)}] $ shiftNode child
+    Typed.TypedLocal occurrence _ -> Typed.TypedLocal (shiftOccurrence occurrence) (1 :: Int)
+    _ -> form
 
 typedGeneratedTests :: TestTree
 typedGeneratedTests = testGroup "typed generated candidate graphs"

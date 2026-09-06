@@ -45,8 +45,12 @@ module Language.Haskell.Synthesis.TypedGenerated
   , TypeStructureLimitError (..)
   , TypeStructure (..)
   , sharedTypeStructure
+  , ForallTypeStructure (..)
+  , sharedForallTypeStructure
   , ApplicationWitness (..)
   , TypeApplicationWitness (..)
+  , ForallIntroductionWitness (..)
+  , ImplicitTypeApplicationWitness (..)
   , TypedPattern (..)
   , TypedPatternNode (..)
   , TermNode (..)
@@ -238,7 +242,51 @@ data TypeStructure ty = TypeStructure
   , constructorPatternFieldTypes :: Name -> ty -> Maybe [ty]
   , validTypeApplicationWitness
       :: Generated.VisibleTypeArgument -> TypeApplicationWitness ty -> Bool
+  , forallTypeStructure :: Maybe (ForallTypeStructure ty)
+    -- ^ Explicit authority for erased quantifier rules. The ordinary shared
+    -- structure supplies no such authority; existing callers remain unchanged.
   }
+
+-- | Source-type observations needed for erased quantifier rules. These
+-- callbacks must compare exact free-variable identities, expose every free
+-- variable, and recognize only fresh rigid variables as introduction binders.
+-- The sealer independently checks their lexical scope throughout the graph.
+data ForallTypeStructure ty = ForallTypeStructure
+  { forallFreeTypeVariables :: ty -> [ty]
+  , validForallIntroductionWitness :: ForallIntroductionWitness ty -> Bool
+  , validImplicitTypeApplicationWitness
+      :: ImplicitTypeApplicationWitness ty -> Bool
+  }
+
+-- | Constraint-free System F rules over shared source types. Opening requires
+-- a rigid variable; flexible inference variables are never generalization
+-- evidence. Constraint-bearing foralls require dictionary evidence and are
+-- deliberately not admitted by this structural authority.
+sharedForallTypeStructure
+  :: Ord identity
+  => ForallTypeStructure (SharedType.Type (SharedType.Variable identity))
+sharedForallTypeStructure = ForallTypeStructure
+  { forallFreeTypeVariables = map SharedType.TypeVariable
+      . SharedType.freeVariablesInFirstOccurrenceOrder
+  , validForallIntroductionWitness = \witness ->
+      case forallIntroductionVariable witness of
+        variable@(SharedType.TypeVariable (SharedType.RigidVariable _)) ->
+          constraintFreeLeadingForall (forallIntroductionSource witness)
+            && TypeAtom.isLeadingForallInstantiation
+                (forallIntroductionSource witness) variable
+                (forallIntroductionBody witness)
+        _ -> False
+  , validImplicitTypeApplicationWitness = \witness ->
+      constraintFreeLeadingForall (implicitTypeApplicationSource witness)
+        && TypeAtom.isLeadingForallInstantiation
+            (implicitTypeApplicationSource witness)
+            (implicitTypeApplicationSelected witness)
+            (implicitTypeApplicationResult witness)
+  }
+ where
+  constraintFreeLeadingForall source = case source of
+    SharedType.ForallType (_ : _) [] _ -> True
+    _ -> False
 
 -- | Structural observations for the shared synthesis type language.
 -- Checked source types compare modulo lexical forall-binder spelling while
@@ -263,6 +311,7 @@ sharedTypeStructure = TypeStructure
         (typeApplicationSelected witness)
         (typeApplicationResult witness)
         && Generated.visibleTypeArgumentMatches argument (typeApplicationSelected witness)
+  , forallTypeStructure = Nothing
   }
 
 observeSharedTypeWithin
@@ -335,6 +384,28 @@ data TypeApplicationWitness ty = TypeApplicationWitness
 
 instance NFData ty => NFData (TypeApplicationWitness ty)
 
+-- | One erased forall introduction. The child is checked at the exact opened
+-- body type; the containing node has the original quantified source type.
+data ForallIntroductionWitness ty = ForallIntroductionWitness
+  { forallIntroductionSource :: ty
+  , forallIntroductionVariable :: ty
+  , forallIntroductionBody :: ty
+  }
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
+
+instance NFData ty => NFData (ForallIntroductionWitness ty)
+
+-- | One inferred instantiation, erased from the compatibility syntax. Unlike
+-- visible applications this cannot own or borrow a source-VTA certificate.
+data ImplicitTypeApplicationWitness ty = ImplicitTypeApplicationWitness
+  { implicitTypeApplicationSource :: ty
+  , implicitTypeApplicationSelected :: ty
+  , implicitTypeApplicationResult :: ty
+  }
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
+
+instance NFData ty => NFData (ImplicitTypeApplicationWitness ty)
+
 -- | One typed pattern node.  Its occurrence identifies the exact source or
 -- generated binding/elimination site independently of local spelling.
 -- A 'TypedBind' or 'TypedAs' local identity is unique across the whole sealed
@@ -387,6 +458,10 @@ data TermNodeForm ty local
       !TermNodeId
       Generated.VisibleTypeArgument
       (TypeApplicationWitness ty)
+  | TypedForallIntroduction
+      !OccurrenceId !TermNodeId (ForallIntroductionWitness ty)
+  | TypedImplicitTypeApplication
+      !OccurrenceId !TermNodeId (ImplicitTypeApplicationWitness ty)
   | TypedTuple [TermNodeId]
   | TypedHole !OccurrenceId local
   | TypedLet (TypedPattern ty local) !TermNodeId !TermNodeId
@@ -464,6 +539,17 @@ data TermGraphError ty local
   | VisibleTypeApplicationResultMismatch TermNodeId ty ty
   | InvalidVisibleTypeApplicationWitness
       TermNodeId Generated.VisibleTypeArgument (TypeApplicationWitness ty)
+  | ErasedForallTypeStructureUnavailable TermNodeId
+  | InvalidForallIntroductionWitness TermNodeId (ForallIntroductionWitness ty)
+  | ForallIntroductionSourceMismatch TermNodeId ty ty
+  | ForallIntroductionBodyMismatch TermNodeId ty ty
+  | InvalidImplicitTypeApplicationWitness
+      TermNodeId (ImplicitTypeApplicationWitness ty)
+  | ImplicitTypeApplicationSourceMismatch TermNodeId ty ty
+  | ImplicitTypeApplicationResultMismatch TermNodeId ty ty
+  | DuplicateForallIntroductionVariable TermNodeId TermNodeId ty
+  | ForallIntroductionVariableEscapes TermNodeId ty
+  | ForallIntroductionVariableInGlobal TermNodeId ty
   | ExpectedTupleType TermNodeId ty
   | TupleArityTypeMismatch TermNodeId Int Int
   | TupleFieldTypeMismatch TermNodeId Int ty ty
@@ -613,6 +699,7 @@ sealTermGraph typeStructure limits source = do
     unreachable : _ -> Left $ UnreachableTermNode unreachable
     [] -> pure ()
   validateNodeTypes typeStructure nodes binderTypes rawNodes
+  validateForallScopes typeStructure limits nodes root rawNodes
   (projection, projectedCount) <- projectGraph limits nodes root
   either (Left . ProjectedExpressionScopeError) Right
     $ Generated.validateExpressionScope projection
@@ -675,6 +762,8 @@ validateNodeCollections limits nodes = do
     TypedApply{} -> Right state
     TypedVisibleTypeApplication occurrence _ _ _ ->
       addOccurrence occurrence state
+    TypedForallIntroduction occurrence _ _ -> addOccurrence occurrence state
+    TypedImplicitTypeApplication occurrence _ _ -> addOccurrence occurrence state
     TypedTuple elements ->
       observeWithin (TupleElementList nodeId') width elements >> Right state
     TypedHole occurrence _ -> addOccurrence occurrence state
@@ -765,6 +854,20 @@ validateGraphTypeAnnotations typeStructure limits = mapM_ visitNode
           $ typeApplicationSelected witness
         inspect (GraphTypeApplicationResultType nodeId')
           $ typeApplicationResult witness
+      TypedForallIntroduction _ _ witness -> do
+        inspect (GraphTypeApplicationSourceType nodeId')
+          $ forallIntroductionSource witness
+        inspect (GraphTypeApplicationSelectedType nodeId')
+          $ forallIntroductionVariable witness
+        inspect (GraphTypeApplicationResultType nodeId')
+          $ forallIntroductionBody witness
+      TypedImplicitTypeApplication _ _ witness -> do
+        inspect (GraphTypeApplicationSourceType nodeId')
+          $ implicitTypeApplicationSource witness
+        inspect (GraphTypeApplicationSelectedType nodeId')
+          $ implicitTypeApplicationSelected witness
+        inspect (GraphTypeApplicationResultType nodeId')
+          $ implicitTypeApplicationResult witness
       TypedTuple{} -> Right ()
       TypedHole{} -> Right ()
       TypedLet pattern _ _ -> visitPattern pattern
@@ -791,6 +894,8 @@ nodeReferences (nodeId', TermNode _ form) = Right (nodeId', references form)
     TypedLambda _ body -> [body]
     TypedApply function argument _ -> [function, argument]
     TypedVisibleTypeApplication _ function _ _ -> [function]
+    TypedForallIntroduction _ body _ -> [body]
+    TypedImplicitTypeApplication _ function _ -> [function]
     TypedTuple elements -> elements
     TypedHole{} -> []
     TypedLet _ binding body -> [binding, body]
@@ -855,6 +960,117 @@ validateAcyclic references root = visit [] Set.empty root
         reached <- foldM (visit (nodeId' : path)) visited children
         pure $ Set.insert nodeId' reached
 
+-- Introduction skolems are lexical type binders, not arbitrary annotations.
+-- Inspect every annotation (including witnesses and patterns), so an unused
+-- branch or an erased type application cannot hide a scope escape. Globals
+-- always denote the source inventory and cannot acquire a local skolem.
+validateForallScopes
+  :: TypeStructure ty
+  -> TermGraphLimits
+  -> Map TermNodeId (TermNode ty local)
+  -> TermNodeId
+  -> [(TermNodeId, TermNode ty local)]
+  -> Either (TermGraphError ty local) ()
+validateForallScopes structure limits nodes root rawNodes =
+  case introductions of
+    [] -> Right ()
+    _ -> case forallTypeStructure structure of
+      Nothing -> Left $ ErasedForallTypeStructureUnavailable root
+      Just authority -> do
+        _ <- foldM distinct [] introductions
+        visit authority [] root
+ where
+  equivalent = equivalentTypes structure
+  introductions =
+    [ (owner, forallIntroductionVariable witness)
+    | (owner, TermNode _ (TypedForallIntroduction _ _ witness)) <- rawNodes
+    ]
+  introduced = map snd introductions
+  member variable = any (equivalent variable)
+
+  distinct previous current@(owner, variable) =
+    case List.find (equivalent variable . snd) previous of
+      Just (firstOwner, _) -> Left $
+        DuplicateForallIntroductionVariable firstOwner owner variable
+      Nothing -> Right $ current : previous
+
+  inspect authority owner active ty = do
+    let variables = forallFreeTypeVariables authority ty
+        maximumVariables = maximumTermGraphTypeNodes limits
+        observed = observedListLength maximumVariables variables
+    when (observed > maximumVariables) $ Left $
+      TermGraphTypeNodeLimitExceeded (GraphTermNodeType owner)
+        maximumVariables observed
+    mapM_ (checkVariable owner active) variables
+
+  checkVariable owner active variable
+    | member variable introduced && not (member variable active) =
+        Left $ ForallIntroductionVariableEscapes owner variable
+    | otherwise = Right ()
+
+  visit authority active owner = case Map.lookup owner nodes of
+    Nothing -> Left $ DanglingTermNodeReference owner owner
+    Just (TermNode ty form) -> do
+      inspect authority owner active ty
+      let inspectHere = inspect authority owner active
+          visitHere = visit authority active
+          patternHere = visitPattern authority owner active
+      case form of
+        TypedLocal{} -> Right ()
+        TypedGlobal{} -> case List.find (`member` introduced)
+            $ forallFreeTypeVariables authority ty of
+          Just variable -> Left $
+            ForallIntroductionVariableInGlobal owner variable
+          Nothing -> Right ()
+        TypedLambda patterns body ->
+          mapM_ patternHere patterns >> visitHere body
+        TypedApply function argument witness -> do
+          inspectHere $ applicationDomain witness
+          inspectHere $ applicationResult witness
+          visitHere function
+          visitHere argument
+        TypedVisibleTypeApplication _ function _ witness -> do
+          mapM_ inspectHere
+            [ typeApplicationSource witness
+            , typeApplicationSelected witness
+            , typeApplicationResult witness
+            ]
+          visitHere function
+        TypedForallIntroduction _ body witness -> do
+          inspectHere $ forallIntroductionSource witness
+          let opened = forallIntroductionVariable witness : active
+          inspect authority owner opened $ forallIntroductionVariable witness
+          inspect authority owner opened $ forallIntroductionBody witness
+          visit authority opened body
+        TypedImplicitTypeApplication _ function witness -> do
+          mapM_ inspectHere
+            [ implicitTypeApplicationSource witness
+            , implicitTypeApplicationSelected witness
+            , implicitTypeApplicationResult witness
+            ]
+          visitHere function
+        TypedTuple elements -> mapM_ visitHere elements
+        TypedHole{} -> Right ()
+        TypedLet pattern binding body -> do
+          patternHere pattern
+          visitHere binding
+          visitHere body
+        TypedCase scrutinee alternatives -> do
+          visitHere scrutinee
+          mapM_ (\(pattern, body) -> patternHere pattern >> visitHere body)
+            alternatives
+
+  visitPattern authority owner active pattern = do
+    inspect authority owner active $ typedPatternType pattern
+    case typedPatternNode pattern of
+      TypedBind{} -> Right ()
+      TypedWildcard -> Right ()
+      TypedConstructor _ fields ->
+        mapM_ (visitPattern authority owner active) fields
+      TypedTuplePattern fields ->
+        mapM_ (visitPattern authority owner active) fields
+      TypedAs _ nested -> visitPattern authority owner active nested
+
 validateNodeTypes
   :: (Ord local)
   => TypeStructure ty
@@ -910,6 +1126,28 @@ validateNodeTypes typeStructure nodes binderTypes = mapM_ validateNode
           (typeApplicationResult witness) (termNodeType node)
       unless (validTypeApplicationWitness typeStructure argument witness) $
         Left $ InvalidVisibleTypeApplicationWitness nodeId' argument witness
+    TypedForallIntroduction _ body witness -> do
+      authority <- requireForallStructure nodeId'
+      bodyType <- lookupNodeType nodeId' body
+      unless (validForallIntroductionWitness authority witness) $
+        Left $ InvalidForallIntroductionWitness nodeId' witness
+      unless (termNodeType node `equivalent` forallIntroductionSource witness) $
+        Left $ ForallIntroductionSourceMismatch nodeId'
+          (forallIntroductionSource witness) (termNodeType node)
+      unless (bodyType `equivalent` forallIntroductionBody witness) $
+        Left $ ForallIntroductionBodyMismatch nodeId'
+          (forallIntroductionBody witness) bodyType
+    TypedImplicitTypeApplication _ function witness -> do
+      authority <- requireForallStructure nodeId'
+      functionType <- lookupNodeType nodeId' function
+      unless (validImplicitTypeApplicationWitness authority witness) $
+        Left $ InvalidImplicitTypeApplicationWitness nodeId' witness
+      unless (functionType `equivalent` implicitTypeApplicationSource witness) $
+        Left $ ImplicitTypeApplicationSourceMismatch nodeId'
+          functionType (implicitTypeApplicationSource witness)
+      unless (termNodeType node `equivalent` implicitTypeApplicationResult witness) $
+        Left $ ImplicitTypeApplicationResultMismatch nodeId'
+          (implicitTypeApplicationResult witness) (termNodeType node)
     TypedTuple elements -> validateTuple nodeId' (termNodeType node) elements
     TypedHole{} -> Right ()
     TypedLet pattern binding body -> do
@@ -925,6 +1163,10 @@ validateNodeTypes typeStructure nodes binderTypes = mapM_ validateNode
       scrutineeType <- lookupNodeType nodeId' scrutinee
       mapM_ (validateAlternative nodeId' scrutineeType) alternatives
       mapM_ (validateBranchResult nodeId' $ termNodeType node) alternatives
+
+  requireForallStructure nodeId' = case forallTypeStructure typeStructure of
+    Nothing -> Left $ ErasedForallTypeStructureUnavailable nodeId'
+    Just authority -> Right authority
 
   validateLambda nodeId' lambdaType patterns bodyType =
     consume lambdaType patterns
@@ -1031,26 +1273,46 @@ projectGraph limits nodes root = do
     (maximumTermGraphProjectionNodes limits) root
   pure (expression, maximumTermGraphProjectionNodes limits - remaining)
  where
+  -- Source lambda groups can cross an erased type-binder boundary. Keep
+  -- their canonical grouping while preserving the separate typed scopes.
+  -- Ordinary nested lambda nodes retain their historical exact projection.
+  crossesErasedForall node = case Map.lookup node nodes of
+    Just (TermNode _ TypedForallIntroduction{}) -> True
+    Just (TermNode _ (TypedImplicitTypeApplication _ child _)) -> crossesErasedForall child
+    _ -> False
+
   consumeProjectionNode remaining
     | remaining <= 0 = Left $ TermGraphProjectionLimitExceeded
         (maximumTermGraphProjectionNodes limits)
         (saturatedSuccessor $ maximumTermGraphProjectionNodes limits)
     | otherwise = Right $ remaining - 1
 
-  projectNode remaining nodeId' = do
-    remaining' <- consumeProjectionNode remaining
+  projectNode = projectNodeWithMergedLambda False
+
+  projectNodeWithMergedLambda merged remaining nodeId' = do
     case Map.lookup nodeId' nodes of
       Nothing -> Left $ DanglingTermNodeReference nodeId' nodeId'
-      Just (TermNode _ form) -> projectForm remaining' form
+      Just (TermNode _ form) -> case form of
+        -- Erased evidence nodes are bounded by the graph-node/edge quotas;
+        -- they create no compatibility node and consume no projection slot.
+        TypedForallIntroduction _ child _ -> projectNodeWithMergedLambda merged remaining child
+        TypedImplicitTypeApplication _ child _ -> projectNodeWithMergedLambda merged remaining child
+        _ -> do
+          remaining' <- case form of
+            TypedLambda{} | merged -> Right remaining
+            _ -> consumeProjectionNode remaining
+          projectForm remaining' form
 
   projectForm remaining form = case form of
     TypedLocal _ local -> Right (Generated.Local local, remaining)
     TypedGlobal _ name -> Right (Generated.Global name, remaining)
     TypedLambda patterns body -> do
       (projectedPatterns, remaining') <- projectPatterns remaining patterns
-      (bodyExpression, remaining'') <- projectNode remaining' body
+      (bodyExpression, remaining'') <- projectNodeWithMergedLambda
+        (crossesErasedForall body) remaining' body
       pure
-        ( Generated.Lambda projectedPatterns bodyExpression
+        ( (if crossesErasedForall body then Generated.lambdaExpression else Generated.Lambda)
+            projectedPatterns bodyExpression
         , remaining''
         )
     TypedApply function argument _ -> do
@@ -1064,6 +1326,8 @@ projectGraph limits nodes root = do
         ( Generated.VisibleTypeApplication functionExpression argument
         , remaining'
         )
+    TypedForallIntroduction _ body _ -> projectNode remaining body
+    TypedImplicitTypeApplication _ function _ -> projectNode remaining function
     TypedTuple elements -> do
       (expressions, remaining') <- projectMany remaining elements
       pure (Generated.Tuple (reverse expressions), remaining')
@@ -1150,6 +1414,8 @@ graphMetrics nodes edgeCount patternCount occurrences projectedCount =
     TypedVisibleTypeApplication{} -> metrics
       { typedGraphVisibleTypeApplications =
           typedGraphVisibleTypeApplications metrics + 1 }
+    TypedForallIntroduction{} -> metrics
+    TypedImplicitTypeApplication{} -> metrics
     TypedTuple{} -> metrics
       { typedGraphTuples = typedGraphTuples metrics + 1 }
     TypedHole{} -> metrics

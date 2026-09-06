@@ -236,6 +236,10 @@ Library
 
   Other-Modules:
     Djinn.Internal.CheckedCandidate
+    Djinn.Internal.SourceEvidence
+    Djinn.Internal.SourceGraph
+    Djinn.Internal.SourceGraphKinds
+    Djinn.Internal.SourceTypingContext
     Djinn.Internal.Declaration
     Djinn.Internal.GeneratedDeduplication
     Djinn.Internal.HCheck.Implementation
@@ -469,7 +473,12 @@ Test-Suite synthesis-length-tests
   Hs-Source-Dirs:
     synthesis/test-length
     synthesis/internal
+    djinn/src-internal
   Other-Modules:
+    DjinnSourceGraphSpec
+    Djinn.Internal.SourceGraph
+    Djinn.Internal.SourceGraphKinds
+    Djinn.Internal.SourceTypingContext
     LengthWhereSpec
     SMTLibLiveSpec
     SMTLibQFLIASpec
@@ -757,3 +766,25 @@ Test-Suite exference-cli-tests
   Hs-Source-Dirs: exference/test-cli
   Build-Depends:  djex
   Build-Tool-Depends: djex:exference
+
+Test-Suite djinn-source-graph-tests
+  import:         tasty-hunit-test, containers-dep
+  Type:           exitcode-stdio-1.0
+  Main-Is:        Spec.hs
+  Hs-Source-Dirs: djinn/test-source-graph
+  Other-Modules: KindCases
+  Build-Depends:  djex
+
+Test-Suite djinn-source-graph-private-tests
+  import:         tasty-hunit-test, containers-dep, transformers-dep
+  Type:           exitcode-stdio-1.0
+  Main-Is:        Spec.hs
+  Hs-Source-Dirs:
+    djinn/test-source-graph-private
+    djinn/src-internal
+  Other-Modules:
+    KindGraphCases
+    Djinn.Internal.SourceGraph
+    Djinn.Internal.SourceGraphKinds
+    Djinn.Internal.SourceTypingContext
+  Build-Depends:  djex

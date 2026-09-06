@@ -258,12 +258,15 @@ import Language.Haskell.Synthesis.TypedGenerated
   , TermNodeForm (..)
   , TermNodeId
   , TypeApplicationWitness (..)
+  , ForallIntroductionWitness (..)
+  , ImplicitTypeApplicationWitness (..)
   , TypeStructure (..)
   , TypedPattern (..)
   , TypedPatternNode (..)
   , defaultTermGraphLimits
   , lookupTermNode
   , sharedTypeStructure
+  , sharedForallTypeStructure
   , termGraphNodes
   , termGraphRoot
   )
@@ -1924,6 +1927,8 @@ termNodeReferences form = case form of
   TypedLambda _ body -> [body]
   TypedApply function argument _ -> [function, argument]
   TypedVisibleTypeApplication _ function _ _ -> [function]
+  TypedForallIntroduction _ body _ -> [body]
+  TypedImplicitTypeApplication _ function _ -> [function]
   TypedTuple fields -> fields
   TypedHole{} -> []
   TypedLet _ binding body -> [binding, body]
@@ -1978,6 +1983,7 @@ fingerprintLengthAssociatedTermGraph session limits =
   maximumBytes = lengthProblemGraphFingerprintByteLimit limits
   typeStructure = case checkedLengthSessionCasePolicy session of
     LengthCasesRejected -> sharedTypeStructure
+      { forallTypeStructure = Just sharedForallTypeStructure }
     LengthExactZeroStepCases -> lengthTermGraphTypeStructure model
   model = lengthContextSpineModel $ checkedLengthSessionContext session
 
@@ -1987,6 +1993,7 @@ lengthTermGraphTypeStructure
   -> TypeStructure (Type (Variable identity))
 lengthTermGraphTypeStructure model = sharedTypeStructure
   { constructorPatternFieldTypes = fields
+  , forallTypeStructure = Just sharedForallTypeStructure
   }
  where
   fields name patternType
@@ -2047,17 +2054,42 @@ preflightGraph session providers candidateAuthorization authorized graph = do
 
   validateVisibleSelection (nodeId, TermNode _ form) = case form of
     TypedVisibleTypeApplication _ _ _ witness
-      | freeVariablesAuthorized authorized
-          $ typeApplicationSelected witness -> Right ()
-      | otherwise -> Left $ LengthProblemVisibleTypeSelectionRejected
-          nodeId $ typeApplicationSelected witness
+      -> validateSelection nodeId $ typeApplicationSelected witness
+    TypedImplicitTypeApplication _ _ witness ->
+      validateSelection nodeId $ implicitTypeApplicationSelected witness
+    TypedForallIntroduction _ _ witness ->
+      validateSelection nodeId $ forallIntroductionVariable witness
     _ -> Right ()
 
+  -- The graph has already been freshly resealed with lexical forall checks.
+  -- Local introduction variables are valid at their own witnessed selections;
+  -- they do not extend the separate authority used to resolve source globals.
+  selectedVariables = Set.union authorized $ Set.fromList
+    [ identity
+    | (_, TermNode _ (TypedForallIntroduction _ _ witness)) <- nodes
+    , TypeVariable (RigidVariable identity) <- [forallIntroductionVariable witness]
+    ]
+
+  validateSelection nodeId selected
+    | freeVariablesAuthorized selectedVariables selected = Right ()
+    | otherwise = Left $ LengthProblemVisibleTypeSelectionRejected nodeId selected
+
   selectedKindObligation (nodeId, TermNode _ form) = case form of
-    TypedVisibleTypeApplication _ _ _ witness -> do
+    TypedVisibleTypeApplication _ _ _ witness ->
+      selectionKind nodeId (typeApplicationSource witness)
+        (typeApplicationSelected witness)
+    TypedImplicitTypeApplication _ _ witness ->
+      selectionKind nodeId (implicitTypeApplicationSource witness)
+        (implicitTypeApplicationSelected witness)
+    TypedForallIntroduction _ _ witness ->
+      selectionKind nodeId (forallIntroductionSource witness)
+        (forallIntroductionVariable witness)
+    _ -> Right []
+
+  selectionKind nodeId sourceType selected = do
       source <- first
         (LengthProblemGraphKindRejected . InvalidKindInferenceType)
-        $ normalizeType $ typeApplicationSource witness
+        $ normalizeType sourceType
       case source of
         ForallType (binder : remaining) constraints body -> do
           inferred <- first LengthProblemGraphKindRejected
@@ -2066,11 +2098,10 @@ preflightGraph session providers candidateAuthorization authorized graph = do
                 [retainForall remaining constraints body]
           case lookup binder inferred of
             Just kind -> Right
-              [(kind, typeApplicationSelected witness)]
+              [(kind, selected)]
             Nothing -> Left
               $ LengthProblemVisibleTypeSourceHasNoBinder nodeId
         _ -> Left $ LengthProblemVisibleTypeSourceHasNoBinder nodeId
-    _ -> Right []
 
   retainForall [] [] body = body
   retainForall binders constraints body =
@@ -2159,6 +2190,10 @@ graphProperTypeAnnotations (_, TermNode nodeType form) =
       [ typeApplicationSource witness
       , typeApplicationResult witness
       ]
+    TypedForallIntroduction _ _ witness ->
+      [forallIntroductionSource witness, forallIntroductionBody witness]
+    TypedImplicitTypeApplication _ _ witness ->
+      [implicitTypeApplicationSource witness, implicitTypeApplicationResult witness]
     TypedLet pattern _ _ -> patternTypeAnnotations pattern
     TypedCase _ branches -> foldMap
       (patternTypeAnnotations . fst) branches
@@ -2520,6 +2555,9 @@ evaluateNode context environment nodeId = do
       Just authorization -> interpretAuthorizedConditionalProvider
         context nodeId authorization
       Nothing -> evaluateNode context environment function
+    TypedForallIntroduction _ body _ -> evaluateNode context environment body
+    TypedImplicitTypeApplication _ function _ ->
+      evaluateNode context environment function
     TypedTuple fields -> pure $ SemanticTuple
       [DeferredThunk field environment | field <- fields]
     TypedHole _ local -> lift $ Left $ LengthProblemHole nodeId local
@@ -3133,4 +3171,3 @@ buildCompleteProblemFingerprintWith role dialectTag session inventory
  where
   maximumBytes = fromIntegral $ lengthFingerprintByteLimit
     $ checkedLengthSessionLimits session
-

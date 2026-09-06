@@ -49,6 +49,8 @@ module Djinn.Core (
     DjinnQueryOptionsError(..), DjinnQueryError(..),
     inhabitResult, inhabitResultPrepared, inhabitSynthesisResultPrepared,
     inhabitTypedSynthesisResultPrepared,
+    DjinnSourceProviderEvidence(..),
+    inhabitTypedSynthesisResultPreparedWithSourceGoal,
     inhabitSynthesisResultPreparedWithInstantiationCandidates,
     inhabitTypedSynthesisResultPreparedWithInstantiationCandidates,
     inhabitSynthesisResultPreparedWithInstantiationAssignments,
@@ -93,7 +95,7 @@ import Djinn.Internal.CheckedCandidate
     ( ValidatedCandidate
     , ValidatedResult
     , checkCandidateProofWith
-    , convertCheckedCandidate
+    , convertCheckedCandidateWithEvidence
     , mkValidatedResult
     , projectValidatedResultWith
     , sortValidatedCandidates
@@ -107,7 +109,6 @@ import Djinn.Internal.GeneratedDeduplication
 import Djinn.Internal.HTypes
 import Djinn.Internal.Instantiation
     ( closedMonotypeSubtrees
-    , eliminateInstantiationEvidence
     , independentConstructionScopes
     , instantiationAxiomPremises
     , instantiationAxiomSymbols
@@ -124,17 +125,14 @@ import Djinn.Internal.Instantiation
     , providerInstantiationAssignmentPremises
     , providerInstantiationPremiseBindings
     , providerInstantiationPremises
-    , rewriteProviderInstantiationEvidence
     , usesInstantiationEvidence
     )
 import Djinn.Internal.LJT
 import Djinn.Internal.PlanFamily (nextAdmittedPlanFamily)
+import qualified Djinn.Internal.SourceEvidence as SourceEvidence
+import qualified Djinn.Internal.SourceGraph as SourceGraph
 import Djinn.Internal.ProofCheck.Evidence (checkProofWithEvidence)
 import Djinn.Internal.ProofEnv
-import Djinn.Internal.ProofToGenerated
-    ( termToGeneratedClause
-    , termToGeneratedClauseWithVisibleApplications
-    )
 import Djinn.Internal.Type
 import Djinn.Internal.TypeFormula
     ( PolarizedFormulaPlans
@@ -708,25 +706,23 @@ type DjinnCandidate =
     SharedCandidate.Candidate (SharedType.Type HSymbol) DjinnCandidateDetails
         (SharedGenerated.FunctionClause HSymbol)
 
--- | Why a checked Djinn candidate does not yet carry a shared source-typed
--- graph.
+-- | Why a checked Djinn candidate cannot carry a shared source-typed graph.
 --
--- Djinn's retained proof evidence is exact in the LJT formula vocabulary, but
--- structural datatype expansion and later proof restoration, instantiation
--- erasure, visible application, and generated-term cleanup are not yet sealed
--- into one source-typed authority.  Reporting that gap is sounder than
--- reconstructing source types from rendered formula atoms or generated code.
+-- The final clause is checked against its retained nominal source inventory
+-- and complete request after proof restoration and lowering. Missing source
+-- authority, unsupported dictionary evidence, or a bounded checking failure
+-- remains explicit; formula atoms are never used as source type declarations.
 data DjinnTermGraphAbsence
     = DjinnTermGraphSourceTypingContextUnavailable
-    deriving (Bounded, Enum, Eq, Ord, Show)
+    | DjinnTermGraphSourceTypingFailure String
+    deriving (Eq, Ord, Show)
 
--- | Future graph-local source identity domain.  Keeping flexible variables
--- distinct from rigid skolems is required before a Djinn graph can cross the
--- behavioral root-opening boundary; the compatibility 'DjinnCandidate' type
+-- | Graph-local source identity domain. Flexible variables remain distinct
+-- from the fresh rigid openings of nested foralls. The compatibility 'DjinnCandidate' type
 -- deliberately retains its historical untagged variable domain.
 type DjinnTermGraphTypeVariable = SharedType.Variable HSymbol
 
--- | Source-type vocabulary reserved for an eventual checked Djinn graph.
+-- | Source-type vocabulary of a checked Djinn graph.
 type DjinnTermGraphType = SharedType.Type DjinnTermGraphTypeVariable
 
 -- | One checked compatibility candidate paired with its explicit typed-graph
@@ -1039,6 +1035,42 @@ inhabitTypedSynthesisResultPreparedWithKindedInstantiationAssignments options
         options prepared contexts []
         (KindedProviderInstantiationAssignments assignments) target goal
 
+-- | The provider evidence carried by a prepared source-aware request. Each
+-- branch crosses the same bounded validation as its existing public runner.
+data DjinnSourceProviderEvidence
+    = DjinnSourceInstantiationCandidates
+        [SharedQuery.ProviderInstantiationCandidate HSymbol]
+    | DjinnSourceInstantiationAssignments
+        [SharedQuery.ProviderInstantiationAssignment HSymbol]
+    | DjinnSourceKindedInstantiationAssignments
+        [SharedQuery.KindedProviderInstantiationAssignment HSymbol]
+
+-- | Preserve the complete source goal while searching its already prepared
+-- implicit form. The source and search types must have the exact contextual
+-- relationship produced by leading-forall opening; an unrelated source goal
+-- cannot acquire either a candidate graph or negative search evidence.
+inhabitTypedSynthesisResultPreparedWithSourceGoal
+    :: QueryOptions
+    -> PreparedEnvironment
+    -> SharedType.Type HSymbol
+    -> [Constraint (SharedType.Type HSymbol)]
+    -> DjinnSourceProviderEvidence
+    -> SharedGenerated.DefinitionName
+    -> SharedType.Type HSymbol
+    -> Either DjinnQueryError DjinnTypedResult
+inhabitTypedSynthesisResultPreparedWithSourceGoal options prepared sourceGoal
+        contexts evidence target goal = do
+    first DjinnQueryOptionsFailure $ validateQueryOptions options
+    let (candidates, assignments) = case evidence of
+            DjinnSourceInstantiationCandidates supplied ->
+                (supplied, InferredProviderInstantiationAssignments [])
+            DjinnSourceInstantiationAssignments supplied ->
+                ([], InferredProviderInstantiationAssignments supplied)
+            DjinnSourceKindedInstantiationAssignments supplied ->
+                ([], KindedProviderInstantiationAssignments supplied)
+    inhabitSynthesisTypedResultPreparedCheckedWithSourceGoal (Just sourceGoal)
+        options prepared contexts candidates assignments target goal
+
 -- | Compatibility projection of 'inhabitResult'.
 inhabitGenerated :: QueryOptions -> Environment -> [Context] -> HSymbol -> HType
                  -> Either String GeneratedQueryReport
@@ -1099,9 +1131,24 @@ inhabitSynthesisTypedResultPreparedChecked
     -> SharedType.Type HSymbol
     -> Either DjinnQueryError DjinnTypedResult
 inhabitSynthesisTypedResultPreparedChecked options prepared contexts candidates
-        assignmentEvidence target goal = do
-    validated <- inhabitSynthesisValidatedResultPreparedChecked
+        assignmentEvidence target goal =
+    inhabitSynthesisTypedResultPreparedCheckedWithSourceGoal Nothing
         options prepared contexts candidates assignmentEvidence target goal
+
+inhabitSynthesisTypedResultPreparedCheckedWithSourceGoal
+    :: Maybe (SharedType.Type HSymbol)
+    -> QueryOptions
+    -> PreparedEnvironment
+    -> [Constraint (SharedType.Type HSymbol)]
+    -> [SharedQuery.ProviderInstantiationCandidate HSymbol]
+    -> ProviderInstantiationAssignmentEvidence
+    -> SharedGenerated.DefinitionName
+    -> SharedType.Type HSymbol
+    -> Either DjinnQueryError DjinnTypedResult
+inhabitSynthesisTypedResultPreparedCheckedWithSourceGoal sourceGoal options
+        prepared contexts candidates assignmentEvidence target goal = do
+    validated <- inhabitSynthesisValidatedResultPreparedChecked
+        sourceGoal options prepared contexts candidates assignmentEvidence target goal
     first DjinnResultInvariantFailure $
         projectValidatedTypedDjinnResult validated
 
@@ -1110,7 +1157,8 @@ inhabitSynthesisTypedResultPreparedChecked options prepared contexts candidates
 -- and the configured final ordering step has moved whole associations into
 -- their final order.
 inhabitSynthesisValidatedResultPreparedChecked
-    :: QueryOptions
+    :: Maybe (SharedType.Type HSymbol)
+    -> QueryOptions
     -> PreparedEnvironment
     -> [Constraint (SharedType.Type HSymbol)]
     -> [SharedQuery.ProviderInstantiationCandidate HSymbol]
@@ -1118,8 +1166,8 @@ inhabitSynthesisValidatedResultPreparedChecked
     -> SharedGenerated.DefinitionName
     -> SharedType.Type HSymbol
     -> Either DjinnQueryError ValidatedDjinnResult
-inhabitSynthesisValidatedResultPreparedChecked options prepared contexts candidates
-        assignmentEvidence target goal = do
+inhabitSynthesisValidatedResultPreparedChecked sourceGoal options prepared
+        contexts candidates assignmentEvidence target goal = do
     elaboratedGoal <- resolveSynthesisQueryContexts prepared
         ( "goal type " ++ renderSynthesisType goal
         , KStar
@@ -1151,12 +1199,61 @@ inhabitSynthesisValidatedResultPreparedChecked options prepared contexts candida
         prepared candidates
     checkedAssignments <- prepareProviderInstantiationAssignments
         prepared assignmentEvidence
-    searchPreparedFormula options prepared checkedCandidates checkedAssignments target
+    checkedSourceGoal <- case sourceGoal of
+        Nothing -> Right elaboratedGoal
+        Just original -> do
+            checked <- resolveSynthesisQueryContexts prepared
+                ("source goal type " ++ renderSynthesisType original, KStar, original) []
+            checkSourceSearchCorrespondence original contexts goal
+            pure checked
+    -- This table becomes authority only after the bounded assignment checker
+    -- has checked every supplied kind, exact provider, and correlated vector.
+    let providerKinds = case assignmentEvidence of
+            InferredProviderInstantiationAssignments{} -> Map.empty
+            KindedProviderInstantiationAssignments assignments -> Map.fromList
+                [ ( SharedQuery.kindedProviderInstantiationAssignmentProvider assignment
+                  , map fst $ SharedQuery.kindedProviderInstantiationAssignmentArguments assignment
+                  )
+                | assignment <- assignments
+                ]
+        sourceContext = SourceEvidence.sourceTypingContextWithProviderKinds
+            prepared checkedSourceGoal providerKinds
+    searchPreparedFormula options sourceContext checkedCandidates checkedAssignments target
         elaboratedGoal
         parametricDataRelevant
         plans nominalPlans
   where
     translatorFailure = first DjinnInternalQueryFailure
+
+-- The adapter normalizes and opens all leading binders before separating the
+-- class context from the search goal. Reproduce that operation as one type,
+-- retaining the variable identities shared by contexts and the goal. This
+-- check intentionally precedes no historical validation and changes none of
+-- the search inputs. The source type is independently elaborated above.
+checkSourceSearchCorrespondence
+    :: SharedType.Type HSymbol
+    -> [Constraint (SharedType.Type HSymbol)]
+    -> SharedType.Type HSymbol
+    -> Either DjinnQueryError ()
+checkSourceSearchCorrespondence source contexts goal = do
+    normalizedSource <- normalize source
+    opened <- first (DjinnInternalQueryFailure . show)
+        $ fst <$> SharedType.implicitizeLeadingForalls
+            (const (Nothing :: Maybe ())) freshTypeVariable Set.empty normalizedSource
+    normalizedOpened <- normalize opened
+    normalizedSearch <- normalize $ SharedType.ForallType [] contexts goal
+    -- Normalization retains an empty forall wrapper. Compare the complete
+    -- prenex decomposition so a context-free wrapper is immaterial, while
+    -- actual binders, joint contexts, and every residual type boundary remain
+    -- exact. In particular, the supplied search type cannot bind a variable
+    -- which the source opening deliberately made implicit.
+    unless (SharedType.splitLeadingForalls normalizedOpened ==
+            SharedType.splitLeadingForalls normalizedSearch) $
+        internalQueryFailure "prepared search goal does not match its preserved source goal"
+  where
+    normalize = first (DjinnInternalQueryFailure . show) . normalizeSynthesisType
+    freshTypeVariable unavailable variable =
+        Just $ fst $ freshPrimedVariable unavailable variable
 
 inhabitResultPreparedChecked
     :: QueryOptions
@@ -1481,7 +1578,7 @@ prepareProviderInstantiationAssignments prepared evidence = do
 -- evidence.
 searchPreparedFormula
     :: QueryOptions
-    -> PreparedEnvironment
+    -> SourceEvidence.SourceTypingContext
     -> [PreparedProviderInstantiationCandidate]
     -> [PreparedProviderInstantiationAssignment]
     -> SharedGenerated.DefinitionName
@@ -1490,7 +1587,7 @@ searchPreparedFormula
     -> PolarizedFormulaPlans
     -> PolarizedFormulaPlans
     -> Either DjinnQueryError ValidatedDjinnResult
-searchPreparedFormula options prepared providerCandidates providerAssignments
+searchPreparedFormula options sourceContext providerCandidates providerAssignments
         target elaboratedGoal parametricDataRelevant formulaPlans
         nominalFormulaPlans = do
     results <- if interleavePlanAlternatives
@@ -2669,7 +2766,7 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             activateLane completed $ FormulaPlanLane (nextPlanOrdinal ordinal)
                 inhabitationOnly families remaining Nothing
         | otherwise = do
-            stream <- startFormulaPlanStream options target plan
+            stream <- startFormulaPlanStream sourceContext options target plan
             return $ Just $ FormulaPlanLane ordinal inhabitationOnly families remaining $
                 Just stream {formulaStreamFirstCandidateOnly = firstCandidateOnly}
       where
@@ -2716,7 +2813,7 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
               , negativeEvidenceSound
               )
                 : remaining) = do
-        result <- searchPreparedFormulaPlan firstProofOnly
+        result <- searchPreparedFormulaPlan sourceContext firstProofOnly
             currentOptions candidateLimit target planPremises axiomSymbols
             visibleApplications providerApplications diagnosticOnlyPremises form
             negativeEvidenceSound
@@ -2741,6 +2838,8 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
             ("$djinn$query-directed-instantiation$" `isPrefixOf` spelling ||
                 "$djinn$query-constructed-instantiation$" `isPrefixOf` spelling))
     isInhabitationFallbackSymbol _ = False
+
+    prepared = SourceEvidence.sourceTypingPreparedEnvironment sourceContext
 
     -- A proof-backed target diagnostic is already the sharpest candidate-free
     -- result. A completed refutation may still be sharpened by a later
@@ -2782,32 +2881,36 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
 -- which makes the caller's cutoff global across every translation.
 type ValidatedDjinnCandidate =
     ValidatedCandidate DjinnCandidateDetails
-        (SharedGenerated.FunctionClause HSymbol)
+        SourceEvidence.SourceCandidate
 
 type ValidatedDjinnResult =
     ValidatedResult DjinnQueryMetadata DjinnCandidateDetails
-        (SharedGenerated.FunctionClause HSymbol)
+        SourceEvidence.SourceCandidate
 
 -- | Package the final whole candidate association into the shared typed
--- envelope.  The explicit absence is deliberately lazy and payload-free;
--- compatibility projection therefore does not traverse checked proof
--- evidence or attempt an unsound source-type reconstruction.
+-- envelope. Graph construction is lazy: compatibility projection does not
+-- perform source checking or demand a later candidate's retained evidence.
 projectValidatedTypedDjinnResult
     :: ValidatedDjinnResult
     -> Either SharedQuery.QueryResultInvariantError DjinnTypedResult
 projectValidatedTypedDjinnResult =
     projectValidatedResultWith projectCandidate
   where
-    projectCandidate _candidateKey validated =
+    projectCandidate candidateKey validated =
+        let sourceCandidate = validatedCandidateOutput validated
+        in
         SharedTypedCandidate.mkTypedCandidate
         (SharedCandidate.Candidate
             { SharedCandidate.candidateOutput =
-                validatedCandidateOutput validated
+                SourceEvidence.sourceCandidateClause sourceCandidate
             , SharedCandidate.candidateResidualConstraints = []
             , SharedCandidate.candidateDetails =
                 validatedCandidateDetails validated
             })
-        (Left DjinnTermGraphSourceTypingContextUnavailable)
+        (first (DjinnTermGraphSourceTypingFailure . show) $
+            SourceGraph.checkSourceClauseGraph candidateKey
+                (SourceEvidence.sourceCandidateContext sourceCandidate)
+                (SourceEvidence.sourceCandidateClause sourceCandidate))
 
 data FormulaPlanResult = FormulaPlanResult
     { formulaPlanFormula :: String
@@ -2846,9 +2949,10 @@ data FormulaPlanLane = FormulaPlanLane
 -- assumptions. The callback only supplies an already-observed raw prefix;
 -- it cannot add premises or bypass the existing checked conversion pipeline.
 startFormulaPlanStream
-    :: QueryOptions -> SharedGenerated.DefinitionName -> FormulaSearchPlan
+    :: SourceEvidence.SourceTypingContext
+    -> QueryOptions -> SharedGenerated.DefinitionName -> FormulaSearchPlan
     -> Either DjinnQueryError FormulaPlanStream
-startFormulaPlanStream options target
+startFormulaPlanStream sourceContext options target
         (premises, diagnostics, symbols, visible, providers, form, negativeSound) = do
     let (_, internalEnv, mode) = formulaPlanSearchContext options target premises providers
     cursor <- first (DjinnInternalQueryFailure .
@@ -2857,7 +2961,7 @@ startFormulaPlanStream options target
     return FormulaPlanStream
         { formulaStreamCursor = cursor
         , formulaStreamAssess = \outcome -> searchPreparedFormulaPlanBy
-            True (\_ _ _ -> Right outcome) options 1 target premises symbols visible
+            sourceContext True (\_ _ _ -> Right outcome) options 1 target premises symbols visible
             providers diagnostics form negativeSound
         , formulaStreamProducedProof = False
         , formulaStreamFirstCandidateOnly = False
@@ -2905,7 +3009,8 @@ formulaPlanSearchContext options target externalEnv providerApplications =
 -- synthetic occurrence through its exact provider before the existing visible
 -- type-application lowering runs.
 searchPreparedFormulaPlan
-    :: Bool
+    :: SourceEvidence.SourceTypingContext
+    -> Bool
     -> QueryOptions
     -> Int
     -> SharedGenerated.DefinitionName
@@ -2918,11 +3023,12 @@ searchPreparedFormulaPlan
     -> Formula
     -> Bool
     -> Either DjinnQueryError FormulaPlanResult
-searchPreparedFormulaPlan firstProofOnly = searchPreparedFormulaPlanBy False $
+searchPreparedFormulaPlan sourceContext firstProofOnly = searchPreparedFormulaPlanBy sourceContext False $
     if firstProofOnly then proveFirstWithModeChecked else proveWithModeChecked
 
 searchPreparedFormulaPlanBy
-    :: Bool
+    :: SourceEvidence.SourceTypingContext
+    -> Bool
     -> (SearchMode -> [(Symbol, Formula)] -> Formula -> Either String SearchOutcome)
     -> QueryOptions
     -> Int
@@ -2935,7 +3041,7 @@ searchPreparedFormulaPlanBy
     -> Formula
     -> Bool
     -> Either DjinnQueryError FormulaPlanResult
-searchPreparedFormulaPlanBy chargeDiagnosticChoices runProofSearch options candidateLimit target externalEnv
+searchPreparedFormulaPlanBy sourceContext chargeDiagnosticChoices runProofSearch options candidateLimit target externalEnv
         axiomSymbols visibleApplications providerApplications
         diagnosticOnlyEnv form
         negativeEvidenceSound = do
@@ -3003,23 +3109,10 @@ searchPreparedFormulaPlanBy chargeDiagnosticChoices runProofSearch options candi
             let (internalProofs, overflow) =
                     splitAt candidateLimit proofs
                 candidateLimitReached = not $ null overflow
-                convertProof internalProof =
-                    let restored = restoreProofTerm proofEnv internalProof
-                        providerApplied =
-                            rewriteProviderInstantiationEvidence
-                                providerApplications restored
-                        implicitAxiomSymbols = axiomSymbols
-                            `Set.difference`
-                            Map.keysSet visibleApplications
-                        erased = eliminateInstantiationEvidence
-                            implicitAxiomSymbols providerApplied
-                        convert
-                            | usesInstantiationEvidence
-                                axiomSymbols restored =
-                                termToGeneratedClauseWithVisibleApplications
-                                    visibleApplications
-                            | otherwise = termToGeneratedClause
-                    in convert target erased
+                convertProof _ evidence =
+                    SourceEvidence.lowerCheckedSourceCandidate sourceContext
+                        proofEnv axiomSymbols visibleApplications
+                        providerApplications target evidence
             -- Preserve the historical error precedence by checking every raw
             -- proof before converting any of them. Each opaque intermediate
             -- retains the exact evidence returned for that same raw proof;
@@ -3054,7 +3147,8 @@ searchPreparedFormulaPlanBy chargeDiagnosticChoices runProofSearch options candi
             generatedCandidates <- internalFailure
                 "cannot construct generated clause" $
                 mapM
-                    (convertCheckedCandidate convertProof candidateDetails)
+                    (convertCheckedCandidateWithEvidence convertProof
+                        (candidateDetails . SourceEvidence.sourceCandidateClause))
                     independentProofs
             let firstProof = case internalProofs of
                     firstProofTerm : _ -> Just $ show firstProofTerm
@@ -3106,10 +3200,10 @@ mergeFormulaPlanResults options results = Right validatedResult
     -- candidate without rewriting the first, potentially eta-sensitive output
     -- we retain.
     distinctCandidates = deduplicateEtaEquivalentClausesOn
-        validatedCandidateOutput mergedCandidates
+        (SourceEvidence.sourceCandidateClause . validatedCandidateOutput) mergedCandidates
     candidates = SharedQuality.rankCandidatesByQuality (optionRanking options)
         (\name -> Map.findWithDefault (SharedQuality.defaultCandidateProviderCost name) name $ optionProviderCosts options)
-        (SharedGenerated.functionClauseExpression . validatedCandidateOutput)
+        (SharedGenerated.functionClauseExpression . SourceEvidence.sourceCandidateClause . validatedCandidateOutput)
         historicallyRanked
     historicallyRanked
         | optionSorted options = sortValidatedCandidates distinctCandidates

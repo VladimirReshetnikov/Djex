@@ -37,6 +37,7 @@ import Unsafe.Coerce (unsafeCoerce)
 import qualified SMTLibLiveSpec
 import qualified SMTLibQFLIASpec
 import qualified LengthWhereSpec
+import qualified DjinnSourceGraphSpec
 import qualified Language.Haskell.Djex as Djex
 import Language.Haskell.Synthesis.Constraint (Constraint (..))
 import Language.Haskell.Synthesis.Declaration
@@ -125,6 +126,7 @@ main = defaultMain lengthTests
 lengthTests :: TestTree
 lengthTests = testGroup "finite-list-spine-length/v1"
   [ LengthWhereSpec.lengthWhereTests
+  , DjinnSourceGraphSpec.tests
   , limitTests
   , contextTests
   , contractTests
@@ -567,13 +569,29 @@ instance Exception LiveUsableWorkCallbackException
 assertLiveUsableWorkCallbackException :: IO ()
 assertLiveUsableWorkCallbackException =
   SMTLibLiveSpec.withFakeZ3Mode "healthy" $ \executable _ -> do
-    execution <- mkBudgetLiveExecution executable 1000
-    budget <- mkLiveUsableWorkBudget 400
+    let budgetMilliseconds = 5000
+    execution <- mkBudgetLiveExecution executable 4000
+    budget <- mkLiveUsableWorkBudget budgetMilliseconds
+    callbackEntered <- newIORef False
+    callbackCrossedDeadline <- newIORef False
     attempted <- try
       $ SMTLibLive.withLengthSMTLibLiveSessionWithUsableWorkBudget
           budget execution $ \_ -> do
-            threadDelay 600000
+            writeIORef callbackEntered True
+            entered <- getMonotonicTimeNSec
+            -- The convenience entrance captures its shared deadline before
+            -- opening the worker. Waiting one full budget from callback entry
+            -- therefore crosses that same deadline even after slow setup;
+            -- the extra millisecond avoids relying on its exact boundary.
+            delayUntilMonotonic $ entered
+              + fromIntegral ((budgetMilliseconds + 1) * 1000000)
+            writeIORef callbackCrossedDeadline True
             throwIO LiveUsableWorkCallbackException
+    entered <- readIORef callbackEntered
+    assertBool ("worker setup did not enter the exception callback: "
+      ++ show attempted) entered
+    readIORef callbackCrossedDeadline >>= assertBool
+      "the exception callback did not wait past the shared deadline"
     case attempted of
       Left failure -> failure @?= LiveUsableWorkCallbackException
       Right (_ :: Either SMTLibLive.LengthSMTLibLiveSessionError ()) ->
@@ -15287,6 +15305,8 @@ certifiedVisibleApplication (_, Djex.TermNode _ form) = case form of
   Djex.TypedGlobal{} -> False
   Djex.TypedLambda{} -> False
   Djex.TypedApply{} -> False
+  Djex.TypedForallIntroduction{} -> False
+  Djex.TypedImplicitTypeApplication{} -> False
   Djex.TypedTuple{} -> False
   Djex.TypedHole{} -> False
   Djex.TypedLet{} -> False

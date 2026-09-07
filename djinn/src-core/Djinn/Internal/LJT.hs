@@ -33,7 +33,7 @@ module Djinn.Internal.LJT (
     defaultSearchMode, proveWithMode, proveWithModeChecked,
     proveFirstWithModeChecked,
     ProofSearchCursor, ProofSearchObservation(..),
-    startProofSearchChecked, observeProofSearch
+    startProofSearchChecked, startProofSearchWithNormalPriorityChecked, observeProofSearch
     ) where
 
 import Control.Applicative (Alternative(empty, (<|>)))
@@ -193,11 +193,27 @@ data ProofSearchObservation
 startProofSearchChecked
     :: SearchMode -> [(Symbol, Formula)] -> Formula
     -> Either String ProofSearchCursor
-startProofSearchChecked mode environment goal = do
+startProofSearchChecked = startProofSearchCheckedBy proofSearchComputation
+
+-- | A streaming-only scheduling preference for an already selected exact
+-- instantiation context. Keep the historical first proof, then spend more of
+-- each finite turn on increasing-size normal forms than on the unrestricted
+-- LJT tail. Both continuations and every charged choice remain present.
+startProofSearchWithNormalPriorityChecked
+    :: SearchMode -> [(Symbol, Formula)] -> Formula
+    -> Either String ProofSearchCursor
+startProofSearchWithNormalPriorityChecked = startProofSearchCheckedBy $
+    proofSearchComputationBy $ interleaveProofWorkWeighted 64 4096
+
+startProofSearchCheckedBy
+    :: (SearchMode -> [(Symbol, Formula)] -> Formula -> P Proof)
+    -> SearchMode -> [(Symbol, Formula)] -> Formula
+    -> Either String ProofSearchCursor
+startProofSearchCheckedBy computation mode environment goal = do
     checkProofEnvironment environment
     return $ ProofSearchCursor $ reify (searchStrategy mode)
         (startPS reservedSymbols) $
-        proofSearchComputation mode environment goal
+        computation mode environment goal
   where
     reservedSymbols = map fst environment ++
         concatMap (formulaSymbols . snd) environment ++ formulaSymbols goal
@@ -217,7 +233,12 @@ observeProofSearch (ProofSearchCursor stream) = case stream of
 -- unsuccessful LJT search keeps its original negative evidence and budget.
 proofSearchComputation
     :: SearchMode -> [(Symbol, Formula)] -> Formula -> P Proof
-proofSearchComputation mode environment goal
+proofSearchComputation = proofSearchComputationBy $ interleaveProofWork 64
+
+proofSearchComputationBy
+    :: (Steps (PS, Proof) -> Steps (PS, Proof) -> Steps (PS, Proof))
+    -> SearchMode -> [(Symbol, Formula)] -> Formula -> P Proof
+proofSearchComputationBy schedule mode environment goal
     | searchAlternatives mode && searchTermAlternatives mode &&
         searchStrategy mode == Interleave = P $ \strategy state sk fk ->
             let normalTail
@@ -227,7 +248,7 @@ proofSearchComputation mode environment goal
                     | otherwise = Done
                 afterFirst Done = Done
                 afterFirst (Step rest) = Step (afterFirst rest)
-                afterFirst (Yield result rest) = Yield result (interleaveProofWork 64 rest normalTail)
+                afterFirst (Yield result rest) = Yield result (schedule rest normalTail)
             in replay sk fk $ afterFirst $ reify strategy state original
     | otherwise = original
   where
@@ -583,16 +604,24 @@ interleaveS (Step xs) ys = Step (interleaveS ys xs)
 -- one is precisely interleaveS. This is a scheduling quantum, not a proof,
 -- size, or total-work cap; neither stream is restarted or granted new fuel.
 interleaveProofWork :: Int -> Steps a -> Steps a -> Steps a
-interleaveProofWork quantum = advance turnSize
+interleaveProofWork quantum = interleaveProofWorkWeighted quantum quantum
+
+-- Every yielded proof hands over immediately; an unproductive turn hands
+-- over after its own finite choice quantum. Distinct quanta change effort
+-- allocation only, never the number of observed choices or retained proofs.
+interleaveProofWorkWeighted :: Int -> Int -> Steps a -> Steps a -> Steps a
+interleaveProofWorkWeighted leftQuantum rightQuantum =
+    advance leftSize leftSize rightSize
   where
-    turnSize = max 1 quantum
-    advance _ Done right = right
-    advance _ (Yield result rest) right =
-        Yield result (advance turnSize right rest)
-    advance remaining (Step rest) right = Step $
+    leftSize = max 1 leftQuantum
+    rightSize = max 1 rightQuantum
+    advance _ _ _ Done right = right
+    advance _ ownSize nextSize (Yield result rest) right =
+        Yield result (advance nextSize nextSize ownSize right rest)
+    advance remaining ownSize nextSize (Step rest) right = Step $
         if remaining <= 1
-            then advance turnSize right rest
-            else advance (remaining - 1) rest right
+            then advance nextSize nextSize ownSize right rest
+            else advance (remaining - 1) ownSize nextSize rest right
 
 -- The success continuation receives the value's final state and the rest
 -- of the stream (all remaining alternatives) as an already-built tail.

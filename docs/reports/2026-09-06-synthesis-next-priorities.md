@@ -23,7 +23,35 @@ focused test does not by itself establish the full runtime acceptance result.
 
 ## Recommended order
 
-### 1. Ordinary recursive data: one case split, then folds
+### 1. Source-evidence-driven Haskell elaboration
+
+After the streaming acceptance repair, address the gap between retained source
+typing and Haskell output. The
+[behavioral renderer](../../src/Language/Haskell/Djex/REPL.hs#L769) receives typed
+candidates but renders their compatibility clauses. The
+[worker](../../src/Language/Haskell/Djex/REPL/BehavioralWorker.hs#L170) supplies the
+outer signature; the graph's implicit type selections and forall scopes do not
+currently guide internal annotations or explicit applications.
+
+The demand-first append/filter captures contain `BehavioralCompilationError`
+examples involving polytype inference and skolem mismatch. Only the first
+three error messages per query were retained, so these samples establish
+neither the classification of every error nor graph availability for each
+failed candidate. They do not show that the source checker accepted an invalid
+term.
+
+First retain a bounded sample of each failed candidate's own handle, requested
+type, exact rendered expression, and graph availability without regenerating
+the candidate. Distinguish source-graph absence from graph-present output that
+GHC cannot elaborate. Add internal signatures or visible type applications
+only when that same candidate's exact source evidence supplies the types and
+scopes. Acceptance must compile the resulting rank-N/impredicative term at its
+original full signature, execute its behavioral predicate, and display exactly
+the implementation that was checked. Preserve rejection of escaped skolems
+and unavailable authority. This is a focused supported-fragment improvement,
+not a promise that every sampled failure is repairable.
+
+### 2. Ordinary recursive data: one case split, then folds
 
 The next capability priority is ordinary lists and trees. Djinn currently
 supports bounded positive construction and forwarding, but does not synthesize
@@ -45,7 +73,7 @@ and Lean termination evidence. This staged extension has more immediate value
 than increasing another occurrence-plan bound, while avoiding an open-ended
 general-recursion search project.
 
-### 2. Contextual providers and dictionary evidence
+### 3. Contextual providers and dictionary evidence
 
 Djinn's graph checker still rejects source schemes requiring dictionaries
 ([source boundary](../../djinn/src-internal/Djinn/Internal/SourceGraph.hs#L283)).
@@ -61,7 +89,7 @@ identities, and invented dictionary authority. Independent GHC checking and
 Lean replay remain separate gates. General contextual subsumption should
 follow this representation work, rather than precede it.
 
-### 3. Broader behavioral specifications and coverage
+### 4. Broader behavioral specifications and coverage
 
 Extend the accepted six total Church operations to naturals, options/eithers,
 folds, conversions, and the 19 supplied-default cases. Keep the agreed explicit
@@ -80,7 +108,7 @@ kernel checking, and axiom inventories. Failure to prove the assertion or its
 negation stays inconclusive. Keep ordinary finite predicates as controls; do
 not claim general induction or theorem discovery from this extension.
 
-### 4. Native Windows Length support as an independent platform task
+### 5. Native Windows Length support as an independent platform task
 
 Leant's public Length file acquisition deliberately returns
 `LengthFilePlatformUnsupported` on Windows
@@ -94,12 +122,19 @@ the configuration successfully is only the first gate; it does not establish
 successful solver-backed filtering. Keep this task separate from recursive
 search and rank-N typing changes.
 
-### 5. Optimize the measured streaming costs
+### 6. Optimize the measured streaming costs
 
 Use the current acceptance measurements to select the next bottleneck before
 changing defaults. Compare first accepted result latency, observed candidates,
 search work, checking/rendering cost, and retained memory under identical
-queries and settings. Potential targets include the stream's
+queries and settings. The first Haskell Djinn six-operation comparison reached
+success sooner in five cases but made more predicate attempts and reported more
+candidate-check errors. The later demand-first append/filter samples identify
+compiler inference failures among the first three errors captured for each
+query; the bounded source-evidence investigation in priority 1 addresses that
+concrete finding. Time the remaining phases separately: aggregate error counts
+do not establish that every error has the same cause or source-graph status.
+Potential targets include the stream's
 [linear alpha-equivalence scan](../../djinn/src-core/Djinn/Core.hs#L2841), repeated
 plan preparation, and kind inference or sealing outside the source checker's
 charged-step counter. None is yet a demonstrated dominant cost.

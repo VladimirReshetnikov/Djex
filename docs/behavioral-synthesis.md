@@ -102,13 +102,30 @@ for higher-rank or impredicative synthesis. Failed attempts, argument
 partitions, the finite-bound analysis, and advancing a size layer all consume
 the existing choice allowance.
 
-Formula plans are admitted incrementally. The LJT and normal-term streams,
-and the active formula plans, give up their turn after a raw proof or 64
-observed choices. This is a scheduling interval, not an additional budget.
+Formula plans are admitted incrementally. Active formula plans give up their
+turn after a raw proof or 64 observed choices. Streaming cycles among three
+families: historical plans, exact-result specialization plans, and other
+carrier plans. Each family retains its own incremental queue, so adding plans
+in one family does not dilute the others' turn frequency. This also preserves
+regular progress for function-valued carriers when the demanded result itself
+has a simpler specialization. Empty families lend their turns to the others;
+the first turn remains historical.
+These are scheduling intervals, not additional search budgets.
+
+Inside a focused carrier plan whose final result matches the demanded result,
+the original LJT tail receives a 64-choice turn and the increasing-size
+normal-form tail receives a 4,096-choice turn. Both hand over immediately after
+a raw proof. The original
+first proof is preserved, every choice is charged, and both continuations
+remain available. Other plans and ordinary batch search keep the existing
+equal 64-choice turns.
+
 Small plans can group already-checked instantiation bridges that share an
 exact result type, allowing different source schemes to cooperate without
 adding unrelated instances. Every bridge keeps its own source type and
-visible type arguments; the broader original plans remain available.
+visible type arguments. Streaming also keeps an exact-result singleton bridge
+live when multiple inputs have the same source scheme: a composition may need
+to reuse that one specialization. The broader original plans remain available.
 
 All emitted proofs still pass the existing independent checking and source
 conversion. Rejected proofs and duplicates consume their original raw slots;

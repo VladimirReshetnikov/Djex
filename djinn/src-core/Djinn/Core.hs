@@ -1659,17 +1659,23 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
     { preparedFormulaBatchResult = do
         results <- if interleavePlanAlternatives
             then runFairPlans (optionCutoff options) (optionBudget options) []
-                initialLanes []
+                (initialLanes carrierAlternativeSearchPlans) []
             else runPlans False historicalFamilies
                 collectAcrossPlans options (optionCutoff options) [] transportSearchPlans
         mergeFormulaPlanResults options results
     , preparedFormulaCandidateStream = streamPlans (optionCutoff options)
-        (optionBudget options) Nothing Nothing Nothing [] 0 initialLanes []
+        (optionBudget options) Nothing Nothing Nothing [] 0
+        (FormulaStreamQueues 0
+            ([FormulaPlanLane (0, 0) False historicalFamilies transportSearchPlans Nothing], [])
+            ([FormulaPlanLane (1, 0) False [] demandedStreamingPlans Nothing
+                | interleavePlanAlternatives], [])
+            ([FormulaPlanLane (2, 0) False [] otherStreamingCarrierPlans Nothing
+                | interleavePlanAlternatives], []))
     }
   where
-    initialLanes =
+    initialLanes carrierPlans =
         FormulaPlanLane (0, 0) False historicalFamilies transportSearchPlans Nothing :
-        [FormulaPlanLane (1, 0) False [] carrierAlternativeSearchPlans Nothing
+        [FormulaPlanLane (1, 0) False [] carrierPlans Nothing
         | interleavePlanAlternatives]
     historicalFamilies =
         [(False, initialSearchPlans), (True, loadedConstructedAccelerationPlans),
@@ -2514,9 +2520,36 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
     carrierAlternativeSearchPlans
         | not interleavePlanAlternatives = []
         | otherwise = commonResultInstantiationSearchPlans ++
-            focusedPlansWithPrefix "$djinn$carrier-focused$"
-                [(instantiationAxiomPremises queryCarrierAxioms,
-                    instantiationVisibleApplications queryCarrierAxioms)]
+            functionCarrierSearchPlans
+    functionCarrierSearchPlans = focusedPlansWithPrefix "$djinn$carrier-focused$"
+        [(instantiationAxiomPremises queryCarrierAxioms,
+            instantiationVisibleApplications queryCarrierAxioms)]
+    -- Streaming has no complete candidate pool to rank. Give exact instances
+    -- whose final result is demanded by the primary goal an early live turn.
+    -- A repeated alpha-equivalent quantified input needs only one bridge,
+    -- reusable on both values; ordinary focused plans would suppress that
+    -- singleton after an earlier projection or constant already succeeded.
+    -- The carrier-focused policy instead checks that the bridge is actually
+    -- used and retains its cursor alongside every historical continuation.
+    --
+    -- This is a positive-only scheduling heuristic over the existing bounded
+    -- axiom inventory, not additional instantiation evidence or a completeness
+    -- claim. Common groups retain their original symbol indices and member
+    -- order. Batch, depth-first, and first-only schedules remain unchanged.
+    demandedStreamingPlans = demandedCommonResultPlans ++ demandedSingletonPlans
+    otherStreamingCarrierPlans = otherCommonResultPlans ++ functionCarrierSearchPlans
+    demandedResult = instantiationResult $ translatedFormula primary
+    demandedSingletonPlans = focusedPlansWithPrefix "$djinn$carrier-focused$demand$"
+        [( [ premise
+           | premise@(_, PVar _ :-> body) <- activeAxiomPremises
+           , instantiationResult body == demandedResult
+           ]
+         , activeVisibleApplications
+         )]
+    demandedCommonResultPlans =
+        [plan | (True, plan) <- classifiedCommonResultPlans]
+    otherCommonResultPlans =
+        [plan | (False, plan) <- classifiedCommonResultPlans]
     -- Several source schemes may cooperate at one exact result type. Keep
     -- those already-checked bridges together before the singleton carrier
     -- contexts, without importing every unrelated instantiation image. This
@@ -2526,8 +2559,10 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
     -- The existing bounded historical axiom inventory bounds these groups.
     -- Their order follows first result occurrence, and heads within a group
     -- retain source encounter order. No tuple or additional axiom is created.
-    commonResultInstantiationSearchPlans =
-        [ ( premises ++ loadedSchemePremises ++
+    commonResultInstantiationSearchPlans = map snd classifiedCommonResultPlans
+    classifiedCommonResultPlans =
+        [ (result == demandedResult,
+          ( premises ++ loadedSchemePremises ++
                 [(focusedSymbol, formula) | (_, focusedSymbol, formula) <- renamed]
           , []
           , Set.fromList [focusedSymbol | (_, focusedSymbol, _) <- renamed]
@@ -2538,8 +2573,8 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
           , Map.empty
           , translatedFormula primary
           , False
-          )
-        | (groupIndex, group) <- zip [0 :: Int ..] commonResultInstantiationGroups
+          ))
+        | (groupIndex, (result, group)) <- zip [0 :: Int ..] commonResultInstantiationGroups
         , let renamed =
                 [ (originalSymbol, Symbol $ "$djinn$carrier-focused$common$" ++
                         show groupIndex ++ "$" ++ show memberIndex, formula)
@@ -2547,7 +2582,7 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
                 ]
         ]
     commonResultInstantiationGroups =
-        [ group
+        [ (result, group)
         | result <- SharedCollection.distinctOn id
             [instantiationResult body | (_, PVar _ :-> body) <- activeAxiomPremises]
         , let group =
@@ -2727,38 +2762,44 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
         filter ((`Set.notMember` providerNames) . fst)
 
     -- The streaming driver observes exactly one raw proof at a time using
-    -- the same resumable cursors and plan-family admission as the fair batch
+    -- the same resumable cursors and checked plan machinery as the fair batch
     -- driver below. Only compact de-duplication expressions and the earliest
     -- successful ordinals survive delivery; consumed proof trees, source
     -- contexts and typed graphs are not accumulated in scheduler history.
     streamPlans candidateLimit budget firstCandidateOrdinal firstEvidenceOrdinal
-            latest seen candidateKey front rear
+            latest seen candidateKey queues
         | candidateLimit <= 0 = finishStream
             (SharedSearch.truncated SharedSearch.CandidateLimitReached) latest
-        | otherwise = case front of
-            [] -> case reverse rear of
-                [] -> finishStream SharedSearch.Finished latest
-                next -> resume candidateLimit budget latest seen candidateKey next []
-            lane : remaining -> case activateLaneWith suppress lane of
+        | otherwise = case takeFormulaStreamLane queues of
+            Nothing -> finishStream SharedSearch.Finished latest
+            Just (lane, remaining) -> case activateLaneWith startStreamingPlan suppress lane of
                 Left failure -> [Left failure]
-                Right Nothing -> resume candidateLimit budget latest seen candidateKey remaining rear
+                Right Nothing -> resume candidateLimit budget latest seen candidateKey remaining
                 Right (Just (FormulaPlanLane ordinal inhabitationOnly families pendingPlans (Just stream))) ->
+                    advance ordinal inhabitationOnly families pendingPlans stream budget remaining
+                Right (Just _) -> [Left $ DjinnInternalQueryFailure
+                    "streaming proof-plan activation did not retain a cursor"]
+      where
+        -- Each family owns its local incremental plan queue. A turn ends at
+        -- one raw proof or the existing finite choice quantum, so admitting
+        -- more historical plans cannot dilute either carrier family's work
+        -- share. The first turn remains historical, with no candidate lookahead.
+        advance ordinal inhabitationOnly families pendingPlans stream currentBudget remaining =
                     case observeProofSearch $ formulaStreamCursor stream of
                         ProofSearchChoice continuation
-                            | Just fuel <- budget, fuel <= 0 -> finishStream
+                            | Just fuel <- currentBudget, fuel <= 0 -> finishStream
                                 (SharedSearch.truncated SharedSearch.ChoicePointLimitReached) latest
                             | not interleavePlanAlternatives || formulaStreamWorkRemaining stream > 1 ->
-                                resume candidateLimit (fmap (subtract 1) budget) latest seen candidateKey
-                                    (FormulaPlanLane ordinal inhabitationOnly families pendingPlans
-                                        (Just stream {formulaStreamCursor = continuation,
-                                            formulaStreamWorkRemaining = formulaStreamWorkRemaining stream - 1})
-                                        : remaining) rear
-                            | otherwise -> resume candidateLimit (fmap (subtract 1) budget)
-                                latest seen candidateKey remaining $
-                                requeuePlan ordinal inhabitationOnly families pendingPlans
-                                    stream {formulaStreamCursor = continuation} rear
+                                advance ordinal inhabitationOnly families pendingPlans
+                                    stream {formulaStreamCursor = continuation,
+                                        formulaStreamWorkRemaining = formulaStreamWorkRemaining stream - 1}
+                                    (fmap (subtract 1) currentBudget) remaining
+                            | otherwise -> resume candidateLimit (fmap (subtract 1) currentBudget)
+                                latest seen candidateKey $
+                                requeueStreamingPlan ordinal inhabitationOnly families pendingPlans
+                                    stream {formulaStreamCursor = continuation} remaining
                         ProofSearchResult proof continuation ->
-                            case formulaStreamAssess stream $ SearchOutcome [proof] False budget of
+                            case formulaStreamAssess stream $ SearchOutcome [proof] False currentBudget of
                                 Left failure -> [Left failure]
                                 Right result ->
                                     let candidates = formulaPlanCandidates result
@@ -2769,25 +2810,27 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
                                             ordinal firstEvidenceOrdinal
                                         continued = stream {formulaStreamCursor = continuation,
                                             formulaStreamProducedProof = True}
-                                        (nextFront, nextRear)
+                                        nextQueues
                                             | interleavePlanAlternatives =
-                                                (remaining, requeuePlan ordinal inhabitationOnly
-                                                    families pendingPlans continued rear)
-                                            | not collectAcrossPlans && found = ([], [])
+                                                requeueStreamingPlan ordinal inhabitationOnly
+                                                    families pendingPlans continued remaining
+                                            | not collectAcrossPlans && found = emptyFormulaStreamQueues
                                             | otherwise =
-                                                (FormulaPlanLane ordinal inhabitationOnly families pendingPlans
-                                                    (Just continued) : remaining, rear)
+                                                prependFormulaStreamLane
+                                                    (FormulaPlanLane ordinal inhabitationOnly families pendingPlans
+                                                        (Just continued)) remaining
                                         nextLatest = Just $ streamPlanSummary result
-                                        continue nextSeen nextKey = streamPlans (candidateLimit - 1) budget
+                                        continue nextSeen nextKey = streamPlans (candidateLimit - 1) currentBudget
                                             nextCandidateOrdinal nextEvidenceOrdinal nextLatest nextSeen nextKey
-                                            nextFront nextRear
+                                            nextQueues
                                     in emitStreamCandidates result seen candidateKey candidates continue
                         ProofSearchFinished
                             | formulaStreamProducedProof stream ->
-                                resume candidateLimit budget latest seen candidateKey remaining $
-                                    FormulaPlanLane (nextPlanOrdinal ordinal) inhabitationOnly
-                                        families pendingPlans Nothing : rear
-                            | otherwise -> case formulaStreamAssess stream $ SearchOutcome [] False budget of
+                                resume candidateLimit currentBudget latest seen candidateKey $
+                                    enqueueFormulaStreamLane
+                                        (FormulaPlanLane (nextPlanOrdinal ordinal) inhabitationOnly
+                                            families pendingPlans Nothing) remaining
+                            | otherwise -> case formulaStreamAssess stream $ SearchOutcome [] False currentBudget of
                                 Left failure -> [Left failure]
                                 Right result ->
                                     let nextLatest = Just $ streamPlanSummary result
@@ -2797,12 +2840,10 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
                                     in if evidenceCanBenefitFromAnotherPlan result
                                         then streamPlans candidateLimit (formulaPlanRemainingBudget result)
                                             firstCandidateOrdinal nextEvidenceOrdinal nextLatest seen candidateKey
-                                            remaining (FormulaPlanLane (nextPlanOrdinal ordinal) inhabitationOnly
-                                                families pendingPlans Nothing : rear)
+                                            (enqueueFormulaStreamLane
+                                                (FormulaPlanLane (nextPlanOrdinal ordinal) inhabitationOnly
+                                                    families pendingPlans Nothing) remaining)
                                         else finishStream SharedSearch.Finished nextLatest
-                Right (Just _) -> [Left $ DjinnInternalQueryFailure
-                    "streaming proof-plan activation did not retain a cursor"]
-      where
         resume nextLimit nextBudget = streamPlans nextLimit nextBudget
             firstCandidateOrdinal firstEvidenceOrdinal
         earlierThan ordinal = maybe False (< ordinal)
@@ -2828,6 +2869,25 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
 
     noteOrdinal False _ previous = previous
     noteOrdinal True ordinal previous = Just $ maybe ordinal (min ordinal) previous
+
+    requeueStreamingPlan ordinal inhabitationOnly families pendingPlans stream queues =
+        foldr enqueueFormulaStreamLane queues $
+            requeuePlan ordinal inhabitationOnly families pendingPlans stream []
+
+    -- Favor small compositions in carrier contexts whose residual result is
+    -- demanded by the goal, including function-valued accumulators ending at
+    -- that result. Non-carrier cursors and all batch plans keep their existing
+    -- work schedule. Marker identities
+    -- here are private planner provenance; the demand test compares formulae.
+    startStreamingPlan plan@(planPremises, _, symbols, _, _, form, _) =
+        startFormulaPlanStreamWithNormalPriority prioritize sourceContext options target plan
+      where
+        carrierSymbol symbol =
+            "$djinn$carrier-focused$" `isPrefixOf` symbolSpelling symbol
+        relevant = [(symbol, formula) | (symbol, formula) <- planPremises,
+            symbol `Set.member` symbols]
+        prioritize = any carrierSymbol (Set.toList symbols) &&
+            all ((== instantiationResult form) . instantiationResult . snd) relevant
 
     streamPlanSummary result =
         ( DjinnQueryMetadata (formulaPlanFormula result) (formulaPlanFirstProof result)
@@ -2943,30 +3003,31 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
     -- An admitted first-inhabitant accelerator can still be cancelled when
     -- an earlier source subsequently succeeds; consumed work and already
     -- emitted results remain in the global accounting/result stream.
-    activateLane completed = activateLaneWith $ \ordinal inhabitationOnly firstCandidateOnly ->
+    activateLane completed = activateLaneWith (startFormulaPlanStream sourceContext options target) $
+        \ordinal inhabitationOnly firstCandidateOnly ->
         suppressPlan ordinal inhabitationOnly firstCandidateOnly completed
-    activateLaneWith suppress lane@(FormulaPlanLane ordinal inhabitationOnly families pendingPlans (Just stream))
+    activateLaneWith start suppress lane@(FormulaPlanLane ordinal inhabitationOnly families pendingPlans (Just stream))
         | suppress ordinal inhabitationOnly (formulaStreamFirstCandidateOnly stream) =
-            activateLaneWith suppress $ FormulaPlanLane (nextPlanOrdinal ordinal)
+            activateLaneWith start suppress $ FormulaPlanLane (nextPlanOrdinal ordinal)
                 inhabitationOnly families pendingPlans Nothing
         | otherwise = Right $ Just lane
-    activateLaneWith suppress (FormulaPlanLane ordinal _ families [] Nothing) =
+    activateLaneWith start suppress (FormulaPlanLane ordinal _ families [] Nothing) =
         case nextAdmittedPlanFamily
                 (\inhabitationOnly -> suppress ordinal inhabitationOnly False)
                 families of
             Nothing -> Right Nothing
             Just (inhabitationOnly, familyPlans, remaining) ->
-                activateLaneWith suppress $ FormulaPlanLane ordinal inhabitationOnly
+                activateLaneWith start suppress $ FormulaPlanLane ordinal inhabitationOnly
                     remaining familyPlans Nothing
-    activateLaneWith suppress (FormulaPlanLane ordinal inhabitationOnly families (plan : remaining) Nothing)
+    activateLaneWith start suppress (FormulaPlanLane ordinal inhabitationOnly families (plan : remaining) Nothing)
         | suppress ordinal inhabitationOnly False =
-            activateLaneWith suppress $ FormulaPlanLane ordinal False families [] Nothing
+            activateLaneWith start suppress $ FormulaPlanLane ordinal False families [] Nothing
         | firstCandidateOnly
         , suppress ordinal False True =
-            activateLaneWith suppress $ FormulaPlanLane (nextPlanOrdinal ordinal)
+            activateLaneWith start suppress $ FormulaPlanLane (nextPlanOrdinal ordinal)
                 inhabitationOnly families remaining Nothing
         | otherwise = do
-            stream <- startFormulaPlanStream sourceContext options target plan
+            stream <- start plan
             return $ Just $ FormulaPlanLane ordinal inhabitationOnly families remaining $
                 Just stream {formulaStreamFirstCandidateOnly = firstCandidateOnly}
       where
@@ -3147,6 +3208,61 @@ formulaPlanWorkQuantum = 64
 data FormulaPlanLane = FormulaPlanLane
     (Int, Int) Bool [(Bool, [FormulaSearchPlan])] [FormulaSearchPlan] (Maybe FormulaPlanStream)
 
+-- Streaming rotates among historical, exact-demand, and other-carrier
+-- families. Each remains a FIFO of active cursors and lazy plan sources.
+-- Growing one family's plan population cannot reduce another's turn
+-- frequency: function-valued accumulators retain their own turn alongside
+-- direct result instances. Empty families lend their turns without probing
+-- any proof cursor. The private source ordinal's first coordinate tags its
+-- family; it is not candidate or proof identity.
+data FormulaStreamQueues = FormulaStreamQueues
+    Int ([FormulaPlanLane], [FormulaPlanLane])
+        ([FormulaPlanLane], [FormulaPlanLane]) ([FormulaPlanLane], [FormulaPlanLane])
+
+emptyFormulaStreamQueues :: FormulaStreamQueues
+emptyFormulaStreamQueues = FormulaStreamQueues 0 ([], []) ([], []) ([], [])
+
+takeFormulaStreamLane :: FormulaStreamQueues -> Maybe (FormulaPlanLane, FormulaStreamQueues)
+takeFormulaStreamLane (FormulaStreamQueues preferred historical demanded carriers) =
+    choose [preferred, (preferred + 1) `mod` 3, (preferred + 2) `mod` 3]
+  where
+    choose [] = Nothing
+    choose (family : rest) = case popFamily family of
+        Just selected -> Just selected
+        Nothing -> choose rest
+    popFamily 0 = fmap (\(lane, remaining) ->
+        (lane, FormulaStreamQueues 1 remaining demanded carriers)) $ pop historical
+    popFamily 1 = fmap (\(lane, remaining) ->
+        (lane, FormulaStreamQueues 2 historical remaining carriers)) $ pop demanded
+    popFamily _ = fmap (\(lane, remaining) ->
+        (lane, FormulaStreamQueues 0 historical demanded remaining)) $ pop carriers
+    pop (firstLane : remaining, rear) = Just (firstLane, (remaining, rear))
+    pop ([], rear) = case reverse rear of
+        [] -> Nothing
+        firstLane : remaining -> Just (firstLane, (remaining, []))
+
+enqueueFormulaStreamLane :: FormulaPlanLane -> FormulaStreamQueues -> FormulaStreamQueues
+enqueueFormulaStreamLane lane@(FormulaPlanLane (family, _) _ _ _ _)
+        (FormulaStreamQueues preferred (historical, historicalRear)
+            (demanded, demandedRear) (carriers, carriersRear))
+    | family == 1 = FormulaStreamQueues preferred
+        (historical, historicalRear) (demanded, lane : demandedRear) (carriers, carriersRear)
+    | family == 2 = FormulaStreamQueues preferred
+        (historical, historicalRear) (demanded, demandedRear) (carriers, lane : carriersRear)
+    | otherwise = FormulaStreamQueues preferred
+        (historical, lane : historicalRear) (demanded, demandedRear) (carriers, carriersRear)
+
+prependFormulaStreamLane :: FormulaPlanLane -> FormulaStreamQueues -> FormulaStreamQueues
+prependFormulaStreamLane lane@(FormulaPlanLane (family, _) _ _ _ _)
+        (FormulaStreamQueues preferred (historical, historicalRear)
+            (demanded, demandedRear) (carriers, carriersRear))
+    | family == 1 = FormulaStreamQueues preferred
+        (historical, historicalRear) (lane : demanded, demandedRear) (carriers, carriersRear)
+    | family == 2 = FormulaStreamQueues preferred
+        (historical, historicalRear) (demanded, demandedRear) (lane : carriers, carriersRear)
+    | otherwise = FormulaStreamQueues preferred
+        (lane : historical, historicalRear) (demanded, demandedRear) (carriers, carriersRear)
+
 -- The cursor and the independent checker use exactly the same renamed
 -- assumptions. The callback only supplies an already-observed raw prefix;
 -- it cannot add premises or bypass the existing checked conversion pipeline.
@@ -3154,12 +3270,20 @@ startFormulaPlanStream
     :: SourceEvidence.SourceTypingContext
     -> QueryOptions -> SharedGenerated.DefinitionName -> FormulaSearchPlan
     -> Either DjinnQueryError FormulaPlanStream
-startFormulaPlanStream sourceContext options target
+startFormulaPlanStream = startFormulaPlanStreamWithNormalPriority False
+
+startFormulaPlanStreamWithNormalPriority
+    :: Bool
+    -> SourceEvidence.SourceTypingContext
+    -> QueryOptions -> SharedGenerated.DefinitionName -> FormulaSearchPlan
+    -> Either DjinnQueryError FormulaPlanStream
+startFormulaPlanStreamWithNormalPriority prioritize sourceContext options target
         (premises, diagnostics, symbols, visible, providers, form, negativeSound) = do
     let (_, internalEnv, mode) = formulaPlanSearchContext options target premises providers
     cursor <- first (DjinnInternalQueryFailure .
         ("invalid proof-search environment: " ++)) $
-        startProofSearchChecked mode internalEnv form
+        (if prioritize then startProofSearchWithNormalPriorityChecked else startProofSearchChecked)
+            mode internalEnv form
     return FormulaPlanStream
         { formulaStreamCursor = cursor
         , formulaStreamAssess = \outcome -> searchPreparedFormulaPlanBy

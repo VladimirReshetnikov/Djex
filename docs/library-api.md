@@ -258,6 +258,16 @@ is met. Using `traverse` over the entire list deliberately collects the search
 and gives up early delivery. `typedQueryResultCompatibility` remains a lazy
 projection of an individual typed result; it does not force graph checking.
 
+In `Interleave` mode, streaming cycles turns among historical plans,
+exact-result specialization plans, and other carrier plans. Each family
+admits new plans incrementally and retains its active cursors. A turn ends after a raw proof or
+64 charged choices, so admitting more plans in one family cannot dilute the
+others' shares. Focused carrier plans ending at the demanded result also give
+increasing-size normal forms a larger finite turn within their proof cursor. This scheduling
+preference adds no premises, type assignments, or search allowance; ordinary
+batch scheduling is unchanged. See the
+[behavioral search guide](behavioral-synthesis.md#djinns-explicit-alternative-search).
+
 ## Supply provider-local instantiation evidence
 
 A frontend whose source environment proves otherwise erased type choices can

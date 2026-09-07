@@ -50,7 +50,7 @@ import qualified Djinn.Internal.Environment as RawEnvironment
 import qualified Djinn.Internal.CheckedCandidate as CheckedCandidate
 import qualified Djinn.Internal.Generated as DjinnGenerated
 import Djinn.Internal.GeneratedDeduplication
-    (deduplicateEtaEquivalentClausesOn)
+    (deduplicateEtaEquivalentClausesOn, etaNormalClauseExpression)
 import Djinn.Internal.HCheck (
     htCheckEnv, htCheckType, htCheckTypeKind, htCheckTypesKinds,
     htInferClassKinds)
@@ -118,6 +118,10 @@ tests =
     , ("separate streaming terminal logical evidence from truncation", testCandidateStreamEvidence)
     , ("retain contextual streaming source authority without inventing dictionary graphs", testCandidateStreamContext)
     , ("validate streaming requests before observing their search", testCandidateStreamValidation)
+    , ("stream a demanded singleton bridge reused by alpha-equivalent quantified inputs", testCandidateStreamDemandedSingleton)
+    , ("stream cooperating quantified bridges at the exact demanded result", testCandidateStreamDemandedGroup)
+    , ("stream a quantified consumer at a function-valued accumulator", testCandidateStreamFunctionAccumulator)
+    , ("retain finite proof fairness and exact choices under streaming normal priority", testStreamingNormalPriorityAccounting)
     , ("reuse one fold bridge on two distinct opaque inputs", testFoldBridgeReuse)
     , ("retain both binary compositions over the inner result", testBinaryCompositionWithOuterResult)
     , ("compose endomorphisms using the last result argument", testEndomorphismCompositionWithOuterResult)
@@ -1839,6 +1843,119 @@ testCandidateStreamFirstDelivery = do
             ProofSearchFinished -> fail "identity raw cursor produced no proof"
             ProofSearchChoice rest -> measureFirstProofChoices (charged + 1) rest
             ProofSearchResult _ _ -> pure charged
+
+-- Both quantified inputs denote the same source scheme after alpha
+-- normalization. The query needs one exact-result instance, used once for
+-- each input. An earlier constant/projection must not suppress that plan.
+testCandidateStreamDemandedSingleton :: IO ()
+testCandidateStreamDemandedSingleton = do
+    let local = SharedGenerated.Local
+        apply = SharedGenerated.Apply
+        specialize value seed = apply (apply (local value) (local "step")) seed
+        body = specialize "leftInput" $ specialize "rightInput" $ local "seed"
+    assertCheckedStreamPrefix 128 "streamRepeatedScheme"
+        "(forall leftResult. (item -> leftResult -> leftResult) -> leftResult -> leftResult) -> (forall rightResult. (item -> rightResult -> rightResult) -> rightResult -> rightResult) -> (forall result. (item -> result -> result) -> result -> result)"
+        ["leftInput", "rightInput", "step", "seed"] body
+
+-- Two distinct schemes cooperate at the goal's result: a selector's chosen
+-- result must be the same exact atom as a consumer's accumulator. A common
+-- result group supplies both existing bridges without mixing in other
+-- available instantiation images or identifying the two source schemes.
+testCandidateStreamDemandedGroup :: IO ()
+testCandidateStreamDemandedGroup = do
+    let local = SharedGenerated.Local
+        apply = SharedGenerated.Apply
+        apps = foldl apply
+        selected = apps (local "predicate")
+            [ local "element"
+            , apps (local "step") [local "element", local "rest"]
+            , local "rest"
+            ]
+        callback = SharedGenerated.Lambda
+            [SharedGenerated.Bind "element", SharedGenerated.Bind "rest"] selected
+        body = apps (local "input") [callback, local "seed"]
+    assertCheckedStreamPrefix 128 "streamCooperatingSchemes"
+        "(item -> (forall selected. selected -> selected -> selected)) -> (forall folded. (item -> folded -> folded) -> folded -> folded) -> (forall result. (item -> result -> result) -> result -> result)"
+        ["predicate", "input", "step", "seed"] body
+
+-- A quantified consumer also needs a live specialization whose accumulator
+-- is a function, beyond the goal's direct result instances. Historical plan
+-- admission must not dilute that carrier's continuation. This composition
+-- traverses its input while accumulating a continuation for the final seed.
+testCandidateStreamFunctionAccumulator :: IO ()
+testCandidateStreamFunctionAccumulator = do
+    let local = SharedGenerated.Local
+        apps = foldl SharedGenerated.Apply
+        callback = SharedGenerated.Lambda
+            [SharedGenerated.Bind "element", SharedGenerated.Bind "rest", SharedGenerated.Bind "carry"] $
+            apps (local "rest") [apps (local "step") [local "element", local "carry"]]
+        identity = SharedGenerated.Lambda [SharedGenerated.Bind "carry"] $ local "carry"
+        body = apps (local "input") [callback, identity]
+    assertCheckedStreamPrefix 256 "streamFunctionAccumulator"
+        "(forall folded. (item -> folded -> folded) -> folded -> folded) -> (forall result. (item -> result -> result) -> result -> result)"
+        ["input", "step"] body
+
+assertCheckedStreamPrefix
+    :: Int -> String -> String -> [String] -> SharedGenerated.Expression String -> IO ()
+assertCheckedStreamPrefix prefix name signature binders body = do
+    source <- expectRight (parseHType signature) >>= expectShownRight . toSynthesisType
+    prepared <- expectShownRight $ prepareEnvironment emptyEnvironment
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $ sharedName name
+    let configured = defaultQueryOptions
+            { optionAlternatives = True, optionSorted = False, optionStrategy = Interleave
+            , optionCutoff = 65536, optionBudget = Just 500000 }
+        expected = SharedGenerated.FunctionClause target (map SharedGenerated.Bind binders) body
+        matches candidate = SharedGenerated.alphaEquivalentExpression
+            (etaNormalClauseExpression expected) $
+            etaNormalClauseExpression $ SharedCandidate.candidateOutput $
+                SharedTypedCandidate.typedCandidateCompatibility candidate
+    stream <- expectShownRight $ inhabitTypedSynthesisStreamPreparedWithSourceGoal
+        configured prepared source [] (DjinnSourceInstantiationCandidates []) target source
+    observations <- mapM expectShownRight $ take prefix stream
+    case [observation | observation <- observations,
+            any matches $ SharedSearch.batchCandidates $ SharedQuery.resultSearch observation] of
+        matching : _ -> assertTypedCoreGraphs target source matching
+        [] -> fail $ name ++ ": direct checked composition absent from first " ++ show prefix ++
+            " streaming observations (observed " ++ show (length observations) ++ ")"
+
+testStreamingNormalPriorityAccounting :: IO ()
+testStreamingNormalPriorityAccounting = do
+    let atom = PVar $ Symbol "streamScheduleAtom"
+        goal = atom :-> atom :-> atom
+        mode = (defaultSearchMode True)
+            { searchStrategy = Interleave, searchTermAlternatives = True
+            , searchRanking = SharedQuality.defaultCandidateRankingPolicy }
+    ordinary <- expectRight $ proveWithModeChecked
+        mode {searchTermAlternatives = False} [] goal
+    cursor <- expectRight $ startProofSearchWithNormalPriorityChecked mode [] goal
+    let (complete, completeChoices, completeRest) = consume 10000 cursor
+        (prefix, prefixChoices, prefixRest) = consume 7 cursor
+        (suffix, suffixChoices, suffixRest) = case prefixRest of
+            Nothing -> ([], 0, Nothing)
+            Just continuation -> consume (10000 - prefixChoices) continuation
+    assertEqual "normal priority moved the first historical proof"
+        (take 1 $ searchProofs ordinary) (take 1 complete)
+    assertBool "normal priority starved a finite historical proof alternative" $
+        all (`elem` complete) $ searchProofs ordinary
+    assertBool "finite normal and historical lanes did not finish" $
+        finished completeRest && finished suffixRest
+    assertEqual "resumption lost or repeated a prioritized proof" complete (prefix ++ suffix)
+    assertEqual "resumption refunded or duplicated prioritized choice work"
+        completeChoices (prefixChoices + suffixChoices)
+    mapM_ (expectRight . checkProof [] goal) complete
+  where
+    finished Nothing = True
+    finished Just{} = False
+    consume :: Integer -> ProofSearchCursor -> ([Proof], Integer, Maybe ProofSearchCursor)
+    consume allowance cursor | allowance <= 0 = ([], 0, Just cursor)
+    consume allowance cursor = case observeProofSearch cursor of
+        ProofSearchFinished -> ([], 0, Nothing)
+        ProofSearchChoice rest ->
+            let (proofs, charged, continuation) = consume (allowance - 1) rest
+            in (proofs, charged + 1, continuation)
+        ProofSearchResult proof rest ->
+            let (proofs, charged, continuation) = consume allowance rest
+            in (proof : proofs, charged, continuation)
 
 testCandidateStreamBudgets :: IO ()
 testCandidateStreamBudgets = do

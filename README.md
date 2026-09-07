@@ -504,8 +504,9 @@ signatures and compiler-checks the generated terms under its documented
 environment and partiality assumptions.
 
 The [next-priorities review](docs/reports/2026-09-06-synthesis-next-priorities.md)
-separates the current streaming acceptance work from proposed recursive-data,
-contextual-provider, and behavioral-specification improvements.
+separates the current streaming acceptance work from proposed Haskell
+elaboration, recursive-data, contextual-provider, and behavioral-specification
+improvements.
 
 `:type EXPRESSION` (or `:t EXPRESSION`) is a separate, non-evaluating
 inspection command. It infers against term signatures in the current loaded
@@ -527,9 +528,8 @@ synonyms normalized. See
 qualification behavior, and the intentionally supported kind-language subset.
 
 `:eval EXPRESSION` compiles the loaded source workspace with real GHC and
-evaluates one expression in the current prompt module/import context. This is
-the only REPL command that executes Haskell code, and each invocation uses a
-fresh interpreter. If the workspace or its prompt context does not compile,
+evaluates one expression in the current prompt module/import context. Each
+invocation uses a fresh interpreter. If the workspace or its prompt context does not compile,
 evaluation falls back to Prelude scope and reports an advisory. See
 [evaluating expressions](docs/repl.md#evaluating-expressions) for the scope,
 fallback, isolation, and interrupt contract.

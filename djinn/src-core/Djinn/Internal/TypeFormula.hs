@@ -45,6 +45,7 @@ module Djinn.Internal.TypeFormula
     , compileTransportFormula
     , compileRecursiveDataViews
     , compileDataConstructorViews
+    , compileDataViewInstanceFormula
     , compileDataViewFormula
     , compileConstructedHypothesisFormula
     , negativeOpaqueFormulaSymbols
@@ -713,6 +714,19 @@ compileDataViewFormula namespace polarity view prepared source = do
     expanded <- expansionTypeAt view QueryOrigin [] source
     lowerExpansionType
         (PreserveData $ PolarizedForalls (show namespace) polarity view Set.empty Set.empty)
+        prepared emptyExpansionPath [] expanded
+
+-- | Exact vocabulary for instances used beside opaque datatype views. Keep
+-- quantified subterms opaque as well: instantiating a provider must not open
+-- another obligation scope or acquire fresh skolems implicitly.
+compileDataViewInstanceFormula
+    :: TypeView (SharedType.Type String)
+    -> PreparedFormulaCompiler
+    -> SharedType.Type String
+    -> Either String Formula
+compileDataViewInstanceFormula view prepared source = do
+    expanded <- expansionTypeAt view QueryOrigin [] source
+    translatedFormula <$> lowerExpansionType (PreserveData OpaqueForalls)
         prepared emptyExpansionPath [] expanded
 
 -- | Exact opaque forall types available at negative source positions.

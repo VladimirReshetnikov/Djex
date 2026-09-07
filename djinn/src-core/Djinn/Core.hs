@@ -157,6 +157,7 @@ import Djinn.Internal.TypeFormula
     , singleOpenFormulaPlans
     , translatedFormula
     , translationIncomplete
+    , translationIntroducedSkolems
     )
 
 ------------------------------------------------------------------
@@ -2619,47 +2620,127 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
     -- introduction premises resolve to actual constructors in the checked
     -- source inventory. Ordinary source checking validates the resulting tree.
     -- Do not infer non-inhabitation from this finite recursive approximation.
-    recursiveDataSearchPlans =
-        [ (dataPremises ++ constructorPremises ++ viewPremises, [],
-            Set.fromList $ map fst viewPremises ++ map fst constructorPremises,
-            Map.empty, constructorApplications, goal, False)
+    recursiveDataSearchPlans = concat
+        [ dataPlans [] Map.empty False ++
+            concat
+                [ dataPlans bridges applications True
+                | (bridges, applications) <- instanceFamilies
+                ]
         | Right translation <-
             [preparedEnvironmentDataViewFormula prepared 0 PositiveFormula elaboratedGoal]
-        , Right (dataPremises, _) <- [preparedEnvironmentDataViewFunctionPremises prepared]
+        , Right (dataPremises, dataSpellings) <- [preparedEnvironmentDataViewFunctionPremises prepared]
         , let goal = translatedFormula translation
-              sequent = goal : map snd dataPremises
-              views = preparedEnvironmentDataConstructorViews prepared sequent
-              negativeTypes = atomsAtPolarity False True goal `Set.union`
+              sourceSequent = goal : map snd dataPremises
+              sourceNegativeTypes = atomsAtPolarity False True goal `Set.union`
                   Set.unions [atomsAtPolarity False False form | (_, form) <- dataPremises]
-              positiveTypes = atomsAtPolarity True True goal `Set.union`
-                  Set.unions [atomsAtPolarity True False form | (_, form) <- dataPremises]
               results = residualResults goal
-              viewPremises =
-                  [ (Symbol $ "$djinn$recursive-view$unfold$" ++ show index ++ "$" ++ show resultIndex,
-                      (structural :-> result) :-> (opaque :-> result))
-                  | (index, (opaque, structural)) <- zip [0 :: Natural ..] views
-                  , opaque `Set.member` negativeTypes
-                  , (resultIndex, result) <- zip [0 :: Natural ..] results
+              ownedSpellings = SharedCollection.distinctOn id $
+                  goalVariables ++ translationIntroducedSkolems translation ++ dataSpellings
+              instanceTranslator = checkedTranslator (Set.fromList ownedSpellings) $
+                  preparedEnvironmentDataViewInstanceTranslator prepared
+              activeDataPremises = filter ((/= targetSymbol) . fst) dataPremises
+              -- A retained full source scheme is one opaque atom regardless
+              -- of its body's datatype view. Keep these original quantified
+              -- identities rather than rebuilding schemes from implicitized
+              -- premise variables or rendered atom spellings.
+              availableSchemes = activeLoadedSchemePremises
+              instancePremises = activeDataPremises ++ availableSchemes
+              localInstances = instantiationAxioms instanceTranslator visibleArgument
+                  ownedSpellings [goal] (map snd activeDataPremises)
+              loadedInstances = loadedInstantiationAxioms instanceTranslator visibleArgument
+                  ownedSpellings closedCandidates [goal] (map snd activeDataPremises)
+                  (map snd availableSchemes)
+              directedInstances = queryDirectedInstantiationAxioms instanceTranslator visibleArgument
+                  localInstances ownedSpellings elaboratedGoal [goal] (map snd instancePremises)
+              carrierInstances = queryCarrierInstantiationAxioms instanceTranslator visibleArgument
+                  ownedSpellings [goal] (map snd instancePremises)
+              instanceImages = SharedCollection.distinctOn
+                  (\(_, form, arguments) -> (form, arguments))
+                  [ (symbol, form, Map.lookup symbol $ instantiationVisibleApplications family)
+                  | family <- [localInstances, loadedInstances, directedInstances, carrierInstances]
+                  , (symbol, form) <- instantiationAxiomPremises family
                   ]
-              constructors =
-                  [ ( Symbol $ "$djinn$data-constructor$" ++ show index ++ "$" ++ show constructorIndex
-                    , Symbol name
-                    , foldr (:->) opaque fields)
-                  | (index, (opaque, Disj alternatives)) <- zip [0 :: Natural ..] views
-                  , opaque `Set.member` positiveTypes
-                  , (constructorIndex, (ConsDesc name arity, Conj fields)) <-
-                      zip [0 :: Natural ..] alternatives
-                  , arity == length fields
+              -- Exact demanded result images get a small coherent context
+              -- first. The complete bounded image family remains a fallback
+              -- for compositions using intermediate accumulator types.
+              -- A small exact image must not wait behind every other
+              -- accumulator specialization. Prefer singleton compositions
+              -- whose result is demanded and which consume one of the
+              -- query's actual recursive inputs. Both tests compare checked
+              -- formula identities, not provider names or datatype spelling.
+              -- The old grouped contexts remain after this additive prefix.
+              goalRecursiveInputs = Set.fromList
+                  [ opaque
+                  | (opaque, _) <- preparedEnvironmentRecursiveDataViews prepared [goal]
+                  , opaque `Set.member` atomsAtPolarity False True goal
                   ]
-        , any ((`Set.member` negativeTypes) . fst) $
-            preparedEnvironmentRecursiveDataViews prepared sequent
-        -- Inspect and forward existing values before introducing fresh ones.
-        -- The second plan restores construction without committing the first
-        -- branch of a case to a closed constructor before lexical defaults.
-        , selectedConstructors <- if null constructors then [[]] else [[], constructors]
-        , let constructorPremises = [(symbol, form) | (symbol, _, form) <- selectedConstructors]
-              constructorApplications = Map.fromList
-                  [(symbol, (source, [])) | (symbol, source, _) <- selectedConstructors]
+              preferredImages =
+                  [ [image]
+                  | image@(_, _ :-> body, _) <- instanceImages
+                  , instantiationResult body `elem` results
+                  , any (`Set.member` goalRecursiveInputs) $ argumentTypes body
+                  ]
+              imageGroups = SharedCollection.distinctOn
+                  (map (\(_, form, arguments) -> (form, arguments))) $
+                  preferredImages ++ [ images
+                  | result <- results
+                  , let images = [image | image@(_, _ :-> body, _) <- instanceImages,
+                                          instantiationResult body == result]
+                  , not $ null images
+                  ] ++ [instanceImages | not $ null instanceImages]
+              instanceFamilies =
+                  [ ( [(symbol, form) | (symbol, form, _) <- renamed]
+                    , Map.fromList [(symbol, arguments) | (symbol, _, Just arguments) <- renamed]
+                    )
+                  | (familyIndex, images) <- zip [0 :: Natural ..] imageGroups
+                  , let renamed =
+                          [ (Symbol $ "$djinn$carrier-focused$data$" ++ show familyIndex ++ "$" ++ show index,
+                              form, arguments)
+                          | (index, (_, form, arguments)) <- zip [0 :: Natural ..] images
+                          ]
+                  ]
+              dataPlans bridges applications instantiated =
+                  [ (planPremises ++ constructorPremises ++ selectedViews, [],
+                      Set.fromList $ map fst selectedViews ++ map fst constructorPremises ++ map fst bridges,
+                      applications, constructorApplications, goal, False)
+                  | let planPremises = dataPremises ++ bridges ++
+                              [scheme | instantiated, scheme <- availableSchemes]
+                        sequent = goal : map snd planPremises
+                        views = preparedEnvironmentDataConstructorViews prepared sequent
+                        negativeTypes = atomsAtPolarity False True goal `Set.union`
+                            Set.unions [atomsAtPolarity False False form | (_, form) <- planPremises]
+                        positiveTypes = atomsAtPolarity True True goal `Set.union`
+                            Set.unions [atomsAtPolarity True False form | (_, form) <- planPremises]
+                        viewPremises =
+                            [ (Symbol $ "$djinn$recursive-view$unfold$" ++ show index ++ "$" ++ show resultIndex,
+                                (structural :-> result) :-> (opaque :-> result))
+                            | (index, (opaque, structural)) <- zip [0 :: Natural ..] views
+                            , opaque `Set.member` negativeTypes
+                            , (resultIndex, result) <- zip [0 :: Natural ..] results
+                            ]
+                        constructors =
+                            [ ( Symbol $ "$djinn$data-constructor$" ++ show index ++ "$" ++ show constructorIndex
+                              , Symbol name
+                              , foldr (:->) opaque fields)
+                            | (index, (opaque, Disj alternatives)) <- zip [0 :: Natural ..] views
+                            , opaque `Set.member` positiveTypes
+                            , (constructorIndex, (ConsDesc name arity, Conj fields)) <-
+                                zip [0 :: Natural ..] alternatives
+                            , arity == length fields
+                            ]
+                  -- Existing cases preserve their constructor-free prefix.
+                  -- Generic folds first compose constructors without forcing
+                  -- one-layer cases; a second context permits both mechanisms.
+                  , selectedViews <- if instantiated && not (null viewPremises)
+                      then [[], viewPremises] else [viewPremises]
+                  , selectedConstructors <- if null constructors then [[]]
+                      else if instantiated then [constructors] else [[], constructors]
+                  , let constructorPremises = [(symbol, form) | (symbol, _, form) <- selectedConstructors]
+                        constructorApplications = Map.fromList
+                            [(symbol, (source, [])) | (symbol, source, _) <- selectedConstructors]
+                  ]
+        , any ((`Set.member` sourceNegativeTypes) . fst) $
+            preparedEnvironmentRecursiveDataViews prepared sourceSequent
         ]
       where
         -- Continuation form postpones selecting the scrutinized value until
@@ -2669,6 +2750,8 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
         residualResults (_ :-> remaining) = residualResults remaining
         residualResults (Conj fields) = concatMap residualResults fields
         residualResults resultFormula = [resultFormula]
+        argumentTypes (argument :-> remaining) = argument : argumentTypes remaining
+        argumentTypes _ = []
         atomsAtPolarity wanted polarity formula = case formula of
             atom@PVar{} | wanted == polarity -> Set.singleton atom
             left :-> right -> atomsAtPolarity wanted (not polarity) left
@@ -2848,20 +2931,20 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
         -- more historical plans cannot dilute either carrier family's work
         -- share. The first turn remains historical, with no candidate lookahead.
         advance ordinal inhabitationOnly families pendingPlans stream currentBudget remaining =
-                    case observeProofSearch $ formulaStreamCursor stream of
-                        ProofSearchChoice continuation
+                    case observeFormulaPlanStream stream of
+                        FormulaStreamChoice continuation
                             | Just fuel <- currentBudget, fuel <= 0 -> finishStream
                                 (SharedSearch.truncated SharedSearch.ChoicePointLimitReached) latest
                             | not interleavePlanAlternatives || formulaStreamWorkRemaining stream > 1 ->
                                 advance ordinal inhabitationOnly families pendingPlans
-                                    stream {formulaStreamCursor = continuation,
+                                    continuation {
                                         formulaStreamWorkRemaining = formulaStreamWorkRemaining stream - 1}
                                     (fmap (subtract 1) currentBudget) remaining
                             | otherwise -> resume candidateLimit (fmap (subtract 1) currentBudget)
                                 latest seen candidateKey $
                                 requeueStreamingPlan ordinal inhabitationOnly families pendingPlans
-                                    stream {formulaStreamCursor = continuation} remaining
-                        ProofSearchResult proof continuation ->
+                                    continuation remaining
+                        FormulaStreamProof proof continuation ->
                             case formulaStreamAssess stream $ SearchOutcome [proof] False currentBudget of
                                 Left failure -> [Left failure]
                                 Right result ->
@@ -2871,7 +2954,7 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
                                         nextEvidenceOrdinal = noteOrdinal
                                             (formulaPlanEvidence result /= SharedQuery.NoEvidence)
                                             ordinal firstEvidenceOrdinal
-                                        continued = stream {formulaStreamCursor = continuation,
+                                        continued = continuation {
                                             formulaStreamProducedProof = True}
                                         nextQueues
                                             | interleavePlanAlternatives =
@@ -2887,7 +2970,7 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
                                             nextCandidateOrdinal nextEvidenceOrdinal nextLatest nextSeen nextKey
                                             nextQueues
                                     in emitStreamCandidates result seen candidateKey candidates continue
-                        ProofSearchFinished
+                        FormulaStreamFinished
                             | formulaStreamProducedProof stream ->
                                 resume candidateLimit currentBudget latest seen candidateKey $
                                     enqueueFormulaStreamLane
@@ -2939,11 +3022,14 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
 
     -- Favor small compositions in carrier contexts whose residual result is
     -- demanded by the goal, including function-valued accumulators ending at
-    -- that result. Non-carrier cursors and all batch plans keep their existing
-    -- work schedule. Marker identities
+    -- that result. Other streaming cursors retain their existing work
+    -- schedule; constructor composition uses the policy below in both APIs.
+    -- Marker identities
     -- here are private planner provenance; the demand test compares formulae.
     startStreamingPlan plan@(planPremises, _, symbols, _, _, form, _) =
-        startFormulaPlanStreamWithNormalPriority prioritize sourceContext options target plan
+        if constructorCompositionPlan plan
+            then startConstructorCompositionPlan sourceContext options target plan
+            else startFormulaPlanStreamWithNormalPriority prioritize sourceContext options target plan
       where
         carrierSymbol symbol =
             "$djinn$carrier-focused$" `isPrefixOf` symbolSpelling symbol
@@ -2951,6 +3037,21 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
             symbol `Set.member` symbols]
         prioritize = any carrierSymbol (Set.toList symbols) &&
             all ((== instantiationResult form) . instantiationResult . snd) relevant
+
+    -- LJT may saturate a supplied fold with a closed constructor before the
+    -- query's lambda-bound inputs are available. Open the exact outer arrow
+    -- spine first in these contexts, so ordinary neutral argument search can
+    -- select every compatible input, including distinct same-typed inputs in
+    -- either order. Both APIs use the same charged introduction entrance and
+    -- normal-form scheduling preference. Reconstructed proofs still check
+    -- against the original sequent; source/provider authority is unchanged.
+    -- This may replace an eta-short neutral prefix in these positive-only
+    -- contexts. Historical and case-view plans retain their ordinary schedule.
+    constructorCompositionPlan (_, _, symbols, _, _, _, _) =
+        any (isPrefixOf "$djinn$carrier-focused$data$" . symbolSpelling) names &&
+            not (any (isPrefixOf "$djinn$recursive-view$" . symbolSpelling) names)
+      where
+        names = Set.toList symbols
 
     streamPlanSummary result =
         ( DjinnQueryMetadata (formulaPlanFormula result) (formulaPlanFirstProof result)
@@ -2995,29 +3096,29 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
                 case active of
                     Nothing -> runFairPlans candidateLimit budget completed remaining rear
                     Just (FormulaPlanLane ordinal inhabitationOnly families pendingPlans (Just stream)) ->
-                        case observeProofSearch $ formulaStreamCursor stream of
-                            ProofSearchChoice continuation
+                        case observeFormulaPlanStream stream of
+                            FormulaStreamChoice continuation
                                 | Just fuel <- budget, fuel <= 0 -> finishFair
                                     (SharedSearch.truncated SharedSearch.ChoicePointLimitReached)
                                     budget completed
                                 | formulaStreamWorkRemaining stream > 1 ->
                                     runFairPlans candidateLimit (fmap (subtract 1) budget) completed
                                         (FormulaPlanLane ordinal inhabitationOnly families pendingPlans
-                                            (Just stream {formulaStreamCursor = continuation,
+                                            (Just continuation {
                                                 formulaStreamWorkRemaining = formulaStreamWorkRemaining stream - 1})
                                             : remaining) rear
                                 | otherwise -> runFairPlans candidateLimit
                                     (fmap (subtract 1) budget) completed remaining $
                                     requeuePlan ordinal inhabitationOnly families pendingPlans
-                                        stream {formulaStreamCursor = continuation} rear
-                            ProofSearchResult proof continuation -> do
+                                        continuation rear
+                            FormulaStreamProof proof continuation -> do
                                 result <- formulaStreamAssess stream $
                                     SearchOutcome [proof] False budget
                                 runFairPlans (candidateLimit - 1) budget ((ordinal, result) : completed)
                                     remaining $ requeuePlan ordinal inhabitationOnly families pendingPlans
-                                        stream {formulaStreamCursor = continuation,
+                                        continuation {
                                             formulaStreamProducedProof = True} rear
-                            ProofSearchFinished
+                            FormulaStreamFinished
                                 | formulaStreamProducedProof stream ->
                                     runFairPlans candidateLimit budget completed remaining $
                                         FormulaPlanLane (nextPlanOrdinal ordinal) inhabitationOnly
@@ -3066,7 +3167,10 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
     -- An admitted first-inhabitant accelerator can still be cancelled when
     -- an earlier source subsequently succeeds; consumed work and already
     -- emitted results remain in the global accounting/result stream.
-    activateLane completed = activateLaneWith (startFormulaPlanStream sourceContext options target) $
+    activateLane completed = activateLaneWith
+        (\plan -> if constructorCompositionPlan plan
+            then startConstructorCompositionPlan sourceContext options target plan
+            else startFormulaPlanStream sourceContext options target plan) $
         \ordinal inhabitationOnly firstCandidateOnly ->
         suppressPlan ordinal inhabitationOnly firstCandidateOnly completed
     activateLaneWith start suppress lane@(FormulaPlanLane ordinal inhabitationOnly families pendingPlans (Just stream))
@@ -3257,11 +3361,31 @@ type FormulaSearchPlan =
 
 data FormulaPlanStream = FormulaPlanStream
     { formulaStreamCursor :: ProofSearchCursor
+    , formulaStreamPendingIntroductions :: Int
     , formulaStreamAssess :: SearchOutcome -> Either DjinnQueryError FormulaPlanResult
     , formulaStreamProducedProof :: Bool
     , formulaStreamFirstCandidateOnly :: Bool
     , formulaStreamWorkRemaining :: Int
     }
+
+data FormulaStreamObservation
+    = FormulaStreamFinished
+    | FormulaStreamChoice FormulaPlanStream
+    | FormulaStreamProof Proof FormulaPlanStream
+
+-- A focused sequent may have opened the query's outer arrows before entering
+-- LJT. Charge every such introduction through the very same outer choice
+-- counter, without observing its proof cursor or borrowing another budget.
+observeFormulaPlanStream :: FormulaPlanStream -> FormulaStreamObservation
+observeFormulaPlanStream stream
+    | formulaStreamPendingIntroductions stream > 0 = FormulaStreamChoice
+        stream {formulaStreamPendingIntroductions = formulaStreamPendingIntroductions stream - 1}
+    | otherwise = case observeProofSearch $ formulaStreamCursor stream of
+        ProofSearchFinished -> FormulaStreamFinished
+        ProofSearchChoice continuation -> FormulaStreamChoice
+            stream {formulaStreamCursor = continuation}
+        ProofSearchResult proof continuation -> FormulaStreamProof proof
+            stream {formulaStreamCursor = continuation}
 
 -- Scheduling only: a raw proof preempts this turn, and every choice still
 -- spends the shared query allowance. It is not a separate search budget.
@@ -3340,22 +3464,75 @@ startFormulaPlanStreamWithNormalPriority
     -> SourceEvidence.SourceTypingContext
     -> QueryOptions -> SharedGenerated.DefinitionName -> FormulaSearchPlan
     -> Either DjinnQueryError FormulaPlanStream
-startFormulaPlanStreamWithNormalPriority prioritize sourceContext options target
+startFormulaPlanStreamWithNormalPriority prioritize =
+    startFormulaPlanStreamWithGoalPolicy prioritize False
+
+startConstructorCompositionPlan
+    :: SourceEvidence.SourceTypingContext
+    -> QueryOptions -> SharedGenerated.DefinitionName -> FormulaSearchPlan
+    -> Either DjinnQueryError FormulaPlanStream
+startConstructorCompositionPlan sourceContext options =
+    startFormulaPlanStreamWithGoalPolicy True
+        (optionAlternatives options && optionStrategy options == Interleave)
+        sourceContext options
+
+startFormulaPlanStreamWithGoalPolicy
+    :: Bool -> Bool
+    -> SourceEvidence.SourceTypingContext
+    -> QueryOptions -> SharedGenerated.DefinitionName -> FormulaSearchPlan
+    -> Either DjinnQueryError FormulaPlanStream
+startFormulaPlanStreamWithGoalPolicy prioritize introduce sourceContext options target
         (premises, diagnostics, symbols, visible, providers, form, negativeSound) = do
     let (_, internalEnv, mode) = formulaPlanSearchContext options target premises providers
+        reserved = Set.fromList $
+            Symbol (SharedGenerated.definitionSpelling target) :
+            map fst (internalEnv ++ premises ++ diagnostics) ++
+            concatMap (formulaSymbols . snd) (internalEnv ++ premises ++ diagnostics) ++
+            formulaSymbols form ++ Set.toList symbols ++ Map.keys visible ++
+            Map.keys providers ++ map fst (Map.elems providers)
+        (introduced, searchGoal)
+            | introduce = openGoal reserved 0 form
+            | otherwise = ([], form)
+        searchEnv = reverse introduced ++ internalEnv
+        restoreGoal proof = foldr (Lam . fst) proof introduced
+        assess outcome = do
+            -- Check exactly the environment the cursor used before restoring
+            -- the goal's lambda spine. The ordinary downstream checker then
+            -- independently validates the wrapped proof at the original goal.
+            unless (null introduced) $
+                first (DjinnInternalQueryFailure . ("invalid opened-goal proof: " ++)) $
+                    mapM_ (void . checkProofWithEvidence searchEnv searchGoal) $ searchProofs outcome
+            searchPreparedFormulaPlanBy sourceContext True
+                (\_ _ _ -> Right outcome {searchProofs = map restoreGoal $ searchProofs outcome})
+                options 1 target premises symbols visible providers diagnostics form negativeSound
     cursor <- first (DjinnInternalQueryFailure .
         ("invalid proof-search environment: " ++)) $
         (if prioritize then startProofSearchWithNormalPriorityChecked else startProofSearchChecked)
-            mode internalEnv form
+            mode searchEnv searchGoal
     return FormulaPlanStream
         { formulaStreamCursor = cursor
-        , formulaStreamAssess = \outcome -> searchPreparedFormulaPlanBy
-            sourceContext True (\_ _ _ -> Right outcome) options 1 target premises symbols visible
-            providers diagnostics form negativeSound
+        , formulaStreamPendingIntroductions = length introduced
+        , formulaStreamAssess = assess
         , formulaStreamProducedProof = False
         , formulaStreamFirstCandidateOnly = False
         , formulaStreamWorkRemaining = formulaPlanWorkQuantum
         }
+  where
+    -- Freshness includes source/provider spellings as well as internal names:
+    -- restoring a free assumption must never capture it under a new lambda.
+    -- The domains are the original exact Formula nodes, with no substitution
+    -- or extra proof premise beyond the query's own arrow-introduction rule.
+    openGoal used next (domain :-> result) =
+        let (binder, following) = freshInput used next
+            (remaining, final) = openGoal (Set.insert binder used) following result
+        in ((binder, domain) : remaining, final)
+    openGoal _ _ result = ([], result)
+
+    freshInput used next =
+        let binder = Symbol $ "$djinn$query-input$" ++ show (next :: Natural)
+        in if binder `Set.member` used
+            then freshInput used (next + 1)
+            else (binder, next + 1)
 
 formulaPlanSearchContext
     :: QueryOptions -> SharedGenerated.DefinitionName -> [(Symbol, Formula)]

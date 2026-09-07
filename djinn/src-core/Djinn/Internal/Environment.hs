@@ -28,6 +28,7 @@ module Djinn.Internal.Environment (
     preparedEnvironmentDataConstructorViews,
     preparedEnvironmentDataViewFormula,
     preparedEnvironmentDataViewFunctionPremises,
+    preparedEnvironmentDataViewInstanceTranslator,
     preparedEnvironmentNominalTransportSynthesisFormula,
     preparedEnvironmentTransportFunctionPremises,
     preparedEnvironmentNominalTransportFunctionPremises,
@@ -1414,6 +1415,16 @@ preparedEnvironmentDataViewFunctionPremises
     :: PreparedEnvironment -> Either String ([(Symbol, Formula)], [String])
 preparedEnvironmentDataViewFunctionPremises prepared =
     translateFunctionPremises (preparedEnvironmentDataViewFormula prepared) prepared
+
+-- | Provider instances must use the same datatype atoms as their goal and
+-- premises. This exact translator preserves all remaining forall scopes;
+-- callers separately kind-check every proposed instance under owned skolems.
+preparedEnvironmentDataViewInstanceTranslator
+    :: PreparedEnvironment -> SharedType.Type HSymbol -> Either String Formula
+preparedEnvironmentDataViewInstanceTranslator
+        (PreparedEnvironment _ _ _ _ _ _ compiler _ _) =
+    compileDataViewInstanceFormula synthesisFormulaTypeView compiler .
+        SharedType.canonicalizeType
 
 -- | One additional positive view selected by exact types already available
 -- in the current query. This is prepared only by the candidate-free fallback;

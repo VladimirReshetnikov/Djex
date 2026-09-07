@@ -23,6 +23,7 @@ import Djinn.Internal.Environment (preparedEnvironmentInventory)
 import Djinn.Internal.SourceGraphKinds
   ( validateSourceGraphKinds, inferSourceGraphMetavariableKinds )
 import qualified Language.Haskell.Synthesis.Declaration as D
+import Language.Haskell.Synthesis.Constraint (Constraint(..))
 import qualified Language.Haskell.Synthesis.Environment as E
 import qualified Language.Haskell.Synthesis.Generated as G
 import qualified Language.Haskell.Synthesis.Inventory as I
@@ -56,6 +57,7 @@ data CheckState = CheckState
   , checkGlobals :: Map.Map Name Type
   , checkConstructors :: Map.Map Name Type
   , checkEmptyTypes :: Set.Set Name
+  , checkGivens :: [(Constraint Type, Q.ContextEvidence)]
   }
 
 type Check = StateT CheckState (Either SourceGraphError)
@@ -84,7 +86,7 @@ checkSourceClauseGraph key context clause = do
         | ty <- goal : Map.elems globals
         ]
       initial = CheckState key 0 100000 0 reserved Map.empty Map.empty
-        Map.empty Map.empty globals constructors emptyTypes
+        Map.empty Map.empty globals constructors emptyTypes []
   first (SourceGraphTypingFailure . show) $ G.validateFunctionClauseScope clause
   (root, state) <- runStateT
     (checkExpression Map.empty (G.functionClauseExpression clause) goal) initial
@@ -101,13 +103,14 @@ checkSourceClauseGraph key context clause = do
     (mapM (resolveNodeWith resolveEvidenceType) $ Map.toAscList $ checkNodes completedState)
     completedState
   let structure = Q.sharedTypeStructure
-        { Q.forallTypeStructure = Just Q.sharedForallTypeStructure
+        { Q.forallTypeStructure = Just Q.sharedContextualForallTypeStructure
         , Q.constructorPatternFieldTypes = constructorFields constructors
         }
       source = Q.TermGraphSource root nodes
   first (SourceGraphTypingFailure . ("completed source graph: " ++)) $
     validateSourceGraphKinds context source
-  graph <- first SourceGraphSealingFailure $ Q.sealTermGraph structure
+  graph <- first SourceGraphSealingFailure $ Q.sealTermGraphWithContext
+    Q.sharedContextTypeStructure structure
     Q.defaultTermGraphLimits source
   unless (Q.eraseTermGraphToFunctionClause (G.clauseName clause) graph == clause) $
     Left SourceGraphProjectionMismatch
@@ -259,12 +262,22 @@ unify left right = do
       (T.TypeApplication a b, T.TypeApplication c d) -> unify a c >> unify b d
       (T.TupleType box xs, T.TupleType box' ys)
         | box == box', length xs == length ys -> zipWithM_ unify xs ys
+      (T.ForallType [] cs body, T.ForallType [] ds other)
+        | length cs == length ds -> do
+            zipWithM_ unifyConstraint cs ds
+            unify body other
       (T.ForallType{}, T.ForallType{}) -> underLevel $ do
         rigid <- freshVariable True
         openedLeft <- consumeForall l rigid
         openedRight <- consumeForall r rigid
         unify openedLeft openedRight
       _ -> failCheck $ "source type mismatch: " ++ show l ++ " /= " ++ show r
+ where
+  -- Comparing two qualified types is not evidence discharge. Their complete
+  -- ordered contexts must agree, including all instantiated class arguments.
+  unifyConstraint (Constraint name xs) (Constraint other ys)
+    | name == other, length xs == length ys = zipWithM_ unify xs ys
+    | otherwise = failCheck "source qualified types have different constraints"
 
 underLevel :: Check a -> Check a
 underLevel action = do
@@ -276,17 +289,18 @@ underLevel action = do
 
 consumeForall :: Type -> Type -> Check Type
 consumeForall source selected = case source of
-  T.ForallType (binder : rest) [] body ->
+  T.ForallType (binder : rest) constraints body ->
     either (lift . Left) (pure . T.canonicalizeType) $ substitute
       (Map.singleton binder selected)
-      (if null rest then body else T.ForallType rest [] body)
-  T.ForallType _ (_ : _) _ -> failCheck "source forall requires dictionary evidence"
+      (if null rest && null constraints then body else T.ForallType rest constraints body)
+  T.ForallType [] (_ : _) _ -> failCheck "source type application cannot consume dictionary evidence"
   _ -> failCheck "source type application does not consume a forall binder"
 
 instantiate :: Q.TermNodeId -> Check Q.TermNodeId
 instantiate node = do
   ty <- nodeType node
   case ty of
+    T.ForallType [] (_ : _) _ -> applyContext node ty >>= instantiate
     T.ForallType{} -> do
       selected <- freshVariable False
       result <- consumeForall ty selected
@@ -295,6 +309,48 @@ instantiate node = do
         $ Q.ImplicitTypeApplicationWitness ty selected result
       instantiate instantiated
     _ -> pure node
+
+-- Only exact, lexically introduced Givens can discharge a qualified layer.
+-- There is deliberately no instance search, superclass traversal, or shared
+-- root dictionary pool. Expected result/argument typing selects polymorphic
+-- arguments before this check; a dictionary never guesses an unconstrained
+-- type variable or supplies evidence outside its introduction's subtree.
+applyContext :: Q.TermNodeId -> Type -> Check Q.TermNodeId
+applyContext node source = do
+  resolved <- zonk source
+  witness <- maybe (failCheck "source context application has no qualified layer") pure $
+    Q.contextIntroductionWitness Q.sharedContextTypeStructure resolved
+  evidence <- mapM lookupGiven $ Q.contextIntroductionConstraints witness
+  application <- maybe (failCheck "source context application lost its qualified layer") pure $
+    Q.contextApplicationWitness Q.sharedContextTypeStructure resolved evidence
+  occurrence <- freshOccurrence
+  emit (Q.contextApplicationResult application) $
+    Q.TypedContextApplication occurrence node application
+
+lookupGiven :: Constraint Type -> Check Q.ContextEvidence
+lookupGiven required = do
+  wanted <- traverse zonk required
+  available <- gets checkGivens
+  findExact wanted available
+ where
+  findExact _ [] = failCheck $
+    "source constraint has no exact lexical given (instances and superclass evidence are unsupported): "
+      ++ show required
+  findExact wanted ((given, evidence) : remaining) = do
+    tick
+    actual <- traverse zonk given
+    if sameConstraint wanted actual then pure evidence else findExact wanted remaining
+  sameConstraint (Constraint name xs) (Constraint other ys) =
+    name == other && length xs == length ys &&
+      and (zipWith A.alphaEquivalentTypes xs ys)
+
+withGivens :: [(Constraint Type, Q.ContextEvidence)] -> Check a -> Check a
+withGivens introduced action = do
+  previous <- gets checkGivens
+  modify $ \s -> s { checkGivens = introduced ++ previous }
+  result <- action
+  modify $ \s -> s { checkGivens = previous }
+  pure result
 
 functionParts :: Type -> Check (Type, Type)
 functionParts source = do
@@ -311,7 +367,23 @@ checkExpression :: Locals -> G.Expression String -> Type -> Check Q.TermNodeId
 checkExpression locals expression expected = do
   tick
   ty <- zonk expected
-  case ty of
+  exactForward <- case expression of
+    G.Local local | not $ null $ T.typeConstraints ty -> do
+      source <- traverse zonk $ Map.lookup local locals
+      pure $ maybe False (A.alphaEquivalentTypes ty) source
+    _ -> pure False
+  if exactForward then inferExpression locals expression else case ty of
+    T.ForallType [] (_ : _) _ -> do
+      witness <- maybe (failCheck "source context introduction lost its qualified layer") pure $
+        Q.contextIntroductionWitness Q.sharedContextTypeStructure ty
+      occurrence <- freshOccurrence
+      let introduced =
+            [ (constraint, Q.givenContextEvidence occurrence slot)
+            | (slot, constraint) <- zip [0 ..] $ Q.contextIntroductionConstraints witness
+            ]
+      body <- withGivens introduced $
+        checkExpression locals expression $ Q.contextIntroductionBody witness
+      emit ty $ Q.TypedContextIntroduction occurrence body witness
     T.ForallType{} -> underLevel $ do
       rigid <- freshVariable True
       opened <- consumeForall ty rigid
@@ -348,11 +420,7 @@ checkExpression locals expression expected = do
         checkedAlternatives <- mapM (checkAlternative locals scrutineeType ty) alternatives
         emit ty $ Q.TypedCase checkedScrutinee checkedAlternatives
       G.Hole{} -> failCheck "source candidate contains a hole"
-      _ -> do
-        inferred <- inferExpression locals expression >>= instantiate
-        actual <- nodeType inferred
-        unify actual ty
-        pure inferred
+      _ -> checkApplication locals expression $ Just ty
 
 -- Generalize only identities created by this checker and unconstrained by
 -- the surrounding environment or result. Recheck the exact value under the
@@ -364,7 +432,9 @@ inferLetValue locals expected pattern' value = do
   previousNodes <- gets checkNodes
   checked <- underLevel $ inferExpression locals value
   inferred <- nodeType checked
-  surrounding <- mapM zonk $ expected : Map.elems locals
+  givens <- gets checkGivens
+  surrounding <- mapM zonk $ expected : Map.elems locals ++
+    concatMap (constraintArguments . fst) givens
   metas <- gets checkMetas
   let eligible = T.freeVariables inferred `Set.intersection` Map.keysSet metas
         `Set.difference` Set.unions (map T.freeVariables surrounding)
@@ -424,10 +494,11 @@ inferExpression locals expression = do
     G.VisibleTypeApplication{} -> checkApplication locals expression Nothing
     _ -> freshVariable False >>= checkExpression locals expression
 
-data ApplicationStep
-  = ValueStep Type Type (G.Expression String)
+data ApplicationStep value
+  = ValueStep Type Type value
   | ImplicitStep Type Type Type
   | VisibleStep Type Type Type G.VisibleTypeArgument
+  | ContextStep Type Type
 
 -- Infer the complete mixed application telescope before checking any value
 -- argument. Expected nominal result arguments can therefore determine every
@@ -448,7 +519,14 @@ checkApplication locals expression expected = do
       unify instantiated wanted
       pure (tailSteps, instantiated)
   _ <- zonk finalType
-  foldM buildStep headNode $ steps ++ finalSteps
+  let allSteps = steps ++ finalSteps
+  if any isContextStep allSteps then do
+    -- A qualified provider's type variables may be fixed by a later value
+    -- argument. Check all those values before choosing its dictionary slots,
+    -- while retaining the original order of the application telescope.
+    checkedSteps <- mapM checkValueStep allSteps
+    foldM (buildStep $ \node _ -> pure node) headNode checkedSteps
+  else foldM (buildStep $ checkExpression locals) headNode allSteps
  where
   planArguments source [] = pure ([], source)
   planArguments source (G.TermArgument argument : rest) = do
@@ -466,6 +544,9 @@ checkApplication locals expression expected = do
   planImplicit source = do
     resolved <- zonk source
     case resolved of
+      T.ForallType [] (_ : _) body -> do
+        (rest, finalType) <- planImplicit body
+        pure (ContextStep resolved body : rest, finalType)
       T.ForallType{} -> do
         selected <- freshVariable False
         result <- consumeForall resolved selected
@@ -473,9 +554,19 @@ checkApplication locals expression expected = do
         pure (ImplicitStep resolved selected result : rest, finalType)
       _ -> pure ([], resolved)
 
-  buildStep function step = case step of
+  isContextStep ContextStep{} = True
+  isContextStep _ = False
+
+  checkValueStep step = case step of
+    ValueStep domain result argument ->
+      ValueStep domain result <$> checkExpression locals argument domain
+    ImplicitStep source selected result -> pure $ ImplicitStep source selected result
+    VisibleStep source selected result argument -> pure $ VisibleStep source selected result argument
+    ContextStep source result -> pure $ ContextStep source result
+
+  buildStep checkArgument function step = case step of
     ValueStep domain result argument -> do
-      checkedArgument <- checkExpression locals argument domain
+      checkedArgument <- checkArgument argument domain
       emit result $ Q.TypedApply function checkedArgument $ Q.ApplicationWitness domain result
     ImplicitStep source selected result -> do
       occurrence <- freshOccurrence
@@ -485,6 +576,7 @@ checkApplication locals expression expected = do
       occurrence <- freshOccurrence
       emit result $ Q.TypedVisibleTypeApplication occurrence function argument
         $ Q.TypeApplicationWitness source selected result Nothing
+    ContextStep source _ -> applyContext function source
 
 selectedVisibleType :: G.VisibleTypeArgument -> Check Type
 selectedVisibleType argument = case G.visibleTypeArgumentPatternType argument of
@@ -612,6 +704,10 @@ resolveNodeWith resolve (identity, Q.TermNode ty form) = do
       Q.TypedImplicitTypeApplication occurrence child <$> (Q.ImplicitTypeApplicationWitness
         <$> resolve (Q.implicitTypeApplicationSource witness) <*> resolve (Q.implicitTypeApplicationSelected witness)
         <*> resolve (Q.implicitTypeApplicationResult witness))
+    Q.TypedContextIntroduction occurrence child witness ->
+      Q.TypedContextIntroduction occurrence child <$> traverse resolve witness
+    Q.TypedContextApplication occurrence child witness ->
+      Q.TypedContextApplication occurrence child <$> traverse resolve witness
     Q.TypedLet pattern' value body -> Q.TypedLet <$> resolvePatternWith resolve pattern' <*> pure value <*> pure body
     Q.TypedCase scrutinee alternatives -> Q.TypedCase scrutinee <$> mapM
       (\(pattern', body) -> (,) <$> resolvePatternWith resolve pattern' <*> pure body) alternatives

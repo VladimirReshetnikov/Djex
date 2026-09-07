@@ -52,6 +52,7 @@ import qualified Test.Tasty.QuickCheck as QC
 import CandidateQualitySpec (candidateQualityTests)
 import BehavioralSpec (behavioralTests)
 import ClassResolutionSpec (classResolutionTests)
+import ContextHaskellSpec (contextHaskellTests)
 import SMTLibCausalBoundaryWhitespaceSpec
   ( smtLibCausalBoundaryWhitespaceTests )
 import SMTLibCausalDriverSpec (smtLibCausalDriverTests)
@@ -68,6 +69,8 @@ tests :: TestTree
 tests = testGroup "Djex synthesis foundation"
   [ candidateTests
   , erasedForallTests
+  , contextEvidenceTests
+  , contextHaskellTests
   , behavioralTests
   , candidateQualityTests
   , semanticObservationTests
@@ -488,6 +491,295 @@ erasedForallTests = testGroup "erased forall graph evidence"
         Typed.typedPatternNode = Typed.TypedBind (1 :: Int)}] $ shiftNode child
     Typed.TypedLocal occurrence _ -> Typed.TypedLocal (shiftOccurrence occurrence) (1 :: Int)
     _ -> form
+
+contextEvidenceTests :: TestTree
+contextEvidenceTests = testGroup "lexical context graph evidence"
+  [ testCase "retain an unused source given and exact dictionary-independent body" $ do
+      graph <- checked identitySource
+      Typed.eraseTermGraph graph @?= Lambda [Bind (0 :: Int)] (Local 0)
+      Typed.termGraphNodes graph @?= Typed.termGraphSourceNodes identitySource
+      Typed.typedGraphProjectedNodes (Typed.termGraphMetrics graph) @?= 3
+      Typed.typedGraphPatternNodes (Typed.termGraphMetrics graph) @?= 1
+      Typed.typedGraphSourceOccurrences (Typed.termGraphMetrics graph) @?= 3
+  , testCase "require opt-in context authority on the ordinary sealing entrance" $
+      case Typed.sealTermGraph structure Typed.defaultTermGraphLimits identitySource of
+        Left Typed.ContextTypeStructureUnavailable{} -> pure ()
+        _ -> assertFailure "ordinary sealing accepted a contextual graph"
+  , testCase "forward a constrained provider using the enclosing source slot" $ do
+      graph <- checked $ forwardSource [c unit] [c unit] [given 0 0]
+      Typed.eraseTermGraph graph @?= Global global
+      Typed.typedGraphProjectedNodes (Typed.termGraphMetrics graph) @?= 1
+      let binder = Typed.contextEvidenceBinder $ given 0 0
+      Typed.evidenceBinderIntroduction binder @?= oid 0
+      Typed.evidenceBinderSlot binder @?= 0
+  , testCase "apply a lexical constrained parameter under the matching given" $ do
+      let provider = qualify [c unit] unit
+          body = arrow provider unit
+          source = qualify [c unit] body
+      graph <- checked $ Typed.TermGraphSource (nid 0)
+        [ (nid 0, node source $ introduction 0 1 source)
+        , (nid 1, node body $ Typed.TypedLambda [bind 1 0 provider] (nid 2))
+        , (nid 2, node unit $ application 2 3 provider [given 0 0])
+        , (nid 3, node provider $ Typed.TypedLocal (oid 3) (0 :: Int))
+        ]
+      Typed.eraseTermGraph graph @?= Lambda [Bind (0 :: Int)] (Local 0)
+  , testCase "retain ordered and repeated source givens without deduplication" $ do
+      _ <- checked $ forwardSource [c unit, d unit] [c unit, d unit]
+        [given 0 0, given 0 1]
+      _ <- checked $ forwardSource [c unit, c unit] [c unit, c unit]
+        [given 0 1, given 0 0]
+      pure ()
+  , testCase "reject swapped class slots and wrong class argument types" $ do
+      expectGivenMismatch $ forwardSource [c unit, d unit] [c unit, d unit]
+        [given 0 1, given 0 0]
+      expectGivenMismatch $ forwardSource [c unit] [c $ arrow unit unit] [given 0 0]
+  , testCase "reject missing or excess evidence even with a matching lexical given" $
+      forM_ [[], [given 0 0, given 0 0]] $ \evidence ->
+        case seal $ forwardSource [c unit] [c unit] evidence of
+          Left Typed.ContextEvidenceArityMismatch{} -> pure ()
+          _ -> assertFailure "context application accepted a wrong evidence arity"
+  , testCase "reject nonexistent introduction and out-of-range source slots" $
+      forM_ [given 9 0, given 0 1, given 2 0] $ \evidence ->
+        expectUnbound $ forwardSource [c unit] [c unit] [evidence]
+  , testCase "carry outer givens through a distinct nested context" $ do
+      let inner = qualify [d unit] unit
+          source = qualify [c unit] inner
+          provider = qualify [c unit] unit
+      graph <- checked $ Typed.TermGraphSource (nid 0)
+        [ (nid 0, node source $ introduction 0 1 source)
+        , (nid 1, node inner $ introduction 1 2 inner)
+        , (nid 2, node unit $ application 2 3 provider [given 0 0])
+        , (nid 3, node provider $ Typed.TypedGlobal (oid 3) global)
+        ]
+      Typed.eraseTermGraph graph @?= Global global
+  , testCase "reject a given introduced in a sibling expression" $ do
+      let provider = qualify [c unit] unit
+      expectUnbound $ Typed.TermGraphSource (nid 0)
+        [ (nid 0, node (tuple [provider, unit]) $ Typed.TypedTuple [nid 1, nid 3])
+        , (nid 1, node provider $ introduction 1 2 provider)
+        , (nid 2, node unit $ Typed.TypedGlobal (oid 2) global)
+        , (nid 3, node unit $ application 3 4 provider [given 1 0])
+        , (nid 4, node provider $ Typed.TypedGlobal (oid 4) global)
+        ]
+  , testCase "reject a given introduced below the function being discharged" $ do
+      let provider = qualify [c unit] unit
+      expectUnbound $ Typed.TermGraphSource (nid 0)
+        [ (nid 0, node unit $ application 0 1 provider [given 1 0])
+        , (nid 1, node provider $ introduction 1 2 provider)
+        , (nid 2, node unit $ Typed.TypedGlobal (oid 2) global)
+        ]
+  , testCase "reject duplicate introduction occurrence identities" $ do
+      let inner = qualify [d unit] unit
+          source = qualify [c unit] inner
+      case seal $ Typed.TermGraphSource (nid 0)
+          [ (nid 0, node source $ introduction 0 1 source)
+          , (nid 1, node inner $ introduction 0 2 inner)
+          , (nid 2, node unit $ Typed.TypedGlobal (oid 2) global)
+          ] of
+        Left Typed.DuplicateOccurrenceId{} -> pure ()
+        _ -> assertFailure "duplicate evidence introduction identity was accepted"
+  , testCase "recheck private witness metadata against the sealing source observer" $ do
+      let provider = qualify [c unit] unit
+          falseObserver = Typed.ContextTypeStructure $ const $ Just ([d unit], unit)
+          witness = required $ Typed.contextIntroductionWitness falseObserver provider
+      case seal $ Typed.TermGraphSource (nid 0)
+          [ (nid 0, node provider $ Typed.TypedContextIntroduction (oid 0) (nid 1) witness)
+          , (nid 1, node unit $ Typed.TypedGlobal (oid 1) global)
+          ] of
+        Left Typed.ContextConstraintMismatch{} -> pure ()
+        _ -> assertFailure "independently claimed witness constraints were trusted"
+  , testCase "reject ordinary types claimed to have a context by a witness builder" $ do
+      let falseObserver = Typed.ContextTypeStructure $ const $ Just ([c unit], unit)
+          witness = required $ Typed.contextIntroductionWitness falseObserver unit
+      case seal $ Typed.TermGraphSource (nid 0)
+          [ (nid 0, node unit $ Typed.TypedContextIntroduction (oid 0) (nid 1) witness)
+          , (nid 1, node unit $ Typed.TypedGlobal (oid 1) global)
+          ] of
+        Left Typed.InvalidContextSource{} -> pure ()
+        _ -> assertFailure "an ordinary type supplied dictionary authority"
+  , testCase "check exact introduction and application result types" $ do
+      let provider = qualify [c unit] unit
+          wrong = arrow unit unit
+          introductionSource = Typed.TermGraphSource (nid 0)
+            [ (nid 0, node provider $ introduction 0 1 provider)
+            , (nid 1, node wrong $ Typed.TypedGlobal (oid 1) global)
+            ]
+          applicationSource = Typed.TermGraphSource (nid 0)
+            [ (nid 0, node (qualify [c unit] wrong) $ introduction 0 1 $ qualify [c unit] wrong)
+            , (nid 1, node wrong $ application 1 2 provider [given 0 0])
+            , (nid 2, node provider $ Typed.TypedGlobal (oid 2) global)
+            ]
+      forM_ [introductionSource, applicationSource] $ \source -> case seal source of
+        Left Typed.ContextResultMismatch{} -> pure ()
+        _ -> assertFailure "context witness accepted an incorrect result"
+  , testCase "open a quantified context without erasing its constraints" $ do
+      let body = arrow (variable bound) $ variable bound
+          source = SharedType.ForallType [bound] [c $ variable bound] body
+          openedBody = arrow rigid rigid
+          opened = qualify [c rigid] openedBody
+      graph <- checked $ Typed.TermGraphSource (nid 0)
+        [ (nid 0, node source $ Typed.TypedForallIntroduction (oid 0) (nid 1)
+            $ Typed.ForallIntroductionWitness source rigid opened)
+        , (nid 1, node opened $ introduction 1 2 opened)
+        , (nid 2, node openedBody $ Typed.TypedLambda [bind 2 0 rigid] (nid 3))
+        , (nid 3, node rigid $ Typed.TypedLocal (oid 3) (0 :: Int))
+        ]
+      Typed.eraseTermGraph graph @?= Lambda [Bind (0 :: Int)] (Local 0)
+  , testCase "reject introduced type variables escaping through contextual class arguments" $ do
+      let polymorphic = SharedType.ForallType [bound] [] unit
+          escaped = qualify [c rigid] unit
+      case seal $ Typed.TermGraphSource (nid 0)
+          [ (nid 0, node (tuple [polymorphic, escaped]) $ Typed.TypedTuple [nid 1, nid 3])
+          , (nid 1, node polymorphic $ Typed.TypedForallIntroduction (oid 1) (nid 2)
+              $ Typed.ForallIntroductionWitness polymorphic rigid unit)
+          , (nid 2, node unit $ Typed.TypedGlobal (oid 2) global)
+          , (nid 3, node escaped $ introduction 3 4 escaped)
+          , (nid 4, node unit $ Typed.TypedGlobal (oid 4) global)
+          ] of
+        Left Typed.ForallIntroductionVariableEscapes{} -> pure ()
+        _ -> assertFailure "a source context allowed a rigid variable to escape"
+  , testCase "preserve a forall result inside the discharged context" $ do
+      let polymorphic = SharedType.ForallType [bound] [] $
+            arrow (variable bound) $ variable bound
+          provider = qualify [c unit] polymorphic
+      graph <- checked $ Typed.TermGraphSource (nid 0)
+        [ (nid 0, node provider $ introduction 0 1 provider)
+        , (nid 1, node polymorphic $ application 1 2 provider [given 0 0])
+        , (nid 2, node provider $ Typed.TypedGlobal (oid 2) global)
+        ]
+      Typed.eraseTermGraph graph @?= Global global
+  , testCase "substitute class arguments before discharging the exact given" $ do
+      let source = SharedType.ForallType [bound] [c $ variable bound] unit
+          selected = qualify [c unit] unit
+      _ <- checked $ Typed.TermGraphSource (nid 0)
+        [ (nid 0, node selected $ introduction 0 1 selected)
+        , (nid 1, node unit $ application 1 2 selected [given 0 0])
+        , (nid 2, node selected $ Typed.TypedImplicitTypeApplication (oid 2) (nid 3)
+            $ Typed.ImplicitTypeApplicationWitness source unit selected)
+        , (nid 3, node source $ Typed.TypedGlobal (oid 3) global)
+        ]
+      assertBool "forall substitution silently discarded the class context" $
+        not $ Typed.validImplicitTypeApplicationWitness Typed.sharedContextualForallTypeStructure $
+          Typed.ImplicitTypeApplicationWitness source unit unit
+  , testCase "do not consume type binders or invent an empty context" $ do
+      let polymorphic = SharedType.ForallType [bound] [c $ variable bound] unit
+      Typed.contextIntroductionWitness Typed.sharedContextTypeStructure polymorphic @?= Nothing
+      Typed.contextIntroductionWitness Typed.sharedContextTypeStructure unit @?= Nothing
+      Typed.contextIntroductionWitness Typed.sharedContextTypeStructure
+        (SharedType.ForallType [] [] unit) @?= Nothing
+  , testCase "bound infinite evidence lists before arity or scope traversal" $ do
+      let limits = right $ Typed.mkTermGraphLimits 4 4 16 32 4 8
+      case sealWith Typed.sharedContextTypeStructure limits $
+          forwardSource [c unit] [c unit] (repeat $ given 0 0) of
+        Left (Typed.TermGraphCollectionLimitExceeded (Typed.ContextEvidenceList _) 4 5) -> pure ()
+        _ -> assertFailure "infinite given references were not bounded"
+  , testCase "bound total dictionary slots and references independently of syntax cost" $ do
+      let limits = right $ Typed.mkTermGraphLimits 4 4 1 32 4 8
+      case sealWith Typed.sharedContextTypeStructure limits $
+          forwardSource [c unit] [c unit] [given 0 0] of
+        Left (Typed.TermGraphContextEvidenceLimitExceeded 1 2) -> pure ()
+        _ -> assertFailure "total context evidence exceeded its budget"
+  , testCase "bound cached and freshly observed contextual metadata" $ do
+      let limits = right $ Typed.mkTermGraphLimits 4 4 16 16 4 8
+          provider = qualify [c unit] unit
+          source = Typed.TermGraphSource (nid 0)
+            [ (nid 0, node provider $ introduction 0 1 provider)
+            , (nid 1, node unit $ Typed.TypedGlobal (oid 1) global)
+            ]
+          infiniteType = arrow unit infiniteType
+          unboundedConstraints = Typed.ContextTypeStructure $
+            const $ Just (repeat $ c unit, unit)
+          unboundedArguments = Typed.ContextTypeStructure $
+            const $ Just ([Constraint classC $ repeat unit], unit)
+          unboundedBody = Typed.ContextTypeStructure $
+            const $ Just ([c unit], infiniteType)
+          unboundedArgumentType = Typed.ContextTypeStructure $
+            const $ Just ([c infiniteType], unit)
+      forM_ [unboundedConstraints, unboundedArguments] $ \authority ->
+        case sealWith authority limits source of
+          Left Typed.TermGraphCollectionLimitExceeded{} -> pure ()
+          _ -> assertFailure "unbounded context observer collection was traversed"
+      forM_ [unboundedBody, unboundedArgumentType] $ \authority ->
+        case sealWith authority limits source of
+          Left Typed.TermGraphTypeNodeLimitExceeded{} -> pure ()
+          _ -> assertFailure "unbounded context observer type reached equality"
+      let forged = required $ Typed.contextIntroductionWitness unboundedConstraints provider
+      case sealWith Typed.sharedContextTypeStructure limits $ Typed.TermGraphSource (nid 0)
+          [ (nid 0, node provider $ Typed.TypedContextIntroduction (oid 0) (nid 1) forged)
+          , (nid 1, node unit $ Typed.TypedGlobal (oid 1) global)
+          ] of
+        Left Typed.TermGraphCollectionLimitExceeded{} -> pure ()
+        _ -> assertFailure "unbounded cached witness constraints were traversed"
+  , testCase "retain the complete qualification around a dictionary-independent Haskell body" $ do
+      graph <- checked identitySource
+      case TypedHaskell.renderHaskellTermGraph (defaultRenderOptions $ const "x") graph of
+        Left failure -> assertFailure $ show failure
+        Right rendered -> assertBool "the source context was erased from the annotation" $
+          "(Fixture.C ()) => () -> ()" `isInfixOf` rendered
+  ]
+ where
+  structure :: Typed.TypeStructure (SharedType.Type (SharedType.Variable String))
+  structure = Typed.sharedTypeStructure
+    {Typed.forallTypeStructure = Just Typed.sharedContextualForallTypeStructure}
+  sealWith
+    :: Typed.ContextTypeStructure (SharedType.Type (SharedType.Variable String))
+    -> Typed.TermGraphLimits
+    -> Typed.TermGraphSource (SharedType.Type (SharedType.Variable String)) Int
+    -> Either (Typed.TermGraphError (SharedType.Type (SharedType.Variable String)) Int)
+      (Typed.TermGraph (SharedType.Type (SharedType.Variable String)) Int)
+  sealWith authority limits = Typed.sealTermGraphWithContext authority structure limits
+  seal :: Typed.TermGraphSource (SharedType.Type (SharedType.Variable String)) Int
+    -> Either (Typed.TermGraphError (SharedType.Type (SharedType.Variable String)) Int)
+      (Typed.TermGraph (SharedType.Type (SharedType.Variable String)) Int)
+  seal = sealWith Typed.sharedContextTypeStructure Typed.defaultTermGraphLimits
+  checked source = case seal source of
+    Left failure -> assertFailure (show failure) >> fail "unreachable"
+    Right graph -> pure graph
+  expectUnbound source = case seal source of
+    Left Typed.UnboundContextEvidence{} -> pure ()
+    _ -> assertFailure "nonlexical dictionary evidence was accepted"
+  expectGivenMismatch source = case seal source of
+    Left Typed.ContextGivenTypeMismatch{} -> pure ()
+    _ -> assertFailure "a given with the wrong class or arguments was accepted"
+  required = maybe (error "invalid context fixture source") id
+  qualify = SharedType.ForallType []
+  variable = SharedType.TypeVariable
+  bound = SharedType.FlexibleVariable "a"
+  rigid = variable $ SharedType.RigidVariable "contextOpening"
+  arrow = SharedType.FunctionType
+  tuple = SharedType.TupleType Boxed
+  unit :: SharedType.Type (SharedType.Variable String)
+  unit = tuple []
+  classC = right $ parseName "Fixture.C"
+  classD = right $ parseName "Fixture.D"
+  c ty = Constraint classC [ty]
+  d ty = Constraint classD [ty]
+  global = right $ parseName "Fixture.contextual"
+  nid = Typed.termNodeId
+  oid = Typed.occurrenceId
+  node = Typed.TermNode
+  given occurrence = Typed.givenContextEvidence $ oid occurrence
+  bind occurrence local ty = Typed.TypedPattern (oid occurrence) ty $ Typed.TypedBind local
+  introduction occurrence child source = Typed.TypedContextIntroduction (oid occurrence) (nid child)
+    $ required $ Typed.contextIntroductionWitness Typed.sharedContextTypeStructure source
+  application occurrence child source evidence = Typed.TypedContextApplication (oid occurrence) (nid child)
+    $ required $ Typed.contextApplicationWitness Typed.sharedContextTypeStructure source evidence
+  identitySource = Typed.TermGraphSource (nid 0)
+    [ (nid 0, node source $ introduction 0 1 source)
+    , (nid 1, node body $ Typed.TypedLambda [bind 1 0 unit] (nid 2))
+    , (nid 2, node unit $ Typed.TypedLocal (oid 2) (0 :: Int))
+    ]
+   where
+    body = arrow unit unit
+    source = qualify [c unit] body
+  forwardSource givens requirements evidence = Typed.TermGraphSource (nid 0)
+    [ (nid 0, node source $ introduction 0 1 source)
+    , (nid 1, node unit $ application 1 2 provider evidence)
+    , (nid 2, node provider $ Typed.TypedGlobal (oid 2) global)
+    ]
+   where
+    source = qualify givens unit
+    provider = qualify requirements unit
 
 typedGeneratedTests :: TestTree
 typedGeneratedTests = testGroup "typed generated candidate graphs"

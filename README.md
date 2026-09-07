@@ -93,15 +93,33 @@ The improvements cover:
   candidate with Lean.
 
 Recent checked improvements add same-candidate Haskell elaboration retries,
-implicit local polymorphic-use evidence, and Djinn's bounded case analysis for
-ordinary recursive data. The [implementation register](docs/reports/2026-09-07-synthesis-priorities-1-4.md)
+implicit local polymorphic-use evidence, and bounded case analysis for
+ordinary recursive data in both engines. The [implementation register](docs/reports/2026-09-07-synthesis-priorities-1-4.md)
 records live repair under `first`, `best`, and `all` selection, with exact
-displayed-source compiler replay, and eight Djinn Haskell recursive-data
-scenarios. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md)
-keeps Exference case parity, complete Leant integration, recursors,
-contextual dictionaries, and broader Church behavior
-explicitly open. Unused lambda and let binders now retain source graphs as
+displayed-source compiler replay. The ordinary-data matrix now passes eight
+scenarios in each Haskell engine, including tuple fields and independently typed
+recursive inputs. Exference's complete-case graphs and protected queues preserve
+the caller's total step and queue bounds. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md)
+keeps complete Leant integration, broader recursion, complete contextual-provider support,
+and broader Church behavior explicitly open. Unused lambda and let binders now retain source graphs as
 checked wildcards, preserving exact compatibility erasure.
+
+The [supplied-fold composition report](docs/reports/2026-09-07-supplied-recursor-composition.md)
+describes synthesis of `map`, order-sensitive `append`, and generalized `length`
+from one generic fold signature. Djinn's coherent type instances and bounded
+argument introduction make these compositions reachable without supplying
+target implementations. Exact graph checks, full-signature GHC execution, and
+the empty-input control distinguish these results from broader recursion and
+Lean integration, which remain under acceptance.
+
+The [contextual-evidence report](docs/reports/2026-09-07-contextual-evidence-design.md)
+describes the new lexical Given graph nodes, independent source checkers, and
+qualified Haskell rendering. Dictionary identities retain their introduction
+and ordered source slot through nested rank-N scopes. The shared/private suites
+and full-signature Haskell renderer replays pass. Live synthesis also covers five
+Exference roles and three Djinn roles, with scoped leakage controls and GHC
+execution. Methods, instance/superclass derivations, complete Djinn constrained
+search, and production Lean projection remain separate integration requirements.
 
 Leant also adds [bounded simplification of behavioral assertions](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-07-bounded-behavioral-simplification.md)
 after decision checks of the assertion and its negation. The three-engine live

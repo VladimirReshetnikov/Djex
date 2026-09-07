@@ -69,13 +69,19 @@ import Language.Haskell.Exference.EnvironmentParser
   )
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit ((@?=), assertBool, assertEqual, testCase)
+import qualified RecursorSpec
+import qualified ContextHaskellReplaySpec
+import qualified ContextEvidenceSpec
 
 main :: IO ()
 main = defaultMain tests
 
 tests :: TestTree
 tests = testGroup "Djex facade"
-  [ testCase "synthesize and execute ordinary list and tree observations" $ do
+  [ RecursorSpec.tests
+  , ContextHaskellReplaySpec.tests
+  , ContextEvidenceSpec.tests
+  , testCase "synthesize and execute ordinary list and tree observations" $ do
       listName' <- expectRight $ parseName "[]"
       consName' <- expectRight $ parseName ":"
       boolName <- expectRight $ parseName "Bool"
@@ -138,21 +144,46 @@ tests = testGroup "Djex facade"
       environment <- expectRight (mkEnvironment declarations :: Either
         (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
       session <- expectRight $ mkDjinnSession environment
-      generated <- forM specifications $ \(label, signature, predicate) -> do
+      exferenceEnvironment <- expectRight (mkEnvironment
+        (map (mapDeclarationTypeVariables $ const $ FlexibleVariable 0) declarations) :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      exferenceSession <- expectRight $ mkExferenceSession exferenceEnvironment
+      let matrix = [(engine, specification) | engine <- ["djinn", "exference"], specification <- specifications]
+      generated <- forM matrix $ \(engine, (operation, signature, predicate)) -> do
+        let label = engine ++ "_" ++ operation
+            limit = if operation == "independent" then 256 else 64
         target <- expectRight $ mkIdentifier $ "recursive_" ++ label
-        request <- expectRight $ parseDjinnRequest session
-          defaultQueryOptions { optionCutoff = if label == "independent" then 256 else 64,
-            optionAlternatives = True,
-            optionStrategy = if label `elem` ["unconsOr", "independent"] then Interleave else DepthFirst,
-            optionSorted = False, optionBudget = Just 50000 }
-          target "recursive-case-behavior" signature
-        result <- expectRight $ runDjinnTypedQuery session request
-        let candidates = batchCandidates $ resultSearch result
-        assertBool ("no candidate for " ++ label) $ not $ null candidates
-        definitions <- forM (zip [0 :: Int ..] candidates) $ \(index, candidate) -> do
-          graph <- expectRight $ typedCandidateTermGraph candidate
-          term <- expectRight $ TypedHaskell.renderHaskellTermGraph
-            (defaultRenderOptions id) graph
+        terms <- if engine == "djinn" then do
+          request <- expectRight $ parseDjinnRequest session
+            defaultQueryOptions { optionCutoff = limit, optionAlternatives = True,
+              optionStrategy = if operation `elem` ["unconsOr", "independent"] then Interleave else DepthFirst,
+              optionSorted = False, optionBudget = Just 50000 }
+            target "recursive-case-behavior" signature
+          result <- expectRight $ runDjinnTypedQuery session request
+          forM (batchCandidates $ resultSearch result) $ \candidate -> do
+            graph <- expectRight $ typedCandidateTermGraph candidate
+            expectRight $ TypedHaskell.renderHaskellTermGraph (defaultRenderOptions id) graph
+          else do
+            request <- expectRight $ parseExferenceRequest exferenceSession
+              defaultExferenceOptions { exferenceMaximumSteps = 100000,
+                exferenceMaximumQueueSize = Just 1024,
+                exferenceAllowUnused = True,
+                exferenceMultiConstructorPatterns = True }
+              target "recursive-case-behavior" signature
+            results <- expectRight $ runExferenceTypedQuery exferenceSession request
+            forM (take (fromIntegral limit) $ concatMap (batchCandidates . resultSearch) results) $ \candidate -> do
+              graph <- either
+                (\failure -> fail $ label ++ ": " ++ show failure ++ "; " ++
+                    show (candidateOutput $ typedCandidateCompatibility candidate))
+                pure $ typedCandidateTermGraph candidate
+              -- Exference opens the request's outer quantifiers in its graph.
+              -- These rank-1 cases need no internal annotation: replay the
+              -- exact checked erasure under the original full signature below.
+              expectRight $ renderExpression
+                (defaultRenderOptions $ \variable -> "v" ++ show variable)
+                $ eraseTermGraph graph
+        assertBool ("no candidate for " ++ label) $ not $ null terms
+        definitions <- forM (zip [0 :: Int ..] terms) $ \(index, term) -> do
           let function = "case_" ++ label ++ "_" ++ show index
           pure ([function ++ " :: " ++ signature, function ++ " = " ++ term], predicate function)
         pure (concatMap fst definitions,
@@ -173,8 +204,8 @@ tests = testGroup "Djex facade"
       withTemporaryHaskellModule fixture $ \sourcePath -> do
         replay <- timeout 30000000 $ readProcessWithExitCode "runghc" [sourcePath] ""
         case replay of
-          Just (ExitSuccess, output, _) -> assertEqual fixture
-            (unlines [show (label, True) | (label, _, _) <- specifications]) output
+          Just (ExitSuccess, output, _) -> assertEqual "independently executed recursive-data matrix"
+            (unlines [show (engine ++ "_" ++ label, True) | (engine, (label, _, _)) <- matrix]) output
           _ -> fail $ "ordinary recursive behavior replay failed: " ++ show replay
   , testCase "compile and execute source-graph Haskell forall and impredicative hints" $ do
       environment <- expectRight (mkEnvironment [] :: Either

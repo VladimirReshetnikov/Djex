@@ -174,15 +174,58 @@ configured full Leant boundary rerun are pending. See the current re-triage
 for receipt locations and exact gates. This is not completion of the full
 case milestone or the separate recursor stage.
 
+## Subsequent case and lexical-evidence increment
+
+The current Haskell ordinary-data matrix passes all sixteen cells across Djinn
+and Exference: `null`, `headOr`, `tailOr`, shallow trees, aliases, `unconsOr`,
+tuple fields, and independently typed recursive inputs. Each observed candidate
+requires an exact source graph; independent GHC execution checks the accepted
+implementation under the complete original signature. Exference's checker now
+retains exhaustive constructor cases from one exact declaration inventory.
+Its optional/eager case queues share one total step allowance and queue cap.
+Both engines also pass `map`, order-sensitive `append`, generalized `length`,
+and the empty-input control from one generic fold signature; see the
+[supplied-recursor report](2026-09-07-supplied-recursor-composition.md).
+The initial sixteen-cell pass and a subsequent unchanged matrix pass are logged
+in `dist-newstyle/priority-cases-ordinary-protected-queue.log` and
+`priority-recursors-regression-v5.log`. The earlier Leant failures above remain
+the last complete cross-engine Lean receipt until this source is integrated.
+
+The [contextual-evidence report](2026-09-07-contextual-evidence-design.md) records
+explicit lexical Given graph nodes, independent source reconstruction in both
+engines, qualified Haskell rendering, passing complete shared/private suites,
+and full-signature GHC renderer replays. This closes the representation/checker
+foundation. Eleven live Given acceptance tests cover five Exference roles,
+three Djinn roles, and three leakage controls. Remaining Djinn constrained
+search and production Lean projection are still open.
+Instances and superclass derivations remain separate required increments.
+
+The final strict build passes. The complete affected-suite run passes all ten
+non-Length suites: 502 shared, 94 certificate, 10 graph-fingerprint, 133 Djinn,
+59 public and 55 private Djinn graph, 513 Exference, 70 private Exference,
+124 facade, and 100 CLI tests. Length passes 430/432; both existing deadline
+failures pass an unchanged focused retry. The
+[aggregate receipt](../../test-integration/receipts/recursive-context-checkpoint.json)
+and [separate retry](../../test-integration/receipts/recursive-context-length-retry.json)
+retain exact source/executable hashes and do not claim an unfiltered full-Length
+pass. The build log is `dist-newstyle/priority-final-build-v9.log`.
+
+Leant's [bounded behavioral simplification](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-07-bounded-behavioral-simplification.md)
+is published and passes live three-engine acceptance plus independent replay.
+It preserves false and inconclusive outcomes. The report retains the incomplete
+full boundary receipt separately from its passing unchanged focused retry.
+
 ## Remaining work
 
-- Close priority 2's Exference case parity and complete cross-engine kernel and
-  full Leant boundary acceptance, retaining the accepted Djinn subset; then
+- Close priority 2's cross-engine kernel and full Leant boundary acceptance,
+  retaining the accepted sixteen-cell Haskell matrix; then
   implement the separate recursor/decreasing-call stage.
 - Finish priority 1's remaining selection and negative evidence acceptance;
   integrate and validate any further shared changes in Leant.
-- Implement priority 3's dictionary representation and supported provider uses.
-- Implement priority 4's broader corpus and bounded Lean simplification.
+- Complete priority 3's live direct-Given uses and Lean projection, then methods,
+  conditional providers, and superclass evidence.
+- Compile, execute, and synthesize priority 4's broader corpus and all nineteen
+  supplied-default cases, retaining bounded Lean simplification as a regression.
 - Run the appropriate complete affected suites and live compiler/kernel
   acceptance, update capability documentation, and integrate both repositories.
 

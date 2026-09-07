@@ -111,6 +111,7 @@ data TermGraphFingerprintError identity local
   = TermGraphFingerprintSharedResealError
       (TermGraphError (Type (Variable identity)) local)
   | TermGraphFingerprintUnsupportedCertificate !CertificateId
+  | TermGraphFingerprintUnsupportedContextEvidence !TermNodeId
   | TermGraphFingerprintMissingNode !TermNodeId
   | TermGraphFingerprintUnboundLocal !TermNodeId local
   | TermGraphFingerprintByteLimitExceeded !Natural !Natural
@@ -555,6 +556,10 @@ fingerprintNodeForm certificateReferences graph locals owner form = case form of
     resultField <- fingerprintType $ implicitTypeApplicationResult witness
     pure $ taggedFingerprintField "implicit-type-application"
       [functionField, sourceField, selectedField, resultField]
+  TypedContextIntroduction{} -> lift $ Left $
+    TermGraphFingerprintUnsupportedContextEvidence owner
+  TypedContextApplication{} -> lift $ Left $
+    TermGraphFingerprintUnsupportedContextEvidence owner
   TypedTuple elements -> do
     elementFields <- mapM
       (fingerprintNode certificateReferences graph locals) elements

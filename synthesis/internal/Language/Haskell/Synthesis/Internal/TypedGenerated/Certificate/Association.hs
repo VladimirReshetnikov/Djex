@@ -111,6 +111,7 @@ data TypeApplicationCertificateAssociationError variable local
       !CertificateId !Natural !TermNodeId
   | MissingGraphTypeApplicationCertificateUse !CertificateId !Natural
   | MissingAssociatedSealedTermNode !TermNodeId
+  | TypeApplicationCertificateContextEvidenceUnsupported !TermNodeId
   | ExpectedTypeApplicationCertificateGlobalBase
       !CertificateId !TermNodeId
   | TypeApplicationCertificateGlobalOwnerMismatch
@@ -311,6 +312,8 @@ childNodes form = case form of
   TypedVisibleTypeApplication _ function _ _ -> [function]
   TypedForallIntroduction _ body _ -> [body]
   TypedImplicitTypeApplication _ function _ -> [function]
+  TypedContextIntroduction _ body _ -> [body]
+  TypedContextApplication _ function _ -> [function]
   TypedTuple elements -> elements
   TypedHole{} -> []
   TypedLet _ binding body -> [binding, body]
@@ -347,6 +350,10 @@ collectCertificateUses = foldM collect (Map.empty, [])
     TypedApply{} -> Right current
     TypedForallIntroduction{} -> Right current
     TypedImplicitTypeApplication{} -> Right current
+    TypedContextIntroduction{} -> Left $
+      TypeApplicationCertificateContextEvidenceUnsupported nodeId
+    TypedContextApplication{} -> Left $
+      TypeApplicationCertificateContextEvidenceUnsupported nodeId
     TypedTuple{} -> Right current
     TypedHole{} -> Right current
     TypedLet{} -> Right current

@@ -6,7 +6,49 @@ the scope or numbering of the active **implement priorities 1–4** goal. The
 [implementation register](2026-09-07-synthesis-priorities-1-4.md) remains the
 completion checklist. None of those four priorities is complete.
 
-## Evidence that changes the ordering
+## Current implementation evidence
+
+The ordinary-data Haskell matrix now passes all **16 cells**: eight operations
+in each of Djinn and Exference. Every observed candidate must retain its exact
+source graph, and the accepted implementations compile and execute under their
+full original signatures. Exference now retains complete constructor-case
+evidence and uses two bounded queues when multiple independent recursive inputs
+require both whole-value forwarding and inspection. Both queues share the
+caller's total step and queue allowances. This closes the Haskell failures
+described in the historical baseline below; fresh three-engine Lean replay and
+the full Leant boundary gate remain open.
+
+The [lexical-evidence increment](2026-09-07-contextual-evidence-design.md) now
+passes the complete shared and private checker suites and four Haskell renderer
+replay tests. Explicit Given identities preserve their exact introduction and
+source slot. These graph/checker results do not by themselves establish search
+reachability, method/instance/superclass evidence, or production Lean rendering.
+The subsequent native Given matrix establishes five live Exference roles and
+three Djinn roles, plus three leakage controls. The report retains its exact
+inventory, constraint-pruning policy, original signatures, and GHC replay.
+Djinn's constrained local/global search remains separate from those accepted
+roles.
+
+The final strict build passes, and the
+[complete affected-suite receipt](../../test-integration/receipts/recursive-context-checkpoint.json)
+records 2,090/2,092 passing tests. All ten non-Length suites pass in full.
+Two existing short-deadline Length process tests fail in the 432-test run and
+pass an [unchanged focused retry](../../test-integration/receipts/recursive-context-length-retry.json).
+The retry preserves the same executable and internal limits; it is not an
+unfiltered full-Length pass. The earlier seven-failure baseline and its separate
+retry remain under `dist-newstyle/priority-baseline-suites-v1/` and
+`priority-baseline-length-retry-v1/`.
+
+The [generic fold composition increment](2026-09-07-supplied-recursor-composition.md)
+now passes `map`, order-sensitive `append`, generalized `length`, and the
+empty-input control in both Haskell engines within the original bounds. The
+next immediate gate is vendoring this checkpoint for cross-engine Lean
+acceptance. Expanded Church acceptance must cover additional total operations
+and all nineteen partial cases with explicit supplied defaults. New source and
+oracle controls must compile and run before those cells count as accepted
+behavior.
+
+## Earlier published baseline and resolved experiments
 
 Djinn's [case-search checkpoint](2026-09-07-recursive-data-cases.md), committed
 in `5fcc4a8b` and corrected in `3ce26cfd`, now passes eight Haskell execution
@@ -93,8 +135,8 @@ current blocking fixtures.
 
 | Order | Existing goal item | Deliverable | Acceptance and reason for its position |
 | --- | --- | --- | --- |
-| 1 | Priority 2, case stage; priority 4 acceptance | Close Exference case parity and complete Leant integration | Retain all eight accepted Djinn cases; close Exference `tailOr` and tuple fields, extending checked case evidence beyond same-result zero/step spines. Require exact graphs and Haskell execution. Replay all eight in Djinn, Exference, and Both with false controls, then pass the full configured Leant suite. Preserve positive-only construction bounds. |
-| 2 | Priority 2, recursor stage; extend priority 4 corpus | Supplied folds and recursors for ordinary recursive programs | Prepared fixtures exercise `map`, `append`, and `length` using generic recursors, with tree operations in Lean. Implement coherent polymorphic instantiation where needed, then require exact source evidence, host behavior, and termination checking. Fixture preparation is not capability acceptance. |
+| 1 | Priority 2, case stage; priority 4 acceptance | Complete cross-engine Leant integration | Retain the passing sixteen-cell Haskell matrix. Replay all eight operations in Djinn, Exference, and Both with false controls, then pass the full configured Leant suite. Preserve exact complete-case graphs, shared queue/step bounds, and positive-only construction bounds. |
+| 2 | Priority 2, recursor stage; extend priority 4 corpus | Complete Lean acceptance and broaden supplied recursor composition | Retain the accepted Haskell `map`, `append`, and generalized `length` fixture in both engines. Replay supplied folds and tree operations in Lean, including actual termination checks; extend accumulator shapes where concrete programs expose a gap. |
 | 3 | Priority 3 | Contextual providers with explicit dictionary evidence | First exact constrained forwarding and dictionary-independent bodies under lexical givens; then methods, conditional providers, and superclasses. This crosses search, graph, and host-projection boundaries and deserves its own staged acceptance. |
 | 4 | Priority 4, corpus completion | Close the remaining Church behavioral coverage | Cover naturals, options/eithers, folds, conversions, and all 19 supplied-default cases. Start adding these tests during earlier steps; this row is the final coverage gate, not permission to postpone all behavioral work. |
 
@@ -109,9 +151,9 @@ separate receipts do not claim an unfiltered 620-test pass.
 
 The first/best CLI fixture is now accepted and should be retained at subsequent
 integration checkpoints. The first row remains the principal cross-engine
-capability gap; bounded simplification can be validated independently while its
-search fix is developed. Its live acceptance is now complete; retain it as a
-regression gate and proceed to recursors. The schedule separates delivery size from importance. Dictionary support
+integration gate. Bounded simplification's live acceptance is complete; retain
+it as a regression gate while proceeding to recursors. The schedule separates
+delivery size from importance. Dictionary support
 remains a required capability; bounded simplification does not replace it.
 Nor does accepting a recursor milestone complete recursive-data work without
 the documented source-evidence and Lean checking gates.
@@ -128,12 +170,11 @@ recursive layer. Include aliases, mutual recursion, multiple inputs, tuple
 results, and unchanged positive-only bounds. A bounded case view must retain
 its incomplete-search status and cannot authorize a non-inhabitation claim.
 
-**Use existing evidence infrastructure for contexts.** The current
+**Use existing evidence infrastructure for contexts.** The new
 [`SourceGraph.hs`](../../djinn/src-internal/Djinn/Internal/SourceGraph.hs)
-rejects forall consumption requiring dictionary evidence. Reuse the shared
-constraint representation and Exference's checked resolution where applicable;
-do not create another context-erased shortcut. Carry provider identities and
-lexical givens through the graph and the Lean projection. Test sibling-scope
+and Exference checker reconstruct direct lexical evidence. Extend search and
+production projection around these checked identities. Carry provider identities
+and lexical givens through the graph and the Lean projection. Test sibling-scope
 leakage, escaped skolems, wrong providers, and unavailable dictionary authority.
 
 **Behavior is a continuing acceptance requirement.** Add host execution and
@@ -148,7 +189,7 @@ An unsuccessful proof attempt remains inconclusive.
 | --- | --- | --- |
 | Native Windows Length acquisition | Separate platform milestone after the capability deliveries, or sooner for a concrete Windows Length user task | Implement the complete bounded acquisition, solver execution, and independent replay route; configuration parsing alone is insufficient. |
 | Cross-engine progress and cancellation | Promote the observed Both delay into the case-stage acceptance | Compare the same tuple-payload query in Djinn, Exference, and Both. An expensive lane must not hide an accepted result past the command deadline. First close the Exference search regression; introduce broader scheduling changes only if the delay persists. |
-| Other search and checker performance | Instrument now; optimize a demonstrated cost | Separate cold startup, first accepted result, search work, rendering/checking, and memory. Compare identical queries and budgets before changing defaults. |
+| Other search and checker performance | Instrument now; optimize a demonstrated cost | The Exference supplied-fold `[a] -> a` rejection fixture takes about 147 seconds at 100,000 steps; this is a concrete exhaustion-cost benchmark. Separate cold startup, first accepted result, search work, rendering/checking, and memory before changing defaults. The interpreted/default-deferral contextual failures and native/immediate-pruning successes changed two variables, so they are not a controlled performance comparison. |
 | Failure diagnostics and capability receipts | Include in current deliveries | Keep graph absence, compiler rejection, behavioral falsehood, inconclusive checking, and exhausted search distinct. Retain per-engine results, actual replay status, source revision, settings, exact emitted source, and negative controls; a failed matrix must not obscure the accepted subset or imply unperformed kernel checks. |
 | Semantic provider retrieval | Retain as the next scaling investigation | Show a useful provider excluded by inventory selection in a realistic project; measure retrieval recall as well as latency. Larger inventories alone are not an acceptance criterion. |
 | Canonical duplicate keys and a shared subgoal DAG | Defer broad refactoring; allow a measured local optimization | A profile must identify duplicate comparison or repeated subgoal work as material. Preserve source identity, scope, budget charging, and replay. |

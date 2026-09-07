@@ -15306,6 +15306,8 @@ certifiedVisibleApplication (_, Djex.TermNode _ form) = case form of
   Djex.TypedLambda{} -> False
   Djex.TypedApply{} -> False
   Djex.TypedForallIntroduction{} -> False
+  Djex.TypedContextIntroduction{} -> False
+  Djex.TypedContextApplication{} -> False
   Djex.TypedImplicitTypeApplication{} -> False
   Djex.TypedTuple{} -> False
   Djex.TypedHole{} -> False

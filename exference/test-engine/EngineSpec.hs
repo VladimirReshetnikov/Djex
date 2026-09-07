@@ -16,7 +16,7 @@ import Test.Tasty.HUnit
   ((@?=), assertBool, assertEqual, assertFailure, testCase)
 
 import Language.Haskell.Exference.Core.Candidate
-  ( emptyExferenceSourceTypeVariableHints )
+  ( ExferenceCandidateDetails (..), emptyExferenceSourceTypeVariableHints )
 import Language.Haskell.Exference.Core.ConstraintSolver (filterUnresolved)
 import Language.Haskell.Exference.Core.Expression
   ( Expression (..), toGeneratedExpression )
@@ -109,13 +109,15 @@ import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 import qualified Language.Haskell.Synthesis.TypedGenerated as Typed
 import qualified Language.Haskell.Synthesis.TypedGenerated.Fingerprint
   as Fingerprint
+import qualified GivenEvidenceSpec
 
 main :: IO ()
 main = defaultMain tests
 
 tests :: TestTree
 tests = testGroup "Exference private engine boundaries"
-  [ testCase "rigid scopes reject direct and propagated skolem escapes" $ do
+  [ GivenEvidenceSpec.tests
+  , testCase "rigid scopes reject direct and propagated skolem escapes" $ do
       let opened = registerRigidScope
             (IntSet.singleton 0) [7] emptyRigidScope
       validateRigidSubstitutions opened
@@ -1616,7 +1618,7 @@ tests = testGroup "Exference private engine boundaries"
       -- Forall introduction intentionally makes the graph draft unavailable,
       -- so there is no retained checked-term chain for the reference observer.
       checkedExpressionTypeApplicationOriginReferences evidence @?= []
-  , testCase "checker retains only exact recursive zero-step spine cases" $ do
+  , testCase "checker retains complete constructor cases with exact field authority" $ do
       let payload = TypeCons $ name "Payload"
           spineName = name "Spine"
           zeroName = name "SpineZero"
@@ -1671,8 +1673,40 @@ tests = testGroup "Exference private engine boundaries"
 
       ordinaryEvidence <- checkedEvidence emptyStaticClassEnv functions
         [ordinaryDeconstructor] goal expression
-      expectUnavailable "nonrecursive zero-step case"
-        (== NominalConstructorPattern zeroName) ordinaryEvidence
+      expectPlainGraph "nonrecursive complete case" 30 ordinaryEvidence
+      -- Competing fragments of one datatype are rejected before any branch
+      -- can acquire constructor authority from the combined inventory.
+      case checkExpression (mkQueryClassEnv emptyStaticClassEnv []) functions
+          [exactDeconstructor { deconstructorConstructors = [constructor] }
+          | constructor <- deconstructorConstructors exactDeconstructor]
+          goal [] expression of
+        Left InvalidCheckEnvironmentBindings{} -> pure ()
+        other -> fail $ "split constructor inventory crossed preparation: " ++ show other
+
+      let token = TypeCons $ name "CaseToken"
+          tokenName = name "caseToken"
+          tokenProvider = FunctionBinding token tokenName 0 [] []
+          observer alternatives = ExpLambda 1 spine
+            $ ExpCaseMatch (ExpVar 1 spine) alternatives
+          zeroAlternative = (zeroName, [], ExpName tokenName)
+          stepAlternative = (stepName, [(2, payload), (3, spine)], ExpName tokenName)
+      observerEvidence <- checkedEvidence emptyStaticClassEnv
+        (tokenProvider : functions) [exactDeconstructor]
+        (TypeArrow spine token) $ observer [zeroAlternative, stepAlternative]
+      expectPlainGraph "case result independent of its scrutinee" 31 observerEvidence
+      mapM_ (\alternatives -> do
+          partialEvidence <- checkedEvidence emptyStaticClassEnv
+            (tokenProvider : functions) [exactDeconstructor]
+            (TypeArrow spine token) $ observer alternatives
+          expectUnavailable "partial or duplicate alternatives cannot own case evidence"
+            (== NominalConstructorPattern zeroName) partialEvidence)
+        [[zeroAlternative], [zeroAlternative, zeroAlternative]]
+      partialLetEvidence <- checkedEvidence emptyStaticClassEnv functions
+        [exactDeconstructor] (TypeArrow spine spine)
+        (ExpLambda 1 spine $ ExpLetMatch stepName [(2, payload), (3, spine)]
+          (ExpVar 1 spine) $ ExpVar 3 spine)
+      expectUnavailable "one constructor of a sum cannot own total let evidence"
+        (== NominalConstructorPattern stepName) partialLetEvidence
 
       -- Shared generated-expression validation forbids one local identity
       -- from being rebound anywhere in a candidate. Keep that stronger raw
@@ -1805,6 +1839,127 @@ tests = testGroup "Exference private engine boundaries"
             capacities input
       assertBool "strict production search did not retain the rebuild-case graph"
         $ any isRebuildCase candidates
+  , testGroup "bounded recursive case scheduling"
+      [ testCase "both lanes share the caller's step and queue allowance" $ do
+          let token = TypeCons $ name "LaneToken"
+              base = recursiveLaneInput
+                { E.input_goalType = TypeArrow laneSpine
+                    $ TypeArrow laneSpine token
+                , E.input_envFuncs =
+                    [ FunctionBinding token (name "laneSeed") 0 [] []
+                    , FunctionBinding token (name "laneWrap") 0 [] [token]
+                    ]
+                }
+          forM_ [0, 1, 2, 3, 8] $ \queueBound ->
+            forM_ [1, 2, 16] $ \stepBound -> do
+              let input = base
+                    { E.input_maxSteps = stepBound
+                    , E.input_maxQueueSize = Just queueBound
+                    }
+              results <- recursiveLaneResults input
+              assertBool "a protected lane doubled the global step allowance"
+                $ length results <= stepBound
+              terminal <- lastResult results
+              assertBool "a bounded trace ended without reporting completion"
+                $ SharedSearch.batchProgress (SharedQuery.resultSearch terminal)
+                    /= SharedSearch.Continuing
+              let candidates = concatMap
+                    (SharedSearch.batchCandidates . SharedQuery.resultSearch)
+                    results
+              forM_ candidates $ \candidate -> do
+                let stats = exferenceCandidateStats
+                      $ SharedCandidate.candidateDetails candidate
+                assertBool "a result exceeded the aggregate queue allowance"
+                  $ exference_finalSize stats <= queueBound
+                assertBool "a result exceeded the shared step deadline"
+                  $ exference_steps stats <= stepBound
+              if queueBound > 0 && stepBound == 16
+                then assertBool "the budget checks observed no completed work"
+                  $ not $ null candidates
+                else pure ()
+      , testCase "one recursive input retains its original first-result step" $ do
+          let input = recursiveLaneInput
+                { E.input_goalType = TypeArrow laneSpine laneSpine
+                , E.input_maxSteps = 3
+                }
+          results <- recursiveLaneResults input
+          let candidates = concatMap
+                (SharedSearch.batchCandidates . SharedQuery.resultSearch)
+                results
+              isIdentity candidate = case
+                  Generated.functionClauseExpression
+                    $ SharedCandidate.candidateOutput candidate of
+                Generated.Lambda [Generated.Bind variable]
+                    (Generated.Local returned) -> variable == returned
+                _ -> False
+          assertBool "a one-input query acquired a second scheduling lane"
+            $ any isIdentity candidates
+          map (exference_steps . exferenceCandidateStats
+              . SharedCandidate.candidateDetails) candidates @?=
+            replicate (length candidates) 3
+      , testCase "scheduling does not become heuristic expression depth" $ do
+          let token = TypeCons $ name "LaneDepthToken"
+              input = recursiveLaneInput
+                { E.input_goalType = TypeArrow laneSpine
+                    $ TypeArrow laneSpine token
+                , E.input_envFuncs =
+                    [FunctionBinding token (name "laneDepthSeed") 0 [] []]
+                , E.input_maxSteps = 64
+                , E.input_maxDepth = Just 0
+                , E.input_heuristicsConfig = defaultHeuristicsConfig
+                    { heuristics_functionGoalTransform = 0
+                    , heuristics_stepProvidedGood = 0
+                    , heuristics_stepProvidedBad = 0
+                    , heuristics_stepEnvGood = 0
+                    , heuristics_stepEnvBad = 0
+                    , heuristics_unusedVar = 1000
+                    }
+                }
+          allowed <- recursiveLaneResults input
+          assertBool "forwarding gained a synthetic depth penalty"
+            $ any (not . null . SharedSearch.batchCandidates
+                . SharedQuery.resultSearch) allowed
+          rejected <- recursiveLaneResults input
+            { E.input_heuristicsConfig = (E.input_heuristicsConfig input)
+                {heuristics_functionGoalTransform = 1}
+            }
+          assertBool "the protected lane bypassed the existing depth bound"
+            $ all (null . SharedSearch.batchCandidates
+                . SharedQuery.resultSearch) rejected
+      , testCase "the ordinary lane preserves a whole-value consumer" $ do
+          let token = TypeCons $ name "LaneObserved"
+              observer = name "laneObserve"
+              input = recursiveLaneInput
+                { E.input_goalType = TypeArrow laneSpine
+                    $ TypeArrow laneSpine token
+                , E.input_envFuncs =
+                    [FunctionBinding token observer 0 [] [laneSpine, laneSpine]]
+                , E.input_maxSteps = 64
+                }
+          results <- recursiveLaneResults input
+          let candidates = concatMap
+                (SharedSearch.batchCandidates . SharedQuery.resultSearch)
+                results
+              usesWhole candidate =
+                Generated.alphaEquivalentExpression
+                  (Generated.functionClauseExpression
+                    $ SharedCandidate.candidateOutput candidate)
+                  (Generated.Global observer)
+          assertBool "eager cases suppressed an uninspected consumer"
+            $ any usesWhole candidates
+      , testCase "both case policies retain ordered-action oracle parity" $ do
+          let token = TypeCons $ name "LaneParityToken"
+              input = recursiveLaneInput
+                { E.input_goalType = TypeArrow laneSpine
+                    $ TypeArrow laneSpine token
+                , E.input_envFuncs =
+                    [FunctionBinding token (name "laneParitySeed") 0 [] []]
+                , E.input_maxSteps = 24
+                , E.input_maxQueueSize = Just 8
+                }
+          assertStepRouteParity "bounded recursive lanes"
+            (IdentifierCapacities 1000 1000 1000 1000) input
+      ]
   , testCase "final zonking seals a multi-binder inferred specialization" $ do
       let integer = TypeCons $ name "Int"
           boolean = TypeCons $ name "Bool"
@@ -2036,11 +2191,7 @@ tests = testGroup "Exference private engine boundaries"
       patternEvidence <- checkedEvidence emptyStaticClassEnv []
         [boxDeconstructor] (TypeArrow (box integer) integer)
         matchedExpression
-      expectUnavailable "nominal constructor pattern"
-        (\reason -> case reason of
-          NominalConstructorPattern{} -> True
-          _ -> False)
-        patternEvidence
+      expectPlainGraph "complete nominal constructor let" 32 patternEvidence
 
       pairName <- expectRight $ SharedName.tupleName Boxed 2
       let pairType = TypeTuple Boxed [integer, integer]
@@ -2050,11 +2201,7 @@ tests = testGroup "Exference private engine boundaries"
                 (ExpVar 2 integer)
       tupleEvidence <- checkedEvidence emptyStaticClassEnv [] []
         (TypeArrow pairType integer) tupleExpression
-      expectUnavailable "structural tuple pattern"
-        (\reason -> case reason of
-          UnsupportedStructuralConstructorPattern{} -> True
-          _ -> False)
-        tupleEvidence
+      expectPlainGraph "structural tuple pattern" 33 tupleEvidence
 
       let className = name "C"
           token = TypeCons $ name "Token"
@@ -2085,7 +2232,7 @@ tests = testGroup "Exference private engine boundaries"
         implicitContextualExpression
       expectUnavailable "implicit local dictionaries still require graph evidence"
         (\reason -> case reason of
-          ImplicitLocalSpecialization{} -> True
+          UnsupportedContextEvidence{} -> True
           _ -> False)
         implicitContextualEvidence
 
@@ -2202,6 +2349,39 @@ identityInput = E.ExferenceInput
   (TypeArrow (TypeVar 0) (TypeVar 0))
   [] [] emptyStaticClassEnv
   False False 0 False 20 Nothing Nothing defaultHeuristicsConfig
+
+-- A fresh nominal recursive declaration exercises scheduling without giving
+-- search any reference operation or recursive eliminator. Constructors are
+-- visible for matching only, so tests cannot pass by reconstructing a value.
+laneSpine :: HsType
+laneSpine = TypeCons $ name "LaneSpine"
+
+recursiveLaneInput :: E.ExferenceInput
+recursiveLaneInput = identityInput
+  { E.input_envDeconsS =
+      [ DeconstructorBinding laneSpine
+          [ ConstructorBinding (name "LaneZero") []
+          , ConstructorBinding (name "LaneStep") [laneSpine]
+          ] True
+      ]
+  , E.input_allowUnused = True
+  , E.input_multiPM = True
+  , E.input_maxQueueSize = Just 32
+  }
+
+recursiveLaneResults :: E.ExferenceInput -> IO [E.ExferenceResult]
+recursiveLaneResults input = do
+  environment <- expectRight $ sealLegacyEnvironment input
+  target <- checkedIdentifierTarget "recursiveLane"
+  let legacyQuery = legacyInputQuery input
+      query = legacyQuery
+        { E.querySearchOptions = (E.querySearchOptions legacyQuery)
+            {exferenceCandidateRanking = SharedQuality.defaultCandidateRankingPolicy}
+        }
+  expectRight $ findQueryResultsWithIdentifierCapacitiesEither
+    (IdentifierCapacities 1000 1000 1000 1000)
+    target (emptyExferenceSourceTypeVariableHints $ E.input_goalType input)
+    environment query
 
 legacyInputEnvironment :: E.ExferenceInput -> EnvDictionary
 legacyInputEnvironment input = EnvDictionary

@@ -6,6 +6,7 @@ import Data.Void (Void)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertBool, assertEqual, assertFailure, testCase)
 import qualified KindGraphCases
+import qualified DjinnContextSpec
 
 import Djinn.Internal.Environment (prepareGroundSynthesisEnvironment)
 import Djinn.Internal.SourceGraph (SourceGraphError, checkSourceClauseGraph)
@@ -26,7 +27,8 @@ import qualified Language.Haskell.Synthesis.TypedGenerated as Q
 -- No public candidate/graph association constructor is exposed by this suite.
 main :: IO ()
 main = defaultMain $ testGroup "private Djinn source graph checker"
-  [ sharingTests, lexicalTests, constructorTests, specializationTests, KindGraphCases.tests ]
+  [ sharingTests, lexicalTests, constructorTests, specializationTests
+  , KindGraphCases.tests, DjinnContextSpec.tests ]
 
 type DeclarationSource = Declaration String Void ()
 type SourceType = T.Type String

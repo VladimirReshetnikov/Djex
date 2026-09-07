@@ -142,6 +142,8 @@ data ExferenceTermGraphAbsence
   | NominalConstructorPattern QualifiedName
   | UnsupportedStructuralConstructorPattern QualifiedName
   | UnsupportedContextualVisibleApplication HsType HsType HsType
+  | UnsupportedContextEvidence HsType
+  | UnsupportedContextualCertificateGraph
   | TermGraphEvidenceMismatch
   | TermGraphConstructionLimit ExferenceTermGraphConstructionLimit
   | TermGraphSealingFailure (SharedTyped.TermGraphError HsType TVarId)
@@ -358,10 +360,13 @@ checkedExpressionTypeApplicationOriginReferences
       CheckedApply function argument -> collect function ++ collect argument
       CheckedVisibleTypeApplication _ _ _ _ function -> collect function
       CheckedImplicitTypeApplication _ function -> collect function
+      CheckedForallIntroduction _ body -> collect body
+      CheckedContextIntroduction _ body -> collect body
+      CheckedContextApplication _ function -> collect function
       CheckedTuple elements -> concatMap collect elements
       CheckedLet _ _ binding body -> collect binding ++ collect body
       CheckedEmptyCase scrutinee -> collect scrutinee
-      CheckedExactZeroStepCase scrutinee alternatives ->
+      CheckedConstructorMatch _ scrutinee alternatives ->
         collect scrutinee
           ++ concatMap (\(CheckedCaseAlternative _ _ _ body) -> collect body)
               alternatives
@@ -450,11 +455,22 @@ data CheckedTermResult = CheckedTermResult
 
 data CheckedTerm = CheckedTerm HsType CheckedTermForm
 
+-- These coordinates belong to the independent check, not the search tree.
+-- Graph lowering replaces the introduction coordinate with its actual graph
+-- occurrence; the ordered source slot is retained unchanged.
+data CheckedGiven = CheckedGiven !Natural !Natural HsConstraint
+
+data CheckedOpening
+  = CheckedOpenForall HsType HsType
+  | CheckedOpenContext HsType
+
 data CheckedCaseAlternative = CheckedCaseAlternative
   QualifiedName
   HsType
   [(TVarId, HsType)]
   CheckedTerm
+
+data CheckedMatchSyntax = CheckedCaseExpression | CheckedPatternBinding
 
 data CheckedTermForm
   = CheckedLocal TVarId
@@ -465,16 +481,21 @@ data CheckedTermForm
       SharedGenerated.VisibleTypeArgument HsType Bool
       (Maybe (Natural, Natural)) CheckedTerm
   | CheckedImplicitTypeApplication HsType CheckedTerm
+  | CheckedForallIntroduction HsType CheckedTerm
+  | CheckedContextIntroduction !Natural CheckedTerm
+  | CheckedContextApplication [CheckedGiven] CheckedTerm
   | CheckedTuple [CheckedTerm]
   | CheckedLet TVarId HsType CheckedTerm CheckedTerm
   | CheckedEmptyCase CheckedTerm
-  | CheckedExactZeroStepCase CheckedTerm [CheckedCaseAlternative]
+  | CheckedConstructorMatch CheckedMatchSyntax CheckedTerm [CheckedCaseAlternative]
 
 data CheckState = CheckState
   { checkFlexibleIds :: !FlexibleIdSupply
   , checkAliveFlexibleIds :: !IntSet.IntSet
   , checkSubstitutions :: !Substs
   , checkLocalGivens :: [HsConstraint]
+  , checkEvidenceGivens :: [CheckedGiven]
+  , checkNextContextIntroduction :: !Natural
   , checkConstraints :: [ScopedConstraint]
   , checkRigidPlan :: !RigidInstantiationPlan
   , checkRigidScope :: !RigidScope
@@ -493,6 +514,7 @@ data CheckState = CheckState
 -- node or repeatedly scanning the complete environment.
 data ExpressionCheckContext = ExpressionCheckContext
   HsType
+  [CheckedOpening]
   QueryClassEnv
   [FunctionBinding]
   [DeconstructorBinding]
@@ -678,9 +700,10 @@ prepareExpressionCheckContextUnchecked
   -> Either ExpressionCheckError ExpressionCheckContext
 prepareExpressionCheckContextUnchecked plan classEnvironment functions
     deconstructors schemes goal = do
-  (checkedGoal, openedConstraints) <- instantiateGoal plan goal
+  (checkedGoal, openedConstraints, openings) <- instantiateGoal plan goal
   pure $ ExpressionCheckContext
     checkedGoal
+    (if null openedConstraints then [] else openings)
     (addQueryClassEnv openedConstraints classEnvironment)
     functions
     deconstructors
@@ -699,7 +722,7 @@ checkValidatedExpression
   -> Expression
   -> Either ExpressionCheckError CheckedExpressionEvidence
 checkValidatedExpression provenCandidateRigids
-    (ExpressionCheckContext checkedGoal augmentedEnvironment
+    (ExpressionCheckContext checkedGoal rootOpenings augmentedEnvironment
       functions deconstructors functionSchemes _ rigidPlan)
     expected expression = do
   let candidateRigids = IntSet.filter
@@ -714,6 +737,8 @@ checkValidatedExpression provenCandidateRigids
         , checkAliveFlexibleIds = flexibleFreeIdentifiers checkedGoal
         , checkSubstitutions = IntMap.empty
         , checkLocalGivens = []
+        , checkEvidenceGivens = []
+        , checkNextContextIntroduction = 0
         , checkConstraints = []
         , checkRigidPlan = rigidPlan
         , checkRigidScope = emptyRigidScope
@@ -726,7 +751,8 @@ checkValidatedExpression provenCandidateRigids
         , checkProviderOccurrences = []
         }
   (checkedResult, finalState) <- runStateT
-    (checkAgainst IntMap.empty expression checkedGoal)
+    (checkOpenedTelescope rootOpenings $
+      checkAgainst IntMap.empty expression checkedGoal)
     initialState
   let substitutions = checkSubstitutions finalState
       rigidAlpha = checkRigidAlpha finalState
@@ -803,10 +829,15 @@ checkValidatedExpression provenCandidateRigids
               unifyTypes (checkedResultType inferred) expectedType
               pure inferred)
             (do
-              _ <- introduceExpectedForallChain
+              introduced <- introduceExpectedForallChain
                 variables checkedExpression expectedType
-              pure $ unavailableCheckedTerm expectedType
-                $ NestedForallIntroduction expectedType)
+              -- Preserve the existing context-free graph boundary for this
+              -- increment. Qualified chains retain every intervening forall,
+              -- including a context-free layer outside a qualified one.
+              pure $ if null $ typeConstraints expectedType
+                then unavailableCheckedTerm expectedType $
+                  NestedForallIntroduction expectedType
+                else introduced)
         (ExpLambda variable annotation body, TypeArrow parameter result) -> do
           unifyTypes annotation parameter
           checkedBody <- checkAgainst
@@ -865,7 +896,7 @@ checkValidatedExpression provenCandidateRigids
     -- a snapshot of those givens so a sibling cannot consume them later.
     introduceExpectedForallChain variables checkedExpression source =
       case source of
-        TypeForall binders constraints body -> do
+        TypeForall binders _ body -> do
           instantiations <- mapM allocateCanonicalNestedRigid binders
           alive <- gets checkAliveFlexibleIds
           rigidScope <- gets checkRigidScope
@@ -874,17 +905,17 @@ checkValidatedExpression provenCandidateRigids
                 [ (binder, TypeConstant rigid)
                 | (binder, rigid) <- instantiations
                 ]
-              instantiatedConstraints = map
-                (snd . constraintApplySubsts substitutions) constraints
           modify' $ \current -> current
             { checkRigidScope = registerRigidScope alive rigids rigidScope
             , checkIntroducedRigidIds = IntSet.union
                 (IntSet.fromList rigids)
                 (checkIntroducedRigidIds current)
             }
-          withLocalGivens instantiatedConstraints
-            $ introduceExpectedForallChain variables checkedExpression
-            $ snd $ applySubsts substitutions body
+          -- Keep the established simultaneous substitution for checking.
+          -- Its graph witnesses replay that same layer one binder at a time.
+          checkOpenedTelescope (checkedLayerOpenings source instantiations) $
+            introduceExpectedForallChain variables checkedExpression $
+              snd $ applySubsts substitutions body
         body -> checkAgainst variables checkedExpression body
 
     infer :: VariableEnvironment -> Expression -> Check CheckedTermResult
@@ -911,28 +942,32 @@ checkValidatedExpression provenCandidateRigids
           pure $ unavailableCheckedTerm result
             $ SubsumedLocalSpecialization variable declared' result
         InstantiateProviderUse -> do
-          let (_, contexts, _) = SharedType.splitLeadingForalls declared'
-          if null contexts then do
-            instantiated <- instantiateImplicitLocalProvider
-              $ availableCheckedTerm declared' $ CheckedLocal variable
-            unifyTypes (checkedResultType instantiated) annotation'
-            pure instantiated
-          else do
-            instantiated <- instantiateScopedProvider declared'
-            unifyTypes instantiated annotation'
-            result <- zonk annotation'
-            pure $ unavailableCheckedTerm result
-              $ ImplicitLocalSpecialization variable declared' result
+          instantiated <- instantiateImplicitLocalProvider
+            $ availableCheckedTerm declared' $ CheckedLocal variable
+          unifyTypes (checkedResultType instantiated) annotation'
+          pure instantiated
         OrdinaryProviderUse -> do
           unifyTypes declared' annotation'
           availableCheckedTerm <$> zonk declared' <*> pure (CheckedLocal variable)
       recordProviderOccurrence (Left variable) declared' $ checkedResultType checked
       pure checked
     infer _ (ExpName name) = do
-      instantiated <- instantiateBinding name
+      checked <- case Map.lookup name functionSchemes of
+        Just scheme | Set.null $ SharedType.freeVariables scheme ->
+          instantiateImplicitLocalProvider $
+            availableCheckedTerm scheme $ CheckedGlobal name Nothing
+        _ -> do
+          instantiated <- instantiateBinding name
+          let contextual = any
+                (\binding -> functionName binding == name
+                  && not (null $ functionConstraints binding)) functions
+          pure $ if contextual
+            then unavailableCheckedTerm instantiated $ UnsupportedContextEvidence instantiated
+            else availableCheckedTerm instantiated $ CheckedGlobal name Nothing
+      let instantiated = checkedResultType checked
       recordProviderOccurrence (Right name)
         (Map.findWithDefault instantiated name functionSchemes) instantiated
-      pure $ availableCheckedTerm instantiated $ CheckedGlobal name Nothing
+      pure checked
     infer variables (ExpLambda variable annotation body) = do
       recordAliveType annotation
       checkedBody <- infer (IntMap.insert variable annotation variables) body
@@ -984,8 +1019,15 @@ checkValidatedExpression provenCandidateRigids
       checkedVariables <- foldM addPatternVariable variables
         $ zip patternVariables fieldTypes
       checkedBody <- infer checkedVariables body
-      pure $ unavailableCheckedTerm (checkedResultType checkedBody)
-        $ constructorPatternAbsence constructor
+      patternType <- zonk $ checkedResultType checkedBinding
+      fields <- mapM zonk fieldTypes
+      let alternatives = [(constructor, zip (map fst patternVariables) fields, checkedBody)]
+      complete <- completeConstructorCase patternType alternatives
+      pure $ if complete
+        then checkedConstructorMatch CheckedPatternBinding
+          (checkedResultType checkedBody) patternType checkedBinding alternatives
+        else unavailableCheckedTerm (checkedResultType checkedBody)
+          $ constructorPatternAbsence constructor
     infer variables (ExpLet variable annotation binding body) = do
       checkedBinding <- checkAgainst variables binding annotation
       checkedBody <- infer (IntMap.insert variable annotation variables) body
@@ -1008,10 +1050,10 @@ checkValidatedExpression provenCandidateRigids
       scrutineeType <- zonk $ checkedResultType checkedScrutinee
       result <- zonk resultType
       normalizedAlternatives <- mapM normalizeAlternative checkedAlternatives
-      pure $ if exactZeroStepSpineCase
-          scrutineeType result normalizedAlternatives
-        then checkedExactCaseTerm result checkedScrutinee
-          normalizedAlternatives
+      complete <- completeConstructorCase scrutineeType normalizedAlternatives
+      pure $ if complete
+        then checkedConstructorMatch CheckedCaseExpression result scrutineeType
+          checkedScrutinee normalizedAlternatives
         else unavailableCheckedTerm result
           $ constructorPatternAbsence firstConstructor
 
@@ -1047,51 +1089,61 @@ checkValidatedExpression provenCandidateRigids
         fields
       pure (constructor, normalizedFields, checkedAlternative)
 
-    -- Retain only one exact nonempty case shape. The independently checked
-    -- environment must describe a recursive two-constructor spine with one
-    -- zero-field constructor and one two-field constructor, exactly one of
-    -- whose fields is the recursive spine. The case must contain those two
-    -- direct alternatives and return the same spine it scrutinizes. Every
-    -- other nonempty case keeps the historical graph-absence result.
-    exactZeroStepSpineCase scrutineeType result alternatives =
-      result == scrutineeType && case exactSchemas of
-        [(zeroName, stepName)] ->
-          Set.fromList (map alternativeName alternatives)
-            == Set.fromList [zeroName, stepName]
-            && length alternatives == 2
-            && case [fields | (name, fields, _) <- alternatives
-                            , name == zeroName] of
-                [[]] -> case [fields | (name, fields, _) <- alternatives
-                                     , name == stepName] of
-                  [stepFields] -> length stepFields == 2
-                    && length
-                        [ ()
-                        | (_, fieldType) <- stepFields
-                        , fieldType == scrutineeType
-                        ] == 1
-                  _ -> False
-                _ -> False
-        _ -> False
+    -- Every alternative was independently typechecked above. Graph authority
+    -- additionally requires the complete constructor inventory of one matching
+    -- declaration, instantiated together so field correlations are preserved.
+    -- Duplicate or partial alternatives never acquire total-case evidence.
+    completeConstructorCase scrutineeType alternatives = StateT $ \initialState ->
+      trySchemas initialState matchingSchemas
      where
-      alternativeName (name, _, _) = name
-      exactSchemas =
-        [ (constructorName zero, constructorName step)
+      names = [constructor | (constructor, _, _) <- alternatives]
+      uniqueNames = Set.fromList names
+      completeNames constructors =
+        length names == Set.size uniqueNames
+          && length constructors == length names
+          && Set.fromList (map constructorName constructors) == uniqueNames
+      matchingSchemas =
+        [ deconstructor
         | deconstructor <- deconstructors
-        , deconstructorRecursive deconstructor
-        , let constructors = deconstructorConstructors deconstructor
-        , [zero] <- [filter (null . constructorFields) constructors]
-        , [step] <- [filter ((== 2) . length . constructorFields) constructors]
-        , length constructors == 2
-        , Set.fromList [constructorName zero, constructorName step]
-            == Set.fromList (map alternativeName alternatives)
-        ]
+        , completeNames $ deconstructorConstructors deconstructor
+        ] ++ case (scrutineeType, alternatives) of
+          (TypeTuple boxity fields, [(constructor, _, _)])
+            | SharedName.nameSpecial constructor ==
+                Just (SharedName.TupleConstructor boxity $ length fields) ->
+              [DeconstructorBinding scrutineeType
+                [ConstructorBinding constructor fields] False]
+          _ -> []
+      trySchemas initialState [] = Right (False, initialState)
+      trySchemas initialState (schema : rest) =
+        case runStateT (checkSchema schema) initialState of
+          Right checked -> Right checked
+          Left FlexibleIdentifierSupplyExhausted ->
+            Left FlexibleIdentifierSupplyExhausted
+          Left _ -> trySchemas initialState rest
+      checkSchema schema = do
+        let constructors = deconstructorConstructors schema
+        (freshInput :| freshFields, _) <- freshenTypes
+          (deconstructorInput schema :| concatMap constructorFields constructors) []
+        unifyTypes scrutineeType freshInput
+        checkFields freshFields constructors
+        pure True
+      checkFields _ [] = pure ()
+      checkFields fields (constructor : rest) = do
+        let (current, remaining) = splitAt (length $ constructorFields constructor) fields
+        case [patternFields | (name, patternFields, _) <- alternatives
+                            , name == constructorName constructor] of
+          [patternFields] | length patternFields == length current ->
+            zipWithM_ unifyTypes (map snd patternFields) current
+          _ -> throwCheck $ PatternArity (constructorName constructor)
+            (length current) 0
+        checkFields remaining rest
 
-    checkedExactCaseTerm result checkedScrutinee alternatives =
+    checkedConstructorMatch syntax result patternType checkedScrutinee alternatives =
       CheckedTermResult result $ do
         scrutineeTerm <- checkedTermDraft checkedScrutinee
-        checked <- traverse (checkedAlternativeTerm result) alternatives
+        checked <- traverse (checkedAlternativeTerm patternType) alternatives
         pure $ CheckedTerm result
-          $ CheckedExactZeroStepCase scrutineeTerm checked
+          $ CheckedConstructorMatch syntax scrutineeTerm checked
 
     checkedAlternativeTerm patternType (constructor, fields, checkedBody) = do
       body <- checkedTermDraft checkedBody
@@ -1238,8 +1290,9 @@ checkValidatedExpression provenCandidateRigids
     -- annotation is accepted as an instantiation witness: fresh variables are
     -- introduced here, constrained by the independently checked use, and
     -- normalized with the complete check's substitutions before graph sealing.
-    -- Contextual schemes retain the existing obligation path below until their
-    -- dictionary evidence can be represented in the graph.
+    -- A type application preserves the qualified intermediate type. Only a
+    -- separate context application consumes its dictionaries, carrying the
+    -- exact lexical snapshot until final substitutions are known.
     instantiateImplicitLocalProvider original = do
       -- A constructor-derived local scheme may contain source binder IDs
       -- absent from the initial goal. Reserve its whole namespace before any
@@ -1252,35 +1305,25 @@ checkValidatedExpression provenCandidateRigids
       consume original
      where
       consume checked = case checkedResultType checked of
-        TypeForallNative (binder : remaining) [] body -> do
+        TypeForallNative (binder : remaining) contexts body -> do
           selected <- freshTypeVariable
           let result = SharedType.canonicalizeType $
                 substituteScopedVariable binder selected $
-                  if null remaining then body
-                    else TypeForallNative remaining [] body
+                  if null remaining && null contexts then body
+                    else TypeForallNative remaining contexts body
           recordAliveType result
           consume $ unaryCheckedTerm result
             (CheckedImplicitTypeApplication selected) checked
-        _ -> pure checked
-
-    instantiateScopedProvider declared = do
-      supply <- gets checkFlexibleIds
-      case instantiateLeadingForallsWith allocateNamespace supply declared of
-        Nothing -> throwCheck FlexibleIdentifierSupplyExhausted
-        Just (instantiated, constraints, nextSupply) -> do
+        source@(TypeForallNative [] constraints@(_ : _) body) -> do
           localGivens <- gets checkLocalGivens
+          evidenceGivens <- gets checkEvidenceGivens
           modify' $ \current -> current
-            { checkFlexibleIds = nextSupply
-            , checkAliveFlexibleIds = IntSet.unions
-                $ checkAliveFlexibleIds current
-                : flexibleFreeIdentifiers instantiated
-                : map (foldMap flexibleFreeIdentifiers . constraint_params)
-                    constraints
-            , checkConstraints =
-                scopedConstraints localGivens constraints
-                  ++ checkConstraints current
-            }
-          pure instantiated
+            { checkConstraints = scopedConstraints localGivens constraints
+                ++ checkConstraints current }
+          recordAliveType source
+          consume $ unaryCheckedTerm body
+            (CheckedContextApplication evidenceGivens) checked
+        _ -> pure checked
 
     -- Visible application consumes exactly one binder. Contexts attached to
     -- a multi-binder layer become obligations only after its last binder has
@@ -1417,30 +1460,6 @@ checkValidatedExpression provenCandidateRigids
           modify' $ \current -> current {checkFlexibleIds = nextSupply}
           pure $ SharedType.FlexibleVariable identifier
 
-    -- Replace occurrences owned by this forall layer while respecting a
-    -- nested layer that deliberately shadows the same nominal binder.
-    substituteScopedVariable binder replacement typeExpression =
-      case typeExpression of
-        SharedType.TypeVariable variable
-          | variable == binder -> replacement
-          | otherwise -> typeExpression
-        SharedType.TypeConstructor{} -> typeExpression
-        SharedType.TypeApplication typeFunction typeArgument ->
-          SharedType.TypeApplication
-            (substituteScopedVariable binder replacement typeFunction)
-            (substituteScopedVariable binder replacement typeArgument)
-        SharedType.FunctionType parameter result -> SharedType.FunctionType
-          (substituteScopedVariable binder replacement parameter)
-          (substituteScopedVariable binder replacement result)
-        SharedType.TupleType boxity elements -> SharedType.TupleType boxity
-          $ map (substituteScopedVariable binder replacement) elements
-        SharedType.ForallType binders nestedContexts nestedBody
-          | binder `elem` binders -> typeExpression
-          | otherwise -> SharedType.ForallType binders
-              (map (fmap $ substituteScopedVariable binder replacement)
-                nestedContexts)
-              (substituteScopedVariable binder replacement nestedBody)
-
     instantiateConstructor name scrutineeType = case
         SharedName.nameSpecial name of
       Just (SharedName.TupleConstructor boxity arity) -> do
@@ -1564,6 +1583,8 @@ normalizeCheckedTermResult substitutions rigidAlpha
     UnsupportedContextualVisibleApplication source selected result ->
       UnsupportedContextualVisibleApplication
         (normalize source) (normalize selected) (normalize result)
+    UnsupportedContextEvidence source -> UnsupportedContextEvidence $ normalize source
+    UnsupportedContextualCertificateGraph -> reason
     TermGraphEvidenceMismatch -> reason
     TermGraphConstructionLimit{} -> reason
     TermGraphSealingFailure{} -> reason
@@ -1584,13 +1605,21 @@ normalizeCheckedTermResult substitutions rigidAlpha
             (normalizeTerm function)
       CheckedImplicitTypeApplication selected function ->
         CheckedImplicitTypeApplication (normalize selected) (normalizeTerm function)
+      CheckedForallIntroduction selected body ->
+        CheckedForallIntroduction (normalize selected) (normalizeTerm body)
+      CheckedContextIntroduction introduction body ->
+        CheckedContextIntroduction introduction (normalizeTerm body)
+      CheckedContextApplication givens function -> CheckedContextApplication
+        [CheckedGiven introduction slot (fmap normalize constraint)
+        | CheckedGiven introduction slot constraint <- givens]
+        (normalizeTerm function)
       CheckedTuple elements -> CheckedTuple $ map normalizeTerm elements
       CheckedLet variable annotation binding body -> CheckedLet
         variable (normalize annotation)
         (normalizeTerm binding) (normalizeTerm body)
       CheckedEmptyCase scrutinee -> CheckedEmptyCase $ normalizeTerm scrutinee
-      CheckedExactZeroStepCase scrutinee alternatives ->
-        CheckedExactZeroStepCase
+      CheckedConstructorMatch syntax scrutinee alternatives ->
+        CheckedConstructorMatch syntax
           (normalizeTerm scrutinee)
           (map normalizeAlternative alternatives)
 
@@ -1649,32 +1678,36 @@ checkedExpressionTermGraph candidateKey
   case checkedResult of
     CheckedTermResult _ (Left reason) ->
       ExferenceTermGraphUnavailable reason
-    CheckedTermResult _ (Right checkedTerm) ->
-      case buildCheckedTermGraph candidateKey checkedTerm of
-        Left reason -> ExferenceTermGraphUnavailable reason
-        Right source -> case origins of
-          [] -> case SharedTyped.sealTermGraph
-              (checkedTermTypeStructure checkedTerm)
-              SharedTyped.defaultTermGraphLimits
-              source of
-            Left failure -> ExferenceTermGraphUnavailable
-              $ TermGraphSealingFailure failure
-            Right graph -> retainPlain compatibility graph
-          _ -> case SharedAssociation.sealCheckedTypeApplicationCertificateGraph
-              SharedCertificate.defaultTypeApplicationCertificateLimits
-              (checkedTermTypeStructure checkedTerm)
-              SharedTyped.defaultTermGraphLimits
-              source
-              (map lowerTypeApplicationOrigin origins) of
-            Left failure -> ExferenceTermGraphUnavailable
-              $ associationAbsence failure
-            Right checked ->
-              let graph =
-                    SharedAssociation.checkedTypeApplicationCertificateGraph
-                      checked
-              in if SharedTyped.eraseTermGraph graph == compatibility
-                  then ExferenceTermGraphAssociated checked
-                  else ExferenceTermGraphUnavailable TermGraphProjectionMismatch
+    CheckedTermResult _ (Right checkedTerm)
+      | not (null origins), checkedTermHasContext checkedTerm ->
+          ExferenceTermGraphUnavailable UnsupportedContextualCertificateGraph
+      | otherwise ->
+          case buildCheckedTermGraph candidateKey checkedTerm of
+            Left reason -> ExferenceTermGraphUnavailable reason
+            Right source -> case origins of
+              [] -> case SharedTyped.sealTermGraphWithContext
+                  SharedTyped.sharedContextTypeStructure
+                  (checkedTermTypeStructure checkedTerm)
+                  SharedTyped.defaultTermGraphLimits
+                  source of
+                Left failure -> ExferenceTermGraphUnavailable
+                  $ TermGraphSealingFailure failure
+                Right graph -> retainPlain compatibility graph
+              _ -> case SharedAssociation.sealCheckedTypeApplicationCertificateGraph
+                  SharedCertificate.defaultTypeApplicationCertificateLimits
+                  (checkedTermTypeStructure checkedTerm)
+                  SharedTyped.defaultTermGraphLimits
+                  source
+                  (map lowerTypeApplicationOrigin origins) of
+                Left failure -> ExferenceTermGraphUnavailable
+                  $ associationAbsence failure
+                Right checked ->
+                  let graph =
+                        SharedAssociation.checkedTypeApplicationCertificateGraph
+                          checked
+                  in if SharedTyped.eraseTermGraph graph == compatibility
+                      then ExferenceTermGraphAssociated checked
+                      else ExferenceTermGraphUnavailable TermGraphProjectionMismatch
 
 retainPlain
   :: SharedGenerated.Expression TVarId
@@ -1709,6 +1742,8 @@ associationAbsence failure = case failure of
     TermGraphSealingFailure graph
   SharedAssociation.TypeApplicationCertificateAssociationPlanError plan ->
     TermGraphCertificateAssociationFailure $ planAssociationFailure plan
+  SharedAssociation.TypeApplicationCertificateContextEvidenceUnsupported owner ->
+    TermGraphSealingFailure $ SharedTyped.ContextTypeStructureUnavailable owner
   SharedAssociation.DuplicateGraphTypeApplicationCertificateUse{} ->
     occurrenceFailure
   SharedAssociation.UnexpectedGraphTypeApplicationCertificateUse{} ->
@@ -1788,7 +1823,7 @@ planAssociationFailure failure = case failure of
   invalid = TermGraphCertificatePlanValidationFailure
 
 -- Constructor-pattern authority is retained only inside the checker-owned
--- draft which proved the exact zero/step case. Ordinary terms therefore use
+-- draft which proved the complete constructor match. Ordinary terms therefore use
 -- the unchanged shared structure, while a retained case admits exactly the
 -- constructor/type/field triples independently reconstructed above. The
 -- resulting schema is consumed atomically by sealing and is never exposed
@@ -1796,7 +1831,7 @@ planAssociationFailure failure = case failure of
 checkedTermTypeStructure :: CheckedTerm -> SharedTyped.TypeStructure HsType
 checkedTermTypeStructure checked = SharedTyped.sharedTypeStructure
   { SharedTyped.constructorPatternFieldTypes = resolve
-  , SharedTyped.forallTypeStructure = Just SharedTyped.sharedForallTypeStructure
+  , SharedTyped.forallTypeStructure = Just SharedTyped.sharedContextualForallTypeStructure
   }
  where
   schemas = checkedTermConstructorSchemas checked
@@ -1822,12 +1857,15 @@ checkedTermConstructorSchemas (CheckedTerm _ form) = case form of
   CheckedVisibleTypeApplication _ _ _ _ function ->
     checkedTermConstructorSchemas function
   CheckedImplicitTypeApplication _ function -> checkedTermConstructorSchemas function
+  CheckedForallIntroduction _ body -> checkedTermConstructorSchemas body
+  CheckedContextIntroduction _ body -> checkedTermConstructorSchemas body
+  CheckedContextApplication _ function -> checkedTermConstructorSchemas function
   CheckedTuple elements -> concatMap checkedTermConstructorSchemas elements
   CheckedLet _ _ binding body ->
     checkedTermConstructorSchemas binding
       ++ checkedTermConstructorSchemas body
   CheckedEmptyCase scrutinee -> checkedTermConstructorSchemas scrutinee
-  CheckedExactZeroStepCase scrutinee alternatives ->
+  CheckedConstructorMatch _ scrutinee alternatives ->
     checkedTermConstructorSchemas scrutinee
       ++ concatMap alternativeSchemas alternatives
  where
@@ -1836,6 +1874,27 @@ checkedTermConstructorSchemas (CheckedTerm _ form) = case form of
     (name, patternType, map snd fields)
       : checkedTermConstructorSchemas body
 
+checkedTermHasContext :: CheckedTerm -> Bool
+-- Only explicit lexical evidence needs the context-aware association entrance.
+-- Existing certificate-bearing visible applications retain their separately
+-- checked source constraints and legacy result/obligation observations; their
+-- contextual flag does not introduce a lexical dictionary node.
+checkedTermHasContext (CheckedTerm _ form) = case form of
+  CheckedLocal{} -> False
+  CheckedGlobal{} -> False
+  CheckedLambda _ _ body -> checkedTermHasContext body
+  CheckedApply function argument -> checkedTermHasContext function || checkedTermHasContext argument
+  CheckedVisibleTypeApplication _ _ _ _ function -> checkedTermHasContext function
+  CheckedImplicitTypeApplication _ function -> checkedTermHasContext function
+  CheckedForallIntroduction _ body -> checkedTermHasContext body
+  CheckedContextIntroduction{} -> True
+  CheckedContextApplication{} -> True
+  CheckedTuple elements -> any checkedTermHasContext elements
+  CheckedLet _ _ binding body -> checkedTermHasContext binding || checkedTermHasContext body
+  CheckedEmptyCase scrutinee -> checkedTermHasContext scrutinee
+  CheckedConstructorMatch _ scrutinee alternatives -> checkedTermHasContext scrutinee
+    || any (\(CheckedCaseAlternative _ _ _ body) -> checkedTermHasContext body) alternatives
+
 data TermGraphBuildState = TermGraphBuildState
   { termGraphBuildCandidateKey :: !Natural
   , termGraphBuildLimits :: !SharedTyped.TermGraphLimits
@@ -1843,6 +1902,7 @@ data TermGraphBuildState = TermGraphBuildState
   , termGraphBuildNextOccurrence :: !Natural
   , termGraphBuildEdges :: !Natural
   , termGraphBuildPatterns :: !Natural
+  , termGraphBuildEvidenceIntroductions :: !(Map.Map Natural SharedTyped.OccurrenceId)
   , termGraphBuildNodes ::
       [(SharedTyped.TermNodeId, SharedTyped.TermNode HsType TVarId)]
   }
@@ -1864,6 +1924,7 @@ buildCheckedTermGraph candidateKey checkedTerm = do
       , termGraphBuildNextOccurrence = 0
       , termGraphBuildEdges = 0
       , termGraphBuildPatterns = 0
+      , termGraphBuildEvidenceIntroductions = Map.empty
       , termGraphBuildNodes = []
       }
   pure $ SharedTyped.TermGraphSource root $ termGraphBuildNodes finalState
@@ -1930,6 +1991,42 @@ buildCheckedTerm (CheckedTerm ty checkedForm) = do
         $ lift $ Left TermGraphEvidenceMismatch
       pure $ SharedTyped.TypedImplicitTypeApplication occurrence functionId
         $ SharedTyped.ImplicitTypeApplicationWitness source selected ty
+    CheckedForallIntroduction selected body -> do
+      reserveTermGraphEdges 1
+      occurrence <- allocateCheckedOccurrence
+      bodyId <- buildCheckedTerm body
+      let bodyType = case body of CheckedTerm childType _ -> childType
+      pure $ SharedTyped.TypedForallIntroduction occurrence bodyId $
+        SharedTyped.ForallIntroductionWitness ty selected bodyType
+    CheckedContextIntroduction introduction body -> do
+      reserveTermGraphEdges 1
+      occurrence <- allocateCheckedOccurrence
+      witness <- maybe (lift $ Left $ UnsupportedContextEvidence ty) pure $
+        SharedTyped.contextIntroductionWitness SharedTyped.sharedContextTypeStructure ty
+      _ <- observeTermGraphCollection (SharedTyped.ContextConstraintList nodeId') $
+        SharedTyped.contextIntroductionConstraints witness
+      outerIntroductions <- gets termGraphBuildEvidenceIntroductions
+      when (Map.member introduction outerIntroductions) $
+        lift $ Left TermGraphEvidenceMismatch
+      modify' $ \current -> current
+        { termGraphBuildEvidenceIntroductions = Map.insert introduction occurrence outerIntroductions }
+      bodyId <- buildCheckedTerm body
+      modify' $ \current -> current
+        { termGraphBuildEvidenceIntroductions = outerIntroductions }
+      pure $ SharedTyped.TypedContextIntroduction occurrence bodyId witness
+    CheckedContextApplication givens function -> do
+      reserveTermGraphEdges 1
+      occurrence <- allocateCheckedOccurrence
+      let source = case function of CheckedTerm functionType _ -> functionType
+      sourceWitness <- maybe (lift $ Left $ UnsupportedContextEvidence source) pure $
+        SharedTyped.contextIntroductionWitness SharedTyped.sharedContextTypeStructure source
+      let constraints = SharedTyped.contextIntroductionConstraints sourceWitness
+      _ <- observeTermGraphCollection (SharedTyped.ContextConstraintList nodeId') constraints
+      evidence <- mapM (resolveCheckedGiven source givens) constraints
+      witness <- maybe (lift $ Left $ UnsupportedContextEvidence source) pure $
+        SharedTyped.contextApplicationWitness SharedTyped.sharedContextTypeStructure source evidence
+      functionId <- buildCheckedTerm function
+      pure $ SharedTyped.TypedContextApplication occurrence functionId witness
     CheckedTuple elements -> do
       elementCount <- observeTermGraphCollection
         (SharedTyped.TupleElementList nodeId') elements
@@ -1952,13 +2049,18 @@ buildCheckedTerm (CheckedTerm ty checkedForm) = do
       reserveTermGraphEdges 1
       scrutineeId <- buildCheckedTerm scrutinee
       pure $ SharedTyped.TypedCase scrutineeId []
-    CheckedExactZeroStepCase scrutinee alternatives -> do
+    CheckedConstructorMatch syntax scrutinee alternatives -> do
       alternativeCount <- observeTermGraphCollection
         (SharedTyped.CaseAlternativeList nodeId') alternatives
       reserveTermGraphEdges $ 1 + alternativeCount
       scrutineeId <- buildCheckedTerm scrutinee
       checkedAlternatives <- mapM buildCheckedCaseAlternative alternatives
-      pure $ SharedTyped.TypedCase scrutineeId checkedAlternatives
+      case (syntax, checkedAlternatives) of
+        (CheckedCaseExpression, _) ->
+          pure $ SharedTyped.TypedCase scrutineeId checkedAlternatives
+        (CheckedPatternBinding, [(pattern', bodyId)]) ->
+          pure $ SharedTyped.TypedLet pattern' scrutineeId bodyId
+        _ -> lift $ Left TermGraphEvidenceMismatch
   modify' $ \current -> current
     { termGraphBuildNodes =
         (nodeId', SharedTyped.TermNode ty form)
@@ -1990,6 +2092,28 @@ buildCheckedCaseAlternative
     , bodyId
     )
 
+-- Resolve after the complete check has zonked both the obligation and its
+-- lexical snapshot. Successful instance/superclass resolution in the legacy
+-- checker cannot enter this rule: only an exact original given is considered.
+-- Equal dictionaries retain distinct slots; source order selects one stable
+-- identity, which the shared sealer then checks against the actual scope.
+resolveCheckedGiven :: HsType -> [CheckedGiven] -> HsConstraint
+  -> TermGraphBuild SharedTyped.ContextEvidence
+resolveCheckedGiven source givens required = case
+    [(introduction, slot)
+    | CheckedGiven introduction slot actual <- givens
+    , sameConstraint required actual] of
+  [] -> lift $ Left $ UnsupportedContextEvidence source
+  (introduction, slot) : _ -> do
+    active <- gets termGraphBuildEvidenceIntroductions
+    occurrence <- maybe (lift $ Left $ UnsupportedContextEvidence source) pure $
+      Map.lookup introduction active
+    pure $ SharedTyped.givenContextEvidence occurrence slot
+ where
+  sameConstraint (HsConstraint left leftArguments) (HsConstraint right rightArguments) =
+    left == right && length leftArguments == length rightArguments
+      && and (zipWith SharedTypeAtom.alphaEquivalentTypes leftArguments rightArguments)
+
 checkedTermLocalUses :: CheckedTerm -> IntSet.IntSet
 checkedTermLocalUses (CheckedTerm _ form) = case form of
   CheckedLocal variable -> IntSet.singleton variable
@@ -2001,12 +2125,15 @@ checkedTermLocalUses (CheckedTerm _ form) = case form of
   CheckedVisibleTypeApplication _ _ _ _ function ->
     checkedTermLocalUses function
   CheckedImplicitTypeApplication _ function -> checkedTermLocalUses function
+  CheckedForallIntroduction _ body -> checkedTermLocalUses body
+  CheckedContextIntroduction _ body -> checkedTermLocalUses body
+  CheckedContextApplication _ function -> checkedTermLocalUses function
   CheckedTuple elements -> IntSet.unions $ map checkedTermLocalUses elements
   CheckedLet variable _ binding body ->
     checkedTermLocalUses binding `IntSet.union`
       IntSet.delete variable (checkedTermLocalUses body)
   CheckedEmptyCase scrutinee -> checkedTermLocalUses scrutinee
-  CheckedExactZeroStepCase scrutinee alternatives -> IntSet.unions
+  CheckedConstructorMatch _ scrutinee alternatives -> IntSet.unions
     $ checkedTermLocalUses scrutinee
     : [ foldr IntSet.delete (checkedTermLocalUses body)
           $ map fst fields
@@ -2156,7 +2283,7 @@ validateCheckCandidateInputs
   -> Expression
   -> Either ExpressionCheckError ()
 validateCheckCandidateInputs
-    (ExpressionCheckContext _ classEnvironment _ _ _ constructorArities _)
+    (ExpressionCheckContext _ _ classEnvironment _ _ _ constructorArities _)
     expected expression = do
   mapM_ (validateCheckConstraint classEnvironment QueryConstraint) expected
   validateExpressionPatternArities
@@ -2401,14 +2528,43 @@ orElseTransactionally preferred fallback = StateT $ \initialState ->
 -- Restore only the lexical-given component after checking; every substitution,
 -- rigid allocation, and scoped obligation produced by the body remains part
 -- of the successful checker state.
-withLocalGivens :: [HsConstraint] -> Check a -> Check a
-withLocalGivens givens action = do
+withLocalGivens :: Natural -> [HsConstraint] -> Check a -> Check a
+withLocalGivens introduction givens action = do
   outerGivens <- gets checkLocalGivens
+  outerEvidence <- gets checkEvidenceGivens
   modify' $ \current -> current
-    {checkLocalGivens = outerGivens ++ givens}
+    { checkLocalGivens = outerGivens ++ givens
+    , checkEvidenceGivens = outerEvidence ++
+        [CheckedGiven introduction slot constraint
+        | (slot, constraint) <- zip [0 ..] givens]
+    }
   result <- action
-  modify' $ \current -> current {checkLocalGivens = outerGivens}
+  modify' $ \current -> current
+    { checkLocalGivens = outerGivens, checkEvidenceGivens = outerEvidence }
   pure result
+
+-- Root and nested telescopes use the same lexical bracket. The root class
+-- environment still supplies the historical checker acceptance policy; these
+-- frames add source identities without reconstructing them from its sets.
+checkOpenedTelescope :: [CheckedOpening] -> Check CheckedTermResult
+  -> Check CheckedTermResult
+checkOpenedTelescope [] action = action
+checkOpenedTelescope (opening : remaining) action = case opening of
+  CheckedOpenForall source selected ->
+    unaryCheckedTerm source (CheckedForallIntroduction selected)
+      <$> checkOpenedTelescope remaining action
+  CheckedOpenContext source -> case source of
+    TypeForallNative [] constraints@(_ : _) _ -> do
+      introduction <- gets checkNextContextIntroduction
+      modify' $ \current -> current
+        { checkNextContextIntroduction = introduction + 1 }
+      checked <- withLocalGivens introduction constraints $
+        checkOpenedTelescope remaining action
+      pure $ unaryCheckedTerm source (CheckedContextIntroduction introduction) checked
+    _ -> do
+      checked <- checkOpenedTelescope remaining action
+      pure $ unavailableCheckedTerm (checkedResultType checked) $
+        UnsupportedContextEvidence source
 
 normalizeScopedConstraint
   :: (HsConstraint -> HsConstraint)
@@ -2620,7 +2776,7 @@ zonk ty = do
 instantiateGoal
   :: RigidInstantiationPlan
   -> HsType
-  -> Either ExpressionCheckError (HsType, [HsConstraint])
+  -> Either ExpressionCheckError (HsType, [HsConstraint], [CheckedOpening])
 instantiateGoal plan goal
   | plannedBinders /= actualBinders = Left
       $ RigidInstantiationPlanMismatch plannedBinders actualBinders
@@ -2645,10 +2801,58 @@ instantiateGoal plan goal
           [(variable, TypeConstant rigid) | (variable, rigid) <- current]
         layerConstraints = map
           (snd . constraintApplySubsts substitutions) constraints
-        (instantiated, deeper) = instantiateFrom rest
+        (instantiated, deeper, deeperOpenings) = instantiateFrom rest
           $ snd $ applySubsts substitutions body
-    in (instantiated, layerConstraints ++ deeper)
-  instantiateFrom _ instantiated = (instantiated, [])
+        openings = checkedLayerOpenings
+          (TypeForall variables constraints body) current
+    in (instantiated, layerConstraints ++ deeper, openings ++ deeperOpenings)
+  instantiateFrom _ instantiated = (instantiated, [], [])
+
+-- Replace occurrences owned by this forall layer while respecting a nested
+-- layer that deliberately shadows the same nominal binder. Both expression
+-- checking and root telescope reconstruction use this scoped operation.
+substituteScopedVariable :: SynthesisVariable -> HsType -> HsType -> HsType
+substituteScopedVariable binder replacement typeExpression =
+  case typeExpression of
+    SharedType.TypeVariable variable
+      | variable == binder -> replacement
+      | otherwise -> typeExpression
+    SharedType.TypeConstructor{} -> typeExpression
+    SharedType.TypeApplication typeFunction typeArgument ->
+      SharedType.TypeApplication
+        (substituteScopedVariable binder replacement typeFunction)
+        (substituteScopedVariable binder replacement typeArgument)
+    SharedType.FunctionType parameter result -> SharedType.FunctionType
+      (substituteScopedVariable binder replacement parameter)
+      (substituteScopedVariable binder replacement result)
+    SharedType.TupleType boxity elements -> SharedType.TupleType boxity
+      $ map (substituteScopedVariable binder replacement) elements
+    SharedType.ForallType binders nestedContexts nestedBody
+      | binder `elem` binders -> typeExpression
+      | otherwise -> SharedType.ForallType binders
+          (map (fmap $ substituteScopedVariable binder replacement) nestedContexts)
+          (substituteScopedVariable binder replacement nestedBody)
+
+-- Retain precisely one original layer. In particular, a context outside a
+-- subsequent forall is never merged into the later binder's scope. The caller
+-- retains the established simultaneous substitution for ordinary checking;
+-- graph sealing independently verifies these finer one-binder witnesses.
+checkedLayerOpenings :: HsType -> [(TVarId, TVarId)] -> [CheckedOpening]
+checkedLayerOpenings source instantiations = case (source, instantiations) of
+  (TypeForallNative (binder : remainingBinders) constraints body,
+      (_, rigid) : remaining) ->
+    let selected = TypeConstant rigid
+        remainder = if null remainingBinders && null constraints then body
+          else TypeForallNative remainingBinders constraints body
+        opened = SharedType.canonicalizeType $
+          substituteScopedVariable binder selected remainder
+        innerOpenings
+          | null remaining =
+              [CheckedOpenContext opened | null remainingBinders, not $ null constraints]
+          | otherwise = checkedLayerOpenings opened remaining
+    in CheckedOpenForall source selected : innerOpenings
+  (TypeForallNative [] (_ : _) _, []) -> [CheckedOpenContext source]
+  _ -> []
 
 expressionFlexibleIdentifiers :: Expression -> IntSet.IntSet
 expressionFlexibleIdentifiers =

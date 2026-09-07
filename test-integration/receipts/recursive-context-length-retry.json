@@ -1,0 +1,35 @@
+{
+  "status": "passed",
+  "note": "Focused unchanged retry of the two failed live process tests; this does not replace the failed full 432-test receipt.",
+  "source_snapshot_sha256": "e63b8c613ca01526f19f4735f6ac893f553cfeb5e5cf617f7880dfc62e311e8d",
+  "executable_sha256": "e7798af7b596eec3455d34460114b0f11c89fd310194272174e67b4aaf3c84e9",
+  "source_and_executable_unchanged": true,
+  "pattern": "/sanitize query expiry, poison atomically, and remove the workspace/||/check public session callback return before fresh cleanup/",
+  "exit_code": 0,
+  "processes": [
+    {
+      "label": "length-retry",
+      "command": [
+        "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\synthesis-length-tests\\build\\synthesis-length-tests\\synthesis-length-tests.exe",
+        "-j1",
+        "--timeout=180s",
+        "-p",
+        "/sanitize query expiry, poison atomically, and remove the workspace/||/check public session callback return before fresh cleanup/"
+      ],
+      "process_timeout_seconds": 180,
+      "cwd": "C:\\Djex",
+      "status": "completed",
+      "started_utc": "2026-09-07T23:00:58Z",
+      "capture_format": "raw child bytes; returned text decodes UTF-8 with universal newlines",
+      "stdout_path": "C:\\Djex\\dist-newstyle\\priority-milestone-length-retry-v1\\length-retry.stdout.txt",
+      "stderr_path": "C:\\Djex\\dist-newstyle\\priority-milestone-length-retry-v1\\length-retry.stderr.txt",
+      "owned_root_pid": 24992,
+      "exit_code": 0,
+      "timed_out": false,
+      "wall_seconds": 2.037907099991571,
+      "finished_utc": "2026-09-07T23:01:00Z",
+      "stdout_sha256": "752575db2e845b9aa03615d51e71e0c5ded59532300e7d16f3445ec2c4584264",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

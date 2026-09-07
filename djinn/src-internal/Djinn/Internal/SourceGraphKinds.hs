@@ -92,8 +92,8 @@ sourceGraphKindObligations context source = do
   unless (Map.member (Q.termGraphSourceRoot source) nodes) $
     Left "source graph root is absent during kind checking"
   proper <- fmap concat $ mapM properAnnotations rawNodes
-  let selections = concatMap selectionAnnotations rawNodes
-      allTypes = proper ++ concatMap (\(_, before, selected) -> [before, selected]) selections
+  selections <- fmap concat $ mapM selectionAnnotations rawNodes
+  let allTypes = proper ++ concatMap (\(_, before, selected) -> [before, selected]) selections
   mapM_ observeType allTypes
   globals <- first ("source kind inventory: " ++) $ sourceTypingTermSchemes context
   let globals' = Map.map (fmap T.FlexibleVariable) globals
@@ -152,6 +152,14 @@ sourceGraphKindObligations context source = do
             [Q.implicitTypeApplicationSource witness, Q.implicitTypeApplicationResult witness]
           Q.TypedForallIntroduction _ _ witness ->
             [Q.forallIntroductionSource witness, Q.forallIntroductionBody witness]
+          -- Checking the complete qualified source uses the original
+          -- inventory's class arities and parameter kinds. Constraint
+          -- arguments may have higher kinds and must not be checked as
+          -- independent proper types.
+          Q.TypedContextIntroduction _ _ witness ->
+            [Q.contextIntroductionSource witness, Q.contextIntroductionBody witness]
+          Q.TypedContextApplication _ _ witness ->
+            [Q.contextApplicationSource witness, Q.contextApplicationResult witness]
           _ -> []
     pure $ ty : witnesses ++ patternTypes
 
@@ -208,29 +216,36 @@ sourceGraphKindObligations context source = do
             advance globals active owner child $ Q.typeApplicationSource witness
           Q.TypedImplicitTypeApplication _ child witness ->
             advance globals active owner child $ Q.implicitTypeApplicationSource witness
+          Q.TypedContextApplication _ child witness ->
+            follow globals active owner child $ Q.contextApplicationSource witness
           -- Only the leading source telescope owns the retained kind vector.
           -- An intervening term application, local alias, or introduced
           -- forall begins a different typing site and cannot inherit it.
           _ -> Right Nothing
 
   advance globals active owner child before = do
+    fmap (fmap $ \(name, slot) -> (name, slot + 1)) $
+      follow globals active owner child before
+
+  -- A dictionary application keeps the provider's consumed type-binder
+  -- count. Only type applications advance its positional kind vector.
+  follow globals active owner child before = do
     childType <- case Map.lookup child nodes of
       Nothing -> Left "dangling source kind function child"
       Just node -> Right $ Q.termNodeType node
     unless (A.alphaEquivalentTypes childType before) $
       Left "source kind selection is not attached to its actual function type"
-    fmap (fmap $ \(name, slot) -> (name, slot + 1)) $
-      applicationOrigin globals (Set.insert owner active) child
+    applicationOrigin globals (Set.insert owner active) child
 
-selectionAnnotations :: Node -> [(Q.TermNodeId, Type, Type)]
+selectionAnnotations :: Node -> Either String [(Q.TermNodeId, Type, Type)]
 selectionAnnotations (owner, Q.TermNode _ form) = case form of
   Q.TypedVisibleTypeApplication _ _ _ witness ->
-    [(owner, Q.typeApplicationSource witness, Q.typeApplicationSelected witness)]
+    pure [(owner, Q.typeApplicationSource witness, Q.typeApplicationSelected witness)]
   Q.TypedImplicitTypeApplication _ _ witness ->
-    [(owner, Q.implicitTypeApplicationSource witness, Q.implicitTypeApplicationSelected witness)]
+    pure [(owner, Q.implicitTypeApplicationSource witness, Q.implicitTypeApplicationSelected witness)]
   Q.TypedForallIntroduction _ _ witness ->
-    [(owner, Q.forallIntroductionSource witness, Q.forallIntroductionVariable witness)]
-  _ -> []
+    pure [(owner, Q.forallIntroductionSource witness, Q.forallIntroductionVariable witness)]
+  _ -> pure []
 
 allVariables :: Type -> Set.Set Variable
 allVariables ty = T.freeVariables ty `Set.union` Set.fromList (T.typeBinderVariables ty)

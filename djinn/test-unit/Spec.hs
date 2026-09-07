@@ -114,9 +114,10 @@ tests =
     , ("skip suppressed formula families before forcing their generators", testLazyPlanFamilyAdmission)
     , ("deliver a streaming candidate before a poisoned global ranking and large tail", testCandidateStreamFirstDelivery)
     , ("retain cumulative streaming proof and choice allowances", testCandidateStreamBudgets)
+    , ("bound supplied-fold constructor introductions in batch and streaming", testConstructorCompositionBudgets)
     , ("retain streaming source graph ownership and distinct graph keys", testCandidateStreamGraphs)
     , ("separate streaming terminal logical evidence from truncation", testCandidateStreamEvidence)
-    , ("retain contextual streaming source authority without inventing dictionary graphs", testCandidateStreamContext)
+    , ("retain contextual streaming identity with exact unused Given authority", testCandidateStreamContext)
     , ("validate streaming requests before observing their search", testCandidateStreamValidation)
     , ("stream a demanded singleton bridge reused by alpha-equivalent quantified inputs", testCandidateStreamDemandedSingleton)
     , ("stream cooperating quantified bridges at the exact demanded result", testCandidateStreamDemandedGroup)
@@ -2008,6 +2009,114 @@ testCandidateStreamBudgets = do
             | otherwise -> cursorCompletion remaining (fuel - 1) rest
         ProofSearchResult _ rest -> cursorCompletion (remaining - 1) fuel rest
 
+-- The supplied fold and intrinsic constructors activate multiple positive-only
+-- plans. Unlike the one-plan test above, their batch/stream schedules need not
+-- emit the same finite prefix. Both must honor the same explicit allowances,
+-- retain exact candidate authority, and never turn truncation into refutation.
+testConstructorCompositionBudgets :: IO ()
+testConstructorCompositionBudgets = do
+    let element = SharedType.TypeVariable "a"
+        result = SharedType.TypeVariable "r"
+        listOf = SharedType.TypeApplication $ SharedType.TypeConstructor SharedName.listName
+        foldName = sharedName "foldList"
+        foldType = SharedType.ForallType ["a", "r"] [] $
+            SharedType.FunctionType (SharedType.FunctionType element $
+                SharedType.FunctionType result result) $
+            SharedType.FunctionType result $ SharedType.FunctionType (listOf element) result
+        declarations =
+            [ SharedDeclaration.DataTypeDeclaration () SharedName.listName
+                [SharedDeclaration.TypeParameter "a" Nothing]
+                [ SharedDeclaration.DataConstructor () SharedName.listName []
+                , SharedDeclaration.DataConstructor () SharedName.consName [element, listOf element]
+                ]
+            , SharedDeclaration.ValueDeclaration $
+                SharedDeclaration.ValueSignature () foldName foldType
+            ]
+    environment <- mkNeutralDjinnEnvironment declarations
+    prepared <- expectShownRight $ RawEnvironment.prepareGroundSynthesisEnvironment environment
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $ sharedName "boundedFoldComposition"
+    forM_ [(False, "forall a. [a] -> [a] -> [a]"),
+           (True, "forall a. [a] -> a")] $ \(opaque, spelling) -> do
+        source <- expectRight (parseHType spelling) >>= expectShownRight . toSynthesisType
+        -- Mirror request preparation: preserve the explicit source signature,
+        -- but pass its freshly implicitized body to the prepared search API.
+        (implicit, _) <- expectShownRight $ SharedType.implicitizeLeadingForalls
+            (const (Nothing :: Maybe ())) freshSourceVariable Set.empty source
+        let (_, contexts, searchGoal) = SharedType.splitLeadingForalls implicit
+        forM_ [(raw, fuel) | raw <- [1, 2, 8], fuel <- [0, 1, 2, 4, 40]] $ \(raw, fuel) -> do
+            let configured = defaultQueryOptions
+                    { optionAlternatives = True, optionSorted = False, optionStrategy = Interleave
+                    , optionCutoff = raw, optionBudget = Just fuel }
+                atBounds message = message ++ " at " ++ show (spelling, raw, fuel)
+                runBatch = inhabitTypedSynthesisResultPreparedWithSourceGoal
+                    configured prepared source contexts (DjinnSourceInstantiationCandidates []) target searchGoal
+                runStream = inhabitTypedSynthesisStreamPreparedWithSourceGoal
+                    configured prepared source contexts (DjinnSourceInstantiationCandidates []) target searchGoal
+                candidates = SharedSearch.batchCandidates . SharedQuery.resultSearch
+                checkResult resultBatch = do
+                    let actual = candidates resultBatch
+                        evidence = SharedQuery.resultEvidence resultBatch
+                    assertBool (atBounds "a finite positive-only plan acquired negative evidence") $
+                        evidence == SharedQuery.NoEvidence || evidence == SharedQuery.ValidatedCandidates
+                    if opaque then do
+                        assertEqual (atBounds "the empty recursive input acquired an element") [] actual
+                        assertEqual (atBounds "opaque recursive search acquired logical evidence")
+                            SharedQuery.NoEvidence evidence
+                    else pure ()
+                    forM_ actual $ \candidate -> do
+                        graph <- expectShownRight $ SharedTypedCandidate.typedCandidateTermGraph candidate
+                        let clause = SharedCandidate.candidateOutput $
+                                SharedTypedCandidate.typedCandidateCompatibility candidate
+                        assertEqual (atBounds "constructor composition changed its associated clause")
+                            clause $ SharedTypedGenerated.eraseTermGraphToFunctionClause target graph
+                        root <- maybe (fail $ atBounds "sealed candidate has no root") pure $
+                            SharedTypedGenerated.lookupTermNode (SharedTypedGenerated.termGraphRoot graph) graph
+                        assertBool (atBounds "opened inputs changed the exact source goal") $
+                            SharedTypeAtom.alphaEquivalentClosedTypes source $ SharedTypedGenerated.termNodeType root
+                        assertBool (atBounds "opened inputs captured or introduced a source global") $
+                            all (`elem` [foldName, SharedName.listName, SharedName.consName]) $
+                                SharedGenerated.expressionGlobals $ SharedTypedGenerated.eraseTermGraph graph
+            batch <- expectShownRight runBatch
+            checkResult batch
+            assertBool (atBounds "batch exceeded the raw candidate allowance") $
+                length (candidates batch) <= raw
+            observations <- expectShownRight runStream >>= mapM expectShownRight
+            mapM_ checkResult observations
+            assertBool (atBounds "stream exceeded its cumulative raw candidate allowance") $
+                sum (map (length . candidates) observations) <= raw
+            case reverse observations of
+                [] -> fail $ atBounds "stream omitted its terminal observation"
+                terminal : earlier -> do
+                    assertEqual (atBounds "terminal batch repeated a candidate") [] $ candidates terminal
+                    assertEqual (atBounds "terminal batch repeated positive evidence")
+                        SharedQuery.NoEvidence $ SharedQuery.resultEvidence terminal
+                    case SharedSearch.batchProgress $ SharedQuery.resultSearch terminal of
+                        SharedSearch.Continuing -> fail $ atBounds "finite stream did not finish"
+                        SharedSearch.Completed _ -> pure ()
+                    forM_ earlier $ \observation -> do
+                        assertEqual (atBounds "prefix claimed completion before its tail")
+                            SharedSearch.Continuing $ SharedSearch.batchProgress $ SharedQuery.resultSearch observation
+                        assertBool (atBounds "stream combined more than one raw-proof result") $
+                            length (candidates observation) <= 1
+            if fuel == 0 then do
+                let exhausted = SharedSearch.Completed $
+                        SharedSearch.truncated SharedSearch.ChoicePointLimitReached
+                assertEqual (atBounds "zero-choice batch bypassed its first charged step")
+                    exhausted $ SharedSearch.batchProgress $ SharedQuery.resultSearch batch
+                assertEqual (atBounds "zero-choice stream emitted a candidate") 0 $
+                    sum $ map (length . candidates) observations
+                case reverse observations of
+                    terminal : _ -> assertEqual (atBounds "zero-choice stream bypassed its first charged step")
+                        exhausted $ SharedSearch.batchProgress $ SharedQuery.resultSearch terminal
+                    [] -> fail $ atBounds "zero-choice stream omitted its terminal observation"
+            else pure ()
+  where
+    freshSourceVariable unavailable variable = Just $ choose $ variable ++ "'"
+      where
+        choose candidate
+            | candidate `Set.member` unavailable = choose $ candidate ++ "'"
+            | otherwise = candidate
+
 testCandidateStreamGraphs :: IO ()
 testCandidateStreamGraphs = do
     source <- expectRight (parseHType "a -> a -> a") >>= expectShownRight . toSynthesisType
@@ -2113,11 +2222,8 @@ testCandidateStreamContext = do
         (compatibility $ SharedSearch.batchCandidates $ SharedQuery.resultSearch batch)
         (compatibility candidates)
     assertBool "the contextual identity fixture produced no candidates" $ not $ null candidates
-    forM_ candidates $ \candidate -> case SharedTypedCandidate.typedCandidateTermGraph candidate of
-        Left (DjinnTermGraphSourceTypingFailure message) -> assertBool
-            "contextual streaming lost its dictionary boundary" $ "dictionary evidence" `isInfixOf` message
-        Left failure -> fail $ "unexpected streaming context graph absence: " ++ show failure
-        Right _ -> fail "a contextual streamed candidate acquired an unchecked dictionary graph"
+    assertUnusedGivenIdentityGraphs target source (sharedName "StreamContext") batch
+    forM_ observations $ assertUnusedGivenIdentityGraphs target source (sharedName "StreamContext")
 
 testFoldBridgeReuse :: IO ()
 testFoldBridgeReuse = do
@@ -8405,6 +8511,56 @@ assertTypedCoreGraphs target expectedGoal result = do
             actualGoal == taggedGoal ||
                 SharedTypeAtom.alphaEquivalentClosedTypes expectedGoal actualGoal
 
+-- An unused source context still introduces its ordered Given telescope.
+-- This helper accepts an empty terminal stream batch; callers separately
+-- require a positive identity result before checking the exact graph evidence.
+assertUnusedGivenIdentityGraphs
+    :: SharedGenerated.DefinitionName
+    -> SharedType.Type String
+    -> SharedName.Name
+    -> DjinnTypedResult
+    -> Assertion
+assertUnusedGivenIdentityGraphs target expectedSource className result = do
+    let candidates = SharedSearch.batchCandidates $ SharedQuery.resultSearch result
+    if null candidates then pure () else assertTypedCoreGraphs target expectedSource result
+    forM_ candidates $ \candidate -> do
+        graph <- expectShownRight $ SharedTypedCandidate.typedCandidateTermGraph candidate
+        let nodes = SharedTypedGenerated.termGraphNodes graph
+            introductions = [() | (_, node) <- nodes,
+                SharedTypedGenerated.TypedContextIntroduction{} <- [SharedTypedGenerated.termNodeForm node]]
+            applications = [() | (_, node) <- nodes,
+                SharedTypedGenerated.TypedContextApplication{} <- [SharedTypedGenerated.termNodeForm node]]
+        assertEqual "identity lost or duplicated its source Given introduction" 1 $ length introductions
+        assertEqual "unused identity fabricated a dictionary application" [] applications
+        assertEqual "contextual identity acquired a method or provider" [] $
+            SharedGenerated.expressionGlobals $ SharedTypedGenerated.eraseTermGraph graph
+        (_, child, witness) <- rootContext graph $ SharedTypedGenerated.termGraphRoot graph
+        body <- maybe (fail "Given introduction lost its body") pure $
+            SharedTypedGenerated.lookupTermNode child graph
+        let bodyType = SharedTypedGenerated.termNodeType body
+        parameter <- case bodyType of
+            SharedType.FunctionType domain codomain | domain == codomain -> pure domain
+            _ -> fail $ "Given identity body lost its exact parameter correlation: " ++ show bodyType
+        let constraint = Constraint className [parameter]
+            constraints = [constraint]
+        assertEqual "Given introduction changed its ordered source slot"
+            [(0 :: Natural, constraint)] $
+            zip [0 ..] $ SharedTypedGenerated.contextIntroductionConstraints witness
+        assertEqual "Given introduction changed its qualified source type"
+            (SharedType.ForallType [] constraints bodyType) $
+            SharedTypedGenerated.contextIntroductionSource witness
+        assertEqual "Given introduction changed its source body"
+            bodyType $ SharedTypedGenerated.contextIntroductionBody witness
+  where
+    -- Only actual leading forall introductions may precede the context.
+    -- A nested or unrelated introduction cannot stand in for root authority.
+    rootContext graph nodeId = case SharedTypedGenerated.lookupTermNode nodeId graph of
+        Just node -> case SharedTypedGenerated.termNodeForm node of
+            SharedTypedGenerated.TypedForallIntroduction _ child _ -> rootContext graph child
+            SharedTypedGenerated.TypedContextIntroduction occurrence child witness ->
+                pure (occurrence, child, witness)
+            _ -> fail "source context is not at the exact graph introduction root"
+        Nothing -> fail "source context traversal lost a graph node"
 testPreparedSourceGoalGraphs :: IO ()
 testPreparedSourceGoalGraphs = do
     tokenEnvironment <- expectRight $ declare
@@ -8464,14 +8620,12 @@ testPreparedSourceContextCorrespondence = do
         legacy $ SharedTypedCandidate.typedQueryResultCompatibility typed
     let candidates = SharedSearch.batchCandidates $ SharedQuery.resultSearch typed
     assertBool "context-independent identity was lost" $ not $ null candidates
-    -- Class-method-free search remains useful, but no dictionary graph is
-    -- supplied for a contextual source type. Keep that precise limitation.
-    mapM_ (\candidate -> case SharedTypedCandidate.typedCandidateTermGraph candidate of
-        Left (DjinnTermGraphSourceTypingFailure message) -> assertBool
-            "contextual graph failure lost the dictionary boundary"
-            $ "dictionary evidence" `isInfixOf` message
-        Left failure -> fail $ "unexpected contextual graph absence: " ++ show failure
-        Right _ -> fail "a contextual candidate acquired an unchecked dictionary graph") candidates
+    -- Alias expansion preserves the full quantified/contextual source shape;
+    -- its unused Given is introduced but never applied to a method/provider.
+    let expandedSource = SharedType.ForallType ["a"]
+            [Constraint (sharedName "SourceContext") [variable "a"]] $
+            SharedType.FunctionType (variable "a") (variable "a")
+    assertUnusedGivenIdentityGraphs target expandedSource (sharedName "SourceContext") typed
     case inhabitTypedSynthesisResultPreparedWithSourceGoal defaultQueryOptions prepared
             source [sourceContext $ variable "unrelated"]
             (DjinnSourceInstantiationCandidates []) target searchGoal of

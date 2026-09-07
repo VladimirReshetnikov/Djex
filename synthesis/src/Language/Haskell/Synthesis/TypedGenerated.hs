@@ -47,6 +47,26 @@ module Language.Haskell.Synthesis.TypedGenerated
   , sharedTypeStructure
   , ForallTypeStructure (..)
   , sharedForallTypeStructure
+  , sharedContextualForallTypeStructure
+  , ContextTypeStructure (..)
+  , sharedContextTypeStructure
+  , EvidenceBinderId
+  , evidenceBinderIntroduction
+  , evidenceBinderSlot
+  , ContextEvidence
+  , givenContextEvidence
+  , contextEvidenceBinder
+  , ContextIntroductionWitness
+  , contextIntroductionWitness
+  , contextIntroductionSource
+  , contextIntroductionConstraints
+  , contextIntroductionBody
+  , ContextApplicationWitness
+  , contextApplicationWitness
+  , contextApplicationSource
+  , contextApplicationConstraints
+  , contextApplicationEvidence
+  , contextApplicationResult
   , ApplicationWitness (..)
   , TypeApplicationWitness (..)
   , ForallIntroductionWitness (..)
@@ -62,6 +82,7 @@ module Language.Haskell.Synthesis.TypedGenerated
   , TypedGraphMetrics (..)
   , TermGraph
   , sealTermGraph
+  , sealTermGraphWithContext
   , termGraphRoot
   , termGraphNodes
   , lookupTermNode
@@ -82,7 +103,7 @@ import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Collection (observedListLength)
-import Language.Haskell.Synthesis.Constraint (constraintArguments)
+import Language.Haskell.Synthesis.Constraint (Constraint (..), constraintArguments)
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import Language.Haskell.Synthesis.Name (Boxity (Boxed), Name)
 import qualified Language.Haskell.Synthesis.Type as SharedType
@@ -288,6 +309,114 @@ sharedForallTypeStructure = ForallTypeStructure
     SharedType.ForallType (_ : _) [] _ -> True
     _ -> False
 
+-- | Quantifier rules which preserve a qualified layer after substituting its
+-- type binders. This grants no dictionary discharge: the resulting contextual
+-- type must be consumed separately by a checked context application.
+sharedContextualForallTypeStructure
+  :: Ord identity
+  => ForallTypeStructure (SharedType.Type (SharedType.Variable identity))
+sharedContextualForallTypeStructure = sharedForallTypeStructure
+  { validForallIntroductionWitness = \witness ->
+      case forallIntroductionVariable witness of
+        variable@(SharedType.TypeVariable (SharedType.RigidVariable _)) ->
+          TypeAtom.isLeadingForallInstantiation
+            (forallIntroductionSource witness) variable
+            (forallIntroductionBody witness)
+        _ -> False
+  , validImplicitTypeApplicationWitness = \witness ->
+      TypeAtom.isLeadingForallInstantiation
+        (implicitTypeApplicationSource witness)
+        (implicitTypeApplicationSelected witness)
+        (implicitTypeApplicationResult witness)
+  }
+
+-- | Opt-in source-type observations for lexical dictionary evidence. Only one
+-- binderless, nonempty qualified layer is exposed; type binders and a later
+-- qualified layer are not consumed by this operation. The sealer independently
+-- rechecks this observation and bounds its output before traversing it.
+newtype ContextTypeStructure ty = ContextTypeStructure
+  { contextTypeComponents :: ty -> Maybe ([Constraint ty], ty) }
+
+sharedContextTypeStructure :: ContextTypeStructure (SharedType.Type variable)
+sharedContextTypeStructure = ContextTypeStructure $ \source -> case source of
+  SharedType.ForallType [] constraints@(_ : _) body -> Just (constraints, body)
+  _ -> Nothing
+
+-- | A dictionary binder is identified by its actual introduction occurrence
+-- and its ordered source-telescope slot. An arbitrary number cannot introduce
+-- a given: only a validated context-introduction node creates these bindings.
+data EvidenceBinderId = EvidenceBinderId !OccurrenceId !Natural
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData EvidenceBinderId
+
+evidenceBinderIntroduction :: EvidenceBinderId -> OccurrenceId
+evidenceBinderIntroduction (EvidenceBinderId occurrence _) = occurrence
+
+evidenceBinderSlot :: EvidenceBinderId -> Natural
+evidenceBinderSlot (EvidenceBinderId _ slot) = slot
+
+-- | An untrusted reference to one lexical given. Instance and superclass
+-- derivations are deliberately absent until their source authority is retained.
+newtype ContextEvidence = ContextGiven EvidenceBinderId
+  deriving (Eq, Ord, Show, NFData)
+
+-- | Reference an introduction/slot, without granting authority to that pair.
+-- Sealing must find the exact source-derived binder in the current scope.
+givenContextEvidence :: OccurrenceId -> Natural -> ContextEvidence
+givenContextEvidence occurrence = ContextGiven . EvidenceBinderId occurrence
+
+contextEvidenceBinder :: ContextEvidence -> EvidenceBinderId
+contextEvidenceBinder (ContextGiven binder) = binder
+
+-- The constructors stay private: a checker builds witnesses from a source
+-- qualified type, never an independently claimed constraint/body tuple.
+data ContextIntroductionWitness ty = ContextIntroductionWitness
+  ty [Constraint ty] ty
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
+
+instance NFData ty => NFData (ContextIntroductionWitness ty)
+
+contextIntroductionWitness
+  :: ContextTypeStructure ty -> ty -> Maybe (ContextIntroductionWitness ty)
+contextIntroductionWitness structure source = do
+  (constraints, body) <- contextTypeComponents structure source
+  pure $ ContextIntroductionWitness source constraints body
+
+contextIntroductionSource :: ContextIntroductionWitness ty -> ty
+contextIntroductionSource (ContextIntroductionWitness source _ _) = source
+
+contextIntroductionConstraints :: ContextIntroductionWitness ty -> [Constraint ty]
+contextIntroductionConstraints (ContextIntroductionWitness _ constraints _) = constraints
+
+contextIntroductionBody :: ContextIntroductionWitness ty -> ty
+contextIntroductionBody (ContextIntroductionWitness _ _ body) = body
+
+data ContextApplicationWitness ty = ContextApplicationWitness
+  ty [Constraint ty] [ContextEvidence] ty
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
+
+instance NFData ty => NFData (ContextApplicationWitness ty)
+
+contextApplicationWitness
+  :: ContextTypeStructure ty -> ty -> [ContextEvidence]
+  -> Maybe (ContextApplicationWitness ty)
+contextApplicationWitness structure source evidence = do
+  (constraints, body) <- contextTypeComponents structure source
+  pure $ ContextApplicationWitness source constraints evidence body
+
+contextApplicationSource :: ContextApplicationWitness ty -> ty
+contextApplicationSource (ContextApplicationWitness source _ _ _) = source
+
+contextApplicationConstraints :: ContextApplicationWitness ty -> [Constraint ty]
+contextApplicationConstraints (ContextApplicationWitness _ constraints _ _) = constraints
+
+contextApplicationEvidence :: ContextApplicationWitness ty -> [ContextEvidence]
+contextApplicationEvidence (ContextApplicationWitness _ _ evidence _) = evidence
+
+contextApplicationResult :: ContextApplicationWitness ty -> ty
+contextApplicationResult (ContextApplicationWitness _ _ _ result) = result
+
 -- | Structural observations for the shared synthesis type language.
 -- Checked source types compare modulo lexical forall-binder spelling while
 -- retaining nominal free-variable identity.
@@ -462,6 +591,10 @@ data TermNodeForm ty local
       !OccurrenceId !TermNodeId (ForallIntroductionWitness ty)
   | TypedImplicitTypeApplication
       !OccurrenceId !TermNodeId (ImplicitTypeApplicationWitness ty)
+  | TypedContextIntroduction
+      !OccurrenceId !TermNodeId (ContextIntroductionWitness ty)
+  | TypedContextApplication
+      !OccurrenceId !TermNodeId (ContextApplicationWitness ty)
   | TypedTuple [TermNodeId]
   | TypedHole !OccurrenceId local
   | TypedLet (TypedPattern ty local) !TermNodeId !TermNodeId
@@ -491,6 +624,9 @@ data GraphCollectionSite
   | CaseAlternativeList TermNodeId
   | ConstructorPatternFieldList OccurrenceId
   | TuplePatternFieldList OccurrenceId
+  | ContextConstraintList TermNodeId
+  | ContextConstraintArgumentList TermNodeId Int
+  | ContextEvidenceList TermNodeId
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData GraphCollectionSite
@@ -504,6 +640,9 @@ data GraphTypeSite
   | GraphTypeApplicationSourceType TermNodeId
   | GraphTypeApplicationSelectedType TermNodeId
   | GraphTypeApplicationResultType TermNodeId
+  | GraphContextSourceType TermNodeId
+  | GraphContextResultType TermNodeId
+  | GraphContextConstraintArgumentType TermNodeId Int Int
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData GraphTypeSite
@@ -550,6 +689,15 @@ data TermGraphError ty local
   | DuplicateForallIntroductionVariable TermNodeId TermNodeId ty
   | ForallIntroductionVariableEscapes TermNodeId ty
   | ForallIntroductionVariableInGlobal TermNodeId ty
+  | ContextTypeStructureUnavailable TermNodeId
+  | InvalidContextSource TermNodeId ty
+  | ContextSourceMismatch TermNodeId ty ty
+  | ContextResultMismatch TermNodeId ty ty
+  | ContextConstraintMismatch TermNodeId [Constraint ty] [Constraint ty]
+  | ContextEvidenceArityMismatch TermNodeId Int Int
+  | UnboundContextEvidence TermNodeId EvidenceBinderId
+  | ContextGivenTypeMismatch TermNodeId EvidenceBinderId (Constraint ty) (Constraint ty)
+  | TermGraphContextEvidenceLimitExceeded Int Int
   | ExpectedTupleType TermNodeId ty
   | TupleArityTypeMismatch TermNodeId Int Int
   | TupleFieldTypeMismatch TermNodeId Int ty ty
@@ -680,7 +828,30 @@ sealTermGraph
   -> TermGraphLimits
   -> TermGraphSource ty local
   -> Either (TermGraphError ty local) (TermGraph ty local)
-sealTermGraph typeStructure limits source = do
+sealTermGraph = sealTermGraphWithContextAuthority Nothing
+
+-- | Seal with explicit authority for qualified type structure. Lexical givens
+-- come only from this graph's checked introductions, never from the observer
+-- or an unscoped class-environment fact. The ordinary entry point deliberately
+-- rejects context nodes, preserving its previous authority boundary.
+sealTermGraphWithContext
+  :: Ord local
+  => ContextTypeStructure ty
+  -> TypeStructure ty
+  -> TermGraphLimits
+  -> TermGraphSource ty local
+  -> Either (TermGraphError ty local) (TermGraph ty local)
+sealTermGraphWithContext contextStructure =
+  sealTermGraphWithContextAuthority $ Just contextStructure
+
+sealTermGraphWithContextAuthority
+  :: Ord local
+  => Maybe (ContextTypeStructure ty)
+  -> TypeStructure ty
+  -> TermGraphLimits
+  -> TermGraphSource ty local
+  -> Either (TermGraphError ty local) (TermGraph ty local)
+sealTermGraphWithContextAuthority contextStructure typeStructure limits source = do
   let rawNodes = termGraphSourceNodes source
       root = termGraphSourceRoot source
   observeWithin GraphNodeTable (maximumTermGraphNodes limits) rawNodes
@@ -698,8 +869,9 @@ sealTermGraph typeStructure limits source = do
       nodeId' `Set.notMember` reachable] of
     unreachable : _ -> Left $ UnreachableTermNode unreachable
     [] -> pure ()
-  validateNodeTypes typeStructure nodes binderTypes rawNodes
+  validateNodeTypes contextStructure typeStructure limits nodes binderTypes rawNodes
   validateForallScopes typeStructure limits nodes root rawNodes
+  validateContextScopes typeStructure nodes root
   (projection, projectedCount) <- projectGraph limits nodes root
   either (Left . ProjectedExpressionScopeError) Right
     $ Generated.validateExpressionScope projection
@@ -732,6 +904,7 @@ observeWithin site maximumExpected values =
 
 data CollectionState ty local = CollectionState
   { collectionPatternCount :: !Int
+  , collectionContextEvidenceCount :: !Int
   , collectionOccurrences :: !(Set OccurrenceId)
   , collectionBinderTypes :: !(Map local ty)
   }
@@ -744,7 +917,7 @@ validateNodeCollections
       (TermGraphError ty local)
       (Int, Set OccurrenceId, Map local ty)
 validateNodeCollections limits nodes = do
-  final <- foldM visitNode (CollectionState 0 Set.empty Map.empty) nodes
+  final <- foldM visitNode (CollectionState 0 0 Set.empty Map.empty) nodes
   pure
     ( collectionPatternCount final
     , collectionOccurrences final
@@ -764,6 +937,15 @@ validateNodeCollections limits nodes = do
       addOccurrence occurrence state
     TypedForallIntroduction occurrence _ _ -> addOccurrence occurrence state
     TypedImplicitTypeApplication occurrence _ _ -> addOccurrence occurrence state
+    TypedContextIntroduction occurrence _ witness -> do
+      inspectConstraints nodeId' $ contextIntroductionConstraints witness
+      charged <- addEvidenceCount state $ contextIntroductionConstraints witness
+      addOccurrence occurrence charged
+    TypedContextApplication occurrence _ witness -> do
+      inspectConstraints nodeId' $ contextApplicationConstraints witness
+      observeWithin (ContextEvidenceList nodeId') width $ contextApplicationEvidence witness
+      charged <- addEvidenceCount state $ contextApplicationEvidence witness
+      addOccurrence occurrence charged
     TypedTuple elements ->
       observeWithin (TupleElementList nodeId') width elements >> Right state
     TypedHole occurrence _ -> addOccurrence occurrence state
@@ -772,6 +954,25 @@ validateNodeCollections limits nodes = do
       observeWithin (CaseAlternativeList nodeId') width alternatives
       foldM (\current (pattern, _) -> visitPattern current pattern)
         state alternatives
+
+  inspectConstraints owner constraints = do
+    observeWithin (ContextConstraintList owner) width constraints
+    mapM_ (\(index, constraint) -> observeWithin
+      (ContextConstraintArgumentList owner index) width $ constraintArguments constraint)
+      $ zip [0 ..] constraints
+
+  -- Dictionary slots have a separate counter under the existing pattern-size
+  -- allowance. This bounds total evidence, not merely each node's list width,
+  -- without changing the public limit-table constructor or pattern metrics.
+  addEvidenceCount state evidence =
+    let maximumEvidence = maximumTermGraphPatternNodes limits
+        remaining = max 0 $ maximumEvidence - collectionContextEvidenceCount state
+        observed = observedListLength remaining evidence
+    in if observed > remaining
+      then Left $ TermGraphContextEvidenceLimitExceeded maximumEvidence
+        (saturatedSuccessor maximumEvidence)
+      else Right state
+        { collectionContextEvidenceCount = collectionContextEvidenceCount state + observed }
 
   visitPattern state pattern = do
     let currentCount = collectionPatternCount state
@@ -868,10 +1069,25 @@ validateGraphTypeAnnotations typeStructure limits = mapM_ visitNode
           $ implicitTypeApplicationSelected witness
         inspect (GraphTypeApplicationResultType nodeId')
           $ implicitTypeApplicationResult witness
+      TypedContextIntroduction _ _ witness ->
+        inspectContext nodeId' (contextIntroductionSource witness)
+          (contextIntroductionConstraints witness) (contextIntroductionBody witness)
+      TypedContextApplication _ _ witness ->
+        inspectContext nodeId' (contextApplicationSource witness)
+          (contextApplicationConstraints witness) (contextApplicationResult witness)
       TypedTuple{} -> Right ()
       TypedHole{} -> Right ()
       TypedLet pattern _ _ -> visitPattern pattern
       TypedCase _ alternatives -> mapM_ (visitPattern . fst) alternatives
+
+  inspectContext owner source constraints result = do
+    inspect (GraphContextSourceType owner) source
+    inspect (GraphContextResultType owner) result
+    mapM_ (\(constraintIndex, constraint) ->
+      mapM_ (\(argumentIndex, argument) -> inspect
+        (GraphContextConstraintArgumentType owner constraintIndex argumentIndex) argument)
+        $ zip [0 ..] $ constraintArguments constraint)
+      $ zip [0 ..] constraints
 
   visitPattern pattern = do
     inspect (GraphPatternType $ typedPatternOccurrence pattern)
@@ -896,6 +1112,8 @@ nodeReferences (nodeId', TermNode _ form) = Right (nodeId', references form)
     TypedVisibleTypeApplication _ function _ _ -> [function]
     TypedForallIntroduction _ body _ -> [body]
     TypedImplicitTypeApplication _ function _ -> [function]
+    TypedContextIntroduction _ body _ -> [body]
+    TypedContextApplication _ function _ -> [function]
     TypedTuple elements -> elements
     TypedHole{} -> []
     TypedLet _ binding body -> [binding, body]
@@ -1049,6 +1267,16 @@ validateForallScopes structure limits nodes root rawNodes =
             , implicitTypeApplicationResult witness
             ]
           visitHere function
+        TypedContextIntroduction _ body witness -> do
+          mapM_ inspectHere $ contextIntroductionSource witness
+            : contextIntroductionBody witness
+            : concatMap constraintArguments (contextIntroductionConstraints witness)
+          visitHere body
+        TypedContextApplication _ function witness -> do
+          mapM_ inspectHere $ contextApplicationSource witness
+            : contextApplicationResult witness
+            : concatMap constraintArguments (contextApplicationConstraints witness)
+          visitHere function
         TypedTuple elements -> mapM_ visitHere elements
         TypedHole{} -> Right ()
         TypedLet pattern binding body -> do
@@ -1071,14 +1299,57 @@ validateForallScopes structure limits nodes root rawNodes =
         mapM_ (visitPattern authority owner active) fields
       TypedAs _ nested -> visitPattern authority owner active nested
 
+-- Only a context introduction creates dictionary bindings. The active map is
+-- extended for its child alone; siblings and a let binding's unrelated body
+-- cannot consume evidence introduced elsewhere in the tree. Type substitutions
+-- have already been normalized in the graph and exact source constraints are
+-- checked before this traversal.
+validateContextScopes
+  :: TypeStructure ty
+  -> Map TermNodeId (TermNode ty local)
+  -> TermNodeId
+  -> Either (TermGraphError ty local) ()
+validateContextScopes structure nodes = visit Map.empty
+ where
+  equivalent = equivalentConstraint (equivalentTypes structure)
+  visit active owner = case Map.lookup owner nodes of
+    Nothing -> Left $ DanglingTermNodeReference owner owner
+    Just node -> case termNodeForm node of
+      TypedContextIntroduction occurrence body witness ->
+        let bindings = Map.fromList
+              [ (EvidenceBinderId occurrence slot, constraint)
+              | (slot, constraint) <- zip [0 ..] $ contextIntroductionConstraints witness ]
+        in visit (Map.union bindings active) body
+      TypedContextApplication _ function witness -> do
+        mapM_ (checkGiven owner active) $ zip
+          (contextApplicationConstraints witness) (contextApplicationEvidence witness)
+        visit active function
+      _ -> do
+        (_, children) <- nodeReferences (owner, node)
+        mapM_ (visit active) children
+
+  checkGiven owner active (required, evidence) =
+    let binder = contextEvidenceBinder evidence
+    in case Map.lookup binder active of
+      Nothing -> Left $ UnboundContextEvidence owner binder
+      Just actual -> unless (required `equivalent` actual) $ Left $
+        ContextGivenTypeMismatch owner binder required actual
+
+equivalentConstraint :: (ty -> ty -> Bool) -> Constraint ty -> Constraint ty -> Bool
+equivalentConstraint equivalent (Constraint leftName left) (Constraint rightName right) =
+  leftName == rightName && length left == length right
+    && and (zipWith equivalent left right)
+
 validateNodeTypes
   :: (Ord local)
-  => TypeStructure ty
+  => Maybe (ContextTypeStructure ty)
+  -> TypeStructure ty
+  -> TermGraphLimits
   -> Map TermNodeId (TermNode ty local)
   -> Map local ty
   -> [(TermNodeId, TermNode ty local)]
   -> Either (TermGraphError ty local) ()
-validateNodeTypes typeStructure nodes binderTypes = mapM_ validateNode
+validateNodeTypes contextStructure typeStructure limits nodes binderTypes = mapM_ validateNode
  where
   equivalent = equivalentTypes typeStructure
 
@@ -1148,6 +1419,28 @@ validateNodeTypes typeStructure nodes binderTypes = mapM_ validateNode
       unless (termNodeType node `equivalent` implicitTypeApplicationResult witness) $
         Left $ ImplicitTypeApplicationResultMismatch nodeId'
           (implicitTypeApplicationResult witness) (termNodeType node)
+    TypedContextIntroduction _ body witness -> do
+      validateContextSource nodeId' (contextIntroductionSource witness)
+        (contextIntroductionConstraints witness) (contextIntroductionBody witness)
+      unless (termNodeType node `equivalent` contextIntroductionSource witness) $
+        Left $ ContextSourceMismatch nodeId' (termNodeType node)
+          (contextIntroductionSource witness)
+      bodyType <- lookupNodeType nodeId' body
+      unless (bodyType `equivalent` contextIntroductionBody witness) $
+        Left $ ContextResultMismatch nodeId' bodyType (contextIntroductionBody witness)
+    TypedContextApplication _ function witness -> do
+      validateContextSource nodeId' (contextApplicationSource witness)
+        (contextApplicationConstraints witness) (contextApplicationResult witness)
+      functionType <- lookupNodeType nodeId' function
+      unless (functionType `equivalent` contextApplicationSource witness) $
+        Left $ ContextSourceMismatch nodeId' functionType (contextApplicationSource witness)
+      unless (termNodeType node `equivalent` contextApplicationResult witness) $
+        Left $ ContextResultMismatch nodeId' (termNodeType node)
+          (contextApplicationResult witness)
+      let expected = length $ contextApplicationConstraints witness
+          actual = length $ contextApplicationEvidence witness
+      unless (actual == expected) $
+        Left $ ContextEvidenceArityMismatch nodeId' expected actual
     TypedTuple elements -> validateTuple nodeId' (termNodeType node) elements
     TypedHole{} -> Right ()
     TypedLet pattern binding body -> do
@@ -1167,6 +1460,44 @@ validateNodeTypes typeStructure nodes binderTypes = mapM_ validateNode
   requireForallStructure nodeId' = case forallTypeStructure typeStructure of
     Nothing -> Left $ ErasedForallTypeStructureUnavailable nodeId'
     Just authority -> Right authority
+
+  validateContextSource owner source constraints result = do
+    authority <- case contextStructure of
+      Nothing -> Left $ ContextTypeStructureUnavailable owner
+      Just checked -> Right checked
+    (expected, body) <- case contextTypeComponents authority source of
+      Nothing -> Left $ InvalidContextSource owner source
+      Just components -> Right components
+    let width = maximumTermGraphCollectionWidth limits
+    observeWithin (ContextConstraintList owner) width expected
+    mapM_ (\(index, constraint) -> observeWithin
+      (ContextConstraintArgumentList owner index) width $ constraintArguments constraint)
+      $ zip [0 ..] expected
+    inspectObserved (GraphContextResultType owner) body
+    mapM_ (\(constraintIndex, constraint) ->
+      mapM_ (\(argumentIndex, argument) -> inspectObserved
+        (GraphContextConstraintArgumentType owner constraintIndex argumentIndex) argument)
+        $ zip [0 ..] $ constraintArguments constraint)
+      $ zip [0 ..] expected
+    when (null expected) $ Left $ InvalidContextSource owner source
+    unless (length expected == length constraints
+        && and (zipWith (equivalentConstraint equivalent) expected constraints)) $
+      Left $ ContextConstraintMismatch owner expected constraints
+    unless (body `equivalent` result) $ Left $ ContextResultMismatch owner body result
+
+  -- An authority callback is an observation boundary too: it must not smuggle
+  -- an unbounded or malformed type into equality before the normal type gate.
+  inspectObserved site ty = do
+    let maximumNodes = maximumTermGraphTypeNodes limits
+        maximumWidth = maximumTermGraphCollectionWidth limits
+    case observeTypeWithin typeStructure maximumNodes maximumWidth ty of
+      Left (TypeStructureNodeLimitExceeded observed) -> Left $
+        TermGraphTypeNodeLimitExceeded site maximumNodes observed
+      Left (TypeStructureCollectionLimitExceeded observed) -> Left $
+        TermGraphTypeCollectionLimitExceeded site maximumWidth observed
+      Right () -> Right ()
+    unless (validTypeAnnotation typeStructure ty) $ Left $
+      InvalidTermGraphTypeAnnotation site ty
 
   validateLambda nodeId' lambdaType patterns bodyType =
     consume lambdaType patterns
@@ -1279,6 +1610,8 @@ projectGraph limits nodes root = do
   crossesErasedForall node = case Map.lookup node nodes of
     Just (TermNode _ TypedForallIntroduction{}) -> True
     Just (TermNode _ (TypedImplicitTypeApplication _ child _)) -> crossesErasedForall child
+    Just (TermNode _ TypedContextIntroduction{}) -> True
+    Just (TermNode _ (TypedContextApplication _ child _)) -> crossesErasedForall child
     _ -> False
 
   consumeProjectionNode remaining
@@ -1297,6 +1630,8 @@ projectGraph limits nodes root = do
         -- they create no compatibility node and consume no projection slot.
         TypedForallIntroduction _ child _ -> projectNodeWithMergedLambda merged remaining child
         TypedImplicitTypeApplication _ child _ -> projectNodeWithMergedLambda merged remaining child
+        TypedContextIntroduction _ child _ -> projectNodeWithMergedLambda merged remaining child
+        TypedContextApplication _ child _ -> projectNodeWithMergedLambda merged remaining child
         _ -> do
           remaining' <- case form of
             TypedLambda{} | merged -> Right remaining
@@ -1328,6 +1663,8 @@ projectGraph limits nodes root = do
         )
     TypedForallIntroduction _ body _ -> projectNode remaining body
     TypedImplicitTypeApplication _ function _ -> projectNode remaining function
+    TypedContextIntroduction _ body _ -> projectNode remaining body
+    TypedContextApplication _ function _ -> projectNode remaining function
     TypedTuple elements -> do
       (expressions, remaining') <- projectMany remaining elements
       pure (Generated.Tuple (reverse expressions), remaining')
@@ -1416,6 +1753,8 @@ graphMetrics nodes edgeCount patternCount occurrences projectedCount =
           typedGraphVisibleTypeApplications metrics + 1 }
     TypedForallIntroduction{} -> metrics
     TypedImplicitTypeApplication{} -> metrics
+    TypedContextIntroduction{} -> metrics
+    TypedContextApplication{} -> metrics
     TypedTuple{} -> metrics
       { typedGraphTuples = typedGraphTuples metrics + 1 }
     TypedHole{} -> metrics

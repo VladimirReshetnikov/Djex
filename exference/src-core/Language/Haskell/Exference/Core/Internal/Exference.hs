@@ -117,7 +117,7 @@ import qualified Data.Set as S
 import qualified Data.Sequence as Seq
 import qualified Data.List as L
 
-import Data.Maybe (fromMaybe, listToMaybe, maybeToList)
+import Data.Maybe (fromMaybe, isJust, listToMaybe, maybeToList)
 import Control.Monad ( mzero, forM, unless, void, when )
 import Control.Applicative ( (<|>) )
 import Data.List ( find, partition, sortBy, unfoldr )
@@ -429,6 +429,14 @@ data FrontierEntry
 -- the configured queue bound; there is no separate unbounded result buffer.
 type RatedNodes = Q.MaxPQueue (Priority, Bool) FrontierEntry
 
+-- Recursive inspection multiplies outstanding goals, so ordinary priority
+-- pruning can discard every fully inspected branch before any leaf is solved.
+-- A second bounded lane protects that construction strategy without assigning
+-- artificial expression depth to its whole-value siblings.
+data RecursiveCasePolicy
+  = OptionalRecursiveCases
+  | EagerRecursiveCases
+
 -- | Which private implementation expands one popped node.  Production uses
 -- the explicit ordered action list; the historical monolithic action remains
 -- reachable only through internal test observers as a differential oracle.
@@ -443,14 +451,60 @@ data FindExpressionsState = FindExpressionsState
   , findIdentifierSpaceExhausted :: Bool
   , findBindingUsages :: BindingUsages
   , findQueue :: RatedNodes
+  , findEagerCaseQueue :: RatedNodes
+  , findNextCasePolicy :: RecursiveCasePolicy
   }
 
 -- Keep the search trace productive by retaining the historical lazy state
 -- transformer. An empty priority queue terminates the unfold through Maybe.
-popBestNode :: StateT FindExpressionsState Maybe FrontierEntry
+popBestNode
+  :: StateT FindExpressionsState Maybe (RecursiveCasePolicy, FrontierEntry)
 popBestNode = StateT $ \searchState -> do
-  (node, remaining) <- Q.maxView $ findQueue searchState
-  return (node, searchState { findQueue = remaining })
+  let preferred = findNextCasePolicy searchState
+      selected
+        | Q.null $ caseQueue preferred searchState = otherCasePolicy preferred
+        | otherwise = preferred
+  (node, remaining) <- Q.maxView $ caseQueue selected searchState
+  return
+    ( (selected, node)
+    , (setCaseQueue selected remaining searchState)
+        { findNextCasePolicy = otherCasePolicy selected }
+    )
+
+otherCasePolicy :: RecursiveCasePolicy -> RecursiveCasePolicy
+otherCasePolicy OptionalRecursiveCases = EagerRecursiveCases
+otherCasePolicy EagerRecursiveCases = OptionalRecursiveCases
+
+caseQueue :: RecursiveCasePolicy -> FindExpressionsState -> RatedNodes
+caseQueue OptionalRecursiveCases = findQueue
+caseQueue EagerRecursiveCases = findEagerCaseQueue
+
+setCaseQueue
+  :: RecursiveCasePolicy -> RatedNodes
+  -> FindExpressionsState -> FindExpressionsState
+setCaseQueue OptionalRecursiveCases queued searchState =
+  searchState { findQueue = queued }
+setCaseQueue EagerRecursiveCases queued searchState =
+  searchState { findEagerCaseQueue = queued }
+
+frontierSize :: FindExpressionsState -> Natural
+frontierSize searchState =
+  queueSizeNatural (findQueue searchState)
+    + queueSizeNatural (findEagerCaseQueue searchState)
+
+-- Both lanes consume one shared capacity. While both are live each retains a
+-- protected share; after one exhausts, its sibling may borrow the full bound.
+-- Even an unlimited caller remains within the priority queue's native bound.
+caseQueueLimit
+  :: Maybe Int -> RecursiveCasePolicy -> FindExpressionsState -> Maybe Int
+caseQueueLimit maximumSize policy searchState
+  | Q.null $ caseQueue (otherCasePolicy policy) searchState = maximumSize
+  | otherwise = Just $ fromIntegral $ case policy of
+      OptionalRecursiveCases -> capacity - div capacity 2
+      EagerRecursiveCases -> div capacity 2
+ where
+  capacity = min maximumPQueueSize $ maybe maximumPQueueSize
+    (fromIntegral . max 0) maximumSize
 
 -- Return the old step number: search budgets and statistics have always used
 -- post-increment semantics here.
@@ -637,9 +691,40 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
     , findDepthPruned = 0
     , findIdentifierSpaceExhausted = False
     , findBindingUsages = M.empty
-    , findQueue = Q.singleton (0, False) $ Unfinished $ ScheduledNode rootGoal rootSearchNode
+    , findQueue = rootQueue
+    , findEagerCaseQueue = if protectRecursiveCases then rootQueue else Q.empty
+    , findNextCasePolicy = OptionalRecursiveCases
     }
+  rootQueue = Q.singleton (0, False)
+    $ Unfinished $ ScheduledNode rootGoal rootSearchNode
   t = forallify rawType
+  -- One recursive input does not cause the Cartesian starvation addressed
+  -- here. Keep that established single-frontier schedule exactly, including
+  -- callers whose queue cannot accommodate two roots. Only actual function
+  -- domains (and their finite tuple fields) can introduce recursive inputs;
+  -- an arbitrary type application argument is not a value in lexical scope.
+  protectRecursiveCases =
+    multiPM && maybe True (>= 2) maxQueueSize && hasJointRecursiveInputs t
+  hasJointRecursiveInputs source = case source of
+    TypeForallNative _ _ body -> hasJointRecursiveInputs body
+    TypeArrow{} ->
+      let (result, parameters) = splitArrowChain source
+      in sum (map recursiveInputCount parameters) >= (2 :: Natural)
+          || any hasJointRecursiveInputs (result : parameters)
+    TypeTuple _ elements -> any hasJointRecursiveInputs elements
+    _ -> False
+  recursiveInputCount source = case source of
+    TypeTuple _ elements -> sum $ map recursiveInputCount elements
+    TypeArrow{} -> 0
+    TypeForallNative{} -> 0
+    _ -> if any (matchesRecursiveInput source) deconss' then 1 else 0
+  matchesRecursiveInput source (DeconstructorBinding matchParam _ True) =
+    case typeConstructorHead source of
+      Just sourceHead ->
+        Just sourceHead == typeConstructorHead matchParam
+          && isJust (unifyRight source matchParam)
+      Nothing -> False
+  matchesRecursiveInput _ _ = False
   rootGoal = TGoal
     (VarBinding 0 t) initialScopeId OpenLeadingForalls AllowTupleTree []
   rootSearchNode = SearchNode
@@ -684,7 +769,7 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
           remainingConstraints
           (ExferenceStats n' d
             $ SharedCount.saturatingNaturalToInt
-            $ queueSizeNatural newNodes)
+            $ frontierSize searchState)
           typedGraphAvailability
       | ReadySolution originStep solutionIndex solution <- potentialSolutions
       , let contxt = nodeQueryClassEnv solution
@@ -727,13 +812,13 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
       totalDepthPruned = findDepthPruned searchState
       identifierSpaceExhausted = findIdentifierSpaceExhausted searchState
       newBindingUsages = findBindingUsages searchState
-      newNodes = findQueue searchState
+      frontierEmpty = frontierSize searchState == 0
       progress
-        | Q.null newNodes
+        | frontierEmpty
         , reason : remaining <- truncationReasons =
             SharedSearch.Completed $ SharedSearch.Truncated
               $ reason :| remaining
-        | Q.null newNodes =
+        | frontierEmpty =
             SharedSearch.Completed SharedSearch.Finished
         | n' >= maxSteps =
             SharedSearch.Completed $ SharedSearch.Truncated
@@ -794,7 +879,7 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
   helper :: FindExpressionsState -> Maybe (EngineBatch, FindExpressionsState)
   helper searchState | findSteps searchState >= maxSteps = Nothing
   helper searchState = runStateT (do
-    entry <- popBestNode
+    (casePolicy, entry) <- popBestNode
     n' <- advanceStep
     let
       -- actual work happens in stateStep
@@ -805,7 +890,7 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
         allowConstraints allowConstraintsStopStep n'
       stepResults = case entry of
         Unfinished (ScheduledNode nextGoal s) -> runStateStep
-          stepRoute allocators multiPM relaxConstraints heuristics nextGoal s
+          stepRoute allocators casePolicy multiPM relaxConstraints heuristics nextGoal s
         Ready _ -> []
       (rNodes, stepIdentifierSpaceExhausted) =
         foldr collectStepResult ([], False) stepResults
@@ -846,19 +931,35 @@ findEngineBatchesWithStateStepRoute stepRoute allocators
           findIdentifierSpaceExhausted current
             || stepIdentifierSpaceExhausted
       }
-    queued <- gets findQueue
+    currentState <- gets id
+    let queued = caseQueue casePolicy currentState
+        maximumLaneSize = caseQueueLimit maxQueueSize casePolicy currentState
     let (admitted, retained, queueDiscarded) = case ranking of
           SharedQuality.LegacyCandidateRanking ->
             let (remaining, discarded) = mergeQueueWithCapacity
-                  maximumPQueueSize maxQueueSize queued ratedFutures
+                  maximumPQueueSize maximumLaneSize queued ratedFutures
             in (discovered, remaining, discarded)
-          _ -> admitReadyFrontier (n' + 1 >= maxSteps) maxQueueSize queued
+          _ -> admitReadyFrontier (n' + 1 >= maxSteps) maximumLaneSize queued
             (ratedFutures ++ ratedReady)
-    modify $ \current -> current
-      { findQueue = retained
-      , findQueuePruned = findQueuePruned current + queueDiscarded
-      }
-    gets $ transformSolutions admitted) searchState
+    modify $ \current ->
+      (setCaseQueue casePolicy retained current)
+        { findQueuePruned = findQueuePruned current + queueDiscarded }
+    -- The global final step belongs to both lanes. Ready results awaiting
+    -- admission in the other lane already consumed their discovery work and
+    -- must not disappear merely because its turn would follow the deadline.
+    finalReady <- if n' + 1 >= maxSteps
+      then do
+        current <- gets id
+        let otherPolicy = otherCasePolicy casePolicy
+            (ready, remaining, discarded) = admitReadyFrontier True
+              (caseQueueLimit maxQueueSize otherPolicy current)
+              (caseQueue otherPolicy current) []
+        modify $ \latest ->
+          (setCaseQueue otherPolicy remaining latest)
+            { findQueuePruned = findQueuePruned latest + discarded }
+        pure ready
+      else pure []
+    gets $ transformSolutions (admitted ++ finalReady)) searchState
 
 -- Completed branches participate in the same priority frontier as unfinished
 -- work. Already-best completions are emitted during the producing step, so
@@ -1987,18 +2088,19 @@ data StateStepPlan = StateStepPlan
 runStateStep
   :: StateStepRoute
   -> SearchAllocators
+  -> RecursiveCasePolicy
   -> Bool
   -> Bool
   -> ExferenceHeuristicsConfig
   -> TGoal
   -> SearchNode
   -> [Either BranchTruncation SearchNode]
-runStateStep route allocators multiPM allowConstrs h goal initialNode =
+runStateStep route allocators casePolicy multiPM allowConstrs h goal initialNode =
   case route of
     OrderedStateStepActions -> concatMap runAction
-      $ stateStepActions allocators multiPM allowConstrs h goal initialNode
+      $ stateStepActions allocators casePolicy multiPM allowConstrs h goal initialNode
     LegacyStateStepAction -> runSearchBranches
-      $ execStateT (stateStep allocators multiPM allowConstrs h goal) initialNode
+      $ execStateT (stateStep allocators casePolicy multiPM allowConstrs h goal) initialNode
  where
   runAction action = runSearchBranches $ execStateT action initialNode
 
@@ -2006,41 +2108,44 @@ runStateStep route allocators multiPM allowConstrs h goal initialNode =
 -- used by the engine-test facade.
 stateStep
   :: SearchAllocators
+  -> RecursiveCasePolicy
   -> Bool
   -> Bool
   -> ExferenceHeuristicsConfig
   -> TGoal
   -> StepAction
-stateStep allocators multiPM allowConstrs h goal = do
+stateStep allocators casePolicy multiPM allowConstrs h goal = do
   initialNode <- gets id
   plannedLegacyAction
-    $ stateStepPlan allocators multiPM allowConstrs h goal initialNode
+    $ stateStepPlan allocators casePolicy multiPM allowConstrs h goal initialNode
 
 -- Take one SearchNode and expose its finite ordered sibling actions before any
 -- branch-local unification, allocation, substitution, or expression work.
 stateStepActions
   :: SearchAllocators
+  -> RecursiveCasePolicy
   -> Bool
   -> Bool
   -> ExferenceHeuristicsConfig
   -> TGoal
   -> SearchNode
   -> [StepAction]
-stateStepActions allocators multiPM allowConstrs h goal initialNode =
+stateStepActions allocators casePolicy multiPM allowConstrs h goal initialNode =
   plannedOrderedActions
-    $ stateStepPlan allocators multiPM allowConstrs h goal initialNode
+    $ stateStepPlan allocators casePolicy multiPM allowConstrs h goal initialNode
 
 -- Take one SearchNode, return some amount of sub-SearchNodes. Some returned
 -- nodes may in fact be potential solutions that need no further evaluation.
 stateStepPlan
   :: SearchAllocators
+  -> RecursiveCasePolicy
   -> Bool
   -> Bool
   -> ExferenceHeuristicsConfig
   -> TGoal
   -> SearchNode
   -> StateStepPlan
-stateStepPlan allocators multiPM allowConstrs h
+stateStepPlan allocators casePolicy multiPM allowConstrs h
     (TGoal (VarBinding var goalType) scopeId forallMode tupleMode
       givenConstraints) initialNode =
   let
@@ -2078,7 +2183,7 @@ stateStepPlan allocators multiPM allowConstrs h
           -- may cause duplication of the goals (e.g. for the different cases
           -- in the pattern match).
           additionalGoals <- addScopePatternMatch
-            allocators multiPM g nextId newScopeId tupleMode givenConstraints
+            allocators casePolicy multiPM g nextId newScopeId tupleMode givenConstraints
             $ map splitBinding
             $ reverse ts
           modify $ \node -> node
@@ -2572,6 +2677,7 @@ stateStepPlan allocators multiPM allowConstrs h
               }
             additionalGoals <- addScopePatternMatch
               allocators
+              casePolicy
               multiPM
               goalType
               var
@@ -2798,6 +2904,7 @@ stateStepPlan allocators multiPM allowConstrs h
           traverse_ (builderRecordVarUse . fst) applierVariable
           additionalGoals <- addScopePatternMatch
             allocators
+            casePolicy
             multiPM
             goalType
             var
@@ -2914,6 +3021,7 @@ stateStepPlan allocators multiPM allowConstrs h
 -- as the goals for different cases are distinct because their scopes are
 -- modified when new bindings are added by the pattern-matching.
 addScopePatternMatch :: SearchAllocators
+                     -> RecursiveCasePolicy
                      -> Bool -- should p-m on anything but newtypes?
                      -> HsType -- the current goal (should be returned in one
                                --  form or another)
@@ -2923,13 +3031,23 @@ addScopePatternMatch :: SearchAllocators
                      -> [HsConstraint] -- lexical class givens for this goal
                      -> [VarPBinding]
                      -> StateT SearchNode SearchBranches [TGoal]
-addScopePatternMatch allocators multiPM goalType vid sid tupleMode givens
-    bindings =
+addScopePatternMatch allocators casePolicy multiPM goalType vid sid tupleMode givens
+    bindings = addScopePatternQueue allocators casePolicy multiPM goalType vid sid tupleMode givens
+      [(True, binding) | binding <- bindings]
+
+-- Recursive constructor fields may expose finite nonrecursive structure
+-- (notably tuple payloads), but never another recursive constructor layer.
+-- Each queued binding carries that permission independently, so suppressing
+-- recursion in one field does not suppress a later function argument's case.
+addScopePatternQueue :: SearchAllocators -> RecursiveCasePolicy -> Bool -> HsType -> Int -> ScopeId
+                     -> TupleGoalMode -> [HsConstraint] -> [(Bool, VarPBinding)]
+                     -> StateT SearchNode SearchBranches [TGoal]
+addScopePatternQueue allocators casePolicy multiPM goalType vid sid tupleMode givens bindings =
   case bindings of
   [] -> return
     [TGoal (VarBinding vid goalType) sid TryForallIntroduction
       tupleMode givens]
-  (b : bindingRest) -> do
+  ((allowRecursive, b) : bindingRest) -> do
     let v = varPVariable b
         vtResult = varPResult b
         vtParams = varPParameters b
@@ -2937,8 +3055,8 @@ addScopePatternMatch allocators multiPM goalType vid sid tupleMode givens
     modify $ \node -> node
       { nodeProvidedScopes = scopesAddPBinding sid b
           $ nodeProvidedScopes node }
-    let defaultHandleRest = addScopePatternMatch
-          allocators multiPM goalType vid sid tupleMode givens bindingRest
+    let defaultHandleRest = addScopePatternQueue
+          allocators casePolicy multiPM goalType vid sid tupleMode givens bindingRest
     case vtResult of
       TypeVar {}    -> defaultHandleRest -- dont pattern-match on variables, even if it unifies
       TypeArrow {}  ->
@@ -2963,6 +3081,8 @@ addScopePatternMatch allocators multiPM goalType vid sid tupleMode givens
           mapFunc
             :: DeconstructorBinding
             -> Maybe (StateT SearchNode SearchBranches [TGoal])
+          mapFunc (DeconstructorBinding _ _ True)
+            | not allowRecursive = Nothing
           mapFunc (DeconstructorBinding matchParam [] _) =
             let eliminateEmpty = do
                   -- An empty case evaluates its scrutinee once and has no
@@ -2990,7 +3110,7 @@ addScopePatternMatch allocators multiPM goalType vid sid tupleMode givens
               <$ unifyRight vtResult matchParam
           mapFunc (DeconstructorBinding matchParam
                     [ConstructorBinding matchId matchRs] recursive) =
-            mapFunc1 <$> unifyRight vtResult matchParam
+            (recursiveChoice recursive . mapFunc1) <$> unifyRight vtResult matchParam
            where
             mapFunc1 substs = do
               vars <- forM matchRs $ \_ ->
@@ -3008,29 +3128,20 @@ addScopePatternMatch allocators multiPM goalType vid sid tupleMode givens
               modify $ \node -> node
                 { nodeExpression = fillExprHole vid expr
                     $ nodeExpression node }
-              if recursive
-                then do
-                  -- A recursive datatype may be inspected once without
-                  -- synthesizing recursion. Retain its fields as ordinary
-                  -- providers in this branch, but do not feed them back into
-                  -- eager pattern decomposition: a self- or mutually-
-                  -- recursive field would otherwise make this state
-                  -- transformation diverge before search can apply its normal
-                  -- step, queue, or depth bounds.
-                  addBindingsToScope sid newBinds
-                  defaultHandleRest
-                else addScopePatternMatch
+              addScopePatternQueue
                   allocators
+                  casePolicy
                   multiPM
                   goalType
                   vid
                   sid
                   tupleMode
                   givens
-                  (reverse newBinds ++ bindingRest)
+                  ([(allowRecursive && not recursive, binding) | binding <- reverse newBinds]
+                    ++ bindingRest)
           mapFunc (DeconstructorBinding matchParam
               matchers@(_ : _) recursive)
-            | multiPM = mapFunc2 <$> unifyRight vtResult matchParam
+            | multiPM = (recursiveChoice recursive . mapFunc2) <$> unifyRight vtResult matchParam
            where
             mapFunc2 substs = do
               -- The case expression evaluates its scrutinee once. Its
@@ -3059,41 +3170,28 @@ addScopePatternMatch allocators multiPM goalType vid sid tupleMode givens
                     (ExpCaseMatch expVar $ map fst matchData)
                     (nodeExpression node) }
               fmap concat $ map snd matchData `forM`
-                \(newVid, newBinds, newSid) -> if recursive
-                  then do
-                    -- Each alternative owns a child scope. Fields from one
-                    -- recursive constructor must remain usable in that branch
-                    -- without becoming visible to a sibling or triggering a
-                    -- second eager match layer.
-                    addBindingsToScope newSid $ reverse newBinds
-                    addScopePatternMatch
-                      allocators
-                      multiPM
-                      goalType
-                      newVid
-                      newSid
-                      tupleMode
-                      givens
-                      bindingRest
-                  else addScopePatternMatch
+                \(newVid, newBinds, newSid) -> addScopePatternQueue
                     allocators
+                    casePolicy
                     multiPM
                     goalType
                     newVid
                     newSid
                     tupleMode
                     givens
-                    (newBinds ++ bindingRest)
+                    ([(allowRecursive && not recursive, binding) | binding <- newBinds]
+                      ++ bindingRest)
           mapFunc _ = Nothing
 
-          -- Add a complete constructor-field group in declaration order.
-          -- 'scopesAddPBinding' prepends, so the right fold preserves the same
-          -- innermost-first order produced by ordinary recursive calls above.
-          addBindingsToScope scope bindings' = modify $ \node -> node
-            { nodeProvidedScopes = foldr
-                (scopesAddPBinding scope)
-                (nodeProvidedScopes node)
-                bindings'
-            }
+          -- Retaining an input whole lets a default value coexist with a
+          -- case on another argument of the same recursive type. Mandatory
+          -- splitting of both inputs creates needless Cartesian branch goals.
+          -- The ordinary lane retains both choices. The protected lane only
+          -- changes scheduling by exploring eager cases separately; it shares
+          -- the same finite field-inspection rule and all checking authority.
+          recursiveChoice True inspect = case casePolicy of
+            OptionalRecursiveCases -> defaultHandleRest <|> inspect
+            EagerRecursiveCases -> inspect
+          recursiveChoice False inspect = inspect
   -- where
   --  (<&>) = flip (<$>)

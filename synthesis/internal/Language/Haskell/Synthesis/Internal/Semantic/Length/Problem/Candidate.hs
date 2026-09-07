@@ -271,7 +271,7 @@ import Language.Haskell.Synthesis.TypedGenerated
   , termGraphRoot
   )
 import Language.Haskell.Synthesis.TypedGenerated.Fingerprint
-  ( TermGraphFingerprintError
+  ( TermGraphFingerprintError (..)
   , TermGraphFingerprintSubject
   , defaultTermGraphFingerprintByteLimit
   , fingerprintSharedTermGraph
@@ -1929,6 +1929,8 @@ termNodeReferences form = case form of
   TypedVisibleTypeApplication _ function _ _ -> [function]
   TypedForallIntroduction _ body _ -> [body]
   TypedImplicitTypeApplication _ function _ -> [function]
+  TypedContextIntroduction _ body _ -> [body]
+  TypedContextApplication _ function _ -> [function]
   TypedTuple fields -> fields
   TypedHole{} -> []
   TypedLet _ binding body -> [binding, body]
@@ -2038,7 +2040,13 @@ preflightGraph session providers candidateAuthorization authorized graph = do
 
   rejectHole (nodeId, TermNode _ form) = case form of
     TypedHole _ local -> Left $ LengthProblemHole nodeId local
+    TypedContextIntroduction{} -> unsupportedContextEvidence nodeId
+    TypedContextApplication{} -> unsupportedContextEvidence nodeId
     _ -> Right ()
+
+  unsupportedContextEvidence nodeId = Left $
+    LengthProblemTermGraphFingerprintRejected $
+      TermGraphFingerprintUnsupportedContextEvidence nodeId
 
   casePolicy = checkedLengthSessionCasePolicy session
 
@@ -2558,6 +2566,12 @@ evaluateNode context environment nodeId = do
     TypedForallIntroduction _ body _ -> evaluateNode context environment body
     TypedImplicitTypeApplication _ function _ ->
       evaluateNode context environment function
+    TypedContextIntroduction{} -> lift $ Left $
+      LengthProblemTermGraphFingerprintRejected $
+        TermGraphFingerprintUnsupportedContextEvidence nodeId
+    TypedContextApplication{} -> lift $ Left $
+      LengthProblemTermGraphFingerprintRejected $
+        TermGraphFingerprintUnsupportedContextEvidence nodeId
     TypedTuple fields -> pure $ SemanticTuple
       [DeferredThunk field environment | field <- fields]
     TypedHole _ local -> lift $ Left $ LengthProblemHole nodeId local

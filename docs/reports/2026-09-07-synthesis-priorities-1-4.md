@@ -119,11 +119,30 @@ the existing scope, skolem, and certificate controls remain in these suites.
 Logs are `dist-newstyle/priority-implicit-final-build.log` and
 `dist-newstyle/priority-implicit-<suite>-final.log` for those five suites.
 
+## Leant integration and recursive-case work in progress
+
+Leant `aab110e99e3c3d96549a05d3975b26bea93dc6ef` integrates Djex
+`6890bb5a8a56902c2baf137581e23c25a376fad0`. Retained receipts record the strict
+GHC build, 615 boundary tests, 18 existing corpus cases across three engine
+modes, three false controls, and independent Lean replay with 69 empty axiom
+inventories. This closes integration of that checkpoint, not the remaining
+priority-1 selection acceptance or priority-4 coverage.
+
+The current uncommitted priority-2 experiment introduces finite recursive
+constructor views and public synthesis/execution tests. The focused strict
+build passes. The latest combined behavioral test fails: `headOr` and shallow
+tree inspection have matching implementations, while `null` and `tailOr` do
+not within the tested search configuration. The log is
+`dist-newstyle/priority-recursive-cps-behavior.log`. Full affected suites and
+Lean replay have not accepted this experiment. It is work in progress, not a
+completed one-layer elimination milestone.
+
 ## Remaining work
 
-- Finish priority 1's remaining selection and negative evidence acceptance, then
-  synchronize and validate the shared changes in Leant.
-- Implement priority 2's case analysis and recursor/decreasing-call stages.
+- Close priority 2's failing case-analysis fixture and its source/host acceptance,
+  then implement the separate recursor/decreasing-call stage.
+- Finish priority 1's remaining selection and negative evidence acceptance;
+  integrate and validate any further shared changes in Leant.
 - Implement priority 3's dictionary representation and supported provider uses.
 - Implement priority 4's broader corpus and bounded Lean simplification.
 - Run the appropriate complete affected suites and live compiler/kernel

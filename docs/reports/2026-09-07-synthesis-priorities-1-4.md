@@ -128,19 +128,20 @@ modes, three false controls, and independent Lean replay with 69 empty axiom
 inventories. This closes integration of that checkpoint, not the remaining
 priority-1 selection acceptance or priority-4 coverage.
 
-The current uncommitted priority-2 experiment introduces finite recursive
-constructor views and public synthesis/execution tests. The focused strict
-build passes. The latest combined behavioral test fails: `headOr` and shallow
-tree inspection have matching implementations, while `null` and `tailOr` do
-not within the tested search configuration. The log is
-`dist-newstyle/priority-recursive-cps-behavior.log`. Full affected suites and
-Lean replay have not accepted this experiment. It is work in progress, not a
-completed one-layer elimination milestone.
+The [recursive-case checkpoint](2026-09-07-recursive-data-cases.md) now passes
+all four original Haskell behavior targets and four additional scenarios for
+aliases, tuple fields/results, and independently typed inputs. Coherent
+datatype views and explicit constructor authority replace the earlier failing
+experiment. The report records strict builds, 132 Djinn unit tests, 59 public
+and 43 private graph tests, 101 facade tests, 99 CLI tests, and four property
+groups with 200 trials each. Lean integration and independent kernel replay
+remain outstanding; this is not completion of the full case milestone or the
+separate recursor stage.
 
 ## Remaining work
 
-- Close priority 2's failing case-analysis fixture and its source/host acceptance,
-  then implement the separate recursor/decreasing-call stage.
+- Integrate priority 2's accepted Haskell case-search checkpoint into Leant and
+  close its kernel acceptance, then implement the separate recursor/decreasing-call stage.
 - Finish priority 1's remaining selection and negative evidence acceptance;
   integrate and validate any further shared changes in Leant.
 - Implement priority 3's dictionary representation and supported provider uses.

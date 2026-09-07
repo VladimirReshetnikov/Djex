@@ -8,6 +8,7 @@ module Djinn.Internal.ProofToGenerated
   ( termToGeneratedExpression
   , termToGeneratedClause
   , termToGeneratedClauseWithVisibleApplications
+  , termToGeneratedClauseWithSourceApplications
   ) where
 
 import Control.Monad (foldM, zipWithM)
@@ -37,14 +38,15 @@ termToGeneratedExpression = termToGeneratedExpressionWithEta True
 
 termToGeneratedExpressionWithEta :: Bool -> Term -> Either String Expression
 termToGeneratedExpressionWithEta contractEta =
-  termToGeneratedExpressionWithEvidence contractEta Map.empty
+  termToGeneratedExpressionWithEvidence contractEta Map.empty Set.empty
 
 termToGeneratedExpressionWithEvidence
   :: Bool
   -> Map.Map Symbol [Generated.VisibleTypeArgument]
+  -> Set.Set Name.Name
   -> Term
   -> Either String Expression
-termToGeneratedExpressionWithEvidence contractEta visibleEvidence term = do
+termToGeneratedExpressionWithEvidence contractEta visibleEvidence constructorNames term = do
   validateTermMetadata term
   (expression, _) <- convert [] renamedTerm
   let simplifyBindings
@@ -83,8 +85,12 @@ termToGeneratedExpressionWithEvidence contractEta visibleEvidence term = do
     let spelling = unSymbol symbol
     expression <- if spelling `elem` enclosing
       then Right $ Generated.Local spelling
-      else Generated.Global <$>
-        generatedGlobalName Name.VariableLike "value" spelling
+      else Generated.Global <$> case
+          generatedGlobalName Name.VariableLike "value" spelling of
+        Right name -> Right name
+        Left failure -> case generatedGlobalName Name.ConstructorLike "constructor" spelling of
+          Right name | name `Set.member` constructorNames -> Right name
+          _ -> Left failure
     pure (expression, [])
   convert enclosing lambdaTerm@Lam{} = do
     let (symbols, body) = termLambdaSpine lambdaTerm
@@ -401,7 +407,21 @@ termToGeneratedClauseWithVisibleApplications
   -> Term
   -> Either String (Generated.FunctionClause HSymbol)
 termToGeneratedClauseWithVisibleApplications evidence target term = do
-  expression <- termToGeneratedExpressionWithEvidence False evidence term
+  expression <- termToGeneratedExpressionWithEvidence False evidence Set.empty term
+  expressionToClause target expression
+
+-- | The source boundary supplies the exact constructor names from its checked
+-- environment. Ordinary raw proof conversion still rejects uppercase values;
+-- source constructor providers cannot acquire authority from spelling alone.
+termToGeneratedClauseWithSourceApplications
+  :: Bool
+  -> Map.Map Symbol [Generated.VisibleTypeArgument]
+  -> Set.Set Name.Name
+  -> Generated.DefinitionName
+  -> Term
+  -> Either String (Generated.FunctionClause HSymbol)
+termToGeneratedClauseWithSourceApplications contractEta evidence constructors target term = do
+  expression <- termToGeneratedExpressionWithEvidence contractEta evidence constructors term
   expressionToClause target expression
 
 expressionToClause

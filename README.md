@@ -968,6 +968,12 @@ constructor layer each on a logical path. Same-SCC revisits, a third SCC,
 negative occurrences, and the exact-opaque view remain atomic. Its exact
 fallback preserves recursive identity, and any search that encounters the
 bounded projection withholds negative evidence when it finds no term.
+An additional checked case-search plan supports one-layer recursive input
+inspection, including ordinary `null`, `headOr`, `tailOr`, and shallow tree
+observations. It keeps recursive fields opaque and uses exact visible
+constructor evidence; [acceptance and limits](docs/reports/2026-09-07-recursive-data-cases.md)
+include aliases, tuple results, and explicit supplied defaults. Recursive
+calls and induction remain separate work.
 Exference retains recursive datatype eliminators under a finite rule: matching
 a recursive scrutinee exposes one constructor layer, and its fields become
 ordinary providers in that branch without being fed back into eager pattern

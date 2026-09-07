@@ -409,10 +409,21 @@ negative occurrence, and the exact-opaque view all retain the complete
 application as an atom. This lets an independent `Outer` and `Inner` compose
 one finite layer each while preventing unbounded or exponentially duplicated
 expansion. The exact view preserves forwarding such as `Rec a -> Rec a`, and
-the positive view can construct `Done a :: Rec a` without admitting recursive
-elimination, recursive calls, or induction. Every query translation that
+the positive view can construct `Done a :: Rec a`. Every query translation that
 touches this bounded rule is incomplete, so an empty search is inconclusive
 rather than proof of non-inhabitation.
+
+A complementary checked case-search plan now inspects recursive inputs one
+constructor layer at a time while retaining datatype fields as exact opaque
+source types. Goals and loaded providers use the same datatype view, so a
+recursive tail can be returned without reopening its structure. Constructor
+providers come from the checked, visible source inventory. This supports
+ordinary `null`, `headOr`, `tailOr`, and shallow tree inspection; supplied
+defaults remain explicit. Interleaved alternatives fairly combine tuple
+components and case branches. The [case-search report](reports/2026-09-07-recursive-data-cases.md)
+records execution and graph acceptance, including aliases and product results.
+This finite case search does not synthesize recursive calls or induction and
+cannot establish non-inhabitation on exhaustion.
 
 ### The query-directed slice and nominal atoms
 

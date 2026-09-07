@@ -8,6 +8,12 @@ completion checklist. None of those four priorities is complete.
 
 ## Evidence that changes the ordering
 
+Subsequent implementation: the [case-search report](2026-09-07-recursive-data-cases.md)
+records eight passing Haskell execution scenarios and the affected regression
+suites. The failing experiment described below is the historical evidence for
+this re-triage. The next case-stage gate is now Leant integration and kernel
+replay, followed by the remaining elaboration selection acceptance.
+
 Djex `6890bb5a8a56902c2baf137581e23c25a376fad0` includes source-graph
 Haskell rendering, bounded same-candidate retries, and checked implicit local
 type selections. The [implementation register](2026-09-07-synthesis-priorities-1-4.md#implicit-local-evidence-and-live-repair)

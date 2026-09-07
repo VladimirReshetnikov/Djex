@@ -2741,7 +2741,7 @@ testReplDjinnReferenceNamespaces = withTemporaryEnvironment
   assertContains "the genuine empty datatype supports absurd elimination"
     "case a of {}" output
   assertContains "only the intrinsic recursive list reports an elimination limitation"
-    "[]: recursive datatype; constructors are introduction-only in Djinn" output
+    "[]: recursive datatype; constructor search is bounded in Djinn" output
   assertBool "cross-namespace reference forced the standard fallback" $
     not $ "Djinn falls back to its standard checked environment" `isInfixOf`
       output
@@ -2775,7 +2775,7 @@ testReplDjinnHigherKindStub = withTemporaryEnvironment
   assertContains "the inferred external stub and intrinsic types remain in the projection"
     "5 declarations (projected from the module scope, 1 omissions)" output
   assertContains "only the intrinsic recursive list reports an elimination limitation"
-    "[]: recursive datatype; constructors are introduction-only in Djinn" output
+    "[]: recursive datatype; constructor search is bounded in Djinn" output
   assertBool "higher-kinded stub forced the standard-environment fallback" $
     not $ "Djinn falls back to its standard checked environment" `isInfixOf`
       output
@@ -2807,7 +2807,7 @@ testReplDjinnRecursiveHigherKind = withTemporaryEnvironment
     ("Fix Maybe remains well-kinded and constructible: " ++ output ++ errors)
     2 $ countOccurrences "\\_ -> Fix Nothing" output
   assertContains "recursive Fix reports its deliberate elimination boundary"
-    "Fix: recursive datatype; constructors are introduction-only in Djinn"
+    "Fix: recursive datatype; constructor search is bounded in Djinn"
     output
   assertBool "recursive kind loss forced the standard-environment fallback" $
     not $ "Djinn falls back to its standard checked environment" `isInfixOf`
@@ -2874,7 +2874,7 @@ testReplDjinnAliasRecursiveRecord = withTemporaryEnvironment
     ("alias-hidden recursion lost its visible selector: " ++ output ++ errors)
     "payload" output
   assertContains "alias-hidden recursion reports its elimination boundary"
-    "Rec: recursive datatype; constructors are introduction-only in Djinn"
+    "Rec: recursive datatype; constructor search is bounded in Djinn"
     output
   assertNoCallStack errors
 
@@ -2900,12 +2900,14 @@ testReplDjinnHiddenRecursiveSelector = withTemporaryEnvironment
     ]
   assertEqual "hidden recursive selector REPL exit" ExitSuccess exitCode
   assertContains "the recursive record keeps its honest elimination boundary"
-    "Rec: recursive datatype; constructors are introduction-only in Djinn"
+    "Rec: recursive datatype; constructor search is bounded in Djinn"
     output
   assertBool "an unimported recursive selector entered Djinn search" $
     not $ "hiddenResult" `isInfixOf` output
-  assertContains "the hidden selector leaves recursive elimination undecided"
-    "[DJEX_DJINN_UNDECIDED]" errors
+  assertBool ("the visible constructor did not support field elimination: " ++ output ++ errors) $
+    "\\(MkRec a _) -> a" `isInfixOf` output || "case " `isInfixOf` output
+  assertBool "a checked constructor case was reported as undecided" $
+    not $ "[DJEX_DJINN_UNDECIDED]" `isInfixOf` errors
   assertNoCallStack errors
 
 -- Constructor introduction follows the value namespace exactly. A recursive
@@ -2934,11 +2936,11 @@ testReplDjinnHiddenRecursiveConstructors = withTemporaryEnvironment
     not ("Done" `isInfixOf` output || "Again" `isInfixOf` output)
   assertBool ("an already-abstract projection gained a recursive omission: " ++ output ++ errors) $
     all (\line -> all (\subject -> not $
-        (subject ++ ": recursive datatype; constructors are introduction-only")
+        (subject ++ ": recursive datatype; constructor search is bounded")
           `isPrefixOf` dropWhile isSpace line)
       ["Rec", "HiddenRecursive.Rec"]) $ lines output
   assertContains "the intrinsic list keeps its separate introduction-only limitation"
-    "[]: recursive datatype; constructors are introduction-only in Djinn" output
+    "[]: recursive datatype; constructor search is bounded in Djinn" output
   assertContains "constructor-hidden recursion remains uninhabitable"
     "[DJEX_DJINN_UNINHABITABLE]" errors
   assertNoCallStack errors
@@ -2969,11 +2971,11 @@ testReplDjinnRepairedRecursiveConstructors = withTemporaryEnvironment
       ++ " the Djinn scope; projected as an abstract type") output
   assertBool ("a repaired datatype retained a stale constructor boundary: " ++ output ++ errors) $
     all (\line -> all (\subject -> not $
-        (subject ++ ": recursive datatype; constructors are introduction-only")
+        (subject ++ ": recursive datatype; constructor search is bounded")
           `isPrefixOf` dropWhile isSpace line)
       ["Rec", "RepairedRecursive.Rec"]) $ lines output
   assertContains "the intrinsic list keeps its separate introduction-only limitation"
-    "[]: recursive datatype; constructors are introduction-only in Djinn" output
+    "[]: recursive datatype; constructor search is bounded in Djinn" output
   assertBool "a repaired recursive constructor entered Djinn search" $
     not ("Done" `isInfixOf` output || "Again" `isInfixOf` output)
   assertContains "the repaired abstract recursion remains uninhabitable"

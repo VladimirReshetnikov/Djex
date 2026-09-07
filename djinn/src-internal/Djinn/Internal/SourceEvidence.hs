@@ -34,11 +34,11 @@ import Djinn.Internal.ProofCheck.Evidence
 import Djinn.Internal.ProofEnv
   ( ProofEnvironment, proofBindings, restoreProofTerm )
 import Djinn.Internal.ProofToGenerated
-  ( termToGeneratedClause, termToGeneratedClauseWithVisibleApplications )
+  ( termToGeneratedClauseWithSourceApplications )
 import Djinn.Internal.SourceTypingContext
   ( SourceTypingContext, sourceTypingContext, sourceTypingContextWithProviderKinds
   , sourceTypingPreparedEnvironment, sourceTypingGoal, sourceTypingProviderKinds
-  , sourceTypingTermSchemes )
+  , sourceTypingTermSchemes, sourceTypingConstructorNames )
 import qualified Language.Haskell.Synthesis.Generated as Generated
 
 -- | One indivisible association.  Every term in the history is computed
@@ -73,10 +73,9 @@ lowerCheckedSourceCandidate context proofEnvironment axiomSymbols visible
           providerApplied = rewriteProviderInstantiationEvidence providers restored
           implicitSymbols = axiomSymbols `Set.difference` Map.keysSet visible
           erased = eliminateInstantiationEvidence implicitSymbols providerApplied
-          convert
-            | usesInstantiationEvidence axiomSymbols restored =
-                termToGeneratedClauseWithVisibleApplications visible
-            | otherwise = termToGeneratedClause
+          constructors = sourceTypingConstructorNames context
+          convert = termToGeneratedClauseWithSourceApplications
+              (not $ usesInstantiationEvidence axiomSymbols restored) visible constructors
       clause <- convert target erased
       pure $ SourceCandidate context evidence restored providerApplied erased
         visible providers clause

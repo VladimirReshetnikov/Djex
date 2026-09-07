@@ -8,9 +8,11 @@ module Djinn.Internal.SourceTypingContext
   , sourceTypingGoal
   , sourceTypingProviderKinds
   , sourceTypingTermSchemes
+  , sourceTypingConstructorNames
   ) where
 
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 
 import Djinn.Internal.Environment
   ( PreparedEnvironment, preparedEnvironmentInventory
@@ -52,6 +54,17 @@ sourceTypingGoal (SourceTypingContext _ goal _) = goal
 
 sourceTypingProviderKinds :: SourceTypingContext -> Map.Map Name [GroundKind]
 sourceTypingProviderKinds (SourceTypingContext _ _ kinds) = kinds
+
+-- | Constructor roles come from the sealed declaration inventory. This name
+-- projection does not repeat kind inference or source scheme elaboration.
+sourceTypingConstructorNames :: SourceTypingContext -> Set.Set Name
+sourceTypingConstructorNames (SourceTypingContext prepared _ _) = Set.fromList
+  [ Declaration.constructorName constructor
+  | Declaration.DataTypeDeclaration _ _ _ constructors <-
+      Environment.environmentDeclarations $
+        Inventory.inventoryEnvironment $ preparedEnvironmentInventory prepared
+  , constructor <- constructors
+  ]
 
 -- | Exact source names and independently scoped schemes. Class methods
 -- remain excluded, consistently with Djinn's dictionary-independent search.

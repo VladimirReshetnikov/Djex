@@ -2613,7 +2613,69 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
         -- unchanged byte for byte.
         providerAssignmentPriorityStructuralSearchPlans ++
         providerAssignmentPriorityNominalSearchPlans ++
-        take 1 structuralSearchPlans
+        take 1 structuralSearchPlans ++ recursiveDataSearchPlans
+    -- Exact recursive atoms may be inspected through their declared one-layer
+    -- constructor shape. Continuation views erase as representation identities;
+    -- introduction premises resolve to actual constructors in the checked
+    -- source inventory. Ordinary source checking validates the resulting tree.
+    -- Do not infer non-inhabitation from this finite recursive approximation.
+    recursiveDataSearchPlans =
+        [ (dataPremises ++ constructorPremises ++ viewPremises, [],
+            Set.fromList $ map fst viewPremises ++ map fst constructorPremises,
+            Map.empty, constructorApplications, goal, False)
+        | Right translation <-
+            [preparedEnvironmentDataViewFormula prepared 0 PositiveFormula elaboratedGoal]
+        , Right (dataPremises, _) <- [preparedEnvironmentDataViewFunctionPremises prepared]
+        , let goal = translatedFormula translation
+              sequent = goal : map snd dataPremises
+              views = preparedEnvironmentDataConstructorViews prepared sequent
+              negativeTypes = atomsAtPolarity False True goal `Set.union`
+                  Set.unions [atomsAtPolarity False False form | (_, form) <- dataPremises]
+              positiveTypes = atomsAtPolarity True True goal `Set.union`
+                  Set.unions [atomsAtPolarity True False form | (_, form) <- dataPremises]
+              results = residualResults goal
+              viewPremises =
+                  [ (Symbol $ "$djinn$recursive-view$unfold$" ++ show index ++ "$" ++ show resultIndex,
+                      (structural :-> result) :-> (opaque :-> result))
+                  | (index, (opaque, structural)) <- zip [0 :: Natural ..] views
+                  , opaque `Set.member` negativeTypes
+                  , (resultIndex, result) <- zip [0 :: Natural ..] results
+                  ]
+              constructors =
+                  [ ( Symbol $ "$djinn$data-constructor$" ++ show index ++ "$" ++ show constructorIndex
+                    , Symbol name
+                    , foldr (:->) opaque fields)
+                  | (index, (opaque, Disj alternatives)) <- zip [0 :: Natural ..] views
+                  , opaque `Set.member` positiveTypes
+                  , (constructorIndex, (ConsDesc name arity, Conj fields)) <-
+                      zip [0 :: Natural ..] alternatives
+                  , arity == length fields
+                  ]
+        , not $ null $ preparedEnvironmentRecursiveDataViews prepared sequent
+        -- Inspect and forward existing values before introducing fresh ones.
+        -- The second plan restores construction without committing the first
+        -- branch of a case to a closed constructor before lexical defaults.
+        , selectedConstructors <- if null constructors then [[]] else [[], constructors]
+        , let constructorPremises = [(symbol, form) | (symbol, _, form) <- selectedConstructors]
+              constructorApplications = Map.fromList
+                  [(symbol, (source, [])) | (symbol, source, _) <- selectedConstructors]
+        ]
+      where
+        -- Continuation form postpones selecting the scrutinized value until
+        -- the goal's arguments are in scope. Direct R -> Shape R saturation
+        -- would commit to a constructed nil before seeing those arguments,
+        -- losing behaviorally distinct eliminations of the real inputs.
+        residualResults (_ :-> remaining) = residualResults remaining
+        residualResults (Conj fields) = concatMap residualResults fields
+        residualResults resultFormula = [resultFormula]
+        atomsAtPolarity wanted polarity formula = case formula of
+            atom@PVar{} | wanted == polarity -> Set.singleton atom
+            left :-> right -> atomsAtPolarity wanted (not polarity) left
+                `Set.union` atomsAtPolarity wanted polarity right
+            Conj fields -> Set.unions $ map (atomsAtPolarity wanted polarity) fields
+            Disj alternatives -> Set.unions $
+                map (atomsAtPolarity wanted polarity . snd) alternatives
+            _ -> Set.empty
     searchPlans =
         drop 1 structuralSearchPlans ++
         nominalSearchPlans ++

@@ -438,7 +438,7 @@ recursiveDataTypeIntroductionOmissions recursive = mapMaybe describe
     DataTypeDeclaration _ name _ _
       | name `Set.member` recursive -> Just $ DjinnScopeOmission
           (renderCanonical name)
-          "recursive datatype; constructors are introduction-only in Djinn"
+          "recursive datatype; constructor search is bounded in Djinn"
     _ -> Nothing
 
 unzipOmissions

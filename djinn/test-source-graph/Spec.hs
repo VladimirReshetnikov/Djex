@@ -181,8 +181,8 @@ ordinaryTests =
     isCase _ = False
 
 -- Use the actual builtin identities, not a nominal List/Nil/Cons lookalike.
--- Admitting this complete declaration preserves constructor introduction;
--- it does not grant a new recursive input-elimination rule.
+-- Admitting this complete declaration authorizes the finite constructor view;
+-- unknown or merely same-spelled families do not supply that authority.
 intrinsicListTests :: [TestTree]
 intrinsicListTests =
     [ testCase "the public session retains the exact builtin list declaration" $
@@ -197,22 +197,25 @@ intrinsicListTests =
         forM_ graphs $ \graph -> do
             assertBool "forced nil did not retain the actual builtin [] global" $
                 N.listName `elem` globalNames graph
-            assertBool "an unrelated output element acquired a cons payload" $
-                N.consName `notElem` globalNames graph
+        -- Case alternatives can now reconstruct an input list before returning
+        -- nil. Such an intermediate (:) is not a payload of the unrelated
+        -- output type; every graph above is checked at the full forall type.
+        assertBool "the simple nil inhabitant was lost" $
+            any (notElem N.consName . globalNames) graphs
     , testCase "list introduction retains the actual builtin cons global" $ do
         (_, _, graphs) <- queryGraphs [listDeclaration Nothing] alternatives
             "forall a. a -> [a] -> [a]"
         assertBool "no source-checked candidate actually introduced (:)" $
             any (\graph -> N.consName `elem` globalNames graph
                 && N.consName `elem` G.expressionGlobals (T.eraseTermGraph graph)) graphs
-    , testCase "builtin list admission preserves default recursive input opacity" $ do
+    , testCase "builtin list cases retain forwarding and no false refutation" $ do
         let declarations = [listDeclaration Nothing]
         (_, _, forwarded) <- queryGraphs declarations alternatives
             "forall a. [a] -> [a]"
         assertBool "the exact recursive input was not forwarded" $
             any (null . globalNames) forwarded
-        assertBool "recursive forwarding unexpectedly acquired a case eliminator" $
-            all (all (not . isCase . T.termNodeForm . snd) . T.termGraphNodes) forwarded
+        assertBool "the recursive view produced no checked case eliminator" $
+            any (any (isCase . T.termNodeForm . snd) . T.termGraphNodes) forwarded
         session <- seal declarations
         query <- request session options "forall a. [a] -> a"
         result <- right $ D.runDjinnTypedQuery session query
@@ -222,6 +225,49 @@ intrinsicListTests =
             Q.NoEvidence $ Q.resultEvidence result
         assertEqual "the finite recursive-input plans did not finish"
             (S.Completed S.Finished) $ S.batchProgress $ Q.resultSearch result
+    , testCase "ordinary list observations retain full source graphs" $ do
+        let flag = name "Flag"
+            flagDeclaration = DataTypeDeclaration () flag []
+                [DataConstructor () (name "No") [], DataConstructor () (name "Yes") []]
+        forM_ ["forall a. [a] -> Flag", "forall a. a -> [a] -> a",
+                "forall a. [a] -> [a] -> [a]"] $ \signature -> do
+            (_, _, graphs) <- queryGraphs [listDeclaration Nothing, flagDeclaration]
+                alternatives signature
+            assertBool ("no source-checked list case for " ++ signature) $
+                any (any (isCase . T.termNodeForm . snd) . T.termGraphNodes) graphs
+    , testCase "one-layer tree inspection retains exact constructor identities" $ do
+        let tree = name "Tree"
+            element = TypeVariable "element"
+            treeType = TypeApplication (TypeConstructor tree) element
+            declaration = DataTypeDeclaration () tree [TypeParameter "element" Nothing]
+                [ DataConstructor () (name "Tip") [element]
+                , DataConstructor () (name "Fork") [treeType, treeType]
+                ]
+        (_, _, graphs) <- queryGraphs [declaration] alternatives
+            "forall a. a -> Tree a -> a"
+        assertBool "no checked tree case was synthesized" $
+            any (any (isCase . T.termNodeForm . snd) . T.termGraphNodes) graphs
+    , testCase "recursive cases compose with exact loaded providers" $ do
+        let declarations = [listDeclaration Nothing, abstract "Seed" 0, abstract "Token" 0,
+                value "fallback" (nominal "Token"),
+                value "observe" (FunctionType (nominal "Seed") (nominal "Token"))]
+        (_, _, graphs) <- queryGraphs declarations alternatives "[Seed] -> Token"
+        assertBool "a recursive case lost its loaded observation provider" $
+            any (\graph -> name "observe" `elem` globalNames graph
+                && any (isCase . T.termNodeForm . snd) (T.termGraphNodes graph)) graphs
+        assertBool "the empty branch invented an abstract default" $
+            all (elem (name "fallback") . globalNames) graphs
+    , testCase "one-layer mutual recursion retains opaque sibling fields" $ do
+        let declarations =
+                [ datatype "LeftTree" ["a"]
+                    [("LeftLeaf", [variable "a"]), ("ToRight", [apply "RightTree" [variable "a"]])]
+                , datatype "RightTree" ["a"]
+                    [("ToLeft", [apply "LeftTree" [variable "a"]])]
+                ]
+        (_, _, graphs) <- queryGraphs declarations alternatives
+            "forall a. a -> LeftTree a -> a"
+        assertBool "no checked mutual-family case was synthesized" $
+            any (any (isCase . T.termNodeForm . snd) . T.termGraphNodes) graphs
     ]
   where
     listDeclaration kind = DataTypeDeclaration () N.listName

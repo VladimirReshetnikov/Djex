@@ -942,7 +942,7 @@ redant mode more antes atomImps nestImps atoms goal =
             [foldr Lam proof variables, p]
     reduceAntecedent _ (A p (Disj alternatives)) pending g = do
         variables <- mapM (const (newSym "d")) alternatives
-        proofs <- mapM proveAlternative (zip variables alternatives)
+        proofs <- sequenceProofs proveAlternative (zip variables alternatives)
         -- Even when both propositions print as @false@, a raw empty
         -- disjunction and a nominal empty datatype are distinct proof-checker
         -- types.  Cross that boundary with the proper empty eliminator rather
@@ -1065,7 +1065,7 @@ redant mode more antes atomImps nestImps atoms goal =
         else
             mzero
     redsucc (Conj conjuncts) = do
-        proofs <- mapM redsucc conjuncts
+        proofs <- sequenceProofs redsucc conjuncts
         return $ applys (Ctuple (length conjuncts)) proofs
     -- Push the choice of disjunct into implication processing on the left.
     -- 'newSym' is seeded with every input atom, so the continuation atom is
@@ -1123,6 +1123,19 @@ redant mode more antes atomImps nestImps atoms goal =
         qz <- redant mode more [A (Var z) (d :-> b)] atomImps remaining atoms (c :-> d)
         proof <- redant mode more [A (Var x) b] atomImps remaining atoms g
         subst (applyImp p (Lam z qz)) x proof
+
+    -- Each tuple component and case branch has its own alternatives. Ordinary
+    -- bind exhausts every later component before advancing the first one,
+    -- even when choice nodes themselves interleave. Use the existing charged,
+    -- freshness-preserving fair bind for explicitly interleaved alternatives.
+    sequenceProofs _ [] = pure []
+    sequenceProofs proveOne (part : parts)
+        | more && searchStrategy mode == Interleave =
+            bindInterleaved (proveOne part) $ \proof ->
+                (proof :) <$> sequenceProofs proveOne parts
+        | otherwise = do
+            proof <- proveOne part
+            (proof :) <$> sequenceProofs proveOne parts
 
 -- A cheap necessary-condition check before branching over nested implications.
 -- On the left, every disjunct must yield the atom, while any conjunct may do

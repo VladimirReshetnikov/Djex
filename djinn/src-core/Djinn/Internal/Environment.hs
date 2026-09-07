@@ -24,6 +24,10 @@ module Djinn.Internal.Environment (
     preparedEnvironmentPolarizedSynthesisFormulaPlans,
     preparedEnvironmentNominalPolarizedSynthesisFormulaPlans,
     preparedEnvironmentTransportSynthesisFormula,
+    preparedEnvironmentRecursiveDataViews,
+    preparedEnvironmentDataConstructorViews,
+    preparedEnvironmentDataViewFormula,
+    preparedEnvironmentDataViewFunctionPremises,
     preparedEnvironmentNominalTransportSynthesisFormula,
     preparedEnvironmentTransportFunctionPremises,
     preparedEnvironmentNominalTransportFunctionPremises,
@@ -1384,6 +1388,33 @@ preparedEnvironmentNominalPolarizedSynthesisFormulaPlans
         (PreparedEnvironment _ _ _ _ _ _ _ compiler _) =
     compilePolarizedSynthesisFormulaPlans 0 PositiveFormula compiler
 
+-- | Bounded constructor views from the checked datatype inventory and exact
+-- recursive source atoms in the current sequent.
+preparedEnvironmentRecursiveDataViews
+    :: PreparedEnvironment -> [Formula] -> [(Formula, Formula)]
+preparedEnvironmentRecursiveDataViews
+        (PreparedEnvironment _ _ _ _ _ _ compiler _ _) =
+    compileRecursiveDataViews synthesisFormulaTypeView compiler
+
+preparedEnvironmentDataConstructorViews
+    :: PreparedEnvironment -> [Formula] -> [(Formula, Formula)]
+preparedEnvironmentDataConstructorViews
+        (PreparedEnvironment _ _ _ _ _ _ compiler _ _) =
+    compileDataConstructorViews synthesisFormulaTypeView compiler
+
+preparedEnvironmentDataViewFormula
+    :: PreparedEnvironment -> Natural -> FormulaPolarity
+    -> SharedType.Type HSymbol -> Either String FormulaTranslation
+preparedEnvironmentDataViewFormula
+        (PreparedEnvironment _ _ _ _ _ _ compiler _ _) namespace polarity =
+    compileDataViewFormula namespace polarity synthesisFormulaTypeView compiler .
+        SharedType.canonicalizeType
+
+preparedEnvironmentDataViewFunctionPremises
+    :: PreparedEnvironment -> Either String ([(Symbol, Formula)], [String])
+preparedEnvironmentDataViewFunctionPremises prepared =
+    translateFunctionPremises (preparedEnvironmentDataViewFormula prepared) prepared
+
 -- | One additional positive view selected by exact types already available
 -- in the current query. This is prepared only by the candidate-free fallback;
 -- ordinary cached occurrence frontiers keep their established order.
@@ -1446,6 +1477,14 @@ transportFunctionPremises
     -> Set.Set Symbol
     -> Either String ([(Symbol, Formula)], [String])
 transportFunctionPremises compiler prepared available = do
+    translateFunctionPremises (compileTransportSynthesisFormula compiler available) prepared
+
+translateFunctionPremises
+    :: (Natural -> FormulaPolarity -> SharedType.Type HSymbol
+        -> Either String FormulaTranslation)
+    -> PreparedEnvironment
+    -> Either String ([(Symbol, Formula)], [String])
+translateFunctionPremises compilePremise prepared = do
     translated <- mapM translate $ zip [1 ..] signatures
     pure (map fst translated, SharedCollection.distinctOn id $ concatMap snd translated)
   where
@@ -1468,8 +1507,7 @@ transportFunctionPremises compiler prepared available = do
                 (const (Nothing :: Maybe ())) freshBinder mempty
                 source)
         let (_, _, body) = SharedType.splitLeadingForalls implicit
-        translation <- compileTransportSynthesisFormula compiler available
-            namespace NegativeFormula body
+        translation <- compilePremise namespace NegativeFormula body
         pure ((Symbol name, translatedFormula translation),
             SharedType.freeVariablesInFirstOccurrenceOrder body ++
                 translationIntroducedSkolems translation)

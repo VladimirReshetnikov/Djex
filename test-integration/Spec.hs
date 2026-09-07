@@ -75,7 +75,108 @@ main = defaultMain tests
 
 tests :: TestTree
 tests = testGroup "Djex facade"
-  [ testCase "compile and execute source-graph Haskell forall and impredicative hints" $ do
+  [ testCase "synthesize and execute ordinary list and tree observations" $ do
+      listName' <- expectRight $ parseName "[]"
+      consName' <- expectRight $ parseName ":"
+      boolName <- expectRight $ parseName "Bool"
+      falseName <- expectRight $ parseName "False"
+      trueName <- expectRight $ parseName "True"
+      treeName <- expectRight $ parseName "Tree"
+      leafName <- expectRight $ parseName "Leaf"
+      branchName <- expectRight $ parseName "Branch"
+      aliasName <- expectRight $ parseName "Sequence"
+      payloadName <- expectRight $ parseName "Payload"
+      pairLeafName <- expectRight $ parseName "PairLeaf"
+      nextName <- expectRight $ parseName "Next"
+      let element = TypeVariable "a"
+          listType = TypeApplication (TypeConstructor listName') element
+          treeType = TypeApplication (TypeConstructor treeName) element
+          payloadType = TypeApplication (TypeConstructor payloadName) element
+          declarations =
+            [ DataTypeDeclaration () listName' [TypeParameter "a" Nothing]
+                [ DataConstructor () listName' []
+                , DataConstructor () consName' [element, listType] ]
+            , DataTypeDeclaration () boolName []
+                [DataConstructor () falseName [], DataConstructor () trueName []]
+            , DataTypeDeclaration () treeName [TypeParameter "a" Nothing]
+                [ DataConstructor () leafName [element]
+                , DataConstructor () branchName [treeType, treeType] ]
+            , TypeSynonymDeclaration () aliasName [TypeParameter "a" Nothing] listType
+            , DataTypeDeclaration () payloadName [TypeParameter "a" Nothing]
+                [ DataConstructor () pairLeafName [TupleType Boxed [element, element]]
+                , DataConstructor () nextName [payloadType] ]
+            ]
+          specifications =
+            [ ("null", "forall a. [a] -> Bool", \f ->
+                f ++ " ([] :: [Int]) && not (" ++ f ++ " [11 :: Int]) && not ("
+                  ++ f ++ " [True, False])")
+            , ("headOr", "forall a. a -> [a] -> a", \f ->
+                f ++ " 91 ([] :: [Int]) == 91 && " ++ f ++ " 91 [11 :: Int] == 11 && "
+                  ++ f ++ " 91 [11, 29 :: Int] == 11 && " ++ f ++ " False [True]")
+            , ("tailOr", "forall a. [a] -> [a] -> [a]", \f ->
+                f ++ " [91] ([] :: [Int]) == [91] && " ++ f ++ " [91] [11 :: Int] == [] && "
+                  ++ f ++ " [91] [11, 29, 37 :: Int] == [29, 37] && "
+                  ++ f ++ " [False] [True, True] == [True]")
+            , ("tree", "forall a. a -> Tree a -> a", \f ->
+                f ++ " 91 (Leaf (11 :: Int)) == 11 && "
+                  ++ f ++ " 91 (Branch (Leaf (11 :: Int)) (Leaf 29)) == 91 && "
+                  ++ f ++ " False (Leaf True)")
+            , ("alias", "forall a. a -> Sequence a -> a", \f ->
+                f ++ " 91 ([] :: [Int]) == 91 && " ++ f ++ " 91 [11, 29 :: Int] == 11")
+            , ("unconsOr", "forall a. a -> [a] -> (a, [a])", \f ->
+                f ++ " 91 ([] :: [Int]) == (91, []) && "
+                  ++ f ++ " 91 [11, 29 :: Int] == (11, [29]) && "
+                  ++ f ++ " False [True, False] == (True, [False])")
+            , ("tupleField", "forall a. a -> Payload a -> a", \f ->
+                f ++ " 91 (PairLeaf (11, 29 :: Int)) == 11 && "
+                  ++ f ++ " 91 (Next (PairLeaf (11, 29 :: Int))) == 91")
+            , ("independent", "forall a b. a -> b -> [a] -> [b] -> (a, b)", \f ->
+                f ++ " 91 False ([] :: [Int]) [] == (91, False) && "
+                  ++ f ++ " 91 False [11, 29 :: Int] [True] == (11, True) && "
+                  ++ f ++ " 91 False [] [True] == (91, True)")
+            ]
+      environment <- expectRight (mkEnvironment declarations :: Either
+        (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+      session <- expectRight $ mkDjinnSession environment
+      generated <- forM specifications $ \(label, signature, predicate) -> do
+        target <- expectRight $ mkIdentifier $ "recursive_" ++ label
+        request <- expectRight $ parseDjinnRequest session
+          defaultQueryOptions { optionCutoff = if label == "independent" then 256 else 64,
+            optionAlternatives = True,
+            optionStrategy = if label `elem` ["unconsOr", "independent"] then Interleave else DepthFirst,
+            optionSorted = False, optionBudget = Just 50000 }
+          target "recursive-case-behavior" signature
+        result <- expectRight $ runDjinnTypedQuery session request
+        let candidates = batchCandidates $ resultSearch result
+        assertBool ("no candidate for " ++ label) $ not $ null candidates
+        definitions <- forM (zip [0 :: Int ..] candidates) $ \(index, candidate) -> do
+          graph <- expectRight $ typedCandidateTermGraph candidate
+          term <- expectRight $ TypedHaskell.renderHaskellTermGraph
+            (defaultRenderOptions id) graph
+          let function = "case_" ++ label ++ "_" ++ show index
+          pure ([function ++ " :: " ++ signature, function ++ " = " ++ term], predicate function)
+        pure (concatMap fst definitions,
+          "(" ++ show label ++ ", or [" ++ concat
+            [ (if index == 0 then "" else ", ") ++ "(" ++ observation ++ ")"
+            | (index, (_, observation)) <- zip [0 :: Int ..] definitions ] ++ "])")
+      let fixture = unlines $
+            [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, ScopedTypeVariables, TypeApplications #-}"
+            , "module Main where"
+            , "data Tree a = Leaf a | Branch (Tree a) (Tree a)"
+            , "type Sequence a = [a]"
+            , "data Payload a = PairLeaf (a, a) | Next (Payload a)" ]
+            ++ concatMap fst generated ++
+            [ "main :: IO ()"
+            , "main = mapM_ print [" ++ concat
+                [ (if index == 0 then "" else ", ") ++ observation
+                | (index, (_, observation)) <- zip [0 :: Int ..] generated ] ++ "]" ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        replay <- timeout 30000000 $ readProcessWithExitCode "runghc" [sourcePath] ""
+        case replay of
+          Just (ExitSuccess, output, _) -> assertEqual fixture
+            (unlines [show (label, True) | (label, _, _) <- specifications]) output
+          _ -> fail $ "ordinary recursive behavior replay failed: " ++ show replay
+  , testCase "compile and execute source-graph Haskell forall and impredicative hints" $ do
       environment <- expectRight (mkEnvironment [] :: Either
         (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
       session <- expectRight $ mkDjinnSession environment

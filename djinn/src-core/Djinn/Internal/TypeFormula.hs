@@ -43,6 +43,9 @@ module Djinn.Internal.TypeFormula
     , structuralFormulaRetainsAssignments
     , compilePolarizedFormulaPlans
     , compileTransportFormula
+    , compileRecursiveDataViews
+    , compileDataConstructorViews
+    , compileDataViewFormula
     , compileConstructedHypothesisFormula
     , negativeOpaqueFormulaSymbols
     ) where
@@ -639,10 +642,82 @@ compileConstructedHypothesisFormula family index view prepared source = do
   where
     namespace = "construction$" ++ family ++ "$" ++ show index
 
--- | Exact opaque types available at negative source positions. Polarity is
--- the compiler's initial polarity, so a prepared premise starts negative and
--- a requested goal starts positive. Free skolems stay nominal in symbol keys;
--- an inner scope cannot accidentally authorize an alpha-similar outer type.
+-- | Exact one-layer views of recursive atoms already present in this sequent.
+-- Source values retain their declared constructors while LJT may keep their
+-- complete nominal type opaque or inspect a finite constructor shape.
+-- Datatype fields and all foralls remain opaque. In particular this does not recursively
+-- close the inventory under expanding applications such as R (Maybe a).
+-- Callers may use these views only in proof-producing, incomplete search plans.
+compileRecursiveDataViews
+    :: TypeView (SharedType.Type String)
+    -> PreparedFormulaCompiler
+    -> [Formula]
+    -> [(Formula, Formula)]
+compileRecursiveDataViews = compileDataConstructorViewsWith True
+
+-- | Constructor shapes for all exact declared data atoms in a recursive case
+-- sequent, including nonrecursive result families such as Bool.
+compileDataConstructorViews
+    :: TypeView (SharedType.Type String)
+    -> PreparedFormulaCompiler
+    -> [Formula]
+    -> [(Formula, Formula)]
+compileDataConstructorViews = compileDataConstructorViewsWith False
+
+compileDataConstructorViewsWith
+    :: Bool
+    -> TypeView (SharedType.Type String)
+    -> PreparedFormulaCompiler
+    -> [Formula]
+    -> [(Formula, Formula)]
+compileDataConstructorViewsWith recursiveOnly view prepared =
+    mapMaybe compile . Set.toAscList . Set.unions . map atoms
+  where
+    atoms formula = case formula of
+        PVar symbol -> Set.singleton symbol
+        left :-> right -> atoms left `Set.union` atoms right
+        Conj fields -> Set.unions $ map atoms fields
+        Disj alternatives -> Set.unions $ map (atoms . snd) alternatives
+        _ -> Set.empty
+
+    compile symbol = do
+        source <- opaqueSymbolSource symbol
+        either (const Nothing) Just $ do
+            expanded <- expansionTypeAt view QueryOrigin [] source
+            normalized <- normalizeExpansionAliases prepared emptyExpansionPath expanded
+            case expansionApplication normalized [] of
+                (ExpansionCon name origin, arguments)
+                    | Just (parameters, body@ExpansionUnion{}) <- lookupFormulaDefinition name prepared
+                    , not recursiveOnly || formulaDefinitionIsRecursiveData name prepared
+                    , length parameters == length arguments -> do
+                        layer <- expandDefinitionStep prepared emptyExpansionPath
+                            name origin parameters body arguments
+                        unfolded <- lowerExpansionType (PreserveData OpaqueForalls) prepared
+                            (pushExpansion name origin $
+                                rememberRecursiveComponent prepared name emptyExpansionPath)
+                            [] layer
+                        pure (PVar symbol, translatedFormula unfolded)
+                _ -> Left "not an exact datatype application"
+
+-- | A coherent nominal datatype view for case search. Positive foralls still
+-- introduce their own skolems; aliases expand, but every declared datatype
+-- application retains its exact source identity on both sides of an arrow.
+compileDataViewFormula
+    :: Natural
+    -> FormulaPolarity
+    -> TypeView (SharedType.Type String)
+    -> PreparedFormulaCompiler
+    -> SharedType.Type String
+    -> Either String FormulaTranslation
+compileDataViewFormula namespace polarity view prepared source = do
+    expanded <- expansionTypeAt view QueryOrigin [] source
+    lowerExpansionType
+        (PreserveData $ PolarizedForalls (show namespace) polarity view Set.empty Set.empty)
+        prepared emptyExpansionPath [] expanded
+
+-- | Exact opaque forall types available at negative source positions.
+-- Free skolems stay nominal in symbol keys; an inner scope cannot accidentally
+-- authorize an alpha-similar outer type.
 negativeOpaqueFormulaSymbols :: FormulaPolarity -> Formula -> Set.Set Symbol
 negativeOpaqueFormulaSymbols polarity formula = case formula of
     PVar symbol | polarity == NegativeFormula,
@@ -660,6 +735,7 @@ oppositePolarity NegativeFormula = PositiveFormula
 
 data ForallLowering
     = OpaqueForalls
+    | PreserveData ForallLowering
     | PolarizedForalls
         String
         FormulaPolarity
@@ -844,7 +920,7 @@ lowerForall
     -> ExpansionOrigin
     -> SharedTypeAtom.TypeAtom String
     -> Either String FormulaTranslation
-lowerForall lowering definitions path occurrencePath origin atom = case lowering of
+lowerForall lowering definitions path occurrencePath origin atom = case forallPolicy lowering of
     OpaqueForalls -> Right opaque
     PolarizedForalls namespace PositiveFormula openedView opaqueSites transportTypes ->
         case SharedTypeAtom.typeAtomType atom of
@@ -870,7 +946,10 @@ lowerForall lowering definitions path occurrencePath origin atom = case lowering
                         }
             _ -> Right incompleteOpaque
     PolarizedForalls _ NegativeFormula _ _ _ -> Right incompleteOpaque
+    PreserveData inner -> lowerForall inner definitions path occurrencePath origin atom
   where
+    forallPolicy (PreserveData inner) = forallPolicy inner
+    forallPolicy policy = policy
     site = ForallSite origin occurrencePath
     symbol = opaqueTypeSymbol $ SharedTypeAtom.typeAtomType atom
     opaque = completeTranslation $ PVar symbol
@@ -947,6 +1026,7 @@ combineBinary constructor left right = FormulaTranslation
 reverseFormulaPolarity :: ForallLowering -> ForallLowering
 reverseFormulaPolarity lowering = case lowering of
     OpaqueForalls -> OpaqueForalls
+    PreserveData inner -> PreserveData $ reverseFormulaPolarity inner
     PolarizedForalls namespace polarity openedView selected transportTypes ->
         PolarizedForalls namespace (oppositePolarity polarity) openedView selected
             transportTypes
@@ -963,6 +1043,9 @@ lowerApplication lowering definitions path occurrencePath source =
         (ExpansionCon name origin, arguments) ->
             case lookupFormulaDefinition name definitions of
                 Just (parameters, body)
+                    | length parameters == length arguments
+                    , PreserveData{} <- lowering
+                    , ExpansionUnion{} <- body -> atom True
                     | length parameters == length arguments ->
                         if formulaDefinitionIsRecursiveData name definitions
                             then lowerRecursiveData
@@ -1004,7 +1087,12 @@ lowerApplication lowering definitions path occurrencePath source =
 
     atom forceIncomplete = do
         normalized <- normalizeExpansionAliases definitions path source
-        formula <- PVar <$> expansionSymbol normalized
+        -- Retain recursive source applications structurally, including plain
+        -- monotypes. Their checked one-layer views must never recover a type
+        -- by parsing a proposition's diagnostic spelling.
+        formula <- PVar <$> if forceIncomplete
+            then opaqueTypeSymbol <$> expansionSourceType normalized
+            else expansionSymbol normalized
         return $ FormulaTranslation formula
             (forceIncomplete || polarizedOpaqueForall lowering normalized) [] []
 
@@ -1015,6 +1103,7 @@ recursiveDataCanUnfold
     -> ExpansionPath
     -> Bool
 recursiveDataCanUnfold lowering definitions name path = case lowering of
+    PreserveData{} -> False
     PolarizedForalls _ PositiveFormula _ _ _ ->
         recursiveComponentLayerAvailable path &&
             not (expansionPathContainsRecursiveComponent definitions name path)
@@ -1049,6 +1138,7 @@ expansionPathContainsRecursiveComponent definitions name
 
 polarizedOpaqueForall :: ForallLowering -> ExpansionType -> Bool
 polarizedOpaqueForall lowering source = case lowering of
+    PreserveData inner -> polarizedOpaqueForall inner source
     OpaqueForalls -> False
     PolarizedForalls{} -> expansionContainsForall source
 

@@ -134,14 +134,25 @@ aliases, tuple fields/results, and independently typed inputs. Coherent
 datatype views and explicit constructor authority replace the earlier failing
 experiment. The report records strict builds, 132 Djinn unit tests, 59 public
 and 43 private graph tests, 101 facade tests, 99 CLI tests, and four property
-groups with 200 trials each. Lean integration and independent kernel replay
-remain outstanding; this is not completion of the full case milestone or the
-separate recursor stage.
+groups with 200 trials each. The later `3ce26cfd` correction activates these
+plans only when a recursive type occurs negatively, preserving positive-only
+construction bounds.
+
+Leant's working integration of that revision passes all eight Djinn-only live
+queries and their independent Lean replay, with sixteen empty axiom inventories
+and an actually falsified control. Cross-engine acceptance remains open:
+Exference misses `tailOr` within 100,000 steps and times out on a unary tuple
+payload; Both also times out on that payload. The failed matrix performed no
+independent kernel replay. An Exference search/evidence fix and a correctly
+configured full Leant boundary rerun are pending. See the current re-triage
+for receipt locations and exact gates. This is not completion of the full
+case milestone or the separate recursor stage.
 
 ## Remaining work
 
-- Integrate priority 2's accepted Haskell case-search checkpoint into Leant and
-  close its kernel acceptance, then implement the separate recursor/decreasing-call stage.
+- Close priority 2's Exference case parity and complete cross-engine kernel and
+  full Leant boundary acceptance, retaining the accepted Djinn subset; then
+  implement the separate recursor/decreasing-call stage.
 - Finish priority 1's remaining selection and negative evidence acceptance;
   integrate and validate any further shared changes in Leant.
 - Implement priority 3's dictionary representation and supported provider uses.

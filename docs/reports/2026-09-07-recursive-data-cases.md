@@ -70,9 +70,22 @@ Those logs are `priority-data-cli-tests-final.log`,
 
 ## Remaining gates
 
-Integrate the accepted Haskell dependency checkpoint into Leant and replay the
-actual displayed Lean implementations and
-their observations in the kernel. Supplied folds/recursors and their termination
+Leant's working integration of `3ce26cfd` now passes the eight Djinn-only
+live queries and independent Lean replay of the exact displayed implementations
+and finite observations, with sixteen empty axiom inventories and an actually
+falsified control. Its receipt is
+`dist-newstyle/recursive-acceptance/djinn-v1/results.json` in Leant.
+
+Full integration remains open. The Exference/Both run fails on the unary tuple
+payload, and Exference misses `tailOr` within its 100,000-step bound. That
+failed run performed no independent kernel replays. Close those search/evidence
+cases, require all eight scenarios in all three engine modes, and rerun the
+full Leant boundary suite with the fake-Z3 helper configured. Preserve the
+negative-occurrence activation gate and positive-only constructor limits.
+The [current re-triage](2026-09-07-synthesis-retriage.md) records the revised
+execution order and evidence boundaries.
+
+Supplied folds/recursors and their termination
 evidence remain a separate required delivery. This checkpoint does not establish
 general recursive synthesis, induction, or completion of the broader Church
 behavioral corpus.

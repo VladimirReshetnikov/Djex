@@ -92,6 +92,16 @@ The improvements cover:
   Lean terms with explicit and implicit binders and checks every displayed
   candidate with Lean.
 
+Recent checked improvements add same-candidate Haskell elaboration retries,
+implicit local polymorphic-use evidence, and Djinn's bounded case analysis for
+ordinary recursive data. The [implementation register](docs/reports/2026-09-07-synthesis-priorities-1-4.md)
+records the accepted live repair under `all` selection and eight Haskell
+recursive-data scenarios. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md)
+keeps Exference case parity, complete Leant integration, remaining selection
+acceptance, recursors, contextual dictionaries, and broader Church behavior
+explicitly open. Unused lambda and let binders now retain source graphs as
+checked wildcards, preserving exact compatibility erasure.
+
 Candidate quality is considered before the result cutoff. Both engines
 support `balanced`, `compact`, `diverse`, and `legacy` ranking profiles.
 Structural policies combine term size, elimination structure, exact provider
@@ -108,7 +118,7 @@ The [policy guide](docs/candidate-quality.md) explains the scores, exact
 provider-cost overrides, and bounded selection. The
 [rank-N guide](docs/rank-n.md) describes the typing rules and search families.
 
-Current Haskell validation at Djex `2954b6d2` passed all **19 test components**,
+The earlier full Haskell validation at Djex `2954b6d2` passed all **19 test components**,
 including the [Church acceptance suite](test-church/README.md): **350/350
 resolved signatures for each engine**, with both complete generated modules
 accepted by GHC. It also reran all **100 independent scope queries**, including
@@ -120,7 +130,7 @@ original signatures, supplying `undefined` only after synthesis.
 
 The separate [quality comparisons](test-church/quality.md) passed **56 Haskell
 queries with 104 GHC-checked terms**, plus **14 exact CLI outputs and ten
-invalid-option rejections**. Current Leant `043a6a3d` passed **all 578 unit
+invalid-option rejections**. Leant `043a6a3d` passed **all 578 unit
 tests serially in 533.23 seconds**, its executable build, and a fresh **84-query
 quality matrix with 136 exact kernel-accepted terms**: 112 empty axiom
 inventories and 24 containing only declared provider premises. Three paired
@@ -137,7 +147,8 @@ terms kernel-accepted and axiom-free**. Lean keeps the 19 partial cases per
 engine total under supplied default arguments. This corpus was not rerun for
 the Leant-only accepted-spelling repair, which preserves each accepted
 candidate's own evidence and the bounded raw search prefix. Canonical Djex
-code `2954b6d2` and its recorded 19-component aggregate are unchanged. The
+`2954b6d2` is the source revision for that recorded 19-component aggregate;
+later changes have their own focused acceptance in the implementation register. The
 [acceptance guides](test-church/README.md) preserve exact executable identities,
 budgets, and earlier compatibility reviews. Quality gains are
 not universal: the reviewed manual Q20 first result grew from two matches to

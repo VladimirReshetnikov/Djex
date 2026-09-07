@@ -5,13 +5,15 @@ module Language.Haskell.Djex.REPL.Behavioral
 
 import Control.Monad (forM_, unless, when)
 import Data.List (intercalate)
+import Data.IORef (newIORef, readIORef, modifyIORef')
 import System.Exit (ExitCode (ExitSuccess))
 import System.IO (hFlush, stdout)
+import System.Timeout (timeout)
 
 import Language.Haskell.Djex
 import Language.Haskell.Djex.Command
 import Language.Haskell.Djex.REPL.BehavioralWorker
-import Language.Haskell.Synthesis.Behavioral (BehavioralQuery)
+import Language.Haskell.Synthesis.Behavioral (BehavioralQuery (..))
 
 -- No candidate is reconstructed, given another candidate's evidence, or
 -- fetched to refill a rejected slot. First stops at the first True; best/all
@@ -23,18 +25,62 @@ presentBehavioralCandidates
   -> BehavioralContext
   -> BehavioralQuery
   -> (candidate -> Either RenderError String)
+  -> (candidate -> (String, Either String String))
   -> (candidate -> Either RenderError String)
   -> (candidate -> rank)
-  -> ([candidate] -> [candidate])
+  -> ([(candidate, Maybe String)] -> [(candidate, Maybe String)])
   -> Either Diagnostic [Either Diagnostic (QueryResult metadata candidate)]
   -> IO ExitCode
-presentBehavioralCandidates options context query expression render rank order checkedResults =
+presentBehavioralCandidates options context query expression elaborate render rank order checkedResults =
   withBehavioralEvaluator context $ \preflight check -> do
+    samples <- newIORef []
+    retries <- newIORef (0 :: Int)
+    observations <- newIORef (0 :: Int)
+    let assess candidate = do
+          modifyIORef' observations (+ 1)
+          ordinal <- readIORef observations
+          -- An annotation retry does not grant a second candidate deadline.
+          -- Cancelling an active worker exchange retires its owned child.
+          checked <- timeout 30000000 $ assessAt ordinal candidate
+          pure $ maybe (BehavioralTimedOut, Nothing) id checked
+        assessAt ordinal candidate = case expression candidate of
+          Left failure -> pure (BehavioralCompilationError $ show failure, Nothing)
+          Right term -> do
+            original <- check query term
+            case original of
+              BehavioralCompilationError _ -> do
+                let (evidence, alternative) = elaborate candidate
+                retried <- case alternative of
+                  Right revised | revised /= term -> do
+                    modifyIORef' retries (+ 1)
+                    outcome <- check query revised
+                    pure (outcome, if outcome == BehavioralPassed then Just revised else Nothing)
+                  _ -> pure (original, Nothing)
+                retained <- readIORef samples
+                when (length retained < 3) $ modifyIORef' samples
+                  (++ [intercalate "\n"
+                    [ "candidate observation: " ++ show ordinal
+                    , "candidate evidence: " ++ evidence
+                    , "requested type: " ++ behavioralType query
+                    , "original expression: " ++ term
+                    , "original check: " ++ show original
+                    , either ("elaboration unavailable: " ++) ("elaborated expression: " ++) alternative
+                    , "final check: " ++ show (fst retried) ]])
+                pure retried
+              _ -> pure (original, Nothing)
     valid <- preflight query
     if valid /= BehavioralPassed then diagnosticFailure $ contextualDiagnostic Error
       "DJEX_REPL_BEHAVIORAL_PREFLIGHT" "behavioral predicate could not be checked"
       (show valid)
-    else run check
+    else do
+      result <- run assess
+      attempted <- readIORef retries
+      when (attempted > 0) $ emitDiagnostic $ contextualDiagnostic Info
+        "DJEX_REPL_BEHAVIORAL_ELABORATION" "source-graph elaboration retries"
+        $ "checks=" ++ show attempted ++ "; retries retain the same candidate and original observation slot"
+      readIORef samples >>= mapM_ (emitDiagnostic . contextualDiagnostic Info
+        "DJEX_REPL_BEHAVIORAL_SOURCE_SAMPLE" "bounded candidate compilation sample")
+      pure result
  where
   run check = case checkedResults of
     Left failure -> diagnosticFailure failure
@@ -47,9 +93,9 @@ presentBehavioralCandidates options context query expression render rank order c
           SelectFirst -> accepted
           _ -> case accepted of
             [] -> []
-            _ -> let best = minimum $ map rank accepted
-                 in filter ((== best) . rank) accepted
-    rendered <- pure $ traverse render chosen
+            _ -> let best = minimum $ map (rank . fst) accepted
+                 in filter ((== best) . rank . fst) accepted
+    rendered <- pure $ traverse renderAccepted chosen
     case rendered of
       Left failure -> diagnosticFailure $ contextualDiagnostic Error
         "DJEX_REPL_BEHAVIORAL_RENDER" "behavioral candidate could not be rendered"
@@ -83,6 +129,10 @@ presentBehavioralCandidates options context query expression render rank order c
         forM_ (progressTruncationDiagnostic progress) emitDiagnostic
         maybe (pure ExitSuccess) diagnosticFailure streamFailure
   mode = presentationSelection options
+  renderAccepted (candidate, Nothing) = render candidate
+  renderAccepted (_, Just term) = Right $ case presentationRenderMode options of
+    RenderExpression -> term
+    RenderDefinition -> behavioralName query ++ " = " ++ term
   window = max 0 $ presentationQualityWindow options
   initialLookahead = case mode of SelectBestLookahead n -> max 0 n; _ -> maxBound
   count predicate = length . filter predicate
@@ -114,7 +164,7 @@ presentBehavioralCandidates options context query expression render rank order c
       accepted outcomes $ batchCandidates batch
     let nextBest = case nextAccepted of
           [] -> Nothing
-          _ -> Just $ minimum $ map rank nextAccepted
+          _ -> Just $ minimum $ map (rank . fst) nextAccepted
         improved = case (best, nextBest) of
           (Nothing, Just _) -> True
           (Just old, Just new) -> new < old
@@ -133,10 +183,8 @@ presentBehavioralCandidates options context query expression render rank order c
   candidates _ remaining accepted outcomes [] =
     pure (remaining, accepted, outcomes, False)
   candidates check remaining accepted outcomes (candidate : rest) = do
-    outcome <- case expression candidate of
-      Left failure -> pure $ BehavioralCompilationError $ show failure
-      Right term -> check query term
-    let nextAccepted = if isPassed outcome then candidate : accepted else accepted
+    (outcome, revised) <- check candidate
+    let nextAccepted = if isPassed outcome then (candidate, revised) : accepted else accepted
         nextOutcomes = outcome : outcomes
         nextRemaining = remaining - 1
     if terminal outcome || (mode == SelectFirst && isPassed outcome)

@@ -115,6 +115,7 @@ import Language.Haskell.Djex.REPL.Type
 import Language.Haskell.Djex.REPL.Workspace
 import Language.Haskell.Djex.Text (normalize, trim)
 import Language.Haskell.Synthesis.Behavioral (BehavioralQuery (..))
+import qualified Language.Haskell.Synthesis.TypedGenerated.Haskell as TypedHaskell
 import qualified Language.Haskell.Djex.Exference.Internal.Session
   as ExferenceSession
 import qualified Language.Haskell.Exference.Core.Types as ExferenceType
@@ -768,6 +769,7 @@ runQuery sourceName query state = do
     Left failure -> diagnosticFailure failure
     Right request -> presentBehavioralCandidates options context behavioral
         (renderDjinnCandidateExpression qualification . projected)
+        (elaborateBehavioral $ defaultRenderOptions id)
         (renderDefinitionOrExpression renderDjinnCandidateDefinition
           renderDjinnCandidateExpression options . projected)
         (\candidate -> (if presentationRanking options == LegacyCandidateRanking
@@ -775,7 +777,7 @@ runQuery sourceName query state = do
           candidateQualityCost (presentationRanking options) (providerPrice options)
             $ functionClauseExpression $ candidateOutput $ projected candidate))
         (rankCandidatesByQuality (presentationRanking options) (providerPrice options)
-          $ functionClauseExpression . candidateOutput . projected)
+          $ functionClauseExpression . candidateOutput . projected . fst)
         (runDjinnTypedQueryStream (currentDjinnSession state) request)
    where
     options = (djinnPresentationOptions state) { presentationQualification = FullyQualified }
@@ -790,12 +792,13 @@ runQuery sourceName query state = do
     Left failure -> diagnosticFailure failure
     Right request -> presentBehavioralCandidates options context behavioral
         (renderExferenceCandidateExpression qualification . projected)
+        (elaborateBehavioral $ defaultRenderOptions $ const "x")
         (renderDefinitionOrExpression renderExferenceCandidateDefinition
           renderExferenceCandidateExpression options . projected)
         (\candidate -> (candidateQualityCost (presentationRanking options)
             (providerPrice options) $ expression candidate,
           exferenceCandidateComplexity $ exferenceCandidateMetrics $ projected candidate))
-        (rankCandidatesByQuality (presentationRanking options) (providerPrice options) expression)
+        (rankCandidatesByQuality (presentationRanking options) (providerPrice options) $ expression . fst)
         (fmap (map Right) $ runExferenceTypedQuery session request)
    where
     options = (presentation state) { presentationQualification = FullyQualified }
@@ -803,6 +806,14 @@ runQuery sourceName query state = do
     projected = fmap (projectFieldSelectors $ scopeFieldSelectors state)
       . typedCandidateCompatibility
     expression = functionClauseExpression . candidateOutput . projected
+
+  elaborateBehavioral renderOptions candidate = case typedCandidateTermGraph candidate of
+    Left failure -> ("graph unavailable: " ++ show failure, Left "no source graph for this candidate")
+    Right graph ->
+      ( "graph present; root=" ++ show (termGraphRoot graph)
+          ++ "; nodes=" ++ show (length $ termGraphNodes graph)
+      , either (Left . show) Right $ TypedHaskell.renderHaskellTermGraph renderOptions graph
+      )
 
   providerPrice options name = Map.findWithDefault
     (defaultCandidateProviderCost name) name $ presentationProviderCosts options

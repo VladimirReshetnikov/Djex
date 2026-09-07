@@ -1601,6 +1601,17 @@ A nominally distinct binary-product sibling
 covers results that are one boxed pair of spines; its evidence cannot be
 presented as scalar evidence or vice versa.
 
+The separately importable `Language.Haskell.Synthesis.TypedGenerated.Haskell`
+module provides `renderHaskellTermGraph`. It accepts render options and a sealed
+closed graph over shared source types, returning explicit Haskell annotations
+or a `HaskellGraphRenderError`. It preserves source forall scopes and exact
+instantiation choices; it rejects open roots, unavailable type variables,
+unsupported forall evidence, and holes. Its output needs `RankNTypes`,
+`ImpredicativeTypes`, `ScopedTypeVariables`, and `TypeApplications` and must be
+independently checked by GHC at the original requested signature. Rendering
+does not create source, provider, or certificate authority. Prefer the graph
+from the exact opaque `TypedCandidate` being presented.
+
 Supporting vocabulary, all re-exported by the facade:
 
 - `Language.Haskell.Synthesis.TypedGenerated` — sealed, typed term graphs

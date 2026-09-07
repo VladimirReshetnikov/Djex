@@ -54,6 +54,16 @@ or observation allowance. The `DJEX_REPL_BEHAVIORAL_OBSERVATIONS` diagnostic
 reports the counts, and `DJEX_REPL_BEHAVIORAL_NO_MATCH` identifies an observed
 search with no accepted candidate.
 
+A compatibility compilation failure may retry the same candidate with source
+graph annotations. Missing graph evidence is reported and cannot authorize a
+retry. The accepted revised expression is retained for exact display; ranking
+still uses the original candidate. Both attempts share one candidate observation
+slot and the same 30-second candidate deadline. The additional compiler attempt
+is counted by `DJEX_REPL_BEHAVIORAL_ELABORATION`. At most three compilation
+samples per query record the observation identity, full requested type, exact
+expressions, graph availability, and check outcomes. A false predicate or runtime
+failure does not trigger annotation retries.
+
 Worker startup and each candidate compilation/evaluation have a 30-second wall
 deadline. `:set timeout N` can stop the encompassing operation earlier;
 `:set timeout 0` removes that encompassing limit.

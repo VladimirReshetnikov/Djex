@@ -44,6 +44,7 @@ import qualified Djinn.Core as DjinnCore (Environment)
 -- Raw Exference fixtures below use their historical @functionName@ field;
 -- hide the shared structural-name accessor at this integration-only seam.
 import Language.Haskell.Djex hiding (functionName)
+import qualified Language.Haskell.Synthesis.TypedGenerated.Haskell as TypedHaskell
 import Language.Haskell.Djex.Exference.HaskellSrc
   ( parseExferenceRequest
   , parseExferenceRequestWithCheckedTarget
@@ -74,7 +75,122 @@ main = defaultMain tests
 
 tests :: TestTree
 tests = testGroup "Djex facade"
-  [ testCase "compile transport-directed rank-N introductions and loaded consumers"
+  [ testCase "compile and execute source-graph Haskell forall and impredicative hints" $ do
+      environment <- expectRight (mkEnvironment [] :: Either
+        (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+      session <- expectRight $ mkDjinnSession environment
+      definitions <- forM
+        [ ("identity", "forall a. a -> a")
+        , ("first", "forall a b. a -> b -> a")
+        , ("polyResult", "(forall a. a -> a) -> forall b. b -> b")
+        , ("polyArgument", "forall a. (forall b. b -> b) -> a -> a")
+        , ("higherKind", "forall f a. f a -> f a")
+        ] $ \(name, signature) -> do
+          target <- expectRight $ mkIdentifier name
+          request <- expectRight $ parseDjinnRequest session
+            defaultQueryOptions { optionCutoff = 1, optionSorted = False }
+            target "graph-haskell" signature
+          result <- expectRight $ runDjinnTypedQuery session request
+          candidate <- case batchCandidates $ resultSearch result of
+            firstCandidate : _ -> pure firstCandidate
+            [] -> fail $ "missing graph fixture: " ++ name
+          graph <- expectRight $ typedCandidateTermGraph candidate
+          expression <- expectRight $ TypedHaskell.renderHaskellTermGraph
+            (defaultRenderOptions $ const "djexPoly0") graph
+          pure [name ++ " :: " ++ signature, name ++ " = " ++ expression]
+      let variable = FlexibleVariable "a" :: Variable String
+          poly = ForallType [variable] [] $
+            FunctionType (TypeVariable variable) (TypeVariable variable)
+          selected = FunctionType poly poly
+      idName <- expectRight $ parseName "Prelude.id"
+      graph <- expectRight $ sealTermGraph
+        sharedTypeStructure { forallTypeStructure = Just sharedForallTypeStructure }
+        defaultTermGraphLimits $ TermGraphSource (termNodeId 0)
+          [ (termNodeId 0, TermNode selected $
+              TypedImplicitTypeApplication (occurrenceId 0) (termNodeId 1)
+                $ ImplicitTypeApplicationWitness poly poly selected)
+          , (termNodeId 1, TermNode poly $ TypedGlobal (occurrenceId 1) idName)
+          ]
+      impredicative <- expectRight $ TypedHaskell.renderHaskellTermGraph
+        (defaultRenderOptions $ const "x" :: RenderOptions Int) graph
+      let fixture = unlines $
+            [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, ScopedTypeVariables, TypeApplications #-}"
+            , "module Main where" ] ++ concat definitions ++
+            [ "selected :: (forall a. a -> a) -> (forall b. b -> b)"
+            , "selected = " ++ impredicative
+            , "main :: IO ()"
+            , "main = if identity (7 :: Int) == 7 && first True ()"
+            , "  && polyResult id (9 :: Int) == 9 && polyArgument id True"
+            , "  && selected id (11 :: Int) == 11 then putStrLn \"graph-haskell-ok\""
+            , "  else error \"graph Haskell changed behavior\""
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        completed <- timeout 30000000 $
+          readProcessWithExitCode "runghc" [sourcePath] ""
+        case completed of
+          Nothing -> fail "graph Haskell compiler/execution exceeded 30 seconds"
+          Just (exitCode, output, errors) -> do
+            assertEqual (errors ++ "\n" ++ fixture) ExitSuccess exitCode
+            output @?= "graph-haskell-ok\n"
+  , testCase "source-graph annotations repair an impredicative let rejected by GHC" $ do
+      idName <- expectRight $ parseName "Prelude.id"
+      listConsName <- expectRight $ parseName ":"
+      nilName <- expectRight $ parseName "[]"
+      let variable = FlexibleVariable "a" :: Variable String
+          a = TypeVariable variable
+          poly = ForallType [variable] [] $ FunctionType a a
+          list element = TypeApplication (TypeConstructor nilName) element
+          result = list poly
+          consType = ForallType [variable] [] $ FunctionType a $
+            FunctionType (list a) (list a)
+          nilType = ForallType [variable] [] $ list a
+          consSelected = FunctionType poly $ FunctionType result result
+          n = termNodeId
+          o = occurrenceId
+          source = TermGraphSource (n 0)
+            [ (n 0, TermNode result $ TypedLet
+                (TypedPattern (o 0) result $ TypedBind (0 :: Int)) (n 1) (n 8))
+            , (n 1, TermNode result $ TypedApply (n 2) (n 6) $
+                ApplicationWitness result result)
+            , (n 2, TermNode (FunctionType result result) $ TypedApply (n 3) (n 5) $
+                ApplicationWitness poly (FunctionType result result))
+            , (n 3, TermNode consSelected $ TypedImplicitTypeApplication (o 3) (n 4) $
+                ImplicitTypeApplicationWitness consType poly consSelected)
+            , (n 4, TermNode consType $ TypedGlobal (o 4) listConsName)
+            , (n 5, TermNode poly $ TypedGlobal (o 5) idName)
+            , (n 6, TermNode result $ TypedImplicitTypeApplication (o 6) (n 7) $
+                ImplicitTypeApplicationWitness nilType poly result)
+            , (n 7, TermNode nilType $ TypedGlobal (o 7) nilName)
+            , (n 8, TermNode result $ TypedLocal (o 8) 0)
+            ]
+      graph <- expectRight $ sealTermGraph
+        sharedTypeStructure { forallTypeStructure = Just sharedForallTypeStructure }
+        defaultTermGraphLimits source
+      let options = defaultRenderOptions $ const "xs"
+          fixture expression = unlines
+            [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, ScopedTypeVariables, TypeApplications #-}"
+            , "module Main where"
+            , "value :: [forall a. a -> a]"
+            , "value = " ++ expression
+            , "main :: IO ()"
+            , "main = if head value True && head value (7 :: Int) == 7"
+            , "  then putStrLn \"repaired\" else error \"wrong behavior\""
+            ]
+      original <- expectRight $ renderExpression options $ eraseTermGraph graph
+      revised <- expectRight $ TypedHaskell.renderHaskellTermGraph options graph
+      withTemporaryHaskellModule (fixture original) $ \sourcePath -> do
+        (exitCode, _, errors) <- readProcessWithExitCode "ghc"
+          ["-v0", "-fno-code", "-fno-write-interface", sourcePath] ""
+        assertBool "unannotated impredicative-let control unexpectedly compiled" $
+          exitCode /= ExitSuccess && "Couldn't match type" `isInfixOf` errors
+      withTemporaryHaskellModule (fixture revised) $ \sourcePath -> do
+        completed <- timeout 30000000 $ readProcessWithExitCode "runghc" [sourcePath] ""
+        case completed of
+          Nothing -> fail "impredicative-let replay exceeded 30 seconds"
+          Just (exitCode, output, errors) -> do
+            assertEqual (errors ++ "\n" ++ fixture revised) ExitSuccess exitCode
+            output @?= "repaired\n"
+  , testCase "compile transport-directed rank-N introductions and loaded consumers"
       testTransportCompilerReplay
   , testCase "compile delayed impredicative choices from local and global providers"
       testDelayedImpredicativeCompilerReplay

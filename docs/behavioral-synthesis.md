@@ -37,6 +37,19 @@ successful Boolean check.
 See [Haskell behavioral runtime details](behavioral-constraints.md) for exact
 workspace scope, worker lifecycle, deadlines, and observation accounting.
 
+If GHC rejects a candidate's compatibility expression, the named Haskell path
+can retry it using annotations from that same candidate's retained source
+graph. Scoped forall signatures, argument types, and exact type applications
+guide GHC elaboration. A missing graph or unsupported scope does not authorize
+invented annotations. The retry checks the full requested signature and the
+same predicate; an accepted retry displays exactly the expression checked.
+It consumes no new candidate slot, and its extra compiler check is reported
+separately. The first three compilation failures include bounded source samples
+with the observation number, graph status, original expression, and retry
+outcome. Runtime failures, false predicates, and timeouts are not retried.
+The [priorities implementation report](reports/2026-09-07-synthesis-priorities-1-4.md)
+tracks the current scope and remaining acceptance work.
+
 ## Six-operation corpus
 
 The new corpus connects the existing Church type-acceptance suite to

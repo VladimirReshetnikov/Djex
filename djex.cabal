@@ -191,6 +191,7 @@ Library
     Language.Haskell.Synthesis.TypeSynonym
     Language.Haskell.Synthesis.TypedCandidate
     Language.Haskell.Synthesis.TypedGenerated
+    Language.Haskell.Synthesis.TypedGenerated.Haskell
     Language.Haskell.Synthesis.TypedGenerated.Fingerprint
     Language.Haskell.Synthesis.TypeRender
     Djinn.Core

@@ -39,6 +39,7 @@ import qualified Language.Haskell.Synthesis.TypeInstantiation as TypeInstantiati
 import qualified Language.Haskell.Synthesis.TypeSynonym as TypeSynonym
 import qualified Language.Haskell.Synthesis.TypedCandidate as TypedCandidate
 import qualified Language.Haskell.Synthesis.TypedGenerated as Typed
+import qualified Language.Haskell.Synthesis.TypedGenerated.Haskell as TypedHaskell
 import Test.Tasty (TestTree, defaultMain, localOption, testGroup)
 import Test.Tasty.HUnit
   ( Assertion
@@ -313,6 +314,11 @@ erasedForallTests = testGroup "erased forall graph evidence"
       graph <- checked $ identitySource rigid
       Typed.eraseTermGraph graph @?= Lambda [Bind (0 :: Int)] (Local 0)
       Typed.typedGraphProjectedNodes (Typed.termGraphMetrics graph) @?= 3
+      assertBool "source forall and opened lambda type were not emitted" $
+        case TypedHaskell.renderHaskellTermGraph (defaultRenderOptions $ const "x") graph of
+          Right text -> "forall djexSkolem0." `isInfixOf` text
+            && "x :: djexSkolem0" `isInfixOf` text
+          Left _ -> False
       let limits = right $ Typed.mkTermGraphLimits 3 2 1 32 4 3
       assertBool "erased introduction consumed a compatibility slot" $
         not $ isLeft $ Typed.sealTermGraph structure limits $ identitySource rigid
@@ -322,6 +328,14 @@ erasedForallTests = testGroup "erased forall graph evidence"
             Typed.defaultTermGraphLimits source of
           Left Typed.ErasedForallTypeStructureUnavailable{} -> pure ()
           other -> assertFailure $ "missing authority was accepted: " ++ show other
+  , testCase "Haskell graph rendering refuses to implicitly quantify an open root" $ do
+      let open = arrow (variable bound) (variable bound)
+      graph <- checked $ Typed.TermGraphSource (nid 0)
+        [ (nid 0, node open $ Typed.TypedLambda [bind 0 0 $ variable bound] (nid 1))
+        , (nid 1, node (variable bound) $ Typed.TypedLocal (oid 1) 0)
+        ]
+      TypedHaskell.renderHaskellTermGraph (defaultRenderOptions $ const "x") graph
+        @?= Left TypedHaskell.HaskellGraphOpenRoot
   , testCase "retain an exact impredicative inferred selection without inventing VTA" $ do
       graph <- checked $ implicitSource poly
       Typed.eraseTermGraph graph @?= Global global

@@ -1884,7 +1884,9 @@ buildCheckedTerm (CheckedTerm ty checkedForm) = do
       occurrence <- allocateCheckedOccurrence
       bodyId <- buildCheckedTerm body
       let pattern' = SharedTyped.TypedPattern occurrence annotation
-            $ SharedTyped.TypedBind variable
+            $ if IntSet.member variable $ checkedTermLocalUses body
+                then SharedTyped.TypedBind variable
+                else SharedTyped.TypedWildcard
       pure $ SharedTyped.TypedLambda [pattern'] bodyId
     CheckedApply function argument -> do
       reserveTermGraphEdges 2
@@ -1940,7 +1942,9 @@ buildCheckedTerm (CheckedTerm ty checkedForm) = do
       bindingId <- buildCheckedTerm binding
       bodyId <- buildCheckedTerm body
       let pattern' = SharedTyped.TypedPattern occurrence annotation
-            $ SharedTyped.TypedBind variable
+            $ if IntSet.member variable $ checkedTermLocalUses body
+                then SharedTyped.TypedBind variable
+                else SharedTyped.TypedWildcard
       pure $ SharedTyped.TypedLet pattern' bindingId bodyId
     CheckedEmptyCase scrutinee -> do
       _ <- observeTermGraphCollection

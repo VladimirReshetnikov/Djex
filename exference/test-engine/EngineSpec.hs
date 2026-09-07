@@ -2118,7 +2118,7 @@ tests = testGroup "Exference private engine boundaries"
           "layered contextual application unexpectedly produced a graph"
         ExferenceTermGraphAssociated _ -> fail
           "local contextual application gained global certificate authority"
-  , testCase "typed evidence reports sealing and projection mismatches" $ do
+  , testCase "typed evidence reports limits and preserves unused binders as wildcards" $ do
       let integer = TypeCons $ name "Int"
           seedName = name "seed"
           seed = FunctionBinding integer seedName 0 [] []
@@ -2152,8 +2152,18 @@ tests = testGroup "Exference private engine boundaries"
       let unusedExpression = ExpLambda 1 integer $ ExpName seedName
       unusedEvidence <- checkedEvidence emptyStaticClassEnv [seed] []
         (TypeArrow integer integer) unusedExpression
-      expectUnavailable "unused-binder compatibility projection"
-        (== TermGraphProjectionMismatch) unusedEvidence
+      case checkedExpressionTermGraph 38 unusedEvidence of
+        ExferenceTermGraphAvailable graph -> Typed.eraseTermGraph graph @?=
+          Generated.Lambda [Generated.Wildcard] (Generated.Global seedName)
+        other -> fail $ "unused-binder evidence unavailable: " ++ show other
+      let unusedLet = ExpLet 2 integer (ExpName seedName) unusedExpression
+      unusedLetEvidence <- checkedEvidence emptyStaticClassEnv [seed] []
+        (TypeArrow integer integer) unusedLet
+      case checkedExpressionTermGraph 39 unusedLetEvidence of
+        ExferenceTermGraphAvailable graph -> Typed.eraseTermGraph graph @?=
+          Generated.Let Generated.Wildcard (Generated.Global seedName)
+            (Generated.Lambda [Generated.Wildcard] $ Generated.Global seedName)
+        other -> fail $ "unused-let evidence unavailable: " ++ show other
   , testCase "query-result projection preserves its envelope lazily" $ do
       targetName <- expectRight $ SharedName.mkOperator "<~>"
       target <- expectRight $ Generated.mkDefinitionName targetName

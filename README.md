@@ -405,6 +405,14 @@ and group checked specializations by exact result type. Its recorded run uses
 a larger search allowance than Exference's; the guide gives the complete
 settings, exact emitted definitions, and acceptance receipts.
 
+Named behavioral queries now receive Djinn candidates incrementally through
+the checked typed-result interface. With `select first`, generation stops when
+the predicate accepts a candidate. The stream preserves each candidate's
+source evidence and the configured search limits; ordinary queries keep their
+existing batch ranking. The [behavioral guide](docs/behavioral-synthesis.md)
+explains discovery order and early stopping, and the
+[library API](docs/library-api.md) documents the additive streaming runners.
+
 The symbolic Length interface remains available separately. It reasons about
 checked list-spine models rather than executing arbitrary Haskell expressions.
 Djex already owns the checked Length-contract, replay, SMT-LIB, and Z3
@@ -494,6 +502,10 @@ and worked `:djinn`/`:exference`/`:compare` examples. The
 [Church regression suite](test-church/README.md) covers all 350 source
 signatures and compiler-checks the generated terms under its documented
 environment and partiality assumptions.
+
+The [next-priorities review](docs/reports/2026-09-06-synthesis-next-priorities.md)
+separates the current streaming acceptance work from proposed recursive-data,
+contextual-provider, and behavioral-specification improvements.
 
 `:type EXPRESSION` (or `:t EXPRESSION`) is a separate, non-evaluating
 inspection command. It infers against term signatures in the current loaded

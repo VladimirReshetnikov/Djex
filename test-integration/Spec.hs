@@ -14,7 +14,7 @@ import Control.Exception
   , try
   )
 import Data.Either (isRight)
-import Data.List (find, isInfixOf, isPrefixOf, nub, tails)
+import Data.List (find, isInfixOf, isPrefixOf, nub, sort, tails)
 import qualified Data.Map.Strict as Map
 import System.Directory (getTemporaryDirectory, removeFile)
 import System.Exit (ExitCode (ExitSuccess))
@@ -135,6 +135,48 @@ tests = testGroup "Djex facade"
               (defaultRenderOptions id) (candidateOutput candidate) @?=
             Right "swap (a, b) = (b, a)"
         [] -> fail "Djinn reported candidate evidence without a candidate"
+  , testCase "stream exact Djinn typed candidates through every provider facade" $ do
+      session <- sealDjinnEnvironment emptyEnvironment
+      target <- expectRight $ mkIdentifier "streamChoose"
+      goal <- expectRight $ parseHType "forall a. a -> a -> a"
+      request <- sharedDjinnRequest target [] defaultQueryOptions
+        { optionAlternatives = True, optionSorted = False
+        , optionCutoff = 32, optionBudget = Just 10000 } goal
+      batch <- expectRight $ runDjinnQuery session request
+      let expected = sort $ map candidateOutput $ batchCandidates $ resultSearch batch
+          runners =
+            [ runDjinnTypedQueryStream session
+            , runDjinnTypedQueryStreamWithInstantiationCandidates session []
+            , runDjinnTypedQueryStreamWithInstantiationAssignments session []
+            , runDjinnTypedQueryStreamWithKindedInstantiationAssignments session []
+            ]
+      forM_ runners $ \run -> do
+        stream <- expectRight $ run request
+        results <- traverse expectRight stream
+        assertBool "typed stream did not deliver both projections" $
+          length results >= 3
+        let candidates = concatMap (batchCandidates . resultSearch) results
+        sort (map (candidateOutput . typedCandidateCompatibility) candidates) @?= expected
+        case results of
+          firstResult : _ -> batchProgress (resultSearch firstResult) @?= Continuing
+          [] -> fail "typed stream returned no observations"
+        resultEvidence (last results) @?= NoEvidence
+        forM_ candidates $ \candidate -> do
+          graph <- expectRight $ typedCandidateTermGraph candidate
+          let clause = candidateOutput $ typedCandidateCompatibility candidate
+          eraseTermGraphToFunctionClause (clauseName clause) graph @?= clause
+  , testCase "validate streaming Djinn requests before provider evidence" $ do
+      session <- sealDjinnEnvironment standardEnvironment
+      target <- expectRight $ mkIdentifier "streamInvalid"
+      request <- expectRight $ parseDjinnRequest session defaultQueryOptions
+        target "stream-invalid.djinn" "Not"
+      batchFailure <- case runDjinnQuery session request of
+        Left failure -> pure failure
+        Right _ -> fail "invalid batch query succeeded"
+      case runDjinnTypedQueryStreamWithInstantiationCandidates session
+          (error "provider evidence forced before invalid request") request of
+        Left failure -> failure @?= batchFailure
+        Right _ -> fail "invalid streaming query succeeded"
   , testCase "preserve Djinn candidate-limit truncation" $ do
       first <- expectRight $ parseHType "a"
       second <- expectRight $ parseHType "b"

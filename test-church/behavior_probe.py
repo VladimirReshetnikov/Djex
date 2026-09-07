@@ -14,7 +14,7 @@ from pathlib import Path
 import re
 import sys
 
-from behavior_runtime import (Processes, prepare_output_directory, sha256,
+from behavior_runtime import (OutputMilestones, Processes, prepare_output_directory, sha256,
                               source_provenance, validate_limits, write_json)
 from behavior_spec import (OPERATIONS, OBSERVATIONS, HASKELL_TYPES,
                            haskell_predicate, haskell_control_source)
@@ -105,6 +105,20 @@ def validate_settings(output, engine, args):
     return expected
 
 
+def latency_observer(cases):
+    """This frontend does not echo queries; retain the process-start origin."""
+    if not cases:
+        return None
+    if len(cases) != 1:
+        raise ValueError("Haskell latency observation requires one query per process")
+    name = cases[0]["name"]
+    return OutputMilestones([{
+        "id": name, "start_pattern": None,
+        "success_pattern": (r"^(?:djex\[(?:djinn|exference|both)\]> ?)?" + re.escape(name)
+                            + r"(?=\s|=)(?![^\n]*::)[^\n]*="),
+    }])
+
+
 def replay_source(cases, evaluation_seconds, *, module_name="Main"):
     """One candidate OR the oracle controls; never grant either extra names."""
     if len(cases) > 1:
@@ -164,6 +178,8 @@ def main():
     parser.add_argument("--steps", type=int, default=100000)
     parser.add_argument("--budget", type=int, default=100000)
     parser.add_argument("--process-timeout", type=float, default=300)
+    parser.add_argument("--observe-latency", action="store_true",
+                        help="observe first accepted output visibility by 20 ms monotonic file polling; includes process startup and reports observer overhead")
     parser.add_argument("--evaluation-timeout", type=float, default=2)
     parser.add_argument("--ghc", default="ghc")
     parser.add_argument("--prepare-only", action="store_true")
@@ -198,6 +214,7 @@ def main():
                            "independent_evaluation_seconds": args.evaluation_timeout,
                            "separate_process_guard_seconds": args.process_timeout},
               "named_synthesis_providers": [], "cases": [],
+              "latency_observation_enabled": args.observe_latency,
               "oracle_control_source": str(control_path.resolve()),
               "oracle_control_sha256": sha256(control_path),
               "oracle_control_assertion_count": len(control_labels)}
@@ -223,7 +240,8 @@ def main():
     processes = Processes(args.output, args.process_timeout)
     try:
         for engine, label, source, cases in planned:
-            live = processes.run(label, [args.djex.resolve(), "repl", "--ignore-startup", "--environment", environment.resolve()], source=source, cwd=ROOT)
+            observer = latency_observer(cases) if args.observe_latency else None
+            live = processes.run(label, [args.djex.resolve(), "repl", "--ignore-startup", "--environment", environment.resolve()], source=source, cwd=ROOT, observe=observer)
             if live.returncode:
                 raise ValueError(f"{engine} live process failed: {live.returncode}")
             # Semantic rejection has its own diagnostic; syntax/settings/type
@@ -236,6 +254,8 @@ def main():
                 case["behavioral_observations"] = observations
                 case["validated_settings"] = settings
                 report["cases"].append(case)
+            if observer is not None:
+                observer.validate_counts({case["name"]: 1 for case in cases})
             if not cases:
                 report.setdefault("false_oracle_results", []).append({"engine": engine, "observations": observations})
             if re.search(r"(?m)^behavior_" + engine + r"_reject_all(?:\s|=).*?=", live.stdout):

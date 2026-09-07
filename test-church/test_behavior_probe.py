@@ -10,8 +10,8 @@ import unittest
 from unittest import mock
 
 from behavior_probe import (behavioral_observations, commands, displayed_definition,
-                            isolated_replay_sources, main, replay_source, validate_settings)
-from behavior_runtime import Processes, prepare_output_directory, render_type
+                            isolated_replay_sources, latency_observer, main, replay_source, validate_settings)
+from behavior_runtime import OutputMilestones, Processes, prepare_output_directory, render_type
 
 
 class TranscriptTests(unittest.TestCase):
@@ -125,6 +125,50 @@ class TranscriptTests(unittest.TestCase):
             replay_source([first, second], 2)
 
 
+class OutputMilestoneTests(unittest.TestCase):
+    def test_complete_lines_keep_utf8_byte_offsets_and_query_ownership(self):
+        observer = OutputMilestones([
+            {"id": "one", "start_pattern": "^λ> one$", "success_pattern": r"^  it\d+ "},
+            {"id": "two", "start_pattern": "^λ> two$", "success_pattern": r"^  it\d+ "},
+            {"id": "false", "start_pattern": "^λ> false$", "success_pattern": None},
+        ])
+        first = "λ> one\r\n  it1 α\r\n".encode()
+        observer.feed(first[:1], 1.0)
+        self.assertEqual(observer.events, [])
+        observer.feed(first[1:], 2.0)
+        observer.feed("λ> two\n  it1 β\n  it2 γ\nλ> false\n  it1 forbidden\n".encode(), 3.0)
+        accepted = [event for event in observer.events if event["kind"] == "accepted_output_line"]
+        self.assertEqual([event["query_id"] for event in accepted], ["one", "two", "two"])
+        self.assertEqual(accepted[0]["stdout_byte_offset"], len("λ> one\r\n".encode()))
+        self.assertEqual([event["observed_seconds"] for event in accepted], [2.0, 3.0, 3.0])
+        observer.validate_counts({"one": 1, "two": 2, "false": 0})
+        with self.assertRaises(ValueError):
+            observer.validate_counts({"one": 1, "two": 1, "false": 0})
+
+    def test_haskell_observer_excludes_signatures_and_uses_process_origin(self):
+        observer = latency_observer([{"name": "answer"}])
+        observer.feed(b"answer :: a -> a\nother x = x\nanswer x =", 1.0)
+        self.assertEqual(observer.events, [])
+        observer.feed(b" x\n", 2.0)
+        self.assertEqual(len(observer.events), 1)
+        self.assertEqual(observer.events[0]["query_id"], "answer")
+        self.assertIsNone(observer.receipt()["queries"][0]["start_pattern"])
+
+    def test_incomplete_final_line_is_observed_only_at_final_read(self):
+        observer = OutputMilestones([{"id": "one", "success_pattern": r"^result "}])
+        observer.feed(b"result complete", 1.0)
+        self.assertEqual(observer.events, [])
+        observer.feed(b"", 2.0, final=True)
+        self.assertEqual(observer.events[0]["observed_seconds"], 2.0)
+
+    def test_ambiguous_or_invalid_observer_configuration_fails(self):
+        for queries in ([], [{"id": "a"}, {"id": "a"}], [{"id": "a"}, {"id": "b"}]):
+            with self.assertRaises(ValueError):
+                OutputMilestones(queries)
+        with self.assertRaises(ValueError):
+            OutputMilestones([{"id": "a"}], interval_seconds=0)
+
+
 def still_running(pid):
     if os.name == "nt":
         from ctypes import wintypes
@@ -150,6 +194,18 @@ def still_running(pid):
 
 
 class ProcessTreeTests(unittest.TestCase):
+    def test_visible_success_precedes_process_completion(self):
+        with tempfile.TemporaryDirectory(prefix="behavior-observed-success-") as directory:
+            observer = OutputMilestones([{"id": "answer", "success_pattern": r"^answer ="}])
+            program = "import time; print('answer = 1',flush=True); time.sleep(0.3)"
+            result = Processes(directory, 10).run("observed", [sys.executable, "-c", program], observe=observer)
+            self.assertEqual(result.stdout, "answer = 1\n")
+            receipt = json.loads((Path(directory) / "processes.json").read_text())[0]
+            observation = receipt["output_observations"]
+            self.assertEqual(len(observation["events"]), 1)
+            self.assertLess(observation["events"][0]["observed_seconds"], receipt["wall_seconds"] - 0.1)
+            self.assertGreater(observation["poll_count"], 1)
+
     def test_short_owned_process_success(self):
         with tempfile.TemporaryDirectory(prefix="behavior-process-success-") as directory:
             result = Processes(directory, 10).run("success", [sys.executable, "-c", "print('owned success')"])
@@ -162,12 +218,14 @@ class ProcessTreeTests(unittest.TestCase):
     def test_timeout_terminates_sleeping_descendant(self):
         with tempfile.TemporaryDirectory(prefix="behavior-process-timeout-") as directory:
             program = "import subprocess,sys,time; child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); print(child.pid,flush=True); time.sleep(60)"
+            observer = OutputMilestones([{"id": "child", "success_pattern": r"^\d+$"}])
             with self.assertRaises(TimeoutError):
-                Processes(directory, 2).run("timeout", [sys.executable, "-c", program])
+                Processes(directory, 2).run("timeout", [sys.executable, "-c", program], observe=observer)
             receipt = json.loads((Path(directory) / "processes.json").read_text())[0]
             child = int(Path(receipt["stdout_path"]).read_text().strip())
             self.assertTrue(receipt["timed_out"])
             self.assertIsNone(receipt["exit_code"])
+            self.assertEqual(len(receipt["output_observations"]["events"]), 1)
             self.assertFalse(still_running(child), "owned descendant escaped timeout cleanup")
             self.assertFalse(still_running(receipt["owned_root_pid"]))
 

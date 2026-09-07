@@ -17,8 +17,9 @@ snapshots; signature-only synthesis models cannot supply runtime definitions.
 backend still synthesizes from the type and current declaration inventory.
 The predicate is checked separately and does not supply implementations or
 providers to synthesis. Ordinary unnamed queries keep their existing meaning.
-The existing `--where CLAUSE -- TYPE` syntax remains the separate Exference
-Length/Z3 path, with its existing execution policy and evidence requirements.
+The existing `--where CLAUSE -- TYPE` syntax remains the separate symbolic
+Length/Z3 path for both engines, with its existing execution policy and
+evidence requirements.
 
 A named query checks the predicate's type before searching. Each candidate is
 then compiled with the original polymorphic type annotation and evaluated in
@@ -45,8 +46,9 @@ closed; this path never falls back to Prelude.
 `:set quality-window N` bounds raw candidate observations, including `False`,
 errors, and duplicates, for every behavioral selection mode. `first` stops at
 the first passing candidate; best/all selection stays inside that same window.
-Djinn enables alternative enumeration for a constrained first query, retaining
-its configured candidate cutoff and choice budget. Exference retains its step,
+Djinn enables alternative enumeration for a constrained first query and yields
+checked typed candidates incrementally, retaining its configured candidate
+cutoff and choice budget. Exference retains its step,
 depth, and queue bounds. Predicate rejection never refills an exhausted search
 or observation allowance. The `DJEX_REPL_BEHAVIORAL_OBSERVATIONS` diagnostic
 reports the counts, and `DJEX_REPL_BEHAVIORAL_NO_MATCH` identifies an observed

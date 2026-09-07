@@ -114,10 +114,21 @@ All emitted proofs still pass the existing independent checking and source
 conversion. Rejected proofs and duplicates consume their original raw slots;
 none of these paths refill a query's work allowance. Preserving the first LJT
 proof of each plan does not promise the same first result across differently
-scheduled plans. Similarly, `select first` stops at the first accepted result
-in the frontend, while Djinn may materialize its bounded internal candidate
-pool before behavioral evaluation begins. A larger raw window can therefore
-increase latency even when an acceptable term appears early in that pool.
+scheduled plans. Named behavioral queries now consume Djinn's typed candidate
+stream directly. A checked candidate reaches the predicate before the backend
+collects its remaining pool, and `select first` leaves the continuation
+unobserved after a success. The stream keeps deterministic discovery order;
+ordinary unnamed queries retain their existing complete-batch ranking.
+
+Each observation carries its own source association. Raw proofs rejected by
+conversion and duplicates still spend the one search's raw-proof and choice
+allowances; rejected predicates do not restart or refill it. Completion or a
+late search error is observed only when the consumer reaches it. A successful
+prefix does not claim that the rest of the search completed. Behavioral
+`best` and `all` still inspect their bounded observation window before selecting
+and presenting results.
+For Djinn's singleton stream, `best-lookahead` counts candidate observations
+without an improvement, rather than complete candidate pools.
 
 ## Reproduction and evidence
 

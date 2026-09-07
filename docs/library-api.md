@@ -237,6 +237,27 @@ charges rejected and duplicate candidate observations as well as accepted
 ones, preserves whole handles, and reports conservative truncation at the cap
 without probing the next candidate.
 
+Djinn also exposes `runDjinnTypedQueryStream`, together with
+`runDjinnTypedQueryStreamWithInstantiationCandidates`,
+`runDjinnTypedQueryStreamWithInstantiationAssignments`, and
+`runDjinnTypedQueryStreamWithKindedInstantiationAssignments`. Their result is
+`Either Diagnostic [Either Diagnostic DjinnTypedResult]`: the outer failure
+belongs to request preparation, while a failure in the lazy list belongs to
+the search at that observation. Provider evidence is validated against the
+same exact session as the batch runner. Each successful candidate observation
+is a singleton `Continuing` batch with its own typed association and globally
+distinct graph identities. The final observation is an empty `Completed`
+batch. Logical negative evidence is confined to a fully finished candidate-free
+search; a truncated stream never supplies it.
+
+These runners deliver deterministic discovery order rather than the batch
+API's whole-pool ranking. They share one raw-proof allowance and one choice
+budget across all observations. Consumers should inspect each inner `Either`
+as they advance, stopping without traversing the tail when their success quota
+is met. Using `traverse` over the entire list deliberately collects the search
+and gives up early delivery. `typedQueryResultCompatibility` remains a lazy
+projection of an individual typed result; it does not force graph checking.
+
 ## Supply provider-local instantiation evidence
 
 A frontend whose source environment proves otherwise erased type choices can

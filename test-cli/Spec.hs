@@ -189,6 +189,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
   , testCase "REPL :eval runs expressions with real GHC" testReplEval
   , testCase "REPL behavioral predicates filter before the displayed cutoff"
       testReplBehavioralPredicates
+  , testCase "REPL streamed Djinn best and all retain both accepted projections"
+      testReplBehavioralStreamingSelection
   , testCase "behavioral worker checks Bool without leaking previous bindings"
       testBehavioralWorkerIsolation
   , testCase "REPL behavioral timeout retires its worker before the next query"
@@ -3527,6 +3529,27 @@ testReplBehavioralPredicates = do
  assertContains "self-contained predicate then uses actual Prelude" "cleared " startupOutput
  assertBool "cleared startup unexpectedly failed behavioral preflight" $
    not $ "BEHAVIORAL_PREFLIGHT" `isInfixOf` startupErrors
+
+testReplBehavioralStreamingSelection :: Assertion
+testReplBehavioralStreamingSelection = withTemporaryEnvironment [] $ \directory ->
+  forM_ ["best", "all"] $ \selection -> do
+    (exitCode, output, errors) <- runRepl directory
+      [ ":backend djinn"
+      , ":set select " ++ selection
+      , ":set render definition"
+      , ":set allow-unused on"
+      , ":set quality-window 16"
+      , ":set candidate-limit 16"
+      , ":set choice-budget 10000"
+      , ":synth multi :: forall a. a -> a -> a where Prelude.True"
+      ]
+    assertEqual (selection ++ " streaming REPL exit") ExitSuccess exitCode
+    assertEqual (selection ++ " lost a distinct accepted projection") 2 $
+      countOccurrences "multi " output
+    assertContains "each streamed projection receives its own behavioral check"
+      "checked=2, true=2, false=0, error=0, timeout=0" errors
+    assertBool "a successful streamed query reported no match" $
+      not $ "DJEX_REPL_BEHAVIORAL_NO_MATCH" `isInfixOf` errors
 
 testBehavioralWorkerIsolation :: Assertion
 testBehavioralWorkerIsolation = do

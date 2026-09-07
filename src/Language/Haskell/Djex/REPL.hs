@@ -771,18 +771,18 @@ runQuery sourceName query state = do
         (renderDefinitionOrExpression renderDjinnCandidateDefinition
           renderDjinnCandidateExpression options . projected)
         (\candidate -> (if presentationRanking options == LegacyCandidateRanking
-            then Just $ candidateDetails candidate else Nothing,
+            then Just $ candidateDetails $ typedCandidateCompatibility candidate else Nothing,
           candidateQualityCost (presentationRanking options) (providerPrice options)
             $ functionClauseExpression $ candidateOutput $ projected candidate))
         (rankCandidatesByQuality (presentationRanking options) (providerPrice options)
           $ functionClauseExpression . candidateOutput . projected)
-        (fmap pure $ runDjinnQuery (currentDjinnSession state) request)
+        (runDjinnTypedQueryStream (currentDjinnSession state) request)
    where
     options = (djinnPresentationOptions state) { presentationQualification = FullyQualified }
     qualification = presentationQualification options
     selectors = maybe noFieldSelectors djinnProjectionFieldSelectors
       $ djinnProjection $ djinnRuntime state
-    projected = fmap $ projectFieldSelectorsWithoutEta selectors
+    projected = fmap (projectFieldSelectorsWithoutEta selectors) . typedCandidateCompatibility
 
   runBehavioralExference context behavioral target session parsed = case
       mkExferenceRequestWithCheckedTargetFromParsed
@@ -796,7 +796,7 @@ runQuery sourceName query state = do
             (providerPrice options) $ expression candidate,
           exferenceCandidateComplexity $ exferenceCandidateMetrics $ projected candidate))
         (rankCandidatesByQuality (presentationRanking options) (providerPrice options) expression)
-        (runExferenceTypedQuery session request)
+        (fmap (map Right) $ runExferenceTypedQuery session request)
    where
     options = (presentation state) { presentationQualification = FullyQualified }
     qualification = presentationQualification options

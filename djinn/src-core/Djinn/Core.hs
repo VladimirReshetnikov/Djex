@@ -51,6 +51,7 @@ module Djinn.Core (
     inhabitTypedSynthesisResultPrepared,
     DjinnSourceProviderEvidence(..),
     inhabitTypedSynthesisResultPreparedWithSourceGoal,
+    inhabitTypedSynthesisStreamPreparedWithSourceGoal,
     inhabitSynthesisResultPreparedWithInstantiationCandidates,
     inhabitTypedSynthesisResultPreparedWithInstantiationCandidates,
     inhabitSynthesisResultPreparedWithInstantiationAssignments,
@@ -61,6 +62,7 @@ module Djinn.Core (
     QueryOutcome(..), QueryReport(..), inhabit
     ) where
 
+import Control.DeepSeq (deepseq)
 import Control.Monad (foldM, unless, void, when)
 import Data.Bifunctor (first)
 import Data.Either (fromRight)
@@ -105,7 +107,7 @@ import Djinn.Internal.CheckedCandidate
 import Djinn.Internal.Environment
 import Djinn.Internal.Declaration
 import Djinn.Internal.GeneratedDeduplication
-    ( deduplicateEtaEquivalentClausesOn )
+    ( deduplicateEtaEquivalentClausesOn, etaNormalClauseExpression )
 import Djinn.Internal.HTypes
 import Djinn.Internal.Instantiation
     ( closedMonotypeSubtrees
@@ -1071,6 +1073,46 @@ inhabitTypedSynthesisResultPreparedWithSourceGoal options prepared sourceGoal
     inhabitSynthesisTypedResultPreparedCheckedWithSourceGoal (Just sourceGoal)
         options prepared contexts candidates assignments target goal
 
+-- | Incrementally enumerate checked candidates from a source-aware request.
+-- Request validation is eager in the outer 'Either'; each lazy observation
+-- then contains either a continuing singleton candidate, a terminal empty
+-- result, or a terminal search failure. Dropping the tail cancels all future
+-- proof search and source-graph construction. Candidate graph keys are unique
+-- throughout the stream, rather than restarting at each singleton batch.
+--
+-- Candidates retain deterministic proof-plan encounter order. Global result
+-- sorting and ranking require a complete pool and belong to the batch API;
+-- this entrance deliberately does not apply them. Search strategy and local
+-- provider costs still guide the same proof cursors. The configured raw-proof
+-- cutoff and choice budget are shared by every resumed plan, including raw
+-- proofs discarded by checking or cross-plan de-duplication.
+-- Reaching the raw cutoff reports 'SharedSearch.CandidateLimitReached'
+-- without inspecting another proof or choice. The historical sequential
+-- batch runner probes for an overflow proof and can therefore observe a
+-- different later completion (including choice exhaustion) at that boundary.
+inhabitTypedSynthesisStreamPreparedWithSourceGoal
+    :: QueryOptions
+    -> PreparedEnvironment
+    -> SharedType.Type HSymbol
+    -> [Constraint (SharedType.Type HSymbol)]
+    -> DjinnSourceProviderEvidence
+    -> SharedGenerated.DefinitionName
+    -> SharedType.Type HSymbol
+    -> Either DjinnQueryError [Either DjinnQueryError DjinnTypedResult]
+inhabitTypedSynthesisStreamPreparedWithSourceGoal options prepared sourceGoal
+        contexts evidence target goal = do
+    first DjinnQueryOptionsFailure $ validateQueryOptions options
+    let (candidates, assignments) = case evidence of
+            DjinnSourceInstantiationCandidates supplied ->
+                (supplied, InferredProviderInstantiationAssignments [])
+            DjinnSourceInstantiationAssignments supplied ->
+                ([], InferredProviderInstantiationAssignments supplied)
+            DjinnSourceKindedInstantiationAssignments supplied ->
+                ([], KindedProviderInstantiationAssignments supplied)
+    preparedSearch <- inhabitSynthesisPreparedSearchChecked (Just sourceGoal)
+        options prepared contexts candidates assignments target goal
+    pure $ preparedFormulaCandidateStream preparedSearch
+
 -- | Compatibility projection of 'inhabitResult'.
 inhabitGenerated :: QueryOptions -> Environment -> [Context] -> HSymbol -> HType
                  -> Either String GeneratedQueryReport
@@ -1168,6 +1210,25 @@ inhabitSynthesisValidatedResultPreparedChecked
     -> Either DjinnQueryError ValidatedDjinnResult
 inhabitSynthesisValidatedResultPreparedChecked sourceGoal options prepared
         contexts candidates assignmentEvidence target goal = do
+    preparedSearch <- inhabitSynthesisPreparedSearchChecked sourceGoal options
+        prepared contexts candidates assignmentEvidence target goal
+    preparedFormulaBatchResult preparedSearch
+
+-- Validation and formula-family preparation are shared by batch and streaming
+-- execution. Neither constructing this record nor selecting one field forces
+-- the other execution, and no cursor exists until that execution is observed.
+inhabitSynthesisPreparedSearchChecked
+    :: Maybe (SharedType.Type HSymbol)
+    -> QueryOptions
+    -> PreparedEnvironment
+    -> [Constraint (SharedType.Type HSymbol)]
+    -> [SharedQuery.ProviderInstantiationCandidate HSymbol]
+    -> ProviderInstantiationAssignmentEvidence
+    -> SharedGenerated.DefinitionName
+    -> SharedType.Type HSymbol
+    -> Either DjinnQueryError PreparedFormulaSearch
+inhabitSynthesisPreparedSearchChecked sourceGoal options prepared
+        contexts candidates assignmentEvidence target goal = do
     elaboratedGoal <- resolveSynthesisQueryContexts prepared
         ( "goal type " ++ renderSynthesisType goal
         , KStar
@@ -1218,7 +1279,7 @@ inhabitSynthesisValidatedResultPreparedChecked sourceGoal options prepared
                 ]
         sourceContext = SourceEvidence.sourceTypingContextWithProviderKinds
             prepared checkedSourceGoal providerKinds
-    searchPreparedFormula options sourceContext checkedCandidates checkedAssignments target
+    pure $ prepareFormulaSearch options sourceContext checkedCandidates checkedAssignments target
         elaboratedGoal
         parametricDataRelevant
         plans nominalPlans
@@ -1576,7 +1637,12 @@ prepareProviderInstantiationAssignments prepared evidence = do
 -- worker; validated class contexts add no premises here, while bounded
 -- hypothesis-instantiation axioms occupy appended plans under erased
 -- evidence.
-searchPreparedFormula
+data PreparedFormulaSearch = PreparedFormulaSearch
+    { preparedFormulaBatchResult :: Either DjinnQueryError ValidatedDjinnResult
+    , preparedFormulaCandidateStream :: [Either DjinnQueryError DjinnTypedResult]
+    }
+
+prepareFormulaSearch
     :: QueryOptions
     -> SourceEvidence.SourceTypingContext
     -> [PreparedProviderInstantiationCandidate]
@@ -1586,19 +1652,25 @@ searchPreparedFormula
     -> Bool
     -> PolarizedFormulaPlans
     -> PolarizedFormulaPlans
-    -> Either DjinnQueryError ValidatedDjinnResult
-searchPreparedFormula options sourceContext providerCandidates providerAssignments
+    -> PreparedFormulaSearch
+prepareFormulaSearch options sourceContext providerCandidates providerAssignments
         target elaboratedGoal parametricDataRelevant formulaPlans
-        nominalFormulaPlans = do
-    results <- if interleavePlanAlternatives
-        then runFairPlans (optionCutoff options) (optionBudget options) []
-            [ FormulaPlanLane (0, 0) False historicalFamilies transportSearchPlans Nothing
-            , FormulaPlanLane (1, 0) False [] carrierAlternativeSearchPlans Nothing
-            ] []
-        else runPlans False historicalFamilies
-            collectAcrossPlans options (optionCutoff options) [] transportSearchPlans
-    mergeFormulaPlanResults options results
+        nominalFormulaPlans = PreparedFormulaSearch
+    { preparedFormulaBatchResult = do
+        results <- if interleavePlanAlternatives
+            then runFairPlans (optionCutoff options) (optionBudget options) []
+                initialLanes []
+            else runPlans False historicalFamilies
+                collectAcrossPlans options (optionCutoff options) [] transportSearchPlans
+        mergeFormulaPlanResults options results
+    , preparedFormulaCandidateStream = streamPlans (optionCutoff options)
+        (optionBudget options) Nothing Nothing Nothing [] 0 initialLanes []
+    }
   where
+    initialLanes =
+        FormulaPlanLane (0, 0) False historicalFamilies transportSearchPlans Nothing :
+        [FormulaPlanLane (1, 0) False [] carrierAlternativeSearchPlans Nothing
+        | interleavePlanAlternatives]
     historicalFamilies =
         [(False, initialSearchPlans), (True, loadedConstructedAccelerationPlans),
             (False, searchPlans)] ++ deferredInstantiationPlans
@@ -2654,6 +2726,132 @@ searchPreparedFormula options sourceContext providerCandidates providerAssignmen
     withoutProviders providerNames =
         filter ((`Set.notMember` providerNames) . fst)
 
+    -- The streaming driver observes exactly one raw proof at a time using
+    -- the same resumable cursors and plan-family admission as the fair batch
+    -- driver below. Only compact de-duplication expressions and the earliest
+    -- successful ordinals survive delivery; consumed proof trees, source
+    -- contexts and typed graphs are not accumulated in scheduler history.
+    streamPlans candidateLimit budget firstCandidateOrdinal firstEvidenceOrdinal
+            latest seen candidateKey front rear
+        | candidateLimit <= 0 = finishStream
+            (SharedSearch.truncated SharedSearch.CandidateLimitReached) latest
+        | otherwise = case front of
+            [] -> case reverse rear of
+                [] -> finishStream SharedSearch.Finished latest
+                next -> resume candidateLimit budget latest seen candidateKey next []
+            lane : remaining -> case activateLaneWith suppress lane of
+                Left failure -> [Left failure]
+                Right Nothing -> resume candidateLimit budget latest seen candidateKey remaining rear
+                Right (Just (FormulaPlanLane ordinal inhabitationOnly families pendingPlans (Just stream))) ->
+                    case observeProofSearch $ formulaStreamCursor stream of
+                        ProofSearchChoice continuation
+                            | Just fuel <- budget, fuel <= 0 -> finishStream
+                                (SharedSearch.truncated SharedSearch.ChoicePointLimitReached) latest
+                            | not interleavePlanAlternatives || formulaStreamWorkRemaining stream > 1 ->
+                                resume candidateLimit (fmap (subtract 1) budget) latest seen candidateKey
+                                    (FormulaPlanLane ordinal inhabitationOnly families pendingPlans
+                                        (Just stream {formulaStreamCursor = continuation,
+                                            formulaStreamWorkRemaining = formulaStreamWorkRemaining stream - 1})
+                                        : remaining) rear
+                            | otherwise -> resume candidateLimit (fmap (subtract 1) budget)
+                                latest seen candidateKey remaining $
+                                requeuePlan ordinal inhabitationOnly families pendingPlans
+                                    stream {formulaStreamCursor = continuation} rear
+                        ProofSearchResult proof continuation ->
+                            case formulaStreamAssess stream $ SearchOutcome [proof] False budget of
+                                Left failure -> [Left failure]
+                                Right result ->
+                                    let candidates = formulaPlanCandidates result
+                                        found = not $ null candidates
+                                        nextCandidateOrdinal = noteOrdinal found ordinal firstCandidateOrdinal
+                                        nextEvidenceOrdinal = noteOrdinal
+                                            (formulaPlanEvidence result /= SharedQuery.NoEvidence)
+                                            ordinal firstEvidenceOrdinal
+                                        continued = stream {formulaStreamCursor = continuation,
+                                            formulaStreamProducedProof = True}
+                                        (nextFront, nextRear)
+                                            | interleavePlanAlternatives =
+                                                (remaining, requeuePlan ordinal inhabitationOnly
+                                                    families pendingPlans continued rear)
+                                            | not collectAcrossPlans && found = ([], [])
+                                            | otherwise =
+                                                (FormulaPlanLane ordinal inhabitationOnly families pendingPlans
+                                                    (Just continued) : remaining, rear)
+                                        nextLatest = Just $ streamPlanSummary result
+                                        continue nextSeen nextKey = streamPlans (candidateLimit - 1) budget
+                                            nextCandidateOrdinal nextEvidenceOrdinal nextLatest nextSeen nextKey
+                                            nextFront nextRear
+                                    in emitStreamCandidates result seen candidateKey candidates continue
+                        ProofSearchFinished
+                            | formulaStreamProducedProof stream ->
+                                resume candidateLimit budget latest seen candidateKey remaining $
+                                    FormulaPlanLane (nextPlanOrdinal ordinal) inhabitationOnly
+                                        families pendingPlans Nothing : rear
+                            | otherwise -> case formulaStreamAssess stream $ SearchOutcome [] False budget of
+                                Left failure -> [Left failure]
+                                Right result ->
+                                    let nextLatest = Just $ streamPlanSummary result
+                                        nextEvidenceOrdinal = noteOrdinal
+                                            (formulaPlanEvidence result /= SharedQuery.NoEvidence)
+                                            ordinal firstEvidenceOrdinal
+                                    in if evidenceCanBenefitFromAnotherPlan result
+                                        then streamPlans candidateLimit (formulaPlanRemainingBudget result)
+                                            firstCandidateOrdinal nextEvidenceOrdinal nextLatest seen candidateKey
+                                            remaining (FormulaPlanLane (nextPlanOrdinal ordinal) inhabitationOnly
+                                                families pendingPlans Nothing : rear)
+                                        else finishStream SharedSearch.Finished nextLatest
+                Right (Just _) -> [Left $ DjinnInternalQueryFailure
+                    "streaming proof-plan activation did not retain a cursor"]
+      where
+        resume nextLimit nextBudget = streamPlans nextLimit nextBudget
+            firstCandidateOrdinal firstEvidenceOrdinal
+        earlierThan ordinal = maybe False (< ordinal)
+        suppress ordinal inhabitationOnly firstCandidateOnly =
+            (inhabitationOnly &&
+                (earlierThan ordinal firstCandidateOrdinal || earlierThan ordinal firstEvidenceOrdinal)) ||
+            (firstCandidateOnly && earlierThan ordinal firstCandidateOrdinal)
+
+        -- An empty terminal batch cannot repeat ValidatedCandidates, and a
+        -- later incompatible formula view cannot refute an earlier witness.
+        -- Truncation itself never becomes logical negative evidence.
+        finishStream completion summary =
+            [first DjinnResultInvariantFailure $ SharedQuery.mkQueryResult evidence $
+                SharedSearch.SearchBatch (SharedSearch.Completed completion) metadata []]
+          where
+            metadata = maybe
+                (DjinnQueryMetadata (show $ translatedFormula primary) Nothing)
+                fst summary
+            evidence
+                | firstCandidateOrdinal /= Nothing = SharedQuery.NoEvidence
+                | completion /= SharedSearch.Finished = SharedQuery.NoEvidence
+                | otherwise = maybe SharedQuery.NoEvidence snd summary
+
+    noteOrdinal False _ previous = previous
+    noteOrdinal True ordinal previous = Just $ maybe ordinal (min ordinal) previous
+
+    streamPlanSummary result =
+        ( DjinnQueryMetadata (formulaPlanFormula result) (formulaPlanFirstProof result)
+        , case formulaPlanEvidence result of
+            SharedQuery.ValidatedCandidates -> SharedQuery.NoEvidence
+            other -> other
+        )
+
+    emitStreamCandidates _ seen candidateKey [] continue = continue seen candidateKey
+    emitStreamCandidates result seen candidateKey (candidate : remaining) continue
+        | any (SharedGenerated.alphaEquivalentExpression key) seen =
+            emitStreamCandidates result seen candidateKey remaining continue
+        | otherwise = case first DjinnResultInvariantFailure $
+                SharedQuery.mkQueryResult SharedQuery.ValidatedCandidates $
+                    SharedSearch.SearchBatch SharedSearch.Continuing
+                        (fst $ streamPlanSummary result)
+                        [projectValidatedTypedDjinnCandidate candidateKey candidate] of
+            Left failure -> [Left failure]
+            Right batch -> key `deepseq` (Right batch : emitStreamCandidates result (key : seen)
+                (candidateKey + 1) remaining continue)
+      where
+        key = etaNormalClauseExpression $
+            SourceEvidence.sourceCandidateClause $ validatedCandidateOutput candidate
+
     -- Advance active plans round-robin after one raw proof or a bounded
     -- quantum of choices. Every choice is still observed and charged before
     -- continuing the current turn. After a new plan's first turn, its cursor
@@ -2745,25 +2943,27 @@ searchPreparedFormula options sourceContext providerCandidates providerAssignmen
     -- An admitted first-inhabitant accelerator can still be cancelled when
     -- an earlier source subsequently succeeds; consumed work and already
     -- emitted results remain in the global accounting/result stream.
-    activateLane completed lane@(FormulaPlanLane ordinal inhabitationOnly families pendingPlans (Just stream))
-        | suppressPlan ordinal inhabitationOnly (formulaStreamFirstCandidateOnly stream) completed =
-            activateLane completed $ FormulaPlanLane (nextPlanOrdinal ordinal)
+    activateLane completed = activateLaneWith $ \ordinal inhabitationOnly firstCandidateOnly ->
+        suppressPlan ordinal inhabitationOnly firstCandidateOnly completed
+    activateLaneWith suppress lane@(FormulaPlanLane ordinal inhabitationOnly families pendingPlans (Just stream))
+        | suppress ordinal inhabitationOnly (formulaStreamFirstCandidateOnly stream) =
+            activateLaneWith suppress $ FormulaPlanLane (nextPlanOrdinal ordinal)
                 inhabitationOnly families pendingPlans Nothing
         | otherwise = Right $ Just lane
-    activateLane completed (FormulaPlanLane ordinal _ families [] Nothing) =
+    activateLaneWith suppress (FormulaPlanLane ordinal _ families [] Nothing) =
         case nextAdmittedPlanFamily
-                (\inhabitationOnly -> suppressPlan ordinal inhabitationOnly False completed)
+                (\inhabitationOnly -> suppress ordinal inhabitationOnly False)
                 families of
             Nothing -> Right Nothing
             Just (inhabitationOnly, familyPlans, remaining) ->
-                activateLane completed $ FormulaPlanLane ordinal inhabitationOnly
+                activateLaneWith suppress $ FormulaPlanLane ordinal inhabitationOnly
                     remaining familyPlans Nothing
-    activateLane completed (FormulaPlanLane ordinal inhabitationOnly families (plan : remaining) Nothing)
-        | suppressPlan ordinal inhabitationOnly False completed =
-            activateLane completed $ FormulaPlanLane ordinal False families [] Nothing
+    activateLaneWith suppress (FormulaPlanLane ordinal inhabitationOnly families (plan : remaining) Nothing)
+        | suppress ordinal inhabitationOnly False =
+            activateLaneWith suppress $ FormulaPlanLane ordinal False families [] Nothing
         | firstCandidateOnly
-        , suppressPlan ordinal False True completed =
-            activateLane completed $ FormulaPlanLane (nextPlanOrdinal ordinal)
+        , suppress ordinal False True =
+            activateLaneWith suppress $ FormulaPlanLane (nextPlanOrdinal ordinal)
                 inhabitationOnly families remaining Nothing
         | otherwise = do
             stream <- startFormulaPlanStream sourceContext options target plan
@@ -2894,12 +3094,14 @@ projectValidatedTypedDjinnResult
     :: ValidatedDjinnResult
     -> Either SharedQuery.QueryResultInvariantError DjinnTypedResult
 projectValidatedTypedDjinnResult =
-    projectValidatedResultWith projectCandidate
-  where
-    projectCandidate candidateKey validated =
-        let sourceCandidate = validatedCandidateOutput validated
-        in
-        SharedTypedCandidate.mkTypedCandidate
+    projectValidatedResultWith projectValidatedTypedDjinnCandidate
+
+projectValidatedTypedDjinnCandidate
+    :: Natural -> ValidatedDjinnCandidate -> DjinnTypedCandidate
+projectValidatedTypedDjinnCandidate candidateKey validated =
+    let sourceCandidate = validatedCandidateOutput validated
+    in
+    SharedTypedCandidate.mkTypedCandidate
         (SharedCandidate.Candidate
             { SharedCandidate.candidateOutput =
                 SourceEvidence.sourceCandidateClause sourceCandidate

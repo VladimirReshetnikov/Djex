@@ -120,3 +120,5 @@ Reports are listed oldest first.
 - 2026-08-20 — [Deterministic parallel backend search](2026-08-20-deterministic-parallel-backend-search.md)
 - 2026-08-20 — [Timed parallel backend deadline](2026-08-20-timed-parallel-backend-deadline.md)
 - 2026-08-20 — [Exference serial ordered StepActions and parallel research checkpoint](2026-08-20-exference-serial-step-actions.md)
+- 2026-09-06 — [Incremental Djinn behavioral synthesis](2026-09-06-djinn-behavioral-streaming.md)
+- 2026-09-06 — [Next synthesis priorities in Djex and Leant](2026-09-06-synthesis-next-priorities.md)

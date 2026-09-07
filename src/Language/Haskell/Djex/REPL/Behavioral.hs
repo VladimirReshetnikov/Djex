@@ -26,7 +26,7 @@ presentBehavioralCandidates
   -> (candidate -> Either RenderError String)
   -> (candidate -> rank)
   -> ([candidate] -> [candidate])
-  -> Either Diagnostic [QueryResult metadata candidate]
+  -> Either Diagnostic [Either Diagnostic (QueryResult metadata candidate)]
   -> IO ExitCode
 presentBehavioralCandidates options context query expression render rank order checkedResults =
   withBehavioralEvaluator context $ \preflight check -> do
@@ -40,7 +40,7 @@ presentBehavioralCandidates options context query expression render rank order c
     Left failure -> diagnosticFailure failure
     Right results -> present check results
   present check results = do
-    (accepted, outcomes, progress, capped) <- batches check window [] [] Nothing Nothing
+    (accepted, outcomes, progress, capped, streamFailure) <- batches check window [] [] Nothing Nothing
       initialLookahead results
     let chosen = case mode of
           SelectAll -> order accepted
@@ -81,7 +81,7 @@ presentBehavioralCandidates options context query expression render rank order c
           "DJEX_REPL_BEHAVIORAL_WINDOW" "behavioral observation window reached"
           "rejected and failed candidates consumed their original slots; search was not refilled"
         forM_ (progressTruncationDiagnostic progress) emitDiagnostic
-        pure ExitSuccess
+        maybe (pure ExitSuccess) diagnosticFailure streamFailure
   mode = presentationSelection options
   window = max 0 $ presentationQualityWindow options
   initialLookahead = case mode of SelectBestLookahead n -> max 0 n; _ -> maxBound
@@ -102,10 +102,12 @@ presentBehavioralCandidates options context query expression render rank order c
 
   -- The first guard precedes inspection of either result or candidate tails.
   batches _ remaining accepted outcomes progress _ _ _ | remaining <= 0 =
-    pure (reverse accepted, reverse outcomes, progress, True)
+    pure (reverse accepted, reverse outcomes, progress, True, Nothing)
   batches _ _ accepted outcomes progress _ _ [] =
-    pure (reverse accepted, reverse outcomes, progress, False)
-  batches check remaining accepted outcomes _ best quiet (result : rest) = do
+    pure (reverse accepted, reverse outcomes, progress, False, Nothing)
+  batches _ _ accepted outcomes progress _ _ (Left failure : _) =
+    pure (reverse accepted, reverse outcomes, progress, False, Just failure)
+  batches check remaining accepted outcomes _ best quiet (Right result : rest) = do
     let batch = resultSearch result
         progress = Just $ batchProgress batch
     (left, nextAccepted, nextOutcomes, stopped) <- candidates check remaining
@@ -123,7 +125,7 @@ presentBehavioralCandidates options context query expression render rank order c
           SelectBestLookahead _ -> nextBest /= Nothing && nextQuiet <= 0
           _ -> False
     if stopped || lookaheadDone then
-      pure (reverse nextAccepted, reverse nextOutcomes, progress, left <= 0)
+      pure (reverse nextAccepted, reverse nextOutcomes, progress, left <= 0, Nothing)
     else batches check left nextAccepted nextOutcomes progress nextBest nextQuiet rest
 
   candidates _ remaining accepted outcomes _ | remaining <= 0 =

@@ -31,6 +31,7 @@ import Djinn.Core (
     inhabitGeneratedPrepared, inhabitResultPrepared,
     inhabitSynthesisResultPrepared, inhabitTypedSynthesisResultPrepared,
     inhabitTypedSynthesisResultPreparedWithSourceGoal,
+    inhabitTypedSynthesisStreamPreparedWithSourceGoal,
     generatedReportCandidates,
     kArrow, kStar, optionAlternatives, optionBudget, optionCutoff, optionSorted,
     optionStrategy, optionRanking, optionProviderCosts,
@@ -111,6 +112,12 @@ tests =
     , ("interleave carriers without starving append and filter", testCarrierPlanFairness)
     , ("admit a later formula view beside a prolific proof cursor", testFormulaPlanAdmission)
     , ("skip suppressed formula families before forcing their generators", testLazyPlanFamilyAdmission)
+    , ("deliver a streaming candidate before a poisoned global ranking and large tail", testCandidateStreamFirstDelivery)
+    , ("retain cumulative streaming proof and choice allowances", testCandidateStreamBudgets)
+    , ("retain streaming source graph ownership and distinct graph keys", testCandidateStreamGraphs)
+    , ("separate streaming terminal logical evidence from truncation", testCandidateStreamEvidence)
+    , ("retain contextual streaming source authority without inventing dictionary graphs", testCandidateStreamContext)
+    , ("validate streaming requests before observing their search", testCandidateStreamValidation)
     , ("reuse one fold bridge on two distinct opaque inputs", testFoldBridgeReuse)
     , ("retain both binary compositions over the inner result", testBinaryCompositionWithOuterResult)
     , ("compose endomorphisms using the last result argument", testEndomorphismCompositionWithOuterResult)
@@ -1772,6 +1779,228 @@ testLazyPlanFamilyAdmission = do
     case nextAdmittedPlanFamily id lazyTail of
         Just (False, firstPlan : _, _) -> assertEqual "the admitted head changed" (23 :: Int) firstPlan
         _ -> fail "the first admitted family was unavailable"
+
+testCandidateStreamFirstDelivery :: IO ()
+testCandidateStreamFirstDelivery = do
+    source <- expectRight (parseHType "(a -> a) -> a -> a") >>= expectShownRight . toSynthesisType
+    prepared <- expectShownRight $ prepareEnvironment emptyEnvironment
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $ sharedName "streamFirst"
+    let configured = defaultQueryOptions
+            { optionAlternatives = True
+            , optionSorted = error "streaming forced the final whole-pool sort policy"
+            , optionStrategy = Interleave
+            , optionCutoff = 1000000000
+            , optionBudget = Just 1000000000 }
+    stream <- expectShownRight $ inhabitTypedSynthesisStreamPreparedWithSourceGoal
+        configured prepared source [] (DjinnSourceInstantiationCandidates []) target source
+    -- A batch-sized search of this recursive normal-form language cannot
+    -- consume its billion-proof allowance within this deliberately loose
+    -- guard. Only the first observation and its own source graph are forced.
+    delivered <- timeout 10000000 $ case stream of
+        Right firstBatch : _ -> do
+            assertEqual "the first candidate claimed terminal progress" SharedSearch.Continuing $
+                SharedSearch.batchProgress $ SharedQuery.resultSearch firstBatch
+            assertTypedCoreGraphs target source firstBatch
+            evaluate $ length $ show $ SharedTypedCandidate.typedQueryResultCompatibility firstBatch
+        Left failure : _ -> fail $ show failure
+        [] -> fail "the streaming producer returned no observations"
+    assertBool "the first candidate waited for the rest of its bounded pool" $ delivered /= Nothing
+    identitySource <- expectRight (parseHType "a -> a") >>= expectShownRight . toSynthesisType
+    identityFormula <- expectRight $
+        RawEnvironment.preparedEnvironmentSynthesisFormulaTranslator prepared identitySource
+    identityCursor <- expectRight $ startProofSearchChecked
+        (defaultSearchMode True)
+            { searchStrategy = Interleave, searchTermAlternatives = True
+            , searchRanking = optionRanking configured }
+        [] identityFormula
+    -- Type introduction itself can consume choices. Measure the exact raw
+    -- prefix rather than assuming an identity proof costs zero, then give the
+    -- public producer precisely that allowance and no fuel for its tail.
+    firstProofChoices <- measureFirstProofChoices 0 identityCursor
+    exactFuel <- expectShownRight $ inhabitTypedSynthesisStreamPreparedWithSourceGoal
+        configured {optionBudget = Just firstProofChoices} prepared identitySource []
+        (DjinnSourceInstantiationCandidates []) target identitySource
+    case exactFuel of
+        Right firstBatch : tailObservations -> do
+            assertEqual "exact-fuel first delivery consulted a later choice"
+                SharedSearch.Continuing $ SharedSearch.batchProgress $ SharedQuery.resultSearch firstBatch
+            assertTypedCoreGraphs target identitySource firstBatch
+            terminal <- mapM expectShownRight tailObservations
+            assertEqual "the later charged normal-form search was not observed on resumption"
+                (SharedSearch.Completed $ SharedSearch.truncated SharedSearch.ChoicePointLimitReached) $
+                SharedSearch.batchProgress $ SharedQuery.resultSearch $ last terminal
+        Left failure : _ -> fail $ show failure
+        [] -> fail "exact-fuel identity did not produce its measured first proof"
+  where
+    measureFirstProofChoices :: Integer -> ProofSearchCursor -> IO Integer
+    measureFirstProofChoices charged cursor
+        | charged > 1000 = fail "identity raw cursor did not reach its first proof within 1000 choices"
+        | otherwise = case observeProofSearch cursor of
+            ProofSearchFinished -> fail "identity raw cursor produced no proof"
+            ProofSearchChoice rest -> measureFirstProofChoices (charged + 1) rest
+            ProofSearchResult _ _ -> pure charged
+
+testCandidateStreamBudgets :: IO ()
+testCandidateStreamBudgets = do
+    source <- expectRight (parseHType "(a -> a) -> (a -> a) -> a -> a") >>= expectShownRight . toSynthesisType
+    prepared <- expectShownRight $ prepareEnvironment emptyEnvironment
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $ sharedName "streamBudget"
+    -- This fixture has one formula plan and no providers or polymorphic
+    -- families. Its independent raw cursor exposes the precise work boundary;
+    -- the sequential batch runner's overflow-proof lookahead may pass it.
+    formula <- expectRight $ RawEnvironment.preparedEnvironmentSynthesisFormulaTranslator prepared source
+    forM_ [(strategy, raw, fuel) | strategy <- [DepthFirst, Interleave],
+            raw <- [1, 2, 8], fuel <- [0, 1, 4, 40, 200]] $ \(strategy, raw, fuel) -> do
+        let configured = defaultQueryOptions
+                { optionAlternatives = True, optionSorted = False, optionStrategy = strategy
+                , optionCutoff = raw, optionBudget = Just fuel }
+            atBounds message = message ++ " at " ++ show (strategy, raw, fuel)
+        batch <- expectShownRight $ inhabitTypedSynthesisResultPreparedWithSourceGoal
+            configured prepared source [] (DjinnSourceInstantiationCandidates []) target source
+        observations <- expectShownRight (inhabitTypedSynthesisStreamPreparedWithSourceGoal
+            configured prepared source [] (DjinnSourceInstantiationCandidates []) target source)
+            >>= mapM expectShownRight
+        rawCursor <- expectRight $ startProofSearchChecked
+            (defaultSearchMode True)
+                { searchStrategy = strategy, searchTermAlternatives = True
+                , searchBudget = Just fuel, searchRanking = optionRanking configured }
+            [] formula
+        let clauses result = map (show . SharedCandidate.candidateOutput .
+                SharedTypedCandidate.typedCandidateCompatibility) $
+                SharedSearch.batchCandidates $ SharedQuery.resultSearch result
+            allClauses = concatMap clauses observations
+        assertEqual (atBounds "streaming restarted/refunded an allowance")
+            (sort $ clauses batch) (sort allClauses)
+        assertBool (atBounds "de-duplication failed across singleton batches") $
+            length allClauses == length (nub allClauses)
+        assertEqual (atBounds "streaming changed the exact observed raw/choice boundary")
+            (SharedSearch.Completed $ cursorCompletion raw fuel rawCursor)
+            (SharedSearch.batchProgress $ SharedQuery.resultSearch $ last observations)
+        forM_ (init observations) $ \observation -> assertEqual
+            (atBounds "a prefix batch reported an unobserved terminal result") SharedSearch.Continuing $
+                SharedSearch.batchProgress $ SharedQuery.resultSearch observation
+        assertEqual (atBounds "an empty terminal stream batch repeated positive candidate evidence")
+            SharedQuery.NoEvidence $ SharedQuery.resultEvidence $ last observations
+  where
+    cursorCompletion remaining _ _ | remaining <= 0 =
+        SharedSearch.truncated SharedSearch.CandidateLimitReached
+    cursorCompletion remaining fuel cursor = case observeProofSearch cursor of
+        ProofSearchFinished -> SharedSearch.Finished
+        ProofSearchChoice rest
+            | fuel <= 0 -> SharedSearch.truncated SharedSearch.ChoicePointLimitReached
+            | otherwise -> cursorCompletion remaining (fuel - 1) rest
+        ProofSearchResult _ rest -> cursorCompletion (remaining - 1) fuel rest
+
+testCandidateStreamGraphs :: IO ()
+testCandidateStreamGraphs = do
+    source <- expectRight (parseHType "a -> a -> a") >>= expectShownRight . toSynthesisType
+    prepared <- expectShownRight $ prepareEnvironment emptyEnvironment
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $ sharedName "streamGraphs"
+    let configured = defaultQueryOptions
+            { optionAlternatives = True, optionSorted = False, optionStrategy = Interleave
+            , optionCutoff = 32, optionBudget = Just 10000 }
+    observations <- expectShownRight (inhabitTypedSynthesisStreamPreparedWithSourceGoal
+        configured prepared source [] (DjinnSourceInstantiationCandidates []) target source)
+        >>= mapM expectShownRight
+    let candidates = concatMap (SharedSearch.batchCandidates . SharedQuery.resultSearch) observations
+    assertEqual "the finite two-choice stream lost or duplicated a candidate" 2 $ length candidates
+    graphs <- mapM (expectShownRight . SharedTypedCandidate.typedCandidateTermGraph) candidates
+    let nodeIds = concatMap (map fst . SharedTypedGenerated.termGraphNodes) graphs
+    assertEqual "singleton stream batches reused a candidate graph identity"
+        (length nodeIds) (Set.size $ Set.fromList nodeIds)
+    forM_ (zip candidates graphs) $ \(candidate, graph) -> assertEqual
+        "a streamed source graph moved to another compatibility candidate"
+        (SharedCandidate.candidateOutput $ SharedTypedCandidate.typedCandidateCompatibility candidate)
+        (SharedTypedGenerated.eraseTermGraphToFunctionClause target graph)
+
+testCandidateStreamEvidence :: IO ()
+testCandidateStreamEvidence = do
+    source <- expectRight (parseHType "a") >>= expectShownRight . toSynthesisType
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $ sharedName "streamEvidence"
+    self <- expectRight $ declare (Function "streamEvidence" $ HTVar "a") emptyEnvironment
+    unsupported <- expectRight (parseHType "((forall a. a) -> b) -> b") >>= expectShownRight . toSynthesisType
+    forM_ [(strategy, name, environment, goal) | strategy <- [DepthFirst, Interleave],
+            (name, environment, goal) <- [("uninhabited", emptyEnvironment, source),
+                ("self-reference", self, source), ("unsupported", emptyEnvironment, unsupported)]] $
+        \(strategy, name, environment, goal) -> do
+            prepared <- expectShownRight $ prepareEnvironment environment
+            let configured = defaultQueryOptions
+                    { optionAlternatives = True, optionSorted = False, optionStrategy = strategy
+                    , optionCutoff = 16, optionBudget = Just 1000 }
+                atCase message = message ++ " at " ++ show (strategy, name)
+            batch <- expectShownRight $ inhabitTypedSynthesisResultPreparedWithSourceGoal
+                configured prepared goal [] (DjinnSourceInstantiationCandidates []) target goal
+            observations <- expectShownRight (inhabitTypedSynthesisStreamPreparedWithSourceGoal
+                configured prepared goal [] (DjinnSourceInstantiationCandidates []) target goal)
+                >>= mapM expectShownRight
+            assertEqual (atCase "a candidate-free stream invented a witness") 0 $ sum $
+                map (length . SharedSearch.batchCandidates . SharedQuery.resultSearch) observations
+            assertEqual (atCase "a terminal stream changed the established logical diagnostic")
+                (SharedQuery.resultEvidence batch) $ SharedQuery.resultEvidence $ last observations
+            assertEqual (atCase "a candidate-free stream changed operational termination")
+                (SharedSearch.batchProgress $ SharedQuery.resultSearch batch)
+                (SharedSearch.batchProgress $ SharedQuery.resultSearch $ last observations)
+            assertBool (atCase "a candidate-free prefix exposed terminal negative evidence") $
+                null $ filter ((/= SharedQuery.NoEvidence) . SharedQuery.resultEvidence) $ init observations
+    prepared <- expectShownRight $ prepareEnvironment emptyEnvironment
+    forM_ [DepthFirst, Interleave] $ \strategy -> do
+        zero <- expectShownRight (inhabitTypedSynthesisStreamPreparedWithSourceGoal
+            defaultQueryOptions {optionAlternatives = True, optionStrategy = strategy, optionBudget = Just 0}
+            prepared unsupported [] (DjinnSourceInstantiationCandidates []) target unsupported)
+            >>= mapM expectShownRight
+        assertEqual ("zero-fuel streaming absence became a refutation at " ++ show strategy)
+            SharedQuery.NoEvidence $ SharedQuery.resultEvidence $ last zero
+
+testCandidateStreamValidation :: IO ()
+testCandidateStreamValidation = do
+    prepared <- expectShownRight $ prepareEnvironment emptyEnvironment
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $ sharedName "streamValidation"
+    let poison = error "invalid streaming options inspected their query source"
+    case inhabitTypedSynthesisStreamPreparedWithSourceGoal
+            defaultQueryOptions {optionCutoff = 0} prepared poison []
+            (DjinnSourceInstantiationCandidates []) target poison of
+        Left (DjinnQueryOptionsFailure (NonPositiveCandidateCutoff 0)) -> pure ()
+        Left failure -> fail $ "unexpected streaming validation error: " ++ show failure
+        Right _ -> fail "invalid streaming cutoff crossed eager request validation"
+    let variable = SharedType.TypeVariable
+    case inhabitTypedSynthesisStreamPreparedWithSourceGoal defaultQueryOptions
+            prepared (variable "a") [] (DjinnSourceInstantiationCandidates []) target (variable "b") of
+        Left (DjinnInternalQueryFailure message) -> assertBool
+            "streaming mismatch lost source ownership diagnostic" $
+                "does not match its preserved source goal" `isInfixOf` message
+        Left failure -> fail $ "unexpected source mismatch: " ++ show failure
+        Right _ -> fail "unrelated streaming source goal acquired a lazy candidate stream"
+
+testCandidateStreamContext :: IO ()
+testCandidateStreamContext = do
+    environment <- expectRight $ declare
+        (ClassDecl "StreamContext" ["a"]
+            [("streamContextMethod", HTArrow (HTVar "a") (HTVar "a"))]) emptyEnvironment
+    prepared <- expectShownRight $ prepareEnvironment environment
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $ sharedName "streamContext"
+    let variable = SharedType.TypeVariable "a"
+        contexts = [Constraint (sharedName "StreamContext") [variable]]
+        goal = SharedType.FunctionType variable variable
+        source = SharedType.ForallType [] contexts goal
+        configured = defaultQueryOptions
+            { optionAlternatives = True, optionSorted = False, optionStrategy = Interleave
+            , optionCutoff = 16, optionBudget = Just 1000 }
+    batch <- expectShownRight $ inhabitTypedSynthesisResultPreparedWithSourceGoal
+        configured prepared source contexts (DjinnSourceInstantiationCandidates []) target goal
+    observations <- expectShownRight (inhabitTypedSynthesisStreamPreparedWithSourceGoal
+        configured prepared source contexts (DjinnSourceInstantiationCandidates []) target goal)
+        >>= mapM expectShownRight
+    let candidates = concatMap (SharedSearch.batchCandidates . SharedQuery.resultSearch) observations
+        compatibility = map SharedTypedCandidate.typedCandidateCompatibility
+    assertEqual "streaming contextual synthesis changed compatible candidates"
+        (compatibility $ SharedSearch.batchCandidates $ SharedQuery.resultSearch batch)
+        (compatibility candidates)
+    assertBool "the contextual identity fixture produced no candidates" $ not $ null candidates
+    forM_ candidates $ \candidate -> case SharedTypedCandidate.typedCandidateTermGraph candidate of
+        Left (DjinnTermGraphSourceTypingFailure message) -> assertBool
+            "contextual streaming lost its dictionary boundary" $ "dictionary evidence" `isInfixOf` message
+        Left failure -> fail $ "unexpected streaming context graph absence: " ++ show failure
+        Right _ -> fail "a contextual streamed candidate acquired an unchecked dictionary graph"
 
 testFoldBridgeReuse :: IO ()
 testFoldBridgeReuse = do

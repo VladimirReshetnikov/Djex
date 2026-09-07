@@ -80,13 +80,92 @@ def source_provenance(manifest_path):
             "church_source_canonical_lf_sha256": normalized_hash, "operations": selected}
 
 
+class OutputMilestones:
+    """Observe complete stdout lines without changing the child's streams.
+
+    Timestamps are upper observations of file visibility, not engine CPU time.
+    The final transcript parser must separately accept every reported success.
+    """
+    def __init__(self, queries, interval_seconds=0.02):
+        if not 0 < interval_seconds <= 1:
+            raise ValueError("observation interval must be in (0,1] seconds")
+        if not queries or len({query["id"] for query in queries}) != len(queries):
+            raise ValueError("output observation requires unique nonempty query identities")
+        implicit = [query for query in queries if query.get("start_pattern") is None]
+        if implicit and len(queries) != 1:
+            raise ValueError("a process-start-only observation requires one query")
+        self.queries = [dict(query) for query in queries]
+        self.patterns = [(query["id"],
+                          re.compile(query["start_pattern"]) if query.get("start_pattern") else None,
+                          re.compile(query["success_pattern"]) if query.get("success_pattern") else None)
+                         for query in queries]
+        self.interval = interval_seconds
+        self.active = implicit[0]["id"] if implicit else None
+        self.pending = b""
+        self.offset = 0
+        self.events = []
+        self.poll_count = 0
+        self.poll_seconds = 0.0
+
+    def feed(self, data, elapsed_seconds, *, final=False):
+        self.pending += data
+        while b"\n" in self.pending or (final and self.pending):
+            if b"\n" in self.pending:
+                line, self.pending = self.pending.split(b"\n", 1)
+                consumed = len(line) + 1
+            else:
+                line, self.pending = self.pending, b""
+                consumed = len(line)
+            raw_line = line.rstrip(b"\r")
+            text = raw_line.decode("utf-8", errors="replace")
+            for identity, start, _ in self.patterns:
+                if start is not None and start.search(text):
+                    self.active = identity
+                    self._record("query_echo", identity, elapsed_seconds, raw_line)
+            for identity, _, success in self.patterns:
+                if identity == self.active and success is not None and success.search(text):
+                    self._record("accepted_output_line", identity, elapsed_seconds, raw_line)
+            self.offset += consumed
+
+    def _record(self, kind, identity, elapsed, line):
+        self.events.append({"kind": kind, "query_id": identity,
+                            "observed_seconds": elapsed, "stdout_byte_offset": self.offset,
+                            "line_sha256": hashlib.sha256(line).hexdigest()})
+
+    def poll(self, capture, started, *, final=False):
+        before = time.monotonic()
+        self.poll_count += 1
+        data = capture.read()
+        self.feed(data, time.monotonic() - started, final=final)
+        self.poll_seconds += time.monotonic() - before
+
+    def receipt(self):
+        return {"measurement": "complete stdout line visible in direct capture file",
+                "origin": "Processes.run entry, including capture setup and process startup",
+                "clock": "time.monotonic", "poll_interval_seconds": self.interval,
+                "poll_count": self.poll_count, "observer_poll_seconds": self.poll_seconds,
+                "resolution_note": "polling and OS scheduling delay visibility observations; child buffering is unchanged",
+                "queries": self.queries, "events": list(self.events)}
+
+    def validate_counts(self, expected):
+        """Bind visibility measurements to the independently parsed outcomes."""
+        if set(expected) != {query["id"] for query in self.queries}:
+            raise ValueError("latency query inventory differs from parsed outcomes")
+        for query in self.queries:
+            events = [event for event in self.events if event["query_id"] == query["id"]]
+            starts = [event for event in events if event["kind"] == "query_echo"]
+            accepted = [event for event in events if event["kind"] == "accepted_output_line"]
+            if len(starts) != (query.get("start_pattern") is not None) or len(accepted) != expected[query["id"]]:
+                raise ValueError("latency output observations differ from parsed outcomes: " + query["id"])
+
+
 class Processes:
     def __init__(self, directory, timeout):
         self.directory = Path(directory)
         self.timeout = timeout
         self.rows = []
 
-    def run(self, label, command, *, source=None, cwd=None, env=None):
+    def run(self, label, command, *, source=None, cwd=None, env=None, observe=None):
         started = time.monotonic()
         row = {"label": label, "command": list(map(str, command)),
                "process_timeout_seconds": self.timeout, "cwd": str(cwd) if cwd else None,
@@ -105,6 +184,7 @@ class Processes:
         print(f"[behavior process] started {label} at {row['started_utc']} (guard {self.timeout:g}s)", flush=True)
         process = None
         job = None
+        observation_capture = None
         captures = ExitStack()
         try:
             # Files expose progress while the child runs and cannot retain
@@ -114,6 +194,8 @@ class Processes:
             stdin = captures.enter_context(input_path.open("rb")) if input_path else subprocess.DEVNULL
             stdout = captures.enter_context(paths["stdout"].open("wb", buffering=0))
             stderr = captures.enter_context(paths["stderr"].open("wb", buffering=0))
+            if observe is not None:
+                observation_capture = captures.enter_context(paths["stdout"].open("rb", buffering=0))
             job = WindowsJob() if os.name == "nt" else None
             # Windows starts suspended so no compiler/backend can escape the
             # Job before assignment. POSIX creates a dedicated process group.
@@ -126,7 +208,23 @@ class Processes:
             write_json(self.directory / "processes.json", self.rows)
             if job:
                 job.assign_and_resume(process)
-            process.wait(timeout=self.timeout)
+            if observe is None:
+                process.wait(timeout=self.timeout)
+            else:
+                # The same one-shot guard starts after process setup. Polling
+                # never renews it, drains a pipe, or changes candidate input.
+                deadline = time.monotonic() + self.timeout
+                while True:
+                    observe.poll(observation_capture, started)
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired(command, self.timeout)
+                    try:
+                        process.wait(timeout=min(observe.interval, remaining))
+                        break
+                    except subprocess.TimeoutExpired:
+                        if time.monotonic() >= deadline:
+                            raise subprocess.TimeoutExpired(command, self.timeout)
             row.update(status="completed", exit_code=process.returncode, timed_out=False)
         except subprocess.TimeoutExpired:
             row.update(status="timed_out", exit_code=None, timed_out=True)
@@ -145,6 +243,9 @@ class Processes:
                 job.close()
             elif process is not None:
                 terminate_tree(process, None)
+            if observe is not None and observation_capture is not None:
+                observe.poll(observation_capture, started, final=True)
+                row["output_observations"] = observe.receipt()
             captures.close()
             row["wall_seconds"] = time.monotonic() - started
             row["finished_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

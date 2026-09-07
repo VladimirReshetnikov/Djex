@@ -53,6 +53,10 @@ module Language.Haskell.Djex.Djinn
   , runDjinnTypedQueryWithInstantiationCandidates
   , runDjinnTypedQueryWithInstantiationAssignments
   , runDjinnTypedQueryWithKindedInstantiationAssignments
+  , runDjinnTypedQueryStream
+  , runDjinnTypedQueryStreamWithInstantiationCandidates
+  , runDjinnTypedQueryStreamWithInstantiationAssignments
+  , runDjinnTypedQueryStreamWithKindedInstantiationAssignments
   , runDjinnQuery
   , runDjinnQueryWithInstantiationCandidates
   , runDjinnQueryWithInstantiationAssignments
@@ -252,6 +256,53 @@ runDjinnTypedQueryWithKindedInstantiationAssignments session assignments =
   runDjinnTypedQueryWithProviderEvidence session $
     KindedAssignmentEvidence assignments
 
+-- | Observe one configured search incrementally, in deterministic discovery
+-- order. Request validation precedes the stream; each observed result retains
+-- its own checked typed candidates and cumulative search progress. The final
+-- observation carries completion evidence. Stopping at a successful prefix
+-- does not inspect the remaining search or establish its final verdict.
+--
+-- Unlike 'runDjinnTypedQuery', this route does not collect and globally rank
+-- the complete candidate pool. Candidate and choice limits belong to the one
+-- search, not to individual observations. A late query failure occurs at its
+-- position in the stream and does not invalidate earlier checked candidates.
+runDjinnTypedQueryStream
+  :: DjinnSession
+  -> DjinnRequest
+  -> Either Diagnostic [Either Diagnostic DjinnTypedResult]
+runDjinnTypedQueryStream session =
+  runDjinnTypedQueryStreamWithInstantiationCandidates session []
+
+-- | Incremental counterpart of 'runDjinnTypedQueryWithInstantiationCandidates'.
+-- Exact provider evidence is checked once before the search can yield results.
+runDjinnTypedQueryStreamWithInstantiationCandidates
+  :: DjinnSession
+  -> [ProviderInstantiationCandidate DjinnTypeVariable]
+  -> DjinnRequest
+  -> Either Diagnostic [Either Diagnostic DjinnTypedResult]
+runDjinnTypedQueryStreamWithInstantiationCandidates session candidates =
+  runDjinnTypedQueryStreamWithProviderEvidence session $ CandidateEvidence candidates
+
+-- | Incremental counterpart of 'runDjinnTypedQueryWithInstantiationAssignments'.
+runDjinnTypedQueryStreamWithInstantiationAssignments
+  :: DjinnSession
+  -> [ProviderInstantiationAssignment DjinnTypeVariable]
+  -> DjinnRequest
+  -> Either Diagnostic [Either Diagnostic DjinnTypedResult]
+runDjinnTypedQueryStreamWithInstantiationAssignments session assignments =
+  runDjinnTypedQueryStreamWithProviderEvidence session $ AssignmentEvidence assignments
+
+-- | Incremental counterpart of
+-- 'runDjinnTypedQueryWithKindedInstantiationAssignments'. The ordered provider
+-- and kind vectors remain attached to the exact source request and session.
+runDjinnTypedQueryStreamWithKindedInstantiationAssignments
+  :: DjinnSession
+  -> [KindedProviderInstantiationAssignment DjinnTypeVariable]
+  -> DjinnRequest
+  -> Either Diagnostic [Either Diagnostic DjinnTypedResult]
+runDjinnTypedQueryStreamWithKindedInstantiationAssignments session assignments =
+  runDjinnTypedQueryStreamWithProviderEvidence session $ KindedAssignmentEvidence assignments
+
 -- | Compatibility projection of 'runDjinnTypedQuery'.  Mapping does not
 -- inspect typed-graph availability or checked proof evidence.
 runDjinnQuery
@@ -311,22 +362,48 @@ runDjinnTypedQueryWithProviderEvidence session evidence request = do
   let query = djinnRequestQuery request
   (contexts, goal) <- Request.prepareDjinnRequest
     (Session.sessionClassArity session) request
-  let sourceEvidence = case evidence of
-        CandidateEvidence candidates ->
-          Core.DjinnSourceInstantiationCandidates candidates
-        AssignmentEvidence assignments ->
-          Core.DjinnSourceInstantiationAssignments assignments
-        KindedAssignmentEvidence assignments ->
-          Core.DjinnSourceKindedInstantiationAssignments assignments
-      execute = Core.inhabitTypedSynthesisResultPreparedWithSourceGoal
+  let execute = Core.inhabitTypedSynthesisResultPreparedWithSourceGoal
         (requestOptions query)
         (Session.sessionPreparedEnvironment session)
         (requestContextualType query)
         contexts
-        sourceEvidence
+        (djinnSourceEvidence evidence)
         (requestTarget query)
         goal
-  case execute of
+  adaptDjinnQueryResult session request execute
+
+runDjinnTypedQueryStreamWithProviderEvidence
+  :: DjinnSession
+  -> DjinnProviderEvidence
+  -> DjinnRequest
+  -> Either Diagnostic [Either Diagnostic DjinnTypedResult]
+runDjinnTypedQueryStreamWithProviderEvidence session evidence request = do
+  let query = djinnRequestQuery request
+  (contexts, goal) <- Request.prepareDjinnRequest
+    (Session.sessionClassArity session) request
+  case Core.inhabitTypedSynthesisStreamPreparedWithSourceGoal
+      (requestOptions query)
+      (Session.sessionPreparedEnvironment session)
+      (requestContextualType query)
+      contexts
+      (djinnSourceEvidence evidence)
+      (requestTarget query)
+      goal of
+    Left failure -> Left $ djinnQueryFailure request failure
+    Right results -> Right $ map (adaptDjinnQueryResult session request) results
+
+djinnSourceEvidence :: DjinnProviderEvidence -> Core.DjinnSourceProviderEvidence
+djinnSourceEvidence evidence = case evidence of
+  CandidateEvidence candidates -> Core.DjinnSourceInstantiationCandidates candidates
+  AssignmentEvidence assignments -> Core.DjinnSourceInstantiationAssignments assignments
+  KindedAssignmentEvidence assignments -> Core.DjinnSourceKindedInstantiationAssignments assignments
+
+adaptDjinnQueryResult
+  :: DjinnSession
+  -> DjinnRequest
+  -> Either DjinnQueryError DjinnTypedResult
+  -> Either Diagnostic DjinnTypedResult
+adaptDjinnQueryResult session request execute = case execute of
     Left failure -> Left $
       djinnQueryFailure request failure
     Right result

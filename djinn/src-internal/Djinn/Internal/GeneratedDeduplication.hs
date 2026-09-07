@@ -6,6 +6,7 @@
 -- associations by zipping sidecars onto an already de-duplicated clause list.
 module Djinn.Internal.GeneratedDeduplication
     ( deduplicateEtaEquivalentClausesOn
+    , etaNormalClauseExpression
     ) where
 
 import qualified Language.Haskell.Synthesis.Generated as Generated
@@ -25,19 +26,8 @@ deduplicateEtaEquivalentClausesOn
 deduplicateEtaEquivalentClausesOn clauseOf = distinctBy etaAlphaEquivalent
   where
     etaAlphaEquivalent left right = Generated.alphaEquivalentExpression
-        (etaNormalExpression $ clauseOf left)
-        (etaNormalExpression $ clauseOf right)
-
-    etaNormalExpression = Generated.simplifyExpressionBy id
-        . splitLambdaGroups
-        . Generated.functionClauseExpression
-
-    splitLambdaGroups = Generated.rewriteExpressionBottomUp $ \expression ->
-        case expression of
-            Generated.Lambda patterns body -> foldr
-                (\pattern nested -> Generated.Lambda [pattern] nested)
-                body patterns
-            other -> other
+        (etaNormalClauseExpression $ clauseOf left)
+        (etaNormalClauseExpression $ clauseOf right)
 
     distinctBy _ [] = []
     distinctBy equivalent (firstCandidate : remaining) =
@@ -46,3 +36,21 @@ deduplicateEtaEquivalentClausesOn clauseOf = distinctBy etaAlphaEquivalent
             | candidate <- remaining
             , not $ equivalent firstCandidate candidate
             ]
+
+-- | The compact comparison payload retained by an incremental enumerator.
+-- Keeping this expression does not retain proof evidence or source graphs
+-- belonging to a candidate that has already been delivered.
+etaNormalClauseExpression
+    :: Ord local
+    => Generated.FunctionClause local
+    -> Generated.Expression local
+etaNormalClauseExpression = Generated.simplifyExpressionBy id
+    . splitLambdaGroups
+    . Generated.functionClauseExpression
+  where
+    splitLambdaGroups = Generated.rewriteExpressionBottomUp $ \expression ->
+        case expression of
+            Generated.Lambda patterns body -> foldr
+                (\pattern nested -> Generated.Lambda [pattern] nested)
+                body patterns
+            other -> other

@@ -107,8 +107,8 @@ and executes it with GHC. The query observes eight candidates and performs one
 additional compiler check without adding a candidate slot. A second run with
 `not (null (repaired id))` rejects the repaired expression as behaviorally false.
 
-This establishes live positive repair under `all` selection. It does not by
-itself establish every remaining selection-mode acceptance or Leant integration.
+This establishes live positive repair under `all` selection. The additional
+first/best acceptance below covers the other selection modes separately.
 
 After the final namespace-reservation change, the GHC 9.12.4 `-Werror` build
 passed. Full affected suites passed: 53 Exference engine tests (0.26 seconds),
@@ -118,6 +118,32 @@ tests total. The contextual implicit-local control still declines a graph;
 the existing scope, skolem, and certificate controls remain in these suites.
 Logs are `dist-newstyle/priority-implicit-final-build.log` and
 `dist-newstyle/priority-implicit-<suite>-final.log` for those five suites.
+
+## First/best repaired-candidate selection
+
+The public CLI regression now exercises `first` and `best`, each in expression
+and definition display mode, with a real loaded abstract `Token` provider whose
+continuation consumes an impredicative list. The first observed candidate fails
+GHC at `(forall a. a -> a) -> Token`, retains its own checked graph, and passes
+after graph-guided elaboration. The test independently compiles and executes the
+exact displayed repair against the original provider module and full signature.
+There is no substituted compiler, observation-dependent predicate, or supplied
+target implementation.
+
+The three-candidate window records one observation under `first` and three under
+`best`, with one extra compiler check in each run. Best selection retains the
+accepted repair while two later candidates fail compilation. This establishes
+retention of that accepted result; this particular fixture does not compare two
+distinct passing repairs against each other. The prior all-selection repair and
+actually false predicate remain in the full CLI suite.
+
+The strict GHC 9.12.4 build passed, the focused regression passed in 24.89 seconds,
+and all 100 CLI tests passed in 142.44 seconds. Logs are
+`dist-newstyle/priority-exference-forwarding-cost-build.log`,
+`dist-newstyle/priority-first-best-cli-focused.log`, and
+`dist-newstyle/priority-first-best-cli-full.log`. These binaries also contain the
+concurrent, unaccepted recursive-case experiment; this receipt closes the CLI
+selection fixture, not acceptance of that experiment or a new Leant integration.
 
 ## Leant integration and recursive-case work in progress
 

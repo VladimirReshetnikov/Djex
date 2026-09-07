@@ -194,6 +194,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplBehavioralStreamingSelection
   , testCase "live graph elaboration repairs and displays the exact checked candidate"
       testReplBehavioralElaboration
+  , testCase "live first and best selection retain the exact repaired provider candidate"
+      testReplBehavioralElaborationSelection
   , testCase "behavioral worker checks Bool without leaking previous bindings"
       testBehavioralWorkerIsolation
   , testCase "REPL behavioral timeout retires its worker before the next query"
@@ -3594,6 +3596,82 @@ testReplBehavioralElaboration = withTemporaryEnvironment [] $ \directory ->
       "final check: BehavioralFalse" falseErrors
     assertBool "the false repaired implementation leaked into displayed results" $
       not $ revised `isInfixOf` falseOutput
+
+testReplBehavioralElaborationSelection :: Assertion
+testReplBehavioralElaborationSelection = withTemporaryEnvironment
+  [("RepairSelection.hs", unlines
+    [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes #-}"
+    , "module RepairSelection (Token, make, observe) where"
+    , "import Prelude"
+    , "data Token = Token Bool"
+    , "make :: forall a. ((a -> a) -> [(forall b. b -> b)]) -> (forall c. c -> c) -> Token"
+    , "make k _ = Token (null (k id))"
+    , "observe :: Token -> Bool"
+    , "observe (Token result) = result"
+    ])] $ \directory ->
+  forM_ ["first", "best"] $ \selection ->
+   forM_ ["expression", "definition"] $ \renderMode -> do
+    -- The abstract result requires the real provider. Its continuation's
+    -- impredicative parameter cannot be recovered from make's result type.
+    -- Unlike the empty-list-only fixture above, its first candidate really
+    -- requires repair; no observation counter or substituted worker is used.
+    let signature = "(forall a. a -> a) -> Token"
+    (exitCode, output, errors) <- runRepl directory
+      [ ":module RepairSelection"
+      , ":backend exference"
+      , ":set select " ++ selection
+      , ":set render " ++ renderMode
+      , ":set allow-unused off"
+      , ":set quality-window 3"
+      , ":set candidate-limit 3"
+      , ":set max-steps 8192"
+      , ":synth repaired :: " ++ signature ++ " where observe (repaired id)"
+      ]
+    assertEqual (selection ++ " live repair REPL exit") ExitSuccess exitCode
+    revised <- case
+        [ term
+        | line <- lines errors
+        , Just term <- [stripPrefix "elaborated expression: " line]
+        ] of
+      [term] -> pure term
+      terms -> fail $ "expected one actual provider repair: " ++ show terms ++ errors
+    assertContains "the repaired occurrence must be the first observed candidate"
+      "candidate observation: 1" errors
+    assertContains "provider repair must retain the candidate's own graph"
+      "candidate evidence: graph present;" errors
+    assertContains "unannotated provider application must really fail GHC"
+      "original check: BehavioralCompilationError" errors
+    assertContains "the annotated provider application must pass the real predicate"
+      "final check: BehavioralPassed" errors
+    assertContains "one repaired occurrence needs one additional compiler check"
+      "checks=1; retries retain the same candidate" errors
+    let expectedObservations = case selection of
+          "first" -> "checked=1, true=1, false=0, error=0, timeout=0, window=3"
+          _ -> "checked=3, true=1, false=0, error=2, timeout=0, window=3"
+        displayed = case renderMode of
+          "definition" -> "repaired = " ++ revised
+          _ -> revised
+    assertContains "selection must retain each candidate's original observation slot"
+      expectedObservations errors
+    assertEqual "selection must display the exact checked repair once" 1 $
+      countOccurrences displayed output
+    assertBool "a passing provider repair must not report no match" $
+      not $ "DJEX_REPL_BEHAVIORAL_NO_MATCH" `isInfixOf` errors
+    let fixture = directory ++ "/RepairedSelection.hs"
+    writeFile fixture $ unlines
+      [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, ScopedTypeVariables, TypeApplications #-}"
+      , "module Main where"
+      , "import RepairSelection"
+      , "repaired :: " ++ signature
+      , "repaired = " ++ revised
+      , "main :: IO ()"
+      , "main = if observe (repaired id) then putStrLn \"replayed\" else error \"wrong behavior\""
+      ]
+    replay <- timeout 30000000 $ readProcessWithExitCode "runghc"
+      ["-i" ++ directory, fixture] ""
+    case replay of
+      Just (ExitSuccess, "replayed\n", _) -> pure ()
+      _ -> fail $ "exact displayed provider repair failed independent GHC execution: " ++ show replay
 
 testReplBehavioralStreamingSelection :: Assertion
 testReplBehavioralStreamingSelection = withTemporaryEnvironment [] $ \directory ->

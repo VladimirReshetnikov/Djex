@@ -95,10 +95,11 @@ The improvements cover:
 Recent checked improvements add same-candidate Haskell elaboration retries,
 implicit local polymorphic-use evidence, and Djinn's bounded case analysis for
 ordinary recursive data. The [implementation register](docs/reports/2026-09-07-synthesis-priorities-1-4.md)
-records the accepted live repair under `all` selection and eight Haskell
-recursive-data scenarios. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md)
-keeps Exference case parity, complete Leant integration, remaining selection
-acceptance, recursors, contextual dictionaries, and broader Church behavior
+records live repair under `first`, `best`, and `all` selection, with exact
+displayed-source compiler replay, and eight Djinn Haskell recursive-data
+scenarios. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md)
+keeps Exference case parity, complete Leant integration, recursors,
+contextual dictionaries, and broader Church behavior
 explicitly open. Unused lambda and let binders now retain source graphs as
 checked wildcards, preserving exact compatibility erasure.
 

@@ -41,7 +41,14 @@ capability. The failed run performed no independent kernel replays.
 The unused-binder correction is committed separately in `02bfde77`; its strict
 build and all 53 Exference engine tests pass. It emits checked wildcard patterns
 for unused lambda and let binders without relaxing exact erasure equality.
-The broader complete-case graph extension remains open.
+The broader complete-case graph extension now has passing direct engine tests,
+but remains uncommitted and has no complete cross-engine acceptance. The current
+ordinary-data matrix still fails on two independently typed recursive inputs.
+Search must retain both whole-value forwarding and complete input inspection;
+simply changing their order does not overcome the score charged for all case
+branches. A protected scheduling experiment is in progress. Its work must share
+the existing step, queue, and depth limits. The earlier experimental forwarding
+penalty changed depth accounting and is being replaced, not adopted as a default.
 
 Leant's full post-integration suite also needs a clean rerun. The first run
 had missing fake-Z3 setup and two genuine positive-constructor-bound failures;
@@ -55,8 +62,12 @@ Haskell rendering, bounded same-candidate retries, and checked implicit local
 type selections. The [implementation register](2026-09-07-synthesis-priorities-1-4.md#implicit-local-evidence-and-live-repair)
 records a live Exference repair under `all` selection, exact displayed-source
 replay in expression and definition modes, and a false control. Its five
-affected suites passed 1,231 tests. First/best selection of a repaired
-candidate remains an acceptance gap; the renderer itself is implemented.
+affected suites passed 1,231 tests. The subsequent real-provider fixture now
+passes first/best selection in both display modes, with exact displayed-source
+GHC replay. All 100 CLI tests pass, including the existing all-selection and
+false controls. This closes that selection fixture; the
+[register](2026-09-07-synthesis-priorities-1-4.md#firstbest-repaired-candidate-selection)
+records its precise limits and the concurrent unaccepted source changes.
 
 The live `reverse` diagnostic's rejected occurrence had **no source graph**.
 Its source checker reported a rigid-variable type mismatch. More annotations
@@ -83,16 +94,15 @@ current blocking fixtures.
 | Order | Existing goal item | Deliverable | Acceptance and reason for its position |
 | --- | --- | --- | --- |
 | 1 | Priority 2, case stage; priority 4 acceptance | Close Exference case parity and complete Leant integration | Retain all eight accepted Djinn cases; close Exference `tailOr` and tuple fields, extending checked case evidence beyond same-result zero/step spines. Require exact graphs and Haskell execution. Replay all eight in Djinn, Exference, and Both with false controls, then pass the full configured Leant suite. Preserve positive-only construction bounds. |
-| 2 | Priority 1 | Close the remaining elaboration acceptance | Require live first/best selection of a repaired candidate, exact checked/displayed text, rejection controls, and the shared deadline. Retain the accepted all-selection fixture and integrate any resulting changes into Leant. |
-| 3 | Priority 4, Lean checker stage | Bounded simplification after decision attempts | Check the proposition and its negation by decision first, then try bounded simplification. Accept only completed kernel proofs, preserve deadlines and axiom inventories, and retain false and inconclusive controls. This is a smaller independent delivery than class-evidence representation. |
-| 4 | Priority 2, recursor stage; extend priority 4 corpus | Supplied folds and recursors for ordinary recursive programs | Exercise `map`, `append`, and `length` as acceptance targets using generic recursors, not those target implementations as providers. Reuse checked recursion structure before adding synthesis of recursive definitions. Require independent host checking and termination evidence appropriate to the construction. |
-| 5 | Priority 3 | Contextual providers with explicit dictionary evidence | First exact constrained forwarding and dictionary-independent bodies under lexical givens; then methods, conditional providers, and superclasses. This crosses search, graph, and host-projection boundaries and deserves its own staged acceptance. |
-| 6 | Priority 4, corpus completion | Close the remaining Church behavioral coverage | Cover naturals, options/eithers, folds, conversions, and all 19 supplied-default cases. Start adding these tests during earlier steps; this row is the final coverage gate, not permission to postpone all behavioral work. |
+| 2 | Priority 4, Lean checker stage | Validate the implemented bounded simplification | Both decision polarities precede both simplification polarities. Require the 16 isolated method controls, 15 live queries across all three engines, exact candidate replay, false/inconclusive outcomes, and the full boundary suite. Record actual proof axioms separately from candidate axioms. |
+| 3 | Priority 2, recursor stage; extend priority 4 corpus | Supplied folds and recursors for ordinary recursive programs | Prepared fixtures exercise `map`, `append`, and `length` using generic recursors, with tree operations in Lean. Implement coherent polymorphic instantiation where needed, then require exact source evidence, host behavior, and termination checking. Fixture preparation is not capability acceptance. |
+| 4 | Priority 3 | Contextual providers with explicit dictionary evidence | First exact constrained forwarding and dictionary-independent bodies under lexical givens; then methods, conditional providers, and superclasses. This crosses search, graph, and host-projection boundaries and deserves its own staged acceptance. |
+| 5 | Priority 4, corpus completion | Close the remaining Church behavioral coverage | Cover naturals, options/eithers, folds, conversions, and all 19 supplied-default cases. Start adding these tests during earlier steps; this row is the final coverage gate, not permission to postpone all behavioral work. |
 
-The first row stays ahead of the small priority-1 acceptance closure because
-it has concrete cross-engine failures. This is a bounded case
-milestone: do not let general recursion design absorb the remaining selection
-checks. The schedule separates delivery size from importance. Dictionary support
+The first/best CLI fixture is now accepted and should be retained at subsequent
+integration checkpoints. The first row remains the principal cross-engine
+capability gap; bounded simplification can be validated independently while its
+search fix is developed. The schedule separates delivery size from importance. Dictionary support
 remains a required capability; bounded simplification does not replace it.
 Nor does accepting a recursor milestone complete recursive-data work without
 the documented source-evidence and Lean checking gates.

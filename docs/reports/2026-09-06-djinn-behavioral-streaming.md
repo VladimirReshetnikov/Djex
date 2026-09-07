@@ -1,9 +1,11 @@
 # Incremental Djinn behavioral synthesis
 
-Status: the current three-family streaming implementation is under validation.
-The focused ten-test group, complete Djex suites, and both Haskell behavioral
-profiles passed. Final Leant integration and its live matrix remain pending.
-This report does not claim completion or publication.
+Status: **acceptance passed** for the three-family streaming implementation.
+Strict builds, complete affected suites, the 30-cell behavioral matrix, and
+the three additional Lean control profiles passed. This report identifies the
+tested source and executables; it does not claim repository publication.
+The [compact final receipt](../../test-church/receipts/behavior-streaming-final.json)
+records the acceptance identities and supporting receipt hashes.
 
 ## Scope and acceptance requirements
 
@@ -44,7 +46,7 @@ The supplementary Leant diagnostics distinguish graph absence from target-only
 reconstruction over selected rendered groups. They carry no source or logical
 authority and must not force an unselected candidate tail.
 
-## Current implementation
+## Accepted implementation
 
 The additive `runDjinnTypedQueryStream` family returns eager request failure
 or a lazy list of per-observation `Either` results. All three provider-evidence
@@ -55,11 +57,12 @@ distinct across all its candidate occurrences.
 
 Streaming uses deterministic discovery order. Existing local strategy and
 provider costs remain search inputs, while whole-pool ranking stays with the
-ordinary batch API. The first passing definition can therefore differ from
-the historical pooled result. Incremental deduplication retains compact
-eta-normal expressions, not consumed typed graphs or proof trees.
+ordinary batch API. A first passing definition can therefore differ from the
+historical pooled result, although all 30 accepted spellings in this acceptance
+matrix were unchanged. Incremental deduplication retains compact eta-normal
+expressions, not consumed typed graphs or proof trees.
 
-Explicit interleaved streaming now rotates among three independent families:
+Explicit interleaved streaming rotates among three independent families:
 
 - historical plans and their retained cursors;
 - existing exact-demand instantiation groups and singleton bridges;
@@ -88,184 +91,179 @@ finite inner work quanta are 64 choices for the LJT tail and 4,096 for the
 normal-form stream; either stream yields its turn immediately after a proof.
 The outer family scheduler still preempts after its own 64-choice quantum.
 Both continuations remain live, and every step is charged individually before
-continuation. This is effort allocation, not a larger search limit or a claim
-of exhaustive normal-form enumeration. Ordinary batch, depth-first, and
-first-only search schedules retain their established policies.
+continuation. This allocates effort within the existing limit; it does not
+establish exhaustive normal-form enumeration. Ordinary batch, depth-first,
+and first-only search schedules retain their established policies.
 
 Djex's named behavioral path retains the typed candidate handle while rendering
 its compatibility projection for GHC. Leant maps each observation through its
 existing exact source renderer and checks a group before resuming the stream.
 Each frontend retains its own observation window and behavior-selection rules.
 For Djinn's singleton observations, best-lookahead counts observations without
-an improvement. Its first-selection path does not inspect a later graph,
-candidate, error, or terminal verdict after success.
+an improvement. First-selection does not inspect a later graph, candidate,
+error, or terminal verdict after success.
 
 At a raw cutoff, streaming reports that cutoff without looking beyond it.
 The historical depth-first batch path probes the overflow tail and can instead
-encounter choice exhaustion there. The stream deliberately avoids that extra
-work; candidate-set parity is checked separately from the exact consumed
-cursor-prefix status. Neither incomplete result provides negative evidence.
+encounter choice exhaustion there. Candidate-set parity is checked separately
+from the exact consumed cursor-prefix status. Neither incomplete result
+provides negative evidence.
 
-## Frozen baseline
+## Tested identities and frozen baseline
 
-The baseline executables were copied before the streaming build:
+The baseline executables were copied before the streaming build. Leant was
+built from the root source revision below with its Djex vendor checkout at
+`6a964389`; the build record pins this combination separately. Subsequent
+documentation and vendor-integration commits preserve that tested source.
 
-| Frontend | Published source revision | Executable SHA-256 |
+| Frontend | Frozen baseline source | Accepted source |
 | --- | --- | --- |
-| Djex | `4051f41f6d3b4886fa99627d2c6bf5a48e046e90` | `1682dfa30bddbd956997bf7ca4c7f9e02551cae0cb884d1b06ced557a8aff765` |
-| Leant | `62f7b536172b0a8ba7dfe9a6251c4b26d576c4aa` | `bc041b71eb86e7787e5bd4461635702ed34fdf97804c7c26d5e9994d4b7e15fc` |
+| Djex | `4051f41f6d3b4886fa99627d2c6bf5a48e046e90` | `6a964389` |
+| Leant | `62f7b536172b0a8ba7dfe9a6251c4b26d576c4aa` | `00e9655` |
 
-The opt-in runner observes complete stdout lines in the unchanged direct
-capture file using a monotonic clock and a 20-millisecond polling interval.
-Observed time includes buffering and operating-system scheduling. Haskell
-reports process-entry-to-definition visibility, including startup; Lean also
-records echoed-query-to-result visibility. Final exact transcript parsing and
-independent replay must agree with the observed success-line inventory.
-
-The fresh Haskell Djinn baseline passed all six operations, its actual false
-control, and 23 independent execution assertions. Each accepted definition,
-predicate and replay module matched the earlier source-graph acceptance run.
-The full baseline receipt is retained locally under
-`dist-newstyle/streaming-acceptance/baseline-haskell-djinn/results.json`, SHA-256
-`59439a755c7bb7b48c74bd47b22eb297717a1b61a68224d6b75435f5e7ca330f`.
-The fresh Lean Djinn baseline also passed six operations and its false control,
-with 45 empty kernel axiom inventories across the isolated candidate and oracle
-modules. The other three frozen baseline profiles also passed: Haskell
-Exference, Lean Exference, and Lean Both. Together the five baselines cover all
-30 host/engine/operation cells, with actual false-predicate controls and
-independent execution or kernel replay. Current-executable acceptance remains
-open.
-
-## Current validation matrix
-
-The current focused streaming group passed **10 tests in 1.84 seconds**, with
-its receipt at `dist-newstyle/streaming-acceptance/carrier-core-focused.log`.
-It covers early delivery with a poisoned global-ranking field and large tail,
-both strategies' cumulative allowances, graph identity and erasure, terminal
-evidence, contextual authority, eager request validation, a reused singleton
-bridge, cooperating schemes, a function-valued accumulator, and finite inner
-proof fairness with exact choice accounting. The composition-prefix checks
-are focused calibration requirements, not universal latency bounds.
-
-The final strict Djex build passed with GHC 9.12.4 and `-Werror`. The complete
-serial suites passed 132 core tests in 59.86 seconds, 98 shared-facade tests in
-12.72 seconds, and 98 CLI tests in 71.22 seconds. Their source/executable hashes
-and process records are retained in
-`dist-newstyle/streaming-acceptance/carrier-djex-units/results.json`.
-
-The current Haskell Djinn profile passed all six operations, its actual false
-control, and **23 independent execution assertions**. Both compiler and
-execution exit codes were zero, and the executable remained unchanged. The
-receipt is `dist-newstyle/streaming-acceptance/carrier-haskell-djinn/results.json`,
-SHA-256 `e839d16b05099a4268598a870435721f757f334400534008fa89f72bf700f258`.
-Its executable SHA-256 is
-`2a500d9cb6cffb55ed714ee81af2041d0239e181d46470566584c30d999724f7`.
-
-| Haskell Djinn operation | Frozen baseline first visible (s) | Current first visible (s) | Current predicate attempts | Current candidate-check errors |
-| --- | ---: | ---: | ---: | ---: |
-| `not` | 69.599 | 1.724 | 6 | 0 |
-| `swap` | 30.825 | 1.219 | 1 | 0 |
-| `map` | 39.562 | 1.251 | 2 | 0 |
-| `append` | 114.598 | 2.232 | 109 | 0 |
-| `reverse` | 77.990 | 4.370 | 242 | 1 |
-| `filter` | 20.622 | 2.442 | 106 | 0 |
-
-The independent receipt audit found all six exact definitions and all eight
-replay modules equal to the frozen baseline. Median first-visible time across
-the six operations changed from 54.581 to 1.978 seconds. These are single-run
-visibility observations including startup, not a statistical speed guarantee.
-Positive-query attempts changed from 503 to 466 and candidate-check errors from
-11 to 1, with no predicate timeouts. These attempts are behavioral observations,
-not counts of raw proofs or search choices. The improvement is not uniform:
-reverse used 242 observations compared with the baseline's 78.
-
-The current Haskell Exference profile also reports six passes, its false
-control, and 23 independent execution assertions for the same executable.
-Its receipt is `dist-newstyle/streaming-acceptance/carrier-haskell-exference/results.json`,
-SHA-256 `fe3f1ac4c293e8380fcc2b87bf9edc1ef761a84c75dbcfa015a8e6f14b40f8ff`.
-Its independent paired audit passed: all six definitions, all eight replay
-modules, commands, limits, and oracle/harness hashes match the baseline.
-Positive-query counters remain 196 checked, 6 true, and 190 false, with no
-errors or timeouts. The actual false control again rejected 256 candidates.
-
-| Current implementation gate | Status |
+| Executable | SHA-256 |
 | --- | --- |
-| Focused ten-test streaming group | Passed; receipt above |
-| Final strict Djex build and complete affected suites | Passed: 132 core, 98 facade, 98 CLI |
-| Final strict Leant build, full suite, and vendor integration | Pending final receipts |
-| Haskell Djinn: six operations, false control, independent GHC execution | Passed for the executable identified above |
-| Haskell Exference: six operations, false control, independent GHC execution | Passed; independent paired audit passed |
-| Lean Djinn, Exference, and Both: six operations each, false controls, independent kernel replay | Pending current-executable matrix |
-| Paired current-versus-frozen timing and identity checks | Pending complete matrix |
-| Final documentation and repository integration | Pending |
+| Frozen Djex | `1682dfa30bddbd956997bf7ca4c7f9e02551cae0cb884d1b06ced557a8aff765` |
+| Accepted Djex | `2a500d9cb6cffb55ed714ee81af2041d0239e181d46470566584c30d999724f7` |
+| Frozen Leant | `bc041b71eb86e7787e5bd4461635702ed34fdf97804c7c26d5e9994d4b7e15fc` |
+| Accepted Leant | `9a55eb231c5dd6608eb6750e87a5f05e2dad76cae98e20be197d2e9cf5d94424` |
 
-Final acceptance must bind the exact tested executables and source inputs to
-the complete 30-cell host/engine/operation matrix. The historical receipts
-below are retained to explain the regression and the repair; their compiler
-and runtime passes do not certify the revised scheduler.
+All five frozen baseline profiles passed their six operations, actual
+false-predicate controls, and independent execution or kernel replay. The
+fresh Haskell Djinn baseline receipt is retained under
+`dist-newstyle/streaming-acceptance/baseline-haskell-djinn/results.json`,
+SHA-256 `59439a755c7bb7b48c74bd47b22eb297717a1b61a68224d6b75435f5e7ca330f`.
 
-## Historical phase-one evidence
+## Validation results
 
-The initial streaming implementation passed strict GHC 9.12.4 `-Werror`
-builds and the following tests before the scheduler repairs:
+Both final strict builds passed with GHC 9.12.4 and `-Werror`. The complete
+serial Djex suites passed **132 core tests**, **98 shared-facade tests**, and
+**98 CLI tests** in 59.86, 12.72, and 71.22 seconds respectively. The complete
+Leant suite passed **615 tests in 534.77 seconds**. The Djex process records
+are in `dist-newstyle/streaming-acceptance/carrier-djex-units/results.json`.
 
-| Historical test gate | Result |
-| --- | --- |
-| Djex core | 128 passed in 126.91 seconds, including six streaming tests |
-| Djex shared facade | 98 passed in 12.19 seconds |
-| Djex CLI | 98 passed in 120.97 seconds |
-| Leant focused streaming/observability | 32 passed |
-| Leant full suite | 615 passed in 430.06 seconds |
-| Observer/comparison harnesses | 17 Djex observer, 9 Lean observer, and 5 paired-receipt tests passed |
+The focused streaming group passed **10 tests in 1.84 seconds** before final
+comment-only cleanup and the strict build. It covers poisoned global ranking
+and an unevaluated tail, both strategies' cumulative allowances, graph identity
+and erasure, terminal evidence, contextual authority, eager request validation,
+a reusable singleton bridge, cooperating schemes, a function-valued accumulator,
+and finite inner proof fairness with exact choice accounting. Its
+composition-prefix checks are calibration requirements, not universal latency
+bounds. The unchanged observer/comparison harnesses previously passed **31
+tests**: 17 Djex observer, nine Lean observer, and five paired-receipt tests.
 
-The historical Leant executable SHA-256 was
-`0c22c7ab765490bbd266003bb02f1af29a54a32d5af435ab2bff56126f7bc9cf`;
-its test executable was
-`2bc2b11fe08f273cc7632fd8fd2c5d3c348237e0f8448db117c589eff781451a`.
-These identities are phase-one evidence, not the current build identities.
+Haskell late-error retention and first-selection tail avoidance were supported
+by source review and actual first/best/all CLI checks. No Haskell presenter
+fault-injection test with a poisoned later error is claimed. Lean additionally
+has a poisoned-late-presenter regression test.
 
-The first live Lean Djinn profile exposed an acceptance regression: `append`
-and `filter` reached their unchanged **120-second** command deadlines after
-**240** and **293 falsified candidates**, respectively. Four other operations
-displayed passing results, and the real false control recorded **five
-falsifications**. The harness rejected the incomplete six-operation profile
-before independent kernel replay. It is therefore **not a passed Lean
-acceptance result**. The receipt remains at
-`dist-newstyle/streaming-acceptance/after-lean-djinn/results.json` in Leant.
+| Accepted behavioral profile | Six operations | Actual false control | Independent replay |
+| --- | --- | --- | --- |
+| Haskell Djinn | Passed | Passed | 23 execution assertions |
+| Haskell Exference | Passed | Passed | 23 execution assertions |
+| Lean Djinn | Passed | Passed | 45 empty kernel axiom inventories |
+| Lean Exference | Passed | Passed | 45 empty kernel axiom inventories |
+| Lean Both | Passed | Passed | 45 empty kernel axiom inventories |
 
-The initial Haskell Djinn profile did pass six operations, the real false
-control, and 23 independent execution assertions. Its receipt is
-`dist-newstyle/streaming-acceptance/after-haskell-djinn/results.json`, SHA-256
-`1b22717a311d9fc0910d0a028323e923b56803f360fff12d1e21f9e6b1ab150b`.
-Its executable SHA-256 was
-`a4e013f6ed5bfee8cf90a323965b2aab313e95cab107674f49b9dfc1a6a2043a`.
-Exact queries, limits, corpus sources, and oracle/harness hashes matched the
-frozen baseline. The following timings belong only to that initial profile:
+Each profile covers `not`, `swap`, `map`, `append`, `reverse`, and
+`filter`, with **626 finite observations** across those operations. Independent
+paired audits passed for the complete **30-cell matrix**. All 30 exact accepted
+spellings matched their frozen baseline cells; both Haskell profiles also
+retained all eight exact replay modules. Recorded commands, corpus/oracle
+inputs, and limits were checked for paired comparability. These are finite
+behavioral checks and exact-term replay, not proofs of every possible
+behavioral law.
 
-| Operation | Frozen baseline first visible (s) | Historical phase-one first visible (s) |
-| --- | ---: | ---: |
-| `not` | 69.599 | 1.335 |
-| `swap` | 30.825 | 1.039 |
-| `map` | 39.562 | 1.073 |
-| `append` | 114.598 | 25.634 |
-| `reverse` | 77.990 | 14.136 |
-| `filter` | 20.622 | 23.484 |
+Three additional live Leant profiles passed independent kernel replay:
 
-These single-run visibility measurements include startup and do not establish
-a statistical performance guarantee. Positive-query predicate attempts rose
-from 503 to 2,367, including an increase from 11 to 109 candidate-check errors;
-all six accepted results still passed their independent checks, and neither
-run had a predicate timeout. Predicate attempts do not measure raw proof or
-choice work. Discovery order changed the accepted spelling of `not`; the
-other five exact definitions and replay modules were unchanged.
+| Control profile | Named queries | Retained terms, including warmup/recovery | Empty kernel axiom inventories |
+| --- | ---: | ---: | ---: |
+| Quotas, false and inconclusive checks, recovery | 10 | 9 | 20 |
+| Djinn partial results at a 10-second deadline | 3 | 77 | 154 |
+| Both partial results at a 10-second deadline | 3 | 3 | 6 |
+
+The quota profile checks that false or inconclusive assertions do not fill
+success slots, widening can reach the other projection, two distinct successes
+can fill a quota, and a later query still succeeds. These claims concern Djinn
+and Both mode behavior; the second projection in the Both control uses an
+Exference fallback. They do not claim that each engine independently proved
+every inconclusive case.
+
+At the deadline, the Djinn target retained 75 accepted terms below quota 256;
+the Both target retained one accepted term below its quota. Both reported zero
+falsified and zero inconclusive assertions for their target queries, explicitly
+reported incomplete further search, and then passed recovery. Source inputs
+and executable identities remained unchanged across all three control runs.
+The Leant receipts are under
+`dist-newstyle/streaming-acceptance/carrier-controls-quota/results.json`,
+`carrier-controls-partial-djinn/results.json`, and
+`carrier-controls-partial-both/results.json`.
+
+## Before/after measurements
+
+The observer reads complete stdout lines in the unchanged direct capture file
+using a monotonic clock and a 20-millisecond polling interval. Visibility
+includes child buffering, polling, and operating-system scheduling. Haskell
+uses process entry to accepted-definition visibility, including startup. Lean
+uses the actual echoed query to accepted-result visibility and separately
+records process-entry timing. Exact final transcript parsing and independent
+replay agree with the observed success-line inventory.
+
+| Profile | Median first visible before (s) | Median first visible after (s) | Timing basis |
+| --- | ---: | ---: | --- |
+| Haskell Djinn | 54.581 | 1.978 | Process entry |
+| Haskell Exference | 1.240 | 1.001 | Process entry |
+| Lean Djinn | 30.752 | 7.497 | Query echo |
+| Lean Exference | 0.626 | 1.010 | Query echo |
+| Lean Both | 0.611 | 1.215 | Query echo |
+
+These are **one observed run per cell**, not statistical latency guarantees.
+The Lean Djinn first `not` result remained effectively unchanged from process
+entry, **94.241 to 94.168 seconds**; its query-relative time decreased because
+the query echo occurred later. Lean Exference and Both had slower medians in
+this run. The evidence supports a substantial Haskell Djinn visibility
+improvement and a lower Lean Djinn query-relative median, not a general
+frontend speedup or uniformly faster startup.
+
+For Haskell Djinn, positive-query predicate observations changed from 503 to
+466 and candidate-check errors from 11 to one, with no predicate timeouts.
+Current attempts were 6, 1, 2, 109, 242, and 106 for the six operations in the
+order listed above. Reverse required more observations than its baseline
+(242 versus 78), so reduced checking work was not uniform. These counters do
+not measure raw proof counts or consumed search choices.
+
+The complete paired timing and identity data, including all five summaries,
+cell detail, process durations, and observer costs, are retained in
+`dist-newstyle/streaming-acceptance/carrier-comparison/results.json`,
+SHA-256 `02f65196fbdb5f22639c4eb8bb3bdddb19417a1c593f322252c640e712368ad4`.
+Live process durations exclude independent replay and repeat across Lean cells
+that share a process.
+
+## Historical regression and follow-up
+
+The initial streaming implementation passed its then-current builds and
+unit tests, but its first live Lean Djinn profile exposed an acceptance
+regression: `append` and `filter` reached their unchanged **120-second**
+command deadlines after **240** and **293 falsified candidates**, respectively.
+Four other operations displayed passing results, and the actual false control
+recorded five falsifications. The harness rejected the incomplete profile
+before independent kernel replay. That historical run is **not a passed Lean
+acceptance result**; its receipt remains in Leant under
+`dist-newstyle/streaming-acceptance/after-lean-djinn/results.json`.
+
+The corresponding initial Haskell Djinn profile passed its six operations and
+23 independent execution assertions, but positive-query attempts rose from
+503 to 2,367 and candidate-check errors from 11 to 109. Removing whole-pool
+ranking exposed poor discovery order; admitting more plans alone did not
+prevent useful carrier work from being diluted among historical cursors.
+The accepted three-family rotation and finite carrier normal-form priority
+repair that work allocation without requiring a future proof pool.
 
 Later demand-first append/filter diagnostics retained only the first three
 errors per query and identified GHC polytype-inference and skolem failures
 among those samples. They do not establish graph availability for the failed
-candidates or a defect in the source checker. The concrete follow-up is
-[source-evidence-driven Haskell elaboration](2026-09-06-synthesis-next-priorities.md#1-source-evidence-driven-haskell-elaboration).
-
-The three-family scheduler and finite carrier normal-form priority address
-work allocation before behavioral checking. Their final acceptance and
-performance results belong in the current matrix above. No publication result
-is claimed for this change.
+candidates or a defect in the source checker. The concrete next step remains
+[source-evidence-driven Haskell elaboration](2026-09-06-synthesis-next-priorities.md#1-source-evidence-driven-haskell-elaboration):
+capture the failed candidate's own handle and graph availability, then use
+exact source evidence for annotations or type applications and independently
+compile and behavior-check the exact displayed term.

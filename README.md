@@ -412,6 +412,9 @@ source evidence and the configured search limits; ordinary queries keep their
 existing batch ranking. The [behavioral guide](docs/behavioral-synthesis.md)
 explains discovery order and early stopping, and the
 [library API](docs/library-api.md) documents the additive streaming runners.
+The [streaming acceptance report](docs/reports/2026-09-06-djinn-behavioral-streaming.md)
+records the complete paired behavioral matrix, independent compiler/kernel
+replay, deadline and quota controls, and measured latency with its limitations.
 
 The symbolic Length interface remains available separately. It reasons about
 checked list-spine models rather than executing arbitrary Haskell expressions.
@@ -504,7 +507,7 @@ signatures and compiler-checks the generated terms under its documented
 environment and partiality assumptions.
 
 The [next-priorities review](docs/reports/2026-09-06-synthesis-next-priorities.md)
-separates the current streaming acceptance work from proposed Haskell
+separates the accepted streaming milestone from proposed Haskell
 elaboration, recursive-data, contextual-provider, and behavioral-specification
 improvements.
 

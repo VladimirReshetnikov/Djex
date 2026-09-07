@@ -1,7 +1,7 @@
 # Next synthesis priorities in Djex and Leant
 
-This re-triage separates accepted capabilities, current acceptance work, and
-proposed follow-ups. It is a roadmap, not a claim that all synthesis goals or
+This re-triage separates accepted capabilities and proposed follow-ups.
+It is a roadmap, not a claim that all synthesis goals or
 behavioral laws have been proved.
 
 ## Current boundary
@@ -14,18 +14,19 @@ have been accepted within their recorded scopes. A type-correct implementation
 does not establish the operation suggested by its name; finite observations
 do not establish a universal law.
 
-**Djinn behavioral streaming is implemented and under acceptance.** Its current
-work includes early candidate delivery, exact source ownership, cumulative
-resource bounds, first/best/all selection, terminal evidence, and measured
-latency. Finish that validation and record its limitations before choosing the
-next implementation milestone. The presence of streaming code or a successful
-focused test does not by itself establish the full runtime acceptance result.
+**Djinn behavioral streaming has passed its recorded acceptance gates.** The
+[streaming report](2026-09-06-djinn-behavioral-streaming.md) records the complete
+paired 30-cell behavioral matrix, 943 affected unit tests, source ownership and
+resource-bound checks, and live quota, inconclusive, timeout-retention, and
+recovery controls. Every accepted corpus spelling matched the frozen baseline.
+The measurements improve Djinn's median visibility in both hosts but do not
+establish a general speedup across engines or remove cold Lean startup costs.
 
 ## Recommended order
 
 ### 1. Source-evidence-driven Haskell elaboration
 
-After the streaming acceptance repair, address the gap between retained source
+Address the remaining gap between retained source
 typing and Haskell output. The
 [behavioral renderer](../../src/Language/Haskell/Djex/REPL.hs#L769) receives typed
 candidates but renders their compatibility clauses. The
@@ -127,13 +128,18 @@ search and rank-N typing changes.
 Use the current acceptance measurements to select the next bottleneck before
 changing defaults. Compare first accepted result latency, observed candidates,
 search work, checking/rendering cost, and retained memory under identical
-queries and settings. The first Haskell Djinn six-operation comparison reached
-success sooner in five cases but made more predicate attempts and reported more
-candidate-check errors. The later demand-first append/filter samples identify
-compiler inference failures among the first three errors captured for each
-query; the bounded source-evidence investigation in priority 1 addresses that
-concrete finding. Time the remaining phases separately: aggregate error counts
-do not establish that every error has the same cause or source-graph status.
+queries and settings. The final Haskell Djinn profile after the scheduler repair
+passed the same six operations with 466 predicate attempts and one candidate-check
+error, versus 503 attempts and 11 errors in the frozen baseline. Its median
+first-visible time fell from 54.581 to 1.978 seconds, although `reverse` needed
+more observations (78 to 242). These single-run measurements support the repair
+but do not identify a remaining dominant cost. Lean Djinn's median query-relative
+visibility also improved, while its first cold result stayed near 94 seconds
+from process entry. Lean Exference and Both had higher medians in their control
+runs. Separate initialization, search, rendering, and checking costs before
+attributing those differences to the producer. The earlier bounded error
+samples motivate priority 1 without establishing that every error has the same
+cause or source-graph status.
 Potential targets include the stream's
 [linear alpha-equivalence scan](../../djinn/src-core/Djinn/Core.hs#L2841), repeated
 plan preparation, and kind inference or sealing outside the source checker's

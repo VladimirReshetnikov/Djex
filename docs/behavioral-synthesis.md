@@ -149,6 +149,16 @@ without an improvement, rather than complete candidate pools.
 
 ## Reproduction and evidence
 
+The later [streaming acceptance report](reports/2026-09-06-djinn-behavioral-streaming.md)
+and [paired compact receipt](../test-church/receipts/behavior-streaming-final.json)
+record the current streaming milestone. All 30 Haskell/Lean behavioral cells
+passed at unchanged per-engine limits with independent exact-term replay,
+alongside 943 affected unit tests and separate Lean quota, inconclusive, and
+deadline-retention controls. Djinn's Haskell median first-visible result changed
+from 54.581 to 1.978 seconds in the paired runs; the report preserves startup,
+engine-specific, and single-run limitations. The earlier executable-specific
+receipts below remain historical evidence.
+
 Run against an already built executable; the runner does not build Djex:
 
 ```powershell

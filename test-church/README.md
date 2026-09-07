@@ -1,5 +1,13 @@
 # Church signature synthesis acceptance
 
+The [Djinn streaming acceptance report](../docs/reports/2026-09-06-djinn-behavioral-streaming.md)
+and [compact paired receipt](receipts/behavior-streaming-final.json) record the
+later behavioral milestone: all six operations in both Haskell engines and
+all three Lean modes, independently replayed at unchanged per-engine limits.
+They include current affected unit suites and separate Lean quota,
+inconclusive, deadline-retention, and recovery controls. This behavioral
+validation is separate from the full signature-inhabitation corpus below.
+
 The [candidate-quality guide](../docs/candidate-quality.md) and
 [focused quality probes](quality.md) cover the separate comparison of
 `legacy`, `balanced`, `compact`, and `diverse`. The reproduction commands

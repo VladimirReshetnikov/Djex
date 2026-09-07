@@ -69,8 +69,8 @@ let-bound list of polymorphic identities, then compiles the graph-rendered
 expression at `[forall a. a -> a]` and executes it at both `Bool` and `Int`.
 The shared suite also rejects implicit quantification of an open graph root
 and retains its existing escaped-skolem and sibling-scope rejection tests.
-This positive compiler repair is a graph-renderer fixture; it does not yet
-establish a successful retry through the complete live query path.
+That initial positive compiler repair is a graph-renderer fixture. The live
+acceptance added below exercises the complete query path separately.
 
 The full facade suite passed 100 tests in 10.52 seconds, and the shared
 synthesis suite passed 466 tests in 0.11 seconds. The strict build uses
@@ -80,9 +80,48 @@ shared-deadline change. Logs are retained at
 `priority-cli-final.log`; the final CLI strict build log is
 `dist-newstyle/priority-shared-deadline-build.log`.
 
+## Implicit local evidence and live repair
+
+Exference's independent checker now retains its exact implicit selections for
+context-free local polymorphic values. Each occurrence starts from its own
+declared scheme and independently allocated variables. The complete check's
+substitutions normalize those selections before sealing. Source binder IDs
+are reserved before allocation, including in constructor-derived local types.
+The graph records implicit applications, preserves compatibility erasure, and
+does not gain global provider-certificate authority. Contextual schemes retain
+their existing constraint checking and explicit graph-absence result.
+
+The public behavioral query
+
+```haskell
+:synth repaired :: (forall a. a -> a) -> [(forall b. b -> b)] where null (repaired id)
+```
+
+with Exference, `select all`, an eight-candidate observation window, and 1024
+search steps reaches an occurrence whose compatibility expression is
+`\f1 -> f1 (\f5 -> f5 []) f1`. GHC rejects that expression at the full signature.
+The same occurrence now has a graph; its annotated expression compiles and
+passes the predicate. The CLI regression checks both expression and definition
+display, extracts the exact accepted elaboration, and independently compiles
+and executes it with GHC. The query observes eight candidates and performs one
+additional compiler check without adding a candidate slot. A second run with
+`not (null (repaired id))` rejects the repaired expression as behaviorally false.
+
+This establishes live positive repair under `all` selection. It does not by
+itself establish every remaining selection-mode acceptance or Leant integration.
+
+After the final namespace-reservation change, the GHC 9.12.4 `-Werror` build
+passed. Full affected suites passed: 53 Exference engine tests (0.26 seconds),
+513 Exference tests (1.50 seconds), 466 shared-synthesis tests (0.12 seconds),
+100 facade tests (10.01 seconds), and 99 CLI tests (71.88 seconds), for 1,231
+tests total. The contextual implicit-local control still declines a graph;
+the existing scope, skolem, and certificate controls remain in these suites.
+Logs are `dist-newstyle/priority-implicit-final-build.log` and
+`dist-newstyle/priority-implicit-<suite>-final.log` for those five suites.
+
 ## Remaining work
 
-- Finish priority 1's positive retry and negative evidence acceptance, then
+- Finish priority 1's remaining selection and negative evidence acceptance, then
   synchronize and validate the shared changes in Leant.
 - Implement priority 2's case analysis and recursor/decreasing-call stages.
 - Implement priority 3's dictionary representation and supported provider uses.

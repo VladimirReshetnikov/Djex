@@ -357,6 +357,7 @@ checkedExpressionTypeApplicationOriginReferences
       CheckedLambda _ _ body -> collect body
       CheckedApply function argument -> collect function ++ collect argument
       CheckedVisibleTypeApplication _ _ _ _ function -> collect function
+      CheckedImplicitTypeApplication _ function -> collect function
       CheckedTuple elements -> concatMap collect elements
       CheckedLet _ _ binding body -> collect binding ++ collect body
       CheckedEmptyCase scrutinee -> collect scrutinee
@@ -463,6 +464,7 @@ data CheckedTermForm
   | CheckedVisibleTypeApplication
       SharedGenerated.VisibleTypeArgument HsType Bool
       (Maybe (Natural, Natural)) CheckedTerm
+  | CheckedImplicitTypeApplication HsType CheckedTerm
   | CheckedTuple [CheckedTerm]
   | CheckedLet TVarId HsType CheckedTerm CheckedTerm
   | CheckedEmptyCase CheckedTerm
@@ -909,11 +911,18 @@ checkValidatedExpression provenCandidateRigids
           pure $ unavailableCheckedTerm result
             $ SubsumedLocalSpecialization variable declared' result
         InstantiateProviderUse -> do
-          instantiated <- instantiateScopedProvider declared'
-          unifyTypes instantiated annotation'
-          result <- zonk annotation'
-          pure $ unavailableCheckedTerm result
-            $ ImplicitLocalSpecialization variable declared' result
+          let (_, contexts, _) = SharedType.splitLeadingForalls declared'
+          if null contexts then do
+            instantiated <- instantiateImplicitLocalProvider
+              $ availableCheckedTerm declared' $ CheckedLocal variable
+            unifyTypes (checkedResultType instantiated) annotation'
+            pure instantiated
+          else do
+            instantiated <- instantiateScopedProvider declared'
+            unifyTypes instantiated annotation'
+            result <- zonk annotation'
+            pure $ unavailableCheckedTerm result
+              $ ImplicitLocalSpecialization variable declared' result
         OrdinaryProviderUse -> do
           unifyTypes declared' annotation'
           availableCheckedTerm <$> zonk declared' <*> pure (CheckedLocal variable)
@@ -1225,6 +1234,35 @@ checkValidatedExpression provenCandidateRigids
     -- Their direct forall contexts become ordinary checker obligations. The
     -- generated occurrence annotation contains search's instantiated
     -- monotype, so checking does not need to reproduce search's fresh IDs.
+    -- Keep the checker's own selections at this local occurrence. No search
+    -- annotation is accepted as an instantiation witness: fresh variables are
+    -- introduced here, constrained by the independently checked use, and
+    -- normalized with the complete check's substitutions before graph sealing.
+    -- Contextual schemes retain the existing obligation path below until their
+    -- dictionary evidence can be represented in the graph.
+    instantiateImplicitLocalProvider original = do
+      -- A constructor-derived local scheme may contain source binder IDs
+      -- absent from the initial goal. Reserve its whole namespace before any
+      -- binder is erased, as in instantiateLeadingForallsWith.
+      modify' $ \current -> current
+        { checkFlexibleIds = reserveIdentifiers
+            (IntSet.toAscList $ flexibleIdentifiers $ checkedResultType original)
+            (checkFlexibleIds current)
+        }
+      consume original
+     where
+      consume checked = case checkedResultType checked of
+        TypeForallNative (binder : remaining) [] body -> do
+          selected <- freshTypeVariable
+          let result = SharedType.canonicalizeType $
+                substituteScopedVariable binder selected $
+                  if null remaining then body
+                    else TypeForallNative remaining [] body
+          recordAliveType result
+          consume $ unaryCheckedTerm result
+            (CheckedImplicitTypeApplication selected) checked
+        _ -> pure checked
+
     instantiateScopedProvider declared = do
       supply <- gets checkFlexibleIds
       case instantiateLeadingForallsWith allocateNamespace supply declared of
@@ -1544,6 +1582,8 @@ normalizeCheckedTermResult substitutions rigidAlpha
           origin function -> CheckedVisibleTypeApplication argument
             (normalize selected) contextualApplication origin
             (normalizeTerm function)
+      CheckedImplicitTypeApplication selected function ->
+        CheckedImplicitTypeApplication (normalize selected) (normalizeTerm function)
       CheckedTuple elements -> CheckedTuple $ map normalizeTerm elements
       CheckedLet variable annotation binding body -> CheckedLet
         variable (normalize annotation)
@@ -1756,6 +1796,7 @@ planAssociationFailure failure = case failure of
 checkedTermTypeStructure :: CheckedTerm -> SharedTyped.TypeStructure HsType
 checkedTermTypeStructure checked = SharedTyped.sharedTypeStructure
   { SharedTyped.constructorPatternFieldTypes = resolve
+  , SharedTyped.forallTypeStructure = Just SharedTyped.sharedForallTypeStructure
   }
  where
   schemas = checkedTermConstructorSchemas checked
@@ -1780,6 +1821,7 @@ checkedTermConstructorSchemas (CheckedTerm _ form) = case form of
       ++ checkedTermConstructorSchemas argument
   CheckedVisibleTypeApplication _ _ _ _ function ->
     checkedTermConstructorSchemas function
+  CheckedImplicitTypeApplication _ function -> checkedTermConstructorSchemas function
   CheckedTuple elements -> concatMap checkedTermConstructorSchemas elements
   CheckedLet _ _ binding body ->
     checkedTermConstructorSchemas binding
@@ -1877,6 +1919,15 @@ buildCheckedTerm (CheckedTerm ty checkedForm) = do
                 (SharedTyped.certificateId identifier, slot))
               annotation
           }
+    CheckedImplicitTypeApplication selected function -> do
+      reserveTermGraphEdges 1
+      occurrence <- allocateCheckedOccurrence
+      functionId <- buildCheckedTerm function
+      let source = case function of CheckedTerm functionType _ -> functionType
+      unless (SharedTypeAtom.isLeadingForallInstantiation source selected ty)
+        $ lift $ Left TermGraphEvidenceMismatch
+      pure $ SharedTyped.TypedImplicitTypeApplication occurrence functionId
+        $ SharedTyped.ImplicitTypeApplicationWitness source selected ty
     CheckedTuple elements -> do
       elementCount <- observeTermGraphCollection
         (SharedTyped.TupleElementList nodeId') elements
@@ -1945,6 +1996,7 @@ checkedTermLocalUses (CheckedTerm _ form) = case form of
     checkedTermLocalUses function `IntSet.union` checkedTermLocalUses argument
   CheckedVisibleTypeApplication _ _ _ _ function ->
     checkedTermLocalUses function
+  CheckedImplicitTypeApplication _ function -> checkedTermLocalUses function
   CheckedTuple elements -> IntSet.unions $ map checkedTermLocalUses elements
   CheckedLet variable _ binding body ->
     checkedTermLocalUses binding `IntSet.union`

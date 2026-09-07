@@ -1612,6 +1612,15 @@ independently checked by GHC at the original requested signature. Rendering
 does not create source, provider, or certificate authority. Prefer the graph
 from the exact opaque `TypedCandidate` being presented.
 
+Exference also retains checker-owned implicit instantiations of context-free
+local polymorphic values as `TypedImplicitTypeApplication` nodes. Each use has
+its own fresh selections, normalized after independent checking; erasure keeps
+the compatibility expression unchanged. These nodes carry no global provider
+certificate. Contextual local instantiation still reports graph absence until
+its dictionary evidence is representable. The
+[implementation register](reports/2026-09-07-synthesis-priorities-1-4.md)
+records the live Haskell elaboration acceptance and remaining host work.
+
 Supporting vocabulary, all re-exported by the facade:
 
 - `Language.Haskell.Synthesis.TypedGenerated` — sealed, typed term graphs

@@ -1947,19 +1947,57 @@ tests = testGroup "Exference private engine boundaries"
                 witnesses
         _ -> fail
           "production search duplicated the exact impredicative candidate"
-  , testCase "typed evidence explains the deliberately unsupported subset" $ do
+  , testCase "implicit local specialization retains checker-owned type selections" $ do
       let unit = TypeTuple Boxed []
           polymorphic = TypeForall [0] [] $ TypeVar 0
           implicitExpression = ExpLambda 1 polymorphic
             $ ExpVar 1 $ TypeVar 2
       implicitEvidence <- checkedEvidence emptyStaticClassEnv [] []
         (TypeArrow polymorphic unit) implicitExpression
-      expectUnavailable "implicit local specialization"
-        (\reason -> case reason of
-          ImplicitLocalSpecialization{} -> True
-          _ -> False)
-        implicitEvidence
-
+      expectPlainGraph "implicit local specialization" 23 implicitEvidence
+      case checkedExpressionTermGraph 23 implicitEvidence of
+        ExferenceTermGraphAvailable graph -> do
+          let witnesses =
+                [ witness
+                | (_, Typed.TermNode _ (Typed.TypedImplicitTypeApplication _ _ witness))
+                    <- Typed.termGraphNodes graph
+                ]
+          length witnesses @?= 1
+          map Typed.implicitTypeApplicationSelected witnesses @?= [unit]
+          assertBool "implicit evidence changed compatibility syntax" $
+            Typed.eraseTermGraph graph ==
+              Generated.discardUnusedPatternBindingsBy id
+                (toGeneratedExpression implicitExpression)
+        _ -> fail "implicit local graph not retained"
+  , testCase "implicit local occurrences select independent monotypes and polytypes" $ do
+      let unit = TypeTuple Boxed []
+          pair = TypeTuple Boxed [unit, unit]
+          poly = TypeForall [0] [] $ TypeArrow (TypeVar 0) (TypeVar 0)
+          use ty = ExpVar 1 $ TypeArrow ty ty
+          expression = ExpLambda 1 poly $ ExpTuple
+            [ ExpApply (use unit) $ ExpTuple []
+            , ExpApply (use pair) $ ExpTuple [ExpTuple [], ExpTuple []]
+            , use poly
+            ]
+          goal = TypeArrow poly $ TypeTuple Boxed
+            [unit, pair, TypeArrow poly poly]
+      evidence <- checkedEvidence emptyStaticClassEnv [] [] goal expression
+      expectPlainGraph "independent implicit occurrences" 29 evidence
+      case checkedExpressionTermGraph 29 evidence of
+        ExferenceTermGraphAvailable graph -> do
+          let selected =
+                [ Typed.implicitTypeApplicationSelected witness
+                | (_, Typed.TermNode _ (Typed.TypedImplicitTypeApplication _ _ witness))
+                    <- Typed.termGraphNodes graph
+                ]
+          length selected @?= 3
+          forM_ [unit, pair, poly] $ \expected ->
+            assertBool "a local occurrence borrowed another occurrence's selection" $
+              any (SharedTypeAtom.alphaEquivalentTypes expected) selected
+          Typed.typedGraphVisibleTypeApplications (Typed.termGraphMetrics graph) @?= 0
+        _ -> fail "independent implicit graphs not retained"
+  , testCase "typed evidence explains the deliberately unsupported subset" $ do
+      let polymorphic = TypeForall [0] [] $ TypeVar 0
       let distinct = TypeForall [1] []
             $ TypeArrow (TypeVar 1) (TypeVar 1)
           subsumedExpression = ExpLambda 1 polymorphic $ ExpVar 1 distinct
@@ -2037,6 +2075,19 @@ tests = testGroup "Exference private engine boundaries"
           UnsupportedContextualVisibleApplication{} -> True
           _ -> False)
         contextualEvidence
+
+      let implicitContextualProvider = TypeForall [0]
+            [constraint $ TypeVar 0] $ TypeArrow (TypeVar 0) (TypeVar 0)
+          implicitContextualExpression = ExpLambda 1 implicitContextualProvider
+            $ ExpVar 1 $ TypeArrow integer integer
+      implicitContextualEvidence <- checkedEvidence contextualClasses [] []
+        (TypeArrow implicitContextualProvider $ TypeArrow integer integer)
+        implicitContextualExpression
+      expectUnavailable "implicit local dictionaries still require graph evidence"
+        (\reason -> case reason of
+          ImplicitLocalSpecialization{} -> True
+          _ -> False)
+        implicitContextualEvidence
 
       let layeredContextualProvider = TypeForall [] [constraint integer]
             $ TypeForall [0, 1] []

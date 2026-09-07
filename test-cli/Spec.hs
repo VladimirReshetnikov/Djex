@@ -38,6 +38,7 @@ import System.Process
   , readCreateProcessWithExitCode
   , readProcessWithExitCode
   )
+import System.Timeout (timeout)
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit
   ( Assertion
@@ -191,6 +192,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplBehavioralPredicates
   , testCase "REPL streamed Djinn best and all retain both accepted projections"
       testReplBehavioralStreamingSelection
+  , testCase "live graph elaboration repairs and displays the exact checked candidate"
+      testReplBehavioralElaboration
   , testCase "behavioral worker checks Bool without leaking previous bindings"
       testBehavioralWorkerIsolation
   , testCase "REPL behavioral timeout retires its worker before the next query"
@@ -3529,6 +3532,66 @@ testReplBehavioralPredicates = do
  assertContains "self-contained predicate then uses actual Prelude" "cleared " startupOutput
  assertBool "cleared startup unexpectedly failed behavioral preflight" $
    not $ "BEHAVIORAL_PREFLIGHT" `isInfixOf` startupErrors
+
+testReplBehavioralElaboration :: Assertion
+testReplBehavioralElaboration = withTemporaryEnvironment [] $ \directory ->
+  forM_ ["expression", "definition"] $ \renderMode -> do
+    let signature = "(forall a. a -> a) -> [(forall b. b -> b)]"
+        commands predicate =
+          [ ":load"
+          , ":backend exference"
+          , ":set select all"
+          , ":set render " ++ renderMode
+          , ":set allow-unused on"
+          , ":set quality-window 8"
+          , ":set candidate-limit 8"
+          , ":set max-steps 1024"
+          , ":synth repaired :: " ++ signature ++ " where " ++ predicate
+          ]
+    (exitCode, output, errors) <- runRepl directory $ commands "null (repaired id)"
+    assertEqual "live elaboration REPL exit" ExitSuccess exitCode
+    revised <- case
+        [ term
+        | line <- lines errors
+        , Just term <- [stripPrefix "elaborated expression: " line]
+        ] of
+      [term] -> pure term
+      terms -> fail $ "expected one actual compilation repair: " ++ show terms ++ errors
+    assertContains "repair must use the failing candidate's own graph"
+      "candidate evidence: graph present;" errors
+    assertContains "control expression must really fail GHC elaboration"
+      "original check: BehavioralCompilationError" errors
+    assertContains "revised term must pass the real worker predicate"
+      "final check: BehavioralPassed" errors
+    assertContains "retry must retain the original observation budget"
+      "checked=8, true=6, false=2, error=0, timeout=0, window=8" errors
+    assertContains "exactly one additional compiler check"
+      "checks=1; retries retain the same candidate" errors
+    let displayed = case renderMode of
+          "definition" -> "repaired = " ++ revised
+          _ -> revised
+    assertContains "all selection lost or rerendered the accepted source"
+      displayed output
+    let fixture = directory ++ "/Repaired.hs"
+    writeFile fixture $ unlines
+      [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, ScopedTypeVariables, TypeApplications #-}"
+      , "module Main where"
+      , "repaired :: " ++ signature
+      , "repaired = " ++ revised
+      , "main :: IO ()"
+      , "main = if null (repaired id) then putStrLn \"replayed\" else error \"wrong behavior\""
+      ]
+    replay <- timeout 30000000 $ readProcessWithExitCode "runghc" [fixture] ""
+    case replay of
+      Just (ExitSuccess, "replayed\n", _) -> pure ()
+      _ -> fail $ "exact displayed repair failed independent GHC execution: " ++ show replay
+    (falseExit, falseOutput, falseErrors) <- runRepl directory $
+      commands "not (null (repaired id))"
+    assertEqual "false-control REPL exit" ExitSuccess falseExit
+    assertContains "a compiling repair is still subject to the predicate"
+      "final check: BehavioralFalse" falseErrors
+    assertBool "the false repaired implementation leaked into displayed results" $
+      not $ revised `isInfixOf` falseOutput
 
 testReplBehavioralStreamingSelection :: Assertion
 testReplBehavioralStreamingSelection = withTemporaryEnvironment [] $ \directory ->

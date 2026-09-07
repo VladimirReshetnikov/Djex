@@ -8,6 +8,12 @@ completion checklist. None of those four priorities is complete.
 
 ## Evidence that changes the ordering
 
+The [implementation register](2026-09-07-synthesis-priorities-1-4.md#implicit-local-evidence-and-live-repair)
+now records a subsequent live Exference repair under `all` selection, including
+exact displayed-source replay and a false control. The revision-specific
+baseline below explains the original ordering; consult that register for the
+new acceptance evidence and remaining work.
+
 Djex `0a79d2311d966f7689c52a33c211f49f3a15bbea` implements source-graph
 Haskell rendering and a compilation-failure retry in both named behavioral
 engine paths. The retained logs record 100 facade, 466 shared-synthesis, and

@@ -1,5 +1,10 @@
 # Next synthesis priorities in Djex and Leant
 
+The [September 7 re-triage](2026-09-07-synthesis-retriage.md) updates the
+execution order and implemented status below. This dated roadmap retains the
+priority numbers used by the active implementation goal; its descriptions of
+work still to begin reflect the September 6 checkpoint.
+
 This re-triage separates accepted capabilities and proposed follow-ups.
 It is a roadmap, not a claim that all synthesis goals or
 behavioral laws have been proved.

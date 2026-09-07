@@ -5,6 +5,11 @@ Status: **in progress**. This work implements the first four items in the
 priorities is declared complete by this checkpoint. The earlier streaming
 acceptance receipt belongs to its recorded source revisions.
 
+The [current re-triage](2026-09-07-synthesis-retriage.md) schedules the remaining
+deliveries. It preserves every completion requirement below while moving the
+bounded Lean simplification stage ahead of the larger contextual-evidence work
+and making corpus expansion part of each capability's acceptance.
+
 ## Completion requirements
 
 1. **Evidence-guided Haskell elaboration.** Capture a bounded sample of failed

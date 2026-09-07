@@ -38,6 +38,8 @@ version, and dependency contract.
   [350-signature Church regression guide](test-church/README.md).
 - For better first results and useful alternatives under bounded search, see
   [candidate quality, checked normalization, and ranking policies](docs/candidate-quality.md).
+- For the next improvements and their acceptance requirements, see the
+  [current synthesis re-triage](docs/reports/2026-09-07-synthesis-retriage.md).
 
 New library code should start with `Language.Haskell.Djex`, a narrower checked
 backend adapter, or a focused `Language.Haskell.Synthesis.*` import. The package

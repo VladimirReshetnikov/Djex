@@ -94,15 +94,24 @@ current blocking fixtures.
 | Order | Existing goal item | Deliverable | Acceptance and reason for its position |
 | --- | --- | --- | --- |
 | 1 | Priority 2, case stage; priority 4 acceptance | Close Exference case parity and complete Leant integration | Retain all eight accepted Djinn cases; close Exference `tailOr` and tuple fields, extending checked case evidence beyond same-result zero/step spines. Require exact graphs and Haskell execution. Replay all eight in Djinn, Exference, and Both with false controls, then pass the full configured Leant suite. Preserve positive-only construction bounds. |
-| 2 | Priority 4, Lean checker stage | Validate the implemented bounded simplification | Both decision polarities precede both simplification polarities. Require the 16 isolated method controls, 15 live queries across all three engines, exact candidate replay, false/inconclusive outcomes, and the full boundary suite. Record actual proof axioms separately from candidate axioms. |
-| 3 | Priority 2, recursor stage; extend priority 4 corpus | Supplied folds and recursors for ordinary recursive programs | Prepared fixtures exercise `map`, `append`, and `length` using generic recursors, with tree operations in Lean. Implement coherent polymorphic instantiation where needed, then require exact source evidence, host behavior, and termination checking. Fixture preparation is not capability acceptance. |
-| 4 | Priority 3 | Contextual providers with explicit dictionary evidence | First exact constrained forwarding and dictionary-independent bodies under lexical givens; then methods, conditional providers, and superclasses. This crosses search, graph, and host-projection boundaries and deserves its own staged acceptance. |
-| 5 | Priority 4, corpus completion | Close the remaining Church behavioral coverage | Cover naturals, options/eithers, folds, conversions, and all 19 supplied-default cases. Start adding these tests during earlier steps; this row is the final coverage gate, not permission to postpone all behavioral work. |
+| 2 | Priority 2, recursor stage; extend priority 4 corpus | Supplied folds and recursors for ordinary recursive programs | Prepared fixtures exercise `map`, `append`, and `length` using generic recursors, with tree operations in Lean. Implement coherent polymorphic instantiation where needed, then require exact source evidence, host behavior, and termination checking. Fixture preparation is not capability acceptance. |
+| 3 | Priority 3 | Contextual providers with explicit dictionary evidence | First exact constrained forwarding and dictionary-independent bodies under lexical givens; then methods, conditional providers, and superclasses. This crosses search, graph, and host-projection boundaries and deserves its own staged acceptance. |
+| 4 | Priority 4, corpus completion | Close the remaining Church behavioral coverage | Cover naturals, options/eithers, folds, conversions, and all 19 supplied-default cases. Start adding these tests during earlier steps; this row is the final coverage gate, not permission to postpone all behavioral work. |
+
+Leant's bounded simplification milestone is now published in `990b7f3`. Its
+[acceptance report](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-07-bounded-behavioral-simplification.md)
+records 16 isolated method controls, 15 live queries across all three engines,
+and independent replay of six displayed results. Every candidate has an empty
+axiom inventory; quantified simplification proofs use exactly `propext` and
+`Quot.sound`. The full configured boundary run passed 619/620 tests, with one
+existing provider-stage timeout; an unchanged focused retry passed. These
+separate receipts do not claim an unfiltered 620-test pass.
 
 The first/best CLI fixture is now accepted and should be retained at subsequent
 integration checkpoints. The first row remains the principal cross-engine
 capability gap; bounded simplification can be validated independently while its
-search fix is developed. The schedule separates delivery size from importance. Dictionary support
+search fix is developed. Its live acceptance is now complete; retain it as a
+regression gate and proceed to recursors. The schedule separates delivery size from importance. Dictionary support
 remains a required capability; bounded simplification does not replace it.
 Nor does accepting a recursor milestone complete recursive-data work without
 the documented source-evidence and Lean checking gates.

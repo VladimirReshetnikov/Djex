@@ -103,6 +103,12 @@ contextual dictionaries, and broader Church behavior
 explicitly open. Unused lambda and let binders now retain source graphs as
 checked wildcards, preserving exact compatibility erasure.
 
+Leant also adds [bounded simplification of behavioral assertions](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-07-bounded-behavioral-simplification.md)
+after decision checks of the assertion and its negation. The three-engine live
+matrix and independent Lean replay pass, preserving proved-false and
+inconclusive outcomes. The report distinguishes those results from the separate
+full-suite timing failure and its passing unchanged focused retry.
+
 Candidate quality is considered before the result cutoff. Both engines
 support `balanced`, `compact`, `diverse`, and `legacy` ranking profiles.
 Structural policies combine term size, elimination structure, exact provider

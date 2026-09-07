@@ -2651,7 +2651,8 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
                       zip [0 :: Natural ..] alternatives
                   , arity == length fields
                   ]
-        , not $ null $ preparedEnvironmentRecursiveDataViews prepared sequent
+        , any ((`Set.member` negativeTypes) . fst) $
+            preparedEnvironmentRecursiveDataViews prepared sequent
         -- Inspect and forward existing values before introducing fresh ones.
         -- The second plan restores construction without committing the first
         -- branch of a case to a closed constructor before lexical defaults.

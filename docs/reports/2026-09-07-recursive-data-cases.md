@@ -25,8 +25,9 @@ when its selector function is hidden.
 
 An initial case plan uses existing values; the following plan adds constructor
 choices. This keeps supplied defaults reachable before closed constructors
-multiply branch choices. The plans apply only to sequents containing a recursive
-datatype and never authorize negative logical evidence. Historical nonrecursive
+multiply branch choices. The plans apply only to sequents supplying a recursive
+datatype at a negative position and never authorize negative logical evidence.
+Pure constructor introduction retains its existing finite layer bounds. Historical nonrecursive
 search and its refutation boundary remain in place.
 
 For explicitly interleaved alternatives, tuple components and case branches

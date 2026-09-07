@@ -247,6 +247,10 @@ intrinsicListTests =
             "forall a. a -> Tree a -> a"
         assertBool "no checked tree case was synthesized" $
             any (any (isCase . T.termNodeForm . snd) . T.termGraphNodes) graphs
+        (_, _, introduced) <- queryGraphs [declaration] alternatives
+            "forall a. a -> Tree a"
+        assertBool "case plans reopened a purely positive recursive constructor" $
+            all (notElem (name "Fork") . globalNames) introduced
     , testCase "recursive cases compose with exact loaded providers" $ do
         let declarations = [listDeclaration Nothing, abstract "Seed" 0, abstract "Token" 0,
                 value "fallback" (nominal "Token"),

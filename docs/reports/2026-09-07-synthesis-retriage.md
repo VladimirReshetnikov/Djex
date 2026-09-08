@@ -1,4 +1,4 @@
-# Synthesis re-triage after recursive-data execution and Lean replay
+# Synthesis re-triage: correctness, integration, and behavioral coverage
 
 This is the current execution recommendation as of 2026-09-07. It updates the
 [September 6 roadmap](2026-09-06-synthesis-next-priorities.md) without changing
@@ -6,7 +6,71 @@ the scope or numbering of the active **implement priorities 1–4** goal. The
 [implementation register](2026-09-07-synthesis-priorities-1-4.md) remains the
 completion checklist. None of those four priorities is complete.
 
-## Current implementation evidence
+## Decision after the current source and acceptance audit
+
+**Close the dictionary-ownership and verification boundaries before broadening
+search. Run behavioral coverage as part of each delivery.** The accepted
+Haskell elaboration, one-layer recursive cases, and bounded simplification are
+regression baselines; rebuilding that infrastructure is not the next project.
+The order below preserves the original four priorities and their full scope.
+
+| Order | Improvement | Concrete completion gate |
+| --- | --- | --- |
+| 1 | Preserve the selected dictionary through nested scopes | Reject the known overlapping-Given cases until the proof-selected source slot survives erasure and graph reconstruction. Unsupported propositional proofs must consume their original budget and allow later supported proofs to be considered; malformed evidence remains an internal failure. Require public forced-use tests, sibling/overlap controls, GHC replay, and different dictionary payloads in Lean. |
+| 2 | Deliver the bounded production Lean context route | Integrate published Djex `90c88261`, exact query metadata, and the context renderer. Require ordinary and named-`where` queries in all three modes, exact displayed-source replay, full types, payload observations, and the complete affected suite. A compiled serializer and hand-constructed graph tests do not close this gate. |
+| 3 | Make already-found fold candidates reliably verifiable | Trace the actual live append/length failure under unchanged limits, identify the failing request stage, and fix that cause. Preserve command deadlines, cancellation, backend ownership, and false-versus-inconclusive results; rerun the native fold matrix and exact replay. Standalone fast requests are diagnostic controls, not a fix. |
+| 4 | Execute the expanded Church behavior matrix | Run the additional total operations and every one of the 19 supplied-default cases in both Haskell engines and all three Lean modes. Compile oracle controls first, restrict providers, retain actual false controls, and replay each exact displayed implementation at its full target signature: original for total cases, explicitly default-adjusted for partial cases. Track each operation and engine independently so one timeout does not conceal other coverage. |
+| 5 | Extend contexts and recursion from concrete missing programs | Add nested forall/Given interaction, actual duplicate-slot selection, complete provider/universe metadata, methods and instance/superclass evidence; broaden supplied tree folds and accumulator programs. Each is a separate checked capability increment, with termination evidence for recursive programs. |
+
+Items 1 and 3 are correctness and reliability work. Item 2 is the nearest
+integration delivery. They can be developed in parallel, with heavy validation
+serialized. Item 4 starts with the current prepared fixtures and continues
+through those deliveries; it does not wait for every context or recursion
+extension. Original priority 1's specific remaining selection and negative
+evidence checks stay in the completion register and regression gates.
+
+The working-tree audit found concrete reasons for this order:
+
+- The first nested-Given extension passed its strict build and all 99 private
+  tests, but three of four public tests failed during lowering. LJT can reuse
+  an introduction helper beneath an equal active dictionary. A valid
+  propositional proof is not necessarily an admissible lexical source proof.
+  There is also a separate residual-qualified-result ownership gap. These are
+  implementation work in progress, not accepted nested-context support.
+- Leant's refreshed strict executable/unit build and all 51 focused tests pass
+  in 8.61 seconds: 22 production context, eight transport trace, and 21 renderer
+  tests. The first run passed 50 of 51 because an older test expected the
+  now-supported wildcard to be refused. The corrected test retains a genuinely
+  unsupported-pattern control and checks actual wildcard rendering. Public
+  Lean synthesis, replay and the full affected-suite run remain
+  separate gates. The initial packet deliberately supports a local `Type 0`
+  subset; it must reject unrecorded constant universe arguments even when a
+  declaration's result is `Type 0`.
+  Leant's [focused audit receipt](https://github.com/VladimirReshetnikov/Leant/blob/main/test-context/receipts/production-boundary-audit.json)
+  retains both runs and a post-run source/executable snapshot; it does not
+  claim before/after source integrity or full production acceptance.
+- Standalone transport traces accepted three exact length requests under the
+  five-second guard, while raw REPL startup varied from about one to 25
+  seconds. Together with the earlier direct timeout without synthesis, this
+  makes startup/request variability a measured issue but leaves its cause
+  unresolved. More raw candidates cannot repair an already-found candidate's
+  failed verification request.
+- The extended Lean oracle preflight accepts 58 declarations for 13 operations
+  (11 additional source operations and two numeral extensions). Fifty-six
+  inventories are empty; exactly two comparison/control proofs use `propext`.
+  Candidate implementations retain an empty-axiom requirement. All 19 partial
+  operations are source-prepared with explicit defaults and 736 observations,
+  but their 20 oracle files and 491 requested inventories still need kernel
+  execution. Neither preflight nor source preparation is live synthesis.
+
+These working-tree observations select the next work; they do not enlarge the
+published acceptance receipts below. The published pair at this audit is Djex
+`90c882615ae2a3a296ad963f3f8cb786d4aa614f` and Leant
+`b764e65ef77fa4822d25481ece777c4acf0cd12d`. The latter publishes the older
+`922c5558` dependency; its working integration of `90c88261` is not yet a
+published or fully accepted production context route.
+
+## Accepted baselines and diagnostic history
 
 Published Djex `922c55580eadec156ba9ef447b300f43e0953ed7` establishes the
 Haskell case, supplied-fold, and lexical-Given baselines below. Leant's current
@@ -192,7 +256,11 @@ input. These are resolved design experiments, retained as evidence that graph
 availability alone does not establish useful behavior. They are no longer the
 current blocking fixtures.
 
-## Recommended execution order
+## Earlier fold-first schedule and its remaining gates
+
+The decision table at the top supersedes this earlier delivery order. Keep
+the acceptance requirements below; the nested dictionary audit adds an earlier
+correctness gate, and corpus execution now accompanies each delivery.
 
 The observed false-negative-evidence gate is now corrected and validated in
 canonical Djex; carry it into the next Leant dependency integration. Before
@@ -302,14 +370,14 @@ An unsuccessful proof attempt remains inconclusive.
 
 | Idea | Disposition | Concrete trigger for promotion |
 | --- | --- | --- |
-| Native Windows Length acquisition | Separate platform milestone after the capability deliveries, or sooner for a concrete Windows Length user task | Implement the complete bounded acquisition, solver execution, and independent replay route; configuration parsing alone is insufficient. |
+| Native Windows Length acquisition | Next independent platform milestone after the current integration gates, or sooner for a concrete Windows Length user task | Implement the complete bounded acquisition, solver execution, and independent replay route; configuration parsing and the 432 existing Length tests do not establish this missing native acquisition path. |
 | Cross-engine progress and cancellation | Retain the accepted request-policy and raw-slot alternation fixes as regressions | Leant now passes the tuple/default cases in all three modes without increasing the recorded bounds. These fixes do not preempt a single engine step. Promote broader scheduling only for a measured remaining latency or cancellation failure. |
-| Other search and checker performance | Instrument now; optimize a demonstrated cost | The Exference supplied-fold `[a] -> a` rejection fixture takes about 147 seconds at 100,000 steps; this is a concrete exhaustion-cost benchmark. Separate cold startup, first accepted result, search work, rendering/checking, and memory before changing defaults. The interpreted/default-deferral contextual failures and native/immediate-pruning successes changed two variables, so they are not a controlled performance comparison. |
-| Failure diagnostics and capability receipts | Include in current deliveries | Keep graph absence, compiler rejection, behavioral falsehood, inconclusive checking, and exhausted search distinct. Retain per-engine results, actual replay status, source revision, settings, exact emitted source, and negative controls; a failed matrix must not obscure the accepted subset or imply unperformed kernel checks. |
+| Other search and checker performance | Measure rejected contextual proofs and the existing exhaustion case next; optimize only a demonstrated cost | The Exference supplied-fold `[a] -> a` rejection fixture takes about 147 seconds at 100,000 steps. Nested introduction helpers can also consume slots with unsupported proofs. Measure those costs separately from cold startup, first accepted result, rendering/checking, and memory. Preserve original charges; do not silently refill a window or raise defaults. |
+| Failure diagnostics and capability receipts | Required delivery infrastructure; promote precise stage diagnostics, not another framework rewrite | Keep graph absence, unsupported proof admission, compiler rejection, behavioral falsehood, inconclusive checking, and exhausted search distinct. Retain per-operation and per-engine results, actual replay status, source revision, settings, exact emitted source, and negative controls. Freeze a small repeated validation matrix before expanding diagnostics further. |
 | Semantic provider retrieval | Retain as the next scaling investigation | Show a useful provider excluded by inventory selection in a realistic project; measure retrieval recall as well as latency. Larger inventories alone are not an acceptance criterion. |
 | Canonical duplicate keys and a shared subgoal DAG | Defer broad refactoring; allow a measured local optimization | A profile must identify duplicate comparison or repeated subgoal work as material. Preserve source identity, scope, budget charging, and replay. |
 | Isolated-worker production routing | Separate integration project | Require environment snapshots, backend parity, transcript equality, bounded cancellation, and memory measurements. The existing foundation is not proof of a speedup. |
-| Native Lean tactic integration | Separate product milestone | An editor or proof-mode workflow needing this entrance should define the acceptance fixture. It does not close the current synthesis capability gaps by itself. |
+| Native Lean tactic integration or a Lean implementation of the engine | Defer broad migration; allow a small independently replayed vertical slice when a workflow requires it | An editor or proof-mode workflow must define the fixture. Keeping elaborated `Expr` values could remove translation boundaries, but a rewrite does not establish equivalent search coverage, budgets, or behavior and should not displace the current integration work. |
 | Dependent/indexed refinement and residual-hole search | Defer until the ordinary-data and contextual milestones settle | Start from a concrete missing indexed program and explicit equality/transport obligations, rather than a general dependent-synthesis rewrite. |
 | Arbitrary frontier widening, persistent caches, cooperative internal search, equality saturation, induction/invariant discovery | Defer | Require a missing program or measured bottleneck that the smaller accepted extensions cannot address. |
 

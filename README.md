@@ -106,11 +106,12 @@ Its full configured 647-test integration run passes in 343.79 seconds, with
 unchanged source, test-executable, and fake-Z3 helper hashes. Unused lambda and let binders
 retain source graphs as checked wildcards, preserving exact compatibility
 erasure. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md)
-places truthful contextual negative evidence and Lean verification-request
-recovery first: a source method omitted from search must not cause a false
-non-inhabitation claim, and correct fold candidates already reach Lean's
-verification boundary. Supplied-fold acceptance, production contextual evidence,
-and the broader Church behavioral corpus follow those gates.
+prioritizes exact dictionary ownership in nested scopes, production Lean
+context integration, and reliable verification of already-found fold candidates.
+The expanded Church behavior matrix runs alongside these deliveries, including
+all 19 supplied-default cases. Tree folds, accumulator programs, and richer
+class evidence follow as separate checked increments. The detailed report
+distinguishes published acceptance from the current implementation experiments.
 
 The [supplied-fold composition report](docs/reports/2026-09-07-supplied-recursor-composition.md)
 describes synthesis of `map`, order-sensitive `append`, and generalized `length`

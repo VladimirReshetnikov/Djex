@@ -8,9 +8,11 @@ acceptance receipt belongs to its recorded source revisions.
 The [current re-triage](2026-09-07-synthesis-retriage.md) schedules the remaining
 deliveries. It preserves every completion requirement below. Bounded Lean
 simplification and the eight-case ordinary-data matrix now have live acceptance;
-the next gates are Lean supplied-fold composition, production contextual
-evidence, and broader Church behavior. Corpus expansion remains part of each
-capability's acceptance.
+the next gates are selected-dictionary ownership under nested scopes, production
+Lean contextual integration, reliable supplied-fold verification, and broader
+Church behavior. Corpus expansion remains part of each capability's acceptance;
+it does not wait for all richer context and recursion extensions. The current
+re-triage preserves the original priority numbers and completion requirements.
 
 Leant's [ordinary-data receipt](https://github.com/VladimirReshetnikov/Leant/blob/main/test-recursive/receipts/all-engines.json)
 records all eight cases under Djinn, Exference, and Both: 24 exact displayed

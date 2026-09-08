@@ -7,32 +7,34 @@ or numbering of the active **implement priorities 1–4** goal. The
 
 ## Current decision and next delivery gates
 
-**September 8 follow-up: close the working Leant integration, then the
-Haskell frontend gaps and missing Church constructions.** The
-[updated triage and evidence extraction](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-08-integration-retriage.md)
-supersede the earlier method-failure diagnosis. Canonical Djex `4a4ed0fc`
-remains published with its strict build and all 2,304 tests passing. Leant's
-working prototype now uses that dependency and passes all 13 focused tests,
-six real ordinary/where method queries with full-type kernel replay and
-24 observations, and all three actual False controls. The prototype and
-dependency update remain uncommitted pending integration acceptance.
+**September 8 acceptance follow-up: close frontend gaps, then missing Church
+constructions.** The [global-method integration report](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-08-global-contextual-providers.md) records the completed
+bounded Leant delivery against Djex `4a4ed0fc`: six native ordinary/where method
+cases with full-type kernel replay and 24 observations; nine cache/False
+sessions with 21 independent replay files; a fresh 39/39 local-context matrix;
+a strict build; and the complete 701/701 unit suite. Canonical Djex's existing
+strict build and 2,304-test acceptance remain attached to their recorded
+revision; no new canonical engine changes are claimed here.
 
-The complete Leant suite passed 698/699; its obsolete source-text assertion
-was corrected and the focused test passes, but the complete rerun remains due.
-The prior 39-cell local-context matrix also needs a fresh integration run.
-The four-slot cache fixture misses the required legacy candidate; a 32-slot
-diagnostic finds it before and after the contextual visit but fails an
-ordinary-query trace annotation requirement. Inspection confirms the actual
-ordinary verification request exists. This is a trace-contract mismatch,
-not established cache corruption or completed cache acceptance.
+Ordinary verification now carries exact candidate ownership in optional
+request traces. All cache captures are complete at the explicitly selected
+512-record cap. Cache queries pass at 32 candidates; the original four-slot
+query still misses its required legacy implementation. Neither setting changes
+product defaults. Keep that bounded search miss as a regression target, without
+reopening the now-completed trace/correlation work.
 
-| Order | Delivery | Required acceptance |
+| Order | Delivery | Why now and required acceptance |
 | --- | --- | --- |
-| 1 | Finish Leant global-method integration (priority 3) | Preserve the successful forced method fixture and exact source/engine/dictionary ownership. Correct ordinary verification correlation, finish all cache/discovery sessions and exact replays, rerun the existing local-context matrix and complete 699-test suite, then publish code and reproducible evidence. |
-| 2 | Close Haskell frontend gaps (priority 3) | Complete loaded constrained-provider admission/source schemes and implicit-root behavioral scoping. Require actual ordinary/where synthesis in both engines at full signatures, distinct dictionary payload behavior and False controls. |
-| 3 | Make missing Church constructions reachable (priority 4) | Trace actual branch admission/substitutions/queue decisions for `maybeEither` and `foldl1`, then validate a generic fix using original live queries and bounds. Keep reference witnesses out of inventories and extend the remaining total/defaulted cells. |
-| 4 | Accept supplied tree folds with accumulators (priority 2; independent bounded delivery) | Execute the prepared polymorphic tree fixture in both Haskell engines and all three Lean modes, with exact provider inventories, order-sensitive observations, full-type behavior, termination checking and False controls. |
-| 5 | Preserve dictionary occurrence, then extend evidence (priority 3) | Keep overlap guards until equal-predicate outer/inner uses retain the selected dictionary and distinguish payloads. Add conditional providers and superclass projections separately. |
+| 1 | Close Haskell frontend gaps (priority 3) | The engine/API inference already passes, but loaded constrained-provider admission/source schemes and implicit-root behavioral scoping still prevent frontend acceptance. Require actual ordinary/where synthesis in both engines at original full signatures, distinct dictionary payload behavior and False controls. |
+| 2 | Support mixed Lean contextual provider inventories (priority 3) | Cap-one method discovery passes, but the existing mixed inventory still refuses `ContextProduction.Dictionary.mk`, whose dictionary-valued scheme is unsupported. Extend source representation/admission while retaining explicit unsupported cases and ownership checks. Exercise an ordinary inventory containing constructors and methods; do not discard rejected packets merely to obtain a pass. |
+| 3 | Make missing Church constructions reachable (priority 4) | Inspect actual rule admission, substitutions and queue decisions for `maybeEither` and `foldl1`, then validate a generic fix with the original live queries and bounds. Checked references stay outside provider inventories. Two failed heuristic experiments are evidence against more blind tuning. |
+| 4 | Accept supplied tree folds with accumulators (priority 2; independent bounded delivery) | Run the prepared polymorphic tree fixture in both Haskell engines and all three Lean modes, with exact provider inventories, order-sensitive observations, full-type behavior, termination checking and False controls. The fixture is prepared, not accepted. |
+| 5 | Preserve dictionary occurrence, then extend evidence (priority 3) | Keep overlap guards until equal-predicate outer/inner uses retain the selected dictionary and distinguish payloads. Add conditional providers, superclass projections and richer universe metadata as separate increments. |
+
+The first two deliveries close concrete frontend gaps exposed by the current
+implementation. They should not grow into a general frontend rewrite or defer
+the Church work behind unrelated infrastructure. Diagnostics belong inside the
+delivery they unblock; a successful trace is not a synthesized implementation.
 
 The full priority-4 obligation remains **all 13 extended operations and all
 19 explicit-default counterparts**, across Haskell Djinn/Exference and Lean
@@ -44,9 +46,9 @@ easier batch. Heavy runtime acceptance remains serialized.
 
 ## What changed in this re-triage
 
-The [latest integration follow-up](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-08-integration-retriage.md) records the new working-tree
-results and the revised priorities. The diagnosis below describes earlier
-runs; its old six-case failure no longer describes the updated prototype.
+The [accepted integration follow-up](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-08-global-contextual-providers.md) supersedes the earlier
+working-prototype and incomplete-regression status below. The following
+diagnoses and counts remain historical evidence at their recorded revisions.
 
 The [constraint-only inference report](2026-09-08-constraint-only-provider-inference.md)
 supersedes the engine failure diagnosis below with implementation and tests.
@@ -148,7 +150,7 @@ failures. Those historical failures do not replace the fresh complete results.
 The accepted route is a local `Type 0` subset. It refuses unrecorded universe
 arguments, selected polytypes without complete metadata, and global/caller
 premises without source packets. The published accepted provider map is empty
-and rejects typed globals; the newer working-tree prototype remains unaccepted.
+and rejects typed globals; the subsequent global-method acceptance above extends this older boundary.
 Equal active dictionaries remain unsupported. Rank-N constrained
 forwarding is covered; richer nested forall/Given combinations outside the
 accepted bounded forms remain open. This acceptance does not establish methods, superclass
@@ -526,9 +528,9 @@ An unsuccessful proof attempt remains inconclusive.
 | Idea | Disposition | Concrete trigger for promotion |
 | --- | --- | --- |
 | Exact accepted-candidate provenance and reproducible replay | Complete 39-cell matrix and 680-test suite accepted | Retain own-Variant graph/renderer/engine observations, non-forcing diagnostics and direct kernel pinning. Retain the accepted bounded request capture and its whole-record omission accounting. Keep the accepted empty-environment repair and lifecycle controls as regressions; defer a general tracing framework. |
-| Verification trace and runner consistency | Promote narrowly within integration | Align ordinary verification with the supplemental ownership contract. Share exercised UTF-8, runtime-pinning and exact query-format helpers; retain bounds and negative controls. |
+| Verification trace and runner consistency | Completed for the global-method increment | Retain exact ordinary/where verification correlation, portable runners, explicit capture caps and negative controls. Defer a broader tracing framework unless another concrete acceptance gap requires it. |
 | Routing-test maintenance | Incremental when a boundary is touched | Replace brittle source-text counts with executable routing or boundary controls where practical, preserving coverage. Do not turn this into a broad cleanup milestone. |
-| Constraint-only provider instantiation | Engine/API published; Leant native fixture passes in the working prototype | Finish Leant trace/cache and aggregate regression closure. Haskell loaded-provider metadata and implicit-root alias scoping remain concrete follow-ups; preflight success is not candidate acceptance. |
+| Constraint-only provider instantiation | Engine/API and bounded Leant integration accepted | Close Haskell loaded-provider metadata and implicit-root scoping, then Lean mixed-inventory source representation. Preflight success and cap-one method acceptance do not establish these wider cases. |
 | Selected dictionary occurrence and complete context metadata | Required before relaxing overlap guards | Separately demonstrate differing outer/inner payload behavior under faithful scoped capture in Haskell and Lean. A unique type substitution, graph identity or successful compilation alone does not establish selected dictionary ownership. Extend conditional providers and superclass evidence individually. |
 | Tree folds and accumulator programs | Independent next recursion delivery; fixture prepared, not run | Use the polymorphic tree accumulator to test order-sensitive composition, retaining exact recursor inventories, full-signature behavior and termination checking. Native verification repair is already accepted. |
 | Flexible-goal construction and branch diagnostics | Next Church-search investigation | Trace one missing derivation through actual rule admission, substitutions and queue decisions. Distinguish an unavailable construction from an admitted but delayed branch. Count every alternative against existing budgets and check the resulting term independently. Public graph-shape histograms alone cannot locate the cause. |
@@ -538,7 +540,7 @@ An unsuccessful proof attempt remains inconclusive.
 | Cross-engine progress and cancellation | Retain the accepted request-policy and raw-slot alternation fixes as regressions | Leant now passes the tuple/default cases in all three modes without increasing the recorded bounds. These fixes do not preempt a single engine step. Promote broader scheduling only for a measured remaining latency or cancellation failure. |
 | Other search and checker performance | Measure rejected contextual proofs and the existing exhaustion case next; optimize only a demonstrated cost | The Exference supplied-fold `[a] -> a` rejection fixture takes about 147 seconds at 100,000 steps. Nested introduction helpers can also consume slots with unsupported proofs. Measure those costs separately from cold startup, first accepted result, rendering/checking, and memory. Preserve original charges; do not silently refill a window or raise defaults. |
 | Failure diagnostics and capability receipts | Required delivery infrastructure; promote precise stage diagnostics, not another framework rewrite | Keep graph absence, unsupported proof admission, compiler rejection, behavioral falsehood, inconclusive checking, and exhausted search distinct. Retain per-operation and per-engine results, actual replay status, source revision, settings, exact emitted source, and negative controls. Freeze a small repeated validation matrix before expanding diagnostics further. |
-| Semantic provider retrieval | Conditional scaling investigation | Show a useful provider excluded by inventory selection in a realistic project; measure retrieval recall as well as latency. The forced method fixture already supplies its provider, so retrieval cannot resolve that failure. Larger inventories alone are not an acceptance criterion. |
+| Semantic provider retrieval | Conditional scaling investigation | Show a useful provider excluded by inventory selection in a realistic project; measure retrieval recall as well as latency. The forced method fixture now passes; the mixed-inventory refusal requires source representation, not broader retrieval. Larger inventories alone are not an acceptance criterion. |
 | Canonical duplicate keys and a shared subgoal DAG | Defer broad refactoring; allow a measured local optimization | A profile must identify duplicate comparison or repeated subgoal work as material. Preserve source identity, scope, budget charging, and replay. |
 | Isolated-worker production routing | Separate integration project | Require environment snapshots, backend parity, transcript equality, bounded cancellation, and memory measurements. The existing foundation is not proof of a speedup. |
 | Native Lean tactic integration or a Lean implementation of the engine | Defer broad migration; allow a small independently replayed vertical slice when a workflow requires it | An editor or proof-mode workflow must define the fixture. Keeping elaborated `Expr` values could remove translation boundaries, but a rewrite does not establish equivalent search coverage, budgets, or behavior and should not displace the current integration work. |

@@ -131,20 +131,21 @@ marks priority 1's supported-fragment Haskell elaboration complete: all 101
 CLI tests pass, including first/best/all repair selection, exact GHC replay,
 and retention of the original failed-candidate sample when its elaboration
 retry times out under the same deadline. Priorities 2–4 remain open. The
-[latest integration triage](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-08-integration-retriage.md)
-records Leant's working prototype against `4a4ed0fc`: all 13 focused tests,
-six native ordinary/where method queries with full-type replay and 24
-observations, and three actual False controls pass. The prototype remains
-unpublished pending cache/discovery, local-context and complete regression
-closure. Its full suite passed 698/699; the corrected source-text test passes
-in isolation, with a complete rerun still due. Next close those gates and the
-Haskell loaded-provider/implicit-root frontend gaps, then address missing
-Church constructions. Supplied tree folds are an independent delivery.
-The original four-slot cache search miss and a 32-slot diagnostic trace mismatch
-remain distinct. Two Exference ranking experiments still produced 256 false
-`maybeEither` candidates and were restored; further tuning needs a concrete
-branch/queue diagnosis. The detailed re-triage retains the complete scope.
-Bounded Lean contexts now pass their complete 39-cell matrix and 680-test suite. Exact
+[accepted Leant global-method integration](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-08-global-contextual-providers.md)
+uses Djex `4a4ed0fc` to carry complete source schemes and lexical class
+assumptions through native method discovery and both engines. Six ordinary/where
+method cases pass with exact full-type replay and 24 dictionary-payload
+observations. Nine cache/False sessions, a fresh 39-cell local-context matrix,
+a strict Leant build and its complete 701-test suite also pass. Cache acceptance
+uses an explicit 32-candidate window and 512-record diagnostic capture; the
+original four-candidate query remains a search miss, with product defaults
+unchanged. Next close Haskell loaded-provider admission and implicit-root
+scoping, support Lean mixed inventories containing dictionary constructors,
+and make missing Church constructions reachable. Supplied tree folds remain
+an independent delivery. Two failed `maybeEither` ranking experiments favor
+diagnosing actual construction and queue decisions before more tuning. The
+[current re-triage](docs/reports/2026-09-07-synthesis-retriage.md) retains the full scope.
+Exact
 proof-selected dictionary transport remains required before that guard is
 relaxed, with payload-sensitive Haskell and Lean replay. Both partial oracle preflights now pass: all 20 Lean files with 491
 inventories (487 empty, four allowlisted observer/proofs), and all 63 Haskell

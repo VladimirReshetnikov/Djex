@@ -9,6 +9,7 @@ import qualified KindGraphCases
 import qualified DjinnContextSpec
 import qualified ContextualInstantiationSpec
 import qualified ContextualErasureSpec
+import qualified NestedGivenErasureSpec
 
 import Djinn.Internal.Environment (prepareGroundSynthesisEnvironment)
 import Djinn.Internal.SourceGraph (SourceGraphError, checkSourceClauseGraph)
@@ -31,7 +32,7 @@ main :: IO ()
 main = defaultMain $ testGroup "private Djinn source graph checker"
   [ sharingTests, lexicalTests, constructorTests, specializationTests
   , KindGraphCases.tests, DjinnContextSpec.tests, ContextualInstantiationSpec.tests
-  , ContextualErasureSpec.tests ]
+  , ContextualErasureSpec.tests, NestedGivenErasureSpec.tests ]
 
 type DeclarationSource = Declaration String Void ()
 type SourceType = T.Type String

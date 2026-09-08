@@ -102,18 +102,20 @@ recursive inputs. Exference's complete-case graphs and protected queues preserve
 the caller's total step and queue bounds. Leant now passes these eight scenarios
 in Djinn, Exference, and Both: 24 exact displayed terms pass independent kernel
 replay, with 48 empty axiom inventories and three actual false controls.
-Its full configured 647-test integration run passes in 343.79 seconds, with
+Its earlier full configured 647-test integration run passes in 343.79 seconds, with
 unchanged source, test-executable, and fake-Z3 helper hashes. Unused lambda and let binders
 retain source graphs as checked wildcards, preserving exact compatibility
 erasure. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md)
-prioritizes validating and publishing guarded nested-Given support, completing
-the bounded production Lean context route, and repairing verification of
-already-found fold candidates. Exact proof-selected dictionary transport
-follows the guarded milestone before overlap restrictions are relaxed. The
-expanded Church behavioral corpus, including all 19 supplied-default cases,
-runs alongside these deliveries. Its latest Lean partial-oracle preflight
-passes 19 of 20 files; the remaining `at` inline predicate still needs repair.
-Preflight and type inhabitation remain separate from behavioral synthesis.
+prioritizes integrating the accepted guarded nested-Given increment into
+Leant, preserving original failure samples when elaboration retries time out,
+and repairing verification of already-found fold candidates. First/best/all
+repair selection already passes in the current 100-test CLI suite. Exact
+proof-selected dictionary transport follows before overlap restrictions are
+relaxed. Both partial oracle preflights now pass: all 20 Lean files with 491
+inventories (487 empty, four allowlisted observer/proofs), and all 63 Haskell
+controls. Expanded live behavioral acceptance for the additional totals and all
+19 supplied-default cases remains open; oracle preflight and type inhabitation
+do not establish behavioral synthesis.
 
 The [supplied-fold composition report](docs/reports/2026-09-07-supplied-recursor-composition.md)
 describes synthesis of `map`, order-sensitive `append`, and generalized `length`
@@ -142,8 +144,8 @@ dictionary erasure, and shared batch/stream budgets. All 92 private tests and
 the expanded sixteen-test Given target pass, including independent GHC replay.
 Qualified searches that omit class methods now report no evidence rather than
 incorrectly refuting the source type; genuine unconstrained refutations remain.
-Duplicate equal Givens, forced nested uses, methods, and partial constrained
-instantiation still need further work. Leant's published `922c5558` dependency
+Duplicate equal Givens, nested forall/Given interaction, methods, and partial
+constrained instantiation still need further work. Leant's published `922c5558` dependency
 does not yet contain this increment.
 
 Its [validation receipt](test-integration/receipts/conditional-givens-checkpoint.json)
@@ -151,6 +153,19 @@ records 2,168 passing tests across twelve complete affected suites, including
 all 432 Length tests. These are complementary complete-suite runs with
 unchanged production source; the detailed report preserves the initial stale
 test expectations and their complete corrected reruns.
+
+The subsequent [guarded nested-Given increment](docs/reports/2026-09-07-djinn-nested-givens.md)
+adds forced monomorphic nested local/global calls and prevents overlapping
+dictionaries hidden in residual results, constructor fields, or aliases from
+acquiring unsupported evidence. Its complete final private and facade suites
+pass 106 and 147 tests, with the facade suite taking 234.23 seconds and including
+24 contextual cases and GHC witnesses. The [checkpoint receipt](test-integration/receipts/guarded-nested-givens-checkpoint.json)
+records 1,048 Tasty cases, 700 Church cases and 100 scope queries across twelve
+complementary complete suites with unchanged production sources. Five fixture
+lines were corrected before the final reruns. Leant's guard integration remains
+pending. Its prepared provenance path passes 14 pure runner controls, but the
+new strict build, 52 focused tests, full 678-test integration inventory and
+39 live ordinary/where contextual cells have not yet passed.
 
 Leant also adds [bounded simplification of behavioral assertions](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-07-bounded-behavioral-simplification.md)
 after decision checks of the assertion and its negation. The three-engine live

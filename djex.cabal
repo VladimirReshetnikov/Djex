@@ -795,6 +795,7 @@ Test-Suite djinn-source-graph-private-tests
     DjinnContextSpec
     ContextualInstantiationSpec
     ContextualErasureSpec
+    NestedGivenErasureSpec
     Djinn.Internal.ContextualInstantiation
     Djinn.Internal.SourceEvidence
     Djinn.Internal.Instantiation

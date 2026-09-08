@@ -38,6 +38,11 @@ module Djinn.Internal.Environment (
     preparedEnvironmentLoadedFunctionInstantiation,
     PreparedRootGivenOpening, prepareRootGivenOpening,
     rootGivenOpeningSource, rootGivenOpeningContexts, rootGivenOpeningBody,
+    PreparedNestedGivenOpening, prepareNestedGivenOpenings,
+    nestedGivenOpeningQuerySource, nestedGivenOpeningQueryBody,
+    nestedGivenOpeningKindScope, nestedGivenOpeningSource,
+    nestedGivenOpeningContexts, nestedGivenOpeningBody,
+    nestedGivenOpeningAvailableContexts,
     preparedEnvironmentQueryUsesParametricData,
     lookupPreparedSynthesisClass, synthesisFunctionSymbol,
     synthesisMethodSymbol,
@@ -1307,8 +1312,7 @@ prepareRootGivenOpening prepared source actualBody = do
         checkPreparedSynthesisTypesKinds prepared [(KStar, opened)]
         -- Equal Givens need an explicit selected-slot association in the
         -- source graph; the pilot never chooses between them silently.
-        if length contexts /= length
-                (SharedCollection.distinctOn dictionarySymbol contexts)
+        if not $ unambiguousPositiveGivenScopes prepared opened
             then Right Nothing
             else Right $ Just $ PreparedRootGivenOpening source contexts body
   where
@@ -1323,6 +1327,133 @@ rootGivenOpeningContexts (PreparedRootGivenOpening _ contexts _) = contexts
 
 rootGivenOpeningBody :: PreparedRootGivenOpening -> SharedType.Type HSymbol
 rootGivenOpeningBody (PreparedRootGivenOpening _ _ body) = body
+
+-- | A positive, monomorphic qualification at an actual term position of the
+-- jointly opened query. The complete query remains the kind authority for
+-- ambient variables: inspecting the smaller callback alone could change an
+-- otherwise defaulted outer variable's kind. No nested forall is opened here.
+data PreparedNestedGivenOpening = PreparedNestedGivenOpening
+    (SharedType.Type HSymbol) (SharedType.Type HSymbol)
+    (SharedType.Type HSymbol) (SharedType.Type HSymbol)
+    [Constraint (SharedType.Type HSymbol)]
+
+prepareNestedGivenOpenings
+    :: PreparedEnvironment
+    -> SharedType.Type HSymbol
+    -> SharedType.Type HSymbol
+    -> Either String [PreparedNestedGivenOpening]
+prepareNestedGivenOpenings prepared source actualBody = do
+    opened <- first show $ fst <$> SharedType.implicitizeLeadingForalls
+        (const (Nothing :: Maybe ())) fresh Set.empty source
+    let (binders, contexts, body) = SharedType.splitLeadingForalls opened
+    if null binders &&
+            SharedType.splitLeadingForalls (SharedType.canonicalizeType body) ==
+            SharedType.splitLeadingForalls (SharedType.canonicalizeType actualBody)
+        then Right ()
+        else Left "nested-Given opening does not match the exact search body"
+    checkPreparedSynthesisTypesKinds prepared [(KStar, opened)]
+    pure $ if unambiguousPositiveGivenScopes prepared opened
+        then collect opened body contexts True body else []
+  where
+    fresh unavailable variable = Just $ fst $ freshPrimedVariable unavailable variable
+    distinct contexts = length contexts == length
+        (SharedCollection.distinctOn dictionarySymbol contexts)
+    collect kindScope queryBody available positive ty = case ty of
+        SharedType.FunctionType domain result ->
+            collect kindScope queryBody available (not positive) domain ++
+            collect kindScope queryBody available positive result
+        SharedType.TupleType _ fields ->
+            concatMap (collect kindScope queryBody available positive) fields
+        SharedType.ForallType{}
+            | ([], [], body) <- SharedType.splitLeadingForalls ty ->
+                collect kindScope queryBody available positive body
+            | ([], contexts, body) <- SharedType.splitLeadingForalls ty
+            , positive && distinct (available ++ contexts) ->
+                PreparedNestedGivenOpening source queryBody kindScope ty
+                    (available ++ contexts) :
+                collect kindScope queryBody (available ++ contexts) positive body
+        -- Quantified callbacks require fresh eigenvariables with their own
+        -- source scope receipt. Negative qualifications remain opaque provider
+        -- values; nominal type arguments do not establish term-level variance.
+        _ -> []
+
+-- Qualification erasure does not yet retain a proof-selected dictionary slot
+-- when source checking enters another equal Given. Check the whole positive
+-- source spine, including qualified residual results and constructor fields,
+-- rather than only introductions for which a bridge happens to be built.
+-- The existing prepared projection cache contains checked, alias-expanded
+-- fields; specialization uses simultaneous capture-avoiding substitution.
+-- This inspection authorizes no new constructor, variance, or Given rule.
+-- Siblings have separate scopes. Nested forall names are conservatively kept:
+-- a shadowed spelling can refuse this optional plan, but cannot authorize a
+-- choice between two equal dictionaries. Ordinary opaque plans are unchanged.
+unambiguousPositiveGivenScopes
+    :: PreparedEnvironment -> SharedType.Type HSymbol -> Bool
+unambiguousPositiveGivenScopes
+        (PreparedEnvironment _ _ _ _ _ _ _ _
+            (PreparedNominalReachability _ projections _)) = go Map.empty [] True
+  where
+    go visited available positive ty = case ty of
+        SharedType.FunctionType domain result ->
+            go visited available (not positive) domain &&
+            go visited available positive result
+        SharedType.TupleType _ fields -> all (go visited available positive) fields
+        SharedType.ForallType _ contexts body
+            | positive ->
+                let active = available ++ contexts
+                in length active == length (SharedCollection.distinctOn dictionarySymbol active) &&
+                    go visited active positive body
+            | otherwise -> go visited available positive body
+        SharedType.TypeApplication{} -> inspectApplication visited available positive ty
+        SharedType.TypeConstructor{} -> inspectApplication visited available positive ty
+        SharedType.TypeVariable{} -> True
+
+    inspectApplication visited available positive ty =
+        -- A type argument does not establish nominal variance. Inspect its
+        -- explicit qualifications conservatively, and inspect each actual
+        -- instantiated constructor field at the owner's term polarity too.
+        all (go visited available True) arguments && case headType of
+            SharedType.TypeConstructor owner
+                | Just (PreparedDatatypeProjection parameters fields) <- Map.lookup owner projections
+                , length parameters == length arguments ->
+                    let state = (arguments, available, positive)
+                    in case Map.lookup owner visited of
+                        -- Exact cycles add no new source scope. A changed
+                        -- application or scope is deliberately unsupported:
+                        -- never unroll growing recursive datatype arguments.
+                        Just earlier -> earlier == state
+                        Nothing -> case SharedType.substituteTypeVariablesBatch
+                                fresh Set.empty (Map.fromList $ zip parameters arguments) fields of
+                            Left _ -> False
+                            Right specialized -> all
+                                (go (Map.insert owner state visited) available positive) specialized
+            _ -> True
+      where
+        (headType, arguments) = SharedType.applicationSpine ty
+    fresh unavailable variable = Just $ fst $ freshPrimedVariable unavailable variable
+
+nestedGivenOpeningQuerySource, nestedGivenOpeningQueryBody,
+    nestedGivenOpeningKindScope, nestedGivenOpeningSource
+    :: PreparedNestedGivenOpening -> SharedType.Type HSymbol
+nestedGivenOpeningQuerySource (PreparedNestedGivenOpening source _ _ _ _) = source
+nestedGivenOpeningQueryBody (PreparedNestedGivenOpening _ body _ _ _) = body
+nestedGivenOpeningKindScope (PreparedNestedGivenOpening _ _ scope _ _) = scope
+nestedGivenOpeningSource (PreparedNestedGivenOpening _ _ _ source _) = source
+
+nestedGivenOpeningContexts
+    :: PreparedNestedGivenOpening -> [Constraint (SharedType.Type HSymbol)]
+nestedGivenOpeningContexts opening =
+    let (_, contexts, _) = SharedType.splitLeadingForalls $ nestedGivenOpeningSource opening
+    in contexts
+
+nestedGivenOpeningBody :: PreparedNestedGivenOpening -> SharedType.Type HSymbol
+nestedGivenOpeningBody opening =
+    let (_, _, body) = SharedType.splitLeadingForalls $ nestedGivenOpeningSource opening
+    in body
+
+nestedGivenOpeningAvailableContexts
+    :: PreparedNestedGivenOpening -> [Constraint (SharedType.Type HSymbol)]
+nestedGivenOpeningAvailableContexts (PreparedNestedGivenOpening _ _ _ _ contexts) = contexts
 
 -- | Translate a checked shared type directly. Stable raw and native queries
 -- meet here after raw compatibility validation and use the exact same

@@ -1718,19 +1718,75 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
     -- shared by its Givens and its body. No constraint below an arrow/product
     -- becomes a root assumption. Failed/ambiguous optional openings add no
     -- plan and, like all contextual plans, confer no negative evidence.
-    contextualPlanEntries = do
+    contextualPlanEntries = rootContextualPlanEntries ++ nestedContextualPlanEntries
+    rootContextualPlanEntries = do
         Right (Just opening) <- [prepareRootGivenOpening prepared
             (SourceEvidence.sourceTypingGoal sourceContext) elaboratedGoal]
         Right bodyFormula <- [preparedEnvironmentSynthesisFormulaTranslator prepared $
             rootGivenOpeningBody opening]
-        let exactPremises = SharedCollection.distinctOn fst $
-                activeLoadedSchemePremises ++ filter ((/= targetSymbol) . fst)
-                    (preparedEnvironmentFunctionPremises prepared)
-            availableSources = SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey
+        let family = Contextual.contextualInstantiationAxioms
+                [ sealed
+                | (source, vector) <- contextualRequests
+                    (rootGivenOpeningContexts opening) [bodyFormula]
+                , Right () <- [Contextual.checkContextualInstantiationKinds
+                    prepared opening source vector]
+                , Right sealed <- [Contextual.sealContextualInstantiation contextualTypeCheck
+                    (preparedEnvironmentSynthesisFormulaTranslator prepared) source vector]
+                ]
+            helpers = filter
+                (all (`elem` rootGivenOpeningContexts opening) .
+                    Contextual.contextualInstantiationObligations)
+                $ Contextual.contextualInstantiations family
+        if null helpers then [] else pure ()
+        Right erasure <- [SourceEvidence.rootGivenErasure sourceContext opening helpers]
+        pure $ contextualPlan helpers [] erasure
+    -- A nested qualification is introduced only by a checked bridge whose
+    -- proof argument binds its dictionaries. It never extends the root pool.
+    -- This first scope supports monomorphic qualifiers over the jointly
+    -- opened root variables; nested forall eigenvariables remain opaque.
+    nestedContextualPlanEntries = do
+        Right candidates <- [prepareNestedGivenOpenings prepared
+            (SourceEvidence.sourceTypingGoal sourceContext) elaboratedGoal]
+        let openings = take SharedQuery.maximumProviderInstantiationAssignments candidates
+        firstOpening : _ <- [openings]
+        Right introductions <- [Contextual.contextualIntroductions prepared openings]
+        Right bodyFormula <- [preparedEnvironmentSynthesisFormulaTranslator prepared elaboratedGoal]
+        let available = map nestedGivenOpeningAvailableContexts openings
+            family = Contextual.contextualInstantiationAxioms
+                [ sealed
+                | (source, vector) <- contextualRequests (concat available)
+                    (bodyFormula : map Contextual.contextualIntroductionBodyFormula introductions)
+                , Right () <- [Contextual.checkNestedContextualInstantiationKinds
+                    prepared firstOpening source vector]
+                , Right sealed <- [Contextual.sealContextualInstantiation contextualTypeCheck
+                    (preparedEnvironmentSynthesisFormulaTranslator prepared) source vector]
+                ]
+            helpers = filter
+                (\helper -> any (\givens -> all (`elem` givens) $
+                    Contextual.contextualInstantiationObligations helper) available)
+                $ Contextual.contextualInstantiations family
+        if null helpers then [] else pure ()
+        Right erasure <- [SourceEvidence.nestedGivenErasure sourceContext helpers introductions]
+        pure $ contextualPlan helpers introductions erasure
+    contextualExactPremises = SharedCollection.distinctOn fst $
+        activeLoadedSchemePremises ++ filter ((/= targetSymbol) . fst)
+            (preparedEnvironmentFunctionPremises prepared)
+    contextualTypeCheck = checkPreparedSynthesisTypesKindsWithRigids prepared
+        (Set.fromList goalVariables) . (: []) . (,) KStar
+    contextualPlan helpers introductions erasure =
+        ((contextualExactPremises ++
+            [(Contextual.contextualInstantiationSymbol helper,
+                Contextual.contextualInstantiationFormula helper) | helper <- helpers] ++
+            [(Contextual.contextualIntroductionSymbol helper,
+                Contextual.contextualIntroductionFormula helper) | helper <- introductions],
+            [], Set.empty, Map.empty, Map.empty,
+            SourceEvidence.rootGivenErasureGoal erasure, False), erasure)
+    contextualRequests availableContexts forms =
+        let availableSources = SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey
                 [ source
                 | symbol <- Set.toList $ Set.unions $
-                    negativeOpaqueFormulaSymbols PositiveFormula bodyFormula :
-                    map (negativeOpaqueFormulaSymbols NegativeFormula . snd) exactPremises
+                    map (negativeOpaqueFormulaSymbols PositiveFormula) forms ++
+                    map (negativeOpaqueFormulaSymbols NegativeFormula . snd) contextualExactPremises
                 , Just source <- [opaqueSymbolSource symbol]
                 , let (binders, contexts, _) = SharedType.splitLeadingForalls source
                 , not $ null contexts
@@ -1739,7 +1795,7 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
             vocabulary = take SharedQuery.maximumProviderInstantiationCandidates $
                 SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey $
                     map SharedType.TypeVariable goalVariables ++
-                    [argument | Constraint _ arguments <- rootGivenOpeningContexts opening,
+                    [argument | Constraint _ arguments <- availableContexts,
                         argument <- arguments] ++ closedMonotypeSubtrees elaboratedGoal
             tuples source =
                 let (binders, _, _) = SharedType.splitLeadingForalls source
@@ -1749,31 +1805,9 @@ prepareFormulaSearch options sourceContext providerCandidates providerAssignment
             -- Charge optional proposals against the existing finite assignment
             -- bound before type checking/dedup. Proof search still spends its
             -- one shared raw-proof/choice allowance; this is no extra search.
-            requests = take SharedQuery.maximumProviderInstantiationAssignments $
+        in take SharedQuery.maximumProviderInstantiationAssignments $
                 roundRobin [[(source, vector) | vector <- tuples source]
                     | source <- availableSources]
-            check = checkPreparedSynthesisTypesKindsWithRigids prepared
-                (Set.fromList goalVariables) . (: []) . (,) KStar
-            family = Contextual.contextualInstantiationAxioms
-                [ sealed
-                | (source, vector) <- requests
-                , Right () <- [Contextual.checkContextualInstantiationKinds
-                    prepared opening source vector]
-                , Right sealed <- [Contextual.sealContextualInstantiation check
-                    (preparedEnvironmentSynthesisFormulaTranslator prepared) source vector]
-                ]
-            helpers = filter
-                (all (`elem` rootGivenOpeningContexts opening) .
-                    Contextual.contextualInstantiationObligations)
-                $ Contextual.contextualInstantiations family
-        if null helpers then [] else pure ()
-        Right erasure <- [SourceEvidence.rootGivenErasure sourceContext opening helpers]
-        let plan = (exactPremises ++
-                [(Contextual.contextualInstantiationSymbol helper,
-                    Contextual.contextualInstantiationFormula helper) | helper <- helpers],
-                [], Set.empty, Map.empty, Map.empty,
-                SourceEvidence.rootGivenErasureGoal erasure, False)
-        pure (plan, erasure)
       where
         roundRobin streams = case [(value, rest) | value : rest <- streams] of
             [] -> []
@@ -3825,8 +3859,11 @@ searchPreparedFormulaPlanByWithContextual contextual sourceContext chargeDiagnos
                 candidateLimitReached = not $ null overflow
                 convertProof _ evidence =
                     (case contextual of
-                        Nothing -> SourceEvidence.lowerCheckedSourceCandidate
-                        Just receipt -> SourceEvidence.lowerCheckedContextualSourceCandidate receipt)
+                        Nothing -> \context environment axioms visible providers definition proof ->
+                            first SourceEvidence.InvalidContextualLowering $
+                                SourceEvidence.lowerCheckedSourceCandidate context environment
+                                    axioms visible providers definition proof
+                        Just receipt -> SourceEvidence.admitCheckedContextualSourceCandidate receipt)
                         sourceContext
                         proofEnv axiomSymbols visibleApplications
                         providerApplications target evidence
@@ -3861,13 +3898,20 @@ searchPreparedFormulaPlanByWithContextual contextual sourceContext chargeDiagnos
                 requiredCarrierSymbols = Set.filter
                     (isPrefixOf "$djinn$carrier-focused$" . symbolSpelling)
                     axiomSymbols
-            generatedCandidates <- internalFailure
+            admitted <- internalFailure
                 "cannot construct generated clause" $
                 mapM
-                    (convertCheckedCandidateWithEvidence convertProof
-                        (candidateDetails . SourceEvidence.sourceCandidateClause))
+                    (\checked -> case convertCheckedCandidateWithEvidence convertProof
+                        (candidateDetails . SourceEvidence.sourceCandidateClause) checked of
+                        Left (SourceEvidence.UnsupportedContextualErasure _) -> Right Nothing
+                        Left (SourceEvidence.InvalidContextualLowering failure) -> Left failure
+                        Right candidate -> Right $ Just candidate)
                     independentProofs
-            let firstProof = case internalProofs of
+            -- Unsupported lexical erasures still consumed their raw proof and
+            -- all cursor choices. Do not retry/refill, claim negative evidence,
+            -- or detach another proof's source authority when omitting them.
+            let generatedCandidates = [candidate | Just candidate <- admitted]
+                firstProof = case internalProofs of
                     firstProofTerm : _ -> Just $ show firstProofTerm
                     [] -> Nothing
                 completion

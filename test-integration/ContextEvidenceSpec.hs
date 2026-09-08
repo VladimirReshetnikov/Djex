@@ -39,6 +39,9 @@ data Role
   | ExactForwarding
   | LocalGivenApplication
   | GlobalGivenApplication
+  | NestedLocalGivenApplication
+  | NestedGlobalGivenApplication
+  | NestedSiblingLeakage
   | SiblingLeakage
   deriving (Eq, Show)
 
@@ -90,7 +93,228 @@ contextualMatrix label rows = testGroup label
        checkSiblingLeakage
    , testCase "GHC independently rejects sibling given leakage" $
        bounded "sibling GHC control" compileSiblingLeakage
-   ] ++ omittedMethodTests)
+   ] ++ omittedMethodTests ++ [nestedGivenTests])
+
+-- This increment introduces no new forall beneath the callback. Its C a
+-- qualification refers to the already opened root a, and must actually be
+-- used by a supplied provider before the callback can produce Token.
+nestedGivenTests :: TestTree
+nestedGivenTests = testGroup "Nested monomorphic Given provider use"
+  ([ testCase (roleName role) $ bounded (roleName role) $
+       executeSpecification DjinnEngine role
+   | role <- [NestedLocalGivenApplication, NestedGlobalGivenApplication]
+   ] ++
+   [ testCase "a nested qualified tuple field cannot supply its unqualified sibling" $
+       bounded "nested sibling control" $ do
+         result <- synthesize DjinnEngine NestedSiblingLeakage
+         assertEqual (searchDescription result) [] $ observedTerms result
+         let preamble = runtimePreamble ++
+               [ "good :: forall a. a -> (C a => Token)"
+               , "good x = token x"
+               , "main :: IO ()"
+               , "main = print True"
+               ]
+         positive <- executeModule $ unlines preamble
+         case positive of
+           (ExitSuccess, _, _) -> pure ()
+           _ -> fail $ "GHC rejected the lexical positive control: " ++ show positive
+         negative <- executeModule $ unlines $ preamble ++
+           [ "bad :: forall a. a -> ((C a => Token), Token)"
+           , "bad x = (token x, token x)"
+           ]
+         case negative of
+           (ExitFailure _, _, errors) -> assertBool
+             ("sibling rejection lost its missing dictionary: " ++ errors) $
+               "C a" `isInfixOf` errors
+           _ -> fail $ "GHC accepted sibling Given leakage: " ++ show negative
+   , testCase "nested local and global batches and streams retain their raw bounds" $
+       bounded "nested Given budgets" nestedGivenBudgets
+   , testCase "a root specialization cannot silently choose an equal residual Given" $
+       bounded "overlapping residual Given" nestedResidualOverlap
+   , testCase "a qualified Box argument cannot hide an overlapping dictionary choice" $
+       bounded "Box overlapping Given" $ nestedFieldOverlap False
+   , testCase "a Hidden constructor field cannot hide an overlapping dictionary choice" $
+       bounded "Hidden overlapping Given" $ nestedFieldOverlap True
+   ])
+
+-- The source type is inhabited, but a helper that selected the root C a before
+-- returning the residual qualification would lose that dictionary selection
+-- during erasure. Until selected-slot provenance survives source reconstruction,
+-- both contextual entrances refuse this source shape without refuting it.
+nestedResidualOverlap :: IO ()
+nestedResidualOverlap = do
+  className <- expectRight $ parseName "C"
+  tokenTypeName <- expectRight $ parseName "Token"
+  providerName <- expectRight $ mkIdentifier "provider"
+  target <- expectRight $ mkIdentifier "overlap"
+  let a = TypeVariable "a"
+      unit = TupleType Boxed []
+      given = Constraint className [a]
+      residual = ForallType [] [given] $ TypeConstructor tokenTypeName
+      providerType = ForallType ["a"] [given] $
+        FunctionType a $ FunctionType unit residual
+      sourceDeclarations =
+        [ ClassDeclaration () className [TypeParameter "a" Nothing] [] []
+        , AbstractTypeDeclaration () tokenTypeName ProperTypeKind
+        , ValueDeclaration $ ValueSignature () providerName providerType
+        ]
+      source = "forall a. C a => () -> a -> (C a => Token)"
+  environment <- expectRight (mkEnvironment sourceDeclarations :: Either
+    (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+  session <- expectRight $ mkDjinnSession environment
+  assertEqual "the overlap control changed its complete constrained provider"
+    [providerType] [valueType value | ValueDeclaration value <-
+      environmentDeclarations $ djinnSessionEnvironment session]
+  forM_ [DepthFirst, Interleave] $ \strategy -> do
+    request <- expectRight $ parseDjinnRequest session
+      defaultQueryOptions
+        { optionCutoff = 8, optionBudget = Just 2000, optionAlternatives = True
+        , optionSorted = False, optionStrategy = strategy
+        }
+      target "overlapping-residual-given" source
+    batch <- expectRight $ runDjinnTypedQuery session request
+    stream <- expectRight $ runDjinnTypedQueryStream session request
+    streamObservations <- traverse expectRight $ take 10 stream
+    assertBool "the overlap stream omitted completion" $ not $ null streamObservations
+    case reverse streamObservations of
+      terminal : _ -> case batchProgress $ resultSearch terminal of
+        Completed{} -> pure ()
+        Continuing -> fail "overlap refusal exceeded its original candidate window"
+      [] -> fail "the overlap stream was empty"
+    forM_ (batch : streamObservations) $ \result -> do
+      assertBool "an unsupported dictionary choice was erased into a source candidate" $
+        null $ batchCandidates $ resultSearch result
+      assertEqual "an inhabited overlapping source was refuted" NoEvidence $ resultEvidence result
+  replay <- executeModule $ unlines
+    [ "{-# LANGUAGE RankNTypes, FlexibleContexts #-}"
+    , "module Main where"
+    , "data Token = Token Int"
+    , "class C a where payload :: a -> Int"
+    , "provider :: forall a. C a => a -> () -> (C a => Token)"
+    , "provider x () = Token (payload x)"
+    , "witness :: " ++ source
+    , "witness u x = provider x u"
+    , "main :: IO ()"
+    , "main = print True"
+    ]
+  case replay of
+    (ExitSuccess, output, errors) -> assertEqual
+      ("overlapping source witness replay: " ++ errors)
+      (Just True) (readMaybe output :: Maybe Bool)
+    _ -> fail $ "GHC rejected the exact overlapping source inhabitant: " ++ show replay
+
+nestedFieldOverlap :: Bool -> IO ()
+nestedFieldOverlap hidden = do
+  className <- expectRight $ parseName "C"
+  tokenTypeName <- expectRight $ parseName "Token"
+  ownerName <- expectRight $ parseName $ if hidden then "Hidden" else "Box"
+  providerName <- expectRight $ mkIdentifier "provider"
+  target <- expectRight $ mkIdentifier "overlapField"
+  let a = TypeVariable "a"
+      given = Constraint className [a]
+      residual = ForallType [] [given] $ TypeConstructor tokenTypeName
+      providerType = ForallType ["a"] [given] $ FunctionType a residual
+      parameter = if hidden then "a" else "t"
+      field = if hidden then residual else TypeVariable parameter
+      ownerDeclaration = DataTypeDeclaration () ownerName
+        [TypeParameter parameter Nothing] [DataConstructor () ownerName [field]]
+      sourceDeclarations =
+        [ ClassDeclaration () className [TypeParameter "a" Nothing] [] []
+        , AbstractTypeDeclaration () tokenTypeName ProperTypeKind
+        , ownerDeclaration
+        , ValueDeclaration $ ValueSignature () providerName providerType
+        ]
+      source = "forall a. C a => a -> " ++
+        if hidden then "Hidden a" else "Box (C a => Token)"
+  environment <- expectRight (mkEnvironment sourceDeclarations :: Either
+    (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+  session <- expectRight $ mkDjinnSession environment
+  assertEqual "field control lost its exact source constructor or parameter"
+    [ownerDeclaration] [declaration | declaration@DataTypeDeclaration{} <-
+      environmentDeclarations $ djinnSessionEnvironment session]
+  assertEqual "field control lost the provider's complete residual qualification"
+    [providerType] [valueType value | ValueDeclaration value <-
+      environmentDeclarations $ djinnSessionEnvironment session]
+  forM_ [DepthFirst, Interleave] $ \strategy -> do
+    request <- expectRight $ parseDjinnRequest session
+      defaultQueryOptions
+        { optionCutoff = 8, optionBudget = Just 2000, optionAlternatives = True
+        , optionSorted = False, optionStrategy = strategy
+        }
+      target "overlapping-field-given" source
+    batch <- expectRight $ runDjinnTypedQuery session request
+    stream <- expectRight $ runDjinnTypedQueryStream session request
+    streamObservations <- traverse expectRight $ take 10 stream
+    case reverse streamObservations of
+      terminal : _ -> case batchProgress $ resultSearch terminal of
+        Completed{} -> pure ()
+        Continuing -> fail "field overlap refusal exceeded its original raw window"
+      [] -> fail "the field overlap stream omitted its terminal observation"
+    forM_ (batch : streamObservations) $ \result -> do
+      assertBool "a constructor field reassigned the proof-selected dictionary" $
+        null $ batchCandidates $ resultSearch result
+      assertEqual "a conservative field refusal refuted an inhabited source"
+        NoEvidence $ resultEvidence result
+  replay <- executeModule $ unlines
+    [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, FlexibleContexts, ScopedTypeVariables, TypeApplications #-}"
+    , "module Main where"
+    , "data Token = Token Int"
+    , "class C a where payload :: a -> Int"
+    , if hidden then "data Hidden a = Hidden (C a => Token)" else "data Box t = Box t"
+    , "provider :: forall a. C a => a -> (C a => Token)"
+    , "provider x = Token (payload x)"
+    , "witness :: " ++ source
+    , if hidden then "witness x = Hidden (provider x)"
+        else "witness x = Box @(C a => Token) (provider x)"
+    , "main :: IO ()"
+    , "main = print True"
+    ]
+  case replay of
+    (ExitSuccess, output, errors) -> assertEqual
+      ("qualified field source witness replay: " ++ errors)
+      (Just True) (readMaybe output :: Maybe Bool)
+    _ -> fail $ "GHC rejected the exact qualified-field source inhabitant: " ++ show replay
+
+nestedGivenBudgets :: IO ()
+nestedGivenBudgets = forM_ [NestedLocalGivenApplication, NestedGlobalGivenApplication] $ \role -> do
+  sourceDeclarations <- declarations role
+  environment <- expectRight (mkEnvironment sourceDeclarations :: Either
+    (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+  session <- expectRight $ mkDjinnSession environment
+  target <- expectRight $ mkIdentifier "nestedBudget"
+  providerName <- expectRight $ mkIdentifier "token"
+  let allowed = [providerName | role == NestedGlobalGivenApplication]
+  forM_ [(cap, fuel) | cap <- [1, 2, 8], fuel <- [0, 1, 2, 4, 40, 2000]] $ \(cap, fuel) -> do
+    request <- expectRight $ parseDjinnRequest session
+      defaultQueryOptions
+        { optionCutoff = cap, optionBudget = Just fuel, optionAlternatives = True
+        , optionSorted = False, optionStrategy = Interleave
+        }
+      target "nested-given-budget" $ signature role
+    batch <- expectRight $ runDjinnTypedQuery session request
+    stream <- expectRight $ runDjinnTypedQueryStream session request
+    observed <- traverse expectRight $ take (cap + 2) stream
+    assertBool "nested stream omitted its terminal observation" $ not $ null observed
+    case reverse observed of
+      terminal : _ -> case batchProgress $ resultSearch terminal of
+        Completed{} -> pure ()
+        Continuing -> fail "nested stream did not stop within its original raw window"
+      [] -> fail "nested stream omitted its terminal observation"
+    forM_ [[batch], observed] $ \results -> do
+      let candidates = concatMap (batchCandidates . resultSearch) results
+      assertBool "resuming a nested plan refilled the raw candidate allowance" $
+        length candidates <= cap
+      if fuel == 0 then assertBool "nested introduction bypassed zero choices" (null candidates)
+        else pure ()
+      forM_ results $ \result -> assertBool "a partial contextual search produced negative evidence" $
+        resultEvidence result `elem` [NoEvidence, ValidatedCandidates]
+      forM_ candidates $ \candidate -> do
+        graph <- expectRight $ typedCandidateTermGraph candidate
+        let clause = candidateOutput $ typedCandidateCompatibility candidate
+        assertEqual "nested budget candidate lost its exact clause" clause $
+          eraseTermGraphToFunctionClause (clauseName clause) graph
+        _ <- inspectGraph role allowed graph
+        pure ()
 
 -- Class methods deliberately remain outside Djinn's candidate vocabulary.
 -- That is an incomplete search policy, not a refutation of their qualified
@@ -124,28 +348,69 @@ omittedMethodTests =
   , testCase "an unconstrained query keeps genuine negative evidence with the same class inventory" $
       bounded "unconstrained method evidence control" $
         checkMethodEvidence "A -> Token" ProvedUninhabitable
+  , testCase "a constructor field's own Given prevents refuting Hidden make" $
+      bounded "hidden method evidence" $ do
+        session <- methodEvidenceSession True
+        checkMethodEvidenceIn session "Hidden A" NoEvidence
+        checkMethodEvidenceIn session "A -> Token" ProvedUninhabitable
+        replay <- executeModule $ unlines
+          [ "{-# LANGUAGE RankNTypes #-}"
+          , "module Main where"
+          , "data A = A"
+          , "data Token = Token"
+          , "class C a where make :: a -> Token"
+          , "data Hidden a = Hidden (C a => a -> Token)"
+          , "witness :: Hidden A"
+          , "witness = Hidden make"
+          , "main :: IO ()"
+          , "main = print True"
+          ]
+        case replay of
+          (ExitSuccess, output, errors) ->
+            assertEqual ("independent hidden method witness replay: " ++ errors)
+              (Just True) (readMaybe output :: Maybe Bool)
+          _ -> fail $ "GHC rejected Hidden make under its field's own Given: " ++ show replay
   ]
 
 checkMethodEvidence :: String -> QueryEvidence -> IO ()
 checkMethodEvidence source expectedEvidence = do
+  session <- methodEvidenceSession False
+  checkMethodEvidenceIn session source expectedEvidence
+
+methodEvidenceSession :: Bool -> IO DjinnSession
+methodEvidenceSession includeHidden = do
   className <- expectRight $ parseName "C"
   atomName <- expectRight $ parseName "A"
   tokenTypeName <- expectRight $ parseName "Token"
+  hiddenName <- expectRight $ parseName "Hidden"
   methodName <- expectRight $ mkIdentifier "make"
-  target <- expectRight $ mkIdentifier "methodEvidence"
-  let sourceDeclarations =
+  let hiddenDeclaration = DataTypeDeclaration () hiddenName
+        [TypeParameter "a" Nothing]
+        [DataConstructor () hiddenName
+          [ForallType [] [Constraint className [TypeVariable "a"]] $
+            FunctionType (TypeVariable "a") $ TypeConstructor tokenTypeName]]
+      sourceDeclarations =
         [ AbstractTypeDeclaration () atomName ProperTypeKind
         , AbstractTypeDeclaration () tokenTypeName ProperTypeKind
         , ClassDeclaration () className [TypeParameter "a" Nothing] []
             [ValueSignature () methodName $
               FunctionType (TypeVariable "a") $ TypeConstructor tokenTypeName]
-        ]
+        ] ++ [hiddenDeclaration | includeHidden]
   environment <- expectRight (mkEnvironment sourceDeclarations :: Either
     (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
   session <- expectRight $ mkDjinnSession environment
   assertEqual "the class method became an ordinary value provider" []
     [valueName value | ValueDeclaration value <-
       environmentDeclarations $ djinnSessionEnvironment session]
+  assertEqual "the hidden-field evidence fixture changed its exact source constructor"
+    [hiddenDeclaration | includeHidden]
+    [declaration | declaration@DataTypeDeclaration{} <-
+      environmentDeclarations $ djinnSessionEnvironment session]
+  pure session
+
+checkMethodEvidenceIn :: DjinnSession -> String -> QueryEvidence -> IO ()
+checkMethodEvidenceIn session source expectedEvidence = do
+  target <- expectRight $ mkIdentifier "methodEvidence"
   forM_ [DepthFirst, Interleave] $ \strategy -> do
     request <- expectRight $ parseDjinnRequest session
       defaultQueryOptions
@@ -191,6 +456,9 @@ roleName NestedQualifiedCallback = "nested_qualified_callback"
 roleName ExactForwarding = "exact_contextual_forwarding"
 roleName LocalGivenApplication = "forced_local_given_application"
 roleName GlobalGivenApplication = "forced_global_given_application"
+roleName NestedLocalGivenApplication = "forced_nested_local_given_application"
+roleName NestedGlobalGivenApplication = "forced_nested_global_given_application"
+roleName NestedSiblingLeakage = "nested_sibling_given_leakage"
 roleName SiblingLeakage = "sibling_given_leakage"
 
 signature :: Role -> String
@@ -202,6 +470,11 @@ signature ExactForwarding =
 signature LocalGivenApplication =
   "forall a. C a => (forall b. C b => b -> Token) -> a -> Token"
 signature GlobalGivenApplication = "forall a. C a => a -> Token"
+signature NestedLocalGivenApplication =
+  "forall a. (forall b. C b => b -> Token) -> a -> ((C a => Token) -> Token) -> Token"
+signature NestedGlobalGivenApplication =
+  "forall a. a -> ((C a => Token) -> Token) -> Token"
+signature NestedSiblingLeakage = "forall a. a -> ((C a => Token), Token)"
 signature SiblingLeakage =
   "forall a. ((C a => a -> Token), a -> Token)"
 
@@ -221,7 +494,8 @@ declarations role = do
     , AbstractTypeDeclaration () tokenTypeName ProperTypeKind
     ] ++
     [ ValueDeclaration $ ValueSignature () providerName providerType
-    | role `elem` [GlobalGivenApplication, SiblingLeakage]
+    | role `elem` [GlobalGivenApplication, SiblingLeakage,
+        NestedGlobalGivenApplication, NestedSiblingLeakage]
     ]
 
 -- These finite bounds are acceptance budgets, not completeness claims. Inspect
@@ -234,7 +508,8 @@ synthesize engine role = do
     "context_" ++ engineName engine ++ "_" ++ roleName role
   providerName <- expectRight $ mkIdentifier "token"
   let expectedValues =
-        [providerName | role `elem` [GlobalGivenApplication, SiblingLeakage]]
+        [providerName | role `elem` [GlobalGivenApplication, SiblingLeakage,
+            NestedGlobalGivenApplication, NestedSiblingLeakage]]
       checkInventory environment = do
         let actual = environmentDeclarations environment
         assertEqual "the source environment gained declarations"
@@ -260,7 +535,20 @@ synthesize engine role = do
           }
         target "context-evidence-acceptance" $ signature role
       result <- expectRight $ runDjinnTypedQuery session request
-      terms <- forM (batchCandidates $ resultSearch result) $ \candidate -> do
+      streamResults <- if role `elem`
+          [NestedLocalGivenApplication, NestedGlobalGivenApplication, NestedSiblingLeakage]
+        then do
+          stream <- expectRight $ runDjinnTypedQueryStream session request
+          traverse expectRight $ take 34 stream
+        else pure []
+      assertBool "nested stream refilled its candidate window" $
+        length (concatMap (batchCandidates . resultSearch) streamResults) <= 32
+      if role == NestedSiblingLeakage then
+        forM_ (result : streamResults) $ \observed ->
+          assertEqual "unsupported sibling scope became false negative evidence"
+            NoEvidence $ resultEvidence observed
+        else pure ()
+      terms <- forM (concatMap (batchCandidates . resultSearch) $ result : streamResults) $ \candidate -> do
         let clause = candidateOutput $ typedCandidateCompatibility candidate
         graph <- either
           (\failure -> fail $ unlines [show engine, roleName role, show failure, show clause])
@@ -331,6 +619,16 @@ inspectGraph role allowedGlobals graph = do
           assertEqual "application selected a different provider origin" origin actualOrigin
           assertEqual "application did not use the exact root introduction/slot"
             rootGivens [binder]
+      requireNested origin = do
+        assertEqual "the nested Given was promoted to the query root" [] rootGivens
+        assertBool "the nested provider never consumed dictionary evidence" $
+          not $ null applications
+        forM_ applications $ \(binder, actualOrigin) -> do
+          assertEqual "nested use selected another provider origin" origin actualOrigin
+          assertEqual "the nested dictionary lost its original source slot" 0 $
+            Q.evidenceBinderSlot binder
+          assertBool "nested use did not retain its actual lexical introduction" $
+            binder `elem` [introduced | (introduced, _, False) <- introductions]
   case role of
     UnusedRootGiven -> do
       requireOneRoot
@@ -356,6 +654,9 @@ inspectGraph role allowedGlobals graph = do
       pure opaque
     LocalGivenApplication -> requireForced LocalProvider >> pure True
     GlobalGivenApplication -> requireForced (GlobalProvider providerName) >> pure True
+    NestedLocalGivenApplication -> requireNested LocalProvider >> pure True
+    NestedGlobalGivenApplication -> requireNested (GlobalProvider providerName) >> pure True
+    NestedSiblingLeakage -> fail "a nested Given escaped into its unqualified sibling"
     SiblingLeakage -> fail "an uninhabited sibling query acquired a checked candidate"
  where
   node owner = maybe (fail $ "missing graph node: " ++ show owner) pure $
@@ -478,6 +779,10 @@ runtimePreamble =
   , "inspectIdentity f = Token (f (7 :: Int) + f (91 :: Int) + (if f True then 100 else 0) + (if f False then 1000 else 0))"
   , "inspectIdentityAgain :: (forall a. C a => a -> a) -> Token"
   , "inspectIdentityAgain f = Token (f (29 :: Int) + (if f False then 1 else 11))"
+  , "inspectGivenInt :: (C Int => Token) -> Token"
+  , "inspectGivenInt value = Token (1000 + observe value)"
+  , "inspectGivenBool :: (C Bool => Token) -> Token"
+  , "inspectGivenBool value = Token (2000 + observe value)"
   ]
 
 observations :: Role -> String -> String
@@ -496,6 +801,15 @@ observations role function = conjunction $ case role of
     [ "observe (" ++ function ++ " (7 :: Int)) == 211"
     , "observe (" ++ function ++ " False) == 211"
     ]
+  NestedLocalGivenApplication ->
+    [ "observe (" ++ function ++ " suppliedA (7 :: Int) inspectGivenInt) == 1037"
+    , "observe (" ++ function ++ " suppliedB False inspectGivenBool) == 2091"
+    ]
+  NestedGlobalGivenApplication ->
+    [ "observe (" ++ function ++ " (7 :: Int) inspectGivenInt) == 1211"
+    , "observe (" ++ function ++ " False inspectGivenBool) == 2211"
+    ]
+  NestedSiblingLeakage -> ["False"]
   SiblingLeakage -> ["False"]
  where
   supplied =

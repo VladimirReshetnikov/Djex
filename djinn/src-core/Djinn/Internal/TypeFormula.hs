@@ -198,7 +198,8 @@ data FormulaPolarity
     deriving (Eq, Show)
 
 -- | A polarized formula plus an honesty bit. 'translationIncomplete' means
--- that at least one quantified subtree remained opaque or a recursive
+-- that at least one quantified subtree remained opaque, a positive
+-- qualification was opened without its dictionary premises, or a recursive
 -- datatype was unfolded/atomized only to the configured positive bound.
 -- Proofs are still sound, but an empty proof search is not a refutation of the
 -- Haskell type.
@@ -942,7 +943,9 @@ lowerForall lowering definitions path occurrencePath origin atom = case forallPo
             -- LJT receives only the body: accepting a contextual positive
             -- forall therefore permits dictionary-independent introduction
             -- without pretending that class methods are proof premises.
-            SharedType.ForallType binders _ body
+            -- The omitted context makes this view incomplete even when it
+            -- appears only after expanding a constructor field or alias.
+            SharedType.ForallType binders contexts body
                 | site `Set.member` opaqueSites ||
                     symbol `Set.member` transportTypes -> Right incompleteOpaque
                 | otherwise -> do
@@ -953,7 +956,9 @@ lowerForall lowering definitions path occurrencePath origin atom = case forallPo
                     translation <- lowerExpansionType lowering definitions path
                         occurrencePath expanded
                     return translation
-                        { translationOpenableForalls = site
+                        { translationIncomplete = not (null contexts)
+                            || translationIncomplete translation
+                        , translationOpenableForalls = site
                             : translationOpenableForalls translation
                         , translationIntroducedSkolems = skolems
                             ++ translationIntroducedSkolems translation

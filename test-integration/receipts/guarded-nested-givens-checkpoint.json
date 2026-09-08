@@ -1,0 +1,869 @@
+{
+  "format": "guarded-nested-givens-checkpoint-v1",
+  "status": "passed_complementary_complete_suites",
+  "scope": "Ten complete suites from v2 plus complete corrected private/facade suites from v3; not one passing twelve-suite invocation.",
+  "summarizer": {
+    "path": "dist-newstyle/summarize_guarded_nested.py",
+    "sha256": "ed64da62aa69bede12fd412370d0867af893ca1f85ae4b721668d015416337e7"
+  },
+  "inputs": {
+    "original_v2": {
+      "path": "dist-newstyle/priority-nested-givens-suites-v2/results.json",
+      "sha256": "7b9181336fd6728950445cb9d052972fd9278f05ffbb98be7b168c6c02e0da10"
+    },
+    "corrected_v3": {
+      "path": "dist-newstyle/priority-nested-givens-suites-v3/results.json",
+      "sha256": "f663ee1f9c76d73e5a65b96dad0cbfcd44a47027ed9a1ae3cb694398fac260d8"
+    }
+  },
+  "integrity": {
+    "both_runs_frozen": true,
+    "production_identical_between_runs": true,
+    "helper_executables_identical_between_runs": true,
+    "runner_source_identical_between_runs": true,
+    "current_files_match_final_manifest": true,
+    "source_manifest_count": 231,
+    "source_manifest_sha256": "92e18242c4a2fdffb466739c968eb353d58584e913739ac430da1e6ceddf9880"
+  },
+  "fixture_only_changes": {
+    "djinn/test-source-graph-private/NestedGivenErasureSpec.hs": {
+      "before_sha256": "50d1417862f889cd2b553f1585eda0aa62632a0fcf25c139d94e4782c6e55e0e",
+      "after_sha256": "5ea01d638231f4a65e575011cda33b9924a4951c241ac8bc09d01962f2a8800f"
+    },
+    "test-integration/ContextEvidenceSpec.hs": {
+      "before_sha256": "8aca816e77a0a3c3d8ba379cbecb450e6d815924f14c250e8b98b17025b76b8c",
+      "after_sha256": "7e5fb305f2a8c3b75494d1c42d43a6ec3a5adb7933f92ddb7fd96680e6c768fb"
+    }
+  },
+  "important_source_hashes": {
+    "djex.cabal": "c53e3a62826ac9e7b3ed5053b3eba495f4aa3457168fee4d35fda720c7c3af66",
+    "djinn/src-core/Djinn/Core.hs": "7fe42d2e3114d06e5d74422e5e3d7ae372dd3e773bdceefbfadc4e56955dccb5",
+    "djinn/src-core/Djinn/Internal/Environment.hs": "e9aac5cf1ad5b136f101031ce18e67b5f509184fe2ff9d4fcbcde0ec8bb6fb2f",
+    "djinn/src-core/Djinn/Internal/TypeFormula.hs": "48d80d3b1f9eb5c048c21beadf66c2fa6b4d5851060d1c26c54e3d87997f7cd1",
+    "djinn/src-internal/Djinn/Internal/ContextualInstantiation.hs": "fedd1fa4e253b765369f8fb6d1825adddddb0aeafda20cfc9066df4bbd123894",
+    "djinn/src-internal/Djinn/Internal/SourceEvidence.hs": "526bb7a64d3be6fde50174e34c41e1696262a6f526a9dabc53d1065ffe3eb720",
+    "djinn/test-source-graph-private/Spec.hs": "887fa15790f1ba223269d939372cf3aadc3f915e03e067690f7c9bc64559ae27",
+    "djinn/test-source-graph-private/NestedGivenErasureSpec.hs": "5ea01d638231f4a65e575011cda33b9924a4951c241ac8bc09d01962f2a8800f",
+    "test-integration/ContextEvidenceSpec.hs": "7e5fb305f2a8c3b75494d1c42d43a6ec3a5adb7933f92ddb7fd96680e6c768fb"
+  },
+  "helper_executable_hashes": {
+    "dist-newstyle/build/x86_64-windows/ghc-9.12.4/djex-2026.7.17/x/djex/build/djex/djex.exe": "8f0fdedd25cc996f49bc35a6e70eda910b35abc95735b0086cf0190180b39369",
+    "dist-newstyle/build/x86_64-windows/ghc-9.12.4/djex-2026.7.17/x/djinn/build/djinn/djinn.exe": "4b6c773e2a5a4f8b3b8f4049cd72f5523548125d7f2311731bfe39387f9955c8",
+    "dist-newstyle/build/x86_64-windows/ghc-9.12.4/djex-2026.7.17/x/djex-fake-cabal/build/djex-fake-cabal/djex-fake-cabal.exe": "f3d47589d8e45a899d78a3270bc586035c5a2c7da35289a20f23cca838f875a6",
+    "dist-newstyle/build/x86_64-windows/ghc-9.12.4/djex-2026.7.17/x/djex-fake-z3/build/djex-fake-z3/djex-fake-z3.exe": "9d94e74f3cbb2a9660c8949afeb4ebcf9e5a97de4a1c54acd12b45c3726dbfa8"
+  },
+  "strict_build_logs": [
+    {
+      "path": "dist-newstyle/priority-nested-givens-build-v5.log",
+      "sha256": "32c6d59c318bfc3ba0f1309157b20fbcd751c5e32fb986ec5805861d3aab1934",
+      "reported_result": "passed",
+      "result_authority": "coordinator-reported completed strict build; no exit inferred from log text"
+    },
+    {
+      "path": "dist-newstyle/priority-nested-givens-build-v6.log",
+      "sha256": "5b240d1fc5d53bec1c35fd54ae737999833a8206c48332a87e95c9d3401f50da",
+      "reported_result": "passed",
+      "result_authority": "coordinator-reported completed strict build; no exit inferred from log text"
+    }
+  ],
+  "totals": {
+    "complete_suite_count": 12,
+    "tasty_test_cases": 1048,
+    "church_engine_signature_checks": 700,
+    "rank_n_engine_scope_checks": 100,
+    "heterogeneous_checks_total": 1848,
+    "meaning": "Tasty cases, Church engine/signature checks and scope engine/probe checks are reported separately; the contextual subset is not added again."
+  },
+  "contextual_target": {
+    "count": 24,
+    "inventory_sha256": "88787d9eda83fe9ec855efbe9ae5b0a1beef489560076f925f940494d03ff367",
+    "names": [
+      "Djex facade.Complete contextual Given acceptance target.djinn.unused_root_given",
+      "Djex facade.Complete contextual Given acceptance target.djinn.nested_qualified_callback",
+      "Djex facade.Complete contextual Given acceptance target.djinn.exact_contextual_forwarding",
+      "Djex facade.Complete contextual Given acceptance target.djinn.forced_local_given_application",
+      "Djex facade.Complete contextual Given acceptance target.djinn.forced_global_given_application",
+      "Djex facade.Complete contextual Given acceptance target.djinn.a qualified tuple component cannot supply its sibling",
+      "Djex facade.Complete contextual Given acceptance target.exference.unused_root_given",
+      "Djex facade.Complete contextual Given acceptance target.exference.nested_qualified_callback",
+      "Djex facade.Complete contextual Given acceptance target.exference.exact_contextual_forwarding",
+      "Djex facade.Complete contextual Given acceptance target.exference.forced_local_given_application",
+      "Djex facade.Complete contextual Given acceptance target.exference.forced_global_given_application",
+      "Djex facade.Complete contextual Given acceptance target.exference.a qualified tuple component cannot supply its sibling",
+      "Djex facade.Complete contextual Given acceptance target.the public expression checker rejects sibling given leakage",
+      "Djex facade.Complete contextual Given acceptance target.GHC independently rejects sibling given leakage",
+      "Djex facade.Complete contextual Given acceptance target.omitted methods cannot refute inhabited root or nested qualifications",
+      "Djex facade.Complete contextual Given acceptance target.an unconstrained query keeps genuine negative evidence with the same class inventory",
+      "Djex facade.Complete contextual Given acceptance target.a constructor field's own Given prevents refuting Hidden make",
+      "Djex facade.Complete contextual Given acceptance target.Nested monomorphic Given provider use.forced_nested_local_given_application",
+      "Djex facade.Complete contextual Given acceptance target.Nested monomorphic Given provider use.forced_nested_global_given_application",
+      "Djex facade.Complete contextual Given acceptance target.Nested monomorphic Given provider use.a nested qualified tuple field cannot supply its unqualified sibling",
+      "Djex facade.Complete contextual Given acceptance target.Nested monomorphic Given provider use.nested local and global batches and streams retain their raw bounds",
+      "Djex facade.Complete contextual Given acceptance target.Nested monomorphic Given provider use.a root specialization cannot silently choose an equal residual Given",
+      "Djex facade.Complete contextual Given acceptance target.Nested monomorphic Given provider use.a qualified Box argument cannot hide an overlapping dictionary choice",
+      "Djex facade.Complete contextual Given acceptance target.Nested monomorphic Given provider use.a Hidden constructor field cannot hide an overlapping dictionary choice"
+    ],
+    "coverage": "contained in complete djex-tests inventory/run; no duplicate subset execution"
+  },
+  "selected_complete_suites": [
+    {
+      "suite": "djinn-source-graph-private-tests",
+      "kind": "tasty_test_cases",
+      "status": "passed",
+      "inventory_count": 106,
+      "inventory_sha256": "3422133846ddf827ae8c29b306e4f52d74ddf749b84f2ee6ed365190f3a5ace0",
+      "passed_count": 106,
+      "failed_count": 0,
+      "summary_seconds": 0.03,
+      "executable": "dist-newstyle/build/x86_64-windows/ghc-9.12.4/djex-2026.7.17/t/djinn-source-graph-private-tests/build/djinn-source-graph-private-tests/djinn-source-graph-private-tests.exe",
+      "executable_sha256": "1cdc915211d5525abc934809d903c6cb949da643f487745c276037b13b773d2f",
+      "inventory_command": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djinn-source-graph-private-tests\\build\\djinn-source-graph-private-tests\\djinn-source-graph-private-tests.exe",
+          "--list-tests"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:35:47Z",
+        "finished_utc": "2026-09-08T03:35:47Z",
+        "wall_seconds": 0.4998650000197813,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v3/djinn-source-graph-private-tests-inventory.stdout.txt",
+          "sha256": "17a70484c72aa9133301f247609ac4c7c7f062c2ae67e35287349ec72f8b4ef6"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v3/djinn-source-graph-private-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "run": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djinn-source-graph-private-tests\\build\\djinn-source-graph-private-tests\\djinn-source-graph-private-tests.exe",
+          "-j1",
+          "--timeout=180s"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:35:47Z",
+        "finished_utc": "2026-09-08T03:35:47Z",
+        "wall_seconds": 0.12393870000960305,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v3/djinn-source-graph-private-tests.stdout.txt",
+          "sha256": "4eb6929c3448deaf436b5881238402a968f077fba110b4ae6aa5a47d87819297"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v3/djinn-source-graph-private-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "source_run": "corrected_v3"
+    },
+    {
+      "suite": "djinn-source-graph-tests",
+      "kind": "tasty_test_cases",
+      "status": "passed",
+      "inventory_count": 59,
+      "inventory_sha256": "9bca0fa86828e9afe2fa7eca3d618ce99e638e8a6446121633e1bb86df321e99",
+      "passed_count": 59,
+      "failed_count": 0,
+      "summary_seconds": 0.27,
+      "executable": "dist-newstyle/build/x86_64-windows/ghc-9.12.4/djex-2026.7.17/t/djinn-source-graph-tests/build/djinn-source-graph-tests/djinn-source-graph-tests.exe",
+      "executable_sha256": "7e6ce6e71fe9de09b6b577d30597a3e205b17f4b93dfeace28cef3146fe1c724",
+      "inventory_command": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djinn-source-graph-tests\\build\\djinn-source-graph-tests\\djinn-source-graph-tests.exe",
+          "--list-tests"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:22:06Z",
+        "finished_utc": "2026-09-08T03:22:06Z",
+        "wall_seconds": 0.45593259995803237,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-source-graph-tests-inventory.stdout.txt",
+          "sha256": "ebdc71f2096593587f885dd6bb2cec56d44c98bf7802d5ce6bcf02c0a891ba94"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-source-graph-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "run": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djinn-source-graph-tests\\build\\djinn-source-graph-tests\\djinn-source-graph-tests.exe",
+          "-j1",
+          "--timeout=180s"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:22:06Z",
+        "finished_utc": "2026-09-08T03:22:06Z",
+        "wall_seconds": 0.3105726999929175,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-source-graph-tests.stdout.txt",
+          "sha256": "f6fdd83994b22b88a94f01383fd9619d64e9a54806dbbfa48a87cf7f2acc07b6"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-source-graph-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "source_run": "original_v2"
+    },
+    {
+      "suite": "djinn-tests",
+      "kind": "tasty_test_cases",
+      "status": "passed",
+      "inventory_count": 133,
+      "inventory_sha256": "89b008326bf8fdbbec1dca35f6018dbfda24a38d0a4895b086c235c2a633cdf1",
+      "passed_count": 133,
+      "failed_count": 0,
+      "summary_seconds": 123.46,
+      "executable": "dist-newstyle/build/x86_64-windows/ghc-9.12.4/djex-2026.7.17/t/djinn-tests/build/djinn-tests/djinn-tests.exe",
+      "executable_sha256": "654fea1541f76a4e911b9011fdfbbcb67c1a80199486eb82f43239d3d517d6f0",
+      "inventory_command": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djinn-tests\\build\\djinn-tests\\djinn-tests.exe",
+          "--list-tests"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:22:07Z",
+        "finished_utc": "2026-09-08T03:22:07Z",
+        "wall_seconds": 0.48372209997614846,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-tests-inventory.stdout.txt",
+          "sha256": "7df7622c21adbe938a0cd278e7a76aaa700e198e01801a39254859d501fe0f0f"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "run": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djinn-tests\\build\\djinn-tests\\djinn-tests.exe",
+          "-j1",
+          "--timeout=180s"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:22:07Z",
+        "finished_utc": "2026-09-08T03:24:11Z",
+        "wall_seconds": 123.54732509999303,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-tests.stdout.txt",
+          "sha256": "c442db105fedf92c14d5082a9745e92db1b7aad6af29a3779f5bc8820b98d487"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "source_run": "original_v2"
+    },
+    {
+      "suite": "djinn-frontend-api-tests",
+      "kind": "tasty_test_cases",
+      "status": "passed",
+      "inventory_count": 5,
+      "inventory_sha256": "2097449933555af83aa7d633ed62d08548510b20dff3b074a9c7bc87e2a34402",
+      "passed_count": 5,
+      "failed_count": 0,
+      "summary_seconds": 0.01,
+      "executable": "dist-newstyle/build/x86_64-windows/ghc-9.12.4/djex-2026.7.17/t/djinn-frontend-api-tests/build/djinn-frontend-api-tests/djinn-frontend-api-tests.exe",
+      "executable_sha256": "177c255dbde4d891eea35306ced697ee89f364fe46e43ed28453852dfd72ad69",
+      "inventory_command": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djinn-frontend-api-tests\\build\\djinn-frontend-api-tests\\djinn-frontend-api-tests.exe",
+          "--list-tests"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:24:11Z",
+        "finished_utc": "2026-09-08T03:24:12Z",
+        "wall_seconds": 0.49240639997879043,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-frontend-api-tests-inventory.stdout.txt",
+          "sha256": "54f3c3a6a4082f021c40a4efde427c41e1530e84ff53f24b4a98d6f723cfce9d"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-frontend-api-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "run": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djinn-frontend-api-tests\\build\\djinn-frontend-api-tests\\djinn-frontend-api-tests.exe",
+          "-j1",
+          "--timeout=180s"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:24:12Z",
+        "finished_utc": "2026-09-08T03:24:12Z",
+        "wall_seconds": 0.0650506999809295,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-frontend-api-tests.stdout.txt",
+          "sha256": "c86a4efcae8efb59be767d2c48db413588c47e259ea79e4b4ff415406509ac4b"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-frontend-api-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "source_run": "original_v2"
+    },
+    {
+      "suite": "djex-api-tests",
+      "kind": "tasty_test_cases",
+      "status": "passed",
+      "inventory_count": 38,
+      "inventory_sha256": "b2d9d7aac2d5ba179de5c1c0bea51126eaa81f13fd8314ed35d65fa0fe828a99",
+      "passed_count": 38,
+      "failed_count": 0,
+      "summary_seconds": 0.04,
+      "executable": "dist-newstyle/build/x86_64-windows/ghc-9.12.4/djex-2026.7.17/t/djex-api-tests/build/djex-api-tests/djex-api-tests.exe",
+      "executable_sha256": "695e8eae88c0e86b438f0905cf785e393381efdaceb81791499223548813efea",
+      "inventory_command": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djex-api-tests\\build\\djex-api-tests\\djex-api-tests.exe",
+          "--list-tests"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:24:12Z",
+        "finished_utc": "2026-09-08T03:24:13Z",
+        "wall_seconds": 0.14343480003299192,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djex-api-tests-inventory.stdout.txt",
+          "sha256": "27826718befb26f2596139e05a175147607db5b6c515b049957dd2b2e9937857"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djex-api-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "run": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djex-api-tests\\build\\djex-api-tests\\djex-api-tests.exe",
+          "-j1",
+          "--timeout=180s"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:24:13Z",
+        "finished_utc": "2026-09-08T03:24:13Z",
+        "wall_seconds": 0.10362519999034703,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djex-api-tests.stdout.txt",
+          "sha256": "8e0c3c6564575958efb8bbdc69e3ef2017151c5fa9b48d379870cc470061d4aa"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djex-api-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "source_run": "original_v2"
+    },
+    {
+      "suite": "djex-tests",
+      "kind": "tasty_test_cases",
+      "status": "passed",
+      "inventory_count": 147,
+      "inventory_sha256": "4b055f636abf64ec2c1f9cdae189078b56f3dbe41a731b9c17e4928e1392c226",
+      "passed_count": 147,
+      "failed_count": 0,
+      "summary_seconds": 234.23,
+      "executable": "dist-newstyle/build/x86_64-windows/ghc-9.12.4/djex-2026.7.17/t/djex-tests/build/djex-tests/djex-tests.exe",
+      "executable_sha256": "07346a8d76784a3143ab3e1388e88811f8dca53d0d1021af5bec8cfbff761ff8",
+      "inventory_command": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djex-tests\\build\\djex-tests\\djex-tests.exe",
+          "--list-tests"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:35:47Z",
+        "finished_utc": "2026-09-08T03:35:47Z",
+        "wall_seconds": 0.10478030005469918,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v3/djex-tests-inventory.stdout.txt",
+          "sha256": "f8f1fd0fed5bdeb1ee58377ad2a772b87e3c15f96d831eccfe885207c6ee8d59"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v3/djex-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "run": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djex-tests\\build\\djex-tests\\djex-tests.exe",
+          "-j1",
+          "--timeout=180s"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:35:47Z",
+        "finished_utc": "2026-09-08T03:39:42Z",
+        "wall_seconds": 234.3006754000089,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v3/djex-tests.stdout.txt",
+          "sha256": "09a1c58a88b21d82c50fd9d4353b44de2f8baf550debfa9813b64af560a80cad"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v3/djex-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "source_run": "corrected_v3"
+    },
+    {
+      "suite": "djex-cli-tests",
+      "kind": "tasty_test_cases",
+      "status": "passed",
+      "inventory_count": 100,
+      "inventory_sha256": "b30ed7a52f83c59bd3f0d183d74c5afcd5a3f22c884c8b8e43075dcee9cb74b7",
+      "passed_count": 100,
+      "failed_count": 0,
+      "summary_seconds": 174.24,
+      "executable": "dist-newstyle/build/x86_64-windows/ghc-9.12.4/djex-2026.7.17/t/djex-cli-tests/build/djex-cli-tests/djex-cli-tests.exe",
+      "executable_sha256": "1222c3c651b8e60a7fe09dccfd54f2a559da8bfddeec3742459fcfede4a12e50",
+      "inventory_command": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djex-cli-tests\\build\\djex-cli-tests\\djex-cli-tests.exe",
+          "--list-tests"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:28:35Z",
+        "finished_utc": "2026-09-08T03:28:36Z",
+        "wall_seconds": 0.3761287999805063,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djex-cli-tests-inventory.stdout.txt",
+          "sha256": "00f11391a4e645665cb5a2b3febe566ccf9c221874bfb7d4541df97bcfa63491"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djex-cli-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "run": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djex-cli-tests\\build\\djex-cli-tests\\djex-cli-tests.exe",
+          "-j1",
+          "--timeout=180s"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:28:36Z",
+        "finished_utc": "2026-09-08T03:31:30Z",
+        "wall_seconds": 174.2945206000004,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djex-cli-tests.stdout.txt",
+          "sha256": "9aafffdd98b534768727341e47be357a7330aab55b1662c91db814ade850693f"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djex-cli-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "source_run": "original_v2"
+    },
+    {
+      "suite": "djinn-cli-tests",
+      "kind": "tasty_test_cases",
+      "status": "passed",
+      "inventory_count": 24,
+      "inventory_sha256": "21beffa7aa1f53d87dec7fdf2fdb8ce528c5ee0269cd98a476da2afd9dead0bc",
+      "passed_count": 24,
+      "failed_count": 0,
+      "summary_seconds": 2.05,
+      "executable": "dist-newstyle/build/x86_64-windows/ghc-9.12.4/djex-2026.7.17/t/djinn-cli-tests/build/djinn-cli-tests/djinn-cli-tests.exe",
+      "executable_sha256": "acec72e183e994d266d436b37c37520532bd0e4205e394ab8694450e5c86a0bc",
+      "inventory_command": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djinn-cli-tests\\build\\djinn-cli-tests\\djinn-cli-tests.exe",
+          "--list-tests"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:31:30Z",
+        "finished_utc": "2026-09-08T03:31:31Z",
+        "wall_seconds": 0.36720750003587455,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-cli-tests-inventory.stdout.txt",
+          "sha256": "c4921458af7ced7785f517980b862bdab8d93d5a699dbb07311d1e9307fd8a40"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-cli-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "run": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djinn-cli-tests\\build\\djinn-cli-tests\\djinn-cli-tests.exe",
+          "-j1",
+          "--timeout=180s"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:31:31Z",
+        "finished_utc": "2026-09-08T03:31:33Z",
+        "wall_seconds": 2.1304987000185065,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-cli-tests.stdout.txt",
+          "sha256": "93ab4114cc8118a06cfea1f2a7a2dfa525d10d5e51fea59e61d3983fd69ab0eb"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-cli-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "source_run": "original_v2"
+    },
+    {
+      "suite": "djex-church-tests",
+      "kind": "church_engine_signature_checks",
+      "status": "passed",
+      "inventory_count": 700,
+      "passed_count": 700,
+      "inventory_sha256": "cdbde0098955c83fb1adae40d8195ed2c7690fc40fa418bea55b6e176aa8ea82",
+      "executable": "dist-newstyle/build/x86_64-windows/ghc-9.12.4/djex-2026.7.17/t/djex-church-tests/build/djex-church-tests/djex-church-tests.exe",
+      "executable_sha256": "c33a0828ffac17daea8e1a8c1fe785ec1bb30d9a8cc6327b2a824fec6dcc577d",
+      "run": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djex-church-tests\\build\\djex-church-tests\\djex-church-tests.exe",
+          "--cases",
+          "C:\\Djex\\test-church\\cases.tsv",
+          "--report-dir",
+          "C:\\Djex\\dist-newstyle\\priority-nested-givens-suites-v2\\church-generated"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:31:33Z",
+        "finished_utc": "2026-09-08T03:31:38Z",
+        "wall_seconds": 5.368063399975654,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djex-church-tests.stdout.txt",
+          "sha256": "799e2fbfc0d3db6d1dfbc5a6d8698636413e551514dfb7a9680316b5817b1de9"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djex-church-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "generated_file_count": 6,
+      "generated_manifest_sha256": "3018ff785d9df87dbc8e757bd51b26e143714385440ccc61908b03915cff4463",
+      "signatures_per_engine": 350,
+      "independent_ghc_engines": [
+        "djinn",
+        "exference"
+      ],
+      "source_run": "original_v2"
+    },
+    {
+      "suite": "djex-rank-n-scope-tests",
+      "kind": "rank_n_engine_scope_checks",
+      "status": "passed",
+      "inventory_count": 100,
+      "passed_count": 100,
+      "inventory_sha256": "3f5a3a944b1c14316c5ecc1895503135c306d4940ecc8539ba19dbeed456e069",
+      "executable": "dist-newstyle/build/x86_64-windows/ghc-9.12.4/djex-2026.7.17/t/djex-rank-n-scope-tests/build/djex-rank-n-scope-tests/djex-rank-n-scope-tests.exe",
+      "executable_sha256": "8631dd00558f7b947c1b73f585d6b086369f7d4827ac204db6bb9897fcf2f724",
+      "run": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djex-rank-n-scope-tests\\build\\djex-rank-n-scope-tests\\djex-rank-n-scope-tests.exe"
+        ],
+        "cwd": "C:\\Djex\\dist-newstyle\\priority-nested-givens-suites-v2\\scope-workspace",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:31:39Z",
+        "finished_utc": "2026-09-08T03:31:42Z",
+        "wall_seconds": 3.0081956000067294,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djex-rank-n-scope-tests.stdout.txt",
+          "sha256": "f9d3048c735fa4650ade1358ea15e46cbc3ed8c772b51644795a7404ef98fcc9"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djex-rank-n-scope-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "generated_file_count": 81,
+      "generated_manifest_sha256": "2d63be1975731ac80f6de0a5cbd1d97f3b2052c620c4eef925cde499b48025f5",
+      "positive_count": 76,
+      "negative_count": 24,
+      "negative_meaning": "no candidate within the configured budget, not a source-level refutation",
+      "independent_ghc_engines": [
+        "djinn",
+        "exference"
+      ],
+      "source_run": "original_v2"
+    },
+    {
+      "suite": "synthesis-length-tests",
+      "kind": "tasty_test_cases",
+      "status": "passed",
+      "inventory_count": 432,
+      "inventory_sha256": "7565515364425266213d5a8693794a6925aac5a2ec1a10bf3d6f5a7489348ec8",
+      "passed_count": 432,
+      "failed_count": 0,
+      "summary_seconds": 64.56,
+      "executable": "dist-newstyle/build/x86_64-windows/ghc-9.12.4/djex-2026.7.17/t/synthesis-length-tests/build/synthesis-length-tests/synthesis-length-tests.exe",
+      "executable_sha256": "6cdf7d8362b8d818b7a7182e9c579ea71a9bc3d05c542f75517162ba04dbbc2e",
+      "inventory_command": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\synthesis-length-tests\\build\\synthesis-length-tests\\synthesis-length-tests.exe",
+          "--list-tests"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:31:42Z",
+        "finished_utc": "2026-09-08T03:31:42Z",
+        "wall_seconds": 0.19429870002204552,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/synthesis-length-tests-inventory.stdout.txt",
+          "sha256": "7c3c732343b4024bba19b5d05ab06f0b55971523a9e319538b48cdd36715e726"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/synthesis-length-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "run": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\synthesis-length-tests\\build\\synthesis-length-tests\\synthesis-length-tests.exe",
+          "-j1",
+          "--timeout=180s"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:31:42Z",
+        "finished_utc": "2026-09-08T03:32:47Z",
+        "wall_seconds": 64.69894550001482,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/synthesis-length-tests.stdout.txt",
+          "sha256": "b25c0f698f5238749b48540ed140441edbb648e075667738d672bf4f83328129"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/synthesis-length-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "source_run": "original_v2"
+    },
+    {
+      "suite": "djinn-property-tests",
+      "kind": "tasty_test_cases",
+      "status": "passed",
+      "inventory_count": 4,
+      "inventory_sha256": "d08d5d98a653b95dd26b06ebbc5dae2ee2e6f08b8c06feda9ce501b4cf65c53c",
+      "passed_count": 4,
+      "failed_count": 0,
+      "summary_seconds": 0.13,
+      "executable": "dist-newstyle/build/x86_64-windows/ghc-9.12.4/djex-2026.7.17/t/djinn-property-tests/build/djinn-property-tests/djinn-property-tests.exe",
+      "executable_sha256": "3702755be004f1ac3285ff3b239003449c15dbf9e4c85900197c8bcc56077cff",
+      "inventory_command": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djinn-property-tests\\build\\djinn-property-tests\\djinn-property-tests.exe",
+          "--list-tests"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:32:47Z",
+        "finished_utc": "2026-09-08T03:32:48Z",
+        "wall_seconds": 0.4697832000092603,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-property-tests-inventory.stdout.txt",
+          "sha256": "69527b1533838cf0b43de8f21bbb4721bfa4409639e0a07559e04b2052a96cbd"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-property-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "run": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djinn-property-tests\\build\\djinn-property-tests\\djinn-property-tests.exe",
+          "-j1",
+          "--timeout=180s"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:32:48Z",
+        "finished_utc": "2026-09-08T03:32:48Z",
+        "wall_seconds": 0.18661379994591698,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-property-tests.stdout.txt",
+          "sha256": "b90c5d89043db9a1b89ef90b54073a6d9bbe14bf1852147bc8ba45f1a8edd5b2"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-property-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "source_run": "original_v2"
+    }
+  ],
+  "preserved_failure_history": [
+    {
+      "suite": "djex-tests",
+      "kind": "tasty_test_cases",
+      "status": "failed",
+      "inventory_count": 147,
+      "inventory_sha256": "4b055f636abf64ec2c1f9cdae189078b56f3dbe41a731b9c17e4928e1392c226",
+      "passed_count": 144,
+      "failed_count": 3,
+      "summary_seconds": 261.68,
+      "executable": "dist-newstyle/build/x86_64-windows/ghc-9.12.4/djex-2026.7.17/t/djex-tests/build/djex-tests/djex-tests.exe",
+      "executable_sha256": "aff728e0117af15c690cb976b93427b8fc2e470192fb1813e0b8af6471c70b2a",
+      "inventory_command": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djex-tests\\build\\djex-tests\\djex-tests.exe",
+          "--list-tests"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:24:13Z",
+        "finished_utc": "2026-09-08T03:24:13Z",
+        "wall_seconds": 0.11186210002051666,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djex-tests-inventory.stdout.txt",
+          "sha256": "f8f1fd0fed5bdeb1ee58377ad2a772b87e3c15f96d831eccfe885207c6ee8d59"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djex-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "run": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djex-tests\\build\\djex-tests\\djex-tests.exe",
+          "-j1",
+          "--timeout=180s"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 1,
+        "started_utc": "2026-09-08T03:24:13Z",
+        "finished_utc": "2026-09-08T03:28:35Z",
+        "wall_seconds": 261.741337799991,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djex-tests.stdout.txt",
+          "sha256": "a4df2df05c8d0aab3210631a52243738d5041fc9215366012c47c7020196386a"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djex-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "failure_names": [
+        "a constructor field's own Given prevents refuting Hidden make",
+        "a qualified Box argument cannot hide an overlapping dictionary choice",
+        "a Hidden constructor field cannot hide an overlapping dictionary choice"
+      ],
+      "failure_reason": "ExplicitParameterKindUnsupported",
+      "rejected_parameters": [
+        "a",
+        "t",
+        "a"
+      ],
+      "disposition": "preserved historical setup failure; replaced only by complete corrected-suite rerun"
+    },
+    {
+      "suite": "djinn-source-graph-private-tests",
+      "kind": "tasty_test_cases",
+      "status": "failed",
+      "inventory_count": 106,
+      "inventory_sha256": "3422133846ddf827ae8c29b306e4f52d74ddf749b84f2ee6ed365190f3a5ace0",
+      "passed_count": 102,
+      "failed_count": 4,
+      "summary_seconds": 0.02,
+      "executable": "dist-newstyle/build/x86_64-windows/ghc-9.12.4/djex-2026.7.17/t/djinn-source-graph-private-tests/build/djinn-source-graph-private-tests/djinn-source-graph-private-tests.exe",
+      "executable_sha256": "2186776662990dd1eda2fae3f0009b9a01d3fcefc3f81fcc3a173a4e491f2000",
+      "inventory_command": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djinn-source-graph-private-tests\\build\\djinn-source-graph-private-tests\\djinn-source-graph-private-tests.exe",
+          "--list-tests"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 0,
+        "started_utc": "2026-09-08T03:22:05Z",
+        "finished_utc": "2026-09-08T03:22:05Z",
+        "wall_seconds": 0.4755853000096977,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-source-graph-private-tests-inventory.stdout.txt",
+          "sha256": "17a70484c72aa9133301f247609ac4c7c7f062c2ae67e35287349ec72f8b4ef6"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-source-graph-private-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "run": {
+        "command": [
+          "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djinn-source-graph-private-tests\\build\\djinn-source-graph-private-tests\\djinn-source-graph-private-tests.exe",
+          "-j1",
+          "--timeout=180s"
+        ],
+        "cwd": "C:\\Djex",
+        "exit_code": 1,
+        "started_utc": "2026-09-08T03:22:05Z",
+        "finished_utc": "2026-09-08T03:22:05Z",
+        "wall_seconds": 0.06568559998413548,
+        "process_timeout_seconds": 1800,
+        "stdout": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-source-graph-private-tests.stdout.txt",
+          "sha256": "96f059f4917fa421538f9637d5f75699d132b26ddb3b9ee472b7619bc8a973bc"
+        },
+        "stderr": {
+          "path": "dist-newstyle/priority-nested-givens-suites-v2/djinn-source-graph-private-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "failure_names": [
+        "checked constructor fields cannot hide equal root Givens",
+        "constructor specialization preserves distinct predicates and sibling scopes",
+        "recursive field inspection closes exact cycles and refuses growing instances",
+        "opening a qualified constructor field retains source incompleteness through aliases"
+      ],
+      "failure_reason": "ExplicitParameterKindUnsupported",
+      "rejected_parameters": [
+        "a",
+        "a",
+        "a",
+        "a"
+      ],
+      "disposition": "preserved historical setup failure; replaced only by complete corrected-suite rerun"
+    }
+  ],
+  "limitations": [
+    "Haskell guarded monomorphic nested-Given acceptance; no Lean integration claim.",
+    "Equal active dictionary ownership, nested forall eigenvariables and wholly vacuous constrained binders remain unsupported.",
+    "Historical failing executable bytes may have been replaced by the rebuild; their original hashes and stable-run flags are retained from v2."
+  ]
+}

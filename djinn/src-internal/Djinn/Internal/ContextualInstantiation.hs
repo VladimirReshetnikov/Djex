@@ -12,6 +12,10 @@ module Djinn.Internal.ContextualInstantiation
     , ContextualInstantiationAxioms
     , ContextualInstantiation
     , checkContextualInstantiationKinds
+    , checkNestedContextualInstantiationKinds
+    , ContextualIntroduction, contextualIntroductions
+    , contextualIntroductionSymbol, contextualIntroductionOpening
+    , contextualIntroductionFormula, contextualIntroductionBodyFormula
     , prepareContextualInstantiation
     , sealContextualInstantiation
     , contextualInstantiationAxioms
@@ -34,9 +38,13 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import Djinn.Internal.Environment
-    ( PreparedEnvironment, PreparedRootGivenOpening
+    ( PreparedEnvironment, PreparedRootGivenOpening, PreparedNestedGivenOpening
     , preparedEnvironmentInventory, checkPreparedSynthesisTypesKindsWithRigids
-    , rootGivenOpeningContexts, rootGivenOpeningBody )
+    , preparedEnvironmentSynthesisFormulaTranslator
+    , rootGivenOpeningContexts, rootGivenOpeningBody
+    , nestedGivenOpeningKindScope, nestedGivenOpeningSource
+    , nestedGivenOpeningContexts, nestedGivenOpeningBody
+    , nestedGivenOpeningAvailableContexts )
 import Djinn.Internal.HTypes (HKind(KStar), fromGroundHKind)
 import Djinn.Internal.LJTFormula
     ( Formula (..), Symbol (Symbol), dictionarySymbol, opaqueTypeSymbol )
@@ -80,7 +88,19 @@ checkContextualInstantiationKinds
 checkContextualInstantiationKinds prepared opening source vector = do
     let root = Type.ForallType [] (rootGivenOpeningContexts opening) $
             rootGivenOpeningBody opening
-        ambient = Type.freeVariables root
+    checkInstantiationKindsInScope prepared root source vector
+
+checkNestedContextualInstantiationKinds
+    :: PreparedEnvironment -> PreparedNestedGivenOpening
+    -> Type.Type String -> [Type.Type String] -> Either String ()
+checkNestedContextualInstantiationKinds prepared opening =
+    checkInstantiationKindsInScope prepared $ nestedGivenOpeningKindScope opening
+
+checkInstantiationKindsInScope
+    :: PreparedEnvironment -> Type.Type String
+    -> Type.Type String -> [Type.Type String] -> Either String ()
+checkInstantiationKindsInScope prepared root source vector = do
+    let ambient = Type.freeVariables root
         reserved = Set.unions $ ambient : map allVariables vector
     (unique, _) <- first show $ Type.uniquifyTypeBinders
         (const (Nothing :: Maybe ())) freshVariable reserved source
@@ -99,6 +119,41 @@ checkContextualInstantiationKinds prepared opening source vector = do
             | (variable, kind) <- ambientKinds]
     checkPreparedSynthesisTypesKindsWithRigids prepared ambient $
         (KStar, root) : fixedAmbient ++ zip kinds vector
+
+-- | A source-owned qualification introduction. It supplies no dictionary or
+-- body value: its sole argument must prove the body under actual dictionary
+-- lambdas. The checked eraser consumes those lambdas only inside this helper.
+data ContextualIntroduction = ContextualIntroduction
+    Symbol PreparedNestedGivenOpening Formula
+
+contextualIntroductions
+    :: PreparedEnvironment -> [PreparedNestedGivenOpening]
+    -> Either String [ContextualIntroduction]
+contextualIntroductions prepared openings = mapM prepare $
+    zip [0 :: Int ..] $ distinctOn
+        (\opening -> (TypeAtom.alphaTypeKey $ nestedGivenOpeningSource opening,
+            map dictionarySymbol $ nestedGivenOpeningAvailableContexts opening)) openings
+  where
+    prepare (index, opening) = do
+        body <- preparedEnvironmentSynthesisFormulaTranslator prepared $
+            nestedGivenOpeningBody opening
+        pure $ ContextualIntroduction
+            (Symbol $ "$djinn$context-introduction$" ++ show index) opening body
+
+contextualIntroductionSymbol :: ContextualIntroduction -> Symbol
+contextualIntroductionSymbol (ContextualIntroduction symbol _ _) = symbol
+
+contextualIntroductionOpening :: ContextualIntroduction -> PreparedNestedGivenOpening
+contextualIntroductionOpening (ContextualIntroduction _ opening _) = opening
+
+contextualIntroductionBodyFormula :: ContextualIntroduction -> Formula
+contextualIntroductionBodyFormula (ContextualIntroduction _ _ body) = body
+
+contextualIntroductionFormula :: ContextualIntroduction -> Formula
+contextualIntroductionFormula (ContextualIntroduction _ opening body) =
+    foldr (\constraint rest -> PVar (dictionarySymbol constraint) :-> rest)
+        body (nestedGivenOpeningContexts opening) :->
+    PVar (opaqueTypeSymbol $ nestedGivenOpeningSource opening)
 
 -- | Check structural specialization of one exact source scheme. Production
 -- preparation must first validate the complete selected vector against the

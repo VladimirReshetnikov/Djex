@@ -8,10 +8,11 @@ acceptance receipt belongs to its recorded source revisions.
 The [current re-triage](2026-09-07-synthesis-retriage.md) schedules the remaining
 deliveries. It preserves every completion requirement below. Bounded Lean
 simplification and the eight-case ordinary-data matrix now have live acceptance;
-the next deliveries are final validation of the guarded nested-Given increment,
-bounded production Lean contextual integration, reliable supplied-fold
-verification, and broader Church behavior. Full proof-selected dictionary
-transport follows the guarded delivery and remains required before relaxing
+the guarded nested-Given increment now also has complete affected-suite
+acceptance. Next are its bounded production Lean integration, preservation of
+failure samples across elaboration timeouts, reliable supplied-fold verification,
+and broader Church behavior. Full proof-selected dictionary transport remains
+required before relaxing
 overlap restrictions. The current working Djinn Lean route has three public
 behavioral outputs with full-type replay, but ordinary queries, other engines,
 metadata refusals and the final integration suite remain separate gates.
@@ -258,19 +259,58 @@ reproduces the failure without synthesis, so startup/request variability must
 be resolved before attributing it to search. Leant's published dependency remains
 `922c5558`; integration of this contextual increment is still required.
 
+## Guarded nested-Given checkpoint
+
+The [guarded nested-Given increment](2026-09-07-djinn-nested-givens.md) now
+accepts forced monomorphic nested local/global calls and conservatively
+rejects ambiguous dictionary ownership through residual results, constructor
+fields and aliases. Equal active dictionaries and nested forall/Given
+interaction remain explicitly unsupported; no richer source evidence is
+inferred from their compatibility expressions.
+
+The final complete private and facade suites pass all 106 and 147 tests. The
+facade suite takes 234.23 seconds and includes 24 contextual cases and independent
+GHC witnesses. Together with ten complete v2 suites, the
+[checkpoint receipt](../../test-integration/receipts/guarded-nested-givens-checkpoint.json)
+records 1,048 Tasty cases, 700 Church cases and 100 scope queries across twelve
+complementary complete suites. Production source stayed identical. Five fixture
+lines were corrected to remove unsupported explicit datatype/synonym parameter
+kinds; the initial setup failures and final complete reruns are retained.
+The current 100-test CLI suite includes the accepted first/best/all elaboration
+repairs. This checkpoint establishes canonical Djex behavior; Leant's working
+dependency still predates the guard and its integration remains required.
+
 ## Remaining work
 
-- Retain priority 2's accepted sixteen-cell Haskell matrix, 24-cell Lean
-  replay, and complete 647-test Leant integration. Replay the accepted
-  supplied-fold map/append/generalized-length baseline in Lean, then broaden
-  tree folds, accumulator shapes, and structurally decreasing programs.
-- Finish priority 1's remaining selection and negative evidence acceptance;
-  integrate and validate any further shared changes in Leant.
-- Complete priority 3's forced nested Given uses, actual duplicate-slot
-  association, partial constrained instantiation, and Lean projection, then
-  methods, conditional instances, and superclass evidence.
-- Compile, execute, and synthesize priority 4's broader corpus and all nineteen
-  supplied-default cases, retaining bounded Lean simplification as a regression.
+- Integrate priority 3's accepted guarded increment into Leant. Its prepared
+  exact displayed-Variant/graph/renderer/engine observations and direct hashed
+  replay kernel pass 14 pure harness controls; 12 extended-corpus and six
+  partial pure controls also pass. The new strict build, 52 focused tests,
+  expected full 678-test inventory and 39 live contextual cells remain pending.
+  Require both ordinary and named-`where` commands in all three engine modes,
+  exact full-type/payload replay, actual False controls and metadata refusals.
+- Preserve priority 1's accepted first/best/all repair behavior in the current
+  100-test CLI suite. Fix the concrete loss of the original bounded compilation
+  sample when the shared candidate deadline interrupts the elaboration retry.
+  Retain the original occurrence, full type, expression/error and evidence
+  before retrying; test the final timeout without adding a slot or deadline.
+- Retain priority 2's accepted sixteen-cell Haskell matrix, 24-cell Lean replay
+  and historical 647-test integration receipt. Diagnose and repair live Lean
+  verification of already-found append/length candidates under unchanged limits,
+  with exact replay, actual False controls and environment-preserving recovery.
+  Broaden supplied tree folds and accumulator programs after that gate passes.
+- Execute priority 4's broader behavioral corpus and all nineteen supplied-default
+  cases. Both partial oracle preflights now pass: 20 Lean files with 491 axiom
+  inventories (487 empty, four allowlisted observer/proofs) and 63 Haskell
+  controls. All 736 observations remain; expanded live synthesis acceptance
+  remains open. Keep each engine/operation result separate
+  and retain bounded Lean simplification as a regression.
+- Extend priority 3 first with actual proof-selected introduction/slot transport
+  and a forced equal-predicate outer/inner dictionary fixture with differing
+  payloads. Preserve overlap guards until both Haskell and Lean replay pass.
+  Then extend nested forall/Given interaction, partial constrained use, exact
+  provider/universe metadata, methods, conditional instances and superclasses
+  from concrete missing programs.
 - Run the appropriate complete affected suites and live compiler/kernel
   acceptance, update capability documentation, and integrate both repositories.
 

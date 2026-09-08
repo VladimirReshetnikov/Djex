@@ -1,5 +1,11 @@
 # Constraint-only provider inference from lexical assumptions
 
+**Later frontend follow-up:** [loaded ordinary provider schemes](2026-09-08-loaded-contextual-providers.md)
+now pass explicit-forall behavioral synthesis and independent displayed-source
+replay in both engines. The original engine/API results and then-open frontend
+diagnostics below remain historical evidence; the new report retains the
+remaining implicit-root, ordinary-presentation and derived-method boundaries.
+
 Djinn and Exference can now infer fresh provider type parameters from a unique,
 coherent match against lexical class assumptions. For example, given only
 `method :: forall b. C b => Token`, they can synthesize the goal

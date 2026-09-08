@@ -411,8 +411,8 @@ adaptDjinnQueryResult session request execute = case execute of
           weakenCandidateFreeEvidence result
       | otherwise -> Right result
  where
-  -- A projected contextual provider is absent from proof search, not proved
-  -- unusable. Preserve every checked candidate, but make all candidate-free
+  -- A projected contextual provider may require a source instance outside
+  -- lexical proof search. Preserve every checked candidate, but make candidate-free
   -- conclusions explicitly inconclusive, including the self-reference-only
   -- diagnostic which an omitted ordinary provider could have avoided.
   weakenCandidateFreeEvidence result = case resultEvidence result of

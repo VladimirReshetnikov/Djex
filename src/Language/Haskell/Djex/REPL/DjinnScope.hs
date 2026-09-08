@@ -478,13 +478,10 @@ admitDeclarations = foldr admit ([], [], False)
           )
     ValueDeclaration signature
       | hasLeadingContext $ valueType signature ->
-          ( kept
-          , DjinnScopeOmission
-              (renderCanonical $ valueName signature)
-              "its residual class context cannot become a proof axiom"
-              : omitted
-          , True
-          )
+          case checkDeclaration declaration of
+            Right () -> (declaration : kept, omitted, True)
+            Left failure ->
+              (kept, describeOmission (valueName signature) failure : omitted, True)
     _ -> case checkDeclaration declaration of
       Right () ->
         (declaration : kept, omitted, contextualProvidersOmitted)
@@ -497,10 +494,11 @@ admitDeclarations = foldr admit ([], [], False)
   admissibleMethod signature =
     checkDeclaration (ValueDeclaration signature) == Right ()
 
-  -- Context-free prenex binders are safe: the environment sealer merely
-  -- implicitizes them before formula compilation. A residual dictionary
-  -- context would instead turn a conditional Haskell value into an
-  -- unconditional propositional premise, so it remains an explicit omission.
+  -- The core now seals a qualified value as its complete opaque scheme;
+  -- checked conditional application must discharge its dictionaries. Retain
+  -- conservative negative evidence while source instances remain omitted by
+  -- this projection: a provider unavailable to lexical search may still have
+  -- a Haskell implementation using such an instance.
   hasLeadingContext source = case SharedType.splitLeadingForalls source of
     (_, [], _) -> False
     _ -> True

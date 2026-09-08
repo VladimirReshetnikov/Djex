@@ -71,11 +71,11 @@ type DjinnInventory = Inventory String ()
 -- neutral source view on demand and publishes a replacement only after the
 -- complete environment has been sealed transactionally.
 --
--- The strict flag records that a source projection omitted at least one
--- loaded value solely because its direct class context cannot become a Djinn
--- proof premise. Such a value may still be usable in Haskell through an
--- instance unavailable to Djinn, so an empty search cannot soundly become
--- negative evidence. Ordinary sessions are complete at this boundary.
+-- The strict flag records incomplete contextual provider search in a source
+-- projection. Qualified values can retain opaque schemes while source
+-- instances remain unavailable to Djinn; an empty lexical search therefore
+-- cannot establish backend-independent negative evidence. Ordinary neutral
+-- sessions are complete at this boundary.
 data DjinnSession = DjinnSession PreparedEnvironment !Bool
 
 -- | One coherent projection of the declaration tables retained for Djinn's
@@ -210,8 +210,9 @@ resolveDjinnInstanceMethods (DjinnSession prepared _) prerequisites target =
     $ resolvePreparedInstanceMethods prepared prerequisites target
 
 -- | Conservatively record one projection-local loss of loaded value proof
--- power. This operation is idempotent and private to trusted frontends: the
--- omitted declaration itself never enters the prepared proof environment.
+-- power. This historical name also covers retained opaque providers whose
+-- source instances are omitted. The operation is idempotent and private to
+-- trusted frontends; it never adds dictionary evidence or an ordinary premise.
 markDjinnSessionContextualProvidersOmitted
   :: DjinnSession
   -> DjinnSession

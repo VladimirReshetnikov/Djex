@@ -125,13 +125,16 @@ import qualified Language.Haskell.Synthesis.Kind as SharedKind
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 
--- | One ordered source binding. Class methods retain their exactly qualified
+-- | One ordered source binding. Ordinary source signatures retain their closed
+-- scheme before flattening; callers supplying the historical constructor do
+-- not acquire specified-binder provenance. Class methods retain their exactly qualified
 -- owning class while exposing the same flat function projection as the
 -- historical frontend API. Their compatibility types carry the derived
 -- implicit constraint; duplicating its parameter IDs in the tag would let the
 -- two representations drift.
 data SourceBinding
   = SourceFunction FunctionBinding
+  | SourceFunctionWithScheme FunctionBinding HsType
   | SourceClassMethod QualifiedName FunctionBinding
   deriving (Show)
 
@@ -140,12 +143,13 @@ data SourceBinding
 sourceBindingFunction :: SourceBinding -> FunctionBinding
 sourceBindingFunction binding = case binding of
   SourceFunction function -> function
+  SourceFunctionWithScheme function _ -> function
   SourceClassMethod _ function -> function
 
 -- | The complete source inventory produced by the HSE frontend. Signatures
--- enter the backend's named t'FunctionBinding' shape during extraction, so
--- rating and checked lowering update one representation rather than carrying
--- a parallel raw tuple layer.
+-- retain their complete telescope alongside the backend's named flat binding.
+-- Sealing checks their correspondence before using the scheme. Ratings alter
+-- only the flat binding's penalty; they cannot replace its type or scheme.
 data SourceEnvironment = SourceEnvironment
   { sourceBindings :: [SourceBinding]
   , sourceDeconstructors :: [DeconstructorBinding]
@@ -222,7 +226,10 @@ checkedSourceProjection (CheckedSourceEnvironment prepared synonyms) =
     , method <- methods
     ]
   tagBinding binding = case M.lookup (functionName binding) methodOwners of
-    Nothing -> SourceFunction binding
+    Nothing -> case M.lookup (functionName binding) $ preparedSynthesisSchemes prepared of
+      Just scheme | S.null $ SharedType.freeVariables scheme ->
+        SourceFunctionWithScheme binding scheme
+      _ -> SourceFunction binding
     Just owner -> SourceClassMethod owner binding
 
 -- | The result of an environment-loading operation together with its
@@ -888,8 +895,16 @@ toSynthesisSourceInventory environment = do
         ]
       valueBindings =
         [ binding
-        | SourceFunction binding <- sourceBindings environment
+        | tagged <- sourceBindings environment
+        , binding <- case tagged of
+            SourceFunction value -> [value]
+            SourceFunctionWithScheme value _ -> [value]
+            SourceClassMethod{} -> []
         , functionName binding `S.notMember` constructorNames
+        ]
+      sourceSchemes = M.fromList
+        [ (functionName binding, scheme)
+        | SourceFunctionWithScheme binding scheme <- sourceBindings environment
         ]
       classMethods = M.fromListWith (flip (++))
         [ (owner, [binding])
@@ -911,6 +926,20 @@ toSynthesisSourceInventory environment = do
     then pure ()
     else Left $ MismatchedConstructorFunctionBindings
       mismatchedFunctions
+  -- Validate the paired view before it can replace any declaration type.
+  -- Fresh extraction uses the historical flat opener; checked projection uses
+  -- the prepared lowerer's fresh variable namespace. Each comparison requires
+  -- the exact full binding under that opener, never just its name or result.
+  -- Compatibility bindings without source metadata keep their old semantics.
+  forM_ [ (binding, scheme)
+        | SourceFunctionWithScheme binding scheme <- sourceBindings environment
+        ] $ \(binding, scheme) ->
+    if S.null (SharedType.freeVariables scheme)
+        && (functionBindingFromType (functionName binding) (functionPenalty binding) scheme == binding
+          || validatePreparedFunctionSchemes [binding]
+              (M.singleton (functionName binding) scheme) == Right ())
+      then pure ()
+      else Left $ PreparedFunctionSchemeMismatch $ functionName binding
   synonyms <- first SynthesisEnvironmentDeclarationError
     $ mapM toSynthesisTypeDeclaration
     $ sourceTypeSynonyms environment
@@ -919,8 +948,13 @@ toSynthesisSourceInventory environment = do
     valueBindings
     (sourceDeconstructors environment)
     (sourceClasses environment)
-  let declarations =
-        synonyms ++ SharedEnvironment.environmentDeclarations core
+  let retainScheme declaration = case declaration of
+        SharedDeclaration.ValueDeclaration signature
+          | Just scheme <- M.lookup (SharedDeclaration.valueName signature) sourceSchemes ->
+              SharedDeclaration.ValueDeclaration signature { SharedDeclaration.valueType = scheme }
+        _ -> declaration
+      declarations = synonyms ++ map retainScheme
+        (SharedEnvironment.environmentDeclarations core)
   sealSynthesisInventory declarations
  where
   -- Compatibility callers can construct the shared type through either its
@@ -1672,7 +1706,7 @@ parseModuleInputsM inputs = do
     hExtractBinds resolver tDeclMap mode modul methodResults = do
       fromData <- getDataConssSourcedWithResolverAndExtensions
         resolver tDeclMap (extensions mode) modul
-      declarations <- getDeclsSourcedWithResolver
+      declarations <- getDeclSchemesSourcedWithResolver
         resolver tDeclMap modul
       let ordered = sortOn orderedBindingSlot
             $ map dataBindingExtraction fromData
@@ -1700,12 +1734,12 @@ dataBindingExtraction (SourcedExtraction slot result) = case result of
     (map SourceFunction bindings) [deconstructor] []
 
 ordinaryBindingExtraction
-  :: SourcedExtraction [FunctionBinding]
+  :: SourcedExtraction [(FunctionBinding, HsType)]
   -> OrderedBindingExtraction
 ordinaryBindingExtraction (SourcedExtraction slot result) = case result of
   Left failure -> OrderedBindingExtraction slot [] [] [failure]
   Right bindings -> OrderedBindingExtraction slot
-    (map SourceFunction bindings) [] []
+    (map (uncurry SourceFunctionWithScheme) bindings) [] []
 
 methodBindingExtraction
   :: SourcedExtraction [ClassMethodDeclaration]
@@ -1793,6 +1827,8 @@ applyRatings ratings environment =
 
   rateSourceBinding sourceBinding = case sourceBinding of
     SourceFunction binding -> SourceFunction $ rateBinding binding
+    SourceFunctionWithScheme binding scheme ->
+      SourceFunctionWithScheme (rateBinding binding) scheme
     SourceClassMethod owner binding ->
       SourceClassMethod owner $ rateBinding binding
 

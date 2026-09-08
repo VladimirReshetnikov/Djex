@@ -6479,12 +6479,12 @@ tests = testGroup "Exference"
               map (functionName . sourceBindingFunction) sourceDeclarations
                 @?= expectedNames
               case sourceDeclarations of
-                [ SourceFunction _
-                  , SourceFunction _
+                [ SourceFunctionWithScheme _ _
+                  , SourceFunctionWithScheme _ _
                   , SourceClassMethod firstOwner _
                   , SourceClassMethod actualOwner _
                   , SourceFunction _
-                  , SourceFunction _
+                  , SourceFunctionWithScheme _ _
                   ] -> do
                     firstOwner @?= owner
                     actualOwner @?= owner
@@ -7450,6 +7450,48 @@ tests = testGroup "Exference"
             (SharedEnvironment.dataConstructorMap shared) @?= True
           Map.member SharedName.consName
             (SharedEnvironment.valueSignatureMap shared) @?= False
+      , testCase "loaded value schemes preserve specified binder order and reseal" $
+          withTemporaryFile (unlines
+            [ "{-# LANGUAGE ExplicitForAll #-}"
+            , "module OrderedScheme where"
+            , "value :: forall z a. a -> z -> a"
+            ]) $ \modulePath -> do
+              LoadReport result _ <- environmentFromModule modulePath
+              checked <- expectRight result
+              valueOwner <- expectRight $ mkQualifiedName ["OrderedScheme"] "value"
+              let projection = checkedSourceProjection checked
+              case find ((== valueOwner) . functionName . sourceBindingFunction)
+                  (sourceBindings projection) of
+                Just (SourceFunctionWithScheme _
+                    (SharedType.ForallType [z, a] []
+                      (SharedType.FunctionType (SharedType.TypeVariable input)
+                        (SharedType.FunctionType (SharedType.TypeVariable second)
+                          (SharedType.TypeVariable resultVariable))))) -> do
+                  (input, second, resultVariable) @?= (a, z, a)
+                  assertBool "distinct specified variables collapsed" $ a /= z
+                other -> fail $ "lost complete ordered source scheme: " ++ show other
+              resealed <- expectRight $ checkSourceEnvironment projection
+              sourceFunctions (checkedSourceProjection resealed) @?= sourceFunctions projection
+      , testCase "loaded source scheme cannot replace its flat binding" $
+          withTemporaryFile (unlines
+            [ "{-# LANGUAGE ExplicitForAll #-}"
+            , "module SchemeOwner where"
+            , "value :: forall a. a -> a"
+            ]) $ \modulePath -> do
+              LoadReport result _ <- environmentFromModule modulePath
+              checked <- expectRight result
+              valueOwner <- expectRight $ mkQualifiedName ["SchemeOwner"] "value"
+              let projection = checkedSourceProjection checked
+                  tamper tagged = case tagged of
+                    SourceFunctionWithScheme binding (SharedType.ForallType [variable] contexts _)
+                      | functionName binding == valueOwner -> SourceFunctionWithScheme binding
+                          $ SharedType.ForallType [variable] contexts $ SharedType.TypeVariable variable
+                    _ -> tagged
+              case checkSourceEnvironment projection
+                  { sourceBindings = map tamper $ sourceBindings projection } of
+                Left (InvalidSourceInventory (PreparedFunctionSchemeMismatch owner)) -> owner @?= valueOwner
+                Left failure -> fail $ "wrong source ownership failure: " ++ show failure
+                Right _ -> fail "a substituted scheme acquired binding authority"
       , testCase "frontend inventories nest each rated class method once" $
           withTemporaryFile (unlines
             [ "module Owned where"
@@ -7509,7 +7551,7 @@ tests = testGroup "Exference"
                 $ sourceFunctions projection) @?= 1
               case find ((== ordinaryName) . functionName . sourceBindingFunction)
                   (sourceBindings projection) of
-                Just (SourceFunction _) -> pure ()
+                Just (SourceFunctionWithScheme _ _) -> pure ()
                 entry -> fail $ "ordinary binding acquired class ownership: "
                   ++ show entry
               case Map.lookup className

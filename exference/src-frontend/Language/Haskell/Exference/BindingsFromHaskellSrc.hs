@@ -11,6 +11,7 @@ module Language.Haskell.Exference.BindingsFromHaskellSrc
   , getDeclsLocated
   , getDeclsSourced
   , getDeclsSourcedWithResolver
+  , getDeclSchemesSourcedWithResolver
   , getDataConss
   , getDataConssLocated
   , getDataConssSourced
@@ -107,7 +108,21 @@ getDeclsSourcedWithResolver
   -> TypeDeclMap
   -> Module SrcSpanInfo
   -> m [SourcedExtraction [FunctionBinding]]
-getDeclsSourcedWithResolver resolver tDeclMap modul = sequence $ do
+getDeclsSourcedWithResolver resolver tDeclMap modul =
+  map project <$> getDeclSchemesSourcedWithResolver resolver tDeclMap modul
+ where
+  project (SourcedExtraction slot result) =
+    SourcedExtraction slot $ map fst <$> result
+
+-- | Complete source schemes paired with their historical flat projection.
+-- Keep specified binder order before opening the leading forall telescope.
+getDeclSchemesSourcedWithResolver
+  :: Monad m
+  => TypeResolver
+  -> TypeDeclMap
+  -> Module SrcSpanInfo
+  -> m [SourcedExtraction [(FunctionBinding, HsType)]]
+getDeclSchemesSourcedWithResolver resolver tDeclMap modul = sequence $ do
   (mn, declarations) <- maybeToList $ moduleNameAndDecls modul
   (slot, declaration) <- zip [0 :: Natural ..] declarations
   case declaration of
@@ -127,7 +142,7 @@ transformDeclWithResolver
   -> ModuleName SrcSpanInfo
   -> TypeDeclMap
   -> Decl SrcSpanInfo
-  -> ExceptT String m [FunctionBinding]
+  -> ExceptT String m [(FunctionBinding, HsType)]
 transformDeclWithResolver resolver mn tDeclMap declaration = case declaration of
   TypeSig _ names qtype -> lowerSignature names qtype
   -- A foreign import introduces an ordinary Haskell binding.  Its calling
@@ -150,10 +165,11 @@ helper
   :: ModuleName SrcSpanInfo
   -> HsType
   -> Name SrcSpanInfo
-  -> Either String FunctionBinding
+  -> Either String (FunctionBinding, HsType)
 helper mn signature syntaxName = do
   name <- convertModuleName mn syntaxName
-  pure $ functionBindingFromType name 0 $ forallify signature
+  let scheme = forallify signature
+  pure (functionBindingFromType name 0 scheme, scheme)
 
 -- | Extract each data declaration's value-level constructor bindings followed
 -- by its record selectors, plus the pattern-matching shape. A selector shared

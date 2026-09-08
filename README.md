@@ -139,9 +139,14 @@ observations. Nine cache/False sessions, a fresh 39-cell local-context matrix,
 a strict Leant build and its complete 701-test suite also pass. Cache acceptance
 uses an explicit 32-candidate window and 512-record diagnostic capture; the
 original four-candidate query remains a search miss, with product defaults
-unchanged. Next close Haskell loaded-provider admission and implicit-root
-scoping, support Lean mixed inventories containing dictionary constructors,
-and make missing Church constructions reachable. Supplied tree folds remain
+unchanged. [Loaded Haskell provider schemes](docs/reports/2026-09-08-loaded-contextual-providers.md)
+now survive source extraction and checked admission in both engines. Explicit-
+`forall` behavioral method queries pass distinct dictionary payload checks,
+independent replay of the displayed definitions and actual False controls;
+the strict build and all 2,306 tests in 15 complete suites pass. Implicit-root
+scoping, ordinary contextual presentation and derived class-method schemes
+remain frontend work. Lean mixed dictionary inventories and missing Church
+constructions also remain open. Supplied tree folds remain
 an independent delivery. Two failed `maybeEither` ranking experiments favor
 diagnosing actual construction and queue decisions before more tuning. The
 [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md) retains the full scope.

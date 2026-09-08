@@ -770,7 +770,7 @@ runQuery sourceName query state = do
     Left failure -> diagnosticFailure failure
     Right request -> presentBehavioralCandidates options context behavioral
         (renderDjinnCandidateExpression qualification . projected)
-        (elaborateBehavioral parsed $ defaultRenderOptions id)
+        (elaborateBehavioral parsed projectSignature $ defaultRenderOptions id)
         (renderDefinitionOrExpression renderDjinnCandidateDefinition
           renderDjinnCandidateExpression options . projected)
         (\candidate -> (if presentationRanking options == LegacyCandidateRanking
@@ -786,6 +786,8 @@ runQuery sourceName query state = do
     selectors = maybe noFieldSelectors djinnProjectionFieldSelectors
       $ djinnProjection $ djinnRuntime state
     projected = fmap (projectFieldSelectorsWithoutEta selectors) . typedCandidateCompatibility
+    projectSignature = mapTypeNames $ \name -> Map.findWithDefault name name $
+      maybe Map.empty djinnProjectionPromptNames $ djinnProjection $ djinnRuntime state
 
   runBehavioralExference context behavioral target session parsed = case
       mkExferenceRequestWithCheckedTargetFromParsed
@@ -793,7 +795,7 @@ runQuery sourceName query state = do
     Left failure -> diagnosticFailure failure
     Right request -> presentBehavioralCandidates options context behavioral
         (renderExferenceCandidateExpression qualification . projected)
-        (elaborateBehavioral parsed $ defaultRenderOptions $ const "x")
+        (elaborateBehavioral parsed id $ defaultRenderOptions $ const "x")
         (renderDefinitionOrExpression renderExferenceCandidateDefinition
           renderExferenceCandidateExpression options . projected)
         (\candidate -> (candidateQualityCost (presentationRanking options)
@@ -808,14 +810,15 @@ runQuery sourceName query state = do
       . typedCandidateCompatibility
     expression = functionClauseExpression . candidateOutput . projected
 
-  elaborateBehavioral parsed renderOptions candidate = case typedCandidateTermGraph candidate of
+  elaborateBehavioral parsed projectSignature renderOptions candidate = case typedCandidateTermGraph candidate of
     Left failure -> ("graph unavailable: " ++ show failure, Left "no source graph for this candidate")
     Right graph ->
       ( "graph present; root=" ++ show (termGraphRoot graph)
           ++ "; nodes=" ++ show (length $ termGraphNodes graph)
       , either (Left . show) Right $ case traverse (`Map.lookup` sourceNames) $ parsedSourceType parsed of
           Nothing -> TypedHaskell.renderHaskellTermGraph renderOptions graph
-          Just signature -> TypedHaskell.renderHaskellTermGraphAtSignature renderOptions signature graph
+          Just signature -> TypedHaskell.renderHaskellTermGraphAtSignature renderOptions
+            (projectSignature signature) graph
       )
    where
     sourceNames = Map.fromList

@@ -77,7 +77,7 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplRankNQueries
   , testCase "REPL retains safe Djinn rank-N axioms"
       testReplRankNAxioms
-  , testCase "REPL contextual Djinn omissions weaken only negative evidence"
+  , testCase "REPL contextual Djinn instance gaps weaken only negative evidence"
       testReplDjinnContextualOmissionEvidence
   , testCase "REPL instantiates loaded Djinn values"
       testReplLoadedPolymorphicValue
@@ -204,8 +204,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplBehavioralTimeout
   , testCase "REPL behavioral execution preserves loaded scope and same-named providers"
       testReplBehavioralScope
-  , testCase "REPL preflight forwards explicitly scoped constraint-only parameters"
-      testReplConstraintOnlyPreflight
+  , testCase "REPL synthesizes loaded constraint-only providers with exact replay"
+      testReplLoadedConstraintOnlyProvider
   , testCase "REPL scripts persist state and reject recursion"
       testReplScripts
   , testCase "REPL history preserves chronological numbering"
@@ -894,8 +894,8 @@ testReplRankNAxioms = withTemporaryEnvironment
   assertEqual "rank-N axiom REPL exit" ExitSuccess exitCode
   assertContains "context-free rank-N value remains a searchable axiom"
     "church" output
-  assertContains "constrained rank-N value remains an explicit omission"
-    "its residual class context cannot become a proof axiom" output
+  assertBool "the complete constrained scheme was omitted" $
+    not $ "constrained: " `isInfixOf` output
   assertBool "the safe rank-N value was reported as an omission" $
     not $ "church: " `isInfixOf` output
   assertNoCallStack errors
@@ -931,9 +931,10 @@ testReplDjinnContextualOmissionEvidence = do
     assertEqual "contextual-omission REPL exit" ExitSuccess exitCode
     assertContains "checked candidates survive the incompleteness marker"
       "djexResult = Ground" output
-    assertContains "the contextual provider remains visibly omitted"
-      "provider: its residual class context cannot become a proof axiom"
-      output
+    assertBool "the contextual provider was omitted instead of retaining its scheme" $
+      not $ "provider: " `isInfixOf` output
+    assertBool "a constrained scheme became an unconditional result" $
+      not $ "djexResult = provider" `isInfixOf` output
     assertContains "the omitted provider makes negative evidence uncertain"
       "[DJEX_DJINN_UNDECIDED]" errors
     assertBool "the omitted provider still allowed a false refutation" $
@@ -3862,11 +3863,10 @@ testReplBehavioralScope = withTemporaryEnvironment
     assertBool "same-named global became recursive during checking" $
       not $ "BEHAVIORAL_TIMEOUT" `isInfixOf` errors
 
--- Preflight must compile the named predicate before search. Loaded contextual
--- providers still need complete source-scheme transport from the frontend;
--- this test claims no candidate or method-discovery acceptance.
-testReplConstraintOnlyPreflight :: Assertion
-testReplConstraintOnlyPreflight = withTemporaryEnvironment
+-- Loaded contextual providers must retain their complete source scheme and
+-- synthesize the original ambiguous signature using its lexical dictionary.
+testReplLoadedConstraintOnlyProvider :: Assertion
+testReplLoadedConstraintOnlyProvider = withTemporaryEnvironment
   [("Methods.hs", unlines
     [ "{-# LANGUAGE RankNTypes, ScopedTypeVariables, TypeApplications, AllowAmbiguousTypes, NoPolyKinds #-}"
     , "module Methods (Token, C, method, observe) where"
@@ -3881,16 +3881,45 @@ testReplConstraintOnlyPreflight = withTemporaryEnvironment
     ])] $ \directory -> forM_ ["djinn", "exference"] $ \backend -> do
       (exitCode, output, errors) <- runRepl directory
         [ ":backend " ++ backend, ":module Methods", ":set select first"
+        , ":set djinn-axioms on"
         , ":set render definition", ":set allow-unused on"
-        , ":set quality-window 1", ":set candidate-limit 1"
+        , ":set quality-window 32", ":set candidate-limit 32"
         , ":set choice-budget 20000", ":set max-steps 20000"
         , ":synth selectedMethod :: forall a. C a => Token where observe (selectedMethod @Prelude.Int) == 37 && observe (selectedMethod @Prelude.Bool) == 91"
+        , ":synth rejectedMethod :: forall a. C a => Token where Prelude.False"
         ]
       assertEqual (backend ++ " constraint-only method REPL exit") ExitSuccess exitCode
       assertBool ("the original predicate failed before synthesis: " ++ errors) $
         not $ "BEHAVIORAL_PREFLIGHT" `isInfixOf` errors
       assertContains ("preflight did not reach the bounded search: " ++ output)
         "DJEX_REPL_BEHAVIORAL_OBSERVATIONS" errors
+      assertContains (backend ++ " failed to synthesize the loaded method: " ++ errors)
+        "selectedMethod =" output
+      assertContains (backend ++ " did not check both dictionary payloads")
+        "true=1" errors
+      assertBool (backend ++ " did not actually reject False: " ++ errors) $
+        any (\line -> "true=0, false=" `isInfixOf` line
+          && not ("true=0, false=0," `isInfixOf` line)
+          && "error=0, timeout=0" `isInfixOf` line) $ lines errors
+      assertBool "False admitted a displayed implementation" $
+        not $ "rejectedMethod =" `isInfixOf` output
+      definition <- case filter ("selectedMethod =" `isPrefixOf`) $ lines output of
+        [one] -> pure one
+        other -> fail $ "expected exactly one displayed method: " ++ show other
+      withTemporaryEnvironment [("Main.hs", unlines
+          [ "{-# LANGUAGE RankNTypes, ScopedTypeVariables, TypeApplications, AllowAmbiguousTypes #-}"
+          , "module Main where"
+          , "import Methods"
+          , "selectedMethod :: forall a. C a => Token"
+          , definition
+          , "main :: IO ()"
+          , "main = print (observe (selectedMethod @Int), observe (selectedMethod @Bool))"
+          ])] $ \replayDirectory -> do
+        replay <- timeout 30000000 $ readProcessWithExitCode "runghc"
+          ["-i" ++ directory, replayDirectory </> "Main.hs"] ""
+        case replay of
+          Just (ExitSuccess, "(37,91)\n", _) -> pure ()
+          _ -> fail $ "exact loaded method failed independent full-type replay: " ++ show replay
 
 testReplEval :: Assertion
 testReplEval = do

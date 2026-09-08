@@ -8,9 +8,14 @@ acceptance receipt belongs to its recorded source revisions.
 The [current re-triage](2026-09-07-synthesis-retriage.md) schedules the remaining
 deliveries. It preserves every completion requirement below. Bounded Lean
 simplification and the eight-case ordinary-data matrix now have live acceptance;
-the next gates are selected-dictionary ownership under nested scopes, production
-Lean contextual integration, reliable supplied-fold verification, and broader
-Church behavior. Corpus expansion remains part of each capability's acceptance;
+the next deliveries are final validation of the guarded nested-Given increment,
+bounded production Lean contextual integration, reliable supplied-fold
+verification, and broader Church behavior. Full proof-selected dictionary
+transport follows the guarded delivery and remains required before relaxing
+overlap restrictions. The current working Djinn Lean route has three public
+behavioral outputs with full-type replay, but ordinary queries, other engines,
+metadata refusals and the final integration suite remain separate gates.
+Corpus expansion remains part of each capability's acceptance;
 it does not wait for all richer context and recursion extensions. The current
 re-triage preserves the original priority numbers and completion requirements.
 
@@ -250,7 +255,7 @@ The Lean fold diagnostic now accepts native map and independently checks the
 exact append/length terms already present in the debug stream. Request failures
 still prevent their live acceptance. A subsequent five-second direct control
 reproduces the failure without synthesis, so startup/request variability must
-be resolved before attributing it to search. Leant's pinned dependency remains
+be resolved before attributing it to search. Leant's published dependency remains
 `922c5558`; integration of this contextual increment is still required.
 
 ## Remaining work

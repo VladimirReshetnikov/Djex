@@ -1,74 +1,94 @@
-# Synthesis re-triage: correctness, integration, and behavioral coverage
+# Synthesis re-triage: finish bounded deliveries, then extend evidence
 
-This is the current execution recommendation as of 2026-09-07. It updates the
-[September 6 roadmap](2026-09-06-synthesis-next-priorities.md) without changing
-the scope or numbering of the active **implement priorities 1–4** goal. The
-[implementation register](2026-09-07-synthesis-priorities-1-4.md) remains the
-completion checklist. None of those four priorities is complete.
+This 2026-09-07 update changes the execution order, not the scope or numbering
+of the active **implement priorities 1–4** goal. The
+[original roadmap](2026-09-06-synthesis-next-priorities.md) and
+[completion register](2026-09-07-synthesis-priorities-1-4.md) retain that scope.
 
-## Decision after the current source and acceptance audit
+## Decision after the latest acceptance and source review
 
-**Close the dictionary-ownership and verification boundaries before broadening
-search. Run behavioral coverage as part of each delivery.** The accepted
-Haskell elaboration, one-layer recursive cases, and bounded simplification are
-regression baselines; rebuilding that infrastructure is not the next project.
-The order below preserves the original four priorities and their full scope.
+**Validate and publish the guarded contextual increment, finish its bounded
+Lean integration, and resolve the live verification failure before broadening
+search. Execute Church behavior alongside these deliveries.** Full dictionary
+selection remains required, but it need not hold up a smaller capability that
+correctly refuses ambiguous cases.
 
-| Order | Improvement | Concrete completion gate |
+The material change from the previous order is to separate a correctness
+boundary that can be shipped now from the larger evidence extension that will
+eventually remove it. Keep the original four priorities open until their own
+completion requirements pass; this table is a delivery order, not new goal
+numbering.
+
+| Order | Delivery | Completion gate and boundary |
 | --- | --- | --- |
-| 1 | Preserve the selected dictionary through nested scopes | Reject the known overlapping-Given cases until the proof-selected source slot survives erasure and graph reconstruction. Unsupported propositional proofs must consume their original budget and allow later supported proofs to be considered; malformed evidence remains an internal failure. Require public forced-use tests, sibling/overlap controls, GHC replay, and different dictionary payloads in Lean. |
-| 2 | Deliver the bounded production Lean context route | Integrate published Djex `90c88261`, exact query metadata, and the context renderer. Require ordinary and named-`where` queries in all three modes, exact displayed-source replay, full types, payload observations, and the complete affected suite. A compiled serializer and hand-constructed graph tests do not close this gate. |
-| 3 | Make already-found fold candidates reliably verifiable | Trace the actual live append/length failure under unchanged limits, identify the failing request stage, and fix that cause. Preserve command deadlines, cancellation, backend ownership, and false-versus-inconclusive results; rerun the native fold matrix and exact replay. Standalone fast requests are diagnostic controls, not a fix. |
-| 4 | Execute the expanded Church behavior matrix | Run the additional total operations and every one of the 19 supplied-default cases in both Haskell engines and all three Lean modes. Compile oracle controls first, restrict providers, retain actual false controls, and replay each exact displayed implementation at its full target signature: original for total cases, explicitly default-adjusted for partial cases. Track each operation and engine independently so one timeout does not conceal other coverage. |
-| 5 | Extend contexts and recursion from concrete missing programs | Add nested forall/Given interaction, actual duplicate-slot selection, complete provider/universe metadata, methods and instance/superclass evidence; broaden supplied tree folds and accumulator programs. Each is a separate checked capability increment, with termination evidence for recursive programs. |
+| 1 | Validate and publish guarded nested-Given support | Build the final sources and run the complete private suite, 23-case public contextual target, and affected producer/API/facade/CLI regressions. Preserve forced monomorphic nested local/global calls, raw work charges, and `NoEvidence` for unsupported forms. Test overlap through residual results and constructor fields, including `Box` and hidden qualified fields, with independent GHC witnesses. Keep equal active dictionaries and nested forall/Given interaction explicitly unsupported. |
+| 2 | Publish bounded production Lean contexts | Integrate the guarded dependency or an equivalent checked refusal. Accept identity, constrained forwarding, and forced local dictionary use through ordinary and named-`where` commands in Djinn, Exference and Both. Require full-type replay with differing payloads, actual false controls, richer-universe/global-metadata refusals, exact generated-serializer compilation, and the full configured integration suite. Pin the actual replay kernel and associate each displayed term with its own typed evidence and engine. |
+| 3 | Repair verification of already-found folds | Trace the actual native append/length workload under unchanged bounds; identify the failing request stage and fix that cause. Validate deadlines, cancellation, owned cleanup, recovery with a context-dependent command, false controls, and exact replay. Larger search windows and repeated fast standalone requests do not close this gate. |
+| 4 | Execute the remaining Church behavior cells continuously | Finish the small `at` predicate preflight repair, while running independent passing operations. Cover the additional total cases and all 19 explicit-default cases in both Haskell engines and all three Lean modes. Require controlled providers, real false controls, and independent replay of the exact displayed implementation at its full original or explicitly default-adjusted signature. Record each operation and engine separately. |
+| 5 | Remove capability restrictions with exact evidence | Carry the proof-selected dictionary occurrence and ordered slot through lowering, normalization, reconstruction and candidate retention before removing overlap guards. Then extend nested forall/Given interaction, partial constrained use, complete provider/universe metadata, and method, conditional-instance and superclass evidence. Expand supplied tree folds and accumulator programs from concrete missing behavior, with termination evidence. |
 
-Items 1 and 3 are correctness and reliability work. Item 2 is the nearest
-integration delivery. They can be developed in parallel, with heavy validation
-serialized. Item 4 starts with the current prepared fixtures and continues
-through those deliveries; it does not wait for every context or recursion
-extension. Original priority 1's specific remaining selection and negative
-evidence checks stay in the completion register and regression gates.
+Orders 1, 2 and 5 advance original priority 3; order 3 advances priority 2;
+order 4 advances priority 4 and supplies regression cases for every delivery.
+Retain priority 1's accepted first/best/all elaboration behavior and close its
+remaining selection and negative-evidence checks in the completion register.
+Heavy validation stays serialized. The full dictionary extension, a single
+failing corpus fixture, and a fold-specific transport investigation do not
+need to block unrelated accepted cells or a safely bounded publication.
 
-The working-tree audit found concrete reasons for this order:
+## What changed since the preceding re-triage
 
-- The first nested-Given extension passed its strict build and all 99 private
-  tests, but three of four public tests failed during lowering. LJT can reuse
-  an introduction helper beneath an equal active dictionary. A valid
-  propositional proof is not necessarily an admissible lexical source proof.
-  There is also a separate residual-qualified-result ownership gap. These are
-  implementation work in progress, not accepted nested-context support.
-- Leant's refreshed strict executable/unit build and all 51 focused tests pass
-  in 8.61 seconds: 22 production context, eight transport trace, and 21 renderer
-  tests. The first run passed 50 of 51 because an older test expected the
-  now-supported wildcard to be refused. The corrected test retains a genuinely
-  unsupported-pattern control and checks actual wildcard rendering. Public
-  Lean synthesis, replay and the full affected-suite run remain
-  separate gates. The initial packet deliberately supports a local `Type 0`
-  subset; it must reject unrecorded constant universe arguments even when a
-  declaration's result is `Type 0`.
-  Leant's [focused audit receipt](https://github.com/VladimirReshetnikov/Leant/blob/main/test-context/receipts/production-boundary-audit.json)
-  retains both runs and a post-run source/executable snapshot; it does not
-  claim before/after source integrity or full production acceptance.
-- Standalone transport traces accepted three exact length requests under the
-  five-second guard, while raw REPL startup varied from about one to 25
-  seconds. Together with the earlier direct timeout without synthesis, this
-  makes startup/request variability a measured issue but leaves its cause
-  unresolved. More raw candidates cannot repair an already-found candidate's
-  failed verification request.
-- The extended Lean oracle preflight accepts 58 declarations for 13 operations
-  (11 additional source operations and two numeral extensions). Fifty-six
-  inventories are empty; exactly two comparison/control proofs use `propext`.
-  Candidate implementations retain an empty-axiom requirement. All 19 partial
-  operations are source-prepared with explicit defaults and 736 observations,
-  but their 20 oracle files and 491 requested inventories still need kernel
-  execution. Neither preflight nor source preparation is live synthesis.
+- **Nested admission now has a passing intermediate result.** After the first
+  public lowering failures, the repaired version passes all 102 private tests
+  and all 21 contextual tests, including full-signature GHC replay. The later
+  constructor-field overlap guard changes those sources and expands the
+  expected gates to 105 private and 23 contextual tests. That final guard has
+  not yet been compiled or tested. The earlier pass does not validate it.
+- **The Lean production route has its first public acceptance.** A strict
+  executable/unit build and compilation of the exact emitted serializer pass.
+  Djinn passes three named-`where` contextual queries and their exact full-type
+  replays, with 24 empty declaration inventories. The false control records
+  one falsification and no inconclusive checks. Ordinary queries, Exference,
+  Both, metadata refusals, and the fresh full integration suite remain open.
+  These are working-source results, not a published complete capability.
+- **Two small acceptance gaps are now explicit.** The production runner hashes
+  Leant and its inputs but invokes the replay kernel through an unpinned
+  toolchain launcher. Its typed-rendering metric is aggregate, rather than
+  tied to the displayed candidate and owning engine. Pin the actual kernel
+  and retain that candidate association in the final receipt. The current
+  context route explicitly refuses compatibility rendering; these review
+  findings do not demonstrate an incorrectly accepted implementation.
+- **Partial preflight has executed.** Nineteen of 20 isolated Lean files pass:
+  18 of the 19 operation files plus the separate generic integer primitive.
+  The remaining `at` file's original Bool oracle and controls pass, but four
+  inline Prop proofs cannot synthesize `Decidable`. Source review identifies
+  the 168-leaf conjunction's instance-size cost. The next fixture repair is
+  to decide each equality separately, combine the Bool results, and assert
+  that result is true, preserving every observation and the existing limits.
+  This proposed repair still needs kernel execution. All 736 observations and
+  explicit defaults remain required; preflight is not live synthesis.
+- **Axiom exceptions stay local to observer proofs.** The extended total
+  preflight passes 58 inventories, with only two comparison/control proofs
+  using `propext`. The partial preflight permits exactly four named `atKey`
+  observer/proofs to use `propext`, `Classical.choice` and `Quot.sound`, traced
+  to standard `String.length`. Every candidate implementation still requires
+  an empty inventory. Neither exception changes the behavioral contract.
+- **The fold failure remains a live-workload investigation.** Opt-in request
+  tracing has compiled and its focused tests pass. Standalone startup/request
+  measurements vary, and some exact requests complete within five seconds.
+  No traced live append/length acceptance or root-cause fix is established.
 
-These working-tree observations select the next work; they do not enlarge the
-published acceptance receipts below. The published pair at this audit is Djex
-`90c882615ae2a3a296ad963f3f8cb786d4aa614f` and Leant
-`b764e65ef77fa4822d25481ece777c4acf0cd12d`. The latter publishes the older
-`922c5558` dependency; its working integration of `90c88261` is not yet a
-published or fully accepted production context route.
+The [working-boundary audit](https://github.com/VladimirReshetnikov/Leant/blob/main/test-context/receipts/retriage-working-boundaries.json)
+retains compact results and hashes of the underlying receipts. Its source
+snapshots describe working changes and historical runs; they do not promote
+unvalidated changes. Audited starting revisions are Djex `9f45bef8` and Leant
+`7f700f89`. Published Leant still pins Djex `922c5558`; the working dependency
+is `90c88261` and does not contain the final nested guard.
+
+The initial production context subset is local `Type 0`. It explicitly
+refuses richer sorts, unrecorded constant universe vectors, selected polytypes
+without their full metadata, and global/caller premises without source packets.
+A result in `Type 0` does not establish that the declaration has no universe
+arguments. Extend this subset only with exact metadata and independent replay.
 
 ## Accepted baselines and diagnostic history
 
@@ -370,6 +390,9 @@ An unsuccessful proof attempt remains inconclusive.
 
 | Idea | Disposition | Concrete trigger for promotion |
 | --- | --- | --- |
+| Exact accepted-candidate provenance and reproducible replay | Immediate, small acceptance work | Pin the actual replay kernel and associate the exact displayed term with its typed evidence and engine. An aggregate rendering count does not establish this association. Keep these checks in the current delivery instead of starting a general tracing framework. |
+| Selected dictionary occurrence and complete context metadata | Next required capability extension after guarded publication | Preserve the actual checked occurrence and ordered slot before removing overlap guards; equal predicate types alone do not identify a dictionary. Extend provider schemes and universes, then method/instance/superclass evidence. |
+| Tree folds and accumulator programs | Next recursion extension after live verification is reliable | Select concrete missing corpus programs, retaining exact recursor inventories, full-signature behavior and termination checking. |
 | Native Windows Length acquisition | Next independent platform milestone after the current integration gates, or sooner for a concrete Windows Length user task | Implement the complete bounded acquisition, solver execution, and independent replay route; configuration parsing and the 432 existing Length tests do not establish this missing native acquisition path. |
 | Cross-engine progress and cancellation | Retain the accepted request-policy and raw-slot alternation fixes as regressions | Leant now passes the tuple/default cases in all three modes without increasing the recorded bounds. These fixes do not preempt a single engine step. Promote broader scheduling only for a measured remaining latency or cancellation failure. |
 | Other search and checker performance | Measure rejected contextual proofs and the existing exhaustion case next; optimize only a demonstrated cost | The Exference supplied-fold `[a] -> a` rejection fixture takes about 147 seconds at 100,000 steps. Nested introduction helpers can also consume slots with unsupported proofs. Measure those costs separately from cold startup, first accepted result, rendering/checking, and memory. Preserve original charges; do not silently refill a window or raise defaults. |

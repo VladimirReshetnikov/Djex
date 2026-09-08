@@ -106,12 +106,14 @@ Its full configured 647-test integration run passes in 343.79 seconds, with
 unchanged source, test-executable, and fake-Z3 helper hashes. Unused lambda and let binders
 retain source graphs as checked wildcards, preserving exact compatibility
 erasure. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md)
-prioritizes exact dictionary ownership in nested scopes, production Lean
-context integration, and reliable verification of already-found fold candidates.
-The expanded Church behavior matrix runs alongside these deliveries, including
-all 19 supplied-default cases. Tree folds, accumulator programs, and richer
-class evidence follow as separate checked increments. The detailed report
-distinguishes published acceptance from the current implementation experiments.
+prioritizes validating and publishing guarded nested-Given support, completing
+the bounded production Lean context route, and repairing verification of
+already-found fold candidates. Exact proof-selected dictionary transport
+follows the guarded milestone before overlap restrictions are relaxed. The
+expanded Church behavioral corpus, including all 19 supplied-default cases,
+runs alongside these deliveries. Its latest Lean partial-oracle preflight
+passes 19 of 20 files; the remaining `at` inline predicate still needs repair.
+Preflight and type inhabitation remain separate from behavioral synthesis.
 
 The [supplied-fold composition report](docs/reports/2026-09-07-supplied-recursor-composition.md)
 describes synthesis of `map`, order-sensitive `append`, and generalized `length`
@@ -129,8 +131,10 @@ and full-signature Haskell renderer replays pass. Live synthesis also covers fiv
 Exference roles and three Djinn roles, with scoped leakage controls and GHC
 execution. Leant's isolated direct dictionary renderer passes 21 focused tests,
 seven full-signature Lean replays, and sixteen empty implementation/proof axiom
-inventories, including distinct equal-predicate dictionaries. Ordinary `:synth`
-still needs exact source metadata and production routing. Methods,
+inventories, including distinct equal-predicate dictionaries. The bounded
+working production route now passes three public Djinn behavioral queries and
+exact full-type replay; ordinary queries, other engine modes, and final
+integration acceptance remain pending. Methods,
 instance/superclass derivations, and complete Djinn constrained search remain
 open. The [conditional-Given increment](docs/reports/2026-09-07-djinn-conditional-givens.md)
 adds forced Djinn local/global uses under the exact root dictionaries, checked
@@ -139,7 +143,7 @@ the expanded sixteen-test Given target pass, including independent GHC replay.
 Qualified searches that omit class methods now report no evidence rather than
 incorrectly refuting the source type; genuine unconstrained refutations remain.
 Duplicate equal Givens, forced nested uses, methods, and partial constrained
-instantiation still need further work. Leant's pinned `922c5558` dependency
+instantiation still need further work. Leant's published `922c5558` dependency
 does not yet contain this increment.
 
 Its [validation receipt](test-integration/receipts/conditional-givens-checkpoint.json)

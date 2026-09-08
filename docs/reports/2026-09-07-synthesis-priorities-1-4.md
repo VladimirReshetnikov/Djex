@@ -6,6 +6,13 @@ implements the first four items in the
 within its original supported-fragment scope. The earlier streaming acceptance
 receipt belongs to its recorded source revisions.
 
+The latest [delivery re-triage](2026-09-08-post-integration-priorities.md)
+records a 700/701 native unit run and executed supplied-tree accumulator
+failures. It prioritizes the recurring layered-provider deadline, semantic
+provider filtering, function-carrier folds and bounded frontend usability.
+Those diagnoses add no accepted behavioral cells and preserve all requirements
+in this register, including all 19 explicit defaults.
+
 The [current retriage](2026-09-07-synthesis-retriage.md) preserves every
 completion requirement below. **Bounded local Lean context integration is now
 accepted**, using Djex `38435709bf4e70c4b53c541c462b0bbd35837bf2`.

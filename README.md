@@ -129,9 +129,10 @@ Its earlier full configured 647-test integration run passes in 343.79 seconds, w
 unchanged source, test-executable, and fake-Z3 helper hashes. Unused lambda and let binders
 retain source graphs as checked wildcards, preserving exact compatibility
 erasure. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md) puts
-a clean native integration gate first, then alternates missing Church
-constructions with bounded Haskell frontend usability and supplied tree folds.
-Broader contextual source and selected-dictionary evidence follow.
+a clean native integration gate first, with targeted provider filtering and
+supplied tree-fold repairs as the next capability deliveries. Bounded Haskell
+frontend usability remains independent; missing Church constructions, broader
+contextual source and selected-dictionary evidence stay in scope.
 The [focused introduction change](docs/reports/2026-09-08-focused-forall-search.md)
 keeps determined local goals together and avoids a temporary priority drop
 while quantified function parameters enter scope. It accepts **all 13 extended
@@ -150,7 +151,12 @@ remain open at their recorded limits. The [native acceptance and refinement foll
 records fresh **13/13 Lean Exference** acceptance at Djex `3529c465` and a
 refined scheduler at `63a23f58` that preserves monomorphic goal ordering.
 The refinement passes all 2,308 Haskell tests and retains the Haskell behavior
-and signature results; its complete native integration remains open. The full **13 extended
+and signature results; its complete native integration remains open. The latest
+native unit run passes **700/701**, with one recurring layered-provider deadline.
+The supplied tree accumulator is now an executed miss in both Haskell engines;
+Lean's positive cells fail the generated-provider inventory gate. The next work
+targets that deadline, provider filtering, useful function-carrier folds and
+bounded frontend usability. A broader scheduling experiment failed and was reverted. The full **13 extended
 operations and all 19 explicit defaults**, across both Haskell engines and
 Lean Djinn/Exference/Both, remain required; newer canonical Haskell results
 require separate native integration. Selected dictionary transport also

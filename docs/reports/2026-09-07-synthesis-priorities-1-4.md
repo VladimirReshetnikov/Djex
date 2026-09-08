@@ -16,10 +16,19 @@ elaboration, including failure-sample retention across retry timeouts, is
 accepted. Full proof-selected dictionary transport remains required before
 relaxing overlap restrictions. The fresh Lean strict build and 52 focused tests pass,
 along with two Djinn identity replays through ordinary and named-`where`
-commands, each retaining its own accepted-variant provenance. The initial
-full run passed 675/678 tests; three stale source-routing assertions have been
-corrected and the complete rerun remains pending. The 39-cell contextual
-matrix is not yet accepted.
+commands, each retaining its own accepted-variant provenance. The corrected
+[complete Leant suite](https://github.com/VladimirReshetnikov/Leant/blob/c17ce6655a64db348e92f6f7fb9a0889cbebaa25/test-context/receipts/unit-context-integration.json)
+passes 678/678 in 283.51 seconds (283.64 seconds for the owned process), retaining
+the earlier 675/678 result and three stale source-assertion corrections.
+Production source and bounds stayed unchanged. The
+[contextual matrix receipt](https://github.com/VladimirReshetnikov/Leant/blob/af6483a658cf2e49db127405d5e22410e8e9fd78/test-context/receipts/production-context-initial.json)
+accepts 35/39 cells across two runs: the initial 29 comprise 14 exact outputs,
+three actual False controls and 12 metadata refusals; six independent metadata
+replays pass after explicitly declaring the universe fixture's class as `Type`.
+Production stayed unchanged and all integrity checks pass. All nine named-`where`
+positives pass. Four ordinary forwarding/local-Given cells still reach 45-second
+timeouts in Exference and Both. A collection patch is applied but unvalidated;
+the complete matrix remains unaccepted.
 Corpus expansion remains part of each capability's acceptance;
 it does not wait for all richer context and recursion extensions. The current
 re-triage preserves the original priority numbers and completion requirements.
@@ -315,11 +324,12 @@ remains required.
   exact displayed-Variant/graph/renderer/engine observations and direct hashed
   replay kernel pass 14 pure harness controls; 12 extended-corpus and six
   partial pure controls also pass. The new strict build, 52 focused tests,
-  and two Djinn identity ordinary/`where` full-type replays pass. The initial
-  full run passed 675/678 tests; three source-routing expectations were corrected,
-  and the complete rerun is pending. The 39-cell contextual matrix remains open.
-  Require both ordinary and named-`where` commands in all three engine modes,
-  exact full-type/payload replay, actual False controls and metadata refusals.
+  two Djinn identity ordinary/`where` full-type replays, and corrected complete
+  678-test suite pass. The contextual matrix accepts 35/39 cells across the two
+  recorded runs. Resolve the four ordinary Exference/Both forwarding/local-Given
+  timeouts within the existing gate; all nine named-`where` positives, three
+  actual False controls and 18 metadata refusals already pass. Retain exact
+  full-type/payload replay and each accepted variant's own provenance.
 - Retain priority 2's accepted sixteen-cell Haskell matrix, 24-cell Lean replay
   and historical 647-test integration receipt. Diagnose and repair live Lean
   verification of already-found append/length candidates under unchanged limits,
@@ -333,11 +343,15 @@ remains required.
   controls. All 736 observations remain; expanded live synthesis acceptance
   remains open. Keep each engine/operation result separate
   and retain bounded Lean simplification as a regression.
-- Extend priority 3 first with actual proof-selected introduction/slot transport
-  and a forced equal-predicate outer/inner dictionary fixture with differing
-  payloads. Preserve overlap guards until both Haskell and Lean replay pass.
-  Then extend nested forall/Given interaction, partial constrained use, exact
-  provider/universe metadata, methods, conditional instances and superclasses
+- After bounded Lean publication, extend priority 3 with one fully described
+  global contextual provider in the existing `Type 0` fragment under the current
+  non-overlap guard. Independently, carry actual proof-selected introduction/slot
+  transport and require a forced equal-predicate outer/inner fixture before
+  relaxing that guard. Haskell and Lean replay must observe differing payload
+  behavior under faithful scoped capture; graph identity or successful GHC
+  compilation alone is insufficient. Then extend nested forall/Given interaction,
+  partial constrained use, exact provider/universe metadata, methods, conditional
+  instances and superclasses
   from concrete missing programs.
 - Run the appropriate complete affected suites and live compiler/kernel
   acceptance, update capability documentation, and integrate both repositories.

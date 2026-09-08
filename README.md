@@ -111,8 +111,10 @@ CLI tests pass, including first/best/all repair selection, exact GHC replay,
 and retention of the original failed-candidate sample when its elaboration
 retry times out under the same deadline. Priorities 2–4 remain open. Next are
 bounded Lean context integration, verification of already-found folds, and
-broader behavior. Exact proof-selected dictionary transport follows before
-overlap restrictions are relaxed. Both partial oracle preflights now pass: all 20 Lean files with 491
+broader behavior. After bounded context publication, one fully described global
+provider can extend the existing Lean `Type 0` route under its current non-overlap guard. Exact
+proof-selected dictionary transport remains required before that guard is
+relaxed, with payload-sensitive Haskell and Lean replay. Both partial oracle preflights now pass: all 20 Lean files with 491
 inventories (487 empty, four allowlisted observer/proofs), and all 63 Haskell
 controls. Expanded live behavioral acceptance for the additional totals and all
 19 supplied-default cases remains open. Supplied-default `head` now passes
@@ -138,9 +140,10 @@ execution. Leant's isolated direct dictionary renderer passes 21 focused tests,
 seven full-signature Lean replays, and sixteen empty implementation/proof axiom
 inventories, including distinct equal-predicate dictionaries. The bounded
 earlier production subset passed three public Djinn behavioral queries and
-exact full-type replay. The fresh strict build, 52 focused tests, and two Djinn
-identity ordinary/`where` replays pass; full integration acceptance remains
-pending. Methods,
+exact full-type replay. The fresh strict build, 52 focused tests, complete
+678-test suite, and two Djinn identity ordinary/`where` replays pass; the
+production matrix has 35/39 accepted cells and four ordinary-query timeouts
+remain open. Methods,
 instance/superclass derivations, and complete Djinn constrained search remain
 open. The [conditional-Given increment](docs/reports/2026-09-07-djinn-conditional-givens.md)
 adds forced Djinn local/global uses under the exact root dictionaries, checked
@@ -168,9 +171,19 @@ records 1,048 Tasty cases, 700 Church cases and 100 scope queries across twelve
 complementary complete suites with unchanged production sources. Five fixture
 lines were corrected before the final reruns. Leant's guard integration remains
 under acceptance. Its strict build, 52 focused tests, and two own-variant Djinn
-identity ordinary/`where` full-type replays pass. The first full run passed
-675/678 tests; three stale source-routing assertions were corrected, with a
-complete rerun pending. The 39-cell contextual matrix remains open.
+identity ordinary/`where` full-type replays pass. The corrected
+[complete Leant suite](https://github.com/VladimirReshetnikov/Leant/blob/c17ce6655a64db348e92f6f7fb9a0889cbebaa25/test-context/receipts/unit-context-integration.json)
+passes **678/678 in 283.51 seconds** (283.64 seconds for the owned process).
+Its receipt preserves the earlier 675/678 result and three stale assertion
+corrections; production source and bounds stayed unchanged. The
+[contextual matrix receipt](https://github.com/VladimirReshetnikov/Leant/blob/af6483a658cf2e49db127405d5e22410e8e9fd78/test-context/receipts/production-context-initial.json)
+accepts **35/39 cells across two runs**: 14 exact outputs, three actual False
+controls and 18 metadata refusals. The initial run accepted 29; a separate
+six-cell replay passed after explicitly declaring the universe fixture's class
+as `Type`, with production unchanged. All nine named-`where` positives pass.
+Four ordinary forwarding/local-Given queries in Exference and Both still reach
+45-second command timeouts. Ordinary pool collection precedes first verification;
+an incremental collection patch is applied and undergoing validation.
 
 Leant also adds [bounded simplification of behavioral assertions](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-07-bounded-behavioral-simplification.md)
 after decision checks of the assertion and its negation. The three-engine live

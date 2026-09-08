@@ -20,10 +20,10 @@ requirements pass; this table is a delivery order, not new goal numbering.
 
 | Order | Delivery | Completion gate and boundary |
 | --- | --- | --- |
-| 1 | Publish bounded production Lean contexts | The strict build, 52 focused tests, and two own-variant Djinn identity ordinary/`where` full-type replays pass. Complete the corrected 678-test rerun after the initial 675/678 result and three stale source assertions. Execute all 39 public cells: require 18 positive full-type/payload replays, three actual False controls, and 18 explicit universe/global-metadata refusals across Djinn/Exference/Both. Reconcile the unfiltered inventory and pin the directly invoked kernel. |
+| 1 | Publish bounded production Lean contexts | The strict build, 52 focused tests and corrected complete 678-test suite pass. The contextual matrix accepts 35/39 cells across two runs: 14 exact full-type/payload outputs, three actual False controls and all 18 metadata refusals. Resolve the four ordinary forwarding/local-Given timeouts in Exference/Both, preserving own-variant graph/renderer/engine observations, directly pinned kernel replay, and inventory reconciliation. The existing 39-cell gate is unchanged. |
 | 2 | Repair verification of already-found folds | Trace the actual native append/length workload under unchanged bounds; identify the failing request stage and fix that cause. Validate deadlines, cancellation, owned cleanup, recovery with a context-dependent command, false controls, and exact replay. Larger search windows and repeated fast standalone requests do not close this gate. |
 | 3 | Execute the remaining Church behavior cells continuously | Both partial oracle preflights now pass. Run the additional total cases and all 19 explicit-default cases in both Haskell engines and all three Lean modes. Require controlled providers, real false controls, and independent replay of the exact displayed implementation at its full original or explicitly default-adjusted signature. Record each operation and engine separately; independent cells need not wait for fold repair. |
-| 4 | Preserve the selected dictionary before relaxing guards | Carry the proof-selected introduction occurrence and ordered slot through lowering and reconstruction. First require a forced equal-predicate outer/inner fixture with distinct payloads and Haskell/Lean replay. Then extend one missing provider scheme or dictionary derivation at a time. Broaden supplied tree folds and accumulator programs only after native verification is reliable. |
+| 4 | Extend bounded contexts and preserve selected dictionary identity | After bounded publication, admit one fully described global contextual provider in the existing `Type 0` fragment under the current non-overlap guard. In parallel or next, carry the proof-selected introduction occurrence and ordered slot through lowering and reconstruction. Before relaxing overlap guards, require a forced equal-predicate outer/inner fixture whose faithful scoped capture preserves distinct payload behavior in Haskell and Lean replay. |
 
 Orders 1 and 4 advance original priority 3; order 2 advances priority 2;
 order 3 advances priority 4 and supplies regression cases for every delivery.
@@ -49,17 +49,28 @@ bounded contextual delivery.
   executable/unit build and compilation of the exact emitted serializer pass.
   Djinn passes three named-`where` contextual queries and their exact full-type
   replays, with 24 empty declaration inventories. The false control records
-  one falsification and no inconclusive checks. The broader ordinary-query,
-  Exference/Both and metadata-refusal matrices, and full integration remain open.
-  These are working-source results, not a published complete capability.
-- **The stronger Lean acceptance path has focused acceptance.** The strict
+  one falsification and no inconclusive checks. This earlier subset is extended
+  by the 35/39 composite below; complete production acceptance remains open.
+- **The stronger Lean acceptance path passes its complete unit suite.** The strict
   build, 52 focused tests, and two Djinn identity ordinary/`where` full-type
   replays pass with their own accepted-variant provenance and directly hashed
   kernel. Compatibility diagnostics do not force an unobserved opposing stream.
-  The first complete run passed 675/678 tests; three stale source-routing
-  assertions were corrected and a complete rerun remains pending. The 39-cell
-  contextual matrix is still open; the existing pure harness passes do not
-  replace those runtime gates.
+  The corrected [complete unit receipt](https://github.com/VladimirReshetnikov/Leant/blob/c17ce6655a64db348e92f6f7fb9a0889cbebaa25/test-context/receipts/unit-context-integration.json)
+  records 678 unique enumerated tests and 678 passing rows in 283.51 seconds
+  (283.64 seconds for the owned process), with stable source/executable hashes.
+  It preserves the initial 675/678 result and three stale source-assertion
+  corrections; only the test source changed, with production and bounds unchanged.
+  The [contextual production receipt](https://github.com/VladimirReshetnikov/Leant/blob/af6483a658cf2e49db127405d5e22410e8e9fd78/test-context/receipts/production-context-initial.json)
+  records 35/39 accepted cells across two runs. The initial complete run accepted
+  29: 14 exact outputs, three actual False controls and 12 metadata refusals.
+  Four Exference/Both ordinary forwarding/local-Given cells reached 45-second
+  timeouts; six universe-fixture cells failed preflight because the class
+  inferred `Prop` while the fixture required `Type`. A separate replay passed
+  all six after the sole fixture change `: Type`, with production unchanged and
+  all integrity checks passing. All 18 metadata refusals and all nine named-`where`
+  positives are accepted. The four ordinary timeouts remain open. Source
+  inspection identifies pool collection before first verification; an incremental
+  collection patch is applied; acceptance remains pending.
 - **Both partial oracle preflights pass.** All 20 Lean files pass with 491
   declaration inventories: 487 empty and four explicitly allowlisted
   observer/proofs. The repaired `at` inline predicate preserves its complete
@@ -94,7 +105,8 @@ checkpoint above supersedes its pending-guard status. Audited starting
 revisions for that earlier audit are Djex `9f45bef8` and Leant
 `7f700f89`. Published Leant still pins Djex `922c5558`; the working dependency
 is `38435709bf4e70c4b53c541c462b0bbd35837bf2` and contains the final nested guard.
-The fresh full integration rerun and complete contextual matrix remain pending.
+The corrected full 678-test integration suite passes. The contextual runtime
+matrix accepts 35/39 cells; four ordinary-query timeouts keep its full gate open.
 
 The initial production context subset is local `Type 0`. It explicitly
 refuses richer sorts, unrecorded constant universe vectors, selected polytypes
@@ -402,8 +414,8 @@ An unsuccessful proof attempt remains inconclusive.
 
 | Idea | Disposition | Concrete trigger for promotion |
 | --- | --- | --- |
-| Exact accepted-candidate provenance and reproducible replay | Implemented; Haskell and live validation pending | The 14 pure production-runner controls pass. Validate own-Variant graph/renderer/engine observations, non-forcing compatibility diagnostics and direct kernel hashes through the prepared strict/focused/full/live gates. Defer a general tracing framework. |
-| Selected dictionary occurrence and complete context metadata | Next capability extension after bounded Lean integration | First preserve and replay actual outer/inner ownership with differing payloads for equal predicates. Then extend one missing provider scheme or evidence derivation; equal predicate types alone do not identify a dictionary. |
+| Exact accepted-candidate provenance and reproducible replay | Strict build, 52 focused tests and complete 678-test suite pass; contextual matrix accepts 35/39 cells | Resolve the four ordinary-query timeouts within the existing 39-cell gate. Preserve own-Variant graph/renderer/engine observations, non-forcing compatibility diagnostics and directly hashed kernel replay. Defer a general tracing framework. |
+| Selected dictionary occurrence and complete context metadata | Narrow global-provider increment after bounded Lean integration; exact selection before relaxing overlap guards | Admit one fully described global contextual provider under the existing `Type 0` non-overlap guard; the current provider map is empty and rejects every typed global. Separately demonstrate differing outer/inner payload behavior under faithful scoped capture in Haskell and Lean. Graph identities or successful GHC compilation alone do not establish selected dictionary ownership. Extend further schemes or evidence derivations individually. |
 | Tree folds and accumulator programs | Next recursion extension after live verification is reliable | Select concrete missing corpus programs, retaining exact recursor inventories, full-signature behavior and termination checking. |
 | Native Windows Length acquisition | Next independent platform milestone after the current integration gates, or sooner for a concrete Windows Length user task | Implement the complete bounded acquisition, solver execution, and independent replay route; configuration parsing and the 432 existing Length tests do not establish this missing native acquisition path. |
 | Cross-engine progress and cancellation | Retain the accepted request-policy and raw-slot alternation fixes as regressions | Leant now passes the tuple/default cases in all three modes without increasing the recorded bounds. These fixes do not preempt a single engine step. Promote broader scheduling only for a measured remaining latency or cancellation failure. |

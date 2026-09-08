@@ -206,6 +206,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplBehavioralScope
   , testCase "REPL synthesizes loaded constraint-only providers with exact replay"
       testReplLoadedConstraintOnlyProvider
+  , testCase "REPL checks parenthesized forall signatures with exact replay"
+      testReplParenthesizedForallBehavior
   , testCase "REPL scripts persist state and reject recursion"
       testReplScripts
   , testCase "REPL history preserves chronological numbering"
@@ -3920,6 +3922,44 @@ testReplLoadedConstraintOnlyProvider = withTemporaryEnvironment
         case replay of
           Just (ExitSuccess, "(37,91)\n", _) -> pure ()
           _ -> fail $ "exact loaded method failed independent full-type replay: " ++ show replay
+
+testReplParenthesizedForallBehavior :: Assertion
+testReplParenthesizedForallBehavior = withTemporaryEnvironment [] $ \directory ->
+  forM_ ["djinn", "exference"] $ \backend -> do
+    let signature = "((forall z a. (z -> a) -> z -> a))"
+        predicate = "parenthesized @Prelude.Int @Prelude.Bool (Prelude.> 0) 3 && parenthesized @Prelude.Bool @Prelude.Int (\\b -> if b then 37 else 91) Prelude.False == 91"
+    (exitCode, output, errors) <- runRepl directory
+      [ ":backend " ++ backend, ":set select first", ":set render definition"
+      , ":set allow-unused on", ":set quality-window 16", ":set candidate-limit 16"
+      , ":synth parenthesized :: " ++ signature ++ " where " ++ predicate
+      , ":synth rejectedParen :: " ++ signature ++ " where Prelude.False"
+      ]
+    assertEqual "parenthesized query REPL exit" ExitSuccess exitCode
+    assertBool ("parenthesized forall failed preflight: " ++ errors) $
+      not $ "BEHAVIORAL_PREFLIGHT" `isInfixOf` errors
+    assertContains "the actual predicate did not accept" "true=1" errors
+    assertBool ("False was not checked successfully: " ++ errors) $
+      any (\line -> "true=0, false=" `isInfixOf` line
+        && not ("true=0, false=0," `isInfixOf` line)
+        && "error=0, timeout=0" `isInfixOf` line) $ lines errors
+    assertBool "False displayed a definition" $
+      not $ any ("rejectedParen " `isPrefixOf`) $ lines output
+    definition <- case filter ("parenthesized " `isPrefixOf`) $ lines output of
+      [one] -> pure one
+      other -> fail $ "expected one parenthesized definition: " ++ show other ++ "\n" ++ output
+    withTemporaryEnvironment [("Main.hs", unlines
+        [ "{-# LANGUAGE RankNTypes, ScopedTypeVariables, TypeApplications #-}"
+        , "module Main where"
+        , "parenthesized :: " ++ signature
+        , definition
+        , "main :: IO ()"
+        , "main = print (" ++ predicate ++ ")"
+        ])] $ \replayDirectory -> do
+      replay <- timeout 30000000 $ readProcessWithExitCode "runghc"
+        [replayDirectory </> "Main.hs"] ""
+      case replay of
+        Just (ExitSuccess, "True\n", _) -> pure ()
+        _ -> fail $ "parenthesized signature replay failed: " ++ show replay
 
 testReplEval :: Assertion
 testReplEval = do

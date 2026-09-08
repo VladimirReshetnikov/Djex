@@ -177,13 +177,24 @@ candidateCheckExpression query term =
   ++ " } in (" ++ behavioralPredicate query ++ "\n)"
  where
   name = behavioralName query
-  ty = behavioralType query
+  -- GHC's lexical ScopedTypeVariables rule requires the explicit forall at
+  -- the syntactic outside of the signature. Parentheses preserve the type
+  -- but prevent its variables from scoping over the binding's RHS. Remove
+  -- only enclosing type parentheses in these private checking signatures;
+  -- the requested type and all inner quantifier scopes remain unchanged.
+  ty = case parsedType of
+    HSE.ParseOk parsed@HSE.TyParen{} -> HSE.prettyPrint $ withoutOuterParens parsed
+    _ -> behavioralType query
+  parsedType = HSE.parseTypeWithMode
+    (haskellSrcExtsParseMode "behavioral-alias") $ behavioralType query
+  withoutOuterParens parsed = case parsed of
+    HSE.TyParen _ body -> withoutOuterParens body
+    _ -> parsed
   -- The second binding must forward the first binding's exact type choices.
   -- Implicit subsumption loses a constraint-only parameter before the
   -- predicate gets to apply it. Only explicitly scoped source binders may
   -- name these applications; GHC still checks the complete original type.
-  explicitBinders = case HSE.parseTypeWithMode
-      (haskellSrcExtsParseMode "behavioral-alias") ty of
+  explicitBinders = case parsedType of
     HSE.ParseOk parsed -> leading parsed
     HSE.ParseFailed{} -> []
   leading parsed = case parsed of

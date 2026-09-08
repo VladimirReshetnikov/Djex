@@ -65,6 +65,15 @@ easier batch. Heavy runtime acceptance remains serialized.
 
 ## What changed in this re-triage
 
+The [parenthesized-forall checking follow-up](2026-09-08-parenthesized-forall-checking.md)
+repairs a worker regression exposed by the unchanged Church query. Its actual
+branch trace reaches both injection obligations at step 73, then observes a
+priority drop when the first is opened. No compatible descendant is popped
+again in the original 256-candidate prefix. A further introduction-cost
+estimate still produces 256 false candidates and was removed. Queue retention
+and competing completions remain the next diagnostic target; the supported
+checking correction adds no Church operation.
+
 The [accepted integration follow-up](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-08-global-contextual-providers.md) supersedes the earlier
 working-prototype and incomplete-regression status below. The following
 diagnoses and counts remain historical evidence at their recorded revisions.
@@ -553,7 +562,7 @@ An unsuccessful proof attempt remains inconclusive.
 | Selected dictionary occurrence and complete context metadata | Required before relaxing overlap guards | Separately demonstrate differing outer/inner payload behavior under faithful scoped capture in Haskell and Lean. A unique type substitution, graph identity or successful compilation alone does not establish selected dictionary ownership. Extend conditional providers and superclass evidence individually. |
 | Tree folds and accumulator programs | Independent next recursion delivery; fixture prepared, not run | Use the polymorphic tree accumulator to test order-sensitive composition, retaining exact recursor inventories, full-signature behavior and termination checking. Native verification repair is already accepted. |
 | Flexible-goal construction and branch diagnostics | Promoted to the first delivery | Trace one missing derivation through actual rule admission, substitutions and queue decisions. Distinguish an unavailable construction from an admitted but delayed branch. Count every alternative against existing budgets and check the resulting term independently. Public graph-shape histograms alone cannot locate the cause. |
-| Further heuristic tuning | Demoted after two failed experiments | Forall complexity and an extra-arrow penalty both leave the original `maybeEither` query at 256 false candidates. Require a measured branch/queue explanation and a successful original query before adopting a new ranking change; preserve the accepted corpus. |
+| Further heuristic tuning | Demoted after three failed experiments | Forall complexity, an extra-arrow penalty and an introduction-body estimate all leave the original `maybeEither` query at 256 false candidates. The latest actual branch trace identifies a priority drop but not the subsequent queue fate. Require a successful original query before adopting a ranking change; preserve the accepted corpus. |
 | Counterexample-guided search | Conditional follow-up | Promote if repeated expensive behavioral rejection remains material after required constructions become reachable. Cache only observations of the exact candidate under the exact environment and predicate; finite agreement must not become general equivalence or justify unsound pruning. |
 | Native Windows Length acquisition | Conditional milestone for a concrete Windows Length workflow | Implement the complete bounded acquisition, solver execution, and independent replay route; configuration parsing and the 432 existing Length tests do not establish this missing native acquisition path. |
 | Cross-engine progress and cancellation | Retain the accepted request-policy and raw-slot alternation fixes as regressions | Leant now passes the tuple/default cases in all three modes without increasing the recorded bounds. These fixes do not preempt a single engine step. Promote broader scheduling only for a measured remaining latency or cancellation failure. |

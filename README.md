@@ -148,11 +148,18 @@ scoping, ordinary contextual presentation and derived class-method schemes
 remain frontend work. The
 [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md) puts missing
 Church constructions first, then bounded Haskell frontend usability, supplied
-tree folds, and broader contextual source/evidence support. Two failed
+tree folds, and broader contextual source/evidence support. The failed
 `maybeEither` ranking experiments favor diagnosing actual construction and
 queue decisions before more tuning. Mixed Lean dictionary inventories and
 derived method schemes remain required, but do not block the earlier
 provider-free Church fixtures. The full coverage obligation is unchanged.
+The [parenthesized-forall checking correction](docs/reports/2026-09-08-parenthesized-forall-checking.md)
+repairs a preflight regression at the original Church signatures. A bounded
+search trace now reaches both success-continuation arguments in `maybeEither`,
+but exposes a priority drop when opening an injection. A further estimate
+change still produced 256 false candidates and was removed; Church behavioral
+coverage is unchanged. The correction passes a strict build and all 2,307
+tests in 15 complete suites, including original-signature replay in both engines.
 Exact
 proof-selected dictionary transport remains required before that guard is
 relaxed, with payload-sensitive Haskell and Lean replay. Both partial oracle preflights now pass: all 20 Lean files with 491

@@ -196,6 +196,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplBehavioralElaboration
   , testCase "live first and best selection retain the exact repaired provider candidate"
       testReplBehavioralElaborationSelection
+  , testCase "an elaboration retry timeout retains its exact failed-candidate sample"
+      testReplBehavioralElaborationTimeoutSample
   , testCase "behavioral worker checks Bool without leaking previous bindings"
       testBehavioralWorkerIsolation
   , testCase "REPL behavioral timeout retires its worker before the next query"
@@ -3672,6 +3674,58 @@ testReplBehavioralElaborationSelection = withTemporaryEnvironment
     case replay of
       Just (ExitSuccess, "replayed\n", _) -> pure ()
       _ -> fail $ "exact displayed provider repair failed independent GHC execution: " ++ show replay
+
+testReplBehavioralElaborationTimeoutSample :: Assertion
+testReplBehavioralElaborationTimeoutSample = withTemporaryEnvironment
+  [("RepairSelection.hs", unlines
+    [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes #-}"
+    , "module RepairSelection (Token, make, observe) where"
+    , "import Prelude"
+    , "data Token = Token Bool"
+    , "make :: forall a. ((a -> a) -> [(forall b. b -> b)]) -> (forall c. c -> c) -> Token"
+    , "make k _ = Token (null (k id))"
+    , "observe :: Token -> Bool"
+    , "observe (Token result) = result"
+    ])] $ \directory -> do
+    -- Preserve the proven first-repair fixture's three-candidate cohort.
+    -- The first timeout must stop without observing either remaining slot.
+    (exitCode, output, errors) <- runRepl directory
+      [ ":module RepairSelection"
+      , ":backend exference"
+      , ":set select first"
+      , ":set render definition"
+      , ":set allow-unused off"
+      , ":set quality-window 3"
+      , ":set candidate-limit 3"
+      , ":set max-steps 8192"
+      , ":set timeout 0"
+      , ":synth diverges :: (forall a. a -> a) -> Token where observe (diverges id) && Prelude.all (\\n -> n >= 0) ([0..] :: [Prelude.Integer])"
+      , ":synth recovered :: forall a. a -> a where recovered True"
+      ]
+    assertEqual "retry-timeout recovery REPL exit" ExitSuccess exitCode
+    assertContains "the failed original occurrence retained its observation identity"
+      "candidate observation: 1" errors
+    assertEqual "only the failed repaired occurrence reserves a sample" 1 $
+      countOccurrences "[DJEX_REPL_BEHAVIORAL_SOURCE_SAMPLE]" errors
+    assertContains "the timed-out retry has the original candidate's own graph"
+      "candidate evidence: graph present;" errors
+    assertContains "the original expression must genuinely fail compilation"
+      "original check: BehavioralCompilationError" errors
+    assertContains "timeout occurred after an actual graph-guided alternative was produced"
+      "elaborated expression: " errors
+    assertContains "shared deadline preserved the original compilation-failure sample"
+      "final check: BehavioralTimedOut" errors
+    assertEqual "only the actual annotation retry receives another compiler call" 1 $
+      countOccurrences "checks=1; retries retain the same candidate" errors
+    assertContains "timeout consumes one original observation and never refills it"
+      "checked=1, true=0, false=0, error=0, timeout=1, window=3" errors
+    assertBool "the candidate deadline was replaced by an encompassing query timeout" $
+      not $ "[DJEX_SEARCH_TIMEOUT]" `isInfixOf` errors
+    assertBool "a timed-out repair was displayed" $
+      not $ "diverges =" `isInfixOf` output
+    assertContains "the next query has a functioning fresh worker" "recovered " output
+    assertBool "timeout left the next worker unavailable" $
+      not $ "BehavioralUnavailable" `isInfixOf` errors
 
 testReplBehavioralStreamingSelection :: Assertion
 testReplBehavioralStreamingSelection = withTemporaryEnvironment [] $ \directory ->

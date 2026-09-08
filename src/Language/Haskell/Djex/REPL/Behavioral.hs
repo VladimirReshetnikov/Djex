@@ -3,9 +3,11 @@
 module Language.Haskell.Djex.REPL.Behavioral
   ( presentBehavioralCandidates ) where
 
+import Control.DeepSeq (force)
+import Control.Exception (evaluate, mask)
 import Control.Monad (forM_, unless, when)
 import Data.List (intercalate)
-import Data.IORef (newIORef, readIORef, modifyIORef')
+import Data.IORef (atomicModifyIORef', newIORef, readIORef, modifyIORef')
 import System.Exit (ExitCode (ExitSuccess))
 import System.IO (hFlush, stdout)
 import System.Timeout (timeout)
@@ -14,6 +16,33 @@ import Language.Haskell.Djex
 import Language.Haskell.Djex.Command
 import Language.Haskell.Djex.REPL.BehavioralWorker
 import Language.Haskell.Synthesis.Behavioral (BehavioralQuery (..))
+
+-- A reserved row owns one observed compilation failure. Optional graph fields
+-- are installed only after they have been fully evaluated within that same
+-- candidate's deadline; emitting a timed-out sample must not resume rendering.
+data CompilationSample = CompilationSample
+  { compilationSampleOrdinal :: Int
+  , compilationSampleRequestedType :: String
+  , compilationSampleOriginalExpression :: String
+  , compilationSampleOriginalOutcome :: BehavioralOutcome
+  , compilationSampleElaboration :: Maybe (String, Either String String)
+  , compilationSampleFinalOutcome :: Maybe BehavioralOutcome
+  }
+
+renderCompilationSample :: CompilationSample -> String
+renderCompilationSample sample = intercalate "\n"
+  [ "candidate observation: " ++ show (compilationSampleOrdinal sample)
+  , "candidate evidence: " ++ maybe "inspection incomplete within candidate deadline" fst detail
+  , "requested type: " ++ compilationSampleRequestedType sample
+  , "original expression: " ++ compilationSampleOriginalExpression sample
+  , "original check: " ++ show (compilationSampleOriginalOutcome sample)
+  , maybe "elaboration unavailable: inspection incomplete within candidate deadline"
+      (either ("elaboration unavailable: " ++) ("elaborated expression: " ++) . snd) detail
+  , "final check: " ++ maybe "interrupted before an outcome was recorded" show
+      (compilationSampleFinalOutcome sample)
+  ]
+ where
+  detail = compilationSampleElaboration sample
 
 -- No candidate is reconstructed, given another candidate's evidence, or
 -- fetched to refill a rejected slot. First stops at the first True; best/all
@@ -36,37 +65,54 @@ presentBehavioralCandidates options context query expression elaborate render ra
     samples <- newIORef []
     retries <- newIORef (0 :: Int)
     observations <- newIORef (0 :: Int)
-    let assess candidate = do
+    let reserveSample ordinal term original = atomicModifyIORef' samples $ \retained ->
+          if length retained >= 3 then (retained, False)
+          else (retained ++ [CompilationSample ordinal (behavioralType query)
+                 term original Nothing Nothing], True)
+        updateSample ordinal update = modifyIORef' samples replace
+         where
+          -- Keep at most three materialized row constructors; later unsampled
+          -- observations must not build a chain of deferred map updates.
+          replace [] = []
+          replace (sample : rest) =
+            let updated = if compilationSampleOrdinal sample == ordinal
+                  then update sample else sample
+                remaining = replace rest
+            in updated `seq` remaining `seq` (updated : remaining)
+        assess candidate = do
           modifyIORef' observations (+ 1)
           ordinal <- readIORef observations
           -- An annotation retry does not grant a second candidate deadline.
           -- Cancelling an active worker exchange retires its owned child.
           checked <- timeout 30000000 $ assessAt ordinal candidate
-          pure $ maybe (BehavioralTimedOut, Nothing) id checked
+          let outcome = maybe (BehavioralTimedOut, Nothing) id checked
+          updateSample ordinal $ \sample -> sample
+            { compilationSampleFinalOutcome = Just $ fst outcome }
+          pure outcome
         assessAt ordinal candidate = case expression candidate of
           Left failure -> pure (BehavioralCompilationError $ show failure, Nothing)
-          Right term -> do
-            original <- check query term
+          Right term -> mask $ \restore -> do
+            original <- restore $ check query term
             case original of
               BehavioralCompilationError _ -> do
-                let (evidence, alternative) = elaborate candidate
-                retried <- case alternative of
-                  Right revised | revised /= term -> do
-                    modifyIORef' retries (+ 1)
-                    outcome <- check query revised
-                    pure (outcome, if outcome == BehavioralPassed then Just revised else Nothing)
-                  _ -> pure (original, Nothing)
-                retained <- readIORef samples
-                when (length retained < 3) $ modifyIORef' samples
-                  (++ [intercalate "\n"
-                    [ "candidate observation: " ++ show ordinal
-                    , "candidate evidence: " ++ evidence
-                    , "requested type: " ++ behavioralType query
-                    , "original expression: " ++ term
-                    , "original check: " ++ show original
-                    , either ("elaboration unavailable: " ++) ("elaborated expression: " ++) alternative
-                    , "final check: " ++ show (fst retried) ]])
-                pure retried
+                -- Reserve immediately after the observed failure, before any
+                -- interruptible graph rendering or retry. Only this bounded
+                -- IORef update is masked; both compiler calls stay cancellable.
+                retained <- reserveSample ordinal term original
+                restore $ do
+                  alternative <-
+                    if retained then do
+                      detail <- evaluate $ force $ elaborate candidate
+                      updateSample ordinal $ \sample -> sample
+                        { compilationSampleElaboration = Just detail }
+                      pure $ snd detail
+                    else pure $ snd $ elaborate candidate
+                  case alternative of
+                    Right revised | revised /= term -> do
+                      modifyIORef' retries (+ 1)
+                      outcome <- check query revised
+                      pure (outcome, if outcome == BehavioralPassed then Just revised else Nothing)
+                    _ -> pure (original, Nothing)
               _ -> pure (original, Nothing)
     valid <- preflight query
     if valid /= BehavioralPassed then diagnosticFailure $ contextualDiagnostic Error
@@ -79,7 +125,8 @@ presentBehavioralCandidates options context query expression elaborate render ra
         "DJEX_REPL_BEHAVIORAL_ELABORATION" "source-graph elaboration retries"
         $ "checks=" ++ show attempted ++ "; retries retain the same candidate and original observation slot"
       readIORef samples >>= mapM_ (emitDiagnostic . contextualDiagnostic Info
-        "DJEX_REPL_BEHAVIORAL_SOURCE_SAMPLE" "bounded candidate compilation sample")
+        "DJEX_REPL_BEHAVIORAL_SOURCE_SAMPLE" "bounded candidate compilation sample"
+        . renderCompilationSample)
       pure result
  where
   run check = case checkedResults of

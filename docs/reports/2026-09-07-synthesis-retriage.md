@@ -7,29 +7,27 @@ of the active **implement priorities 1–4** goal. The
 
 ## Decision after the latest acceptance and source review
 
-**The guarded Djex contextual increment is accepted. Finish its bounded Lean
-integration, preserve failed-candidate evidence across elaboration timeouts,
-and resolve live fold verification before broadening search. Execute Church
+**Priority 1's supported-fragment Haskell elaboration is complete. The guarded
+Djex contextual increment is accepted. Finish its bounded Lean integration and
+resolve live fold verification before broadening search. Execute Church
 behavior alongside these deliveries.** Exact selection between equal
 dictionaries remains a separate capability extension.
 
 The material change from the previous order is to separate a correctness
 boundary that can be shipped now from the larger evidence extension that will
-eventually remove it. Keep the original four priorities open until their own
-completion requirements pass; this table is a delivery order, not new goal
-numbering.
+eventually remove it. Priorities 2–4 remain open until their own completion
+requirements pass; this table is a delivery order, not new goal numbering.
 
 | Order | Delivery | Completion gate and boundary |
 | --- | --- | --- |
-| 1 | Publish bounded production Lean contexts | Integrate the accepted guarded dependency. Validate the prepared exact-candidate provenance path with a strict build, 52 focused tests, the expected full 678-test inventory, and 39 public cells across ordinary/named-`where` commands and Djinn/Exference/Both. Require 18 positive full-type/payload replays, three actual where-False controls, and 18 explicit universe/global-metadata refusals. Reconcile the actual unfiltered suite inventory and pin the directly invoked replay kernel. |
-| 2 | Preserve failed-candidate evidence when elaboration times out | First/best/all live repair selection already passes. Record the original compilation failure before the repair, then retain its observation identity, full type, exact expression/error and evidence when the shared deadline interrupts the retry. Add a deterministic timeout control without granting another candidate slot or deadline; retain owned worker cleanup and rerun affected CLI tests. |
-| 3 | Repair verification of already-found folds | Trace the actual native append/length workload under unchanged bounds; identify the failing request stage and fix that cause. Validate deadlines, cancellation, owned cleanup, recovery with a context-dependent command, false controls, and exact replay. Larger search windows and repeated fast standalone requests do not close this gate. |
-| 4 | Execute the remaining Church behavior cells continuously | Both partial oracle preflights now pass. Run the additional total cases and all 19 explicit-default cases in both Haskell engines and all three Lean modes. Require controlled providers, real false controls, and independent replay of the exact displayed implementation at its full original or explicitly default-adjusted signature. Record each operation and engine separately; independent cells need not wait for fold repair. |
-| 5 | Preserve the selected dictionary before relaxing guards | Carry the proof-selected introduction occurrence and ordered slot through lowering and reconstruction. First require a forced equal-predicate outer/inner fixture with distinct payloads and Haskell/Lean replay. Then extend one missing provider scheme or dictionary derivation at a time. Broaden supplied tree folds and accumulator programs only after native verification is reliable. |
+| 1 | Publish bounded production Lean contexts | The strict build, 52 focused tests, and two own-variant Djinn identity ordinary/`where` full-type replays pass. Complete the corrected 678-test rerun after the initial 675/678 result and three stale source assertions. Execute all 39 public cells: require 18 positive full-type/payload replays, three actual False controls, and 18 explicit universe/global-metadata refusals across Djinn/Exference/Both. Reconcile the unfiltered inventory and pin the directly invoked kernel. |
+| 2 | Repair verification of already-found folds | Trace the actual native append/length workload under unchanged bounds; identify the failing request stage and fix that cause. Validate deadlines, cancellation, owned cleanup, recovery with a context-dependent command, false controls, and exact replay. Larger search windows and repeated fast standalone requests do not close this gate. |
+| 3 | Execute the remaining Church behavior cells continuously | Both partial oracle preflights now pass. Run the additional total cases and all 19 explicit-default cases in both Haskell engines and all three Lean modes. Require controlled providers, real false controls, and independent replay of the exact displayed implementation at its full original or explicitly default-adjusted signature. Record each operation and engine separately; independent cells need not wait for fold repair. |
+| 4 | Preserve the selected dictionary before relaxing guards | Carry the proof-selected introduction occurrence and ordered slot through lowering and reconstruction. First require a forced equal-predicate outer/inner fixture with distinct payloads and Haskell/Lean replay. Then extend one missing provider scheme or dictionary derivation at a time. Broaden supplied tree folds and accumulator programs only after native verification is reliable. |
 
-Orders 1 and 5 advance original priority 3; order 2 advances priority 1;
-order 3 advances priority 2; order 4 advances priority 4 and supplies regression
-cases for every delivery. The small timeout repair and independent corpus
+Orders 1 and 4 advance original priority 3; order 2 advances priority 2;
+order 3 advances priority 4 and supplies regression cases for every delivery.
+Priority 1 is complete and remains a regression gate. Independent corpus
 cells can proceed alongside integration while heavy validation stays serialized.
 Full dictionary selection and fold-specific transport work need not block the
 bounded contextual delivery.
@@ -51,22 +49,25 @@ bounded contextual delivery.
   executable/unit build and compilation of the exact emitted serializer pass.
   Djinn passes three named-`where` contextual queries and their exact full-type
   replays, with 24 empty declaration inventories. The false control records
-  one falsification and no inconclusive checks. Ordinary queries, Exference,
-  Both, metadata refusals, and the fresh full integration suite remain open.
+  one falsification and no inconclusive checks. The broader ordinary-query,
+  Exference/Both and metadata-refusal matrices, and full integration remain open.
   These are working-source results, not a published complete capability.
-- **The stronger Lean acceptance path is implemented, not yet accepted.**
-  The runner directly invokes and hashes the resolved kernel; each displayed
-  verification Variant retains its own graph, renderer alternative and engine.
-  Compatibility debug output does not force lazy origin recovery from a later
-  engine stream. All 14 production-runner, 12 extended-corpus and six partial
-  pure controls pass. The new Haskell strict build, 52 focused tests, complete
-  678-test integration inventory and 39 live contextual cells remain pending.
+- **The stronger Lean acceptance path has focused acceptance.** The strict
+  build, 52 focused tests, and two Djinn identity ordinary/`where` full-type
+  replays pass with their own accepted-variant provenance and directly hashed
+  kernel. Compatibility diagnostics do not force an unobserved opposing stream.
+  The first complete run passed 675/678 tests; three stale source-routing
+  assertions were corrected and a complete rerun remains pending. The 39-cell
+  contextual matrix is still open; the existing pure harness passes do not
+  replace those runtime gates.
 - **Both partial oracle preflights pass.** All 20 Lean files pass with 491
   declaration inventories: 487 empty and four explicitly allowlisted
   observer/proofs. The repaired `at` inline predicate preserves its complete
   observation set. Haskell passes all 63 controls. All 19 supplied-default
-  signatures and 736 observations remain represented. Expanded live synthesis
-  acceptance remains open; the oracle results do not close it.
+  signatures and 736 observations remain represented. Supplied-default `head`
+  now passes actual synthesis, exact GHC execution, and False controls in both
+  Haskell engines. Most expanded live cells remain open; oracle acceptance
+  does not close them.
 - **Axiom exceptions stay local to observer proofs.** The extended total
   preflight passes 58 inventories, with only two comparison/control proofs
   using `propext`. The partial preflight permits exactly four named `atKey`
@@ -77,17 +78,23 @@ bounded contextual delivery.
   tracing has compiled and its focused tests pass. Standalone startup/request
   measurements vary, and some exact requests complete within five seconds.
   No traced live append/length acceptance or root-cause fix is established.
-- **Elaboration selection is an accepted baseline.** The current 100-test CLI
-  suite includes the live first/best/all repairs and exact GHC replay. The
-  remaining concrete bug is loss of the original bounded failure sample if
-  the shared candidate deadline interrupts its elaboration retry.
+- **Priority 1 is complete.** The strict build and complete 101-test CLI suite
+  pass. First/best/all repairs and exact displayed-source GHC replay remain
+  accepted; the new real interrupted-retry control retains the original
+  compilation failure, observation identity, graph-guided alternative, and
+  final timeout under the existing shared deadline. It neither refills a
+  candidate slot nor loses worker recovery. Established missing-authority,
+  scope, skolem and source-identity rejection controls remain required
+  regressions. The [register](2026-09-07-synthesis-priorities-1-4.md#haskell-elaboration-checkpoint)
+  records the final receipt and supported-fragment boundary.
 
 The [working-boundary audit](https://github.com/VladimirReshetnikov/Leant/blob/main/test-context/receipts/retriage-working-boundaries.json)
 retains the earlier working results and their receipt hashes; the guarded
 checkpoint above supersedes its pending-guard status. Audited starting
 revisions for that earlier audit are Djex `9f45bef8` and Leant
 `7f700f89`. Published Leant still pins Djex `922c5558`; the working dependency
-is `90c88261` and does not contain the final nested guard.
+is `38435709bf4e70c4b53c541c462b0bbd35837bf2` and contains the final nested guard.
+The fresh full integration rerun and complete contextual matrix remain pending.
 
 The initial production context subset is local `Type 0`. It explicitly
 refuses richer sorts, unrecorded constant universe vectors, selected polytypes

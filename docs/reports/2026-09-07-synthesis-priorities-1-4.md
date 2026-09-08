@@ -1,21 +1,25 @@
 # Implementation of synthesis priorities 1–4
 
-Status: **in progress**. This work implements the first four items in the
-[accepted roadmap](2026-09-06-synthesis-next-priorities.md). None of the four
-priorities is declared complete by this checkpoint. The earlier streaming
-acceptance receipt belongs to its recorded source revisions.
+Status: **priority 1 complete; priorities 2–4 in progress**. This work
+implements the first four items in the
+[accepted roadmap](2026-09-06-synthesis-next-priorities.md). Priority 1 is complete
+within its original supported-fragment scope. The earlier streaming acceptance
+receipt belongs to its recorded source revisions.
 
 The [current re-triage](2026-09-07-synthesis-retriage.md) schedules the remaining
 deliveries. It preserves every completion requirement below. Bounded Lean
 simplification and the eight-case ordinary-data matrix now have live acceptance;
 the guarded nested-Given increment now also has complete affected-suite
-acceptance. Next are its bounded production Lean integration, preservation of
-failure samples across elaboration timeouts, reliable supplied-fold verification,
-and broader Church behavior. Full proof-selected dictionary transport remains
-required before relaxing
-overlap restrictions. The current working Djinn Lean route has three public
-behavioral outputs with full-type replay, but ordinary queries, other engines,
-metadata refusals and the final integration suite remain separate gates.
+acceptance. Next are its bounded production Lean integration, reliable
+supplied-fold verification, and broader Church behavior. Same-candidate Haskell
+elaboration, including failure-sample retention across retry timeouts, is
+accepted. Full proof-selected dictionary transport remains required before
+relaxing overlap restrictions. The fresh Lean strict build and 52 focused tests pass,
+along with two Djinn identity replays through ordinary and named-`where`
+commands, each retaining its own accepted-variant provenance. The initial
+full run passed 675/678 tests; three stale source-routing assertions have been
+corrected and the complete rerun remains pending. The 39-cell contextual
+matrix is not yet accepted.
 Corpus expansion remains part of each capability's acceptance;
 it does not wait for all richer context and recursion extensions. The current
 re-triage preserves the original priority numbers and completion requirements.
@@ -30,7 +34,7 @@ or production use of the separate lexical-Given renderer.
 
 ## Completion requirements
 
-1. **Evidence-guided Haskell elaboration.** Capture a bounded sample of failed
+1. **Evidence-guided Haskell elaboration — complete.** Capture a bounded sample of failed
    candidates with their observation identity, full requested type, exact
    expression, and graph availability. Use only the same candidate's source
    evidence for internal annotations and type applications. Independently
@@ -54,6 +58,25 @@ or production use of the separate lexical-Given renderer.
 
 ## Haskell elaboration checkpoint
 
+**Priority 1 is complete within the accepted roadmap's supported fragment.**
+The strict timeout-repair build passes, and the complete **101-test CLI suite**
+passes in 124.17 seconds, including the existing first/best/all repairs, exact displayed-source GHC
+execution, actual false predicates, and the new interrupted-retry regression.
+The latter preserves the original compilation failure and observation 1,
+its own graph-guided alternative, and final `BehavioralTimedOut`; it consumes
+one of the three existing observation slots and successfully runs the next
+query with a fresh worker. It adds neither a candidate slot nor a deadline.
+The real timeout case passes in 33.53 seconds. The
+[acceptance receipt](../../test-integration/receipts/elaboration-timeout-samples.json)
+records the complete inventory, commands, source/executable identities, and
+unchanged-source and helper checks.
+
+Missing-authority, escaped-skolem, lexical-scope, and changed-source-identity
+rejections remain covered by the established shared/private checker fixtures.
+This closes the original requirement, not every possible compiler rejection.
+Priorities 2–4 retain their separate recursive-data, contextual-evidence, and
+expanded behavioral acceptance requirements.
+
 `Language.Haskell.Synthesis.TypedGenerated.Haskell` renders a selected closed
 graph with scoped local forall signatures, typed lambda and case patterns,
 application-domain annotations, and exact visible/implicit type selections.
@@ -72,6 +95,10 @@ after best/all selection. False, runtime-error, timeout, and unavailable-worker
 outcomes do not initiate elaboration retries. The first three compilation
 failures retain their own observation number, graph status/root, requested type,
 original expression/error, proposed elaboration, and final check outcome.
+Each bounded sample is reserved before the cancellable retry. Retained graph
+metadata is fully evaluated within the original candidate deadline, so emitting
+a timeout sample cannot resume graph rendering. An interrupted inspection is
+reported explicitly and is never mislabeled as graph absence.
 
 The initial live `reverse` diagnostic passed synthesis and independent GHC
 execution. It established that the remaining rejected candidate has no source
@@ -169,8 +196,9 @@ Leant `aab110e99e3c3d96549a05d3975b26bea93dc6ef` integrates Djex
 `6890bb5a8a56902c2baf137581e23c25a376fad0`. Retained receipts record the strict
 GHC build, 615 boundary tests, 18 existing corpus cases across three engine
 modes, three false controls, and independent Lean replay with 69 empty axiom
-inventories. This closes integration of that checkpoint, not the remaining
-priority-1 selection acceptance or priority-4 coverage.
+inventories. This closes integration of that historical checkpoint. Priority
+1's subsequent selection and timeout acceptance is recorded above; priority
+4's expanded behavioral coverage remains open.
 
 The [recursive-case checkpoint](2026-09-07-recursive-data-cases.md) now passes
 all four original Haskell behavior targets and four additional scenarios for
@@ -276,9 +304,10 @@ records 1,048 Tasty cases, 700 Church cases and 100 scope queries across twelve
 complementary complete suites. Production source stayed identical. Five fixture
 lines were corrected to remove unsupported explicit datatype/synonym parameter
 kinds; the initial setup failures and final complete reruns are retained.
-The current 100-test CLI suite includes the accepted first/best/all elaboration
-repairs. This checkpoint establishes canonical Djex behavior; Leant's working
-dependency still predates the guard and its integration remains required.
+That checkpoint's 100-test CLI suite includes the accepted first/best/all
+elaboration repairs; the later 101-test timeout acceptance is recorded above.
+Leant's working dependency contains the guard, but full integration acceptance
+remains required.
 
 ## Remaining work
 
@@ -286,21 +315,20 @@ dependency still predates the guard and its integration remains required.
   exact displayed-Variant/graph/renderer/engine observations and direct hashed
   replay kernel pass 14 pure harness controls; 12 extended-corpus and six
   partial pure controls also pass. The new strict build, 52 focused tests,
-  expected full 678-test inventory and 39 live contextual cells remain pending.
+  and two Djinn identity ordinary/`where` full-type replays pass. The initial
+  full run passed 675/678 tests; three source-routing expectations were corrected,
+  and the complete rerun is pending. The 39-cell contextual matrix remains open.
   Require both ordinary and named-`where` commands in all three engine modes,
   exact full-type/payload replay, actual False controls and metadata refusals.
-- Preserve priority 1's accepted first/best/all repair behavior in the current
-  100-test CLI suite. Fix the concrete loss of the original bounded compilation
-  sample when the shared candidate deadline interrupts the elaboration retry.
-  Retain the original occurrence, full type, expression/error and evidence
-  before retrying; test the final timeout without adding a slot or deadline.
 - Retain priority 2's accepted sixteen-cell Haskell matrix, 24-cell Lean replay
   and historical 647-test integration receipt. Diagnose and repair live Lean
   verification of already-found append/length candidates under unchanged limits,
   with exact replay, actual False controls and environment-preserving recovery.
   Broaden supplied tree folds and accumulator programs after that gate passes.
 - Execute priority 4's broader behavioral corpus and all nineteen supplied-default
-  cases. Both partial oracle preflights now pass: 20 Lean files with 491 axiom
+  cases. Supplied-default `head` now passes live synthesis, exact GHC
+  execution, and actual False controls in both Haskell engines. Most expanded
+  cells remain open. Both partial oracle preflights now pass: 20 Lean files with 491 axiom
   inventories (487 empty, four allowlisted observer/proofs) and 63 Haskell
   controls. All 736 observations remain; expanded live synthesis acceptance
   remains open. Keep each engine/operation result separate

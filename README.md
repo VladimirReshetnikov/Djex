@@ -106,16 +106,19 @@ Its earlier full configured 647-test integration run passes in 343.79 seconds, w
 unchanged source, test-executable, and fake-Z3 helper hashes. Unused lambda and let binders
 retain source graphs as checked wildcards, preserving exact compatibility
 erasure. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md)
-prioritizes integrating the accepted guarded nested-Given increment into
-Leant, preserving original failure samples when elaboration retries time out,
-and repairing verification of already-found fold candidates. First/best/all
-repair selection already passes in the current 100-test CLI suite. Exact
-proof-selected dictionary transport follows before overlap restrictions are
-relaxed. Both partial oracle preflights now pass: all 20 Lean files with 491
+marks priority 1's supported-fragment Haskell elaboration complete: all 101
+CLI tests pass, including first/best/all repair selection, exact GHC replay,
+and retention of the original failed-candidate sample when its elaboration
+retry times out under the same deadline. Priorities 2–4 remain open. Next are
+bounded Lean context integration, verification of already-found folds, and
+broader behavior. Exact proof-selected dictionary transport follows before
+overlap restrictions are relaxed. Both partial oracle preflights now pass: all 20 Lean files with 491
 inventories (487 empty, four allowlisted observer/proofs), and all 63 Haskell
 controls. Expanded live behavioral acceptance for the additional totals and all
-19 supplied-default cases remains open; oracle preflight and type inhabitation
-do not establish behavioral synthesis.
+19 supplied-default cases remains open. Supplied-default `head` now passes
+actual synthesis, exact GHC execution, and False controls in both Haskell
+engines; most expanded cells are still unaccepted. Oracle preflight and type
+inhabitation do not establish behavioral synthesis.
 
 The [supplied-fold composition report](docs/reports/2026-09-07-supplied-recursor-composition.md)
 describes synthesis of `map`, order-sensitive `append`, and generalized `length`
@@ -134,9 +137,10 @@ Exference roles and three Djinn roles, with scoped leakage controls and GHC
 execution. Leant's isolated direct dictionary renderer passes 21 focused tests,
 seven full-signature Lean replays, and sixteen empty implementation/proof axiom
 inventories, including distinct equal-predicate dictionaries. The bounded
-working production route now passes three public Djinn behavioral queries and
-exact full-type replay; ordinary queries, other engine modes, and final
-integration acceptance remain pending. Methods,
+earlier production subset passed three public Djinn behavioral queries and
+exact full-type replay. The fresh strict build, 52 focused tests, and two Djinn
+identity ordinary/`where` replays pass; full integration acceptance remains
+pending. Methods,
 instance/superclass derivations, and complete Djinn constrained search remain
 open. The [conditional-Given increment](docs/reports/2026-09-07-djinn-conditional-givens.md)
 adds forced Djinn local/global uses under the exact root dictionaries, checked
@@ -163,9 +167,10 @@ pass 106 and 147 tests, with the facade suite taking 234.23 seconds and includin
 records 1,048 Tasty cases, 700 Church cases and 100 scope queries across twelve
 complementary complete suites with unchanged production sources. Five fixture
 lines were corrected before the final reruns. Leant's guard integration remains
-pending. Its prepared provenance path passes 14 pure runner controls, but the
-new strict build, 52 focused tests, full 678-test integration inventory and
-39 live ordinary/where contextual cells have not yet passed.
+under acceptance. Its strict build, 52 focused tests, and two own-variant Djinn
+identity ordinary/`where` full-type replays pass. The first full run passed
+675/678 tests; three stale source-routing assertions were corrected, with a
+complete rerun pending. The 39-cell contextual matrix remains open.
 
 Leant also adds [bounded simplification of behavioral assertions](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-07-bounded-behavioral-simplification.md)
 after decision checks of the assertion and its negation. The three-engine live

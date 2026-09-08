@@ -7,10 +7,15 @@ or numbering of the active **implement priorities 1–4** goal. The
 
 ## Current decision and next delivery gates
 
-**September 8 re-triage after loaded-provider acceptance: prioritize missing
-Church programs, then bounded frontend usability and tree folds.** Broader
-contextual support remains required, but is no longer a prerequisite for those
-deliveries. This changes execution order without narrowing priorities 1–4.
+**September 8 re-triage after complete extended Exference acceptance:**
+close the remaining Church matrix and validate the newer engine in Lean;
+then finish bounded frontend usability, tree folds and contextual evidence.
+The [focused introduction report](2026-09-08-focused-forall-search.md) records a fresh **13/13 extended
+Haskell Exference run**, exact full-signature replay, positive/wrong-reference
+controls and an actual False query at unchanged limits. Strict builds,
+**2,308 regression tests in 15 suites**, and **350 signatures in each Haskell
+engine** pass. This closes Exference's observed `maybeEither` miss.
+It does not establish Djinn parity or native Lean acceptance of the change.
 
 The [loaded-provider report](2026-09-08-loaded-contextual-providers.md) records
 accepted ordinary Haskell source-scheme transport and explicit-`forall`
@@ -34,7 +39,7 @@ reopening the now-completed trace/correlation work.
 
 | Order | Delivery | Why now and required acceptance |
 | --- | --- | --- |
-| 1 | Synthesize missing Church programs and close coverage (priority 4) | Diagnose `maybeEither` rule admission, substitutions and queue decisions at the original bounds, then `foldl1` and the remaining cells. Establish whether a needed construction is unavailable or merely delayed before changing search. Accept a generic fix only through the original public queries, exact full-signature replay and False controls. Reference implementations stay outside search inventories. |
+| 1 | Close Church engine parity, explicit defaults and native integration (priority 4) | Preserve fresh Exference 13/13 acceptance; reproduce and repair Djinn `maybeEither`, then Exference `foldl1`/`at` and all remaining default cells. Validate the newer Djex revision in Lean before advancing its pin, with affected context/recursor regressions and all three engine modes. Require original public queries, exact full-signature replay, provider inventories and False controls; reference programs remain outside search. |
 | 2 | Finish bounded Haskell frontend usability (priority 3) | Preserve implicit root binder order and lexical scope, and make ordinary contextual output independently usable. Test explicit and implicit signatures, expression and definition output, and ordinary and named-`where` routes. The worker must check the exact displayed implementation at the original signature. Derived class-method extraction is a separate increment in delivery 4. |
 | 3 | Accept supplied tree folds with accumulators (priority 2) | Execute the prepared polymorphic tree fixture in both Haskell engines and all three Lean modes. Require exact provider inventories, order-sensitive observations, full-type replay, termination checking and False controls. Preparation alone is not acceptance; do not add a new general-recursion mechanism before this fixture identifies a need. |
 | 4 | Extend contextual source coverage (priority 3) | Complete Haskell derived class-method schemes and Lean mixed inventories containing constructors and methods. The existing `ContextProduction.Dictionary.mk` refusal requires source representation/admission, not a larger provider cap. Retain rejected packets and precise unsupported outcomes; integrate a newer Djex pin only with its own native validation. |
@@ -57,22 +62,33 @@ validation serialized and run affected acceptance cells with each increment.
 
 The full priority-4 obligation remains **all 13 extended operations and all
 19 explicit-default counterparts**, across Haskell Djinn/Exference and Lean
-Djinn/Exference/Both. The accepted 12/13 Haskell extended operations, selected
-2/4 Exference defaulted cases and selected 6/6 Lean Exference operations are
-unions of recorded subsets. They do not close that obligation. Run outstanding
-cells alongside relevant increments; do not redefine completion around an
-easier batch. Heavy runtime acceptance remains serialized.
+Djinn/Exference/Both. Exference's 13/13 extended Haskell result is now a fresh
+complete run. Djinn's 12/13 extended Haskell result, the selected 2/4 Exference
+defaults and the selected 6/6 Lean Exference operations remain historical
+unions at their recorded revisions. They do not close the full obligation.
+Run outstanding cells alongside relevant increments, with heavy runtime
+acceptance serialized. A supplied witness or an oracle preflight is not a
+synthesized program.
+
+Delivery 1 is a sequence of publishable increments, not a reason to postpone
+the prepared frontend and tree fixtures indefinitely. After each accepted
+engine repair, update the coverage register and execute the next relevant
+native or prepared fixture. If a cell exposes a distinct missing construction,
+record its exact failure and pursue that bounded repair; do not spend another
+milestone collecting equivalent traces or blindly changing ranking weights.
 
 ## What changed in this re-triage
 
-The [parenthesized-forall checking follow-up](2026-09-08-parenthesized-forall-checking.md)
-repairs a worker regression exposed by the unchanged Church query. Its actual
-branch trace reaches both injection obligations at step 73, then observes a
-priority drop when the first is opened. No compatible descendant is popped
-again in the original 256-candidate prefix. A further introduction-cost
-estimate still produces 256 false candidates and was removed. Queue retention
-and competing completions remain the next diagnostic target; the supported
-checking correction adds no Church operation.
+The [focused introduction change](2026-09-08-focused-forall-search.md) follows the actual unfinished
+`maybeEither` branch to the queue boundary. It remains at position 1,002 of
+8,192 after the original prefix; it was delayed, not capacity-pruned.
+Completing determined goal groups before interleaving siblings, together with
+retaining the forall estimate until arrow parameters enter scope, finds a
+matching program in the original 256-candidate window. Ordering alone failed;
+the combined generic change passes the full extended corpus and regressions.
+This supersedes the earlier Exference search-miss diagnosis below. The
+parenthesized-forall worker correction remains a separate accepted repair.
+Leant still pins `4a4ed0fc`; advancing that dependency requires native validation.
 
 The [accepted integration follow-up](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-08-global-contextual-providers.md) supersedes the earlier
 working-prototype and incomplete-regression status below. The following
@@ -225,9 +241,9 @@ keeps these boundaries separate; remaining engine, tree-fold and accumulator
 acceptance follows this specific reliability repair.
 
 The [P4 behavioral coverage report](2026-09-07-priority4-behavioral-coverage.md)
-records the union of separate accepted runs: **12/13 extended operations
-in each Haskell engine and 2/4 Exference explicit-default operations**.
-Both engines still lack `maybeEither`; Exference `foldl1` and `at`
+now records a fresh **13/13 extended Haskell Exference run**, plus historical
+**12/13 Djinn extended and 2/4 Exference explicit-default** acceptance.
+Djinn still lacks `maybeEither`; Exference `foldl1` and `at`
 remain unaccepted at the recorded bounds. Fresh native-Int length synthesis,
 exact GHC replay and False controls pass in both Haskell engines; Exference's
 repeat length run adds no unique coverage. Historical harness hashes and
@@ -561,8 +577,8 @@ An unsuccessful proof attempt remains inconclusive.
 | Constraint-only provider instantiation | Engine/API, bounded Leant integration and loaded Haskell explicit-forall behavioral use accepted | Retain the 2,306-test canonical and 701-test native receipts at their distinct revisions. Implicit-root scoping and ordinary presentation are delivery 2; derived method schemes and mixed Lean inventories are delivery 4. Do not reopen completed admission work. |
 | Selected dictionary occurrence and complete context metadata | Required before relaxing overlap guards | Separately demonstrate differing outer/inner payload behavior under faithful scoped capture in Haskell and Lean. A unique type substitution, graph identity or successful compilation alone does not establish selected dictionary ownership. Extend conditional providers and superclass evidence individually. |
 | Tree folds and accumulator programs | Independent next recursion delivery; fixture prepared, not run | Use the polymorphic tree accumulator to test order-sensitive composition, retaining exact recursor inventories, full-signature behavior and termination checking. Native verification repair is already accepted. |
-| Flexible-goal construction and branch diagnostics | Promoted to the first delivery | Trace one missing derivation through actual rule admission, substitutions and queue decisions. Distinguish an unavailable construction from an admitted but delayed branch. Count every alternative against existing budgets and check the resulting term independently. Public graph-shape histograms alone cannot locate the cause. |
-| Further heuristic tuning | Demoted after three failed experiments | Forall complexity, an extra-arrow penalty and an introduction-body estimate all leave the original `maybeEither` query at 256 false candidates. The latest actual branch trace identifies a priority drop but not the subsequent queue fate. Require a successful original query before adopting a ranking change; preserve the accepted corpus. |
+| Flexible-goal construction and branch diagnostics | Apply next to remaining Djinn/default misses | Exference `maybeEither` is accepted. Use one failing original query to identify the next unavailable or delayed construction, beginning with Djinn parity and `foldl1`. Preserve every alternative and existing budget charges; independently check the emitted term. |
+| Further heuristic tuning | Keep the accepted focused introduction change; defer broad tuning | The actual branch remained queued, and the combined scheduling/forall-phase estimate passes all 13 extended Exference operations at original bounds. Earlier broad estimates and ordering alone failed. Promote another change only for a measured remaining miss and a controlled accepted-corpus comparison. |
 | Counterexample-guided search | Conditional follow-up | Promote if repeated expensive behavioral rejection remains material after required constructions become reachable. Cache only observations of the exact candidate under the exact environment and predicate; finite agreement must not become general equivalence or justify unsound pruning. |
 | Native Windows Length acquisition | Conditional milestone for a concrete Windows Length workflow | Implement the complete bounded acquisition, solver execution, and independent replay route; configuration parsing and the 432 existing Length tests do not establish this missing native acquisition path. |
 | Cross-engine progress and cancellation | Retain the accepted request-policy and raw-slot alternation fixes as regressions | Leant now passes the tuple/default cases in all three modes without increasing the recorded bounds. These fixes do not preempt a single engine step. Promote broader scheduling only for a measured remaining latency or cancellation failure. |

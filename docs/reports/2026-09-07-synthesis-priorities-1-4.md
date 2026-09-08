@@ -19,31 +19,25 @@ exact replay kernel. The unit suite takes 293.73 seconds (293.86 seconds for
 the owned process). Earlier failures and fixture corrections remain in the
 receipt; they do not replace this fresh complete acceptance.
 
-This closes the bounded integration milestone within original priority 3,
-not that priority's broader contextual-evidence scope. Methods, superclass
-search, selected equal-predicate dictionaries and global contextual providers
-remain open. Priority 1's supported-fragment Haskell elaboration, including
-same-deadline failure-sample retention, is complete. Priorities 2–4 continue.
-Next are the observed broader Church failures and remaining coverage,
-then supplied folds and trees after the native verification repair, and one fully
-described global `Type 0` provider under the current guard. Exact dictionary
-selection remains required before overlap restrictions are relaxed.
+This closes a bounded integration milestone within original priority 3.
+The later [global-method integration](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-08-global-contextual-providers.md)
+accepts described global `Type 0` methods at Djex `4a4ed0fc`, with 701 native
+unit tests and fresh context/method replay. [Loaded Haskell schemes](2026-09-08-loaded-contextual-providers.md)
+also pass explicit-forall behavioral queries in both engines. Implicit-root
+scoping, ordinary contextual presentation, derived method schemes, mixed Lean
+inventories, selected equal-predicate dictionaries and richer evidence remain
+open. Priority 1's original supported-fragment elaboration scope is complete.
 
 The [current P4 coverage report](2026-09-07-priority4-behavioral-coverage.md)
-records **12/13 extended operations in each Haskell engine and 2/4 Exference
-explicit-default operations**, combining separate runs at their own
-harness pins. Fresh native-Int length acceptance passes in both Haskell engines.
-Lean Exference's selected first six now accept 6/6: five historical exact
-replays plus fresh native length. The separate runs preserve the original
-length fixture failure; they are not a fresh complete matrix. Original priority 4 remains open for the full 13 extended
-operations and all 19 explicit defaults across the required engines.
-
-The [Exference forall-graph update](2026-09-08-exference-forall-graphs.md)
-retains source quantifiers, constructor instantiations and exact lambda
-projection. Its supplied `maybeEither` witness passes original-type GHC
-replay. Live search still reports 256 false candidates, now with zero errors
-or timeouts after five same-candidate repairs. This closes an observed
-elaboration obstacle without adding a synthesized operation to priority 4.
+now records a **fresh 13/13 extended Haskell Exference run**, historical
+**12/13 Haskell Djinn** and **2/4 selected Exference explicit-default** results.
+The [focused introduction change](2026-09-08-focused-forall-search.md) closes
+Exference `maybeEither` at unchanged limits with exact full-signature behavior
+and False controls. All 2,308 tests in 15 suites and 350 signature cases per
+Haskell engine pass. Lean Exference retains its historical first-six 6/6
+composite; the newer engine still needs native integration. Original priority
+4 remains open for all 13 extended operations and all 19 explicit defaults
+across every required engine. The current re-triage defines execution order.
 
 The [accepted Leant environment repair](https://github.com/VladimirReshetnikov/Leant/blob/f35c243a9a2cf26d6c5ffe8c5e16ba4fba523b2e/docs/reports/2026-09-07-empty-environment-reuse.md) now reuses the exact empty user
 world for temporary behavioral checks. Original native Djinn append and length
@@ -361,19 +355,21 @@ acceptance and 680-test suite are recorded above. Broader priority 3 remains ope
   retain their historical diagnostic role.
 - Complete priority 4's full 13 extended operations and all nineteen explicit
   defaults across both Haskell engines and all three Lean modes. Preserve the
-  current separate-run unions (12/13 extended operations in each Haskell
-  engine, 2/4 Exference defaults) and the Lean first-six composite 6/6 boundary. Close the exact
-  outstanding maybeEither and Exference foldl1/at cells, then the
+  fresh 13/13 Haskell Exference run, historical 12/13 Djinn and 2/4
+  Exference default subsets, and the Lean first-six composite 6/6 boundary.
+  Close Djinn maybeEither and Exference foldl1/at, then the
   unexecuted combinations. Earlier head and oracle receipts remain separate;
   preflight, type inhabitation and repeating an accepted cell do not increase
   behavioral coverage.
-- Extend priority 3 with one fully described global contextual provider in
-  the existing `Type 0` fragment under the current non-overlap guard.
+- Extend priority 3 beyond the accepted global `Type 0` methods with implicit
+  Haskell root scoping, usable ordinary contextual output, derived method
+  schemes and mixed Lean constructor/method inventories. Retain the accepted
+  global-method and 701-test native checkpoint at its recorded pin.
   Separately carry the proof-selected introduction and ordered slot through
   lowering and reconstruction. Before relaxing overlap guards, require
   differing outer/inner payload behavior under faithful scoped capture in
   Haskell and Lean; graph identity or successful compilation alone is
-  insufficient. Methods, superclass evidence and further schemes require
+  insufficient. Further methods, superclass evidence and schemes require
   their own source metadata and replay.
 - Keep native Windows Length acquisition conditional on a concrete workflow;
   require actual bounded acquisition, solver execution and replay. Optimize

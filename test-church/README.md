@@ -1,8 +1,10 @@
 # Church signature synthesis acceptance
 
 The [expanded behavioral coverage report](../docs/reports/2026-09-07-priority4-behavioral-coverage.md)
-records 12 of 13 extended operations in each Haskell engine and the separate
-explicit-default results. `behavior_extended_probe.py` and
+records a fresh 13/13 extended Haskell Exference run, historical 12/13 Djinn
+acceptance and the separate explicit-default results. The [focused introduction
+report](../docs/reports/2026-09-08-focused-forall-search.md) links exact replay,
+regression and whole-signature evidence. `behavior_extended_probe.py` and
 `behavior_partial_probe.py` run the canonical specifications with exact provider
 inventories, actual False controls, and independent full-signature GHC replay.
 The partial suite retains all 19 supplied-default operations. Its successful

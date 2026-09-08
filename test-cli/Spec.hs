@@ -208,6 +208,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplLoadedConstraintOnlyProvider
   , testCase "REPL checks parenthesized forall signatures with exact replay"
       testReplParenthesizedForallBehavior
+  , testCase "Exference composes both Church branches within the original window"
+      testReplChurchBranchComposition
   , testCase "REPL scripts persist state and reject recursion"
       testReplScripts
   , testCase "REPL history preserves chronological numbering"
@@ -3960,6 +3962,64 @@ testReplParenthesizedForallBehavior = withTemporaryEnvironment [] $ \directory -
       case replay of
         Just (ExitSuccess, "True\n", _) -> pure ()
         _ -> fail $ "parenthesized signature replay failed: " ++ show replay
+
+-- Observation helpers exist only in the predicate and independent replay;
+-- the empty source environment cannot use them as synthesis providers.
+testReplChurchBranchComposition :: Assertion
+testReplChurchBranchComposition = withTemporaryEnvironment [] $ \directory -> do
+  let churchMaybe binder element = "(forall " ++ binder ++ ". " ++ binder
+        ++ " -> (" ++ element ++ " -> " ++ binder ++ ") -> " ++ binder ++ ")"
+      churchEither binder left right = "(forall " ++ binder ++ ". (" ++ left
+        ++ " -> " ++ binder ++ ") -> (" ++ right ++ " -> " ++ binder
+        ++ ") -> " ++ binder ++ ")"
+      sourceType = churchEither "r" (churchMaybe "s" "a") (churchMaybe "t" "b")
+      resultType = churchMaybe "u" $ churchEither "v" "a" "b"
+      signature = "forall a b. " ++ sourceType ++ " -> " ++ resultType
+      predicate = "let { " ++ intercalate "; "
+        [ "encMaybe :: forall a. Prelude.Maybe a -> " ++ churchMaybe "r" "a"
+        , "encMaybe m zero some = Prelude.maybe zero some m"
+        , "enc :: forall a b. Prelude.Either (Prelude.Maybe a) (Prelude.Maybe b) -> " ++ sourceType
+        , "enc e left right = Prelude.either (\\m -> left (encMaybe m)) (\\m -> right (encMaybe m)) e"
+        , "dec :: forall a b. " ++ resultType ++ " -> Prelude.Maybe (Prelude.Either a b)"
+        , "dec m = m Prelude.Nothing (\\e -> Prelude.Just (e Prelude.Left Prelude.Right))"
+        , "inputs :: [Prelude.Either (Prelude.Maybe Prelude.Int) (Prelude.Maybe Prelude.Bool)]"
+        , "inputs = Prelude.map Prelude.Left [Prelude.Nothing, Prelude.Just (-1), Prelude.Just 0, Prelude.Just 2] Prelude.++ Prelude.map Prelude.Right [Prelude.Nothing, Prelude.Just Prelude.False, Prelude.Just Prelude.True]"
+        ] ++ " } in Prelude.and [dec (distributed (enc e)) == Prelude.either (Prelude.fmap Prelude.Left) (Prelude.fmap Prelude.Right) e | e <- inputs]"
+  (exitCode, output, errors) <- runRepl directory
+    [ ":backend exference", ":set ranking balanced", ":set select first"
+    , ":set render definition", ":set allow-unused on"
+    , ":set quality-window 256", ":set candidate-limit 256"
+    , ":set max-steps 100000", ":set max-queue 8192"
+    , ":synth distributed :: " ++ signature ++ " where " ++ predicate
+    , ":synth rejectedBranches :: " ++ signature ++ " where Prelude.False"
+    ]
+  assertEqual "Church composition REPL exit" ExitSuccess exitCode
+  assertBool ("Church predicate failed before search: " ++ errors) $
+    not $ "BEHAVIORAL_PREFLIGHT" `isInfixOf` errors
+  assertContains ("both Church branches were not synthesized: " ++ errors) "true=1" errors
+  assertBool ("False did not consume actual candidates: " ++ errors) $
+    any (\line -> "true=0, false=" `isInfixOf` line
+      && not ("true=0, false=0," `isInfixOf` line)
+      && "error=0, timeout=0" `isInfixOf` line) $ lines errors
+  assertBool "False displayed a definition" $
+    not $ any ("rejectedBranches " `isPrefixOf`) $ lines output
+  definition <- case dropWhile (not . ("distributed " `isPrefixOf`)) $ lines output of
+    first : rest -> pure $ unlines $ first : takeWhile continued rest
+    _ -> fail $ "missing displayed Church composition: " ++ output ++ errors
+  withTemporaryEnvironment [("Main.hs", unlines
+      [ "{-# LANGUAGE RankNTypes, ImpredicativeTypes, ScopedTypeVariables, TypeApplications #-}"
+      , "module Main where"
+      , "distributed :: " ++ signature, definition
+      , "main :: IO ()", "main = print (" ++ predicate ++ ")"
+      ])] $ \replayDirectory -> do
+    replay <- timeout 30000000 $ readProcessWithExitCode "runghc"
+      [replayDirectory </> "Main.hs"] ""
+    case replay of
+      Just (ExitSuccess, "True\n", _) -> pure ()
+      _ -> fail $ "displayed Church composition failed exact replay: " ++ show replay
+ where
+  continued [] = True
+  continued (character : _) = isSpace character
 
 testReplEval :: Assertion
 testReplEval = do

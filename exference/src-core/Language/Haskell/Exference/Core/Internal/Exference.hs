@@ -2028,6 +2028,12 @@ rateNode ranking providerCost h s = priorityFromPenalty $
 rateGoals :: ExferenceHeuristicsConfig -> Seq.Seq TGoal -> Penalty
 rateGoals h = sumScores . fmap rateGoal
   where
+    -- Opening a quantified function exposes the types of its supplied
+    -- parameters before arrow introduction has installed them in the scope.
+    -- Keep the quantifier's existing estimate through this administrative
+    -- phase; after introduction, the actual body and local usage are rated.
+    rateGoal (TGoal (VarBinding _ TypeArrow{}) _ ContinueForallIntroduction _ _) =
+      heuristics_goalCons h
     rateGoal (TGoal (VarBinding _ t) _ _ _ _) = typeComplexity h t
 
 -- | Heuristic penalty of a goal type: the configured per-node weights summed
@@ -2073,6 +2079,23 @@ getUnusedVarCount = IntMap.foldl' countUnused 0 . nodeVarUses
   countUnused count uses
     | uses == 0 = count + 1
     | otherwise = count
+
+-- Finish an already determined local obligation before interleaving another
+-- sibling's construction. Flexible variables in either the goal or its local
+-- context can still receive information from siblings, so those groups keep
+-- the established deferred order. This changes only the worklist order: all
+-- obligations and ordinary search-step charges remain present.
+scheduleKnownGoals :: Scopes -> [TGoal] -> Seq.Seq TGoal -> Seq.Seq TGoal
+scheduleKnownGoals scopes goals pending
+  | all determined goals = Seq.fromList goals <> pending
+  | otherwise = pending <> Seq.fromList goals
+ where
+  determined goal = case goalBinding goal of
+    VarBinding _ source -> closed source
+      && all (all closed . constraint_params) (goalGivenConstraints goal)
+      && all closedBinding (scopeGetAllBindings (goalScope goal) scopes)
+  closed = S.null . freeVars
+  closedBinding binding = all closed $ varPResult binding : varPParameters binding
 
 -- One suspended branch-local transformation of the popped search node.  Every
 -- sibling action is interpreted against the same immutable input node.
@@ -2187,7 +2210,8 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
             $ map splitBinding
             $ reverse ts
           modify $ \node -> node
-            { nodeGoals = nodeGoals node <> Seq.fromList additionalGoals }
+            { nodeGoals = scheduleKnownGoals (nodeProvidedScopes node)
+                additionalGoals (nodeGoals node) }
 
     -- if type is TypeForall, fix the forall-variables, i.e. invent a fresh
     -- set of constants that replace the relevant forall-variables.
@@ -2971,10 +2995,11 @@ stateStepPlan allocators casePolicy multiPM allowConstrs h
                       $ snd $ applySubsts provSS dependencyType
                   }
               Right _ -> id
-        modify $ \node -> node
-          { nodeGoals = nodeGoals node
-              <> Seq.fromList (goalOrder $ map applyProviderSubstitution newGoals) }
         builderApplySubst allSS substs
+        modify $ \node -> node
+          { nodeGoals = scheduleKnownGoals (nodeProvidedScopes node)
+              (goalOrder $ map (goalApplySubst substs . applyProviderSubstitution) newGoals)
+              (nodeGoals node) }
         modify $ \node -> node
           { nodeExpression = fillExprHole var
               (foldl' ExpApply coreExp (map ExpHole vars))

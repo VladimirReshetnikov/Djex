@@ -100,8 +100,10 @@ displayed-source compiler replay. Exference now retains the original root
 quantifiers and context-free nested forall evidence, including polymorphic
 constructor selections, while preserving its exact lambda syntax and checked
 projection costs. The [forall-graph report](docs/reports/2026-09-08-exference-forall-graphs.md)
-records a full-signature `maybeEither` witness replay and the separate live
-search result: all 256 candidates now compile, but none matches the predicate.
+records the earlier full-signature `maybeEither` witness replay and compiler
+repair. The subsequent [focused introduction change](docs/reports/2026-09-08-focused-forall-search.md)
+also synthesizes a matching implementation and passes all 13 extended Church
+behavior cases at the original Exference search limits.
 The matching [Leant integration](https://github.com/VladimirReshetnikov/Leant/blob/e1ed6f7eb308b9a431db1ec8c956f9eb7a30d05f/docs/reports/2026-09-08-nested-forall-graphs.md)
 passes nine native ordinary/behavioral/False cells across all three engine
 modes: six exact full-type replays, 24 observations and 16 empty axiom
@@ -126,53 +128,31 @@ replay, with 48 empty axiom inventories and three actual false controls.
 Its earlier full configured 647-test integration run passes in 343.79 seconds, with
 unchanged source, test-executable, and fake-Z3 helper hashes. Unused lambda and let binders
 retain source graphs as checked wildcards, preserving exact compatibility
-erasure. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md)
-marks priority 1's supported-fragment Haskell elaboration complete: all 101
-CLI tests pass, including first/best/all repair selection, exact GHC replay,
-and retention of the original failed-candidate sample when its elaboration
-retry times out under the same deadline. Priorities 2–4 remain open. The
-[accepted Leant global-method integration](https://github.com/VladimirReshetnikov/Leant/blob/main/docs/reports/2026-09-08-global-contextual-providers.md)
-uses Djex `4a4ed0fc` to carry complete source schemes and lexical class
-assumptions through native method discovery and both engines. Six ordinary/where
-method cases pass with exact full-type replay and 24 dictionary-payload
-observations. Nine cache/False sessions, a fresh 39-cell local-context matrix,
-a strict Leant build and its complete 701-test suite also pass. Cache acceptance
-uses an explicit 32-candidate window and 512-record diagnostic capture; the
-original four-candidate query remains a search miss, with product defaults
-unchanged. [Loaded Haskell provider schemes](docs/reports/2026-09-08-loaded-contextual-providers.md)
-now survive source extraction and checked admission in both engines. Explicit-
-`forall` behavioral method queries pass distinct dictionary payload checks,
-independent replay of the displayed definitions and actual False controls;
-the strict build and all 2,306 tests in 15 complete suites pass. Implicit-root
-scoping, ordinary contextual presentation and derived class-method schemes
-remain frontend work. The
-[current re-triage](docs/reports/2026-09-07-synthesis-retriage.md) puts missing
-Church constructions first, then bounded Haskell frontend usability, supplied
-tree folds, and broader contextual source/evidence support. The failed
-`maybeEither` ranking experiments favor diagnosing actual construction and
-queue decisions before more tuning. Mixed Lean dictionary inventories and
-derived method schemes remain required, but do not block the earlier
-provider-free Church fixtures. The full coverage obligation is unchanged.
-The [parenthesized-forall checking correction](docs/reports/2026-09-08-parenthesized-forall-checking.md)
-repairs a preflight regression at the original Church signatures. A bounded
-search trace now reaches both success-continuation arguments in `maybeEither`,
-but exposes a priority drop when opening an injection. A further estimate
-change still produced 256 false candidates and was removed; Church behavioral
-coverage is unchanged. The correction passes a strict build and all 2,307
-tests in 15 complete suites, including original-signature replay in both engines.
-Exact
-proof-selected dictionary transport remains required before that guard is
-relaxed, with payload-sensitive Haskell and Lean replay. Both partial oracle preflights now pass: all 20 Lean files with 491
-inventories (487 empty, four allowlisted observer/proofs), and all 63 Haskell
-controls. [Broader behavioral coverage](docs/reports/2026-09-07-priority4-behavioral-coverage.md)
-now combines separate accepted runs: **12/13 extended operations in each
-Haskell engine and 2/4 Exference explicit-default cases**.
-Fresh native-Int length synthesis and exact GHC replay pass in both Haskell
-engines. Both engines still lack `maybeEither`; Exference `foldl1` and `at`
-remain unaccepted at the recorded bounds. Lean Exference's selected first six accept 6/6 as a composite of five
-historical replays and the fresh native-length follow-up. These are subsets, not a
-fresh complete matrix: the full 13 extended operations and all 19 defaults
-across both Haskell engines and all three Lean modes remain required.
+erasure. The [current re-triage](docs/reports/2026-09-07-synthesis-retriage.md) puts remaining
+Church coverage and native integration first, then bounded Haskell frontend
+usability, supplied tree folds, and broader contextual source/evidence support.
+The [focused introduction change](docs/reports/2026-09-08-focused-forall-search.md)
+keeps determined local goals together and avoids a temporary priority drop
+while quantified function parameters enter scope. It accepts **all 13 extended
+Church operations in one fresh Haskell Exference run**, including `maybeEither`,
+without increasing the 256-candidate window, 100,000-step limit or 8,192-node
+queue limit. All exact displayed implementations pass original-signature GHC
+replay; 28 oracle controls and an actual False query pass. Strict builds,
+**2,308 tests in 15 complete suites**, and **350 signature cases in each Haskell
+engine** pass. The earlier [parenthesized-forall correction](docs/reports/2026-09-08-parenthesized-forall-checking.md)
+preserves lexical checking scope at those signatures.
+
+The [coverage register](docs/reports/2026-09-07-priority4-behavioral-coverage.md)
+retains historical **12/13 Djinn extended** and **2/4 selected Exference
+explicit-default** acceptance. Djinn `maybeEither` and Exference `foldl1`/`at`
+remain open at their recorded limits. Lean Exference's selected first six
+retain composite 6/6 acceptance at their own pins. The full **13 extended
+operations and all 19 explicit defaults**, across both Haskell engines and
+Lean Djinn/Exference/Both, remain required; newer canonical Haskell results
+require separate native integration. Selected dictionary transport also
+remains required before overlap guards are relaxed. Partial oracle preflights
+retain all 20 Lean files with 491 inventories (487 empty, four allowlisted)
+and all 63 Haskell controls as separate checking evidence.
 Earlier supplied-default `head` acceptance has separate receipts. Oracle
 preflight and type inhabitation do not establish behavioral synthesis.
 

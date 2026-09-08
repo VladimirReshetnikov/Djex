@@ -2085,15 +2085,12 @@ getUnusedVarCount = IntMap.foldl' countUnused 0 . nodeVarUses
 -- context can still receive information from siblings, so those groups keep
 -- the established deferred order. Keep monomorphic work in that order too:
 -- eagerly completing it can crowd out supplied structural instantiations.
--- A determined dependency can also unblock a pending polymorphic construction;
--- include that pending work when deciding whether this is a polymorphic group.
--- Wholly monomorphic goals and visible local types retain the deferred order.
+-- Focus a group only when its goal or a visible local type contains a forall.
 -- This changes only the worklist order: all
 -- obligations and ordinary search-step charges remain present.
 scheduleKnownGoals :: Scopes -> [TGoal] -> Seq.Seq TGoal -> Seq.Seq TGoal
 scheduleKnownGoals scopes goals pending
-  | all determined goals && (any polymorphic goals || any polymorphic pending) =
-      Seq.fromList goals <> pending
+  | all determined goals && any polymorphic goals = Seq.fromList goals <> pending
   | otherwise = pending <> Seq.fromList goals
  where
   determined goal = case goalBinding goal of

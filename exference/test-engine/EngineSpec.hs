@@ -109,6 +109,8 @@ import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 import qualified Language.Haskell.Synthesis.TypedGenerated as Typed
 import qualified Language.Haskell.Synthesis.TypedGenerated.Fingerprint
   as Fingerprint
+import qualified NestedForallGraphSpec
+import qualified ImplicitConstructorGraphSpec
 import qualified GivenEvidenceSpec
 
 main :: IO ()
@@ -116,7 +118,9 @@ main = defaultMain tests
 
 tests :: TestTree
 tests = testGroup "Exference private engine boundaries"
-  [ GivenEvidenceSpec.tests
+  [ NestedForallGraphSpec.tests
+  , ImplicitConstructorGraphSpec.tests
+  , GivenEvidenceSpec.tests
   , testCase "rigid scopes reject direct and propagated skolem escapes" $ do
       let opened = registerRigidScope
             (IntSet.singleton 0) [7] emptyRigidScope
@@ -1615,9 +1619,17 @@ tests = testGroup "Exference private engine boundaries"
             (checkedTypeApplicationOriginSteps origin) @?= [0]
         origins -> fail $ "transactional retry retained ghost origins: "
           ++ show (length origins)
-      -- Forall introduction intentionally makes the graph draft unavailable,
-      -- so there is no retained checked-term chain for the reference observer.
-      checkedExpressionTypeApplicationOriginReferences evidence @?= []
+      -- The successful independent introduction retains exactly its own
+      -- visible-origin reference; the abandoned preferred inference adds none.
+      checkedExpressionTypeApplicationOriginReferences evidence @?= [(0, 0)]
+      case checkedExpressionTermGraph 61 evidence of
+        ExferenceTermGraphAssociated checked -> do
+          let graph = Association.checkedTypeApplicationCertificateGraph checked
+          Typed.eraseTermGraph graph @?=
+            Generated.discardUnusedPatternBindingsBy id
+              (toGeneratedExpression expression)
+        other -> fail $ "transactional introduction lost its exact origin: "
+          ++ show other
   , testCase "checker retains complete constructor cases with exact field authority" $ do
       let payload = TypeCons $ name "Payload"
           spineName = name "Spine"
@@ -2173,11 +2185,19 @@ tests = testGroup "Exference private engine boundaries"
             $ rigidIdentity 1 2
       introducedEvidence <- checkedEvidence emptyStaticClassEnv [] []
         (TypeArrow outer identityScheme) introducedExpression
-      expectUnavailable "nested forall introduction"
-        (\reason -> case reason of
-          NestedForallIntroduction{} -> True
-          _ -> False)
-        introducedEvidence
+      expectPlainGraph "nested forall introduction" 31 introducedEvidence
+      case checkedExpressionTermGraph 31 introducedEvidence of
+        ExferenceTermGraphAvailable graph -> do
+          length
+            [ ()
+            | (_, Typed.TermNode _ Typed.TypedForallIntroduction{}) <-
+                Typed.termGraphNodes graph
+            ] @?= 2
+          Typed.eraseTermGraph graph @?=
+            Generated.discardUnusedPatternBindingsBy id
+              (toGeneratedExpression introducedExpression)
+        other -> fail $ "nested introduction lost its checked openings: "
+          ++ show other
 
       let integer = TypeCons $ name "Int"
           boxName = name "Box"

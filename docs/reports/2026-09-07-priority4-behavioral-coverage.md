@@ -1,5 +1,12 @@
 # Priority 4 behavioral coverage: accepted subsets and remaining cells
 
+The later [forall-graph increment](2026-09-08-exference-forall-graphs.md)
+adds an exact provider-free `maybeEither` witness replay and a fresh public
+Exference attempt. The live attempt still accepts no implementation: 256
+false, zero errors and zero timeouts. Five original compiler failures are now
+repaired without replacing their observation slots. The coverage table below
+is unchanged; the supplied witness is not a search result.
+
 Updated 2026-09-08 from separately completed runs. Receipt timestamps and input
 hashes identify each execution; this union is not a fresh whole-matrix run.
 

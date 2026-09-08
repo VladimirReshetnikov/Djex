@@ -38,6 +38,13 @@ replays plus fresh native length. The separate runs preserve the original
 length fixture failure; they are not a fresh complete matrix. Original priority 4 remains open for the full 13 extended
 operations and all 19 explicit defaults across the required engines.
 
+The [Exference forall-graph update](2026-09-08-exference-forall-graphs.md)
+retains source quantifiers, constructor instantiations and exact lambda
+projection. Its supplied `maybeEither` witness passes original-type GHC
+replay. Live search still reports 256 false candidates, now with zero errors
+or timeouts after five same-candidate repairs. This closes an observed
+elaboration obstacle without adding a synthesized operation to priority 4.
+
 The [accepted Leant environment repair](https://github.com/VladimirReshetnikov/Leant/blob/f35c243a9a2cf26d6c5ffe8c5e16ba4fba523b2e/docs/reports/2026-09-07-empty-environment-reuse.md) now reuses the exact empty user
 world for temporary behavioral checks. Original native Djinn append and length
 queries pass unchanged bounds, actual False controls and independent full-type

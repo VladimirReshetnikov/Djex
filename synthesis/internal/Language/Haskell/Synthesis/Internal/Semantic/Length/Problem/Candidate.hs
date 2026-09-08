@@ -236,6 +236,8 @@ import Language.Haskell.Synthesis.Type
   , freeVariablesInFirstOccurrenceOrder
   , functionSpine
   , normalizeType
+  , isFlexibleVariable
+  , quantifyFreeVariables
   , splitLeadingForalls
   )
 import Language.Haskell.Synthesis.TypeInstantiation
@@ -1611,6 +1613,11 @@ matchRootOpening
       (Set identity)
 matchRootOpening target actual
   | null implicitBinders && typesAlphaEqual target actual =
+      Right $ rigidFreeVariables actual
+  -- Match the checker's exact canonical source closure: Ord binder order,
+  -- prepended to an existing forall layer. The legacy openingTarget below
+  -- deliberately retains its separate first-occurrence selection order.
+  | typesAlphaEqual (quantifyFreeVariables isFlexibleVariable target) actual =
       Right $ rigidFreeVariables actual
   | otherwise = case matchContextFreeScheme openingTarget actual of
       Left _ -> rejected LengthRootOpeningShapeMismatch

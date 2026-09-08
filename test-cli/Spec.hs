@@ -3630,13 +3630,24 @@ testReplBehavioralElaborationSelection = withTemporaryEnvironment
       , ":synth repaired :: " ++ signature ++ " where observe (repaired id)"
       ]
     assertEqual (selection ++ " live repair REPL exit") ExitSuccess exitCode
+    let repairs =
+          [ term
+          | line <- lines errors
+          , Just term <- [stripPrefix "elaborated expression: " line]
+          ]
+        expectedRepairs = if selection == "first" then 1 else 3
+        renderRepair term = case renderMode of
+          "definition" -> "repaired = " ++ term
+          _ -> term
+    -- Nested forall introductions make the second and third source candidates
+    -- repairable too. Best selection must choose one of the actual checked
+    -- alternatives without erasing or rerendering its annotations.
+    assertEqual "each observed provider candidate receives its own repair"
+      expectedRepairs $ length repairs
     revised <- case
-        [ term
-        | line <- lines errors
-        , Just term <- [stripPrefix "elaborated expression: " line]
-        ] of
+        [term | term <- repairs, renderRepair term `isInfixOf` output] of
       [term] -> pure term
-      terms -> fail $ "expected one actual provider repair: " ++ show terms ++ errors
+      terms -> fail $ "expected one exact displayed provider repair: " ++ show terms ++ errors
     assertContains "the repaired occurrence must be the first observed candidate"
       "candidate observation: 1" errors
     assertContains "provider repair must retain the candidate's own graph"
@@ -3645,14 +3656,16 @@ testReplBehavioralElaborationSelection = withTemporaryEnvironment
       "original check: BehavioralCompilationError" errors
     assertContains "the annotated provider application must pass the real predicate"
       "final check: BehavioralPassed" errors
-    assertContains "one repaired occurrence needs one additional compiler check"
-      "checks=1; retries retain the same candidate" errors
+    assertEqual "every original provider expression fails before its repair"
+      expectedRepairs $ countOccurrences "original check: BehavioralCompilationError" errors
+    assertEqual "every graph-guided provider repair passes the real predicate"
+      expectedRepairs $ countOccurrences "final check: BehavioralPassed" errors
+    assertContains "each repaired occurrence needs one additional compiler check"
+      ("checks=" ++ show expectedRepairs ++ "; retries retain the same candidate") errors
     let expectedObservations = case selection of
           "first" -> "checked=1, true=1, false=0, error=0, timeout=0, window=3"
-          _ -> "checked=3, true=1, false=0, error=2, timeout=0, window=3"
-        displayed = case renderMode of
-          "definition" -> "repaired = " ++ revised
-          _ -> revised
+          _ -> "checked=3, true=3, false=0, error=0, timeout=0, window=3"
+        displayed = renderRepair revised
     assertContains "selection must retain each candidate's original observation slot"
       expectedObservations errors
     assertEqual "selection must display the exact checked repair once" 1 $

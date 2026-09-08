@@ -72,7 +72,6 @@ import Language.Haskell.Synthesis.TypedGenerated
   , TermGraph
   , TermGraphError
   , TermGraphLimits
-  , TermGraphSource (..)
   , TermNode (..)
   , TermNodeForm (..)
   , TermNodeId
@@ -85,10 +84,9 @@ import Language.Haskell.Synthesis.TypedGenerated
   , TypedPattern (..)
   , TypedPatternNode (..)
   , lookupTermNode
-  , sealTermGraph
+  , resealTermGraph
   , sharedTypeStructure
   , sharedForallTypeStructure
-  , termGraphNodes
   , termGraphRoot
   )
 
@@ -172,10 +170,7 @@ fingerprintTermGraphWithTypeStructure
 fingerprintTermGraphWithTypeStructure typeStructure graphLimits maximumBytes
     original = do
   graph <- first TermGraphFingerprintSharedResealError $
-    sealTermGraph typeStructure graphLimits TermGraphSource
-      { termGraphSourceRoot = termGraphRoot original
-      , termGraphSourceNodes = termGraphNodes original
-      }
+    resealTermGraph typeStructure graphLimits original
   rootField <- evalStateT
     (fingerprintNode Map.empty graph Map.empty $ termGraphRoot graph)
     emptyFingerprintState
@@ -236,11 +231,8 @@ fingerprintCheckedTypeApplicationCertificateGraphWithTypeStructure
         maximumBytes $ checkedTypeApplicationCertificateGraph checked
   | otherwise = do
       graph <- first TermGraphFingerprintSharedResealError $
-        sealTermGraph (provisionalCertificateTypeStructure typeStructure)
-          graphLimits TermGraphSource
-            { termGraphSourceRoot = termGraphRoot projected
-            , termGraphSourceNodes = termGraphNodes projected
-            }
+        resealTermGraph (provisionalCertificateTypeStructure typeStructure)
+          graphLimits projected
       let associations = certificateSemanticAssociations checked
       references <- certificateSemanticReferences associations
       (rootField, associationFields) <- evalStateT

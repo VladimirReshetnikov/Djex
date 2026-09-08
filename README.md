@@ -96,7 +96,13 @@ Recent checked improvements add same-candidate Haskell elaboration retries,
 implicit local polymorphic-use evidence, and bounded case analysis for
 ordinary recursive data in both engines. The [implementation register](docs/reports/2026-09-07-synthesis-priorities-1-4.md)
 records live repair under `first`, `best`, and `all` selection, with exact
-displayed-source compiler replay. The ordinary-data matrix now passes eight
+displayed-source compiler replay. Exference now retains the original root
+quantifiers and context-free nested forall evidence, including polymorphic
+constructor selections, while preserving its exact lambda syntax and checked
+projection costs. The [forall-graph report](docs/reports/2026-09-08-exference-forall-graphs.md)
+records a full-signature `maybeEither` witness replay and the separate live
+search result: all 256 candidates now compile, but none matches the predicate.
+The ordinary-data matrix now passes eight
 scenarios in each Haskell engine, including tuple fields and independently typed
 recursive inputs. Exference's complete-case graphs and protected queues preserve
 the caller's total step and queue bounds. Leant now passes these eight scenarios

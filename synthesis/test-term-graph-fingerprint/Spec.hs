@@ -90,6 +90,26 @@ tests = testGroup "shared term-graph fingerprints"
           $ Typed.InvalidTermGraphTypeAnnotation
               (Typed.GraphTermNodeType $ nodeId 77)
               malformedType)
+  , testCase "fresh fingerprint resealing retains exact source lambda projection cost" $ do
+      let inner = erasedIntroductionFixture "a" "opening" 0
+          bound = Type.TypeVariable $ Type.FlexibleVariable "a"
+          poly = Type.ForallType [Type.FlexibleVariable "a"] []
+            $ Type.FunctionType bound bound
+          source = Typed.TermGraphSource (nodeId 3) $
+            (nodeId 3, Typed.TermNode
+              (Type.FunctionType simpleType poly)
+              $ Typed.TypedLambda
+                [Typed.TypedPattern (occurrenceId 3) simpleType $ Typed.TypedBind 1]
+                (nodeId 0)) : Typed.termGraphSourceNodes inner
+          structure = Typed.sharedTypeStructure
+            {Typed.forallTypeStructure = Just Typed.sharedForallTypeStructure}
+      graph <- expectRight $ Typed.sealTermGraphWithProjection
+        Typed.PreserveLambdaBoundaries structure Typed.defaultTermGraphLimits source
+      limits <- expectRight $ Typed.mkTermGraphLimits 4 3 2 32 4 4
+      GraphFingerprint.fingerprintSharedTermGraph limits
+        GraphFingerprint.defaultTermGraphFingerprintByteLimit graph
+        @?= Left (GraphFingerprint.TermGraphFingerprintSharedResealError
+          $ Typed.TermGraphProjectionLimitExceeded 4 5)
   , testCase "require inventory authority for constructor patterns" $ do
       graph <- expectRight $ Typed.sealTermGraph constructorAwareTypeStructure
         Typed.defaultTermGraphLimits constructorPatternSource

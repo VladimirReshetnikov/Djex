@@ -703,7 +703,10 @@ prepareExpressionCheckContextUnchecked plan classEnvironment functions
   (checkedGoal, openedConstraints, openings) <- instantiateGoal plan goal
   pure $ ExpressionCheckContext
     checkedGoal
-    (if null openedConstraints then [] else openings)
+    -- Preserve the exact source-owned opening plan for graph construction.
+    -- Reconstructing closure from free variables later would lose the original
+    -- binder order and its association with these checked rigid identities.
+    openings
     (addQueryClassEnv openedConstraints classEnvironment)
     functions
     deconstructors
@@ -831,13 +834,10 @@ checkValidatedExpression provenCandidateRigids
             (do
               introduced <- introduceExpectedForallChain
                 variables checkedExpression expectedType
-              -- Preserve the existing context-free graph boundary for this
-              -- increment. Qualified chains retain every intervening forall,
-              -- including a context-free layer outside a qualified one.
-              pure $ if null $ typeConstraints expectedType
-                then unavailableCheckedTerm expectedType $
-                  NestedForallIntroduction expectedType
-                else introduced)
+              -- The independently checked source telescope owns every
+              -- opening, including context-free layers. Keep its witnesses;
+              -- sealing still checks fresh rigid scope and exact erasure.
+              pure introduced)
         (ExpLambda variable annotation body, TypeArrow parameter result) -> do
           unifyTypes annotation parameter
           checkedBody <- checkAgainst
@@ -954,6 +954,9 @@ checkValidatedExpression provenCandidateRigids
     infer _ (ExpName name) = do
       checked <- case Map.lookup name functionSchemes of
         Just scheme | Set.null $ SharedType.freeVariables scheme ->
+          instantiateImplicitLocalProvider $
+            availableCheckedTerm scheme $ CheckedGlobal name Nothing
+        _ | Just scheme <- implicitConstructorScheme name ->
           instantiateImplicitLocalProvider $
             availableCheckedTerm scheme $ CheckedGlobal name Nothing
         _ -> do
@@ -1259,6 +1262,34 @@ checkValidatedExpression provenCandidateRigids
     recordProviderOccurrence identity source selected = modify' $ \current -> current
       { checkProviderOccurrences = (identity, source, selected) :
           checkProviderOccurrences current }
+
+    -- Constructors have no specified-binder sidecar: their source authority
+    -- is the validated datatype input and ordered fields. A root/nested
+    -- skolem must enter through a checked implicit application, never be
+    -- baked into a global leaf. Match the corresponding flat binding before
+    -- using that declaration; raw checker inputs need not have passed the
+    -- shared inventory's constructor/function correspondence gate.
+    -- This closure supplies no visible-application scheme or certificate.
+    implicitConstructorScheme name = case
+        [ source
+        | deconstructor <- deconstructors
+        , constructor <- deconstructorConstructors deconstructor
+        , constructorName constructor == name
+        , binding <- functions
+        , functionName binding == name
+        , null $ functionConstraints binding
+        , let source = forallify $ SharedType.functionType
+                (constructorFields constructor) (deconstructorInput deconstructor)
+        , Set.null $ SharedType.freeVariables source
+        , SharedTypeAtom.alphaEquivalentTypes source
+            $ forallify $ functionBindingType binding
+        ] of
+      -- forallify closes even ground types with an empty wrapper. That
+      -- synthetic no-op must not hide a monomorphic constructor's arrow;
+      -- there is no binder or dictionary to instantiate in this case.
+      TypeForallNative [] [] body : _ -> Just body
+      source : _ -> Just source
+      [] -> Nothing
 
     instantiateBinding name = case
         [binding | binding <- functions, functionName binding == name] of
@@ -1685,7 +1716,8 @@ checkedExpressionTermGraph candidateKey
           case buildCheckedTermGraph candidateKey checkedTerm of
             Left reason -> ExferenceTermGraphUnavailable reason
             Right source -> case origins of
-              [] -> case SharedTyped.sealTermGraphWithContext
+              [] -> case SharedTyped.sealTermGraphWithContextAndProjection
+                  SharedTyped.PreserveLambdaBoundaries
                   SharedTyped.sharedContextTypeStructure
                   (checkedTermTypeStructure checkedTerm)
                   SharedTyped.defaultTermGraphLimits
@@ -1693,7 +1725,8 @@ checkedExpressionTermGraph candidateKey
                 Left failure -> ExferenceTermGraphUnavailable
                   $ TermGraphSealingFailure failure
                 Right graph -> retainPlain compatibility graph
-              _ -> case SharedAssociation.sealCheckedTypeApplicationCertificateGraph
+              _ -> case SharedAssociation.sealCheckedTypeApplicationCertificateGraphWithProjection
+                  SharedTyped.PreserveLambdaBoundaries
                   SharedCertificate.defaultTypeApplicationCertificateLimits
                   (checkedTermTypeStructure checkedTerm)
                   SharedTyped.defaultTermGraphLimits

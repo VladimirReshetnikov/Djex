@@ -2769,7 +2769,7 @@ facadeTests = testGroup "public Djex facade"
               candidateOutput (typedCandidateCompatibility candidate)
             assertBool "the typed graph lost source occurrence identities"
               $ typedGraphSourceOccurrences (termGraphMetrics graph) > 0
-  , testCase "retains explicit typed fallback without weakening evidence" $ do
+  , testCase "retains nested forall graphs without changing validated evidence" $ do
       environment <- expectRight
         (mkEnvironment [] ::
           Either (EnvironmentError ExferenceTypeVariable)
@@ -2805,10 +2805,19 @@ facadeTests = testGroup "public Djex facade"
         (result, candidate) : _ -> do
           resultEvidence result @?= ValidatedCandidates
           case typedCandidateTermGraph candidate of
-            Left NestedForallIntroduction{} -> pure ()
-            Left absence -> fail $ "unexpected typed fallback: "
-              ++ show absence
-            Right _ -> fail "the unsupported forall introduction claimed a graph"
+            Left absence -> fail $ "nested forall evidence was unavailable: " ++ show absence
+            Right graph -> do
+              eraseTermGraphToFunctionClause target graph @?=
+                candidateOutput (typedCandidateCompatibility candidate)
+              case lookupTermNode (termGraphRoot graph) graph of
+                Nothing -> fail "the sealed graph lost its root"
+                Just root -> do
+                  assertBool "the graph lost the full quantified request" $
+                    alphaEquivalentClosedTypes
+                      (quantifyFreeVariables isFlexibleVariable goal) (termNodeType root)
+                  assertBool "the graph leaked a free root variable" $
+                    Set.null $ freeVariables $ termNodeType root
+              length [() | (_, TermNode _ TypedForallIntroduction{}) <- termGraphNodes graph] @?= 2
   , testCase "seals Djinn from the neutral environment vocabulary" $ do
       let checkedEnvironment
             :: Either (EnvironmentError DjinnTypeVariable) DjinnEnvironment

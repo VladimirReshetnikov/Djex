@@ -22,6 +22,7 @@ module Language.Haskell.Synthesis.Internal.TypedGenerated.Certificate.Associatio
   , TypeApplicationCertificateAssociationError (..)
   , CheckedTypeApplicationCertificateGraph
   , sealCheckedTypeApplicationCertificateGraph
+  , sealCheckedTypeApplicationCertificateGraphWithProjection
   , checkedTypeApplicationCertificateGraph
   , foldCheckedTypeApplicationCertificateGraph
   ) where
@@ -66,6 +67,7 @@ import Language.Haskell.Synthesis.TypedGenerated
   , TermGraph
   , TermGraphError
   , TermGraphLimits
+  , TermGraphProjectionStyle (..)
   , TermGraphSource
   , TermNode (..)
   , TermNodeForm (..)
@@ -73,7 +75,7 @@ import Language.Haskell.Synthesis.TypedGenerated
   , TypeApplicationWitness (..)
   , TypeStructure (..)
   , lookupTermNode
-  , sealTermGraph
+  , sealTermGraphWithProjection
   , termGraphRoot
   )
 
@@ -216,14 +218,31 @@ sealCheckedTypeApplicationCertificateGraph
   -> Either
       (TypeApplicationCertificateAssociationError variable local)
       (CheckedTypeApplicationCertificateGraph variable local)
-sealCheckedTypeApplicationCertificateGraph certificateLimits baseStructure
+sealCheckedTypeApplicationCertificateGraph =
+  sealCheckedTypeApplicationCertificateGraphWithProjection
+    MergeLambdaGroupsAcrossEvidence
+
+-- | Retain the same checked certificate/occurrence association while selecting
+-- only the exact lambda grouping of the compatibility syntax.
+sealCheckedTypeApplicationCertificateGraphWithProjection
+  :: (Ord variable, Ord local)
+  => TermGraphProjectionStyle
+  -> TypeApplicationCertificateLimits
+  -> TypeStructure (Type variable)
+  -> TermGraphLimits
+  -> TermGraphSource (Type variable) local
+  -> [TypeApplicationCertificateOrigin variable]
+  -> Either
+      (TypeApplicationCertificateAssociationError variable local)
+      (CheckedTypeApplicationCertificateGraph variable local)
+sealCheckedTypeApplicationCertificateGraphWithProjection projectionStyle certificateLimits baseStructure
     graphLimits graphSource origins = do
   table <- first TypeApplicationCertificateAssociationPlanError $
     sealTypeApplicationCertificateTable certificateLimits $
       map certificateSource origins
   preparedOrigins <- mapM (prepareOrigin table) origins
   graph <- first TypeApplicationCertificateAssociationGraphError $
-    sealTermGraph (provisionalCertificateStructure baseStructure)
+    sealTermGraphWithProjection projectionStyle (provisionalCertificateStructure baseStructure)
       graphLimits graphSource
   rooted <- rootedTermNodes graph
   (uses, reversedUses) <- collectCertificateUses rooted

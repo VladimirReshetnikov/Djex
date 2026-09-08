@@ -1,0 +1,1882 @@
+{
+  "schema": "djex.exference-forall-graphs.v1",
+  "status": "accepted_graph_and_elaboration_milestone",
+  "new_synthesized_operations": 0,
+  "tested_parent_commit": "1b9db48f0f782a194b4076ae2cb3d910570746d7",
+  "strict_build": {
+    "status": "passed",
+    "log": "dist-newstyle/priority4-live/exference-graph-build-v5.log",
+    "log_sha256": "a3e75fa5fb83925e482c1c150ac119d7efae65eb35a60bc2a0aec6a6cb1f1a1c",
+    "jobs": 1,
+    "ghc_options": [
+      "-Werror"
+    ]
+  },
+  "suites": {
+    "status": "passed",
+    "complete_suites": 13,
+    "passed_tests": 2119,
+    "raw": {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\results.json",
+      "sha256": "bedb9fb65e8d12ed90d9431458aff4975d9d8d213952c4ce738237aa726ceab8",
+      "status": "passed",
+      "captures_audited": 52,
+      "captures": [
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\exference-engine-tests-inventory.stdout.txt",
+          "sha256": "dd783ac2c0bac17cb58b7f01aaa1f148d731b2b0f9803ab4740d83d7ae926ea2"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\exference-engine-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\exference-engine-tests.stdout.txt",
+          "sha256": "9a52c193b9bcaa2317657a18a4d65159cab59d136dae65ed94924789b95f00d0"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\exference-engine-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\exference-tests-inventory.stdout.txt",
+          "sha256": "06820ceb5fba458404a44ecdd394047fe2b4630bed57effd465b987da631e9af"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\exference-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\exference-tests.stdout.txt",
+          "sha256": "9871bff3c5e8c57be974747d73b656e4c0a2826d613eb2117aaec7ebfbcf106a"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\exference-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\synthesis-length-tests-inventory.stdout.txt",
+          "sha256": "77c86e786283d9c1d8e4b66feae39afbeb10f5a143f7e56deed322d1898b9c2d"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\synthesis-length-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\synthesis-length-tests.stdout.txt",
+          "sha256": "c04432d91c7b9ed5a60ac7a01c0258ffa42ffc7ee9c5e502342570b2da5bc6a3"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\synthesis-length-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djex-tests-inventory.stdout.txt",
+          "sha256": "f8f1fd0fed5bdeb1ee58377ad2a772b87e3c15f96d831eccfe885207c6ee8d59"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djex-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djex-tests.stdout.txt",
+          "sha256": "37eb91bae346b3631daa4c7a9685854bd96d64e1a6f83cb13b9c7adb8744653b"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djex-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djex-api-tests-inventory.stdout.txt",
+          "sha256": "3cf9036eeb793f90a037e79d54b600d34658dce01b3446dc4d0988e5d9f0d9ce"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djex-api-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djex-api-tests.stdout.txt",
+          "sha256": "57dc47c6fd4e1e2431e28d3024af995e5d42b64bc94543eb4b5c081fc09de3fd"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djex-api-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djex-cli-tests-inventory.stdout.txt",
+          "sha256": "c9b5fb4589c28f10939e4a2e2d90cc2e089be07c9ae2384366c47e4656cf6a9d"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djex-cli-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djex-cli-tests.stdout.txt",
+          "sha256": "ca29e00dfe6afc7350b91e94281ceac85684d32b9f880c91535082c3fc93b675"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djex-cli-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\exference-frontend-api-tests-inventory.stdout.txt",
+          "sha256": "c6138f03ba375340462cf1f2e359df790c1dc97a89e821f513c6aca9fe09db9e"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\exference-frontend-api-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\exference-frontend-api-tests.stdout.txt",
+          "sha256": "8a40ff4dada319f1a163be5015c8a6efea54baf41c1a572433fd8bcb5d21eb04"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\exference-frontend-api-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\exference-cli-tests-inventory.stdout.txt",
+          "sha256": "586a9725e0156c49c870312e5e4a749b059d3a8b2ab12312b80cdb6aa3bad8ba"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\exference-cli-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\exference-cli-tests.stdout.txt",
+          "sha256": "a60ebc95f4084a954d5690bc943fad9bd9b934ee151b9b2d42870f1d04dd0d8a"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\exference-cli-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\synthesis-tests-inventory.stdout.txt",
+          "sha256": "fffdbab977ee0725555109b93309ef1370388f4da523f8c2a4fe5d1436651893"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\synthesis-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\synthesis-tests.stdout.txt",
+          "sha256": "9c530aec568b8687d307b7d38d9cf5a29b844163c2095871c6e2ae632e67ffb5"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\synthesis-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\synthesis-certificate-tests-inventory.stdout.txt",
+          "sha256": "8ed23698ecdaf6c07120e79b9c20dfafdedcd685d325e41dec7a13951697bd8a"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\synthesis-certificate-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\synthesis-certificate-tests.stdout.txt",
+          "sha256": "bbb48fa8c6f93a39f9ebb8bfa00f8514ad34b7358910c83aef94df8cfb2b0345"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\synthesis-certificate-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\synthesis-term-graph-fingerprint-tests-inventory.stdout.txt",
+          "sha256": "2af2d953a1a52f8021b2764e076755cca92e8447cdfea8938f3513aa732c8a67"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\synthesis-term-graph-fingerprint-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\synthesis-term-graph-fingerprint-tests.stdout.txt",
+          "sha256": "ef3ff07513d5dd66886e94ec11f7d1035e49cea1f52855a415b1dd6154a81559"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\synthesis-term-graph-fingerprint-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djinn-source-graph-tests-inventory.stdout.txt",
+          "sha256": "ebdc71f2096593587f885dd6bb2cec56d44c98bf7802d5ce6bcf02c0a891ba94"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djinn-source-graph-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djinn-source-graph-tests.stdout.txt",
+          "sha256": "1fa1f3d9e17c55ca4d0f17e8c7dbfa979717c7b7612e21904e5f564ad959efe3"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djinn-source-graph-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djinn-source-graph-private-tests-inventory.stdout.txt",
+          "sha256": "17a70484c72aa9133301f247609ac4c7c7f062c2ae67e35287349ec72f8b4ef6"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djinn-source-graph-private-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djinn-source-graph-private-tests.stdout.txt",
+          "sha256": "4eb6929c3448deaf436b5881238402a968f077fba110b4ae6aa5a47d87819297"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v3\\djinn-source-graph-private-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    "rows": [
+      {
+        "suite": "exference-engine-tests",
+        "status": "passed",
+        "filtered": false,
+        "executable": "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\exference-engine-tests\\build\\exference-engine-tests\\exference-engine-tests.exe",
+        "executable_sha256": "8cdc730f14d433b613e5ed62bc8a8fe9a4d952334e710abb6d59ebefa6e074ff",
+        "inventory_count": 82,
+        "required_regression_leaves": [
+          "root opening retains the original source forall",
+          "direct nested introduction retains both lexical binders",
+          "application argument carries its own forall introduction",
+          "annotation-only foreign rigid cannot impersonate either scope",
+          "sibling introductions cannot share an annotation rigid",
+          "maybeEither exact source witness seals and renders without search",
+          "zero constructor keeps its closed declaration before root instantiation",
+          "step constructor selects the actual nested spine payload",
+          "monomorphic zero constructor has no vacuous source wrapper",
+          "monomorphic step constructor remains directly applicable",
+          "a same-spelled ordinary binding has no constructor closure authority",
+          "a mismatched constructor result cannot supply closure authority"
+        ],
+        "exit_code": 0,
+        "passed_count": 82,
+        "seconds": 0.27,
+        "executable_unchanged": true
+      },
+      {
+        "suite": "exference-tests",
+        "status": "passed",
+        "filtered": false,
+        "executable": "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\exference-tests\\build\\exference-tests\\exference-tests.exe",
+        "executable_sha256": "8ffcd0be0d847e7725df742c16a16e340415abbe6ecc4b84db526519b483dade",
+        "inventory_count": 513,
+        "required_regression_leaves": [],
+        "exit_code": 0,
+        "passed_count": 513,
+        "seconds": 1.26,
+        "executable_unchanged": true
+      },
+      {
+        "suite": "synthesis-length-tests",
+        "status": "passed",
+        "filtered": false,
+        "executable": "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\synthesis-length-tests\\build\\synthesis-length-tests\\synthesis-length-tests.exe",
+        "executable_sha256": "148140ae48f86e33c629f971960f8bbbcf2bc1314f6cad8fa535116588bcc40d",
+        "inventory_count": 436,
+        "required_regression_leaves": [
+          "accept exact closed root openings without weakening legacy rigid openings",
+          "reject a closed root with different quantified correlation",
+          "closed root equality retains source class constraints",
+          "closed roots use canonical source binder order and existing forall layer"
+        ],
+        "exit_code": 0,
+        "passed_count": 436,
+        "seconds": 55.19,
+        "executable_unchanged": true
+      },
+      {
+        "suite": "djex-tests",
+        "status": "passed",
+        "filtered": false,
+        "executable": "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djex-tests\\build\\djex-tests\\djex-tests.exe",
+        "executable_sha256": "ff79d43de5de3a8ab6e67cb9d0ce08fa0cba533c859ab1953d6caec27d2ba36b",
+        "inventory_count": 147,
+        "required_regression_leaves": [],
+        "exit_code": 0,
+        "passed_count": 147,
+        "seconds": 116.97,
+        "executable_unchanged": true
+      },
+      {
+        "suite": "djex-api-tests",
+        "status": "passed",
+        "filtered": false,
+        "executable": "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djex-api-tests\\build\\djex-api-tests\\djex-api-tests.exe",
+        "executable_sha256": "abfbede0dcab274297c78db7b760c1249817652c950bbc0c23aa626d77bc3033",
+        "inventory_count": 38,
+        "required_regression_leaves": [],
+        "exit_code": 0,
+        "passed_count": 38,
+        "seconds": 0.03,
+        "executable_unchanged": true
+      },
+      {
+        "suite": "djex-cli-tests",
+        "status": "passed",
+        "filtered": false,
+        "executable": "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djex-cli-tests\\build\\djex-cli-tests\\djex-cli-tests.exe",
+        "executable_sha256": "3e613a01162dee2f81a052ad38735630802f6058632d59ef7192996376c195df",
+        "inventory_count": 101,
+        "required_regression_leaves": [],
+        "exit_code": 0,
+        "passed_count": 101,
+        "seconds": 121.66,
+        "executable_unchanged": true
+      },
+      {
+        "suite": "exference-frontend-api-tests",
+        "status": "passed",
+        "filtered": false,
+        "executable": "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\exference-frontend-api-tests\\build\\exference-frontend-api-tests\\exference-frontend-api-tests.exe",
+        "executable_sha256": "0c80daee07df210c389d8516ed5da3580cb1245bcfd8b8defbe1402b13eaa01e",
+        "inventory_count": 4,
+        "required_regression_leaves": [],
+        "exit_code": 0,
+        "passed_count": 4,
+        "seconds": 0.0,
+        "executable_unchanged": true
+      },
+      {
+        "suite": "exference-cli-tests",
+        "status": "passed",
+        "filtered": false,
+        "executable": "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\exference-cli-tests\\build\\exference-cli-tests\\exference-cli-tests.exe",
+        "executable_sha256": "a839017036afaff99f98d8dc575cd226cdbaa66307a20172f8b70f6d819854bc",
+        "inventory_count": 25,
+        "required_regression_leaves": [],
+        "exit_code": 0,
+        "passed_count": 25,
+        "seconds": 3.83,
+        "executable_unchanged": true
+      },
+      {
+        "suite": "synthesis-tests",
+        "status": "passed",
+        "filtered": false,
+        "executable": "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\synthesis-tests\\build\\synthesis-tests\\synthesis-tests.exe",
+        "executable_sha256": "6ae4649dfccc8ca0c08a9e09aa27ef02eb213d45e4442c3a921ef0a46ffc3868",
+        "inventory_count": 503,
+        "required_regression_leaves": [
+          "preserve exact source lambda boundaries through erased forall and resealing"
+        ],
+        "exit_code": 0,
+        "passed_count": 503,
+        "seconds": 0.17,
+        "executable_unchanged": true
+      },
+      {
+        "suite": "synthesis-certificate-tests",
+        "status": "passed",
+        "filtered": false,
+        "executable": "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\synthesis-certificate-tests\\build\\synthesis-certificate-tests\\synthesis-certificate-tests.exe",
+        "executable_sha256": "cdaea609e7dc04dd760e9e7c82423970fdb8dc867073fe30b47d5bc20f2e929d",
+        "inventory_count": 94,
+        "required_regression_leaves": [],
+        "exit_code": 0,
+        "passed_count": 94,
+        "seconds": 0.02,
+        "executable_unchanged": true
+      },
+      {
+        "suite": "synthesis-term-graph-fingerprint-tests",
+        "status": "passed",
+        "filtered": false,
+        "executable": "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\synthesis-term-graph-fingerprint-tests\\build\\synthesis-term-graph-fingerprint-tests\\synthesis-term-graph-fingerprint-tests.exe",
+        "executable_sha256": "11825c2c0bf8dd63a20c2132a59abd2368a08a80c1f57f7fa8e4b0207d1d45b9",
+        "inventory_count": 11,
+        "required_regression_leaves": [
+          "fresh fingerprint resealing retains exact source lambda projection cost"
+        ],
+        "exit_code": 0,
+        "passed_count": 11,
+        "seconds": 0.0,
+        "executable_unchanged": true
+      },
+      {
+        "suite": "djinn-source-graph-tests",
+        "status": "passed",
+        "filtered": false,
+        "executable": "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djinn-source-graph-tests\\build\\djinn-source-graph-tests\\djinn-source-graph-tests.exe",
+        "executable_sha256": "63862f853a39179db0dc9fea76ba96d6820e80a1764d9302ecd63c54a2614095",
+        "inventory_count": 59,
+        "required_regression_leaves": [],
+        "exit_code": 0,
+        "passed_count": 59,
+        "seconds": 0.35,
+        "executable_unchanged": true
+      },
+      {
+        "suite": "djinn-source-graph-private-tests",
+        "status": "passed",
+        "filtered": false,
+        "executable": "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\t\\djinn-source-graph-private-tests\\build\\djinn-source-graph-private-tests\\djinn-source-graph-private-tests.exe",
+        "executable_sha256": "c4b475ff51c2a23fdf2e4ed45be31876633ccc4bee69b72da0b1bfd0911528fa",
+        "inventory_count": 106,
+        "required_regression_leaves": [],
+        "exit_code": 0,
+        "passed_count": 106,
+        "seconds": 0.03,
+        "executable_unchanged": true
+      }
+    ],
+    "source_hashes": {
+      "C:\\Djex\\dist-newstyle\\cache\\plan.json": "697b07cd9c5a37cbc3fd095edb019e2ad7c1d24e8a2beaedce2b9b7b0bc13865",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-acceptance-prepared-v3\\run_acceptance.py": "162399320411006c84e891e6544c62b5772d08889007d8ff09ace1db212511eb",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\LengthRootHelper.fragment.hs": "215976e41a256d8cfee721b866c59282213ac19793c957044c7c78d032d4f930",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\LengthRootTests.fragment.hs": "99d33fd412d41251530bccdb3cdf0fbe77012450098dbb0c821874b71984d778",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\MaybeEither.original-type.txt": "ee0e3e54c7f5fc5b34ab6a6cd0712a37e183816153e929d99c1e2e5398c172cf",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\MaybeEitherGraphProbe.hs": "10d727b00078e3777a80299c41f45661887aa4d1971df82eb407972c6f9cccec",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\NestedForallGraphSpec.hs": "bc77ba150439c8f6271548e3c8cbe23f989166acf6b0595fd10fb4cabdd726e2",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\candidate\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\ExpressionCheck.hs": "89914ed403bf9bb39149294cb0d15b119ca8dfe0815778dc2ac699ba97d63044",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\candidate\\exference\\test-engine\\EngineSpec.hs": "0d3dc97d6c6b80073e7efbb11d33bae1b7a6beef815962c740dcfc64bf286ee5",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\candidate\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Semantic\\Length\\Problem\\Candidate.hs": "43049366f041c1681c9aee2d0fafbaf2b561a953263332da539b0500c6daf751",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\candidate\\synthesis\\test-length\\Spec.hs": "d606c498171960e090dd4e30d6b7d0078dd2501b0faa301f2117b4bd81b801ac",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\implementation-lf.patch": "6a74c4026b0b9f32ee2500725b22d9581351f8593555a00ba1a3511051ee299c",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\implementation.patch": "6a74c4026b0b9f32ee2500725b22d9581351f8593555a00ba1a3511051ee299c",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\leant-candidate\\test-unit\\Spec.hs": "72dd9ed4689de53acc1378b09310c879251750b64bfe884c26d981007dae2195",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\leant-integration.patch": "c5d47144e285d180e446bd9dfb2efe45b2fa384fc21256868855fbf76fb7b9c7",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\leant-original\\test-unit\\Spec.hs": "50d4236ff0c434c4323c58a7caa3c55b0c18526ca04507499b7a91701a1a7f36",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\manifest.json": "5005167429ee9d2fe250541c8aefce118c5222a86a17adf12d9f61b4a58103c7",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\original\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\ExpressionCheck.hs": "da40e603ca84132eecb589b5a7441f961a7f24d50e7efe87eb138878b3eb71c2",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\original\\exference\\test-engine\\EngineSpec.hs": "1fcb14e669eb29b297e4588473f392d825ca7fda5be51791a1c34439efc30c83",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\original\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Semantic\\Length\\Problem\\Candidate.hs": "4bd03ec98724cb75a05bf58168ff8eafa2822314c4c2ca59fd4bd69c9e37a299",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\original\\synthesis\\test-length\\Spec.hs": "d6d68fcdda92cb262ceb98286543bb7c6d507ac7d048dad6a32e36372b028b41",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\root-closure-review\\Helper.fragment.hs": "5344f98edd4a69c3fc0abf60c94fc7cfaa72b4c908832f29f45a3c7a4ef32101",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\root-closure-review\\Regression.fragment.hs": "00edf93aab5b7df752faf2bb7682fa81493d1875eae76d65d7f670db839b6972",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\root-closure-review\\candidate\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Semantic\\Length\\Problem\\Candidate.hs": "c7403ea81200dfb6a137f321707fde58fb55e878f0ad005cc88e8192f9257d40",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\root-closure-review\\candidate\\synthesis\\test-length\\Spec.hs": "91ad1a2ab7eb4f9b0f728b3773880f83c2ffe5334b19f23ced243d97a47117b7",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\root-closure-review\\manifest.json": "f5039cf9983a0bc6eaf1761f3c0b3514aa237141fd3b760c17216d2e68fcb317",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\root-closure-review\\revision-lf.patch": "1fce8df904ace10992c842ff968a5310b570d03c6ccf5027da293249c78c628a",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\root-closure-review\\revision.patch": "1fce8df904ace10992c842ff968a5310b570d03c6ccf5027da293249c78c628a",
+      "C:\\Djex\\djex.cabal": "7cc3eeccabaecfbba3ffa94d393c4bd97c1bc2ef81ca870f51c2b61831ed16ee",
+      "C:\\Djex\\djinn\\src-core\\Djinn\\Core.hs": "7fe42d2e3114d06e5d74422e5e3d7ae372dd3e773bdceefbfadc4e56955dccb5",
+      "C:\\Djex\\djinn\\src-core\\Djinn\\Internal\\Declaration.hs": "ed5d9d48f5036989e24c76828753169fce0763398a1bbf3d0d7049140f064fd3",
+      "C:\\Djex\\djinn\\src-core\\Djinn\\Internal\\Environment.hs": "e9aac5cf1ad5b136f101031ce18e67b5f509184fe2ff9d4fcbcde0ec8bb6fb2f",
+      "C:\\Djex\\djinn\\src-core\\Djinn\\Internal\\Generated.hs": "f4a1387fbb766e6cbc154392b2738df6994c57bf9c373ae49b007e1b9a2f1885",
+      "C:\\Djex\\djinn\\src-core\\Djinn\\Internal\\HCheck.hs": "efbb0d1e160daac282b0c3b58cf7cfd9b457580c0eac6b5717a418f18ecaf362",
+      "C:\\Djex\\djinn\\src-core\\Djinn\\Internal\\HCheck\\Implementation.hs": "cb3929fe493da5c2288b47743016561a2e9de8c67bf52ae472e9e99f84151280",
+      "C:\\Djex\\djinn\\src-core\\Djinn\\Internal\\HIdentifier.hs": "80ecced5df74d28dfdf5a1a1579b475f8eaff9c00f4bbc12ac673027605315de",
+      "C:\\Djex\\djinn\\src-core\\Djinn\\Internal\\HTypes.hs": "7fe1ffb615ef4a43203efc0f465b96b6edd3839e130323d07f1aaf0d5856e7fd",
+      "C:\\Djex\\djinn\\src-core\\Djinn\\Internal\\LJT.hs": "ea7630b33d36da6b110fa81ba36057e7551258843a11117a18e0c78fdcf7ee00",
+      "C:\\Djex\\djinn\\src-core\\Djinn\\Internal\\LJTFormula.hs": "f21fbe61c591e29c6daa0e090fe1d51f2da1d4c7d6222f3c9e9d19bea5a4f7f9",
+      "C:\\Djex\\djinn\\src-core\\Djinn\\Internal\\ProofCheck.hs": "7a488d12c2277f11522267e67a7c1f7cbbb5d971c32da20a158343956e709151",
+      "C:\\Djex\\djinn\\src-core\\Djinn\\Internal\\ProofEnv.hs": "800f535b0ea1c6ecd0c4e49dd230d10fc030ab15adf4e6084bf258d5f47f881e",
+      "C:\\Djex\\djinn\\src-core\\Djinn\\Internal\\Type.hs": "ac713e5b2793b75152d82a8a9c47d743356c99a373b16021f16abb16451423ab",
+      "C:\\Djex\\djinn\\src-core\\Djinn\\Internal\\TypeFormula.hs": "48d80d3b1f9eb5c048c21beadf66c2fa6b4d5851060d1c26c54e3d87997f7cd1",
+      "C:\\Djex\\djinn\\src-core\\Language\\Haskell\\Djex\\Djinn.hs": "a7c45a9ae41b4346f009045037a1381e5eb92f8ff06f4340641365a4ca3c73dd",
+      "C:\\Djex\\djinn\\src-core\\Language\\Haskell\\Djex\\Djinn\\Internal\\Request.hs": "215253025b233ab3cbcb268538ed382750fcc373e6171b911e7e403c8da87141",
+      "C:\\Djex\\djinn\\src-core\\Language\\Haskell\\Djex\\Djinn\\Internal\\Session.hs": "ba383567090d6af6c57452286b16cc6ef2ce8634ca3a7c1b2e4f2a0086ad8fc5",
+      "C:\\Djex\\djinn\\src-internal\\Djinn\\Internal\\CheckedCandidate.hs": "fc87d2b3661001b3f8b24a0592f8c40284ad5eb9499ee682aa949658eb914adf",
+      "C:\\Djex\\djinn\\src-internal\\Djinn\\Internal\\ContextualInstantiation.hs": "fedd1fa4e253b765369f8fb6d1825adddddb0aeafda20cfc9066df4bbd123894",
+      "C:\\Djex\\djinn\\src-internal\\Djinn\\Internal\\DirectedInstantiation.hs": "537f56d92f8a0fd151e19f52f7cd9c806ca63c9e818b8bbe3d7d06ff67bb0eae",
+      "C:\\Djex\\djinn\\src-internal\\Djinn\\Internal\\GeneratedDeduplication.hs": "02a6f1e498abe45f0a634bee37acdd0aa916a2d914be6ea758714cc31da667b3",
+      "C:\\Djex\\djinn\\src-internal\\Djinn\\Internal\\Instantiation.hs": "536d8a8959b79074992771553626e122e0703f06c5d3eaf73e34b5ae71c931b8",
+      "C:\\Djex\\djinn\\src-internal\\Djinn\\Internal\\InstantiationEvidence.hs": "50537e66b39350307400f1ff16bd7781be26729c7ea111f2fadbcf329275e48c",
+      "C:\\Djex\\djinn\\src-internal\\Djinn\\Internal\\PlanFamily.hs": "41b823369a49a05e8a7e7ade721d91be9733b6d7c26e543de072d291b012bd61",
+      "C:\\Djex\\djinn\\src-internal\\Djinn\\Internal\\ProofCheck\\Evidence.hs": "04391366ef681cf824338a819b7aae61d535949ab1612b0a4f066e700f7be071",
+      "C:\\Djex\\djinn\\src-internal\\Djinn\\Internal\\ProofToGenerated.hs": "3abd60ca57a8834b3c80c8388c2ef69575ad8fa63509e0261dec97ef0941a55c",
+      "C:\\Djex\\djinn\\src-internal\\Djinn\\Internal\\SourceEvidence.hs": "526bb7a64d3be6fde50174e34c41e1696262a6f526a9dabc53d1065ffe3eb720",
+      "C:\\Djex\\djinn\\src-internal\\Djinn\\Internal\\SourceGraph.hs": "5d4c8af661b84cdfc7592aab835091890c6406dcdea62461e5090f204be987ec",
+      "C:\\Djex\\djinn\\src-internal\\Djinn\\Internal\\SourceGraphKinds.hs": "7c35d0c24310fb378e06f3efa4d82125918bcc69ab0190c01c65cf3bb8478303",
+      "C:\\Djex\\djinn\\src-internal\\Djinn\\Internal\\SourceTypingContext.hs": "5a3657c047b6e93c91944be2812cc1c95a222783ae0f81c54cc2e8ea025a1b9f",
+      "C:\\Djex\\djinn\\test-source-graph-private\\ContextualErasureSpec.hs": "5b836e4e70b9d5d80876595181cc30127271e2df161c53bfe4a40f9a2bee18e9",
+      "C:\\Djex\\djinn\\test-source-graph-private\\ContextualInstantiationSpec.hs": "7fdae1312b05c6b5007ec5e62198c51ea4828156c8603397adec3d50e1990458",
+      "C:\\Djex\\djinn\\test-source-graph-private\\DjinnContextSpec.hs": "7c46dc7b76b9b1585bd4ff8a5cf3d6863e244df106dcb5d4dd4ab84bfe910d38",
+      "C:\\Djex\\djinn\\test-source-graph-private\\KindGraphCases.hs": "6d0a235b88b43e97f5f9b9485d962ce19ad707e6d1e1c2b346026a837a6b151d",
+      "C:\\Djex\\djinn\\test-source-graph-private\\NestedGivenErasureSpec.hs": "5ea01d638231f4a65e575011cda33b9924a4951c241ac8bc09d01962f2a8800f",
+      "C:\\Djex\\djinn\\test-source-graph-private\\Spec.hs": "887fa15790f1ba223269d939372cf3aadc3f915e03e067690f7c9bc64559ae27",
+      "C:\\Djex\\djinn\\test-source-graph\\KindCases.hs": "b7bafb04cae9a45b87afa877789922ec86da0ac9e144efa61ca6b1303f632d6f",
+      "C:\\Djex\\djinn\\test-source-graph\\Spec.hs": "0dea1cc6c9db58bdde0cd2562d52aa2b6e94d70dea635e5569c71280fabadc98",
+      "C:\\Djex\\exference\\app\\Main.hs": "646d40c7408a461bb9c336440488c7526e2429dc57c5da1287ca8b19d5abcefa",
+      "C:\\Djex\\exference\\bench\\Bench.hs": "c098e7ff4f81b7d5c18637902fd0fe551b626f5d42a366d3c547e8697d28389a",
+      "C:\\Djex\\exference\\bench\\Corpus.hs": "67825cdaf8953ef4837fba4c440d03c61c48c75ad8f43d98325badd2e8dbffc7",
+      "C:\\Djex\\exference\\environment\\Applicative.hs": "e5a55fe90bf6dda9728ae93e88e0d7baeafeb7e8e6619281083d170657364035",
+      "C:\\Djex\\exference\\environment\\Arrow.hs": "361928e0f7dc9082e8d45616f7f438ca4f4418734f260464abf89448aff4e209",
+      "C:\\Djex\\exference\\environment\\Bits.hs": "9b50035c05be2113d46cea0502487ca81725a3b15f130fd12b1be299908a2340",
+      "C:\\Djex\\exference\\environment\\Bool.hs": "c1df79a891055bc35a527b63e4c1a9b233daf569c22139795d71ba5d21e7e4f2",
+      "C:\\Djex\\exference\\environment\\Category.hs": "3a140b45340bb0dcaf4e2efb24a70fdb3bf8e826289c13788a535eaf4595e3ed",
+      "C:\\Djex\\exference\\environment\\Char.hs": "65d131cd6e716dd12e5f51f89b952cbc11fde9b5a591634f80962f295f537263",
+      "C:\\Djex\\exference\\environment\\Comonad.hs": "d4ac22f94f347c379d0c608f30ce8e276aee6a812a5d62950307e376852c0337",
+      "C:\\Djex\\exference\\environment\\Complex.hs": "d80cc1f138bf4415d2c164f5f6ed560e6a30eb7ea48bce3741bbfb9268f72689",
+      "C:\\Djex\\exference\\environment\\Cont.hs": "eb0fa3de6f6ebf8187cff9f354b0dc969c6c659f79dc4ba14833b944b79121aa",
+      "C:\\Djex\\exference\\environment\\ControlConcurrentSTM.hs": "e06682b7fe6371d68f5768c8b0f4fa5c94df7ea804e3fdc796981664b083ec53",
+      "C:\\Djex\\exference\\environment\\ControlException.hs": "e3152c8bd0cac61ee079d7887055c7bea7f0749b00dd960d694e5f2cd971a61c",
+      "C:\\Djex\\exference\\environment\\ControlMonadIOClass.hs": "39b5b3bd907bc6ac7bfff347b60b3b1de3432a1718828e31296ae597a3f051d0",
+      "C:\\Djex\\exference\\environment\\ControlMonadST.hs": "b541e771861bacdf326aef4a1377c5cf91851956b4db1292b923a7c49f8520d4",
+      "C:\\Djex\\exference\\environment\\ControlMonadTransClass.hs": "033c27cb81204bfe120e2027947fc97c34cfe1c23f09334bc96fffdcee551da5",
+      "C:\\Djex\\exference\\environment\\Data.hs": "7c6c2baeef6c862d3e0ecbb2eee18683ef0050aaf426b88a9514b6ba4f04ffcb",
+      "C:\\Djex\\exference\\environment\\DataFunction.hs": "818207b089adf443b085e01626351688c8b2c4355361a86f8573caca3317c0b5",
+      "C:\\Djex\\exference\\environment\\DataFunctorConst.hs": "42ace2dc8cac1313fdc34f20f048a9f048bf1dc59b8e0800debb8133966878a6",
+      "C:\\Djex\\exference\\environment\\DataFunctorIdentity.hs": "7d068de65e5a63cf68170e6409333dcfea67b1ff4bed038ef92bd6bfc146e1a2",
+      "C:\\Djex\\exference\\environment\\Either.hs": "c8d0b2c79a09fbc16b5c3edfd9c3fc559ea9434124b786b347001b6e03be392b",
+      "C:\\Djex\\exference\\environment\\EitherT.hs": "d455cc42474bf916b1e0ef4609821ebf0ac73d979ed6110ec4ac5296b1c6bc16",
+      "C:\\Djex\\exference\\environment\\Eq.hs": "6b6a1d207d976a2392380ec1d236d28ed5725a0e809da64a7b494a810cc8b271",
+      "C:\\Djex\\exference\\environment\\Foldable.hs": "1bc33289fc2182035b06e409f8a96097630b6c1c880e13be3900c73fcffdcddb",
+      "C:\\Djex\\exference\\environment\\Functor.hs": "6713ea0cd562b9c57e839ba5dbab0f093adf96c6ce4e7668f709ad2aacfd7a4c",
+      "C:\\Djex\\exference\\environment\\Generics.hs": "58f5a6e8a789fd2f795e8f66036ce99c9d03c49803d2e5c584c78f1489521137",
+      "C:\\Djex\\exference\\environment\\Int.hs": "be2324be2ccfd50057b2b18ab8f2f88b186e21ae94092b13b10f89717290c48c",
+      "C:\\Djex\\exference\\environment\\Ix.hs": "6fae4019d3c6a12c8f10885f34e22c297ba2c171bd5ad5cffc621ff5a9761f77",
+      "C:\\Djex\\exference\\environment\\List.hs": "2543e56210ec7eb9d508238ce38db172831629fb9a8c2e9d4871ba3f3faa1af7",
+      "C:\\Djex\\exference\\environment\\Map.hs": "e358b5a8e3fc7531d9756d4eb9b76cff2743e2f3715c53e58190b75abc6fad9f",
+      "C:\\Djex\\exference\\environment\\Maybe.hs": "0984e0cb3e0dfc804c626599e6ad79fa0dbc21160d9c8cc00ffeb3f064d53d7e",
+      "C:\\Djex\\exference\\environment\\Monad.hs": "34920137585f949018d1c25768b15564143b9571efcf94737fbccaadec6f6e06",
+      "C:\\Djex\\exference\\environment\\MonadLoops.hs": "1e1d92e765904ef05cbd0803b76026f5f537da1ce039742f01c8575cf881013a",
+      "C:\\Djex\\exference\\environment\\Monoid.hs": "cb0dc6df14766dcc61273127352347b51d1709128271f803268953f82f92f4f8",
+      "C:\\Djex\\exference\\environment\\Ord.hs": "87340fb016ef9f25cca2516076e844b45a1d815bc13965ced5f7a81e0c4758af",
+      "C:\\Djex\\exference\\environment\\Prelude.hs": "a0d178917ff03f41e1d89beddb1aa88d86c98e222e979956d6c27646f1a4da99",
+      "C:\\Djex\\exference\\environment\\Printf.hs": "5c1d184f65b5e669d629feb21ea2aeb2350d8c260ad7cb46065b792a89d003ca",
+      "C:\\Djex\\exference\\environment\\Proxy.hs": "b45de8d90aac95035ffad3c99e1500773cb56f3f6d59298b24422a6610379f91",
+      "C:\\Djex\\exference\\environment\\Ratio.hs": "50a8b09f383607c976ef54792b18ae2919f2536794c8a2fdfff1076fc0c839fd",
+      "C:\\Djex\\exference\\environment\\Read.hs": "3997852d473a7222439d977b292628a784780b8b3ab069ed7c7b8969dd55129d",
+      "C:\\Djex\\exference\\environment\\Show.hs": "c11dc3905806c9a52eec558dd0b6d246c25643dd131766d1049c4d28c8704a90",
+      "C:\\Djex\\exference\\environment\\State.hs": "5dabaebd1d6947af597e7013e889e76c81e88607b82cbc0fef4dfe99f5d0d966",
+      "C:\\Djex\\exference\\environment\\Storable.hs": "3983307eb320250aa911180085536580dc9084f774f22991401af37c9f05d166",
+      "C:\\Djex\\exference\\environment\\String.hs": "2a66f23246a79ad166f8b9db7ded70bd8b850354a3a833a06a8d9ec0bf85478a",
+      "C:\\Djex\\exference\\environment\\SystemConsoleGetOpt.hs": "2d9a7dbc02743431597419806370f65696f18dacb220e82ab5b6e9af70a50bc3",
+      "C:\\Djex\\exference\\environment\\SystemIO.hs": "a1adf622fb98cc83210bd0bf4124413c16958cdbffd812b7712921d47ae88400",
+      "C:\\Djex\\exference\\environment\\Text.hs": "abba1f83464ade40ba657cdbe0c4681bf850735198feab4fb6c7a9a630636e3b",
+      "C:\\Djex\\exference\\environment\\TextParserCombinatorsReadP.hs": "f09792b8b0182c2a1e715d25d5167ac706cf053bc5d572fd3de328d97e54c18b",
+      "C:\\Djex\\exference\\environment\\TextParserCombinatorsReadPrec.hs": "9ab0a448d4ea82a584c1af879352d88a27efa3b1f44cc4bc833bec76915542c9",
+      "C:\\Djex\\exference\\environment\\Traversable.hs": "3f83e7d457c5ea654de198bb036f802d8598923298d77e5c0264c44091278dc6",
+      "C:\\Djex\\exference\\environment\\Typeable.hs": "b081cac4ef8617aeaba5996ba0bd70ee996983b8af5b3f7c723000c4901f3fd3",
+      "C:\\Djex\\exference\\environment\\Void.hs": "bced0c066b870419af6c04e54e8a580c72bedafb735cb8935767a289112534b3",
+      "C:\\Djex\\exference\\environment\\Word.hs": "64e6a206bc6f13d7d2dc44b273340829714da3d920a86e64a7f19129a9da9e12",
+      "C:\\Djex\\exference\\notes.txt": "cb75e682cb415bc864c695c621f67b4bda4bddef6214cef1b650f15d44faf3b8",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Djex\\Exference.hs": "83b23acc943f30ec2a5cfd401ddae83411c5ba31cc60e08bbe7aa1435136dcb3",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Djex\\Exference\\Internal\\Request.hs": "a2cdffc3882e36463ac8593ae8a70ef2cfe7906fbebe0e1e255ce3ece3b1423d",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Djex\\Exference\\Internal\\Session.hs": "3eda9afa786a8463eca287d49072ef7b8f19f356dd12fe34ca719480a4f7587a",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference.hs": "b6d73fff5dc913a8e25d68685a9ff543bc90c68883033744c8515847d0d5b67e",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core.hs": "8b85d5442b068854cc3c943078b06cc2f3feab8d1a20d9050d4bdd74a4784b40",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Candidate.hs": "5547e8492578db3153e55763abd1dbbf28617612e4fb29c1ff218bd19c4d2879",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\ConstraintSolver.hs": "6a82482a37adfe5dbb0949df94cabbdf4c9e00fe53b42e8d7b385179fb405cdb",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Declaration.hs": "b682bd87440945e3e9ae1e0455e60f02820192f5c5dc788b449fa431062ab567",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\ExferenceStats.hs": "3463637c164da430d12824c5d1b295c76be5c461c952cba5c0f297ac57d8bc83",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Expression.hs": "44b061fb5bf0291cf79f4b515bd03d31a49f84491a96e2204496b788435ddb29",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\ExpressionCheck.hs": "94d94bd4a47e89027d06dc4162d0ee0ed1a2bd52493457ff7106a592dff8d574",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\ExpressionSimplify.hs": "ad31df3d9afe0567783c5f53ecc336f5513953af41702c1b4089c8d32caaa367",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\FunctionBinding.hs": "fc5140c9378ad9779b5a3bd9974b23ca9f7a80d26883fedc8302e2cf1680806b",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\Candidate.hs": "6db7853773210a6c71d5c617c138961b89f924320111590de71ea6dbc02c7856",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\Exference.hs": "9d1f67c10129fbe61259edb4f452cfedf3ddaf812c92c40c8c8bd19ff2ef32ae",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\ExferenceNode.hs": "0d8241f755105ed7526f17fdccfdeaa120ed120e06111903d9549500c9f28c53",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\ExferenceNodeBuilder.hs": "9e926146e98b6492f62ed56e77c436a24973282117cacece581d65fa788dcc50",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\ExpressionCheck.hs": "10c3275ec4910103645253cbce153946a310e249eb5ec0db306d6645518677b7",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\FlexibleIds.hs": "74652ef508f368abe2f8a095e58b1015e2e14a949dbb603d05090e625d3462e5",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\Options.hs": "183aee939fac7883ea14c686c8c28e36c38f26e0d4efa8aa517e07a0f0f235e6",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\Polytype.hs": "79f9cea7a2d9be2d445fd624bbd16cdcb2bfe23c2b27579dd999b99f5e286da5",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\RigidScope.hs": "a9555df7bf5bf020ac4b4066d88d5f275107dedec50d7b3ee7271bbf83ecb37e",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\Scope.hs": "4487853f5633ac1d63c2542a8eae02632cd3e3792f3724ce99806f58257be22e",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\ScopedConstraint.hs": "4749eb325227fcb7bda0c415cce36edffd846a89746d66eecfcaf24a920a4d33",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\SearchControl.hs": "8cc9d465f3164fe0d0410d618d46b42578d772ef2d8e4ee0ba1589197e9e7340",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\SourceNames.hs": "701eeda75fc4015f1e78bc294dac8dc6129899e10e89ad4f8497c89ee3d015a1",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Internal\\VariableSupply.hs": "987718d704beeb56e7aa6f0ec9cebb5223321e44c1636dd8ea387ed22f967115",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Name.hs": "ca16d5afa22e437bb8bd691f7b3c41b989a06005aedd382de218b99e83cf7bbe",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\RigidInstantiation.hs": "6dc0cda5ec2d804012a8dafc9d5aa7e76e688ad6cd6622cdf7b0fccb6f889b7b",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Score.hs": "c4cdb86904ccbe7d16d3b6f4e7c8c54a95dec069eebec81528cafac7392d4307",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\TypeUtils.hs": "1fb4292c3814215bdb3d84dc3725d87f916d3b19745e6c40b44b85a99f17f849",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Types.hs": "253fda537c69a7d3ba1d06e2700afc9b47c7e16e876f0e96f10d74572e90f5be",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Core\\Unify.hs": "d17bd0c82023ca0668f17342d0ce405641ae72900cff0387970f7c8cb27a76c4",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\Diagnostic.hs": "01991e1f30243f4329b31d7e25f04782aae13044877949f2c284ea018b78bfc8",
+      "C:\\Djex\\exference\\src-core\\Language\\Haskell\\Exference\\SimpleDict.hs": "e1661cecaa47e29607f783c2527046193993c87b6a2dac22f4b987533d4bffa9",
+      "C:\\Djex\\exference\\src-frontend\\Language\\Haskell\\Djex\\Exference\\HaskellSrc.hs": "b007094d789aeceb3427052366060bc10dd3426bfe0e7632ad473e8af85c8df2",
+      "C:\\Djex\\exference\\src-frontend\\Language\\Haskell\\Exference\\BindingsFromHaskellSrc.hs": "3f663597cf5e706a52111d699ed38348395f355252237684fbd0ab89d4595ecd",
+      "C:\\Djex\\exference\\src-frontend\\Language\\Haskell\\Exference\\CLI.hs": "0eb9b00139c60386fcefafa11959c96a9c9b3e3a765ca549b880ed9cac527a62",
+      "C:\\Djex\\exference\\src-frontend\\Language\\Haskell\\Exference\\ClassEnvFromHaskellSrc.hs": "0f2606585ccfe7fc231df278f70df3d6322822965e0f604cfaf51babe29cc8ef",
+      "C:\\Djex\\exference\\src-frontend\\Language\\Haskell\\Exference\\EnvironmentParser.hs": "ea0dff3e5f9f712dd9021e5de6b550b8de086d42bb7c93bc40124cc7db694e1e",
+      "C:\\Djex\\exference\\src-frontend\\Language\\Haskell\\Exference\\ExpressionToHaskellSrc.hs": "3fdb763a0e746ed90ab0edee516fb4aded19cc24e7e4ba87848d538bd0b39764",
+      "C:\\Djex\\exference\\src-frontend\\Language\\Haskell\\Exference\\ExtractionError.hs": "8571b8b79e0075c4b5e7dfe51865d5d7b622e9d0d57c327711765671773a2b14",
+      "C:\\Djex\\exference\\src-frontend\\Language\\Haskell\\Exference\\HaskellSrcUtils.hs": "ab03851c9c9fb10316e921a30fe01d067c9047ad3aad37ca486953ba57c91641",
+      "C:\\Djex\\exference\\src-frontend\\Language\\Haskell\\Exference\\Internal\\SourceTypeScope.hs": "3ee7bdd417dff10cd73c0bcec9dfebe9754a884a3cc740826fdff921f10ffe0f",
+      "C:\\Djex\\exference\\src-frontend\\Language\\Haskell\\Exference\\Internal\\TypeParsing.hs": "79996a2c542202058d9cbe1e5a0a6c3886c01977815dfd96420848db6d9a6d1d",
+      "C:\\Djex\\exference\\src-frontend\\Language\\Haskell\\Exference\\Session.hs": "a286657fef359b38c9cb5ff01b044002b408abbb49b38d5f26124ff03b4a1567",
+      "C:\\Djex\\exference\\src-frontend\\Language\\Haskell\\Exference\\TypeDeclsFromHaskellSrc.hs": "5a57dd9babbdaf43683a61866b1f22bdf46362e279fa7d45882facce667b29f3",
+      "C:\\Djex\\exference\\src-frontend\\Language\\Haskell\\Exference\\TypeFromHaskellSrc.hs": "21717a1ffe69c1ecb3b1ec318b8d2dd2643cc74c6f368f157148ce69b3b7c1af",
+      "C:\\Djex\\exference\\test-cli\\CLISpec.hs": "5af54f4c8b81e0b8ee0ca5a87d5caef5672b8822a2c2a66b0dd25412242cf196",
+      "C:\\Djex\\exference\\test-engine\\EngineSpec.hs": "38028b32eecf140dd86d76d33c285d42e082e5d023479e691ac975782998fb6c",
+      "C:\\Djex\\exference\\test-engine\\GivenEvidenceSpec.hs": "d4b6639dff905d8c89e31c89f4153caf17e75c0b88e43c9f64fdfa1c34dd1461",
+      "C:\\Djex\\exference\\test-engine\\ImplicitConstructorGraphSpec.hs": "8de6042390af7e72dc571ff90ce5a2ea4abcb2aed6e2662ceb3ccc73470982f1",
+      "C:\\Djex\\exference\\test-engine\\Language\\Haskell\\Exference\\Core\\Internal\\Testing.hs": "07405a6c99865b656b54820a2a09530fb6c0994ac5d0490391e96a88f0ce2f8d",
+      "C:\\Djex\\exference\\test-engine\\NestedForallGraphSpec.hs": "b77ba10193982e915778338d880e686ec98572e45ade841a4002165355b405f3",
+      "C:\\Djex\\exference\\test-frontend-api\\Spec.hs": "7d28770bc6ffd5d5e8853f170e29c1762252ca8c5d867a04ca1fff405607b055",
+      "C:\\Djex\\exference\\test-unit\\CompatibilityImport.hs": "194da4b5dbd1df41d6e9b949dbf03273272bdd74d4786a867917f1c5a0a21ee5",
+      "C:\\Djex\\exference\\test-unit\\DeprecatedCompatibility.hs": "eeb27d8670085745a3bf232444b8f6660a83f7b337d0ffe3722e74e9e8ce7a3a",
+      "C:\\Djex\\exference\\test-unit\\Spec.hs": "a6839f01805ec428d1d2022254e4831980be228b0139ad656ac359c0f7e0e374",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex.hs": "b7707c34a4c3ad2df8794bf0bfba8cdfe7f15b6a85f444e80c989ffe7481e8c9",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\CLI.hs": "eb8282b1d75542fafa16ef2a19ff8dfb3ac01b88e78d0ca4d16a585b028af50a",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\Command.hs": "2a4553b3fdf76be6f403cb8fe6732f11f9e30d1583ede36d3f5d817dbeb83f6a",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\Command\\Output.hs": "3578bef3cfd8c124e7c143fcf02d7907b58204881fb9da3ebf034e1c3b142e87",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\HaskellSrc.hs": "ff52bb66912ef4ada9a43d1baa280164be5ae48fee32118332bacfff404332f3",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\Internal\\DependencyGraph.hs": "3facef560d3e4486fe6de8fa8cb05fb733d855823d06cae4d6a17dee7542d60e",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\Internal\\ImplicitPrelude.hs": "9cd560537b4e2ef31002b5bcaf62391a83160126818f9b497122ccf02aa54f08",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\Package.hs": "70465bff7c5bd912843be39d5bc90e5c13f964648538dde25b9999e6a59d68ed",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\REPL.hs": "879cfbc83c9a921e21aff248549a12d77bfa1dcf656b0b1aa666a68c495c661d",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\REPL\\Behavioral.hs": "2f5257f2a89deebd3c27e77e8e39e1142f7948be0204df3663d7dfe02ae7adfb",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\REPL\\BehavioralWorker.hs": "3b2180b95524f1d409017433280594c679b8783a59bb3f09d7a7fb6053c9d792",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\REPL\\Command.hs": "bf3a9a9cc67db9a0390af6b0b46d1f3355acd757fd9d516a30efa5eae7a5c910",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\REPL\\DjinnScope.hs": "29a2d12e21ed55417abac68484243f63b015ad24ca1578848aa2d821c327bec6",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\REPL\\Driver.hs": "63a62540a1b4933c10f1130d18e7d615d3a67226dc76fdb8cd2aecefb558ef4b",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\REPL\\Eval.hs": "8a201423f6ea28eb082ca27e97f59bc2f8fa94deee5300d5f9e28bf1574009aa",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\REPL\\Kind.hs": "8b0d09e0835e8c66e3d95830790a8843856c4bf4790e14afaedf05fe5a820513",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\REPL\\LengthWhere.hs": "c51eaf38f179f7a81c3419bf113f915f5b89a1abfe7ea14e4789781996baf0cd",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\REPL\\Parallel.hs": "83a741138a30d10c732cd59543000f27abdbc627d5be89c0409caaf1a13a1ba3",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\REPL\\Scope.hs": "e9f6d11eec0598fa159e0e76d9f4b6beaed9e10aba9e9a60c66f92524c8345b2",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\REPL\\Type.hs": "d539bddfa7499a7e08afb4fe9b8b736813ee0b45dcaaf2deed262a75e2a4105d",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\REPL\\Workspace.hs": "ee41767666476bc73c4a25d1dd5cfbf5e5cb8e106d41d3275a89910eef8dc1b6",
+      "C:\\Djex\\src\\Language\\Haskell\\Djex\\Text.hs": "4bb8eb0a9202d6a25b34553feb88495e4b2252106c0e31d1c123ba4ab251bb4a",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Alpha.hs": "2fba8fe8a54e737cf7f472a008fe1e546efb433e9d4e470e185c1a6412e6c61f",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\ClassResolution.hs": "fe6e82260fe4c2428923128d65e3d4a5a88cb0637f60f5183550e06c92efb524",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Fingerprint.hs": "85d99f4a9bfd3d3b92049f5980dd096b4b8a521a51a54e7479439bcf7b82facc",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Fingerprint\\Type.hs": "951c2e14292448212e74499866ea0b874655170e6eff9f65f156071340bfcd88",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\SMTLib\\Causal.hs": "46e36045e40323a92916ca9928719254c0d05238e70da9f69c8e48877f518ad4",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\SMTLib\\Causal\\BoundaryWhitespace.hs": "f826dd770c4679baa129e912549694ab7decce0d8bf0d1a75da9588493c546b0",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\SMTLib\\Causal\\Driver.hs": "6ea367ffa5263c0d9001e4ef78f02f30d1487a4cbf355b41c6f2a82497d60b10",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\SMTLib\\Causal\\StdoutChunk.hs": "be898d84837dc7c51dcf74fa26637f0ff0876e826f2484256633510ff144a343",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\SMTLib\\Causal\\Stream.hs": "9a0c5de15c457f30dbb655d09e875b64535840b9b94fd00a7bb55e634f3c84bc",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\SMTLib\\Lexical.hs": "6216618284e3e3755b119e56701e6c4f29a9123db50a0f90ddb7ffd07b7bf1ee",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\SMTLib\\QFLIA.hs": "14fb86f0b59b3c83c52fcfa8caa88f2a814021ac8a0586fcd889d424b0045dd8",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\SMTLib\\Response.hs": "f617c9d5b04a128c91f061b67d5c86e61841db9197f35677fb2e2a0467427303",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\SMTLib\\Response\\Standard.hs": "f3444ca409eb5fb2f1064a855473caedf8cdc6ee6084fe5ab9ffd5970cc44705",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\SMTLib\\Stream.hs": "b26e621336db692e5f9b2e00a7c598bbda465fefc76a0f60e0d5a339637eb2f1",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\SMTLib\\Z3\\Execution.hs": "45c8e83033f804cf22b2ffa1d4d089feb84bea07084509df91e318c1567f8305",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\SMTLib\\Z3\\Process.hs": "0c8cf26deac0e5525dae4860560be4fd3e9c2f496e2faaa9774c8eb096914e15",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Semantic\\Length.hs": "1a77bddd4d0facdf853498ad6bff47d51ca7c41a746880fa363f92eaece3c892",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Semantic\\Length\\CounterexampleBank.hs": "5483b3da59f8c644ef59e0593743e205e3cda5c8cae39200bb942720e6a69b3c",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Semantic\\Length\\Problem.hs": "62dfc261d1f49e228ccc9191ebd5d7fc4345745cff6776b18f9bd0c9d1a0ef2d",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Semantic\\Length\\Problem\\Candidate.hs": "c7403ea81200dfb6a137f321707fde58fb55e878f0ad005cc88e8192f9257d40",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Semantic\\Length\\SMTLib.hs": "dac0da2fde776a01fe3aa307ad31dfc3d330c3e95fbad4e48d0411f4e974b8cc",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Semantic\\Length\\SMTLib\\Execution.hs": "564677ba72eede3a69ae7dc83bb960aec1f80f8a99447b0afc2f417b7bcb34f2",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Semantic\\Length\\SMTLib\\Observation.hs": "a27089f4de47ff0768d7087deaffbab7cce760bc6ea11d7ecf5e7a80858d4f3d",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Semantic\\Length\\SMTLib\\Protocol.hs": "b89874cda0fdf699a87be576aa25a66ae50517308de762329a5638e4c54afdd2",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Semantic\\Length\\SMTLib\\Protocol\\SpinePair.hs": "875f5a9e1713a570355234cb04f8d44d42c84842c2f8f57566b91ced586017ec",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Semantic\\Length\\SMTLib\\Response.hs": "bfa957c78b74f06e951d3b030c6d190056851f18049d9fbaf80b267d1a1555e0",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Semantic\\Length\\SMTLib\\Session.hs": "0b50ec1c04af0ffd37fbe5631fef23e1d615ccfcf84138134d0cc2bfa1c3cda7",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Semantic\\Length\\SMTLib\\Session\\Capability.hs": "3aa8c2b155bdfcf8404a1221be0390b561c434745123e115bd4260375d4dcc41",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Semantic\\Length\\SMTLib\\Session\\Process.hs": "78fee626f555eb4627ed13ee60fb35674706226e1c110d49b1f5a41676c484c0",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Semantic\\Length\\SMTLib\\Session\\Transport.hs": "112f32d00cafe2ff513d6e83d6a79f160a091ba8014e7cba432a264d2469d1df",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\Semantic\\Problem.hs": "fcb6bde0061a2317a3be54714d7d65b9338087fafd4ae0f7ee5efa76740347b5",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\TypeInstantiation.hs": "fb68e2ac6349f3288c1307f1702d7522a79545ea78fec3cfc18e1258f76f2be5",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\TypedCandidate.hs": "da62a0a75266a5c920b78f9f59679e8ef3236c4924b4d9e5ae64c9183425b8a1",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\TypedGenerated\\Certificate.hs": "02717e963411b4e037c344fe6aa49038343fa4243bf94fe8b46da92f2a29404b",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\TypedGenerated\\Certificate\\Association.hs": "e636596c34fedd2dbc1eb654572ca180695837a034bd01e6b47357df5db610eb",
+      "C:\\Djex\\synthesis\\internal\\Language\\Haskell\\Synthesis\\Internal\\TypedGenerated\\Fingerprint.hs": "c25a4041c7594b05e7afacdf03717d65974616cc5d976fcafbcd8c958971014f",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Behavioral.hs": "046af70baf0304ee7d7a173288d6dcd48a339da6bcda207c827a23a62beeda91",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Candidate.hs": "47d5ccc6b746a6b151209a90acf9df70e8913054e9423512a9321de6197a80f2",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\CandidateQuality.hs": "40ede0ad99df057d880d7efb7dd3ad9967988f946db3dbc22d58c79d1c0b3757",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Class.hs": "79cd2f04816cad144691e71175a5269bef2884fb2f320b5990b6054c95969349",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Collection.hs": "a3a8a276c7bf2c91dc6b1cb3cecf5078de7be7b665a4c843ea2e51a609d3cf3f",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Constraint.hs": "1c833edec51d6a7bf61610002c46a9bdfd95b71559e33f9f7fb4f56e6a4e3e58",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Count.hs": "8d3db530bec9f364d7d6c2caa3bfecc307dd3c950342dd666453a9f1f9d3ca4b",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Declaration.hs": "3f5fb6dcec1103f0130d6d2bc29bade0e6a49db9e6109cda4f3055727a2fe975",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Diagnostic.hs": "41a7801b21337e2649511bf290eb95b711b3b899aecb33538acb0a1a2faa61e3",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Environment.hs": "d873c950baef15b7502646b3da88566a429664abe95a52c199af780aa322f316",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Fingerprint.hs": "8a363e877321b70e9ea29e3da1db3a3856b59db88f82613f45eb9c09a2fdbd22",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Fresh.hs": "9d937c059db183fa7f8b6b514d78972e4a53aef5a134893efd957a5dc60a8557",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Generated.hs": "40c70b4de17f4c176c7068a7cfaa92a64e827880a81f6ecef3e4e5b3b0df3e0f",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Internal\\InstanceHead.hs": "c5824685d4e9dd80910156dd44a9a87514d635e003314b5e2575427be3cece66",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Inventory.hs": "9ca4e5dd6a4aa1322ab9dad51868cd2147c6394cc15a6b8069b27eed755a3bfe",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Kind.hs": "8e8e1310b60d65d8f6c8a152a26d1b8ad7f0f1da9edbc14db3df2f4a8c0f25f8",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\KindInference.hs": "df73647ec293a6c97d83e0f86b9498c74eb1642153816da069b40047e3f886e5",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Name.hs": "17d001bcae61db880af35c5527e2aafe1395f1d8c8c4b7e8366bcafcf018775d",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Observability.hs": "095429544dd83f760ee96dc41f0feec36560082576627078c5df54185bc9dd3c",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Qualification.hs": "d567454e71c2349c912aaeecf3547f407baee543e93e4638922254dc2727cfea",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Query.hs": "7ed2e4cbc82f878682a829a5dc4d5f40b4b02a0bf45f60ecfd7d87ab4d87bee7",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Search.hs": "63eb8450ebe6280a7f5d195081d572ba8ea0e1dc7c1ef4a67a466361f702a269",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Selection.hs": "9d1a62e25bb465e6c0f5b1b83119b56fa385202a5ad6cd5007208fb284b34f9c",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Semantic\\Length.hs": "2b19f89b5ff661dd142fb13168cd2c7239e3946dc9840bbb7a6cde9783792330",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Semantic\\Length\\CounterexampleBank.hs": "611bac9b782206502a6ec0cfa9444f72b371cf433aa98efb2ab35d7f66b974b5",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Semantic\\Length\\Evaluate.hs": "0451618f8ec99eb266419562e1f5c281d10125220f3e3301424124117cd4098a",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Semantic\\Length\\Problem.hs": "b6f748311ea81b252fc8c4e0ee48f4e542fcc712941e00bb87fe2b095a42541f",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Semantic\\Length\\SMTLib.hs": "286581ea4589d0b91ddfad9ac52ed8923cee72bffcc67f32685fc5ae92568165",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Semantic\\Length\\SMTLib\\Execution.hs": "322382bea8b73e03555ac3f406d8b828871b4ca101795160b1f5f0e790d7e106",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Semantic\\Length\\SMTLib\\Live.hs": "1e0c3c011803041ecf5601a2646b9fe00e1d0fd9b50bbe65f0665094817136c1",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Semantic\\Length\\SMTLib\\Observation.hs": "8378e7c3bea5d482faf899039c99f88684e176c40beb7a5913f7756fd369e5eb",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Semantic\\Length\\SMTLib\\Response.hs": "376811d1c465886f2a8590ce36a75dfe2d515cb0fed760dea49abadc7ee15db7",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Semantic\\Length\\Where.hs": "506e0c75a700f9a3fc0a15b0fa23cd0a14ef25164f49ac170ec9d5f4099265ea",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Semantic\\Observation.hs": "9050dafd6a9c97261a6f0d3915a5095b9ae5694585ba4f7ee58b00cf63905e73",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Semantic\\Problem.hs": "39abb740f2abf36c55b9fb9b51426875384ab38ecfd9c80de0474e7346b87e18",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\Type.hs": "26145a7c401f0be451ae9202e888d8915d11a277a46c9ff9b6342a17bff7ec99",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\TypeAtom.hs": "fd31e0e695d4f1eaca804583ed883e354951ac68e0298668f182de2b8a7578c1",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\TypeInstantiation.hs": "c22e76440a54686e0c9fd224dd60b2f3415e7f99e0a436637be78f2cedd6f016",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\TypeRender.hs": "f505e16c836b5644a16a964eb6bdc302977b6588021c5292e52fa535a8479541",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\TypeSynonym.hs": "6ea1a446152a7355a07d4f9b1f1c1991d68756e160dbdff03055159457ce786c",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\TypedCandidate.hs": "71d1c0d8b5dbb0d176d6d4db12a6abd659805c1bf395bff21a3247ef81c3820a",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\TypedGenerated.hs": "d18ed416b15ece590ac58d3f4b398b2dd1a9434779a2b7ae82434620aa0fc3e5",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\TypedGenerated\\Fingerprint.hs": "3314ae4928166a11d5f96184ad624931df45e56adbd6bb57ced0099388a18b45",
+      "C:\\Djex\\synthesis\\src\\Language\\Haskell\\Synthesis\\TypedGenerated\\Haskell.hs": "91efd148d18abc7f182e00fc5b12c8a082dbc9da1fafca36a29ca06474da2d8a",
+      "C:\\Djex\\synthesis\\test-certificate\\AssociationSpec.hs": "4e41c32ff41eaedd1eebbca7534c2d835bc71bd3bdac52c1451dc4964d476b5b",
+      "C:\\Djex\\synthesis\\test-certificate\\Spec.hs": "f88773972b5221b08f39f26ad1ec6d2d1562547864823514dc63bb0ad3bcc783",
+      "C:\\Djex\\synthesis\\test-certificate\\TypedCandidateSpec.hs": "7b7e3bdedbc7b2a3a081f0b0958269997cc10f5659dfc02e2e21e9a14f050bdb",
+      "C:\\Djex\\synthesis\\test-fingerprint\\Spec.hs": "91aa625a0999ff2a52b6c653b1a8101630bc1e5db4636aadcfd6ff4125faa0b7",
+      "C:\\Djex\\synthesis\\test-length\\DjinnSourceGraphSpec.hs": "17f3e32ddcf3dcdb72fc80f52a10dbd4638d67e64fa4ea60f18737ff803b3a65",
+      "C:\\Djex\\synthesis\\test-length\\LengthWhereSpec.hs": "378bd8ed597eda2965f52ff26d975503dc0c9decca85b3412c56b27361c3fdc3",
+      "C:\\Djex\\synthesis\\test-length\\SMTLibLiveSpec.hs": "bfe8f25d1d89180ee1f0670698e8e1c08754a442ed3d9cddb47133b20a8b13ea",
+      "C:\\Djex\\synthesis\\test-length\\SMTLibQFLIASpec.hs": "dc36bb697f5a5d825884229974662641004cebb62599274eb0ffc0329e27a4b1",
+      "C:\\Djex\\synthesis\\test-length\\Spec.hs": "7e15f79359bdb0df6985fa18ad21df381f8e0f8f43f3858b88f4addd918b28cb",
+      "C:\\Djex\\synthesis\\test-term-graph-fingerprint\\Spec.hs": "2216aa97b9ebea682dcd40104de62bb12fdcf5c7fc96eee1c31447055de9283c",
+      "C:\\Djex\\synthesis\\test\\BehavioralSpec.hs": "8ce709b420247c9c212ac66ebe1d7cdf673bccbddb38f51bac15cb8221c3d917",
+      "C:\\Djex\\synthesis\\test\\CandidateQualitySpec.hs": "ee27f9cfb452d21d37ef731f45279912d67b37179ada47cb1111e4b293925bc0",
+      "C:\\Djex\\synthesis\\test\\ClassResolutionSpec.hs": "6214b73b8f4449dfa8c3a1af6004f74a624b3f91ca537d743513938df4ae07d1",
+      "C:\\Djex\\synthesis\\test\\ContextHaskellSpec.hs": "ded62809656273bf976fa8a1e52d8d504801889f89661e90a3b14bc1f5dd7854",
+      "C:\\Djex\\synthesis\\test\\SMTLibCausalBoundaryWhitespaceSpec.hs": "74c3ff7516f008bcd33a8c4caa7e2b32c10f3022b63f59f56ba0e4aec2e31f9f",
+      "C:\\Djex\\synthesis\\test\\SMTLibCausalDriverSpec.hs": "654b736ec71439d9a5c774aed2fd77771a998d21dccad8213abecf47e3935a75",
+      "C:\\Djex\\synthesis\\test\\SMTLibCausalStdoutChunkSpec.hs": "42d9a13c7f4074897c2a6600e41d4603a99267d4851292c85d06d29dc3ebb5e9",
+      "C:\\Djex\\synthesis\\test\\SMTLibCausalStreamSpec.hs": "68e31a39c5160c4ee8eb4399052343ee60e8978a0321efd86f7b24557c68722a",
+      "C:\\Djex\\synthesis\\test\\SMTLibLexicalSpec.hs": "bd4bea98362b4bc49e3157f05f3a3b2e7c5b6997cada2e9b30251a5aec33cbe1",
+      "C:\\Djex\\synthesis\\test\\SMTLibStandardResponseSpec.hs": "1544a38f1beedc31eccdfe53e44aa29145d22a14743523bed1a1dd4ad8910adc",
+      "C:\\Djex\\synthesis\\test\\SMTLibStreamSpec.hs": "cf433589004a888ece2827a817e62805a790621884b090eea9b4275cdb4b0531",
+      "C:\\Djex\\synthesis\\test\\Spec.hs": "bc7f8eb5e122b10c944d07fee8abdd8ba3fcdf173afb25d04fb50a45b0f4066e",
+      "C:\\Djex\\test-api\\AbstractionBoundary.hs": "465aa137a49a4542a0a3d8621d4acbf1c6706b32fbed9791e62c9a0949d5e01e",
+      "C:\\Djex\\test-api\\ExferencePatternImports.hs": "ddb36da03bef13a3862429d62a171de01a7bb8a6bf2ba8b5f9111fc715640b1f",
+      "C:\\Djex\\test-api\\FacadeSpec.hs": "a163728805edd219be493bb249b977cf3310d31a0b1891a64c3156ffa1307b10",
+      "C:\\Djex\\test-api\\Spec.hs": "f67117cd6a0bee69dbdf0074a32c8cc5ab93ebc0726487a349f1d882aff5039f",
+      "C:\\Djex\\test-church\\behavior_runtime.py": "b5240378e17d3fb25af8ad18fc0ba88f0226dc2116b99efe3300f4b006a88028",
+      "C:\\Djex\\test-cli\\Spec.hs": "abb58e384271042e5c37b2d24a6875ca2515b814e55726e2fbc6190d79ec1cfc",
+      "C:\\Djex\\test-integration\\ContextBudgetSpec.hs": "83e90bf425c38e4478681a8f3aa0436cf419240ad57037b059d7b7d485a851f5",
+      "C:\\Djex\\test-integration\\ContextEvidenceSpec.hs": "7e5fb305f2a8c3b75494d1c42d43a6ec3a5adb7933f92ddb7fd96680e6c768fb",
+      "C:\\Djex\\test-integration\\ContextHaskellReplaySpec.hs": "916808a8ccab8301c6e3ec0e0459a200534636fbe022fcb3098ce66a8052bc2d",
+      "C:\\Djex\\test-integration\\RecursorSpec.hs": "017ef76d13e70c87b1a618ab589371cbd6900efc20fd4d56dfd431b8ce9e63b2",
+      "C:\\Djex\\test-integration\\Spec.hs": "6d24635d4ccbf313ccdad45c8f3ebcec6c52df8fdbf4f540910a9065d1d74d77",
+      "C:\\Djex\\test-support\\CLIAssertions.hs": "221a4d077b351af352a2f43d9c5487a4bdf2150a8338d25956a0b9ec5e3ddf6f",
+      "C:\\Djex\\test-support\\fake-cabal\\Main.hs": "8076192b1cec1ec7129aa6a0c2840e09d4d2ed5f6faa41e1d07575bdee7c2136",
+      "C:\\Djex\\test-support\\fake-z3\\Main.hs": "2052a4d331a4e10beffb47334c6b8dd45a554aa1363e363a9a952409505d84b9"
+    },
+    "helper_hashes": {
+      "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex-fake-cabal\\build\\djex-fake-cabal\\djex-fake-cabal.exe": "f3d47589d8e45a899d78a3270bc586035c5a2c7da35289a20f23cca838f875a6",
+      "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex-fake-z3\\build\\djex-fake-z3\\djex-fake-z3.exe": "9d94e74f3cbb2a9660c8949afeb4ebcf9e5a97de4a1c54acd12b45c3726dbfa8",
+      "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe": "a335bc8857163e2292d3ac8c8d17cea0fc0759527d88ee8cbc7b23c8da4835de",
+      "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djinn\\build\\djinn\\djinn.exe": "78815d6858a1aba3c0cd61c342cba90fbdf06de2e773954ee5df3d30249f1310",
+      "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\exference\\build\\exference\\exference.exe": "0a4d9fe72d5e22216d3e03b8bfa79fa9674bab4e5b9d6c0f39924f3990062787",
+      "C:\\ghcup\\bin\\cabal.exe": "7c55e201f71860c5babea886007c8fa44b861abf50d1c07e5677eb0bda387a70",
+      "C:\\ghcup\\ghc\\9.12.4\\bin\\ghc.exe": "0560906f7b7a046742d9e8433b95c0db49fc0c2fc28989e67cb23a7b347acc66"
+    }
+  },
+  "exact_witness": {
+    "status": "passed",
+    "live_search_acceptance": false,
+    "original_type": "(forall church0 church1. ((forall church4. (((forall church2. (church2 -> ((church0 -> church2) -> church2))) -> church4) -> (((forall church3. (church3 -> ((church1 -> church3) -> church3))) -> church4) -> church4))) -> (forall church6. (church6 -> (((forall church5. ((church0 -> church5) -> ((church1 -> church5) -> church5))) -> church6) -> church6)))))",
+    "finite_observations": 7,
+    "evaluation_timeout_seconds": 2,
+    "provider_inventory": [],
+    "artifacts": {
+      "test-church/receipts/priority4-exference-forall-witness/Candidate.hs": "cf6db8a387c4a4ced46797df8fa6d72ead24918af4b51bf2cf418bda3bb733f8",
+      "test-church/receipts/priority4-exference-forall-witness/Main.hs": "64e7929111ea9205a794aa33f59fbcdfd6340035202d2b06db43f782b86ad07b",
+      "test-church/receipts/priority4-exference-forall-witness/compatibility.txt": "d5844f5d4cf2ed0a1fb3e0bcb16b0eaeadac0a63584459f61831a9a8b3680647",
+      "test-church/receipts/priority4-exference-forall-witness/graph.txt": "f2cc004295970b1b576075977e67163bf58461774d33469e98361db40c749fca",
+      "test-church/receipts/priority4-exference-forall-witness/predicate.original.txt": "fa714c3131b440be443d8dc32ef4d9c45329081d16820673feae728adc7ae0e1",
+      "test-church/receipts/priority4-exference-forall-witness/predicate.replay.txt": "1a4f19a24939340ca050212fe6969a9e0309b0504934df570e1fd0c85b8fefa0",
+      "test-church/receipts/priority4-exference-forall-witness/original-type.txt": "ee0e3e54c7f5fc5b34ab6a6cd0712a37e183816153e929d99c1e2e5398c172cf"
+    },
+    "raw": {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-witness-v2\\results.json",
+      "sha256": "9e29f83c3dfa80eb1ae543da0b369edb3eab8a78747668825478cd2d61309af9",
+      "status": "passed",
+      "captures_audited": 8,
+      "captures": [
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-witness-v2\\maybe-either-probe-compile.stdout.txt",
+          "sha256": "b57a5eada46dfac46829e209af5d2d81024e1ae5d3332618b2cc2f008d36a0aa"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-witness-v2\\maybe-either-probe-compile.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-witness-v2\\maybe-either-probe.stdout.txt",
+          "sha256": "0d89a6ed9a248735a8751916c728bfce7fb40cb446b23fd3588234abb767bf58"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-witness-v2\\maybe-either-probe.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-witness-v2\\maybe-either-exact-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-witness-v2\\maybe-either-exact-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-witness-v2\\maybe-either-exact-execute.stdout.txt",
+          "sha256": "6ea009e85e0640595cf83b79b152fcb2fe0362a42da9d559e1ef9bfd81181598"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-witness-v2\\maybe-either-exact-execute.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    "original_inputs": {
+      "C:\\Djex\\dist-newstyle\\priority4-live\\exference-nested-forall-graph-proposal-v1\\MaybeEither.original-type.txt": "ee0e3e54c7f5fc5b34ab6a6cd0712a37e183816153e929d99c1e2e5398c172cf",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-v2-remaining\\exference-maybeEither.commands.txt": "620b68a049401af2d33d0457b93ee441f785faf8920805c9f59104edaca58da5",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-v2-remaining\\results.json": "4d63710bb034d23fce596d49963ab1bcdf7e6c3a1adbd98c222a97f039061b93"
+    },
+    "probe_package_unit_ids": [
+      "base-4.21.2.0-db76",
+      "containers-0.7-21fa",
+      "deepseq-1.5.1.0-e799",
+      "djex-2026.7.17-inplace",
+      "pqueue-1.7.0.0-9d9f46e70d1eea6ff0d47aed013910bc9ce59dfe",
+      "tasty-1.5.4-06a9e173c5c061a1d8bd825767405503965a5d65",
+      "tasty-hunit-0.10.2-c3a2b6c2a32e3c916d2fec66f0e370527c3a7e82",
+      "transformers-0.6.3.0-7e7b",
+      "directory-1.3.10.1-5815",
+      "filepath-1.5.5.0-42f3",
+      "pretty-1.1.3.6-f01e"
+    ],
+    "replay_executable_sha256": "361cd03c023457f3c2c1e78ea5223d865900ad4343554f0b88e2df6ecb5c0804"
+  },
+  "live_search": {
+    "status": "bounded_miss",
+    "raw": {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\results.json",
+      "sha256": "7f36c66851441bc128217d12597bc944ad40fc72aa7da11d4ed6e2b0769a78c5",
+      "status": "failed",
+      "captures_audited": 12,
+      "captures": [
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\control-positive-maybeEither-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\control-positive-maybeEither-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\control-positive-maybeEither-execute.stdout.txt",
+          "sha256": "b4db3c67b83d3cf10b745fa769ca794a99e49720af3b459b943891a2e65190cb"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\control-positive-maybeEither-execute.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\control-wrong-maybeEither_nothing-ghc.stdout.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\control-wrong-maybeEither_nothing-ghc.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\control-wrong-maybeEither_nothing-execute.stdout.txt",
+          "sha256": "d70ae0d3e162d7fa7480c1a6c7d04aee25a82f200e02c08048d759ff57b22c14"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\control-wrong-maybeEither_nothing-execute.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\exference-maybeEither-synthesis.stdout.txt",
+          "sha256": "9520deff2021b3ccd08554adf2a9d46e39268555f6cba7fce17e350b4b9ae032"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\exference-maybeEither-synthesis.stderr.txt",
+          "sha256": "516ce6dcc4bebd588b58571df573d6ef0bd034c5f8767fe0a35096e42619838f"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\exference-reject-all-synthesis.stdout.txt",
+          "sha256": "9520deff2021b3ccd08554adf2a9d46e39268555f6cba7fce17e350b4b9ae032"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\exference-reject-all-synthesis.stderr.txt",
+          "sha256": "5bd5fbff44d4f5eab13ef5d747d5c6b1d169420b53cbf259ca3e3e37f654ecae"
+        }
+      ]
+    },
+    "source_hashes": {
+      "C:\\Djex\\test-church\\behavior_extended_probe.py": "322efc48eb360517aec7315132e4830113d4e216f6651a6cdaafaa409eb73908",
+      "C:\\Djex\\test-church\\behavior_extended_spec.py": "7c8f0f42c28b533e72ffe9debceaedad1192438820efc344dcbdfe76d04eb444",
+      "C:\\Djex\\test-church\\behavior_probe.py": "6093f0d122fc09e4fc5a84322042b106cce2f969fb417b9eb2d56c6c69332022",
+      "C:\\Djex\\test-church\\behavior_runtime.py": "b5240378e17d3fb25af8ad18fc0ba88f0226dc2116b99efe3300f4b006a88028",
+      "C:\\Djex\\test-church\\behavior_spec.py": "426fb6cf5e8a607608bed4ca52a74776cd38d1c5f7a5c49866fda6b2a98cedf4",
+      "C:\\Djex\\test-church\\manifest.json": "0c2954eeb36811ea065aba86187d09cd8761529de1acefd5111ccf088b189ed9",
+      "C:\\Djex\\docs\\examples\\Church.hs": "782e4edaa5bf813e30e39ae02d52278ab0566315ebc521401a947b98c44cfd11",
+      "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\numeric-fixture\\ExtendedNumeric.hs": "7470bd88599ee15f3f3d0b934b484b2dc067d11162ed82a2c12ea8e0daee3138"
+    },
+    "executable_hashes": {
+      "C:\\Djex\\dist-newstyle\\build\\x86_64-windows\\ghc-9.12.4\\djex-2026.7.17\\x\\djex\\build\\djex\\djex.exe": "a335bc8857163e2292d3ac8c8d17cea0fc0759527d88ee8cbc7b23c8da4835de",
+      "C:\\ghcup\\ghc\\9.12.4\\bin\\ghc.exe": "0560906f7b7a046742d9e8433b95c0db49fc0c2fc28989e67cb23a7b347acc66"
+    },
+    "settings": {
+      "exference": {
+        "window": 256,
+        "budget": 100000,
+        "djinn_strategy": "depth-first",
+        "steps": 100000,
+        "process_timeout": 300.0,
+        "queue": 8192
+      }
+    },
+    "cells": [
+      {
+        "engine": "exference",
+        "operation": "maybeEither",
+        "name": "extended_exference_maybeEither",
+        "type": "(forall church0 church1. ((forall church4. (((forall church2. (church2 -> ((church0 -> church2) -> church2))) -> church4) -> (((forall church3. (church3 -> ((church1 -> church3) -> church3))) -> church4) -> church4))) -> (forall church6. (church6 -> (((forall church5. ((church0 -> church5) -> ((church1 -> church5) -> church5))) -> church6) -> church6)))))",
+        "search_type": "(forall church0 church1. ((forall church4. (((forall church2. (church2 -> ((church0 -> church2) -> church2))) -> church4) -> (((forall church3. (church3 -> ((church1 -> church3) -> church3))) -> church4) -> church4))) -> (forall church6. (church6 -> (((forall church5. ((church0 -> church5) -> ((church1 -> church5) -> church5))) -> church6) -> church6)))))",
+        "djinn_axioms": "off",
+        "predicate": "let { enc :: forall a. [a] -> (forall r. (a -> r -> r) -> r -> r); enc xs step zero = Prelude.foldr step zero xs; dec :: forall a. (forall r. (a -> r -> r) -> r -> r) -> [a]; dec xs = xs (:) []; encMaybe :: forall a. Prelude.Maybe a -> (forall r. r -> (a -> r) -> r); encMaybe m zero some = Prelude.maybe zero some m; decMaybe :: forall a. (forall r. r -> (a -> r) -> r) -> Prelude.Maybe a; decMaybe m = m Prelude.Nothing Prelude.Just; encEither :: forall a b. Prelude.Either a b -> (forall r. (a -> r) -> (b -> r) -> r); encEither e onLeft onRight = Prelude.either onLeft onRight e; decEither :: forall a b. (forall r. (a -> r) -> (b -> r) -> r) -> Prelude.Either a b; decEither e = e Prelude.Left Prelude.Right; encMaybes :: forall a. [Prelude.Maybe a] -> (forall r. ((forall r. r -> (a -> r) -> r) -> r -> r) -> r -> r); encMaybes xs step zero = Prelude.foldr (\\m rest -> step (encMaybe m) rest) zero xs; encNestedMaybe :: forall a. Prelude.Maybe (Prelude.Maybe a) -> (forall r. r -> ((forall r. r -> (a -> r) -> r) -> r) -> r); encNestedMaybe mm zero some = Prelude.maybe zero (\\m -> some (encMaybe m)) mm; encMaybeEither :: forall a b. Prelude.Either (Prelude.Maybe a) (Prelude.Maybe b) -> (forall r. ((forall r. r -> (a -> r) -> r) -> r) -> ((forall r. r -> (b -> r) -> r) -> r) -> r); encMaybeEither e onLeft onRight = Prelude.either (\\m -> onLeft (encMaybe m)) (\\m -> onRight (encMaybe m)) e; decMaybeEither :: forall a b. (forall r. r -> ((forall r. (a -> r) -> (b -> r) -> r) -> r) -> r) -> Prelude.Maybe (Prelude.Either a b); decMaybeEither m = m Prelude.Nothing (\\e -> Prelude.Just (decEither e)); encNum :: Prelude.Int -> (forall r. (r -> r) -> r -> r); encNum n step zero = Prelude.iterate step zero Prelude.!! n; decNum :: (forall r. (r -> r) -> r -> r) -> Prelude.Int; decNum n = n (\\x -> x + 1) 0; inputs :: [[Prelude.Int]]; inputs = [[], [-1], [0], [2], [-1, -1], [-1, 0], [-1, 2], [0, -1], [0, 0], [0, 2], [2, -1], [2, 0], [2, 2], [-1, -1, -1], [-1, -1, 0], [-1, -1, 2], [-1, 0, -1], [-1, 0, 0], [-1, 0, 2], [-1, 2, -1], [-1, 2, 0], [-1, 2, 2], [0, -1, -1], [0, -1, 0], [0, -1, 2], [0, 0, -1], [0, 0, 0], [0, 0, 2], [0, 2, -1], [0, 2, 0], [0, 2, 2], [2, -1, -1], [2, -1, 0], [2, -1, 2], [2, 0, -1], [2, 0, 0], [2, 0, 2], [2, 2, -1], [2, 2, 0], [2, 2, 2]]; boolInputs :: [[Prelude.Bool]]; boolInputs = [[],[Prelude.False],[Prelude.True],[Prelude.True,Prelude.False]]; maybeInputs :: [Prelude.Maybe Prelude.Int]; maybeInputs = [Prelude.Nothing,Prelude.Just (-1),Prelude.Just 0,Prelude.Just 2]; maybeBools :: [Prelude.Maybe Prelude.Bool]; maybeBools = [Prelude.Nothing,Prelude.Just Prelude.False,Prelude.Just Prelude.True]; maybeLists :: [[Prelude.Maybe Prelude.Int]]; maybeLists = [[],[Prelude.Nothing],[(Prelude.Just (-1))],[(Prelude.Just (2))],[Prelude.Nothing,Prelude.Nothing],[Prelude.Nothing,(Prelude.Just (-1))],[Prelude.Nothing,(Prelude.Just (2))],[(Prelude.Just (-1)),Prelude.Nothing],[(Prelude.Just (-1)),(Prelude.Just (-1))],[(Prelude.Just (-1)),(Prelude.Just (2))],[(Prelude.Just (2)),Prelude.Nothing],[(Prelude.Just (2)),(Prelude.Just (-1))],[(Prelude.Just (2)),(Prelude.Just (2))],[Prelude.Nothing,Prelude.Nothing,Prelude.Nothing],[Prelude.Nothing,Prelude.Nothing,(Prelude.Just (-1))],[Prelude.Nothing,Prelude.Nothing,(Prelude.Just (2))],[Prelude.Nothing,(Prelude.Just (-1)),Prelude.Nothing],[Prelude.Nothing,(Prelude.Just (-1)),(Prelude.Just (-1))],[Prelude.Nothing,(Prelude.Just (-1)),(Prelude.Just (2))],[Prelude.Nothing,(Prelude.Just (2)),Prelude.Nothing],[Prelude.Nothing,(Prelude.Just (2)),(Prelude.Just (-1))],[Prelude.Nothing,(Prelude.Just (2)),(Prelude.Just (2))],[(Prelude.Just (-1)),Prelude.Nothing,Prelude.Nothing],[(Prelude.Just (-1)),Prelude.Nothing,(Prelude.Just (-1))],[(Prelude.Just (-1)),Prelude.Nothing,(Prelude.Just (2))],[(Prelude.Just (-1)),(Prelude.Just (-1)),Prelude.Nothing],[(Prelude.Just (-1)),(Prelude.Just (-1)),(Prelude.Just (-1))],[(Prelude.Just (-1)),(Prelude.Just (-1)),(Prelude.Just (2))],[(Prelude.Just (-1)),(Prelude.Just (2)),Prelude.Nothing],[(Prelude.Just (-1)),(Prelude.Just (2)),(Prelude.Just (-1))],[(Prelude.Just (-1)),(Prelude.Just (2)),(Prelude.Just (2))],[(Prelude.Just (2)),Prelude.Nothing,Prelude.Nothing],[(Prelude.Just (2)),Prelude.Nothing,(Prelude.Just (-1))],[(Prelude.Just (2)),Prelude.Nothing,(Prelude.Just (2))],[(Prelude.Just (2)),(Prelude.Just (-1)),Prelude.Nothing],[(Prelude.Just (2)),(Prelude.Just (-1)),(Prelude.Just (-1))],[(Prelude.Just (2)),(Prelude.Just (-1)),(Prelude.Just (2))],[(Prelude.Just (2)),(Prelude.Just (2)),Prelude.Nothing],[(Prelude.Just (2)),(Prelude.Just (2)),(Prelude.Just (-1))],[(Prelude.Just (2)),(Prelude.Just (2)),(Prelude.Just (2))]]; nestedMaybes :: [Prelude.Maybe (Prelude.Maybe Prelude.Int)]; nestedMaybes = Prelude.Nothing : Prelude.map Prelude.Just maybeInputs; nestedBools :: [Prelude.Maybe (Prelude.Maybe Prelude.Bool)]; nestedBools = [Prelude.Nothing,Prelude.Just Prelude.Nothing,Prelude.Just (Prelude.Just Prelude.True)]; eitherInputs :: [Prelude.Either Prelude.Int Prelude.Bool]; eitherInputs = Prelude.map Prelude.Left [-1,0,2] Prelude.++ Prelude.map Prelude.Right [Prelude.False,Prelude.True]; maybeEitherInputs :: [Prelude.Either (Prelude.Maybe Prelude.Int) (Prelude.Maybe Prelude.Bool)]; maybeEitherInputs = Prelude.map Prelude.Left maybeInputs Prelude.++ Prelude.map Prelude.Right maybeBools; foldSteps :: [Prelude.Int -> Prelude.Int -> Prelude.Int]; foldSteps = [(\\x y -> x - y),(\\x y -> 2*x + y),(\\x y -> x + 3*y)] } in Prelude.and [decMaybeEither (extended_exference_maybeEither (encMaybeEither e)) == Prelude.either (Prelude.fmap Prelude.Left) (Prelude.fmap Prelude.Right) e | e <- maybeEitherInputs]",
+        "kind": "synthesis",
+        "finite_observation_count": 7,
+        "provider_inventory": [],
+        "source_case_id": "church_case_107",
+        "provenance": {
+          "classification": "Church.hs_total_signature",
+          "manifest_classification": "total",
+          "manifest_case_id": "church_case_107",
+          "source_line": 615,
+          "source_signature": "Either (Maybe a) (Maybe b) -> Maybe (Either a b)",
+          "acceptance_status": "specification_only_not_probed"
+        },
+        "settings": {
+          "window": 256,
+          "budget": 100000,
+          "djinn_strategy": "depth-first",
+          "steps": 100000,
+          "process_timeout": 300.0,
+          "queue": 8192
+        },
+        "id": "exference-maybeEither",
+        "status": "failed",
+        "command_path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\exference-maybeEither.commands.txt",
+        "command_sha256": "620b68a049401af2d33d0457b93ee441f785faf8920805c9f59104edaca58da5",
+        "synthesis_exit_code": 0,
+        "validated_settings": {
+          "backend": "exference",
+          "ranking": "balanced",
+          "select": "first",
+          "render": "definition",
+          "prompt": "\"\"",
+          "allow-unused": "on",
+          "djinn-axioms": "off",
+          "djinn-strategy": "depth-first",
+          "candidate-limit": "256",
+          "quality-window": "256",
+          "choice-budget": "100000",
+          "max-steps": "100000",
+          "max-queue": "8192"
+        },
+        "observed_inventory": {
+          "declarations": [
+            "(no declarations)"
+          ],
+          "builtin_declarations": [],
+          "values": [],
+          "type_aliases": []
+        },
+        "failure": "displayed success lacks a successful behavioral observation",
+        "oracle_controls_passed": true,
+        "accepted": false
+      },
+      {
+        "engine": "exference",
+        "operation": null,
+        "name": "extended_exference_reject_all",
+        "type": "forall a. a -> a",
+        "search_type": "forall a. a -> a",
+        "djinn_axioms": "off",
+        "predicate": "Prelude.False",
+        "kind": "false_oracle_query",
+        "finite_observation_count": 1,
+        "provider_inventory": [],
+        "source_case_id": null,
+        "provenance": null,
+        "settings": {
+          "window": 256,
+          "budget": 100000,
+          "djinn_strategy": "depth-first",
+          "steps": 100000,
+          "process_timeout": 300.0,
+          "queue": 8192
+        },
+        "id": "exference-reject-all",
+        "status": "passed",
+        "command_path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\exference-reject-all.commands.txt",
+        "command_sha256": "1867ee4f1a82c6c35427d3b170c239ae834233ab03fc72f7cbebd75c38554ede",
+        "synthesis_exit_code": 0,
+        "validated_settings": {
+          "backend": "exference",
+          "ranking": "balanced",
+          "select": "first",
+          "render": "definition",
+          "prompt": "\"\"",
+          "allow-unused": "on",
+          "djinn-axioms": "off",
+          "djinn-strategy": "depth-first",
+          "candidate-limit": "256",
+          "quality-window": "256",
+          "choice-budget": "100000",
+          "max-steps": "100000",
+          "max-queue": "8192"
+        },
+        "observed_inventory": {
+          "declarations": [
+            "(no declarations)"
+          ],
+          "builtin_declarations": [],
+          "values": [],
+          "type_aliases": []
+        },
+        "behavioral_observations": {
+          "checked": 256,
+          "true": 0,
+          "false": 256,
+          "error": 0,
+          "timeout": 0,
+          "window": 256
+        },
+        "oracle_controls_passed": true,
+        "accepted": true
+      }
+    ],
+    "oracle_controls": [
+      {
+        "id": "positive-maybeEither",
+        "operation": "maybeEither",
+        "kind": "positive_oracle_witness",
+        "type": "(forall church0 church1. ((forall church4. (((forall church2. (church2 -> ((church0 -> church2) -> church2))) -> church4) -> (((forall church3. (church3 -> ((church1 -> church3) -> church3))) -> church4) -> church4))) -> (forall church6. (church6 -> (((forall church5. ((church0 -> church5) -> ((church1 -> church5) -> church5))) -> church6) -> church6)))))",
+        "definition": "generated = \\e zero some -> e (\\m -> m zero (\\x -> some (\\onLeft _ -> onLeft x))) (\\m -> m zero (\\y -> some (\\_ onRight -> onRight y)))",
+        "assertion": "let { enc :: forall a. [a] -> (forall r. (a -> r -> r) -> r -> r); enc xs step zero = Prelude.foldr step zero xs; dec :: forall a. (forall r. (a -> r -> r) -> r -> r) -> [a]; dec xs = xs (:) []; encMaybe :: forall a. Prelude.Maybe a -> (forall r. r -> (a -> r) -> r); encMaybe m zero some = Prelude.maybe zero some m; decMaybe :: forall a. (forall r. r -> (a -> r) -> r) -> Prelude.Maybe a; decMaybe m = m Prelude.Nothing Prelude.Just; encEither :: forall a b. Prelude.Either a b -> (forall r. (a -> r) -> (b -> r) -> r); encEither e onLeft onRight = Prelude.either onLeft onRight e; decEither :: forall a b. (forall r. (a -> r) -> (b -> r) -> r) -> Prelude.Either a b; decEither e = e Prelude.Left Prelude.Right; encMaybes :: forall a. [Prelude.Maybe a] -> (forall r. ((forall r. r -> (a -> r) -> r) -> r -> r) -> r -> r); encMaybes xs step zero = Prelude.foldr (\\m rest -> step (encMaybe m) rest) zero xs; encNestedMaybe :: forall a. Prelude.Maybe (Prelude.Maybe a) -> (forall r. r -> ((forall r. r -> (a -> r) -> r) -> r) -> r); encNestedMaybe mm zero some = Prelude.maybe zero (\\m -> some (encMaybe m)) mm; encMaybeEither :: forall a b. Prelude.Either (Prelude.Maybe a) (Prelude.Maybe b) -> (forall r. ((forall r. r -> (a -> r) -> r) -> r) -> ((forall r. r -> (b -> r) -> r) -> r) -> r); encMaybeEither e onLeft onRight = Prelude.either (\\m -> onLeft (encMaybe m)) (\\m -> onRight (encMaybe m)) e; decMaybeEither :: forall a b. (forall r. r -> ((forall r. (a -> r) -> (b -> r) -> r) -> r) -> r) -> Prelude.Maybe (Prelude.Either a b); decMaybeEither m = m Prelude.Nothing (\\e -> Prelude.Just (decEither e)); encNum :: Prelude.Int -> (forall r. (r -> r) -> r -> r); encNum n step zero = Prelude.iterate step zero Prelude.!! n; decNum :: (forall r. (r -> r) -> r -> r) -> Prelude.Int; decNum n = n (\\x -> x + 1) 0; inputs :: [[Prelude.Int]]; inputs = [[], [-1], [0], [2], [-1, -1], [-1, 0], [-1, 2], [0, -1], [0, 0], [0, 2], [2, -1], [2, 0], [2, 2], [-1, -1, -1], [-1, -1, 0], [-1, -1, 2], [-1, 0, -1], [-1, 0, 0], [-1, 0, 2], [-1, 2, -1], [-1, 2, 0], [-1, 2, 2], [0, -1, -1], [0, -1, 0], [0, -1, 2], [0, 0, -1], [0, 0, 0], [0, 0, 2], [0, 2, -1], [0, 2, 0], [0, 2, 2], [2, -1, -1], [2, -1, 0], [2, -1, 2], [2, 0, -1], [2, 0, 0], [2, 0, 2], [2, 2, -1], [2, 2, 0], [2, 2, 2]]; boolInputs :: [[Prelude.Bool]]; boolInputs = [[],[Prelude.False],[Prelude.True],[Prelude.True,Prelude.False]]; maybeInputs :: [Prelude.Maybe Prelude.Int]; maybeInputs = [Prelude.Nothing,Prelude.Just (-1),Prelude.Just 0,Prelude.Just 2]; maybeBools :: [Prelude.Maybe Prelude.Bool]; maybeBools = [Prelude.Nothing,Prelude.Just Prelude.False,Prelude.Just Prelude.True]; maybeLists :: [[Prelude.Maybe Prelude.Int]]; maybeLists = [[],[Prelude.Nothing],[(Prelude.Just (-1))],[(Prelude.Just (2))],[Prelude.Nothing,Prelude.Nothing],[Prelude.Nothing,(Prelude.Just (-1))],[Prelude.Nothing,(Prelude.Just (2))],[(Prelude.Just (-1)),Prelude.Nothing],[(Prelude.Just (-1)),(Prelude.Just (-1))],[(Prelude.Just (-1)),(Prelude.Just (2))],[(Prelude.Just (2)),Prelude.Nothing],[(Prelude.Just (2)),(Prelude.Just (-1))],[(Prelude.Just (2)),(Prelude.Just (2))],[Prelude.Nothing,Prelude.Nothing,Prelude.Nothing],[Prelude.Nothing,Prelude.Nothing,(Prelude.Just (-1))],[Prelude.Nothing,Prelude.Nothing,(Prelude.Just (2))],[Prelude.Nothing,(Prelude.Just (-1)),Prelude.Nothing],[Prelude.Nothing,(Prelude.Just (-1)),(Prelude.Just (-1))],[Prelude.Nothing,(Prelude.Just (-1)),(Prelude.Just (2))],[Prelude.Nothing,(Prelude.Just (2)),Prelude.Nothing],[Prelude.Nothing,(Prelude.Just (2)),(Prelude.Just (-1))],[Prelude.Nothing,(Prelude.Just (2)),(Prelude.Just (2))],[(Prelude.Just (-1)),Prelude.Nothing,Prelude.Nothing],[(Prelude.Just (-1)),Prelude.Nothing,(Prelude.Just (-1))],[(Prelude.Just (-1)),Prelude.Nothing,(Prelude.Just (2))],[(Prelude.Just (-1)),(Prelude.Just (-1)),Prelude.Nothing],[(Prelude.Just (-1)),(Prelude.Just (-1)),(Prelude.Just (-1))],[(Prelude.Just (-1)),(Prelude.Just (-1)),(Prelude.Just (2))],[(Prelude.Just (-1)),(Prelude.Just (2)),Prelude.Nothing],[(Prelude.Just (-1)),(Prelude.Just (2)),(Prelude.Just (-1))],[(Prelude.Just (-1)),(Prelude.Just (2)),(Prelude.Just (2))],[(Prelude.Just (2)),Prelude.Nothing,Prelude.Nothing],[(Prelude.Just (2)),Prelude.Nothing,(Prelude.Just (-1))],[(Prelude.Just (2)),Prelude.Nothing,(Prelude.Just (2))],[(Prelude.Just (2)),(Prelude.Just (-1)),Prelude.Nothing],[(Prelude.Just (2)),(Prelude.Just (-1)),(Prelude.Just (-1))],[(Prelude.Just (2)),(Prelude.Just (-1)),(Prelude.Just (2))],[(Prelude.Just (2)),(Prelude.Just (2)),Prelude.Nothing],[(Prelude.Just (2)),(Prelude.Just (2)),(Prelude.Just (-1))],[(Prelude.Just (2)),(Prelude.Just (2)),(Prelude.Just (2))]]; nestedMaybes :: [Prelude.Maybe (Prelude.Maybe Prelude.Int)]; nestedMaybes = Prelude.Nothing : Prelude.map Prelude.Just maybeInputs; nestedBools :: [Prelude.Maybe (Prelude.Maybe Prelude.Bool)]; nestedBools = [Prelude.Nothing,Prelude.Just Prelude.Nothing,Prelude.Just (Prelude.Just Prelude.True)]; eitherInputs :: [Prelude.Either Prelude.Int Prelude.Bool]; eitherInputs = Prelude.map Prelude.Left [-1,0,2] Prelude.++ Prelude.map Prelude.Right [Prelude.False,Prelude.True]; maybeEitherInputs :: [Prelude.Either (Prelude.Maybe Prelude.Int) (Prelude.Maybe Prelude.Bool)]; maybeEitherInputs = Prelude.map Prelude.Left maybeInputs Prelude.++ Prelude.map Prelude.Right maybeBools; foldSteps :: [Prelude.Int -> Prelude.Int -> Prelude.Int]; foldSteps = [(\\x y -> x - y),(\\x y -> 2*x + y),(\\x y -> x + 3*y)] } in Prelude.and [decMaybeEither (Candidate.generated (encMaybeEither e)) == Prelude.either (Prelude.fmap Prelude.Left) (Prelude.fmap Prelude.Right) e | e <- maybeEitherInputs]",
+        "status": "passed",
+        "replay": {
+          "directory": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\control-positive-maybeEither",
+          "sources": [
+            {
+              "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\control-positive-maybeEither\\Candidate.hs",
+              "sha256": "04da3b399f6ddad7a41ef0b4bf61096e644215720cd3929696e6a475a234e4a6"
+            },
+            {
+              "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\control-positive-maybeEither\\Main.hs",
+              "sha256": "f4d4fd7c89404ed7786c848c37914799c6286ef1b80a185cd2e4ede3d8761c87"
+            }
+          ],
+          "candidate_import_policy": "NoImplicitPrelude; native Int types only, plus exactly zero/successor for length",
+          "fully_typed_source": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\control-positive-maybeEither\\Candidate.hs",
+          "fully_typed_source_sha256": "04da3b399f6ddad7a41ef0b4bf61096e644215720cd3929696e6a475a234e4a6",
+          "expected_pass_labels": [
+            "positive-maybeEither"
+          ],
+          "status": "passed",
+          "compiler_exit_code": 0,
+          "executable_path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\control-positive-maybeEither\\replay.exe",
+          "executable_sha256": "f2f7517873045ce34d48e4da348a2dfff737cb31738db1d4f1052df569454025",
+          "execution_exit_code": 0,
+          "observed_pass_labels": [
+            "positive-maybeEither"
+          ],
+          "executable_unchanged": true,
+          "sources_unchanged": true
+        }
+      },
+      {
+        "id": "wrong-maybeEither_nothing",
+        "operation": "maybeEither",
+        "kind": "fully_typed_wrong_candidate",
+        "type": "(forall church0 church1. ((forall church4. (((forall church2. (church2 -> ((church0 -> church2) -> church2))) -> church4) -> (((forall church3. (church3 -> ((church1 -> church3) -> church3))) -> church4) -> church4))) -> (forall church6. (church6 -> (((forall church5. ((church0 -> church5) -> ((church1 -> church5) -> church5))) -> church6) -> church6)))))",
+        "definition": "generated = \\_ zero _ -> zero",
+        "assertion": "Prelude.not (let { enc :: forall a. [a] -> (forall r. (a -> r -> r) -> r -> r); enc xs step zero = Prelude.foldr step zero xs; dec :: forall a. (forall r. (a -> r -> r) -> r -> r) -> [a]; dec xs = xs (:) []; encMaybe :: forall a. Prelude.Maybe a -> (forall r. r -> (a -> r) -> r); encMaybe m zero some = Prelude.maybe zero some m; decMaybe :: forall a. (forall r. r -> (a -> r) -> r) -> Prelude.Maybe a; decMaybe m = m Prelude.Nothing Prelude.Just; encEither :: forall a b. Prelude.Either a b -> (forall r. (a -> r) -> (b -> r) -> r); encEither e onLeft onRight = Prelude.either onLeft onRight e; decEither :: forall a b. (forall r. (a -> r) -> (b -> r) -> r) -> Prelude.Either a b; decEither e = e Prelude.Left Prelude.Right; encMaybes :: forall a. [Prelude.Maybe a] -> (forall r. ((forall r. r -> (a -> r) -> r) -> r -> r) -> r -> r); encMaybes xs step zero = Prelude.foldr (\\m rest -> step (encMaybe m) rest) zero xs; encNestedMaybe :: forall a. Prelude.Maybe (Prelude.Maybe a) -> (forall r. r -> ((forall r. r -> (a -> r) -> r) -> r) -> r); encNestedMaybe mm zero some = Prelude.maybe zero (\\m -> some (encMaybe m)) mm; encMaybeEither :: forall a b. Prelude.Either (Prelude.Maybe a) (Prelude.Maybe b) -> (forall r. ((forall r. r -> (a -> r) -> r) -> r) -> ((forall r. r -> (b -> r) -> r) -> r) -> r); encMaybeEither e onLeft onRight = Prelude.either (\\m -> onLeft (encMaybe m)) (\\m -> onRight (encMaybe m)) e; decMaybeEither :: forall a b. (forall r. r -> ((forall r. (a -> r) -> (b -> r) -> r) -> r) -> r) -> Prelude.Maybe (Prelude.Either a b); decMaybeEither m = m Prelude.Nothing (\\e -> Prelude.Just (decEither e)); encNum :: Prelude.Int -> (forall r. (r -> r) -> r -> r); encNum n step zero = Prelude.iterate step zero Prelude.!! n; decNum :: (forall r. (r -> r) -> r -> r) -> Prelude.Int; decNum n = n (\\x -> x + 1) 0; inputs :: [[Prelude.Int]]; inputs = [[], [-1], [0], [2], [-1, -1], [-1, 0], [-1, 2], [0, -1], [0, 0], [0, 2], [2, -1], [2, 0], [2, 2], [-1, -1, -1], [-1, -1, 0], [-1, -1, 2], [-1, 0, -1], [-1, 0, 0], [-1, 0, 2], [-1, 2, -1], [-1, 2, 0], [-1, 2, 2], [0, -1, -1], [0, -1, 0], [0, -1, 2], [0, 0, -1], [0, 0, 0], [0, 0, 2], [0, 2, -1], [0, 2, 0], [0, 2, 2], [2, -1, -1], [2, -1, 0], [2, -1, 2], [2, 0, -1], [2, 0, 0], [2, 0, 2], [2, 2, -1], [2, 2, 0], [2, 2, 2]]; boolInputs :: [[Prelude.Bool]]; boolInputs = [[],[Prelude.False],[Prelude.True],[Prelude.True,Prelude.False]]; maybeInputs :: [Prelude.Maybe Prelude.Int]; maybeInputs = [Prelude.Nothing,Prelude.Just (-1),Prelude.Just 0,Prelude.Just 2]; maybeBools :: [Prelude.Maybe Prelude.Bool]; maybeBools = [Prelude.Nothing,Prelude.Just Prelude.False,Prelude.Just Prelude.True]; maybeLists :: [[Prelude.Maybe Prelude.Int]]; maybeLists = [[],[Prelude.Nothing],[(Prelude.Just (-1))],[(Prelude.Just (2))],[Prelude.Nothing,Prelude.Nothing],[Prelude.Nothing,(Prelude.Just (-1))],[Prelude.Nothing,(Prelude.Just (2))],[(Prelude.Just (-1)),Prelude.Nothing],[(Prelude.Just (-1)),(Prelude.Just (-1))],[(Prelude.Just (-1)),(Prelude.Just (2))],[(Prelude.Just (2)),Prelude.Nothing],[(Prelude.Just (2)),(Prelude.Just (-1))],[(Prelude.Just (2)),(Prelude.Just (2))],[Prelude.Nothing,Prelude.Nothing,Prelude.Nothing],[Prelude.Nothing,Prelude.Nothing,(Prelude.Just (-1))],[Prelude.Nothing,Prelude.Nothing,(Prelude.Just (2))],[Prelude.Nothing,(Prelude.Just (-1)),Prelude.Nothing],[Prelude.Nothing,(Prelude.Just (-1)),(Prelude.Just (-1))],[Prelude.Nothing,(Prelude.Just (-1)),(Prelude.Just (2))],[Prelude.Nothing,(Prelude.Just (2)),Prelude.Nothing],[Prelude.Nothing,(Prelude.Just (2)),(Prelude.Just (-1))],[Prelude.Nothing,(Prelude.Just (2)),(Prelude.Just (2))],[(Prelude.Just (-1)),Prelude.Nothing,Prelude.Nothing],[(Prelude.Just (-1)),Prelude.Nothing,(Prelude.Just (-1))],[(Prelude.Just (-1)),Prelude.Nothing,(Prelude.Just (2))],[(Prelude.Just (-1)),(Prelude.Just (-1)),Prelude.Nothing],[(Prelude.Just (-1)),(Prelude.Just (-1)),(Prelude.Just (-1))],[(Prelude.Just (-1)),(Prelude.Just (-1)),(Prelude.Just (2))],[(Prelude.Just (-1)),(Prelude.Just (2)),Prelude.Nothing],[(Prelude.Just (-1)),(Prelude.Just (2)),(Prelude.Just (-1))],[(Prelude.Just (-1)),(Prelude.Just (2)),(Prelude.Just (2))],[(Prelude.Just (2)),Prelude.Nothing,Prelude.Nothing],[(Prelude.Just (2)),Prelude.Nothing,(Prelude.Just (-1))],[(Prelude.Just (2)),Prelude.Nothing,(Prelude.Just (2))],[(Prelude.Just (2)),(Prelude.Just (-1)),Prelude.Nothing],[(Prelude.Just (2)),(Prelude.Just (-1)),(Prelude.Just (-1))],[(Prelude.Just (2)),(Prelude.Just (-1)),(Prelude.Just (2))],[(Prelude.Just (2)),(Prelude.Just (2)),Prelude.Nothing],[(Prelude.Just (2)),(Prelude.Just (2)),(Prelude.Just (-1))],[(Prelude.Just (2)),(Prelude.Just (2)),(Prelude.Just (2))]]; nestedMaybes :: [Prelude.Maybe (Prelude.Maybe Prelude.Int)]; nestedMaybes = Prelude.Nothing : Prelude.map Prelude.Just maybeInputs; nestedBools :: [Prelude.Maybe (Prelude.Maybe Prelude.Bool)]; nestedBools = [Prelude.Nothing,Prelude.Just Prelude.Nothing,Prelude.Just (Prelude.Just Prelude.True)]; eitherInputs :: [Prelude.Either Prelude.Int Prelude.Bool]; eitherInputs = Prelude.map Prelude.Left [-1,0,2] Prelude.++ Prelude.map Prelude.Right [Prelude.False,Prelude.True]; maybeEitherInputs :: [Prelude.Either (Prelude.Maybe Prelude.Int) (Prelude.Maybe Prelude.Bool)]; maybeEitherInputs = Prelude.map Prelude.Left maybeInputs Prelude.++ Prelude.map Prelude.Right maybeBools; foldSteps :: [Prelude.Int -> Prelude.Int -> Prelude.Int]; foldSteps = [(\\x y -> x - y),(\\x y -> 2*x + y),(\\x y -> x + 3*y)] } in Prelude.and [decMaybeEither (Candidate.generated (encMaybeEither e)) == Prelude.either (Prelude.fmap Prelude.Left) (Prelude.fmap Prelude.Right) e | e <- maybeEitherInputs])",
+        "status": "passed",
+        "replay": {
+          "directory": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\control-wrong-maybeEither_nothing",
+          "sources": [
+            {
+              "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\control-wrong-maybeEither_nothing\\Candidate.hs",
+              "sha256": "937f2bfa0222e44346839a8db23b6464c637907ecea83c074323f1c1167f1417"
+            },
+            {
+              "path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\control-wrong-maybeEither_nothing\\Main.hs",
+              "sha256": "5b4b6d22a45f72a6957d5397942f220b4219261bcda59232512e300211bdc3a4"
+            }
+          ],
+          "candidate_import_policy": "NoImplicitPrelude; native Int types only, plus exactly zero/successor for length",
+          "fully_typed_source": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\control-wrong-maybeEither_nothing\\Candidate.hs",
+          "fully_typed_source_sha256": "937f2bfa0222e44346839a8db23b6464c637907ecea83c074323f1c1167f1417",
+          "expected_pass_labels": [
+            "wrong-maybeEither_nothing"
+          ],
+          "status": "passed",
+          "compiler_exit_code": 0,
+          "executable_path": "C:\\Djex\\dist-newstyle\\priority4-live\\extended-exference-maybe-either-graph-v1\\control-wrong-maybeEither_nothing\\replay.exe",
+          "executable_sha256": "ce1248853e2ecf97704373d14790edab5e43dc5a50645964c1412587624bc272",
+          "execution_exit_code": 0,
+          "observed_pass_labels": [
+            "wrong-maybeEither_nothing"
+          ],
+          "executable_unchanged": true,
+          "sources_unchanged": true
+        }
+      }
+    ],
+    "observations": {
+      "checked": 256,
+      "passed": 0,
+      "false": 256,
+      "errors": 0,
+      "timeouts": 0
+    },
+    "same_candidate_elaboration_retries": 5,
+    "actual_false_controls_passed": 1,
+    "oracle_controls_passed": 2,
+    "new_synthesized_operations": 0
+  },
+  "type_regressions": {
+    "status": "passed",
+    "raw": {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\results.json",
+      "sha256": "60142d5f50780fcb98c63473b3ecf161921d2218bbaf86abf5522c0bc5679871",
+      "status": "passed",
+      "captures_audited": 4,
+      "captures": [
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\church.stdout.txt",
+          "sha256": "799e2fbfc0d3db6d1dfbc5a6d8698636413e551514dfb7a9680316b5817b1de9"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\church.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scopes.stdout.txt",
+          "sha256": "f9d3048c735fa4650ade1358ea15e46cbc3ed8c772b51644795a7404ef98fcc9"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scopes.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    "rows": [
+      {
+        "kind": "church",
+        "status": "passed",
+        "engines": [
+          {
+            "engine": "djinn",
+            "signatures": 350,
+            "compiler": "ExitSuccess"
+          },
+          {
+            "engine": "exference",
+            "signatures": 350,
+            "compiler": "ExitSuccess"
+          }
+        ],
+        "artifacts": {
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\church\\djinn-generated.hs": "95d241bc925a5334a93c4067f142367590d89db56d4b62c770f7965271abaf92",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\church\\djinn-ghc.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\church\\djinn-results.tsv": "0e990a8cc0717858bdae543f014ce7c872b8bb41e58dd5bb5639ef86afbe3b59",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\church\\exference-generated.hs": "673d2a6bc840b5d797465fb3b018c0749dc7fbd20f1e717b6eaa9097bae87714",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\church\\exference-ghc.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\church\\exference-results.tsv": "ec9ea8db236be553039d2de43d8570165f9760dbe12b3be8b7223f4f9e2a5420"
+        }
+      },
+      {
+        "kind": "scopes",
+        "status": "passed",
+        "engines": [
+          {
+            "engine": "djinn",
+            "queries": 50,
+            "compiler": "ExitSuccess",
+            "positive": 38,
+            "bounded_rejections": 12
+          },
+          {
+            "engine": "exference",
+            "queries": 50,
+            "compiler": "ExitSuccess",
+            "positive": 38,
+            "bounded_rejections": 12
+          }
+        ],
+        "artifacts": {
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\ScopeProviders.hs": "ef61a91b81200d1e2efeecc1c84c35d5818787b8226d1463bee014e30bb59de4",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-alternatingAmbientResults.hs": "374a7503d0319a65905bd102793d737461973b17ca3aa278795cc508488c7965",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-alternatingGlobalResults.hs": "359fc32f3e72677427eeaf5d36ea18e1877191e9701dfd30133432a792f450b0",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-alternatingMixedPolytypes.hs": "f90686f5c8dc096fecc57da6d5dc2a5539be102e3e935eccd8626d8aa7b7a16f",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-alternatingQuantifiedResults.hs": "ced9ab555aaa92c1fa57c6f148e15604864fb792a532e06663a8733699defd64",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-closedPolyvalue.hs": "a95a47544ae34d05b4f28fb87658a614067c8565bfb33be5f810828a37744e42",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-compoundAlpha.hs": "faf34afc16b346fb7c0a80135628e8fc8bf84b2fb8462e386494077c68e9dbac",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-constructAmbientPolymorphicArgument.hs": "4d4b5cbbaf1a8754339e00efe5d742030e528906b97bd78a9699384495a4c5b6",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-constructHigherKindedPolymorphicArgument.hs": "c9327963b71b4b57a2cbe1b3a923c1b20e3cec693640e058ab3374cf74d3167c",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-constructNestedDependentArgument.hs": "96af17517799431a925cc5bfe901a4247cad567a352092e280c7a8368d1c4028",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-constructNestedPolymorphicArgument.hs": "6b12cda3e4326d99e765e884c4767c5bd3990c06c6c67df3509a15088c71e349",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-constructPolymorphicArgument.hs": "56cbc8e1d657fc3c07feaa856d07f66903d01acbe15c4cfe4d810c3377ab7389",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-constructPolymorphicComposition.hs": "c1e3efad9b6f1e048dc7abcc76af8531ddb7f6fa426d063ff2062422987d2432",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-constructRepeatedBinderPolytypes.hs": "dc7b720b54cb000af568eaea4cda7da5a4cbef34d222824df2c7749e0783d6cd",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-constructTwoPolymorphicArguments.hs": "2f4264b15098f0da92aca3bc064ae430aab7282ee0be083a2455b80797002730",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-correlatedAlpha.hs": "095708dd4b8772c096ec08640144585b13e2db3a8475ce3b7e4d5ad6f9bccde6",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-delayedAmbientArgument.hs": "093dbbe848f93daccefb24bfd5638fba8b95957bda8c887169a7ff84774fbe59",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-delayedArgumentInstantiation.hs": "cc85a707885512827749a2b46e0fc99c1d7d962e4d35a1429fc94945071ff232",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-delayedGlobalAmbientArgument.hs": "cca497249c5a1cb3fa63e7b0c48fb3583f59ce91911c1a4a34babc6911c8c48e",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-delayedGlobalArgument.hs": "d8a76e382d8e1d3db7b6668303dcd1b57cfa9a5feadc572f7f43bc00a0763962",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-ghc.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-higherKindedCorrelation.hs": "63130f56221dbf2dd78c52e894790d3c3e43350feeca98d41a7aa7bfadb1d5a3",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-higherKindedSubstitution.hs": "a27c7d3e8df71669cf1ba670185e8740b52b5a0aaef843277a8c1a0cfc0a7f59",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-nestedAbstractConstructor.hs": "a5e5598d5bed2974ef296a0cba4b1c06b97f55542f88b6e555a80eae53583fdd",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-nestedAmbientResult.hs": "746cc476d0f6ed67418d8bbcadd6c3c56cf29c4d8480860485a21752fe9efc6e",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-nestedAmbientShadowing.hs": "a01d356a483f6477a17cc1122a35c0a830eb1800d98556c3f3c5b8f32421ba43",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-nestedCorrelatedAmbient.hs": "e6a158b8675418ad85006dd16aad181ec909d09b40cd72ccff4a46b81acb87c8",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-nestedCorrelatedResult.hs": "272c57441e2f8922703f91146a52c15e7e44262b4a5eed4831f572aeca881b4b",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-nestedHigherKindedAmbient.hs": "35c0094f05cde3117d3b35ec664b703b12feb162274b76a9a9c5e4c40e4f849f",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-nestedPolyResult.hs": "804dd81fc69c62193b3caafddb86593920098c49082d8d31c0217272aca40d0d",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-nestedRepeatedAmbient.hs": "c54fde1cdec1eab586aef33493e38abc8e9c82ad576a81121fd0ed49c2dbd14b",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-outerRigidCapture.hs": "ffc3d781f9577d46921b23df113b1d7c29ec3f6e20fe42524d4d7f037146b455",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-polymorphicResultAfterArgument.hs": "9abb93c3397571133c00a4b83aefdbdfa34013059de018c7ff89e301290002fb",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-polymorphicResultAfterUnit.hs": "ca38dd79e91d5b26cb07637139d81de290bdca22256507163032d447823377b9",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-results.tsv": "97998f71c3d091c5940cd19ccecce4303d3dc69d644a98f26e3ba21928ae9397",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-scopedPolyvalueForwarding.hs": "a30fab35795ec216c23582520eef08edf34ed1a2ee4f304f4899862d86b26799",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-seedLeadingGlobalBinary.hs": "3407fa8b2a2738b5bc58ced2d79d2883c226250b98453a41e71c39be1ccd3002",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-seedLeadingGlobalTernary.hs": "849789d90f8bc3e1a1a27518d837e57456f241dcc7a50359a888e8d238583893",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-shadowedCallback.hs": "2f4769d54dedc2d91511e90d2f036e8a1fe77f6d6e74ceaa1f0174925c7344f6",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-shadowedResult.hs": "8d8c35d38921db68355366edd5886b0272543dbf238073ebacebc65637b7f086",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\djinn-successiveQuantifiers.hs": "be35514f6759e05e73cd8f616a978be92bbae1918c6fc73aa83b6d57345dfb00",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-alternatingAmbientResults.hs": "9b1d39102cf321cb5f353512de1354413e6ae9dc878f7c2b94555179fc532ab1",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-alternatingGlobalResults.hs": "26339f8fe19476e557debe5fd9bde5eb5c6496c1aaa9c741fef75d1fa6dd7c76",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-alternatingMixedPolytypes.hs": "d4807f62ddbfdc9dd880a54794591613daabcbe51fecbf24e0f3767f420edbee",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-alternatingQuantifiedResults.hs": "d62aebcae4fef27b1b00edce79748d7a85fe64311401aa0acb9f92ca0c586685",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-closedPolyvalue.hs": "44889f03bf0c924063a9a1fb64f16cccf071a4f65dce44c54386963353bc0a5e",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-compoundAlpha.hs": "7fa9a26b2e273ec24d3b78daa9e783f531b7767f62eff0424d0e50feddcdf96e",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-constructAmbientPolymorphicArgument.hs": "f4383ac398c1b43e082e3f41f4ba59d98631b1b90a45b689a687c995dd096e48",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-constructHigherKindedPolymorphicArgument.hs": "d009035063a6a963737b63578ab9057737a23266b0c6201099006bc1b27b2bb1",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-constructNestedDependentArgument.hs": "076969716026c91b3861f736edfe0c528842cac8979a13c6b8601b4b0bda0d8e",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-constructNestedPolymorphicArgument.hs": "69e4b1c117dafc992b8bda8bd0b516fb27339dc5516b4a5d279b0e2c1c4b84c0",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-constructPolymorphicArgument.hs": "a6d2fec47280a2a9e5369d8a79b204fd1f40ac177ab11c373857b23f039af138",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-constructPolymorphicComposition.hs": "5eea04bd2f35167783123ca016692f65e4ea00dbc2faa474d0ef574bbc90ddfd",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-constructRepeatedBinderPolytypes.hs": "aa0b3a76daeb0dc258bac9f936b2b4524733ee2143ab76dbd103d44bec8e72ce",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-constructTwoPolymorphicArguments.hs": "57248cfe5644c4dc8d872e6aa237747fc420d92e62d9bcdbbc4f5822d40443a5",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-correlatedAlpha.hs": "15ce5b63bf5a807d9f2f6fb069a4287467264ce1865a82c70f7fec9d4b6f2fbd",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-delayedAmbientArgument.hs": "a7ae04c63502dd574c73c478c32c9fa0d80930c4f638c635fdc55a8536f49eae",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-delayedArgumentInstantiation.hs": "8d64b533d9fc98e13a8ae35cdc38aaa259601eb91c6bab8989c454f43b5912d1",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-delayedGlobalAmbientArgument.hs": "cca497249c5a1cb3fa63e7b0c48fb3583f59ce91911c1a4a34babc6911c8c48e",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-delayedGlobalArgument.hs": "d8a76e382d8e1d3db7b6668303dcd1b57cfa9a5feadc572f7f43bc00a0763962",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-ghc.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-higherKindedCorrelation.hs": "93ccec85bb62cdb60b9515239efe52e17fbc1d51f1140a67fae6ea521f691df0",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-higherKindedSubstitution.hs": "b95481aced8979b06ab5dccfe23eee1594480d4b9e107ba36bf3442eaee53e88",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-nestedAbstractConstructor.hs": "a5e5598d5bed2974ef296a0cba4b1c06b97f55542f88b6e555a80eae53583fdd",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-nestedAmbientResult.hs": "afed6239a338e92e2038ccd57ac57c759cbd208b5a1547b2c640d6a664577919",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-nestedAmbientShadowing.hs": "46a6fb810c03a27af09f55ad318d1e1794e7e6e3f10fc20297c015344bdb475a",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-nestedCorrelatedAmbient.hs": "c8286d9bd54d055fd73caf6f47714cb39e790cff2373522aa25ad48f22d27445",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-nestedCorrelatedResult.hs": "a6ccdb72b566a39552979bc334c38224aa7418c3c608e7a6f4099377b2d7a73e",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-nestedHigherKindedAmbient.hs": "69ec05ca6fb7eb467b86de5c13e7691421ee48bf3ab55300d27d405b8c3343b6",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-nestedPolyResult.hs": "b77ff38dd7ab6e8060dc75b855d3f7c56cbad77390e508480adb57c6b33a1737",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-nestedRepeatedAmbient.hs": "fb8c73679c3c1b4d4f2578a18138ad5c2bb86b63dbeb2c8a7cdf0ae1f3970dfd",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-outerRigidCapture.hs": "2b48dfdbd3f2b5ac021f3c7c6d519ce33e23be86a3f4505c97d1ae84bf455fa1",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-polymorphicResultAfterArgument.hs": "70bc7a8eb8f9c78c2b055a700b3059198e1d2aa6aa9743b04d5fb7e940bd098e",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-polymorphicResultAfterUnit.hs": "412e08aa304673d9d6716f7d0a5a9ad71f86846c6b9d0ddbac38376310b1b45b",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-results.tsv": "97998f71c3d091c5940cd19ccecce4303d3dc69d644a98f26e3ba21928ae9397",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-scopedPolyvalueForwarding.hs": "3e177ac9a4ad957025c661552c4afb7af762b19cd3360e1718243f0bd9ec3e14",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-seedLeadingGlobalBinary.hs": "b460d6b48d8b5cf140cbc646606834c1bc00a76ccf3069d3751133d57cf62f37",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-seedLeadingGlobalTernary.hs": "de841c655fff5e3d7d2577c76f0296c9828ab5c1059fae9397b2e02da453d3e2",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-shadowedCallback.hs": "a55c1849ac437a0e51fe5215438cf47c501bfdaddca94fa1b065ae7a05aafcf9",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-shadowedResult.hs": "c5eba7375cac7e3bd61486fb200c9dc340556686d106d4a80b153b9aea9ed8b2",
+          "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-corpus-v1\\scope-work\\test-church\\results\\scopes\\exference-successiveQuantifiers.hs": "aa5c93784641eee91283d46aaed80457bd4a7eaed29f96561896f064fd932710"
+        }
+      }
+    ],
+    "church_signatures_per_engine": 350,
+    "scope_queries_per_engine": 50,
+    "evidence": "type inhabitation and bounded scope checks; not behavioral coverage"
+  },
+  "failure_history": [
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\results.json",
+      "sha256": "1e11eec5e1382464c0a870c9a3bd601691d4478b7febc3d2595688b8875b6826",
+      "status": "failed",
+      "captures_audited": 44,
+      "captures": [
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\exference-engine-tests-inventory.stdout.txt",
+          "sha256": "0d5e28b033db7d1f51033c4fc2004f76fb5a1d07f5821c0e078fe7068803e41f"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\exference-engine-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\exference-engine-tests.stdout.txt",
+          "sha256": "1595f0cd307efd9c40ed16b0600329bfb218c9cba33dd544d175a6ecba9c578a"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\exference-engine-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\exference-tests-inventory.stdout.txt",
+          "sha256": "06820ceb5fba458404a44ecdd394047fe2b4630bed57effd465b987da631e9af"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\exference-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\exference-tests.stdout.txt",
+          "sha256": "f874579297c55037aab1170a8d2ff37f85a8c32fd3295191969f136fa75aeae9"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\exference-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\synthesis-length-tests-inventory.stdout.txt",
+          "sha256": "77c86e786283d9c1d8e4b66feae39afbeb10f5a143f7e56deed322d1898b9c2d"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\synthesis-length-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\synthesis-length-tests.stdout.txt",
+          "sha256": "fc22e90ec9839c58d24ecd044721531952339f62b16d55df5177393962d99d53"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\synthesis-length-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\djex-tests-inventory.stdout.txt",
+          "sha256": "f8f1fd0fed5bdeb1ee58377ad2a772b87e3c15f96d831eccfe885207c6ee8d59"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\djex-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\djex-tests.stdout.txt",
+          "sha256": "57b9c78c5e6d71812e529384004f2131f6794506273cc2ec6b52dbcad6f39798"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\djex-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\djex-api-tests-inventory.stdout.txt",
+          "sha256": "27826718befb26f2596139e05a175147607db5b6c515b049957dd2b2e9937857"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\djex-api-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\djex-api-tests.stdout.txt",
+          "sha256": "33fd29db99d0f4f656979735449eea5e909ffd765b8fb5c8b8bbebd85ee05e03"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\djex-api-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\djex-cli-tests-inventory.stdout.txt",
+          "sha256": "c9b5fb4589c28f10939e4a2e2d90cc2e089be07c9ae2384366c47e4656cf6a9d"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\djex-cli-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\djex-cli-tests.stdout.txt",
+          "sha256": "8feadaf43f180e22cde51bc8b6373df7817193e9a8fe19e51855886c15b0b8d7"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\djex-cli-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\exference-frontend-api-tests-inventory.stdout.txt",
+          "sha256": "c6138f03ba375340462cf1f2e359df790c1dc97a89e821f513c6aca9fe09db9e"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\exference-frontend-api-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\exference-frontend-api-tests.stdout.txt",
+          "sha256": "8a40ff4dada319f1a163be5015c8a6efea54baf41c1a572433fd8bcb5d21eb04"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\exference-frontend-api-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\exference-cli-tests-inventory.stdout.txt",
+          "sha256": "586a9725e0156c49c870312e5e4a749b059d3a8b2ab12312b80cdb6aa3bad8ba"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\exference-cli-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\exference-cli-tests.stdout.txt",
+          "sha256": "48f5ff3b4cc69d328ee02b2401cc9b10d1d21b6de764fd505838b0e4b4cad67d"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\exference-cli-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\synthesis-tests-inventory.stdout.txt",
+          "sha256": "1381baa01ce80230fbb5cd13db336ddd15c024ca03f637d9c43a12671cc98581"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\synthesis-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\synthesis-tests.stdout.txt",
+          "sha256": "d0874908ce49e2d0bfa4a949df5f5b42f243eda9115da7aba65e604ebd247ff7"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\synthesis-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\synthesis-certificate-tests-inventory.stdout.txt",
+          "sha256": "8ed23698ecdaf6c07120e79b9c20dfafdedcd685d325e41dec7a13951697bd8a"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\synthesis-certificate-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\synthesis-certificate-tests.stdout.txt",
+          "sha256": "bbb48fa8c6f93a39f9ebb8bfa00f8514ad34b7358910c83aef94df8cfb2b0345"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\synthesis-certificate-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\synthesis-term-graph-fingerprint-tests-inventory.stdout.txt",
+          "sha256": "b7f569d92eda8986b5c22a1c5cb55e5c74c30b4dab3b64d9d1ed20810ecd7682"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\synthesis-term-graph-fingerprint-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\synthesis-term-graph-fingerprint-tests.stdout.txt",
+          "sha256": "500624414b3e9260822ce425526f208e5c1dd57c51cb52d777d707abe728b0ed"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v1\\synthesis-term-graph-fingerprint-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "rows": [
+        {
+          "suite": "exference-engine-tests",
+          "status": "failed",
+          "inventory_count": 76,
+          "failure": "ValueError: complete passing summary does not match actual inventory"
+        },
+        {
+          "suite": "exference-tests",
+          "status": "passed",
+          "inventory_count": 513,
+          "passed_count": 513,
+          "seconds": 2.69
+        },
+        {
+          "suite": "synthesis-length-tests",
+          "status": "failed",
+          "inventory_count": 436,
+          "failure": "ValueError: complete passing summary does not match actual inventory"
+        },
+        {
+          "suite": "djex-tests",
+          "status": "failed",
+          "inventory_count": 147,
+          "failure": "ValueError: complete passing summary does not match actual inventory"
+        },
+        {
+          "suite": "djex-api-tests",
+          "status": "failed",
+          "inventory_count": 38,
+          "failure": "ValueError: complete passing summary does not match actual inventory"
+        },
+        {
+          "suite": "djex-cli-tests",
+          "status": "failed",
+          "inventory_count": 101,
+          "failure": "ValueError: complete passing summary does not match actual inventory"
+        },
+        {
+          "suite": "exference-frontend-api-tests",
+          "status": "passed",
+          "inventory_count": 4,
+          "passed_count": 4,
+          "seconds": 0.0
+        },
+        {
+          "suite": "exference-cli-tests",
+          "status": "failed",
+          "inventory_count": 25,
+          "failure": "ValueError: complete passing summary does not match actual inventory"
+        },
+        {
+          "suite": "synthesis-tests",
+          "status": "passed",
+          "inventory_count": 502,
+          "passed_count": 502,
+          "seconds": 0.22
+        },
+        {
+          "suite": "synthesis-certificate-tests",
+          "status": "passed",
+          "inventory_count": 94,
+          "passed_count": 94,
+          "seconds": 0.02
+        },
+        {
+          "suite": "synthesis-term-graph-fingerprint-tests",
+          "status": "passed",
+          "inventory_count": 10,
+          "passed_count": 10,
+          "seconds": 0.01
+        }
+      ]
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\results.json",
+      "sha256": "01e91578fbe0c9575056c62e6d7f039d2db877af1d48f5115b6331e82abdcc57",
+      "status": "failed",
+      "captures_audited": 52,
+      "captures": [
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\exference-engine-tests-inventory.stdout.txt",
+          "sha256": "cd5d06adf6beeaadf4ce4cdca70f428677bf930b7d5c3521dbdba784524673e7"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\exference-engine-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\exference-engine-tests.stdout.txt",
+          "sha256": "06855819d30e18b752f7a2396c4393f07a6dace36ea243b63ec81b0fad912d4a"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\exference-engine-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\exference-tests-inventory.stdout.txt",
+          "sha256": "06820ceb5fba458404a44ecdd394047fe2b4630bed57effd465b987da631e9af"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\exference-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\exference-tests.stdout.txt",
+          "sha256": "f381546322327653e11cc11cb11bb78e366740febd091093ebebccc2e3f3e48f"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\exference-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\synthesis-length-tests-inventory.stdout.txt",
+          "sha256": "77c86e786283d9c1d8e4b66feae39afbeb10f5a143f7e56deed322d1898b9c2d"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\synthesis-length-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\synthesis-length-tests.stdout.txt",
+          "sha256": "e899d911c7510dd2bfff54f7a231010eef3b1744039b4654502bc4c307cce4ad"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\synthesis-length-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djex-tests-inventory.stdout.txt",
+          "sha256": "f8f1fd0fed5bdeb1ee58377ad2a772b87e3c15f96d831eccfe885207c6ee8d59"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djex-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djex-tests.stdout.txt",
+          "sha256": "34f197188e38d440bf7b37477be71e8d4d515d80e184f607de5f6e99010f9ebd"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djex-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djex-api-tests-inventory.stdout.txt",
+          "sha256": "27826718befb26f2596139e05a175147607db5b6c515b049957dd2b2e9937857"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djex-api-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djex-api-tests.stdout.txt",
+          "sha256": "0e71844af9ec5c98d8901004460f11671aae906c1e5914298b6dba2d949a2969"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djex-api-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djex-cli-tests-inventory.stdout.txt",
+          "sha256": "c9b5fb4589c28f10939e4a2e2d90cc2e089be07c9ae2384366c47e4656cf6a9d"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djex-cli-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djex-cli-tests.stdout.txt",
+          "sha256": "7d571472dc30b1f8af0fab86c128bb4b46d4d7d5fee3a866815728710ec195ea"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djex-cli-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\exference-frontend-api-tests-inventory.stdout.txt",
+          "sha256": "c6138f03ba375340462cf1f2e359df790c1dc97a89e821f513c6aca9fe09db9e"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\exference-frontend-api-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\exference-frontend-api-tests.stdout.txt",
+          "sha256": "8a40ff4dada319f1a163be5015c8a6efea54baf41c1a572433fd8bcb5d21eb04"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\exference-frontend-api-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\exference-cli-tests-inventory.stdout.txt",
+          "sha256": "586a9725e0156c49c870312e5e4a749b059d3a8b2ab12312b80cdb6aa3bad8ba"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\exference-cli-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\exference-cli-tests.stdout.txt",
+          "sha256": "60a5610e1d90f306ea8e3be47910a5065380f115eb6680b5406b59d75098f42d"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\exference-cli-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\synthesis-tests-inventory.stdout.txt",
+          "sha256": "fffdbab977ee0725555109b93309ef1370388f4da523f8c2a4fe5d1436651893"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\synthesis-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\synthesis-tests.stdout.txt",
+          "sha256": "0810afd3988925d1913948444c9dd33f7a7a37d40eda661b5e9e2b9c18eace49"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\synthesis-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\synthesis-certificate-tests-inventory.stdout.txt",
+          "sha256": "8ed23698ecdaf6c07120e79b9c20dfafdedcd685d325e41dec7a13951697bd8a"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\synthesis-certificate-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\synthesis-certificate-tests.stdout.txt",
+          "sha256": "bbb48fa8c6f93a39f9ebb8bfa00f8514ad34b7358910c83aef94df8cfb2b0345"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\synthesis-certificate-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\synthesis-term-graph-fingerprint-tests-inventory.stdout.txt",
+          "sha256": "2af2d953a1a52f8021b2764e076755cca92e8447cdfea8938f3513aa732c8a67"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\synthesis-term-graph-fingerprint-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\synthesis-term-graph-fingerprint-tests.stdout.txt",
+          "sha256": "ef3ff07513d5dd66886e94ec11f7d1035e49cea1f52855a415b1dd6154a81559"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\synthesis-term-graph-fingerprint-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djinn-source-graph-tests-inventory.stdout.txt",
+          "sha256": "ebdc71f2096593587f885dd6bb2cec56d44c98bf7802d5ce6bcf02c0a891ba94"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djinn-source-graph-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djinn-source-graph-tests.stdout.txt",
+          "sha256": "7565b99762fc2e39a4276b181a1a542e020b1a369f6384250b46939d702abdbe"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djinn-source-graph-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djinn-source-graph-private-tests-inventory.stdout.txt",
+          "sha256": "17a70484c72aa9133301f247609ac4c7c7f062c2ae67e35287349ec72f8b4ef6"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djinn-source-graph-private-tests-inventory.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djinn-source-graph-private-tests.stdout.txt",
+          "sha256": "4eb6929c3448deaf436b5881238402a968f077fba110b4ae6aa5a47d87819297"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-suites-v2\\djinn-source-graph-private-tests.stderr.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "rows": [
+        {
+          "suite": "exference-engine-tests",
+          "status": "failed",
+          "inventory_count": 80,
+          "failure": "ValueError: complete passing summary does not match actual inventory"
+        },
+        {
+          "suite": "exference-tests",
+          "status": "passed",
+          "inventory_count": 513,
+          "passed_count": 513,
+          "seconds": 1.76
+        },
+        {
+          "suite": "synthesis-length-tests",
+          "status": "passed",
+          "inventory_count": 436,
+          "passed_count": 436,
+          "seconds": 56.05
+        },
+        {
+          "suite": "djex-tests",
+          "status": "passed",
+          "inventory_count": 147,
+          "passed_count": 147,
+          "seconds": 121.28
+        },
+        {
+          "suite": "djex-api-tests",
+          "status": "failed",
+          "inventory_count": 38,
+          "failure": "ValueError: complete passing summary does not match actual inventory"
+        },
+        {
+          "suite": "djex-cli-tests",
+          "status": "passed",
+          "inventory_count": 101,
+          "passed_count": 101,
+          "seconds": 118.74
+        },
+        {
+          "suite": "exference-frontend-api-tests",
+          "status": "passed",
+          "inventory_count": 4,
+          "passed_count": 4,
+          "seconds": 0.0
+        },
+        {
+          "suite": "exference-cli-tests",
+          "status": "passed",
+          "inventory_count": 25,
+          "passed_count": 25,
+          "seconds": 2.7
+        },
+        {
+          "suite": "synthesis-tests",
+          "status": "passed",
+          "inventory_count": 503,
+          "passed_count": 503,
+          "seconds": 0.17
+        },
+        {
+          "suite": "synthesis-certificate-tests",
+          "status": "passed",
+          "inventory_count": 94,
+          "passed_count": 94,
+          "seconds": 0.02
+        },
+        {
+          "suite": "synthesis-term-graph-fingerprint-tests",
+          "status": "passed",
+          "inventory_count": 11,
+          "passed_count": 11,
+          "seconds": 0.0
+        },
+        {
+          "suite": "djinn-source-graph-tests",
+          "status": "passed",
+          "inventory_count": 59,
+          "passed_count": 59,
+          "seconds": 0.34
+        },
+        {
+          "suite": "djinn-source-graph-private-tests",
+          "status": "passed",
+          "inventory_count": 106,
+          "passed_count": 106,
+          "seconds": 0.03
+        }
+      ]
+    },
+    {
+      "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-witness-v1\\results.json",
+      "sha256": "0e80ec243f9d765c368479dd85aebf806fbff47c2cfc09df1e87998e6ac99e26",
+      "status": "failed",
+      "captures_audited": 2,
+      "captures": [
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-witness-v1\\maybe-either-probe-compile.stdout.txt",
+          "sha256": "446a37dd971927db9296be502b88d9be72d1e21e7426a31c647a08050c7f8fcf"
+        },
+        {
+          "path": "C:\\Djex\\dist-newstyle\\priority4-live\\exference-graph-witness-v1\\maybe-either-probe-compile.stderr.txt",
+          "sha256": "ff83966c7e940f77d0c983bf386779af2a0bf5c9b75cffa627b6836769b16185"
+        }
+      ],
+      "rows": [
+        {
+          "kind": "exact source-witness graph/typed-rendering/GHC predicate replay",
+          "status": "failed",
+          "failure": "RuntimeError: maybe-either-probe-compile failed with exit 1"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    "Final source and helper bytes freshly rehashed before receipt creation.",
+    "Historical captures freshly rehashed; historical executable files are not relabeled as current.",
+    "Exact supplied witness acceptance does not establish search delivery.",
+    "All thirteen extended and nineteen defaulted operations remain required across the full engine matrix."
+  ]
+}

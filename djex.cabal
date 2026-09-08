@@ -731,6 +731,8 @@ Test-Suite exference-engine-tests
     exference/src-core
     synthesis/internal
   Other-Modules:
+    NestedForallGraphSpec
+    ImplicitConstructorGraphSpec
     GivenEvidenceSpec
     Language.Haskell.Exference.Core.Candidate
     Language.Haskell.Exference.Core.ConstraintSolver

@@ -421,6 +421,32 @@ erasedForallTests = testGroup "erased forall graph evidence"
         Right graph -> pure graph
       Typed.eraseTermGraph graph @?= Lambda [Bind (1 :: Int), Bind 0] (Local 0)
       Typed.typedGraphProjectedNodes (Typed.termGraphMetrics graph) @?= 4
+  , testCase "preserve exact source lambda boundaries through erased forall and resealing" $ do
+      let source = arrow unit poly
+          graphSource = Typed.TermGraphSource (nid 3) $
+            (nid 3, node source $ Typed.TypedLambda [bind 3 1 unit] (nid 0))
+              : Typed.termGraphSourceNodes (identitySource rigid)
+          exactLimits = right $ Typed.mkTermGraphLimits 4 3 2 32 4 5
+          shortLimits = right $ Typed.mkTermGraphLimits 4 3 2 32 4 4
+          preserve = Typed.sealTermGraphWithProjection Typed.PreserveLambdaBoundaries
+            structure
+      graph <- case preserve exactLimits graphSource of
+        Left failure -> assertFailure (show failure) >> fail "unreachable"
+        Right graph -> pure graph
+      Typed.eraseTermGraph graph @?=
+        Lambda [Bind (1 :: Int)] (Lambda [Bind 0] $ Local 0)
+      Typed.typedGraphProjectedNodes (Typed.termGraphMetrics graph) @?= 5
+      let refuse label result = case result of
+            Left Typed.TermGraphProjectionLimitExceeded{} -> pure ()
+            other -> assertFailure $ label ++ show other
+      refuse "initial source grouping undercharged: " $ preserve shortLimits graphSource
+      refuse "fresh resealing changed source grouping: " $
+        Typed.resealTermGraph structure shortLimits graph
+      case Typed.resealTermGraph structure exactLimits graph of
+        Left failure -> assertFailure $ show failure
+        Right resealed -> do
+          Typed.eraseTermGraph resealed @?= Typed.eraseTermGraph graph
+          Typed.termGraphMetrics resealed @?= Typed.termGraphMetrics graph
   , testCase "do not erase class constraints without dictionary evidence" $ do
       let constrained = SharedType.ForallType [bound]
             [Constraint (right $ parseName "Eq") [variable bound]]

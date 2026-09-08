@@ -4,7 +4,7 @@
 module Main (main) where
 
 import Data.Maybe (fromMaybe)
-import Control.Monad (void, when)
+import Control.Monad (forM_, void, when)
 import Control.Concurrent (forkIO, myThreadId, threadDelay, throwTo)
 import Control.Concurrent.MVar
   ( newEmptyMVar
@@ -4934,6 +4934,81 @@ candidateProblemTests = testGroup "typed candidate behavioral problems"
       LengthProblem.checkedLengthCandidateResult
           (LengthProblem.checkedLengthProblemCandidate freshProblem) @?=
         Length.LengthVariable (Length.LengthInput 0)
+  , testCase "accept exact closed root openings without weakening legacy rigid openings" $ do
+      session <- adversarialLengthSession [] []
+      let sourceSpine = adversarialListOf $ TypeVariable $ FlexibleVariable "source"
+          target = FunctionType sourceSpine sourceSpine
+          openedSpine = adversarialListOf $ TypeVariable $ RigidVariable "legacy-open"
+      contract <- adversarialLengthContract session target identityLengthContract
+      opened <- sealAdversarialGraph $ adversarialIdentityGraphSource openedSpine
+      closed <- adversarialQuantifiedIdentityGraph
+      mapM_ (\graph -> do
+        problem <- expectRight $ LengthProblem.sealLengthTypedCandidateProblem
+          LengthProblem.defaultLengthProblemLimits session contract
+          $ adversarialTypedCandidate $ Right graph
+        LengthProblem.checkedLengthCandidateResult
+            (LengthProblem.checkedLengthProblemCandidate problem) @?=
+          Length.LengthVariable (Length.LengthInput 0)) [opened, closed]
+      Djex.eraseTermGraph closed @?= Djex.eraseTermGraph opened
+  , testCase "closed roots use canonical source binder order and existing forall layer" $ do
+      session <- adversarialLengthSession [] []
+      let firstBinder = FlexibleVariable "canonical-a"
+          secondBinder = FlexibleVariable "canonical-b"
+          firstSpine = adversarialListOf $ TypeVariable firstBinder
+          secondSpine = adversarialListOf $ TypeVariable secondBinder
+          body = FunctionType secondSpine $ FunctionType firstSpine secondSpine
+          targets = [body, ForallType [secondBinder] [] body]
+      (opened, closed) <- adversarialCanonicalFirstGraphs
+      Djex.eraseTermGraph closed @?= Djex.eraseTermGraph opened
+      forM_ targets $ \target -> do
+        contract <- adversarialLengthContract session target identityLengthContract
+        -- Contract preparation retains these identities and the existing
+        -- forall layer; it does not canonicalize the target's binder order.
+        Length.checkedLengthContractTarget contract @?= target
+        forM_ [opened, closed] $ \graph -> do
+          problem <- expectRight $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session contract
+            $ adversarialTypedCandidate $ Right graph
+          LengthProblem.checkedLengthCandidateResult
+              (LengthProblem.checkedLengthProblemCandidate problem) @?=
+            Length.LengthVariable (Length.LengthInput 0)
+  , testCase "reject a closed root with different quantified correlation" $ do
+      session <- adversarialLengthSession [] []
+      let first = adversarialListOf $ TypeVariable $ FlexibleVariable "source-first"
+          second = adversarialListOf $ TypeVariable $ FlexibleVariable "source-second"
+      contract <- adversarialLengthContract session
+        (FunctionType first second) trivialLengthContract
+      closed <- adversarialQuantifiedIdentityGraph
+      assertLeft
+        (LengthProblem.LengthProblemRootOpeningRejected
+          LengthProblem.LengthRootOpeningShapeMismatch)
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session contract
+            $ adversarialTypedCandidate $ Right closed
+  , testCase "closed root equality retains source class constraints" $ do
+      session <- adversarialLengthSession [] []
+      className <- expectName "Fixture.RootConstraint"
+      providerName <- expectName "Fixture.QualifiedIdentity"
+      let spine = adversarialListOf $ TypeVariable $ FlexibleVariable "source"
+          bound = FlexibleVariable "qualified-source"
+          boundType = TypeVariable bound
+          boundSpine = adversarialListOf boundType
+          qualifiedType = ForallType [bound] [Constraint className [boundType]]
+            $ FunctionType boundSpine boundSpine
+      contract <- adversarialLengthContract session
+        (FunctionType spine spine) identityLengthContract
+      -- A global root reaches the root matcher without the earlier rejection
+      -- of dictionary-introduction nodes. Missing provider-law authority is a
+      -- later boundary and must not mask this exact source-type mismatch.
+      qualified <- sealAdversarialGraph $ Djex.TermGraphSource (Djex.termNodeId 0)
+        [(Djex.termNodeId 0, Djex.TermNode qualifiedType
+          $ Djex.TypedGlobal (Djex.occurrenceId 0) providerName)]
+      assertLeft
+        (LengthProblem.LengthProblemRootOpeningRejected
+          LengthProblem.LengthRootOpeningShapeMismatch)
+        $ LengthProblem.sealLengthTypedCandidateProblem
+            LengthProblem.defaultLengthProblemLimits session contract
+            $ adversarialTypedCandidate $ Right qualified
   , testCase "interpret an inventory-owned zero-arity provider" $ do
       providerName <- expectName "Fixture.zeroArityLengthProvider"
       let providerScheme = adversarialClosedList
@@ -16030,6 +16105,73 @@ adversarialVisibleProviderProblem providerName providerScheme selected result
     LengthProblem.defaultLengthProblemLimits session contract
     $ adversarialTypedCandidate $ Right graph
 
+-- The canonical source order is a,b, while occurrences are b,a,b. Both
+-- forall witnesses retain their exact bodies; the shared sealer checks the
+-- selected rigids and scope before the production Length consumer sees them.
+adversarialCanonicalFirstGraphs :: IO (AdversarialGraph, AdversarialGraph)
+adversarialCanonicalFirstGraphs = do
+  let a = FlexibleVariable "canonical-a"
+      b = FlexibleVariable "canonical-b"
+      selectedA = TypeVariable $ RigidVariable "canonical-open-a"
+      selectedB = TypeVariable $ RigidVariable "canonical-open-b"
+      sourceA = adversarialListOf $ TypeVariable a
+      sourceB = adversarialListOf $ TypeVariable b
+      openedA = adversarialListOf selectedA
+      openedB = adversarialListOf selectedB
+      sourceBody = FunctionType sourceB $ FunctionType sourceA sourceB
+      source = ForallType [a, b] [] sourceBody
+      afterFirst = ForallType [b] [] $
+        FunctionType sourceB $ FunctionType openedA sourceB
+      openedBody = FunctionType openedB $ FunctionType openedA openedB
+      bodyNodes =
+        [ (Djex.termNodeId 0, Djex.TermNode openedB $
+            Djex.TypedLocal (Djex.occurrenceId 0) 0)
+        , (Djex.termNodeId 1, Djex.TermNode openedBody $
+            Djex.TypedLambda
+              [ Djex.TypedPattern (Djex.occurrenceId 1) openedB $ Djex.TypedBind 0
+              , Djex.TypedPattern (Djex.occurrenceId 2) openedA Djex.TypedWildcard
+              ] (Djex.termNodeId 0))
+        ]
+      sourceNodes = bodyNodes ++
+        [ (Djex.termNodeId 2, Djex.TermNode afterFirst $
+            Djex.TypedForallIntroduction (Djex.occurrenceId 3) (Djex.termNodeId 1) $
+              Djex.ForallIntroductionWitness afterFirst selectedB openedBody)
+        , (Djex.termNodeId 3, Djex.TermNode source $
+            Djex.TypedForallIntroduction (Djex.occurrenceId 4) (Djex.termNodeId 2) $
+              Djex.ForallIntroductionWitness source selectedA afterFirst)
+        ]
+  opened <- sealAdversarialGraph $ Djex.TermGraphSource (Djex.termNodeId 1) bodyNodes
+  closed <- expectRight $ Djex.sealTermGraph
+    (Djex.sharedTypeStructure
+      { Djex.forallTypeStructure = Just Djex.sharedForallTypeStructure })
+    Djex.defaultTermGraphLimits $ Djex.TermGraphSource (Djex.termNodeId 3) sourceNodes
+  pure (opened, closed)
+
+
+-- A complete independently sealed graph, including the source forall and its
+-- exact opened body. This does not bypass the production root-opening matcher.
+adversarialQuantifiedIdentityGraph :: IO AdversarialGraph
+adversarialQuantifiedIdentityGraph = do
+  let binder = FlexibleVariable "closed-root-source"
+      selected = RigidVariable "closed-root-selected"
+      sourceElement = TypeVariable binder
+      selectedElement = TypeVariable selected
+      sourceSpine = adversarialListOf sourceElement
+      selectedSpine = adversarialListOf selectedElement
+      sourceBody = FunctionType sourceSpine sourceSpine
+      selectedBody = FunctionType selectedSpine selectedSpine
+      source = ForallType [binder] [] sourceBody
+      bodyNodes = Djex.termGraphSourceNodes
+        $ adversarialIdentityGraphSource selectedSpine
+      graphSource = Djex.TermGraphSource (Djex.termNodeId 2)
+        $ bodyNodes ++
+          [(Djex.termNodeId 2, Djex.TermNode source
+            $ Djex.TypedForallIntroduction (Djex.occurrenceId 2) (Djex.termNodeId 1)
+                (Djex.ForallIntroductionWitness source selectedElement selectedBody))]
+  expectRight $ Djex.sealTermGraph
+    (Djex.sharedTypeStructure
+      { Djex.forallTypeStructure = Just Djex.sharedForallTypeStructure })
+    Djex.defaultTermGraphLimits graphSource
 adversarialIdentityGraphSource
   :: AdversarialType
   -> Djex.TermGraphSource AdversarialType AdversarialLocal

@@ -7,7 +7,7 @@ import CLIAssertions
   )
 import Control.Exception (bracket)
 import Control.Monad (forM_)
-import Data.List (isInfixOf, isPrefixOf)
+import Data.List (isInfixOf, isPrefixOf, stripPrefix)
 import System.Directory
   (createDirectory, getTemporaryDirectory, removeFile, removePathForcibly)
 import System.Exit (ExitCode (..))
@@ -93,8 +93,17 @@ testIdentity = do
   -- The environment-free simplifier deliberately keeps the checked lambda
   -- instead of assuming that an unqualified Prelude.id is available.
   assertContains "identity should be synthesized" "\\a -> a" output
-  assertContains "candidate metrics should describe the emitted queue state"
-    "(depth 0.42000000000000004, 3 steps, 152 final queue size)" output
+  -- Check the emitted metric's value and label, without pinning the queue size
+  -- to one version of the shipped provider inventory.
+  case [ suffix
+       | line <- lines output
+       , Just suffix <- [stripPrefix
+           "(depth 0.42000000000000004, 3 steps, " (dropWhile (== ' ') line)]
+       ] of
+    [suffix] -> case reads suffix :: [(Int, String)] of
+      [(size, " final queue size)")] | size > 0 -> pure ()
+      _ -> fail $ "invalid final queue-size metric: " ++ show suffix
+    metrics -> fail $ "expected one candidate metric: " ++ show metrics ++ output
   assertBool "a final queue size must not be reported as a historical maximum"
     (not $ "max pqueue size" `isInfixOf` output)
   assertBool "the adapter's internal clause target must stay hidden"

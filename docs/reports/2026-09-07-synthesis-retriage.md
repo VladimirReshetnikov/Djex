@@ -16,7 +16,7 @@ is complete. Priorities 2–4 retain their original requirements.
 
 | Order | Delivery | Required acceptance |
 | --- | --- | --- |
-| 1 | Complete expanded Church behavior and its concrete failures | Both Haskell engines accept 12/13 extended operations from separate batches; maybeEither remains missing. Close the observed graph/elaboration and fixture gates, then all 19 explicit-default counterparts and remaining Lean cells. Preserve exact providers, actual False controls, full-signature replay and per-cell limits. |
+| 1 | Complete expanded Church behavior and its concrete failures | Both Haskell engines accept 12/13 extended operations from separate batches; maybeEither remains missing. Exference's repaired graph route now compiles all 256 candidates, but every candidate is false. Diagnose construction and ordering next, then all 19 explicit-default counterparts and remaining Lean cells. Preserve exact providers, actual False controls, full-signature replay and per-cell limits. |
 | 2 | Broaden supplied-fold acceptance after the native verification repair | Exact empty-user-root reuse now passes native Djinn append/length, lifecycle isolation/reset/recovery and the complete 686-test suite. Continue the remaining engine and supplied tree-fold/accumulator cases with exact provider inventories, full-signature behavior and termination-checked replay. Keep existing bounds and failure classifications. |
 | 3 | Admit one described global contextual provider | Extend the existing `Type 0` route with one fully described global provider while retaining the current non-overlap guard. Preserve complete source metadata, exact owned graph/renderer evidence and payload-sensitive replay; do not broaden instances or universes as part of this increment. |
 | 4 | Preserve selected dictionary identity before relaxing overlap guards | Carry the selected introduction occurrence and ordered slot through lowering and reconstruction. Require a forced equal-predicate outer/inner fixture whose faithful scoped capture preserves distinct payload behavior in Haskell and Lean replay. Graph IDs or successful compilation alone are insufficient. Methods, superclass evidence and further provider schemes remain separate extensions. |
@@ -33,6 +33,15 @@ The 2026-09-08 coverage update uses separate receipt boundaries. The latest
 failed batches make concrete behavioral failures the next delivery gate; this
 supersedes the earlier native-fold-first order. Independent preparation can
 continue in parallel while heavy execution stays serialized.
+
+The [forall-graph increment](2026-09-08-exference-forall-graphs.md) separates
+two remaining concerns. A supplied, provider-free `maybeEither` witness now
+passes exact graph construction, typed rendering and GHC replay of the
+original predicate. A fresh public query at the original window still misses:
+256 false, zero errors and zero timeouts, including five successful
+same-candidate compilation repairs. This adds no behavioral coverage. Candidate
+construction and ordering are the next diagnostic targets; a larger default
+window is not the acceptance criterion.
 
 The [contextual acceptance receipt](https://github.com/VladimirReshetnikov/Leant/blob/469a822da0abfdc7a4d8228a203af0a0b7d2b59b/test-context/receipts/ordinary-context-streaming.json) records a **fresh complete 39/39
 public matrix**: 18 exact displayed outputs with full-type replay, 72 finite

@@ -126,3 +126,4 @@ Reports are listed oldest first.
 - 2026-09-07 — [Synthesis re-triage after the Haskell elaboration checkpoint](2026-09-07-synthesis-retriage.md)
 
 - 2026-09-08 — [Expanded Church behavioral coverage and remaining delivery gates](2026-09-07-priority4-behavioral-coverage.md)
+- 2026-09-08 — [Exference forall graphs, constructor schemes and exact projection](2026-09-08-exference-forall-graphs.md)

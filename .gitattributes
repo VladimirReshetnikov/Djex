@@ -1,4 +1,5 @@
 # These acceptance receipts retain exact raw-byte SHA-256 identities.
 test-church/receipts/priority4-*.json -text whitespace=cr-at-eol
+test-church/receipts/priority4-exference-forall-witness/* -text whitespace=cr-at-eol
 test-church/receipts/haskell-djinn-first-six.json -text whitespace=cr-at-eol
 test-church/receipts/haskell-exference-first-13-and-partial-four.json -text whitespace=cr-at-eol

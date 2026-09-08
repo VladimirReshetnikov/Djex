@@ -81,8 +81,12 @@ module Language.Haskell.Synthesis.TypedGenerated
   , TermGraphError (..)
   , TypedGraphMetrics (..)
   , TermGraph
+  , TermGraphProjectionStyle (..)
   , sealTermGraph
+  , sealTermGraphWithProjection
   , sealTermGraphWithContext
+  , sealTermGraphWithContextAndProjection
+  , resealTermGraph
   , termGraphRoot
   , termGraphNodes
   , lookupTermNode
@@ -767,9 +771,20 @@ instance Semigroup TypedGraphMetrics where
 instance Monoid TypedGraphMetrics where
   mempty = TypedGraphMetrics 0 0 0 0 0 0 0 0 0 0 0 0 0 0
 
+-- | Source syntax policy for lambda groups separated by erased evidence.
+-- It changes no typing or scope authority. Ordinary adjacent lambda nodes
+-- keep their exact grouping under both policies.
+data TermGraphProjectionStyle
+  = MergeLambdaGroupsAcrossEvidence
+  | PreserveLambdaBoundaries
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData TermGraphProjectionStyle
+
 -- | A sealed finite graph and its checked one-way compatibility projection.
 -- The constructor is private so these views cannot drift apart.
 data TermGraph ty local = TermGraph
+  !TermGraphProjectionStyle
   !TermNodeId
   [(TermNodeId, TermNode ty local)]
   !(Map TermNodeId (TermNode ty local))
@@ -780,8 +795,8 @@ data TermGraph ty local = TermGraph
 type role TermGraph nominal nominal
 
 instance (NFData ty, NFData local) => NFData (TermGraph ty local) where
-  rnf (TermGraph root nodes nodeMap expression metrics) =
-    rnf root `seq`
+  rnf (TermGraph projectionStyle root nodes nodeMap expression metrics) =
+    rnf projectionStyle `seq` rnf root `seq`
       rnf nodes `seq`
         rnf nodeMap `seq`
           rnf expression `seq`
@@ -789,11 +804,11 @@ instance (NFData ty, NFData local) => NFData (TermGraph ty local) where
 
 -- | The node at which evaluation of the sealed term begins.
 termGraphRoot :: TermGraph ty local -> TermNodeId
-termGraphRoot (TermGraph root _ _ _ _) = root
+termGraphRoot (TermGraph _ root _ _ _ _) = root
 
 -- | Every sealed node in allocation order, dead nodes included.
 termGraphNodes :: TermGraph ty local -> [(TermNodeId, TermNode ty local)]
-termGraphNodes (TermGraph _ nodes _ _ _) = nodes
+termGraphNodes (TermGraph _ _ nodes _ _ _) = nodes
 
 -- | Resolve one node identity within this graph; 'Nothing' for a foreign or
 -- out-of-range identity.
@@ -801,15 +816,15 @@ lookupTermNode
   :: TermNodeId
   -> TermGraph ty local
   -> Maybe (TermNode ty local)
-lookupTermNode nodeId' (TermGraph _ _ nodes _ _) = Map.lookup nodeId' nodes
+lookupTermNode nodeId' (TermGraph _ _ _ nodes _ _) = Map.lookup nodeId' nodes
 
 -- | The size and shape observations recorded while the graph was sealed.
 termGraphMetrics :: TermGraph ty local -> TypedGraphMetrics
-termGraphMetrics (TermGraph _ _ _ _ metrics) = metrics
+termGraphMetrics (TermGraph _ _ _ _ _ metrics) = metrics
 
 -- | The compatibility expression checked while the graph was sealed.
 eraseTermGraph :: TermGraph ty local -> Generated.Expression local
-eraseTermGraph (TermGraph _ _ _ expression _) = expression
+eraseTermGraph (TermGraph _ _ _ _ expression _) = expression
 
 -- | Project the sealed graph to one legacy top-level clause.  Leading typed
 -- lambdas become clause patterns through the compatibility AST's sole
@@ -828,7 +843,32 @@ sealTermGraph
   -> TermGraphLimits
   -> TermGraphSource ty local
   -> Either (TermGraphError ty local) (TermGraph ty local)
-sealTermGraph = sealTermGraphWithContextAuthority Nothing
+sealTermGraph = sealTermGraphWithProjection MergeLambdaGroupsAcrossEvidence
+
+-- | Seal with the source's exact lambda projection policy. The same bounded
+-- scope and type checks run before the selected compatibility projection.
+sealTermGraphWithProjection
+  :: Ord local
+  => TermGraphProjectionStyle
+  -> TypeStructure ty
+  -> TermGraphLimits
+  -> TermGraphSource ty local
+  -> Either (TermGraphError ty local) (TermGraph ty local)
+sealTermGraphWithProjection projectionStyle =
+  sealTermGraphWithContextAuthority projectionStyle Nothing
+
+-- | Reseal under fresh limits without silently changing source projection
+-- shape or its node cost. This does not grant contextual authority.
+resealTermGraph
+  :: Ord local
+  => TypeStructure ty
+  -> TermGraphLimits
+  -> TermGraph ty local
+  -> Either (TermGraphError ty local) (TermGraph ty local)
+resealTermGraph structure limits
+    (TermGraph projectionStyle root nodes _ _ _) =
+  sealTermGraphWithProjection projectionStyle structure limits $
+    TermGraphSource root nodes
 
 -- | Seal with explicit authority for qualified type structure. Lexical givens
 -- come only from this graph's checked introductions, never from the observer
@@ -841,17 +881,30 @@ sealTermGraphWithContext
   -> TermGraphLimits
   -> TermGraphSource ty local
   -> Either (TermGraphError ty local) (TermGraph ty local)
-sealTermGraphWithContext contextStructure =
-  sealTermGraphWithContextAuthority $ Just contextStructure
+sealTermGraphWithContext =
+  sealTermGraphWithContextAndProjection MergeLambdaGroupsAcrossEvidence
 
-sealTermGraphWithContextAuthority
+-- | Context-authorized counterpart retaining the exact source syntax policy.
+sealTermGraphWithContextAndProjection
   :: Ord local
-  => Maybe (ContextTypeStructure ty)
+  => TermGraphProjectionStyle
+  -> ContextTypeStructure ty
   -> TypeStructure ty
   -> TermGraphLimits
   -> TermGraphSource ty local
   -> Either (TermGraphError ty local) (TermGraph ty local)
-sealTermGraphWithContextAuthority contextStructure typeStructure limits source = do
+sealTermGraphWithContextAndProjection projectionStyle contextStructure =
+  sealTermGraphWithContextAuthority projectionStyle $ Just contextStructure
+
+sealTermGraphWithContextAuthority
+  :: Ord local
+  => TermGraphProjectionStyle
+  -> Maybe (ContextTypeStructure ty)
+  -> TypeStructure ty
+  -> TermGraphLimits
+  -> TermGraphSource ty local
+  -> Either (TermGraphError ty local) (TermGraph ty local)
+sealTermGraphWithContextAuthority projectionStyle contextStructure typeStructure limits source = do
   let rawNodes = termGraphSourceNodes source
       root = termGraphSourceRoot source
   observeWithin GraphNodeTable (maximumTermGraphNodes limits) rawNodes
@@ -872,14 +925,14 @@ sealTermGraphWithContextAuthority contextStructure typeStructure limits source =
   validateNodeTypes contextStructure typeStructure limits nodes binderTypes rawNodes
   validateForallScopes typeStructure limits nodes root rawNodes
   validateContextScopes typeStructure nodes root
-  (projection, projectedCount) <- projectGraph limits nodes root
+  (projection, projectedCount) <- projectGraph projectionStyle limits nodes root
   either (Left . ProjectedExpressionScopeError) Right
     $ Generated.validateExpressionScope projection
   either (Left . ProjectedExpressionSyntaxError) Right
     $ Generated.validateExpressionSyntax projection
   let metrics = graphMetrics
         rawNodes edgeCount patternCount occurrences projectedCount
-  pure $ TermGraph root rawNodes nodes projection metrics
+  pure $ TermGraph projectionStyle root rawNodes nodes projection metrics
 
 buildNodeMap
   :: [(TermNodeId, TermNode ty local)]
@@ -1593,13 +1646,14 @@ validateNodeTypes contextStructure typeStructure limits nodes binderTypes = mapM
         expected (typedPatternType field)
 
 projectGraph
-  :: TermGraphLimits
+  :: TermGraphProjectionStyle
+  -> TermGraphLimits
   -> Map TermNodeId (TermNode ty local)
   -> TermNodeId
   -> Either
       (TermGraphError ty local)
       (Generated.Expression local, Int)
-projectGraph limits nodes root = do
+projectGraph projectionStyle limits nodes root = do
   (expression, remaining) <- projectNode
     (maximumTermGraphProjectionNodes limits) root
   pure (expression, maximumTermGraphProjectionNodes limits - remaining)
@@ -1607,6 +1661,7 @@ projectGraph limits nodes root = do
   -- Source lambda groups can cross an erased type-binder boundary. Keep
   -- their canonical grouping while preserving the separate typed scopes.
   -- Ordinary nested lambda nodes retain their historical exact projection.
+  crossesErasedForall _ | projectionStyle == PreserveLambdaBoundaries = False
   crossesErasedForall node = case Map.lookup node nodes of
     Just (TermNode _ TypedForallIntroduction{}) -> True
     Just (TermNode _ (TypedImplicitTypeApplication _ child _)) -> crossesErasedForall child

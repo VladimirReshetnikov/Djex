@@ -1616,10 +1616,22 @@ Exference also retains checker-owned implicit instantiations of context-free
 local polymorphic values as `TypedImplicitTypeApplication` nodes. Each use has
 its own fresh selections, normalized after independent checking; erasure keeps
 the compatibility expression unchanged. These nodes carry no global provider
-certificate. Contextual local instantiation still reports graph absence until
-its dictionary evidence is representable. The
+certificate. Uses whose required dictionaries lack exact source evidence
+still report graph absence. The
 [implementation register](reports/2026-09-07-synthesis-priorities-1-4.md)
 records the live Haskell elaboration acceptance and remaining host work.
+
+Exference retains the original root closure and context-free nested forall
+introductions in its source graph. Constructor globals retain their closed
+declared schemes, with actual selections on implicit application edges.
+The default `sealTermGraph` projection keeps the existing lambda grouping;
+`sealTermGraphWithProjection` and `sealTermGraphWithContextAndProjection`
+allow a source producer to select `PreserveLambdaBoundaries`. Exference uses
+that policy to preserve its exact compatibility syntax. `resealTermGraph`
+retains the policy when enforcing fresh limits, including fingerprint and
+Length admission; it grants no contextual authority. See the
+[forall-graph report](reports/2026-09-08-exference-forall-graphs.md) for the
+root contract, projection-cost checks and exact `maybeEither` witness replay.
 
 Supporting vocabulary, all re-exported by the facade:
 

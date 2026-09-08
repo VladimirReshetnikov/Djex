@@ -3347,6 +3347,15 @@ candidate and query constructors remain unchanged while engines migrate, so a
 backend must report typed-view absence explicitly rather than inventing an
 annotation after erasure.
 
+The opaque graph also retains its source lambda-projection policy. Default
+sealers preserve the established merging across erased forall evidence;
+the explicit projection entrances can preserve Exference's singleton lambda
+boundaries instead. `resealTermGraph` keeps that choice under fresh limits,
+so regrouping cannot reduce the charged compatibility-node count during
+fingerprint or Length admission. The same type, scope and syntax checks run
+under both policies. The [forall-graph report](reports/2026-09-08-exference-forall-graphs.md)
+records this distinction and the retained original Exference root closure.
+
 #### `Internal.TypedGenerated.Certificate`
 
 The package-private `Internal.TypedGenerated.Certificate` module accepts a
@@ -3372,8 +3381,8 @@ existing public fingerprint failure is unchanged. See the
 #### `Internal.TypedGenerated.Certificate.Association`
 
 `Internal.TypedGenerated.Certificate.Association` adds an opaque, atomic
-graph-occurrence foundation without widening that neutral table. Its single
-entrance takes an untrusted `TermGraphSource`, caller-owned trusted
+graph-occurrence foundation without widening that neutral table. Its
+entrances take an untrusted `TermGraphSource`, caller-owned trusted
 `TypeStructure`, graph limits, certificate limits, and independent origin rows.
 It builds and matches the table before sealing the graph. During that seal only
 certificate-bearing visible witnesses are admitted provisionally; every
@@ -3383,6 +3392,11 @@ owner scheme, base global, node/child/witness source and result types, specified
 argument and selection, complete zero-based child chain, and exhaustive
 one-origin-to-one-use coverage. All occurrence receipts are derived from the
 rooted graph rather than supplied as caller coordinates.
+
+The explicit-projection entrance changes only compatibility lambda grouping;
+the original entrance retains its default. Both preserve all certificate and
+occurrence checks, and subsequent fingerprint resealing retains the graph's
+selected policy and its actual projection cost.
 
 The carrier co-owns its graph, structural table, normalized owner schemes, and
 complete occurrence receipts. Projecting its graph produces only a bare legacy
